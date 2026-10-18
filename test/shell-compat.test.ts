@@ -1656,3 +1656,27 @@ it('reports an app sighting for a shell result outside the turn\'s message ids, 
   const turn = (await f.ask()).turns[0];
   expect(turn.sightings).toEqual([{ requestId: OTHER, appId: 'asdk_app_x1', linkId: 'link_x', appName: 'Chat On Steroids Core' }]);
 });
+
+// Edit & resubmit (#365): the shell model has no parent ids. A question follows the previous turn's
+// last message in the thread's ordered entries (the first follows the root), and only ChatGPT's own
+// versions control proves that two questions with the same place are versions of one message.
+it('places each question in ChatGPT\'s message tree, with the versions control as proof of an edit', async () => {
+  const f = fixture();
+  f.entry.turn.status = 'complete';
+  const second = addExchange(f, 2, 'Second question');
+  const thread = f.chain({ entries: [f.entry, second.entry] }, f.top);
+  f.row.return = thread;
+  const secondNode = f.doc.querySelectorAll('[data-turn-key]')[1] as any;
+  secondNode.__reactFiber$fixture = f.chain({ entry: second.entry }, thread);
+  const questions = async () => (await f.ask()).turns.flatMap((turn: any) => turn.messages.filter((m: any) => m.role === 'user')
+    .map((m: any) => [m.rawMessageId, m.parentId, m.parentExact]));
+  // After a real message, the place alone proves versions; at the root only ChatGPT's versions control does.
+  expect(await questions()).toEqual([[USER, 'root', false], [second.userId, ANSWER, true]]);
+  const versions = f.doc.createElement('button');
+  (versions as any).__reactFiber$fixture = f.chain({ onClick: () => ({ conversationId: THREAD, messageId: USER, usesVersionsEndpoint: !0 }) });
+  f.doc.querySelector('[data-turn-key]')!.querySelector('[data-content-search-turn-key]')!.append(versions);
+  expect(await questions()).toEqual([[USER, 'root', true], [second.userId, ANSWER, true]]);
+  // A turn the thread list does not hold exactly once gives no place at all.
+  thread.memoizedProps.entries = [f.entry];
+  expect((await questions()).find(([id]: any) => id === second.userId)?.[1]).toBeUndefined();
+});

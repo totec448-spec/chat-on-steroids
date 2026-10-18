@@ -56,7 +56,7 @@ export function mainTexts(): Record<MainText, string> {
     'Remove worker Git checkout?': t('Remove worker Git checkout?'),
     'Review the worker checkout before removing it': t('Review the worker checkout before removing it'),
     'Checkout: {0}': t('Checkout: {0}'),
-    '{0} uncommitted or ignored paths would be discarded:': t('{0} uncommitted or ignored paths would be discarded:'),
+    'Uncommitted or ignored paths that would be discarded ({0}):': t('Uncommitted or ignored paths that would be discarded ({0}):'),
     'No uncommitted or ignored paths were detected.': t('No uncommitted or ignored paths were detected.'),
     'Additional paths are not shown; review the checkout before confirming.': t('Additional paths are not shown; review the checkout before confirming.'),
     'Ignored files are included in the removal.': t('Ignored files are included in the removal.'),

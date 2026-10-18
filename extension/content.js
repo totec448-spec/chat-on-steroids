@@ -145,6 +145,22 @@
     }
     return text;
   }
+  /**
+   * A count in the app language's plural form (CLF_I18N.tn). A helper without tn still gives the
+   * key's own (plural) translation, and no helper the English form.
+   */
+  function tn(key, count, one, other, substitutions = [count]) {
+    try {
+      const helper = globalThis.CLF_I18N;
+      if (helper && typeof helper.tn === 'function') {
+        const translated = helper.tn(key, count, one, other, substitutions);
+        if (typeof translated === 'string' && translated) return translated;
+      }
+    } catch {
+      // Presentation only; the key's translation below still reads in the right language.
+    }
+    return t(key, count === 1 ? one : other, substitutions);
+  }
   let RENDER_STREAM = TEST_MODE ? false : true;
   let SHOW_TIMES = false;
   let renderPreferenceReady = TEST_MODE;
@@ -799,6 +815,8 @@
    * never runs: the whole resumed turn's work fell into Unattributed activity.
    */
   const USER_SEND_RECEIPT_MS = 30_000;
+  /** A worker page reports its Send for this long; the app takes a late start back for fifteen minutes (#1086). */
+  const WORKER_RECEIPT_WAIT_MS = 10 * 60_000;
   /** Waits before asking the worker again for a send acknowledgement whose reply was lost. */
   const ACK_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000];
   let userSendReceipt = null;
@@ -1045,8 +1063,8 @@
   let mentionPlugins = false;
   function sendSubmittedText(stillCurrent, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null,
                              matchesUser = matchesSubmittedUser, receiptTimeoutMs = null, explain = null, mention = currentCoreMention(), sentRequest = null,
-                             whileGenerating = false) {
-    return CLF_DOM.send({ stillCurrent, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention, explain, sentRequest, whileGenerating,
+                             whileGenerating = false, stillCurrentAfterClick = null) {
+    return CLF_DOM.send({ stillCurrent, stillCurrentAfterClick, clearAcceptedDraft, beforeSend, acceptUserReceipt, matchesUser, receiptTimeoutMs, mention, explain, sentRequest, whileGenerating,
       observeEvidence: check => { pageViewChecks.add(check); return () => pageViewChecks.delete(check); } });
   }
   const GOAL_MARKER_INSTRUCTION = '\n\nFor this Goal session only: at the end of each final reply, write exactly one separate last line: [[COS_GOAL:COMPLETE]] if the entire requested task is finished, or [[COS_GOAL:CONTINUE]] if requested work remains. Do not claim completion for partial work. If user input is required, explain it and omit both markers.';
@@ -1065,18 +1083,19 @@
       (acceptedIdentity || (receipt.inserted ? matchesSubmittedBootstrap : matchesSubmittedUser)(message, receipt.text));
   }
 
-  function rememberUserSend(inserted = false) {
+  /** `edit`: a question resubmitted through ChatGPT's own editor (#365), not from the composer. */
+  function rememberUserSend(inserted = false, edit = null) {
     if (!alive) return;
     // Only the explicitly selected offline Goal backend changes the user prompt.
     const composer = CLF_DOM.composer();
-    if (goalConfig?.backend === 'templates' && (goalConfig?.enabled === true || (!goalConfig?.own && !!goalConfig?.objective)) && goalConfig?.mode !== 'loop' && !desktopDecision) {
+    if (!edit && goalConfig?.backend === 'templates' && (goalConfig?.enabled === true || (!goalConfig?.own && !!goalConfig?.objective)) && goalConfig?.mode !== 'loop' && !desktopDecision) {
       const raw = composer?.innerText || composer?.textContent || '';
       if (raw.trim() && !raw.includes(GOAL_MARKER_INSTRUCTION.trim())) CLF_DOM.insertPrompt(raw + GOAL_MARKER_INSTRUCTION, true);
     }
     // The receipt is compared with the rendered message, which readers take without an app
     // mention chip (#861); capture the same authored text, never the chip (#900).
-    const text = sendText(CLF_DOM.composerAuthoredText());
-    const attachmentNames = CLF_DOM.composerAttachmentNames();
+    const text = sendText(edit ? edit.text : CLF_DOM.composerAuthoredText());
+    const attachmentNames = edit ? [] : CLF_DOM.composerAttachmentNames();
     if (!text && !attachmentNames.length) return;
     // The same Send is recorded again by the page's own click and submit listeners; they cannot
     // tell who inserted the text, so they keep what the inserting caller said about it.
@@ -1084,6 +1103,8 @@
       inserted = true;
     let previousMessageId = null;
     for (const message of CLF_DOM.messages()) {
+      // An edit's question takes the place of the one it replaces: the question before that one is its before-state.
+      if (edit && message.id === edit.replaces) break;
       if (userMessagePresent(message)) previousMessageId = message.id;
     }
     // The submitted question owns its before-state. Identity/route hydration may delay
@@ -3929,6 +3950,10 @@
         rawText,
         // A boolean from MAIN; only `true` exactly means ChatGPT stored this as escaped Markdown.
         ...(entry.role === 'user' && entry.markdown === true ? { markdown: true } : {}),
+        // A question's place in ChatGPT's message tree (Edit & resubmit, #365).
+        ...(entry.role === 'user' && typeof entry.parentId === 'string' &&
+          (entry.parentId === 'root' || /^[A-Za-z0-9:_-]{8,190}$/.test(entry.parentId))
+          ? { parentId: entry.parentId, parentExact: entry.parentExact === true } : {}),
         ...(attachments.length ? { attachments } : {}),
         renderedHtml,
         sectionIndex:
@@ -4998,12 +5023,18 @@
 
         const message = item.value;
         if (message.role === 'user') {
-          if (!message.createTime && !message.attachments?.length && renderedUserTexts.get(message.messageId) === message.rawText) continue;
+          // The DOM pass reports a question the page shows as written, but not where it sits in
+          // ChatGPT's message tree (#365): only this report carries that, so a question whose place
+          // is not reported yet goes out from here too. The occurrence key below keeps it once.
+          if (!message.createTime && !message.attachments?.length && renderedUserTexts.get(message.messageId) === message.rawText &&
+            !message.parentId) continue;
           const sentModel = sendModels.get(message.messageId);
           // The model is part of the occurrence, so a send-model report that lands after the
           // first sighting re-emits the same message with it.
+          // The tree place is part of the occurrence too: ChatGPT shows its versions control only
+          // once a second version exists, so an edit re-emits the question it replaced.
           const key = occurrenceKey(message.messageId, message.rawText + (message.attachments?.length ? JSON.stringify(message.attachments) : '') +
-            (sentModel ? `\u0000${sentModel}` : ''));
+            (sentModel ? `\u0000${sentModel}` : '') + (message.parentId ? `\u0000${message.parentId}:${message.parentExact === true}` : ''));
           if (message.createTime) {
             if (userAuthoredTimesReported.get(key) === message.createTime) continue;
             userAuthoredTimesReported.set(key, message.createTime);
@@ -5018,6 +5049,7 @@
             text: shownUserText(message.rawText, message.markdown === true, renderedUserTexts.get(message.messageId)),
             ...(message.attachments?.length ? { attachments: message.attachments } : {}),
             ...(sentModel ? { model: sentModel } : {}),
+            ...(message.parentId ? { parentId: message.parentId, parentExact: message.parentExact === true } : {}),
             ...(message.createTime ? { time: message.createTime, authoredTime: true, authoredAt: message.createTime } : {})
           });
           reportedUserMessages.delete(message.messageId);
@@ -5934,7 +5966,7 @@
     }
     if (changes.length > 12) {
       const count = changes.length - 12;
-      lines.push({ kind: 'more', text: t('content_tool_more_changed_files', '$1 more changed files', count) });
+      lines.push({ kind: 'more', text: tn('content_tool_more_changed_files', count, '$1 more changed file', '$1 more changed files') });
     }
     return lines;
   }
@@ -6006,10 +6038,11 @@
       if (value.truncated) {
         const note = document.createElement('div');
         note.className = 'clf-stream-detail-note';
-        note.textContent = t(
+        note.textContent = tn(
           'content_tool_preview_truncated',
-          'Preview truncated from $1 characters.',
-          Math.floor(value.chars)
+          Math.floor(value.chars),
+          'Preview truncated from $1 character.',
+          'Preview truncated from $1 characters.'
         );
         recorded.append(note);
       }
@@ -6259,7 +6292,7 @@
         head.replaceChildren(...[...members[members.length - 1].querySelector('summary').childNodes].map(node => node.cloneNode(true)));
         head.dataset.clfSignature = signature;
       }
-      setAttr(head, 'title', t('content_tool_calls_count', '$1 tool calls', members.length));
+      setAttr(head, 'title', tn('content_tool_calls_count', members.length, '$1 tool call', '$1 tool calls'));
       reconcileStreamChildren(group.lastElementChild, members);
       children.push(group); i = end;
     }
@@ -7452,7 +7485,7 @@
     // The app's own reason, rather than this tab's guess. Today there is exactly one: a
     // worker chat, where the prime already writes the user's turns.
     const from = threshold > 0
-      ? t('content_tokens_from', 'from $1 tokens', roundK(threshold))
+      ? tn('content_tokens_from', threshold, 'from $1 token', 'from $1 tokens', [roundK(threshold)])
       : '';
     // Is anything driving this chat at all? A saved goal is enough on its own, but only for a
     // chat that has never moved its own switch — the same rule the app applies.
@@ -9095,19 +9128,18 @@
       return frame(
         progress.tools.count === 1
           ? t('content_waiting_local_tool', 'Waiting for a local tool to finish')
-          : t('content_waiting_local_tools', 'Waiting for $1 local tools to finish', progress.tools.count)
+          : tn('content_waiting_local_tools', progress.tools.count, 'Waiting for $1 local tool to finish', 'Waiting for $1 local tools to finish')
       );
     const workers = progress?.workers;
     // Failed workers remain in history and the agent panel. Only live workers
     // explain this wait; a historical failure must not pin it across handoffs.
     if (workers?.active > 0) {
-      const summary = workers.failed
-        ? t(
-          'content_workers_summary_failed',
-          '$1 finished · $2 running · $3 failed',
-          [workers.finished, workers.active, workers.failed]
-        )
-        : t('content_workers_summary', '$1 finished · $2 running', [workers.finished, workers.active]);
+      // One counted part per number, so each takes its own plural form.
+      const summary = [
+        tn('content_workers_finished', workers.finished, '$1 finished', '$1 finished'),
+        tn('content_workers_running', workers.active, '$1 running', '$1 running'),
+        ...workers.failed ? [tn('content_workers_failed', workers.failed, '$1 failed', '$1 failed')] : []
+      ].join(' · ');
       // Running siblings are not proof that the prime is blocked on them.
       return frame(
         workers.active === 1
@@ -9116,7 +9148,7 @@
             'Worker still running: $1',
             workers.names?.[0] || t('content_worker_label', 'Worker')
           )
-          : t('content_workers_still_running', '$1 workers still running', workers.active),
+          : tn('content_workers_still_running', workers.active, '$1 worker still running', '$1 workers still running'),
         summary
       );
     }
@@ -9197,7 +9229,7 @@
       if (goal.phase === 'retrying') {
         const seconds = Math.round((goal.retryMs || GOAL_RETRY_MS) / 1000);
         return {
-          stage: t('content_goal_retrying', 'Retrying Goal in $1 seconds', seconds),
+          stage: tn('content_goal_retrying', seconds, 'Retrying Goal in $1 second', 'Retrying Goal in $1 seconds'),
           detail: failure,
           body: '',
           kind: 'goal',
@@ -11965,11 +11997,13 @@
     // resource finished loading, not whether this editing host is usable, and waiting on it
     // is what turned a fresh resume tab into a blank tab for a minute on a throttled page.
     step('composer');
-    const readyComposer = await waitForComposer();
+    // A worker's hidden tab can take longer than 12 s to show the box on a busy machine; it has the
+    // rest of its own budget, less what model, insert and Send need (#1086). A resume or wake keeps 12 s.
+    const readyComposer = await waitForComposer(boot.type === 'worker' ? commandWaitMs(12_000, 20_000) : 12_000);
     // `transient`: this page redeemed the command, loaded the chat and typed nothing, so a wake
     // may be tried again without counting against the chat (#1086).
     if (!readyComposer) return void (await fail(t(
-      'content_bootstrap_composer_unavailable',
+      'content_bootstrap_composer_never_ready',
       'ChatGPT never exposed a usable composer for bootstrap'
     ), 'transient'));
     if (await failIfRetargeted()) return;
@@ -12055,6 +12089,14 @@
     }
     const submittedLifetime = submittedSendLifetime(target);
     const sendingBootstrap = () => commandAlive() && submittedLifetime();
+    // The deadline forbids a worker's Send, not the report of one already made: on a starved machine
+    // its new chat can appear after the page's copy of the deadline, and the app takes that late
+    // receipt back (#1086). A resume keeps the deadline throughout; its marker commits it instead.
+    const reportingBootstrap = boot.type === 'worker' ? () => !attempt?.cancelled && submittedLifetime()
+      : () => !attempt?.cancelled && sendingBootstrap();
+    // How long a worker keeps trying to report its Send: inside the fifteen minutes the app takes a late
+    // start back, because a hidden tab on a starved machine can draw its new chat minutes late (#1086).
+    const reportBy = Date.now() + WORKER_RECEIPT_WAIT_MS;
     // Stop/composer-clear may acknowledge acceptance before the authored row mounts.
     // Keep the original draft lease through that receipt, exactly as desktop delivery does;
     // identical text alone must never erase a later trusted edit or a replacement editor.
@@ -12200,7 +12242,8 @@
                                   matchesSubmittedBootstrap, boot.type === 'resume' ? 30_000 : null,
                                   why => { sendRefusal = why; },
                                   currentCoreMention(), boot.type === 'resume'
-                                    ? clickedAt => sentRequestSince(clickedAt, sendEpoch) : null))) {
+                                    ? clickedAt => sentRequestSince(clickedAt, sendEpoch) : null,
+                                  false, reportingBootstrap))) {
       // Once send() was invoked, a missing/cleared draft cannot prove that no click
       // happened. Only the exact pre-click check above may release the dispatch.
       if (boot.type === 'resume') {
@@ -12255,11 +12298,23 @@
     // already present. Reuse the receipt observer and the same 40s ceiling instead.
     // The route and exact submitted user row must agree for workers as for resumes;
     // a missing receipt is still ambiguous and cannot report a successful binding.
-    const found = await waitPageView(bootstrapConversation,
-      () => !attempt?.cancelled && sendingBootstrap(), Math.min(40000, commandWaitMs(40000, 2_000)));
-    if (!found || !sendingBootstrap()) return;
+    let found = null;
+    do {
+      found = await waitPageView(bootstrapConversation, reportingBootstrap,
+        boot.type === 'worker' ? 40000 : Math.min(40000, commandWaitMs(40000, 2_000)));
+    } while (!found && boot.type === 'worker' && alive && reportingBootstrap() && Date.now() < reportBy);
+    if (!found || !reportingBootstrap()) return;
     if (boot.type === 'resume') rememberResumeGoalPending(found, boot.id);
-    const acknowledged = await ask({ type: 'ack', id: boot.id, status: 'sent', conversationId: found, agent, client: RUN_ID });
+    const report = { type: 'ack', id: boot.id, status: 'sent', conversationId: found, agent, client: RUN_ID };
+    let acknowledged = await ask(report);
+    // No answer means the extension's worker did not take it (stopped or restarting), not a refusal:
+    // nothing reached its durable outbox, so the report is sent again. A duplicate is harmless; both
+    // the outbox and the app keep one answer per command.
+    for (let wait = 2_000; !acknowledged && boot.type === 'worker' && alive && reportingBootstrap() && Date.now() < reportBy;
+      wait = Math.min(wait * 2, 30_000)) {
+      await new Promise(resolve => setTimeout(resolve, wait));
+      acknowledged = await ask(report);
+    }
     await publishBootstrapSelection(found);
     await clearAcknowledgedBootstrap(acknowledged);
     } finally { bootstrapDraft.dispose(); }
@@ -12570,7 +12625,7 @@
     limit.published = limit.retryAt;
     emit({
       kind: 'chat_error',
-      text: t('content_history_rate_limited', 'ChatGPT temporarily rate-limited loading this conversation history. Chat On Steroids is pausing automatic recovery until the retry wait ends.'),
+      text: t('content_history_rate_limited', 'ChatGPT temporarily limited access to this conversation history. Chat On Steroids is pausing automatic recovery until the retry wait ends.'),
       recoverable: false,
       blocking: true,
       retryAt: limit.retryAt
@@ -12906,7 +12961,177 @@
       ...(changed ? { changed, ...(changed === 'progress' && turnProgressSource ? { progressBy: turnProgressSource } : {}) } : {}) });
   }
 
+  /**
+   * Branch in new chat (#482): the input this document made ChatGPT's branch for, and the draft
+   * route ChatGPT moved to. Document-local: a reload or another document never inherits it.
+   */
+  let branchDraft = null;
+  const NATIVE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  /**
+   * ChatGPT's move to its branch draft drops this message's `cos-input` marker, which is how the
+   * extension knows the tab is the one opened for this message (claim, discard protection, tab
+   * group). Put it back without a navigation, as a new chat's home page carries it until Send.
+   */
+  function markBranchDraft(inputId) {
+    const url = new URL(location.href);
+    if (url.searchParams.get('cos-input') === inputId && new URLSearchParams(url.hash.slice(1)).get('cos-input') === inputId) return;
+    const marker = `cos-input=${encodeURIComponent(inputId)}`;
+    history.replaceState(history.state, '', `${location.pathname}?${marker}#${marker}`);
+  }
+  /**
+   * Turns the source chat this tab was opened on into ChatGPT's own branch at the exact reply,
+   * before the ordinary new-chat delivery claims, types and sends. Only the tab the app opened for
+   * this input (its marker) acts, only on an idle, readable page, and nothing is typed or claimed
+   * here: a branch ChatGPT never received a message for stays a local draft in this tab.
+   */
+  async function prepareBranchPage(message) {
+    const branch = message.branch;
+    if (!branch || message.conversationId || !NATIVE_ID.test(branch.conversationId || '') || !NATIVE_ID.test(branch.messageId || '')) return false;
+    if (branchDraft) {
+      const ours = branchDraft.inputId === message.id && location.pathname === branchDraft.path;
+      // ChatGPT can rewrite the draft's address once more after moving there, dropping the marker.
+      if (ours) markBranchDraft(message.id);
+      return ours;
+    }
+    if (desktopInputBusy || modelCatalogBusy || !alive || goalBusy || job?.busy || stopRequestedAt) return false;
+    // ChatGPT's draft of this exact reply, after this document forgot it made it (an extension or
+    // page reload). Only the tab elected for this message is offered it; the draft itself proves
+    // it continues from that reply.
+    if (/^\/c\/local-chatgpt(?::|%3A)/i.test(location.pathname) && !CLF_DOM.conversationId()) {
+      const path = location.pathname;
+      const onDraft = () => alive && location.pathname === path && !CLF_DOM.conversationId() && !stopRequestedAt;
+      desktopInputBusy = true;
+      try {
+        if (!await waitPageView(() => !CLF_DOM.generating() && CLF_DOM.turns().length > 0, onDraft, 15000) || !onDraft()) return false;
+        await refreshFiber();
+        const last = CLF_DOM.turns().filter(candidate => candidate.role === 'assistant').at(-1);
+        if (!onDraft() || !last || fiberTurnFor(last)?.endMessageId !== branch.messageId || CLF_DOM.turns().at(-1)?.role !== 'assistant') return false;
+        branchDraft = { inputId: message.id, path };
+        markBranchDraft(message.id);
+        return true;
+      } finally {
+        desktopInputBusy = false;
+      }
+    }
+    const marked = () => {
+      const url = new URL(location.href);
+      return url.searchParams.get('cos-input') === message.id || new URLSearchParams(url.hash.slice(1)).get('cos-input') === message.id;
+    };
+    if (CLF_DOM.conversationId() !== branch.conversationId || !marked()) return false;
+    const forEpoch = epoch;
+    const onSource = () => alive && epoch === forEpoch && CLF_DOM.conversationId() === branch.conversationId && marked() && !stopRequestedAt;
+    const report = reason => ask({ type: 'desktop_input', id: message.id, conversationId: branch.conversationId, branchFailed: reason }).catch(() => null);
+    desktopInputBusy = true;
+    try {
+      // The reply's own turn, by its native id: a reply still being written is not a branch point.
+      const ready = await waitPageView(() => !CLF_DOM.generating() && pendingTools === 0 && CLF_DOM.turns().length > 0, onSource, 15000);
+      if (!ready || !onSource()) return false;
+      await refreshFiber();
+      if (!onSource()) return false;
+      const turn = CLF_DOM.turns().find(candidate => candidate.role === 'assistant' && fiberTurnFor(candidate)?.endMessageId === branch.messageId);
+      if (!turn) {
+        // Fiber evidence must be readable before the reply can be called missing.
+        if (fiberPresent && CLF_DOM.turns().some(candidate => candidate.role === 'assistant' && fiberTurnFor(candidate))) await report('branch_message_missing');
+        return false;
+      }
+      const node = turn.node || turn.nodes?.[0];
+      const scope = node?.closest?.('[data-turn-key]') || node;
+      const chosen = await CLF_DOM.branchInNewChat(scope, onSource);
+      if (chosen !== 'clicked') { if (onSource()) await report('branch_unavailable'); return false; }
+      // ChatGPT moves this tab to its local draft of the branch: same history, ending at that reply.
+      const drafted = () => alive && /^\/c\/local-chatgpt(?::|%3A)/i.test(location.pathname) && !CLF_DOM.conversationId();
+      if (!await waitPageView(drafted, () => alive && !stopRequestedAt, 15000)) { await report('branch_unavailable'); return false; }
+      branchDraft = { inputId: message.id, path: location.pathname };
+      markBranchDraft(message.id);
+      return true;
+    } finally {
+      desktopInputBusy = false;
+    }
+  }
+
+  /** Why an edit could not be made on this page, as the chat shows it; nothing was sent. */
+  const EDIT_FAILURES = Object.freeze({
+    edit_message_missing: () => t('content_edit_message_missing', 'That message is no longer on the ChatGPT page, so it cannot be edited.'),
+    edit_unavailable: () => t('content_edit_unavailable', 'ChatGPT did not offer Edit for that message. Open the chat in ChatGPT, then try again.')
+  });
+
+  /**
+   * Edit & resubmit (#365): resubmits one question of this chat through ChatGPT's own editor.
+   *
+   * The same claim, authorization and acknowledgement as an ordinary send, with ChatGPT's editor
+   * on that question in place of the composer. Its receipt is a new question with this text where
+   * the edited one was; the edited one leaves the page. Anything that fails before Send closes the
+   * editor, leaving the question as it was.
+   */
+  async function acceptEdit(message) {
+    const target = message.conversationId;
+    const replaced = typeof message.edit?.messageId === 'string' && /^[0-9a-f-]{36}$/i.test(message.edit.messageId) ? message.edit.messageId : null;
+    if (!replaced || !target || desktopInputBusy || modelCatalogBusy || !alive || generating || CLF_DOM.generating() || pendingTools > 0 || goalBusy || job?.busy) return false;
+    const forEpoch = epoch;
+    const onTarget = () => alive && epoch === forEpoch && CLF_DOM.conversationId() === target;
+    const idle = () => onTarget() && !generating && !CLF_DOM.generating() && pendingTools === 0;
+    if (!idle()) return false;
+    desktopInputBusy = true;
+    let editor = null;
+    let sendAttempted = false;
+    try {
+      const reply = await ask({ type: 'desktop_input', id: message.id, conversationId: target, requiresAuthorization: true });
+      const input = reply?.data?.input;
+      if (!input) return false;
+      if (!idle()) return false;
+      const fail = async (error) => {
+        const why = deletedConversations.has(target.toLowerCase()) ? CONVERSATION_DELETED : error;
+        await ask({ type: 'desktop_input', id: input.id, owner: input.owner, fail: true, error: why }); return false;
+      };
+      if (await chatGptSignedOut()) return fail(t(
+        'content_delivery_signed_out',
+        'ChatGPT is not signed in in this browser. Sign in to ChatGPT there, then send again.'
+      ));
+      const limitation = CLF_DOM.errors().find(error => error.blocking === true)?.text;
+      if (limitation) return fail(limitation);
+      // An edit is answered by the model chosen for the chat's next turn, as ChatGPT does it.
+      if (!(await CLF_DOM.selectModelSettings(input.model, input.reasoningEffort, idle))) return fail(t(
+        'content_delivery_model_unconfirmed',
+        'Requested model or reasoning could not be confirmed'
+      ));
+      editor = await CLF_DOM.openQuestionEdit(replaced, idle);
+      if (editor.failure) { const failure = editor.failure; editor = null; return fail(EDIT_FAILURES[failure]()); }
+      let insertionFailure = '';
+      if (!editor.write(input.text, reason => { insertionFailure = reason; })) return fail(t(
+        'content_delivery_text_not_accepted',
+        'ChatGPT did not accept the text$1',
+        insertionFailure ? ` (${insertionFailure})` : ''
+      ));
+      const before = new Set(CLF_DOM.messages().filter(row => row.role === 'user').map(row => row.id));
+      const authorized = await ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, authorize: true });
+      if (authorized?.data?.ok !== true || !idle() || !editor.current()) return false;
+      rememberUserSend(true, { text: input.text, replaces: replaced });
+      sendAttempted = true;
+      if (!editor.submit()) return fail('Native Send did not take the message.');
+      // The receipt: a question this page did not show before, with this text, and the edited one gone.
+      const receipt = await waitPageView(() => {
+        const users = CLF_DOM.messages().filter(row => row.role === 'user');
+        if (users.some(row => row.id === replaced)) return null;
+        return users.find(row => !before.has(row.id) && matchesSubmittedBootstrap(row, input.text)) || null;
+      }, onTarget, DESKTOP_RECEIPT_MS);
+      if (!receipt) return fail('Native Send receipt was not confirmed.');
+      let acknowledged = null;
+      for (let attempt = 0; attempt < ACK_RETRY_DELAYS_MS.length + 1 && alive; attempt++) {
+        if (attempt > 0) await sleep(ACK_RETRY_DELAYS_MS[attempt - 1]);
+        acknowledged = await ask({ type: 'desktop_input', id: message.id, conversationId: target, messageId: receipt.id, owner: input.owner, ack: true });
+        if (acknowledged !== null && acknowledged !== undefined) break;
+      }
+      return acknowledged?.data?.ok === true;
+    } finally {
+      // Never sent: close ChatGPT's editor so the question stays as it was.
+      if (editor && !sendAttempted) { try { editor.cancel(); } catch { /* A closed editor needs nothing. */ } }
+      desktopInputBusy = false;
+    }
+  }
+
   async function acceptDesktopInput(message) {
+    if (message.edit) return acceptEdit(message);
+    if (message.branch && !message.conversationId && !await prepareBranchPage(message)) return false;
     const silencePickup = typeof message.silenceTurnId === 'string';
     let sourceQuiet = silencePickup;
     if (desktopInputBusy || modelCatalogBusy || !alive || (generating && !message.directTurn && !silencePickup) || (pendingTools > 0 && !message.directTurn) || goalBusy || job?.busy) return false;
@@ -13001,8 +13226,11 @@
       const url = new URL(location.href);
       return url.searchParams.get('cos-input') === message.id || new URLSearchParams(url.hash.slice(1)).get('cos-input') === message.id;
     };
-    const ownsFreshPage = () => !target && onTarget() && (project ? CLF_DOM.projectHomeId() === project : location.pathname === '/') &&
-      (project ? freshMarker() : new URL(location.href).searchParams.get('cos-input') === message.id) && !CLF_DOM.turns().length;
+    // A branch's fresh page is the draft this document made for it, already holding the history.
+    const ownsBranchDraft = () => !!message.branch && branchDraft?.inputId === message.id && location.pathname === branchDraft.path;
+    const ownsFreshPage = () => !target && onTarget() && (ownsBranchDraft() || (!message.branch &&
+      (project ? CLF_DOM.projectHomeId() === project : location.pathname === '/') &&
+      (project ? freshMarker() : new URL(location.href).searchParams.get('cos-input') === message.id) && !CLF_DOM.turns().length));
     if (!target && !ownsFreshPage()) return false;
     desktopInputBusy = true;
     let decision = null;
@@ -13219,7 +13447,10 @@
         // Preserve the outbox's revocable claim until the actual native Send is ready.
         if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current(), withdrawWhy)) return false;
         authorizing = true;
-        const authorized = await ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, authorize: true });
+        // Into the running turn the app allows its own automatic continue only while a tool call
+        // runs: sent while the model writes its answer, it lands after it, unanswered (2.1.41).
+        const authorized = await ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, authorize: true,
+          ...(intoTurn ? { intoTurn: true } : {}) });
         if (authorized?.data?.ok !== true) noteWithdraw('app-refused');
         if (!sendCurrent() || authorized?.data?.ok !== true || !onTarget() || !draft.current()) { noteWithdraw(onTarget() ? 'lease-lost' : offTarget()); return false; }
         if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current(), withdrawWhy)) return false;
@@ -13928,10 +14159,13 @@
       // attached or running, and no send of this page in flight.
       if (message.type === 'clf-close-cancelled-opening') {
         const id = typeof message.id === 'string' ? message.id : '';
+        // A worker or handoff page carries its command's `clf` marker instead of an input's.
+        const command = typeof message.command === 'string' ? message.command : '';
         let marked = false;
         try {
-          const url = new URL(location.href);
-          marked = !!id && (url.searchParams.get('cos-input') === id || new URLSearchParams(url.hash.slice(1)).get('cos-input') === id);
+          const url = new URL(location.href), hash = new URLSearchParams(url.hash.slice(1));
+          marked = id ? url.searchParams.get('cos-input') === id || hash.get('cos-input') === id
+            : !!command && (url.searchParams.get('clf') === command || hash.get('clf') === command);
         } catch { marked = false; }
         sendResponse({ safe: marked && !CLF_DOM.conversationId() && !desktopInputBusy && !generating && !CLF_DOM.generating() &&
           pendingTools === 0 && !CLF_DOM.hasComposerAttachments() && !(CLF_DOM.composer()?.textContent || '').trim() &&

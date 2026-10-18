@@ -387,6 +387,10 @@ export type SessionEvent =
       wireTokenEstimate?: number;
       /** Native badge on this exact user message. Missing means unobserved; null means absent. */
       reaction?: string | null;
+      /** Its parent in ChatGPT's message tree ("root" for a chat's first question), as first seen. */
+      parentId?: string;
+      /** Edit & resubmit (#365): the question this one is a later version of, in ChatGPT's own edit. */
+      replaces?: string;
       attachments?: import('./input.js').InputAttachment[];
       assets?: AssetRef[];
       /** Image assets explicitly removed from local recording storage; same-message replay cannot restore them. */
@@ -598,6 +602,11 @@ export interface SessionOrigin {
   agentId: string | null;
   /** The worker's task, verbatim from `agents action=spawn`. Empty for a resume. */
   task: string;
+  /**
+   * Branch in new chat (#482): the ChatGPT chat and exact native reply this chat was branched
+   * from, with `fromSessionId` naming the source session. Presentation only; nothing carries over.
+   */
+  branchOf?: { conversationId: string; messageId: string };
 }
 
 /** Historical presentation projected from an accepted broker snapshot; grants no worker authority. */

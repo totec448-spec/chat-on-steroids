@@ -38,6 +38,9 @@
   "content_bootstrap_composer_replaced": {
     "message": "ChatGPT sustituyó el redactor mientras se insertaba el inicio"
   },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPT no mostró un editor utilizable para el arranque"
+  },
   "content_bootstrap_composer_unavailable": {
     "message": "ChatGPT no volvió a mostrar un editor utilizable tras seleccionar el modelo"
   },
@@ -458,6 +461,12 @@
   "content_goal_retrying": {
     "message": "Reintentando Objetivo en $1 segundos"
   },
+  "content_goal_retrying__one": {
+    "message": "Reintentando Objetivo en $1 segundo"
+  },
+  "content_goal_retrying__many": {
+    "message": "Reintentando Objetivo en $1 de segundos"
+  },
   "content_goal_save": {
     "message": "Guardar como Objetivo"
   },
@@ -635,8 +644,20 @@
   "content_tokens_from": {
     "message": "desde $1 tokens"
   },
+  "content_tokens_from__one": {
+    "message": "desde $1 token"
+  },
+  "content_tokens_from__many": {
+    "message": "desde $1 de tokens"
+  },
   "content_tool_calls_count": {
     "message": "$1 llamadas a herramientas"
+  },
+  "content_tool_calls_count__one": {
+    "message": "$1 llamada a herramienta"
+  },
+  "content_tool_calls_count__many": {
+    "message": "$1 de llamadas a herramientas"
   },
   "content_tool_details_loading": {
     "message": "Cargando detalles registrados…"
@@ -646,6 +667,12 @@
   },
   "content_tool_more_changed_files": {
     "message": "$1 archivos modificados más"
+  },
+  "content_tool_more_changed_files__one": {
+    "message": "$1 archivo modificado más"
+  },
+  "content_tool_more_changed_files__many": {
+    "message": "$1 de archivos modificados más"
   },
   "content_tool_outcome_completed": {
     "message": "completado"
@@ -664,6 +691,12 @@
   },
   "content_tool_preview_truncated": {
     "message": "Vista previa truncada desde $1 caracteres."
+  },
+  "content_tool_preview_truncated__one": {
+    "message": "Vista previa truncada desde $1 carácter."
+  },
+  "content_tool_preview_truncated__many": {
+    "message": "Vista previa truncada desde $1 de caracteres."
   },
   "content_tool_ran": {
     "message": "Se ejecutó $1"
@@ -713,6 +746,12 @@
   "content_waiting_local_tools": {
     "message": "Esperando a que terminen $1 herramientas locales"
   },
+  "content_waiting_local_tools__one": {
+    "message": "Esperando a que termine $1 herramienta local"
+  },
+  "content_waiting_local_tools__many": {
+    "message": "Esperando a que terminen $1 de herramientas locales"
+  },
   "content_worker_generic": {
     "message": "un subagente"
   },
@@ -728,11 +767,11 @@
   "content_workers_still_running": {
     "message": "$1 subagentes aún en ejecución"
   },
-  "content_workers_summary": {
-    "message": "$1 finalizados · $2 en ejecución"
+  "content_workers_still_running__one": {
+    "message": "$1 subagente aún en ejecución"
   },
-  "content_workers_summary_failed": {
-    "message": "$1 finalizados · $2 en ejecución · $3 fallidos"
+  "content_workers_still_running__many": {
+    "message": "$1 de subagentes aún en ejecución"
   },
   "content_working": {
     "message": "trabajando…"
@@ -803,7 +842,19 @@
   "popup_count_held": {
     "message": "$1 retenidos"
   },
+  "popup_count_held__one": {
+    "message": "$1 retenido"
+  },
+  "popup_count_held__many": {
+    "message": "$1 retenidos"
+  },
   "popup_count_held_in_page": {
+    "message": "$1 retenidos en la página"
+  },
+  "popup_count_held_in_page__one": {
+    "message": "$1 retenido en la página"
+  },
+  "popup_count_held_in_page__many": {
     "message": "$1 retenidos en la página"
   },
   "popup_count_queued": {
@@ -820,9 +871,6 @@
   },
   "popup_detail_app_value": {
     "message": "v$1 · puerto $2"
-  },
-  "popup_detail_browser_queue_value": {
-    "message": "$1 retenidos · $2 en total"
   },
   "popup_detail_chat_id": {
     "message": "id del chat"
@@ -848,17 +896,11 @@
   "popup_detail_observed": {
     "message": "observado"
   },
-  "popup_detail_observed_value": {
-    "message": "$1 eventos · $2 llamadas"
-  },
   "popup_detail_ownership": {
     "message": "propiedad"
   },
   "popup_detail_page_sends": {
     "message": "envíos de la página"
-  },
-  "popup_detail_page_sends_value": {
-    "message": "$1 · $2 fallidos"
   },
   "popup_detail_recorder": {
     "message": "registro"
@@ -896,6 +938,12 @@
   "popup_pipeline_call_fallback_many": {
     "message": "La aplicación no pudo ubicar $1 llamadas por ID de solicitud — recurrió a $2."
   },
+  "popup_pipeline_call_fallback_many__one": {
+    "message": "La aplicación no pudo ubicar $1 llamada por ID de solicitud — recurrió a $2."
+  },
+  "popup_pipeline_call_fallback_many__many": {
+    "message": "La aplicación no pudo ubicar $1 de llamadas por ID de solicitud — recurrió a $2."
+  },
   "popup_pipeline_call_fallback_one": {
     "message": "La aplicación no pudo ubicar una llamada por ID de solicitud — recurrió a $1."
   },
@@ -925,6 +973,12 @@
   },
   "popup_pipeline_request_id_matched_many": {
     "message": "$1 ID de solicitud coincidieron con actividad de herramientas registrada."
+  },
+  "popup_pipeline_request_id_matched_many__one": {
+    "message": "$1 ID de solicitud coincidió con actividad de herramientas registrada."
+  },
+  "popup_pipeline_request_id_matched_many__many": {
+    "message": "$1 de ID de solicitud coincidieron con actividad de herramientas registrada."
   },
   "popup_pipeline_request_id_matched_one": {
     "message": "1 ID de solicitud coincidió con actividad de herramientas registrada."
@@ -1177,5 +1231,68 @@
   },
   "popup_app_not_running_help": {
     "message": "Asegúrate de que Chat On Steroids esté abierto en este ordenador. La extensión se conecta sola."
+  },
+  "content_workers_finished": {
+    "message": "$1 finalizados"
+  },
+  "content_workers_finished__one": {
+    "message": "$1 finalizado"
+  },
+  "content_workers_finished__many": {
+    "message": "$1 finalizados"
+  },
+  "content_workers_running": {
+    "message": "$1 en ejecución"
+  },
+  "content_workers_running__one": {
+    "message": "$1 en ejecución"
+  },
+  "content_workers_running__many": {
+    "message": "$1 en ejecución"
+  },
+  "content_workers_failed": {
+    "message": "$1 fallidos"
+  },
+  "content_workers_failed__one": {
+    "message": "$1 fallido"
+  },
+  "content_workers_failed__many": {
+    "message": "$1 fallidos"
+  },
+  "popup_detail_events": {
+    "message": "$1 eventos"
+  },
+  "popup_detail_events__one": {
+    "message": "$1 evento"
+  },
+  "popup_detail_events__many": {
+    "message": "$1 de eventos"
+  },
+  "popup_detail_calls": {
+    "message": "$1 llamadas"
+  },
+  "popup_detail_calls__one": {
+    "message": "$1 llamada"
+  },
+  "popup_detail_calls__many": {
+    "message": "$1 de llamadas"
+  },
+  "popup_detail_failed": {
+    "message": "$1 fallidos"
+  },
+  "popup_detail_failed__one": {
+    "message": "$1 fallido"
+  },
+  "popup_detail_failed__many": {
+    "message": "$1 fallidos"
+  },
+  "popup_detail_total": {
+    "message": "$1 en total"
+  },
+  "content_edit_message_missing": {
+    "message": "Ese mensaje ya no está en la página de ChatGPT, así que no se puede editar."
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT no ofreció Editar para ese mensaje. Abre el chat en ChatGPT e inténtalo de nuevo."
   }
 }

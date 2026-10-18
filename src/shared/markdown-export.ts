@@ -5,7 +5,7 @@ import { continuationMarkerOf, workSequence, type SessionEvent, type StoredText 
    exactly which messages a turn's answer or a session transcript contains. */
 
 /** `html`: an answer's recorded drawing, which can hold what its Markdown left out (#1477). */
-export type TranscriptEntry = { role: 'user' | 'assistant'; stored: StoredText; turnId: string | null; seq: number; html?: StoredText };
+export type TranscriptEntry = { role: 'user' | 'assistant'; stored: StoredText; turnId: string | null; messageId: string | null; seq: number; html?: StoredText };
 
 type Said = Extract<SessionEvent, { kind: 'user_message' | 'assistant_message' }>;
 
@@ -38,7 +38,7 @@ export function transcriptEntries(events: readonly SessionEvent[]): TranscriptEn
     .filter(({ latest }) => !continuationMarkerOf(latest.message.text) && spoken(latest).text.trim())
     .sort((a, b) => a.place - b.place || a.latest.seq - b.latest.seq)
     .map(({ latest }) => ({ role: latest.kind === 'user_message' ? 'user' as const : 'assistant' as const,
-      stored: spoken(latest), turnId: latest.turnId ?? null, seq: latest.seq,
+      stored: spoken(latest), turnId: latest.turnId ?? null, messageId: latest.messageId ?? null, seq: latest.seq,
       ...(latest.kind === 'assistant_message' && latest.renderedHtml ? { html: latest.renderedHtml } : {}) }));
 }
 
@@ -66,6 +66,24 @@ export function answerAnchors(events: readonly SessionEvent[]): Map<string, numb
     if (entry.role === 'assistant' && entry.turnId && done.has(entry.turnId)) anchors.set(entry.turnId, entry.seq);
   }
   return anchors;
+}
+
+/**
+ * Final answers recorded outside any turn, by message id, with the sequence number that carries
+ * their actions: the history ChatGPT copied into a branch, an adopted chat's earlier answers and
+ * replies to messages typed in the ChatGPT tab. A turn's answers keep their turn's actions instead.
+ */
+export function messageAnswerAnchors(events: readonly SessionEvent[]): Map<string, number> {
+  const anchors = new Map<string, number>();
+  for (const entry of transcriptEntries(events)) {
+    if (entry.role === 'assistant' && !entry.turnId && entry.messageId) anchors.set(entry.messageId, entry.seq);
+  }
+  return anchors;
+}
+
+/** The answer a turnless message holds, at its latest revision; none for a turn's own answer. */
+export function messageAnswerEntries(events: readonly SessionEvent[], messageId: string): TranscriptEntry[] {
+  return transcriptEntries(events).filter(entry => entry.role === 'assistant' && !entry.turnId && entry.messageId === messageId);
 }
 
 /** One answer as Markdown: its messages as written, separated by blank lines. */

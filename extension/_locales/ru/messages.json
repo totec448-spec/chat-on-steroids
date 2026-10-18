@@ -38,6 +38,9 @@
   "content_bootstrap_composer_replaced": {
     "message": "ChatGPT заменил редактор сообщения во время вставки запуска"
   },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPT так и не показал доступный редактор сообщения для запуска"
+  },
   "content_bootstrap_composer_unavailable": {
     "message": "после выбора модели ChatGPT так и не показал доступный редактор сообщения"
   },
@@ -458,6 +461,15 @@
   "content_goal_retrying": {
     "message": "Повтор Цели через $1 с"
   },
+  "content_goal_retrying__one": {
+    "message": "Повтор Цели через $1 с"
+  },
+  "content_goal_retrying__few": {
+    "message": "Повтор Цели через $1 с"
+  },
+  "content_goal_retrying__many": {
+    "message": "Повтор Цели через $1 с"
+  },
   "content_goal_save": {
     "message": "Сохранить как Цель"
   },
@@ -633,9 +645,27 @@
     "message": "Укажите, чего должен достичь этот чат. Он работает как $1."
   },
   "content_tokens_from": {
-    "message": "из $1 токенов"
+    "message": "от $1 токена"
+  },
+  "content_tokens_from__one": {
+    "message": "от $1 токена"
+  },
+  "content_tokens_from__few": {
+    "message": "от $1 токенов"
+  },
+  "content_tokens_from__many": {
+    "message": "от $1 токенов"
   },
   "content_tool_calls_count": {
+    "message": "$1 вызова инструментов"
+  },
+  "content_tool_calls_count__one": {
+    "message": "$1 вызов инструмента"
+  },
+  "content_tool_calls_count__few": {
+    "message": "$1 вызова инструментов"
+  },
+  "content_tool_calls_count__many": {
     "message": "$1 вызовов инструментов"
   },
   "content_tool_details_loading": {
@@ -645,7 +675,16 @@
     "message": "Записанные сведения недоступны для этой версии активности."
   },
   "content_tool_more_changed_files": {
-    "message": "ещё изменённых файлов: $1"
+    "message": "ещё $1 изменённого файла"
+  },
+  "content_tool_more_changed_files__one": {
+    "message": "ещё $1 изменённый файл"
+  },
+  "content_tool_more_changed_files__few": {
+    "message": "ещё $1 изменённых файла"
+  },
+  "content_tool_more_changed_files__many": {
+    "message": "ещё $1 изменённых файлов"
   },
   "content_tool_outcome_completed": {
     "message": "выполнено"
@@ -663,6 +702,15 @@
     "message": "неизвестно"
   },
   "content_tool_preview_truncated": {
+    "message": "Предпросмотр сокращён с $1 символа."
+  },
+  "content_tool_preview_truncated__one": {
+    "message": "Предпросмотр сокращён с $1 символа."
+  },
+  "content_tool_preview_truncated__few": {
+    "message": "Предпросмотр сокращён с $1 символов."
+  },
+  "content_tool_preview_truncated__many": {
     "message": "Предпросмотр сокращён с $1 символов."
   },
   "content_tool_ran": {
@@ -713,6 +761,15 @@
   "content_waiting_local_tools": {
     "message": "Ожидание завершения локальных инструментов: $1"
   },
+  "content_waiting_local_tools__one": {
+    "message": "Ожидание завершения локальных инструментов: $1"
+  },
+  "content_waiting_local_tools__few": {
+    "message": "Ожидание завершения локальных инструментов: $1"
+  },
+  "content_waiting_local_tools__many": {
+    "message": "Ожидание завершения локальных инструментов: $1"
+  },
   "content_worker_generic": {
     "message": "воркер"
   },
@@ -728,11 +785,14 @@
   "content_workers_still_running": {
     "message": "Воркеры ещё работают: $1"
   },
-  "content_workers_summary": {
-    "message": "$1 завершено · $2 работают"
+  "content_workers_still_running__one": {
+    "message": "Воркеры ещё работают: $1"
   },
-  "content_workers_summary_failed": {
-    "message": "$1 завершено · $2 работают · $3 с ошибкой"
+  "content_workers_still_running__few": {
+    "message": "Воркеры ещё работают: $1"
+  },
+  "content_workers_still_running__many": {
+    "message": "Воркеры ещё работают: $1"
   },
   "content_working": {
     "message": "работа…"
@@ -801,10 +861,28 @@
     "message": "не удалось скопировать"
   },
   "popup_count_held": {
+    "message": "$1 удерживаются"
+  },
+  "popup_count_held__one": {
     "message": "$1 удерживается"
   },
+  "popup_count_held__few": {
+    "message": "$1 удерживаются"
+  },
+  "popup_count_held__many": {
+    "message": "$1 удерживаются"
+  },
   "popup_count_held_in_page": {
+    "message": "$1 удерживаются на странице"
+  },
+  "popup_count_held_in_page__one": {
     "message": "$1 удерживается на странице"
+  },
+  "popup_count_held_in_page__few": {
+    "message": "$1 удерживаются на странице"
+  },
+  "popup_count_held_in_page__many": {
+    "message": "$1 удерживаются на странице"
   },
   "popup_count_queued": {
     "message": "$1 в очереди"
@@ -820,9 +898,6 @@
   },
   "popup_detail_app_value": {
     "message": "v$1 · порт $2"
-  },
-  "popup_detail_browser_queue_value": {
-    "message": "$1 удерживается · всего $2"
   },
   "popup_detail_chat_id": {
     "message": "ID чата"
@@ -848,17 +923,11 @@
   "popup_detail_observed": {
     "message": "наблюдается"
   },
-  "popup_detail_observed_value": {
-    "message": "$1 событий · $2 вызовов"
-  },
   "popup_detail_ownership": {
     "message": "владение"
   },
   "popup_detail_page_sends": {
     "message": "отправки страницы"
-  },
-  "popup_detail_page_sends_value": {
-    "message": "$1 · ошибок $2"
   },
   "popup_detail_recorder": {
     "message": "рекордер"
@@ -894,6 +963,15 @@
     "message": "ожидает"
   },
   "popup_pipeline_call_fallback_many": {
+    "message": "Приложение не смогло сопоставить $1 вызова по ID запроса — использован резервный способ $2."
+  },
+  "popup_pipeline_call_fallback_many__one": {
+    "message": "Приложение не смогло сопоставить $1 вызов по ID запроса — использован резервный способ $2."
+  },
+  "popup_pipeline_call_fallback_many__few": {
+    "message": "Приложение не смогло сопоставить $1 вызова по ID запроса — использован резервный способ $2."
+  },
+  "popup_pipeline_call_fallback_many__many": {
     "message": "Приложение не смогло сопоставить $1 вызовов по ID запроса — использован резервный способ $2."
   },
   "popup_pipeline_call_fallback_one": {
@@ -924,7 +1002,16 @@
     "message": "Приложение получило ID. Ожидание подтверждения владельца."
   },
   "popup_pipeline_request_id_matched_many": {
+    "message": "$1 ID запроса сопоставлено с записанной активностью инструментов."
+  },
+  "popup_pipeline_request_id_matched_many__one": {
+    "message": "$1 ID запроса сопоставлен с записанной активностью инструментов."
+  },
+  "popup_pipeline_request_id_matched_many__few": {
     "message": "$1 ID запросов сопоставлены с записанной активностью инструментов."
+  },
+  "popup_pipeline_request_id_matched_many__many": {
+    "message": "$1 ID запросов сопоставлено с записанной активностью инструментов."
   },
   "popup_pipeline_request_id_matched_one": {
     "message": "1 ID запроса сопоставлен с записанной активностью инструментов."
@@ -1177,5 +1264,86 @@
   },
   "popup_app_not_running_help": {
     "message": "Убедитесь, что Chat On Steroids открыт на этом компьютере. Расширение подключится само."
+  },
+  "content_workers_finished": {
+    "message": "завершено: $1"
+  },
+  "content_workers_finished__one": {
+    "message": "завершено: $1"
+  },
+  "content_workers_finished__few": {
+    "message": "завершено: $1"
+  },
+  "content_workers_finished__many": {
+    "message": "завершено: $1"
+  },
+  "content_workers_running": {
+    "message": "$1 работают"
+  },
+  "content_workers_running__one": {
+    "message": "$1 работает"
+  },
+  "content_workers_running__few": {
+    "message": "$1 работают"
+  },
+  "content_workers_running__many": {
+    "message": "$1 работают"
+  },
+  "content_workers_failed": {
+    "message": "с ошибкой: $1"
+  },
+  "content_workers_failed__one": {
+    "message": "с ошибкой: $1"
+  },
+  "content_workers_failed__few": {
+    "message": "с ошибкой: $1"
+  },
+  "content_workers_failed__many": {
+    "message": "с ошибкой: $1"
+  },
+  "popup_detail_events": {
+    "message": "$1 события"
+  },
+  "popup_detail_events__one": {
+    "message": "$1 событие"
+  },
+  "popup_detail_events__few": {
+    "message": "$1 события"
+  },
+  "popup_detail_events__many": {
+    "message": "$1 событий"
+  },
+  "popup_detail_calls": {
+    "message": "$1 вызова"
+  },
+  "popup_detail_calls__one": {
+    "message": "$1 вызов"
+  },
+  "popup_detail_calls__few": {
+    "message": "$1 вызова"
+  },
+  "popup_detail_calls__many": {
+    "message": "$1 вызовов"
+  },
+  "popup_detail_failed": {
+    "message": "ошибок: $1"
+  },
+  "popup_detail_failed__one": {
+    "message": "ошибок: $1"
+  },
+  "popup_detail_failed__few": {
+    "message": "ошибок: $1"
+  },
+  "popup_detail_failed__many": {
+    "message": "ошибок: $1"
+  },
+  "popup_detail_total": {
+    "message": "всего $1"
+  },
+  "content_edit_message_missing": {
+    "message": "Этого сообщения больше нет на странице ChatGPT, поэтому его нельзя изменить."
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT не предложил изменить это сообщение. Откройте чат в ChatGPT и попробуйте снова."
   }
 }

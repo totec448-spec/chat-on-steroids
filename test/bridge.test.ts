@@ -54,6 +54,7 @@ const {
   bridgePort,
   bridgeStatus,
   companionDiagnostics,
+  recoveryStoppedChats,
   sessionControlsFor,
   cancelAssistantRecovery,
   onBridgeChange,
@@ -81,6 +82,7 @@ const {
   REVIVAL_ACTIVITY_MS,
   REVIVAL_DEADLINE_MS,
   WORKER_BOOTSTRAP_LIMIT_MS,
+  WORKER_SENDING_GRACE_MS,
   WORKER_REDEEM_MS,
   BROWSER_RECOVERY_COOLDOWN_MS,
   DEFAULT_PORTS,
@@ -118,6 +120,7 @@ const sessionStoreModule = await import('../src/main/session/store.js');
 const { noteServedRequest, resetConnectorIdentityForTests } = await import('../src/main/connector-identity.js');
 const { closeConversation, liveConversations, noteChatOrigin, recordChatObservations, recordProgress, recordToolCall, REQUEST_ID_GRACE_MS, resetRecorderForTests } = await import('../src/main/session/recorder.js');
 const { requestCorrelation, resetCorrelationRegistryForTests, restoreRequestCorrelations } = await import('../src/main/session/correlation.js');
+const { readSessionList } = await import('../src/main/session/read-model.js');
 const { resetBlockedChatsForTests, setChatBlocked } = await import('../src/main/session/blocked-chats.js');
 const {
   CONTINUATIONS_STATE,
@@ -165,6 +168,7 @@ const {
   resetSwarm,
   restoreSwarm,
   snapshotSwarm,
+  swarmRunning,
   swarmState,
   swarmStateForCaller,
   WORKER_CONTEXT_CEILING_TOKENS,
@@ -695,6 +699,42 @@ describe('who is allowed to talk to it', () => {
       expect((await bridgeStatus()).externalExtension).toEqual({ present: false, version: '0.0.1', lastSeenAt: null, signedIn: null, proof: null });
       expect(changed).toHaveBeenCalled();
     } finally { unsubscribe(); }
+  });
+
+  // 2.1.41 bug hunt: with Chrome current and Firefox still on the add-on it had not updated yet, the one
+  // reported version followed whichever browser asked last, and the update notice came and went.
+  it('reports the oldest extension among connected browsers, with its engine, until that browser goes quiet', async () => {
+    await pair();
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const changed = vi.fn(); const unsubscribe = onBridgeChange(changed);
+    const chrome = 'a'.repeat(32), firefox = 'b'.repeat(32);
+    const ask = (browser: string, extensionVersion: string, engine?: string) =>
+      request('POST', '/status', { host: 'browser', browser, extensionVersion, engine, body: { openConversations: [] } });
+    try {
+      await ask(chrome, APP_VERSION);
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: APP_VERSION });
+      expect((await bridgeStatus()).extensionEngine).toBeUndefined();
+      await ask(firefox, '0.0.1', 'gecko');
+      for (let i = 0; i < 3; i++) {
+        await ask(chrome, APP_VERSION);
+        expect(await bridgeStatus()).toMatchObject({ extensionVersion: '0.0.1', extensionEngine: 'gecko' });
+        await ask(firefox, '0.0.1', 'gecko');
+        expect(await bridgeStatus()).toMatchObject({ extensionVersion: '0.0.1', extensionEngine: 'gecko' });
+      }
+      // Firefox closes; Chrome keeps polling. Once Firefox counts as gone the notice is told, unprompted.
+      await vi.advanceTimersByTimeAsync(40_000);
+      await ask(chrome, APP_VERSION);
+      changed.mockClear();
+      await vi.advanceTimersByTimeAsync(20_002);
+      expect(changed).toHaveBeenCalled();
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: APP_VERSION });
+      expect((await bridgeStatus()).extensionEngine).toBeUndefined();
+      // The same browser updated in place replaces its own entry.
+      await ask(firefox, '0.0.1', 'gecko');
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: '0.0.1', extensionEngine: 'gecko' });
+      await ask(firefox, APP_VERSION, 'gecko');
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: APP_VERSION });
+    } finally { unsubscribe(); vi.useRealTimers(); }
   });
 
   it('publishes external expiry while the CoS companion continues polling', async () => {
@@ -7907,6 +7947,35 @@ describe('a command that runs out of time says how far its page got', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  // #1086 (2.1.41, Windows VM under load): pages reported "sending the task" and the app gave the workers
+  // up at the ordinary deadline anyway, while their chats received the task: workers ran that the app had
+  // written off. A page that says it is sending gets a bounded window for its receipt, and is told so.
+  it.each([true, false])('keeps a worker whose page reported Send for its receipt (receipt arrives %s)', async arrives => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
+      const bootstrap = await redeem();
+      await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS - 10_000);
+      const sending = (await step(bootstrap.id, 'sending')).body;
+      expect(sending).toMatchObject({ ok: true });
+      expect(sending.expiresAt).toBeGreaterThanOrEqual(Date.now() + WORKER_SENDING_GRACE_MS - 1_000);
+      const prior = new Set(getLog());
+      await vi.advanceTimersByTimeAsync(30_000); // past the ordinary deadline
+      expect(giveUp(prior, 'worker:')).toBe('');
+      expect(swarmState().agents.find(agent => agent.id === 'worker-1')?.state).toBe('invited');
+      if (arrives) {
+        const conversationId = 'dededede-7654-3210-fedc-ba9876543211';
+        expect((await request('POST', '/commands/ack', { body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' } })).status).toBe(200);
+        expect(swarmState().agents.find(agent => agent.id === 'worker-1')?.state).toBe('active');
+      } else {
+        // The window is bounded: without a receipt the worker still ends, and says it got as far as Send.
+        await vi.advanceTimersByTimeAsync(WORKER_SENDING_GRACE_MS);
+        expect(giveUp(prior, 'worker:')).toContain('last step: sending the task');
+      }
+    } finally { vi.useRealTimers(); }
+  });
+
   it('ignores a step from a page that does not own the command, and unknown steps', async () => {
     vi.useFakeTimers();
     try {
@@ -8199,6 +8268,107 @@ describe('a worker chat that never opens', () => {
       vi.useRealTimers();
       await saveConfig(previous);
     }
+  });
+});
+
+// --------------------------------------------------- late starts
+
+/**
+ * A worker the app gave up on for time, whose chat received its task anyway (#1086).
+ *
+ * On a memory-starved Windows machine (2026-10-18, 250–430 MB free) pages sent their task
+ * within the deadline, but their reports reached the app 20–90 s late. The app failed the
+ * worker, its chat went on working, and nothing tracked it. The truth arriving late is
+ * accepted: the worker rejoins its run when it still can, and is fenced as a stray when not.
+ */
+describe('a worker whose chat starts after the app gave up on it', () => {
+  const ack = (id: string, conversationId: string, client = 'tab-1') =>
+    request('POST', '/commands/ack', { body: { id, status: 'sent', conversationId, agent: 'worker-1', client } });
+  const primeReports = (): string[] =>
+    snapshotSwarm()!.agents.find(entry => entry.info.id === 'prime')!.queue.map(message => message.text);
+  const workerOne = () => swarmState().agents.find(agent => agent.id === 'worker-1');
+  const LATE_CHAT = 'abababab-5555-4444-3333-222222222222';
+
+  it('rejoins its live run and the prime is told to expect its result', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'first half' }, { task: 'second half' }], caller: { conversationId: PRIME_CHAT } });
+      await vi.waitFor(() => expect(opened).toHaveLength(2));
+      const first = await redeem(new URL(opened[0]!).searchParams.get('clf')!);
+      const second = await redeem(new URL(opened[1]!).searchParams.get('clf')!, 'tab-2');
+      expect((await request('POST', '/commands/ack', { body: { id: second.id, status: 'sent',
+        conversationId: 'cdcdcdcd-5555-4444-3333-222222222222', agent: second.agent, client: 'tab-2' } })).status).toBe(200);
+      await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS + 1_000);
+      expect(workerOne()?.state).toBe('failed');
+
+      const late = await ack(first.id, LATE_CHAT);
+      expect(late.status).toBe(200);
+      expect(late.body).toMatchObject({ final: true, committed: true, conversationId: LATE_CHAT });
+      expect(workerOne()).toMatchObject({ state: 'active', conversationId: LATE_CHAT });
+      expect(primeReports().at(-1)).toMatch(/^\[worker-1 started late\] .*do not redo its work/);
+      // A retried ACK after a lost response gets the same final answer, and changes nothing.
+      expect((await ack(first.id, LATE_CHAT)).body).toEqual(late.body);
+      expect(primeReports().filter(text => text.startsWith('[worker-1 started late]'))).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('wakes its parked run when it was the last worker', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'the only half' }], caller: { conversationId: PRIME_CHAT } });
+      const bootstrap = await redeem();
+      await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS + 1_000);
+      expect(swarmRunning()).toBe(false);
+
+      const late = await ack(bootstrap.id, 'abababab-7777-4444-3333-222222222222');
+      expect(late.body, JSON.stringify(late.body)).toMatchObject({ final: true, committed: true });
+      expect(swarmRunning()).toBe(true);
+      expect(workerOne()).toMatchObject({ state: 'active', conversationId: 'abababab-7777-4444-3333-222222222222' });
+      expect(primeReports().at(-1)).toMatch(/^\[worker-1 started late\]/);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('is fenced as a stray when its slot went to a replacement, and the prime is told', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'first half' }, { task: 'second half' }], caller: { conversationId: PRIME_CHAT } });
+      await vi.waitFor(() => expect(opened).toHaveLength(2));
+      const first = await redeem(new URL(opened[0]!).searchParams.get('clf')!);
+      const second = await redeem(new URL(opened[1]!).searchParams.get('clf')!, 'tab-2');
+      await request('POST', '/commands/ack', { body: { id: second.id, status: 'sent',
+        conversationId: 'cdcdcdcd-5555-4444-3333-222222222222', agent: second.agent, client: 'tab-2' } });
+      await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS + 1_000);
+      // The prime did what the failure report told it to: it started a replacement.
+      spawn({ workers: [{ task: 'first half, again' }], caller: { conversationId: PRIME_CHAT } });
+      await vi.waitFor(() => expect(opened).toHaveLength(3));
+      const replacement = await redeem(new URL(opened[2]!).searchParams.get('clf')!, 'tab-3');
+      await request('POST', '/commands/ack', { body: { id: replacement.id, status: 'sent',
+        conversationId: 'efefefef-5555-4444-3333-222222222222', agent: replacement.agent, client: 'tab-3' } });
+
+      const late = await ack(first.id, LATE_CHAT);
+      expect(late.status).toBe(200);
+      expect(late.body).toMatchObject({ final: true, committed: false, conversationId: LATE_CHAT });
+      expect(retiredWorkerForConversation(LATE_CHAT)).toMatchObject({ id: 'worker-1' });
+      expect(swarmState().agents.filter(agent => agent.conversationId === LATE_CHAT)).toEqual([]);
+      expect(primeReports().at(-1)).toMatch(/^\[worker-1 started late, outside the run\] .*tool calls are refused/);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('takes no late ACK from a page other than the one that claimed it', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'the only half' }], caller: { conversationId: PRIME_CHAT } });
+      const bootstrap = await redeem();
+      await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS + 1_000);
+      const otherChat = 'abababab-6666-4444-3333-222222222222';
+      expect((await ack(bootstrap.id, otherChat, 'another-tab')).status).toBe(404);
+      expect(swarmRunning()).toBe(false);
+      expect(retiredWorkerForConversation(otherChat)).toBeNull();
+    } finally { vi.useRealTimers(); }
   });
 });
 
@@ -9663,6 +9833,7 @@ describe('unattributed activity recovery', () => {
       for (let pass = 0; pass < 3; pass++) {
         await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS / 2);
         expect((await request('GET', `/activity?conversationId=${chat}&approval=1`)).status).toBe(200);
+        expect((await readSessionList({ limit: 60 })).approval).toEqual([chat]);
         await vi.advanceTimersByTimeAsync(CHAT_SILENCE_MS / 2);
         await sweepStaleSwarm(Date.now());
         expect(await maintenance(), 'a reload was queued over the approval card').toBeNull();
@@ -9670,6 +9841,7 @@ describe('unattributed activity recovery', () => {
       const why = getLog().filter(entry => entry.message.includes(`silence recovery for ${chat}`)).map(entry => entry.message);
       expect(why).toEqual([expect.stringContaining('waiting: ChatGPT asks the user to allow or deny a tool call')]);
       expect((await request('GET', `/activity?conversationId=${chat}&approval=0`)).status).toBe(200);
+      expect((await readSessionList({ limit: 60 })).approval).toEqual([]);
       await vi.advanceTimersByTimeAsync(GOAL_QUIET_MS);
       await sweepStaleSwarm(Date.now());
       expect(await maintenance()).toMatchObject({ conversationId: chat, reason: 'silence' });
@@ -15250,6 +15422,12 @@ describe('the goal loop over the bridge', () => {
       expect((await sessionControlsFor(session.id)).recovery).toContainEqual({
         kind: 'pickup-stopped', deadline: Date.now(), attempts: 3, next: 'queue'
       });
+      // The session list says the same for every chat, not only the open one: the Inbox reads it.
+      expect((await readSessionList({ limit: 60 })).recoveryStopped).toEqual([chat]);
+      // A chat whose recovery state cannot be read is left out; the list and the other stopped
+      // chats stay readable.
+      const unreadable = { ...row!, id: 'abca0175-0000-4000-8000-0000000001ff', sessionId: 'not/a/session' };
+      expect(await recoveryStoppedChats([unreadable, ...await input.listInputs()])).toEqual([chat]);
       const stoppedAt = Date.now();
       await request('POST', '/events', { body: { conversationId: chat, events: [{
         kind: 'chat_error', time: Date.now(), recoverable: false, blocking: true,
@@ -15275,6 +15453,11 @@ describe('the goal loop over the bridge', () => {
       expect((await request('GET', '/status')).body.repairs?.some((repair: { conversationId: string }) => repair.conversationId === chat)).toBe(false);
       expect((await sessionControlsFor(session.id)).recovery).toContainEqual(expect.objectContaining({ kind: 'pickup-stopped', attempts: 3, next: 'queue' }));
       expect(recoveryBrowserWake).toHaveBeenCalledTimes(3);
+      expect((await readSessionList({ limit: 60 })).recoveryStopped).toEqual([chat]);
+      // The person acting on it ends it: the countdown and the list agree it is gone.
+      expect(await input.cancelInput(row!.id)).toBe(true);
+      expect((await sessionControlsFor(session.id)).recovery?.some(entry => entry.kind === 'pickup-stopped')).toBe(false);
+      expect((await readSessionList({ limit: 60 })).recoveryStopped).toEqual([]);
     } finally {
       await writeDurableNow('session-input', []);
       resetInputForTests();
@@ -15542,6 +15725,7 @@ describe('the goal loop over the bridge', () => {
       expect((await sessionControlsFor(sessionId)).recovery).toContainEqual(expect.objectContaining({
         kind: 'pickup-stopped', attempts: 3, next: 'goal'
       }));
+      expect((await readSessionList({ limit: 60 })).recoveryStopped).toEqual([chat]);
       expect(goal.goalPendingReplyFor(chat)).toMatchObject({ pickupAttempts: 3, pickupStoppedAt: Date.now() });
       expect(await goal.setGoalReplyActiveNow(chat, false)).toBe(true);
       expect(await goal.setGoalReplyActiveNow(chat, true)).toBe(true);
@@ -15560,7 +15744,70 @@ describe('the goal loop over the bridge', () => {
       await vi.advanceTimersByTimeAsync(12 * 60 * 60_000);
       expect(await takeRepair()).toBeNull();
       expect((await request('GET', `/activity?conversationId=${chat}`)).body.goal.pending).toBeNull();
+      expect((await readSessionList({ limit: 60 })).recoveryStopped).toEqual([]);
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The stop of a Goal reply is recorded on its third reload. Its push used to come only after that
+  // reload was queued, so a chat that could no longer take it never told the session list.
+  it('pushes a Goal reply\'s recovery stop even when its last reload cannot be queued', async () => {
+    vi.useFakeTimers();
+    const fsModule = await import('node:fs');
+    const { onSessionChange } = await import('../src/main/session/recorder.js');
+    const realRename = fsModule.promises.rename.bind(fsModule.promises);
+    const chat = 'cafe0073-0000-4000-8000-000000000273';
+    const pushes: unknown[] = [];
+    const stopListening = onSessionChange(change => { pushes.push(change); });
+    let blockedDuringStop = false;
+    const goal = await import('../src/main/goal.js');
+    // While the stop is being written, the chat stops taking browser recovery.
+    const rename = vi.spyOn(fsModule.promises, 'rename').mockImplementation(async (from, to) => {
+      if (!blockedDuringStop && String(to).includes(GOAL_REPLIES_STATE) && goal.goalPendingReplyFor(chat)?.pickupStoppedAt) {
+        blockedDuringStop = true;
+        setChatBlocked(chat, true);
+      }
+      return realRename(from, to);
+    });
+    try {
+      await pair();
+      await goal.setGoalSwitchNow(chat, 'goal', true);
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'keep going', messageId: 'm-stop-push' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'g-stop-push' },
+        { kind: 'turn_end', time: Date.now(), turnId: 'g-stop-push', outcome: 'completed' }
+      ] } });
+      await request('POST', '/events', { body: { conversationId: chat, events: [{
+        kind: 'assistant_message', time: Date.now(), messageId: 'a-stop-push', turnId: 'g-stop-push',
+        text: 'Done with that part.', state: 'final', final: true, goalEligible: true, activeNow: true
+      }] } });
+      expect((await request('GET', `/activity?conversationId=${chat}`)).body.goal.pending).not.toBeNull();
+      const takeRepair = async (): Promise<{ token: string } | null> => {
+        await sweepStaleSwarm(Date.now());
+        return (await request('GET', '/status')).body.repairs?.[0] ?? null;
+      };
+      await vi.advanceTimersByTimeAsync(2 * 60_000 - 1_000);
+      // The first two reloads, each claimed and confirmed as the extension does.
+      for (const gap of [1_000, 5 * 60_000]) {
+        await vi.advanceTimersByTimeAsync(gap);
+        const handout = await takeRepair();
+        expect(handout).not.toBeNull();
+        expect((await request('POST', '/repairs/claim', { body: { token: handout!.token } })).body.allowed).toBe(true);
+        expect((await request('GET', `/status?repaired=${handout!.token}&repairAction=reloaded`)).status).toBe(200);
+      }
+      await vi.advanceTimersByTimeAsync(1_000);
+      pushes.length = 0;
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(await takeRepair()).toBeNull();
+      expect(blockedDuringStop).toBe(true);
+      expect(goal.goalPendingReplyFor(chat)).toMatchObject({ pickupAttempts: 3, pickupStoppedAt: expect.any(Number) });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(pushes.length).toBeGreaterThan(0);
+    } finally {
+      rename.mockRestore();
+      stopListening();
+      setChatBlocked(chat, false);
       vi.useRealTimers();
     }
   });

@@ -76,8 +76,9 @@ function olderThan(value, latest) {
  * reopens only once it was retried on the newest one.
  */
 export function intakeDecision(issue, { latest, opened }) {
+  if (MAINTAINERS.has(issue.author_association)) return { decision: 'none', missing: [] };
+  if (appVersionField(issue.body) === null) return freeFormDecision(issue, { latest, opened });
   const version = appVersionField(issue.body);
-  if (version === null || MAINTAINERS.has(issue.author_association)) return { decision: 'none', missing: [] };
   if (!(Date.parse(issue.created_at) >= Date.parse(INTAKE_SINCE))) {
     const decision = versionDecision(issue);
     return { decision, missing: decision === 'close' ? ['version'] : [] };
@@ -93,19 +94,64 @@ export function intakeDecision(issue, { latest, opened }) {
   return { decision: held ? 'reopen' : 'none', missing };
 }
 
+/**
+ * A bug report written without the form (#1643): no bug-form field, not the feature form, and either the
+ * bug label or a title that starts with "Bug". Its own headings ("### 1. What we saw") don't make it a
+ * form. Ideas and questions written freely are left alone.
+ */
+export function freeFormBug(issue) {
+  if (/^###\s+(?:Problem or workflow|Proposed change)\s*$/m.test(String(issue.body ?? ''))) return false;
+  const labeled = (issue.labels ?? []).some(label => (typeof label === 'string' ? label : label.name) === 'bug');
+  return labeled || /^\s*\[?bug\b/i.test(String(issue.title ?? ''));
+}
+
+/** The app's version where the text names it ("CoS application: 2.1.40", "Chat On Steroids 2.1.40", "[Bug] 2.1.40:"). */
+export function freeFormVersion(issue) {
+  const text = `${issue.title ?? ''}\n${issue.body ?? ''}`;
+  const named = /\b(?:chat on steroids|cos|app(?:lication)?|version)\b[^\n]{0,40}?\bv?(\d+\.\d+\.\d+)(?![.\d])/i.exec(text);
+  const titled = /^\s*\[?bug\]?[:\s-]*v?(\d+\.\d+\.\d+)(?![.\d])/i.exec(String(issue.title ?? ''));
+  return named?.[1] ?? titled?.[1] ?? null;
+}
+
+/**
+ * The same three requirements, read from the whole text. Without the form there is no checkbox: a
+ * report on the newest release says so by its version number, an older one still has to be retried.
+ */
+function freeFormDecision(issue, { latest, opened }) {
+  if (!freeFormBug(issue) || !(Date.parse(issue.created_at) >= Date.parse(INTAKE_SINCE))) return { decision: 'none', missing: [] };
+  const labeled = (issue.labels ?? []).some(label => (typeof label === 'string' ? label : label.name) === INTAKE_LABEL);
+  const held = labeled && issue.state === 'closed';
+  const version = freeFormVersion(issue);
+  const missing = [];
+  if (!version) missing.push('version');
+  if (!hasDiagnostics(issue.body)) missing.push('diagnostics');
+  const checked = /^\s*[-*]\s+\[[xX]\]\s+I reproduced this on the latest release/m.test(String(issue.body ?? ''));
+  if (latest && !checked && (!version || ((opened || held) && olderThan(version, latest)))) missing.push('latest');
+  if (missing.length) return { decision: issue.state === 'open' && !labeled ? 'close' : 'none', missing, freeForm: true };
+  return { decision: held ? 'reopen' : 'none', missing, freeForm: true };
+}
+
 const MISSING_TEXT = {
   version: '**App version**: the exact number, for example `2.1.38`. It is in the app under **Settings → Activity**, or in the browser extension\'s popup.',
   diagnostics: '**Diagnostics report**: in the app, open **Activity** and click **Diagnostics report**, then drag the saved file into that field. Personal details are already replaced in it; please read it before you attach it. If the app does not open at all, attach its `app.log` instead.',
   latest: '**Latest release**: please update to the latest release (Settings → Activity), check that the problem is still there, then tick "I reproduced this on the latest release" and put the new version number in.'
 };
 
+/** A report written without the bug form has no fields to fill: the same parts go into its text. */
+const FREE_FORM_TEXT = {
+  version: '**App version**: the exact number, for example `2.1.38`. It is in the app under **Settings → Activity**, or in the browser extension\'s popup.',
+  diagnostics: '**Diagnostics report**: in the app, open **Activity** and click **Diagnostics report**, then drag the saved file into the issue text. Personal details are already replaced in it; please read it before you attach it. If the app does not open at all, attach its `app.log` instead.',
+  latest: '**Latest release**: please update to the latest release (Settings → Activity), check that the problem is still there, and put the new version number in.'
+};
+
 /** The comment on a closed new report: every missing part and where it comes from. */
-export function missingComment(missing) {
+export function missingComment(missing, { freeForm = false } = {}) {
+  const texts = freeForm ? FREE_FORM_TEXT : MISSING_TEXT;
   return `Thanks for the report! So we can look into it without back-and-forth, a few things are needed first:
 
-${missing.map(item => `- ${MISSING_TEXT[item]}`).join('\n')}
+${missing.map(item => `- ${texts[item]}`).join('\n')}
 
-This issue is closed until then. Please **edit this issue** and add them: it reopens by itself once everything is there.`;
+This issue is closed until then. Please **edit this issue** and add them${freeForm ? ' to the issue text (the **Bug report** form has a field for each)' : ''}: it reopens by itself once everything is there.`;
 }
 
 export const INTAKE_REOPEN_COMMENT = 'Thanks, everything is there now! The issue is open again.';
@@ -127,12 +173,12 @@ async function main() {
   const issue = await github(path, token);
   if (issue.pull_request) return;
   const latest = await github(`/repos/${repository}/releases/latest`, token).then(release => release?.tag_name ?? null, () => null);
-  const { decision, missing } = intakeDecision(issue, { latest, opened: process.env.ISSUE_ACTION === 'opened' });
+  const { decision, missing, freeForm } = intakeDecision(issue, { latest, opened: process.env.ISSUE_ACTION === 'opened' });
   const fresh = Date.parse(issue.created_at) >= Date.parse(INTAKE_SINCE);
   const label = fresh ? INTAKE_LABEL : LABEL;
   const post = (body) => github(`${path}/comments`, token, { method: 'POST', body: JSON.stringify({ body }) });
   if (decision === 'close') {
-    await post(fresh ? missingComment(missing) : CLOSE_COMMENT);
+    await post(fresh ? missingComment(missing, { freeForm }) : CLOSE_COMMENT);
     await github(`${path}/labels`, token, { method: 'POST', body: JSON.stringify({ labels: [label] }) });
     await github(path, token, { method: 'PATCH', body: JSON.stringify({ state: 'closed', state_reason: 'not_planned' }) });
   } else if (decision === 'reopen') {

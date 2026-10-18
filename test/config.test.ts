@@ -96,6 +96,19 @@ describe('settings migration', () => {
     expect(loaded.readOnly).toBe(true); expect(loaded.capabilities.command).toBe(false);
     expect(loaded.ui.appearance).toBeUndefined();
   });
+  it('loads a sidebar layout saved before the setting existed, or no longer offered, as Projects', async () => {
+    const { defaultAppearance } = await import('../src/shared/appearance.js');
+    const config = defaultConfig();
+    const appearance = { ...defaultAppearance(), sidebarLayout: 'inbox' as const }; appearance.dark.sidebar = '#e53aa0';
+    await saveConfig({ ...config, ui: { ...config.ui, appearance } });
+    expect((await loadConfig()).ui.appearance?.sidebarLayout).toBe('inbox');
+    const { sidebarLayout: _, ...old } = appearance;
+    for (const saved of [old, { ...old, sidebarLayout: 'status' }]) {
+      await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...config, ui: { ...config.ui, appearance: saved } }), 'utf8');
+      // The layout alone falls back; the colors around it are kept.
+      expect((await loadConfig()).ui.appearance).toEqual({ ...appearance, sidebarLayout: 'projects' });
+    }
+  });
   it('drops removed file-saving settings without changing other saved choices', async () => {
     const config = defaultConfig();
     config.readOnly = true;

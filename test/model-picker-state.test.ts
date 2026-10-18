@@ -100,6 +100,21 @@ it('confirms the exact selected pair without moving through other model versions
   expect(f.state.currentBucket).toBe(2);
   expect(page.window.document.querySelector('[data-testid="composer-intelligence-picker-content"]')).toBeNull();
 });
+// #1086 (2.1.41, Windows VM): worker tabs open with the model in their address and ChatGPT applies
+// it, but the picker was opened anyway to prove it. In a hidden, throttled worker tab its closing
+// animation never finished, its focus scope hid the composer, and every worker failed with
+// "ChatGPT never re-exposed a usable composer after model selection".
+it('confirms an already selected pair from the page\'s own state without opening the picker', async () => {
+  const f = fixture('', null); // Escape never closes it, as in a tab that draws no frames.
+  const opened = vi.fn();
+  page.window.document.querySelector('button')!.addEventListener('keydown', event => { if (event.key === 'Enter') opened(); });
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(true);
+  expect(opened).not.toHaveBeenCalled();
+  expect(page.window.document.querySelector('[data-testid="composer-intelligence-picker-content"]')).toBeNull();
+  // A different request still goes through the picker.
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'medium')).toBe(false);
+  expect(opened).toHaveBeenCalled();
+});
 it('does not treat an exact but denied current choice as selection proof', async () => {
   const f = fixture();
   f.props.modelSwitcherDenialsBySlug = { 'gpt-5-6-thinking': true };
@@ -139,7 +154,9 @@ it.each([false, true])('releases native hidden-window Presence and reopens a ret
     if (win.getComputedStyle(menu).animation === 'none') menu.remove();
   });
   expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(true);
-  expect(opens).toHaveBeenCalledTimes(1);
+  // Already selected and no menu left behind: the page's own state proves it, nothing opens (#1086).
+  // A retained closed menu still hides the composer, so that one is reopened and released.
+  expect(opens).toHaveBeenCalledTimes(retained ? 1 : 0);
   expect(doc.querySelector('[role="menu"]')).toBeNull();
   expect([...doc.querySelectorAll('style')]).toEqual([nativeStyle]);
 });

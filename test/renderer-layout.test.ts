@@ -260,13 +260,56 @@ describe('the session card header', () => {
  * belongs to, and whether its tab ever opened, are carried by chips — so the chips are
  * the part that must survive a narrow row, and the counts are the part that yields.
  */
+// 2.1.41 bug hunt: the header's connection `.state` rule (margin-left: auto) also matched the Compact &
+// Resume card's status, so "Compact & Resume:" stood alone and its sentence sat at the far right.
+describe('the Compact & Resume card', () => {
+  it('keeps its status sentence right after its name', () => {
+    const own = rule('.compaction > summary .state');
+    expect(own).toContain('margin-left: 0');
+    expect(own).toContain('display: inline');
+  });
+});
+
+// 2.1.41 UI audit: with Update status's details open, the activity log below it shrank to a 23 px sliver,
+// and the page sat 5 px right of every other settings page because only it reserved no scrollbar gutter.
+describe('the Activity page', () => {
+  it('keeps room for the activity log under an expanded update status', () => {
+    // Every block for the selector, in cascade order: settings.css owns the page layout.
+    const rows = [...css.matchAll(/(?:^|\n)\.activity-content\s*\{([^}]*)\}/g)].map(match => match[1]!.replace(/\s+/g, ' ').trim()).join(' ');
+    // A short window keeps Update status whole so its actions stay reachable; the log yields.
+    expect(rows.match(/grid-template-rows: [^;]+/g)?.at(-1)).toBe('grid-template-rows: auto auto minmax(0, 1fr)');
+    // With room to spare, Update status yields first and the log keeps a readable floor.
+    expect(css).toContain('@media (min-height: 760px) { .activity-content { grid-template-rows: auto minmax(0, max-content) minmax(min(260px, 40vh), 1fr); } }');
+  });
+  it('lines up with the other settings pages by reserving the same scrollbar gutter', () => {
+    const panel = rule("[data-panel='activity']");
+    expect(panel).toContain('overflow-y: auto');
+    expect(panel).toContain('scrollbar-gutter: stable');
+  });
+});
+
 describe('a session row', () => {
+  it('draws a still working mark, not a frozen spinner, when the system asks for reduced motion', () => {
+    // Windows "Animation effects: Off" turns reduced motion on, and the sheet then stops every animation.
+    // A quarter arc that no longer turns reads as a stuck app; a whole accent ring still says "working".
+    const still = /@media \(prefers-reduced-motion: reduce\) \{\s*\.session-status\.is-active, \.session-status\.is-working \{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(still).toContain('border-color: var(--accent)');
+  });
+
   it('keeps status visible and lets the title truncate', () => {
     expect(rule('.sess-top')).toContain('display: flex');
     expect(rule('.session-status')).toContain('flex: none');
     const bits = rule('.sess-top b');
     expect(bits).toContain('min-width: 0');
     expect(bits).toContain('text-overflow: ellipsis');
+  });
+
+  it("writes an inbox card's model line in the UI font, as the composer's model picker does, with steady digits", () => {
+    const detail = rule('.sess-detail');
+    expect(detail).not.toContain('font-family');
+    expect(detail).toContain('font-variant-numeric: tabular-nums');
+    expect(detail).toContain('font-size: calc(11px * var(--text-scale, 1))');
+    expect(detail).toContain('color: var(--faint)');
   });
 
   it('never borrows live worker status from a different run that reused worker-1/worker-2', () => {
