@@ -674,6 +674,17 @@ describe('who is allowed to talk to it', () => {
     expect((await bridgeStatus()).externalExtension?.engine).toBeUndefined();
   });
 
+  // 2.1.42 work, Windows VM: a Firefox add-on from before the engine header (2.1.37.1002) showed the
+  // Chrome banner "Reload the extension from this app's folder", which a signed add-on cannot do.
+  // Its moz-extension:// origin says it is Firefox too.
+  it('tells an older Firefox add-on apart by its origin', async () => {
+    await pair();
+    const firefox = 'moz-extension://3f0e5b1a-0c1d-4e2f-8a9b-0c1d2e3f4a5b';
+    await request('GET', '/status', { host: 'browser', origin: firefox, extensionVersion: '2.1.37.1002' });
+    expect((await bridgeStatus()).externalExtension).toMatchObject({ present: true, engine: 'gecko' });
+    expect(await bridgeStatus()).toMatchObject({ extensionVersion: '2.1.37.1002', extensionEngine: 'gecko' });
+  });
+
   // Chrome and Firefox both connected (VM, 2026-10-14): Setup showed whichever polled last, not the
   // browser chosen for ChatGPT. The chosen kind keeps the projection while it is present.
   it('projects the external browser that fits the chosen ChatGPT browser', async () => {
