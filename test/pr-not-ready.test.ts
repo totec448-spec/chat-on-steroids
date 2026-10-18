@@ -74,6 +74,29 @@ it('keeps the label while any check on the same commit still fails', async () =>
   expect(green.calls.at(-1)).toMatchObject({ path: `/repos/o/r/issues/7/labels/${NOT_READY_LABEL}`, init: { method: 'DELETE' } });
 });
 
+// Live #1624: the checklist failed, the author edited the description, and the rerun passed on the
+// same commit. Only each check's latest run (highest id) counts, so the old failure must not keep the label.
+it('clears the label when a check passed again after an older failed run', async () => {
+  const rerun = fake({ '/repos/o/r/commits/abc/check-runs?per_page=100': { check_runs: [
+    { id: 1, name: 'PR checklist', conclusion: 'failure' }, { id: 2, name: 'PR checklist', conclusion: 'success' }] } });
+  expect(await applyNotReady(rerun.request, input('clear'))).toBe('clear');
+  expect(rerun.calls.at(-1)).toMatchObject({ path: `/repos/o/r/issues/7/labels/${NOT_READY_LABEL}`, init: { method: 'DELETE' } });
+});
+
+it('keeps the label when the newest run of a check fails after an older success', async () => {
+  const relapse = fake({ '/repos/o/r/commits/abc/check-runs?per_page=100': { check_runs: [
+    { id: 3, name: 'PR checklist', conclusion: 'failure' }, { id: 2, name: 'PR checklist', conclusion: 'success' }] } });
+  expect(await applyNotReady(relapse.request, input('clear'))).toBe('kept (PR checklist still failing)');
+  expect(relapse.calls.some(call => call.init?.method === 'DELETE')).toBe(false);
+});
+
+it('names only the checks whose latest run still fails', async () => {
+  const mixed = fake({ '/repos/o/r/commits/abc/check-runs?per_page=100': { check_runs: [
+    { id: 1, name: 'CI', conclusion: 'failure' }, { id: 5, name: 'CI', conclusion: 'success' },
+    { id: 4, name: 'PR checklist', conclusion: 'success' }, { id: 6, name: 'PR checklist', conclusion: 'failure' }] } });
+  expect(await applyNotReady(mixed.request, input('clear'))).toBe('kept (PR checklist still failing)');
+});
+
 it('converts with the optional draft token, since the workflow token never may', async () => {
   const labels = fake({});
   const drafts = fake({ '/graphql': { data: { convertPullRequestToDraft: { pullRequest: { isDraft: true } } } } });
