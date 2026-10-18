@@ -740,6 +740,8 @@
   "Retry stage one with the complete plan and queued checkpoints": "Reintentar la primera etapa con el plan completo y los puntos de verificación en cola",
   "Restore this message to the composer for review and sending": "Restaurar este mensaje en el cuadro de texto para revisarlo y enviarlo",
   "Send or clear your current draft before retrying this message.": "Envía o borra tu borrador actual antes de reintentar este mensaje.",
+  "That message can no longer be edited, so this is restored as a new message.": "Este mensaje ya no se puede editar, así que se restaura como un mensaje nuevo.",
+  "Scroll up to the message you edited, then retry.": "Desplázate hacia arriba hasta el mensaje que editaste y vuelve a intentarlo.",
   "Message queued. Browser startup failed:": "Mensaje en cola. Falló el inicio del navegador:",
   "Retry browser": "Reintentar navegador",
   "Helper delivery was not confirmed. Its old chat may still be running.": "No se confirmó el envío al asistente auxiliar. Su chat anterior podría seguir en ejecución.",

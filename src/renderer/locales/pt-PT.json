@@ -734,6 +734,8 @@
   "Retry stage one with the complete plan and queued checkpoints": "Repetir a primeira etapa com o plano completo e os pontos de verificação em fila",
   "Restore this message to the composer for review and sending": "Repor esta mensagem no compositor para revisão e envio",
   "Send or clear your current draft before retrying this message.": "Envie ou limpe o rascunho atual antes de tentar novamente esta mensagem.",
+  "That message can no longer be edited, so this is restored as a new message.": "Esta mensagem já não pode ser editada, por isso foi restaurada como uma nova mensagem.",
+  "Scroll up to the message you edited, then retry.": "Desloque-se para cima até à mensagem que editou e tente novamente.",
   "Message queued. Browser startup failed:": "Mensagem em fila. O arranque do navegador falhou:",
   "Retry browser": "Tentar novamente o navegador",
   "Helper delivery was not confirmed. Its old chat may still be running.": "A entrega do helper não foi confirmada. O chat antigo pode continuar em execução.",
