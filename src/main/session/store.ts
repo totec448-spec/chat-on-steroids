@@ -1514,7 +1514,11 @@ export function upsertMessageEvent(
         entry.summary.contextTokens = Math.max(0, entry.summary.contextTokens + delta);
         entry.summary.updatedAt = Math.max(entry.summary.updatedAt, nextEvent.time);
         noteFinishWork(entry.summary, full);
-        if (full.kind === 'assistant_message' && (full.final === true || full.state === 'final')) {
+        // Only a new final is new work. The same finished answer re-reported after a reload or a
+        // branch keeps its boundary, or the sidebar would call a read chat "New response".
+        const finalBefore = sameMessage && previous.kind === 'assistant_message' &&
+          (previous.final === true || previous.state === 'final');
+        if (!finalBefore && full.kind === 'assistant_message' && (full.final === true || full.state === 'final')) {
           entry.summary.lastAssistantFinalAt = Math.max(
             entry.summary.lastAssistantFinalAt ?? 0,
             nextEvent.time
