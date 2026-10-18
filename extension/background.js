@@ -515,11 +515,24 @@ async function persistJournalNow() {
   }
 }
 
+/** The write queued behind the one in flight; it has not taken its snapshot yet. */
+let queuedJournalWrite = null;
+
 function persistJournal() {
   // storage.session.set is asynchronous and whole-snapshot writes may complete out of order.
   // Serialize them so an older snapshot can never land after a newer one while both callers
   // were already told their observations were durable.
-  const write = journalWriteQueue.then(() => persistJournalNow());
+  //
+  // Each write stores the whole journal (up to 4 MiB), and the snapshot is taken when the write
+  // starts. Callers arriving while one write is in flight therefore share the next one: it holds
+  // all of their observations. One write per message cost a slow Windows machine ~29 s of service
+  // worker time in seven minutes and made pages wait up to ~100 s (#1648).
+  if (queuedJournalWrite) return queuedJournalWrite;
+  const write = journalWriteQueue.then(() => {
+    queuedJournalWrite = null;
+    return persistJournalNow();
+  });
+  queuedJournalWrite = write;
   journalWriteQueue = write.then(
     () => undefined,
     () => undefined
