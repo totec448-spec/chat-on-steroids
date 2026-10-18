@@ -47,6 +47,7 @@ Change something you asked earlier and continue from there, or take a chat in a 
 - **Writing blocks next to formulas.** An answer with both shows its writing panel with title and Copy button.
 - **Files panel.** All toolbar actions stay on screen in narrow panels and every language (as icons with tooltips when the labels don't fit), a file with a very long line says why it can't be previewed, and on Windows, files in SSH projects whose names Windows doesn't allow (like `a:b?.txt`) open and save.
 - **Folder names keep their letters.** "Größe" becomes "groesse" instead of "gr-e".
+- **Extension updates.** If a new chat's first message got lost on its way to ChatGPT, the browser extension no longer waits hours before updating itself. That message shows in its chat as "may already have been sent", with Retry and Dismiss.
 - **What's New** no longer pops up again after you change a setting.
 - **Reduced motion.** With animations turned off in your system, a working chat shows a still ring instead of a spinner that looks stuck.
 - **Windows.** The app list no longer fails because of one unusual Start menu entry.
