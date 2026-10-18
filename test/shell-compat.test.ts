@@ -1660,6 +1660,30 @@ it('reports an app sighting for a shell result outside the turn\'s message ids, 
 // Edit & resubmit (#365): the shell model has no parent ids. A question follows the previous turn's
 // last message in the thread's ordered entries (the first follows the root), and only ChatGPT's own
 // versions control proves that two questions with the same place are versions of one message.
+// 2.1.41 release round, Windows: a message sent into the running answer (a fresh-turn continue, or
+// a person's own follow-up) sits in the same shell turn as the question it followed. Given that
+// turn's place, it looked like a second version of the question, and Edit & resubmit folded the
+// person's question away as "Earlier version". It follows the message before it in its own turn.
+it('places a message sent into a running turn after the message it followed, not beside the turn\'s question', async () => {
+  const f = fixture();
+  f.entry.turn.status = 'complete';
+  const second = addExchange(f, 2, 'Second question');
+  const interim = '99999999-1111-4111-8111-000000000024', steered = '99999999-1111-4111-8111-000000000025';
+  const [question, answer] = second.entry.turn.items;
+  second.entry.turn.items = [question!,
+    { type: 'assistant-message', messageId: interim, content: 'Running step two', phase: 'commentary', completed: true } as any,
+    { type: 'user-message', messageId: steered, serverMessageId: steered, message: 'Continue the task from where you are.' } as any,
+    answer!];
+  second.entry.turn.messageIds = [second.userId, interim, steered, second.answerId];
+  const thread = f.chain({ entries: [f.entry, second.entry] }, f.top);
+  f.row.return = thread;
+  const secondNode = f.doc.querySelectorAll('[data-turn-key]')[1] as any;
+  secondNode.__reactFiber$fixture = f.chain({ entry: second.entry }, thread);
+  const questions = (await f.ask()).turns.flatMap((turn: any) => turn.messages.filter((m: any) => m.role === 'user')
+    .map((m: any) => [m.rawMessageId, m.parentId, m.parentExact]));
+  expect(questions).toEqual([[USER, 'root', false], [second.userId, ANSWER, true], [steered, interim, true]]);
+});
+
 it('places each question in ChatGPT\'s message tree, with the versions control as proof of an edit', async () => {
   const f = fixture();
   f.entry.turn.status = 'complete';
