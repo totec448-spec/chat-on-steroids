@@ -697,11 +697,12 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.filter(message => message.ack)).toHaveLength(change === 'accepted' ? 1 : 0);
     if (change === 'draft') expect(composerText(live.document)).toBe('My own draft');
   });
-  // 2026-10-15, the user's Mac chat: while ChatGPT thinks or runs tools it offers only Stop, no
-  // Send (measured live), so every automatic continue for a long turn timed out unsent and the
-  // turns broke at 41 and 52 minutes anyway. A rotation then does what #1402 decided by hand:
-  // Stop right after the tool result and send Continue. A person's own message never stops a turn.
-  it.each(['rotation', 'user'] as const)('stops a thinking turn for its automatic continue only (%s)', async purpose => {
+  // 2026-10-15, the user's Mac chat: while ChatGPT thinks it offers only Stop, no Send. 2.1.39 then
+  // stopped the turn for a fresh-turn continue. Measured 2026-10-18 (#1662): a Stop while one of the
+  // turn's tool calls runs made the model run that call again. A continue is now sent only into a
+  // running call (the app holds that call's answer for it), so neither message ever stops a turn:
+  // with no Send offered the page sends nothing and the app withdraws the continue.
+  it.each(['rotation', 'user'] as const)('never stops a thinking turn to send a message into it (%s)', async purpose => {
     let directTurn: { id: string; startedAt: number };
     live = await nonProHarness(`https://chatgpt.com/c/${chatA}`, {
       desktop_input: message => {
@@ -726,10 +727,10 @@ describe('desktop input delivery and helper ownership', () => {
     const stops = vi.fn(() => { actions.append(send); void settleTurn(live!); });
     stop.addEventListener('click', stops);
     const result = await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA, directTurn });
-    expect(stops).toHaveBeenCalledTimes(purpose === 'rotation' ? 1 : 0);
-    expect(sends()).toBe(purpose === 'rotation' ? 1 : 0);
-    expect(result).toEqual({ ok: purpose === 'rotation' });
-    expect(live.sent.filter(message => message.ack)).toHaveLength(purpose === 'rotation' ? 1 : 0);
+    expect(stops).not.toHaveBeenCalled();
+    expect(sends()).toBe(0);
+    expect(result).toEqual({ ok: false });
+    expect(live.sent.filter(message => message.ack)).toHaveLength(0);
   });
   // 2026-10-15, live on the VM: in the first turn of a chat the app opened, ChatGPT shows no row
   // for the question (#942), and every automatic continue was refused before its claim because
