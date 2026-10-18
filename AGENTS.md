@@ -1344,8 +1344,9 @@ at its edge: Up recalls with the caret at the start, Down with it at the end. El
 move the caret natively through wrapped and typed rows, so a change of direction first takes it to
 that edge. IME composition, modifiers, an open slash/file menu, attached files or a plan in the
 draft and Edit & resubmit (#365) keep their keys. Only messages the person typed are recalled: the
-outbox row with the event's `messageId` decides, and `authoredSource: 'none'`, a `finishOwner`, a
-`recovery` or a `rotation`/`decision` purpose marks the app's own send. A message with no row was
+outbox row with the event's `inputId` or `messageId` decides, and `authoredSource: 'none'`, a
+`finishOwner`, a `recovery` or a `rotation`/`decision` purpose marks the app's own send. Until the
+window has read the outbox once, recall leaves the arrows to the caret. A message with no row was
 sent in ChatGPT itself and counts as typed, except a worker's or helper's, whose tasks come from the
 app. Messages without text, stored cut short, Compact & Resume prompts, folded earlier versions and
 queued inputs are not recalled either. The list is read at the first press, so a message recorded

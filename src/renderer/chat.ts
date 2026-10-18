@@ -2209,7 +2209,9 @@ let recall: { generation: number; draft: number; prompts: readonly string[]; bac
  * ChatGPT itself, so it is yours, unless it is a worker's: its tasks come from the app.
  */
 function typedPrompt(event: Extract<SessionEvent, { kind: 'user_message' }>): boolean {
-  const rows = event.messageId ? pendingComposerInputs.filter(row => row.messageId ? row.messageId === event.messageId : event.messageId === `input:${row.id}`) : [];
+  // The recorded row id is exact; the message id also finds a row this window read before its receipt.
+  const rows = pendingComposerInputs.filter(row => row.id === event.inputId ||
+    (!!event.messageId && (row.messageId ? row.messageId === event.messageId : event.messageId === `input:${row.id}`)));
   // A correction sent together with the next queued checkpoint is recorded as the correction.
   const row = rows.find(entry => !rows.some(other => other.companionInputId === entry.id));
   if (!row) {
@@ -2243,6 +2245,8 @@ function recallPrompt(event: KeyboardEvent): boolean {
   const up = event.key === 'ArrowUp';
   if ((!up && event.key !== 'ArrowDown') || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
   if (selectedId === null || detailFor !== selectedId || editingQuestion?.sessionId === selectedId) return false;
+  // Before the outbox is read, every message would count as typed; the arrows stay the caret's.
+  if (!composerInputsLoaded) return false;
   const input = $<HTMLTextAreaElement>('chatInput');
   const current = recall?.generation === selectionGeneration && recall.draft === composerDraftGeneration && input.value === recall.text ? recall : null;
   const back = current?.back ?? 0;
@@ -2382,6 +2386,8 @@ let controlledCanInject = false;
 let controlledCanSendDirectly = false;
 let controlledRecovery: RecoveryCountdown[] = [];
 let pendingComposerInputs: InputEntry[] = [];
+/** Whether this window has read the outbox yet; prompt recall needs it to tell the app's sends from yours. */
+let composerInputsLoaded = false;
 let inputQueueGeneration = 0;
 let goalIntentGeneration = 0;
 let goalProgress: (Omit<TaskProgress, 'phase'> & { phase: string; selection: number; inputId?: string }) | null = null;
@@ -7231,7 +7237,7 @@ async function refreshInputQueue(): Promise<void> {
   const selection = selectionGeneration;
   const [all, pausedHelpers] = await Promise.all([run(api.listInputs()), run(api.listPausedHelpers())]);
   if (!all || selection !== selectionGeneration || request !== inputQueueGeneration) return;
-  pendingComposerInputs = all;
+  pendingComposerInputs = all; composerInputsLoaded = true;
   for (const id of dismissedInputNotices) if (!all.some(entry => entry.id === id)) dismissedInputNotices.delete(id);
   paintDeliveryControls();
   const accepted = pendingNewInput && all.find(entry => entry.id === pendingNewInput!.id);
