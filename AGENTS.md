@@ -4067,10 +4067,14 @@ block that differs; otherwise the row is swapped whole, as is an answer first dr
 blocks as it appears live, fade in (opacity only; not when a chat opens or history pages in, nor
 under reduced motion). While a turn works, its newest event, if it is a message not yet final, shows
 only its finished blocks (up to its last blank line outside an open fence, writing block or display
-formula; a list once a finished line after a blank one ends it, since a blank line between items
-turns the whole list loose) and is drawn again only when one more finishes. While any of it is held
+formula; a list or an indented code block once a line after a blank one cannot continue it, since a
+blank line between items turns the whole list loose) and is drawn again only when one more finishes
+or its sources change. While any of it is held
 back the live row stays, saying Thinking where prose would otherwise speak for itself. It shows whole
-once final, its turn ends or anything follows it, and a directive's captured page always does.
+once final, its turn ends or anything follows it, and a directive's captured page always does. Until
+the chat's controls arrive, its recorded open turn counts as working, so rows painted first never show
+a tail they then take back; once they arrive they decide (a turn left open without an end shows its
+message whole), and an answer that changes whether the turn works repaints the message.
 A working turn's timeline ends with one live row: ChatGPT's own words for what the turn is doing
 (the outline's `now`, in the page's language), wearing the icon and clock of a call this app runs
 meanwhile; else that running call by its own caption; else a step ChatGPT's page names in the

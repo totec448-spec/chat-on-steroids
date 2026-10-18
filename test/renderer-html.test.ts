@@ -635,6 +635,29 @@ y=mx+b
     expect(finishedBlocks('- a\n\n- b\n')).toBe('');
   });
 
+  it('opens a list or a display formula only where Markdown would', () => {
+    // Indented four spaces after a paragraph's line, "- option" continues the paragraph.
+    expect(finishedBlocks('Para\n    - option\n\n  Next.\n')).toBe('Para\n    - option\n\n');
+    // A display formula opens at the start of its line, as the math tokenizer reads it; in a list, inside its item.
+    expect(finishedBlocks('Alpha.\n\n  $$ x\n\nNext.\n')).toBe('Alpha.\n\n  $$ x\n\n');
+    expect(finishedBlocks('- a\n\n  $$\n  x\n\n  y\n  $$\n\nNext.\n')).toBe('- a\n\n  $$\n  x\n\n  y\n  $$\n\n');
+    expect(finishedBlocks('- a\n\n  $$\n  x\n\n  y')).toBe('');
+  });
+
+  it('holds an indented code block back until a line after it is not indented', () => {
+    expect(finishedBlocks('Alpha.\n\n    one\n\n    two')).toBe('Alpha.\n\n');
+    expect(finishedBlocks('Alpha.\n\n    one\n\n    two\n\n  ')).toBe('Alpha.\n\n');
+    expect(finishedBlocks('Alpha.\n\n    one\n\n    two\n\nNext')).toBe('Alpha.\n\n    one\n\n    two\n\n');
+    expect(finishedBlocks('\tone\n\n\ttwo\n\nNext.\n')).toBe('\tone\n\n\ttwo\n\n');
+    // An item's indented line is the item's, not code.
+    expect(finishedBlocks('- a\n\n    more\n\nNext.\n')).toBe('- a\n\n    more\n\n');
+  });
+
+  it('opens a writing block only on the line ChatGPT opens one with', () => {
+    expect(finishedBlocks(':::writing example\n\nNext.\n\nMo')).toBe(':::writing example\n\nNext.\n\n');
+    expect(finishedBlocks(':::writing{title="Note"} \nDear team,\n\nThanks')).toBe('');
+  });
+
   it('reads triple backticks inside a line as inline code, not as a fence', () => {
     expect(finishedBlocks('```code``` is odd.\n\nNext para.')).toBe('```code``` is odd.\n\n');
     expect(finishedBlocks('~~~ a`b\nx\n\ny')).toBe('');

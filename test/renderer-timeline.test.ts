@@ -3012,6 +3012,44 @@ describe('an answer while ChatGPT writes it', () => {
       lex.mockRestore();
     });
 
+    /** Opens the chat with its controls held back until `release`, answered with `change` applied. */
+    const openBeforeControls = async (change: Record<string, unknown> = {}) => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe')], false);
+      const api = (w as any).api, original = api.getSessionControls, pending: Array<() => void> = [];
+      api.getSessionControls = (id: string) => new Promise(resolve => pending.push(async () => {
+        const answer = await original(id);
+        resolve({ ...answer, data: { ...answer.data, ...change } });
+      }));
+      (w.document.querySelector('#sessionList [data-id]') as HTMLElement).click();
+      await settle();
+      return { w, append, release: async () => { for (const reply of pending.splice(0)) reply(); await settle(); } };
+    };
+
+    it('holds the tail back from the first paint, before the chat\'s controls arrive', async () => {
+      const { w, release } = await openBeforeControls();
+      expect(blocks(w)).toHaveLength(1);
+      expect(shown(w)).toEqual(['Alpha.']);
+      await release();
+      expect(shown(w)).toEqual(['Alpha.']);
+    });
+
+    it('shows the message whole once the controls say its open turn is not working', async () => {
+      const { w, release } = await openBeforeControls({ activeTurnId: null });
+      expect(shown(w)).toEqual(['Alpha.']);
+      await release();
+      expect(shown(w)).toEqual(['Alpha.', 'Be']);
+    });
+
+    it('draws a source a revision adds to a block already shown', async () => {
+      const body = 'Alpha. :chatgpt-content-reference{index="1"}\n\nBe';
+      const { w, append } = await boot([start, written(2, body)]);
+      expect(blocks(w)[0]!.querySelector('.citation')).toBeNull();
+      const references = [{ index: 1, sources: [{ title: 'A report', url: 'https://news.example.com/report', source: 'Example News' }] }];
+      await append([written(3, body, { references })]);
+      expect(blocks(w)[0]!.querySelector('.citation-pill')?.getAttribute('href')).toBe('https://news.example.com/report');
+      expect(shown(w)).toHaveLength(1);
+    });
+
     it('shows a list once it ends, so it does not turn loose on screen', async () => {
       const { w, append } = await boot([start, written(2, 'Alpha.\n\n- one\n- two\n\n- thr')]);
       expect(shown(w)).toEqual(['Alpha.']);
