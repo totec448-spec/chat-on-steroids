@@ -2341,7 +2341,7 @@
   "Goal paused": "目標已暫停",
   "ChatGPT gave the same answer three times in a row, so Goal stopped asking. Open the chat to continue.": "ChatGPT 連續三次給出相同的回答，因此目標停止了追問。開啟聊天以繼續。",
   "Keep awake while a chat works": "聊天工作時保持喚醒",
-  "Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose The computer and screen.": "防止電腦進入睡眠，讓長時間執行繼續。部分 Windows 筆電在螢幕關閉後仍會睡眠；對於這類電腦，請選擇「電腦和螢幕」。",
+  "Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose “The computer and screen”.": "防止電腦進入睡眠，讓長時間執行繼續。部分 Windows 筆電在螢幕關閉後仍會睡眠；對於這類電腦，請選擇「電腦和螢幕」。",
   "The computer": "電腦",
   "The computer and screen": "電腦和螢幕",
   "Once a worker can't be used again (you cleared the workers, the main chat closed, or its finished task sat for a week), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "當某個 worker 無法再使用時（你清除了子代理、主聊天已關閉，或其已完成的任務閒置了一週），它的聊天會在 ChatGPT 中封存，並從你的聊天清單中移除。你可以在 ChatGPT 的設定中還原；本應用程式會保留其記錄。不會刪除任何內容。",
