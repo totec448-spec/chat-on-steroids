@@ -3324,7 +3324,8 @@ export function finishedBlocks(text: string): string {
     } else if (writing) {
       if (/^:::[ \t]*$/.test(line)) { writing = false; end = at; }
     } else if (math) {
-      if (line.includes(math)) math = null;
+      // A closed formula is a finished block, as a closed fence is: prose may follow without a blank line.
+      if (line.includes(math)) { math = null; if (!hold) end = at; }
     } else if (/^:::writing(?:\{[^}\n]*\})?[ \t]*$/.test(line)) {
       // The opener `writingBlock` reads; ":::writing example" is a paragraph.
       writing = true;
@@ -5268,9 +5269,10 @@ function paintDetail(followBottom = historyBefore === null): void {
     const held = item.kind === 'event' && item.event.kind === 'assistant_message' && writing && item.event.seq === writing.seq
       ? { ...item.event, message: { ...item.event.message, text: writing.shown, chars: writing.shown.length } } : null;
     // A held message is drawn again only when a block finishes or its sources change: each chunk
-    // advances its seq and grows the page's capture, neither of which changes what it shows. Its
-    // final text is not held.
-    const sig = (held ? `${itemSignature({ kind: 'event', event: { ...held, seq: 0, renderedHtml: undefined } })}\u0000held${JSON.stringify(held.references ?? [])}`
+    // advances its seq and grows the page's capture, and the store can move its time to when the
+    // page authored it; none of these changes what it shows (its clock waits for the next block).
+    // Its final text is not held.
+    const sig = (held ? `${itemSignature({ kind: 'event', event: { ...held, seq: 0, time: 0, renderedHtml: undefined } })}\u0000held${JSON.stringify(held.references ?? [])}`
       : itemSignature(item)) + (item.kind === 'event' && item.event.kind === 'chat_error'
       ? JSON.stringify(chatErrorPresentation(item.event, events)) : '') + (answerTurn || looseAnswer ? '\u0000answer' : '') +
       (item.kind === 'event' && stoppedTurnEnd(item.event, events) ? '\u0000stopped' : '') +
