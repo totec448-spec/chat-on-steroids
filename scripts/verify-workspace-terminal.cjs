@@ -88,7 +88,12 @@ app.whenReady().then(async () => {
     window.docks=docks;
     const proto=crypto.randomUUID.bind(crypto);crypto.randomUUID=()=>{const id=proto();window.ids.push(id);return id;};
     window.ready=true;`;
-  const server = await createServer({ configFile: false, root: path.join(root, 'src/renderer'), server: {
+  const server = await createServer({ configFile: false, root: path.join(root, 'src/renderer'),
+    // Keep the test's Vite optimizer graph separate from other renderer checks
+    // in the full UI run, and declare the two xterm ESM dependencies explicitly.
+    cacheDir: path.join(output, 'vite-cache'),
+    optimizeDeps: { noDiscovery: true, include: ['@xterm/xterm', '@xterm/addon-fit'] },
+    server: {
     host: '127.0.0.1', port: 0,
     // Linked worktrees can resolve their dependencies outside this source root.
     // Allow only this project and the real dependency directory, not the filesystem.
@@ -229,7 +234,27 @@ app.whenReady().then(async () => {
     win.setSize(830, 700); await new Promise(resolve => setTimeout(resolve, 300));
     const geometry = await js(`(()=>{const p=document.getElementById('workspaceTerminal').getBoundingClientRect();return {width:p.width,height:p.height,fits:p.right<=innerWidth+1&&p.bottom<=innerHeight+1}})()`);
     assert.ok(geometry.fits, JSON.stringify(geometry));
-    fs.writeFileSync(path.join(output, 'terminal.png'), (await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toPNG());
+    // Immediately after resizing the shown Electron window, the Chromium
+    // compositor may not yet have a committed frame (capturePage throws
+    // UnknownVizError on Windows). Keep the screenshot assertion but only
+    // request it after paint and retry a bounded transient capture failure.
+    let terminalPng = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      // Occluded Electron windows can indefinitely suspend rAF; make each
+      // paint wait bounded so a screenshot probe cannot hang the whole suite.
+      await js('Promise.race([new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))), new Promise(resolve => setTimeout(resolve, 500))])');
+      try {
+        const picture = await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true });
+        if (picture.isEmpty()) throw new Error('Terminal captured an empty frame');
+        terminalPng = picture.toPNG();
+        break;
+      } catch (error) {
+        if (attempt === 2) throw new Error(`Terminal frame capture failed after 3 attempts: ${String(error)}`);
+        await new Promise(resolve => setTimeout(resolve, 150));
+      }
+    }
+    assert.ok(terminalPng && terminalPng.length > 0, 'Terminal must have a screenshot');
+    fs.writeFileSync(path.join(output, 'terminal.png'), terminalPng);
     await js(`window.api.terminalWrite(${JSON.stringify(second)}, "exit 7\\r")`); await until(`exits[${JSON.stringify(second)}]===7`);
     await js("document.querySelector('#workDockRight .work-dock-tab[data-terminal-id] .btn-icon').click()");
     assert.equal((await js(`window.api.terminalWrite(${JSON.stringify(second)}, 'echo closed\\r')`)).ok, false);

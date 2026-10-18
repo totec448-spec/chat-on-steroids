@@ -198,7 +198,17 @@ try {
   $beforeInvoke = [int](Read-State)[3]
   $row = $semantic.elements[0]
   $invoked = Handle-Request @{ op = 'act'; targetWindow = $id; actions = @(@{ type = 'ui_action'; window = $id; snapshotId = $semantic.snapshotId; runtimeKey = $row.runtimeKey; action = 'invoke' }) }
-  if (-not $invoked.ok -or $invoked.routes[0] -ne 'uia' -or [int](Read-State)[3] -ne ($beforeInvoke + 1)) { throw 'zero-bounds semantic invocation failed' }
+  if (-not $invoked.ok -or $invoked.routes[0] -ne 'uia') { throw 'zero-bounds semantic invocation was not routed to UIA' }
+  # WPF can dispatch the Click notification just after InvokePattern returns,
+  # especially while concurrent Windows UI suites are using the dispatcher.
+  # Require exactly one eventual native effect; do not repeat the invocation.
+  $deadline = [DateTime]::UtcNow.AddSeconds(2)
+  $afterInvoke = [int](Read-State)[3]
+  while ($afterInvoke -eq $beforeInvoke -and [DateTime]::UtcNow -lt $deadline) {
+    Start-Sleep -Milliseconds 40
+    $afterInvoke = [int](Read-State)[3]
+  }
+  if ($afterInvoke -ne ($beforeInvoke + 1)) { throw ('zero-bounds semantic invocation failed: ' + $beforeInvoke + ' -> ' + $afterInvoke) }
   $deep = Handle-Request @{ op = 'snapshot'; id = $id; includeScreenshot = $false; includeUi = $true; query = 'deep-needle'; role = 'button'; maxResults = 5 }
   if ($deep.elements.Count -ne 1 -or $deep.elements[0].automationId -ne 'deep-needle' -or $deep.visited -le 100) { throw 'filtered traversal stopped at the first 100 controls' }
   Write-Output 'WINDOWS_ACCESSIBILITY_PROBE_OK'

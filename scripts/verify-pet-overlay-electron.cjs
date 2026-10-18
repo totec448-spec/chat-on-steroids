@@ -183,6 +183,12 @@ function attachOverlay(win) {
           assert.equal(win.isFocused(), false, 'Hovering a pet must not focus the overlay.');
           if (focusedBeforeHover) assert.equal(BrowserWindow.getFocusedWindow(), focusedBeforeHover,
             'Hovering a pet must not steal focus from the previously focused window.');
+          // The owner is a background/partially occluded Chromium window and
+          // may deliver its timer ticks later when the desktop is busy. Keep
+          // the exact four-tick requirement, but await the actual progress
+          // rather than assuming all four fire within one 500 ms sleep.
+          await until(async () => (await hoverOwner.webContents.executeJavaScript('window.__petBehindTicks'))
+            >= ticksBeforeHover + 4, 'owner behind interactive pet keeps advancing', 5_000);
           const ticksAfterHover = await hoverOwner.webContents.executeJavaScript('window.__petBehindTicks');
           assert.ok(ticksAfterHover - ticksBeforeHover >= 4,
             `The owner behind an interactive pet must keep running; ticks=${ticksBeforeHover}->${ticksAfterHover}.`);
@@ -372,6 +378,10 @@ function attachOverlay(win) {
         assert.equal(restored.data.visible, true);
         assert.equal(restored.data.activeCount, 1);
         assert.equal(win.isVisible(), true, 'The View visibility command must restore a dismissed active pet.');
+        // IPC visibility resolves before the renderer receives its next pet
+        // snapshot. The rebuilt DOM must still appear, but not synchronously.
+        await until(async () => (await win.webContents.executeJavaScript('document.querySelectorAll(".pet-shell").length'))
+          === 1, 'dismissed pet shell reappears after restore', 2_500);
         assert.equal(await win.webContents.executeJavaScript('document.querySelectorAll(".pet-shell").length'), 1);
         const restoredRect = await win.webContents.executeJavaScript('document.querySelector(".pet-shell").getBoundingClientRect().toJSON()');
         assert.ok(Math.abs(restoredRect.x - 333) < 2 && Math.abs(restoredRect.y - 444) < 2,
