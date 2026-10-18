@@ -6249,6 +6249,14 @@ describe('prompt recall in the composer', () => {
     expect(input.value).toBe('Second question');
   });
 
+  it('recalls only the messages the agent filter shows', async () => {
+    const { w } = await boot([ask(1, 'Worker question', { agent: 'worker-1' }), answer(2, 'Worker answer'), ask(3, 'Main question'), answer(4, 'Main answer')],
+      true, [], [], { developerMode: true });
+    w.document.querySelector<HTMLButtonElement>('#chatAgentFilter [data-agent="worker-1"]')!.click(); await settle();
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Worker question');
+  });
+
   it('keeps a refused recalled message in the composer when ArrowDown is pressed', async () => {
     const { w } = await boot(chat());
     expect(press(w, 'ArrowUp')).toBe(true);

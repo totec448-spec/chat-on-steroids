@@ -2158,10 +2158,10 @@ function editableQuestion(event: SessionEvent, history: readonly SessionEvent[])
  */
 let recall: { generation: number; draft: number; back: number; text: string } | null = null;
 
-/** Your messages in this chat as its timeline shows them, oldest first; no Compact & Resume prompts or folded versions. */
+/** Your messages in this chat as its timeline shows them (agent filter included), oldest first; no Compact & Resume prompts or folded versions. */
 function sentPrompts(): string[] {
   const prompts: string[] = [];
-  for (const item of timelineItems(events)) {
+  for (const item of timelineItems(visibleEvents())) {
     if (item.kind !== 'event' || item.event.kind !== 'user_message') continue;
     const event = item.event;
     // A stored message cut short would come back incomplete.
