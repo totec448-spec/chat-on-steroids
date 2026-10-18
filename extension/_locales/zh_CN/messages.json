@@ -38,6 +38,9 @@
   "content_bootstrap_composer_replaced": {
     "message": "插入引导消息时，ChatGPT 替换了输入框"
   },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPT 未显示可用于启动的输入框"
+  },
   "content_bootstrap_composer_unavailable": {
     "message": "选择模型后，ChatGPT 未重新显示可用的输入框"
   },
@@ -323,6 +326,9 @@
   "content_delivery_existing_draft": {
     "message": "ChatGPT 中已有未发送的草稿。重试前，请先在 Chrome 中发送或清除该草稿。"
   },
+  "content_delivery_signed_out": {
+    "message": "此浏览器中未登录 ChatGPT。请在其中登录 ChatGPT，然后重新发送。"
+  },
   "content_delivery_model_unconfirmed": {
     "message": "无法确认请求的模型或推理强度"
   },
@@ -334,6 +340,9 @@
   },
   "content_delivery_text_not_accepted": {
     "message": "ChatGPT 未接受该文本$1"
+  },
+  "content_delivery_rotation_not_stopped": {
+    "message": "ChatGPT 在进行中的回答里没有提供发送，为自动继续而停止回答也未完成。"
   },
   "content_delivery_turn_changed": {
     "message": "直接发送前回合已发生变化。"
@@ -722,12 +731,6 @@
   "content_workers_still_running": {
     "message": "仍有 $1 个子代理在运行"
   },
-  "content_workers_summary": {
-    "message": "$1 个已完成 · $2 个运行中"
-  },
-  "content_workers_summary_failed": {
-    "message": "$1 个已完成 · $2 个运行中 · $3 个失败"
-  },
   "content_working": {
     "message": "正在处理…"
   },
@@ -815,9 +818,6 @@
   "popup_detail_app_value": {
     "message": "v$1 · 端口 $2"
   },
-  "popup_detail_browser_queue_value": {
-    "message": "保留 $1 个 · 共 $2 个"
-  },
   "popup_detail_chat_id": {
     "message": "聊天 ID"
   },
@@ -842,17 +842,11 @@
   "popup_detail_observed": {
     "message": "已观察"
   },
-  "popup_detail_observed_value": {
-    "message": "$1 个事件 · $2 次调用"
-  },
   "popup_detail_ownership": {
     "message": "归属"
   },
   "popup_detail_page_sends": {
     "message": "页面发送次数"
-  },
-  "popup_detail_page_sends_value": {
-    "message": "$1 · $2 次失败"
   },
   "popup_detail_recorder": {
     "message": "记录器"
@@ -1168,5 +1162,32 @@
   },
   "popup_app_not_running_help": {
     "message": "请确认 Chat On Steroids 已在这台电脑上打开。扩展会自动连接。"
+  },
+  "content_workers_finished": {
+    "message": "$1 个已完成"
+  },
+  "content_workers_running": {
+    "message": "$1 个运行中"
+  },
+  "content_workers_failed": {
+    "message": "$1 个失败"
+  },
+  "popup_detail_events": {
+    "message": "$1 个事件"
+  },
+  "popup_detail_calls": {
+    "message": "$1 次调用"
+  },
+  "popup_detail_failed": {
+    "message": "$1 次失败"
+  },
+  "popup_detail_total": {
+    "message": "共 $1 个"
+  },
+  "content_edit_message_missing": {
+    "message": "该消息已不在 ChatGPT 页面上，无法编辑。"
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT 没有为该消息提供编辑。请在 ChatGPT 中打开聊天，然后重试。"
   }
 }

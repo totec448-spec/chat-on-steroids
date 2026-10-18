@@ -1,15 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 // @ts-expect-error The planner is a plain Node script without type declarations.
-import { planFailFirst, runnerForFailFirst } from '../scripts/pr-fail-first.mjs';
+import { optedOut, planFailFirst, runnerForFailFirst } from '../scripts/pr-fail-first.mjs';
 
 const plan = planFailFirst as (nameStatus: string) => { tests: string[]; restore: string[]; remove: string[] };
 const runner = runnerForFailFirst as (nameStatus: string) => string;
 
 describe('fail-first proof plan', () => {
-  it('bounds the workflow runner to the two named hosted platforms', () => {
+  it('bounds the workflow runner to the three named hosted platforms', () => {
     const workflow = readFileSync(new URL('../.github/workflows/pr-checklist.yml', import.meta.url), 'utf8');
-    expect(workflow).toContain("runs-on: ${{ needs.fail-first-platform.outputs.runner == 'windows-2025' && 'windows-2025' || 'ubuntu-24.04' }}");
+    expect(workflow).toContain("runs-on: ${{ needs.fail-first-platform.outputs.runner == 'windows-2025' && 'windows-2025' || needs.fail-first-platform.outputs.runner == 'macos-15' && 'macos-15' || 'ubuntu-24.04' }}");
     expect(workflow).not.toContain('runs-on: ${{ needs.fail-first-platform.outputs.runner }}');
   });
 
@@ -19,14 +19,22 @@ describe('fail-first proof plan', () => {
     }
   );
 
+  it.each(['macos-window-capture', 'macos-window-matching'])(
+    'runs changed %s Swift tests on macOS', name => {
+      expect(runner(`A\ttest/${name}.test.ts`)).toBe('macos-15');
+    }
+  );
+
   it('keeps ordinary tests on Linux and ignores removed or support-only Windows files', () => {
     expect(runner('M\ttest/projects.test.ts\nD\ttest/windows-capture.test.ts\nM\ttest/fixtures/windows-desktop/capture.cs')).toBe('ubuntu-24.04');
     expect(runner('M\tsrc/main/computer/windows-capture.ts\nM\tAGENTS.md')).toBe('ubuntu-24.04');
+    expect(runner('D\ttest/macos-window-capture.test.ts\nM\ttest/fixtures/macos-window-capture.swift')).toBe('ubuntu-24.04');
   });
 
   it('uses the destination of a renamed test when selecting the native runner', () => {
     expect(runner('R100\ttest/old.test.ts\ttest/windows-capture.test.ts')).toBe('windows-2025');
     expect(runner('R100\ttest/windows-capture.test.ts\ttest/ordinary.test.ts')).toBe('ubuntu-24.04');
+    expect(runner('R100\ttest/ordinary.test.ts\ttest/macos-window-capture.test.ts')).toBe('macos-15');
   });
 
   it('runs changed tests against base code: restores changed code and removes added code', () => {
@@ -52,5 +60,15 @@ describe('fail-first proof plan', () => {
       'R087\tsrc/main/a.ts\tsrc/main/b.ts',
       'M\ttest/helpers.ts'
     ].join('\n'))).toEqual({ tests: [], restore: ['src/main/a.ts'], remove: ['src/main/b.ts'] });
+  });
+});
+
+describe('opting out of the fail-first proof', () => {
+  const opt = optedOut as (body: string) => boolean;
+  it('counts only an opt-out readers can see (code scanning)', () => {
+    expect(opt('Fail-first: n/a the tests only follow a rename')).toBe(true);
+    expect(opt('<!-- Fail-first: n/a the tests only follow a rename -->')).toBe(false);
+    // One pass of comment removal turned a split comment into a new, still hidden one.
+    expect(opt('<!<!-- x -->--\nFail-first: n/a the tests only follow a rename\n-->')).toBe(false);
   });
 });

@@ -99,10 +99,11 @@ it('carries the same proven classification through asynchronous completion and r
   expect(reread).toMatchObject({ exitCode: 1, benignExit: true, replayed: true });
   expect(execCommandStructuredOutput(reread)).toMatchObject({ exit_code: 1, expected_exit: true, output_replayed: true });
   expect(execCommandStructuredOutput(reread)).not.toHaveProperty('benign_exit');
-  const random = vi.spyOn(Math, 'random').mockReturnValueOnce((id - 1000) / 99000).mockReturnValueOnce(.99999);
-  const next = m.allocateProcessId();
-  expect(next).not.toBe(id);
-  random.mockRestore();
+  // The first draw hits the id whose completed result is still kept: the allocator draws again.
+  const draws = [id, 99_999];
+  const draw = vi.fn(() => draws.shift()!);
+  expect(m.allocateProcessId(draw)).toBe(99_999);
+  expect(draw).toHaveBeenCalledTimes(2);
   await m.terminateAllProcesses();
   await expect(poll(m, id)).rejects.toThrow('Unknown process id');
 });

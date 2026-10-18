@@ -1,4 +1,5 @@
-export type ProjectGitStatus = 'M' | 'A' | 'D' | 'R' | 'U';
+/** Modified, added, deleted, renamed, untracked, or C: an unmerged path in a merge, rebase or cherry-pick. */
+export type ProjectGitStatus = 'M' | 'A' | 'D' | 'R' | 'U' | 'C';
 
 /** One real Git change, expressed relative to the selected Local Project. */
 export interface ProjectGitChange {

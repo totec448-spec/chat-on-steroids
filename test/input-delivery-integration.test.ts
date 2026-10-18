@@ -5,6 +5,7 @@ import { finishInstruction } from '../src/shared/finish.js';
 import { initSkillsPath } from '../src/main/skills.js';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import { positionOf } from '../src/shared/chronology.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { addProject, assignSessionProject } from '../src/main/projects.js';
@@ -238,8 +239,9 @@ it('says why a page withdrew a Continue and ends it after three minutes of withd
     now = firstRelease + input.RECOVERY_WITHDRAW_LIMIT_MS;
     expect(await input.claimBrowserInput(row.id, 'a-document', conversationId, true)).not.toBeNull();
     expect(await input.failBrowserInput(row.id, 'a-document', withdrawn, 'page-unreadable')).toBe(true);
+    // The chat shows one translated sentence that says what to do; the code stays in the log (#1586).
     expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ state: 'failed',
-      error: 'Automatic Continue was not sent: page-unreadable' });
+      error: input.RECOVERY_WITHDRAWN_ERROR });
     expect(getLog().some(entry => entry.message.includes('automatic Continue ended') && entry.message.includes('page-unreadable'))).toBe(true);
     input.resetInputForTests();
     expect((await input.pendingBrowserInputs()).filter(item => item.id === row.id)).toEqual([]);
@@ -1580,6 +1582,19 @@ it('hands a sent temporary planner back for closing with the chat ChatGPT moved 
   expect(await answer).toBe('Routed plan answer');
   expect((await post('/status', { openConversations: [] })).body.inputs).toContainEqual(
     expect.objectContaining({ id: row.id, close: true, conversationId }));
+});
+it.each([false, true])('hands back the tab of a first message cancelled before Send for closing (authorized: %s)', async authorized => {
+  // 2.1.40 release round: the tab opened for a cancelled first message stayed on ChatGPT's empty
+  // start page. One cancelled before Send is handed back to close; one that Send was authorized for
+  // may already be in ChatGPT and keeps its tab.
+  const row = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto' });
+  expect((await post('/input/claim', { id: row.id, owner: 'opening-page', conversationId: null })).body.input).toBeTruthy();
+  if (authorized) expect((await post('/input/claim', { id: row.id, owner: 'opening-page', conversationId: null, authorize: true })).body.ok).toBe(true);
+  expect((await handlers.get('sessions:cancelInput')!(null, { id: row.id })).ok).toBe(true);
+  const inputs = (await post('/status', { openConversations: [] })).body.inputs as Array<Record<string, unknown>>;
+  const closing = inputs.filter(entry => entry.id === row.id && entry.close === true);
+  if (authorized) expect(closing).toEqual([]);
+  else expect(closing).toEqual([expect.objectContaining({ id: row.id, opening: true, close: true, conversationId: null })]);
 });
 afterAll(async () => {
   await stopBridge(); await flushDurable(); resetSessionStoreForTests(); resetDurableForTests();
@@ -3078,25 +3093,31 @@ it('retires a lost authorized browser receipt so the session accepts and deliver
   } finally { clock.mockRestore(); }
 });
 
-it('retires an opening send whose receipt never arrives after six hours, and not before', async () => {
+// Measured 2026-09-27: first messages of app-started chats stayed in `browser` for days, so they got a
+// six-hour bound. The 2.1.41 release round showed that was still too long: an opening whose page died
+// right after Send sat invisible for hours and held every automatic extension update ("a message is
+// being sent"). A first message now gives up waiting like any other send; a late receipt still binds it.
+it('retires an opening send whose receipt never arrives after fifteen minutes, like any other send', async () => {
   let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
   try {
-    // Measured 2026-09-27: first messages of app-started chats stayed in `browser` for days.
     const request = message(null, 'off');
     expect((await handlers.get('sessions:send')!(null, request)).ok).toBe(true);
     const owner = `document-${request.id}`;
     expect((await post('/input/claim', { id: request.id, owner, conversationId: null, requiresAuthorization: true })).body.input).toMatchObject({ opening: true });
     expect((await post('/input/claim', { id: request.id, owner, conversationId: null, authorize: true })).body.ok).toBe(true);
-    now += 15 * 60_000 + 1; // past the ordinary bound, which leaves openings in custody
+    now += 15 * 60_000 - 1_000;
     input.resetInputForTests();
     expect((await input.listInputs()).find(row => row.id === request.id)?.state).toBe('browser');
-    now += 6 * 60 * 60_000;
+    expect((await post('/status', { openConversations: [] })).body.inputOpeningIds).toContain(request.id);
+    now += 2_000;
     input.resetInputForTests();
     expect((await input.listInputs()).find(row => row.id === request.id)).toMatchObject({
       state: 'cancelled',
       error: 'Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.'
     });
     expect((await input.pendingBrowserInputs()).map(row => row.id)).not.toContain(request.id);
+    // The extension no longer counts it as a message being sent, so its update can go ahead.
+    expect((await post('/status', { openConversations: [] })).body.inputOpeningIds).not.toContain(request.id);
   } finally { clock.mockRestore(); }
 });
 
@@ -3138,4 +3159,174 @@ it('keeps a message for the running turn that the page could not take, for after
     expect(kept?.directTurn).toBeUndefined();
     expect(kept?.error).toMatch(/after the running answer/);
   } finally { vi.useRealTimers(); }
+});
+
+it('fails a branch the source page could not make, and gives its reserved chat the branch point', async () => {
+  // Branch in new chat (#482): the page showing the source chat reports why it made no branch.
+  const conversationId = randomUUID(), messageId = randomUUID();
+  const source = await createSession({ title: 'Branch source', conversationId });
+  const row = await input.enqueueInput({ id: randomUUID(), sessionId: null, text: 'Try the other approach.', mode: 'auto', dueAt: 0,
+    model: null, reasoningEffort: null, branch: { sessionId: source.id, conversationId, messageId } });
+  const branched = await getSession(row.sessionId!);
+  expect(branched?.origin).toMatchObject({ kind: 'desktop', fromSessionId: source.id, branchOf: { conversationId, messageId } });
+  expect((await post('/input/claim', { id: row.id, owner: 'a-document', conversationId: randomUUID(), branchFailed: 'branch_unavailable' })).body.ok).toBe(false);
+  expect((await post('/input/claim', { id: row.id, owner: 'a-document', conversationId, branchFailed: 'not-a-reason' })).body.ok).toBe(false);
+  expect((await post('/input/claim', { id: row.id, owner: 'a-document', conversationId, branchFailed: 'branch_message_missing' })).body.ok).toBe(true);
+  expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ state: 'failed', error: input.BRANCH_ERRORS.branch_message_missing });
+});
+
+it('lets a branch from a chat of a linked project be claimed on its draft, not on the Project page (#482)', async () => {
+  // Live 2.1.41 (VM): ChatGPT makes the branch where its source chat lives; the rule that a new chat
+  // of a linked project is claimed only on that Project's page left the branch queued for good.
+  const folder = path.join(directory, 'branch-project-' + randomUUID());
+  await fs.mkdir(folder);
+  const config = defaultConfig();
+  await saveConfig({ ...config, roots: [{ name: 'project', path: folder }] });
+  const projects = await import('../src/main/projects.js');
+  const project = await addProject(folder);
+  const request = (project.chatgpt as { requestId: string }).requestId;
+  expect(await projects.claimProjectCreate(request, 'page-a')).toBe(true);
+  expect(await projects.armProjectCreate(request, 'page-a')).toBe(true);
+  expect(await projects.completeProjectCreate(request, 'page-a', `g-p-${'a'.repeat(32)}`)).toBe(true);
+  const conversationId = randomUUID(), messageId = randomUUID();
+  const source = await createSession({ title: 'Linked source', conversationId });
+  await assignSessionProject(source.id, project.id);
+  const branch = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', projectId: project.id,
+    branch: { sessionId: source.id, conversationId, messageId } });
+  const plain = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', projectId: project.id });
+  const claim = async (id: string) => (await post('/input/claim', { id, owner: 'a-document', conversationId: null, requiresAuthorization: true })).body.input;
+  expect(await claim(plain.id)).toBeNull();
+  expect(await claim(branch.id)).toMatchObject({ id: branch.id, branch: { conversationId, messageId } });
+});
+
+it('gives a branch the history it was branched from before its first question, without duplicates (#482)', async () => {
+  // Live 2.1.41 (VM): the first question was recorded at Send, the copied history only after the
+  // page knew its new id, so the question sat above the history it continues.
+  const source = randomUUID(), branched = randomUUID(), reply = randomUUID(), time = Date.now() - 60_000;
+  const sourceSession = await createSession({ title: 'Branch source', conversationId: source });
+  const earlier = [
+    { kind: 'user_message', messageId: 'source-ask', text: 'Plan the release', time },
+    { kind: 'assistant_message', messageId: reply, text: 'Tag first, then build.', state: 'final', final: true, time: time + 2 }
+  ];
+  await post('/events', { conversationId: source, events: earlier });
+  // Recorded after the reply's final revision, as measured live: the step row and a revision of the
+  // question (a later page scan). They are still part of the history up to that reply.
+  await post('/events', { conversationId: source, events: [
+    { kind: 'page_tool', messageId: 'source-step', text: 'Read the changelog', time: time + 1 },
+    { kind: 'user_message', messageId: 'source-ask', text: 'Plan the release', reaction: 'liked', time }] });
+  await post('/events', { conversationId: source, events: [
+    { kind: 'user_message', messageId: 'source-later', text: 'Not part of the branch', time: time + 3 },
+    { kind: 'assistant_message', messageId: 'source-later-reply', text: 'Neither.', state: 'final', final: true, time: time + 4 }] });
+  const row = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', text: 'Try the other approach.',
+    branch: { sessionId: sourceSession.id, conversationId: source, messageId: reply } });
+  expect((await post('/input/claim', { id: row.id, owner: 'branch-page', conversationId: null, requiresAuthorization: true })).body.input).toMatchObject({ id: row.id });
+  expect((await post('/input/claim', { id: row.id, owner: 'branch-page', conversationId: null, authorize: true })).body.ok).toBe(true);
+  expect((await post('/input/bind', { id: row.id, owner: 'branch-page', conversationId: branched })).body.ok).toBe(true);
+  expect((await post('/input/ack', { id: row.id, owner: 'branch-page', conversationId: branched, messageId: 'branch-ask' })).body.ok).toBe(true);
+  // The page then reports everything it shows: the copied history, the question and the answer.
+  await post('/events', { conversationId: branched, events: [...earlier, { kind: 'page_tool', messageId: 'source-step', text: 'Read the changelog', time: time + 1 },
+    { kind: 'user_message', messageId: 'branch-ask', text: 'Try the other approach.', time: Date.now() },
+    { kind: 'turn_start', turnId: 'branch-turn', time: Date.now() },
+    { kind: 'assistant_message', messageId: 'branch-answer', turnId: 'branch-turn', text: 'Build first.', state: 'final', final: true, time: Date.now() },
+    { kind: 'turn_end', turnId: 'branch-turn', outcome: 'completed', time: Date.now() }] });
+  await (await import('../src/main/session/recorder.js')).flushRecorder();
+  const store = await import('../src/main/session/store.js');
+  const said = (await store.readEvents(row.sessionId!, { kinds: ['user_message', 'assistant_message', 'page_tool'] }))
+    .sort((a, b) => positionOf(a) - positionOf(b)).map(event => 'messageId' in event ? event.messageId : '');
+  // As ChatGPT draws the exchange: its step above its answer, whatever order they were recorded in.
+  expect(said).toEqual(['source-ask', 'source-step', reply, 'branch-ask', 'branch-answer']);
+  // Named by its own first message, not by the question it copied.
+  expect((await getSession(row.sessionId!))?.title).toBe('Try the other approach.');
+});
+
+// 2.1.41 (user decision): a plan's new chat was named after stage 1's generated wording, and its first
+// bubble showed that wording too, instead of the request the person typed.
+it('names a plan\'s new chat and its first message by the person\'s own request', async () => {
+  const conversationId = randomUUID();
+  const objective = 'Write a two-line poem about a lighthouse, then a title.';
+  const row = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', objective, authoredSource: 'objective',
+    text: 'Complete the original creative-writing request in one implementation pass.', stages: ['Verify the poem against the request.'] });
+  expect((await post('/input/claim', { id: row.id, owner: 'plan-page', conversationId: null, requiresAuthorization: true })).body.input).toMatchObject({ id: row.id });
+  expect((await post('/input/claim', { id: row.id, owner: 'plan-page', conversationId: null, authorize: true })).body.ok).toBe(true);
+  expect((await post('/input/bind', { id: row.id, owner: 'plan-page', conversationId })).body.ok).toBe(true);
+  expect((await post('/input/ack', { id: row.id, owner: 'plan-page', conversationId, messageId: 'plan-ask' })).body.ok).toBe(true);
+  await (await import('../src/main/session/recorder.js')).flushRecorder();
+  const store = await import('../src/main/session/store.js');
+  const [first] = await store.readEvents(row.sessionId!, { kinds: ['user_message'] });
+  expect(first).toMatchObject({ kind: 'user_message', messageId: 'plan-ask', authoredText: objective });
+  expect((await getSession(row.sessionId!))?.title).toBe(objective);
+  // The delivered message itself still carries the complete workflow.
+  expect(first?.kind === 'user_message' && first.message.text).toContain('Complete workflow:');
+});
+
+it('copies a branched turn in the order the source draws it, its answer after the steps (#482)', async () => {
+  // Live 2.1.41 (VM): ChatGPT opened the answer early, the step came next, the answer was filled last.
+  const source = randomUUID(), branched = randomUUID(), reply = randomUUID(), time = Date.now() - 60_000;
+  const sourceSession = await createSession({ title: 'Turn source', conversationId: source });
+  await post('/events', { conversationId: source, events: [
+    { kind: 'turn_start', turnId: 'source-turn', time },
+    { kind: 'user_message', messageId: 'turn-ask', turnId: 'source-turn', text: 'Check the sites', time },
+    { kind: 'assistant_message', messageId: reply, turnId: 'source-turn', text: 'Checking', state: 'streaming', time: time + 1 },
+    { kind: 'page_tool', messageId: 'turn-step', turnId: 'source-turn', text: 'Opened the sites', time: time + 2 },
+    { kind: 'assistant_message', messageId: reply, turnId: 'source-turn', text: 'Both load.', state: 'final', final: true, time: time + 3 },
+    { kind: 'turn_end', turnId: 'source-turn', outcome: 'completed', time: time + 4 }] });
+  // A later page scan recorded the turn's interim text only after its final (measured live).
+  await post('/events', { conversationId: source, events: [
+    { kind: 'assistant_message', messageId: 'turn-interim', turnId: 'source-turn', text: 'I will check both.', state: 'streaming', time: time + 1 }] });
+  const row = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', branch: { sessionId: sourceSession.id, conversationId: source, messageId: reply } });
+  await post('/input/claim', { id: row.id, owner: 'branch-page', conversationId: null, requiresAuthorization: true });
+  await post('/input/claim', { id: row.id, owner: 'branch-page', conversationId: null, authorize: true });
+  expect((await post('/input/bind', { id: row.id, owner: 'branch-page', conversationId: branched })).body.ok).toBe(true);
+  const store = await import('../src/main/session/store.js');
+  const said = (await store.readEvents(row.sessionId!, { kinds: ['user_message', 'assistant_message', 'page_tool'] }))
+    .sort((a, b) => positionOf(a) - positionOf(b)).map(event => 'messageId' in event ? event.messageId : '');
+  expect(said).toEqual(['turn-ask', 'turn-step', 'turn-interim', reply]);
+});
+
+it('copies a long branched message in full, from its own copy of the overflow (#482)', async () => {
+  // Older recordings kept long messages inline up to a cap and the rest in the chat's own asset.
+  const source = randomUUID(), branched = randomUUID(), reply = randomUUID(), time = Date.now() - 60_000;
+  const long = 'x'.repeat(20_000) + 'THE-END';
+  const store = await import('../src/main/session/store.js');
+  const sourceSession = await createSession({ title: 'Long source', conversationId: source });
+  const assetId = (await store.writeOverflowText(sourceSession.id, long))!;
+  await store.upsertMessageEvent(sourceSession.id, { kind: 'user_message', source: 'extension', time, messageId: 'long-ask',
+    message: { text: `${long.slice(0, 12_000)}\n…[stored in full as ${assetId}]`, truncated: true, chars: long.length, assetId } });
+  await store.upsertMessageEvent(sourceSession.id, { kind: 'assistant_message', source: 'extension', time: time + 1, messageId: reply,
+    message: { text: 'Read it.', truncated: false, chars: 8 }, state: 'final', final: true });
+  const row = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', branch: { sessionId: sourceSession.id, conversationId: source, messageId: reply } });
+  await post('/input/claim', { id: row.id, owner: 'branch-page', conversationId: null, requiresAuthorization: true });
+  await post('/input/claim', { id: row.id, owner: 'branch-page', conversationId: null, authorize: true });
+  expect((await post('/input/bind', { id: row.id, owner: 'branch-page', conversationId: branched })).body.ok).toBe(true);
+  const [copied] = await store.readEvents(row.sessionId!, { kinds: ['user_message'] });
+  const stored = (copied as { message: { text: string; truncated: boolean; assetId?: string } }).message;
+  expect(stored).toMatchObject({ truncated: true, chars: long.length });
+  // Assets are named by content; the branch chat holds its own copy of it.
+  expect(stored.text).toContain(stored.assetId);
+  expect(await store.readOverflowText(row.sessionId!, stored.assetId!)).toBe(long);
+});
+
+it('copies only the chat a branch was made from, not the chat a Compact & Resume left (#482)', async () => {
+  const old = randomUUID(), source = randomUUID(), branched = randomUUID(), reply = randomUUID();
+  let now = Date.now() - 120_000; const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    const sourceSession = await createSession({ title: 'Resumed source', conversationId: old });
+    await post('/events', { conversationId: old, events: [
+      { kind: 'user_message', messageId: 'old-ask', text: 'Before the compaction', time: now },
+      { kind: 'assistant_message', messageId: 'old-reply', text: 'Old answer.', state: 'final', final: true, time: now + 1 }] });
+    now += 10_000;
+    expect(await rebindSession(sourceSession.id, old, source)).toBe(true);
+    now += 10_000;
+    await post('/events', { conversationId: source, events: [
+      { kind: 'user_message', messageId: 'new-ask', text: 'After the compaction', time: now },
+      { kind: 'assistant_message', messageId: reply, text: 'New answer.', state: 'final', final: true, time: now + 1 }] });
+    now += 10_000;
+    const row = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', branch: { sessionId: sourceSession.id, conversationId: source, messageId: reply } });
+    await post('/input/claim', { id: row.id, owner: 'branch-page', conversationId: null, requiresAuthorization: true });
+    await post('/input/claim', { id: row.id, owner: 'branch-page', conversationId: null, authorize: true });
+    expect((await post('/input/bind', { id: row.id, owner: 'branch-page', conversationId: branched })).body.ok).toBe(true);
+    const store = await import('../src/main/session/store.js');
+    const said = (await store.readEvents(row.sessionId!, { kinds: ['user_message', 'assistant_message'] })).map(event => 'messageId' in event ? event.messageId : '');
+    expect(said).toEqual(['new-ask', reply]);
+  } finally { clock.mockRestore(); }
 });

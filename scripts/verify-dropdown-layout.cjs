@@ -1,4 +1,5 @@
 // Real Electron/Chromium coverage for native customizable selects and production CSS.
+const { withoutScripts } = require('./ui-check-page.cjs');
 const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -11,8 +12,7 @@ app.whenReady().then(async () => {
   const output = path.join(root, 'outputs/dropdown-layout');
   fs.mkdirSync(output, { recursive: true });
   const css = fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8');
-  const html = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+  const html = withoutScripts(fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8'))
     .replace(/<link\b[^>]*>/gi, '');
   await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html.replace('</head>', `<style>${css}</style></head>`)));
   await win.webContents.executeJavaScript(`(() => {

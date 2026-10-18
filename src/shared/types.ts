@@ -89,11 +89,22 @@ export interface SecureStorageInfo {
   detail: string | null;
 }
 
+/** A folder on a server, reached with the system's own `ssh` (#1469). */
+export interface RemoteFolder {
+  /** As the person typed it: an ssh config alias or `user@host`; never starts with "-". */
+  host: string;
+  port?: number;
+  /** Absolute (`/srv/app`) or home-relative (`~/app`) folder on the server; absolute once resolved. */
+  path: string;
+}
+
 export interface Root {
   /** Virtual name exposed to the model, e.g. "project" for /project. */
   name: string;
-  /** Absolute host path. Never sent to the model. */
+  /** Absolute host path. Never sent to the model. For a server folder, `host[:port]:/path`, its identity. */
   path: string;
+  /** Set for a folder on a server: where it is. Its files go over SFTP and its commands over ssh. */
+  remote?: RemoteFolder;
 }
 
 export type TunnelKind = 'openai' | 'cloudflared' | 'manual';
@@ -159,10 +170,14 @@ export interface UiPrefs {
   developerMode?: boolean;
   /** Rotating joke words instead of "Working" in a chat's status line. Off by default. */
   playfulStatus?: boolean;
+  /** A random fun-fact aside at the end of each automatic Continue, marked for the model to ignore. Off by default. */
+  playfulContinue?: boolean;
   /** Keep the chat at its end while it grows, here and on ChatGPT, until the reader scrolls up. On unless false. */
   followOutput?: boolean;
   /** Add the Chat On Steroids Core mention to the user's own prompts sent from the app. On unless false. */
   mentionCore?: boolean;
+  /** Prefer the installed Plugins app on regular COS-managed sends; worker/recovery sends still use Core. Off by default. */
+  mentionPlugins?: boolean;
   /** The interface language the window last reported; the browser extension follows it. */
   language?: import('./ui-language.js').UiLanguage;
   /** The version this install last started as; What's New shows once per real update (#1172). */
@@ -489,6 +504,11 @@ export interface ConnectionStatus {
    * connected" from "we know we were connected N seconds ago".
    */
   handshakeAt: number | null;
+  /**
+   * Why an `offline` state is offline: `service` when OpenAI's tunnel service answered with errors,
+   * so this computer's internet works. Null or absent: OpenAI could not be reached at all.
+   */
+  offlineCause?: 'service' | null;
   /** Epoch ms of the last request ChatGPT sent to this app, end-to-end proof. */
   lastRequestAt: number | null;
   /**
@@ -615,6 +635,11 @@ export interface BridgeStatus {
    */
   extensionVersion: string | null;
   /**
+   * `gecko` when the browser that reported `extensionVersion` is Firefox, whose signed add-on
+   * Firefox updates itself. With several browsers connected, that version is the oldest of them.
+   */
+  extensionEngine?: 'gecko';
+  /**
    * The extension in the person's own Chrome, Edge or Brave, apart from the CoS browser's copy.
    * Null until one has spoken to this app process; Setup's first step waits for it.
    */
@@ -660,6 +685,16 @@ export interface CompanionDiagnostics {
     durations: boolean;
   };
   tab: CompanionTabDiagnostics | null;
+  /** For the diagnostics report: names, versions, counts and booleans only. Absent from older extensions. */
+  environment?: CompanionEnvironment | null;
+}
+
+export interface CompanionEnvironment {
+  browser: { name: string; version: string | null };
+  /** ChatGPT tabs by state. */
+  tabs: { open: number; discarded: number; frozen: number; loading: number; grouped: number; inBackgroundWindow: number };
+  /** Which of ChatGPT's controls the most recently used awake ChatGPT tab still has. */
+  page: { composer: boolean; sendArea: boolean; modelMenu: boolean; plusMenu: boolean; language: string | null } | null;
 }
 
 export interface CompanionTraceEntry {
@@ -747,7 +782,8 @@ export interface UpdateStatus {
 }
 
 /** Receipt only; authoritative component state still establishes completion. */
-export type UpdateAllResult = 'restarting' | 'manual' | 'checking-connectors' | 'cancelled';
+/** `confirm`: the update is downloaded; the app asks the person, then calls again with that version. */
+export type UpdateAllResult = 'restarting' | 'manual' | 'checking-connectors' | 'confirm';
 
 /** Where an installation that cannot update itself gets the new version by hand. */
 export const RELEASES_PAGE = 'https://github.com/totec448-spec/chat-on-steroids/releases/latest';
@@ -778,6 +814,12 @@ export interface MacOSDesktopAccessStatus {
   accessibility: MacOSPermissionState;
   checkedAt: number;
   error: string | null;
+  /**
+   * Which permissions this app was ever seen holding. A missing permission that was granted
+   * before usually means an update changed the app's signature (#1469 era, live 2026-10-15):
+   * System Settings still shows it on, and only resetting it lets macOS ask again.
+   */
+  grantedBefore?: { screen: boolean; accessibility: boolean };
 }
 
 /**

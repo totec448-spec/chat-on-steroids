@@ -1,3 +1,4 @@
+import { getProject } from './projects.js';
 import { createHash } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { statSync, watch as watchFs, type FSWatcher } from 'node:fs';
@@ -181,6 +182,7 @@ function projectRelative(value: string, prefix: string): string | null {
 }
 
 export async function repositoryContext(projectId: string): Promise<RepositoryContext | null> {
+  if ((await getProject(projectId))?.remote) throw new Error('Git changes of a project on a server are not shown in the app yet.');
   const project = await projectFileTarget(projectId, '', { allowRoot: true });
   const result = await runGit(project.real, ['rev-parse', '--show-toplevel', '--absolute-git-dir', '--git-common-dir']);
   if (result.code !== 0) {
@@ -213,7 +215,11 @@ function splitZero(buffer: Buffer): string[] {
   return parts;
 }
 
+/** Git's unmerged pairs: both modified, both added/deleted, and modify/delete in either direction. */
+const UNMERGED = new Set(['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU']);
+
 function statusFromXY(xy: string): ProjectGitStatus {
+  if (UNMERGED.has(xy)) return 'C';
   if (xy === '??') return 'U';
   if (xy.includes('R') || xy.includes('C')) return 'R';
   if (xy.includes('D')) return 'D';
@@ -502,7 +508,13 @@ export async function readProjectGitDiff(projectId: string, relativePath: string
     ? { text: '', tooLarge: false }
     : snapshot.comparison && !checkpoint
       ? await readHeadFile(context, change.path, snapshot.comparison.headOid)
-      : await readWorkingFile(projectId, change.path);
+      // A conflict deleted on both sides has no working file; its diff is the HEAD side removed.
+      : change.status === 'C'
+        ? await readWorkingFile(projectId, change.path).catch((error: unknown) => {
+          if ((error as NodeJS.ErrnoException)?.code === 'ENOENT' || /not found|no longer|does not exist/i.test(String((error as Error)?.message))) return { text: '', tooLarge: false };
+          throw error;
+        })
+        : await readWorkingFile(projectId, change.path);
   const tooLarge = base.tooLarge || current.tooLarge;
   const binary = change.binary || (!tooLarge && (base.text === null || current.text === null));
   return {

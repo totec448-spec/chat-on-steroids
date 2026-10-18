@@ -14,9 +14,10 @@ export function updateAll(quit: () => void, openDownload: (url: string) => Promi
     await checkForUpdates();
     const update = updateStatus();
     const failed = update.stage === 'failed';
-    // Ask after the download, when quitting can actually install the named build. A
-    // cancelled dialog grants neither installer shutdown nor future startup work.
-    if (update.stage === 'ready' && !await confirmRestart(update.latest!)) return 'cancelled';
+    // Ask after the download, when quitting can actually install the named build. Until the
+    // person approves exactly that version in the app, neither installer shutdown nor future
+    // startup work is granted.
+    if (update.stage === 'ready' && !await confirmRestart(update.latest!)) return 'confirm';
     // An app update must not wait on tunnel authentication or connectivity. The next
     // build connects for its accepted refresh request; the current build only commits intent.
     if (failed || !update.latest) {

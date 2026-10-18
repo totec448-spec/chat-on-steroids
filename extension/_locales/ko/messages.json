@@ -38,6 +38,9 @@
   "content_bootstrap_composer_replaced": {
     "message": "부트스트랩을 입력하는 동안 ChatGPT가 입력창을 교체했습니다"
   },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPT가 시작에 사용할 수 있는 입력창을 보여 주지 않았습니다"
+  },
   "content_bootstrap_composer_unavailable": {
     "message": "모델 선택 후 ChatGPT가 사용 가능한 입력창을 다시 보여 주지 않았습니다"
   },
@@ -323,6 +326,9 @@
   "content_delivery_existing_draft": {
     "message": "ChatGPT에 보내지 않은 초안이 이미 있습니다. 다시 시도하기 전에 Chrome에서 그 초안을 보내거나 지우세요."
   },
+  "content_delivery_signed_out": {
+    "message": "이 브라우저에서 ChatGPT에 로그인되어 있지 않습니다. 그 브라우저에서 ChatGPT에 로그인한 다음 다시 보내세요."
+  },
   "content_delivery_model_unconfirmed": {
     "message": "요청한 모델 또는 추론 수준을 확인할 수 없습니다"
   },
@@ -334,6 +340,9 @@
   },
   "content_delivery_text_not_accepted": {
     "message": "ChatGPT가 텍스트를 받아들이지 않았습니다$1"
+  },
+  "content_delivery_rotation_not_stopped": {
+    "message": "ChatGPT가 진행 중인 답변에서 보내기를 제공하지 않았고, 자동 계속을 위한 중지도 끝나지 않았습니다."
   },
   "content_delivery_turn_changed": {
     "message": "직접 전달하기 전에 턴이 바뀌었습니다."
@@ -722,12 +731,6 @@
   "content_workers_still_running": {
     "message": "워커 $1개가 아직 실행 중"
   },
-  "content_workers_summary": {
-    "message": "$1개 완료 · $2개 실행 중"
-  },
-  "content_workers_summary_failed": {
-    "message": "$1개 완료 · $2개 실행 중 · $3개 실패"
-  },
   "content_working": {
     "message": "작업 중…"
   },
@@ -815,9 +818,6 @@
   "popup_detail_app_value": {
     "message": "v$1 · 포트 $2"
   },
-  "popup_detail_browser_queue_value": {
-    "message": "$1개 보류 · 전체 $2개"
-  },
   "popup_detail_chat_id": {
     "message": "대화 ID"
   },
@@ -842,17 +842,11 @@
   "popup_detail_observed": {
     "message": "관찰됨"
   },
-  "popup_detail_observed_value": {
-    "message": "이벤트 $1개 · 호출 $2개"
-  },
   "popup_detail_ownership": {
     "message": "소유권"
   },
   "popup_detail_page_sends": {
     "message": "페이지 전송"
-  },
-  "popup_detail_page_sends_value": {
-    "message": "$1 · $2개 실패"
   },
   "popup_detail_recorder": {
     "message": "recorder"
@@ -1168,5 +1162,32 @@
   },
   "popup_app_not_running_help": {
     "message": "이 컴퓨터에서 Chat On Steroids가 열려 있는지 확인하세요. 확장 프로그램은 자동으로 연결됩니다."
+  },
+  "content_workers_finished": {
+    "message": "$1개 완료"
+  },
+  "content_workers_running": {
+    "message": "$1개 실행 중"
+  },
+  "content_workers_failed": {
+    "message": "$1개 실패"
+  },
+  "popup_detail_events": {
+    "message": "이벤트 $1개"
+  },
+  "popup_detail_calls": {
+    "message": "호출 $1개"
+  },
+  "popup_detail_failed": {
+    "message": "$1개 실패"
+  },
+  "popup_detail_total": {
+    "message": "전체 $1개"
+  },
+  "content_edit_message_missing": {
+    "message": "해당 메시지가 더 이상 ChatGPT 페이지에 없어 편집할 수 없습니다."
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT가 해당 메시지에 편집을 제공하지 않았습니다. ChatGPT에서 채팅을 연 다음 다시 시도하세요."
   }
 }

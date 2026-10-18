@@ -21,6 +21,22 @@ const publish = (version = '1', declarations = tools) => { publishPluginSurface(
 const publishPlugins = (declarations: PluginToolSchema[]) => { publishPluginSurface('plugins', 'Chat On Steroids Plugins', '1', 'Instructions', declarations); vi.advanceTimersByTime(20_000); };
 const claim = (request: { id: string }, declarations = [{ ...tools[0]!, description: 'Older declaration' }]) => claimPluginRefresh({ ...request, appId, connectorName: 'Chat On Steroids Core', tools: declarations });
 const consumeStartup = consumeRequestedPluginRefreshStartup;
+it.each(['claimed', 'manual', 'completed'] as const)('keeps the scoped enrolled App ID in an explicit %s observation without another Refresh claim', async state => {
+  publish(); const first = (await pendingPluginRefreshes())[0]!;
+  if (state === 'manual') await requireManualPluginRefresh({ ...first, appId, connectorName: first.connectorName,
+    tools: [{ ...tools[0]!, description: 'Old' }], error: 'Manual outcome' });
+  else {
+    expect(await claim(first)).toBe(true);
+    if (state === 'completed') expect(await completePluginRefresh({ ...first, appId, tools })).toBe(true);
+  }
+  await requestPluginRefreshes(APP_VERSION);
+  const observation = (await pendingPluginRefreshes(false))[0]!;
+  expect(observation).toMatchObject({ appId, observeOnly: true });
+  expect(observation.id).not.toBe(first.id);
+  expect(await claim(observation)).toBe(false);
+  expect((await readDurable('plugin-refresh') as any[])[0]).toMatchObject({ appId,
+    attempted: state !== 'manual', manual: state === 'manual' });
+});
 it.each(['claimed', 'manual', 'completed'] as const)('preserves unscoped legacy %s authority until the same app proves its tunnel and full schema', async state => {
   const original = configOwner.getConfig(), tunnelId = 'tunnel_legacy00000001';
   const get = vi.spyOn(configOwner, 'getConfig').mockReturnValue({ ...original, tunnel: { ...original.tunnel, kind: 'openai', tunnelId } });
@@ -59,7 +75,9 @@ it.each(['claimed', 'manual', 'completed'] as const)('preserves unscoped legacy 
     expect(await claim(observation)).toBe(false);
   } finally { get.mockRestore(); }
 });
-it.each(['claimed', 'manual'] as const)('shows failed legacy %s rechecks without borrowing verification or another refresh click', async state => {
+// An unconfirmed legacy click on an older schema starts over instead, and a completed one gets its
+// one migration click (both below); a manual receipt stays read-only.
+it.each(['manual'] as const)('shows failed legacy %s rechecks without borrowing verification or another refresh click', async state => {
   const original = configOwner.getConfig(), tunnelId = 'tunnel_legacy00000001';
   let tunnel = { ...original.tunnel, kind: 'openai' as const, tunnelId };
   const get = vi.spyOn(configOwner, 'getConfig').mockImplementation(() => ({ ...original, tunnel }));
@@ -167,7 +185,36 @@ it.each([{ automatic: true, inspectionFailure: false }, { automatic: false, insp
     expect(await pendingPluginRefreshes(automatic)).toEqual([]);
   } finally { get.mockRestore(); }
 });
-it.each(['parked', 'error', 'unconfirmed', 'same-schema'] as const)('keeps a legacy %s receipt read-only even with proven app and tunnel', async outcome => {
+// Live 2026-10-15: Core's receipt from an old build had no tunnel key, an old schema and the error
+// of a click whose outcome was never seen. Automatic refresh skipped it for every later schema,
+// so the "tools changed" reminder stayed although automatic refresh was on.
+it.each(['stuck', 'parked', 'error', 'unconfirmed'] as const)('starts a superseded legacy %s receipt over as a fresh enrollment', async outcome => {
+  const original = configOwner.getConfig(), tunnelId = 'tunnel_legacy00000001';
+  const get = vi.spyOn(configOwner, 'getConfig').mockReturnValue({ ...original, tunnel: { ...original.tunnel, kind: 'openai', tunnelId } });
+  try {
+    publish(); const first = (await pendingPluginRefreshes())[0]!;
+    await claim(first); await completePluginRefresh({ ...first, appId, tools });
+    const legacy = await readDurable('plugin-refresh') as any[]; delete legacy[0].tunnelKey; delete legacy[0].verifiedRun;
+    if (outcome === 'stuck') Object.assign(legacy[0], { completedSchemaId: null, attempted: true, failures: 1,
+      error: 'Refresh was requested, but a changed matching schema was not observed' });
+    if (outcome === 'parked') Object.assign(legacy[0], { parked: true, parkedBy: APP_VERSION });
+    if (outcome === 'error') Object.assign(legacy[0], { error: 'Uncertain saved outcome', failure: 'confirmation' });
+    if (outcome === 'unconfirmed') legacy[0].completedSchemaId = null;
+    await writeDurableNow('plugin-refresh', legacy);
+    const next = [{ ...tools[0]!, description: 'New declarations' }]; publish('2', next);
+    const request = (await pendingPluginRefreshes())[0]!;
+    expect(request).toMatchObject({ appId: null, schemaId: pluginRefreshPublications()[0]!.schemaId });
+    expect(request.observeOnly).toBeUndefined();
+    const input = { ...request, appId, connectorName: request.connectorName, tools, tunnelId, ownsTunnel: () => true };
+    expect(await claimPluginRefresh({ ...input, ownsTunnel: () => false })).toBe(false);
+    expect(await claimPluginRefresh(input)).toBe(true);
+    expect(await completePluginRefresh({ ...request, appId, tools: next })).toBe(true);
+    expect((await pluginRefreshStatuses()).core?.state).toBe('current');
+    await pendingPluginRefreshes();
+    expect(confirmedPluginSchemas().core).toBe(request.schemaId);
+  } finally { get.mockRestore(); }
+});
+it.each(['parked', 'error', 'unconfirmed', 'same-schema'] as const)('keeps a legacy %s receipt read-only on the schema it was about, even with proven app and tunnel', async outcome => {
   const original = configOwner.getConfig(), tunnelId = 'tunnel_legacy00000001';
   const get = vi.spyOn(configOwner, 'getConfig').mockReturnValue({ ...original, tunnel: { ...original.tunnel, kind: 'openai', tunnelId } });
   try {
@@ -178,7 +225,8 @@ it.each(['parked', 'error', 'unconfirmed', 'same-schema'] as const)('keeps a leg
     if (outcome === 'error') legacy[0].error = 'Uncertain saved outcome';
     if (outcome === 'unconfirmed') legacy[0].completedSchemaId = null;
     await writeDurableNow('plugin-refresh', legacy);
-    publish('2', outcome === 'same-schema' ? tools : [{ ...tools[0]!, description: 'New declarations' }]);
+    // A newer schema starts over (above); on the schema the receipt was about, it stays read-only.
+    publish('2', tools);
     await requestPluginRefreshes(APP_VERSION);
     const request = (await pendingPluginRefreshes(false))[0]!;
     expect(request.observeOnly).toBe(true);

@@ -84,7 +84,7 @@ const { createSession, getSession, initSessionStore, resetSessionStoreForTests, 
   '../src/main/session/store.js'
 );
 const store = await import('../src/main/session/store.js');
-const { recordChatObservations, resetRecorderForTests, sessionForConversation } = await import('../src/main/session/recorder.js');
+const { noteChatOrigin, recordChatObservations, resetRecorderForTests, ResumeDestinationPendingError, sessionForConversation } = await import('../src/main/session/recorder.js');
 const { resetWorkspaces, setWorkspaceFor, workspaceEntries } = await import('../src/main/workspace.js');
 const {
   goalObjectiveFor,
@@ -874,6 +874,41 @@ describe('the swarm handover', () => {
     spawn({ workers: [{ task: 'read the tests' }], caller: { conversationId } });
   };
 
+  it('adopts a pending continuation when its prime fleet starts after the compact ticket', async () => {
+    // Production timeline: the durable continuation existed 17 seconds before
+    // the prime/worker run was created. That run must inherit the still-open
+    // handover, rather than vetoing the eventual destination session rebind.
+    const session = await createSession({ title: 'late prime', conversationId: CHAT_A });
+    const opened = await openContinuationNow(session.id, CHAT_A, true);
+    startSwarm(CHAT_A);
+    expect(bindConversation('worker-1', 'worker-late-prime')).toBe(true);
+    finishAgent({ conversationId: 'worker-late-prime' }, 'work finished, available to revive');
+    expect(releaseQuiescentRun()).toBe(true);
+    expect(swarmRunning()).toBe(false);
+    await attachSummary(opened.token, SAMPLE_BRIEF);
+    await claimContinuationNow(opened.token, 'replacement-tab');
+    expect(freezePrimeTransfer(CHAT_A)).toBe('frozen');
+    expect(await commitContinuation(opened.token, CHAT_B)).toBe(true);
+    expect(await attachedChat(session.id)).toBe(CHAT_B);
+    // An entirely parked family has no active prime incarnation. Its durable
+    // owner is proved by the worker history projected to B, not primeConversation().
+    expect(swarmStateForCaller({ conversationId: CHAT_B }).agents.find(a => a.id === 'worker-1'))
+      .toMatchObject({ state: 'sleeping', conversationId: 'worker-late-prime' });
+  });
+
+  it('does not arm a different conversation’s late prime group from the pending ticket', async () => {
+    const session = await createSession({ title: 'only A owns this ticket', conversationId: CHAT_A });
+    const opened = await openContinuationNow(session.id, CHAT_A, true);
+    startSwarm(CHAT_C);
+    expect(freezePrimeTransfer(CHAT_C)).toBe('unavailable');
+    await attachSummary(opened.token, SAMPLE_BRIEF);
+    await claimContinuationNow(opened.token, 'replacement-tab');
+    expect(await commitContinuation(opened.token, CHAT_B)).toBe(true);
+    expect(await attachedChat(session.id)).toBe(CHAT_B);
+    expect(swarmStateForCaller({ conversationId: CHAT_B }).agents).toEqual([]);
+    expect(swarmStateForCaller({ conversationId: CHAT_C }).agents.some(agent => agent.id === 'prime')).toBe(true);
+  });
+
   it('moves a parked prime worker history to the replacement chat and revives the exact old worker', async () => {
     const summary = await createSession({ title: 'parked reusable workers', conversationId: CHAT_A });
     startSwarm(CHAT_A);
@@ -1482,6 +1517,97 @@ describe('the window in which a replacement chat is expected', () => {
     await vi.advanceTimersByTimeAsync(50);
     expect(await observation).toBe(sessionId);
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it('never creates another local session for a delayed dispatched resume after the recorder wait expires', async () => {
+    const { sessionId, token } = await readyContinuation();
+    const destination = '94949494-2222-4333-8444-777777777777';
+    await claimContinuationNow(token, 'delayed-resume-command');
+    expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(token)).toBe(true);
+
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const create = vi.spyOn(store, 'createSession');
+    const gate = vi.spyOn(await import('../src/main/session/resume-gate.js'), 'resumeOpeningChat');
+    const observation = sessionForConversation(destination, undefined, resumeBootstrapText(SAMPLE_BRIEF, token));
+    // Register the rejection handler before advancing fake time; otherwise Node
+    // reports a transient unhandled rejection before the later assertion awaits it.
+    const deferred = expect(observation).rejects.toBeInstanceOf(ResumeDestinationPendingError);
+    await vi.waitFor(() => expect(gate.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 15_000 });
+    await vi.advanceTimersByTimeAsync(RESUME_CLAIM_WINDOW_MS + 100);
+
+    // The resume gate still owns this dispatched handoff. A timeout is not evidence that
+    // an unknown conversation is unrelated, and must never create a competing session.
+    expect(resumeOpeningChat()).toBe(true);
+    await deferred;
+    expect(create).not.toHaveBeenCalled();
+    expect(await commitContinuation(token, destination)).toBe(true);
+    expect(await sessionForConversation(destination)).toBe(sessionId);
+    expect((await store.findSessionByConversation(destination))?.id).toBe(sessionId);
+  });
+
+  it('records unrelated /events after the bounded wait even while a dispatched resume remains unresolved', async () => {
+    const { token } = await readyContinuation();
+    const unrelated = '94949494-2222-4333-8444-888888888888';
+    await claimContinuationNow(token, 'delayed-resume-unrelated-chat');
+    expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(token)).toBe(true);
+
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const gate = vi.spyOn(await import('../src/main/session/resume-gate.js'), 'resumeOpeningChat');
+    const recorded = recordChatObservations(unrelated, [
+      { kind: 'user_message', time: Date.now(), text: 'A separate conversation about dinner.', messageId: 'unrelated-chat-message' }
+    ]);
+    void recorded.catch(() => undefined);
+    await vi.waitFor(() => expect(gate.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 15_000 });
+    await vi.advanceTimersByTimeAsync(RESUME_CLAIM_WINDOW_MS + 100);
+
+    expect(await recorded).toMatchObject({ stored: 1 });
+    const own = await store.findSessionByConversation(unrelated);
+    expect(own?.conversationId).toBe(unrelated);
+    expect(resumeOpeningChat()).toBe(true);
+  });
+
+  it('keeps a command-acknowledged Resume destination deferred even before its user message is visible', async () => {
+    const { sessionId, token } = await readyContinuation();
+    const destination = '94949494-2222-4333-8444-999999999999';
+    await claimContinuationNow(token, 'acknowledged-resume-command');
+    expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(token)).toBe(true);
+    await noteChatOrigin(destination, { kind: 'resume', fromSessionId: sessionId, agentId: null, task: '' });
+
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const create = vi.spyOn(store, 'createSession');
+    const gate = vi.spyOn(await import('../src/main/session/resume-gate.js'), 'resumeOpeningChat');
+    const observed = sessionForConversation(destination);
+    const rejected = expect(observed).rejects.toBeInstanceOf(ResumeDestinationPendingError);
+    await vi.waitFor(() => expect(gate.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 15_000 });
+    await vi.advanceTimersByTimeAsync(RESUME_CLAIM_WINDOW_MS + 100);
+    await rejected;
+    expect(create).not.toHaveBeenCalled();
+    expect(await store.findSessionByConversation(destination)).toBeNull();
+    expect(await commitContinuation(token, destination)).toBe(true);
+    expect(await sessionForConversation(destination)).toBe(sessionId);
+  });
+
+  it('does not treat a foreign Resume marker as this dispatched handoff', async () => {
+    const { token } = await readyContinuation();
+    const unrelated = '94949494-2222-4333-8444-aaaaaaaaaaaa';
+    await claimContinuationNow(token, 'foreign-marker-resume-command');
+    expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(true);
+    expect(await dispatchContinuationDestinationSendNow(token)).toBe(true);
+
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const gate = vi.spyOn(await import('../src/main/session/resume-gate.js'), 'resumeOpeningChat');
+    const recorded = recordChatObservations(unrelated, [
+      { kind: 'user_message', time: Date.now(), text: resumeBootstrapText('Not this pending ticket', 'another_pending_ticket_123'), messageId: 'foreign-marker-user' }
+    ]);
+    void recorded.catch(() => undefined);
+    await vi.waitFor(() => expect(gate.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 15_000 });
+    await vi.advanceTimersByTimeAsync(RESUME_CLAIM_WINDOW_MS + 100);
+    expect(await recorded).toMatchObject({ stored: 1 });
+    expect((await store.findSessionByConversation(unrelated))?.conversationId).toBe(unrelated);
+    expect(resumeOpeningChat()).toBe(true);
   });
 
   it.each(['abort', 'expiry'] as const)('releases unrelated new recording when the resume claim ends by %s', async reason => {

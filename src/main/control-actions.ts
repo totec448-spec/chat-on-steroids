@@ -1,6 +1,10 @@
 import { z } from 'zod';
 import { serveWorkerAction } from './control-workers.js';
+import { resolveChatModel } from '../shared/chat-models.js';
 import type { ControlApiCancelResult, ControlApiSendResult, ControlApiStopResult } from '../shared/control-api.js';
+import { REASONING_EFFORTS } from '../shared/session.js';
+import type { ReasoningEffort } from '../shared/session.js';
+import { getChatModels } from './chat-models.js';
 import { stopSessionTurn } from './bridge.js';
 import type { SessionControlsView } from './bridge.js';
 import { getConfig } from './config.js';
@@ -50,10 +54,14 @@ const sendBody = z
     projectId: lowerUuid.optional(),
     text: z.string().max(MAX_TEXT).refine((value) => value.trim().length > 0, 'text is empty'),
     // Consent to a send that would stop the answer ChatGPT is writing right now.
-    interrupt: z.boolean().optional()
+    interrupt: z.boolean().optional(),
+    // A model and one of its thinking levels from GET /v1/models, always together, as the composer sends them.
+    model: z.string().min(1).max(80).optional(),
+    reasoningEffort: z.enum(REASONING_EFFORTS).optional()
   })
   .strict()
-  .refine((body) => body.sessionId === undefined || body.projectId === undefined, { path: ['projectId'], message: 'a project belongs to a new chat' });
+  .refine((body) => body.sessionId === undefined || body.projectId === undefined, { path: ['projectId'], message: 'a project belongs to a new chat' })
+  .refine((body) => (body.model === undefined) === (body.reasoningEffort === undefined), { path: ['reasoningEffort'], message: 'model and reasoningEffort go together' });
 
 const cancelBody = z.object({}).strict();
 
@@ -107,16 +115,34 @@ async function controllable(sessionId: string | null): Promise<void> {
   if (origin === 'worker' || origin === 'helper') throw new RequestError(409, 'session_not_controllable');
 }
 
+/**
+ * The catalog id and a thinking level it offers, checked against the models the app last read from
+ * ChatGPT's picker, exactly as the composer only offers those. Without them ChatGPT keeps its own selection.
+ */
+function chosenModel(model: string | undefined, effort: ReasoningEffort | undefined): { model: string | null; reasoningEffort: ReasoningEffort | null } {
+  if (model === undefined || effort === undefined) return { model: null, reasoningEffort: null };
+  const catalog = getChatModels();
+  if (catalog.state !== 'ready' || !catalog.models.length) {
+    throw new RequestError(409, 'models_unknown', "the app has not read this account's models yet; refresh them in the app");
+  }
+  const choice = resolveChatModel(catalog.models, model);
+  if (!choice) throw new RequestError(409, 'model_unknown', 'GET /v1/models lists the models this account offers');
+  if (!choice.efforts.includes(effort)) throw new RequestError(409, 'effort_unavailable', choice.id + ' offers ' + choice.efforts.join(', '));
+  return { model: choice.id, reasoningEffort: effort };
+}
+
 async function send(rawBody: unknown): Promise<ActionReply> {
   const body = parse(sendBody, rawBody);
   const text = body.text.trim();
+  const selection = chosenModel(body.model, body.reasoningEffort);
 
   // A repeated id names the row that already exists. It is answered here because the outbox
   // compares the whole request, `dueAt` included, and a retry a moment later would not match.
   const existing = await find(body.id);
   if (existing) {
     // A new chat's first message is filed under its own id.
-    if (existing.purpose === 'decision' || existing.sessionId !== (body.sessionId ?? body.id) || existing.text !== text) {
+    if (existing.purpose === 'decision' || existing.sessionId !== (body.sessionId ?? body.id) || existing.text !== text ||
+        existing.model !== selection.model || existing.reasoningEffort !== selection.reasoningEffort) {
       throw new RequestError(409, 'id_conflict', 'this id belongs to a different message');
     }
     const replay: ControlApiSendResult = { input: projectInput(existing), replayed: true };
@@ -147,8 +173,7 @@ async function send(rawBody: unknown): Promise<ActionReply> {
     text,
     mode: 'auto',
     dueAt: Date.now(),
-    model: null,
-    reasoningEffort: null,
+    ...selection,
     authoredSource: 'text'
   };
   // The switch can flip while the lookups above run; this is the last point before the outbox.

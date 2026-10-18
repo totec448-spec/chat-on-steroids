@@ -91,6 +91,9 @@ win:
 
 nsis:
   include: scripts/windows-installer-acl.nsh
+  # Drawn by scripts/make-icon.mjs from the app icon: the installer an update shows is CoS's own.
+  installerHeader: build/installerHeader.bmp
+  installerSidebar: build/installerSidebar.bmp
   oneClick: false
   perMachine: false
   buildUniversalInstaller: false

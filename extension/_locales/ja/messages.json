@@ -38,6 +38,9 @@
   "content_bootstrap_composer_replaced": {
     "message": "初期メッセージの挿入中に ChatGPT が入力欄を置き換えました"
   },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPTが開始用の使用可能な入力欄を表示しませんでした"
+  },
   "content_bootstrap_composer_unavailable": {
     "message": "モデル選択後にChatGPTが使用可能な入力欄を再表示しませんでした"
   },
@@ -323,6 +326,9 @@
   "content_delivery_existing_draft": {
     "message": "ChatGPT に未送信の下書きがあります。再試行する前に Chrome でその下書きを送信するか削除してください。"
   },
+  "content_delivery_signed_out": {
+    "message": "このブラウザーでは ChatGPT にサインインしていません。そこで ChatGPT にサインインしてから、もう一度送信してください。"
+  },
   "content_delivery_model_unconfirmed": {
     "message": "指定したモデルまたは推論強度を確認できませんでした"
   },
@@ -334,6 +340,9 @@
   },
   "content_delivery_text_not_accepted": {
     "message": "ChatGPT がテキストを受け付けませんでした$1"
+  },
+  "content_delivery_rotation_not_stopped": {
+    "message": "ChatGPT は実行中の回答で送信を提供せず、自動続行のための停止も完了しませんでした。"
   },
   "content_delivery_turn_changed": {
     "message": "直接送信する前にターンが変わりました。"
@@ -722,12 +731,6 @@
   "content_workers_still_running": {
     "message": "$1 個のワーカーがまだ実行中です"
   },
-  "content_workers_summary": {
-    "message": "$1 完了 · $2 実行中"
-  },
-  "content_workers_summary_failed": {
-    "message": "$1 完了 · $2 実行中 · $3 失敗"
-  },
   "content_working": {
     "message": "作業中…"
   },
@@ -815,9 +818,6 @@
   "popup_detail_app_value": {
     "message": "v$1 · ポート $2"
   },
-  "popup_detail_browser_queue_value": {
-    "message": "$1 件を保持 · 合計 $2 件"
-  },
   "popup_detail_chat_id": {
     "message": "チャット ID"
   },
@@ -842,17 +842,11 @@
   "popup_detail_observed": {
     "message": "観測済み"
   },
-  "popup_detail_observed_value": {
-    "message": "$1 件のイベント · $2 件の呼び出し"
-  },
   "popup_detail_ownership": {
     "message": "帰属"
   },
   "popup_detail_page_sends": {
     "message": "ページからの送信回数"
-  },
-  "popup_detail_page_sends_value": {
-    "message": "$1 · $2 件失敗"
   },
   "popup_detail_recorder": {
     "message": "記録機能"
@@ -1168,5 +1162,32 @@
   },
   "popup_app_not_running_help": {
     "message": "このコンピューターで Chat On Steroids が開いていることを確認してください。拡張機能は自動的に接続します。"
+  },
+  "content_workers_finished": {
+    "message": "$1 完了"
+  },
+  "content_workers_running": {
+    "message": "$1 実行中"
+  },
+  "content_workers_failed": {
+    "message": "$1 失敗"
+  },
+  "popup_detail_events": {
+    "message": "$1 件のイベント"
+  },
+  "popup_detail_calls": {
+    "message": "$1 件の呼び出し"
+  },
+  "popup_detail_failed": {
+    "message": "$1 件失敗"
+  },
+  "popup_detail_total": {
+    "message": "合計 $1 件"
+  },
+  "content_edit_message_missing": {
+    "message": "そのメッセージはもう ChatGPT のページにないため、編集できません。"
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT がそのメッセージの編集を提供しませんでした。ChatGPT でチャットを開いてから、もう一度お試しください。"
   }
 }

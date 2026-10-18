@@ -64,6 +64,7 @@ const startup = await import('../src/main/browser-startup.js');
 const connection = await import('../src/main/connection.js');
 const { setChatBlocked } = await import('../src/main/session/blocked-chats.js');
 const controlActions = await import('../src/main/control-actions.js');
+const chatModels = await import('../src/main/chat-models.js');
 const controlApi = await import('../src/main/control-api.js');
 const { listInputs, resetInputForTests } = input;
 
@@ -1074,6 +1075,53 @@ describe('what a message row proves', () => {
     const listed = new Map((await call('GET', '/v1/inputs')).body.inputs.map((entry: { id: string }) => [entry.id, entry]));
     expect(listed.get(recovery.id)).toMatchObject({ automatic: true, state: 'failed', delivery: 'not_sent' });
     expect(listed.get(typed.id)).toMatchObject({ automatic: false });
+  });
+});
+
+describe('choosing a model', () => {
+  const ready = () => vi.spyOn(chatModels, 'getChatModels').mockReturnValue({
+    state: 'ready', requestedAt: null, observedAt: 1,
+    models: [{ id: 'gpt-6', label: 'GPT-6', efforts: ['medium', 'high'], aliases: ['gpt-6-thinking'] }]
+  });
+
+  it('sends with a model and thinking level the account offers, filed under the catalog id', async () => {
+    const catalog = ready();
+    try {
+      const exact = await post('/v1/inputs', sendBody({ model: 'gpt-6', reasoningEffort: 'medium' }));
+      expect(exact.status).toBe(202);
+      expect(exact.body.input).toMatchObject({ model: 'gpt-6', reasoningEffort: 'medium' });
+      await post('/v1/inputs/' + exact.body.input.id + '/cancel');
+      const alias = await post('/v1/inputs', sendBody({ model: 'gpt-6-thinking', reasoningEffort: 'high' }));
+      expect(alias.status).toBe(202);
+      expect((await outbox()).find((entry) => entry.id === alias.body.input.id)).toMatchObject({ model: 'gpt-6', reasoningEffort: 'high' });
+      // The same id with another model is a different message, never a replay.
+      const changed = await post('/v1/inputs', { id: alias.body.input.id, sessionId: chatSession, text: 'Keep going', model: 'gpt-6', reasoningEffort: 'medium' });
+      expect(changed.body.error).toBe('id_conflict');
+    } finally {
+      catalog.mockRestore();
+    }
+  });
+
+  it('refuses a model or level the account does not offer, half a pair, and an unread catalog, before admitting anything', async () => {
+    const catalog = ready();
+    try {
+      expect((await post('/v1/inputs', sendBody({ model: 'gpt-9', reasoningEffort: 'high' }))).body.error).toBe('model_unknown');
+      const effort = await post('/v1/inputs', sendBody({ model: 'gpt-6', reasoningEffort: 'xhigh' }));
+      expect(effort.body).toMatchObject({ error: 'effort_unavailable', detail: 'gpt-6 offers medium, high' });
+      expect((await post('/v1/inputs', sendBody({ model: 'gpt-6' }))).body.error).toBe('invalid_body');
+      expect((await post('/v1/inputs', sendBody({ reasoningEffort: 'high' }))).body.error).toBe('invalid_body');
+      catalog.mockReturnValue({ state: 'unknown', requestedAt: null, observedAt: null, models: [] });
+      expect((await post('/v1/inputs', sendBody({ model: 'gpt-6', reasoningEffort: 'high' }))).body.error).toBe('models_unknown');
+      expect(await outbox()).toEqual([]);
+    } finally {
+      catalog.mockRestore();
+    }
+  });
+
+  it("leaves ChatGPT's own selection when no model is named", async () => {
+    const sent = await post('/v1/inputs', sendBody());
+    expect(sent.status).toBe(202);
+    expect(sent.body.input).toMatchObject({ model: null, reasoningEffort: null });
   });
 });
 

@@ -45,6 +45,7 @@ export function initAppearance(save: (patch: { theme?: AppearanceTheme; appearan
     applyAppearance(theme, current);
     $<HTMLSelectElement>('appearanceTheme').value = theme;
     $<HTMLSelectElement>('appearanceFont').value = current.font;
+    $<HTMLSelectElement>('appearanceSidebarLayout').value = current.sidebarLayout;
     $<HTMLInputElement>('appearanceSize').value = String(current.fontSize);
     $('appearanceSizeValue').textContent = `${current.fontSize} px`;
     $<HTMLInputElement>('appearanceContrast').value = String(current[theme].contrast);
@@ -72,6 +73,7 @@ export function initAppearance(save: (patch: { theme?: AppearanceTheme; appearan
     } else if (control.id === 'appearanceSize') current = { ...current, fontSize: Number(control.value) };
     else if (control.id === 'appearanceContrast') current = { ...current, [theme]: { ...current[theme], contrast: Number(control.value) } };
     else if (control.id === 'appearanceFont') current = { ...current, font: control.value as AppearanceSettings['font'] };
+    else if (control.id === 'appearanceSidebarLayout') current = { ...current, sidebarLayout: control.value as AppearanceSettings['sidebarLayout'] };
     else if (control.id === 'appearanceTranslucent') current = { ...current, translucentSidebar: (control as HTMLInputElement).checked };
     else return false;
     paint();
@@ -98,7 +100,8 @@ export function initAppearance(save: (patch: { theme?: AppearanceTheme; appearan
     }
   });
   $('appearanceReset').addEventListener('click', () => {
-    editing = false; current = defaultAppearance(); paint(); save({ appearance: current });
+    // Colors and typography only: the sidebar keeps the layout the person chose.
+    editing = false; current = { ...defaultAppearance(), sidebarLayout: current.sidebarLayout }; paint(); save({ appearance: current });
   });
   return { apply(ui) {
     if (editing) return;

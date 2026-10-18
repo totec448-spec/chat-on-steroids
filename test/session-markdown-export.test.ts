@@ -62,3 +62,30 @@ it('copies link cards as Markdown links instead of their raw markers', async () 
   await exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't1', target: 'clipboard' }, null);
   expect(electron.clipboard.writeText).toHaveBeenCalledWith('Open [the comparison](https://github.com/o/r/compare) and merge it.\n');
 });
+
+it('copies the rows of a table ChatGPT drew but wrote with only its header (#1477)', async () => {
+  const html = '<div data-d-component="table"><table><tr><td><p><span>Item</span></p></td><td><p>Qty</p></td></tr>' +
+    '<tr><td><p>Rice</p></td><td><p>1 kg</p></td></tr><tr><td><p>Milk</p></td><td><p>2 l</p></td></tr></table></div>' +
+    '<button type="button" data-d-component="button"><span>Copy list</span></button>';
+  store.readEvents.mockResolvedValue([
+    events[0]!,
+    { seq: 2, time: 2, source: 'extension', kind: 'assistant_message', turnId: 't1', messageId: 'a1', final: true, state: 'final',
+      message: { text: '| **Item** | **Qty** |\n|---|---|\n\n[Copy list]', truncated: false, chars: 40 },
+      renderedHtml: { text: html, truncated: false, chars: html.length } },
+    events[2]!
+  ] as SessionEvent[]);
+  await exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't1', target: 'clipboard' }, null);
+  expect(electron.clipboard.writeText).toHaveBeenCalledWith('| **Item** | **Qty** |\n|---|---|\n| Rice | 1 kg |\n| Milk | 2 l |\n');
+});
+
+// An answer recorded outside any turn (copied branch history, an adopted chat) has no turn to name.
+it('copies an answer recorded without a turn by its message id, and only such an answer', async () => {
+  store.readEvents.mockResolvedValue([...events,
+    { seq: 4, time: 4, source: 'extension', kind: 'assistant_message', messageId: 'loose-1', final: true, state: 'final',
+      message: { text: 'An earlier answer', truncated: false, chars: 17 } }] as SessionEvent[]);
+  await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', messageId: 'loose-1', target: 'clipboard' }, null)).resolves.toEqual({ done: 'copied' });
+  expect(electron.clipboard.writeText).toHaveBeenCalledWith('An earlier answer\n');
+  // A turn's own answer is exported by its turn; an unknown or turn-owned id is refused.
+  await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', messageId: 'a1', target: 'clipboard' }, null)).rejects.toThrow('no answer to export');
+  await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', target: 'clipboard' }, null)).rejects.toThrow('has not completed');
+});

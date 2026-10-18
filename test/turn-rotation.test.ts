@@ -61,3 +61,23 @@ it('measures each new turn from its own start', async () => {
   now = startedAt + 30 * 60_000;
   expect(await considerTurnRotation('chat', 'session', 'turn-2', deps())).toBe(true);
 });
+
+// 2026-10-15, the user's Mac chat: seven automatic continues in two turns, every one shown as not
+// sent. A turn the page could not rotate twice is left alone after that, with one log line.
+it('files at most two automatic continues for one turn', async () => {
+  const lines: string[] = [];
+  const logged = (): RotationDeps => ({ ...deps(), log: line => lines.push(line) });
+  now = 31 * 60_000;
+  expect(await considerTurnRotation('chat', 'session', 'turn', logged())).toBe(true);
+  now += 5 * 60_000 + 1;
+  expect(await considerTurnRotation('chat', 'session', 'turn', logged())).toBe(true);
+  for (let step = 0; step < 4; step += 1) {
+    now += 5 * 60_000 + 1;
+    expect(await considerTurnRotation('chat', 'session', 'turn', logged())).toBe(false);
+  }
+  expect(filed).toHaveLength(2);
+  expect(lines.filter(line => line.includes('giving up on fresh turns'))).toHaveLength(1);
+  // The next turn starts over.
+  startedAt = now; now += 31 * 60_000;
+  expect(await considerTurnRotation('chat', 'session', 'turn-2', logged())).toBe(true);
+});

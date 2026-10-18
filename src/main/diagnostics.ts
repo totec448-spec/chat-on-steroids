@@ -160,32 +160,39 @@ export function describeMacOSDesktopAccess(
 
   const check = (
     name: string,
-    state: MacOSDesktopAccessStatus['screen'],
+    permission: 'screen' | 'accessibility',
     missing: string
-  ): Check => ({
-    name,
-    status: state === 'granted' ? 'pass' : state === 'missing' ? 'fail' : 'not-run',
-    ok: state === 'granted' ? true : state === 'missing' ? false : null,
-    detail:
-      state === 'granted'
-        ? 'Granted to the in-process Desktop backend.'
-        : state === 'missing'
-          ? `${missing} Fully quit and reopen the app after changing the macOS permission.`
-          : access.error ?? 'The in-process Desktop backend could not determine the live TCC decision.'
-  });
+  ): Check => {
+    const state = access[permission];
+    // An unsigned update is a new app to macOS: the old grant still shows, but no longer applies.
+    const earlier = access.grantedBefore?.[permission] === true
+      ? ' It was granted to an earlier version; after an update macOS still shows it as allowed. Use Repair permissions in Settings → Workspace.'
+      : '';
+    return {
+      name,
+      status: state === 'granted' ? 'pass' : state === 'missing' ? 'fail' : 'not-run',
+      ok: state === 'granted' ? true : state === 'missing' ? false : null,
+      detail:
+        state === 'granted'
+          ? 'Permission preflight passed in the current Desktop process; capture and control have not been tested.'
+          : state === 'missing'
+            ? `${missing}${earlier} Fully quit and reopen the app after changing the macOS permission.`
+            : access.error ?? 'The in-process Desktop backend could not determine the live TCC decision.'
+    };
+  };
 
   if (caps.screen) {
     checks.push(check(
       'macOS Screen Recording',
-      access.screen,
-      'macOS denied Screen Recording to the current Desktop process. Open Privacy & Security → Device Control and Data Access.'
+      'screen',
+      'Screen Recording permission preflight did not pass in the current Desktop process. Check this installed Chat On Steroids.app in Privacy & Security → Screen & System Audio Recording (or Device Control and Data Access).'
     ));
   }
   if (caps.control) {
     checks.push(check(
       'macOS Accessibility',
-      access.accessibility,
-      'macOS denied AXUIElement access to the in-process Chat On Steroids.app backend. Open Privacy & Security → Accessibility (Device Control and Data Access on newer macOS).'
+      'accessibility',
+      'Accessibility permission preflight did not pass in the current Desktop process. Check this installed Chat On Steroids.app in Privacy & Security → Accessibility (Device Control and Data Access on newer macOS).'
     ));
   }
   return checks;

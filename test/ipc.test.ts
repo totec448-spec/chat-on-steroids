@@ -105,7 +105,7 @@ it('keeps the reported interface language and the extension preferences through 
   expect(getConfig().ui.browserPreferences).toEqual({ overwrite: false, durations: true });
 });
 
-it.each(['playfulStatus', 'followOutput'] as const)('saves the %s display switch from Settings', async key => {
+it.each(['playfulStatus', 'playfulContinue', 'followOutput'] as const)('saves the %s display switch from Settings', async key => {
   // Both are plain ui booleans saved by the general Settings save. The save schema dropped keys
   // it did not list, so a switch that was not listed reverted on the next state push.
   const base = getConfig();
@@ -917,6 +917,18 @@ describe('ChatGPT browser settings', () => {
 });
 
 describe('settings writes from more than one UI', () => {
+  it("keeps the version whose What's New was seen when a setting changes", async () => {
+    // Every settings save rebuilt \`ui\` without it, so What's New came back at the next start after
+    // any changed setting (2.1.41 pass, Windows VM).
+    const base = defaultConfig(); await saveConfig({ ...base, ui: { ...base.ui, lastSeenVersion: '2.1.40' } });
+    const current = getConfig();
+    const { lastSeenVersion: _seen, ...formUi } = current.ui;
+    expect((await save({ ...current, ui: { ...formUi, theme: 'dark' } }, { ...current, ui: formUi })).ok).toBe(true);
+    expect(getConfig().ui.theme).toBe('dark');
+    expect(getConfig().ui.lastSeenVersion).toBe('2.1.40');
+    expect(JSON.parse(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).ui.lastSeenVersion).toBe('2.1.40');
+  });
+
   it('validates and persists the Plugins tunnel id through Settings, including explicit clearing', async () => {
     const base = defaultConfig(); await saveConfig(base);
     const tunnelId = `tunnel_${'a'.repeat(32)}`;
@@ -1397,34 +1409,22 @@ describe('installing a downloaded update on request', () => {
       expect(quitToInstallCalls).toBe(quits); expect(getConfig()).toEqual(before);
     } finally { checked.mockRestore(); status.mockRestore(); connected.mockRestore(); requested.mockRestore(); }
   });
-  it.each(['cancel', 'approve', 'changed-installer', 'no-window'] as const)('acquires native restart approval before update intent: %s', async outcome => {
+  it.each([
+    ['unapproved', undefined], ['other-version', '98.0.0'], ['approve', '99.0.0'], ['changed-installer', '99.0.0']
+  ] as const)('restarts only for the version the app approved: %s', async (outcome, approved) => {
+    // The question is asked in the app's own dialog; the window calls again with that version.
     const updater = await import('../src/main/update.js');
     const refresh = await import('../src/main/plugin-refresh.js');
     const checked = vi.spyOn(updater, 'checkForUpdates').mockResolvedValue(undefined);
     const status = vi.spyOn(updater, 'updateStatus').mockReturnValue({ current: '2.1.35', latest: '99.0.0', stage: 'ready', checkedAt: 1, error: null });
     const marked = vi.spyOn(updater, 'markInstallOnQuit').mockReturnValue(outcome !== 'changed-installer');
     const requested = vi.spyOn(refresh, 'requestPluginRefreshes').mockResolvedValue(undefined);
-    const oldWindow = currentWindow, quits = quitToInstallCalls;
-    currentWindow = outcome === 'no-window' ? null : {
-      setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() }
-    };
-    const approval = faultGate();
-    if (outcome !== 'no-window') vi.mocked(dialog.showMessageBox).mockImplementationOnce(async () => {
-      await approval.hold(); return { response: outcome === 'cancel' ? 0 : 1, checkboxChecked: false };
-    });
+    const quits = quitToInstallCalls;
     try {
-      const pending = handlers.get('update:all')!(null, undefined);
-      if (outcome !== 'no-window') {
-        await approval.entered;
-        expect(requested).not.toHaveBeenCalled(); expect(marked).not.toHaveBeenCalled(); expect(quitToInstallCalls).toBe(quits);
-        expect(dialog.showMessageBox).toHaveBeenLastCalledWith(currentWindow, expect.objectContaining({
-          message: 'Restart to install the update?', buttons: ['Keep working', 'Restart and install'], defaultId: 0, cancelId: 0
-        }));
-        approval.release();
-      }
-      const reply = await pending;
-      if (outcome === 'cancel' || outcome === 'no-window') {
-        expect(reply).toEqual({ ok: true, data: 'cancelled' });
+      const reply = await handlers.get('update:all')!(null, approved);
+      expect(dialog.showMessageBox).not.toHaveBeenCalled();
+      if (outcome === 'unapproved' || outcome === 'other-version') {
+        expect(reply).toEqual({ ok: true, data: 'confirm' });
         expect(requested).not.toHaveBeenCalled(); expect(marked).not.toHaveBeenCalled(); expect(quitToInstallCalls).toBe(quits);
       } else {
         expect(marked).toHaveBeenCalledExactlyOnceWith('99.0.0');
@@ -1435,7 +1435,7 @@ describe('installing a downloaded update on request', () => {
         }
       }
     } finally {
-      currentWindow = oldWindow; checked.mockRestore(); status.mockRestore(); marked.mockRestore(); requested.mockRestore();
+      checked.mockRestore(); status.mockRestore(); marked.mockRestore(); requested.mockRestore();
     }
   });
   it('refuses, and does not quit, when nothing has been downloaded', async () => {
@@ -2343,6 +2343,40 @@ describe('native worker checkout cleanup confirmation', () => {
       }));
       expect(dispose).not.toHaveBeenCalled();
     });
+  });
+
+  it('accepts the renderer\'s whole set of main-process texts', async () => {
+    // The channel's size bound once stayed at 32 while the set grew past it, and a refused set
+    // left the tray, notices and dialogs English in every language.
+    const { MAIN_TEXTS } = await import('../src/shared/main-texts.js');
+    const { mainText, setMainTextTranslations } = await import('../src/main/main-texts.js');
+    try {
+      expect(await invoke('ui:mainTexts', Object.fromEntries(MAIN_TEXTS.map(source => [source, `«${source}»`]))))
+        .toMatchObject({ ok: true });
+      expect(mainText('Quit')).toBe('«Quit»');
+      expect(mainText('Attach files')).toBe('«Attach files»');
+    } finally { setMainTextTranslations({}); }
+  });
+
+  it('asks in the interface language before removing a worker checkout', async () => {
+    const { setMainTextTranslations } = await import('../src/main/main-texts.js');
+    setMainTextTranslations({
+      'Remove worker Git checkout?': 'Worker-Git-Checkout entfernen?',
+      'Keep checkout': 'Checkout behalten',
+      'Checkout: {0}': 'Checkout: {0}',
+      'Uncommitted or ignored paths that would be discarded ({0}):': 'Nicht committete oder ignorierte Pfade, die verworfen würden ({0}):'
+    });
+    try {
+      await withPreview(async ({ dispose }) => {
+        await invoke('swarm:worktreeCleanupRemove', { runId: offer.runId, agentId: offer.agentId });
+        const options = vi.mocked(dialog.showMessageBox).mock.calls.at(-1)?.at(-1) as Electron.MessageBoxOptions;
+        expect(options.title).toBe('Worker-Git-Checkout entfernen?');
+        expect(options.buttons).toEqual(['Checkout behalten', 'Remove checkout; preserve Git branch']);
+        expect(options.detail).toContain(`Checkout: ${preview.workspace}`);
+        expect(options.detail).toContain('Nicht committete oder ignorierte Pfade, die verworfen würden (1):');
+        expect(dispose).not.toHaveBeenCalled();
+      });
+    } finally { setMainTextTranslations({}); }
   });
 
   it('rejects a same-path, same-status and same-size content edit made while the dialog is open', async () => {

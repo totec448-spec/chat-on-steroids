@@ -41,6 +41,19 @@ describe('custom appearance', () => {
     expect(base).toEqual(defaultAppearance());
   });
 
+  it('opens on the Projects sidebar for saves without a layout or with a retired one, and merges the layout per field', () => {
+    const old: Record<string, unknown> = { ...defaultAppearance() };
+    delete old.sidebarLayout;
+    expect(appearanceSchema.parse(old).sidebarLayout).toBe('projects');
+    // 'status' was a concept variant that never shipped; it reads as the default tree.
+    for (const bad of ['status', 'classic', 1, null]) expect(appearanceSchema.parse({ ...old, sidebarLayout: bad }).sidebarLayout).toBe('projects');
+    expect(appearanceSchema.parse({ ...old, sidebarLayout: 'inbox' }).sidebarLayout).toBe('inbox');
+    const base = defaultAppearance(), live = { ...defaultAppearance(), sidebarLayout: 'inbox' as const };
+    // A stale window saving its font keeps the layout another window chose.
+    expect(mergeAppearance(live, base, { ...base, font: 'mono' })).toMatchObject({ sidebarLayout: 'inbox', font: 'mono' });
+    expect(mergeAppearance(base, base, live)!.sidebarLayout).toBe('inbox');
+  });
+
   it('uses the custom sidebar for native caption contrast and the custom page for reload backing', () => {
     const appearance = defaultAppearance();
     appearance.dark.sidebar = '#ffffff'; appearance.dark.background = '#391c56'; appearance.translucentSidebar = false;

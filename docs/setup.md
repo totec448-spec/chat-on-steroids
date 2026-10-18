@@ -98,12 +98,13 @@ It then serves these routes on `127.0.0.1` only:
 - `GET /v1/sessions/{id}/events/stream` (`from` by `seq`, `kinds`): the same events pushed as [Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html), so a caller does not have to poll. It sends what is recorded from `from` on (the first event when omitted), then each new or revised event as it is written. Each frame has `id` (the event's `seq`), `event` (its kind) and `data` (the same JSON as the paged read); a reconnect with `Last-Event-ID` continues after that event. Idle streams carry a comment line every 15 seconds. At most four streams are open at once (a fifth gets `503 busy`), and each ends after 30 minutes, when the API is switched off, or when its reader falls too far behind, with a last `end` frame whose `data.reason` says which (`max_duration`, `stopped`, `slow_consumer`, `session_gone`, `error`): reconnect to continue;
 - `GET /v1/inputs` (`state`, `limit`): the message outbox;
 - `GET /v1/agents`: the multi-agent run;
-- `GET /v1/log` (`limit`, `level`, `since`, inclusive): the in-memory Activity log.
+- `GET /v1/log` (`limit`, `level`, `since`, inclusive): the in-memory Activity log;
+- `GET /v1/models`: the models and thinking levels your ChatGPT account offers, as the app last read them from ChatGPT's model picker. Reading it never opens the picker; refresh the list in the app.
 
 With a second switch, **Allow actions: let local agents send messages, start new chats and cancel messages** (off by default,
 off whenever the API is off, and left off when you turn the API back on), it also serves:
 
-- `POST /v1/inputs` with `{ "id": "<new lowercase UUID>", "sessionId": "...", "text": "..." }` (up to 64,000 characters) sends a message to an existing chat through the same outbox as the composer. Without `sessionId` it starts a **new chat** with that message, like the composer's New chat; the new chat's id is the message `id` (also `input.sessionId` in the answer), so it can be followed right away with `GET /v1/sessions/{id}/events`. A new chat may name a `projectId` to start in that project (404 `project_not_found` for an unknown one); a project together with a `sessionId` is refused. Like the composer it connects CoS and opens the chat in your browser. It answers 202 once the message is stored; whether ChatGPT received it is read later from `GET /v1/inputs` (`delivery`: `sent`, `not_sent`, `unconfirmed` or `pending`). Repeating an id returns the same message and does not send it again, but the outbox keeps only the last 50 finished messages (fewer when they are very large), so use a new UUID for each message. After a timeout, read `GET /v1/inputs` before sending again. A chat takes one message at a time, and if ChatGPT is writing an answer that the send would stop, the request is refused unless it also says `"interrupt": true`. Worker and helper chats cannot be sent to;
+- `POST /v1/inputs` with `{ "id": "<new lowercase UUID>", "sessionId": "...", "text": "..." }` (up to 64,000 characters) sends a message to an existing chat through the same outbox as the composer. Without `sessionId` it starts a **new chat** with that message, like the composer's New chat; the new chat's id is the message `id` (also `input.sessionId` in the answer), so it can be followed right away with `GET /v1/sessions/{id}/events`. A new chat may name a `projectId` to start in that project (404 `project_not_found` for an unknown one); a project together with a `sessionId` is refused. Like the composer it connects CoS and opens the chat in your browser. To choose the model, add `"model"` and `"reasoningEffort"` together, an `id` and one of its `efforts` from `GET /v1/models`; a model or level your account does not offer is refused (409 `model_unknown` or `effort_unavailable`, or `models_unknown` before the app has read the list). Without them ChatGPT keeps its current selection. It answers 202 once the message is stored; whether ChatGPT received it is read later from `GET /v1/inputs` (`delivery`: `sent`, `not_sent`, `unconfirmed` or `pending`). Repeating an id returns the same message and does not send it again, but the outbox keeps only the last 50 finished messages (fewer when they are very large), so use a new UUID for each message. After a timeout, read `GET /v1/inputs` before sending again. A chat takes one message at a time, and if ChatGPT is writing an answer that the send would stop, the request is refused unless it also says `"interrupt": true`. Worker and helper chats cannot be sent to;
 - `POST /v1/sessions/{id}/stop` with `{ "turnId": "..." }` (the `activeTurnId` from `GET /v1/sessions/{id}?live=1`) stops the answer the chat is writing, exactly like the app's Stop button, which also switches Goal or Loop off for that chat. It answers `202` with the chat's `live` state; the answer has ended once its `turn_end` event is recorded. It answers `409 turn_not_running` when that answer is no longer running, so a late request never stops a newer one, and it refuses a worker or helper chat.
 - `POST /v1/inputs/{id}/cancel` withdraws a message that has not been handed to ChatGPT. It refuses a message that was delivered, one whose Send was already authorized (it may be in ChatGPT), the first message of a new chat, a message paired with another, and a message of a worker or helper chat.
 
@@ -128,6 +129,28 @@ Requests need `Authorization: Bearer <token>`. Any request with a browser `Origi
 A read that waits on something the app cannot answer within 15 seconds gets `504 timeout`, and `/v1/health` keeps answering (within the same rate limit), so a caller can tell an app that is waiting from one that is not running. An app frozen outright answers nothing.
 Turning the switch off, or quitting, stops the listener and removes both files. A crash can leave
 them behind, so a caller should treat a refused connection as "not running".
+
+## Projects on a server (SSH)
+
+A project can be a folder on another computer that you reach with SSH. Click **+** next to
+**Projects** in the sidebar, choose **Folder on a server (SSH)…**, then enter:
+
+- **SSH address**: `me@server`, `me@server:2222`, or a `Host` name from your `~/.ssh/config`.
+- **Folder on the server**: an absolute path such as `/srv/app`, or one in your home folder such as `~/app`.
+
+**Test and add** connects once and checks that the folder exists. Chat On Steroids uses your own
+SSH setup (`~/.ssh/config`, your agent, keys and known hosts) and installs nothing on the server.
+The server needs SSH with SFTP and a POSIX shell (Linux, macOS, BSD).
+
+- **Sign-in with a key only.** The app can't answer password prompts. If `ssh <address>` in a
+  terminal asks for a password, add your key to the server or your agent first.
+- **New servers:** connect once in a terminal and confirm the host key; until then the app says
+  "This server is not trusted yet".
+- **What works there:** reading and searching files, images, `apply_patch`, commands (each command
+  is its own SSH connection) and the workspace terminal. Files in the app lists and previews text.
+- **Not yet:** editing files from the app's Files panel, the Git panel, and separate worktrees for
+  sub-agents (they work in the server folder itself). ChatGPT can still change files and run Git
+  with its tools.
 
 ## Permissions and plugins
 

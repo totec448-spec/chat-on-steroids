@@ -15,6 +15,7 @@ import {
   resolvePath,
   splitVirtualPath,
   strayVirtualPath,
+  suggestApprovedSpelling,
   toVirtualPath,
   uniqueRootName,
   validateNewRoot
@@ -359,6 +360,16 @@ describe('root names', () => {
     expect(normaliseRootName('...')).toBe('folder');
     expect(normaliseRootName('')).toBe('folder');
     expect(normaliseRootName('a'.repeat(80)).length).toBe(32);
+    // 2.1.41 UI audit: "Kundenprojekt Größe & Ä" became /kundenprojekt-gr-e, its letters dropped.
+    expect(normaliseRootName('Kundenprojekt Größe & Ä')).toBe('kundenprojekt-groesse-ae');
+    expect(normaliseRootName('Über Straße')).toBe('ueber-strasse');
+    expect(normaliseRootName('Café résumé')).toBe('cafe-resume');
+    expect(normaliseRootName('Søren Ærø')).toBe('soren-aero');
+    expect(normaliseRootName('日本語')).toBe('folder');
+    // A root an older version named keeps that name, and a refused path spelled from its folder still finds it.
+    const roots = [{ name: 'kundenprojekt-gr-e', path: '/x' }, { name: 'ueber-strasse', path: '/y' }] as unknown as Root[];
+    expect(suggestApprovedSpelling(roots, ['C:', 'Kundenprojekt Größe & Ä', 'src', 'a.ts'])).toBe('/kundenprojekt-gr-e/src/a.ts');
+    expect(suggestApprovedSpelling(roots, ['Über Straße', 'b.ts'])).toBe('/ueber-strasse/b.ts');
   });
 
   it('avoids collisions', () => {

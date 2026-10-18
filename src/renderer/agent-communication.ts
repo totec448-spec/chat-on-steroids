@@ -41,6 +41,7 @@ export function communicationTitle(event: Communication): string {
   const worker = event.from === 'prime' ? event.to : event.from;
   if (event.from === 'prime') return t("Message to {0}", [worker]);
   if ((event.message.text.startsWith(`[${worker} is awake again]`) || event.message.text.startsWith(`[${worker} is back]`))) return t("{0} resumed work", [worker]);
+  if (event.message.text.startsWith(`[${worker} started late]`)) return t("{0} started late", [worker]);
   if ((event.message.text.startsWith(`[${worker} reported]`) || event.message.text.startsWith(`[${worker} finished]`))) return t("{0} finished · report", [worker]);
   return t("Message from {0}", [worker]);
 }

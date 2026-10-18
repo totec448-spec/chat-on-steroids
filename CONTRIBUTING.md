@@ -69,11 +69,18 @@ The `canary` prerelease is a test build of `main`, rebuilt automatically after e
 
 A bug report needs the exact app version, for example `2.1.32` (Settings → Activity in the app). "latest" is not enough: it changes with every release. A report without a version number is closed with the `needs-version` label and reopens by itself when the number is edited in.
 
+Bug reports opened from October 15, 2026 on also need:
+
+- **The diagnostics report.** In the app, open Activity and click Diagnostics report, then attach the saved file. Personal details are already replaced in it. If the app does not open at all, attach its `app.log` instead.
+- **A check on the latest release.** Update first and confirm the problem is still there; a report for an older version is asked to retry on the newest one.
+
+A report without them is closed with the `incomplete-report` label and a note on what is missing, and reopens by itself once they are edited in. Steps to reproduce, how often it happens and a screenshot are not required, but they often save a round of questions.
+
 Issues are closed as soon as their fix is merged to `main`; the fix ships with the next release. When an issue is labeled `needs-info`, it waits for details from the reporter: after 7 days without a reply it gets one reminder, and 3 days later it is closed. Reply or reopen at any time with the details.
 
 ## Pull requests
 
-This project is maintained by one person, so review time is the scarce part. A PR is reviewed only when **CI and the "PR checklist" check are green**. The checklist runs automatically on every PR and on every edit of its description; its log says exactly what is missing. Use the pull request template and it passes by itself.
+This project is maintained by one person, so review time is the scarce part. A PR is reviewed only when **CI and the "PR checklist" check are green**. When one of them fails, the PR is turned back into a draft (label `not-ready`); fix it and click **Ready for review** to put it back in the queue. The checklist runs automatically on every PR and on every edit of its description; its log says exactly what is missing. Use the pull request template and it passes by itself.
 
 Maintainers are happy to fix small things before merging, but they do not build out, debug or finish a change from scratch, and a pull request whose checks fail is not reviewed until you fix it. AI-assisted contributions are welcome when you have run, understood and tested every line yourself: you are responsible for the whole change, and a PR is not a request for someone else to finish it.
 
@@ -81,13 +88,14 @@ What every PR needs:
 
 1. **Why and what, in the PR itself.** The root cause or user problem, and the behavior change, in a few sentences each. No separate issue is needed; discussion happens on the PR. When it closes an issue, write `Fixes #123` so the issue closes on merge. For anything beyond a small fix, open a draft PR early and agree on the behavior there before building it out.
 2. **A test that fails without the change.** Name it in the PR. The "Fail-first test" check proves it: it runs your changed tests against `main`'s code, and at least one must fail there. Only when a test is truly impossible, write `No test: <reason>`; when your tests only follow a refactor, write `Fail-first: n/a <reason>`.
-3. **Screenshots for interface changes.** Before and after, with placeholder data. Run `npm run verify:ui`. When renderer code changes but nothing on screen does, write `No visual change: <reason>` instead.
-4. **One topic, small.** At most 600 changed lines outside tests and translations. Split larger work, or state `Large change: <reason>` and expect a slower review.
-5. **Clean contents.** Nothing unrelated: no worklogs, notes, logs, formatting-only edits or generated output. Rebase on `main` when it conflicts.
-6. **Green checks.** `npm run verify` passes on your machine. Say which OS you ran it on. Packaging/runtime changes also need a packaged-runtime smoke check.
-7. **Docs with contracts.** A change to the preload API, IPC handlers or `src/shared` types updates the matching part of [`AGENTS.md`](AGENTS.md) in the same PR, or states `No contract change: <reason>`. The same applies to new recorded fields, bridge routes and extension messages.
-8. **Maintainer edits allowed.** Keep "Allow edits by maintainers" on, so a maintainer can make a small fix before merging instead of another review round. Your authorship stays. It is not a way to leave work unfinished.
-9. **No stacks out of order.** A PR that builds on another one says `Depends on #N` and stays a draft until #N is merged; then rebase it on `main`.
+3. **Live proof for behavior changes.** When the app or the extension behaves differently, show it working in the real app under `## Live proof`: a screenshot, a short recording, or an excerpt of the app log in a code block. Otherwise write `No behavior change: <reason>`. (Required for PRs opened from October 15, 2026 on.)
+4. **Screenshots for interface changes.** Before and after, with placeholder data. Run `npm run verify:ui`. When renderer code changes but nothing on screen does, write `No visual change: <reason>` instead.
+5. **One topic, small.** At most 600 changed lines outside tests and translations. Split larger work, or state `Large change: <reason>` and expect a slower review.
+6. **Clean contents.** Nothing unrelated: no worklogs, notes, logs, formatting-only edits or generated output. Rebase on `main` when it conflicts.
+7. **Green checks.** `npm run verify` passes on your machine. Say which OS you ran it on. Packaging/runtime changes also need a packaged-runtime smoke check.
+8. **Docs with contracts.** A change to the preload API, IPC handlers or `src/shared` types updates the matching part of [`AGENTS.md`](AGENTS.md) in the same PR, or states `No contract change: <reason>`. The same applies to new recorded fields, bridge routes and extension messages.
+9. **Maintainer edits allowed.** Keep "Allow edits by maintainers" on, so a maintainer can make a small fix before merging instead of another review round. Your authorship stays. It is not a way to leave work unfinished.
+10. **No stacks out of order.** A PR that builds on another one says `Depends on #N` and stays a draft until #N is merged; then rebase it on `main`.
 
 What reviews look for, beyond the checks:
 

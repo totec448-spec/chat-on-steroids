@@ -3,6 +3,8 @@ import { t } from './i18n.js';
 /** Localize the updater's authored reasons; unknown external diagnostics remain verbatim. */
 export function updateErrorText(source: string): string {
   switch (source) {
+    case 'GitHub could not be reached':
+      return t('GitHub could not be reached. Check your connection');
     case 'There is no downloaded update to install yet':
       return t('The downloaded update could not be confirmed for installation.');
     case 'Could not read plugin-refresh state':

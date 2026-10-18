@@ -9,6 +9,15 @@ export function mainText(source: MainText): string {
   return translations.get(source) ?? source;
 }
 
+/**
+ * A file dialog's purpose in the interface language, where each platform shows it: Windows and
+ * Linux show the title, while macOS open and save panels show only `message`.
+ */
+export function dialogLabel(source: MainText): { title: string; message: string } {
+  const text = mainText(source);
+  return { title: text, message: text };
+}
+
 /** Repaints surfaces that hold a text, such as the tray menu, after the language changed. */
 export function onMainTextsChange(listener: () => void): () => void {
   listeners.add(listener);

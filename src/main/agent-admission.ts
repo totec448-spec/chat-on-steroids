@@ -104,8 +104,14 @@ export async function spawnAgentWorkers(
       const source = await workspace();
       // Unfiled chats without any selected/learned folder can still delegate ordinary
       // work. Once a source exists, a Git checkout must pass strict isolation checks.
+      // A server folder (#1469) has no checkout on this computer to branch from; its path may even
+      // name an unrelated local folder, so it is never inspected here.
+      const onServer = !!source && getConfig().roots.some(root => root.remote &&
+        (source.virtual === `/${root.name}` || source.virtual.startsWith(`/${root.name}/`)));
       if (!source) {
         isolationNotes.push('No workspace is selected; workers were spawned without isolated Git worktrees.');
+      } else if (onServer) {
+        isolationNotes.push('Workers in a project on a server share its folder; separate worktrees are only made for projects on this computer.');
       } else if (isGitRepository(source.real)) {
         if (!canIsolate()) {
           throw new Error('WORKTREE_PERMISSION_REQUIRED: worker isolation requires Command, Create and Edit, with Read-only disabled.');

@@ -107,6 +107,41 @@
     }
   }
 
+  /** The message for `key` in the current catalog, or Chrome's own, or null when neither has it. */
+  function lookup(key, substitutions) {
+    const entry = catalog && Object.prototype.hasOwnProperty.call(catalog, key) ? catalog[key] : null;
+    if (entry && typeof entry.message === 'string' && entry.message) {
+      try { return formatEntry(entry, normalizeSubstitutions(substitutions)); } catch { /* Try Chrome's catalog. */ }
+    }
+    if (catalog) return null;
+    try {
+      const values = normalizeSubstitutions(substitutions);
+      const translated = chrome?.i18n?.getMessage?.(key, values.length === 0 ? undefined : values.length === 1 ? values[0] : values);
+      return typeof translated === 'string' && translated.length > 0 ? translated : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * A count in the language's own plural form: "1 tool call", "2 tool calls"; Russian
+   * "1 вызов", "2 вызова", "5 вызовов". `key` holds the plural ("other") text and
+   * `<key>__one`, `__few`, `__many` the forms the language has besides it, as Intl.PluralRules
+   * names them. `count` picks the form and is `$1` unless `substitutions` says otherwise.
+   */
+  function tn(key, count, fallbackOne, fallbackOther, substitutions = [count]) {
+    let form = 'other';
+    try {
+      const language = String(catalogLanguage || chrome?.i18n?.getUILanguage?.() || 'en').replace('_', '-');
+      if (Number.isFinite(count)) form = new Intl.PluralRules(language).select(count);
+    } catch {
+      // An unknown language tag reads as the plural, as English would for most counts.
+    }
+    const formed = form === 'other' ? null : lookup(`${key}__${form}`, substitutions);
+    if (formed) return formed;
+    return t(key, form === 'one' ? fallbackOne : fallbackOther, substitutions);
+  }
+
   function localizeAttribute(node, dataName, attribute) {
     const key = node.dataset?.[dataName];
     if (!key) return;
@@ -139,7 +174,7 @@
     return loadCatalog(language);
   }
 
-  const api = Object.freeze({ t, localizeDocument, ready, catalogFor, language: () => catalogLanguage });
+  const api = Object.freeze({ t, tn, localizeDocument, ready, catalogFor, language: () => catalogLanguage });
   scope.CLF_I18N = api;
   scope.CosI18n = api;
 })();

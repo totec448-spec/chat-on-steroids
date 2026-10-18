@@ -1,8 +1,8 @@
 /**
  * English source of the texts the main process shows outside the window: the tray menu and its
  * tooltip, the Session finish desktop notice with its buttons, tunnel-loss notices, and the
- * one-time notice that the CoS browser hid to the tray, update restart confirmation, and the
- * checkpoint Restore confirmation.
+ * one-time notice that the CoS browser hid to the tray, the window that says an update is installing,
+ * native file dialogs, worker checkout removal and checkpoint Restore confirmation.
  *
  * Same contract as STOP_NOTICE_TEXTS (#855): the main process has no interface catalogs, so the
  * renderer translates exactly these strings and publishes them; anything else is refused, and a
@@ -15,12 +15,14 @@ export const MAIN_TEXTS = [
   'Connect',
   'Disconnect',
   'Quit',
-  'Restart to install the update?',
-  'Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.',
-  'Keep working',
-  'Restart and install',
+  'Updating Chat On Steroids',
+  'Saving your work…',
+  'Waiting for your permission in Windows…',
+  'Starting the installer. Chat On Steroids opens again by itself.',
   'Connected',
   'No internet',
+  'OpenAI outage',
+  'Diagnostics report',
   'Not connected',
   'Core connection lost',
   'Desktop connection lost',
@@ -37,7 +39,36 @@ export const MAIN_TEXTS = [
   'Files return to their checkpoint version; files added since are removed. Current files are saved first, so you can undo this in Review.',
   'More files are not shown.',
   'Keep current files',
-  'Restore files'
+  'Restore files',
+  // Native file dialogs and the worker checkout removal confirmation.
+  'Export as Markdown',
+  'Import CoS Pet folder',
+  'Import SKILL.md',
+  'Markdown files',
+  'Text files',
+  'Approve a folder for ChatGPT',
+  'Import Skill folder',
+  'Markdown skills',
+  'Choose a project folder for ChatGPT',
+  'Select the tunnel executable',
+  'Programs',
+  'Attach files',
+  'Import MCP bundle',
+  'MCP bundles',
+  'Remove worker Git checkout?',
+  'Review the worker checkout before removing it',
+  'Checkout: {0}',
+  'Uncommitted or ignored paths that would be discarded ({0}):',
+  'No uncommitted or ignored paths were detected.',
+  'Additional paths are not shown; review the checkout before confirming.',
+  'Ignored files are included in the removal.',
+  'Commits made only on this branch will remain in Git.',
+  'This removes the entire checkout folder, including tracked working files, ignored files and uncommitted changes.',
+  'The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.',
+  'Keep checkout',
+  'Remove checkout; preserve Git branch',
+  // The turn-completion notice when an answer has no text to show.
+  'ChatGPT finished.'
 ] as const;
 
 export type MainText = typeof MAIN_TEXTS[number];

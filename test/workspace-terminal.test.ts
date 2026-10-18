@@ -1,14 +1,15 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
-  spawn: vi.fn(), workspace: vi.fn(), command: true,
+  spawn: vi.fn(), workspace: vi.fn(), project: vi.fn(), command: true,
   pty: { onData: vi.fn(), onExit: vi.fn(), pause: vi.fn(), resume: vi.fn(), write: vi.fn(), resize: vi.fn(), kill: vi.fn() }
 }));
 vi.mock('node-pty', () => ({ spawn: mocks.spawn }));
-vi.mock('../src/main/projects.js', () => ({ projectWorkspace: mocks.workspace }));
+vi.mock('../src/main/projects.js', () => ({ projectWorkspace: mocks.workspace, getProject: mocks.project }));
 vi.mock('../src/main/config.js', () => ({ getConfig: () => ({}), effectiveCapabilities: () => ({ command: mocks.command }) }));
 vi.mock('../src/main/codex/shell.js', () => ({ defaultUserShell: () => ({ shellPath: 'shell', shellType: 'bash' }) }));
 import { resetWorkspaceTerminalExitsForTests, WorkspaceTerminals, workspaceTerminalsExited } from '../src/main/workspace-terminal.js';
-beforeEach(() => { vi.clearAllMocks(); mocks.command = true; mocks.spawn.mockReturnValue(mocks.pty); mocks.workspace.mockResolvedValue({ real: '/project' }); });
+import { sshArgs, sshProgram, remoteLoginShell } from '../src/main/remote/ssh.js';
+beforeEach(() => { vi.clearAllMocks(); mocks.command = true; mocks.spawn.mockReturnValue(mocks.pty); mocks.workspace.mockResolvedValue({ real: '/project' }); mocks.project.mockResolvedValue({ id: 'project-a' }); });
 
 it('captures project cwd and cancels a pending spawn when its tab closes', async () => {
   let resolve!: (value: { real: string }) => void;
@@ -83,4 +84,26 @@ it('lets shutdown wait for a closed shell\'s exit, bounded, so ConPTY is not tor
   expect(Date.now() - started).toBeLessThan(1_000);
   (mocks.pty.onExit.mock.calls[1]![0] as (event: { exitCode: number }) => void)({ exitCode: 0 });
   await expect(workspaceTerminalsExited(10)).resolves.toBeUndefined();
+});
+
+// #1469: a project on a server opens its terminal there, through the person's own ssh, in the
+// project folder and the server account's login shell.
+it('opens a server project\'s terminal over ssh in its folder', async () => {
+  mocks.project.mockResolvedValue({ id: 'remote', remote: { host: 'me@devbox', port: 2222, path: '/srv/my app' } });
+  mocks.workspace.mockResolvedValue({ real: '/srv/my app' });
+  const service = new WorkspaceTerminals(vi.fn(), '/home');
+  await expect(service.create('one', 'remote', 80, 24)).resolves.toMatchObject({ cwd: '/srv/my app', shell: 'sh' });
+  const [program, args, options] = mocks.spawn.mock.calls[0]!;
+  expect(program).toBe(sshProgram());
+  expect(args).toEqual(sshArgs({ host: 'me@devbox', port: 2222, path: '/srv/my app' }, ['-tt'], [remoteLoginShell('/srv/my app')]));
+  // ssh itself runs from the app's own folder: the project folder exists only on the server.
+  expect(options).toMatchObject({ cwd: '/home', cols: 80, rows: 24 });
+  // Typing does not ask the server about the folder for every key; the project's address does.
+  mocks.workspace.mockClear();
+  await service.write('one', 'ls\r');
+  expect(mocks.workspace).not.toHaveBeenCalled();
+  expect(mocks.pty.write).toHaveBeenCalledWith('ls\r');
+  mocks.project.mockResolvedValue({ id: 'remote', remote: { host: 'me@other', path: '/srv/my app' } });
+  await expect(service.write('one', 'rm x\r')).rejects.toThrow('changed');
+  service.dispose();
 });

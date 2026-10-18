@@ -59,3 +59,11 @@ it('writes link entities as Markdown links and drops other provider markers', ()
 it('gives models the link as Markdown too', () => {
   expect(modelFacingText('See urlthe PRhttps://example.com/pr/1.')).toBe('See [the PR](https://example.com/pr/1).');
 });
+
+it('leaves no tag behind in plain text, however the markup nests it (code scanning)', () => {
+  // One pass of tag removal can join the pieces of a split tag into a new one.
+  for (const html of ['<scr<script>x</script>ipt>alert(1)</script>', '<<b>img src=x onerror=alert(1)>', '<style>a{}</sty<style></style>le><p>Hi</p>']) {
+    expect(plainTextOfHtml(html)).not.toMatch(/<\/?[a-z!][^>]*>/i);
+  }
+  expect(plainTextOfHtml('<p>a &lt;b&gt; tag</p>')).toBe('a <b> tag');
+});

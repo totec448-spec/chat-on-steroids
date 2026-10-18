@@ -37,6 +37,7 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-file-text': 'file-text',
   'i-folder': 'folder',
   'i-gear': 'gear-six',
+  'i-git-branch': 'git-branch',
   'i-git-diff': 'git-diff',
   'i-globe': 'globe-hemisphere-west',
   'i-home': 'house',
@@ -128,13 +129,39 @@ export function el(tag: string, className = '', text: string | (() => string) = 
 export const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
 let toastTimer: number | undefined;
+let toastWatch: ResizeObserver | undefined;
 
 export function toast(message: string): void {
   document.querySelector('.toast')?.remove();
+  toastWatch?.disconnect();
   const node = el('div', 'toast', message);
+  node.setAttribute('role', 'status');
   document.body.append(node);
+  placeToast(node);
+  // The composer and its dock can grow or the window resize while the toast shows: it follows.
+  toastWatch = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { if (node.isConnected) placeToast(node); }) : undefined;
+  for (const target of document.querySelectorAll('main, .card.is-session > .composer, .card.is-session > .composer-dock')) toastWatch?.observe(target);
   window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => node.remove(), 3200);
+  toastTimer = window.setTimeout(() => { node.remove(); toastWatch?.disconnect(); }, 3200);
+}
+
+/** Shown over the content it is about: centred on the open chat's composer and just above it and
+ *  its dock, so it never covers the draft or its controls; elsewhere centred on the main pane
+ *  instead of the window, which put it half over the sidebar. */
+function placeToast(node: HTMLElement): void {
+  const visible = (target: Element | null | undefined): DOMRect | null => {
+    const box = target?.getBoundingClientRect();
+    return box && box.width > 0 && box.height > 0 ? box : null;
+  };
+  const composer = visible(document.querySelector('.card.is-session > .composer'));
+  const area = composer ?? visible(document.querySelector('main'));
+  if (!area) return;
+  node.style.left = `${area.left + area.width / 2}px`;
+  node.style.maxWidth = `${Math.max(160, Math.min(560, area.width - 32))}px`;
+  if (!composer) return;
+  const dock = document.querySelector('.card.is-session > .composer-dock');
+  const dockBox = dock && getComputedStyle(dock).opacity !== '0' ? visible(dock) : null;
+  node.style.bottom = `${Math.max(12, window.innerHeight - Math.min(composer.top, dockBox?.top ?? Infinity) + 12)}px`;
 }
 
 /** Unwraps IPC replies, translating known app errors and preserving unknown error text. */

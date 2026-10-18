@@ -12,7 +12,7 @@ import type { UpdateFileChunk } from './hunk.js';
 import type { ApplyPatchFileUpdateMode } from './mode.js';
 import { seekSequence } from './seek-sequence.js';
 import { SourceFile, type Replacement } from './text-file.js';
-import { readFileText } from '../filesystem.js';
+import { localFs, type ProjectFs } from '../../remote/project-fs.js';
 
 /** `AppliedPatch`. */
 export interface AppliedPatch {
@@ -36,14 +36,15 @@ export async function deriveNewContentsFromChunks(
   path: string,
   chunks: readonly UpdateFileChunk[],
   updateFileMode: ApplyPatchFileUpdateMode,
-  baseContents?: string
+  baseContents?: string,
+  fs: ProjectFs = localFs
 ): Promise<AppliedPatch> {
   let originalContents: string;
   if (baseContents !== undefined) {
     originalContents = baseContents;
   } else {
     try {
-      originalContents = await readFileText(path);
+      originalContents = await fs.readFileText(path);
     } catch (error) {
       throw ApplyPatchError.io(`Failed to read file to update ${path}`, error);
     }

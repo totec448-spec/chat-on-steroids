@@ -14,6 +14,33 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.40': {
+    lead: () => t('Projects on a server, Skills and files anywhere in the composer, and a repair for Mac permissions.'),
+    highlights: [
+      { icon: 'i-terminal', title: () => t('Projects on a server'), text: () => t('Add a folder over SSH; ChatGPT reads, edits and runs commands there with your own SSH setup.') },
+      { icon: 'i-skill', title: () => t('/ and @ anywhere'), text: () => t('Pick a Skill with / or a project file with @ at any point in a message.') },
+      { icon: 'i-lock', title: () => t('Mac permissions repaired'), text: () => t('If an update left Desktop access broken on a Mac, one click repairs it.') },
+      { icon: 'i-plug', title: () => t('Prefer Plugins'), text: () => t('If you like, messages the app sends use your Plugins app instead of Core.') }
+    ]
+  },
+  '2.1.39': {
+    lead: () => t('Fresh turns that work while ChatGPT thinks, and a fuller diagnostics report.'),
+    highlights: [
+      { icon: 'i-retry', title: () => t('Fresh turns that hold'), text: () => t('Long work now also continues in a fresh turn while ChatGPT is thinking or running a tool.') },
+      { icon: 'i-browser', title: () => t('No chats in incognito'), text: () => t('Chats the app opens go to your regular browser window, never an incognito one.') },
+      { icon: 'i-check-circle', title: () => t('A fuller diagnostics report'), text: () => t('It also shows how the app is installed, the browser, crashes, frequent warnings and each chat\'s state, still without anything personal.') }
+    ]
+  },
+  '2.1.38': {
+    lead: () => t('Firefox, fresh turns for long work, and approvals you answer in the app.'),
+    highlights: [
+      { icon: 'i-globe', title: () => t('Firefox'), text: () => t('Choose Firefox as the ChatGPT browser. Its add-on is signed by Mozilla and updates itself.') },
+      { icon: 'i-retry', title: () => t('Fresh turns for long work'), text: () => t('Long work continues in a fresh turn every 30 minutes, so it no longer breaks after about 40 minutes.') },
+      { icon: 'i-check-circle', title: () => t('Approvals in the app'), text: () => t('Answer ChatGPT\'s tool approval cards with Deny or Allow once, right in the app.') },
+      { icon: 'i-arrow-down', title: () => t('Update all'), text: () => t('Activity shows the app, the extension and each plugin with its status, and one button updates them.') },
+      { icon: 'i-chart', title: () => t('Codex and Claude Code in Usage'), text: () => t('See Codex\'s limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.') }
+    ]
+  },
   '2.1.37': {
     lead: () => t('Find in chat, slash commands, and messages that go where you want.'),
     highlights: [

@@ -1,5 +1,6 @@
 // Real Chromium acceptance of the current renderer source through Vite. Backend responses are
 // synthetic, and the isolated window never opens a provider, tunnel or the user's app state.
+const { withoutScripts } = require('./ui-check-page.cjs');
 const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -103,8 +104,7 @@ app.whenReady().then(async () => {
     server = await createServer({ configFile: false, root: path.join(root, 'src/renderer'),
       server: { host: '127.0.0.1', port: 0 }, plugins: [{ name: 'pr-workspace-fixture', configureServer(vite) {
         vite.middlewares.use('/fixture.html', async (_request, response) => {
-          const source = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')
-            .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+          const source = withoutScripts(fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8'))
             .replace('</body>', '<script type="module">' + fixture + '</script></body>');
           response.setHeader('Content-Type', 'text/html');
           response.end(await vite.transformIndexHtml('/fixture.html', source));
@@ -212,12 +212,16 @@ app.whenReady().then(async () => {
         const refresh=bar.querySelector('.file-panel-refresh');
         const tabs=document.querySelector('#workDockRight .work-dock-tabs');
         const before=refresh.getBoundingClientRect().right;
+        // Labels that do not fit turn into icons, so every action stays on screen (2.1.41);
+        // sideways scrolling with a pinned refresh remains only as the last resort.
+        const shown=actions.classList.contains('is-compact')&&actions.scrollWidth<=actions.clientWidth+1
+          &&[...actions.querySelectorAll('.file-panel-action')].every(button=>button.getAttribute('aria-label')
+            &&button.getBoundingClientRect().right<=actions.getBoundingClientRect().right+1);
         actions.scrollLeft=actions.scrollWidth;
-        const scrolls=actions.scrollWidth>actions.clientWidth&&actions.scrollLeft>0;
         const fixed=Math.abs(refresh.getBoundingClientRect().right-before)<1
           &&Math.abs(refresh.getBoundingClientRect().right-(bar.getBoundingClientRect().right-10))<2;
         actions.scrollLeft=0;
-        return scrolls&&fixed&&getComputedStyle(actions).flexWrap==='nowrap'
+        return shown&&fixed&&getComputedStyle(actions).flexWrap==='nowrap'
           &&getComputedStyle(actions).scrollbarWidth==='none'
           &&getComputedStyle(tabs).overflowX==='auto'
           &&getComputedStyle(tabs).scrollbarWidth==='none';

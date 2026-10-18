@@ -2,7 +2,8 @@ import path from 'node:path';
 import { readFileStream } from '../codex/filesystem.js';
 import { effectiveCapabilities, getConfig } from '../config.js';
 import { currentCoreInstructions } from '../mcp/instructions.js';
-import { getSessionProject, projectWorkspace } from '../projects.js';
+import { getSessionProject, localProjectPath, projectWorkspace, serverRootOf } from '../projects.js';
+import { fsForRoot } from '../remote/project-fs.js';
 import { resolvePath } from '../sandbox.js';
 import { MAX_CHATGPT_MESSAGE_CHARS, prependUserPrompt } from '../../shared/user-prompt.js';
 import { selectedSkillInstructions, type SelectedSkill } from './skill-prompt.js';
@@ -30,15 +31,19 @@ async function projectInstructions(scope: PromptScope): Promise<ProjectInstructi
   if (!folder) return null;
   const directoryOnly = { directory: folder.virtual, text: '', truncated: false };
   if (!effectiveCapabilities(getConfig()).read) return directoryOnly;
-  const filename = path.join(folder.real, 'AGENTS.md');
+  // A folder on a server (#1469) keeps its AGENTS.md there: it is resolved by its virtual path,
+  // inside the same containment checks, and read over that server's SFTP session.
+  const server = serverRootOf(folder.virtual);
+  const filename = server ? `${folder.virtual.replace(/\/+$/, '')}/AGENTS.md` : path.join(folder.real, 'AGENTS.md');
+  const where = server ? { remote: true } : {};
   try {
-    const resolved = await resolvePath(getConfig().roots, filename, { allowMissing: true });
+    const resolved = await resolvePath(getConfig().roots, filename, { allowMissing: true, ...where });
     // At most four UTF-8 bytes per available UTF-16 code unit, plus one byte to detect overflow.
     // Stream a bounded prefix so even a gigabyte AGENTS.md never becomes a gigabyte allocation.
     const budget = MAX_CHATGPT_MESSAGE_CHARS * 4;
     const chunks: Buffer[] = [];
     let bytes = 0;
-    for await (const chunk of readFileStream(resolved.real)) {
+    for await (const chunk of server ? fsForRoot(server).readFileStream(resolved.real) : readFileStream(resolved.real)) {
       const kept = chunk.subarray(0, Math.max(0, budget + 1 - bytes));
       chunks.push(kept);
       bytes += kept.length;
@@ -50,7 +55,7 @@ async function projectInstructions(scope: PromptScope): Promise<ProjectInstructi
     if (text.includes('\0')) throw new Error('AGENTS.md must be a UTF-8 text file');
     // Permission/path changes during the asynchronous read cannot publish another folder's text.
     const current = scope.sessionId ? await getSessionProject(scope.sessionId) : await projectWorkspace(scope.projectId!);
-    const checked = await resolvePath(getConfig().roots, filename);
+    const checked = await resolvePath(getConfig().roots, filename, where);
     if (!current || current.real !== folder.real || checked.real !== resolved.real || !effectiveCapabilities(getConfig()).read)
       throw new Error('Project instructions changed location or permission while being read');
     return { directory: current.virtual, text: text.trim() ? text : '', truncated: bytes > budget };
@@ -119,7 +124,7 @@ export function fitSessionPrompt(text: string, core: string, agents: ProjectInst
  * follow-ups, helpers, handoff requests and resumed bootstraps never call this. */
 export async function prepareSessionPrompt(text: string, scope: PromptScope = {}, budget = limits, authored = text): Promise<string> {
   const folder = await promptFolder(scope);
-  const skillScope = { projectPath: folder?.real ?? null };
+  const skillScope = { projectPath: localProjectPath(folder) };
   // Automatic routing has already frozen its decision from the app's published Skill catalog at
   // admission, so those Skills come from that catalog: only the selected body is read below. Every
   // other Skill the chat can use is still listed, exactly as without routing.
@@ -135,7 +140,7 @@ export async function prepareSessionPrompt(text: string, scope: PromptScope = {}
 /** Explicit follow-up selection adds Skills only, never repeats opening setup. */
 export async function prepareSkillFollowup(text: string, authored: string, budget = limits, scope: PromptScope = {}): Promise<string> {
   const folder = await promptFolder(scope);
-  const skills = await selectedSkillInstructions(authored, { projectPath: folder?.real ?? null }, undefined, scope.autoSkills);
+  const skills = await selectedSkillInstructions(authored, { projectPath: localProjectPath(folder) }, undefined, scope.autoSkills);
   if ((await promptFolder(scope))?.real !== folder?.real) throw new Error('The selected project changed during Skill preparation');
   return skills.length ? fitSessionPrompt(text, '', null, budget, skills) : text;
 }

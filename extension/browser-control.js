@@ -118,6 +118,47 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
       throw cause;
     }
   }
+  /**
+   * Restores a tab Chrome discarded to save memory, before the debugger is attached (#1568).
+   *
+   * Chrome accepts a debugger on a discarded tab and then never answers Page.enable, so the
+   * attach timed out. Only an explicit attach reaches this, with write permission and a live
+   * permission check, and it reloads that same tab, as Chrome itself does when the person
+   * returns to it. A loaded tab is never reloaded. The wait is bounded by the command.
+   */
+  async function restoreDiscardedTab(state, command) {
+    const tab = await currentTab(state,command);
+    if (tab.status !== 'unloaded' && tab.discarded !== true) return;
+    if (!policy.write) error('BROWSER_TAB_UNLOADED: Chrome unloaded this tab to save memory, and loading it again needs browser write permission. The tab was left as it is.');
+    await authorize(command);
+    alive(state,command);
+    const { tabId } = state;
+    let finish, check;
+    const finished = new Promise((resolve,reject) => {
+      let done = false;
+      finish = cause => {
+        if (done) return; done = true; clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(changed); chrome.tabs.onRemoved.removeListener(removed);
+        cause ? reject(cause) : resolve();
+      };
+      check = () => getTab(tabId).then(next => {
+        if (next.status === 'complete' && next.discarded !== true && !(next.pendingUrl && next.pendingUrl !== next.url)) finish();
+      }).catch(finish);
+      const changed = changedId => { if (changedId === tabId) void check(); };
+      const removed = removedId => { if (removedId === tabId) finish(new Error('BROWSER_TAB_CLOSED: the tab was closed while Chrome loaded it again. Do not recreate it automatically.')); };
+      const timer = setTimeout(() => finish(new Error('BROWSER_TAB_UNLOADED: Chrome was asked to load this tab again but it did not finish loading in time. Inspect the same tab before trying again.')),
+        Math.max(1,Math.min(10_000,command.expiresAt - Date.now() - 1500)));
+      chrome.tabs.onUpdated.addListener(changed); chrome.tabs.onRemoved.addListener(removed);
+    });
+    try { await chrome.tabs.reload(tabId); }
+    catch (cause) {
+      finish(new Error('reload refused')); void finished.catch(() => undefined);
+      error(`BROWSER_TAB_UNLOADED: Chrome did not reload this tab (${cut(cause?.message || cause,250)}). It was not closed or replaced.`);
+    }
+    void check();
+    await finished;
+    alive(state,command);
+  }
   async function input(state, method, params, command) {
     await authorize(command);
     await currentTab(state,command);
@@ -219,6 +260,7 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
     try {
       await currentTab(state,command);
       if (!previous) {
+        await restoreDiscardedTab(state,command);
         await save(); // Crash before/after attach never grants an automatic reattach.
         await chrome.debugger.attach({ tabId },'1.3');
         acquired = true;

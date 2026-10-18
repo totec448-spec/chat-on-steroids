@@ -41,7 +41,7 @@ import type {
   ToolEditReview
 } from '../../shared/session.js';
 import type { WorkerAssignmentSummary } from '../../shared/session.js';
-import { continuationMarkerOf, DEFAULT_RECORDING_STORAGE_GIB, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, RECORDING_STORAGE_LIMITS_GIB, storedTextTokens, workSequence } from '../../shared/session.js';
+import { continuationMarkerOf, DEFAULT_RECORDING_STORAGE_GIB, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, RECORDING_STORAGE_LIMITS_GIB, storedTextTokens, workSequence, UNATTRIBUTED_SESSION_TITLE } from '../../shared/session.js';
 import { applyTurnIdentity, authoredTimeOf, chronological, injectedUserMessage, positionOf, projectTimeline, residenceOf,
   recordedRequestTurn, responseTurnId, type Chronological, type TimelineTurns } from '../../shared/chronology.js';
 import { automaticTitle, firstTitleMessage, legacyContextTitle, legacyLabelPending, projectPageTitle, providerTitleIgnored, refreshUserTitle, userTitle } from './title.js';
@@ -938,7 +938,6 @@ async function rebuildSummaryFromHistory(
         agents: [...new Set([...checkpoint.agents, ...rebuilt.agents])]
       }
     : rebuilt;
-  logWarn(`session ${id}: rebuilt metadata from durable event/message history`);
   await writeSummary(summary, historySeq);
   return summary;
 }
@@ -1004,6 +1003,15 @@ async function readDurableSnapshot(id: string): Promise<DurableSessionSnapshot |
     if (!checkpoint && historySeq === 0) return null;
 
     const summary = await rebuildSummaryFromHistory(id, messages, checkpoint?.summary ?? null, historySeq, checkpoint?.historySeq === historySeq, !!checkpoint && !checkpoint.tokenEstimateCurrent);
+    // New derived fields and estimate versions deliberately replay old history after an
+    // update. That is a migration, not evidence of damaged history. A known stale watermark
+    // or missing checkpoint still needs a recovery warning, even during an upgrade.
+    // Report success only after the rebuilt checkpoint has actually reached disk.
+    if (checkpoint && (checkpoint.historySeq === null || checkpoint.historySeq === historySeq)) {
+      logInfo(`session ${id}: upgraded metadata from durable history (normal version migration)`);
+    } else {
+      logWarn(`session ${id}: rebuilt metadata from durable event/message history (${checkpoint ? 'history checkpoint out of date' : 'metadata checkpoint unavailable'})`);
+    }
     return { summary, messages, historySeq, reconciled: true };
   })();
   reconciling.set(id, work);
@@ -1391,6 +1399,9 @@ export function upsertMessageEvent(
                 authoredText: event.authoredText ?? previous.authoredText,
                 wireTokenEstimate: event.wireTokenEstimate ?? previous.wireTokenEstimate,
                 reaction: event.reaction === undefined ? previous.reaction : event.reaction,
+                // Where it sits in ChatGPT's tree, and which version it replaced, do not change once known.
+                parentId: previous.parentId ?? event.parentId,
+                replaces: previous.replaces ?? event.replaces,
                 // App-owned originals/previews retain their outbox identity when the
                 // provider later observes different native attachment ids for that send.
                 attachments: previous.inputId ? previous.attachments ?? event.attachments : event.attachments ?? previous.attachments,
@@ -1445,7 +1456,7 @@ export function upsertMessageEvent(
             previous.resolvedModel === nextEvent.resolvedModel &&
             JSON.stringify(previous.references) === JSON.stringify(nextEvent.references))) &&
         (nextEvent.kind !== 'user_message' || previous.kind !== 'user_message' ||
-          (nextEvent.reaction === previous.reaction && nextEvent.inputId === previous.inputId && nextEvent.authoredText === previous.authoredText && nextEvent.wireTokenEstimate === previous.wireTokenEstimate && nextEvent.inputDelivery === previous.inputDelivery && JSON.stringify(nextEvent.assets) === JSON.stringify(previous.assets) && JSON.stringify(nextEvent.retiredImageAssetIds) === JSON.stringify(previous.retiredImageAssetIds) && JSON.stringify(nextEvent.attachments) === JSON.stringify(previous.attachments))) &&
+          (nextEvent.reaction === previous.reaction && nextEvent.parentId === previous.parentId && nextEvent.replaces === previous.replaces && nextEvent.inputId === previous.inputId && nextEvent.authoredText === previous.authoredText && nextEvent.wireTokenEstimate === previous.wireTokenEstimate && nextEvent.inputDelivery === previous.inputDelivery && JSON.stringify(nextEvent.assets) === JSON.stringify(previous.assets) && JSON.stringify(nextEvent.retiredImageAssetIds) === JSON.stringify(previous.retiredImageAssetIds) && JSON.stringify(nextEvent.attachments) === JSON.stringify(previous.attachments))) &&
         (previous.turnId ?? undefined) === settledTurnId &&
         (nextEvent.agent === undefined || previous.agent === nextEvent.agent) &&
         (!preferTime || previous.time === nextEvent.time)
@@ -1935,7 +1946,11 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
   // ChatGPT's redraw, when the turn has already ended. A genuinely new question has a new id.
   const ownQuestion = final.turnId ? entry.summary.timelineTurns?.[final.turnId]?.questionId : undefined;
   const nativeFinal = final.kind === 'turn_end' || (final.final === true && !!final.providerMessageId);
-  if (question && positionOf(question) >= positionOf(final) && !correction(question)) return null;
+  // Nor is the turn's own question recorded after its answer: ChatGPT stamps a fast answer with its
+  // server time, the page stamps the question with the local clock, and a clock running ahead put
+  // "worker ready" before the question it answered (#1086, Windows VM, 2.1.41).
+  if (question && positionOf(question) >= positionOf(final) && !correction(question) &&
+      !(ownQuestion && question.kind === 'user_message' && question.messageId === ownQuestion)) return null;
   // With no generation identity, require an actual preceding authored boundary.
   if (!final.turnId && (!question || question.time > final.time)) return null;
   if (entry.summary.activeTurnId && !sameTurn(entry.summary.activeTurnId, final.turnId)) return null;
@@ -2383,7 +2398,7 @@ export async function rewriteUnattributedToolCalls(
   assertSessionId(sessionId);
   const entry = await ensureOpen(sessionId);
   const rewrite = entry.queue.then(async () => {
-    if (entry.summary.conversationId !== null || entry.summary.title !== 'Unattributed activity') {
+    if (entry.summary.conversationId !== null || entry.summary.title !== UNATTRIBUTED_SESSION_TITLE) {
       throw new Error(`Session ${sessionId} is not an Unattributed activity bucket`);
     }
 
@@ -3368,7 +3383,7 @@ export async function renameSession(id: string, title: string, source: SessionSu
     }
     if (source !== 'manual') {
       if (conversationId && entry.summary.conversationId !== conversationId) return;
-      if (!automaticTitle(entry.summary, firstTitleMessage(entry.messages.values()))) return;
+      if (!automaticTitle(entry.summary, firstTitleMessage(entry.messages.values(), entry.summary.origin?.branchOf))) return;
       if (source === 'fallback' && entry.summary.titleSource === 'provider') return;
       if (source === 'provider' && (providerTitleIgnored(entry.summary) || projectPageTitle(title))) return;
     }
@@ -3388,7 +3403,7 @@ export async function clearSessionName(id: string): Promise<void> {
   await enqueueSessionOperation(entry, 'rename', async () => {
     if (entry.summary.titleSource !== 'manual') return;
     const auto = entry.summary.autoTitle;
-    const first = firstTitleMessage(entry.messages.values());
+    const first = firstTitleMessage(entry.messages.values(), entry.summary.origin?.branchOf);
     entry.summary.title = auto?.title || (first ? userTitle(first.message.text, first.authoredText) : '') || 'ChatGPT session';
     entry.summary.titleSource = auto?.source ?? 'fallback';
     delete entry.summary.autoTitle;
