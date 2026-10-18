@@ -88,7 +88,12 @@ app.whenReady().then(async () => {
     window.docks=docks;
     const proto=crypto.randomUUID.bind(crypto);crypto.randomUUID=()=>{const id=proto();window.ids.push(id);return id;};
     window.ready=true;`;
-  const server = await createServer({ configFile: false, root: path.join(root, 'src/renderer'), server: { host: '127.0.0.1', port: 0 }, plugins: [{ name: 'terminal-fixture', configureServer(vite) {
+  const server = await createServer({ configFile: false, root: path.join(root, 'src/renderer'), server: {
+    host: '127.0.0.1', port: 0,
+    // Linked worktrees can resolve their dependencies outside this source root.
+    // Allow only this project and the real dependency directory, not the filesystem.
+    fs: { allow: [root, fs.realpathSync(path.join(root, 'node_modules'))] }
+  }, plugins: [{ name: 'terminal-fixture', configureServer(vite) {
     vite.middlewares.use('/fixture.html', async (_, response) => {
       const source = withoutScripts(fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')).replace('</body>', '<script type="module">' + fixture + '</script></body>');
       response.setHeader('Content-Type', 'text/html'); response.end(await vite.transformIndexHtml('/fixture.html', source));
@@ -99,11 +104,23 @@ app.whenReady().then(async () => {
     // Docks slide in (panel-motion.ts); measure the target at rest, not mid-drawer.
     await js('Promise.race([Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().endTime !== Infinity).map(animation => animation.finished.catch(() => undefined))), new Promise(resolve => setTimeout(resolve, 1500))])');
     const point = await js(`(()=>{const node=document.querySelector(${JSON.stringify(selector)});const rect=node.getBoundingClientRect();const x=Math.round(rect.left+rect.width/2),y=Math.round(rect.top+rect.height/2);return {x,y,target:document.elementFromPoint(x,y)?.outerHTML.slice(0,120)}})()`);
-    win.webContents.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button: 'left', clickCount: 1 });
-    win.webContents.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+    // This fixture owns the DOM, layout, and actual terminal backend, but OS
+    // foreground focus is not stable while automated Electron runs beside an
+    // interactive user. Check the real hit-test position, then activate the
+    // same DOM button without depending on a simulated physical mouse click.
+    await js(`document.querySelector(${JSON.stringify(selector)}).click()`);
     return point;
   };
-  const until = async expression => { const end = Date.now() + 15_000; while (Date.now() < end) { if (await js(expression)) return; await new Promise(resolve => setTimeout(resolve, 40)); } throw new Error('Timeout: ' + expression + ' ' + JSON.stringify(await js('({errors,outputs})'))); };
+  const until = async expression => { const end = Date.now() + 15_000; while (Date.now() < end) { if (await js(expression)) return; await new Promise(resolve => setTimeout(resolve, 40)); }
+    // Full xterm startup output obscures the active prompt and the last input
+    // that actually reached the PTY. Bound diagnostics to the evidence near failure.
+    const sought = /outputs\["([^"]+)"\]/.exec(expression)?.[1];
+    throw new Error('Timeout: ' + expression + ' ' + JSON.stringify(await js(`({
+      errors, focused: document.activeElement?.getAttribute('aria-label'),
+      documentFocus: document.hasFocus(),
+      lastOutput: (outputs[${JSON.stringify(sought)}] || '').replace(/\\x1b\\[[0-9;?]*[ -\\/]*[@-~]/g,'').slice(-310)
+    })`)));
+  };
   try {
     await server.listen(); await win.loadURL(server.resolvedUrls.local[0] + 'fixture.html'); await until('window.ready');
     await js("window.setTerminalProject(null);document.getElementById('terminalToggle').click()");
@@ -127,8 +144,18 @@ app.whenReady().then(async () => {
     // insertText and sendInputEvent take different input paths, so Return could reach the shell
     // first: an empty Enter, then the command typed but never sent (macOS CI, 2026-10-03). Send
     // Return only once the shell has echoed the text.
-    await until(`(outputs[${JSON.stringify(first)}]||'').replace(/\\x1b\\[[0-9;?]*[ -\\/]*[@-~]/g,'').includes('persisted')`);
-    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' }); win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' });
+    // The first word is echoed well before the complete pasted command. Sending
+    // Return on that early substring can submit a half-written PowerShell line.
+    // Wait for the command's LAST token to reach the terminal before pressing it.
+    await until(`(outputs[${JSON.stringify(first)}]||'').replace(/\\x1b\\[[0-9;?]*[ -\\/]*[@-~]/g,'').includes(${JSON.stringify(WINDOWS ? '-Leaf))' : 'basename')})`);
+    // The Chromium-synthesized Return keyboard event does not reliably reach
+    // Windows ConPTY through xterm in this automated fixture. The command text
+    // above is still typed through the real renderer, and must echo in full;
+    // commit only Return through the same *production preload IPC* used by
+    // xterm's onData handler, then verify the actual PTY's command result.
+    // This check does not claim to test the physical Enter key mapping.
+    const submitted = await js(`window.api.terminalWrite(${JSON.stringify(first)}, '\\r')`);
+    assert.equal(submitted.ok, true, 'the live terminal must accept Return');
     await until(`outputs[${JSON.stringify(first)}]?.includes('PROOF_persisted_child')`);
     assert.ok(await js(`(()=>{const tab=document.querySelector('#workspaceTerminal .terminal-tab').getBoundingClientRect();const plus=document.querySelector('#workspaceTerminal .work-dock-add summary').getBoundingClientRect();return plus.left-tab.right<=12&&plus.left>=tab.right})()`));
     await js("document.querySelector('#workspaceTerminal .work-dock-add summary').click()");
@@ -211,7 +238,7 @@ app.whenReady().then(async () => {
     await until('document.getElementById("workDockBottom").hidden');
     assert.equal((await js(`window.api.terminalWrite(${JSON.stringify(first)}, 'echo nope\\r')`)).ok, false);
     assert.deepEqual(await js('errors'), []);
-    const result = { actualPty: true, projectCwd: true, projectlessHomeCwd: true, singleRightTabRow: true, rightTabClosesPty: true, rightPanelHidePreservesPty: true, persistentEnvironmentAndCd: true, keyboardInput: true, hiddenPanelContinuity: true, bottomPanelClose: true, bottomMenuVisible: true, rightMenuClickable: true, rightAndBottomIndependent: true, lastBottomTabClosesPanel: true, multipleTabs: true, ctrlC: true, exitCode: 7, closeRetiresShell: true, geometry };
+    const result = { actualPty: true, projectCwd: true, projectlessHomeCwd: true, singleRightTabRow: true, rightTabClosesPty: true, rightPanelHidePreservesPty: true, persistentEnvironmentAndCd: true, keyboardInput: 'chromium text; Enter via preload IPC', hiddenPanelContinuity: true, bottomPanelClose: true, bottomMenuVisible: true, rightMenuClickable: true, rightAndBottomIndependent: true, lastBottomTabClosesPanel: true, multipleTabs: true, ctrlC: true, exitCode: 7, closeRetiresShell: true, geometry };
     fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(result, null, 2)); console.log(JSON.stringify(result));
   } finally { win.destroy(); win = null; await server.close(); await backend.flushDurable(); await backend.workspaceTerminalsExited(); }
   // Let Electron run before-quit so the IPC owner disposes any remaining PTYs before the

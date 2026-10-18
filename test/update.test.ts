@@ -814,6 +814,10 @@ describe('a check or download that goes wrong on a bad connection', () => {
     expect(online.asked).toEqual([]);
     await vi.advanceTimersByTimeAsync(2_000);
     await vi.waitFor(() => expect(updateStatus().checkedAt).not.toBeNull());
+    // The timestamp is recorded before the staged download finishes. Fully join
+    // the pass before letting the next test reset shared updater state/fetch mocks.
+    await checkForUpdates();
+    expect(updateStatus().stage).toBe('ready');
     expect(updateStatus().error).toBeNull();
     const calls = online.asked.length;
     await vi.advanceTimersByTimeAsync(60 * 60_000);
@@ -824,17 +828,36 @@ describe('a check or download that goes wrong on a bad connection', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     const body = 'installer bytes';
     // One chunk, then silence: the connection is still open but nothing comes.
-    const stalled = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode(body.slice(0, 5))); } });
     const { fetch } = github({ body });
     const answer = fetch.getMockImplementation()!;
-    fetch.mockImplementation(async (input: string | URL) => String(input).endsWith(WINDOWS_ASSET) ? new Response(stalled, { status: 200 }) : answer(input));
+    let assetRequests = 0;
+    let stalled: ReadableStream<Uint8Array> | null = null;
+    fetch.mockImplementation(async (input: string | URL) => {
+      if (!String(input).endsWith(WINDOWS_ASSET)) return answer(input);
+      assetRequests++;
+      stalled = new ReadableStream<Uint8Array>({
+        start(controller) { controller.enqueue(new TextEncoder().encode(body.slice(0, 5))); }
+      });
+      return new Response(stalled, { status: 200 });
+    });
     let done = false;
     const pass = asPlatform('win32', undefined, () => checkForUpdates()).then(() => { done = true; });
-    await vi.waitFor(() => expect(updateStatus().stage).toBe('downloading'));
+    // vi.waitFor advances the mocked timer clock, potentially expiring the 60s
+    // inactivity timeout while the real filesystem is still preparing the download.
+    // Wait for the response stream to be consumed (not merely stage 'downloading')
+    // before advancing the fake clock, so the 60s guard has actually been armed.
+    const until = Date.now() + 5_000;
+    while (!(stalled as ReadableStream<Uint8Array> | null)?.locked) {
+      if (updateStatus().stage === 'failed') throw new Error(`Download failed before reading: ${updateStatus().error}`);
+      if (Date.now() > until) throw new Error('Update did not start consuming the response');
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
+    expect(updateStatus().stage).toBe('downloading');
     await vi.advanceTimersByTimeAsync(59_000);
     expect(done).toBe(false);
     await vi.advanceTimersByTimeAsync(2_000);
     await pass;
+    expect(assetRequests).toBe(1);
     expect(updateStatus()).toMatchObject({ stage: 'failed', latest: NEXT });
     expect(updateStatus().error).toContain('no data for 60 seconds');
   });

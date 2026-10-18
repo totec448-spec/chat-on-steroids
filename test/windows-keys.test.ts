@@ -11,7 +11,9 @@ describe.runIf(process.platform === 'win32')('Windows native key resolution', ()
     const directory = await mkdtemp(path.join(tmpdir(), 'cos-key-resolution-'));
     try {
       const file = path.join(directory, 'keys.ps1');
-      await writeFile(file, `$ErrorActionPreference='Stop'
+      // Windows PowerShell 5.1 treats a BOM-less .ps1 as the legacy ANSI code page.
+      // The unsupported Unicode key below must survive that decoding unchanged.
+      await writeFile(file, '\uFEFF' + `$ErrorActionPreference='Stop'
 Add-Type -TypeDefinition @'
 using System;
 ${WINDOWS_KEYS_SOURCE}

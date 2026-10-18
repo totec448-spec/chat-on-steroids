@@ -3,6 +3,7 @@
 // stands in for chatgpt.com/auth.openai.com behind a test proxy; Google is never contacted, no
 // browser is launched, and no personal profile, installed app, bridge or account is touched.
 // Needs `npm run build` first (it loads out/preload and out/renderer) and OpenSSL for the cert.
+// Git for Windows ships OpenSSL outside PATH on common Windows development machines.
 if (!process.versions.electron) {
   const { spawnSync } = require('node:child_process');
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
@@ -47,10 +48,22 @@ async function waitFor(what, check, timeout = 15_000) {
 /** A self-signed certificate for the synthetic sites; the fixture session trusts only it. */
 function certificate() {
   const key = path.join(fixture, 'site.key'), cert = path.join(fixture, 'site.crt');
-  const made = spawnSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=cos-sign-in-fixture',
-    '-addext', `subjectAltName=${SITES.map(site => `DNS:${site}`).join(',')}`, '-keyout', key, '-out', cert], { encoding: 'utf8' });
-  if (made.status !== 0) throw new Error(`openssl could not make the fixture certificate: ${made.stderr}`);
-  return { key: fs.readFileSync(key), cert: fs.readFileSync(cert) };
+  const args = ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1', '-subj', '/CN=cos-sign-in-fixture',
+    '-addext', `subjectAltName=${SITES.map(site => `DNS:${site}`).join(',')}`, '-keyout', key, '-out', cert];
+  const candidates = ['openssl'];
+  if (process.platform === 'win32') {
+    for (const dir of [process.env.ProgramFiles, process.env['ProgramFiles(x86)']]) {
+      if (dir) candidates.push(path.join(dir, 'Git', 'usr', 'bin', 'openssl.exe'));
+    }
+  }
+  let made;
+  for (const executable of candidates) {
+    made = spawnSync(executable, args, { encoding: 'utf8', windowsHide: true });
+    if (made.error?.code === 'ENOENT') continue;
+    if (made.status !== 0) throw new Error(`openssl (${executable}) could not make the fixture certificate: ${made.stderr || made.error?.message || made.status}`);
+    return { key: fs.readFileSync(key), cert: fs.readFileSync(cert) };
+  }
+  throw new Error('OpenSSL is required for the sign-in TLS fixture (including Git for Windows OpenSSL on Windows)');
 }
 
 /** chatgpt.com and auth.openai.com as far as sign-in goes. Google must never be requested. */
