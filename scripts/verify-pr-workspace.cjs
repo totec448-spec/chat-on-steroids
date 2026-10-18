@@ -166,12 +166,14 @@ app.whenReady().then(async () => {
     await js(`document.querySelector('.review-panel .file-branch-trigger').click();document.querySelector('.file-branch-option').click()`);
     await until(`document.querySelectorAll('.review-panel .file-change-row').length===2`);
     await js(`document.querySelector('.review-panel .file-branch-trigger').click()`);
-    await until('document.querySelector(".file-branch-menu .file-branch-section")?.textContent==="Checkpoints"');
-    assert.deepEqual(await js(`[...document.querySelectorAll('.file-branch-option')].slice(-2).map(option=>option.textContent.split(' · ')[0])`),
-      ['Before restore', 'Before turn']);
+    // The shared searchable picker shows checkpoints as options with a translated
+    // hint, rather than the legacy .file-branch-section heading.
+    await until(`(()=>{const hints=[...document.querySelectorAll('.file-branch-menu .file-branch-option .file-branch-hint')];return hints.length===2&&hints.every(hint=>hint.textContent===window.fixture.t('Checkpoints'))})()`);
+    assert.deepEqual(await js(`[...document.querySelectorAll('.file-branch-menu .file-branch-option')].slice(-2).map(option=>option.querySelector('span')?.textContent.split(' · ')[0])`),
+      await js(`[window.fixture.t('Before restore'),window.fixture.t('Before turn')]`));
     await screenshot('review-checkpoint-menu');
     await js(`[...document.querySelectorAll('.file-branch-option')].at(-1).click()`);
-    await until(`document.querySelector('.review-panel .file-branch-trigger')?.textContent.startsWith('Before turn') && document.querySelectorAll('.review-panel .file-change-row').length===2 && !!document.querySelector('.review-panel .file-checkpoint-bar button')`);
+    await until(`document.querySelector('.review-panel .file-branch-trigger')?.textContent.startsWith(window.fixture.t('Before turn')) && document.querySelectorAll('.review-panel .file-change-row').length===2 && !!document.querySelector('.review-panel .file-checkpoint-bar button')`);
     await screenshot('review-checkpoint-compare');
     await js(`document.querySelector('.review-panel .file-branch-trigger').click();document.querySelector('.file-branch-option').click()`);
     await until(`document.querySelectorAll('.review-panel .file-change-row').length===2 && !document.querySelector('.review-panel .file-checkpoint-bar')`);
