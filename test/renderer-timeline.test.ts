@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
+import { Lexer } from 'marked';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_GOAL_SYSTEM_PROMPT } from '../src/shared/goal.js';
 import { prependUserPrompt } from '../src/shared/user-prompt.js';
@@ -2798,6 +2799,262 @@ it('keeps a streaming message anchor and its following tool group across canonic
   expect(group.open).toBe(true);
 });
 
+describe('an answer while ChatGPT writes it', () => {
+  const answer = (seq: number, body: string, more: Partial<Extract<SessionEvent, { kind: 'assistant_message' }>> = {}): SessionEvent => ({
+    seq, origin: 1, time: T0, source: 'extension', kind: 'assistant_message', messageId: 'live-answer', message: text(body),
+    state: 'streaming', final: false, ...more });
+  const blocks = (w: { document: Document }) => [...w.document.querySelectorAll<HTMLElement>('.ev-assistant_message .msg.rich > *')];
+  const fading = (w: { document: Document }) => blocks(w).filter(block => block.classList.contains('is-entering')).map(block => block.textContent?.trim());
+
+  it('keeps finished paragraphs of a streaming answer as the same nodes while it grows', async () => {
+    const { w, append } = await boot([answer(1, 'Alpha one.')]);
+    const row = w.document.querySelector('.ev-assistant_message');
+    const [first] = blocks(w);
+    const selection = w.getSelection()!;
+    selection.setBaseAndExtent(first!.firstChild!, 0, first!.firstChild!, 5);
+    await append([answer(2, 'Alpha one.\n\nBeta two.')]);
+    expect(w.document.querySelector('.ev-assistant_message')).toBe(row);
+    expect(blocks(w)[0]).toBe(first);
+    expect(blocks(w).map(block => block.textContent)).toEqual(['Alpha one.', 'Beta two.']);
+    expect(selection.anchorNode).toBe(first!.firstChild);
+    expect(selection.toString()).toBe('Alpha');
+  });
+
+  it('fades in only the blocks a revision adds, not the one that grew', async () => {
+    const { w, append } = await boot([answer(1, 'Alpha.\n\nBeta')]);
+    await append([answer(2, 'Alpha.\n\nBeta grew.\n\nGamma.\n\n- Delta')]);
+    expect(fading(w)).toEqual(['Gamma.', 'Delta']);
+  });
+
+  it('keeps a block that faded in as the same node on the next revision', async () => {
+    const { w, append } = await boot([answer(1, 'Alpha.')]);
+    await append([answer(2, 'Alpha.\n\nBeta.')]);
+    const beta = blocks(w)[1]!;
+    expect(beta.classList.contains('is-entering')).toBe(true);
+    // The ended fade leaves the block's class attribute behind, empty.
+    beta.dispatchEvent(new w.Event('animationend'));
+    await append([answer(3, 'Alpha.\n\nBeta.\n\nGamma.')]);
+    expect(blocks(w)[1]).toBe(beta);
+    expect(fading(w)).toEqual(['Gamma.']);
+  });
+
+  it('keeps the blocks a reader used: an opened source card and a copied code block', async () => {
+    const body = 'Alpha. :chatgpt-content-reference{index="1"}\n\n```\nnpm test\n```';
+    const references = [{ index: 1, sources: [{ title: 'A report', url: 'https://news.example.com/report', source: 'Example News' }] }];
+    const { w, append } = await boot([answer(1, body, { references })]);
+    (w as any).api.writeClipboard = vi.fn(async () => ({ ok: true, data: true }));
+    const [alpha, code] = blocks(w);
+    alpha!.querySelector('.citation')!.dispatchEvent(new w.FocusEvent('focusin'));
+    expect(alpha!.querySelector<HTMLElement>('.citation-card')!.hidden).toBe(false);
+    code!.querySelector<HTMLButtonElement>('.tool-copy')!.click();
+    await vi.waitFor(() => expect(code!.querySelector('.tool-copy')!.textContent).toBe('Copied'));
+    await append([answer(2, `${body}\n\nBeta.`, { references })]);
+    expect(blocks(w)[0]).toBe(alpha);
+    expect(blocks(w)[1]).toBe(code);
+    expect(fading(w)).toEqual(['Beta.']);
+  });
+
+  it('opens a chat with a streaming answer without fading its blocks', async () => {
+    const { w } = await boot([answer(1, 'Alpha.\n\nBeta.')]);
+    expect(blocks(w)).toHaveLength(2);
+    expect(fading(w)).toEqual([]);
+  });
+
+  it('replaces an answer from the first block a revision changes', async () => {
+    const { w, append } = await boot([answer(1, 'Alpha.\n\nBeta')]);
+    const [alpha] = blocks(w);
+    // The next line turns the paragraph above it into a heading.
+    await append([answer(2, 'Alpha.\n\nBeta\n---\n\nGamma.')]);
+    expect(blocks(w)[0]).toBe(alpha);
+    expect(blocks(w).map(block => block.tagName)).toEqual(['P', 'H2', 'P']);
+    expect(fading(w)).toEqual(['Gamma.']);
+  });
+
+  it('keeps an answer\'s blocks when it completes and gains its actions', async () => {
+    const ask: SessionEvent = { kind: 'user_message', seq: 1, origin: 1, time: T0, source: 'extension', turnId: 'done-turn', messageId: 'ask', message: text('Say hello') };
+    const { w, append } = await boot([ask, answer(2, 'Alpha.', { origin: 2, turnId: 'done-turn' })]);
+    const row = w.document.querySelector('.ev-assistant_message')!;
+    const [alpha] = blocks(w);
+    expect(row.querySelector('.said > b')!.textContent).toBe('ChatGPT (partial)');
+    await append([answer(3, 'Alpha.\n\nBeta.', { origin: 2, turnId: 'done-turn', state: 'final', final: true })]);
+    await append([{ seq: 4, time: T0 + 2_000, source: 'extension', kind: 'turn_end', turnId: 'done-turn', outcome: 'completed' }]);
+    expect(w.document.querySelector('.ev-assistant_message')).toBe(row);
+    expect(blocks(w)[0]).toBe(alpha);
+    expect(row.querySelector('.said > b')!.textContent).toBe('ChatGPT');
+    expect(row.querySelectorAll('.said > .answer-actions')).toHaveLength(1);
+  });
+
+  it('adds no fade under reduced motion', async () => {
+    const { w, append } = await boot([answer(1, 'Alpha.')]);
+    expect(blocks(w)).toHaveLength(1);
+    Object.defineProperty(w, 'matchMedia', { configurable: true,
+      value: (query: string) => ({ matches: query.includes('reduce'), addEventListener: vi.fn(), removeEventListener: vi.fn() }) });
+    const [alpha] = blocks(w);
+    await append([answer(2, 'Alpha.\n\nBeta.')]);
+    expect(blocks(w)[0]).toBe(alpha);
+    expect(fading(w)).toEqual([]);
+  });
+
+  it('replaces a code block unfaded while it gains lines', async () => {
+    const { w, append } = await boot([answer(1, 'Alpha.\n\n```\nline 1')]);
+    const [alpha, code] = blocks(w);
+    await append([answer(2, 'Alpha.\n\n```\nline 1\nline 2')]);
+    expect(blocks(w)[0]).toBe(alpha);
+    expect(blocks(w)[1]).not.toBe(code);
+    expect(blocks(w)[1]!.querySelector('pre')!.textContent).toBe('line 1\nline 2\n');
+    expect(fading(w)).toEqual([]);
+  });
+
+  it('swaps the whole row when a revision is too long to draw rich', async () => {
+    const { w, append } = await boot([answer(1, 'Alpha.')]);
+    const row = w.document.querySelector('.ev-assistant_message');
+    await append([answer(2, `Alpha. ${'Long. '.repeat(50_000)}`)]);
+    const rows = w.document.querySelectorAll('.ev-assistant_message');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).not.toBe(row);
+    expect(rows[0]!.querySelector('.said > .msg')!.classList.contains('rich')).toBe(false);
+    expect(rows[0]!.textContent).toContain('Alpha. Long.');
+  });
+
+  describe('while its turn works', () => {
+    const start: SessionEvent = { seq: 1, time: T0, source: 'extension', kind: 'turn_start', turnId: 'live-turn' };
+    const written = (seq: number, body: string, more: Partial<Extract<SessionEvent, { kind: 'assistant_message' }>> = {}) =>
+      answer(seq, body, { origin: 2, turnId: 'live-turn', ...more });
+    const shown = (w: { document: Document }) => blocks(w).map(block => block.textContent?.trim());
+
+    it('holds back the paragraph ChatGPT is still writing', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe')]);
+      expect(shown(w)).toEqual(['Alpha.']);
+      const [alpha] = blocks(w);
+      await append([written(3, 'Alpha.\n\nBeta.\n\nGa')]);
+      expect(shown(w)).toEqual(['Alpha.', 'Beta.']);
+      expect(blocks(w)[0]).toBe(alpha);
+      expect(fading(w)).toEqual(['Beta.']);
+    });
+
+    it('opens a chat mid-answer with the tail held back and nothing fading', async () => {
+      const { w } = await boot([start, written(2, 'Alpha.\n\nBeta.\n\nGa')]);
+      expect(shown(w)).toEqual(['Alpha.', 'Beta.']);
+      expect(fading(w)).toEqual([]);
+    });
+
+    it('fades in the first paragraph of an answer as it appears', async () => {
+      const { w, append } = await boot([start, written(2, 'Alp')]);
+      expect(w.document.querySelector<HTMLElement>('.ev-assistant_message')!.hidden).toBe(true);
+      await append([written(3, 'Alpha.\n\nBe')]);
+      expect(w.document.querySelector<HTMLElement>('.ev-assistant_message')!.hidden).toBe(false);
+      expect(fading(w)).toEqual(['Alpha.']);
+    });
+
+    it('never cuts inside an open code fence', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\n~~~~\none\n\n~~~\ntwo\n')]);
+      expect(shown(w)).toEqual(['Alpha.']);
+      await append([written(3, 'Alpha.\n\n~~~~\none\n\n~~~\ntwo\n~~~~\nAf')]);
+      expect(blocks(w)[1]!.querySelector('pre')!.textContent).toBe('one\n\n~~~\ntwo\n');
+    });
+
+    it('shows the whole answer once it is final, keeping the blocks it showed', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe')]);
+      const [alpha] = blocks(w);
+      await append([written(3, 'Alpha.\n\nBeta.', { state: 'final', final: true })]);
+      expect(shown(w)).toEqual(['Alpha.', 'Beta.']);
+      expect(blocks(w)[0]).toBe(alpha);
+      expect(fading(w)).toEqual(['Beta.']);
+    });
+
+    it('shows the rest when the turn ends on a message that stays streaming', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe')]);
+      expect(shown(w)).toEqual(['Alpha.']);
+      await append([{ seq: 3, time: T0 + 3_000, source: 'extension', kind: 'turn_end', turnId: 'live-turn', outcome: 'stopped' }]);
+      expect(shown(w)).toEqual(['Alpha.', 'Be']);
+    });
+
+    it('shows the rest once something follows the message in its turn', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe')]);
+      expect(shown(w)).toEqual(['Alpha.']);
+      await append([{ ...toolCall(3, 'after'), turnId: 'live-turn' }]);
+      expect(shown(w)).toEqual(['Alpha.', 'Be']);
+    });
+
+    it('keeps the live row while it holds back a block ChatGPT is still writing', async () => {
+      const ask: SessionEvent = { kind: 'user_message', seq: 2, origin: 2, time: T0, source: 'extension', turnId: 'live-turn', messageId: 'ask-live', message: text('Write it') };
+      const { w, append } = await boot([start, ask, written(3, 'Alpha.\n\n```ts\nconst a = 1;')]);
+      const live = () => {
+        const row = w.document.querySelector<HTMLElement>('#timeline .turn-now');
+        return row && !row.hidden ? row.querySelector('.turn-now-text')!.textContent : null;
+      };
+      expect(shown(w)).toEqual(['Alpha.']);
+      expect(live()).toBe('Thinking');
+      await append([written(4, 'Alpha.\n\n```ts\nconst a = 1;\nconst b = 2;\nconst c = 3;')]);
+      expect(shown(w)).toEqual(['Alpha.']);
+      expect(live()).toBe('Thinking');
+      // Everything written so far shows: the prose speaks for itself.
+      await append([written(5, 'Alpha.\n\n```ts\nconst a = 1;\nconst b = 2;\nconst c = 3;\n```\n\n')]);
+      expect(blocks(w)).toHaveLength(2);
+      expect(live()).toBeNull();
+    });
+
+    it('draws nothing again for a chunk that finishes no block', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe', { renderedHtml: text('<p>Alpha.</p><p>Be</p>') })]);
+      const row = w.document.querySelector('.ev-assistant_message');
+      const lex = vi.spyOn(Lexer, 'lex');
+      // A revision advances the seq and the page's capture grows, but what shows is the same.
+      await append([written(3, 'Alpha.\n\nBeta is', { renderedHtml: text('<p>Alpha.</p><p>Beta is</p>') })]);
+      expect(lex).not.toHaveBeenCalled();
+      expect(w.document.querySelector('.ev-assistant_message')).toBe(row);
+      await append([written(4, 'Alpha.\n\nBeta is done.\n\nGa')]);
+      expect(lex).toHaveBeenCalled();
+      expect(shown(w)).toEqual(['Alpha.', 'Beta is done.']);
+      lex.mockClear();
+      await append([written(5, 'Alpha.\n\nBeta is done.\n\nGamma.', { state: 'final', final: true })]);
+      expect(lex).toHaveBeenCalled();
+      expect(shown(w)).toEqual(['Alpha.', 'Beta is done.', 'Gamma.']);
+      lex.mockRestore();
+    });
+
+    it('shows a list once it ends, so it does not turn loose on screen', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\n- one\n- two\n\n- thr')]);
+      expect(shown(w)).toEqual(['Alpha.']);
+      await append([written(3, 'Alpha.\n\n- one\n- two\n\n- three\n\nAfter.\n\nNe')]);
+      expect(blocks(w).map(block => block.tagName)).toEqual(['P', 'UL', 'P']);
+      const list = blocks(w)[1]!;
+      expect(list.querySelectorAll('li > p')).toHaveLength(3);
+      expect(fading(w)).toEqual([list.textContent?.trim(), 'After.']);
+      await append([written(4, 'Alpha.\n\n- one\n- two\n\n- three\n\nAfter.\n\nNext.\n\n')]);
+      expect(blocks(w)[1]).toBe(list);
+    });
+  });
+
+  it('draws a final answer opened with the chat again when it is revised', async () => {
+    const { w, append } = await boot([answer(1, 'Alpha.\n\nBeta.', { state: 'final', final: true })]);
+    await append([answer(2, 'Alpha.\n\nBeta, revised.', { state: 'final', final: true })]);
+    expect(blocks(w).map(block => block.textContent)).toEqual(['Alpha.', 'Beta, revised.']);
+  });
+
+  it('pages an earlier answer in without fading it', async () => {
+    const asks = Array.from({ length: 30 }, (_, i): SessionEvent => ({ seq: i + 2, time: T0 + i + 2, source: 'extension',
+      kind: 'user_message', messageId: `ask-${i}`, message: text(`Ask ${i}`) }));
+    const { w } = await boot([answer(1, 'Earlier alpha.\n\nEarlier beta.', { messageId: 'earlier', state: 'final', final: true }), ...asks]);
+    expect(blocks(w)).toEqual([]);
+    const pane = w.document.getElementById('chatBody')!;
+    Object.defineProperties(pane, { clientHeight: { value: 800 }, scrollHeight: { value: 800 } });
+    pane.scrollTop = 0;
+    pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 }));
+    await settleHistoryFrame(w);
+    expect(blocks(w).map(block => block.textContent)).toEqual(['Earlier alpha.', 'Earlier beta.']);
+    expect(fading(w)).toEqual([]);
+  });
+
+  it('fades nothing when a revision shortens an answer', async () => {
+    const { w, append } = await boot([answer(1, 'Alpha.\n\nBeta.\n\nGamma.')]);
+    const [alpha] = blocks(w);
+    await append([answer(2, 'Alpha.\n\nBeta')]);
+    expect(blocks(w)[0]).toBe(alpha);
+    expect(blocks(w).map(block => block.textContent)).toEqual(['Alpha.', 'Beta']);
+    expect(fading(w)).toEqual([]);
+  });
+});
+
 it('keeps an unfolded tool row as the same open node while the chat keeps appending', async () => {
   const { w, append } = await boot([
     { seq: 1, time: T0, source: 'app', kind: 'session_start', conversationId: 'chat-a', title: 'Loop under test' },
@@ -5039,8 +5296,13 @@ it('ends the running turn with a row saying what it is doing now', async () => {
   // It follows the work: a new step lands above it, and it stays the last row.
   expect(now().previousElementSibling?.textContent).toContain('Searching the web');
   expect(now().parentElement!.lastElementChild).toBe(now());
-  // Prose speaks for itself while it is being written…
-  await append([{ kind: 'assistant_message', seq: 4, time: Date.now(), source: 'extension', messageId: 'a-now', message: text('Two tests fail…'), final: false, state: 'streaming' }]);
+  // Prose speaks for itself while it is being written, once its first block shows…
+  await append([{ kind: 'assistant_message', seq: 4, time: Date.now(), source: 'extension', messageId: 'a-now', message: text('Two tests'), final: false, state: 'streaming' }]);
+  expect(shown()).toEqual(['Thinking', '']);
+  await append([{ kind: 'assistant_message', seq: 5, time: Date.now(), source: 'extension', messageId: 'a-now', message: text('Two tests fail.\n\nThe'), final: false, state: 'streaming' }]);
+  // …and once nothing of it is held back.
+  expect(shown()).toEqual(['Thinking', '']);
+  await append([{ kind: 'assistant_message', seq: 6, time: Date.now(), source: 'extension', messageId: 'a-now', message: text('Two tests fail.\n\nThe rest pass.\n\n'), final: false, state: 'streaming' }]);
   expect(shown()).toBeNull();
   // …and once it stops changing the turn is still working: an interim paragraph stays "streaming".
   await new Promise(resolve => setTimeout(resolve, 2_600));

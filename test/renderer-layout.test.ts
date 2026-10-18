@@ -170,6 +170,12 @@ it('does not expose a periodic Astra continuation outside session_finish', () =>
   expect(chatSource).not.toContain("number('goalImpulseMinutes'");
 });
 
+it('fades a block an answer gains by opacity alone, and not under reduced motion', () => {
+  expect(rule('.msg.rich > .is-entering')).toBe('animation: round-title 350ms ease-out both;');
+  expect(css).toContain('@keyframes round-title { from { opacity: 0; } to { opacity: 1; } }');
+  expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*[^{}]*\.msg\.rich > \.is-entering[^{}]*\{ animation: none; \}/);
+});
+
 /** The declarations of one selector, whitespace-normalised. */
 function rule(selector: string): string {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

@@ -5,6 +5,7 @@ import type { MessageReference, StoredText } from '../src/shared/session.js';
 let dom: JSDOM;
 let renderedMessage: (html: StoredText | null | undefined, fallback: string) => HTMLElement;
 let renderedMarkdown: (text: string, capture?: StoredText, references?: readonly MessageReference[]) => HTMLElement;
+let finishedBlocks: (text: string) => string;
 
 /** A whole capture, as the store holds one. */
 const whole = (text: string): StoredText => ({ text, truncated: false, chars: text.length });
@@ -19,7 +20,7 @@ beforeAll(async () => {
     Element: dom.window.Element,
     Node: dom.window.Node
   });
-  ({ renderedMessage, renderedMarkdown } = await import('../src/renderer/chat.js'));
+  ({ renderedMessage, renderedMarkdown, finishedBlocks } = await import('../src/renderer/chat.js'));
 });
 
 afterAll(() => {
@@ -570,5 +571,78 @@ c & d
   it('shows the name of a person or place ChatGPT links, instead of dropping it', () => {
     const rendered = renderedMarkdown('No \uE200entity\uE202["place","Antigo Egito"]\uE201, \uE200entity\uE202["people","René \\"Descartes\\"","filósofo"]\uE201 estudou.');
     expect(JSON.stringify(rendered.textContent!.trim())).toBe(JSON.stringify('No Antigo Egito, René "Descartes" estudou.'));
+  });
+});
+
+/** A revision on screen keeps every leading block equal to the one drawn again (the timeline's streaming). */
+describe('an answer drawn again', () => {
+  const report = (snippet: string) => [{ index: 1, sources: [{ title: 'A report', url: 'https://news.example.com/report', source: 'Example News', snippet }] }];
+
+  it('renders the same markdown twice as equal blocks', () => {
+    const sources = [String.raw`Inline \(x^2\) with a source. :chatgpt-content-reference{index="1"}` +
+      '\n\n```ts\nconst a = 1;\n```\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n' + String.raw`\[
+y=mx+b
+\]`, ':::writing{title="Note"}\nDear team\n:::'];
+    const drawn = sources.map(source => [renderedMarkdown(source, undefined, report('A')), renderedMarkdown(source, undefined, report('A'))]);
+    for (const part of ['.math-inline .katex', '.math-display .katex', '.citation', '.markdown-code', '.markdown-table', '.markdown-writing']) {
+      expect(drawn.some(([first]) => first!.querySelector(part)), part).toBe(true);
+    }
+    for (const [first, second] of drawn) {
+      expect(first!.childNodes).toHaveLength(second!.childNodes.length);
+      expect([...first!.childNodes].every((node, index) => node.isEqualNode(second!.childNodes[index]!))).toBe(true);
+    }
+  });
+
+  it('tells apart citation pills that look the same but hold different sources', () => {
+    const source = 'A claim. :chatgpt-content-reference{index="1"}';
+    const [first, second] = [renderedMarkdown(source, undefined, report('First')), renderedMarkdown(source, undefined, report('Second'))];
+    expect(first.querySelector('a.citation-pill')!.isEqualNode(second.querySelector('a.citation-pill'))).toBe(true);
+    expect(first.querySelector('.citation')!.isEqualNode(second.querySelector('.citation'))).toBe(false);
+  });
+
+  it('cuts an answer being written after its last finished block', () => {
+    expect(finishedBlocks('Alpha.\r\n\r\nBeta')).toBe('Alpha.\r\n\r\n');
+    expect(finishedBlocks('Alpha.\n\n')).toBe('Alpha.\n\n');
+    expect(finishedBlocks('Alpha.')).toBe('');
+    // A fence closes only on its own character, at least as long; a writing block or formula on its end.
+    expect(finishedBlocks('```\na\n\n~~~\nb\n```\nAfter')).toBe('```\na\n\n~~~\nb\n```\n');
+    expect(finishedBlocks('Intro.\n\n:::writing{title="Note"}\nDear team,\n\nThanks\n')).toBe('Intro.\n\n');
+    expect(finishedBlocks(':::writing\nDear team,\n\nThanks\n:::\nAfter')).toBe(':::writing\nDear team,\n\nThanks\n:::\n');
+    expect(finishedBlocks('$$\na\n\nb\n$$\n\nAfter')).toBe('$$\na\n\nb\n$$\n\n');
+  });
+
+  it('holds a list back until a finished line ends it, so it never turns loose on screen', () => {
+    // A blank line between items makes the whole list loose once the next item arrives.
+    expect(finishedBlocks('Intro.\n\n- a\n- b\n\n- c')).toBe('Intro.\n\n');
+    expect(finishedBlocks('Intro.\n\n- a\n- b\n\n- c\n\n1')).toBe('Intro.\n\n');
+    expect(finishedBlocks('Intro.\n\n- a\n- b\n\n- c\n\nAfter.\n')).toBe('Intro.\n\n- a\n- b\n\n- c\n\n');
+    // An indented line after a blank one continues the item.
+    expect(finishedBlocks('1. a\n\n   more')).toBe('');
+    expect(finishedBlocks('1. a\n\n   more\n\n2) b\n\nNext.\n\nEn')).toBe('1. a\n\n   more\n\n2) b\n\nNext.\n\n');
+    // A fence inside an item, at any indent, neither cuts the item nor ends the list when it closes.
+    expect(finishedBlocks('- a\n    ```\n    x\n\n    y')).toBe('');
+    expect(finishedBlocks('- a\n    ```\n    x\n\n    y\n    ```\n\nAfter.\n')).toBe('- a\n    ```\n    x\n\n    y\n    ```\n\n');
+    expect(finishedBlocks('- a\n  ```\n  x\n  ```\n- b')).toBe('');
+  });
+
+  it('ends a list as soon as the line being written cannot continue it', () => {
+    expect(finishedBlocks('- a\n\n- b\n\nThe next')).toBe('- a\n\n- b\n\n');
+    expect(finishedBlocks('- a\n\n- b\n\n# Next')).toBe('- a\n\n- b\n\n');
+    // A digit, a marker or an indent may still become an item.
+    expect(finishedBlocks('- a\n\n- b\n\n2')).toBe('');
+    expect(finishedBlocks('- a\n\n- b\n\n-')).toBe('');
+    expect(finishedBlocks('- a\n\n- b\n\n  mo')).toBe('');
+    expect(finishedBlocks('- a\n\n- b\n')).toBe('');
+  });
+
+  it('reads triple backticks inside a line as inline code, not as a fence', () => {
+    expect(finishedBlocks('```code``` is odd.\n\nNext para.')).toBe('```code``` is odd.\n\n');
+    expect(finishedBlocks('~~~ a`b\nx\n\ny')).toBe('');
+  });
+
+  it('tells apart writing panels that read the same but copy different Markdown', () => {
+    const [first, second] = ['*a*', '_a_'].map(text => renderedMarkdown(`:::writing\n${text}\n:::`));
+    expect(first!.querySelector('blockquote')!.isEqualNode(second!.querySelector('blockquote'))).toBe(true);
+    expect(first!.querySelector('.markdown-writing')!.isEqualNode(second!.querySelector('.markdown-writing'))).toBe(false);
   });
 });
