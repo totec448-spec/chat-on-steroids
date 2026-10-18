@@ -1333,5 +1333,11 @@
   },
   "popup_detail_total": {
     "message": "всего $1"
+  },
+  "content_edit_message_missing": {
+    "message": "Этого сообщения больше нет на странице ChatGPT, поэтому его нельзя изменить."
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT не предложил изменить это сообщение. Откройте чат в ChatGPT и попробуйте снова."
   }
 }

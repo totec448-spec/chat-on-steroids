@@ -1180,5 +1180,11 @@
   },
   "popup_detail_total": {
     "message": "tổng $1"
+  },
+  "content_edit_message_missing": {
+    "message": "Tin nhắn đó không còn trên trang ChatGPT nên không thể chỉnh sửa."
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT không cung cấp Chỉnh sửa cho tin nhắn đó. Hãy mở cuộc trò chuyện trong ChatGPT rồi thử lại."
   }
 }
