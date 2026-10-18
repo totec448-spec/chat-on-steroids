@@ -97,6 +97,31 @@ it('names only the checks whose latest run still fails', async () => {
   expect(await applyNotReady(mixed.request, input('clear'))).toBe('kept (PR checklist still failing)');
 });
 
+// Review of c67512a2: a rerun that is still running, or was cancelled, supersedes the old failure, so
+// the label stays until the latest run of every check has passed.
+it('keeps the label while the latest run of a check is still running', async () => {
+  const rerunning = fake({ '/repos/o/r/commits/abc/check-runs?per_page=100': { check_runs: [
+    { id: 1, name: 'CI', status: 'completed', conclusion: 'failure' }, { id: 2, name: 'CI', status: 'in_progress', conclusion: null },
+    { id: 3, name: 'PR checklist', status: 'completed', conclusion: 'success' }] } });
+  expect(await applyNotReady(rerunning.request, input('clear'))).toBe('kept (CI still running)');
+  expect(rerunning.calls.some(call => call.init?.method === 'DELETE')).toBe(false);
+});
+
+it('keeps the label when the latest run of a check was cancelled', async () => {
+  const cancelled = fake({ '/repos/o/r/commits/abc/check-runs?per_page=100': { check_runs: [
+    { id: 1, name: 'CI', conclusion: 'success' }, { id: 2, name: 'CI', conclusion: 'cancelled' }] } });
+  expect(await applyNotReady(cancelled.request, input('clear'))).toBe('kept (CI still failing)');
+  expect(cancelled.calls.some(call => call.init?.method === 'DELETE')).toBe(false);
+});
+
+it('does not block on a latest run that was skipped or neutral', async () => {
+  const quiet = fake({ '/repos/o/r/commits/abc/check-runs?per_page=100': { check_runs: [
+    { id: 1, name: 'CI', conclusion: 'failure' }, { id: 2, name: 'CI', conclusion: 'skipped' },
+    { id: 3, name: 'PR checklist', conclusion: 'neutral' }] } });
+  expect(await applyNotReady(quiet.request, input('clear'))).toBe('clear');
+  expect(quiet.calls.at(-1)).toMatchObject({ path: `/repos/o/r/issues/7/labels/${NOT_READY_LABEL}`, init: { method: 'DELETE' } });
+});
+
 it('converts with the optional draft token, since the workflow token never may', async () => {
   const labels = fake({});
   const drafts = fake({ '/graphql': { data: { convertPullRequestToDraft: { pullRequest: { isDraft: true } } } } });
