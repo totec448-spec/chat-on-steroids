@@ -6647,4 +6647,15 @@ describe('prompt recall in the composer', () => {
     expect(press(w, 'ArrowUp')).toBe(true);
     expect(composer(w).value).toBe('Second question');
   });
+
+  it.each([
+    ['a fresh-turn continue', 'Continue the task from where you are. (Chat On Steroids starts a fresh turn so the reply is not cut off.)'],
+    ['a Goal continue', 'Continue with the next step of the Goal.']
+  ])('skips %s whose row the outbox no longer keeps', async (_, value) => {
+    // The recorder keeps the input id and the sent text on the message, whoever wrote it.
+    const { w, live, append } = await boot([...chat(), ask(7, value, { inputId: 'trimmed-row', inputDelivery: 'confirmed', authoredText: value }), answer(8, 'Next step done.')]);
+    live.inputs = [sentInput('q-5')]; await append([]);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+  });
 });

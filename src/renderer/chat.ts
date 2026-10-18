@@ -2205,8 +2205,10 @@ let recall: { generation: number; draft: number; prompts: readonly string[]; bac
 
 /**
  * Whether you typed this message. The outbox row that sent it says when the app wrote it: a Goal or
- * Loop continue, a fresh-turn or recovery continue, or a plan stage. With no row it was sent in
- * ChatGPT itself, so it is yours, unless it is a worker's: its tasks come from the app.
+ * Loop continue, a fresh-turn or recovery continue, or a plan stage. The outbox keeps only its newest
+ * finished rows, and the recorded message keeps the same fields whoever wrote it, so a recorded input
+ * id whose row is gone is left out. With no row and no input id it was sent in ChatGPT itself, so it
+ * is yours, unless it is a worker's: its tasks come from the app.
  */
 function typedPrompt(event: Extract<SessionEvent, { kind: 'user_message' }>): boolean {
   // The recorded row id is exact; the message id also finds a row this window read before its receipt.
@@ -2215,6 +2217,7 @@ function typedPrompt(event: Extract<SessionEvent, { kind: 'user_message' }>): bo
   // A correction sent together with the next queued checkpoint is recorded as the correction.
   const row = rows.find(entry => !rows.some(other => other.companionInputId === entry.id));
   if (!row) {
+    if (event.inputId) return false;
     const origin = sessions.find(entry => entry.id === selectedId)?.origin?.kind;
     return origin !== 'worker' && origin !== 'helper' && (!event.agent || event.agent === 'prime');
   }
