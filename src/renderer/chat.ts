@@ -2190,6 +2190,26 @@ function editableQuestion(event: SessionEvent, history: readonly SessionEvent[])
   return !history.some(other => other.kind === 'user_message' && other.replaces === event.messageId);
 }
 
+/** How many messages each question (by seq) is followed by in the chat as shown: what editing it replaces. */
+function laterMessageCounts(items: readonly TimelineItem[]): Map<number, number> {
+  const later = new Map<number, number>();
+  const counted = new Set<string>();
+  for (const item of [...items].reverse()) {
+    if (item.kind !== 'event') continue;
+    const event = item.event;
+    if (event.kind === 'user_message') later.set(event.seq, counted.size);
+    if (event.kind === 'user_message' || (event.kind === 'assistant_message' && (event.final || event.state === 'final')))
+      counted.add(`${event.kind}:${event.messageId ?? event.seq}`);
+  }
+  return later;
+}
+
+/** Whether the chat has messages older than the loaded ones, as the reader pages them in. */
+function olderHistoryPending(): boolean {
+  const oldest = events.reduce((least, event) => Math.min(least, residenceOf(event)), Infinity);
+  return Number.isFinite(oldest) && oldest > 1 && oldest !== historyStart;
+}
+
 /** The Edit action under one of your questions. */
 function questionActions(event: Extract<SessionEvent, { kind: 'user_message' }>, later: number): HTMLElement {
   const bar = el('div', 'question-actions');
@@ -5321,18 +5341,7 @@ function paintDetail(followBottom = historyBefore === null): void {
   const workers = sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null);
   const items = timelineItems(shown);
   const latestCompaction = items.filter(item => item.kind === 'compaction').at(-1);
-  // How many messages each question is followed by in the chat as shown: what editing it replaces.
-  const laterMessages = new Map<number, number>();
-  {
-    const counted = new Set<string>();
-    for (const item of [...items].reverse()) {
-      if (item.kind !== 'event') continue;
-      const event = item.event;
-      if (event.kind === 'user_message') laterMessages.set(event.seq, counted.size);
-      if (event.kind === 'user_message' || (event.kind === 'assistant_message' && (event.final || event.state === 'final')))
-        counted.add(`${event.kind}:${event.messageId ?? event.seq}`);
-    }
-  }
+  const laterMessages = laterMessageCounts(items);
   for (const item of items) {
     if (item.kind === 'event' && duplicateErrors.has(item.event.seq)) continue;
     appendRetiredInputs(item.kind === 'event' ? item.event.time : item.kind === 'earlier' ? item.fold.time : item.block.time);
@@ -7034,12 +7043,25 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
     retry.onclick = () => {
       if (unqueuedPlan) { void retryPlannedInput(entry); return; }
       const input = $<HTMLTextAreaElement>('chatInput');
-      if (authoredComposerText().trim() || imageDrafts.get(draftKey())?.length) { toast(t("Send or clear your current draft before retrying this message.")); return; }
+      // An edit in progress is an unsent draft too, even with the composer cleared: retrying must not replace it.
+      if (authoredComposerText().trim() || imageDrafts.get(draftKey())?.length || editingQuestion?.sessionId === selectedId) { toast(t("Send or clear your current draft before retrying this message.")); return; }
+      // A failed edit stays an edit of that question; if it cannot be edited any more it is a new message.
+      const edit = entry.edit && selectedId && (entry.sessionId ?? entry.deliveredSessionId) === selectedId ? entry.edit : null;
+      const question = edit && events.find(event => event.kind === 'user_message' && event.messageId === edit.messageId);
+      // Editing needs the question and what follows it; an older one is not loaded until it is scrolled to.
+      if (edit && !question && olderHistoryPending()) { toast(t("Scroll up to the message you edited, then retry.")); return; }
       replaceComposerDraft();
       input.value = entry.text;
+      if (edit) {
+        if (question && editableQuestion(question, events)) {
+          // The edit replaces everything after the question, whatever an agent filter shows.
+          const later = laterMessageCounts(timelineItems(foldAgentCommunication(events))).get(question.seq) ?? 0;
+          editingQuestion = { sessionId: selectedId!, messageId: edit.messageId, later, previousDraft: '' };
+        } else toast(t("That message can no longer be edited, so this is restored as a new message."));
+      }
       if (entry.images?.length) imageDrafts.set(draftKey(), [...entry.images]);
       if (entry.attachments?.length) imageDrafts.set(draftKey(), [...(entry.images ?? []), ...entry.attachments]);
-      rememberDraft(); skillPicker?.restore(); paintComposerImages(); paintDeliveryControls(); input.focus();
+      rememberDraft(); skillPicker?.restore(); paintComposerImages(); paintDeliveryControls(); paintEditNotice(); input.focus();
       dismissInputNotice(entry.id);
     };
     row.append(retry);

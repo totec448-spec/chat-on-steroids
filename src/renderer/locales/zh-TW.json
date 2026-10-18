@@ -893,6 +893,8 @@
   "Retry stage one with the complete plan and queued checkpoints": "重試第一階段，並包含完整計畫和排隊檢查點",
   "Restore this message to the composer for review and sending": "將此訊息恢復到輸入框，以便檢查並傳送",
   "Send or clear your current draft before retrying this message.": "重試此訊息前，請先傳送或清空目前草稿。",
+  "That message can no longer be edited, so this is restored as a new message.": "此訊息已無法再編輯，因此已作為新訊息還原。",
+  "Scroll up to the message you edited, then retry.": "請向上捲動到你編輯的訊息，然後重試。",
   "Message queued. Browser startup failed:": "訊息已排隊。瀏覽器啟動失敗：",
   "Retry browser": "重試瀏覽器",
   "Helper delivery was not confirmed. Its old chat may still be running.": "輔助聊天的訊息尚未確認送達，原聊天可能仍在執行。",
