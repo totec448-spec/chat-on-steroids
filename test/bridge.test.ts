@@ -168,6 +168,7 @@ const {
   resetSwarm,
   restoreSwarm,
   snapshotSwarm,
+  swarmRunning,
   swarmState,
   swarmStateForCaller,
   WORKER_CONTEXT_CEILING_TOKENS,
@@ -8267,6 +8268,107 @@ describe('a worker chat that never opens', () => {
       vi.useRealTimers();
       await saveConfig(previous);
     }
+  });
+});
+
+// --------------------------------------------------- late starts
+
+/**
+ * A worker the app gave up on for time, whose chat received its task anyway (#1086).
+ *
+ * On a memory-starved Windows machine (2026-10-18, 250–430 MB free) pages sent their task
+ * within the deadline, but their reports reached the app 20–90 s late. The app failed the
+ * worker, its chat went on working, and nothing tracked it. The truth arriving late is
+ * accepted: the worker rejoins its run when it still can, and is fenced as a stray when not.
+ */
+describe('a worker whose chat starts after the app gave up on it', () => {
+  const ack = (id: string, conversationId: string, client = 'tab-1') =>
+    request('POST', '/commands/ack', { body: { id, status: 'sent', conversationId, agent: 'worker-1', client } });
+  const primeReports = (): string[] =>
+    snapshotSwarm()!.agents.find(entry => entry.info.id === 'prime')!.queue.map(message => message.text);
+  const workerOne = () => swarmState().agents.find(agent => agent.id === 'worker-1');
+  const LATE_CHAT = 'abababab-5555-4444-3333-222222222222';
+
+  it('rejoins its live run and the prime is told to expect its result', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'first half' }, { task: 'second half' }], caller: { conversationId: PRIME_CHAT } });
+      await vi.waitFor(() => expect(opened).toHaveLength(2));
+      const first = await redeem(new URL(opened[0]!).searchParams.get('clf')!);
+      const second = await redeem(new URL(opened[1]!).searchParams.get('clf')!, 'tab-2');
+      expect((await request('POST', '/commands/ack', { body: { id: second.id, status: 'sent',
+        conversationId: 'cdcdcdcd-5555-4444-3333-222222222222', agent: second.agent, client: 'tab-2' } })).status).toBe(200);
+      await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS + 1_000);
+      expect(workerOne()?.state).toBe('failed');
+
+      const late = await ack(first.id, LATE_CHAT);
+      expect(late.status).toBe(200);
+      expect(late.body).toMatchObject({ final: true, committed: true, conversationId: LATE_CHAT });
+      expect(workerOne()).toMatchObject({ state: 'active', conversationId: LATE_CHAT });
+      expect(primeReports().at(-1)).toMatch(/^\[worker-1 started late\] .*do not redo its work/);
+      // A retried ACK after a lost response gets the same final answer, and changes nothing.
+      expect((await ack(first.id, LATE_CHAT)).body).toEqual(late.body);
+      expect(primeReports().filter(text => text.startsWith('[worker-1 started late]'))).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('wakes its parked run when it was the last worker', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'the only half' }], caller: { conversationId: PRIME_CHAT } });
+      const bootstrap = await redeem();
+      await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS + 1_000);
+      expect(swarmRunning()).toBe(false);
+
+      const late = await ack(bootstrap.id, 'abababab-7777-4444-3333-222222222222');
+      expect(late.body, JSON.stringify(late.body)).toMatchObject({ final: true, committed: true });
+      expect(swarmRunning()).toBe(true);
+      expect(workerOne()).toMatchObject({ state: 'active', conversationId: 'abababab-7777-4444-3333-222222222222' });
+      expect(primeReports().at(-1)).toMatch(/^\[worker-1 started late\]/);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('is fenced as a stray when its slot went to a replacement, and the prime is told', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'first half' }, { task: 'second half' }], caller: { conversationId: PRIME_CHAT } });
+      await vi.waitFor(() => expect(opened).toHaveLength(2));
+      const first = await redeem(new URL(opened[0]!).searchParams.get('clf')!);
+      const second = await redeem(new URL(opened[1]!).searchParams.get('clf')!, 'tab-2');
+      await request('POST', '/commands/ack', { body: { id: second.id, status: 'sent',
+        conversationId: 'cdcdcdcd-5555-4444-3333-222222222222', agent: second.agent, client: 'tab-2' } });
+      await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS + 1_000);
+      // The prime did what the failure report told it to: it started a replacement.
+      spawn({ workers: [{ task: 'first half, again' }], caller: { conversationId: PRIME_CHAT } });
+      await vi.waitFor(() => expect(opened).toHaveLength(3));
+      const replacement = await redeem(new URL(opened[2]!).searchParams.get('clf')!, 'tab-3');
+      await request('POST', '/commands/ack', { body: { id: replacement.id, status: 'sent',
+        conversationId: 'efefefef-5555-4444-3333-222222222222', agent: replacement.agent, client: 'tab-3' } });
+
+      const late = await ack(first.id, LATE_CHAT);
+      expect(late.status).toBe(200);
+      expect(late.body).toMatchObject({ final: true, committed: false, conversationId: LATE_CHAT });
+      expect(retiredWorkerForConversation(LATE_CHAT)).toMatchObject({ id: 'worker-1' });
+      expect(swarmState().agents.filter(agent => agent.conversationId === LATE_CHAT)).toEqual([]);
+      expect(primeReports().at(-1)).toMatch(/^\[worker-1 started late, outside the run\] .*tool calls are refused/);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('takes no late ACK from a page other than the one that claimed it', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'the only half' }], caller: { conversationId: PRIME_CHAT } });
+      const bootstrap = await redeem();
+      await vi.advanceTimersByTimeAsync(COMMAND_DEADLINE_MS + 1_000);
+      const otherChat = 'abababab-6666-4444-3333-222222222222';
+      expect((await ack(bootstrap.id, otherChat, 'another-tab')).status).toBe(404);
+      expect(swarmRunning()).toBe(false);
+      expect(retiredWorkerForConversation(otherChat)).toBeNull();
+    } finally { vi.useRealTimers(); }
   });
 });
 

@@ -425,6 +425,7 @@
   "[{0} is awake again]": "[{0} yeniden uyandı]",
   "[{0} is back]": "[{0} geri döndü]",
   "{0} resumed work": "{0} çalışmaya devam etti",
+  "{0} started late": "{0} geç başladı",
   "[{0} reported]": "[{0} rapor verdi]",
   "[{0} finished]": "[{0} tamamladı]",
   "{0} finished · report": "{0} tamamladı · rapor",
