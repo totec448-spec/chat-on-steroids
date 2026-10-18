@@ -166,7 +166,7 @@ async function settleHistoryFrame(w: Pick<Window, 'requestAnimationFrame'>): Pro
   await settle();
 }
 
-async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; followUp?: 'steer' | 'queue'; enterSends?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean; approvalCard?: () => unknown; answerApproval?: (id: string, cardId: string, choice: string) => unknown; summary?: Partial<SessionSummary> } = {}) {
+async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; followUp?: 'steer' | 'queue'; enterSends?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean; approvalCard?: () => unknown; answerApproval?: (id: string, cardId: string, choice: string) => unknown; summary?: Partial<SessionSummary>; holdInputs?: Promise<void> } = {}) {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
@@ -259,7 +259,8 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
       },
       listProjects: () => ok(projects),
       // IPC snapshots cannot share the backend's mutable array with the renderer.
-      listInputs: () => ok(structuredClone(live.inputs)),
+      // `holdInputs`: the outbox read answers only once it resolves, like a slow first read after launch.
+      listInputs: () => options.holdInputs ? options.holdInputs.then(() => ok(structuredClone(live.inputs))) : ok(structuredClone(live.inputs)),
       cancelInput: vi.fn((id: string) => {
         const entry = live.inputs.find(row => row.id === id);
         if (!entry) return ok(false);
@@ -6672,5 +6673,326 @@ describe('edit and resubmit (#365)', () => {
     expect(w.document.querySelector('.toast')?.textContent).toContain('can no longer be edited');
     await submit(w as any);
     expect(live.sent.at(-1)).not.toHaveProperty('edit');
+  });
+
+  it('recalls no earlier message with ArrowUp while a question is being edited, even with the edit cleared', async () => {
+    const { w } = await boot(exchange(), true, [], [], { summary: { conversationId: chat } });
+    editButton(w, 'First question')!.click(); await settle();
+    const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+    input.value = ''; input.dispatchEvent(new w.Event('input', { bubbles: true }));
+    const event = new w.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true });
+    input.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(input.value).toBe('');
+  });
+});
+
+describe('prompt recall in the composer', () => {
+  const ask = (seq: number, value: string, extra: object = {}): SessionEvent =>
+    ({ kind: 'user_message', seq, time: T0 + seq * 1000, source: 'extension', turnId: `t${seq}`, messageId: `q-${seq}`, message: text(value), ...extra }) as SessionEvent;
+  const answer = (seq: number, value: string): SessionEvent =>
+    ({ kind: 'assistant_message', seq, time: T0 + seq * 1000, source: 'extension', turnId: `t${seq - 1}`, messageId: `a-${seq}`, message: text(value), final: true, state: 'final' }) as SessionEvent;
+  // A message with only a file and no text is not recalled.
+  const chat = () => [ask(1, 'First question'), answer(2, 'First answer'),
+    ask(3, '', { attachments: [{ id: 'f-1', name: 'notes.txt', mimeType: 'text/plain', size: 4 }] }), answer(4, 'Read it.'),
+    ask(5, 'Second question'), answer(6, 'Second answer')];
+  const composer = (w: { document: Document }) => w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  /** Presses a key in the composer; true when the app took it over from the textarea. */
+  const press = (w: JSDOM['window'], key: string, init: KeyboardEventInit = {}) => {
+    const event = new w.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
+    composer(w).dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  /** The outbox row that sent the message `messageId`, delivered and recorded. */
+  const sentInput = (messageId: string, extra: Partial<InputEntry> = {}): InputEntry => ({ id: `input-${messageId}`, sessionId: summary([]).id, projectId: null,
+    text: 'Sent text', automation: 'off', model: null, reasoningEffort: null, mode: 'auto', dueAt: 1, createdAt: T0, state: 'sent', owner: 'page', conversationId: null,
+    messageId, deliveredAt: T0, historyRecorded: true, ...extra }) as InputEntry;
+
+  it('fills an empty composer with your last message on ArrowUp, caret at the start, without sending it', async () => {
+    const { w, live } = await boot(chat());
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+    expect([composer(w).selectionStart, composer(w).selectionEnd]).toEqual([0, 0]);
+    await settle();
+    expect(live.sent).toEqual([]);
+  });
+
+  it('goes further back with each ArrowUp and stops at your first message', async () => {
+    const { w } = await boot(chat());
+    press(w, 'ArrowUp');
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('First question');
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe('First question');
+  });
+
+  it('comes forward with ArrowDown and gives back the empty composer past the newest message', async () => {
+    const { w } = await boot(chat());
+    press(w, 'ArrowUp'); press(w, 'ArrowUp');
+    // Up left the caret at the start: the first Down is the textarea's own, taking it to the end.
+    expect(press(w, 'ArrowDown')).toBe(false);
+    composer(w).setSelectionRange(14, 14);
+    expect(press(w, 'ArrowDown')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+    expect(composer(w).selectionStart).toBe('Second question'.length);
+    expect(press(w, 'ArrowDown')).toBe(true);
+    expect(composer(w).value).toBe('');
+    expect(press(w, 'ArrowDown')).toBe(false);
+  });
+
+  it('leaves the arrows to a typed draft', async () => {
+    const { w } = await boot(chat());
+    composer(w).value = 'A draft I am writing';
+    composer(w).dispatchEvent(new w.Event('input', { bubbles: true }));
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe('A draft I am writing');
+  });
+
+  it.each([{ isComposing: true }, { altKey: true }, { ctrlKey: true }, { metaKey: true }, { shiftKey: true }])('recalls nothing with %o', async init => {
+    const { w } = await boot(chat());
+    expect(press(w, 'ArrowUp', init)).toBe(false);
+    expect(composer(w).value).toBe('');
+  });
+
+  it.each([false, true])('recalls nothing into a composer holding an attached file (attached after a recall: %s)', async recalledFirst => {
+    const { w } = await boot(chat());
+    if (recalledFirst) expect(press(w, 'ArrowUp')).toBe(true);
+    (w as any).api.chooseFiles = async () => ({ ok: true, data: [{ id: '11111111-2222-4333-8444-555555555555', name: 'image.png', mimeType: 'image/png', size: 42 }] });
+    w.document.getElementById('attachImages')!.click(); await settle();
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe(recalledFirst ? 'Second question' : '');
+  });
+
+  it('gives the arrows back once the recalled message is edited', async () => {
+    const { w } = await boot(chat());
+    expect(press(w, 'ArrowUp')).toBe(true);
+    composer(w).value = 'Second question, shorter please';
+    composer(w).dispatchEvent(new w.Event('input', { bubbles: true }));
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(press(w, 'ArrowDown')).toBe(false);
+    expect(composer(w).value).toBe('Second question, shorter please');
+  });
+
+  // A recall ends with the composer's next change: the same text typed again by hand is a draft.
+  it.each(['sent', 'cleared'])('leaves the arrows to the same text typed again after a recall was %s', async how => {
+    const { w } = await boot(chat());
+    const input = composer(w);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    if (how === 'sent') { w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await settle(); }
+    else { input.select(); input.setRangeText(''); input.dispatchEvent(new w.Event('input', { bubbles: true })); }
+    expect(input.value).toBe('');
+    input.value = 'Second question'; input.dispatchEvent(new w.Event('input', { bubbles: true }));
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(input.value).toBe('Second question');
+  });
+
+  it('recalls only the messages the agent filter shows', async () => {
+    const { w } = await boot([ask(1, 'Main question', { agent: 'prime' }), answer(2, 'Main answer'), ask(3, 'Unattributed question'), answer(4, 'Unattributed answer')],
+      true, [], [], { developerMode: true });
+    w.document.querySelector<HTMLButtonElement>('#chatAgentFilter [data-agent="prime"]')!.click(); await settle();
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Main question');
+    expect(press(w, 'ArrowUp')).toBe(false);
+  });
+
+  // A recalled message ending in a slash or @file fragment opens that menu; its arrows stay the menu's.
+  it('leaves the arrows to an open slash menu with no matches after a recall', async () => {
+    const { w } = await boot([ask(1, 'First question'), answer(2, 'First answer'), ask(3, 'Use /zzz'), answer(4, 'Done.')]);
+    (w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+    press(w, 'ArrowUp'); press(w, 'ArrowUp');
+    composer(w).setSelectionRange(14, 14);
+    expect(press(w, 'ArrowDown')).toBe(true); await settle();
+    expect(composer(w).value).toBe('Use /zzz');
+    expect(w.document.getElementById('skillPicker')!.hidden).toBe(false);
+    expect(press(w, 'ArrowDown')).toBe(false);
+    expect(composer(w).value).toBe('Use /zzz');
+  });
+
+  it('keeps a refused recalled message in the composer when ArrowDown is pressed', async () => {
+    const { w } = await boot(chat());
+    expect(press(w, 'ArrowUp')).toBe(true);
+    (w as any).api.sendInput = async () => ({ ok: false, error: 'Not delivered' });
+    w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await settle();
+    expect(composer(w).value).toBe('Second question');
+    expect(press(w, 'ArrowDown')).toBe(false);
+    expect(composer(w).value).toBe('Second question');
+  });
+
+  it('moves the caret through a recalled message of several lines before going further back', async () => {
+    const { w } = await boot([ask(1, 'First question'), answer(2, 'First answer'), ask(3, 'Line one\nLine two'), answer(4, 'Done.')]);
+    press(w, 'ArrowUp');
+    expect(composer(w).value).toBe('Line one\nLine two');
+    composer(w).setSelectionRange(17, 17);
+    expect(press(w, 'ArrowUp')).toBe(false);
+    composer(w).setSelectionRange(0, 0);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('First question');
+  });
+
+  // A long one-line message wraps onto several rows: only its very start or end hands the arrows
+  // back to recall, so a lower or upper wrapped row still moves the caret.
+  it.each([['ArrowUp', 40], ['ArrowDown', 40], ['ArrowUp', 'end'], ['ArrowDown', 0]] as const)('leaves %s to the caret inside a long recalled prompt (caret at %s)', async (key, at) => {
+    const long = 'Summarize the release notes for every package in the workspace and group them by area';
+    const { w } = await boot([ask(1, 'First question'), answer(2, 'First answer'), ask(3, long), answer(4, 'Done.')]);
+    press(w, 'ArrowUp');
+    const caret = at === 'end' ? long.length : at;
+    composer(w).setSelectionRange(caret, caret);
+    expect(press(w, key)).toBe(false);
+    expect(composer(w).value).toBe(long);
+  });
+
+  // The slash/file menu reads the caret on the input event, so the caret must already be at the start.
+  it('opens no slash menu for a message ending in /… that ArrowUp recalls with the caret at the start', async () => {
+    const { w } = await boot([ask(1, 'First question'), answer(2, 'First answer'), ask(3, 'Use /zzz'), answer(4, 'Done.')]);
+    (w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Use /zzz');
+    expect(composer(w).selectionStart).toBe(0);
+    expect(w.document.getElementById('skillPicker')!.hidden).toBe(true);
+    await settle();
+    expect(w.document.getElementById('skillPicker')!.hidden).toBe(true);
+  });
+
+  it('keeps its place when a message is recorded while you page through recall', async () => {
+    const { w, append } = await boot(chat());
+    expect(press(w, 'ArrowUp')).toBe(true);
+    await append([ask(7, 'Third question'), answer(8, 'Third answer')]);
+    expect(composer(w).value).toBe('Second question');
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('First question');
+    composer(w).setSelectionRange(14, 14);
+    expect(press(w, 'ArrowDown')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+    expect(press(w, 'ArrowDown')).toBe(true);
+    expect(composer(w).value).toBe('');
+    // A new recall starts from the newest message again.
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Third question');
+  });
+
+  it.each([
+    ['a Goal continue', { finishOwner: { turnId: 't5', periodic: false, mode: 'goal' } }],
+    ['a Goal check you asked for', { finishOwner: { turnId: 't5', periodic: false, mode: 'goal', userRequested: true } }],
+    ['a Loop continue', { finishOwner: { turnId: 't5', periodic: true, mode: 'loop' } }],
+    ['a fresh-turn continue', { authoredSource: 'none', purpose: 'rotation' }],
+    ['a recovery continue', { recovery: { questionId: 'q-5', pro: false, busyUntil: 0, phase: 'resumed' } }],
+    ['a plan stage', { authoredSource: 'none', mode: 'finish' }]
+  ] as const)('skips %s, which the app wrote', async (_, extra) => {
+    const { w, live, append } = await boot([...chat(), ask(7, 'Continue with the next step'), answer(8, 'Next step done.')]);
+    live.inputs = [sentInput('q-5'), sentInput('q-7', extra as Partial<InputEntry>)]; await append([]);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+  });
+
+  it('recalls a correction sent together with the next queued checkpoint', async () => {
+    const { w, live, append } = await boot([...chat(), ask(7, 'Use the staging database'), answer(8, 'Switched.')]);
+    live.inputs = [sentInput('q-7', { id: 'correction', companionInputId: 'checkpoint' }), sentInput('q-7', { id: 'checkpoint', authoredSource: 'none', mode: 'finish' })];
+    await append([]);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Use the staging database');
+  });
+
+  it('skips the tasks of a worker chat but recalls what you typed there', async () => {
+    const { w, live, append } = await boot(chat(), true, [], [], { origin: { kind: 'worker', fromSessionId: null, agentId: 'worker-1', task: 'Inspect' } });
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe('');
+    live.inputs = [sentInput('q-5')]; await append([]);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+    expect(press(w, 'ArrowUp')).toBe(false);
+  });
+
+  it('skips a worker task the agent filter shows', async () => {
+    const { w } = await boot([ask(1, 'Main question', { agent: 'prime' }), answer(2, 'Main answer'), ask(3, 'Inspect the parser', { agent: 'worker-1' }), answer(4, 'Inspected.')],
+      true, [], [], { developerMode: true });
+    w.document.querySelector<HTMLButtonElement>('#chatAgentFilter [data-agent="worker-1"]')!.click(); await settle();
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe('');
+  });
+
+  it('announces each recalled message to screen readers, and nothing once it ends', async () => {
+    const { w } = await boot(chat());
+    const region = w.document.getElementById('recallAnnounce')!;
+    expect(region.getAttribute('aria-live')).toBe('polite');
+    press(w, 'ArrowUp');
+    expect(region.textContent).toBe('Second question');
+    press(w, 'ArrowUp');
+    expect(region.textContent).toBe('First question');
+    composer(w).setSelectionRange(14, 14);
+    press(w, 'ArrowDown'); press(w, 'ArrowDown');
+    expect(composer(w).value).toBe('');
+    expect(region.textContent).toBe('');
+    press(w, 'ArrowUp');
+    expect(region.textContent).toBe('Second question');
+    composer(w).value = 'Second question, shorter please';
+    composer(w).dispatchEvent(new w.Event('input', { bubbles: true }));
+    expect(region.textContent).toBe('');
+  });
+
+  it('ends a recall when the agent filter changes', async () => {
+    const { w } = await boot([ask(1, 'Main question', { agent: 'prime' }), answer(2, 'Main answer'), ask(3, 'Unattributed question'), answer(4, 'Unattributed answer')],
+      true, [], [], { developerMode: true });
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Unattributed question');
+    w.document.querySelector<HTMLButtonElement>('#chatAgentFilter [data-agent="prime"]')!.click(); await settle();
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe('Unattributed question');
+  });
+
+  it('leaves an arrow to a slash menu that was showing, even when the caret moved off its fragment', async () => {
+    const { w } = await boot([ask(1, 'First question'), answer(2, 'First answer'), ask(3, 'Use /zzz'), answer(4, 'Done.')]);
+    (w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+    press(w, 'ArrowUp'); press(w, 'ArrowUp');
+    composer(w).setSelectionRange(14, 14);
+    expect(press(w, 'ArrowDown')).toBe(true); await settle();
+    expect(w.document.getElementById('skillPicker')!.hidden).toBe(false);
+    // Home moves the caret without an input event; the menu is still on screen.
+    composer(w).setSelectionRange(0, 0);
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe('Use /zzz');
+  });
+
+  it('reads out the same message again when it is recalled in the next chat', async () => {
+    const other = { ...summary([]), id: '2026-10-17-other001', title: 'Other chat' };
+    const { w } = await boot(chat(), true, [], [], { sessions: [summary(chat()), other] });
+    const region = w.document.getElementById('recallAnnounce')!;
+    press(w, 'ArrowUp');
+    expect(region.textContent).toBe('Second question');
+    (w.document.querySelector(`#sessionList [data-id="${other.id}"]`) as HTMLElement).click(); await settle();
+    // The other chat's empty composer: the region must change before the same text can be read again.
+    expect(region.textContent).toBe('');
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(region.textContent).toBe('Second question');
+  });
+
+  it('leaves the arrows to the caret until the outbox has been read', async () => {
+    let release!: () => void;
+    const { w, live } = await boot([...chat(), ask(7, 'Continue with the next step'), answer(8, 'Next step done.')], true, [], [], { holdInputs: new Promise<void>(resolve => { release = resolve; }) });
+    // Without the outbox the Goal continue would count as typed.
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe('');
+    live.inputs = [sentInput('q-5'), sentInput('q-7', { finishOwner: { turnId: 't5', periodic: false, mode: 'goal' } })];
+    release(); await settle();
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+  });
+
+  it('skips an app send whose row this window read before its receipt, by the recorded input id', async () => {
+    const { w, live, append } = await boot([...chat(), ask(7, 'Continue with the next step', { inputId: 'goal-row' }), answer(8, 'Next step done.')]);
+    live.inputs = [sentInput('q-5'), sentInput('q-7', { id: 'goal-row', state: 'browser', messageId: undefined, deliveredAt: undefined, finishOwner: { turnId: 't5', periodic: false, mode: 'goal' } })];
+    await append([]);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+  });
+
+  it.each([
+    ['a fresh-turn continue', 'Continue the task from where you are. (Chat On Steroids starts a fresh turn so the reply is not cut off.)'],
+    ['a Goal continue', 'Continue with the next step of the Goal.']
+  ])('skips %s whose row the outbox no longer keeps', async (_, value) => {
+    // The recorder keeps the input id and the sent text on the message, whoever wrote it.
+    const { w, live, append } = await boot([...chat(), ask(7, value, { inputId: 'trimmed-row', inputDelivery: 'confirmed', authoredText: value }), answer(8, 'Next step done.')]);
+    live.inputs = [sentInput('q-5')]; await append([]);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
   });
 });
