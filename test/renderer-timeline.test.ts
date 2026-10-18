@@ -6145,4 +6145,104 @@ describe('edit and resubmit (#365)', () => {
     expect(said(w)).toEqual([expect.stringContaining('Fix the login bug'), expect.stringContaining('Done.')]);
     expect(w.document.querySelector('#timeline .message-edited')?.textContent).toBe('Edited version');
   });
+
+  it('recalls no earlier message with ArrowUp while a question is being edited, even with the edit cleared', async () => {
+    const { w } = await boot(exchange(), true, [], [], { summary: { conversationId: chat } });
+    editButton(w, 'First question')!.click(); await settle();
+    const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+    input.value = ''; input.dispatchEvent(new w.Event('input', { bubbles: true }));
+    const event = new w.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true });
+    input.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(input.value).toBe('');
+  });
+});
+
+describe('prompt recall in the composer', () => {
+  const ask = (seq: number, value: string, extra: object = {}): SessionEvent =>
+    ({ kind: 'user_message', seq, time: T0 + seq * 1000, source: 'extension', turnId: `t${seq}`, messageId: `q-${seq}`, message: text(value), ...extra }) as SessionEvent;
+  const answer = (seq: number, value: string): SessionEvent =>
+    ({ kind: 'assistant_message', seq, time: T0 + seq * 1000, source: 'extension', turnId: `t${seq - 1}`, messageId: `a-${seq}`, message: text(value), final: true, state: 'final' }) as SessionEvent;
+  // A message with only a file and no text is not recalled.
+  const chat = () => [ask(1, 'First question'), answer(2, 'First answer'),
+    ask(3, '', { attachments: [{ id: 'f-1', name: 'notes.txt', mimeType: 'text/plain', size: 4 }] }), answer(4, 'Read it.'),
+    ask(5, 'Second question'), answer(6, 'Second answer')];
+  const composer = (w: { document: Document }) => w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  /** Presses a key in the composer; true when the app took it over from the textarea. */
+  const press = (w: JSDOM['window'], key: string, init: KeyboardEventInit = {}) => {
+    const event = new w.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
+    composer(w).dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+
+  it('fills an empty composer with your last message on ArrowUp, caret at the end, without sending it', async () => {
+    const { w, live } = await boot(chat());
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+    expect(composer(w).selectionStart).toBe('Second question'.length);
+    await settle();
+    expect(live.sent).toEqual([]);
+  });
+
+  it('goes further back with each ArrowUp and stops at your first message', async () => {
+    const { w } = await boot(chat());
+    press(w, 'ArrowUp');
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('First question');
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe('First question');
+  });
+
+  it('comes forward with ArrowDown and gives back the empty composer past the newest message', async () => {
+    const { w } = await boot(chat());
+    press(w, 'ArrowUp'); press(w, 'ArrowUp');
+    expect(press(w, 'ArrowDown')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+    expect(press(w, 'ArrowDown')).toBe(true);
+    expect(composer(w).value).toBe('');
+    expect(press(w, 'ArrowDown')).toBe(false);
+  });
+
+  it('leaves the arrows to a typed draft', async () => {
+    const { w } = await boot(chat());
+    composer(w).value = 'A draft I am writing';
+    composer(w).dispatchEvent(new w.Event('input', { bubbles: true }));
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe('A draft I am writing');
+  });
+
+  it.each([{ isComposing: true }, { altKey: true }, { ctrlKey: true }, { metaKey: true }, { shiftKey: true }])('recalls nothing with %o', async init => {
+    const { w } = await boot(chat());
+    expect(press(w, 'ArrowUp', init)).toBe(false);
+    expect(composer(w).value).toBe('');
+  });
+
+  it.each([false, true])('recalls nothing into a composer holding an attached file (attached after a recall: %s)', async recalledFirst => {
+    const { w } = await boot(chat());
+    if (recalledFirst) expect(press(w, 'ArrowUp')).toBe(true);
+    (w as any).api.chooseFiles = async () => ({ ok: true, data: [{ id: '11111111-2222-4333-8444-555555555555', name: 'image.png', mimeType: 'image/png', size: 42 }] });
+    w.document.getElementById('attachImages')!.click(); await settle();
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe(recalledFirst ? 'Second question' : '');
+  });
+
+  it('gives the arrows back once the recalled message is edited', async () => {
+    const { w } = await boot(chat());
+    expect(press(w, 'ArrowUp')).toBe(true);
+    composer(w).value = 'Second question, shorter please';
+    composer(w).dispatchEvent(new w.Event('input', { bubbles: true }));
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(press(w, 'ArrowDown')).toBe(false);
+    expect(composer(w).value).toBe('Second question, shorter please');
+  });
+
+  it('moves the caret through a recalled message of several lines before going further back', async () => {
+    const { w } = await boot([ask(1, 'First question'), answer(2, 'First answer'), ask(3, 'Line one\nLine two'), answer(4, 'Done.')]);
+    press(w, 'ArrowUp');
+    expect(composer(w).value).toBe('Line one\nLine two');
+    expect(press(w, 'ArrowUp')).toBe(false);
+    composer(w).setSelectionRange(2, 2);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('First question');
+  });
 });
