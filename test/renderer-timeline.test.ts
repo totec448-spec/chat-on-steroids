@@ -6221,6 +6221,17 @@ describe('edit and resubmit (#365)', () => {
     expect(live.sent.at(-1)).not.toHaveProperty('edit');
   });
 
+  it('counts every later message of a retried edit, whatever the agent filter shows', async () => {
+    const worker = { ...a(5, A2, 'Which bug?', 't2'), agent: 'worker-1' } as SessionEvent;
+    const { w, live, append } = await boot([q(1, Q1, 'First question', 't1'), a(2, A1, 'First answer', 't1'), end(3, 't1'),
+      q(4, Q2, 'Fix the logn bug', 't2'), worker, end(6, 't2')], true, [], [], { developerMode: true, summary: { conversationId: chat } });
+    w.document.querySelector<HTMLButtonElement>('#chatAgentFilter [data-agent="worker-1"]')!.click(); await settle();
+    expect(w.document.getElementById('timeline')!.textContent).not.toContain('First question');
+    live.inputs = [failedInput('First question, edited', { edit: { messageId: Q1 } })]; await append([]);
+    await retryDelivery(w as any);
+    expect(w.document.getElementById('editDraft')!.textContent).toContain('Editing your message · replaces 3 later messages');
+  });
+
   it('restores a failed edit whose question can no longer be edited as a new message, and says so', async () => {
     const replaced = [...exchange(), q(7, '6ad3a59b-0003-83eb-8bc4-8c84e68dd911', 'Fix the login bug', 't3', { replaces: Q2 }), end(8, 't3')];
     const { w, live, append } = await boot(replaced, true, [], [], { summary: { conversationId: chat } });
