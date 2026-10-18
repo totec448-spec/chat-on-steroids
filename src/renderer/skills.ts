@@ -359,7 +359,7 @@ export function initSkills(options: Options) {
     const retained = split(displayedPrefix).ids.filter(value => value !== name);
     project(`${retained.map(value => `/${value}\n`).join('')}${input.value}`);
   };
-  return { close, restore, authoredText, hasCommand, removeCommand, keydown: (event: KeyboardEvent): boolean => {
+  return { close, restore, open: (): boolean => !host.hidden, authoredText, hasCommand, removeCommand, keydown: (event: KeyboardEvent): boolean => {
     if (host.hidden || !current() || composing || event.isComposing) return false;
     if (!fragment() || painted !== selectionKey()) { hideInline(); return false; }
     if (event.key === 'Escape') { hideInline(); event.preventDefault(); return true; }
