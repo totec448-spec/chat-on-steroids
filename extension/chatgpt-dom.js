@@ -2495,7 +2495,7 @@ var CLF_DOM = (() => {
     channel.port2.postMessage(null);
   }
 
-  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true, matchesUser = null, observeEvidence = null, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null, receiptTimeoutMs = null, mention = null, explain = null, sentRequest = null, whileGenerating = false } = {}) {
+  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true, stillCurrentAfterClick = null, matchesUser = null, observeEvidence = null, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null, receiptTimeoutMs = null, mention = null, explain = null, sentRequest = null, whileGenerating = false } = {}) {
     // Why a Send ended without acceptance, as one short code for the caller's diagnostics (#820).
     // It names the first refusal only and never changes what Send does.
     const refused = (why) => { try { explain?.(why); } catch { /* Diagnostics never change Send. */ } return false; };
@@ -2626,7 +2626,10 @@ var CLF_DOM = (() => {
         };
         const check = () => {
           if (done) return;
-          if (!stillCurrent() || (beforeConversation && conversationId() !== beforeConversation)) return finish(false, 'chat-changed');
+          // A caller's deadline may forbid the click without disowning a click already made: its
+          // receipt is evidence the caller still has to report (#1086 worker starts).
+          const owned = attempted && stillCurrentAfterClick ? stillCurrentAfterClick : stillCurrent;
+          if (!owned() || (beforeConversation && conversationId() !== beforeConversation)) return finish(false, 'chat-changed');
           if (attempted) {
             if (accepted()) finish(true);
             return;

@@ -3603,6 +3603,9 @@ that claimed it is then settled by `adoptLateWorker`: the same failed worker rej
 the prime gets `[worker-N started late]`; otherwise the chat goes on the retired-worker fence and
 the prime gets `[worker-N started late, outside the run]`. Either way the ACK gets one durable
 final receipt (committed or terminal-failure); any other late ACK is still `no_such_command`.
+The page side has to send that ACK: a worker page's deadline forbids its Send click, not the report
+of one already made, so after the click `CLF_DOM.send` (`stillCurrentAfterClick`) and the wait for
+the new chat id hold only the exact send lifetime. A resume keeps the deadline throughout.
 Historical worker failures remain visible in status and history, but only live workers produce
 the transient waiting caption. A current canonical final
 uses the same completion reader as Continue/Goal and releases the worker before silence,

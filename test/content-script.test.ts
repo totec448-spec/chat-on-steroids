@@ -16714,6 +16714,33 @@ describe('the fresh chat the app opened', () => {
     }
   });
 
+  // #1086 (2.1.41, VM at 255 MB free): three worker pages pressed Send 38–48 s into their 90 s, saw
+  // their new chat only after their copy of the deadline, and returned without a word. The task was in
+  // ChatGPT either way; the app takes a late receipt back (adoptLateWorker) and has to get one.
+  it('reports a worker\'s new chat after Send even when it appears past the page\'s deadline', async () => {
+    let release!: (value: unknown) => void;
+    const redeemed = new Promise(resolve => { release = resolve; });
+    const workerChat = '26262626-3737-4848-8989-909090909090';
+    let clicked = false, page!: { document: Document; dom: JSDOM };
+    live = await harness('https://chatgpt.com/?clf=cmd-late', {
+      redeem: () => redeemed,
+      command_step: () => ({ ok: true }),
+      ack: () => ({ ok: true })
+    }, (document, dom) => {
+      page = { document, dom };
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => { clicked = true; });
+    }, false, true);
+    release({ ok: true, command: { id: 'cmd-late', type: 'worker', text: 'Late worker task', agent: 'worker-1',
+      expiresAt: (live.window as any).Date.now() + 90_000 } });
+    await vi.waitFor(() => expect(clicked).toBe(true));
+    // ChatGPT took the message; the page sees the new chat only after its copy of the deadline.
+    live.advance(120_000);
+    page.dom.reconfigure({ url: `https://chatgpt.com/c/${workerChat}` });
+    userTurn(page.document, 'late-worker-user', 'Late worker task', { sent: false });
+    await vi.waitFor(() => expect(live!.sent.find(message => message.type === 'ack'))
+      .toMatchObject({ id: 'cmd-late', status: 'sent', conversationId: workerChat }));
+  });
+
   it('reacquires a home composer replaced after model selection before placing a worker bootstrap', async () => {
     let release!: (value: unknown) => void;
     const redeemed = new Promise(resolve => { release = resolve; });
