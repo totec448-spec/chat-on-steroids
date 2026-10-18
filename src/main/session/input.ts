@@ -1186,6 +1186,13 @@ export function sendQueuedInputNow(id: string): Promise<boolean> {
 }
 
 /** Revalidate the same durable claim immediately before sending; never hand out text again. */
+/** The fresh-turn continue (#1402) this page claimed and is about to send, if that is what it is. */
+export async function claimedRotation(id: string, owner: string, conversationId: string): Promise<{ sessionId: string; turnId: string } | null> {
+  const row = (await load()).find(entry => entry.id === id && entry.owner === owner && entry.state === 'browser' &&
+    entry.conversationId === conversationId && entry.purpose === 'rotation' && entry.sendAuthorizedAt === undefined);
+  return row?.directTurn && row.sessionId ? { sessionId: row.sessionId, turnId: row.directTurn.id } : null;
+}
+
 /**
  * Retires a claimed fresh-turn continue (#1402) that would be sent into the running answer while no
  * tool call of the chat runs, and names its turn. Only during a call does a native send end the turn
