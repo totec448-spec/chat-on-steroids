@@ -122,6 +122,15 @@ it('does not block on a latest run that was skipped or neutral', async () => {
   expect(quiet.calls.at(-1)).toMatchObject({ path: `/repos/o/r/issues/7/labels/${NOT_READY_LABEL}`, init: { method: 'DELETE' } });
 });
 
+// Two GitHub Apps can report a check with the same name on one commit; a run supersedes only one from its own app.
+it('does not let another app\'s passing run of the same check hide a failed one', async () => {
+  const twoApps = fake({ '/repos/o/r/commits/abc/check-runs?per_page=100': { check_runs: [
+    { id: 1, name: 'CI', conclusion: 'failure', app: { id: 1 } }, { id: 2, name: 'CI', conclusion: 'success', app: { id: 2 } },
+    { id: 3, name: 'PR checklist', conclusion: 'success' }] } });
+  expect(await applyNotReady(twoApps.request, input('clear'))).toBe('kept (CI still failing)');
+  expect(twoApps.calls.some(call => call.init?.method === 'DELETE')).toBe(false);
+});
+
 it('converts with the optional draft token, since the workflow token never may', async () => {
   const labels = fake({});
   const drafts = fake({ '/graphql': { data: { convertPullRequestToDraft: { pullRequest: { isDraft: true } } } } });
