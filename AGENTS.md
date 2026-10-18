@@ -2706,6 +2706,14 @@ Loading alone and failed queries are not departure proof; replacement registrati
 Confirmed user removal or navigation sends a manual departure to the bridge. It suspends
 automatic browser recovery, including silence, Goal/queue and compaction pickups. Exact local
 tool execution remains visible under its existing activity deadline independently of tab presence.
+A start page the extension opened for a new chat's first message (`cos-input` marker, no chat)
+closes once `/status` sends `inputOpeningIds` without that id and hands out no entry for it, when the
+tab is unpinned, inactive and last used over five minutes ago, and the page answers
+`clf-close-cancelled-opening` as untouched. This covers a message that ended where the cancel path's
+own close entry never reached (a changed ChatGPT browser, an app restart); an app that sends no
+`inputOpeningIds` closes nothing this way. A worker or handoff start page (`clf` marker) closes the
+same way once `commandIds` no longer lists its command, as a worker that failed before its first
+message left one behind; the page check then compares the `clf` marker.
 Managed idle/retired/duplicate pruning records a successful removal against the exact tab,
 document, navigation epoch and conversation in the existing session-storage snapshot. Its
 lifecycle event carries a non-manual departure through the close outbox; it does not create
