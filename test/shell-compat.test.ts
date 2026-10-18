@@ -1205,6 +1205,43 @@ it('names no unrendered user message for a stale or foreign stamp', async () => 
   expect(named()).toEqual([]);
 });
 
+// 2.1.41 release round and #1662, Windows: in a chat's later turns ChatGPT keeps a message sent
+// into the running answer (a fresh-turn continue, or the person's own follow-up) in the same
+// exchange as the question it followed, as its own user slot. The whole exchange was skipped as
+// ambiguous, so the fresh turn's answer was never read and its turn never ended (stalled after
+// ten minutes). Distinct slots are distinct questions; only a duplicated slot stays ambiguous.
+it('reads an exchange whose later message was sent into the running answer', async () => {
+  const f = fixture();
+  f.entry.turn.status = 'complete';
+  const second = addExchange(f, 2, 'Second question');
+  const interim = '99999999-1111-4111-8111-000000000024', steered = '99999999-1111-4111-8111-000000000025';
+  const [question, answer] = second.entry.turn.items;
+  second.entry.turn.items = [question!,
+    { type: 'assistant-message', messageId: interim, content: 'Running step two', phase: 'commentary', completed: true } as any,
+    { type: 'user-message', messageId: steered, serverMessageId: steered, message: 'Continue the task from where you are.' } as any,
+    answer!];
+  second.entry.turn.messageIds = [second.userId, interim, steered, second.answerId];
+  const node = f.doc.querySelectorAll('[data-turn-key]')[1]!;
+  const turnKey = second.entry.id;
+  const slots = node.querySelector('[data-content-search-turn-key]')!;
+  slots.querySelector(`[data-content-search-unit-key="${turnKey}:1:assistant"]`)!.setAttribute('data-content-search-unit-key', `${turnKey}:3:assistant`);
+  const interimSlot = f.doc.createElement('div');
+  interimSlot.setAttribute('data-content-search-unit-key', `${turnKey}:1:assistant`);
+  interimSlot.innerHTML = '<div data-markdown-text-style="assistant-message">Running step two</div>';
+  const steeredSlot = f.doc.createElement('div');
+  steeredSlot.setAttribute('data-content-search-unit-key', `${turnKey}:2:user`);
+  steeredSlot.innerHTML = '<div data-user-message-bubble><div class="whitespace-pre-wrap">Continue the task from where you are.</div></div>';
+  slots.querySelector(`[data-content-search-unit-key="${turnKey}:0:user"]`)!.after(interimSlot, steeredSlot);
+  const thread = f.chain({ entries: [f.entry, second.entry] }, f.top);
+  f.row.return = thread;
+  (node as any).__reactFiber$fixture = f.chain({ entry: second.entry }, thread);
+  await f.ask();
+  const roles = f.api.turns().map((turn: any) => turn.role);
+  expect(roles).toEqual(['user', 'assistant', 'user', 'user', 'assistant']);
+  const users = f.api.messages().filter((m: any) => m.role === 'user').map((m: any) => m.id);
+  expect(users).toEqual([USER, second.userId, steered]);
+});
+
 it('still refuses an exchange whose user slot is ambiguous (#910)', () => {
   const f = fixture();
   const exchange = f.doc.querySelector('[data-turn-key]')!;
