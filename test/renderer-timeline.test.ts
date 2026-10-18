@@ -6236,6 +6236,29 @@ describe('prompt recall in the composer', () => {
     expect(composer(w).value).toBe('Second question, shorter please');
   });
 
+  // A recall ends with the composer's next change: the same text typed again by hand is a draft.
+  it.each(['sent', 'cleared'])('leaves the arrows to the same text typed again after a recall was %s', async how => {
+    const { w } = await boot(chat());
+    const input = composer(w);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    if (how === 'sent') { w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await settle(); }
+    else { input.select(); input.setRangeText(''); input.dispatchEvent(new w.Event('input', { bubbles: true })); }
+    expect(input.value).toBe('');
+    input.value = 'Second question'; input.dispatchEvent(new w.Event('input', { bubbles: true }));
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(input.value).toBe('Second question');
+  });
+
+  it('keeps a refused recalled message in the composer when ArrowDown is pressed', async () => {
+    const { w } = await boot(chat());
+    expect(press(w, 'ArrowUp')).toBe(true);
+    (w as any).api.sendInput = async () => ({ ok: false, error: 'Not delivered' });
+    w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await settle();
+    expect(composer(w).value).toBe('Second question');
+    expect(press(w, 'ArrowDown')).toBe(false);
+    expect(composer(w).value).toBe('Second question');
+  });
+
   it('moves the caret through a recalled message of several lines before going further back', async () => {
     const { w } = await boot([ask(1, 'First question'), answer(2, 'First answer'), ask(3, 'Line one\nLine two'), answer(4, 'Done.')]);
     press(w, 'ArrowUp');
