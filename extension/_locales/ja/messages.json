@@ -38,6 +38,9 @@
   "content_bootstrap_composer_replaced": {
     "message": "初期メッセージの挿入中に ChatGPT が入力欄を置き換えました"
   },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPTが開始用の使用可能な入力欄を表示しませんでした"
+  },
   "content_bootstrap_composer_unavailable": {
     "message": "モデル選択後にChatGPTが使用可能な入力欄を再表示しませんでした"
   },

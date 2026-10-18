@@ -430,6 +430,7 @@
   "[{0} is awake again]": "[{0} 已再次唤醒]",
   "[{0} is back]": "[{0} 已返回]",
   "{0} resumed work": "{0} 已恢复工作",
+  "{0} started late": "{0} 延迟启动",
   "[{0} reported]": "[{0} 已汇报]",
   "[{0} finished]": "[{0} 已完成]",
   "{0} finished · report": "{0} 已完成 · 报告",

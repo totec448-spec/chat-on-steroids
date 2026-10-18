@@ -129,4 +129,21 @@ describe('extension localization catalogs', () => {
     expect(used.length).toBeGreaterThan(0);
     for (const key of used) expect(english[key], `missing English extension message ${key}`).toBeDefined();
   });
+
+  // #1086: two different failures shared one key, so the page that never got a message box reported
+  // "after model selection" in every language. A key names one text, and English says what the code says.
+  it('gives every content t() key one English text, the one its call site falls back to', async () => {
+    const content = await readFile(path.join(extension, 'content.js'), 'utf8');
+    const english = await catalog('en');
+    const fallbacks = new Map<string, Set<string>>();
+    for (const match of content.matchAll(/\bt\(\s*'([a-z0-9_]+)'\s*,\s*'((?:[^'\\]|\\.)*)'/g)) {
+      const text = match[2]!.replace(/\\'/g, "'");
+      fallbacks.set(match[1]!, (fallbacks.get(match[1]!) ?? new Set()).add(text));
+    }
+    expect(fallbacks.size).toBeGreaterThan(10);
+    for (const [key, texts] of fallbacks) {
+      expect([...texts], `${key} is used for different texts`).toHaveLength(1);
+      expect((english[key] as { message: string }).message, `${key}: English differs from its fallback`).toBe([...texts][0]);
+    }
+  });
 });

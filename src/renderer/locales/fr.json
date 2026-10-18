@@ -428,6 +428,7 @@
   "[{0} is awake again]": "[{0} est de nouveau actif]",
   "[{0} is back]": "[{0} est de retour]",
   "{0} resumed work": "{0} a repris le travail",
+  "{0} started late": "{0} a commencé en retard",
   "[{0} reported]": "[{0} a fait son rapport]",
   "[{0} finished]": "[{0} a terminé]",
   "{0} finished · report": "{0} a terminé · rapport",

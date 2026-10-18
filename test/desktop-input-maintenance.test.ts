@@ -1045,6 +1045,19 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     expect([...rendered]).toEqual([]);
     expect(h.create).not.toHaveBeenCalled();
   });
+  // #1086 (2.1.41, Windows VM): a worker tab got its rendering lease only at the next status pass, up
+  // to 40 s after it opened. Until then the hidden, throttled page loaded, chose its model and waited for
+  // ChatGPT's composer so slowly that workers missed their start deadline. Its page asks for the lease
+  // the moment it registers.
+  it('renders a command tab as soon as its page registers, without waiting for the next pass', async () => {
+    const rendered = new Set<number>(), marker = `https://chatgpt.com/?clf=${firstId}`;
+    const h = await worker([], undefined, {}, { discardProtectedTabs: { 7: { commandId: firstId, at: Date.now(), url: marker, conversationId: null } } }, rendered);
+    const tab = { id: 7, url: marker }; h.tabs.push(tab);
+    h.fetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, app: 'chat-on-steroids',
+      bridge: BRIDGE_PROTOCOL, compatible: true, paired: true, commandIds: [firstId], inputs: [], nonDiscardableConversations: [] }) });
+    await h.authorizeDocument({ tab, documentId: 'first', frameId: 0, url: marker }, { navigationEpoch: 1 });
+    await vi.waitFor(() => expect([...rendered]).toEqual([7]));
+  });
   it('releases command rendering after document replacement and hands a bound worker to ordinary live activity', async () => {
     const rendered = new Set<number>(), marker = `https://chatgpt.com/?clf=${firstId}`;
     const h = await worker([], undefined, {}, { discardProtectedTabs: { 7: { commandId: firstId, at: Date.now(), url: marker, conversationId: null } } }, rendered);

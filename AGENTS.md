@@ -3589,10 +3589,30 @@ The page reports how far it got with `/commands/step` (`{ id, client, step }`), 
 answering, a non-empty editor, or no usable editor yet; re-reported when the reason changes;
 older pages send `revival-waiting`), then
 `composer`, `model`, `composer-after-model`, `inserting`, `sending` from the redeeming page.
-Reports are fire-and-forget and advisory: they change no lease, deadline or outcome, a report
-from a page that does not own the command is ignored, and they never carry text, titles or
-addresses. Expiry names the last one, or whether the browser or the OS opened the chat and no
+Reports are fire-and-forget and advisory: they change no lease or outcome, a report from a page
+that does not own the command is ignored, and they never carry text, titles or addresses. One
+changes a deadline: a worker's `sending` gives its receipt `WORKER_SENDING_GRACE_MS` from that
+report (bounded), because a page that pressed Send may already have delivered the task (#1086).
+Expiry names the last one, or whether the browser or the OS opened the chat and no
 page picked it up, so "did not report back in time" says where a start stopped (#882 worker-11).
+A worker given up for time after a page claimed it (no page-reported failure) is a late-start
+candidate for `LATE_START_WINDOW_MS`, in memory only (#1086: on a memory-starved machine a page's
+reports reached the app 20–90 s after it sent). A `sent` ACK with a conversation from the page
+that claimed it is then settled by `adoptLateWorker`: the same failed worker rejoins its family
+(live, or parked and woken) when its chat is free and a slot is free, its inbox is restored and
+the prime gets `[worker-N started late]`; otherwise the chat goes on the retired-worker fence and
+the prime gets `[worker-N started late, outside the run]`. Either way the ACK gets one durable
+final receipt (committed or terminal-failure); any other late ACK is still `no_such_command`.
+The page side has to send that ACK: a worker page's deadline forbids its Send click, not the report
+of one already made, so after the click `CLF_DOM.send` (`stillCurrentAfterClick`) and the wait for
+the new chat id hold only the exact send lifetime. A resume keeps the deadline throughout.
+A worker page then waits for its exact receipt in 40 s rounds for up to `WORKER_RECEIPT_WAIT_MS`
+(a hidden tab on a starved machine drew it minutes late), and sends its ACK again with backoff
+while the extension gives no answer (its worker was stopped or restarting and nothing reached the
+outbox). Both stop when the page or its send lifetime ends.
+Before that, a worker's first wait for ChatGPT's message box uses its remaining budget less 20 s
+(a resume or wake keeps 12 s), and a box that never appeared is reported as
+`content_bootstrap_composer_never_ready`, apart from one lost after model selection (#1086).
 Historical worker failures remain visible in status and history, but only live workers produce
 the transient waiting caption. A current canonical final
 uses the same completion reader as Continue/Goal and releases the worker before silence,

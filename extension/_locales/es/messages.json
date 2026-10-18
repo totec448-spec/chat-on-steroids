@@ -38,6 +38,9 @@
   "content_bootstrap_composer_replaced": {
     "message": "ChatGPT sustituyó el redactor mientras se insertaba el inicio"
   },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPT no mostró un editor utilizable para el arranque"
+  },
   "content_bootstrap_composer_unavailable": {
     "message": "ChatGPT no volvió a mostrar un editor utilizable tras seleccionar el modelo"
   },
