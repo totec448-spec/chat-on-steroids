@@ -11,7 +11,7 @@ export function prState({ checks, lastPushAt, lastMaintainerAt }) {
   return lastMaintainerAt && Date.parse(lastMaintainerAt) > Date.parse(lastPushAt) ? 'author' : 'review';
 }
 
-/** Only each check's latest run per app counts; anything but success, neutral or skipped is a failure. */
+/** Only each check's latest run per app counts (main() asks for every run with `filter=all`); anything but success, neutral or skipped is a failure. */
 export function checksState(checkRuns) {
   const runs = checkRuns.filter(run => !checkRuns.some(other => other.name === run.name && other.app?.id === run.app?.id && other.id > run.id));
   return runs.some(run => run.status !== 'completed') ? 'pending'
@@ -46,7 +46,7 @@ async function main() {
   for (const pr of await github(`/repos/${repository}/pulls?state=open&per_page=100`, token)) {
     if (pr.draft || MAINTAINER.has(pr.author_association) || pr.user.type === 'Bot') continue;
     const [runs, commits, reviews, comments] = await Promise.all([
-      github(`/repos/${repository}/commits/${pr.head.sha}/check-runs?per_page=100`, token),
+      github(`/repos/${repository}/commits/${pr.head.sha}/check-runs?per_page=100&filter=all`, token),
       github(`/repos/${repository}/pulls/${pr.number}/commits?per_page=100`, token),
       github(`/repos/${repository}/pulls/${pr.number}/reviews?per_page=100`, token),
       github(`/repos/${repository}/issues/${pr.number}/comments?per_page=100`, token)
