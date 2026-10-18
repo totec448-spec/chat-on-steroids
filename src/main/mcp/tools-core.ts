@@ -1257,9 +1257,9 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
     toolDeclaration('agents', () => ({
       title: 'Multi-agent run',
       description:
-        'Runs ChatGPT workers. Without model/reasoning_effort, saved app defaults apply; overrides are for explicit user requests, so users need not choose. A suitable sleeping worker is reused with message, not respawned. ' +
+        'Runs ChatGPT workers. Without model/reasoning_effort, saved app defaults apply; they are set only for a user’s explicit request. A suitable sleeping worker is reused with message, not respawned. ' +
         'message: prime↔worker. Reports arrive with tool results, not by restarting an idle prime. ' +
-        'status: your active, sleeping/revivable and terminal workers, incl. parked families, and pending reports; one call before a final answer collects them, else the answer says review is pending. Repeated polling adds nothing. finish: records the report, then normally sleeps.',
+        'status: your active, sleeping/revivable and terminal workers, incl. parked families, and pending reports; one call before a final answer collects them. Repeated polling adds nothing. finish: records the report, then normally sleeps.',
       inputSchema: z.object({
         action: z.enum(['spawn', 'message', 'status', 'finish']).describe('What to do.'),
         run_id: z.string().uuid().optional().describe('Select your returned worker family when status lists several; never grants another caller’s workers.'),
@@ -1286,13 +1286,13 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                 .max(80)
                 .optional()
                 .describe(
-                  'Omit unless explicitly requested by the user; app settings supply defaults. Use an exact account-observed model id or provider alias. Invalid overrides return observed ids before opening; the browser confirms availability before Send.'
+                  'Only for a model the user asked for; app settings supply the default. An exact account-observed model id or provider alias. Invalid overrides return observed ids before opening; the browser checks availability before Send.'
                 ),
               reasoning_effort: z
                 .enum(REASONING_EFFORTS)
                 .optional()
                 .describe(
-                  'Omit unless explicitly requested by the user; app settings supply defaults. Do not ask just to spawn a worker. This selects reasoning only, never a model.'
+                  'Only for an effort the user asked for; app settings supply the default. Selects reasoning only, never a model.'
                 )
             }).strict()
           )
@@ -1300,7 +1300,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           .max(8)
           .optional()
           .describe(
-            'spawn: fresh workers to create only after checking status for a suitable sleeping worker; revive one explicitly with message.'
+            'spawn: fresh workers; status lists sleeping workers that message can revive instead.'
           ),
         messages: z
           .array(
@@ -1314,7 +1314,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           .max(16)
           .optional()
           .describe(
-            'message: atomic batch; prefer this to one call per recipient.'
+            'message: atomic batch for several recipients in one call.'
           ),
         to: z
           .string()
