@@ -2889,6 +2889,37 @@ async function applyRequestedBrowserPreferences(request) {
   await call('/browser/preferences', { method: 'POST', body: JSON.stringify(receipt) });
 }
 
+/** A marked start page this old, for a message the app no longer lists, is left over. */
+const LEFTOVER_OPENING_MS = 5 * 60_000;
+/**
+ * Closes a start page this extension opened for a new chat's first message once the app no longer
+ * lists that message at all. The cancel path closes it through its own entry, but a claim that
+ * outlived a change of ChatGPT browser and an app restart left one on ChatGPT's start page for 13
+ * hours (2.1.41 bug hunt). Only an old, inactive, unpinned page closes, and only when the page
+ * proves it untouched: its own marker, no chat, nothing typed, attached or sent.
+ */
+async function closeLeftoverOpenings(tabs, listed, handed) {
+  for (const tab of tabs) {
+    if (!Number.isInteger(tab.id) || tab.pinned || tab.active || tab.pendingUrl || conversationFromUrl(tab.url)) continue;
+    if (!Number.isFinite(tab.lastAccessed) || Date.now() - tab.lastAccessed < LEFTOVER_OPENING_MS) continue;
+    let id = null;
+    try {
+      const url = new URL(tab.url || '');
+      if (url.origin !== 'https://chatgpt.com') continue;
+      id = url.searchParams.get('cos-input') || new URLSearchParams(url.hash.slice(1)).get('cos-input');
+    } catch { continue; }
+    if (!id || !/^[a-f0-9-]{36}$/i.test(id) || listed.has(id) || handed.has(id)) continue;
+    const source = { tab: tab.id, documentId: tabDocuments[String(tab.id)], navigationEpoch: tabEpochs[String(tab.id)] };
+    if (!ownsDocument(source)) continue;
+    try {
+      const proof = await tabReply(tab.id, { type: 'clf-close-cancelled-opening', id }, { documentId: source.documentId });
+      const current = await chrome.tabs.get(tab.id);
+      if (proof?.safe === true && ownsDocument(source) && current && !current.pinned && !current.active &&
+          !current.pendingUrl && current.url === tab.url) await chrome.tabs.remove(tab.id);
+    } catch { /* only the exact, still-owned, untouched start page closes */ }
+  }
+}
+
 /** Retire idle app-owned documents and redundant copies, preserving exact unsent drafts. */
 
 async function pruneManagedTabs(tabs, policy, protectedChats, closable) {
@@ -3253,6 +3284,9 @@ async function maintainOnce() {
   void revealChats(reply.data.reveals).catch(() => undefined);
   void followChat(reply.data.follow).catch(() => undefined);
   void runImageExports(reply.data.imageExports).catch(() => undefined);
+  // Only the app's own list of open messages may call a marked page left over; an older app sends none.
+  if (Array.isArray(reply.data.inputOpeningIds)) void closeLeftoverOpenings(observedTabs, liveOpenings,
+    new Set((Array.isArray(reply.data.inputs) ? reply.data.inputs : []).map(input => input?.id))).catch(() => undefined);
   const renderingWanted = tab => {
     if (intent !== connectionEpoch || !token || disconnected) return false;
     if (liveChats.has(conversationForTab(tab))) return true;

@@ -829,6 +829,23 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     else expect(h.remove).not.toHaveBeenCalled();
     expect(h.create).not.toHaveBeenCalled();
   });
+  it.each(['left-over', 'recent', 'active', 'listed', 'typed-into', 'no-list'])('closes a start page the app opened for a message it no longer lists (%s)', async mode => {
+    // 2.1.41 bug hunt: a new chat's opening tab outlived its message (claimed, then the chosen browser
+    // changed and the app restarted) and sat on ChatGPT's start page for 13 hours. The cancel path's
+    // close entry never came. A marked, untouched start page the app no longer lists now closes.
+    const inputs = mode === 'listed' ? [{ id: firstId, conversationId: null }] : [];
+    const h = await worker(inputs, undefined, {}, {}, mode === 'no-list' ? undefined : new Set<number>());
+    const url = `https://chatgpt.com/?cos-input=${firstId}#cos-input=${firstId}`;
+    h.tabs.push({ id: 7, url, active: mode === 'active', lastAccessed: Date.now() - (mode === 'recent' ? 60_000 : 13 * 3_600_000) } as any);
+    await h.authorizeDocument({ tab: { id: 7 }, documentId: 'opening', frameId: 0, url }, { navigationEpoch: 1 });
+    h.sendMessage.mockImplementation(async (_tab, message: any) =>
+      (message.type === 'clf-close-cancelled-opening' ? { safe: mode !== 'typed-into' } : { ok: true, ready: true }) as never);
+    await h.maintain();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    if (mode === 'left-over') expect(h.remove).toHaveBeenCalledWith(7);
+    else expect(h.remove).not.toHaveBeenCalledWith(7);
+    expect(h.create).not.toHaveBeenCalled();
+  });
   it('never opens a helper for passive model observation, including repeated maintenance', async () => {
     const h = await worker([]);
     const request = { nonce: firstId, expiresAt: Date.now() + 60000, allowOpen: false };
