@@ -287,7 +287,7 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
     json: async () => new URL(input).pathname === '/hello'
       ? { app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true }
       : { ok: true, inputs, background: true, modelCatalogRequest,
-        ...(rendered ? { inputOpeningIds: inputs.map(input => input.id), nonDiscardableConversations: inputs.map(input => input.conversationId).filter(Boolean) } : {}) }
+        ...(rendered ? { inputOpeningIds: inputs.map(input => input.id), commandIds: [], nonDiscardableConversations: inputs.map(input => input.conversationId).filter(Boolean) } : {}) }
   }));
   const scripting = { executeScript: vi.fn(async ({ target, func }: any): Promise<any[]> => {
     const documentId = (saved.tabDocuments as Record<string, string> | undefined)?.[target.tabId];
@@ -845,6 +845,23 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     if (mode === 'left-over') expect(h.remove).toHaveBeenCalledWith(7);
     else expect(h.remove).not.toHaveBeenCalledWith(7);
     expect(h.create).not.toHaveBeenCalled();
+  });
+  it.each(['left-over', 'live', 'typed-into'])('closes the start page of a worker or handoff the app no longer lists (%s)', async mode => {
+    // 2.1.41 bug hunt: a worker that failed before its first message (memory-starved VM) left its
+    // `?clf=` start page open after the run had parked.
+    const h = await worker([], undefined, {}, {}, new Set<number>());
+    if (mode === 'live') h.fetch.mockImplementation(async (input: string) => ({ ok: true, status: 200, json: async () => new URL(input).pathname === '/hello'
+      ? { app: 'chat-on-steroids', bridge: BRIDGE_PROTOCOL, compatible: true, paired: true }
+      : { ok: true, inputs: [], background: true, inputOpeningIds: [], commandIds: ['df36e44ae2a5446f'] } }));
+    const url = 'https://chatgpt.com/?clf=df36e44ae2a5446f#clf=df36e44ae2a5446f';
+    h.tabs.push({ id: 7, url, lastAccessed: Date.now() - 10 * 60_000 } as any);
+    await h.authorizeDocument({ tab: { id: 7 }, documentId: 'worker', frameId: 0, url }, { navigationEpoch: 1 });
+    h.sendMessage.mockImplementation(async (_tab, message: any) =>
+      (message.type === 'clf-close-cancelled-opening' ? { safe: mode !== 'typed-into' && message.command === 'df36e44ae2a5446f' } : { ok: true, ready: true }) as never);
+    await h.maintain();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    if (mode === 'left-over') expect(h.remove).toHaveBeenCalledWith(7);
+    else expect(h.remove).not.toHaveBeenCalledWith(7);
   });
   it('never opens a helper for passive model observation, including repeated maintenance', async () => {
     const h = await worker([]);
