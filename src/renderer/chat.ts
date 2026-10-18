@@ -40,7 +40,7 @@ import { DEFAULT_HELPER_CHAT_MODEL, isAstraModel } from '../shared/chat-models.j
 import { supportsFinishAutomation } from '../shared/finish.js';
 import { answerAnchors, messageAnswerAnchors } from '../shared/markdown-export.js';
 import type { InputImage, InputAttachment, InputAutomation } from '../shared/input.js';
-import { injectableAttachments, queuedFollowup, MAX_INPUT_IMAGES } from '../shared/input.js';
+import { authoredTextOf, injectableAttachments, queuedFollowup, MAX_INPUT_IMAGES } from '../shared/input.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
 import type { DictationEvent } from '../shared/dictation.js';
 import { PROJECT_COLORS, type LocalProject, type ProjectColor } from '../shared/projects.js';
@@ -6964,8 +6964,10 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   if (entry.attachments?.length) files.append(...entry.attachments.map(file => attachmentCard(file)));
   for (const image of entry.images ?? []) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; files.append(preview); }
   if (files.childElementCount) row.append(files);
-  if (entry.text) {
-    const text = el('div', 'pending-message-text', entry.text);
+  // What the person wrote: a plan's first message shows their request, as it will once recorded.
+  const authored = authoredTextOf(entry);
+  if (authored) {
+    const text = el('div', 'pending-message-text', authored);
     text.setAttribute('dir', 'auto');
     row.append(text);
   }

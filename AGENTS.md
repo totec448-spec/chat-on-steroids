@@ -4782,7 +4782,8 @@ tokens, bearer and basic headers, JWTs, URL passwords, private keys, MCP endpoin
 it is cut to a fixed size, and carries the stored length and a `truncated` flag; the stored
 record is never changed. That is a list of shapes, not a guarantee: other secrets typed into a
 chat pass through, which is why the switch and the token matter. A user message shows what the
-user wrote (`authoredText`), not the framed text the app delivered. Asset ids, request ids and
+user wrote (`authoredText`), not the framed text the app delivered; for a plan's first message
+that is the request the person typed (`authoredSource: 'objective'`), not stage 1's generated wording. Asset ids, request ids and
 outbox owners, delivery-only prompt text, attachment paths and recovery bookkeeping (apart from
 the deadlines `live` reports) do not appear. Unknown, repeated or malformed query parameters are refused with 400, page sizes are
 capped, session ids match only in their generated lowercase spelling (a differently cased
