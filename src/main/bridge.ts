@@ -1,5 +1,5 @@
 import { nextWorkerArchive, settleWorkerArchive } from './worker-archive.js';
-import { considerTurnRotation, type RotationDeps } from './turn-rotation.js';
+import { considerTurnRotation, declineTurnRotation, type RotationDeps } from './turn-rotation.js';
 import { conversationProgress } from './session/progress.js';
 import { cosSignInTransfer, SignInTransferError } from './cos-browser/sign-in-transfer.js';
 import { externalBrowserProof, noteExternalInstalled, noteExternalSignedIn, resetBrowserProofForTests } from './browser-proof.js';
@@ -20,7 +20,7 @@ import { injectedUserMessage, recordedRequestTurn, responseTurnId, type Timeline
 import type { SessionSummary } from '../shared/session.js';
 import { messageReferences } from '../shared/session.js';
 import { turnTrace } from '../shared/turn-trace.js';
-import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, fileRotationInput, type InputActivity } from './session/input.js';
+import { publishBrowserDecision, authorizeBrowserInput, declineRotationSteer, sessionInputPolicy, collectRecordedBrowserDecision, fileRotationInput, type InputActivity } from './session/input.js';
 import { authorizedPluginRefreshPublications, hasRequestedPluginRefresh, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
 import { attachBrowserWake, wakeBrowserWork } from './browser-wake.js';
 import { tunnelRouteSettling } from './tunnel/route-settle.js';
@@ -2886,7 +2886,21 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       if (deferred) changed();
       return json(res, 200, { ok: deferred }, origin);
     }
-    if (body.authorize === true) return json(res, 200, { ok: await authorizeBrowserInput(body.id, body.owner, target) }, origin);
+    if (body.authorize === true) {
+      // #1402: a fresh-turn continue goes into the running turn only while one of its tool calls
+      // runs; then ChatGPT ends the turn and carries on. While the model writes its answer it would
+      // land after the answer, unanswered. Retired here and tried again at a later tool result.
+      if (body.intoTurn === true && target && runningToolCalls(target) === 0) {
+        const turnId = await declineRotationSteer(body.id, body.owner, target);
+        if (turnId) {
+          declineTurnRotation(target, turnId, Date.now());
+          logInfo(`turn rotation: ${target} — the model was answering, not running a tool; turn ${turnId} continues as it is for now`);
+          changed();
+          return json(res, 200, { ok: false }, origin);
+        }
+      }
+      return json(res, 200, { ok: await authorizeBrowserInput(body.id, body.owner, target) }, origin);
+    }
     // A message for the running turn may go in while a call runs, exactly as /status offers it;
     // claimBrowserInput still requires that same turn. Everything else waits for the call.
     if (target && runningToolCalls(target) > 0 &&
