@@ -2479,7 +2479,7 @@
   "Inbox sidebar": "받은편지함 사이드바",
   "Optional: all your chats together, active ones first. Under Appearance → Sidebar layout.": "선택 사항: 모든 채팅을 한곳에, 활성 채팅을 먼저 보여 줍니다. 모양 → 사이드바 레이아웃에서 설정합니다.",
   "Sub-agents that start": "확실히 시작되는 서브에이전트",
-  "They start reliably on a busy computer, and one that starts late rejoins its run.": "바쁜 컴퓨터에서도 확실히 시작되고, 늦게 시작된 것도 실행에 다시 합류합니다.",
+  "Reliable on a busy computer; one that starts late rejoins its run.": "바쁜 컴퓨터에서도 확실하게 시작되고, 늦게 시작한 것도 실행에 합류합니다.",
   "Projects on a server, Skills and files anywhere in the composer, and a repair for Mac permissions.": "서버의 프로젝트, 입력란 어디서나 쓰는 Skill과 파일, 그리고 Mac 권한 복구.",
   "Projects on a server": "서버의 프로젝트",
   "Add a folder over SSH; ChatGPT reads, edits and runs commands there with your own SSH setup.": "SSH로 폴더를 추가하면 ChatGPT가 사용자의 SSH 설정으로 그곳에서 파일을 읽고 수정하며 명령을 실행합니다.",

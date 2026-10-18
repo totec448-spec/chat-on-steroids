@@ -69,7 +69,7 @@ app.whenReady().then(async () => {
     const inkInsets=element=>sharedInkInsets(win,js,element);
 
     for (const theme of ['dark','light']) {
-      await open(`theme=${theme}&seen=2.1.40&version=2.1.41`);
+      await open(`lang=en&theme=${theme}&seen=2.1.40&version=2.1.41`);
       await until(`document.getElementById('whatsNewDialog').open`);
       // Measure only once every entry animation has finished: a row still sliding up reads as an
       // icon sitting low in its badge.
@@ -130,7 +130,7 @@ app.whenReady().then(async () => {
     await shot('whats-new-de.png');
 
     // Escape dismisses it the same way.
-    await open('seen=2.1.40&version=2.1.41');
+    await open('lang=en&seen=2.1.40&version=2.1.41');
     await until(`document.getElementById('whatsNewDialog').open`);
     await pause(1100);
     win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'}); win.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'});
@@ -138,7 +138,7 @@ app.whenReady().then(async () => {
 
     // A short window: the list scrolls inside the dialog and both actions stay in view.
     win.setContentSize(720,460);
-    await open('seen=2.1.40&version=2.1.41');
+    await open('lang=en&seen=2.1.40&version=2.1.41');
     await until(`document.getElementById('whatsNewDialog').open`);
     await pause(1100);
     const short=await js(`(()=>{const d=document.getElementById('whatsNewDialog').getBoundingClientRect(),a=document.querySelector('.whats-new-actions').getBoundingClientRect(),l=document.getElementById('whatsNewList');
@@ -148,11 +148,11 @@ app.whenReady().then(async () => {
     win.setContentSize(1180,760);
 
     // Nothing on the same version, and nothing (but a record) on a version without highlights.
-    await open('seen=2.1.30&version=2.1.30');
+    await open('lang=en&seen=2.1.30&version=2.1.30');
     await pause(1200);
     assert.equal(await js(`document.getElementById('whatsNewDialog').open`),false,'Same version: no dialog');
     assert.equal(await js('window.seenCalls'),0,'Same version: nothing recorded');
-    await open('seen=2.1.30&version=9.9.9');
+    await open('lang=en&seen=2.1.30&version=9.9.9');
     await pause(1200);
     assert.equal(await js(`document.getElementById('whatsNewDialog').open`),false,'No highlights: no dialog');
     assert.equal(await js('window.seenCalls'),1,'No highlights: the version is still recorded');

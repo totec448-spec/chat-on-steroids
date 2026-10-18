@@ -2479,7 +2479,7 @@
   "Inbox sidebar": "收件匣側邊欄",
   "Optional: all your chats together, active ones first. Under Appearance → Sidebar layout.": "選用：所有聊天集中顯示，活躍的排在前面。在 外觀 → 側邊欄版面配置 中設定。",
   "Sub-agents that start": "可靠啟動的子代理",
-  "They start reliably on a busy computer, and one that starts late rejoins its run.": "在忙碌的電腦上也能可靠啟動，較晚啟動的也會重新加入它的執行。",
+  "Reliable on a busy computer; one that starts late rejoins its run.": "在忙碌的電腦上也很可靠，較晚啟動的也會重新加入執行。",
   "Projects on a server, Skills and files anywhere in the composer, and a repair for Mac permissions.": "伺服器上的專案、輸入框中隨處可用的 Skills 和檔案，以及 Mac 權限修復。",
   "Projects on a server": "伺服器上的專案",
   "Add a folder over SSH; ChatGPT reads, edits and runs commands there with your own SSH setup.": "透過 SSH 新增資料夾；ChatGPT 會用你自己的 SSH 設定在那裡讀取、編輯並執行指令。",

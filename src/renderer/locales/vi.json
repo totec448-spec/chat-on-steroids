@@ -2479,7 +2479,7 @@
   "Inbox sidebar": "Thanh bên Hộp thư đến",
   "Optional: all your chats together, active ones first. Under Appearance → Sidebar layout.": "Tùy chọn: mọi cuộc trò chuyện ở một nơi, cuộc đang hoạt động lên đầu. Trong Giao diện → Bố cục thanh bên.",
   "Sub-agents that start": "Tác nhân phụ luôn khởi động",
-  "They start reliably on a busy computer, and one that starts late rejoins its run.": "Chúng khởi động ổn định cả trên máy tính đang bận, và tác nhân khởi động muộn sẽ quay lại lượt chạy của nó.",
+  "Reliable on a busy computer; one that starts late rejoins its run.": "Ổn định cả trên máy tính đang bận; tác nhân khởi động muộn sẽ quay lại lượt chạy.",
   "Projects on a server, Skills and files anywhere in the composer, and a repair for Mac permissions.": "Dự án trên máy chủ, Skills và tệp ở bất kỳ đâu trong ô soạn tin, và cách sửa quyền trên Mac.",
   "Projects on a server": "Dự án trên máy chủ",
   "Add a folder over SSH; ChatGPT reads, edits and runs commands there with your own SSH setup.": "Thêm một thư mục qua SSH; ChatGPT đọc, chỉnh sửa và chạy lệnh ở đó bằng thiết lập SSH của bạn.",

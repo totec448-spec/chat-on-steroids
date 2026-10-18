@@ -2553,7 +2553,7 @@
   "Inbox sidebar": "Barra lateral Bandeja de entrada",
   "Optional: all your chats together, active ones first. Under Appearance → Sidebar layout.": "Opcional: todos tus chats juntos, los activos primero. En Apariencia → Diseño de la barra lateral.",
   "Sub-agents that start": "Subagentes que arrancan",
-  "They start reliably on a busy computer, and one that starts late rejoins its run.": "Arrancan de forma fiable en un ordenador ocupado, y uno que arranca tarde vuelve a su ejecución.",
+  "Reliable on a busy computer; one that starts late rejoins its run.": "Fiables en un ordenador ocupado; uno que arranca tarde vuelve a su ejecución.",
   "Projects on a server, Skills and files anywhere in the composer, and a repair for Mac permissions.": "Proyectos en un servidor, Skills y archivos en cualquier parte del editor y una reparación para los permisos de Mac.",
   "Projects on a server": "Proyectos en un servidor",
   "Add a folder over SSH; ChatGPT reads, edits and runs commands there with your own SSH setup.": "Añade una carpeta por SSH; ChatGPT lee, edita y ejecuta comandos allí con tu propia configuración de SSH.",
