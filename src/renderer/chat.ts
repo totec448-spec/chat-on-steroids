@@ -1093,7 +1093,8 @@ async function sendTypedCommand(controlAction: boolean): Promise<void> {
   const rest = input.value.slice(typed[0].length).replace(/^\s+/, '');
   input.value = rest;
   input.dispatchEvent(new Event('input', { bubbles: true }));
-  runComposerCommand(name);
+  // The menu's Plan is a toggle; a typed /plan only arms, so an armed Plan stays armed.
+  if (name !== 'plan' || !taskPlans.has(draftKey())) runComposerCommand(name);
   if (MODE_COMMANDS.has(name) && rest.trim()) $<HTMLFormElement>('composer').requestSubmit();
 }
 function openChatSummary(): SessionSummary | null {

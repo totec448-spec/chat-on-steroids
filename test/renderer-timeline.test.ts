@@ -5894,6 +5894,20 @@ it('drafts a plan from the rest of a typed /plan, and leaves a bare /goal waitin
   expect(input.value).toBe('');
 });
 
+it('keeps Plan armed and drafts the plan when /plan is typed with Plan already armed', async () => {
+  const app = await boot([]);
+  (app.w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+  const drafted: string[] = [];
+  (app.w as any).api.draftTaskPlan = async (text: string) => { drafted.push(text); return { ok: false, error: 'stopped in test' }; };
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  app.w.document.getElementById('createPlan')!.click(); await settle();
+  input.value = '/plan refactor the parser';
+  app.w.document.getElementById('composer')!.dispatchEvent(new app.w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle(); await settle();
+  expect(app.live.sent).toHaveLength(0);
+  expect(drafted).toEqual(['refactor the parser']);
+});
+
 it('runs a typed /rename on the open chat without sending anything', async () => {
   const { w, live, input } = await typed('/rename', [], true);
   expect(w.document.querySelector('#sessionList .sess-rename')).not.toBeNull();
