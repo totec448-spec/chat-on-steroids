@@ -1231,5 +1231,11 @@
   },
   "popup_detail_total": {
     "message": "toplam $1"
+  },
+  "content_edit_message_missing": {
+    "message": "Bu mesaj artık ChatGPT sayfasında değil, bu yüzden düzenlenemez."
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT bu mesaj için Düzenle seçeneği sunmadı. Sohbeti ChatGPT'de açıp yeniden deneyin."
   }
 }

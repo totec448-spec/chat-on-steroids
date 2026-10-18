@@ -24026,3 +24026,79 @@ describe('branch in new chat (#482)', () => {
     expect(claims).toEqual([]);
   });
 });
+
+describe('edit and resubmit (#365)', () => {
+  const inputId = 'eeeeeeee-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const chat = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const question = '6ad3a59b-1111-83eb-8bc4-8c84e68dd911';
+  const edited = '6ad3a59b-2222-83eb-8bc4-8c84e68dd911';
+  const text = 'Fix the login bug';
+  const offer = () => ({ type: 'clf-desktop-input', id: inputId, conversationId: chat, edit: { messageId: question } });
+  async function editPage(options: { authorize?: boolean; failure?: string } = {}) {
+    const claims: Array<Record<string, any>> = [];
+    live = await harness(`https://chatgpt.com/c/${chat}`, {
+      desktop_input: message => { claims.push(message); return { ok: true, data: message.authorize ? { ok: options.authorize !== false }
+        : message.ack || message.fail ? { ok: true } : { input: { id: inputId, owner: 'input-owner', text, model: null, reasoningEffort: null, purpose: 'user', images: [] } } }; }
+    });
+    live.hook.observe(); await settle();
+    const row = (id: string, value: string) => { const node = live!.document.createElement('div'); node.textContent = value; live!.document.body.append(node); return { id, role: 'user', text: value, node }; };
+    let users = [row(question, 'Fix the logn bug')];
+    live.window.CLF_DOM.messages = () => users;
+    const editor = { current: vi.fn(() => true), write: vi.fn(() => true), cancel: vi.fn(),
+      submit: vi.fn(() => { users = [row(edited, text)]; return true; }) };
+    const openQuestionEdit = vi.fn(async () => options.failure ? { failure: options.failure } : editor);
+    live.window.CLF_DOM.openQuestionEdit = openQuestionEdit;
+    return { claims, editor, openQuestionEdit };
+  }
+
+  it('resubmits the question through ChatGPT\'s editor and acknowledges the new version', async () => {
+    const { claims, editor, openQuestionEdit } = await editPage();
+    expect(await live!.runtimeMessage(offer())).toEqual({ ok: true });
+    expect(openQuestionEdit).toHaveBeenCalledWith(question, expect.any(Function));
+    expect(editor.write).toHaveBeenCalledWith(text, expect.any(Function));
+    expect(editor.submit).toHaveBeenCalledTimes(1);
+    expect(editor.cancel).not.toHaveBeenCalled();
+    expect(claims.find(message => message.authorize)).toMatchObject({ id: inputId, conversationId: chat });
+    expect(claims.filter(message => message.ack)).toEqual([expect.objectContaining({ messageId: edited, conversationId: chat })]);
+    // The composer is never touched by an edit.
+    expect(live!.document.querySelector('#prompt-textarea')!.textContent).toBe('');
+  });
+
+  it('says the question is gone when the page no longer shows it, and sends nothing', async () => {
+    const { claims } = await editPage({ failure: 'edit_message_missing' });
+    expect(await live!.runtimeMessage(offer())).toEqual({ ok: false });
+    expect(claims.find(message => message.fail)).toMatchObject({ error: 'That message is no longer on the ChatGPT page, so it cannot be edited.' });
+    expect(claims.some(message => message.authorize)).toBe(false);
+  });
+
+  it('closes ChatGPT\'s editor, leaving the question as it was, when the app withdraws the send', async () => {
+    const { claims, editor } = await editPage({ authorize: false });
+    expect(await live!.runtimeMessage(offer())).toEqual({ ok: false });
+    expect(editor.submit).not.toHaveBeenCalled();
+    expect(editor.cancel).toHaveBeenCalledTimes(1);
+    expect(claims.some(message => message.ack)).toBe(false);
+  });
+
+  // Live 2.1.41 (VM): a question ChatGPT edited in place was recorded from the page as written,
+  // without its tree place, because only the model report carries it and that report skipped every
+  // question the page already showed with the same text. The edit then read as a new question.
+  it('records where a question the page already shows sits in ChatGPT\'s message tree', async () => {
+    live = await harness(`https://chatgpt.com/c/${chat}`);
+    const section = userTurn(live.document, 'tree-user', 'Fix the login bug', { sent: false });
+    live.hook.observe(); await settle(); await live.hook.flush();
+    await bindFiberTurns([{ section, turn: { turnId: 'tree-turn', conversationId: chat,
+      messages: [{ role: 'user', stable: true, messageId: 'm-tree-user', rawMessageId: 'm-tree-user', rawText: 'Fix the login bug', parentId: 'answer-1', parentExact: true }] } }]);
+    live.hook.observe(); await settle(); await live.hook.flush();
+    const reports = emitted(live.sent, 'user_message').filter(entry => entry.event.messageId === 'm-tree-user');
+    expect(reports.some(entry => entry.event.parentId === 'answer-1' && entry.event.parentExact === true)).toBe(true);
+    expect(reports.every(entry => entry.event.text === 'Fix the login bug')).toBe(true);
+  });
+
+  it('claims nothing while a turn is running', async () => {
+    const { claims, openQuestionEdit } = await editPage();
+    live!.window.CLF_DOM.generating = () => true;
+    expect(await live!.runtimeMessage(offer())).toEqual({ ok: false });
+    expect(claims).toEqual([]);
+    expect(openQuestionEdit).not.toHaveBeenCalled();
+  });
+});
