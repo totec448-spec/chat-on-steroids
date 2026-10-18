@@ -2625,7 +2625,7 @@ async function refreshSessionControls(): Promise<void> {
     objective.value = opening?.objective ?? ''; objective.disabled = true;
     objective.dataset.sessionId = id;
     for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
-    paintAutomationSwitch(); paintDeliveryControls();
+    paintAutomationSwitch(); paintDeliveryControls(); repaintHeld();
     return;
   }
   const controls = await run(api.getSessionControls(id));
@@ -2645,6 +2645,7 @@ async function refreshSessionControls(): Promise<void> {
   controlledRecovery = controls?.recovery ?? [];
   paintDeliveryControls();
   paintStateLine();
+  repaintHeld();
   menu.hidden = !controls;
   $('compactSession').hidden = !controls;
   if (!controls) { $('cancelCompaction').hidden = true; return; }
@@ -3280,55 +3281,70 @@ function nativePromptCards(root: ParentNode): Array<{ group: Element; anchor: st
   return cards;
 }
 
-const LIST_ITEM = /^\s*(?:[-*+]|\d+[.)])\s/;
+/** A list's first item: indented four spaces or more, it is code. */
+const LIST_ITEM = /^ {0,3}(?:[-*+]|\d+[.)])\s/;
 /** A list item, or a line indented into one. */
 const LIST_LINE = /^\s*(?:[-*+]|\d+[.)])\s|^(?: {2,}|\t)/;
+/** A line of an indented code block. */
+const CODE_LINE = /^(?: {4,}|\t)/;
 /**
  * The finished blocks of an answer ChatGPT is still writing: up to its last blank line outside an
  * open code fence, writing block or display formula, or the end of a fence or writing block that
- * closed. The block after it waits until it is finished too, so each one appears whole. A list
- * appears once a finished line ends it: a blank line between its items makes the whole list loose
- * when the next item arrives, so a cut there would redraw it.
+ * closed. The block after it waits until it is finished too, so each one appears whole. A list or
+ * an indented code block appears once a line ends it: a blank line between its items makes the
+ * whole list loose when the next item arrives, and one inside the code would split its block, so
+ * a cut there would redraw it.
  */
 export function finishedBlocks(text: string): string {
   const lines = text.split('\n');
   let fence: RegExp | null = null, writing = false, math: string | null = null;
-  // In a list, the end of its last blank line: a cut once the next line does not continue the list.
-  let list = false, gap: number | null = null;
-  let end = 0, at = 0;
+  // In a list or indented code, the end of its last blank line: a cut once a line does not continue it.
+  let hold: 'list' | 'code' | null = null, gap: number | null = null;
+  let end = 0, at = 0, afterBlank = true;
   // The last line has no newline yet: it is still being written.
   for (const raw of lines.slice(0, -1)) {
     at += raw.length + 1;
     const line = raw.replace(/\r$/, '');
-    if (gap !== null && line.trim()) {
-      // A list line continues the list; anything else after a blank line ends it.
-      if (!LIST_LINE.test(line)) { end = gap; list = false; }
+    if (hold && line.trim()) {
+      // A list goes on with its lines (any line, before a blank one); code with indented lines only.
+      if (hold === 'list' ? gap !== null && !LIST_LINE.test(line) : !CODE_LINE.test(line)) {
+        if (gap !== null) end = gap;
+        hold = null;
+      }
       gap = null;
     }
     // A backtick fence's info string has no backtick: "```code``` is odd." is inline code.
     const opens = /^ {0,3}(`{3,}(?=[^`]*$)|~{3,})/.exec(line)?.[1];
     if (fence) {
-      if (fence.test(line)) { fence = null; if (!writing && !list) end = at; }
+      if (fence.test(line)) { fence = null; if (!writing && !hold) end = at; }
+    } else if (hold === 'code') {
+      if (!line.trim()) gap = at;
     } else if (opens) {
       fence = new RegExp(`^ {0,3}${opens[0]}{${opens.length},}[ \\t]*$`);
     } else if (writing) {
       if (/^:::[ \t]*$/.test(line)) { writing = false; end = at; }
     } else if (math) {
       if (line.includes(math)) math = null;
-    } else if (/^:::writing\b/.test(line)) {
+    } else if (/^:::writing(?:\{[^}\n]*\})?[ \t]*$/.test(line)) {
+      // The opener `writingBlock` reads; ":::writing example" is a paragraph.
       writing = true;
-    } else if (/^\s*(?:\\\[|\$\$)/.test(line)) {
+    } else if ((hold === 'list' ? /^\s*(?:\\\[|\$\$)/ : /^(?:\\\[|\$\$)/).test(line)) {
+      // The math tokenizer opens a formula at the start of a line; a list item's indent is not part of it.
       const closer = line.trimStart().startsWith('$$') ? '$$' : '\\]';
       if (!line.trimStart().slice(2).includes(closer)) math = closer;
-    } else if (LIST_ITEM.test(line)) {
-      list = true;
+    } else if (!hold && afterBlank && CODE_LINE.test(line)) {
+      hold = 'code';
+    } else if (!hold && LIST_ITEM.test(line)) {
+      hold = 'list';
     } else if (!line.trim()) {
-      if (list) gap = at; else end = at;
+      if (hold) gap = at; else end = at;
     }
+    afterBlank = !line.trim();
   }
-  // A paragraph's line is complete only once it is done: the line being written ends the list as soon
-  // as it starts with what no item or indent can (a letter, `#`, `|`). A digit, marker or space may still.
-  if (gap !== null && /^[^\s\d*+-]/.test(lines.at(-1)!)) end = gap;
+  // A paragraph's line is complete only once it is done: the line being written ends the block as soon
+  // as it starts with what cannot continue it (a letter, `#`, `|`). A digit, marker or space may still
+  // continue a list, and a space indented code.
+  if (gap !== null && (hold === 'list' ? /^[^\s\d*+-]/ : /^\S/).test(lines.at(-1)!)) end = gap;
   return text.slice(0, end);
 }
 
@@ -5141,10 +5157,22 @@ function composerSessionSelection(summary: SessionSummary | null | undefined) {
  * The message ChatGPT is writing in the working turn, by seq, and what of it shows: its finished
  * blocks. Only the turn's newest event can be one, while not final: interim and stopped messages
  * stay "streaming" for good, so once anything follows it or the turn ends it shows whole. A
- * directive's captured page is not this text's blocks and shows whole too.
+ * directive's captured page is not this text's blocks and shows whole too. Until this chat's
+ * controls arrive, its recorded open turn counts as working: the rows can paint first, and showing
+ * the tail then would take it back once they say the turn works. Once they arrive they decide, so
+ * a turn left open without an end (a crash, a lost tab) shows its message whole.
  */
+/** The message the last paint held back, by seq. */
+let heldAtPaint: number | null = null;
+/** Controls that change whether the turn works repaint the message they hold back, or release. */
+function repaintHeld(): void {
+  if (detailFor === selectedId && (messageBeingWritten()?.seq ?? null) !== heldAtPaint) paintDetail();
+}
+
 function messageBeingWritten(): { seq: number; shown: string } | null {
-  const turn = stateLine().working && timelineReachesEnd() ? openTurnId(events) : null;
+  const known = !!deps.state()?.config.ui.developerMode || (controlledSessionId === selectedId && controlledSelection === selectionGeneration);
+  const working = known ? stateLine().working : detailFor === selectedId;
+  const turn = working && timelineReachesEnd() ? openTurnId(events) : null;
   const tail = turn ? events.findLast(event => !event.turnId || event.turnId === turn) : undefined;
   if (tail?.kind !== 'assistant_message' || tail.final || tail.state === 'final' || hasProviderDirective(tail.message.text)) return null;
   return { seq: tail.seq, shown: finishedBlocks(tail.message.text) };
@@ -5224,6 +5252,7 @@ function paintDetail(followBottom = historyBefore === null): void {
   const items = timelineItems(shown);
   const latestCompaction = items.filter(item => item.kind === 'compaction').at(-1);
   const writing = messageBeingWritten();
+  heldAtPaint = writing?.seq ?? null;
   for (const item of items) {
     if (item.kind === 'event' && duplicateErrors.has(item.event.seq)) continue;
     appendRetiredInputs(item.kind === 'event' ? item.event.time : item.block.time);
@@ -5238,9 +5267,11 @@ function paintDetail(followBottom = historyBefore === null): void {
       !!item.event.messageId && looseAnchors.get(item.event.messageId) === item.event.seq;
     const held = item.kind === 'event' && item.event.kind === 'assistant_message' && writing && item.event.seq === writing.seq
       ? { ...item.event, message: { ...item.event.message, text: writing.shown, chars: writing.shown.length } } : null;
-    // A held message is drawn again only when a block finishes: each chunk advances its seq and grows
-    // the page's capture, neither of which changes what it shows. Its final text is not held.
-    const sig = (held ? `${itemSignature({ kind: 'event', event: { ...held, seq: 0, renderedHtml: undefined } })}\u0000held` : itemSignature(item)) + (item.kind === 'event' && item.event.kind === 'chat_error'
+    // A held message is drawn again only when a block finishes or its sources change: each chunk
+    // advances its seq and grows the page's capture, neither of which changes what it shows. Its
+    // final text is not held.
+    const sig = (held ? `${itemSignature({ kind: 'event', event: { ...held, seq: 0, renderedHtml: undefined } })}\u0000held${JSON.stringify(held.references ?? [])}`
+      : itemSignature(item)) + (item.kind === 'event' && item.event.kind === 'chat_error'
       ? JSON.stringify(chatErrorPresentation(item.event, events)) : '') + (answerTurn || looseAnswer ? '\u0000answer' : '') +
       (item.kind === 'event' && stoppedTurnEnd(item.event, events) ? '\u0000stopped' : '') +
       (item.kind === 'compaction' && item !== latestCompaction ? '\u0000superseded' : '');
