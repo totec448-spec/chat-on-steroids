@@ -6497,4 +6497,16 @@ describe('prompt recall in the composer', () => {
     expect(press(w, key)).toBe(false);
     expect(composer(w).value).toBe(long);
   });
+
+  // The slash/file menu reads the caret on the input event, so the caret must already be at the start.
+  it('opens no slash menu for a message ending in /… that ArrowUp recalls with the caret at the start', async () => {
+    const { w } = await boot([ask(1, 'First question'), answer(2, 'First answer'), ask(3, 'Use /zzz'), answer(4, 'Done.')]);
+    (w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Use /zzz');
+    expect(composer(w).selectionStart).toBe(0);
+    expect(w.document.getElementById('skillPicker')!.hidden).toBe(true);
+    await settle();
+    expect(w.document.getElementById('skillPicker')!.hidden).toBe(true);
+  });
 });
