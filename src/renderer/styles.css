@@ -3813,11 +3813,13 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .round-recap .thinking-ico { color: var(--faint); }
 .is-entering { animation: round-enter 220ms ease-out both; }
 .activity-title.is-entering { animation: round-title 260ms ease-out both; }
+/* A block an answer gains while ChatGPT writes it fades in place: a moving block would shift the text being followed. */
+.msg.rich > .is-entering { animation: round-title 350ms ease-out both; }
 @keyframes round-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @keyframes round-title { from { opacity: 0; } to { opacity: 1; } }
 @keyframes round-open { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
-  .is-entering, .activity-title.is-entering, .tool-group[open] > .tool-group-body { animation: none; }
+  .is-entering, .activity-title.is-entering, .msg.rich > .is-entering, .tool-group[open] > .tool-group-body { animation: none; }
 }
 .agent-avatar { --hue: #7d6198; display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: 0 0 16px; border-radius: 6px; font-size: calc(9px * var(--text-scale, 1)); line-height: 1; background: var(--hue); color: #fff; }
 .agent-avatar[data-color='1'] { --hue: #ac793a; }
