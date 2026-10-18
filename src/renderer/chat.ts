@@ -2166,6 +2166,12 @@ function laterMessageCounts(items: readonly TimelineItem[]): Map<number, number>
   return later;
 }
 
+/** Whether the chat has messages older than the loaded ones, as the reader pages them in. */
+function olderHistoryPending(): boolean {
+  const oldest = events.reduce((least, event) => Math.min(least, residenceOf(event)), Infinity);
+  return Number.isFinite(oldest) && oldest > 1 && oldest !== historyStart;
+}
+
 /** The Edit action under one of your questions. */
 function questionActions(event: Extract<SessionEvent, { kind: 'user_message' }>, later: number): HTMLElement {
   const bar = el('div', 'question-actions');
@@ -7001,14 +7007,17 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
       const input = $<HTMLTextAreaElement>('chatInput');
       // An edit in progress is an unsent draft too, even with the composer cleared: retrying must not replace it.
       if (authoredComposerText().trim() || imageDrafts.get(draftKey())?.length || editingQuestion?.sessionId === selectedId) { toast(t("Send or clear your current draft before retrying this message.")); return; }
+      // A failed edit stays an edit of that question; if it cannot be edited any more it is a new message.
+      const edit = entry.edit && selectedId && (entry.sessionId ?? entry.deliveredSessionId) === selectedId ? entry.edit : null;
+      const question = edit && events.find(event => event.kind === 'user_message' && event.messageId === edit.messageId);
+      // Editing needs the question and what follows it; an older one is not loaded until it is scrolled to.
+      if (edit && !question && olderHistoryPending()) { toast(t("Scroll up to the message you edited, then retry.")); return; }
       replaceComposerDraft();
       input.value = entry.text;
-      // A failed edit stays an edit of that question; if it cannot be edited any more it is a new message.
-      if (entry.edit && selectedId && (entry.sessionId ?? entry.deliveredSessionId) === selectedId) {
-        const question = events.find(event => event.kind === 'user_message' && event.messageId === entry.edit!.messageId);
+      if (edit) {
         if (question && editableQuestion(question, events)) {
           const later = laterMessageCounts(timelineItems(foldAgentCommunication(visibleEvents()))).get(question.seq) ?? 0;
-          editingQuestion = { sessionId: selectedId, messageId: entry.edit.messageId, later, previousDraft: '' };
+          editingQuestion = { sessionId: selectedId!, messageId: edit.messageId, later, previousDraft: '' };
         } else toast(t("That message can no longer be edited, so this is restored as a new message."));
       }
       if (entry.images?.length) imageDrafts.set(draftKey(), [...entry.images]);

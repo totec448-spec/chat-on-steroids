@@ -740,6 +740,7 @@
   "Restore this message to the composer for review and sending": "Restaurer ce message dans le composeur pour le vérifier et l'envoyer",
   "Send or clear your current draft before retrying this message.": "Envoyez ou effacez votre brouillon actuel avant de réessayer ce message.",
   "That message can no longer be edited, so this is restored as a new message.": "Ce message ne peut plus être modifié ; il est donc restauré comme un nouveau message.",
+  "Scroll up to the message you edited, then retry.": "Faites défiler vers le haut jusqu'au message que vous avez modifié, puis réessayez.",
   "Message queued. Browser startup failed:": "Message mis en file. Le démarrage du navigateur a échoué :",
   "Retry browser": "Réessayer le navigateur",
   "Helper delivery was not confirmed. Its old chat may still be running.": "La livraison de l'assistant auxiliaire n'a pas été confirmée. Son ancien chat est peut-être encore en cours.",

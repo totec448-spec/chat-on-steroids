@@ -721,6 +721,7 @@
   "Restore this message to the composer for review and sending": "このメッセージを入力欄に戻して、確認してから送信",
   "Send or clear your current draft before retrying this message.": "このメッセージを再試行する前に、現在の下書きを送信するか消去してください。",
   "That message can no longer be edited, so this is restored as a new message.": "このメッセージはもう編集できないため、新しいメッセージとして復元しました。",
+  "Scroll up to the message you edited, then retry.": "編集したメッセージまで上にスクロールしてから、もう一度試してください。",
   "Message queued. Browser startup failed:": "メッセージをキューに追加しました。ブラウザーの起動に失敗しました：",
   "Retry browser": "ブラウザーを再試行",
   "Helper delivery was not confirmed. Its old chat may still be running.": "補助チャットへの送信を確認できませんでした。元のチャットはまだ実行中の可能性があります。",

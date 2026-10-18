@@ -710,6 +710,7 @@
   "Restore this message to the composer for review and sending": "Diese Nachricht zum Prüfen und Senden zurück ins Eingabefeld holen",
   "Send or clear your current draft before retrying this message.": "Sende oder leere deinen aktuellen Entwurf, bevor du diese Nachricht erneut versuchst.",
   "That message can no longer be edited, so this is restored as a new message.": "Diese Nachricht kann nicht mehr bearbeitet werden, daher wird sie als neue Nachricht wiederhergestellt.",
+  "Scroll up to the message you edited, then retry.": "Scrolle nach oben zur bearbeiteten Nachricht und versuche es dann erneut.",
   "Message queued. Browser startup failed:": "Nachricht eingereiht. Der Browser konnte nicht gestartet werden:",
   "Retry browser": "Browser erneut versuchen",
   "Helper delivery was not confirmed. Its old chat may still be running.": "Die Zustellung an den Helfer wurde nicht bestätigt. Sein alter Chat läuft möglicherweise noch.",
