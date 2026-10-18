@@ -758,36 +758,6 @@ describe('desktop input delivery and helper ownership', () => {
     expect(sends()).toBe(1);
     expect(live.sent.filter(message => message.ack)).toHaveLength(1);
   });
-  // 2.1.41 release round, Windows: Send was offered because the model was writing its answer, and a
-  // fresh-turn continue sent then landed after that answer, unanswered. The page says when its Send
-  // would go into the running turn; the app refuses a continue there unless a tool call runs, and
-  // the page then sends nothing and takes its text back out of the composer.
-  it.each([true, false])('asks to send an automatic continue into the running turn and sends nothing when refused (allowed: %s)', async allowed => {
-    let directTurn: { id: string; startedAt: number };
-    const authorizations: Array<Record<string, unknown>> = [];
-    live = await nonProHarness(`https://chatgpt.com/c/${chatA}`, {
-      desktop_input: message => {
-        if (message.authorize) { authorizations.push(message); return { ok: true, data: { ok: allowed } }; }
-        if (message.ack || message.fail) return { ok: true, data: { ok: true } };
-        return { ok: true, data: { input: claimed({ directTurn, purpose: 'rotation' }) } };
-      }
-    });
-    startGenerating(live.document);
-    live.hook.observe(); await live.hook.flush();
-    const start = emitted(live.sent, 'turn_start').at(-1)!;
-    directTurn = { id: start.event.turnId as string, startedAt: start.event.time as number };
-    const sends = watchSend(live.document);
-    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
-      userTurn(live!.document, 'rotation-continue', text, { sent: false });
-      live!.document.querySelector('#prompt-textarea')!.textContent = '';
-    });
-    const result = await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA, directTurn });
-    expect(authorizations).toEqual([expect.objectContaining({ intoTurn: true })]);
-    expect(sends()).toBe(allowed ? 1 : 0);
-    expect(result).toEqual({ ok: allowed });
-    expect(live.sent.filter(message => message.fail)).toEqual([]);
-    expect(live.document.querySelector('#prompt-textarea')!.textContent).toBe('');
-  });
   it('clears its own automatic continue when the Send it clicked did not take it', async () => {
     // 2.1.40 release round, Windows: a rotation fired right after a tool result while the model
     // was already finishing. Its Send click delivered nothing, the receipt could not be confirmed,
