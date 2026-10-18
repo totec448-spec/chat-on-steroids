@@ -6590,4 +6590,40 @@ describe('prompt recall in the composer', () => {
     composer(w).dispatchEvent(new w.Event('input', { bubbles: true }));
     expect(region.textContent).toBe('');
   });
+
+  it('ends a recall when the agent filter changes', async () => {
+    const { w } = await boot([ask(1, 'Main question', { agent: 'prime' }), answer(2, 'Main answer'), ask(3, 'Unattributed question'), answer(4, 'Unattributed answer')],
+      true, [], [], { developerMode: true });
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Unattributed question');
+    w.document.querySelector<HTMLButtonElement>('#chatAgentFilter [data-agent="prime"]')!.click(); await settle();
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe('Unattributed question');
+  });
+
+  it('leaves an arrow to a slash menu that was showing, even when the caret moved off its fragment', async () => {
+    const { w } = await boot([ask(1, 'First question'), answer(2, 'First answer'), ask(3, 'Use /zzz'), answer(4, 'Done.')]);
+    (w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+    press(w, 'ArrowUp'); press(w, 'ArrowUp');
+    composer(w).setSelectionRange(14, 14);
+    expect(press(w, 'ArrowDown')).toBe(true); await settle();
+    expect(w.document.getElementById('skillPicker')!.hidden).toBe(false);
+    // Home moves the caret without an input event; the menu is still on screen.
+    composer(w).setSelectionRange(0, 0);
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe('Use /zzz');
+  });
+
+  it('reads out the same message again when it is recalled in the next chat', async () => {
+    const other = { ...summary([]), id: '2026-10-17-other001', title: 'Other chat' };
+    const { w } = await boot(chat(), true, [], [], { sessions: [summary(chat()), other] });
+    const region = w.document.getElementById('recallAnnounce')!;
+    press(w, 'ArrowUp');
+    expect(region.textContent).toBe('Second question');
+    (w.document.querySelector(`#sessionList [data-id="${other.id}"]`) as HTMLElement).click(); await settle();
+    // The other chat's empty composer: the region must change before the same text can be read again.
+    expect(region.textContent).toBe('');
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(region.textContent).toBe('Second question');
+  });
 });
