@@ -5858,6 +5858,54 @@ it('opens New chat, Usage, Plugins, Pets and the diagnostics report from their c
   expect(w.document.querySelector('[data-tab="usage"]')!.classList.contains('is-sel') || w.document.querySelector('[data-tab="usage"]')!.getAttribute('aria-selected') === 'true').toBe(true);
 });
 
+// 2.1.41 release round: "/goal …" typed or pasted and sent without picking it from the menu went out as
+// a Skill named "goal" and failed ("Skill "goal" is unavailable in this project"). A leading app command
+// is that command unless a Skill has the name; Goal, Loop and Plan then send the rest as the mode would.
+async function typed(text: string, skills: Array<{ id: string; name: string }> = [], selectExisting = false) {
+  const app = await boot([], selectExisting);
+  (app.w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: skills.map(skill => ({ ...skill, description: '', path: `/skills/${skill.id}/SKILL.md`, scope: 'user', source: 'user', managed: true })), roots: [], errors: [], includeInstructions: true } });
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = text;
+  app.w.document.getElementById('composer')!.dispatchEvent(new app.w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle(); await settle();
+  return { ...app, input };
+}
+
+it('runs a typed /goal as the Goal command and sends the rest as its message', async () => {
+  const { w, live } = await typed('/goal Reply with exactly: done');
+  expect((w.document.getElementById('chatAutomation') as HTMLSelectElement).value).toBe('goal');
+  expect(live.sent.at(-1)).toMatchObject({ text: 'Reply with exactly: done', automation: 'goal' });
+  expect(live.sent.some((sent: any) => /^\/goal/.test(sent.text))).toBe(false);
+});
+
+it('drafts a plan from the rest of a typed /plan, and leaves a bare /goal waiting for its message', async () => {
+  const app = await boot([]);
+  (app.w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+  const drafted: string[] = [];
+  (app.w as any).api.draftTaskPlan = async (text: string) => { drafted.push(text); return { ok: false, error: 'stopped in test' }; };
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  const submit = () => app.w.document.getElementById('composer')!.dispatchEvent(new app.w.Event('submit', { bubbles: true, cancelable: true }));
+  input.value = '/plan Add a settings page'; submit(); await settle(); await settle();
+  expect(drafted).toEqual(['Add a settings page']);
+  app.w.document.getElementById('newChat')!.click(); await settle();
+  input.value = '/goal'; submit(); await settle(); await settle();
+  expect((app.w.document.getElementById('chatAutomation') as HTMLSelectElement).value).toBe('goal');
+  expect(app.live.sent).toHaveLength(0);
+  expect(input.value).toBe('');
+});
+
+it('runs a typed /rename on the open chat without sending anything', async () => {
+  const { w, live, input } = await typed('/rename', [], true);
+  expect(w.document.querySelector('#sessionList .sess-rename')).not.toBeNull();
+  expect(live.sent).toHaveLength(0);
+  expect(input.value).toBe('');
+});
+
+it('keeps a typed /goal a Skill directive when a Skill has that name', async () => {
+  const { live } = await typed('/goal Reply with exactly: done', [{ id: 'goal', name: 'Goal' }]);
+  expect(live.sent.at(-1)).toMatchObject({ text: '/goal Reply with exactly: done' });
+});
+
 it('offers chat-only commands only while a chat is open', async () => {
   const { w } = await slash('', false);
   const listed = [...w.document.querySelectorAll<HTMLElement>('#skillPicker .slash-menu-option')].map(row => row.title);
