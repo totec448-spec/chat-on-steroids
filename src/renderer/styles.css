@@ -930,11 +930,14 @@ main {
 [data-panel='activity'] {
   padding: 46px 36px 36px;
   grid-template-rows: minmax(0, 1fr);
+  /* The same gutter as every scrolling settings page, so this one does not sit half a bar wider;
+     a window too short for the log's floor scrolls the page. */
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .activity-content {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
 }
 
