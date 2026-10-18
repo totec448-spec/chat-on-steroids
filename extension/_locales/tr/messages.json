@@ -38,6 +38,9 @@
   "content_bootstrap_composer_replaced": {
     "message": "ChatGPT, başlangıç metni eklenirken mesaj alanını değiştirdi"
   },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPT başlangıç için kullanılabilir bir ileti alanı göstermedi"
+  },
   "content_bootstrap_composer_unavailable": {
     "message": "Model seçiminden sonra ChatGPT kullanılabilir bir ileti alanını yeniden göstermedi"
   },

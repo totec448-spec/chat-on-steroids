@@ -16796,6 +16796,51 @@ describe('the fresh chat the app opened', () => {
     expect(live.sent.filter(message => message.type === 'ack').every(message => message.conversationId === workerChat)).toBe(true);
   });
 
+  // #1086 (2.1.41, VM): a hidden worker tab showed ChatGPT's message box after 12 s, so the page failed with
+  // 70 of its 90 s unused — and said "after model selection" for a box it never had.
+  it('waits for a worker\'s first message box within its own budget, not a fixed 12 s', async () => {
+    let release!: (value: unknown) => void;
+    const redeemed = new Promise(resolve => { release = resolve; });
+    const workerChat = '29292929-3a3a-4b4b-8c8c-909090909090';
+    let box!: Element, home!: Element;
+    live = await harness('https://chatgpt.com/?clf=cmd-box', {
+      redeem: () => redeemed,
+      command_step: () => ({ ok: true }),
+      ack: () => ({ ok: true })
+    }, (document, dom) => {
+      box = document.querySelector('#prompt-textarea')!; home = box.parentElement!; box.remove();
+      document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+        dom.reconfigure({ url: `https://chatgpt.com/c/${workerChat}` });
+        userTurn(document, 'box-worker-user', 'Box worker task', { sent: false });
+      });
+    });
+    const harnessTimeout = (live.window as any).setTimeout;
+    (live.window as any).setTimeout = (fn: () => void, ms?: number) => {
+      // The box draws only once the page waits longer than the old fixed 12 s.
+      if (Number(ms) > 12_000 && !box.isConnected) home.prepend(box);
+      return harnessTimeout(fn, ms);
+    };
+    release({ ok: true, command: { id: 'cmd-box', type: 'worker', text: 'Box worker task', agent: 'worker-1',
+      expiresAt: (live.window as any).Date.now() + 90_000 } });
+    await vi.waitFor(() => expect(live!.sent.find(message => message.type === 'ack'))
+      .toMatchObject({ id: 'cmd-box', status: 'sent', conversationId: workerChat }));
+  });
+
+  it('says a worker\'s message box never appeared, not that it vanished after model selection', async () => {
+    let release!: (value: unknown) => void;
+    const redeemed = new Promise(resolve => { release = resolve; });
+    live = await harness('https://chatgpt.com/?clf=cmd-nobox', {
+      redeem: () => redeemed,
+      command_step: () => ({ ok: true }),
+      ack: () => ({ ok: true })
+    }, document => { document.querySelector('#prompt-textarea')!.remove(); });
+    release({ ok: true, command: { id: 'cmd-nobox', type: 'worker', text: 'No box task', agent: 'worker-1',
+      expiresAt: (live.window as any).Date.now() + 90_000 } });
+    await vi.waitFor(() => expect(live!.sent.find(message => message.type === 'ack'))
+      .toMatchObject({ id: 'cmd-nobox', status: 'failed', error: 'ChatGPT never exposed a usable composer for bootstrap' }));
+    expect(live.sent.filter(message => message.type === 'command_step').map(message => message.step)).toEqual(['composer']);
+  });
+
   it('reacquires a home composer replaced after model selection before placing a worker bootstrap', async () => {
     let release!: (value: unknown) => void;
     const redeemed = new Promise(resolve => { release = resolve; });

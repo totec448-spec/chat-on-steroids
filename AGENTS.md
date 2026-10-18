@@ -3610,6 +3610,9 @@ A worker page then waits for its exact receipt in 40 s rounds for up to `WORKER_
 (a hidden tab on a starved machine drew it minutes late), and sends its ACK again with backoff
 while the extension gives no answer (its worker was stopped or restarting and nothing reached the
 outbox). Both stop when the page or its send lifetime ends.
+Before that, a worker's first wait for ChatGPT's message box uses its remaining budget less 20 s
+(a resume or wake keeps 12 s), and a box that never appeared is reported as
+`content_bootstrap_composer_never_ready`, apart from one lost after model selection (#1086).
 Historical worker failures remain visible in status and history, but only live workers produce
 the transient waiting caption. A current canonical final
 uses the same completion reader as Continue/Goal and releases the worker before silence,
