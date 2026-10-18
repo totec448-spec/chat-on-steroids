@@ -14,6 +14,15 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.41': {
+    lead: () => t('Edit your earlier messages, branch a chat, and sub-agents that start every time.'),
+    highlights: [
+      { icon: 'i-pencil', title: () => t('Edit your messages'), text: () => t('Change an earlier message and continue from it; what it replaces folds away, nothing is lost.') },
+      { icon: 'i-git-branch', title: () => t('Branch in new chat'), text: () => t('Continue from any answer in a new chat, and keep the original chat exactly as it was.') },
+      { icon: 'i-chat', title: () => t('Inbox sidebar'), text: () => t('Optional: all your chats together, active ones first. Under Appearance → Sidebar layout.') },
+      { icon: 'i-agents', title: () => t('Sub-agents that start'), text: () => t('Reliable on a busy computer; one that starts late rejoins its run.') }
+    ]
+  },
   '2.1.40': {
     lead: () => t('Projects on a server, Skills and files anywhere in the composer, and a repair for Mac permissions.'),
     highlights: [
