@@ -3046,6 +3046,13 @@ describe('an answer while ChatGPT writes it', () => {
       expect(shown(w)).toEqual(['Alpha.', 'Be']);
     });
 
+    it('draws a revision that rewrites a shown block to the same length', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe')]);
+      expect(shown(w)).toEqual(['Alpha.']);
+      await append([written(3, 'Omega.\n\nBe')]);
+      expect(shown(w)).toEqual(['Omega.']);
+    });
+
     it('draws a source a revision adds to a block already shown', async () => {
       const body = 'Alpha. :chatgpt-content-reference{index="1"}\n\nBe';
       const { w, append } = await boot([start, written(2, body)]);
