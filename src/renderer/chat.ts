@@ -5178,7 +5178,7 @@ function messageBeingWritten(): { seq: number; shown: string } | null {
   // it (a chat error, an unplaced call, your next message). This app's own status rows are skipped,
   // with or without a turn: a progress line (a finish notice, a page repair) or a note does not end
   // ChatGPT's answer. Every other row after the message does.
-  const tail = turn ? events.findLast(event => (!event.turnId || event.turnId === turn) && event.kind !== 'progress' && event.kind !== 'note') : undefined;
+  const tail = turn ? events.findLast(event => (!event.turnId || event.turnId === turn) && !(event.kind === 'progress' && event.source === 'app') && event.kind !== 'note') : undefined;
   if (tail?.kind !== 'assistant_message' || tail.final || tail.state === 'final' || hasProviderDirective(tail.message.text)) return null;
   return { seq: tail.seq, shown: finishedBlocks(tail.message.text) };
 }
