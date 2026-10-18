@@ -69,6 +69,28 @@ it('enables right quick actions and plus-menu entries from live scope, then open
   expect(document.activeElement).toBe(quick);
 });
 
+it('only enables Live Viewer for a selected chat and explains the disabled action', () => {
+  const { docks } = setup();
+  let hasChat = false;
+  const show = vi.fn(), hide = vi.fn();
+  docks.register('live', 'Live Viewer', 'i-steps', show, hide, () => hasChat);
+  const quick = document.querySelector<HTMLButtonElement>('.work-dock-quick[data-view=live]')!;
+  const menu = document.querySelector<HTMLButtonElement>('.work-dock-menu-item[data-view=live]')!;
+  expect(quick.disabled).toBe(true);
+  expect(menu.disabled).toBe(true);
+  expect(quick.title).toBe('Open a chat to inspect recorded activity');
+  hasChat = true;
+  docks.sync();
+  expect(quick.disabled).toBe(false);
+  quick.click();
+  expect(show).toHaveBeenCalledOnce();
+  expect(document.querySelector('[role=tab][aria-selected=true]')?.textContent).toContain('Live Viewer');
+  hasChat = false;
+  docks.sync();
+  expect(hide).toHaveBeenCalledOnce();
+  expect(quick.disabled).toBe(true);
+});
+
 it('keeps right and bottom Terminal actions in their own dock', () => {
   const { docks } = setup();
   const rightShow = vi.fn(), rightHide = vi.fn(), bottomShow = vi.fn(), bottomHide = vi.fn();

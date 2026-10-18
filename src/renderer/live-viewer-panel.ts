@@ -2,6 +2,7 @@ import type { SessionEvent } from '../shared/session.js';
 import { toolCallSummary } from '../shared/session.js';
 import { positionOf } from '../shared/chronology.js';
 import { el } from './dom.js';
+import { renderEditCards } from './tool-artifacts.js';
 
 /**
  * Read-only view over the SAME recorded events the chat timeline uses.
@@ -79,13 +80,15 @@ export function createLiveViewerPanel(options: {
         [event.call.tool, summary.detail, event.call.outcome,
           event.call.durationMs != null ? `${event.call.durationMs} ms` : null].filter(Boolean).join(' · '));
       row.append(meta);
-      if (event.call.changes?.length) {
-        const paths = el('div', 'live-viewer-changes');
-        for (const change of event.call.changes.slice(0, 20)) {
-          paths.append(el('div', 'live-viewer-file',
-            `${change.path}  +${change.added ?? 0} / -${change.removed ?? 0}`));
-        }
-        row.append(paths);
+      // The existing recorder owns immutable per-call before/after snapshots. Reuse its
+      // diff reader rather than showing a diff against today's mutable filesystem.
+      if (event.call.changes?.length && owner.id) {
+        const id = owner.id, generation = owner.generation;
+        row.append(renderEditCards(event.call, id, () => {
+          const current = options.selection();
+          return visible && owner.id === id && owner.generation === generation &&
+            current.id === id && current.generation === generation;
+        }));
       }
       if (event.call.args.text) row.append(details('Arguments / code' + (event.call.args.truncated ? ' (excerpt)' : ''),
         event.call.args.text, `${position}:args`, false));

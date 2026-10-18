@@ -128,7 +128,8 @@ export function createWorkspaceDocks(host: HTMLElement) {
         if (!button) continue;
         button.toggleAttribute('disabled', !enabled);
         // Bound, so the reason follows a language change; an enabled entry has no title.
-        ui(button, 'title', () => enabled ? '' : kind === 'agents' ? t('Open a chat to see its sub-agents') : t('Open a project to use Files and Review'));
+        ui(button, 'title', () => enabled ? '' : kind === 'agents' ? t('Open a chat to see its sub-agents')
+          : kind === 'live' ? 'Open a chat to inspect recorded activity' : t('Open a project to use Files and Review'));
         if (enabled) button.removeAttribute('title');
       }
     }

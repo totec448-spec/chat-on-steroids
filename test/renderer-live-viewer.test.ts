@@ -39,6 +39,13 @@ it('renders recorded arguments, results and file changes without interpreting ho
   expect(holder.textContent).toContain(hostile);
   expect(holder.querySelector('img, script')).toBeNull();
   expect(holder.textContent).toContain('src/example.ts');
+  // The same immutable tool-edit viewer used by the main CoS timeline is present.
+  const edit = holder.querySelector<HTMLDetailsElement>('.edit-card')!;
+  expect(edit).not.toBeNull();
+  edit.open = true;
+  edit.dispatchEvent(new dom.window.Event('toggle'));
+  await flush();
+  expect(edit.textContent).toContain('Diff unavailable: this edit was not kept');
   const buttons = [...holder.querySelectorAll<HTMLButtonElement>('[data-filter]')];
   buttons.find(button => button.dataset.filter === 'changes')!.click();
   expect(holder.querySelectorAll('.live-viewer-row')).toHaveLength(1);

@@ -4978,9 +4978,8 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .live-viewer-row-head time { font-size: calc(10px * var(--text-scale, 1)); color: var(--faint); white-space: nowrap; }
 .live-viewer-row-meta { margin: 6px 0; color: var(--soft); font-size: calc(11px * var(--text-scale, 1));
   line-height: 1.55; overflow-wrap: anywhere; }
-.live-viewer-changes { display: grid; gap: 4px; margin: 9px 0; }
-.live-viewer-file { border-radius: 6px; background: var(--hover); padding: 7px 8px;
-  font: calc(11px * var(--text-scale, 1))/1.5 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+.live-viewer-row .edit-cards { margin-top: 10px; min-width: 0; }
+.live-viewer-row .edit-card { min-width: 0; }
 .live-viewer-row details { margin-top: 8px; }
 .live-viewer-row summary { font-size: calc(11px * var(--text-scale, 1)); cursor: pointer; color: var(--soft); }
 .live-viewer-code { max-height: 310px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
