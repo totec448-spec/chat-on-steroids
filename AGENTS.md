@@ -4434,7 +4434,14 @@ and bottom-terminal tabs share one pill layout with a truncating `.tab-label`, a
 pointer drag or Ctrl+Shift+Left/Right; the owner's order stays authoritative. Selecting a tab
 updates the existing pills; only tab, order or title changes rebuild them.
 The right dock has launcher shortcuts, tool tabs and a `+` tool menu. Its Files, Review,
-Sub-agents and Terminal actions open right tabs; repeated Terminal `+` actions add a shell there.
+Sub-agents, Live Viewer and Terminal actions open right tabs; repeated Terminal `+` actions add a shell there.
+Live Viewer (`renderer/live-viewer-panel.ts`) displays bounded, read-only recorded session events
+through the existing preload `getSession` read and chat's `loadDetail` updates. Its owner is the
+selected local session **and selection generation**; it must reject retired asynchronous reads,
+including A→B→A navigation. It does not use the optional local control HTTP API, publish a new
+preload/IPC route, execute tools, or claim to show model token deltas or private reasoning.
+Opening it reads recent history once, subsequent timeline reads feed the same journal events,
+and hidden views do not read. The action is Ctrl+Shift+5, after Review, Terminal, Files and Agents.
 With no tabs, the right dock shows only launcher shortcuts; its tab bar and `+` stay hidden.
 The `+` popover must receive real pointer input above any active tool header.
 The bottom dock has no generic shortcut screen or second tool tab strip; Terminal owns its own

@@ -4,6 +4,7 @@ import { initChatSearch, type ChatSearch } from './chat-search.js';
 import { initChatFind } from './chat-find.js';
 import { createWorkspaceTerminal } from './workspace-terminal.js';
 import { createWorkspaceDocks } from './workspace-docks.js';
+import { createLiveViewerPanel } from './live-viewer-panel.js';
 import { currentLanguage, ui, t, tn } from './i18n.js';
 import { initSkills } from './skills.js';
 import { imageStorageButton } from './image-storage.js';
@@ -304,6 +305,7 @@ function projectColorName(color: ProjectColor): string {
 let workspaceTerminal: ReturnType<typeof createWorkspaceTerminal> | null = null;
 let rightWorkspaceTerminal: ReturnType<typeof createWorkspaceTerminal> | null = null;
 let workspaceDocks: ReturnType<typeof createWorkspaceDocks> | null = null;
+let liveViewerPanel: ReturnType<typeof createLiveViewerPanel> | null = null;
 
 function selectedLocalProject(): LocalProject | null {
   if (selectedId) {
@@ -2768,6 +2770,7 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
   const generation = ++detailLoadGeneration;
   void refreshSessionControls();
   if (wanted === null) {
+    liveViewerPanel?.selected(null, selection);
     handoffLoadGeneration++;
     historyBefore = null;
     events = [];
@@ -2837,6 +2840,7 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
   if (outlined?.ok) traces = outlined.data ?? {};
   else if (tracesFor !== wanted) traces = {};
   tracesFor = wanted;
+  liveViewerPanel?.sync(wanted, selection, events);
   if (opening) $('timelineContent').style.removeProperty('--timeline-scroll-reserve');
   // History paged in is not new work: only rounds that arrive live enter with a fade.
   if (prepend || newerFrom !== undefined) roundsEnter = false;
@@ -7518,6 +7522,7 @@ function selectSession(id: string): void {
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = false;
   selectedId = id;
+  liveViewerPanel?.selected(id, selectionGeneration);
   refreshBackgroundProcesses();
   const selected = sessions.find(row => row.id === id);
   applyComposerSessionModel(`${id}:${selectionGeneration}`, composerSessionSelection(selected) ?? null);
@@ -7562,6 +7567,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
   inputQueueGeneration++;
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = true; selectedId = null; selectedProjectId = projectId; detailFor = null; detailCursor = null;
+  liveViewerPanel?.selected(null, selectionGeneration);
   refreshBackgroundProcesses();
   sendAnchor = null; readingAfterSend = false; readerAtEnd = true;
   if (projectId) expandedProjects.add(projectId);
@@ -7596,6 +7602,13 @@ export function initChat(next: Deps): void {
   const chatHost = document.querySelector<HTMLElement>('[data-panel="chat"]')!;
   const docks = createWorkspaceDocks(chatHost);
   workspaceDocks = docks;
+  liveViewerPanel = createLiveViewerPanel({
+    selection: () => ({ id: selectedId, generation: selectionGeneration }),
+    read: async id => {
+      const detail = await run(api.getSession(id, { limit: 160 }));
+      return detail?.events ?? null;
+    }
+  });
   const agentToolGroups = new Map<string, HTMLElement>();
   const agentSays = new Map<string, { text: string; row: HTMLElement }>();
   agentPanel = createAgentPanel({
@@ -7836,6 +7849,8 @@ export function initChat(next: Deps): void {
     filePanel?.mountAt(mount); void filePanel?.show();
   }, () => filePanel?.hide(), () => selectedLocalProject() !== null);
   docks.register('agents', 'Sub-agents', 'i-agents', () => agentPanel?.show(), () => agentPanel?.hide(), () => selectedId !== null);
+  docks.register('live', 'Live Viewer', 'i-steps', mount => liveViewerPanel?.show(mount),
+    () => liveViewerPanel?.hide(), () => selectedId !== null);
   $('attachImages').addEventListener('click', async () => {
     const owner = composerDraftOwner();
     appendImages(owner, await run(api.chooseFiles()));

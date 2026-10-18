@@ -4954,3 +4954,38 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 @media (prefers-reduced-motion: reduce) { .chat-find { animation: none; } }
 ::highlight(chat-find) { background-color: var(--accent-wash); color: inherit; }
 ::highlight(chat-find-current) { background-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--ink); }
+
+/* Live Viewer is a normal right-dock tab, driven by the existing recorded session. */
+.live-viewer-panel { position: relative; display: flex; flex-direction: column; flex: 1 1 auto;
+  min-height: 0; min-width: 0; background: var(--page); color: var(--ink); border-left: 1px solid var(--line); }
+.live-viewer-panel[hidden] { display: none; }
+.live-viewer-header { display: flex; align-items: baseline; justify-content: space-between;
+  gap: 8px; padding: 17px 16px 12px; border-bottom: 1px solid var(--line); }
+.live-viewer-header strong { font-size: calc(15px * var(--text-scale, 1)); font-weight: 620; }
+.live-viewer-provenance { font-size: calc(11px * var(--text-scale, 1)); color: var(--faint); }
+.live-viewer-controls { display: flex; gap: 5px; padding: 12px 13px 9px; }
+.live-viewer-filter { border: 1px solid var(--line); border-radius: 7px; padding: 5px 9px;
+  font-size: calc(12px * var(--text-scale, 1)); color: var(--soft); background: transparent; }
+.live-viewer-filter[aria-pressed="true"] { border-color: var(--accent-edge); background: var(--accent-wash); color: var(--ink); }
+.live-viewer-status { padding: 0 15px 10px; color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); }
+.live-viewer-list { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain;
+  scrollbar-gutter: stable; padding: 5px 13px 18px; }
+.live-viewer-row { padding: 12px; margin-bottom: 10px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--raise); min-width: 0; }
+.live-viewer-row-head { display: flex; align-items: flex-start; gap: 8px; justify-content: space-between; }
+.live-viewer-row-head strong { font-size: calc(12px * var(--text-scale, 1)); font-weight: 600;
+  line-height: 1.4; overflow-wrap: anywhere; min-width: 0; }
+.live-viewer-row-head time { font-size: calc(10px * var(--text-scale, 1)); color: var(--faint); white-space: nowrap; }
+.live-viewer-row-meta { margin: 6px 0; color: var(--soft); font-size: calc(11px * var(--text-scale, 1));
+  line-height: 1.55; overflow-wrap: anywhere; }
+.live-viewer-changes { display: grid; gap: 4px; margin: 9px 0; }
+.live-viewer-file { border-radius: 6px; background: var(--hover); padding: 7px 8px;
+  font: calc(11px * var(--text-scale, 1))/1.5 ui-monospace, Consolas, monospace; overflow-wrap: anywhere; }
+.live-viewer-row details { margin-top: 8px; }
+.live-viewer-row summary { font-size: calc(11px * var(--text-scale, 1)); cursor: pointer; color: var(--soft); }
+.live-viewer-code { max-height: 310px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+  padding: 10px; background: var(--page); border: 1px solid var(--line); border-radius: 7px;
+  color: var(--ink); font: calc(11px * var(--text-scale, 1))/1.65 ui-monospace, Consolas, monospace; }
+.live-viewer-empty { color: var(--soft); line-height: 1.6; font-size: calc(12px * var(--text-scale, 1)); }
+.live-viewer-foot { border-top: 1px solid var(--line); padding: 10px 15px; margin: 0; color: var(--faint);
+  font-size: calc(10px * var(--text-scale, 1)); line-height: 1.6; }

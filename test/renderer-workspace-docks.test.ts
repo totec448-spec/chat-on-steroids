@@ -150,9 +150,9 @@ it('hides the old right view when a recorded edit directly adopts Review', () =>
   expect(document.querySelector('#workDockRight [role=tab][aria-selected=true]')?.textContent).toContain('Review');
 });
 
-it('keeps Ctrl+backtick for bottom visibility and Ctrl+Shift+1–4 for scoped actions', () => {
+it('keeps Ctrl+backtick for bottom visibility and Ctrl+Shift+1–5 for scoped actions', () => {
   const { docks } = setup();
-  const review = vi.fn(), files = vi.fn(), agents = vi.fn(), rightTerminal = vi.fn(), bottomTerminal = vi.fn();
+  const review = vi.fn(), files = vi.fn(), agents = vi.fn(), live = vi.fn(), rightTerminal = vi.fn(), bottomTerminal = vi.fn();
   docks.register('review', 'Review', 'i-git-diff', review, vi.fn(), () => true);
   const terminalTabs: { id: string; title: string; exited: boolean }[] = [];
   docks.registerTerminal({ show: rightTerminal, hide: vi.fn(), canCreate: () => true,
@@ -161,14 +161,16 @@ it('keeps Ctrl+backtick for bottom visibility and Ctrl+Shift+1–4 for scoped ac
     { show: bottomTerminal, hide: vi.fn() });
   docks.register('files', 'Files', 'i-folder', files, vi.fn(), () => true);
   docks.register('agents', 'Sub-agents', 'i-agents', agents, vi.fn(), () => true);
+  docks.register('live', 'Live Viewer', 'i-steps', live, vi.fn(), () => true);
   const key = (value: string, code: string, shiftKey = false) => document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: value, code, ctrlKey: true, shiftKey, bubbles: true }));
   key('`', 'Backquote'); expect(document.getElementById('workDockBottom')!.hidden).toBe(false);
   key('`', 'Backquote'); expect(document.getElementById('workDockBottom')!.hidden).toBe(true);
   // With Shift held a browser reports the shifted character in `key` (US layout: ! @ # $).
-  for (const [shifted, digit] of [['!', '1'], ['@', '2'], ['#', '3'], ['$', '4']]) key(shifted!, `Digit${digit}`, true);
+  for (const [shifted, digit] of [['!', '1'], ['@', '2'], ['#', '3'], ['$', '4'], ['%', '5']]) key(shifted!, `Digit${digit}`, true);
   expect(review).toHaveBeenCalledOnce(); expect(rightTerminal).toHaveBeenCalledOnce();
   expect(bottomTerminal).toHaveBeenCalledOnce();
   expect(files).toHaveBeenCalledOnce(); expect(agents).toHaveBeenCalledOnce();
+  expect(live).toHaveBeenCalledOnce();
 });
 
 it('opens a view from Ctrl+Shift+digit as the browser really reports it', () => {
