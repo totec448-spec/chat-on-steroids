@@ -3827,6 +3827,9 @@ it.each([false, true])('clears the planner prompt and starts a new-chat plan wit
   input.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', cancelable: true })); await settle();
   expect(live.sent).toHaveLength(1);
   expect(live.sent[0]).toMatchObject({ objective: 'Original objective', text: 'Build foundation', stages: ['Verify it'], reasoningEffort: pro ? 'pro' : 'high' });
+  // While it is delivered, the message shows what the person wrote, as it will once recorded.
+  await settle();
+  expect([...w.document.querySelectorAll('.pending-message-text')].map(node => node.textContent)).toEqual(['Original objective']);
 });
 
 it('does not erase a new composer draft while completed-plan queue admission is pending', async () => {
