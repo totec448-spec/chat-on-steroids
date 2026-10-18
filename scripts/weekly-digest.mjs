@@ -11,11 +11,11 @@ export function prState({ checks, lastPushAt, lastMaintainerAt }) {
   return lastMaintainerAt && Date.parse(lastMaintainerAt) > Date.parse(lastPushAt) ? 'author' : 'review';
 }
 
-/** Only each check's latest run counts; an old failure or pending run is superseded by a rerun. */
+/** Only each check's latest run counts; anything but success, neutral or skipped is a failure. */
 export function checksState(checkRuns) {
   const runs = checkRuns.filter(run => !checkRuns.some(other => other.name === run.name && other.id > run.id));
   return runs.some(run => run.status !== 'completed') ? 'pending'
-    : runs.some(run => run.conclusion === 'failure') ? 'failure' : 'success';
+    : runs.some(run => !['success', 'neutral', 'skipped'].includes(run.conclusion)) ? 'failure' : 'success';
 }
 
 /** One short Markdown overview; empty sections say so instead of disappearing. */

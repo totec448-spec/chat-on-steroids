@@ -33,6 +33,14 @@ it('counts only the latest run of each check', () => {
     { id: 1, name: 'PR checklist', status: 'completed', conclusion: 'success' },
     { id: 2, name: 'build', status: 'in_progress', conclusion: null }
   ])).toBe('pending');
+  expect(checksState([
+    { id: 1, name: 'PR checklist', status: 'completed', conclusion: 'failure' },
+    { id: 2, name: 'PR checklist', status: 'completed', conclusion: 'cancelled' }
+  ])).toBe('failure');
+  expect(checksState([
+    { id: 1, name: 'PR checklist', status: 'completed', conclusion: 'failure' },
+    { id: 2, name: 'PR checklist', status: 'completed', conclusion: 'skipped' }
+  ])).toBe('success');
 });
 
 it('writes every section, saying so when one is empty', () => {
