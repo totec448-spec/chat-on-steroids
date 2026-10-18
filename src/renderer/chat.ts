@@ -2199,7 +2199,23 @@ function editableQuestion(event: SessionEvent, history: readonly SessionEvent[])
  */
 let recall: { generation: number; draft: number; prompts: readonly string[]; back: number; text: string } | null = null;
 
-/** Your messages in this chat as its timeline shows them (agent filter included), oldest first; no Compact & Resume prompts or folded versions. */
+/**
+ * Whether you typed this message. The outbox row that sent it says when the app wrote it: a Goal or
+ * Loop continue, a fresh-turn or recovery continue, or a plan stage. With no row it was sent in
+ * ChatGPT itself, so it is yours, unless it is a worker's: its tasks come from the app.
+ */
+function typedPrompt(event: Extract<SessionEvent, { kind: 'user_message' }>): boolean {
+  const rows = event.messageId ? pendingComposerInputs.filter(row => row.messageId ? row.messageId === event.messageId : event.messageId === `input:${row.id}`) : [];
+  // A correction sent together with the next queued checkpoint is recorded as the correction.
+  const row = rows.find(entry => !rows.some(other => other.companionInputId === entry.id));
+  if (!row) {
+    const origin = sessions.find(entry => entry.id === selectedId)?.origin?.kind;
+    return origin !== 'worker' && origin !== 'helper' && (!event.agent || event.agent === 'prime');
+  }
+  return (row.authoredSource ?? 'text') !== 'none' && !row.finishOwner && !row.recovery && row.purpose !== 'rotation' && row.purpose !== 'decision';
+}
+
+/** The messages you typed in this chat as its timeline shows them (agent filter included), oldest first; no Compact & Resume prompts or folded versions. */
 function sentPrompts(): string[] {
   const prompts: string[] = [];
   for (const item of timelineItems(visibleEvents())) {
@@ -2207,6 +2223,7 @@ function sentPrompts(): string[] {
     const event = item.event;
     // A stored message cut short would come back incomplete.
     if (event.authoredText === undefined && event.message.truncated) continue;
+    if (!typedPrompt(event)) continue;
     const text = event.authoredText ?? userPromptText(event.message.text.trimStart()) ?? event.message.text;
     if (text.trim() && text !== prompts.at(-1)) prompts.push(text);
   }
@@ -2245,6 +2262,8 @@ function recallPrompt(event: KeyboardEvent): boolean {
   input.dispatchEvent(new Event('input', { bubbles: true }));
   // After the input event, which ends any earlier recall.
   recall = next ? { generation: selectionGeneration, draft: composerDraftGeneration, prompts, back: next, text } : null;
+  // A screen reader doesn't read a value set by script, so the recalled message is announced.
+  $('recallAnnounce').textContent = text;
   return true;
 }
 
@@ -8067,6 +8086,8 @@ export function initChat(next: Deps): void {
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape') for (const menu of composerMenus) menu.open = false; });
   $('chatInput').addEventListener('input', () => {
     recall = null;
+    // The same message recalled again later must change the live region to be read again.
+    const recalled = $('recallAnnounce'); if (recalled.textContent) recalled.textContent = '';
     const hasText = !!authoredComposerText().trim();
     const plan = taskPlans.get(draftKey());
     if (plan && !plan.stages && plan.requestId) {

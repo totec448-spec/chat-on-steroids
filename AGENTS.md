@@ -1343,9 +1343,14 @@ newest one the composer is empty again. Only an unedited recalled message keeps 
 at its edge: Up recalls with the caret at the start, Down with it at the end. Elsewhere the arrows
 move the caret natively through wrapped and typed rows, so a change of direction first takes it to
 that edge. IME composition, modifiers, an open slash/file menu, attached files or a plan in the
-draft and Edit & resubmit (#365) keep their keys. Messages without text, stored cut short, Compact &
-Resume prompts, folded earlier versions and queued inputs are not recalled. Recall only fills the
-composer; nothing is stored and nothing is sent.
+draft and Edit & resubmit (#365) keep their keys. Only messages the person typed are recalled: the
+outbox row with the event's `messageId` decides, and `authoredSource: 'none'`, a `finishOwner`, a
+`recovery` or a `rotation`/`decision` purpose marks the app's own send. A message with no row was
+sent in ChatGPT itself and counts as typed, except a worker's or helper's, whose tasks come from the
+app. Messages without text, stored cut short, Compact & Resume prompts, folded earlier versions and
+queued inputs are not recalled either. The list is read at the first press, so a message recorded
+while paging doesn't shift it. Each recalled message is announced through the sr-only polite region
+`#recallAnnounce`. Recall only fills the composer; nothing is stored and nothing is sent.
 
 `session/start-input.ts` returns durable local admission before waiting for connector readiness
 or browser delivery. Each New Chat opening reserves its own local session in the outbox, then
