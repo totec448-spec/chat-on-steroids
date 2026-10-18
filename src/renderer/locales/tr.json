@@ -723,6 +723,8 @@
   "Retry stage one with the complete plan and queued checkpoints": "İlk aşamayı tüm plan ve sıradaki kontrol noktalarıyla yeniden dene",
   "Restore this message to the composer for review and sending": "İnceleyip göndermek için bu mesajı mesaj alanına geri getir",
   "Send or clear your current draft before retrying this message.": "Bu mesajı yeniden denemeden önce mevcut taslağınızı gönderin veya temizleyin.",
+  "That message can no longer be edited, so this is restored as a new message.": "Bu mesaj artık düzenlenemiyor, bu yüzden yeni bir mesaj olarak geri yüklendi.",
+  "Scroll up to the message you edited, then retry.": "Düzenlediğiniz mesaja kadar yukarı kaydırın, ardından yeniden deneyin.",
   "Message queued. Browser startup failed:": "Mesaj sıraya alındı. Tarayıcı başlatılamadı:",
   "Retry browser": "Tarayıcıyı yeniden dene",
   "Helper delivery was not confirmed. Its old chat may still be running.": "Yardımcıya iletim doğrulanmadı. Eski sohbeti hâlâ çalışıyor olabilir.",
