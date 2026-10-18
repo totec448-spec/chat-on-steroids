@@ -2152,6 +2152,50 @@ function editableQuestion(event: SessionEvent, history: readonly SessionEvent[])
   return !history.some(other => other.kind === 'user_message' && other.replaces === event.messageId);
 }
 
+/** Prompt recall: how many of your messages back the composer's recalled one is, and its text. */
+let recall: { generation: number; back: number; text: string } | null = null;
+
+/** Your messages in this chat as its timeline shows them, oldest first; no Compact & Resume prompts or folded versions. */
+function sentPrompts(): string[] {
+  const prompts: string[] = [];
+  for (const item of timelineItems(events)) {
+    if (item.kind !== 'event' || item.event.kind !== 'user_message') continue;
+    const event = item.event;
+    // A stored message cut short would come back incomplete.
+    if (event.authoredText === undefined && event.message.truncated) continue;
+    const text = event.authoredText ?? userPromptText(event.message.text.trimStart()) ?? event.message.text;
+    if (text.trim() && text !== prompts.at(-1)) prompts.push(text);
+  }
+  return prompts;
+}
+
+/**
+ * ArrowUp and ArrowDown in an empty composer, or one still holding an unedited recalled message,
+ * step through your earlier messages in this chat like a shell's history. Past the newest one the
+ * composer is empty again. Recall only fills the composer; it never sends.
+ */
+function recallPrompt(event: KeyboardEvent): boolean {
+  const up = event.key === 'ArrowUp';
+  if ((!up && event.key !== 'ArrowDown') || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
+  if (selectedId === null || detailFor !== selectedId || editingQuestion?.sessionId === selectedId) return false;
+  const input = $<HTMLTextAreaElement>('chatInput');
+  const back = recall?.generation === selectionGeneration && input.value === recall.text ? recall.back : 0;
+  // Attached files and a plan are part of the draft; a recalled message would be sent with them.
+  if (imageDrafts.get(draftKey())?.length || taskPlans.has(draftKey()) || (!back && authoredComposerText())) return false;
+  // In a recalled message of several lines, the arrows move the caret until its first or last line.
+  if (up ? input.value.slice(0, input.selectionStart).includes('\n') : input.value.slice(input.selectionEnd).includes('\n')) return false;
+  const prompts = sentPrompts();
+  const next = back + (up ? 1 : -1);
+  if (next < 0 || next > prompts.length) return false;
+  const text = next ? prompts[prompts.length - next]! : '';
+  recall = next ? { generation: selectionGeneration, back: next, text } : null;
+  event.preventDefault();
+  input.value = text;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  input.setSelectionRange(text.length, text.length);
+  return true;
+}
+
 /** The Edit action under one of your questions. */
 function questionActions(event: Extract<SessionEvent, { kind: 'user_message' }>, later: number): HTMLElement {
   const bar = el('div', 'question-actions');
@@ -7954,7 +7998,7 @@ export function initChat(next: Deps): void {
     paintDeliveryControls(); paintTaskActions();
   });
   $('chatInput').addEventListener('keydown', (event) => {
-    if (skillPicker?.keydown(event)) return;
+    if (skillPicker?.keydown(event) || recallPrompt(event)) return;
     // Codex's "Enter key behavior": Enter sends, or only Cmd/Ctrl+Enter does and Enter adds a line.
     const enterSends = deps.state()?.config.ui.enterSends !== false || event.metaKey || event.ctrlKey;
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && enterSends) { event.preventDefault(); if (currentPreparedPlan() || authoredComposerText().trim() || imageDrafts.get(draftKey())?.length) $<HTMLFormElement>('composer').requestSubmit(); }
