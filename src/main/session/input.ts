@@ -1186,31 +1186,6 @@ export function sendQueuedInputNow(id: string): Promise<boolean> {
 }
 
 /** Revalidate the same durable claim immediately before sending; never hand out text again. */
-/** The fresh-turn continue (#1402) this page claimed and is about to send, if that is what it is. */
-export async function claimedRotation(id: string, owner: string, conversationId: string): Promise<{ sessionId: string; turnId: string } | null> {
-  const row = (await load()).find(entry => entry.id === id && entry.owner === owner && entry.state === 'browser' &&
-    entry.conversationId === conversationId && entry.purpose === 'rotation' && entry.sendAuthorizedAt === undefined);
-  return row?.directTurn && row.sessionId ? { sessionId: row.sessionId, turnId: row.directTurn.id } : null;
-}
-
-/**
- * Retires a claimed fresh-turn continue (#1402) that would be sent into the running answer while no
- * tool call of the chat runs, and names its turn. Only during a call does a native send end the turn
- * and continue in a fresh one. Sent while the model writes its answer, ChatGPT kept it until the
- * answer was done, then posted it and never answered (2.1.41 release round, Windows). The continue
- * was nobody's message, so it leaves no notice behind.
- */
-export function declineRotationSteer(id: string, owner: string, conversationId: string): Promise<string | null> {
-  return serial(async () => {
-    const current = await load();
-    const row = current.find(entry => entry.id === id && entry.owner === owner && entry.state === 'browser' &&
-      entry.conversationId === conversationId && entry.purpose === 'rotation' && entry.sendAuthorizedAt === undefined);
-    if (!row?.directTurn) return null;
-    await commit(current.map(entry => entry === row ? { ...entry, state: 'cancelled' as const } : entry));
-    return row.directTurn.id;
-  });
-}
-
 export function authorizeBrowserInput(id: string, owner: string, conversationId: string | null): Promise<boolean> {
   return serial(async () => {
     const current = await load();

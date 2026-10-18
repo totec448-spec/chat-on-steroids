@@ -13447,10 +13447,7 @@
         // Preserve the outbox's revocable claim until the actual native Send is ready.
         if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current(), withdrawWhy)) return false;
         authorizing = true;
-        // Into the running turn the app allows its own automatic continue only while a tool call
-        // runs: sent while the model writes its answer, it lands after it, unanswered (2.1.41).
-        const authorized = await ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, authorize: true,
-          ...(intoTurn ? { intoTurn: true } : {}) });
+        const authorized = await ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, authorize: true });
         if (authorized?.data?.ok !== true) noteWithdraw('app-refused');
         if (!sendCurrent() || authorized?.data?.ok !== true || !onTarget() || !draft.current()) { noteWithdraw(onTarget() ? 'lease-lost' : offTarget()); return false; }
         if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current(), withdrawWhy)) return false;
