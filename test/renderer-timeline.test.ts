@@ -6034,6 +6034,8 @@ describe('branch in new chat (#482)', () => {
     w.document.querySelector<HTMLButtonElement>('#branchDraft .branch-draft-cancel')!.click(); await settle(); await settle();
     expect(timeline()).toContain('Tag first, then build.');
     expect(timeline()).not.toContain('Later answer 39');
+    // At the bottom of that page the newer rows are still not loaded: the way back to the end shows.
+    expect(w.document.getElementById('jumpLatest')!.classList.contains('is-shown')).toBe(true);
     await submit(w as any, 'Continue from here.');
     await settle(); await settle();
     expect(live.sent.at(-1)).toMatchObject({ text: 'Continue from here.' });

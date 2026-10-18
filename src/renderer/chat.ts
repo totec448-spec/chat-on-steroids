@@ -3785,7 +3785,8 @@ let timelineScrollTop: number | null = null;
 
 function paintJumpLatest(): void {
   const jump = document.getElementById('jumpLatest');
-  if (jump) jump.classList.toggle('is-shown', !!selectedId && timelineShown() && distanceFromTail() > JUMP_DISTANCE);
+  // A page of history ends before the chat does: even at its bottom, the end is not on screen.
+  if (jump) jump.classList.toggle('is-shown', !!selectedId && timelineShown() && (distanceFromTail() > JUMP_DISTANCE || onHistoryPage()));
 }
 
 /** Whether the chat shows a page of history whose newer rows, and so its live end, are not loaded. */
