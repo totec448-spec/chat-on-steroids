@@ -3589,10 +3589,20 @@ The page reports how far it got with `/commands/step` (`{ id, client, step }`), 
 answering, a non-empty editor, or no usable editor yet; re-reported when the reason changes;
 older pages send `revival-waiting`), then
 `composer`, `model`, `composer-after-model`, `inserting`, `sending` from the redeeming page.
-Reports are fire-and-forget and advisory: they change no lease, deadline or outcome, a report
-from a page that does not own the command is ignored, and they never carry text, titles or
-addresses. Expiry names the last one, or whether the browser or the OS opened the chat and no
+Reports are fire-and-forget and advisory: they change no lease or outcome, a report from a page
+that does not own the command is ignored, and they never carry text, titles or addresses. One
+changes a deadline: a worker's `sending` gives its receipt `WORKER_SENDING_GRACE_MS` from that
+report (bounded), because a page that pressed Send may already have delivered the task (#1086).
+Expiry names the last one, or whether the browser or the OS opened the chat and no
 page picked it up, so "did not report back in time" says where a start stopped (#882 worker-11).
+A worker given up for time after a page claimed it (no page-reported failure) is a late-start
+candidate for `LATE_START_WINDOW_MS`, in memory only (#1086: on a memory-starved machine a page's
+reports reached the app 20–90 s after it sent). A `sent` ACK with a conversation from the page
+that claimed it is then settled by `adoptLateWorker`: the same failed worker rejoins its family
+(live, or parked and woken) when its chat is free and a slot is free, its inbox is restored and
+the prime gets `[worker-N started late]`; otherwise the chat goes on the retired-worker fence and
+the prime gets `[worker-N started late, outside the run]`. Either way the ACK gets one durable
+final receipt (committed or terminal-failure); any other late ACK is still `no_such_command`.
 Historical worker failures remain visible in status and history, but only live workers produce
 the transient waiting caption. A current canonical final
 uses the same completion reader as Continue/Goal and releases the worker before silence,
