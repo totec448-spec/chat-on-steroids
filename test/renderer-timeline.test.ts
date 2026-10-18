@@ -6207,6 +6207,20 @@ describe('edit and resubmit (#365)', () => {
     expect(input.value).toBe('My draft');
   });
 
+  it('does not restore a failed edit while the question it edited is in older history that is not loaded', async () => {
+    const filler = Array.from({ length: 40 }, (_, i) => a(2 + i, `6ad3a59b-01${String(i).padStart(2, '0')}-83eb-8bc4-8c84e68dd911`, `Answer ${i}`, 't1'));
+    const { w, live, append } = await boot([q(1, Q1, 'First question', 't1'), ...filler, end(42, 't1')], true, [], [], { summary: { conversationId: chat } });
+    expect(w.document.getElementById('timeline')!.textContent).not.toContain('First question');
+    live.inputs = [failedInput('First question, edited', { edit: { messageId: Q1 } })]; await append([]);
+    await retryDelivery(w as any);
+    expect(w.document.querySelector('.toast')?.textContent).toContain('Scroll up to the message you edited, then retry.');
+    expect((w.document.getElementById('chatInput') as HTMLTextAreaElement).value).toBe('');
+    expect(w.document.getElementById('editDraft')!.hidden).toBe(true);
+    expect(w.document.querySelector('[aria-label="Retry delivery"]')).not.toBeNull();
+    await submit(w as any, 'Unrelated');
+    expect(live.sent.at(-1)).not.toHaveProperty('edit');
+  });
+
   it('restores a failed edit whose question can no longer be edited as a new message, and says so', async () => {
     const replaced = [...exchange(), q(7, '6ad3a59b-0003-83eb-8bc4-8c84e68dd911', 'Fix the login bug', 't3', { replaces: Q2 }), end(8, 't3')];
     const { w, live, append } = await boot(replaced, true, [], [], { summary: { conversationId: chat } });
