@@ -27,6 +27,7 @@ const { findSessionByConversation, initSessionStore, resetSessionStoreForTests }
 const { recordToolCall, resetRecorderForTests } = await import('../src/main/session/recorder.js');
 const { listInputs, resetInputForTests } = await import('../src/main/session/input.js');
 const { resetTurnRotationForTests } = await import('../src/main/turn-rotation.js');
+const { emptyEvidence, trackInFlight } = await import('../src/main/mcp/call-context.js');
 const { setGoalSwitchNow, resetGoalStateForTests } = await import('../src/main/goal.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
 
@@ -197,6 +198,36 @@ describe('turn rotation (#1402)', () => {
     await new Promise(resolve => setTimeout(resolve, 50));
     // Before the fix this still read as exact work on the rotated turn g-rot-follow-0-1.
     expect(sessionInputActivity((await getSession(sessionId))!)).toMatchObject({ exact: false, possible: false });
+  });
+
+  // 2.1.41 release round, Windows: a rotation filed at a quick call's result reached the page while
+  // the model was writing its two-word answer. Sent into that answer, ChatGPT kept it until the
+  // answer was done, then posted it and never answered it: the chat ended with a stray "Continue"
+  // and an empty turn. A native send ends the turn and continues only while a tool call runs.
+  it.each([
+    ['refuses to send it into an answer being written, and retires it without a notice', 'answer', false],
+    ['sends it into the turn while one of its tool calls is running', 'call', true],
+    ['sends it once the page has stopped the turn first', 'stopped', true]
+  ] as const)('%s', async (_name, phase, sent) => {
+    const chat = `f0f00003-1111-4111-8111-00000000010${phase === 'answer' ? 1 : phase === 'call' ? 2 : 3}`;
+    const turnId = `g-rot-steer-${phase}-1`;
+    const sessionId = await turnFor(chat, turnId, 31);
+    await attributedCall(chat);
+    expect(await rotationsFor(sessionId)).toHaveLength(1);
+    const row = (await listInputs()).find(entry => entry.sessionId === sessionId && entry.purpose === 'rotation')!;
+    const claim = await request('POST', '/input/claim', { body: { id: row.id, owner: 'rotation-page', conversationId: chat, requiresAuthorization: true } });
+    expect(claim.body.input).toMatchObject({ id: row.id, directTurn: { id: turnId } });
+    const authorize = () => request('POST', '/input/claim', { body: { id: row.id, owner: 'rotation-page', conversationId: chat,
+      authorize: true, ...(phase === 'stopped' ? {} : { intoTurn: true }) } });
+    const reply = phase === 'call'
+      ? await trackInFlight({ startedAt: Date.now(), transportKey: null, agent: null, outcome: null, evidence: emptyEvidence(),
+        caller: { requestId: 'rotation-running-call', transportKey: null, conversationId: chat } }, authorize)
+      : await authorize();
+    expect(reply.body).toEqual({ ok: sent });
+    const after = (await listInputs()).find(entry => entry.id === row.id)!;
+    if (sent) expect(after).toMatchObject({ state: 'browser', sendAuthorizedAt: expect.any(Number) });
+    // Nobody's message: no "not sent" notice is left in the chat.
+    else { expect(after.state).toBe('cancelled'); expect(after.error).toBeUndefined(); }
   });
 
   it('is off at 0 minutes', async () => {

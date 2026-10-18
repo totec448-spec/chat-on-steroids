@@ -4909,6 +4909,22 @@ it('keeps a failed fresh-turn continue at its creation time, not at the end of t
   expect(timeline.textContent!.indexOf('Continue the task from where you are.')).toBeLessThan(timeline.textContent!.indexOf('Later continuation'));
 });
 
+// 2.1.41 release round: a fresh-turn continue declined because the model was writing its answer is
+// retired without a reason. It was nobody's message and nothing went wrong: nothing is shown.
+it('shows nothing for a fresh-turn continue declined during an answer', async () => {
+  const app = await boot([
+    { seq: 1, time: T0, source: 'extension', kind: 'user_message', messageId: 'declined-before', message: text('Original work') }
+  ]);
+  const { w, live } = app;
+  live.inputs.push({ id: 'declined-rotation', sessionId: summary([]).id, conversationId: 'chat-b', text: 'Continue the task from where you are.',
+    mode: 'auto', dueAt: T0 + 1000, createdAt: T0 + 1000, state: 'cancelled', owner: null, model: null, reasoningEffort: null, purpose: 'rotation',
+    directTurn: { id: 'turn-1', startedAt: T0 } });
+  await app.append([]);
+  expect(w.document.querySelector('[data-input-id="declined-rotation"]')).toBeNull();
+  expect(w.document.getElementById('timeline')!.textContent).not.toContain('Continue the task from where you are.');
+  expect(w.document.getElementById('inputQueue')!.textContent).not.toContain('Continue the task from where you are.');
+});
+
 it('keeps a cancelled automatic draft at its creation time as later messages arrive', async () => {
   const app = await boot([
     { seq: 1, time: T0, source: 'extension', kind: 'user_message', messageId: 'before-draft', message: text('Original work') },
