@@ -2687,8 +2687,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const otherBrowser = notChosenBrowser(req), chosenBuiltIn = chosenBuiltInBrowser(req);
     // A companion the claim route would refuse as out of date is not offered inputs either: being
     // offered one first made it the owner of a new chat it could never claim, and the current
-    // browser was never offered it (2.1.39 release round, Windows VM).
+    // browser was never offered it (2.1.39 release round, Windows VM). Nor a worker's tab or a
+    // wake: Firefox on an old add-on opened two of three workers per run, and the redeem route
+    // then refused their pages (VM, 2026-10-19).
     const refusedAsStale = staleCompanion(req);
+    const takesWork = !otherBrowser && !refusedAsStale;
     const pendingInputs = otherBrowser ? [] : await pendingBrowserInputs();
     const pendingIds = new Set((await pendingBrowserInputs()).map(input => input.id));
     for (const id of openingCustody.keys()) if (!pendingIds.has(id)) openingCustody.delete(id);
@@ -2735,9 +2738,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         commands: commands.length,
         // Rendering custody follows the actual command ledger, including its retirement.
         commandIds: commands.map(command => command.id),
-        revival: otherBrowser ? null : revival,
-        revivals: otherBrowser ? [] : revivals,
-        placement: pendingBrowserPlacement(null, browser),
+        revival: takesWork ? revival : null,
+        revivals: takesWork ? revivals : [],
+        placement: takesWork ? pendingBrowserPlacement(null, browser) : null,
         ...(canReveal ? { reveals: takeReveals(browser) } : {}),
         ...(follow ? { follow } : {}),
         ...(req.method === 'POST' && imageExportRequested ? { imageExports: pendingImageExports() } : {}),

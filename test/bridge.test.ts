@@ -5922,6 +5922,26 @@ describe('delivering a bootstrap', () => {
     expect(status.body.revival).toEqual(status.body.revivals[0]);
   });
 
+  it('offers a worker\'s wake only to a companion that may take work', async () => {
+    const SHIPPED = 'a0a0a0a0a0a0', chrome = 'c'.repeat(32), firefox = 'f'.repeat(32);
+    setShippedExtensionBuildForTest(SHIPPED);
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'first audit' }], caller: { conversationId: PRIME_CHAT } });
+      const conversationId = 'abababab-7654-3210-fedc-ba9876543211';
+      const bootstrap = await redeem();
+      await request('POST', '/commands/ack', { body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' } });
+      finishAgent({ conversationId }, 'reported, waiting for more');
+      wake([{ to: 'worker-1', text: 'one more thing' }]);
+      await waitForRevival();
+      await request('GET', '/status', { extensionBuild: SHIPPED, browser: chrome });
+      const stale = (await request('GET', '/status', { extensionBuild: 'deadbeefcafe', browser: firefox })).body;
+      expect(stale.revival).toBeNull();
+      expect(stale.revivals).toEqual([]);
+      expect((await request('GET', '/status', { extensionBuild: SHIPPED, browser: chrome })).body.revival).toMatchObject({ conversationId });
+    } finally { setShippedExtensionBuildForTest(); }
+  });
+
   // #1086: a page that redeemed the wake and failed before Send says so ("transient"); the
   // broker wakes it again itself instead of spending a strike and troubling the prime.
   it('keeps a worker waking when its page was merely not ready before Send', async () => {
@@ -8146,6 +8166,36 @@ describe('a worker chat that never opens', () => {
     expect(opened).toEqual([]);
     } finally { const closed = once(socket, 'close'); socket.close(); await closed; }
   });
+  // VM, 2026-10-19: two of three workers in every run failed with "the browser opened it, but the
+  // page never picked up its task". Firefox on an out-of-date add-on polled first and was handed
+  // their tabs to open, and the redeem route then refused its pages as out of date.
+  it('hands a worker tab only to a companion that may take work', async () => {
+    const SHIPPED = 'a0a0a0a0a0a0', chrome = 'c'.repeat(32), firefox = 'f'.repeat(32);
+    setShippedExtensionBuildForTest(SHIPPED);
+    await pair();
+    await request('GET', '/status', { extensionBuild: SHIPPED, browser: chrome });
+    const socket = new WebSocket(base.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
+    await once(socket, 'open');
+    const authenticated = once(socket, 'message'); socket.send(token!); await authenticated;
+    try {
+      spawn({ workers: [{ task: 'one placement probe' }], caller: { conversationId: PRIME_CHAT } });
+      // The out-of-date browser polls through the whole time the tab is being offered.
+      for (let poll = 0; poll < 40; poll++) {
+        expect((await request('GET', '/status', { extensionBuild: 'deadbeefcafe', browser: firefox })).body.placement).toBeNull();
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      let placement: any;
+      await vi.waitFor(async () => {
+        placement ||= (await request('GET', '/status', { extensionBuild: SHIPPED, browser: chrome })).body.placement;
+        expect(placement?.id).toBeTruthy();
+      });
+      expect((await redeem(placement.id)).agent).toBe('worker-1');
+    } finally {
+      setShippedExtensionBuildForTest();
+      const closed = once(socket, 'close'); socket.close(); await closed;
+    }
+  });
+
   it('fails the worker definitively instead of leaving it invited, and lets the next one through', async () => {
     await pair();
     spawn({ workers: [{ task: 'first audit' }, { task: 'second audit' }], caller: { conversationId: PRIME_CHAT } });
