@@ -35,3 +35,11 @@ export function browserInputModel(input: { mode: string; model: string | null; r
     ? { model: null, reasoningEffort: null }
     : { model: input.model, reasoningEffort: input.reasoningEffort };
 }
+
+/**
+ * What the person wrote, as the chat shows it and names itself by. A plan's first message carries
+ * stage 1's generated wording as its text; the request the person typed is its objective.
+ */
+export function authoredTextOf(entry: Readonly<{ text: string; objective?: string; authoredSource?: 'text' | 'objective' | 'none' }>): string {
+  return entry.authoredSource === 'objective' && entry.objective?.trim() ? entry.objective : entry.text;
+}

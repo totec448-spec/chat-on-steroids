@@ -2495,7 +2495,7 @@ var CLF_DOM = (() => {
     channel.port2.postMessage(null);
   }
 
-  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true, matchesUser = null, observeEvidence = null, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null, receiptTimeoutMs = null, mention = null, explain = null, sentRequest = null, whileGenerating = false } = {}) {
+  async function send({ acceptanceTimeoutMs = 30000, stillCurrent = () => true, stillCurrentAfterClick = null, matchesUser = null, observeEvidence = null, clearAcceptedDraft = true, beforeSend = null, acceptUserReceipt = null, receiptTimeoutMs = null, mention = null, explain = null, sentRequest = null, whileGenerating = false } = {}) {
     // Why a Send ended without acceptance, as one short code for the caller's diagnostics (#820).
     // It names the first refusal only and never changes what Send does.
     const refused = (why) => { try { explain?.(why); } catch { /* Diagnostics never change Send. */ } return false; };
@@ -2626,7 +2626,10 @@ var CLF_DOM = (() => {
         };
         const check = () => {
           if (done) return;
-          if (!stillCurrent() || (beforeConversation && conversationId() !== beforeConversation)) return finish(false, 'chat-changed');
+          // A caller's deadline may forbid the click without disowning a click already made: its
+          // receipt is evidence the caller still has to report (#1086 worker starts).
+          const owned = attempted && stillCurrentAfterClick ? stillCurrentAfterClick : stillCurrent;
+          if (!owned() || (beforeConversation && conversationId() !== beforeConversation)) return finish(false, 'chat-changed');
           if (attempted) {
             if (accepted()) finish(true);
             return;
@@ -3350,6 +3353,15 @@ var CLF_DOM = (() => {
   }
   async function selectModelSettings(model, effort, stillCurrent = () => true) {
     if (!model && !effort) return true;
+    // The page's own picker state, read without opening anything. A worker tab opens with its model
+    // in the address and ChatGPT applies it; opening the picker only to prove that left its closing
+    // animation unfinished in a hidden, throttled tab, its focus scope hid the composer, and every
+    // worker failed "after model selection" (#1086). The same account-evaluated proof as below.
+    if (!document.querySelector(PICKER)) {
+      const passive = await readPickerState();
+      const now = passive?.choices.find(choice => choice.bucket === passive.currentBucket);
+      if (now?.available && (!model || now.id === model || now.familyId === model) && (!effort || now.effort === effort)) return stillCurrent();
+    }
     const ui = modelPickerAccess(stillCurrent), original = await ui.open();
     if (!original) { await ui.close(); return false; }
     // Account-evaluated exact selection is already proof; visiting unrelated

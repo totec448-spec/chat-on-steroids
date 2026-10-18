@@ -1456,6 +1456,32 @@ describe('session store', () => {
     expect((await getSession(summary.id))?.lastAssistantFinalAt).toBe(200);
   });
 
+  it('keeps the final boundary when a reloaded page reports the same finished answer again', async () => {
+    const summary = await createSession({ title: 'final reread' });
+    const messageId = 'assistant-final-reread';
+    const final = (time: number, text: string, extra: { goalEligible?: boolean; providerMessageId?: string } = {}) =>
+      upsertMessageEvent(summary.id, {
+        time,
+        source: 'extension',
+        kind: 'assistant_message',
+        messageId,
+        message: { text, truncated: false, chars: text.length },
+        state: 'final',
+        final: true,
+        ...extra
+      });
+    await final(200, 'Finished.');
+
+    // ChatGPT redraws the same answer after a reload or a branch and the page learns more about
+    // it: a revision of the stored answer, not a new one.
+    expect((await final(900, 'Finished.', { goalEligible: true, providerMessageId: messageId })).changed).toBe(true);
+    expect((await getSession(summary.id))?.lastAssistantFinalAt).toBe(200);
+
+    // A final whose text changed is a new answer.
+    await final(1000, 'Finished, revised.');
+    expect((await getSession(summary.id))?.lastAssistantFinalAt).toBe(1000);
+  });
+
   it('projects a successful worker finish report as the session finish boundary', async () => {
     const summary = await createSession({ title: 'finish boundary' });
     const call = (callId: string, tool: string, finish: boolean) => ({

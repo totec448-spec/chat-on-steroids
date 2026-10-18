@@ -162,7 +162,9 @@ import { ownCoreHint,
   closableWorkerConversations,
   activeRunIds,
   swarmRunning,
+  adoptLateWorker,
   failAgent,
+  LATE_START_WINDOW_MS,
   finishSilentCeilingWorker,
   WORKER_SILENCE_MS,
   failWorkerRevival,
@@ -283,6 +285,12 @@ export const COMMAND_DEADLINE_MS = 90_000;
  * 90th percentile, and two worker tabs loading beside other tabs both missed 20 s (VM, 2026-10-06). */
 export const WORKER_REDEEM_MS = 45_000;
 export const WORKER_BOOTSTRAP_LIMIT_MS = 120_000;
+/**
+ * How long a worker's page that reported Send has for its receipt (#1086). On a loaded machine
+ * pages said "sending the task" and the app gave the workers up at the ordinary deadline anyway,
+ * while their chats received the task. The page is told this deadline in the step's reply.
+ */
+export const WORKER_SENDING_GRACE_MS = 120_000;
 /** A worker may occupy the broker's `waking` state for one short, absolute attempt. */
 /**
  * How long the browser has to prove it typed a wake into a sleeping worker's chat.
@@ -4788,6 +4796,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (!step || !command || !allowed) return json(res, 200, { ok: false }, origin);
     command.progress = { ...command.progress, step, stepAt: Date.now() };
     if (command.spec.type === 'resume' && command.timer && continuationByToken(command.spec.token)?.automatic) armDeadline(command);
+    // A worker about to send gets its receipt window, and its page learns the new deadline (#1086).
+    if (command.spec.type === 'worker' && step === 'sending') {
+      armDeadline(command);
+      return json(res, 200, { ok: true, expiresAt: Date.now() + Math.max(1, commandDeadlineDelay(command)) }, origin);
+    }
     return json(res, 200, { ok: true }, origin);
   }
   if (route === '/commands/ack' && req.method === 'POST') {
@@ -4829,6 +4842,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // been cancelled or been superseded, accepting the late ACK as success strands a real
     // tab whose model can never be bound to the worker/session it was opened for. Legacy
     // protocol pages omitted client and keep their old idempotent no-op response.
+    if (!ownedCommand && client && status === 'sent' && conversation) {
+      const late = lateStartFor(id);
+      if (late && late.client === client) {
+        const [code, reply] = await settleLateStart(id, late, conversation);
+        return json(res, code, reply, origin);
+      }
+    }
     if (!ownedCommand && client) {
       return json(res, 404, { error: 'no_such_command' }, origin);
     }
@@ -10412,7 +10432,10 @@ function commandDeadlineDelay(command: Command, now = Date.now()): number {
       const redeemBy = Math.max(command.claimedAt + WORKER_REDEEM_MS, lastBrowserLaunchAt + BROWSER_LAUNCH_GRACE_MS);
       return Math.min(redeemBy, limit) - now;
     }
-    return Math.min(command.claimedAt + COMMAND_DEADLINE_MS, limit) - now;
+    const ordinary = Math.min(command.claimedAt + COMMAND_DEADLINE_MS, limit);
+    // A page that said it is sending may already have delivered the task; its receipt gets a window.
+    const { step, stepAt } = command.progress ?? {};
+    return (step === 'sending' && stepAt !== undefined ? Math.max(ordinary, stepAt + WORKER_SENDING_GRACE_MS) : ordinary) - now;
   }
   const claimedAt = command.claimedAt ?? now;
   return claimedAt + COMMAND_DEADLINE_MS - now;
@@ -10506,7 +10529,11 @@ function expire(command: Command): void {
     retire(command, 'its worker is no longer waiting to be woken');
     return;
   }
-  drop(command, commandExpiryReason(command));
+  // A page that claimed its worker and reported no failure may still have sent its task: its
+  // reports can be minutes late on a starved machine (#1086). Its late receipt is adopted.
+  drop(command, commandExpiryReason(command), {
+    startTimedOut: spec.type === 'worker' && command.owner !== null && !command.lastError
+  });
   deliver();
 }
 
@@ -10657,7 +10684,7 @@ function describe(command: Command, client: string | null, claimedSummary?: stri
   };
 }
 
-function drop(command: Command, why: string): boolean {
+function drop(command: Command, why: string, options: { startTimedOut?: boolean } = {}): boolean {
   if (!commands.includes(command)) return false;
   const automaticEntry = command.spec.type === 'resume' ? continuationByToken(command.spec.token) : null;
   const automaticResume =
@@ -10709,7 +10736,10 @@ function drop(command: Command, why: string): boolean {
   // limit, it held the one in-flight agent-bearing bootstrap so the next worker never
   // opened, it kept the run looking alive to takeover, and the prime went on waiting for
   // a report from a chat that does not exist.
-  if (command.spec.type === 'worker') failAgent(command.spec.agent, why, undefined, {}, command.spec.runId);
+  if (command.spec.type === 'worker') {
+    const failed = failAgent(command.spec.agent, why, undefined, { startTimedOut: options.startTimedOut }, command.spec.runId);
+    if (failed && options.startTimedOut && command.owner !== null) noteLateStartCandidate(command.id, command.owner, command.spec);
+  }
   // A revival that never happened is not a worker that failed. Nothing was typed into its
   // chat, so it goes back to sleeping with its inbox intact and its slot released, and the
   // prime is told the message it sent is still waiting to be delivered.
@@ -10822,9 +10852,70 @@ function nextDeliverable(): Command | null {
  */
 type AckStatus = 'sent' | 'failed';
 
+/**
+ * Worker commands given up for time whose page had claimed them (#1086), by command id.
+ *
+ * Their chat may still have received the task: on a starved machine a page's reports reached
+ * the app 20–90 s after it sent. The page that claimed the command is the only one whose late
+ * receipt counts. In memory and bounded: after a restart a late receipt is refused as before.
+ */
+type WorkerCommandSpec = Extract<CommandSpec, { type: 'worker' }>;
+interface LateStartCandidate { client: string; spec: WorkerCommandSpec; droppedAt: number; settling: Promise<[number, Record<string, unknown>]> | null }
+const lateStarts = new Map<string, LateStartCandidate>();
+const MAX_LATE_STARTS = 32;
+
+function noteLateStartCandidate(id: string, client: string, spec: WorkerCommandSpec): void {
+  lateStarts.set(id, { client, spec, droppedAt: Date.now(), settling: null });
+  while (lateStarts.size > MAX_LATE_STARTS) lateStarts.delete(lateStarts.keys().next().value!);
+}
+
+function lateStartFor(id: string): LateStartCandidate | null {
+  const late = lateStarts.get(id);
+  if (late && Date.now() - late.droppedAt > LATE_START_WINDOW_MS) lateStarts.delete(id);
+  return lateStarts.get(id) ?? null;
+}
+
+/** One final answer per late receipt, durable before it is given, shared by a concurrent retry. */
+function settleLateStart(id: string, late: LateStartCandidate, conversation: string): Promise<[number, Record<string, unknown>]> {
+  late.settling ??= (async (): Promise<[number, Record<string, unknown>]> => {
+    const result = adoptLateWorker(late.spec.agent, conversation, late.spec.runId);
+    const adopted = result.outcome === 'adopted';
+    if (adopted) {
+      const opened = await specOrigin(late.spec);
+      if (opened) await noteChatOrigin(conversation, opened).catch((err: Error) =>
+        logWarn(`could not record the origin of a late-started worker chat: ${err.message}`));
+    }
+    const receipt: CommandReceipt = {
+      id,
+      client: late.client,
+      conversationId: conversation,
+      outcome: adopted ? 'committed' : 'terminal-failure',
+      committed: adopted,
+      error: adopted ? null : `the worker's chat started after the app had given up on it, and ${result.outcome === 'stray' ? result.why : ''}`,
+      completedAt: Date.now()
+    };
+    try {
+      await writeDurableNow(COMMANDS_STATE, commandSnapshot({ addReceipt: receipt }));
+    } catch (err) {
+      late.settling = null;
+      logWarn(`bridge: could not persist the late receipt for worker:${late.spec.runId}:${late.spec.agent} — ${err instanceof Error ? err.message : String(err)}`);
+      return [503, { error: 'command_receipt_not_durable', retryable: true }];
+    }
+    commandReceipts = [...commandReceipts.filter((entry) => entry.id !== id), receipt].slice(-MAX_COMMAND_RECEIPTS);
+    lateStarts.delete(id);
+    logInfo(`bridge: worker:${late.spec.runId}:${late.spec.agent} started late — ${adopted ? 'its chat rejoined the run' : 'its chat was fenced as a stray'}`);
+    changed();
+    return [200, receiptReply(receipt)];
+  })();
+  return late.settling;
+}
+
 /** What a queued command says the chat it opened is for. Null once the command is gone. */
 async function commandOrigin(id: string): Promise<SessionOrigin | null> {
-  const spec = commands.find((entry) => entry.id === id)?.spec;
+  return specOrigin(commands.find((entry) => entry.id === id)?.spec);
+}
+
+async function specOrigin(spec: CommandSpec | undefined): Promise<SessionOrigin | null> {
   if (!spec || spec.type === 'stop') return null;
   if (spec.type === 'worker')
     return {
