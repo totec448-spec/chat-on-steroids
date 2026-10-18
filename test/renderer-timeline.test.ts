@@ -6509,4 +6509,21 @@ describe('prompt recall in the composer', () => {
     await settle();
     expect(w.document.getElementById('skillPicker')!.hidden).toBe(true);
   });
+
+  it('keeps its place when a message is recorded while you page through recall', async () => {
+    const { w, append } = await boot(chat());
+    expect(press(w, 'ArrowUp')).toBe(true);
+    await append([ask(7, 'Third question'), answer(8, 'Third answer')]);
+    expect(composer(w).value).toBe('Second question');
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('First question');
+    composer(w).setSelectionRange(14, 14);
+    expect(press(w, 'ArrowDown')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+    expect(press(w, 'ArrowDown')).toBe(true);
+    expect(composer(w).value).toBe('');
+    // A new recall starts from the newest message again.
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Third question');
+  });
 });
