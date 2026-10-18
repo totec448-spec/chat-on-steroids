@@ -663,7 +663,7 @@ function staleCompanion(req: http.IncomingMessage): boolean {
   // Firefox updates its signed add-on itself, up to a day after the app, while a Chromium copy
   // updates within minutes. Where ChatGPT runs in Firefox, refusing its add-on meanwhile would
   // leave every new chat unclaimed (measured 2026-10-14), so the chosen Firefox keeps working.
-  if (req.headers['x-extension-engine'] === 'gecko' && getConfig().ui.chatBrowser === 'firefox') return false;
+  if (geckoExtension(req) && getConfig().ui.chatBrowser === 'firefox') return false;
   const stamp = extensionBuildOf(req);
   const shipped = shippedExtensionBuild();
   if (!stamp || !shipped || stamp === shipped) return false;
@@ -1046,6 +1046,15 @@ export async function bridgeStatus(): Promise<BridgeStatus> {
   };
 }
 
+/**
+ * Whether the request comes from Firefox's add-on. It says so in `x-extension-engine` since 2.1.38;
+ * an older add-on still has its moz-extension:// origin, and its update banner must not ask for a
+ * reload from the app's folder, which a signed add-on cannot do.
+ */
+function geckoExtension(req: http.IncomingMessage): boolean {
+  return req.headers['x-extension-engine'] === 'gecko' || String(req.headers.origin ?? '').startsWith('moz-extension://');
+}
+
 function versionStatus(): Pick<BridgeStatus, 'extensionVersion' | 'extensionEngine'> {
   const reported = reportedExtension();
   return { extensionVersion: reported?.version ?? null, ...(reported?.engine ? { extensionEngine: reported.engine } : {}) };
@@ -1115,7 +1124,7 @@ function keepsExternalRecord(req: http.IncomingMessage): boolean {
   const chosen = getConfig().ui.chatBrowser;
   if (chosen === 'cos') return false;
   const fits = (gecko: boolean) => (chosen === 'firefox') === gecko;
-  return fits(externalExtension.engine === 'gecko') && !fits(req.headers['x-extension-engine'] === 'gecko');
+  return fits(externalExtension.engine === 'gecko') && !fits(geckoExtension(req));
 }
 
 function noteExternalExtension(req: http.IncomingMessage): boolean {
@@ -1133,7 +1142,7 @@ function noteExternalExtension(req: http.IncomingMessage): boolean {
   const sameBrowser = browserId !== undefined && externalExtension?.browserId === browserId && externalExtensionPresent();
   const appeared = !sameBrowser || externalExtension?.version !== version;
   // Firefox runs a signed add-on it updates itself (x-extension-engine: gecko); Chromium sends none.
-  const engine = req.headers['x-extension-engine'] === 'gecko' ? 'gecko' as const : undefined;
+  const engine = geckoExtension(req) ? 'gecko' as const : undefined;
   externalExtension = { ...(sameBrowser ? externalExtension : {}), seenAt: Date.now(), version, browserId, engine };
   // Lasting evidence for Setup: this browser has the extension, in this version.
   const proved = browserId !== undefined && version !== null && noteExternalInstalled(browserId, version);
@@ -1336,7 +1345,7 @@ function noteExtensionVersion(req: http.IncomingMessage): void {
   const before = reportedExtension();
   const source = browserOf(req) ?? (req.headers['x-extension-host'] === 'cos' ? 'cos' : 'unknown');
   extensionVersions.delete(source);
-  extensionVersions.set(source, { version: extensionVersion, ...(req.headers['x-extension-engine'] === 'gecko' ? { engine: 'gecko' as const } : {}), seenAt: Date.now() });
+  extensionVersions.set(source, { version: extensionVersion, ...(geckoExtension(req) ? { engine: 'gecko' as const } : {}), seenAt: Date.now() });
   if (extensionVersions.size > 16) extensionVersions.delete(extensionVersions.keys().next().value!);
   const after = reportedExtension();
   const reportChanged = before?.version !== after?.version || before?.engine !== after?.engine;
@@ -1356,7 +1365,7 @@ function noteExtensionVersion(req: http.IncomingMessage): void {
     if (shipped && stamp && stamp !== shipped) {
       // Expected after every app update: the extension updates itself once no chat is busy.
       // Only an extension loaded from some other folder stays behind and needs a manual reload.
-      logInfo(req.headers['x-extension-engine'] === 'gecko'
+      logInfo(geckoExtension(req)
         ? `bridge: Firefox is running add-on build ${stamp}, but this app ships ${shipped}. Firefox updates the ` +
           'add-on by itself; to do it now, choose Check for Updates on its about:addons page.'
         : `bridge: the browser is running extension build ${stamp}, but this app ships ${shipped}. ` +
