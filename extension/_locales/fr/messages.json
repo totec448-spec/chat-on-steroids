@@ -38,6 +38,9 @@
   "content_bootstrap_composer_replaced": {
     "message": "ChatGPT a remplacé la zone de saisie pendant l’insertion du message initial"
   },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPT n'a pas affiché d'éditeur utilisable pour le démarrage"
+  },
   "content_bootstrap_composer_unavailable": {
     "message": "ChatGPT n'a pas réaffiché d'éditeur utilisable après la sélection du modèle"
   },

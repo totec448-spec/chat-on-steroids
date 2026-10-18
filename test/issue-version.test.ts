@@ -121,3 +121,42 @@ it('tells the reporter exactly where each missing part comes from', () => {
   expect(form).toMatch(/id: diagnostics[\s\S]*?required: true/);
   expect(form).toMatch(/id: latest[\s\S]*?I reproduced this on the latest release[\s\S]*?required: true/);
 });
+
+// #1643 (2026-10-18): a careful bug report written without the bug form (no "### App version" field)
+// got no notice at all, because the check returned "none" for anything without the form's fields.
+// A report without any form heading is read from its text instead, when it says it is a bug.
+const freeForm = (extra = '') => '## Summary\n\nAutomatic compaction waited 47 minutes.\n\n## Environment\n\n' +
+  '- CoS application: **2.1.40** (installed executable reports `2.1.40.0`).\n- Browser: Chrome 155.0.8059.85.\n' +
+  '\n### 1. `resumed` did not establish that a summary request had been sent\n\nObservations.\n' + extra;
+const freeIssue = (body: string, extra: Partial<Intake> & { title?: string } = {}): Intake & { title: string } =>
+  ({ ...fresh(body, { labels: [] }), title: '[Bug] 2.1.40: automatic compaction waited ~47 minutes', ...extra });
+const current = { latest: 'v2.1.40', opened: true };
+
+it('reads a bug report written without the form from its text, and asks for what is missing', () => {
+  expect(intakeDecision(freeIssue(freeForm()), current)).toEqual({ decision: 'close', missing: ['diagnostics'], freeForm: true });
+  expect(intakeDecision(freeIssue(freeForm(`\n${attached}\n`)), current).missing).toEqual([]);
+  // Chrome's four-part number is not the app's version; an older app version needs the latest release.
+  expect(intakeDecision(freeIssue(freeForm(attached).replace(/2\.1\.40/g, '2.1.38')), current).missing).toEqual(['latest']);
+  expect(intakeDecision(freeIssue('## Summary\n\nIt broke on Chrome 155.0.8059.85.', { title: '[Bug] it broke' }), current).missing)
+    .toEqual(['version', 'diagnostics', 'latest']);
+  // The bug label says it too; an idea or a question without either is left alone.
+  expect(intakeDecision(freeIssue(freeForm(), { title: 'Compaction waits long', labels: [{ name: 'bug' }] }), current).decision).toBe('close');
+  expect(intakeDecision(freeIssue(freeForm(), { title: 'Consider adding CodeRabbit' }), current).decision).toBe('none');
+  expect(intakeDecision(freeIssue(freeForm(), { author_association: 'OWNER' }), current).decision).toBe('none');
+});
+
+it('does not close an open free-form report on a later edit only because a newer release came out', () => {
+  expect(intakeDecision(freeIssue(freeForm(attached)), { latest: 'v2.1.41', opened: false }).decision).toBe('none');
+});
+
+it('reopens a free-form report held for its diagnostics once they are in the text', () => {
+  const held = freeIssue(freeForm(attached), { state: 'closed', labels: [{ name: INTAKE_LABEL }] });
+  expect(intakeDecision(held, { latest: 'v2.1.40', opened: false }).decision).toBe('reopen');
+});
+
+it('tells a free-form reporter to add the missing parts to the text', () => {
+  const text = (missingText as (missing: string[], options?: { freeForm?: boolean }) => string)(['diagnostics'], { freeForm: true });
+  expect(text).toContain('Diagnostics report');
+  expect(text).toMatch(/to the issue text/);
+  expect(text).not.toMatch(/into that field|tick/);
+});

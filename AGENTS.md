@@ -478,6 +478,7 @@ Local Project via the existing project-files listing authority and inserts a pro
 reference; it does not upload a file or broaden filesystem access. Commands, Skills and project
 files are separate compact sections; there is no sidebar entry, modal library or native import/remove UI.
 Commands: `/plan`, `/goal`, `/loop`, `/compact`, plus Codex's `/model` and `/reasoning` (open the model picker), `/new`, `/rename`, `/pin`, `/status` (the context meter's panel), `/review` and `/init` (put a review or AGENTS.md request in front of the draft, unsent), `/usage`, `/plugins`, `/pet` and `/feedback` (Settings → Activity, the diagnostics report). `/rename`, `/pin`, `/status` and `/compact` are offered only while a chat is open (`commandAvailable`); popups open after the choosing click has passed the outside-click handlers.
+The same commands typed at the start of a message and sent without the menu (`APP_COMMANDS` in `renderer/skills.ts`) run as if picked, unless a Skill has that id; `/plan`, `/goal` and `/loop` then send the rest of the text as their mode would, any other command leaves the rest in the composer.
 A small plus icon to the right of that Skills button inserts `Please add the following skills to my COS skills:`
 into the authored draft without sending it. ChatGPT can create Markdown instructions through
 the existing permission-checked `/skills` filesystem root. Leading `/id` or `/prompt id` completion projects selected
@@ -3598,10 +3599,30 @@ The page reports how far it got with `/commands/step` (`{ id, client, step }`), 
 answering, a non-empty editor, or no usable editor yet; re-reported when the reason changes;
 older pages send `revival-waiting`), then
 `composer`, `model`, `composer-after-model`, `inserting`, `sending` from the redeeming page.
-Reports are fire-and-forget and advisory: they change no lease, deadline or outcome, a report
-from a page that does not own the command is ignored, and they never carry text, titles or
-addresses. Expiry names the last one, or whether the browser or the OS opened the chat and no
+Reports are fire-and-forget and advisory: they change no lease or outcome, a report from a page
+that does not own the command is ignored, and they never carry text, titles or addresses. One
+changes a deadline: a worker's `sending` gives its receipt `WORKER_SENDING_GRACE_MS` from that
+report (bounded), because a page that pressed Send may already have delivered the task (#1086).
+Expiry names the last one, or whether the browser or the OS opened the chat and no
 page picked it up, so "did not report back in time" says where a start stopped (#882 worker-11).
+A worker given up for time after a page claimed it (no page-reported failure) is a late-start
+candidate for `LATE_START_WINDOW_MS`, in memory only (#1086: on a memory-starved machine a page's
+reports reached the app 20–90 s after it sent). A `sent` ACK with a conversation from the page
+that claimed it is then settled by `adoptLateWorker`: the same failed worker rejoins its family
+(live, or parked and woken) when its chat is free and a slot is free, its inbox is restored and
+the prime gets `[worker-N started late]`; otherwise the chat goes on the retired-worker fence and
+the prime gets `[worker-N started late, outside the run]`. Either way the ACK gets one durable
+final receipt (committed or terminal-failure); any other late ACK is still `no_such_command`.
+The page side has to send that ACK: a worker page's deadline forbids its Send click, not the report
+of one already made, so after the click `CLF_DOM.send` (`stillCurrentAfterClick`) and the wait for
+the new chat id hold only the exact send lifetime. A resume keeps the deadline throughout.
+A worker page then waits for its exact receipt in 40 s rounds for up to `WORKER_RECEIPT_WAIT_MS`
+(a hidden tab on a starved machine drew it minutes late), and sends its ACK again with backoff
+while the extension gives no answer (its worker was stopped or restarting and nothing reached the
+outbox). Both stop when the page or its send lifetime ends.
+Before that, a worker's first wait for ChatGPT's message box uses its remaining budget less 20 s
+(a resume or wake keeps 12 s), and a box that never appeared is reported as
+`content_bootstrap_composer_never_ready`, apart from one lost after model selection (#1086).
 Historical worker failures remain visible in status and history, but only live workers produce
 the transient waiting caption. A current canonical final
 uses the same completion reader as Continue/Goal and releases the worker before silence,
@@ -4791,7 +4812,8 @@ tokens, bearer and basic headers, JWTs, URL passwords, private keys, MCP endpoin
 it is cut to a fixed size, and carries the stored length and a `truncated` flag; the stored
 record is never changed. That is a list of shapes, not a guarantee: other secrets typed into a
 chat pass through, which is why the switch and the token matter. A user message shows what the
-user wrote (`authoredText`), not the framed text the app delivered. Asset ids, request ids and
+user wrote (`authoredText`), not the framed text the app delivered; for a plan's first message
+that is the request the person typed (`authoredSource: 'objective'`), not stage 1's generated wording. Asset ids, request ids and
 outbox owners, delivery-only prompt text, attachment paths and recovery bookkeeping (apart from
 the deadlines `live` reports) do not appear. Unknown, repeated or malformed query parameters are refused with 400, page sizes are
 capped, session ids match only in their generated lowercase spelling (a differently cased
