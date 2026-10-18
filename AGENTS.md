@@ -2711,7 +2711,9 @@ closes once `/status` sends `inputOpeningIds` without that id and hands out no e
 tab is unpinned, inactive and last used over five minutes ago, and the page answers
 `clf-close-cancelled-opening` as untouched. This covers a message that ended where the cancel path's
 own close entry never reached (a changed ChatGPT browser, an app restart); an app that sends no
-`inputOpeningIds` closes nothing this way.
+`inputOpeningIds` closes nothing this way. A worker or handoff start page (`clf` marker) closes the
+same way once `commandIds` no longer lists its command, as a worker that failed before its first
+message left one behind; the page check then compares the `clf` marker.
 Managed idle/retired/duplicate pruning records a successful removal against the exact tab,
 document, navigation epoch and conversation in the existing session-storage snapshot. Its
 lifecycle event carries a non-manual departure through the close outbox; it does not create
