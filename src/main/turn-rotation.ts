@@ -57,6 +57,18 @@ export async function considerTurnRotation(conversationId: string, sessionId: st
   }
 }
 
+/**
+ * The filed continue reached its page while no tool call of the chat was running: the model was
+ * writing its answer, so the continue was retired unsent (see the bridge's claim route). That is
+ * no failure to take it. The turn is tried again at a later tool result after the refused delay,
+ * and the decline gives back its filing.
+ */
+export function declineTurnRotation(conversationId: string, turnId: string, now: number): void {
+  const last = attempts.get(conversationId);
+  if (last?.turnId !== turnId || !last.filed) return;
+  attempts.set(conversationId, { turnId, at: now, filed: false, filings: Math.max(0, last.filings - 1) });
+}
+
 /** Test seam: forgets every attempt. */
 export function resetTurnRotationForTests(): void {
   attempts.clear();
