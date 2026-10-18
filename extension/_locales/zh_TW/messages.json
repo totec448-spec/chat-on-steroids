@@ -1180,5 +1180,11 @@
   },
   "popup_detail_total": {
     "message": "共 $1 個"
+  },
+  "content_edit_message_missing": {
+    "message": "該訊息已不在 ChatGPT 頁面上，無法編輯。"
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT 沒有為該訊息提供編輯。請在 ChatGPT 中開啟聊天，然後再試一次。"
   }
 }

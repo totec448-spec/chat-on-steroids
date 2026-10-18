@@ -6022,3 +6022,127 @@ describe('branch in new chat (#482)', () => {
     expect(live.sent.at(-1)).toMatchObject({ sessionId: pending.id, branch: { sessionId: source.id, conversationId: chat, messageId: replyId } });
   });
 });
+
+describe('edit and resubmit (#365)', () => {
+  const q = (seq: number, messageId: string, value: string, turnId: string, extra: object = {}): SessionEvent =>
+    ({ kind: 'user_message', seq, origin: seq, time: T0 + seq * 1000, source: 'extension', turnId, messageId, message: text(value), ...extra }) as SessionEvent;
+  const a = (seq: number, messageId: string, value: string, turnId: string): SessionEvent =>
+    ({ kind: 'assistant_message', seq, time: T0 + seq * 1000, source: 'extension', turnId, messageId, message: text(value), final: true, state: 'final' }) as SessionEvent;
+  const end = (seq: number, turnId: string): SessionEvent => ({ seq, time: T0 + seq * 1000, source: 'extension', kind: 'turn_end', turnId, outcome: 'completed' }) as SessionEvent;
+  const said = (w: { document: Document }) => [...w.document.querySelectorAll('#timeline > .ev-user_message, #timeline > .ev-assistant_message, #timeline > .earlier-version')]
+    .map(node => node.classList.contains('earlier-version') ? `earlier:${node.querySelector('summary')!.textContent!.trim()}` : node.querySelector('.said')!.textContent!.replace(/\s+/g, ' ').trim().slice(0, 40));
+
+  it('folds the version an edit replaced, and what followed it, under the edited question', async () => {
+    const events = [q(1, 'q-1', 'First question', 't1'), a(2, 'a-1', 'First answer', 't1'), end(3, 't1'),
+      q(4, 'q-2', 'Fix the logn bug', 't2'), a(5, 'a-2', 'Which bug?', 't2'), end(6, 't2'),
+      q(7, 'q-2b', 'Fix the login bug', 't3', { replaces: 'q-2' }), a(8, 'a-3', 'Done, here is the fix.', 't3'), end(9, 't3')];
+    const { w } = await boot(events, true);
+    const rows = said(w);
+    expect(rows[0]).toContain('First question');
+    expect(rows[1]).toContain('First answer');
+    expect(rows[2]).toContain('Fix the login bug');
+    expect(rows[3]).toBe('earlier:Earlier version · 2 messages');
+    expect(rows[4]).toContain('Done, here is the fix.');
+    expect(rows).toHaveLength(5);
+    expect(w.document.querySelector('#timeline > .ev-user_message:nth-of-type(n) .message-edited, #timeline .message-edited')?.textContent).toBe('Edited version');
+    // Directly under the edited question, before the line of the turn that answers it.
+    const editedRow = [...w.document.querySelectorAll('#timeline > .ev-user_message')].find(row => row.textContent!.includes('Fix the login bug'))!;
+    expect(editedRow.nextElementSibling?.classList.contains('earlier-version')).toBe(true);
+    const fold = w.document.querySelector<HTMLDetailsElement>('#timeline > .earlier-version')!;
+    expect(fold.open).toBe(false);
+    fold.open = true; fold.dispatchEvent(new w.Event('toggle')); await settle();
+    const shown = [...fold.querySelectorAll('.said')].map(node => node.textContent!.replace(/\s+/g, ' ').trim());
+    expect(shown).toHaveLength(2);
+    expect(shown[0]).toContain('Fix the logn bug');
+    expect(shown[1]).toContain('Which bug?');
+  });
+
+  it('folds every earlier version of a question edited twice into one row', async () => {
+    const events = [q(1, 'q-1', 'Ask', 't1'), a(2, 'a-1', 'Answer one', 't1'), end(3, 't1'),
+      q(4, 'q-1b', 'Ask again', 't2', { replaces: 'q-1' }), a(5, 'a-2', 'Answer two', 't2'), end(6, 't2'),
+      q(7, 'q-1c', 'Ask a third time', 't3', { replaces: 'q-1b' }), a(8, 'a-3', 'Answer three', 't3'), end(9, 't3')];
+    const { w } = await boot(events, true);
+    expect(said(w)).toEqual([expect.stringContaining('Ask a third time'), 'earlier:Earlier versions · 4 messages', expect.stringContaining('Answer three')]);
+  });
+
+  const chat = '6ad337fe-47a4-83ed-a21f-c2e24d5829a4';
+  const Q1 = '6ad3a59b-0001-83eb-8bc4-8c84e68dd911', Q2 = '6ad3a59b-0002-83eb-8bc4-8c84e68dd911';
+  const A1 = '6ad3a59b-00a1-83eb-8bc4-8c84e68dd911', A2 = '6ad3a59b-00a2-83eb-8bc4-8c84e68dd911';
+  const exchange = () => [q(1, Q1, 'First question', 't1'), a(2, A1, 'First answer', 't1'), end(3, 't1'),
+    q(4, Q2, 'Fix the logn bug', 't2'), a(5, A2, 'Which bug?', 't2'), end(6, 't2')];
+  const submit = async (w: Window & typeof globalThis, value?: string) => {
+    if (value !== undefined) (w.document.getElementById('chatInput') as HTMLTextAreaElement).value = value;
+    w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+  };
+  const editButton = (w: { document: Document }, text: string) => [...w.document.querySelectorAll('#timeline > .ev-user_message')]
+    .find(row => row.textContent!.includes(text))?.querySelector<HTMLButtonElement>('.question-edit') ?? null;
+
+  it('edits one of your questions from the composer and sends it as ChatGPT\'s edit of that question', async () => {
+    const { w, live } = await boot(exchange(), true, [], [], { summary: { conversationId: chat } });
+    (w.document.getElementById('chatInput') as HTMLTextAreaElement).value = 'A draft I was writing';
+    editButton(w, 'First question')!.click(); await settle();
+    const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+    expect(input.value).toBe('First question');
+    const notice = w.document.getElementById('editDraft')!;
+    expect(notice.hidden).toBe(false);
+    expect(notice.textContent).toContain('Editing your message · replaces 3 later messages');
+    // The question being edited is marked in the chat, so an earlier one is easy to find.
+    const marked = () => [...w.document.querySelectorAll('#timeline .ev-user_message.is-being-edited')].map(row => row.textContent!.includes('First question'));
+    expect(marked()).toEqual([true]);
+    await submit(w as any, 'First question, edited');
+    expect(live.sent.at(-1)).toMatchObject({ sessionId: summary([]).id, text: 'First question, edited', mode: 'auto', edit: { messageId: Q1 } });
+    expect(notice.hidden).toBe(true);
+    expect(marked()).toEqual([]);
+    // The draft that was there before the edit comes back.
+    expect(input.value).toBe('A draft I was writing');
+  });
+
+  it('says so when the latest question is edited, and gives the draft back when the edit is cancelled', async () => {
+    const { w, live } = await boot(exchange(), true, [], [], { summary: { conversationId: chat } });
+    const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+    input.value = 'Unfinished';
+    editButton(w, 'Fix the logn bug')!.click(); await settle();
+    expect(w.document.getElementById('editDraft')!.textContent).toContain('Editing your message · replaces 1 later message');
+    w.document.querySelector<HTMLButtonElement>('#editDraft .edit-draft-cancel')!.click(); await settle();
+    expect(w.document.getElementById('editDraft')!.hidden).toBe(true);
+    expect(input.value).toBe('Unfinished');
+    await submit(w as any, 'Just a follow-up');
+    expect(live.sent.at(-1)).not.toHaveProperty('edit');
+  });
+
+  it('offers no Edit in a worker chat', async () => {
+    const { w } = await boot(exchange(), true, [], [], { summary: { conversationId: chat, origin: { kind: 'worker', fromSessionId: null, agentId: 'worker-1', task: 'x' } } });
+    expect(editButton(w, 'First question')).toBeNull();
+  });
+
+  it('offers no Edit for a question without a native id', async () => {
+    const { w } = await boot([q(1, 'user:local:1', 'Local question', 't1'), a(2, A1, 'Answer', 't1'), end(3, 't1')], true, [], [], { summary: { conversationId: chat } });
+    expect(editButton(w, 'Local question')).toBeNull();
+  });
+
+  it('offers Edit on the newest version only, never inside the earlier versions it folded', async () => {
+    const { w } = await boot([...exchange(), q(7, '6ad3a59b-0003-83eb-8bc4-8c84e68dd911', 'Fix the login bug', 't3', { replaces: Q2 }), a(8, '6ad3a59b-00a3-83eb-8bc4-8c84e68dd911', 'Fixed.', 't3'), end(9, 't3')],
+      true, [], [], { summary: { conversationId: chat } });
+    expect(editButton(w, 'Fix the login bug')).not.toBeNull();
+    const fold = w.document.querySelector<HTMLDetailsElement>('#timeline > .earlier-version')!;
+    fold.open = true; fold.dispatchEvent(new w.Event('toggle')); await settle();
+    expect(fold.querySelector('.question-edit')).toBeNull();
+  });
+
+  it('leaves edit mode when another chat is opened', async () => {
+    const other = { ...summary([]), id: '2026-10-17-other001', title: 'Other chat', conversationId: '6ad388c2-faf8-83ed-bb4f-9efff4ad92de' };
+    const { w, live } = await boot(exchange(), true, [], [], { summary: { conversationId: chat }, sessions: [{ ...summary([]), conversationId: chat }, other] });
+    editButton(w, 'First question')!.click(); await settle();
+    (w.document.querySelector(`#sessionList [data-id="${other.id}"]`) as HTMLElement).click(); await settle();
+    expect(w.document.getElementById('editDraft')!.hidden).toBe(true);
+    await submit(w as any, 'Hello there');
+    expect(live.sent.at(-1)).not.toHaveProperty('edit');
+  });
+
+  it('shows an edit whose replaced version is not in the loaded history as edited, without a fold', async () => {
+    const { w } = await boot([q(7, 'q-2b', 'Fix the login bug', 't3', { replaces: 'q-gone' }), a(8, 'a-3', 'Done.', 't3'), end(9, 't3')], true);
+    expect(said(w)).toEqual([expect.stringContaining('Fix the login bug'), expect.stringContaining('Done.')]);
+    expect(w.document.querySelector('#timeline .message-edited')?.textContent).toBe('Edited version');
+  });
+});

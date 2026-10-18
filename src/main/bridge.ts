@@ -1604,6 +1604,13 @@ function parseObservations(input: unknown): ChatObservation[] {
         if (reaction) observation.reaction = reaction;
       }
     }
+    // Edit & resubmit (#365): a question's place in ChatGPT's message tree, and whether the page proved
+    // that questions sharing it are versions of one message.
+    if (kind === 'user_message' && typeof item['parentId'] === 'string' &&
+        (item['parentId'] === 'root' || /^[A-Za-z0-9:_-]{8,190}$/.test(item['parentId']))) {
+      observation.parentId = item['parentId'];
+      if (item['parentExact'] === true) observation.parentExact = true;
+    }
     if (kind === 'user_message' && Array.isArray(item['attachments'])) {
       observation.attachments = item['attachments'].slice(0, 4).filter(file => file && typeof file === 'object' &&
         typeof file.id === 'string' && file.id.length > 0 && file.id.length <= 100 && typeof file.name === 'string' && file.name.length > 0 && file.name.length <= 200 &&

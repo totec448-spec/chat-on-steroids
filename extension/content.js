@@ -1081,18 +1081,19 @@
       (acceptedIdentity || (receipt.inserted ? matchesSubmittedBootstrap : matchesSubmittedUser)(message, receipt.text));
   }
 
-  function rememberUserSend(inserted = false) {
+  /** `edit`: a question resubmitted through ChatGPT's own editor (#365), not from the composer. */
+  function rememberUserSend(inserted = false, edit = null) {
     if (!alive) return;
     // Only the explicitly selected offline Goal backend changes the user prompt.
     const composer = CLF_DOM.composer();
-    if (goalConfig?.backend === 'templates' && (goalConfig?.enabled === true || (!goalConfig?.own && !!goalConfig?.objective)) && goalConfig?.mode !== 'loop' && !desktopDecision) {
+    if (!edit && goalConfig?.backend === 'templates' && (goalConfig?.enabled === true || (!goalConfig?.own && !!goalConfig?.objective)) && goalConfig?.mode !== 'loop' && !desktopDecision) {
       const raw = composer?.innerText || composer?.textContent || '';
       if (raw.trim() && !raw.includes(GOAL_MARKER_INSTRUCTION.trim())) CLF_DOM.insertPrompt(raw + GOAL_MARKER_INSTRUCTION, true);
     }
     // The receipt is compared with the rendered message, which readers take without an app
     // mention chip (#861); capture the same authored text, never the chip (#900).
-    const text = sendText(CLF_DOM.composerAuthoredText());
-    const attachmentNames = CLF_DOM.composerAttachmentNames();
+    const text = sendText(edit ? edit.text : CLF_DOM.composerAuthoredText());
+    const attachmentNames = edit ? [] : CLF_DOM.composerAttachmentNames();
     if (!text && !attachmentNames.length) return;
     // The same Send is recorded again by the page's own click and submit listeners; they cannot
     // tell who inserted the text, so they keep what the inserting caller said about it.
@@ -1100,6 +1101,8 @@
       inserted = true;
     let previousMessageId = null;
     for (const message of CLF_DOM.messages()) {
+      // An edit's question takes the place of the one it replaces: the question before that one is its before-state.
+      if (edit && message.id === edit.replaces) break;
       if (userMessagePresent(message)) previousMessageId = message.id;
     }
     // The submitted question owns its before-state. Identity/route hydration may delay
@@ -3945,6 +3948,10 @@
         rawText,
         // A boolean from MAIN; only `true` exactly means ChatGPT stored this as escaped Markdown.
         ...(entry.role === 'user' && entry.markdown === true ? { markdown: true } : {}),
+        // A question's place in ChatGPT's message tree (Edit & resubmit, #365).
+        ...(entry.role === 'user' && typeof entry.parentId === 'string' &&
+          (entry.parentId === 'root' || /^[A-Za-z0-9:_-]{8,190}$/.test(entry.parentId))
+          ? { parentId: entry.parentId, parentExact: entry.parentExact === true } : {}),
         ...(attachments.length ? { attachments } : {}),
         renderedHtml,
         sectionIndex:
@@ -5014,12 +5021,18 @@
 
         const message = item.value;
         if (message.role === 'user') {
-          if (!message.createTime && !message.attachments?.length && renderedUserTexts.get(message.messageId) === message.rawText) continue;
+          // The DOM pass reports a question the page shows as written, but not where it sits in
+          // ChatGPT's message tree (#365): only this report carries that, so a question whose place
+          // is not reported yet goes out from here too. The occurrence key below keeps it once.
+          if (!message.createTime && !message.attachments?.length && renderedUserTexts.get(message.messageId) === message.rawText &&
+            !message.parentId) continue;
           const sentModel = sendModels.get(message.messageId);
           // The model is part of the occurrence, so a send-model report that lands after the
           // first sighting re-emits the same message with it.
+          // The tree place is part of the occurrence too: ChatGPT shows its versions control only
+          // once a second version exists, so an edit re-emits the question it replaced.
           const key = occurrenceKey(message.messageId, message.rawText + (message.attachments?.length ? JSON.stringify(message.attachments) : '') +
-            (sentModel ? `\u0000${sentModel}` : ''));
+            (sentModel ? `\u0000${sentModel}` : '') + (message.parentId ? `\u0000${message.parentId}:${message.parentExact === true}` : ''));
           if (message.createTime) {
             if (userAuthoredTimesReported.get(key) === message.createTime) continue;
             userAuthoredTimesReported.set(key, message.createTime);
@@ -5034,6 +5047,7 @@
             text: shownUserText(message.rawText, message.markdown === true, renderedUserTexts.get(message.messageId)),
             ...(message.attachments?.length ? { attachments: message.attachments } : {}),
             ...(sentModel ? { model: sentModel } : {}),
+            ...(message.parentId ? { parentId: message.parentId, parentExact: message.parentExact === true } : {}),
             ...(message.createTime ? { time: message.createTime, authoredTime: true, authoredAt: message.createTime } : {})
           });
           reportedUserMessages.delete(message.messageId);
@@ -13010,7 +13024,88 @@
     }
   }
 
+  /** Why an edit could not be made on this page, as the chat shows it; nothing was sent. */
+  const EDIT_FAILURES = Object.freeze({
+    edit_message_missing: () => t('content_edit_message_missing', 'That message is no longer on the ChatGPT page, so it cannot be edited.'),
+    edit_unavailable: () => t('content_edit_unavailable', 'ChatGPT did not offer Edit for that message. Open the chat in ChatGPT, then try again.')
+  });
+
+  /**
+   * Edit & resubmit (#365): resubmits one question of this chat through ChatGPT's own editor.
+   *
+   * The same claim, authorization and acknowledgement as an ordinary send, with ChatGPT's editor
+   * on that question in place of the composer. Its receipt is a new question with this text where
+   * the edited one was; the edited one leaves the page. Anything that fails before Send closes the
+   * editor, leaving the question as it was.
+   */
+  async function acceptEdit(message) {
+    const target = message.conversationId;
+    const replaced = typeof message.edit?.messageId === 'string' && /^[0-9a-f-]{36}$/i.test(message.edit.messageId) ? message.edit.messageId : null;
+    if (!replaced || !target || desktopInputBusy || modelCatalogBusy || !alive || generating || CLF_DOM.generating() || pendingTools > 0 || goalBusy || job?.busy) return false;
+    const forEpoch = epoch;
+    const onTarget = () => alive && epoch === forEpoch && CLF_DOM.conversationId() === target;
+    const idle = () => onTarget() && !generating && !CLF_DOM.generating() && pendingTools === 0;
+    if (!idle()) return false;
+    desktopInputBusy = true;
+    let editor = null;
+    let sendAttempted = false;
+    try {
+      const reply = await ask({ type: 'desktop_input', id: message.id, conversationId: target, requiresAuthorization: true });
+      const input = reply?.data?.input;
+      if (!input) return false;
+      if (!idle()) return false;
+      const fail = async (error) => {
+        const why = deletedConversations.has(target.toLowerCase()) ? CONVERSATION_DELETED : error;
+        await ask({ type: 'desktop_input', id: input.id, owner: input.owner, fail: true, error: why }); return false;
+      };
+      if (await chatGptSignedOut()) return fail(t(
+        'content_delivery_signed_out',
+        'ChatGPT is not signed in in this browser. Sign in to ChatGPT there, then send again.'
+      ));
+      const limitation = CLF_DOM.errors().find(error => error.blocking === true)?.text;
+      if (limitation) return fail(limitation);
+      // An edit is answered by the model chosen for the chat's next turn, as ChatGPT does it.
+      if (!(await CLF_DOM.selectModelSettings(input.model, input.reasoningEffort, idle))) return fail(t(
+        'content_delivery_model_unconfirmed',
+        'Requested model or reasoning could not be confirmed'
+      ));
+      editor = await CLF_DOM.openQuestionEdit(replaced, idle);
+      if (editor.failure) { const failure = editor.failure; editor = null; return fail(EDIT_FAILURES[failure]()); }
+      let insertionFailure = '';
+      if (!editor.write(input.text, reason => { insertionFailure = reason; })) return fail(t(
+        'content_delivery_text_not_accepted',
+        'ChatGPT did not accept the text$1',
+        insertionFailure ? ` (${insertionFailure})` : ''
+      ));
+      const before = new Set(CLF_DOM.messages().filter(row => row.role === 'user').map(row => row.id));
+      const authorized = await ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, authorize: true });
+      if (authorized?.data?.ok !== true || !idle() || !editor.current()) return false;
+      rememberUserSend(true, { text: input.text, replaces: replaced });
+      sendAttempted = true;
+      if (!editor.submit()) return fail('Native Send did not take the message.');
+      // The receipt: a question this page did not show before, with this text, and the edited one gone.
+      const receipt = await waitPageView(() => {
+        const users = CLF_DOM.messages().filter(row => row.role === 'user');
+        if (users.some(row => row.id === replaced)) return null;
+        return users.find(row => !before.has(row.id) && matchesSubmittedBootstrap(row, input.text)) || null;
+      }, onTarget, DESKTOP_RECEIPT_MS);
+      if (!receipt) return fail('Native Send receipt was not confirmed.');
+      let acknowledged = null;
+      for (let attempt = 0; attempt < ACK_RETRY_DELAYS_MS.length + 1 && alive; attempt++) {
+        if (attempt > 0) await sleep(ACK_RETRY_DELAYS_MS[attempt - 1]);
+        acknowledged = await ask({ type: 'desktop_input', id: message.id, conversationId: target, messageId: receipt.id, owner: input.owner, ack: true });
+        if (acknowledged !== null && acknowledged !== undefined) break;
+      }
+      return acknowledged?.data?.ok === true;
+    } finally {
+      // Never sent: close ChatGPT's editor so the question stays as it was.
+      if (editor && !sendAttempted) { try { editor.cancel(); } catch { /* A closed editor needs nothing. */ } }
+      desktopInputBusy = false;
+    }
+  }
+
   async function acceptDesktopInput(message) {
+    if (message.edit) return acceptEdit(message);
     if (message.branch && !message.conversationId && !await prepareBranchPage(message)) return false;
     const silencePickup = typeof message.silenceTurnId === 'string';
     let sourceQuiet = silencePickup;

@@ -12,6 +12,7 @@ import {
   noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS
 } from '../src/main/session/input.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
+import { editReplacement } from '../src/main/session/edits.js';
 import { noteChatOrigin } from '../src/main/session/recorder.js';
 import { stageInputAttachment } from '../src/main/session/input-attachments.js';
 import { listUsageSessions, turnHasMcpCall } from '../src/main/session/store.js';
@@ -21,7 +22,7 @@ const offerToolInput = async (...args: Parameters<typeof offerToolInputBatch>) =
 vi.mock('../src/main/session/recorder.js', () => ({ noteChatOrigin: vi.fn(async () => undefined) }));
 
 const openings = vi.hoisted(() => new Map<string, { id: string; conversationId: string | null; origin: { kind: string } }>());
-const binding = vi.hoisted(() => ({ origin: 'desktop', conversationId: 'conversation-a', blocked: false, recorded: true, activeTurnId: null as string | null, lastToolCallAt: null as number | null, finishEnabled: true, goalEnabled: false, finishReleased: false, recoveryAllowed: true, model: 'gpt-6-astra', leadMinutes: 5, impulseMinutes: 0, end: null as null | { kind: string; outcome: string; reason?: string; turnId: string; time: number; seq?: number } }));
+const binding = vi.hoisted(() => ({ origin: 'desktop', conversationId: 'conversation-a', blocked: false, recorded: true, activeTurnId: null as string | null, lastToolCallAt: null as number | null, finishEnabled: true, goalEnabled: false, finishReleased: false, recoveryAllowed: true, model: 'gpt-6-astra', leadMinutes: 5, impulseMinutes: 0, end: null as null | { kind: string; outcome: string; reason?: string; turnId: string; time: number; seq?: number }, questions: [] as unknown[] }));
 vi.mock('../src/main/session/store.js', () => ({
   sessionsRoot: () => path.join(directory, 'sessions'),
   listUsageSessions: vi.fn(async () => []),
@@ -30,6 +31,7 @@ vi.mock('../src/main/session/store.js', () => ({
   readCompletedFinal: vi.fn(async () => null),
   conversationWasSuperseded: vi.fn(async () => false),
   readRecentEvents: vi.fn(async () => binding.end ? [binding.end] : []),
+  readEvents: vi.fn(async () => binding.questions),
   turnHasMcpCall: vi.fn(async () => true),
   createSession: vi.fn(async (options: { reservedId: string; origin: { kind: string } }) => { const row = openings.get(options.reservedId) ?? { id: options.reservedId, conversationId: null, origin: options.origin, chatIds: [], events: 0 }; openings.set(row.id, row); return row; }),
   rebindSession: vi.fn(async (id: string, from: string | null, to: string) => { const row = openings.get(id); if (!row || row.conversationId !== from) return false; row.conversationId = to; return true; }),
@@ -2242,5 +2244,63 @@ describe('branch in new chat (#482)', () => {
     await expect(enqueueInput(input({ sessionId: null, branch: branch(), mode: 'finish' }))).rejects.toThrow(/./);
     await expect(enqueueInput(input({ sessionId: null, branch: branch(), stages: ['Then this.'] }))).rejects.toThrow(/./);
     await expect(enqueueInput(input({ sessionId: null, branch: branch(), delivery: 'tool' }))).rejects.toThrow(/./);
+  });
+});
+
+describe('edit and resubmit (#365)', () => {
+  const first = '6ad3a59b-0000-83eb-8bc4-8c84e68dd911';
+  const later = '6ad3a59b-1111-83eb-8bc4-8c84e68dd911';
+  const question = (seq: number, messageId: string, text: string, extra: object = {}) =>
+    ({ kind: 'user_message', seq, time: seq, source: 'extension', messageId, message: { text, truncated: false, chars: text.length }, ...extra });
+  beforeEach(() => {
+    binding.conversationId = 'conversation-a';
+    binding.questions = [question(1, first, '[[COS_CONTEXT:5]]\nrules\n[[/COS_CONTEXT]]\n\nFirst question'), question(5, later, 'Fix the logn bug')];
+  });
+  afterEach(() => { binding.questions = []; });
+
+  it('admits an edit of a recorded question in the chat and hands the browser that question', async () => {
+    const entry = await enqueueInput(input({ sessionId, text: 'Fix the login bug', edit: { messageId: later } }));
+    expect(entry).toMatchObject({ sessionId, conversationId: 'conversation-a', edit: { messageId: later } });
+    expect(entry.editFramed).toBeUndefined();
+    expect((await pendingBrowserInputs()).find(row => row.id === entry.id)).toEqual({ id: entry.id, conversationId: 'conversation-a', edit: { messageId: later } });
+  });
+
+  it('marks an edit of the chat\'s first question, so the new version carries the chat\'s setup again', async () => {
+    const entry = await enqueueInput(input({ sessionId, text: 'First question, edited', edit: { messageId: first } }));
+    expect(entry.editFramed).toBe(true);
+  });
+
+  it.each([
+    ['of a question this chat never recorded', { edit: { messageId: randomUUID() } }, /no longer/],
+    ['without a native id', { edit: { messageId: 'user:local:1' } }, /./],
+    ['in a new chat', { sessionId: null, edit: { messageId: later } }, /edit/i],
+    ['with stages', { stages: ['one', 'two'], edit: { messageId: later } }, /one plain message/],
+    ['as a tool response', { delivery: 'tool' as const, edit: { messageId: later } }, /./],
+    ['after the turn instead of now', { mode: 'after-turn' as const, edit: { messageId: later } }, /one plain message/]
+  ])('refuses an edit %s', async (_name, overrides, refusal) => {
+    await expect(enqueueInput(input({ sessionId, ...overrides }))).rejects.toThrow(refusal);
+    expect(await listInputs()).toEqual([]);
+  });
+
+  it('edits only the newest version of a question', async () => {
+    binding.questions = [...binding.questions, question(9, randomUUID(), 'Fix the login bug', { replaces: later })];
+    await expect(enqueueInput(input({ sessionId, edit: { messageId: later } }))).rejects.toThrow(/newest version/);
+  });
+
+  it('waits for a running turn, and refuses a blocked or a worker chat', async () => {
+    binding.activeTurnId = 'running-turn';
+    await expect(enqueueInput(input({ sessionId, edit: { messageId: later } }))).rejects.toThrow(/finishes/);
+    binding.activeTurnId = null; binding.blocked = true;
+    await expect(enqueueInput(input({ sessionId, edit: { messageId: later } }))).rejects.toThrow(/Unblock/);
+    binding.blocked = false; binding.origin = 'worker';
+    await expect(enqueueInput(input({ sessionId, edit: { messageId: later } }))).rejects.toThrow(/cannot be edited/);
+  });
+
+  it('records which question the delivered edit replaced as soon as the page acknowledges it', async () => {
+    const entry = await enqueueInput(input({ sessionId, text: 'Fix the login bug', edit: { messageId: later } }));
+    const claim = await claimBrowserInput(entry.id, 'page', 'conversation-a');
+    const edited = randomUUID();
+    expect(await acknowledgeBrowserInput(entry.id, claim!.owner!, 'conversation-a', edited)).toBe(true);
+    expect(editReplacement(edited)).toBe(later);
   });
 });

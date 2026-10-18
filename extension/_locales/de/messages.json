@@ -1231,5 +1231,11 @@
   },
   "popup_detail_total": {
     "message": "$1 gesamt"
+  },
+  "content_edit_message_missing": {
+    "message": "Diese Nachricht ist nicht mehr auf der ChatGPT-Seite und kann nicht bearbeitet werden."
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT hat für diese Nachricht kein Bearbeiten angeboten. Öffne den Chat in ChatGPT und versuche es dann erneut."
   }
 }

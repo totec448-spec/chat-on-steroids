@@ -2439,7 +2439,9 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
       ...(input.recovery ? { recovery: input.recovery } : {}),
       ...(input.silenceTurnId ? { silenceTurnId: input.silenceTurnId } : {}),
       ...(input.directTurn ? { directTurn: input.directTurn } : {}), ...(input.lifetime ? { lifetime: input.lifetime } : {}),
-      ...(branchInput ? { branch: { conversationId: branchInput.conversationId, messageId: branchInput.messageId } } : {}) });
+      ...(branchInput ? { branch: { conversationId: branchInput.conversationId, messageId: branchInput.messageId } } : {}),
+      // Edit & resubmit (#365): the question in this chat that ChatGPT's own edit replaces.
+      ...(target && input.edit && /^[0-9a-f-]{36}$/i.test(input.edit.messageId) ? { edit: { messageId: input.edit.messageId } } : {}) });
   }
 }
 
