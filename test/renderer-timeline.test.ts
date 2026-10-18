@@ -3678,6 +3678,41 @@ it('cancels pending planning without replacing the draft with a late result', as
   expect(live.sent).toHaveLength(0);
 });
 
+// 2.1.41 bug hunt: a ready plan had already taken the request out of the composer, so Cancel plan
+// (whose tooltip promises to keep the draft) or deleting its last stage lost the request outright.
+it('gives the request back to the composer when a ready plan is cancelled or its last stage deleted', async () => {
+  const { w, live } = await boot([], false);
+  const api = (w as any).api;
+  api.draftTaskPlan = vi.fn(async () => ({ ok: true, data: ['Write it', 'Check it'] }));
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  const plan = w.document.getElementById('createPlan') as HTMLButtonElement;
+  const prepare = async (text: string) => {
+    input.value = text; input.dispatchEvent(new w.Event('input'));
+    plan.click(); w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true })); await settle();
+    expect(input.value).toBe('');
+    expect(w.document.querySelectorAll('#taskPlanPreview .plan-stage')).toHaveLength(2);
+  };
+  await prepare('Write a poem about a lighthouse');
+  plan.click(); await settle();
+  expect(plan.getAttribute('aria-pressed')).toBe('false');
+  expect(input.value).toBe('Write a poem about a lighthouse');
+
+  input.value = ''; input.dispatchEvent(new w.Event('input'));
+  await prepare('Write a song about the sea');
+  for (let i = 0; i < 2; i++) (w.document.querySelector('#taskPlanPreview .plan-stage [aria-label^="Delete stage"]') as HTMLButtonElement).click();
+  await settle();
+  expect(plan.getAttribute('aria-pressed')).toBe('false');
+  expect(input.value).toBe('Write a song about the sea');
+
+  // Something typed since stays; the request does not overwrite it.
+  input.value = ''; input.dispatchEvent(new w.Event('input'));
+  await prepare('Write a limerick');
+  input.value = 'A newer thought'; input.dispatchEvent(new w.Event('input'));
+  plan.click(); await settle();
+  expect(input.value).toBe('A newer thought');
+  expect(live.sent).toHaveLength(0);
+});
+
 it('keeps completed stages after clearing or replacing the composer until explicitly deleted', async () => {
   const { w, live } = await boot([], false);
   const api = (w as any).api;
