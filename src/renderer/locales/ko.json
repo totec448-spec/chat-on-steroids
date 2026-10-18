@@ -2341,7 +2341,7 @@
   "Goal paused": "Goal 일시 중지됨",
   "ChatGPT gave the same answer three times in a row, so Goal stopped asking. Open the chat to continue.": "ChatGPT가 같은 답을 세 번 연속으로 해서 Goal이 더 묻지 않았습니다. 계속하려면 채팅을 여세요.",
   "Keep awake while a chat works": "채팅이 작업하는 동안 깨어 있게 유지",
-  "Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose The computer and screen.": "컴퓨터가 절전 모드로 들어가지 않게 해 긴 실행이 계속되게 합니다. 일부 Windows 노트북은 화면이 꺼지면 그래도 절전 모드로 들어가므로, 그런 경우 컴퓨터와 화면을 선택하세요.",
+  "Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose “The computer and screen”.": "컴퓨터가 절전 모드로 들어가지 않게 해 긴 실행이 계속되게 합니다. 일부 Windows 노트북은 화면이 꺼지면 그래도 절전 모드로 들어가므로, 그런 경우 “컴퓨터와 화면”을 선택하세요.",
   "The computer": "컴퓨터",
   "The computer and screen": "컴퓨터와 화면",
   "Once a worker can't be used again (you cleared the workers, the main chat closed, or its finished task sat for a week), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.": "워커를 더 이상 사용할 수 없게 되면(워커를 지웠거나, 메인 채팅이 닫혔거나, 끝난 작업이 일주일 동안 그대로였던 경우) 그 채팅이 ChatGPT에서 보관되어 채팅 목록에서 사라집니다. ChatGPT 설정에서 복원할 수 있으며, 이 앱은 기록을 유지합니다. 아무것도 삭제되지 않습니다.",
