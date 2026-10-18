@@ -699,6 +699,42 @@ describe('who is allowed to talk to it', () => {
     } finally { unsubscribe(); }
   });
 
+  // 2.1.41 bug hunt: with Chrome current and Firefox still on the add-on it had not updated yet, the one
+  // reported version followed whichever browser asked last, and the update notice came and went.
+  it('reports the oldest extension among connected browsers, with its engine, until that browser goes quiet', async () => {
+    await pair();
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const changed = vi.fn(); const unsubscribe = onBridgeChange(changed);
+    const chrome = 'a'.repeat(32), firefox = 'b'.repeat(32);
+    const ask = (browser: string, extensionVersion: string, engine?: string) =>
+      request('POST', '/status', { host: 'browser', browser, extensionVersion, engine, body: { openConversations: [] } });
+    try {
+      await ask(chrome, APP_VERSION);
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: APP_VERSION });
+      expect((await bridgeStatus()).extensionEngine).toBeUndefined();
+      await ask(firefox, '0.0.1', 'gecko');
+      for (let i = 0; i < 3; i++) {
+        await ask(chrome, APP_VERSION);
+        expect(await bridgeStatus()).toMatchObject({ extensionVersion: '0.0.1', extensionEngine: 'gecko' });
+        await ask(firefox, '0.0.1', 'gecko');
+        expect(await bridgeStatus()).toMatchObject({ extensionVersion: '0.0.1', extensionEngine: 'gecko' });
+      }
+      // Firefox closes; Chrome keeps polling. Once Firefox counts as gone the notice is told, unprompted.
+      await vi.advanceTimersByTimeAsync(40_000);
+      await ask(chrome, APP_VERSION);
+      changed.mockClear();
+      await vi.advanceTimersByTimeAsync(20_002);
+      expect(changed).toHaveBeenCalled();
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: APP_VERSION });
+      expect((await bridgeStatus()).extensionEngine).toBeUndefined();
+      // The same browser updated in place replaces its own entry.
+      await ask(firefox, '0.0.1', 'gecko');
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: '0.0.1', extensionEngine: 'gecko' });
+      await ask(firefox, APP_VERSION, 'gecko');
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: APP_VERSION });
+    } finally { unsubscribe(); vi.useRealTimers(); }
+  });
+
   it('publishes external expiry while the CoS companion continues polling', async () => {
     await pair();
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
