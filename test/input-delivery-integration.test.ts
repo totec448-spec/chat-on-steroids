@@ -3233,6 +3233,26 @@ it('gives a branch the history it was branched from before its first question, w
   expect((await getSession(row.sessionId!))?.title).toBe('Try the other approach.');
 });
 
+// 2.1.41 (user decision): a plan's new chat was named after stage 1's generated wording, and its first
+// bubble showed that wording too, instead of the request the person typed.
+it('names a plan\'s new chat and its first message by the person\'s own request', async () => {
+  const conversationId = randomUUID();
+  const objective = 'Write a two-line poem about a lighthouse, then a title.';
+  const row = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', objective, authoredSource: 'objective',
+    text: 'Complete the original creative-writing request in one implementation pass.', stages: ['Verify the poem against the request.'] });
+  expect((await post('/input/claim', { id: row.id, owner: 'plan-page', conversationId: null, requiresAuthorization: true })).body.input).toMatchObject({ id: row.id });
+  expect((await post('/input/claim', { id: row.id, owner: 'plan-page', conversationId: null, authorize: true })).body.ok).toBe(true);
+  expect((await post('/input/bind', { id: row.id, owner: 'plan-page', conversationId })).body.ok).toBe(true);
+  expect((await post('/input/ack', { id: row.id, owner: 'plan-page', conversationId, messageId: 'plan-ask' })).body.ok).toBe(true);
+  await (await import('../src/main/session/recorder.js')).flushRecorder();
+  const store = await import('../src/main/session/store.js');
+  const [first] = await store.readEvents(row.sessionId!, { kinds: ['user_message'] });
+  expect(first).toMatchObject({ kind: 'user_message', messageId: 'plan-ask', authoredText: objective });
+  expect((await getSession(row.sessionId!))?.title).toBe(objective);
+  // The delivered message itself still carries the complete workflow.
+  expect(first?.kind === 'user_message' && first.message.text).toContain('Complete workflow:');
+});
+
 it('copies a branched turn in the order the source draws it, its answer after the steps (#482)', async () => {
   // Live 2.1.41 (VM): ChatGPT opened the answer early, the step came next, the answer was filled last.
   const source = randomUUID(), branched = randomUUID(), reply = randomUUID(), time = Date.now() - 60_000;
