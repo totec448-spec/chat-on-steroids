@@ -11,7 +11,7 @@ export function prState({ checks, lastPushAt, lastMaintainerAt }) {
   return lastMaintainerAt && Date.parse(lastMaintainerAt) > Date.parse(lastPushAt) ? 'author' : 'review';
 }
 
-/** Only each check's latest run per app counts (main() asks for every run with `filter=all`); anything but success, neutral or skipped is a failure. */
+/** Only each check's latest run per app counts; anything but success, neutral or skipped is a failure. */
 export function checksState(checkRuns) {
   const runs = checkRuns.filter(run => !checkRuns.some(other => other.name === run.name && other.app?.id === run.app?.id && other.id > run.id));
   return runs.some(run => run.status !== 'completed') ? 'pending'
@@ -38,6 +38,17 @@ async function github(path, token, init = {}) {
   return response.json();
 }
 
+/** Every check run on a commit, page by page, since a check's latest run can sit on a later page. */
+async function checkRuns(repository, sha, token) {
+  const runs = [];
+  for (let page = 1; ; page++) {
+    // filter=all: the default keeps runs by completion time and can drop a newer one.
+    const { check_runs: pageRuns } = await github(`/repos/${repository}/commits/${sha}/check-runs?per_page=100&filter=all&page=${page}`, token);
+    runs.push(...pageRuns);
+    if (pageRuns.length < 100) return runs;
+  }
+}
+
 async function main() {
   const repository = process.env.GITHUB_REPOSITORY;
   const token = process.env.GH_TOKEN;
@@ -46,12 +57,12 @@ async function main() {
   for (const pr of await github(`/repos/${repository}/pulls?state=open&per_page=100`, token)) {
     if (pr.draft || MAINTAINER.has(pr.author_association) || pr.user.type === 'Bot') continue;
     const [runs, commits, reviews, comments] = await Promise.all([
-      github(`/repos/${repository}/commits/${pr.head.sha}/check-runs?per_page=100&filter=all`, token),
+      checkRuns(repository, pr.head.sha, token),
       github(`/repos/${repository}/pulls/${pr.number}/commits?per_page=100`, token),
       github(`/repos/${repository}/pulls/${pr.number}/reviews?per_page=100`, token),
       github(`/repos/${repository}/issues/${pr.number}/comments?per_page=100`, token)
     ]);
-    const checks = checksState(runs.check_runs);
+    const checks = checksState(runs);
     const lastPushAt = commits.at(-1)?.commit.committer.date ?? pr.created_at;
     const maintainerTimes = [...reviews.map(review => ({ at: review.submitted_at, who: review.author_association })),
       ...comments.filter(comment => comment.user.type !== 'Bot').map(comment => ({ at: comment.created_at, who: comment.author_association }))]
