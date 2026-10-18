@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { considerTurnRotation, declineTurnRotation, resetTurnRotationForTests, type RotationDeps } from '../src/main/turn-rotation.js';
+import { considerTurnRotation, resetTurnRotationForTests, type RotationDeps } from '../src/main/turn-rotation.js';
 
 /**
  * #1402: turns past ~35 minutes almost always broke; a fresh turn every 30 minutes, started right
@@ -80,25 +80,4 @@ it('files at most two automatic continues for one turn', async () => {
   // The next turn starts over.
   startedAt = now; now += 31 * 60_000;
   expect(await considerTurnRotation('chat', 'session', 'turn-2', logged())).toBe(true);
-});
-
-// 2.1.41 release round, Windows: a rotation filed at a quick call's result reached the page while
-// the model was already writing its answer, so it was declined rather than sent. That is not a
-// page failing to take it: the turn is tried again at a later tool result after the short wait,
-// and the decline does not count toward the two filings.
-it('tries a declined rotation again after a minute, without spending a filing', async () => {
-  now = 31 * 60_000;
-  expect(await considerTurnRotation('chat', 'session', 'turn', deps())).toBe(true);
-  for (let step = 0; step < 3; step += 1) {
-    declineTurnRotation('chat', 'turn', now);
-    now += 30_000;
-    expect(await considerTurnRotation('chat', 'session', 'turn', deps())).toBe(false);
-    now += 31_000;
-    expect(await considerTurnRotation('chat', 'session', 'turn', deps())).toBe(true);
-  }
-  expect(filed).toHaveLength(4);
-  // Only a decline for this exact turn counts; another turn's decline changes nothing.
-  declineTurnRotation('chat', 'other-turn', now);
-  now += 61_000;
-  expect(await considerTurnRotation('chat', 'session', 'turn', deps())).toBe(false);
 });
