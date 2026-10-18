@@ -2181,6 +2181,8 @@ function recallPrompt(event: KeyboardEvent): boolean {
   const up = event.key === 'ArrowUp';
   if ((!up && event.key !== 'ArrowDown') || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return false;
   if (selectedId === null || detailFor !== selectedId || editingQuestion?.sessionId === selectedId) return false;
+  // An open slash or @file menu keeps its arrows, also while it loads or has no choices.
+  if (skillPicker?.open()) return false;
   const input = $<HTMLTextAreaElement>('chatInput');
   const back = recall?.generation === selectionGeneration && recall.draft === composerDraftGeneration && input.value === recall.text ? recall.back : 0;
   // Attached files and a plan are part of the draft; a recalled message would be sent with them.

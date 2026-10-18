@@ -6261,6 +6261,19 @@ describe('prompt recall in the composer', () => {
     expect(composer(w).value).toBe('Worker question');
   });
 
+  // A recalled message ending in a slash or @file fragment opens that menu; its arrows stay the menu's.
+  it('leaves the arrows to an open slash menu with no matches after a recall', async () => {
+    const { w } = await boot([ask(1, 'First question'), answer(2, 'First answer'), ask(3, 'Use /zzz'), answer(4, 'Done.')]);
+    (w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+    press(w, 'ArrowUp'); press(w, 'ArrowUp');
+    composer(w).setSelectionRange(14, 14);
+    expect(press(w, 'ArrowDown')).toBe(true); await settle();
+    expect(composer(w).value).toBe('Use /zzz');
+    expect(w.document.getElementById('skillPicker')!.hidden).toBe(false);
+    expect(press(w, 'ArrowDown')).toBe(false);
+    expect(composer(w).value).toBe('Use /zzz');
+  });
+
   it('keeps a refused recalled message in the composer when ArrowDown is pressed', async () => {
     const { w } = await boot(chat());
     expect(press(w, 'ArrowUp')).toBe(true);
