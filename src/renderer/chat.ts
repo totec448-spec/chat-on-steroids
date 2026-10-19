@@ -3665,13 +3665,14 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
 /** A fence's language (`language-ts`, written by marked and by ChatGPT's page alike), read before the sanitizer drops classes. */
 const CODE_LANGUAGE = /(?:^|\s)language-([\w+#.-]{1,32})(?=\s|$)/;
 /** The extension a block's Save offers; any other language saves as text. */
-const CODE_EXTENSIONS: Readonly<Record<string, string>> = {
+// A Map, so a fence named `constructor` or `__proto__` finds nothing instead of Object's own members.
+const CODE_EXTENSIONS: ReadonlyMap<string, string> = new Map(Object.entries({
   ts: 'ts', typescript: 'ts', tsx: 'tsx', js: 'js', javascript: 'js', jsx: 'jsx', mjs: 'mjs', json: 'json',
   py: 'py', python: 'py', sh: 'sh', bash: 'sh', shell: 'sh', zsh: 'sh', ps1: 'ps1', powershell: 'ps1',
   html: 'html', css: 'css', scss: 'scss', sql: 'sql', yaml: 'yml', yml: 'yml', toml: 'toml', xml: 'xml',
   md: 'md', markdown: 'md', rs: 'rs', rust: 'rs', go: 'go', java: 'java', kt: 'kt', kotlin: 'kt',
   swift: 'swift', c: 'c', cpp: 'cpp', 'c++': 'cpp', cs: 'cs', csharp: 'cs', rb: 'rb', ruby: 'rb', php: 'php', diff: 'diff'
-};
+}));
 
 export function renderedMessage(html: StoredText | null | undefined, fallback: string): HTMLElement {
   const box = el('div', 'msg');
@@ -3763,7 +3764,7 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
       const save = el('button', 'tool-copy code-save', () => t('Save')) as HTMLButtonElement;
       save.type = 'button';
       save.addEventListener('click', () => void (async () => {
-        const name = `snippet.${CODE_EXTENSIONS[language?.toLowerCase() ?? ''] ?? 'txt'}`;
+        const name = `snippet.${CODE_EXTENSIONS.get(language?.toLowerCase() ?? '') ?? 'txt'}`;
         const result = await run(api.saveCode({ text: value, name }));
         if (result?.done === 'saved') toast(t('Saved {0}', [result.name]));
       })());

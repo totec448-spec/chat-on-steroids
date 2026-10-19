@@ -144,6 +144,11 @@ describe('captured ChatGPT rendered HTML', () => {
     expect(odd.querySelector('.tool-output-header strong')?.textContent).toBe('Code');
     odd.querySelector<HTMLButtonElement>('.code-save')!.click();
     await vi.waitFor(() => expect(saveCode).toHaveBeenLastCalledWith({ text: 'x', name: 'snippet.txt' }));
+    // A language that happens to name a member every object has is still just a language.
+    const member = renderedMarkdown('```constructor\ny\n```');
+    expect(member.querySelector('.tool-output-header strong')?.textContent).toBe('constructor');
+    member.querySelector<HTMLButtonElement>('.code-save')!.click();
+    await vi.waitFor(() => expect(saveCode).toHaveBeenLastCalledWith({ text: 'y\n', name: 'snippet.txt' }));
   });
 
   it('shows the page\'s resolved content for a content-reference reply instead of the raw pointer (#574)', () => {
