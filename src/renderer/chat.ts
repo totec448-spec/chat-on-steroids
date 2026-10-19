@@ -874,9 +874,13 @@ function placeSessionTooltip(tip: HTMLElement, row: HTMLElement): void {
   tip.style.top = `${Math.min(bounds.top, window.innerHeight - 110)}px`;
 }
 
+/** Unsent text waits in this chat's composer. The open chat shows its draft itself, so it never counts. */
+function draftedChat(summary: SessionSummary): boolean { return summary.id !== selectedId && inputDrafts.has(summary.id); }
+
 /** A row's tooltip: its name, then `state` when a card says more than its badges, then the badges and its age. */
 function sessionRowTitle(summary: SessionSummary, pinned: boolean, badges: Badge[], state: string[] = []): string {
-  return [shownSessionTitle(summary), ...state, ...(pinned ? [t("Pinned")] : []), ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · ');
+  return [shownSessionTitle(summary), ...state, ...(pinned ? [t("Pinned")] : []), ...(draftedChat(summary) ? [t('Draft')] : []),
+    ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · ');
 }
 
 function sessionRow(summary: SessionSummary): HTMLElement {
@@ -905,10 +909,8 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     const mark = icon('i-pinned', 'ico sess-pin-mark');
     top.append(mark);
   }
-  // Unsent text waits in this chat's composer. The open chat shows its draft itself.
-  const drafted = summary.id !== selectedId && inputDrafts.has(summary.id);
-  if (drafted) top.append(icon('i-pencil', 'ico sess-draft-mark'));
-  ui(row, 'title', () => sessionRowTitle(summary, pinned, badges, drafted ? [t('Draft')] : []));
+  if (draftedChat(summary)) top.append(icon('i-pencil', 'ico sess-draft-mark'));
+  ui(row, 'title', () => sessionRowTitle(summary, pinned, badges));
   const showTip = () => {
     if (sessionTooltipDismissed === summary.id) return;
     // The same chat's tooltip, from before a repaint, stays as it is: recreating it would blink.

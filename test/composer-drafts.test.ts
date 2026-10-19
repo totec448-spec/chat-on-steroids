@@ -61,6 +61,12 @@ it('ignores broken storage and keeps only the newest drafts that fit', () => {
   huge.set('older', 'short');
   huge.set('pasted', 'x'.repeat(1_000_001));
   expect(stored()).toEqual([['older', 'short']]);
+
+  // Under the bound as typed, six times over it as stored: it must not cost the older drafts their restart.
+  const escaped = fixture();
+  escaped.set('older', 'short');
+  escaped.set('pasted', '\u0001'.repeat(700_000));
+  expect(fixture(JSON.stringify(stored())).get('older')).toBe('short');
 });
 
 it('says when a key starts or stops holding a draft, not on every keystroke', () => {
