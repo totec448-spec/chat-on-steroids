@@ -46,8 +46,8 @@ interface FileMirror {
   /** Failed attempts in a row: the retry delay, and one crash snapshot per streak. */
   failures: number;
   retry: NodeJS.Timeout | null;
-  /** Bytes a failed append left in the file: said once in the file, never written again. */
-  lostBytes: number;
+  /** Appends that failed part-way: the cut line is written again in full after a note saying so. */
+  cutWrites: number;
   /** Rotation failed and the file grows past its limit; said once in the file until it rotates. */
   rotationNoted: boolean;
 }
@@ -65,7 +65,7 @@ export function initLogFile(file: string): void {
     bytes = statSync(file).size;
   } catch { /* A first run has no log yet. */ }
   if (mirror?.retry) clearTimeout(mirror.retry);
-  mirror = { file, bytes, pending: [], pendingBytes: 0, dropped: 0, work: null, error: null, failures: 0, retry: null, lostBytes: 0, rotationNoted: false };
+  mirror = { file, bytes, pending: [], pendingBytes: 0, dropped: 0, work: null, error: null, failures: 0, retry: null, cutWrites: 0, rotationNoted: false };
 }
 
 function boundedText(text: string): string {
@@ -82,6 +82,12 @@ async function fileSize(file: string): Promise<number | null> {
   try { return (await fs.stat(file)).size; } catch { return null; }
 }
 
+/** The notes at the head of a batch reached the file: what they report is said. */
+function wroteNotes(state: FileMirror, notes: boolean, lines: boolean, rotationNote: boolean): void {
+  if (notes) { state.cutWrites = 0; if (!lines) state.dropped = 0; }
+  if (rotationNote) state.rotationNoted = true;
+}
+
 /** Puts a batch that never reached the file back at the front, in order (#1682). */
 function requeue(state: FileMirror, lines: string[], bytes: number): void {
   state.pending.unshift(...lines);
@@ -90,15 +96,15 @@ function requeue(state: FileMirror, lines: string[], bytes: number): void {
 
 /**
  * Writes queued lines in order. A failed write never loses or repeats a line and never stops the
- * log for good (#1682): a batch that did not reach the file goes back to the front of the queue, one
- * that partly did is noted in the file instead of being written twice, and the writer tries again
+ * log for good (#1682): what did not reach the file goes back to the front of the queue (a line an
+ * append cut off is written again in full, after a note saying so), and the writer tries again
  * with a growing delay. A log that cannot rotate (Windows: another program holds it, or something
  * sits where the old log goes) keeps growing to twice its size; past that, lines wait for rotation.
  */
 function startWriter(state: FileMirror): void {
-  if (state.work || state.retry || (!state.pending.length && !state.dropped && !state.lostBytes)) return;
+  if (state.work || state.retry || (!state.pending.length && !state.dropped && !state.cutWrites)) return;
   state.work = Promise.resolve().then(async () => {
-    while (state.pending.length || state.dropped || state.lostBytes) {
+    while (state.pending.length || state.dropped || state.cutWrites) {
       const lines: string[] = [];
       let bytes = 0;
       while (state.pending.length) {
@@ -111,7 +117,7 @@ function startWriter(state: FileMirror): void {
         bytes += size;
       }
       const notes: string[] = [];
-      if (state.lostBytes) notes.push(`\n${new Date().toISOString()}  warn   ${state.lostBytes} log bytes lost to a failed write before this line.\n`);
+      if (state.cutWrites) notes.push(`\n${new Date().toISOString()}  warn   ${state.cutWrites} log write(s) failed part-way: the cut-off line above follows again in full.\n`);
       if (!lines.length && state.dropped) notes.push(`${new Date().toISOString()}  warn   ${state.dropped} log line(s) omitted: file writer backlog exceeded its byte limit.\n`);
       let text = notes.join('') + lines.join('');
       let size = Buffer.byteLength(text, 'utf8');
@@ -141,12 +147,23 @@ function startWriter(state: FileMirror): void {
           const written = now === null ? 0 : Math.max(0, now - before);
           if (written >= size) { state.bytes = now!; }
           else {
-            if (written > 0) { state.bytes = now!; state.lostBytes += written; lines.length = 0; bytes = 0; }
+            if (written > 0) {
+              state.bytes = now!;
+              const prefix = size - bytes;
+              if (written >= prefix) wroteNotes(state, notes.length > 0, lines.length > 0, rotationNote);
+              // Whole lines in the file are done; the cut one and the rest go back to the queue.
+              let offset = prefix;
+              while (lines.length && offset + Buffer.byteLength(lines[0]!, 'utf8') <= written) {
+                const done = Buffer.byteLength(lines.shift()!, 'utf8');
+                offset += done;
+                bytes -= done;
+              }
+              state.cutWrites += 1;
+            }
             throw error;
           }
         }
-        if (notes.length) { state.lostBytes = 0; if (!lines.length) state.dropped = 0; }
-        if (rotationNote) state.rotationNoted = true;
+        wroteNotes(state, notes.length > 0, lines.length > 0, rotationNote);
         if (state.bytes === before) state.bytes += size;
         state.error = null;
         state.failures = 0;
@@ -193,7 +210,7 @@ export async function flushLogFile(): Promise<void> {
   if (state.retry) { clearTimeout(state.retry); state.retry = null; }
   startWriter(state);
   while (state.work) await state.work;
-  if (state.error && (state.pending.length || state.lostBytes)) throw state.error;
+  if (state.error && (state.pending.length || state.cutWrites)) throw state.error;
 }
 
 function writeCrashSnapshot(state: FileMirror, reason: string): void {

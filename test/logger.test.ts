@@ -148,21 +148,30 @@ describe('bounded asynchronous diagnostic mirror', () => {
     expect(text.split('first held').length).toBe(2);
   });
 
-  it('never writes a batch twice after an append that failed part-way (#1682)', async () => {
+  it('writes a line an append cut off again in full, after a note, and repeats no complete line (#1682)', async () => {
     const file = await logFile();
     const realAppend = fs.appendFile.bind(fs);
+    logInfo('reached the file before the cut');
+    await flushLogFile();
     vi.spyOn(fs, 'appendFile').mockImplementationOnce(async (target: any, data: any) => {
-      await realAppend(target, String(data).slice(0, 20));
+      const text = String(data);
+      // The first line of the batch lands whole, the second only in part.
+      await realAppend(target, text.slice(0, text.indexOf('\n') + 1 + 20));
       throw new Error('short write');
     });
-    logInfo('a batch that was cut off');
-    await vi.waitFor(async () => expect((await fs.stat(file)).size).toBe(20));
-    logInfo('after the cut');
+    logInfo('first in the batch'); logInfo('cut off part-way'); logInfo('never started');
+    await vi.waitFor(async () => expect(await fs.readFile(`${file}.crash`, 'utf8').catch(() => '')).toContain('short write'));
     await flushLogFile();
     const text = await fs.readFile(file, 'utf8');
-    expect(text.split('a batch that was cut off').length).toBe(1);
-    expect(text).toContain('log bytes lost to a failed write');
-    expect(text).toContain('after the cut');
+    for (const line of ['reached the file before the cut', 'first in the batch', 'cut off part-way', 'never started']) {
+      expect(text.split(line).length, line).toBe(2);
+    }
+    expect(text).toContain('failed part-way: the cut-off line above follows again in full');
+    expect(text.indexOf('first in the batch')).toBeLessThan(text.indexOf('failed part-way'));
+    expect(text.indexOf('failed part-way')).toBeLessThan(text.indexOf('cut off part-way'));
+    expect(text.indexOf('cut off part-way')).toBeLessThan(text.indexOf('never started'));
+    // Each line starts on its own line, the note included.
+    expect(text.split('\n').filter(l => l.includes('warn') && l.includes('failed part-way'))[0]).toMatch(/^\d{4}-/);
   });
 
   it('includes the final shutdown line before completing the exit barrier', async () => {
