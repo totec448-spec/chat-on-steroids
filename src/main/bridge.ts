@@ -4035,6 +4035,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         return json(res, 503, { error: 'continuation_not_durable', retryable: true, sessionId }, origin);
       }
       const { opened, started } = ticket;
+      // A new attempt on the open ticket: the page is asking again, so its last reason is gone (#1643).
+      if (compactionDeferrals.delete(opened.token)) changed();
       return json(
         res,
         202,

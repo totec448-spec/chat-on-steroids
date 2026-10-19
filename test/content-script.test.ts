@@ -18203,6 +18203,66 @@ describe('the context meter and automatic compaction', () => {
     expect(live.sent.some((message) => message.type === 'compact' && message.sourceLost === true)).toBe(false);
   });
 
+  it.each([true, false])('tries an automatic source again once the page helper answers after its receipt wait ran out (helper down: %s)', async helperDown => {
+    // #1643: a reopened tab's helper was unreadable for nine minutes, so the receipt wait ran
+    // out; it answered again the very second the app began a ten-minute pause between pickups.
+    let readable = !helperDown;
+    let received = false;
+    live = await harness(undefined, {
+      activity: () => withContext(205_000, settings({ auto: true }), { pendingTools: 0 }),
+      compact: () => ({ ok: true, data: { token: 'receipt-token', prompt: 'Write the brief.',
+        ...automaticTicket('not-attempted') } })
+    });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'helper-source', []);
+    compactionFiber(section, () => readable ? [compactionCall(received)] : null, () => []);
+    const stopped = vi.fn(() => stopGenerating(live!.document));
+    live.document.querySelector('[data-testid="stop-button"]')!.addEventListener('click', stopped);
+    const sends = watchSend(live.document);
+    await live.hook.startCompact(true);
+    expect(stopped).not.toHaveBeenCalled();
+    expect(live.sent.filter((message) => message.type === 'compact' && message.sourceDeferred === true)).toHaveLength(1);
+
+    readable = true; received = true;
+    await live.hook.refreshFiber();
+    await settle(); await settle();
+    // Only a helper that came back retries here; one that answered throughout leaves it to the app's pickup.
+    expect(stopped).toHaveBeenCalledTimes(helperDown ? 1 : 0);
+    expect(sends()).toBe(helperDown ? 1 : 0);
+    expect(live.sent.some((message) => message.type === 'compact' && message.sourceLost === true)).toBe(false);
+  });
+
+  it('tries again once the helper answers whatever stopped the attempt while it was down, and only once', async () => {
+    // Live 2026-10-19 (VM): with the helper unreadable, a pickup stopped at a different check ("The
+    // original question has not loaded yet"). The reason is the page's; the retry follows the helper.
+    let readable = false;
+    live = await harness(undefined, {
+      activity: () => withContext(205_000, settings({ auto: true }), { pendingTools: 0 }),
+      compact: () => ({ ok: true, data: { token: 'helper-any-token', prompt: 'Write the brief.',
+        ...automaticTicket('not-attempted') } })
+    });
+    const section = assistantTurn(live.document, 'helper-any-source', []);
+    compactionFiber(section, () => readable ? [compactionCall(true)] : null, () => []);
+    const composer = live.document.querySelector('#prompt-textarea')!;
+    const parent = composer.parentElement!;
+    composer.remove();
+    const sends = watchSend(live.document);
+    const deferred = () => live!.sent.filter((message) => message.type === 'compact' && message.sourceDeferred === true);
+    await live.hook.startCompact(true);
+    expect(deferred()).toEqual([expect.objectContaining({ token: 'helper-any-token', sourceError: expect.stringContaining('composer_missing') })]);
+
+    // The helper answers while the message box is still missing: one retry, deferred again, and no more.
+    readable = true;
+    await live.hook.refreshFiber();
+    await settle(); await settle();
+    expect(deferred()).toHaveLength(2);
+    parent.append(composer);
+    await live.hook.refreshFiber();
+    await settle(); await settle();
+    expect(deferred()).toHaveLength(2);
+    expect(sends()).toBe(0);
+  });
+
   it.each(['distinct-pre-row', 'same-request-running', 'same-request-code-pending'])('waits for another outstanding call beside an answered native call (%s)', async mode => {
     let received = false;
     live = await harness(undefined, {
