@@ -4472,7 +4472,8 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
     case 'turn_end': {
       if (stoppedTurnEnd(event, context?.history ?? events)) {
         const line = el('p', 'meta is-progress thinking-line turn-stopped');
-        line.append(icon('i-check-circle', 'ico thinking-ico'), el('span', '', () => t("Stopped. ChatGPT no longer shows this turn running.")));
+        // A stop, not a success: the turn ended without finishing its work.
+        line.append(icon('i-stop', 'ico thinking-ico'), el('span', '', () => t("Stopped. ChatGPT no longer shows this turn running.")));
         return line;
       }
       const line = el(
