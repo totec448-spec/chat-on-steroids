@@ -10,8 +10,7 @@ import { imageStorageButton } from './image-storage.js';
 import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, composerSendModel, ensureComposerModel, chatModelName } from './chat-models.js';
 import { marked, Marked, type TokenizerAndRendererExtension } from 'marked';
 import { safeExternalLink } from '../shared/external-link.js';
-import { AGENT_STATE_WORDS, createAgentPanel, workerName } from './agent-panel.js';
-import { KIND_ICON } from './agent-activity.js';
+import { createAgentPanel, workerName } from './agent-panel.js';
 import { createFilePanel } from './file-panel.js';
 import { renderAgentPlan } from './agent-plan.js';
 import { userPromptText } from '../shared/user-prompt.js';
@@ -37,6 +36,7 @@ import { initContextMeter, paintContextMeter } from './context-meter.js';
 import { installComposerDockMotion, installComposerHeightMotion } from './composer-motion.js';
 import { sanitizeHtmlTree } from './sanitize-html.js';
 import { drawMath, mathExtensions, separateDisplayMath, type MathSlots } from './math.js';
+import { installFormulaMenu } from './formula-menu.js';
 import { DEFAULT_HELPER_CHAT_MODEL, isAstraModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
 import { answerAnchors, messageAnswerAnchors } from '../shared/markdown-export.js';
@@ -55,6 +55,7 @@ import type { RunningExecProcess } from '../shared/background-exec.js';
  */
 
 import type {
+  ActivitySummary,
   AgentState,
   Handoff,
   MessageReference,
@@ -102,6 +103,24 @@ const api = window.api;
 let chatSearch: ChatSearch | null = null;
 let chatFind: ReturnType<typeof initChatFind> | null = null;
 
+/** Sprite id per tool-call family. Deliberately reuses the existing icon set. */
+const KIND_ICON: Record<ActivitySummary['kind'], string> = {
+  edit: 'i-pencil',
+  create: 'i-plus',
+  delete: 'i-trash',
+  move: 'i-out',
+  read: 'i-eye',
+  search: 'i-search',
+  browse: 'i-folder',
+  run: 'i-terminal',
+  process: 'i-terminal',
+  screen: 'i-monitor',
+  input: 'i-monitor',
+  clipboard: 'i-copy',
+  session: 'i-steps',
+  agent: 'i-bolt',
+  other: 'i-bolt'
+};
 
 /**
  * How close to the end of the model list counts as asking for the next page, in pixels.
@@ -4472,8 +4491,7 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
     case 'turn_end': {
       if (stoppedTurnEnd(event, context?.history ?? events)) {
         const line = el('p', 'meta is-progress thinking-line turn-stopped');
-        // A stop, not a success: the turn ended without finishing its work.
-        line.append(icon('i-stop', 'ico thinking-ico'), el('span', '', () => t("Stopped. ChatGPT no longer shows this turn running.")));
+        line.append(icon('i-check-circle', 'ico thinking-ico'), el('span', '', () => t("Stopped. ChatGPT no longer shows this turn running.")));
         return line;
       }
       const line = el(
@@ -6474,14 +6492,10 @@ function paintSwarm(state: SwarmState): void {
       ...state.agents.map((agent) => {
         const row = el('div', 'agent');
         const top = el('div', 'model-top');
-        // The prime is the chat the person started; its internal id says nothing to them.
-        if (agent.role === 'prime') top.append(el('b', '', () => t('Main chat')));
-        else {
-          top.append(el('b', '', () => workerName(agent.id, agent.label)));
-          // The id is what the main chat calls it; worth showing beside a name of its own.
-          if (agent.label?.trim() && agent.label.trim() !== agent.id) top.append(el('span', 'chip', agent.id));
-        }
-        top.append(el('span', `chip is-${agent.state}`, () => t(AGENT_STATE_WORDS[agent.state] ?? agent.state)));
+        const label = agent.label || agent.id;
+        top.append(el('b', '', label));
+        if (label !== agent.id) top.append(el('span', 'chip', agent.id));
+        top.append(el('span', `chip is-${agent.state}`, agent.state));
         // Clearing is offered where the agent is, not only as one global reset at the
         // bottom of a settings form. The two rows mean different things and the tooltip
         // says which: the prime is the run, a worker is one slot.
@@ -6497,7 +6511,8 @@ function paintSwarm(state: SwarmState): void {
           top.append(clear);
         }
         const sub = el('div', 'model-sub');
-        ui(sub, 'textContent', () => [tn("{0} pending", "{0} pending", agent.pending), tn("{0} delivered", "{0} delivered", agent.delivered)].join(' · '));
+        ui(sub, 'textContent', () => [tn("{0} pending", "{0} pending", agent.pending), tn("{0} delivered", "{0} delivered", agent.delivered),
+          ...(agent.conversationId ? [t("chat bound")] : [])].join(' · '));
         row.append(top, sub);
         if (agent.task) row.append(el('p', 'hint', agent.task));
         // Why it failed, not just that it did. A worker only reaches this state when its
@@ -7927,7 +7942,6 @@ export function initChat(next: Deps): void {
       const outlined = await api.turnTraces(id, traceTurnIds(detail.events)).catch(() => null);
       return { events: detail.events, traces: outlined?.ok ? outlined.data ?? {} : {} };
     },
-    loadActivity: async id => (await run(api.getSession(id, { limit: 400, actions: true })))?.events ?? null,
     openMain: selectSession, working: sessionWorking,
     modelLabel: chatModelName,
     agent: worker => [...(swarm?.agents ?? []), ...(swarm?.retainedWorkers ?? [])].find(entry => entry.role === 'worker' && entry.id === worker.origin?.agentId &&
@@ -8488,6 +8502,7 @@ export function initChat(next: Deps): void {
       lastHeight = height;
     }).observe(historyPane);
   }
+  installFormulaMenu($('timeline'));
   $('timeline').addEventListener('click', event => {
     // Disclosure changes deliberately change geometry. Padding retained for an
     // earlier reconciliation is not part of the collapsed headline's height.
