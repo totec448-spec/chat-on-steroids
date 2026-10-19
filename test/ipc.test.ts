@@ -2264,6 +2264,32 @@ it('saves a diagnostics report through the renderer channel without personal det
   expect(shell.showItemInFolder).toHaveBeenCalledWith(target);
 });
 
+it('saves a code block where the save dialog says, offering only its bare name in Downloads', async () => {
+  const save = (payload: unknown) => handlers.get('code:save')!(null, payload);
+  const getPath = app.getPath;
+  const target = path.join(dir, 'chosen.ts');
+  (app as { getPath: (name: string) => string }).getPath = (name: string) => path.join(dir, name);
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: target } as never);
+  try {
+    expect(await save({ text: 'const answer = 42;\n', name: 'snippet.ts' })).toEqual({ ok: true, data: { done: 'saved', name: 'chosen.ts' } });
+  } finally {
+    (app as { getPath: typeof getPath }).getPath = getPath;
+  }
+  expect(vi.mocked(dialog.showSaveDialog).mock.lastCall!.at(-1)).toMatchObject({
+    defaultPath: path.join(dir, 'downloads', 'snippet.ts'),
+    filters: [{ name: 'Text files', extensions: ['ts'] }]
+  });
+  expect(await fs.readFile(target, 'utf8')).toBe('const answer = 42;\n');
+  // The renderer suggests a name, never a place: anything but a bare `name.ext` is refused before any dialog.
+  vi.mocked(dialog.showSaveDialog).mockClear();
+  for (const name of ['../snippet.ts', 'C:\\Users\\you\\snippet.ts', '/home/you/snippet.ts', 'snippet']) {
+    expect(await save({ text: 'x', name })).toMatchObject({ ok: false });
+  }
+  expect(dialog.showSaveDialog).not.toHaveBeenCalled();
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: true } as never);
+  expect(await save({ text: 'x', name: 'snippet.txt' })).toEqual({ ok: true, data: { done: 'cancelled' } });
+});
+
 describe('native worker checkout cleanup confirmation', () => {
   const offer = {
     runId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',

@@ -2506,6 +2506,8 @@
   "This task was sent or removed before your edit was saved, so your edit is in the composer.": "Tác vụ này đã được gửi hoặc bị xóa trước khi bản chỉnh sửa của bạn được lưu, nên bản chỉnh sửa đã được đưa vào ô soạn tin.",
   "Markdown files": "Tệp Markdown",
   "Text files": "Tệp văn bản",
+  "Wrap": "Ngắt dòng",
+  "Save code": "Lưu mã",
   "Approve a folder for ChatGPT": "Phê duyệt thư mục cho ChatGPT",
   "Import Skill folder": "Nhập thư mục skill",
   "Markdown skills": "Skill Markdown",

@@ -2936,6 +2936,11 @@ input[readonly] {
   border-radius: 0;
 }
 
+/* Copy, Wrap and Save sit together at the header's end. */
+.msg.rich .markdown-code .tool-copy + .tool-copy { margin-left: 0; }
+.msg.rich .markdown-code .code-wrap[aria-pressed="true"] { background: var(--hover); color: var(--ink); }
+.msg.rich .markdown-code.is-wrapped pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+
 /* ChatGPT's writing block (#1477): the code panel's frame and header; its text reads as text, not a quote. */
 .msg.rich .markdown-writing {
   margin: 0.55em 0;
