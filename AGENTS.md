@@ -1360,8 +1360,9 @@ while paging doesn't shift it. Each recalled message is announced through the sr
 Esc to stop (`escapeStopsTurn` in `chat.ts`): while the open chat's turn runs and Send shows Stop
 (composer empty, no files, no prepared plan), a first plain Esc in the composer only arms Stop and
 says "Press Esc again to stop the turn" in `#composerStatus`; a second plain Esc within 1.5 s submits
-the form through the Stop button itself, so Stop keeps its one authority (§14). Any other key, a
-chat switch or the timeout disarms it; a held key's repeats, modifiers, IME composition, an Esc the
+the form through the Stop button itself, so Stop keeps its one authority (§14). The armed press
+belongs to its turn: after a new turn starts, the next Esc only arms again. Any other key, a chat
+switch or the timeout disarms it; a held key's repeats, modifiers, IME composition, an Esc the
 dictation or slash/file menu took, a stop already requested and Cancel delivery (no running turn)
 never count.
 
