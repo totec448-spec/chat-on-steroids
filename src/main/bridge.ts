@@ -146,7 +146,7 @@ import {
   turnEndedDurably,
   requestTurnOwnershipCutoff
 } from './session/store.js';
-import { inFlightMcpRequests, inFlightToolCalls, runningToolCalls, runningToolProgress, settlingToolCalls } from './mcp/call-context.js';
+import { inFlightMcpRequests, inFlightToolCalls, runningToolCalls, runningToolProgress, sentResults, settlingToolCalls } from './mcp/call-context.js';
 import { nativeHandoffPrompt } from './session/handoff-prompt.js';
 import { DEFAULT_HANDOFF_PROMPT } from '../shared/handoff.js';
 import { briefShortfall, resumeBootstrapText } from './session/handoff.js';
@@ -3444,6 +3444,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (!automaticCompactionAllowed(summary)) await cancelAutomaticResumesNow(live.sessionId);
     // Worker chats and user-blocked chats alike: neither may auto-compact — see goalBlockReason.
     const workerBlocked = goalFencedChat(id);
+    const recordedQuestionId = live.activeTurnId && !sleptOverTurn ? summary?.timelineTurns?.[live.activeTurnId]?.questionId ?? null : null;
     const requestedSince = Number.isFinite(since) ? Math.max(0, since) : 0;
     // A page reload begins at cursor zero. Never turn that into a full JSONL parse/response:
     // large audited sessions used to freeze the Electron main process here for tens of
@@ -3689,6 +3690,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // REQUEST_ID_GRACE_MS to file its history cannot change the workspace and must not add
         // a cross-chat 15-second tax to the machine-settle barrier.
         pendingTools: runningToolCalls(live.conversationId),
+        // Results this app has fully sent to ChatGPT in the open turn, at least SENT_RESULT_GRACE_MS ago.
+        // ChatGPT's page no longer sees a running turn's results, so the compaction barrier falls
+        // back to this when the page can see none at all (#1643 follow-up).
+        ...(live.activeTurnId && live.activeTurnStartedAt !== null
+          ? { sentResults: sentResults(live.conversationId, live.activeTurnStartedAt, SENT_RESULT_GRACE_MS) } : {}),
         progress: conversationProgress(live.conversationId),
         // Diagnostic only. A finished unattributed call is still being placed into durable
         // history; unknown ownership is conservatively projected onto every chat until that
@@ -3701,7 +3707,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // Durable answer identity survives a quiet deadline and app/extension restart.
         // Boot adoption must not mint a replacement turn merely because liveness expired.
         recordedTurnId: sleptOverTurn ? null : live.activeTurnId ?? null,
-        recordedQuestionId: live.activeTurnId && !sleptOverTurn ? summary?.timelineTurns?.[live.activeTurnId]?.questionId ?? null : null,
+        recordedQuestionId: recordedQuestionId,
+        // The recorded question is its conversation's first (ChatGPT's own parent "root"). A chat's
+        // first exchange can run without showing it, and this is what proves which question it is.
+        ...(recordedQuestionId && await questionIsFirst(live.sessionId, recordedQuestionId, live.conversationId)
+          ? { recordedQuestionFirst: true } : {}),
         // The question whose turn this app has already ended, while nothing is running. See
         // settledQuestionOf(): a reloaded page must not reopen it as a turn nobody recorded.
         settledQuestionId: live.activeTurnId ? null : settledQuestionOf(summary?.timelineTurns),
@@ -9066,6 +9076,29 @@ const AUTOMATIC_ASKING_RETRY_PAUSE_MS = 10 * 60_000;
  * next working turn opens a fresh ticket, as before.
  */
 const AUTOMATIC_ASKING_RETRY_BURSTS = 2;
+
+/**
+ * How long a fully sent result must have been out before the compaction barrier counts it as received.
+ * ChatGPT starts its next call 4–7 s after a result (measured live, 2026-10-19), so a longer grace
+ * never sees a moment with nothing running; delivery through the tunnel takes well under a second.
+ */
+const SENT_RESULT_GRACE_MS = 1_500;
+
+/** Whether a recorded question is its conversation's first, by ChatGPT's own parent ("root"), by question. */
+const firstQuestions = new Map<string, boolean>();
+async function questionIsFirst(sessionId: string, messageId: string, conversationId: string): Promise<boolean> {
+  const key = `${sessionId}\n${conversationId}\n${messageId}`;
+  const known = firstQuestions.get(key);
+  if (known !== undefined) return known;
+  const rows = await readRecentEvents(sessionId, 400, { kinds: ['user_message'] }).catch(() => []);
+  const question = rows.find(event => event.kind === 'user_message' && event.messageId === messageId);
+  // Not recorded yet, or recorded without a parent: unknown, so asked again on the next pull.
+  if (question?.kind !== 'user_message' || !question.parentId) return false;
+  const first = question.parentId === 'root';
+  firstQuestions.set(key, first);
+  if (firstQuestions.size > 256) firstQuestions.delete(firstQuestions.keys().next().value!);
+  return first;
+}
 
 function compactionPhaseOf(entry: ContinuationView): CompactionPhase {
   if (entry.state !== 'awaiting-summary') return 'opening';
