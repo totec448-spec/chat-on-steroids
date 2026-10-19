@@ -6,7 +6,7 @@ import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js
 import { initDurableStore, flushDurable, resetDurableForTests } from '../src/main/durable.js';
 import { observeRequestCorrelation, requestCorrelation } from '../src/main/session/correlation.js';
 import { recordToolCall, recordChatObservations, recordRequestEvidence, sessionForConversation, flushRecorder, resetRecorderForTests } from '../src/main/session/recorder.js';
-import { noteAutomaticReply, resetAutomaticRepliesForTests } from '../src/main/session/automatic-replies.js';
+import { NEW_CHAT, noteAutomaticReply, resetAutomaticRepliesForTests } from '../src/main/session/automatic-replies.js';
 import { appendEvent, createSession, flushSessions, initSessionStore, readActivityEvents, readAsset, readEvents, readRecentEvents, resetSessionStoreForTests, unsetSessionRootForTests, upsertMessageEvent } from '../src/main/session/store.js';
 
 let dir = '';
@@ -204,6 +204,22 @@ it('marks the message a Goal or Loop follow-up came back as, and only that one',
   expect(automatic('q-1')).toBeUndefined();
   expect(automatic('q-2')).toBe(true);
   expect(automatic('q-3')).toBeUndefined();
+});
+
+// A Goal started from the ChatGPT page's own new-chat sheet: the page types the drafted opening
+// message into a chat that has no id yet, so it is noted for whichever new chat it arrives in.
+it('marks a Goal opening message the ChatGPT page typed into a new chat', async () => {
+  resetAutomaticRepliesForTests();
+  const id = await sessionForConversation('conv-opening');
+  const at = Date.now();
+  noteAutomaticReply(NEW_CHAT, 'start by listing the open issues', at);
+  await recordChatObservations('conv-opening', [{ kind: 'user_message' as const, time: at + 1, messageId: 'q-open', text: 'start by listing the open issues' }]);
+  await recordChatObservations('conv-opening-2', [{ kind: 'user_message' as const, time: at + 2, messageId: 'q-again', text: 'start by listing the open issues' }]);
+  await flushRecorder();
+  const opened = (await readEvents(id!, { kinds: ['user_message'] })).at(-1);
+  expect(opened?.kind === 'user_message' && opened.automatic).toBe(true);
+  const other = (await readEvents((await sessionForConversation('conv-opening-2'))!, { kinds: ['user_message'] })).at(-1);
+  expect(other?.kind === 'user_message' && other.automatic).toBeFalsy();
 });
 
 // Edit & resubmit (#365): ChatGPT keeps an edited question as a new version beside the old one,

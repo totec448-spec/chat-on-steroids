@@ -1411,10 +1411,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         from: z.number().int().min(0).max(10_000_000).optional(),
         before: z.number().int().min(1).max(10_000_000).optional(),
         after: z.number().int().min(0).max(10_000_000).optional(),
-        limit: z.number().int().min(1).max(1000).optional()
+        limit: z.number().int().min(1).max(1000).optional(),
+        /** Only the chat's tool calls (and its start, to tell a whole history from a window): a sub-agent's Activity. */
+        actions: z.boolean().optional()
       })
       .parse(payload);
-    const page = await readSessionEvents(id, options);
+    const { actions, ...paging } = options;
+    const page = await readSessionEvents(id, actions ? { ...paging, kinds: ['session_start', 'tool_call'] } : paging);
     if (!page) throw new Error('Session not found');
     return page;
   });

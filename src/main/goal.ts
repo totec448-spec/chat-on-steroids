@@ -62,7 +62,7 @@ import { findSessionByConversation, getSession, readEvents, readHandoff, readRec
 import { foldProgress } from '../shared/session.js';
 import { modelFacingText } from '../shared/content-reference.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
-import { BROWSER_PICKUP_MAX_ATTEMPTS } from '../shared/recovery.js';
+import { BROWSER_PICKUP_MAX_ATTEMPTS, rotationMessage } from '../shared/recovery.js';
 
 /** A finish-only preference has authority only while the finish tool is available. */
 export async function astraFinishOnly(sessionId: string, conversationId: string): Promise<boolean> {
@@ -151,7 +151,8 @@ export function goalProviderKey(kind: GoalProviderKind): Promise<string | null> 
 const MAX_CONTEXT_MESSAGES = 120;
 /** Recent CoS calls read to count per turn; a busy turn can make hundreds. */
 const MAX_TOOL_CALLS_COUNTED = 500;
-const HOLD_TOOLS = new Set(['session_finish', 'keep_astra_on_forever']);
+/** Calls that wait for the app (Session Finish, keep-on): their result is Loop's next instruction, not work. */
+export const GOAL_HOLD_TOOLS: ReadonlySet<string> = new Set(['session_finish', 'keep_astra_on_forever']);
 /** …and how many characters of them, so one 200k-character answer cannot be the whole prompt. */
 const MAX_CONTEXT_CHARS = 120_000;
 /** The per-message cut. Long enough to carry an answer's substance, short enough to fit many. */
@@ -2617,13 +2618,17 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
   // Only how many CoS calls each turn made. Without it the helper cannot tell "ran the
   // command" from "said it did" and keeps asking for the same work again.
   const callsByTurn = new Map<string, number>();
+  const lastCallOfTurn = new Map<string, number>();
   for (const call of toolCalls) {
     // Hold calls are waiting, not work, exactly as the finish boundary counts them.
-    if (call.kind === 'tool_call' && call.source === 'mcp' && call.turnId && !HOLD_TOOLS.has(call.call.tool)) {
+    if (call.kind === 'tool_call' && call.source === 'mcp' && call.turnId && !GOAL_HOLD_TOOLS.has(call.call.tool)) {
       callsByTurn.set(call.turnId, (callsByTurn.get(call.turnId) ?? 0) + 1);
+      lastCallOfTurn.set(call.turnId, Math.max(lastCallOfTurn.get(call.turnId) ?? -1, call.seq));
     }
   }
   const lastAnswerOfTurn = new Map<string, number>();
+  const answerOfTurn = new Map<string, { at: number; seq: number }>();
+  const rotationSeqs: number[] = [];
   const automaticIds = new Set(inputs.filter(input => input.sessionId === sessionId && input.finishOwner).map(input => input.id));
   // Assistant traffic must not evict the user's middle corrections before selection.
   const events = [...new Map([...recent, ...userReferences].map(event => [event.seq, event])).values()]
@@ -2633,6 +2638,8 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
   for (const event of foldProgress(events)) {
     let next: ChatMessage | null = null;
     if (event.kind === 'user_message') {
+      // ChatGPT may keep a page-inserted message with its Markdown escaped.
+      if (event.message.text.replace(/\\(.)/g, '$1').includes(rotationMessage())) rotationSeqs.push(event.seq);
       if (event.inputId && excludedInputIds.has(event.inputId)) continue;
       // The helper judges the user's work, not the executor's transport guidance.
       const content = clip(event.authoredText ?? userPromptText(event.message.text) ?? event.message.text, MAX_USER_MESSAGE_CHARS);
@@ -2659,11 +2666,35 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
       ordered.push(next);
     }
     const turn = next.role === 'assistant' && 'turnId' in event && typeof event.turnId === 'string' ? event.turnId : null;
-    if (turn && callsByTurn.has(turn)) lastAnswerOfTurn.set(turn, Math.max(lastAnswerOfTurn.get(turn) ?? -1, existingAt ?? ordered.length - 1));
+    if (turn) {
+      const at = Math.max(answerOfTurn.get(turn)?.at ?? -1, existingAt ?? ordered.length - 1);
+      answerOfTurn.set(turn, { at, seq: Math.max(answerOfTurn.get(turn)?.seq ?? -1, event.seq) });
+      if (callsByTurn.has(turn)) lastAnswerOfTurn.set(turn, at);
+    }
+  }
+  // A fresh turn (#1402) continues the turn it replaced, which ends without an answer. Its calls
+  // belong to the answer that finished the work: the first one after the app's own continue.
+  // Only across that continue, so the calls of an unrelated unanswered turn are never borrowed.
+  const carried = new Map<string, number>();
+  for (const [turn, count] of callsByTurn) {
+    if (answerOfTurn.has(turn)) continue;
+    const lastCall = lastCallOfTurn.get(turn)!;
+    const rotation = Math.min(...rotationSeqs.filter(seq => seq > lastCall));
+    if (!Number.isFinite(rotation)) continue;
+    let target: string | null = null;
+    for (const [answered, answer] of answerOfTurn) {
+      if (answer.seq > rotation && (target === null || answer.seq < answerOfTurn.get(target)!.seq)) target = answered;
+    }
+    if (target) {
+      carried.set(target, (carried.get(target) ?? 0) + count);
+      lastAnswerOfTurn.set(target, answerOfTurn.get(target)!.at);
+    }
   }
   for (const [turn, at] of lastAnswerOfTurn) {
-    const count = callsByTurn.get(turn)!;
-    ordered[at] = { ...ordered[at]!, content: `${ordered[at]!.content}\n\n[Chat On Steroids: ${count} tool call${count === 1 ? '' : 's'} ran in this turn. Arguments and results are not shown.]` };
+    const before = carried.get(turn) ?? 0;
+    const count = (callsByTurn.get(turn) ?? 0) + before;
+    const continued = before ? `, ${before} of them before Chat On Steroids continued it in a fresh turn` : '';
+    ordered[at] = { ...ordered[at]!, content: `${ordered[at]!.content}\n\n[Chat On Steroids: ${count} tool call${count === 1 ? '' : 's'} ran in this turn${continued}. Arguments and results are not shown.]` };
   }
   for (const text of deliveredInput.slice(-5)) {
     const content = clip(userPromptText(text) ?? text, MAX_USER_MESSAGE_CHARS);
