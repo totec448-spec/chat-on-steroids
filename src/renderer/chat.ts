@@ -10,7 +10,7 @@ import { imageStorageButton } from './image-storage.js';
 import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, composerSendModel, ensureComposerModel, chatModelName } from './chat-models.js';
 import { marked, Marked, type TokenizerAndRendererExtension } from 'marked';
 import { safeExternalLink } from '../shared/external-link.js';
-import { createAgentPanel, workerName } from './agent-panel.js';
+import { AGENT_STATE_WORDS, createAgentPanel, workerName } from './agent-panel.js';
 import { KIND_ICON } from './agent-activity.js';
 import { createFilePanel } from './file-panel.js';
 import { renderAgentPlan } from './agent-plan.js';
@@ -6473,10 +6473,14 @@ function paintSwarm(state: SwarmState): void {
       ...state.agents.map((agent) => {
         const row = el('div', 'agent');
         const top = el('div', 'model-top');
-        const label = agent.label || agent.id;
-        top.append(el('b', '', label));
-        if (label !== agent.id) top.append(el('span', 'chip', agent.id));
-        top.append(el('span', `chip is-${agent.state}`, agent.state));
+        // The prime is the chat the person started; its internal id says nothing to them.
+        if (agent.role === 'prime') top.append(el('b', '', () => t('Main chat')));
+        else {
+          top.append(el('b', '', () => workerName(agent.id, agent.label)));
+          // The id is what the main chat calls it; worth showing beside a name of its own.
+          if (agent.label?.trim() && agent.label.trim() !== agent.id) top.append(el('span', 'chip', agent.id));
+        }
+        top.append(el('span', `chip is-${agent.state}`, () => t(AGENT_STATE_WORDS[agent.state] ?? agent.state)));
         // Clearing is offered where the agent is, not only as one global reset at the
         // bottom of a settings form. The two rows mean different things and the tooltip
         // says which: the prime is the run, a worker is one slot.
@@ -6492,8 +6496,7 @@ function paintSwarm(state: SwarmState): void {
           top.append(clear);
         }
         const sub = el('div', 'model-sub');
-        ui(sub, 'textContent', () => [tn("{0} pending", "{0} pending", agent.pending), tn("{0} delivered", "{0} delivered", agent.delivered),
-          ...(agent.conversationId ? [t("chat bound")] : [])].join(' · '));
+        ui(sub, 'textContent', () => [tn("{0} pending", "{0} pending", agent.pending), tn("{0} delivered", "{0} delivered", agent.delivered)].join(' · '));
         row.append(top, sub);
         if (agent.task) row.append(el('p', 'hint', agent.task));
         // Why it failed, not just that it did. A worker only reaches this state when its
