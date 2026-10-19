@@ -18203,6 +18203,35 @@ describe('the context meter and automatic compaction', () => {
     expect(live.sent.some((message) => message.type === 'compact' && message.sourceLost === true)).toBe(false);
   });
 
+  it.each([true, false])('tries an automatic source again once the page helper answers after its receipt wait ran out (helper down: %s)', async helperDown => {
+    // #1643: a reopened tab's helper was unreadable for nine minutes, so the receipt wait ran
+    // out; it answered again the very second the app began a ten-minute pause between pickups.
+    let readable = !helperDown;
+    let received = false;
+    live = await harness(undefined, {
+      activity: () => withContext(205_000, settings({ auto: true }), { pendingTools: 0 }),
+      compact: () => ({ ok: true, data: { token: 'receipt-token', prompt: 'Write the brief.',
+        ...automaticTicket('not-attempted') } })
+    });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'helper-source', []);
+    compactionFiber(section, () => readable ? [compactionCall(received)] : null, () => []);
+    const stopped = vi.fn(() => stopGenerating(live!.document));
+    live.document.querySelector('[data-testid="stop-button"]')!.addEventListener('click', stopped);
+    const sends = watchSend(live.document);
+    await live.hook.startCompact(true);
+    expect(stopped).not.toHaveBeenCalled();
+    expect(live.sent.filter((message) => message.type === 'compact' && message.sourceDeferred === true)).toHaveLength(1);
+
+    readable = true; received = true;
+    await live.hook.refreshFiber();
+    await settle(); await settle();
+    // Only a helper that came back retries here; one that answered throughout leaves it to the app's pickup.
+    expect(stopped).toHaveBeenCalledTimes(helperDown ? 1 : 0);
+    expect(sends()).toBe(helperDown ? 1 : 0);
+    expect(live.sent.some((message) => message.type === 'compact' && message.sourceLost === true)).toBe(false);
+  });
+
   it.each(['distinct-pre-row', 'same-request-running', 'same-request-code-pending'])('waits for another outstanding call beside an answered native call (%s)', async mode => {
     let received = false;
     live = await harness(undefined, {
