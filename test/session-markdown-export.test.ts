@@ -107,3 +107,19 @@ it('copies the newest finished answer for /copy, skipping a turn that is still o
   store.readEvents.mockResolvedValue([events[0]!]);
   await expect(exportSessionMarkdown({ id: 'session-1', scope: 'latest', target: 'clipboard' }, null)).rejects.toThrow('This chat has no finished answer yet');
 });
+
+it('skips a completed turn that started again for /copy until it ends again', async () => {
+  const later = [
+    { seq: 4, time: 4, source: 'extension', kind: 'user_message', turnId: 't2', messageId: 'u2', message: { text: 'And now?', truncated: false, chars: 8 } },
+    { seq: 5, time: 5, source: 'extension', kind: 'assistant_message', turnId: 't2', messageId: 'a2', final: true, state: 'final',
+      message: { text: 'Done now', truncated: false, chars: 8 } },
+    { seq: 6, time: 6, source: 'extension', kind: 'turn_end', turnId: 't2', outcome: 'completed' },
+    { seq: 7, time: 7, source: 'app', kind: 'turn_start', turnId: 't2' }
+  ];
+  store.readEvents.mockResolvedValue([...events, ...later] as SessionEvent[]);
+  await exportSessionMarkdown({ id: 'session-1', scope: 'latest', target: 'clipboard' }, null);
+  expect(electron.clipboard.writeText).toHaveBeenLastCalledWith('The first part, and the rest of the answer.\n');
+  store.readEvents.mockResolvedValue([...events, ...later, { seq: 8, time: 8, source: 'extension', kind: 'turn_end', turnId: 't2', outcome: 'completed' }] as SessionEvent[]);
+  await exportSessionMarkdown({ id: 'session-1', scope: 'latest', target: 'clipboard' }, null);
+  expect(electron.clipboard.writeText).toHaveBeenLastCalledWith('Done now\n');
+});
