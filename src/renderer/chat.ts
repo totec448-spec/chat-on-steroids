@@ -2278,7 +2278,7 @@ function recallPrompt(event: KeyboardEvent): boolean {
 
 /** How long after a first Esc a second one stops the turn. */
 const ESCAPE_STOP_MS = 1500;
-let escapeStop: { generation: number; at: number; timer: number } | null = null;
+let escapeStop: { generation: number; turnId: string; at: number; timer: number } | null = null;
 function disarmEscapeStop(): void {
   if (!escapeStop) return;
   window.clearTimeout(escapeStop.timer);
@@ -2298,14 +2298,15 @@ function escapeStopsTurn(event: KeyboardEvent): boolean {
   // A held key repeats: it neither counts as the second press nor disarms the first.
   if (event.repeat) return false;
   if (event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ||
-    !running || controlledStopPending || send.dataset.action !== 'stop') { disarmEscapeStop(); return false; }
+    !running || !controlledTurnId || controlledStopPending || send.dataset.action !== 'stop') { disarmEscapeStop(); return false; }
   event.preventDefault();
   const now = performance.now();
-  const second = escapeStop?.generation === selectionGeneration && now - escapeStop.at <= ESCAPE_STOP_MS;
+  // Only the turn the first press was for: a new turn started meanwhile needs its own two presses.
+  const second = escapeStop?.generation === selectionGeneration && escapeStop.turnId === controlledTurnId && now - escapeStop.at <= ESCAPE_STOP_MS;
   disarmEscapeStop();
   // The button itself submits, so Stop keeps its one authority: the control showing Stop.
   if (second) { $<HTMLFormElement>('composer').requestSubmit(send); return true; }
-  escapeStop = { generation: selectionGeneration, at: now, timer: window.setTimeout(disarmEscapeStop, ESCAPE_STOP_MS) };
+  escapeStop = { generation: selectionGeneration, turnId: controlledTurnId, at: now, timer: window.setTimeout(disarmEscapeStop, ESCAPE_STOP_MS) };
   $('composerStatus').textContent = t('Press Esc again to stop the turn');
   return true;
 }
