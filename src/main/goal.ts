@@ -79,6 +79,7 @@ export function loopAfterTurnFor(conversationId: string): boolean {
   return control.enabled && (control.afterTurn || getConfig().ui.finishTool !== true);
 }
 import { resumeBootstrapMatches, resumeBootstrapText } from './session/handoff.js';
+import { noteAutomaticReply } from './session/automatic-replies.js';
 import {
   GOAL_LOOP_STOP_REFUSED,
   GOAL_LOOP_TRAILER,
@@ -2007,6 +2008,8 @@ async function run(draft: GoalDraft): Promise<void> {
     // mistakes a person leaves behind go in. After the NO_REPLY test above, never before it.
     draft.reply = draft.backend === 'templates' ? humanReply(decision.reply.slice(0, -GOAL_MARKER_INSTRUCTION.length)) + GOAL_MARKER_INSTRUCTION : humanReply(decision.reply);
     logInfo(`goal: drafted ${decision.reply.length} characters for ${draft.conversationId} with ${draft.model}`);
+    // Its page types it: the message it comes back as is marked the app's (#1655).
+    noteAutomaticReply(draft.conversationId, draft.reply);
     settle(draft, 'ready');
   } catch (err) {
     const detail = (err as Error).message;

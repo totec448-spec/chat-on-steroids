@@ -79,6 +79,7 @@ import {
 import { RESUME_CLAIM_WINDOW_MS, dispatchedResumeFromSession, dispatchedResumeMarkerIn, resumeOpeningChat } from './resume-gate.js';
 import { summarizeToolCall } from './summarize.js';
 import { editReplacement, replacedQuestion } from './edits.js';
+import { takeAutomaticReply } from './automatic-replies.js';
 
 interface LiveConversation {
   conversationId: string;
@@ -2232,6 +2233,7 @@ async function recordChatObservationsNow(
           ...(item.parentId ? { parentId: item.parentId } : {}),
           ...(editReplacement(item.messageId) ? { replaces: editReplacement(item.messageId) }
             : item.parentId && item.parentExact === true ? await replacedQuestion(sessionId, item.messageId, item.parentId) : {}),
+          ...(takeAutomaticReply(conversationId, item.text ?? '') ? { automatic: true as const } : {}),
           messageId: item.messageId
         }, { preferTime: item.authoredTime === true, work: item.authoredNow === true });
         if (!written.changed) continue;

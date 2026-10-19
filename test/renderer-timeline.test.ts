@@ -6995,4 +6995,13 @@ describe('prompt recall in the composer', () => {
     expect(press(w, 'ArrowUp')).toBe(true);
     expect(composer(w).value).toBe('Second question');
   });
+
+  // Mac release round, 2026-10-19: a Goal follow-up came back first. Its page types it, so it has
+  // no outbox row or input id at all; the recorder marks it `automatic` instead.
+  it('skips a Goal or Loop follow-up its page typed', async () => {
+    const { w, live, append } = await boot([...chat(), ask(7, 'Continue with step two of the goal', { automatic: true }), answer(8, 'Step two done.')]);
+    live.inputs = [sentInput('q-5')]; await append([]);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+  });
 });
