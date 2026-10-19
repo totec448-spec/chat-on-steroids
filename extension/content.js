@@ -3725,6 +3725,12 @@
   let fiberAsking = null;
   /** Off until the helper answers once, so a browser without it behaves exactly as before. */
   let fiberPresent = null; // Unknown until this document gets a reply or a definitive repair failure.
+  /**
+   * An automatic attempt whose receipt wait ran out while the page-model helper could not be read
+   * (#1643). The helper is the only way to see ChatGPT's receipts, so the attempt is tried again the
+   * moment it answers, instead of only at the app's next pickup, which can be ten minutes away.
+   */
+  let receiptDeferral = null;
   /** Avoid turning a missing MAIN-world helper into one script injection per observer tick. */
   let fiberRepairAt = -Infinity;
   let fiberRepairing = null;
@@ -4700,7 +4706,9 @@
       traceStage(call.requestId, 'read');
       traceStage(call.requestId, 'tool', call.tool);
     }
+    const helperReturned = fiberPresent !== true;
     fiberPresent = true;
+    if (helperReturned) retryAfterHelperReturned();
     fiberRows = answer.rows;
     fiberScanToken = answer.scanToken;
     const previousFiberTurns = [...fiberTurns.values()];
@@ -9599,6 +9607,18 @@
    * why, so its log and the chat's Compact & Resume row say what it is waiting on instead of
    * "asking ChatGPT" (#1643: twenty minutes of pickups, each stopped here, none of it logged).
    */
+  function retryAfterHelperReturned() {
+    const deferral = receiptDeferral;
+    receiptDeferral = null;
+    if (!deferral || deferral.forId !== conversationId || deferral.forEpoch !== epoch) return;
+    // After this scan has been taken in; only the error that deferral left is cleared, never a newer one.
+    setTimeout(() => {
+      if (nativeBusy || localError !== deferral.why || conversationId !== deferral.forId || epoch !== deferral.forEpoch) return;
+      localError = '';
+      void maybeResumePendingCompaction(deferral.forId, deferral.forEpoch);
+    }, 0);
+  }
+
   function reportDeferredCompaction(forId, token, why) {
     if (!token || !why) return;
     void ask({ type: 'compact', conversationId: forId, token, sourceDeferred: true, sourceError: why }).catch(() => undefined);
@@ -10054,10 +10074,14 @@
         'content_compact_chat_changed_waiting_results',
         'This chat changed while compaction was waiting for tool results.'
       );
-      if (!ready) return t(
-        'content_compact_results_unconfirmed',
-        'ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted.'
-      );
+      if (!ready) {
+        const why = t(
+          'content_compact_results_unconfirmed',
+          'ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted.'
+        );
+        receiptDeferral = fiberPresent === true ? null : { forId, forEpoch, why };
+        return why;
+      }
     }
     // INTERRUPTING — stop the turn rather than wait it out. That is the whole request, by
     // hand or automatically: this happens because the turn is long, not because it is
