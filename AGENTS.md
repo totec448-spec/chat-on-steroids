@@ -212,7 +212,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Command policy | Off, in Allowlist mode, with no rules. | Missing legacy settings stay Off; a missing mode defaults to Allowlist. Rules and mode persist while Off. An enabled empty Allowlist rejects every launch; an enabled empty Denylist permits simple supported commands. |
 | Plugin auto-refresh | On. | Configs written before the setting existed read Off (schema default); conservative recovery also turns it off. While it is off and `ui.autoRefreshPluginsAsked` is not set, the window offers it once (`pluginRefresh:offer`); either answer sets `autoRefreshPluginsAsked`, which a settings save never clears. Local status/discovery never claims ChatGPT refreshed its connector snapshot. |
 | Turn-done notifications | On (`ui.turnNotifications`, missing means on). | Codex's turn-completion notification. `turn-notifications.ts` watches session changes and notifies once per newer `lastTurnEndAt` of a top-level chat whose outcome is `completed` and has no new active turn, while the window is unfocused. Seeded from the session list at startup, so older turns never notify. Workers, helpers, chats whose Goal/Loop switch is on, and chats that got a Session-finish or stuck notice in the last 2 minutes stay quiet. The body is the answer's first paragraph as plain text (140 characters); a click opens the chat. |
-| Fresh turns for long work | Every 30 minutes (`ui.rotateTurnMinutes`: 0 off, 20/30/45/60; missing or malformed means 30). | #1402. Measured: turns up to ~35 minutes ended cleanly, 37–64 minutes almost always broke; Stop + "continue" by hand never did. `turn-rotation.ts` `considerTurnRotation` runs on each attributed tool call (`noteCallAttribution`, after its `grantActivity`) for the chat's exact running turn. Once that turn's own `turn_start` is `rotateTurnMinutes` old, `input.ts` `fileRotationInput` files one `purpose: 'rotation'` direct-turn message (`rotationMessage()`, Core mention kept) into exactly that turn. The native send makes ChatGPT end the turn as interrupted and continue in a fresh one; the call in flight keeps its result. Never for Pro, worker or helper chats, or chats with Goal/Loop armed (`goalArmedFor`), which decide on turn ends; never for a blocked chat, beside another pending message, or into a different turn. One per turn: a refused filing retries after 1 minute, one the page did not take after 5. The page marks an authorization whose Send goes into the running turn (`intoTurn: true`, forwarded by `background.js`); for a rotation the bridge's `/input/claim` allows that only while a tool call of the chat runs (`runningToolCalls`). Otherwise `declineRotationSteer` retires the claimed row as cancelled without an error and `declineTurnRotation` tries the turn again at a later tool result after 1 minute without spending a filing: sent while the model writes its answer, ChatGPT posted it after that answer and never answered it (2.1.41 release round). When ChatGPT offers only Stop, the page stops the turn first and sends without `intoTurn`. A rotation row is not `manualInput`: a page that cannot take it during the turn drops it rather than keeping it for after the turn, and the timeline raises no delivery notice for it. A message of the user's own cancels a rotation that was never handed out. |
+| Fresh turns for long work | Every 30 minutes (`ui.rotateTurnMinutes`: 0 off, 20/30/45/60; missing or malformed means 30). | #1402. Measured: turns up to ~35 minutes ended cleanly, 37–64 minutes almost always broke; Stop + "continue" by hand never did. `turn-rotation.ts` `considerTurnRotation` runs on each attributed tool call (`noteCallAttribution`, after its `grantActivity`) for the chat's exact running turn. Once that turn's own `turn_start` is `rotateTurnMinutes` old, `input.ts` `fileRotationInput` files one `purpose: 'rotation'` direct-turn message (`rotationMessage()`, Core mention kept) into exactly that turn. The native send makes ChatGPT end the turn as interrupted and continue in a fresh one; the call in flight keeps its result. It must go in while that call still waits for its answer (#1662, measured 2026-10-18: 6/6 clean while a call ran; sent in the gap after a result ChatGPT sometimes queued it behind the reply, and a Stop during a call made the model run it again). So the kernel opens `rotation-hold.ts` `openCallHold` around recording an attributed call, rotation is considered only while `callHoldOpen`, and the bridge's `awaitRotationDelivery` holds the call's answer until the row is sent or settled; a row still unauthorized after 15 s is withdrawn (`withdrawUnsentRotation`, cancelled without an error) and the call answers. The page never stops a turn for it: offered no Send, it sends nothing. Never for Pro, worker or helper chats, and never at the result of a Goal/Loop hold tool (`GOAL_HOLD_TOOLS`: `session_finish`, `keep_astra_on_forever`), which is Loop's next instruction. Goal and Loop chats rotate like any other (2.1.43): the rotated turn ends without a final answer, so no Goal/Loop decision is filed for it, and its continue is recorded with empty `authoredText`, which the Goal helper's transcript leaves out; never for a blocked chat, beside another pending message, or into a different turn. One per turn: a refused filing retries after 1 minute, one the page did not take after 5. A rotation row is not `manualInput`: a page that cannot take it during the turn drops it rather than keeping it for after the turn, and the timeline raises no delivery notice for it. A message of the user's own cancels a rotation that was never handed out. |
 | Follow-up behavior | Join the running turn (`ui.followUp: 'steer'`; a broken value loads as that). | Codex's "Follow-up behavior". Each running turn starts the composer's delivery choice from this default (`queue` selects After this turn); a choice made in the send menu lasts for that turn. Cmd/Ctrl+Shift+Enter sends the other way (`sendComposer('auto' \| 'after-turn')`); with no running turn it is an ordinary send. |
 | Enter key | Enter sends (`ui.enterSends`, missing means true). | Codex's "Enter key behavior". With `false`, Enter adds a line in the composer and Cmd/Ctrl+Enter sends; Shift+Enter always adds a line and Cmd/Ctrl+Shift+Enter keeps sending the other way (Follow-up behavior). |
 | Keep awake | The computer (`ui.keepAwake` on, missing means on; `ui.keepScreenAwake` off). | Codex's "Prevent sleep while running". One select: Off / The computer / The computer and screen. `keep-awake.ts` holds `powerSaveBlocker` (`prevent-app-suspension`: the system stays awake, the screen may sleep; with `keepScreenAwake`, `prevent-display-sleep`, because Windows Modern Standby laptops go to standby once the screen turns off whatever else is held, and the hold is swapped when the choice changes) while any session is working by `sessionWorkingAt` with the bridge's `sessionActivityExpiresAt` deadline, so a chat that died mid-turn releases it when its deadline passes. Refreshed on session changes, at the nearest deadline, every 60 s and when the setting changes. |
@@ -689,9 +689,12 @@ a claim that ChatGPT supplied a retry deadline. The existing pending-repair and 
 pickup-stopped countdowns retain their prior precedence over the generic limit notice.
 While the chat's own automatic Compact & Resume ticket is still before its handoff request, the
 recovery projection is a single read-only `compaction` countdown with `phase` `waiting` (the
-source turn still works) or `asking` (the request is being sent); the dock shows it without a
-clock. From the request on, the chat's Compact & Resume timeline row reports progress and the
-projection is empty. The countdown authorizes nothing.
+source turn still works), `asking` (the request is being sent) or `held` (the source page tried
+and stopped before asking); the dock shows it without a clock. An automatic attempt the page stops
+before asking keeps its ticket and posts `/compact` `sourceDeferred` with `sourceError`, its reason:
+the app logs it and shows `held` until its next pickup. Only the chat's open, still unsent automatic
+ticket accepts it. From the request on, the chat's Compact & Resume timeline row reports progress
+and the projection is empty. The countdown authorizes nothing.
 Once a chat's history has been limited, the page's Retry presses after Retry-After back off to
 0 s, 2, 4, 8, then 15 minutes (`LOAD_FAILURE_LIMITED_BACKOFF_MS`), instead of the once-a-minute
 pace kept for an ordinary load failure. Measured 2026-10-11: pressing every minute drew a new 429
@@ -1337,6 +1340,29 @@ The desktop composer uses native CSS content sizing, bounded at 220px. Layout ow
 height across draft changes, hidden panels and width changes; do not persist a measured
 `scrollHeight` as an inline height. Empty and fitting input must not overflow; longer text
 remains scrollable at the cap. `scripts/verify-composer-layout.cjs` checks real Electron layout.
+Prompt recall (`recallPrompt` in `chat.ts`): in an open chat, plain ArrowUp/ArrowDown in an empty
+composer step through your messages in that chat's loaded timeline, like a shell's history; past the
+newest one the composer is empty again. Only an unedited recalled message keeps the arrows, and only
+at its edge: Up recalls with the caret at the start, Down with it at the end. Elsewhere the arrows
+move the caret natively through wrapped and typed rows, so a change of direction first takes it to
+that edge. IME composition, modifiers, an open slash/file menu, attached files or a plan in the
+draft and Edit & resubmit (#365) keep their keys. Only messages the person typed are recalled: the
+outbox row with the event's `inputId` or `messageId` decides, and `authoredSource: 'none'`, a
+`finishOwner`, a `recovery` or a `rotation`/`decision` purpose marks the app's own send. Until the
+window has read the outbox once, recall leaves the arrows to the caret. The outbox keeps only its
+newest 50 finished rows and the recorded message keeps the same fields (`inputId`, `authoredText`)
+whoever wrote it, so a message with an `inputId` whose row is gone is left out. A Goal or Loop
+follow-up is typed by its page and has no row: when a draft is ready the app notes its text for that
+chat (`session/automatic-replies.ts`, kept an hour), and the recorder marks the one sent message that
+comes back with that text (compared without Markdown escapes) `automatic: true`, which recall skips.
+An opening message the ChatGPT page drafts through `/goal/open` has no chat yet: it is noted under
+`NEW_CHAT` and taken by whichever chat it arrives in. The app's own opening goes through the outbox,
+whose `objective` row records the person's request as `authoredText`, so recall brings that back.
+Any other message with no row and no `inputId` was sent in ChatGPT itself and counts as typed, except
+a worker's or helper's, whose tasks come from the app. Messages without text, stored cut short, Compact & Resume prompts, folded earlier versions and
+queued inputs are not recalled either. The list is read at the first press, so a message recorded
+while paging doesn't shift it. Each recalled message is announced through the sr-only polite region
+`#recallAnnounce`. Recall only fills the composer; nothing is stored and nothing is sent.
 
 `session/start-input.ts` returns durable local admission before waiting for connector readiness
 or browser delivery. Each New Chat opening reserves its own local session in the outbox, then
@@ -4126,6 +4152,21 @@ answer). Without an outline, each interim message or ChatGPT caption opens a rou
 ending a finished round titles it, by position. Disclosures are keyed by turn and round, reuse the
 node their rows already sit in when paging moves a round's start, and rounds drawn after a chat's
 first paint enter with a short fade (none under reduced motion).
+When the new revision of an answer and the one on screen are both drawn rich and laid out alike, the
+row and every leading block the revision left unchanged stay the same nodes, replacing from the first
+block that differs; otherwise the row is swapped whole, as is an answer first drawn already final
+(its blocks are not recorded for comparison). Blocks at new positions, and an answer's first
+blocks as it appears live, fade in (opacity only; not when a chat opens or history pages in, nor
+under reduced motion). While a turn works, its newest event, if it is a message not yet final, shows
+only its finished blocks (up to its last blank line outside an open fence, writing block or display
+formula; a list or an indented code block once a line after a blank one cannot continue it, since a
+blank line between items turns the whole list loose) and is drawn again only when one more finishes
+or its sources change. While any of it is held
+back the live row stays, saying Thinking where prose would otherwise speak for itself. It shows whole
+once final, its turn ends or anything follows it, and a directive's captured page always does. Until
+the chat's controls arrive, its recorded open turn counts as working, so rows painted first never show
+a tail they then take back; once they arrive they decide (a turn left open without an end shows its
+message whole), and an answer that changes whether the turn works repaints the message.
 A working turn's timeline ends with one live row: ChatGPT's own words for what the turn is doing
 (the outline's `now`, in the page's language), wearing the icon and clock of a call this app runs
 meanwhile; else that running call by its own caption; else a step ChatGPT's page names in the

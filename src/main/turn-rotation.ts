@@ -8,8 +8,8 @@
  * the next attributed tool result files one automatic continue into that turn: a native send there
  * ends it as interrupted and carries on in a fresh one, the call in flight keeping its result.
  *
- * Decided per attributed tool call, so it only ever happens right after a tool result, never in the
- * middle of answer text. One rotation per turn; a refused filing is tried again after a minute, a
+ * Decided per attributed tool call while that call's answer is still held (rotation-hold.ts), so the
+ * continue goes in while ChatGPT still sees the call running, never in the middle of answer text. One rotation per turn; a refused filing is tried again after a minute, a
  * filed one the page did not take after five, and a turn is left alone after two filings it did
  * not take (2026-10-15: seven unsent continues in two turns of one chat, each shown as not sent).
  */
@@ -55,18 +55,6 @@ export async function considerTurnRotation(conversationId: string, sessionId: st
   } finally {
     inFlight.delete(conversationId);
   }
-}
-
-/**
- * The filed continue reached its page while no tool call of the chat was running: the model was
- * writing its answer, so the continue was retired unsent (see the bridge's claim route). That is
- * no failure to take it. The turn is tried again at a later tool result after the refused delay,
- * and the decline gives back its filing.
- */
-export function declineTurnRotation(conversationId: string, turnId: string, now: number): void {
-  const last = attempts.get(conversationId);
-  if (last?.turnId !== turnId || !last.filed) return;
-  attempts.set(conversationId, { turnId, at: now, filed: false, filings: Math.max(0, last.filings - 1) });
 }
 
 /** Test seam: forgets every attempt. */

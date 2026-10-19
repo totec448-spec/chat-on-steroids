@@ -267,7 +267,7 @@ interface Reply {
 function request(
   method: string,
   path: string,
-  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string; extensionVersion?: string; protocol?: number; extensionBuild?: string; browser?: string; host?: string; engine?: string } = {}
+  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string; extensionVersion?: string; protocol?: number; extensionBuild?: string; browser?: string; host?: string; engine?: string; userAgent?: string } = {}
 ): Promise<Reply> {
   const url = new URL(path, base);
   const payload = options.raw ?? (options.body === undefined ? null : JSON.stringify(options.body));
@@ -281,6 +281,7 @@ function request(
   if (options.browser) headers['x-extension-browser'] = options.browser;
   if (options.host) headers['x-extension-host'] = options.host;
   if (options.engine) headers['x-extension-engine'] = options.engine;
+  if (options.userAgent) headers['user-agent'] = options.userAgent;
   if (payload !== null) {
     headers['content-type'] = 'application/json';
     headers['content-length'] = String(Buffer.byteLength(payload));
@@ -672,6 +673,33 @@ describe('who is allowed to talk to it', () => {
     expect((await bridgeStatus()).externalExtension?.engine).toBeUndefined();
     await request('GET', '/status', { host: 'browser' });
     expect((await bridgeStatus()).externalExtension?.engine).toBeUndefined();
+  });
+
+  // 2.1.42 work, Windows VM: a Firefox add-on from before the engine header (2.1.37.1002) showed the
+  // Chrome banner "Reload the extension from this app's folder", which a signed add-on cannot do.
+  // Its moz-extension:// origin says it is Firefox too.
+  it('tells an older Firefox add-on apart by its origin', async () => {
+    await pair();
+    const firefox = 'moz-extension://3f0e5b1a-0c1d-4e2f-8a9b-0c1d2e3f4a5b';
+    await request('GET', '/status', { host: 'browser', origin: firefox, extensionVersion: '2.1.37.1002' });
+    expect((await bridgeStatus()).externalExtension).toMatchObject({ present: true, engine: 'gecko' });
+    expect(await bridgeStatus()).toMatchObject({ extensionVersion: '2.1.37.1002', extensionEngine: 'gecko' });
+  });
+
+  // VM, 2026-10-19: with #1669 installed the banner still asked Firefox for a folder reload. Like
+  // Chrome, Firefox leaves the Origin off some of an add-on's requests, and each request rewrote the
+  // record. Its user agent is on every one.
+  it('keeps an older Firefox add-on apart on requests that carry no origin', async () => {
+    await pair();
+    const firefox = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0';
+    await request('GET', '/status', { host: 'browser', origin: 'moz-extension://3f0e5b1a-0c1d-4e2f-8a9b-0c1d2e3f4a5b', extensionVersion: '2.1.37.1002', userAgent: firefox });
+    await request('GET', '/status', { host: 'browser', origin: null, extensionVersion: '2.1.37.1002', userAgent: firefox });
+    expect((await bridgeStatus()).externalExtension).toMatchObject({ present: true, engine: 'gecko' });
+    expect(await bridgeStatus()).toMatchObject({ extensionVersion: '2.1.37.1002', extensionEngine: 'gecko' });
+    // Chrome's user agent says "like Gecko"; that is not Firefox.
+    const chrome = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36';
+    await request('GET', '/status', { host: 'browser', origin: null, extensionVersion: '2.1.37.1002', userAgent: chrome });
+    expect((await bridgeStatus()).extensionEngine).toBeUndefined();
   });
 
   // Chrome and Firefox both connected (VM, 2026-10-14): Setup showed whichever polled last, not the
@@ -3667,6 +3695,59 @@ describe('automatic compaction', () => {
     }
   });
 
+  // #1643: five pickups were "resumed" and none reached Send. The page knew why each attempt
+  // stopped (shown only on its own control); the app logged nothing and said "asking ChatGPT".
+  it('logs and shows why the source page could not ask for an automatic handoff', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac0d';
+      await request('POST', '/events', {
+        body: { conversationId, events: [{ kind: 'user_message', time: Date.now(), text: 'a chat whose page cannot ask yet', messageId: 'm-auto-deferred' }] }
+      });
+      const filed = await request('POST', '/compact', { body: { conversationId, ticket: true, automatic: true } });
+      const token = filed.body.token as string;
+      const sessionId = filed.body.sessionId as string;
+      const why = 'ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted.';
+      const phase = async () => ((await sessionControlsFor(sessionId)).recovery ?? []).map(countdown => countdown.phase);
+      const takeRepair = async (): Promise<{ token: string; reason: string } | null> => {
+        await sweepStaleSwarm(Date.now());
+        return (await request('GET', '/status')).body.repairs?.[0] ?? null;
+      };
+      await sweepStaleSwarm(Date.now());
+      expect(await phase()).toEqual(['asking']);
+
+      const deferred = await request('POST', '/compact', { body: { conversationId, token, sourceDeferred: true, sourceError: why } });
+      expect(deferred.status).toBe(200);
+      expect(continuationByToken(token)).toMatchObject({ state: 'awaiting-summary', sourceSend: { state: 'not-attempted' } });
+      expect(getLog().map(entry => entry.message)).toContainEqual(expect.stringContaining(`could not ask for the handoff yet: ${why}`));
+      expect(await phase()).toEqual(['held']);
+
+      // The next pickup lets the page try again, so the app is asking once more.
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      expect(await takeRepair()).toMatchObject({ reason: 'compaction' });
+      expect(await phase()).toEqual(['asking']);
+
+      // Only the open, still unsent automatic ticket of this chat takes a reason.
+      expect((await request('POST', '/compact', { body: { conversationId, token: 'not-a-ticket', sourceDeferred: true, sourceError: why } })).status).toBe(409);
+      expect((await request('POST', '/compact', { body: { conversationId: 'a1a1a1a1-0000-4000-8000-00000000ac0e', token, sourceDeferred: true, sourceError: why } })).status).toBe(409);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('takes no deferral reason for a manual Compact & Resume', async () => {
+    await pair();
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac0f';
+    await request('POST', '/events', {
+      body: { conversationId, events: [{ kind: 'user_message', time: Date.now(), text: 'a manual press', messageId: 'm-manual-deferred' }] }
+    });
+    const filed = await request('POST', '/compact', { body: { conversationId, ticket: true } });
+    const deferred = await request('POST', '/compact', { body: { conversationId, token: filed.body.token, sourceDeferred: true, sourceError: 'no' } });
+    expect(deferred.status).toBe(409);
+    expect(deferred.body.error).toBe('source_send_not_deferrable');
+  });
+
   it('abandons an automatic ticket that never reaches Send after its bounded retry bursts', async () => {
     vi.useFakeTimers();
     try {
@@ -5856,6 +5937,26 @@ describe('delivering a bootstrap', () => {
     // The second wake reaches the browser now, not only after the first one's page claims it.
     expect(status.body.revivals.map((entry: { conversationId: string }) => entry.conversationId).sort()).toEqual([...chats].sort());
     expect(status.body.revival).toEqual(status.body.revivals[0]);
+  });
+
+  it('offers a worker\'s wake only to a companion that may take work', async () => {
+    const SHIPPED = 'a0a0a0a0a0a0', chrome = 'c'.repeat(32), firefox = 'f'.repeat(32);
+    setShippedExtensionBuildForTest(SHIPPED);
+    try {
+      await pair();
+      spawn({ workers: [{ task: 'first audit' }], caller: { conversationId: PRIME_CHAT } });
+      const conversationId = 'abababab-7654-3210-fedc-ba9876543211';
+      const bootstrap = await redeem();
+      await request('POST', '/commands/ack', { body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' } });
+      finishAgent({ conversationId }, 'reported, waiting for more');
+      wake([{ to: 'worker-1', text: 'one more thing' }]);
+      await waitForRevival();
+      await request('GET', '/status', { extensionBuild: SHIPPED, browser: chrome });
+      const stale = (await request('GET', '/status', { extensionBuild: 'deadbeefcafe', browser: firefox })).body;
+      expect(stale.revival).toBeNull();
+      expect(stale.revivals).toEqual([]);
+      expect((await request('GET', '/status', { extensionBuild: SHIPPED, browser: chrome })).body.revival).toMatchObject({ conversationId });
+    } finally { setShippedExtensionBuildForTest(); }
   });
 
   // #1086: a page that redeemed the wake and failed before Send says so ("transient"); the
@@ -8082,6 +8183,36 @@ describe('a worker chat that never opens', () => {
     expect(opened).toEqual([]);
     } finally { const closed = once(socket, 'close'); socket.close(); await closed; }
   });
+  // VM, 2026-10-19: two of three workers in every run failed with "the browser opened it, but the
+  // page never picked up its task". Firefox on an out-of-date add-on polled first and was handed
+  // their tabs to open, and the redeem route then refused its pages as out of date.
+  it('hands a worker tab only to a companion that may take work', async () => {
+    const SHIPPED = 'a0a0a0a0a0a0', chrome = 'c'.repeat(32), firefox = 'f'.repeat(32);
+    setShippedExtensionBuildForTest(SHIPPED);
+    await pair();
+    await request('GET', '/status', { extensionBuild: SHIPPED, browser: chrome });
+    const socket = new WebSocket(base.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
+    await once(socket, 'open');
+    const authenticated = once(socket, 'message'); socket.send(token!); await authenticated;
+    try {
+      spawn({ workers: [{ task: 'one placement probe' }], caller: { conversationId: PRIME_CHAT } });
+      // The out-of-date browser polls through the whole time the tab is being offered.
+      for (let poll = 0; poll < 40; poll++) {
+        expect((await request('GET', '/status', { extensionBuild: 'deadbeefcafe', browser: firefox })).body.placement).toBeNull();
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      let placement: any;
+      await vi.waitFor(async () => {
+        placement ||= (await request('GET', '/status', { extensionBuild: SHIPPED, browser: chrome })).body.placement;
+        expect(placement?.id).toBeTruthy();
+      });
+      expect((await redeem(placement.id)).agent).toBe('worker-1');
+    } finally {
+      setShippedExtensionBuildForTest();
+      const closed = once(socket, 'close'); socket.close(); await closed;
+    }
+  });
+
   it('fails the worker definitively instead of leaving it invited, and lets the next one through', async () => {
     await pair();
     spawn({ workers: [{ task: 'first audit' }, { task: 'second audit' }], caller: { conversationId: PRIME_CHAT } });
@@ -16003,6 +16134,9 @@ describe('the goal loop over the bridge', () => {
         reply: humanReply('rewrite the parser in rust'),
         model: 'deepseek/deepseek-v4-flash'
       });
+      // The page types it into a chat that has no id yet: whichever new chat it arrives in marks it the app's.
+      const { takeAutomaticReply } = await import('../src/main/session/automatic-replies.js');
+      expect(takeAutomaticReply('c-any-new-chat', humanReply('rewrite the parser in rust'))).toBe(true);
       // The opening turn is the last *conversation* message; the closing reminder the goal
       // loop appends after the transcript is a system message and sits behind it.
       expect(seen.filter((message) => message.role !== 'system').at(-1)!.content).toContain(

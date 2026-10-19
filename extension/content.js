@@ -9594,6 +9594,16 @@
     );
   }
 
+  /**
+   * An automatic run that stopped before asking keeps its ticket for a later pickup. The app hears
+   * why, so its log and the chat's Compact & Resume row say what it is waiting on instead of
+   * "asking ChatGPT" (#1643: twenty minutes of pickups, each stopped here, none of it logged).
+   */
+  function reportDeferredCompaction(forId, token, why) {
+    if (!token || !why) return;
+    void ask({ type: 'compact', conversationId: forId, token, sourceDeferred: true, sourceError: why }).catch(() => undefined);
+  }
+
   async function startCompact(automatic = false) {
     const forId = conversationId;
     const forEpoch = epoch;
@@ -9747,6 +9757,7 @@
             'The chat changed while preparing the handoff. Nothing was sent.'
           );
         if (!automatic || !hydrationCurrent()) await retireUnsentCompaction(forId, String(filed.data.token || ''), localError, current);
+        else reportDeferredCompaction(forId, String(filed.data.token || ''), localError);
         if (!current()) return;
         renderControl();
         return;
@@ -9777,6 +9788,7 @@
       nativePhase = '';
       localError = barrier;
       if (!automatic) await retireUnsentCompaction(forId, String(filed.data.token || ''), barrier, current);
+      else reportDeferredCompaction(forId, String(filed.data.token || ''), barrier);
       if (!current()) return;
       renderControl();
       void pullActivity();
@@ -13428,29 +13440,22 @@
       // comparison never matched, and that first turn got no ACK, no turn start and no turn end
       // for Goal or Loop to act on. The bootstrap comparison is exact either way (raw, then one
       // unescape); a person's own sends keep the raw comparison in matchesUserSendReceipt.
-      // While ChatGPT thinks or runs a tool it offers only Stop, no Send (measured 2026-10-15 on
-      // the user's Mac: every automatic continue for a long turn timed out unsent, and the turns
-      // broke at 41 and 52 minutes anyway). The automatic continue then does what #1402 decided by
-      // hand: Stop right after the tool result, then send Continue as the next message. A person's
-      // own message is never allowed to stop a turn; it waits for the turn's end instead.
-      let intoTurn = !!message.directTurn;
+      // A message into the running turn is sent only with Send. While ChatGPT thinks it offers
+      // only Stop; 2.1.39 then stopped the turn for a fresh-turn continue, but a Stop while one of
+      // the turn's tool calls runs made the model run that call again (measured 2026-10-18, #1662).
+      // The app sends a continue while the call it is due at still waits for its answer; offered
+      // no Send, this page sends nothing and the app withdraws it.
+      const intoTurn = !!message.directTurn;
       if (intoTurn && input.purpose === 'rotation' && CLF_DOM.generating() &&
           !await waitPageView(() => !!CLF_DOM.sendButton(), onTarget, 3000)) {
-        if (!CLF_DOM.stopGeneration(onTarget) ||
-            !await waitPageView(() => !CLF_DOM.generating() && !!CLF_DOM.sendButton() && draft.current(), onTarget, 20000)) return fail(t(
-          'content_delivery_rotation_not_stopped',
-          'ChatGPT offered no Send in the running answer, and stopping it for the automatic continue did not finish.'
-        ));
-        intoTurn = false;
+        noteWithdraw('no-send');
+        return false;
       }
       const nativeSend = () => sendSubmittedText(sendingTarget, false, async sendCurrent => {
         // Preserve the outbox's revocable claim until the actual native Send is ready.
         if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current(), withdrawWhy)) return false;
         authorizing = true;
-        // Into the running turn the app allows its own automatic continue only while a tool call
-        // runs: sent while the model writes its answer, it lands after it, unanswered (2.1.41).
-        const authorized = await ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, authorize: true,
-          ...(intoTurn ? { intoTurn: true } : {}) });
+        const authorized = await ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, authorize: true });
         if (authorized?.data?.ok !== true) noteWithdraw('app-refused');
         if (!sendCurrent() || authorized?.data?.ok !== true || !onTarget() || !draft.current()) { noteWithdraw(onTarget() ? 'lease-lost' : offTarget()); return false; }
         if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current(), withdrawWhy)) return false;

@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
+import { Lexer } from 'marked';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_GOAL_SYSTEM_PROMPT } from '../src/shared/goal.js';
 import { prependUserPrompt } from '../src/shared/user-prompt.js';
@@ -165,7 +166,7 @@ async function settleHistoryFrame(w: Pick<Window, 'requestAnimationFrame'>): Pro
   await settle();
 }
 
-async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; followUp?: 'steer' | 'queue'; enterSends?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean; approvalCard?: () => unknown; answerApproval?: (id: string, cardId: string, choice: string) => unknown; summary?: Partial<SessionSummary> } = {}) {
+async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; followUp?: 'steer' | 'queue'; enterSends?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean; approvalCard?: () => unknown; answerApproval?: (id: string, cardId: string, choice: string) => unknown; summary?: Partial<SessionSummary>; holdInputs?: Promise<void> } = {}) {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
@@ -258,7 +259,8 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
       },
       listProjects: () => ok(projects),
       // IPC snapshots cannot share the backend's mutable array with the renderer.
-      listInputs: () => ok(structuredClone(live.inputs)),
+      // `holdInputs`: the outbox read answers only once it resolves, like a slow first read after launch.
+      listInputs: () => options.holdInputs ? options.holdInputs.then(() => ok(structuredClone(live.inputs))) : ok(structuredClone(live.inputs)),
       cancelInput: vi.fn((id: string) => {
         const entry = live.inputs.find(row => row.id === id);
         if (!entry) return ok(false);
@@ -2798,6 +2800,337 @@ it('keeps a streaming message anchor and its following tool group across canonic
   expect(group.open).toBe(true);
 });
 
+describe('an answer while ChatGPT writes it', () => {
+  const answer = (seq: number, body: string, more: Partial<Extract<SessionEvent, { kind: 'assistant_message' }>> = {}): SessionEvent => ({
+    seq, origin: 1, time: T0, source: 'extension', kind: 'assistant_message', messageId: 'live-answer', message: text(body),
+    state: 'streaming', final: false, ...more });
+  const blocks = (w: { document: Document }) => [...w.document.querySelectorAll<HTMLElement>('.ev-assistant_message .msg.rich > *')];
+  const fading = (w: { document: Document }) => blocks(w).filter(block => block.classList.contains('is-entering')).map(block => block.textContent?.trim());
+
+  it('keeps finished paragraphs of a streaming answer as the same nodes while it grows', async () => {
+    const { w, append } = await boot([answer(1, 'Alpha one.')]);
+    const row = w.document.querySelector('.ev-assistant_message');
+    const [first] = blocks(w);
+    const selection = w.getSelection()!;
+    selection.setBaseAndExtent(first!.firstChild!, 0, first!.firstChild!, 5);
+    await append([answer(2, 'Alpha one.\n\nBeta two.')]);
+    expect(w.document.querySelector('.ev-assistant_message')).toBe(row);
+    expect(blocks(w)[0]).toBe(first);
+    expect(blocks(w).map(block => block.textContent)).toEqual(['Alpha one.', 'Beta two.']);
+    expect(selection.anchorNode).toBe(first!.firstChild);
+    expect(selection.toString()).toBe('Alpha');
+  });
+
+  it('fades in only the blocks a revision adds, not the one that grew', async () => {
+    const { w, append } = await boot([answer(1, 'Alpha.\n\nBeta')]);
+    await append([answer(2, 'Alpha.\n\nBeta grew.\n\nGamma.\n\n- Delta')]);
+    expect(fading(w)).toEqual(['Gamma.', 'Delta']);
+  });
+
+  it('keeps a block that faded in as the same node on the next revision', async () => {
+    const { w, append } = await boot([answer(1, 'Alpha.')]);
+    await append([answer(2, 'Alpha.\n\nBeta.')]);
+    const beta = blocks(w)[1]!;
+    expect(beta.classList.contains('is-entering')).toBe(true);
+    // The ended fade leaves the block's class attribute behind, empty.
+    beta.dispatchEvent(new w.Event('animationend'));
+    await append([answer(3, 'Alpha.\n\nBeta.\n\nGamma.')]);
+    expect(blocks(w)[1]).toBe(beta);
+    expect(fading(w)).toEqual(['Gamma.']);
+  });
+
+  it('keeps the blocks a reader used: an opened source card and a copied code block', async () => {
+    const body = 'Alpha. :chatgpt-content-reference{index="1"}\n\n```\nnpm test\n```';
+    const references = [{ index: 1, sources: [{ title: 'A report', url: 'https://news.example.com/report', source: 'Example News' }] }];
+    const { w, append } = await boot([answer(1, body, { references })]);
+    (w as any).api.writeClipboard = vi.fn(async () => ({ ok: true, data: true }));
+    const [alpha, code] = blocks(w);
+    alpha!.querySelector('.citation')!.dispatchEvent(new w.FocusEvent('focusin'));
+    expect(alpha!.querySelector<HTMLElement>('.citation-card')!.hidden).toBe(false);
+    code!.querySelector<HTMLButtonElement>('.tool-copy')!.click();
+    await vi.waitFor(() => expect(code!.querySelector('.tool-copy')!.textContent).toBe('Copied'));
+    await append([answer(2, `${body}\n\nBeta.`, { references })]);
+    expect(blocks(w)[0]).toBe(alpha);
+    expect(blocks(w)[1]).toBe(code);
+    expect(fading(w)).toEqual(['Beta.']);
+  });
+
+  it('opens a chat with a streaming answer without fading its blocks', async () => {
+    const { w } = await boot([answer(1, 'Alpha.\n\nBeta.')]);
+    expect(blocks(w)).toHaveLength(2);
+    expect(fading(w)).toEqual([]);
+  });
+
+  it('replaces an answer from the first block a revision changes', async () => {
+    const { w, append } = await boot([answer(1, 'Alpha.\n\nBeta')]);
+    const [alpha] = blocks(w);
+    // The next line turns the paragraph above it into a heading.
+    await append([answer(2, 'Alpha.\n\nBeta\n---\n\nGamma.')]);
+    expect(blocks(w)[0]).toBe(alpha);
+    expect(blocks(w).map(block => block.tagName)).toEqual(['P', 'H2', 'P']);
+    expect(fading(w)).toEqual(['Gamma.']);
+  });
+
+  it('keeps an answer\'s blocks when it completes and gains its actions', async () => {
+    const ask: SessionEvent = { kind: 'user_message', seq: 1, origin: 1, time: T0, source: 'extension', turnId: 'done-turn', messageId: 'ask', message: text('Say hello') };
+    const { w, append } = await boot([ask, answer(2, 'Alpha.', { origin: 2, turnId: 'done-turn' })]);
+    const row = w.document.querySelector('.ev-assistant_message')!;
+    const [alpha] = blocks(w);
+    expect(row.querySelector('.said > b')!.textContent).toBe('ChatGPT (partial)');
+    await append([answer(3, 'Alpha.\n\nBeta.', { origin: 2, turnId: 'done-turn', state: 'final', final: true })]);
+    await append([{ seq: 4, time: T0 + 2_000, source: 'extension', kind: 'turn_end', turnId: 'done-turn', outcome: 'completed' }]);
+    expect(w.document.querySelector('.ev-assistant_message')).toBe(row);
+    expect(blocks(w)[0]).toBe(alpha);
+    expect(row.querySelector('.said > b')!.textContent).toBe('ChatGPT');
+    expect(row.querySelectorAll('.said > .answer-actions')).toHaveLength(1);
+  });
+
+  it('adds no fade under reduced motion', async () => {
+    const { w, append } = await boot([answer(1, 'Alpha.')]);
+    expect(blocks(w)).toHaveLength(1);
+    Object.defineProperty(w, 'matchMedia', { configurable: true,
+      value: (query: string) => ({ matches: query.includes('reduce'), addEventListener: vi.fn(), removeEventListener: vi.fn() }) });
+    const [alpha] = blocks(w);
+    await append([answer(2, 'Alpha.\n\nBeta.')]);
+    expect(blocks(w)[0]).toBe(alpha);
+    expect(fading(w)).toEqual([]);
+  });
+
+  it('replaces a code block unfaded while it gains lines', async () => {
+    const { w, append } = await boot([answer(1, 'Alpha.\n\n```\nline 1')]);
+    const [alpha, code] = blocks(w);
+    await append([answer(2, 'Alpha.\n\n```\nline 1\nline 2')]);
+    expect(blocks(w)[0]).toBe(alpha);
+    expect(blocks(w)[1]).not.toBe(code);
+    expect(blocks(w)[1]!.querySelector('pre')!.textContent).toBe('line 1\nline 2\n');
+    expect(fading(w)).toEqual([]);
+  });
+
+  it('swaps the whole row when a revision is too long to draw rich', async () => {
+    const { w, append } = await boot([answer(1, 'Alpha.')]);
+    const row = w.document.querySelector('.ev-assistant_message');
+    await append([answer(2, `Alpha. ${'Long. '.repeat(50_000)}`)]);
+    const rows = w.document.querySelectorAll('.ev-assistant_message');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).not.toBe(row);
+    expect(rows[0]!.querySelector('.said > .msg')!.classList.contains('rich')).toBe(false);
+    expect(rows[0]!.textContent).toContain('Alpha. Long.');
+  });
+
+  describe('while its turn works', () => {
+    const start: SessionEvent = { seq: 1, time: T0, source: 'extension', kind: 'turn_start', turnId: 'live-turn' };
+    const written = (seq: number, body: string, more: Partial<Extract<SessionEvent, { kind: 'assistant_message' }>> = {}) =>
+      answer(seq, body, { origin: 2, turnId: 'live-turn', ...more });
+    const shown = (w: { document: Document }) => blocks(w).map(block => block.textContent?.trim());
+
+    it('holds back the paragraph ChatGPT is still writing', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe')]);
+      expect(shown(w)).toEqual(['Alpha.']);
+      const [alpha] = blocks(w);
+      await append([written(3, 'Alpha.\n\nBeta.\n\nGa')]);
+      expect(shown(w)).toEqual(['Alpha.', 'Beta.']);
+      expect(blocks(w)[0]).toBe(alpha);
+      expect(fading(w)).toEqual(['Beta.']);
+    });
+
+    it('opens a chat mid-answer with the tail held back and nothing fading', async () => {
+      const { w } = await boot([start, written(2, 'Alpha.\n\nBeta.\n\nGa')]);
+      expect(shown(w)).toEqual(['Alpha.', 'Beta.']);
+      expect(fading(w)).toEqual([]);
+    });
+
+    it('fades in the first paragraph of an answer as it appears', async () => {
+      const { w, append } = await boot([start, written(2, 'Alp')]);
+      expect(w.document.querySelector<HTMLElement>('.ev-assistant_message')!.hidden).toBe(true);
+      await append([written(3, 'Alpha.\n\nBe')]);
+      expect(w.document.querySelector<HTMLElement>('.ev-assistant_message')!.hidden).toBe(false);
+      expect(fading(w)).toEqual(['Alpha.']);
+    });
+
+    it('never cuts inside an open code fence', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\n~~~~\none\n\n~~~\ntwo\n')]);
+      expect(shown(w)).toEqual(['Alpha.']);
+      await append([written(3, 'Alpha.\n\n~~~~\none\n\n~~~\ntwo\n~~~~\nAf')]);
+      expect(blocks(w)[1]!.querySelector('pre')!.textContent).toBe('one\n\n~~~\ntwo\n');
+    });
+
+    it('shows the whole answer once it is final, keeping the blocks it showed', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe')]);
+      const [alpha] = blocks(w);
+      await append([written(3, 'Alpha.\n\nBeta.', { state: 'final', final: true })]);
+      expect(shown(w)).toEqual(['Alpha.', 'Beta.']);
+      expect(blocks(w)[0]).toBe(alpha);
+      expect(fading(w)).toEqual(['Beta.']);
+    });
+
+    it('shows the rest when the turn ends on a message that stays streaming', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe')]);
+      expect(shown(w)).toEqual(['Alpha.']);
+      await append([{ seq: 3, time: T0 + 3_000, source: 'extension', kind: 'turn_end', turnId: 'live-turn', outcome: 'stopped' }]);
+      expect(shown(w)).toEqual(['Alpha.', 'Be']);
+    });
+
+    it('shows the rest once something follows the message in its turn', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe')]);
+      expect(shown(w)).toEqual(['Alpha.']);
+      await append([{ ...toolCall(3, 'after'), turnId: 'live-turn' }]);
+      expect(shown(w)).toEqual(['Alpha.', 'Be']);
+    });
+
+    it('keeps the live row while it holds back a block ChatGPT is still writing', async () => {
+      const ask: SessionEvent = { kind: 'user_message', seq: 2, origin: 2, time: T0, source: 'extension', turnId: 'live-turn', messageId: 'ask-live', message: text('Write it') };
+      const { w, append } = await boot([start, ask, written(3, 'Alpha.\n\n```ts\nconst a = 1;')]);
+      const live = () => {
+        const row = w.document.querySelector<HTMLElement>('#timeline .turn-now');
+        return row && !row.hidden ? row.querySelector('.turn-now-text')!.textContent : null;
+      };
+      expect(shown(w)).toEqual(['Alpha.']);
+      expect(live()).toBe('Thinking');
+      await append([written(4, 'Alpha.\n\n```ts\nconst a = 1;\nconst b = 2;\nconst c = 3;')]);
+      expect(shown(w)).toEqual(['Alpha.']);
+      expect(live()).toBe('Thinking');
+      // Everything written so far shows: the prose speaks for itself.
+      await append([written(5, 'Alpha.\n\n```ts\nconst a = 1;\nconst b = 2;\nconst c = 3;\n```\n\n')]);
+      expect(blocks(w)).toHaveLength(2);
+      expect(live()).toBeNull();
+    });
+
+    it('draws nothing again for a chunk that finishes no block', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe', { renderedHtml: text('<p>Alpha.</p><p>Be</p>') })]);
+      const row = w.document.querySelector('.ev-assistant_message');
+      const lex = vi.spyOn(Lexer, 'lex');
+      // A revision advances the seq and the page's capture grows, but what shows is the same.
+      await append([written(3, 'Alpha.\n\nBeta is', { renderedHtml: text('<p>Alpha.</p><p>Beta is</p>') })]);
+      expect(lex).not.toHaveBeenCalled();
+      expect(w.document.querySelector('.ev-assistant_message')).toBe(row);
+      // The store can move a revision's time to when the page authored it; the held row keeps its clock.
+      const clock = row!.querySelector('time')!.textContent;
+      await append([written(4, 'Alpha.\n\nBeta is mo', { time: T0 + 1_500 })]);
+      expect(lex).not.toHaveBeenCalled();
+      await append([written(5, 'Alpha.\n\nBeta is done.\n\nGa')]);
+      expect(lex).toHaveBeenCalled();
+      expect(shown(w)).toEqual(['Alpha.', 'Beta is done.']);
+      lex.mockClear();
+      await append([written(6, 'Alpha.\n\nBeta is done.\n\nGamma.', { state: 'final', final: true, time: T0 + 120_000 })]);
+      expect(lex).toHaveBeenCalled();
+      expect(shown(w)).toEqual(['Alpha.', 'Beta is done.', 'Gamma.']);
+      // The final event is not held: it draws its own time.
+      expect(w.document.querySelector('.ev-assistant_message time')!.textContent).not.toBe(clock);
+      lex.mockRestore();
+    });
+
+    /** Opens the chat with its controls held back until `release`, answered with `change` applied. */
+    const openBeforeControls = async (change: Record<string, unknown> = {}) => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe')], false);
+      const api = (w as any).api, original = api.getSessionControls, pending: Array<() => void> = [];
+      api.getSessionControls = (id: string) => new Promise(resolve => pending.push(async () => {
+        const answer = await original(id);
+        resolve({ ...answer, data: { ...answer.data, ...change } });
+      }));
+      (w.document.querySelector('#sessionList [data-id]') as HTMLElement).click();
+      await settle();
+      return { w, append, release: async () => { for (const reply of pending.splice(0)) reply(); await settle(); } };
+    };
+
+    it('holds the tail back from the first paint, before the chat\'s controls arrive', async () => {
+      const { w, release } = await openBeforeControls();
+      expect(blocks(w)).toHaveLength(1);
+      expect(shown(w)).toEqual(['Alpha.']);
+      await release();
+      expect(shown(w)).toEqual(['Alpha.']);
+    });
+
+    it('shows the message whole once the controls say its open turn is not working', async () => {
+      const { w, release } = await openBeforeControls({ activeTurnId: null });
+      expect(shown(w)).toEqual(['Alpha.']);
+      await release();
+      expect(shown(w)).toEqual(['Alpha.', 'Be']);
+    });
+
+    it('keeps holding the tail when this app files a status row after the message', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe')]);
+      await append([
+        { seq: 3, time: T0 + 1_000, source: 'app', kind: 'progress', progressId: 'finish-notice:x', message: text('Preparing finish notice') },
+        { seq: 4, time: T0 + 1_100, source: 'app', kind: 'note', message: text('Recovered the page') },
+        { seq: 5, time: T0 + 1_200, source: 'app', kind: 'progress', turnId: 'live-turn', progressId: 'browser-repair:y', message: text('Repairing') }
+      ]);
+      expect(shown(w)).toEqual(['Alpha.']);
+      await append([written(6, 'Alpha.\n\nBeta.\n\nGa')]);
+      expect(shown(w)).toEqual(['Alpha.', 'Beta.']);
+    });
+
+    it('shows the rest when an error for the chat follows the message, with or without its turn', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe')]);
+      await append([{ seq: 3, time: T0 + 1_000, source: 'extension', kind: 'chat_error', message: text('Something went wrong') }]);
+      expect(shown(w)).toEqual(['Alpha.', 'Be']);
+    });
+
+    it('shows the rest when ChatGPT\'s own commentary follows the message', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe')]);
+      await append([{ seq: 3, time: T0 + 1_000, source: 'extension', kind: 'progress', message: text('Checking the docs') }]);
+      expect(shown(w)).toEqual(['Alpha.', 'Be']);
+    });
+
+    it('draws a revision that rewrites a shown block to the same length', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\nBe')]);
+      expect(shown(w)).toEqual(['Alpha.']);
+      await append([written(3, 'Omega.\n\nBe')]);
+      expect(shown(w)).toEqual(['Omega.']);
+    });
+
+    it('draws a source a revision adds to a block already shown', async () => {
+      const body = 'Alpha. :chatgpt-content-reference{index="1"}\n\nBe';
+      const { w, append } = await boot([start, written(2, body)]);
+      expect(blocks(w)[0]!.querySelector('.citation')).toBeNull();
+      const references = [{ index: 1, sources: [{ title: 'A report', url: 'https://news.example.com/report', source: 'Example News' }] }];
+      await append([written(3, body, { references })]);
+      expect(blocks(w)[0]!.querySelector('.citation-pill')?.getAttribute('href')).toBe('https://news.example.com/report');
+      expect(shown(w)).toHaveLength(1);
+    });
+
+    it('shows a list once it ends, so it does not turn loose on screen', async () => {
+      const { w, append } = await boot([start, written(2, 'Alpha.\n\n- one\n- two\n\n- thr')]);
+      expect(shown(w)).toEqual(['Alpha.']);
+      await append([written(3, 'Alpha.\n\n- one\n- two\n\n- three\n\nAfter.\n\nNe')]);
+      expect(blocks(w).map(block => block.tagName)).toEqual(['P', 'UL', 'P']);
+      const list = blocks(w)[1]!;
+      expect(list.querySelectorAll('li > p')).toHaveLength(3);
+      expect(fading(w)).toEqual([list.textContent?.trim(), 'After.']);
+      await append([written(4, 'Alpha.\n\n- one\n- two\n\n- three\n\nAfter.\n\nNext.\n\n')]);
+      expect(blocks(w)[1]).toBe(list);
+    });
+  });
+
+  it('draws a final answer opened with the chat again when it is revised', async () => {
+    const { w, append } = await boot([answer(1, 'Alpha.\n\nBeta.', { state: 'final', final: true })]);
+    await append([answer(2, 'Alpha.\n\nBeta, revised.', { state: 'final', final: true })]);
+    expect(blocks(w).map(block => block.textContent)).toEqual(['Alpha.', 'Beta, revised.']);
+  });
+
+  it('pages an earlier answer in without fading it', async () => {
+    const asks = Array.from({ length: 30 }, (_, i): SessionEvent => ({ seq: i + 2, time: T0 + i + 2, source: 'extension',
+      kind: 'user_message', messageId: `ask-${i}`, message: text(`Ask ${i}`) }));
+    const { w } = await boot([answer(1, 'Earlier alpha.\n\nEarlier beta.', { messageId: 'earlier', state: 'final', final: true }), ...asks]);
+    expect(blocks(w)).toEqual([]);
+    const pane = w.document.getElementById('chatBody')!;
+    Object.defineProperties(pane, { clientHeight: { value: 800 }, scrollHeight: { value: 800 } });
+    pane.scrollTop = 0;
+    pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 }));
+    await settleHistoryFrame(w);
+    expect(blocks(w).map(block => block.textContent)).toEqual(['Earlier alpha.', 'Earlier beta.']);
+    expect(fading(w)).toEqual([]);
+  });
+
+  it('fades nothing when a revision shortens an answer', async () => {
+    const { w, append } = await boot([answer(1, 'Alpha.\n\nBeta.\n\nGamma.')]);
+    const [alpha] = blocks(w);
+    await append([answer(2, 'Alpha.\n\nBeta')]);
+    expect(blocks(w)[0]).toBe(alpha);
+    expect(blocks(w).map(block => block.textContent)).toEqual(['Alpha.', 'Beta']);
+    expect(fading(w)).toEqual([]);
+  });
+});
+
 it('keeps an unfolded tool row as the same open node while the chat keeps appending', async () => {
   const { w, append } = await boot([
     { seq: 1, time: T0, source: 'app', kind: 'session_start', conversationId: 'chat-a', title: 'Loop under test' },
@@ -4909,22 +5242,6 @@ it('keeps a failed fresh-turn continue at its creation time, not at the end of t
   expect(timeline.textContent!.indexOf('Continue the task from where you are.')).toBeLessThan(timeline.textContent!.indexOf('Later continuation'));
 });
 
-// 2.1.41 release round: a fresh-turn continue declined because the model was writing its answer is
-// retired without a reason. It was nobody's message and nothing went wrong: nothing is shown.
-it('shows nothing for a fresh-turn continue declined during an answer', async () => {
-  const app = await boot([
-    { seq: 1, time: T0, source: 'extension', kind: 'user_message', messageId: 'declined-before', message: text('Original work') }
-  ]);
-  const { w, live } = app;
-  live.inputs.push({ id: 'declined-rotation', sessionId: summary([]).id, conversationId: 'chat-b', text: 'Continue the task from where you are.',
-    mode: 'auto', dueAt: T0 + 1000, createdAt: T0 + 1000, state: 'cancelled', owner: null, model: null, reasoningEffort: null, purpose: 'rotation',
-    directTurn: { id: 'turn-1', startedAt: T0 } });
-  await app.append([]);
-  expect(w.document.querySelector('[data-input-id="declined-rotation"]')).toBeNull();
-  expect(w.document.getElementById('timeline')!.textContent).not.toContain('Continue the task from where you are.');
-  expect(w.document.getElementById('inputQueue')!.textContent).not.toContain('Continue the task from where you are.');
-});
-
 it('keeps a cancelled automatic draft at its creation time as later messages arrive', async () => {
   const app = await boot([
     { seq: 1, time: T0, source: 'extension', kind: 'user_message', messageId: 'before-draft', message: text('Original work') },
@@ -5093,8 +5410,13 @@ it('ends the running turn with a row saying what it is doing now', async () => {
   // It follows the work: a new step lands above it, and it stays the last row.
   expect(now().previousElementSibling?.textContent).toContain('Searching the web');
   expect(now().parentElement!.lastElementChild).toBe(now());
-  // Prose speaks for itself while it is being written…
-  await append([{ kind: 'assistant_message', seq: 4, time: Date.now(), source: 'extension', messageId: 'a-now', message: text('Two tests fail…'), final: false, state: 'streaming' }]);
+  // Prose speaks for itself while it is being written, once its first block shows…
+  await append([{ kind: 'assistant_message', seq: 4, time: Date.now(), source: 'extension', messageId: 'a-now', message: text('Two tests'), final: false, state: 'streaming' }]);
+  expect(shown()).toEqual(['Thinking', '']);
+  await append([{ kind: 'assistant_message', seq: 5, time: Date.now(), source: 'extension', messageId: 'a-now', message: text('Two tests fail.\n\nThe'), final: false, state: 'streaming' }]);
+  // …and once nothing of it is held back.
+  expect(shown()).toEqual(['Thinking', '']);
+  await append([{ kind: 'assistant_message', seq: 6, time: Date.now(), source: 'extension', messageId: 'a-now', message: text('Two tests fail.\n\nThe rest pass.\n\n'), final: false, state: 'streaming' }]);
   expect(shown()).toBeNull();
   // …and once it stops changing the turn is still working: an interim paragraph stays "streaming".
   await new Promise(resolve => setTimeout(resolve, 2_600));
@@ -5910,6 +6232,20 @@ it('drafts a plan from the rest of a typed /plan, and leaves a bare /goal waitin
   expect(input.value).toBe('');
 });
 
+it('keeps Plan armed and drafts the plan when /plan is typed with Plan already armed', async () => {
+  const app = await boot([]);
+  (app.w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+  const drafted: string[] = [];
+  (app.w as any).api.draftTaskPlan = async (text: string) => { drafted.push(text); return { ok: false, error: 'stopped in test' }; };
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  app.w.document.getElementById('createPlan')!.click(); await settle();
+  input.value = '/plan refactor the parser';
+  app.w.document.getElementById('composer')!.dispatchEvent(new app.w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle(); await settle();
+  expect(app.live.sent).toHaveLength(0);
+  expect(drafted).toEqual(['refactor the parser']);
+});
+
 it('runs a typed /rename on the open chat without sending anything', async () => {
   const { w, live, input } = await typed('/rename', [], true);
   expect(w.document.querySelector('#sessionList .sess-rename')).not.toBeNull();
@@ -6012,6 +6348,37 @@ describe('branch in new chat (#482)', () => {
     w.document.getElementById('newChat')!.click(); await settle();
     await submit(w as any, 'Just a new chat.');
     expect(live.sent.at(-1)).not.toHaveProperty('branch');
+  });
+
+  // 2.1.41 release round, macOS: Cancel branch opened the chat at the reply, on a page of older
+  // history. A message sent from there reached ChatGPT and was answered, but neither showed: a
+  // page of history takes no live rows. Sending returns the chat to its end first.
+  it('shows a message sent after cancelling a branch, even when the reply sat on an older page', async () => {
+    const filler: SessionEvent[] = [];
+    for (let n = 0; n < 40; n += 1) {
+      const seq = 4 + n * 3, turnId = `later-turn-${n}`;
+      filler.push({ kind: 'user_message', seq, origin: seq, time: T0 + seq * 1_000, source: 'extension', turnId, messageId: `later-ask-${n}`, message: text(`Later question ${n}`) },
+        { kind: 'assistant_message', seq: seq + 1, time: T0 + (seq + 1) * 1_000, source: 'extension', turnId,
+          messageId: `0000000${String(n).padStart(1, '0')}-0dc6-4847-bf7a-2e1a0f671e89`.slice(-36), message: text(`Later answer ${n}`), final: true, state: 'final' },
+        { seq: seq + 2, time: T0 + (seq + 2) * 1_000, source: 'extension', kind: 'turn_end', turnId, outcome: 'completed' });
+    }
+    const { w, live } = await boot([ask, reply(), end, ...filler], true, [], [], { summary: { conversationId: chat } });
+    const api = (w as any).api;
+    // The branch came from the first reply, far above the page the chat opens on.
+    api.locateMessage = vi.fn(async () => ({ ok: true, data: { seq: 2, kind: 'assistant_message', messageId: replyId, position: 2 } }));
+    const timeline = () => w.document.getElementById('timeline')!.textContent!;
+    expect(timeline()).toContain('Later answer 39');
+    [...w.document.querySelectorAll<HTMLButtonElement>('.answer-actions .answer-branch')].at(-1)!.click(); await settle();
+    w.document.querySelector<HTMLButtonElement>('#branchDraft .branch-draft-cancel')!.click(); await settle(); await settle();
+    expect(timeline()).toContain('Tag first, then build.');
+    expect(timeline()).not.toContain('Later answer 39');
+    // At the bottom of that page the newer rows are still not loaded: the way back to the end shows.
+    expect(w.document.getElementById('jumpLatest')!.classList.contains('is-shown')).toBe(true);
+    await submit(w as any, 'Continue from here.');
+    await settle(); await settle();
+    expect(live.sent.at(-1)).toMatchObject({ text: 'Continue from here.' });
+    // Back at the end: the latest exchange and the message just sent are in view.
+    expect(timeline()).toContain('Later answer 39');
   });
 
   it('drops the branch and stays a plain new chat when the chat it came from is deleted', async () => {
@@ -6306,5 +6673,335 @@ describe('edit and resubmit (#365)', () => {
     expect(w.document.querySelector('.toast')?.textContent).toContain('can no longer be edited');
     await submit(w as any);
     expect(live.sent.at(-1)).not.toHaveProperty('edit');
+  });
+
+  it('recalls no earlier message with ArrowUp while a question is being edited, even with the edit cleared', async () => {
+    const { w } = await boot(exchange(), true, [], [], { summary: { conversationId: chat } });
+    editButton(w, 'First question')!.click(); await settle();
+    const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+    input.value = ''; input.dispatchEvent(new w.Event('input', { bubbles: true }));
+    const event = new w.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true });
+    input.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(input.value).toBe('');
+  });
+});
+
+describe('prompt recall in the composer', () => {
+  const ask = (seq: number, value: string, extra: object = {}): SessionEvent =>
+    ({ kind: 'user_message', seq, time: T0 + seq * 1000, source: 'extension', turnId: `t${seq}`, messageId: `q-${seq}`, message: text(value), ...extra }) as SessionEvent;
+  const answer = (seq: number, value: string): SessionEvent =>
+    ({ kind: 'assistant_message', seq, time: T0 + seq * 1000, source: 'extension', turnId: `t${seq - 1}`, messageId: `a-${seq}`, message: text(value), final: true, state: 'final' }) as SessionEvent;
+  // A message with only a file and no text is not recalled.
+  const chat = () => [ask(1, 'First question'), answer(2, 'First answer'),
+    ask(3, '', { attachments: [{ id: 'f-1', name: 'notes.txt', mimeType: 'text/plain', size: 4 }] }), answer(4, 'Read it.'),
+    ask(5, 'Second question'), answer(6, 'Second answer')];
+  const composer = (w: { document: Document }) => w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  /** Presses a key in the composer; true when the app took it over from the textarea. */
+  const press = (w: JSDOM['window'], key: string, init: KeyboardEventInit = {}) => {
+    const event = new w.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
+    composer(w).dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  /** The outbox row that sent the message `messageId`, delivered and recorded. */
+  const sentInput = (messageId: string, extra: Partial<InputEntry> = {}): InputEntry => ({ id: `input-${messageId}`, sessionId: summary([]).id, projectId: null,
+    text: 'Sent text', automation: 'off', model: null, reasoningEffort: null, mode: 'auto', dueAt: 1, createdAt: T0, state: 'sent', owner: 'page', conversationId: null,
+    messageId, deliveredAt: T0, historyRecorded: true, ...extra }) as InputEntry;
+
+  it('fills an empty composer with your last message on ArrowUp, caret at the start, without sending it', async () => {
+    const { w, live } = await boot(chat());
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+    expect([composer(w).selectionStart, composer(w).selectionEnd]).toEqual([0, 0]);
+    await settle();
+    expect(live.sent).toEqual([]);
+  });
+
+  it('goes further back with each ArrowUp and stops at your first message', async () => {
+    const { w } = await boot(chat());
+    press(w, 'ArrowUp');
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('First question');
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe('First question');
+  });
+
+  it('comes forward with ArrowDown and gives back the empty composer past the newest message', async () => {
+    const { w } = await boot(chat());
+    press(w, 'ArrowUp'); press(w, 'ArrowUp');
+    // Up left the caret at the start: the first Down is the textarea's own, taking it to the end.
+    expect(press(w, 'ArrowDown')).toBe(false);
+    composer(w).setSelectionRange(14, 14);
+    expect(press(w, 'ArrowDown')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+    expect(composer(w).selectionStart).toBe('Second question'.length);
+    expect(press(w, 'ArrowDown')).toBe(true);
+    expect(composer(w).value).toBe('');
+    expect(press(w, 'ArrowDown')).toBe(false);
+  });
+
+  it('leaves the arrows to a typed draft', async () => {
+    const { w } = await boot(chat());
+    composer(w).value = 'A draft I am writing';
+    composer(w).dispatchEvent(new w.Event('input', { bubbles: true }));
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe('A draft I am writing');
+  });
+
+  it.each([{ isComposing: true }, { altKey: true }, { ctrlKey: true }, { metaKey: true }, { shiftKey: true }])('recalls nothing with %o', async init => {
+    const { w } = await boot(chat());
+    expect(press(w, 'ArrowUp', init)).toBe(false);
+    expect(composer(w).value).toBe('');
+  });
+
+  it.each([false, true])('recalls nothing into a composer holding an attached file (attached after a recall: %s)', async recalledFirst => {
+    const { w } = await boot(chat());
+    if (recalledFirst) expect(press(w, 'ArrowUp')).toBe(true);
+    (w as any).api.chooseFiles = async () => ({ ok: true, data: [{ id: '11111111-2222-4333-8444-555555555555', name: 'image.png', mimeType: 'image/png', size: 42 }] });
+    w.document.getElementById('attachImages')!.click(); await settle();
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe(recalledFirst ? 'Second question' : '');
+  });
+
+  it('gives the arrows back once the recalled message is edited', async () => {
+    const { w } = await boot(chat());
+    expect(press(w, 'ArrowUp')).toBe(true);
+    composer(w).value = 'Second question, shorter please';
+    composer(w).dispatchEvent(new w.Event('input', { bubbles: true }));
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(press(w, 'ArrowDown')).toBe(false);
+    expect(composer(w).value).toBe('Second question, shorter please');
+  });
+
+  // A recall ends with the composer's next change: the same text typed again by hand is a draft.
+  it.each(['sent', 'cleared'])('leaves the arrows to the same text typed again after a recall was %s', async how => {
+    const { w } = await boot(chat());
+    const input = composer(w);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    if (how === 'sent') { w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await settle(); }
+    else { input.select(); input.setRangeText(''); input.dispatchEvent(new w.Event('input', { bubbles: true })); }
+    expect(input.value).toBe('');
+    input.value = 'Second question'; input.dispatchEvent(new w.Event('input', { bubbles: true }));
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(input.value).toBe('Second question');
+  });
+
+  it('recalls only the messages the agent filter shows', async () => {
+    const { w } = await boot([ask(1, 'Main question', { agent: 'prime' }), answer(2, 'Main answer'), ask(3, 'Unattributed question'), answer(4, 'Unattributed answer')],
+      true, [], [], { developerMode: true });
+    w.document.querySelector<HTMLButtonElement>('#chatAgentFilter [data-agent="prime"]')!.click(); await settle();
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Main question');
+    expect(press(w, 'ArrowUp')).toBe(false);
+  });
+
+  // A recalled message ending in a slash or @file fragment opens that menu; its arrows stay the menu's.
+  it('leaves the arrows to an open slash menu with no matches after a recall', async () => {
+    const { w } = await boot([ask(1, 'First question'), answer(2, 'First answer'), ask(3, 'Use /zzz'), answer(4, 'Done.')]);
+    (w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+    press(w, 'ArrowUp'); press(w, 'ArrowUp');
+    composer(w).setSelectionRange(14, 14);
+    expect(press(w, 'ArrowDown')).toBe(true); await settle();
+    expect(composer(w).value).toBe('Use /zzz');
+    expect(w.document.getElementById('skillPicker')!.hidden).toBe(false);
+    expect(press(w, 'ArrowDown')).toBe(false);
+    expect(composer(w).value).toBe('Use /zzz');
+  });
+
+  it('keeps a refused recalled message in the composer when ArrowDown is pressed', async () => {
+    const { w } = await boot(chat());
+    expect(press(w, 'ArrowUp')).toBe(true);
+    (w as any).api.sendInput = async () => ({ ok: false, error: 'Not delivered' });
+    w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await settle();
+    expect(composer(w).value).toBe('Second question');
+    expect(press(w, 'ArrowDown')).toBe(false);
+    expect(composer(w).value).toBe('Second question');
+  });
+
+  it('moves the caret through a recalled message of several lines before going further back', async () => {
+    const { w } = await boot([ask(1, 'First question'), answer(2, 'First answer'), ask(3, 'Line one\nLine two'), answer(4, 'Done.')]);
+    press(w, 'ArrowUp');
+    expect(composer(w).value).toBe('Line one\nLine two');
+    composer(w).setSelectionRange(17, 17);
+    expect(press(w, 'ArrowUp')).toBe(false);
+    composer(w).setSelectionRange(0, 0);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('First question');
+  });
+
+  // A long one-line message wraps onto several rows: only its very start or end hands the arrows
+  // back to recall, so a lower or upper wrapped row still moves the caret.
+  it.each([['ArrowUp', 40], ['ArrowDown', 40], ['ArrowUp', 'end'], ['ArrowDown', 0]] as const)('leaves %s to the caret inside a long recalled prompt (caret at %s)', async (key, at) => {
+    const long = 'Summarize the release notes for every package in the workspace and group them by area';
+    const { w } = await boot([ask(1, 'First question'), answer(2, 'First answer'), ask(3, long), answer(4, 'Done.')]);
+    press(w, 'ArrowUp');
+    const caret = at === 'end' ? long.length : at;
+    composer(w).setSelectionRange(caret, caret);
+    expect(press(w, key)).toBe(false);
+    expect(composer(w).value).toBe(long);
+  });
+
+  // The slash/file menu reads the caret on the input event, so the caret must already be at the start.
+  it('opens no slash menu for a message ending in /… that ArrowUp recalls with the caret at the start', async () => {
+    const { w } = await boot([ask(1, 'First question'), answer(2, 'First answer'), ask(3, 'Use /zzz'), answer(4, 'Done.')]);
+    (w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Use /zzz');
+    expect(composer(w).selectionStart).toBe(0);
+    expect(w.document.getElementById('skillPicker')!.hidden).toBe(true);
+    await settle();
+    expect(w.document.getElementById('skillPicker')!.hidden).toBe(true);
+  });
+
+  it('keeps its place when a message is recorded while you page through recall', async () => {
+    const { w, append } = await boot(chat());
+    expect(press(w, 'ArrowUp')).toBe(true);
+    await append([ask(7, 'Third question'), answer(8, 'Third answer')]);
+    expect(composer(w).value).toBe('Second question');
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('First question');
+    composer(w).setSelectionRange(14, 14);
+    expect(press(w, 'ArrowDown')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+    expect(press(w, 'ArrowDown')).toBe(true);
+    expect(composer(w).value).toBe('');
+    // A new recall starts from the newest message again.
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Third question');
+  });
+
+  it.each([
+    ['a Goal continue', { finishOwner: { turnId: 't5', periodic: false, mode: 'goal' } }],
+    ['a Goal check you asked for', { finishOwner: { turnId: 't5', periodic: false, mode: 'goal', userRequested: true } }],
+    ['a Loop continue', { finishOwner: { turnId: 't5', periodic: true, mode: 'loop' } }],
+    ['a fresh-turn continue', { authoredSource: 'none', purpose: 'rotation' }],
+    ['a recovery continue', { recovery: { questionId: 'q-5', pro: false, busyUntil: 0, phase: 'resumed' } }],
+    ['a plan stage', { authoredSource: 'none', mode: 'finish' }]
+  ] as const)('skips %s, which the app wrote', async (_, extra) => {
+    const { w, live, append } = await boot([...chat(), ask(7, 'Continue with the next step'), answer(8, 'Next step done.')]);
+    live.inputs = [sentInput('q-5'), sentInput('q-7', extra as Partial<InputEntry>)]; await append([]);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+  });
+
+  it('recalls a correction sent together with the next queued checkpoint', async () => {
+    const { w, live, append } = await boot([...chat(), ask(7, 'Use the staging database'), answer(8, 'Switched.')]);
+    live.inputs = [sentInput('q-7', { id: 'correction', companionInputId: 'checkpoint' }), sentInput('q-7', { id: 'checkpoint', authoredSource: 'none', mode: 'finish' })];
+    await append([]);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Use the staging database');
+  });
+
+  it('skips the tasks of a worker chat but recalls what you typed there', async () => {
+    const { w, live, append } = await boot(chat(), true, [], [], { origin: { kind: 'worker', fromSessionId: null, agentId: 'worker-1', task: 'Inspect' } });
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe('');
+    live.inputs = [sentInput('q-5')]; await append([]);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+    expect(press(w, 'ArrowUp')).toBe(false);
+  });
+
+  it('skips a worker task the agent filter shows', async () => {
+    const { w } = await boot([ask(1, 'Main question', { agent: 'prime' }), answer(2, 'Main answer'), ask(3, 'Inspect the parser', { agent: 'worker-1' }), answer(4, 'Inspected.')],
+      true, [], [], { developerMode: true });
+    w.document.querySelector<HTMLButtonElement>('#chatAgentFilter [data-agent="worker-1"]')!.click(); await settle();
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe('');
+  });
+
+  it('announces each recalled message to screen readers, and nothing once it ends', async () => {
+    const { w } = await boot(chat());
+    const region = w.document.getElementById('recallAnnounce')!;
+    expect(region.getAttribute('aria-live')).toBe('polite');
+    press(w, 'ArrowUp');
+    expect(region.textContent).toBe('Second question');
+    press(w, 'ArrowUp');
+    expect(region.textContent).toBe('First question');
+    composer(w).setSelectionRange(14, 14);
+    press(w, 'ArrowDown'); press(w, 'ArrowDown');
+    expect(composer(w).value).toBe('');
+    expect(region.textContent).toBe('');
+    press(w, 'ArrowUp');
+    expect(region.textContent).toBe('Second question');
+    composer(w).value = 'Second question, shorter please';
+    composer(w).dispatchEvent(new w.Event('input', { bubbles: true }));
+    expect(region.textContent).toBe('');
+  });
+
+  it('ends a recall when the agent filter changes', async () => {
+    const { w } = await boot([ask(1, 'Main question', { agent: 'prime' }), answer(2, 'Main answer'), ask(3, 'Unattributed question'), answer(4, 'Unattributed answer')],
+      true, [], [], { developerMode: true });
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Unattributed question');
+    w.document.querySelector<HTMLButtonElement>('#chatAgentFilter [data-agent="prime"]')!.click(); await settle();
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe('Unattributed question');
+  });
+
+  it('leaves an arrow to a slash menu that was showing, even when the caret moved off its fragment', async () => {
+    const { w } = await boot([ask(1, 'First question'), answer(2, 'First answer'), ask(3, 'Use /zzz'), answer(4, 'Done.')]);
+    (w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+    press(w, 'ArrowUp'); press(w, 'ArrowUp');
+    composer(w).setSelectionRange(14, 14);
+    expect(press(w, 'ArrowDown')).toBe(true); await settle();
+    expect(w.document.getElementById('skillPicker')!.hidden).toBe(false);
+    // Home moves the caret without an input event; the menu is still on screen.
+    composer(w).setSelectionRange(0, 0);
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe('Use /zzz');
+  });
+
+  it('reads out the same message again when it is recalled in the next chat', async () => {
+    const other = { ...summary([]), id: '2026-10-17-other001', title: 'Other chat' };
+    const { w } = await boot(chat(), true, [], [], { sessions: [summary(chat()), other] });
+    const region = w.document.getElementById('recallAnnounce')!;
+    press(w, 'ArrowUp');
+    expect(region.textContent).toBe('Second question');
+    (w.document.querySelector(`#sessionList [data-id="${other.id}"]`) as HTMLElement).click(); await settle();
+    // The other chat's empty composer: the region must change before the same text can be read again.
+    expect(region.textContent).toBe('');
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(region.textContent).toBe('Second question');
+  });
+
+  it('leaves the arrows to the caret until the outbox has been read', async () => {
+    let release!: () => void;
+    const { w, live } = await boot([...chat(), ask(7, 'Continue with the next step'), answer(8, 'Next step done.')], true, [], [], { holdInputs: new Promise<void>(resolve => { release = resolve; }) });
+    // Without the outbox the Goal continue would count as typed.
+    expect(press(w, 'ArrowUp')).toBe(false);
+    expect(composer(w).value).toBe('');
+    live.inputs = [sentInput('q-5'), sentInput('q-7', { finishOwner: { turnId: 't5', periodic: false, mode: 'goal' } })];
+    release(); await settle();
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+  });
+
+  it('skips an app send whose row this window read before its receipt, by the recorded input id', async () => {
+    const { w, live, append } = await boot([...chat(), ask(7, 'Continue with the next step', { inputId: 'goal-row' }), answer(8, 'Next step done.')]);
+    live.inputs = [sentInput('q-5'), sentInput('q-7', { id: 'goal-row', state: 'browser', messageId: undefined, deliveredAt: undefined, finishOwner: { turnId: 't5', periodic: false, mode: 'goal' } })];
+    await append([]);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+  });
+
+  it.each([
+    ['a fresh-turn continue', 'Continue the task from where you are. (Chat On Steroids starts a fresh turn so the reply is not cut off.)'],
+    ['a Goal continue', 'Continue with the next step of the Goal.']
+  ])('skips %s whose row the outbox no longer keeps', async (_, value) => {
+    // The recorder keeps the input id and the sent text on the message, whoever wrote it.
+    const { w, live, append } = await boot([...chat(), ask(7, value, { inputId: 'trimmed-row', inputDelivery: 'confirmed', authoredText: value }), answer(8, 'Next step done.')]);
+    live.inputs = [sentInput('q-5')]; await append([]);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+  });
+
+  // Mac release round, 2026-10-19: a Goal follow-up came back first. Its page types it, so it has
+  // no outbox row or input id at all; the recorder marks it `automatic` instead.
+  it('skips a Goal or Loop follow-up its page typed', async () => {
+    const { w, live, append } = await boot([...chat(), ask(7, 'Continue with step two of the goal', { automatic: true }), answer(8, 'Step two done.')]);
+    live.inputs = [sentInput('q-5')]; await append([]);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
   });
 });
