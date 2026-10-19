@@ -13,6 +13,7 @@ import { initUpdateReadiness, paintUpdateReadiness } from './update-readiness.js
 import { updateErrorText } from './update-error.js';
 import { initUsage, refreshOtherApps, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
+import { initAppShortcuts } from './app-shortcuts.js';
 import { initViewMenu } from './view-menu.js';
 import { initPlugins, applyPluginsState } from './plugins.js';
 import { initBrowserPreferences } from './browser-preferences.js';
@@ -2820,6 +2821,11 @@ async function refresh(): Promise<void> {
 
 buildGroups();
 initSidebarResize();
+initAppShortcuts({
+  newChat: $('newChat'),
+  settings: $('workspaceSettings'),
+  settingsShown: () => document.querySelector<HTMLElement>('.app')?.dataset.screen === 'settings'
+});
 const viewMenu = initViewMenu({
   search: openChatSearch,
   cosBrowser: () => state?.config.ui.chatBrowser === 'cos',
