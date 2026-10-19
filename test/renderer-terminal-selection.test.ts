@@ -117,3 +117,13 @@ it('sends the selection with Ctrl+Shift+Enter, and leaves the key to the shell w
   expect(event.defaultPrevented).toBe(true);
   expect(input.value).toBe('```\nError: placeholder\n```\n\n');
 });
+
+it('leaves Ctrl+Shift+Enter to an input method that is still composing', () => {
+  const { input, term } = setup();
+  term.select('Error: placeholder');
+  const event = new dom!.window.KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, shiftKey: true, isComposing: true, cancelable: true });
+  expect(term.keyHandler!(event)).toBe(true);
+  expect(event.defaultPrevented).toBe(false);
+  expect(input.value).toBe('');
+  expect(term.selection).toBe('Error: placeholder');
+});
