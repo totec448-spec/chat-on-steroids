@@ -1274,15 +1274,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return true;
   });
 
-  // Copy or save a completed turn's answer, or the session transcript, as Markdown. Main reads
-  // the full text of answers that were cut in the log, so neither comes out truncated.
+  // Copy or save a completed turn's answer, or the session transcript, as Markdown, or save the
+  // transcript as an HTML page. Main reads the full text of answers that were cut in the log, so
+  // none comes out truncated.
   handle('sessions:exportMarkdown', async (payload) => {
     const request = z.object({
       id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
       scope: z.enum(['answer', 'session']),
       turnId: z.string().min(1).max(200).optional(),
       messageId: z.string().min(1).max(200).optional(),
-      target: z.enum(['clipboard', 'file'])
+      target: z.enum(['clipboard', 'file']),
+      format: z.enum(['markdown', 'html']).optional()
     }).parse(payload);
     return exportSessionMarkdown(request, getWindow());
   });

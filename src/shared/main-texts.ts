@@ -37,9 +37,11 @@ export const MAIN_TEXTS = [
   'Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.',
   // Native file dialogs and the worker checkout removal confirmation.
   'Export as Markdown',
+  'Export as HTML',
   'Import CoS Pet folder',
   'Import SKILL.md',
   'Markdown files',
+  'HTML files',
   'Text files',
   'Approve a folder for ChatGPT',
   'Import Skill folder',
