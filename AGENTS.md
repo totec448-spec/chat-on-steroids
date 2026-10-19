@@ -2160,6 +2160,12 @@ with an event-loop yield between reads, and quitting cancels the warmup before c
 The loading message explains a potentially slow post-update rebuild and that the app remains usable.
 These charts are not a provider invoice, exact
 token consumption or proof of current prices/entitlements.
+**By project** (`UsageOverview.projects`) groups the same cached per-chat model totals by each
+chat's current `projectId`, largest first; `projectId: null` is the chats outside every project.
+The cache holds no project, so moving a chat moves its whole history without a reread or a cache
+version change. The renderer names rows from `listProjects()` (a sidebar-removed project keeps its
+record and name); an id missing from that list, or a list that cannot be read, shows Unknown
+project. The table is left out when no chat has a project.
 
 The bottom **Messages and limits** section counts native user-message IDs with recorded
 model selection proof for GPT-5.6 and GPT-6. It uses provider `authoredAt`, otherwise the

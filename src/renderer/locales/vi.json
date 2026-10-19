@@ -40,6 +40,8 @@
   "Continue until this objective is satisfied.": "Tiếp tục cho đến khi đạt mục tiêu này.",
   "Keep working within the brief until paused.": "Tiếp tục làm trong phạm vi yêu cầu cho đến khi tạm dừng.",
   "By model": "Theo mô hình",
+  "By project": "Theo dự án",
+  "Unknown project": "Dự án không xác định",
   "By day": "Theo ngày",
   "Auto": "Tự động",
   "Browser bridge port": "Cổng bridge trình duyệt",

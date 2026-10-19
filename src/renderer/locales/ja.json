@@ -40,6 +40,8 @@
   "Continue until this objective is satisfied.": "この目標が達成されるまで続けます。",
   "Keep working within the brief until paused.": "一時停止するまで依頼の範囲内で作業を続けます。",
   "By model": "モデル別",
+  "By project": "プロジェクト別",
+  "Unknown project": "不明なプロジェクト",
   "By day": "日別",
   "Code": "コード",
   "est.": "推定",

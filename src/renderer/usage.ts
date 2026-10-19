@@ -3,6 +3,7 @@ import { $, el, run } from './dom.js';
 import { DEFAULT_USAGE_FORMULA, usageDateKey as dateKey, usageEstimate, usageMessageTotals, usageModelGroups, usageRate, usageWeekStart, type UsageFormula, type UsageOverview } from '../shared/usage.js';
 import type { ProviderUsage } from '../shared/provider-usage.js';
 let snapshot: UsageOverview | null = null;
+let projectNames = new Map<string, string>();
 let otherAppsGeneration = 0;
 let loadGeneration = 0;
 const FORMULA_KEY = 'usage-formula-v1';
@@ -20,6 +21,13 @@ function saveFormula(): void {
 const count = { format: (value: number) => new Intl.NumberFormat(currentLanguage(), { notation: 'compact', maximumFractionDigits: 1 }).format(Math.round(value)) };
 const money = { format: (value: number) => new Intl.NumberFormat(currentLanguage(), { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value) };
 const featureLabels: Record<string, string> = { deep_research: "Deep research", file_upload: "File uploads", paste_text_to_file: "Pasted text files", image_gen: "Image generation" };
+// Names only label the By project rows: an unreadable list must not keep the page from loading.
+async function readProjectNames(): Promise<Map<string, string>> {
+  try {
+    const reply = await window.api.listProjects();
+    return new Map(reply.ok ? reply.data.map(project => [project.id, project.name]) : []);
+  } catch { return new Map(); }
+}
 function usageHint(node: HTMLElement, text: string | (() => string)): void {
   ui(node, 'data-usage-hint', typeof text === 'function' ? text : () => text);
   node.setAttribute('tabindex', '0');
@@ -65,10 +73,10 @@ export async function refreshUsage(fresh = false): Promise<void> {
   ui(status, 'textContent', () => t("Updating usage in the background. After an update, this can take a few minutes. You can keep using the app."));
   status.setAttribute('role', 'status');
   try {
-    const value = await run(window.api.getUsage());
+    const [value, names] = await Promise.all([run(window.api.getUsage()), readProjectNames()]);
     if (generation !== loadGeneration) return;
     if (!value) { ui(status, 'textContent', () => t("Usage could not be loaded. Try Refresh.")); return; }
-    snapshot = value;
+    snapshot = value; projectNames = names;
     paintMessages();
     const summary = $('usageSummary'); summary.replaceChildren();
     for (const [label, number] of [['Processed tokens · est.', value.tokens], ['Peak daily tokens', Math.max(0, ...value.days.map((day) => day.tokens))], ['Conversations', value.sessions], ['Active days', value.days.filter((day) => day.tokens > 0).length]] as const) {
@@ -226,11 +234,27 @@ function paintCost(): void {
   breakdown.append(table);
   const modelSection = el('section', 'usage-days-model');
   modelSection.append(el('h3', 'usage-cost-subhead', () => t('By model')), modelTable);
+  const sections = [modelSection];
+  // Someone who never uses projects would get one "No project" row; that is not a breakdown.
+  if (snapshot.projects.some(entry => entry.projectId !== null)) {
+    const projectTable = el('table', 'usage-table'); const projectHead = el('tr');
+    for (const title of ['Project', 'Estimated tokens', 'Estimated equivalent']) projectHead.append(el('th', '', () => t(title)));
+    projectTable.append(projectHead);
+    for (const entry of snapshot.projects) {
+      const estimate = usageEstimate(entry.models, formula); const row = el('tr');
+      const name = () => entry.projectId === null ? t("No project") : projectNames.get(entry.projectId) ?? t("Unknown project");
+      row.append(el('td', '', name), el('td', '', () => Math.round(estimate.tokens).toLocaleString(currentLanguage())), el('td', '', () => estimate.unpricedTokens > 0 && estimate.unpricedTokens === estimate.tokens ? t("Rate unknown") : costText(estimate)));
+      projectTable.append(row);
+    }
+    const projectSection = el('section', 'usage-days-model usage-days-project');
+    projectSection.append(el('h3', 'usage-cost-subhead', () => t('By project')), projectTable);
+    sections.push(projectSection);
+  }
   const daySection = el('section', 'usage-days-daily');
   daySection.append(el('h3', 'usage-cost-subhead', () => t('By day')));
   if (recent.length) daySection.append(scale, chart, axis);
   daySection.append(breakdown);
-  $('usageDays').replaceChildren(modelSection, daySection);
+  $('usageDays').replaceChildren(...sections, daySection);
 }
 /** A limit row in the page's own shape: a name with a note, then the value, its reset and a bar. */
 function limitRow(name: () => string, note: (() => string) | null, value: () => string, small: () => string, remainingPercent: number | null): HTMLElement {
