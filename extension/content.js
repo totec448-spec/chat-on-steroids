@@ -3725,6 +3725,13 @@
   let fiberAsking = null;
   /** Off until the helper answers once, so a browser without it behaves exactly as before. */
   let fiberPresent = null; // Unknown until this document gets a reply or a definitive repair failure.
+  /**
+   * An automatic attempt this page stopped before asking while the page-model helper could not be
+   * read (#1643). Its receipts and the turn's messages are read through the helper, so whatever the
+   * stated reason, the attempt is tried again the moment the helper answers, instead of only at the
+   * app's next pickup, which can be ten minutes away.
+   */
+  let helperDeferral = null;
   /** Avoid turning a missing MAIN-world helper into one script injection per observer tick. */
   let fiberRepairAt = -Infinity;
   let fiberRepairing = null;
@@ -4700,7 +4707,9 @@
       traceStage(call.requestId, 'read');
       traceStage(call.requestId, 'tool', call.tool);
     }
+    const helperReturned = fiberPresent !== true;
     fiberPresent = true;
+    if (helperReturned) retryAfterHelperReturned();
     fiberRows = answer.rows;
     fiberScanToken = answer.scanToken;
     const previousFiberTurns = [...fiberTurns.values()];
@@ -9599,8 +9608,21 @@
    * why, so its log and the chat's Compact & Resume row say what it is waiting on instead of
    * "asking ChatGPT" (#1643: twenty minutes of pickups, each stopped here, none of it logged).
    */
+  function retryAfterHelperReturned() {
+    const deferral = helperDeferral;
+    helperDeferral = null;
+    if (!deferral || deferral.forId !== conversationId || deferral.forEpoch !== epoch) return;
+    // After this scan has been taken in; only the error that deferral left is cleared, never a newer one.
+    setTimeout(() => {
+      if (nativeBusy || localError !== deferral.why || conversationId !== deferral.forId || epoch !== deferral.forEpoch) return;
+      localError = '';
+      void maybeResumePendingCompaction(deferral.forId, deferral.forEpoch);
+    }, 0);
+  }
+
   function reportDeferredCompaction(forId, token, why) {
     if (!token || !why) return;
+    helperDeferral = fiberPresent === true ? null : { forId, forEpoch: epoch, why };
     void ask({ type: 'compact', conversationId: forId, token, sourceDeferred: true, sourceError: why }).catch(() => undefined);
   }
 

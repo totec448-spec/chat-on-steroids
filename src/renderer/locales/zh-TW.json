@@ -2246,6 +2246,7 @@
   "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "重設會備份無法讀取的狀態，並允許重新開始自動重新整理外掛程式。重新整理可能影響現有的 ChatGPT 對話。",
   "A calm capybara who lifts, chills and never panics.": "一隻沉著的水豚，舉鐵、放鬆，從不慌張。",
   "A tiny hamster with a big pre-workout attitude.": "一隻小小的倉鼠，訓練前幹勁十足。",
+  "A cheeky whip that cracks to make Chat On Steroids work faster. It doesn't, but it tries.": "一根調皮的鞭子，啪地一抽想讓 Chat On Steroids 做得更快。沒什麼用，但它很努力。",
   "The built-in Chat On Steroids companion.": "Chat On Steroids 內建的夥伴。",
   "Listening with basic accuracy. For punctuation and better results, turn on online speech recognition in Windows settings.": "正以基本精確度聆聽。若要加上標點並提升效果，請在 Windows 設定中開啟線上語音辨識。",
   "No microphone is available. Connect one, or allow microphone access in Windows settings.": "沒有可用的麥克風。請連接麥克風，或在 Windows 設定中允許麥克風存取。",
@@ -2761,5 +2762,15 @@
   "{0} characters": "{0} 個字元",
   "from {0} events": "來自 {0} 個事件",
   "(~{0} tokens)": "（約 {0} Token）",
-  "{0} · {1} {2} · {3}": "{0} · {1}{2} · {3}"
+  "{0} · {1} {2} · {3}": "{0} · {1}{2} · {3}",
+  "Sub-agent view": "子代理檢視",
+  "Conversation": "對話",
+  "Loading activity…": "正在載入活動…",
+  "Activity unavailable": "活動不可用",
+  "Task": "任務",
+  "Files changed": "已變更的檔案",
+  "No actions yet": "尚無操作",
+  "Earlier actions are in the conversation.": "更早的操作在對話中。",
+  "Last action: {0}": "最後操作：{0}",
+  "Moved": "已移動"
 }

@@ -3736,6 +3736,31 @@ describe('automatic compaction', () => {
     }
   });
 
+  // #1643: the page tries again by itself once its helper answers, before the app's next pickup.
+  it('asks again, not held, when the source page starts a new attempt on its own', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac10';
+      await request('POST', '/events', {
+        body: { conversationId, events: [{ kind: 'user_message', time: Date.now(), text: 'a chat whose helper came back', messageId: 'm-auto-helper' }] }
+      });
+      const filed = await request('POST', '/compact', { body: { conversationId, ticket: true, automatic: true } });
+      const token = filed.body.token as string;
+      const sessionId = filed.body.sessionId as string;
+      const phase = async () => ((await sessionControlsFor(sessionId)).recovery ?? []).map(countdown => countdown.phase);
+      await sweepStaleSwarm(Date.now());
+      await request('POST', '/compact', { body: { conversationId, token, sourceDeferred: true, sourceError: 'ChatGPT has not confirmed receiving the latest tool results.' } });
+      expect(await phase()).toEqual(['held']);
+
+      const again = await request('POST', '/compact', { body: { conversationId, ticket: true, automatic: true } });
+      expect(again.body.token).toBe(token);
+      expect(await phase()).toEqual(['asking']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('takes no deferral reason for a manual Compact & Resume', async () => {
     await pair();
     const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac0f';

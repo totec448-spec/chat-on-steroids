@@ -2318,6 +2318,7 @@
   "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "Al restablecer se guarda una copia del estado ilegible y se permite reiniciar la actualización automática de plugins. La actualización puede afectar a los chats de ChatGPT existentes.",
   "A calm capybara who lifts, chills and never panics.": "Un capibara tranquilo que levanta pesas, se relaja y nunca pierde la calma.",
   "A tiny hamster with a big pre-workout attitude.": "Un hámster diminuto con mucha actitud de preentreno.",
+  "A cheeky whip that cracks to make Chat On Steroids work faster. It doesn't, but it tries.": "Un látigo descarado que restalla para que Chat On Steroids trabaje más rápido. No lo consigue, pero lo intenta.",
   "The built-in Chat On Steroids companion.": "El compañero integrado de Chat On Steroids.",
   "Listening with basic accuracy. For punctuation and better results, turn on online speech recognition in Windows settings.": "Escuchando con precisión básica. Para obtener puntuación y mejores resultados, activa el reconocimiento de voz en línea en la configuración de Windows.",
   "No microphone is available. Connect one, or allow microphone access in Windows settings.": "No hay ningún micrófono disponible. Conecta uno o permite el acceso al micrófono en la configuración de Windows.",
@@ -2851,5 +2852,15 @@
   "(~{0} tokens)": "(~{0} tokens)",
   "(~{0} tokens)|one": "(~{0} token)",
   "(~{0} tokens)|many": "(~{0} de tokens)",
-  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}"
+  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}",
+  "Sub-agent view": "Vista del subagente",
+  "Conversation": "Conversación",
+  "Loading activity…": "Cargando actividad…",
+  "Activity unavailable": "Actividad no disponible",
+  "Task": "Tarea",
+  "Files changed": "Archivos modificados",
+  "No actions yet": "Aún no hay acciones",
+  "Earlier actions are in the conversation.": "Las acciones anteriores están en la conversación.",
+  "Last action: {0}": "Última acción: {0}",
+  "Moved": "Movido"
 }
