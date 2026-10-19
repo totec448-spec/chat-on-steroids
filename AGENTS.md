@@ -249,7 +249,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Finish/planning | `src/main/session/finish.ts`, `task-request.ts`, `goal.ts`, `src/shared/{finish,task-progress}.ts`: held turn, decision/plan invocation and cancellation. |
 | Continuation | `src/main/session/{continuation,resume-gate,handoff,handoff-prompt}.ts`: A→B transaction, send ambiguity and exact brief. |
 | Automation | `src/main/goal.ts`, `src/shared/{goal,goal-templates}.ts`: objectives, switches, obligations, provider/helper decisions. |
-| Agents | `src/main/agents.ts`, `src/renderer/{agent-panel,agent-communication}.ts`: independent prime families, staged mutations and addressed messages. |
+| Agents | `src/main/agents.ts`, `src/renderer/{agent-panel,agent-communication,agent-activity}.ts`: independent prime families, staged mutations and addressed messages. A worker opens on its Activity (#105): its task, its tool calls once each in first-appearance order with their latest record, and the files its successful calls changed; `sessions:events` with `actions: true` reads only `session_start` and `tool_call` rows for it, and a window without `session_start` says earlier actions are in the conversation. |
 | Worker Git worktrees | `src/main/worktrees/`, `src/main/workspace.ts`: approved isolated checkouts, marker-verified ownership and exact worker workspace resolution. |
 | Browser orchestration | `src/main/bridge.ts`, `browser.ts`, `browser-startup.ts`, `browser-wake.ts`, `browser-window-layout.ts`, `browser-preferences.ts`; `src/shared/browser-preferences.ts`. |
 | Built-in browser | `src/main/cos-browser/` (`selection.ts` opt-in loading, `index.ts` lifecycle, `host.ts` windows/tabs/extension/sign-in, `tab-model.ts`, `chrome-api.ts`, `extension-worker.ts`, `match-pattern.ts`, `sign-in.ts`, `sign-in-transfer.ts`); `src/preload/cos-browser{,-worker,-sign-in}.ts`; `src/renderer/cos-browser.{html,ts,css}` toolbar and `cos-browser-sign-in.{html,ts,css}` Google sign-in card; `src/shared/cos-browser-sites.ts`. See §13 Built-in browser. |
@@ -5306,7 +5306,8 @@ work must name the original PR/author and carry appropriate GitHub-linked `Co-au
 trailers; update `CONTRIBUTORS.md` and distinguish incorporated code from reports/proposals.
 Closing a PR or rewriting its implementation does not remove the contributor's credit.
 
-Record changes and actual checks in a focused worklog. Keep security reproductions/private
+Record changes and actual checks in the PR description (Test, Live proof), never as a worklog
+file in the PR (CONTRIBUTING.md "Clean contents"). Keep security reproductions/private
 session material out of public docs and fixtures; follow `SECURITY.md`. Do not package, install,
 commit or publish merely because a source/documentation task was requested.
 

@@ -2354,6 +2354,7 @@
   "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "Сброс сохраняет копию нечитаемого состояния и позволяет возобновить автоматическое обновление плагинов. Обновление может повлиять на существующие чаты ChatGPT.",
   "A calm capybara who lifts, chills and never panics.": "Спокойная капибара, которая качается, отдыхает и никогда не паникует.",
   "A tiny hamster with a big pre-workout attitude.": "Крошечный хомяк с большим предтренировочным настроем.",
+  "A cheeky whip that cracks to make Chat On Steroids work faster. It doesn't, but it tries.": "Дерзкий кнут, который щёлкает, чтобы Chat On Steroids работал быстрее. Не помогает, но он старается.",
   "The built-in Chat On Steroids companion.": "Встроенный компаньон Chat On Steroids.",
   "Listening with basic accuracy. For punctuation and better results, turn on online speech recognition in Windows settings.": "Распознавание с базовой точностью. Чтобы получить знаки препинания и лучший результат, включите распознавание голоса в сети в параметрах Windows.",
   "No microphone is available. Connect one, or allow microphone access in Windows settings.": "Микрофон недоступен. Подключите микрофон или разрешите доступ к нему в параметрах Windows.",
@@ -2896,5 +2897,15 @@
   "(~{0} tokens)|one": "(~{0} токен)",
   "(~{0} tokens)|few": "(~{0} токена)",
   "(~{0} tokens)|many": "(~{0} токенов)",
-  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}"
+  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}",
+  "Sub-agent view": "Вид субагента",
+  "Conversation": "Диалог",
+  "Loading activity…": "Загрузка активности…",
+  "Activity unavailable": "Активность недоступна",
+  "Task": "Задача",
+  "Files changed": "Изменённые файлы",
+  "No actions yet": "Пока нет действий",
+  "Earlier actions are in the conversation.": "Более ранние действия — в диалоге.",
+  "Last action: {0}": "Последнее действие: {0}",
+  "Moved": "Перемещено"
 }

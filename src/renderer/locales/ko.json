@@ -2246,6 +2246,7 @@
   "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "초기화하면 읽을 수 없는 상태를 백업하고 자동 플러그인 새로고침을 다시 시작할 수 있습니다. 새로고침은 기존 ChatGPT 채팅에 영향을 줄 수 있습니다.",
   "A calm capybara who lifts, chills and never panics.": "운동도 하고 느긋하게 쉬며 절대 당황하지 않는 차분한 카피바라.",
   "A tiny hamster with a big pre-workout attitude.": "운동 전 의욕이 넘치는 아주 작은 햄스터.",
+  "A cheeky whip that cracks to make Chat On Steroids work faster. It doesn't, but it tries.": "Chat On Steroids가 더 빨리 일하도록 휘두르는 건방진 채찍. 효과는 없지만 열심히 해요.",
   "The built-in Chat On Steroids companion.": "Chat On Steroids에 기본으로 들어 있는 친구.",
   "Listening with basic accuracy. For punctuation and better results, turn on online speech recognition in Windows settings.": "기본 정확도로 듣고 있습니다. 문장 부호와 더 나은 결과를 원하면 Windows 설정에서 온라인 음성 인식을 켜세요.",
   "No microphone is available. Connect one, or allow microphone access in Windows settings.": "사용할 수 있는 마이크가 없습니다. 마이크를 연결하거나 Windows 설정에서 마이크 액세스를 허용하세요.",
@@ -2761,5 +2762,15 @@
   "{0} characters": "{0}자",
   "from {0} events": "이벤트 {0}개에서 생성",
   "(~{0} tokens)": "(~{0} 토큰)",
-  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}"
+  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}",
+  "Sub-agent view": "서브에이전트 보기",
+  "Conversation": "대화",
+  "Loading activity…": "활동 불러오는 중…",
+  "Activity unavailable": "활동을 사용할 수 없음",
+  "Task": "작업",
+  "Files changed": "변경된 파일",
+  "No actions yet": "아직 작업 없음",
+  "Earlier actions are in the conversation.": "이전 작업은 대화에 있습니다.",
+  "Last action: {0}": "마지막 작업: {0}",
+  "Moved": "이동됨"
 }

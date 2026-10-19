@@ -2246,6 +2246,7 @@
   "Reset backs up the unreadable state and lets automatic plugin refresh start again. Refreshing can affect existing ChatGPT chats.": "リセットすると、読み取れない状態をバックアップして自動プラグイン更新を再開できます。更新は既存のChatGPTチャットに影響する場合があります。",
   "A calm capybara who lifts, chills and never panics.": "筋トレして、のんびりして、決して慌てない穏やかなカピバラ。",
   "A tiny hamster with a big pre-workout attitude.": "トレーニング前のやる気に満ちた小さなハムスター。",
+  "A cheeky whip that cracks to make Chat On Steroids work faster. It doesn't, but it tries.": "Chat On Steroids をもっと速く働かせようとピシッと鳴らす、生意気なムチ。効き目はないけれど、がんばっています。",
   "The built-in Chat On Steroids companion.": "Chat On Steroids に付属のコンパニオン。",
   "Listening with basic accuracy. For punctuation and better results, turn on online speech recognition in Windows settings.": "基本的な精度で聞き取っています。句読点を付けて精度を上げるには、Windows の設定でオンライン音声認識をオンにしてください。",
   "No microphone is available. Connect one, or allow microphone access in Windows settings.": "使用できるマイクがありません。マイクを接続するか、Windows の設定でマイクへのアクセスを許可してください。",
@@ -2761,5 +2762,15 @@
   "{0} characters": "{0}文字",
   "from {0} events": "{0}件のイベントから",
   "(~{0} tokens)": "（約{0}トークン）",
-  "{0} · {1} {2} · {3}": "{0} · {1}{2} · {3}"
+  "{0} · {1} {2} · {3}": "{0} · {1}{2} · {3}",
+  "Sub-agent view": "サブエージェントの表示",
+  "Conversation": "会話",
+  "Loading activity…": "アクティビティを読み込み中…",
+  "Activity unavailable": "アクティビティを利用できません",
+  "Task": "タスク",
+  "Files changed": "変更されたファイル",
+  "No actions yet": "まだアクションはありません",
+  "Earlier actions are in the conversation.": "それ以前のアクションは会話にあります。",
+  "Last action: {0}": "最後のアクション: {0}",
+  "Moved": "移動済み"
 }

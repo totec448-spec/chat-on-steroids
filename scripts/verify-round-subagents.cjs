@@ -50,13 +50,13 @@ const fixture = `(() => {
   selectedModel:{conversationId:'worker-chat-'+n,model:'gpt-6-sol',reasoningEffort:'high',observedAt:now}}));
  const history=Array.from({length:48},(_,i)=>({seq:i+1,time:now+i,source:'extension',kind:'assistant_message',
   messageId:'worker-result-'+i,message:stored('Verification step '+(i+1)+': checked selection, history refresh, keyboard navigation and narrow layout. The prime composer remains intact.'),final:true,state:'final'}));
- window.workerReads=[];
+ window.workerReads=[]; window.workerViews=[];
  window.appendPrimeOutput=()=>{f.events.push(prose('Additional live prime output: verification is continuing.'));f.emit('onSessionChanged',{allTranscripts:true});};
  window.refreshWorker=()=>{workers[0].updatedAt++;f.emit('onSessionChanged',{sessionIds:[workers[0].id]});};
  const methods={
   getState:async()=>{const r=await old.getState();r.data.config=fixtureMerge(fixtureDefaults,r.data.config);return r;},
   listSessions:()=>ok({sessions:[{...f.summary,events:f.events.length},...workers],activeId:f.summary.id,pressure:[]}),
-  getSession:(id,options)=>{if(id.startsWith('worker-local-')){window.workerReads.push(id);return ok({summary:workers.find(w=>w.id===id),events:history,total:history.length,nextFrom:history.length+1});}return old.getSession(id,options);}
+  getSession:(id,options)=>{if(id.startsWith('worker-local-')){window.workerReads.push(id);window.workerViews.push(options?.actions?'activity':'conversation');return ok({summary:workers.find(w=>w.id===id),events:history,total:history.length,nextFrom:history.length+1});}return old.getSession(id,options);}
  };
  window.api=new Proxy(methods,{get:(target,key)=>key in target?target[key]:old[key]});
 })();`;
@@ -106,7 +106,12 @@ app.whenReady().then(async () => {
   await js(`document.querySelectorAll('#timeline .activity-workers')[1].click()`);
   assert.deepEqual(await js(`[...document.querySelectorAll('#workDockRight .is-round-worker')].map(r=>r.dataset.workerSession)`),['worker-local-1']);
   await js(`document.querySelector('#workDockRight .is-round-worker').click()`);
+  // A worker opens on its Activity (#105), read as tool calls only; its conversation is one tab away.
+  await until(`document.querySelector('#workDockRight .agent-panel-view[aria-selected="true"]')?.dataset.view==='activity'&&!!document.querySelector('#workDockRight .agent-activity-heading')`);
+  assert.deepEqual(await js(`workerViews`),['activity']);
+  await js(`document.querySelector('#workDockRight .agent-panel-view[data-view="conversation"]').click()`);
   await until(`document.querySelectorAll('#workDockRight .ev-assistant_message').length===48`);
+  assert.deepEqual(await js(`workerViews`),['activity','conversation']);
   const mainTop=await js(`document.getElementById('chatBody').scrollTop`);
   await js(`document.querySelector('#workDockRight .agent-panel-body').scrollTop=300`);
   const workerTop=await js(`document.querySelector('#workDockRight .agent-panel-body').scrollTop`);
@@ -114,7 +119,8 @@ app.whenReady().then(async () => {
   await until(`document.getElementById('timeline').textContent.includes('Additional live prime output')`);
   assert.ok(Math.abs(await js(`document.getElementById('chatBody').scrollTop`)-mainTop)<=2,'Prime output does not pull the reader');
   assert.equal(await js(`document.querySelector('#workDockRight .agent-panel-body').scrollTop`),workerTop);
-  await js(`refreshWorker()`);await until(`workerReads.length===2`);await settle();
+  await js(`refreshWorker()`);await until(`workerReads.length===3`);await settle();
+  assert.equal(await js(`workerViews[2]`),'conversation','A refresh reloads the view being read');
   assert.equal(await js(`document.querySelector('#workDockRight .agent-panel-body').scrollTop`),workerTop,'Worker refresh preserves reading position');
   assert.equal(await js(`document.getElementById('chatInput').value`),'Keep the prime draft');
   assert.equal(await js(`document.querySelector('.sess.is-sel').dataset.id`),'composer-preview');
