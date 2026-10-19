@@ -539,6 +539,7 @@
   "Provider busy · retry {0}{1}": "プロバイダーが混雑しています · 再試行 {0}{1}",
   "Stop requested": "停止を要求しました",
   "Stop turn": "ターンを停止",
+  "Press Esc again to stop the turn": "もう一度 Esc を押すとターンを停止します",
   "Cancel delivery": "送信をキャンセル",
   "Queue plan at Session finish": "セッション終了通知時に計画を送信",
   "Start full plan": "計画全体を開始",

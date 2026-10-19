@@ -539,6 +539,7 @@
   "Provider busy · retry {0}{1}": "Fournisseur occupé · nouvelle tentative {0}{1}",
   "Stop requested": "Arrêt demandé",
   "Stop turn": "Arrêter le tour",
+  "Press Esc again to stop the turn": "Appuyez de nouveau sur Échap pour arrêter le tour",
   "Cancel delivery": "Annuler l'envoi",
   "Queue plan at Session finish": "Mettre le plan en file à la fin de session",
   "Start full plan": "Démarrer le plan complet",

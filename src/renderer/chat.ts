@@ -336,7 +336,7 @@ function ownsComposerDraft(owner: ComposerDraftOwner): boolean {
   return owner.key === draftKey() && owner.generation === composerDraftGeneration;
 }
 function replaceComposerDraft(): void {
-  retireDictation(); composerDraftGeneration++; skillPicker?.close();
+  retireDictation(); composerDraftGeneration++; skillPicker?.close(); disarmEscapeStop();
   // A recall ends here too; the same message recalled next must change the live region to be read.
   $('recallAnnounce').textContent = '';
 }
@@ -2273,6 +2273,40 @@ function recallPrompt(event: KeyboardEvent): boolean {
   recall = next ? { generation: selectionGeneration, draft: composerDraftGeneration, prompts, back: next, text } : null;
   // A screen reader doesn't read a value set by script, so the recalled message is announced.
   $('recallAnnounce').textContent = text;
+  return true;
+}
+
+/** How long after a first Esc a second one stops the turn. */
+const ESCAPE_STOP_MS = 1500;
+let escapeStop: { generation: number; at: number; timer: number } | null = null;
+function disarmEscapeStop(): void {
+  if (!escapeStop) return;
+  window.clearTimeout(escapeStop.timer);
+  escapeStop = null;
+  const status = $('composerStatus');
+  if (status.textContent === t('Press Esc again to stop the turn')) status.textContent = '';
+}
+/**
+ * Esc twice in an empty composer stops the running turn, as the Stop button does. The first press
+ * only says so under the composer: one stray Esc must not end a long Goal run. A held key, modifiers,
+ * IME composition and an Esc another control took (dictation, the slash menu) don't count.
+ */
+function escapeStopsTurn(event: KeyboardEvent): boolean {
+  if (event.key !== 'Escape') { disarmEscapeStop(); return false; }
+  const send = $<HTMLButtonElement>('chatSend');
+  const running = selectedId !== null && controlledSessionId === selectedId && controlledSelection === selectionGeneration && controlledTurnId !== null;
+  // A held key repeats: it neither counts as the second press nor disarms the first.
+  if (event.repeat) return false;
+  if (event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ||
+    !running || controlledStopPending || send.dataset.action !== 'stop') { disarmEscapeStop(); return false; }
+  event.preventDefault();
+  const now = performance.now();
+  const second = escapeStop?.generation === selectionGeneration && now - escapeStop.at <= ESCAPE_STOP_MS;
+  disarmEscapeStop();
+  // The button itself submits, so Stop keeps its one authority: the control showing Stop.
+  if (second) { $<HTMLFormElement>('composer').requestSubmit(send); return true; }
+  escapeStop = { generation: selectionGeneration, at: now, timer: window.setTimeout(disarmEscapeStop, ESCAPE_STOP_MS) };
+  $('composerStatus').textContent = t('Press Esc again to stop the turn');
   return true;
 }
 
@@ -8285,7 +8319,7 @@ export function initChat(next: Deps): void {
     // A slash or @file menu on screen keeps its arrows, also while it loads, has no choices, or is
     // closed by this very key because the caret left its fragment.
     const menuShown = !!skillPicker?.open();
-    if (skillPicker?.keydown(event) || (!menuShown && recallPrompt(event))) return;
+    if (skillPicker?.keydown(event) || (!menuShown && (recallPrompt(event) || escapeStopsTurn(event)))) return;
     // Codex's "Enter key behavior": Enter sends, or only Cmd/Ctrl+Enter does and Enter adds a line.
     const enterSends = deps.state()?.config.ui.enterSends !== false || event.metaKey || event.ctrlKey;
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && enterSends) { event.preventDefault(); if (currentPreparedPlan() || authoredComposerText().trim() || imageDrafts.get(draftKey())?.length) $<HTMLFormElement>('composer').requestSubmit(); }
