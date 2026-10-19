@@ -28,6 +28,27 @@
 .appearance-preview { display: grid; grid-template-columns: 24% minmax(0, 1fr); min-height: 180px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--page); }
 .appearance-preview-sidebar { display: flex; flex-direction: column; gap: 12px; padding: 20px 14px; background: var(--sidebar-color); color: var(--ink); }
 .appearance-preview-sidebar span { height: 7px; width: 70%; border-radius: 4px; background: var(--soft); opacity: .35; }
+/* Sidebar layout: two pictures of the sidebar to choose from, drawn in the person's own colors. */
+.layout-setting { flex-direction: column; align-items: stretch; }
+/* Its row flex-basis is a width; standing in a column it would be a 14rem-tall gap. */
+.layout-setting > .setting-text { flex: none; }
+.layout-choice { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.layout-option { position: relative; display: grid; gap: 10px; padding: 10px; border-radius: var(--r-lg); box-shadow: inset 0 0 0 1px var(--line); cursor: pointer; }
+.layout-option:hover { background: var(--hover); }
+.layout-option:has(input:checked) { background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent-edge); }
+.layout-option:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 3px; }
+.layout-option input { position: absolute; opacity: 0; pointer-events: none; }
+.layout-option-text { display: grid; gap: 2px; padding: 0 4px 2px; }
+.layout-option-text b { color: var(--ink); font-size: calc(13.5px * var(--text-scale, 1)); font-weight: 600; }
+.layout-option-text em { color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); font-style: normal; line-height: 1.45; }
+.layout-option-text b::after { content: ''; float: right; width: 14px; height: 14px; margin-top: 2px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--edge); }
+.layout-option:has(input:checked) .layout-option-text b::after { box-shadow: inset 0 0 0 4px var(--accent); }
+/* A real picture of each sidebar (scripts/capture-layout-previews.cjs) at its true size, in the
+   theme's own light or dark; its lower edge fades out, as the sidebar goes on. */
+.layout-preview { display: flex; justify-content: center; height: 250px; padding: 14px 14px 0; overflow: hidden; border-radius: var(--r-md); background: var(--sunk); }
+.layout-preview img { display: block; width: 230px; max-width: 100%; height: auto; align-self: flex-start; border-radius: 10px 10px 0 0; box-shadow: 0 0 0 1px var(--line); -webkit-mask-image: linear-gradient(#000 58%, transparent 84%); mask-image: linear-gradient(#000 58%, transparent 84%); }
+:root[data-theme="dark"] .layout-preview .for-light, :root:not([data-theme="dark"]) .layout-preview .for-dark { display: none; }
+@media (max-width: 640px) { .layout-choice { grid-template-columns: minmax(0, 1fr); } }
 .appearance-preview-sidebar .is-selected { width: 100%; height: 24px; margin: 0 -4px; border: 1px solid var(--accent-edge); background: var(--accent-wash); opacity: 1; }
 .appearance-preview-chat { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 22px; font-size: calc(13px * var(--text-scale, 1)); }
 .appearance-preview-composer { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding: 9px 12px; border-radius: 12px; background: var(--card); color: var(--faint); }
@@ -189,6 +210,8 @@
 .usage-status-line > .ico { flex: none; width: 16px; height: 16px; margin-top: 2px; font-size: 16px; }
 .usage-status { line-height: 1.5; margin: 0; }
 .usage-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin-bottom: 34px; }
+/* Until usage has loaded (or when it could not be read) there is nothing to sum up: no empty box. */
+.usage-summary:empty, .usage-heatmap-surface:has(> .usage-heatmap:empty) { display: none; }
 .usage-summary > div { display: grid; place-content: center; gap: 7px; min-height: 116px; padding: 16px 12px; text-align: center; }
 .usage-summary > div + div { border-inline-start: 1px solid var(--line); }
 .usage-summary strong { font-size: calc(24px * var(--text-scale, 1)); font-weight: 600; letter-spacing: -.55px; line-height: 1.15; font-variant-numeric: tabular-nums; }

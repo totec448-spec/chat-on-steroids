@@ -8,6 +8,11 @@
  * so both sides are compared without escapes and with whitespace folded.
  */
 const KEEP_MS = 60 * 60_000;
+/**
+ * A Goal opening message the ChatGPT page drafted for a chat that has no id yet (`/goal/opening`):
+ * it is noted here and taken by whichever chat it arrives in.
+ */
+export const NEW_CHAT = '';
 const PER_CHAT = 4;
 const handed = new Map<string, Array<{ text: string; at: number }>>();
 
@@ -28,6 +33,10 @@ export function noteAutomaticReply(conversationId: string, text: string, now = D
 
 /** Whether this sent message is a noted follow-up; a match is used up, so the same text later is the person's. */
 export function takeAutomaticReply(conversationId: string, text: string, now = Date.now()): boolean {
+  return takeFrom(conversationId, text, now) || (conversationId !== NEW_CHAT && takeFrom(NEW_CHAT, text, now));
+}
+
+function takeFrom(conversationId: string, text: string, now: number): boolean {
   const kept = handed.get(conversationId);
   if (!kept) return false;
   const value = comparable(text);
