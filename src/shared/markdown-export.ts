@@ -81,6 +81,14 @@ export function messageAnswerAnchors(events: readonly SessionEvent[]): Map<strin
   return anchors;
 }
 
+/** The chat's newest answer that offers copy (`/copy`): a completed turn's, or one recorded outside any turn. */
+export function latestAnswer(events: readonly SessionEvent[]): { turnId?: string; messageId?: string } | null {
+  const done = completedTurnIds(events);
+  const last = transcriptEntries(events)
+    .filter(entry => entry.role === 'assistant' && (entry.turnId ? done.has(entry.turnId) : !!entry.messageId)).at(-1);
+  return !last ? null : last.turnId ? { turnId: last.turnId } : { messageId: last.messageId! };
+}
+
 /** The answer a turnless message holds, at its latest revision; none for a turn's own answer. */
 export function messageAnswerEntries(events: readonly SessionEvent[], messageId: string): TranscriptEntry[] {
   return transcriptEntries(events).filter(entry => entry.role === 'assistant' && !entry.turnId && entry.messageId === messageId);
