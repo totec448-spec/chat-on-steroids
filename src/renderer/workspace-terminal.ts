@@ -145,7 +145,7 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
       }
       // Cmd/Ctrl+Shift+Enter does what Send to chat does; without a selection the shell gets the key.
       if (event.type === 'keydown' && event.key === 'Enter' && event.shiftKey && (event.ctrlKey || event.metaKey)
-        && options.onSendSelection && term.hasSelection()) {
+        && !event.isComposing && options.onSendSelection && term.hasSelection()) {
         // The composer takes focus within this keydown: its Enter must not land there as a new line.
         event.preventDefault(); sendSelection(tab); return false;
       }
