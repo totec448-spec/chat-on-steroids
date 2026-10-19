@@ -1,6 +1,6 @@
 // All 96 frames of the whip pet, the animations manifest and the atlas.
 // Lash points are relative to the lash root at the top of the handle (cell 80,26 when standing).
-const { frame } = require('./draw.cjs');
+const { frame, lashTip } = require('./draw.cjs');
 
 const OUT = '#3a2312';
 const star = (x, y, r = 1, rot = 0) => `<g transform="translate(${x},${y}) rotate(${rot}) scale(${r})"><path d="M0,-13 L3.5,-3.5 L13,-4.5 L5.5,2 L10,12 L0,5.5 L-10,12 L-5.5,2 L-13,-4.5 L-3.5,-3.5 Z" fill="#ffd34d" stroke="${OUT}" stroke-width="2.2" stroke-linejoin="round"/></g>`;
@@ -95,21 +95,21 @@ heavy.forEach(add);
 const grabLash = [
   [[16, -2], [30, 10], [42, 28], [52, 48]],
   [[18, 0], [36, 14], [52, 32], [64, 52], [72, 66]],
-  [[18, 2], [38, 18], [56, 38], [70, 58], [76, 72]],
-  [[18, 2], [36, 18], [52, 38], [62, 56], [70, 64], [60, 66]],
-  [[16, 0], [32, 14], [44, 30], [52, 46], [60, 54], [52, 58]],
-  [[14, -2], [28, 8], [38, 22], [46, 36], [52, 46], [46, 50]]
+  [[18, 2], [38, 18], [56, 38], [70, 58], [78, 72]],
+  [[18, 2], [36, 16], [52, 34], [62, 50], [72, 60]],
+  [[16, 0], [32, 12], [44, 26], [54, 40], [64, 48]],
+  [[14, -2], [28, 8], [40, 22], [50, 34], [60, 42]]
 ];
 grabLash.forEach((lash, i) => add({ tilt: [3, 6, 8, 6, 4, 2][i], eyes: i < 3 ? 'open' : 'happy', mouth: i < 3 ? 'o' : 'grin', look: 1, lash }));
 // carry 72-79: hops along, the word swinging from the lash
 hop.forEach((h, i) => add({ y: 130 - h, sx: squash[i][0], sy: squash[i][1], tilt: 3, eyes: i === 6 ? 'closed' : 'happy', mouth: 'grin', look: 0.8,
-  lash: [[14, -2], [28, 8], [38, 22], [46, 36 + (i % 2) * 3], [52, 46 + (i % 2) * 3], [46, 50 + (i % 2) * 3]], fx: i === 6 ? puff(52, 132, 0.6) : '' }));
+  lash: [[14, -2], [28, 8], [40, 22], [50, 34 + (i % 2) * 3], [60, 42 + (i % 2) * 3]], fx: i === 6 ? puff(52, 132, 0.6) : '' }));
 // throw 80-87: winds the word back, then flings it forward (released at frame 84)
 const throwLash = [
-  [[10, -8], [20, -12], [26, -4], [24, 8], [16, 14]],
-  [[-4, -14], [-16, -24], [-30, -26], [-40, -18], [-42, -6]],
-  [[-8, -18], [-20, -34], [-30, -40], [-42, -36], [-48, -26]],
-  [[4, -22], [14, -42], [30, -50], [46, -44], [54, -32]],
+  [[14, -6], [28, -16], [38, -30], [42, -46]],
+  [[4, -20], [0, -40], [-12, -52], [-26, -54]],
+  [[-8, -18], [-24, -32], [-40, -38], [-54, -36]],
+  [[6, -22], [20, -40], [38, -48], [54, -44]],
   [[16, -12], [36, -18], [54, -16], [68, -8]],
   [[18, -4], [36, 0], [52, 6], [66, 14]],
   [[18, 2], [34, 14], [46, 32], [54, 54], [64, 74]],
@@ -140,8 +140,7 @@ for (const name of order) {
   index += n;
 }
 // The word sits at the lash tip while grabbed, carried and wound up for the throw.
-const tipOf = (f) => { const p = f.lash.at(-1), tilt = (f.tilt ?? 0) * Math.PI / 180, y = f.y ?? 130, k = 0.84; const rx = k * (f.sx ?? 1) * p[0], ry = k * (f.sy ?? 1) * (p[1] - 104 + 2 - 6);
-  return [Math.round(80 + rx * Math.cos(tilt) - ry * Math.sin(tilt)), Math.round(y + 6 + rx * Math.sin(tilt) + ry * Math.cos(tilt))]; };
+const tipOf = (f) => lashTip(f).map(Math.round);
 const hands = {};
 for (let f = 69; f <= 84; f++) { const [x, y] = tipOf(frames[f]); hands[String(f)] = [Math.max(8, Math.min(152, x)), Math.max(8, Math.min(152, y + 10)), 1]; }
 module.exports = { frames, frame, manifest: { version: 1, image: 'atlas.png', width: 1280, height: 1920, columns: 8, cellWidth: 160, cellHeight: 160, frameCount: 96, anchor: [80, 136], hands, animations } };
