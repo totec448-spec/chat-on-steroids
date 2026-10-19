@@ -1993,6 +1993,7 @@
   "Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.": "チャットは続いています。戻すには、メニューバーアイコンのメニューで「ブラウザを表示」を選んでください。",
   "Recent": "最近",
   "Pinned": "固定済み",
+  "Draft": "下書き",
   "Unpin this chat": "このチャットの固定を解除",
   "Pin this chat to the top of its list": "このチャットをリストの先頭に固定",
   "Color": "色",

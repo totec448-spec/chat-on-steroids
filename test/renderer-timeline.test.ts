@@ -166,7 +166,7 @@ async function settleHistoryFrame(w: Pick<Window, 'requestAnimationFrame'>): Pro
   await settle();
 }
 
-async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; followUp?: 'steer' | 'queue'; enterSends?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean; approvalCard?: () => unknown; answerApproval?: (id: string, cardId: string, choice: string) => unknown; summary?: Partial<SessionSummary>; holdInputs?: Promise<void> } = {}) {
+async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; followUp?: 'steer' | 'queue'; enterSends?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean; approvalCard?: () => unknown; answerApproval?: (id: string, cardId: string, choice: string) => unknown; summary?: Partial<SessionSummary>; holdInputs?: Promise<void>; storage?: Record<string, string> } = {}) {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
@@ -186,6 +186,8 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
     HTMLButtonElement: w.HTMLButtonElement
   });
   if (!(w.HTMLElement.prototype as any).scrollIntoView) (w.HTMLElement.prototype as any).scrollIntoView = () => {};
+  // What an earlier run of the app left in this window's storage.
+  for (const [key, value] of Object.entries(options.storage ?? {})) w.localStorage.setItem(key, value);
 
   const config = {
     roots: [{ name: 'repo', path: 'C:\\repo' }],
@@ -4610,6 +4612,36 @@ it('preserves composer drafts across chat and settings navigation without forcin
   chat.openChatView('timeline');
   expect(input.value).toBe(draft);
   expect(input.style.height).toBe('');
+});
+
+it('marks chats that hold an unsent draft, and gives drafts back after a restart', async () => {
+  const first = summary([]), second = { ...first, id: 'second-chat', title: 'Second chat' };
+  const sessions = [first, second];
+  const { w } = await boot([], false, [], [], { sessions });
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  const row = (id: string) => w.document.querySelector<HTMLElement>(`#sessionList .sess[data-id="${id}"]`)!;
+  const type = (value: string) => { input.value = value; input.dispatchEvent(new w.Event('input')); };
+  type('A new chat idea');
+  row(first.id).querySelector<HTMLElement>('[data-session-select]')!.click(); await settle();
+  type('Unsent reply');
+  // The open chat shows its draft in the composer, so its row needs no mark.
+  expect(row(first.id).querySelector('.sess-draft-mark')).toBeNull();
+  row(second.id).querySelector<HTMLElement>('[data-session-select]')!.click(); await settle();
+  expect(row(first.id).querySelector('.sess-draft-mark')).not.toBeNull();
+  expect(row(first.id).title).toContain('Draft');
+  expect(row(second.id).querySelector('.sess-draft-mark')).toBeNull();
+
+  w.dispatchEvent(new w.Event('pagehide'));
+  const saved = w.localStorage.getItem('chat-on-steroids.composer-drafts')!;
+  dom!.window.close(); vi.resetModules();
+  const restarted = await boot([], false, [], [], { sessions, storage: { 'chat-on-steroids.composer-drafts': saved } });
+  const after = restarted.w.document;
+  const again = after.getElementById('chatInput') as HTMLTextAreaElement;
+  expect(again.value).toBe('A new chat idea');
+  expect(after.querySelector(`#sessionList .sess[data-id="${first.id}"] .sess-draft-mark`)).not.toBeNull();
+  after.querySelector<HTMLElement>(`#sessionList .sess[data-id="${first.id}"] [data-session-select]`)!.click(); await settle();
+  expect(again.value).toBe('Unsent reply');
+  expect(after.querySelector(`#sessionList .sess[data-id="${first.id}"] .sess-draft-mark`)).toBeNull();
 });
 
 it('retains an existing running chat planner across navigation and accepts its result only in that draft', async () => {
