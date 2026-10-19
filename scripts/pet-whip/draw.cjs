@@ -36,6 +36,27 @@ function lash(points, w0 = 11, w1 = 2.4) {
   const rim = `<path d="M${mids.slice(1, n - 5).map(m => `${(m.c[0]+m.nx*0.45).toFixed(1)},${(m.c[1]+m.ny*0.45).toFixed(1)}`).join(' L')}" stroke="${LASH_L}" stroke-width="1.5" fill="none" stroke-linecap="round" opacity="0.85"/>`;
   return `<polygon points="${pts}" fill="${LASH}" stroke="${OUT}" stroke-width="2.6" stroke-linejoin="round"/>${braid}${rim}${pop}`;
 }
+
+const H = 104, K = 0.84, ROOT_Y = -H + 2;
+const DEFAULT_LASH = [[16, -6], [34, 14], [40, 44], [36, 76], [52, 100], [70, 98]];
+/** The lash points of a frame, kept inside the 160 px cell: only what rises above the handle is compressed. */
+function fitLash(s) {
+  const L = s.lash ?? DEFAULT_LASH, x = s.x ?? 80, y = s.y ?? 130, sx = s.sx ?? 1, sy = s.sy ?? 1;
+  const kx = K * sx, ky = K * sy, groundY = y + 6;
+  const cellY = (py) => groundY + ky * (ROOT_Y + py - 6);
+  const minY = Math.min(...L.map(p => p[1]));
+  const lift = minY < 0 && cellY(minY) < 5 ? ((5 - groundY) / ky + 6 - ROOT_Y) / minY : 1;
+  const reach = Math.max(...L.map(p => Math.abs(p[0])));
+  const spread = reach > 0 ? Math.min(1, ((x > 80 ? 160 - x : x) - 6) / (kx * reach)) : 1;
+  return L.map(([px, py]) => [px * spread, py < 0 ? py * Math.min(1, lift) : py]);
+}
+/** Where the drawn lash ends, in cell pixels: the hand point a carried word hangs from. */
+function lashTip(s) {
+  const [px, py] = fitLash(s).at(-1), tilt = (s.tilt ?? 0) * Math.PI / 180, x = s.x ?? 80, y = s.y ?? 130;
+  const rx = K * (s.sx ?? 1) * px, ry = K * (s.sy ?? 1) * (ROOT_Y + py - 6);
+  return [x + rx * Math.cos(tilt) - ry * Math.sin(tilt), y + 6 + rx * Math.sin(tilt) + ry * Math.cos(tilt)];
+}
+
 /**
  * One frame. s: { x, y (feet), sx, sy (squash), tilt (deg), lash: [p1,p2,p3] relative to the lash root,
  * eyes: 'open'|'closed'|'wide'|'angry'|'happy', look: -1..1, mouth: 'smile'|'o'|'grin'|'grit'|'flat', fx: extra svg }
@@ -84,18 +105,10 @@ function frame(s) {
   }[s.mouth ?? 'smile'];
   const cheeks = `<ellipse cx="-12" cy="${my-2}" rx="3.2" ry="2" fill="#e8846a" opacity="0.45"/><ellipse cx="12" cy="${my-2}" rx="3.2" ry="2" fill="#e8846a" opacity="0.45"/>`;
   const face = `${brow(-ex, false)}${brow(ex, true)}${eye(-ex, false)}${eye(ex, true)}${cheeks}${mouth}`;
-  // Keep the lash inside the 160 px cell: compress only what rises above the handle.
-  const K = 0.84, kx = K * sx, ky = K * sy, groundY = y + 6;
-  const cellY = (py) => groundY + ky * (root[1] + py - 6);
-  let lift = 1;
-  const minY = Math.min(...L.map(p => p[1]));
-  if (minY < 0 && cellY(minY) < 5) lift = ((5 - groundY) / ky + 6 - root[1]) / minY;
-  const reach = Math.max(...L.map(p => Math.abs(p[0])));
-  const spread = reach > 0 ? Math.min(1, ((x > 80 ? 160 - x : x) - 6) / (kx * reach)) : 1;
-  const fitted = L.map(([px, py]) => [px * Math.min(1, spread), py < 0 ? py * Math.min(1, lift) : py]);
+    const fitted = fitLash(s);
   const lashSvg = lash([root, ...fitted.map(p => [root[0] + p[0], root[1] + p[1]])]);
   const behind = s.lashFront ? '' : lashSvg, front = s.lashFront ? lashSvg : '';
   const shadow = s.noShadow ? '' : `<ellipse cx="${x}" cy="136" rx="${(19 * Math.max(0.55, 1 - (130 - y) / 60)).toFixed(1)}" ry="4.5" fill="#000" opacity="${(0.16 * Math.max(0.35, 1 - (130 - y) / 50)).toFixed(2)}"/>`;
   return `${shadow}${s.fxBack ?? ''}<g transform="translate(${x},${y + 6}) rotate(${tilt}) scale(${0.84 * sx},${0.84 * sy}) translate(0,-6)">${behind}${body}${face}${front}</g>${s.fx ?? ''}`;
 }
-module.exports = { frame, bez };
+module.exports = { frame, lashTip };
