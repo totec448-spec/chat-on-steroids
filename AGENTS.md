@@ -4087,8 +4087,9 @@ membership before saving. Off-page order survives partial list refreshes.
 `renderer/chat-cycle.ts`: Ctrl+Tab / Ctrl+Shift+Tab (Ctrl on macOS too, as in browsers) open the
 next/previous chat in the drawn sidebar order, tree or Inbox, wrapping at the ends. Rows inside a
 closed disclosure (a collapsed project, Settled) are skipped. The step clicks the row, so selection
-and the Chat screen follow the click path. It does nothing inside the terminal, the file editor, a
-rename field or an open dialog, nor while Settings hides the list.
+and the Chat screen follow the click path; keyboard focus in the list moves to the new row. It does
+nothing inside the terminal, the file editor, a rename field, an open dialog or a picker popup, nor
+while Settings hides the list.
 `renderer/sidebar-pins.ts` keeps pinned chats (#1133) as a bounded localStorage preference (500 ids;
 the oldest gives way, a pin is never refused). A pinned chat leads its own list (main Chats or its
 project) and has its own drag scope `pinned:<scope>`, so manual order is kept inside the pinned and

@@ -885,6 +885,31 @@ it("opens the next and previous chat in the sidebar's drawn order with Ctrl+Tab 
   expect(press()).toBe(false); expect(selected()).toBe('c1');
 });
 
+it('keeps keyboard focus with the chat Ctrl+Tab opens in the Inbox, and leaves the keys to the open project picker', async () => {
+  const mounted = await mountInbox({ listSessions: async () => listed(['c1', 'c2', 'c3'].map(id => inboxChat(id, { updatedAt: Date.now() }))) });
+  const doc = mounted.window.document, w = mounted.window;
+  await vi.waitFor(() => expect(inboxCardIds(doc)).toHaveLength(3));
+  const [first, second] = inboxCardIds(doc);
+  const top = (id: string) => doc.querySelector<HTMLElement>(`#sessionList .sess[data-id="${id}"] > .sess-top`)!;
+  const selected = () => doc.querySelector<HTMLElement>('#sessionList .sess.is-sel')?.dataset.id;
+  const press = (target: EventTarget) => {
+    const event = new w.KeyboardEvent('keydown', { key: 'Tab', ctrlKey: true, bubbles: true, cancelable: true });
+    target.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  top(first!).click(); top(first!).focus();
+  expect(press(doc.activeElement!)).toBe(true);
+  expect(selected()).toBe(second);
+  // Focus follows the chat that opened, so Enter does not reopen the one before it.
+  expect(doc.activeElement).toBe(top(second!));
+  // The picker is a popup, not a native dialog: its search field keeps Ctrl+Tab.
+  doc.querySelector<HTMLButtonElement>('#chatList [data-inbox-control="picker"]')!.click();
+  const search = doc.querySelector<HTMLInputElement>('.inbox-project-picker input')!;
+  expect(doc.activeElement).toBe(search);
+  expect(press(search)).toBe(false);
+  expect(selected()).toBe(second);
+});
+
 /** The inbox's cards, top to bottom, by session id. */
 const inboxCardIds = (doc: Document) => [...doc.querySelectorAll<HTMLElement>('.inbox-cards > .sess-card')].map(row => row.dataset.id);
 /** One card's state on its meta line: its words, and the card itself for its title and accessible text. */

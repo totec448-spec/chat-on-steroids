@@ -7,9 +7,10 @@
 export function initChatCycle(list: HTMLElement, selected: () => string | null): void {
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Tab' || !event.ctrlKey || event.metaKey || event.altKey || event.defaultPrevented) return;
-    // The terminal and the file editor keep their keys, a rename keeps its field, a dialog its focus.
+    // The terminal and the file editor keep their keys, a rename keeps its field, a dialog or a
+    // popup (the pickers are role="dialog" divs) its focus.
     const target = event.target as Element | null;
-    if (target?.closest?.('.xterm, .cm-editor, .sess-rename') || document.querySelector('dialog[open]')) return;
+    if (target?.closest?.('.xterm, .cm-editor, .sess-rename, [role="dialog"]') || document.querySelector('dialog[open]')) return;
     // Settings hides the chat list: there is no drawn order to walk.
     if (list.closest('[hidden]')) return;
     const rows = [...list.querySelectorAll<HTMLElement>('[data-id] > [data-session-select]')]
@@ -21,8 +22,12 @@ export function initChatCycle(list: HTMLElement, selected: () => string | null):
     const step = event.shiftKey ? -1 : 1;
     const next = rows[at < 0 ? (step > 0 ? 0 : rows.length - 1) : (at + step + rows.length) % rows.length]!;
     const id = next.parentElement!.dataset.id;
+    const focused = list.contains(document.activeElement);
     next.click();
-    // The click repaints the list: bring the new row of the chat now open into view.
-    [...list.querySelectorAll<HTMLElement>('[data-id]')].find(row => row.dataset.id === id)?.scrollIntoView({ block: 'nearest' });
+    // The click repaints the list: bring the new row of the chat now open into view, and keyboard
+    // focus with it when it was in the list, so Enter does not reopen the chat before.
+    const row = [...list.querySelectorAll<HTMLElement>('[data-id]')].find(entry => entry.dataset.id === id);
+    row?.scrollIntoView({ block: 'nearest' });
+    if (focused) row?.querySelector<HTMLElement>(':scope > [data-session-select]')?.focus({ preventScroll: true });
   });
 }
