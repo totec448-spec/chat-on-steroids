@@ -4564,6 +4564,11 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .terminal-screen .xterm { height: 100%; }
 .terminal-empty { margin: 20px; }
 .terminal-empty[hidden] { display: none; }
+/* Send to chat: over the shell's top right corner while it has a selection, above xterm's own layers (up to 11). */
+.terminal-send { position: absolute; top: 8px; right: 18px; z-index: 12; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--edge); border-radius: 8px; background: var(--card); color: var(--ink); font-size: calc(12.5px * var(--text-scale, 1)); box-shadow: 0 6px 20px #0003; }
+.terminal-send:hover { background: var(--hover); }
+.terminal-send[hidden] { display: none; }
+.terminal-send .ico { --ico: 14px; --glyph: 14px; }
 
 /* One quiet frame for right-side tools; the tool owners keep their own content state. */
 [data-panel='chat'].has-work-dock { grid-template-columns: minmax(0, 1fr) var(--work-panel-width, minmax(340px, 42%)); }
