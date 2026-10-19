@@ -402,6 +402,9 @@ let dictationPhase: 'idle' | 'starting' | 'listening' | 'stopping' | 'error' = '
 let dictationNotice = '';
 let writingDictation = false;
 let dictationStopGuard: number | null = null;
+// Hold-to-talk: Ctrl+Space held in the composer records; letting go stops it the way the
+// microphone button does, so the phrase in progress is kept and nothing is sent.
+let heldDictation: DictationSession | null = null;
 
 function clearDictationStopGuard(): void {
   if (dictationStopGuard === null) return;
@@ -427,12 +430,16 @@ function guardDictationStop(): void {
   }, 5_500);
 }
 
+function dictationAvailable(): boolean {
+  return dictationBridge.dictationSupported === true &&
+    typeof dictationBridge.startDictation === 'function' &&
+    typeof dictationBridge.stopDictation === 'function' && typeof dictationBridge.onDictationEvent === 'function';
+}
+
 function paintDictation(): void {
   const button = $<HTMLButtonElement>('dictationButton');
   const status = $('dictationStatus');
-  const available = dictationBridge.dictationSupported === true &&
-    typeof dictationBridge.startDictation === 'function' &&
-    typeof dictationBridge.stopDictation === 'function' && typeof dictationBridge.onDictationEvent === 'function';
+  const available = dictationAvailable();
   button.hidden = !available;
   const active = dictationPhase === 'starting' || dictationPhase === 'listening' || dictationPhase === 'stopping';
   const label = !available ? 'Dictation unavailable' : dictationPhase === 'starting' ? 'Cancel dictation' :
@@ -442,7 +449,8 @@ function paintDictation(): void {
   button.dataset.state = dictationPhase;
   button.setAttribute('aria-pressed', String(active));
   button.setAttribute('aria-label', t(label));
-  button.title = t(label);
+  button.title = dictationPhase === 'idle' || dictationPhase === 'error'
+    ? `${t(label)} (${t('hold {0}', [`${t('Ctrl')}+${t('Space')}`])})` : t(label);
   // Native Windows errors remain verbatim; known UI labels/statuses use the
   // existing locale catalog with English fallback until translations are merged.
   status.textContent = dictationNotice ? t(dictationNotice) : '';
@@ -624,7 +632,24 @@ export function initComposerDictation(): void {
   $('chatInput').addEventListener('input', () => { if (!writingDictation && dictation) retireDictation(); });
   $('chatInput').addEventListener('keydown', event => {
     if (event.key === 'Escape' && dictation) { event.preventDefault(); retireDictation(); }
+    if (event.code !== 'Space' || !event.ctrlKey || event.shiftKey || event.altKey || event.metaKey ||
+      event.isComposing || !dictationAvailable()) return;
+    event.preventDefault();
+    // Auto-repeat while held is the same press. A press during a clicked-on session stops it.
+    if (event.repeat || dictation && dictation === heldDictation) return;
+    const running = dictation;
+    void toggleDictation();
+    heldDictation = running ? null : dictation;
   });
+  const releaseHeld = (): void => {
+    const session = heldDictation;
+    heldDictation = null;
+    if (session && dictation === session && !session.stopping) void toggleDictation();
+  };
+  window.addEventListener('keyup', event => {
+    if (heldDictation && (event.code === 'Space' || event.key === 'Control')) releaseHeld();
+  }, true);
+  window.addEventListener('blur', releaseHeld);
   document.addEventListener('visibilitychange', () => { if (document.hidden) retireDictation(); });
   let unsubscribe: (() => void) | void;
   try { unsubscribe = dictationBridge.onDictationEvent?.(onDictationEvent); }

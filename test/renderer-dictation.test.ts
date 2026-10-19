@@ -137,6 +137,52 @@ describe('renderer microphone draft ownership', () => {
     emit({ type: 'status', status: 'stopped' });
   });
 
+  const holdKey = (type: 'keydown' | 'keyup', options: KeyboardEventInit = {}) => {
+    const event = new dom.window.KeyboardEvent(type, { code: 'Space', key: ' ', ctrlKey: type === 'keydown', bubbles: true, cancelable: true, ...options });
+    input.dispatchEvent(event);
+    return event;
+  };
+
+  it('records while Ctrl+Space is held in the composer, and letting go keeps the words without sending', async () => {
+    let sends = 0;
+    dom.window.document.getElementById('composer')!.addEventListener('submit', () => sends++);
+    expect(button.title).toBe('Start dictation (hold Ctrl+Space)');
+    input.value = 'Note: '; input.setSelectionRange(6, 6);
+    const starts = start.mock.calls.length, stops = stop.mock.calls.length;
+    expect(holdKey('keydown').defaultPrevented).toBe(true);
+    await flush();
+    expect(start).toHaveBeenCalledTimes(starts + 1);
+    emit({ type: 'status', status: 'listening' });
+    emit({ type: 'partial', text: 'hello wor' });
+    expect(input.value).toBe('Note: hello wor');
+    expect(holdKey('keydown', { repeat: true }).defaultPrevented).toBe(true);
+    await flush();
+    expect([start.mock.calls.length, stop.mock.calls.length]).toEqual([starts + 1, stops]);
+    holdKey('keyup');
+    expect(stop).toHaveBeenCalledTimes(stops + 1);
+    expect(button.getAttribute('data-state')).toBe('stopping');
+    emit({ type: 'final', text: 'hello world' });
+    emit({ type: 'status', status: 'stopped' });
+    expect(input.value).toBe('Note: hello world');
+    expect(button.getAttribute('data-state')).toBe('idle');
+    expect(sends).toBe(0);
+  });
+
+  it('stops a held recording when the window loses focus, and a press stops a clicked-on one', async () => {
+    const stops = stop.mock.calls.length;
+    holdKey('keydown'); await flush();
+    dom.window.dispatchEvent(new dom.window.Event('blur'));
+    expect(stop).toHaveBeenCalledTimes(stops + 1);
+    emit({ type: 'status', status: 'stopped' });
+    button.click(); await flush();
+    holdKey('keydown'); await flush();
+    expect(stop).toHaveBeenCalledTimes(stops + 2);
+    holdKey('keyup');
+    expect(stop).toHaveBeenCalledTimes(stops + 2);
+    emit({ type: 'status', status: 'stopped' });
+    expect(button.getAttribute('data-state')).toBe('idle');
+  });
+
   it('unsubscribes on page unload without sending a message', () => {
     dom.window.dispatchEvent(new dom.window.Event('beforeunload'));
     expect(unsubscribe).toHaveBeenCalledTimes(1);

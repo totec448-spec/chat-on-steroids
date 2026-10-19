@@ -5,6 +5,8 @@
   "Stopping dictation": "Parando ditado",
   "Retry dictation": "Tentar ditado novamente",
   "Start dictation": "Iniciar ditado",
+  "hold {0}": "segure {0}",
+  "Space": "Espaço",
   "Dictation did not stop normally. Please try again.": "O ditado não parou corretamente. Tente novamente.",
   "Stopping dictation…": "Parando ditado…",
   "Dictation could not start. Check microphone access and try again.": "Não foi possível iniciar o ditado. Verifique o acesso ao microfone e tente novamente.",
