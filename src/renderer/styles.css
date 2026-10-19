@@ -2806,6 +2806,12 @@ input[readonly] {
 .answer-action:hover, .answer-export[open] > .answer-action { background: var(--hover); color: var(--ink); }
 .answer-action:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
 .answer-action.is-done { color: var(--green); }
+/* Quote a selection into the composer: the button under the words selected in a message. */
+.quote-selection { position: fixed; z-index: 40; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--edge); border-radius: 8px; background: var(--card); color: var(--ink); font: inherit; font-size: calc(12.5px * var(--text-scale, 1)); box-shadow: 0 6px 20px #0003; cursor: pointer; animation: surface-in 120ms ease-out; }
+.quote-selection:hover { background: var(--hover); }
+.quote-selection:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
+.quote-selection .ico { --ico: 14px; --glyph: 14px; }
+@media (prefers-reduced-motion: reduce) { .quote-selection { animation: none; } }
 .answer-export { anchor-scope: --answer-export; }
 .answer-export > summary { anchor-name: --answer-export; }
 .answer-export::details-content { transition: content-visibility 120ms allow-discrete; }

@@ -1,0 +1,109 @@
+import { JSDOM } from 'jsdom';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+
+let dom: JSDOM;
+beforeEach(() => {
+  vi.resetModules();
+  dom = new JSDOM('<main><div class="scroll" id="chatBody"><div id="timeline">' +
+    '<div class="said"><b>ChatGPT</b><div class="msg rich"><p>The loader reads <code>config.port</code> first.</p><p>Then it checks the file.</p></div></div>' +
+    '<p class="meta" id="note">Worked for 2m</p></div></div>' +
+    '<form id="composer"><textarea id="chatInput"></textarea></form></main>', { url: 'https://local.test/', pretendToBeVisual: true });
+  for (const key of ['window', 'document', 'Node', 'NodeFilter', 'Event'] as const) vi.stubGlobal(key, key === 'window' ? dom.window : dom.window[key]);
+  vi.stubGlobal('getComputedStyle', dom.window.getComputedStyle.bind(dom.window));
+  // jsdom lays nothing out: every selected line is one 20px row inside a 600px view.
+  dom.window.Range.prototype.getClientRects = () => [{ top: 100, bottom: 120, left: 40, right: 300, width: 260, height: 20 }] as unknown as DOMRectList;
+  dom.window.Element.prototype.getBoundingClientRect = () => ({ top: 0, bottom: 600, left: 0, right: 800, width: 800, height: 600 }) as DOMRect;
+});
+afterEach(() => { vi.unstubAllGlobals(); dom.window.close(); });
+
+const select = (start: Node, startOffset: number, end: Node, endOffset: number): void => {
+  const range = document.createRange();
+  range.setStart(start, startOffset);
+  range.setEnd(end, endOffset);
+  document.getSelection()!.removeAllRanges();
+  document.getSelection()!.addRange(range);
+  document.dispatchEvent(new dom.window.Event('selectionchange'));
+};
+const button = () => document.querySelector<HTMLButtonElement>('.quote-selection')!;
+const frame = () => new Promise(resolve => dom.window.requestAnimationFrame(resolve));
+
+it('marks every selected line as a quote and leaves a line under it to write on', async () => {
+  const { draftWithQuote, markdownQuote } = await import('../src/renderer/quote-selection.js');
+  expect(markdownQuote('\n\nfirst line  \r\nsecond\u00a0line\n\n\n\nnext paragraph\n\n')).toBe('> first line\n> second line\n>\n> next paragraph');
+  expect(markdownQuote('   \n\n')).toBe('');
+  expect(draftWithQuote('', '> a')).toBe('> a\n\n');
+  expect(draftWithQuote('Why is that?\n\n\n', '> a')).toBe('Why is that?\n\n> a\n\n');
+});
+
+it('reads the selected words as the message shows them, without the code panel controls', async () => {
+  // Chromium's own selection text carried a code panel's "Code" and "Copy" into the quote, and a
+  // formula twice: once drawn, once for screen readers.
+  const { selectedText } = await import('../src/renderer/quote-selection.js');
+  const box = document.createElement('div');
+  box.className = 'said';
+  box.innerHTML = '<div class="msg rich"><p>Before   the\ncode.</p>\n<div class="markdown-code"><div class="tool-output-header"><strong>Code</strong><button>Copy</button></div>' +
+    '<pre><code>const a = 1;\n  return a;\n</code></pre></div>\n<ul>\n<li>one <strong>item</strong></li>\n<li>two</li>\n</ul>\n' +
+    '<table><tr><td>name</td><td>size</td></tr><tr><td>a.txt</td><td>2 KB</td></tr></table>' +
+    '<p>Area <span class="katex"><span class="katex-mathml"><math><semantics><mrow><mi>r</mi></mrow><annotation encoding="application/x-tex">\\pi r^2</annotation></semantics></math></span>' +
+    '<span class="katex-html" aria-hidden="true">πr2</span></span> it is.</p></div>';
+  document.getElementById('timeline')!.append(box);
+  const [first, last] = [box.querySelector('p')!.firstChild!, box.querySelectorAll('p')[1]!.lastChild!];
+  const range = document.createRange();
+  range.setStart(first, 9);
+  range.setEnd(last, 3);
+  expect(selectedText(range)).toBe('the code.\n\nconst a = 1;\n  return a;\n\none item\ntwo\nname | size\na.txt | 2 KB\n\nArea $\\pi r^2$ it');
+
+  const typed = document.createElement('p');
+  typed.className = 'msg user-message-text';
+  typed.style.whiteSpace = 'pre-wrap';
+  typed.textContent = 'first line\n  indented line';
+  document.getElementById('timeline')!.append(typed);
+  range.selectNodeContents(typed);
+  expect(selectedText(range)).toBe('first line\n  indented line');
+});
+
+it('quotes the words selected in an answer into the composer, after what is typed, without sending', async () => {
+  const { initQuoteSelection } = await import('../src/renderer/quote-selection.js');
+  const input = document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'Look at this:';
+  const typed = vi.fn();
+  input.addEventListener('input', typed);
+  const submitted = vi.fn();
+  document.getElementById('composer')!.addEventListener('submit', submitted);
+  initQuoteSelection({ timeline: document.getElementById('timeline')!, input });
+  expect(button().hidden).toBe(true);
+
+  const [first, second] = document.querySelectorAll('.msg p');
+  select(first!.firstChild!, 4, second!.firstChild!, 8);
+  await frame();
+  expect(button().hidden).toBe(false);
+  expect(button().textContent).toBe('Quote');
+  expect(button().style.top).toBe('126px');
+
+  button().dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  expect(input.value).toBe('Look at this:\n\n> loader reads config.port first.\n>\n> Then it\n\n');
+  expect(input.selectionStart).toBe(input.value.length);
+  expect(document.activeElement).toBe(input);
+  expect(typed).toHaveBeenCalledTimes(1);
+  expect(submitted).not.toHaveBeenCalled();
+  expect(document.getSelection()!.isCollapsed).toBe(true);
+  expect(button().hidden).toBe(true);
+});
+
+it('offers nothing outside a message or while the selection is still being dragged', async () => {
+  const { initQuoteSelection } = await import('../src/renderer/quote-selection.js');
+  initQuoteSelection({ timeline: document.getElementById('timeline')!, input: document.getElementById('chatInput') as HTMLTextAreaElement });
+  const note = document.getElementById('note')!.firstChild!;
+  select(note, 0, note, 6);
+  await frame();
+  expect(button().hidden).toBe(true);
+
+  const words = document.querySelector('.msg p')!.firstChild!;
+  document.dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }));
+  select(words, 0, words, 10);
+  await frame();
+  expect(button().hidden).toBe(true);
+  document.dispatchEvent(new dom.window.Event('pointerup', { bubbles: true }));
+  await frame();
+  expect(button().hidden).toBe(false);
+});

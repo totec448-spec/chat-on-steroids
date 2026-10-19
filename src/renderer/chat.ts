@@ -2,6 +2,7 @@ import { hasProviderDirective, resolvedCapture, withoutProviderDirectives } from
 import { completedDilText } from '../shared/dil-tables.js';
 import { initChatSearch, type ChatSearch } from './chat-search.js';
 import { initChatFind } from './chat-find.js';
+import { initQuoteSelection } from './quote-selection.js';
 import { createWorkspaceTerminal } from './workspace-terminal.js';
 import { createWorkspaceDocks } from './workspace-docks.js';
 import { currentLanguage, ui, t, tn } from './i18n.js';
@@ -8431,6 +8432,7 @@ export function initChat(next: Deps): void {
     reveal: revealChatLocation,
     row: rowForLocation
   });
+  initQuoteSelection({ timeline: $('timeline'), input: $<HTMLTextAreaElement>('chatInput') });
   chatSearch = initChatSearch({
     select: (id, match) => {
       if (id !== selectedId) { pendingNewInput = null; selectSession(id); }
