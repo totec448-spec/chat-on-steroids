@@ -204,7 +204,8 @@ app.whenReady().then(async () => {
     await until(`!!document.querySelector('.file-entry-dialog[open]')`, 'new group dialog');
     assert.equal(await js(`document.querySelector('.file-entry-dialog h2').textContent`), 'New group');
     const long = 'A very long group name that keeps going past the sidebar edge';
-    await js(`(() => { const i=document.querySelector('.file-entry-dialog input'); i.value=${JSON.stringify(long.slice(0,60))}; i.form.requestSubmit(); })()`);
+    // The name is spelled out in the page code itself: nothing from outside is spliced into code.
+    await js(`(() => { const i=document.querySelector('.file-entry-dialog input'); i.value='A very long group name that keeps going past the sidebar edge'.slice(0,60); i.form.requestSubmit(); })()`);
     await until(`document.querySelectorAll('[data-project-id="demo-project"] > .chat-group').length === 3`, 'created');
     // A new group leads its project's groups, like any new item in this sidebar.
     assert.equal(await js(`document.querySelector('[data-project-id="demo-project"] > .chat-group .chat-group-name').textContent`), long.slice(0,60));
