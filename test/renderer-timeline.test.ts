@@ -3620,6 +3620,27 @@ describe('Esc in the empty composer during a turn', () => {
     expect(status(w)).toBe('');
   });
 
+  it.each([false, true])('stops the turn it was pressed for before the controls are read again (Plan armed: %s)', async (armPlan) => {
+    const { w, live } = await boot([]);
+    const api = (w as any).api;
+    const stop = vi.fn(async () => ({ ok: true, data: {} }));
+    api.stopSessionTurn = stop;
+    const plan = vi.fn(async () => ({ ok: true, data: null }));
+    api.draftTaskPlan = plan;
+    if (armPlan) (w.document.getElementById('createPlan') as HTMLButtonElement).click();
+    await settle();
+    expect(w.document.getElementById('chatSend')!.dataset.action).toBe('stop');
+    // A turn the window has not seen yet: Stop goes to the turn on screen, not to whatever a reread finds.
+    const controls = api.getSessionControls;
+    api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await controls(id)).data, activeTurnId: 'unseen-turn' } });
+    esc(w); esc(w);
+    await settle();
+    expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'held-turn');
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(plan).not.toHaveBeenCalled();
+    expect(live.sent).toEqual([]);
+  });
+
   it('does not let an Esc armed for one turn stop the next turn', async () => {
     const { w, append } = await boot([]);
     const api = (w as any).api;

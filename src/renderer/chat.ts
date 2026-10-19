@@ -2304,8 +2304,9 @@ function escapeStopsTurn(event: KeyboardEvent): boolean {
   // Only the turn the first press was for: a new turn started meanwhile needs its own two presses.
   const second = escapeStop?.generation === selectionGeneration && escapeStop.turnId === controlledTurnId && now - escapeStop.at <= ESCAPE_STOP_MS;
   disarmEscapeStop();
-  // The button itself submits, so Stop keeps its one authority: the control showing Stop.
-  if (second) { $<HTMLFormElement>('composer').requestSubmit(send); return true; }
+  // Stop exactly the turn both presses were for, as the button's Stop does; not through the form,
+  // where an armed Plan would take the submission, and with no refresh that could swap the turn.
+  if (second) { void stopCurrentTurn(); return true; }
   escapeStop = { generation: selectionGeneration, turnId: controlledTurnId, at: now, timer: window.setTimeout(disarmEscapeStop, ESCAPE_STOP_MS) };
   $('composerStatus').textContent = t('Press Esc again to stop the turn');
   return true;
