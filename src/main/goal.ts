@@ -2833,8 +2833,17 @@ function undash(text: string): string {
  *
  * A typo is only harmless in prose. Inside a path, a command, a URL or a file name it is a
  * different instruction, and the whole point of this message is that ChatGPT acts on it.
+ * A command is not always in backticks (2026-10-19: "run powershel -NoProfile …"), so the rest
+ * of a clause after run/execute/invoke counts as one, and so does a word followed by a flag.
+ * Quoted text and the word after "word" are what a reply has to say, letter for letter.
  */
-const PROTECTED = /```[\s\S]*?```|`[^`\n]*`|https?:\/\/\S+|\S+[\\/@]\S+|[\w-]+\.[\w-]+/g;
+const PROTECTED = new RegExp([
+  '```[\\s\\S]*?```', '`[^`\\n]*`', 'https?:\\/\\/\\S+', '\\S+[\\\\/@]\\S+', '[\\w-]+\\.[\\w-]+',
+  '"[^"\\n]*"', '“[^”\\n]*”',
+  '\\b(?:run|runs|running|execute|executes|executing|invoke|invokes)\\s[^.,;:!?\\n]*',
+  '\\S+(?=\\s+--?[a-z0-9])',
+  '\\bwords?\\s+\\S+'
+].join('|'), 'gi');
 
 /** One plain lowercase word: no capitals, so an acronym or a model id is never a candidate. */
 const CANDIDATE = /(?<![\w'’-])[a-z][a-z'’]{2,}[a-z](?![\w'’-])/g;
