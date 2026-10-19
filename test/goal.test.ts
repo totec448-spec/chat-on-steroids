@@ -28,6 +28,7 @@ vi.mock('electron', () => ({
 const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSecretsPath, setSecret } = await import('../src/main/secrets.js');
 const { initDurableStore } = await import('../src/main/durable.js');
+const { takeAutomaticReply } = await import('../src/main/session/automatic-replies.js');
 const { appendEvent, createSession, observeSessionModel, initSessionStore, resetSessionStoreForTests, readRecentEvents } = await import(
   '../src/main/session/store.js'
 );
@@ -426,6 +427,8 @@ describe('what leaves this machine', () => {
     expect(view.stage).toBe('ready');
     // The streamed text, typed: see `humanReply` and the block at the bottom of this file.
     expect(view.reply).toBe(goal.humanReply('what about the tests'));
+    // Its page will type it: the message it comes back as is the app's, not the person's (#1655).
+    expect(takeAutomaticReply('c-goal-2', view.reply)).toBe(true);
     expect(sent.url).toBe('https://openrouter.ai/api/v1/chat/completions');
     expect((sent.headers as Record<string, string>).authorization).toBe('Bearer sk-or-test');
     expect(sent.body.model).toBe('deepseek/deepseek-v4-flash');
