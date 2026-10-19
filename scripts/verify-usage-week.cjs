@@ -17,14 +17,16 @@ app.whenReady().then(async () => {
     const data = {contextTokenCap:400000, tokens:10000000,
       days:Array.from({length:10},(_,i)=>({date:'2026-09-'+String(12+i).padStart(2,'0'),tokens:1000000,models:[model]})),
       models:[{...model,tokens:10000000}], sessions:3,
-      projects:[{projectId:'project-a',tokens:7000000,models:[{...model,tokens:7000000}]},{projectId:null,tokens:3000000,models:[{...model,tokens:3000000}]}],
+      projects:[{projectId:'project-a',tokens:6000000,models:[{...model,tokens:6000000}]},{projectId:'project-b',tokens:1000000,models:[{...model,tokens:1000000}]},{projectId:null,tokens:3000000,models:[{...model,tokens:3000000}]}],
       limits:[{model:'deep_research',scope:'feature',remaining:250,remainingPercent:null,resetAt:null,windowSeconds:null,observedAt:Date.now()},
         {model:'image_gen',scope:'feature',remaining:1000,remainingPercent:null,resetAt:null,windowSeconds:null,observedAt:Date.now()}],
       messages:{through:new Date(2026,8,21,12).getTime(),days:[
         {date:'2026-09-19',gpt56:24,gpt6:12}, {date:'2026-09-20',gpt56:10,gpt6:3}, {date:'2026-09-21',gpt56:1,gpt6:1}
       ]}};
     window.api = {getUsage:async()=>({ok:true,data}),getChatModels:async()=>({ok:true,data:{models:[]}}),
-      listProjects:async()=>({ok:true,data:[{id:'project-a',name:'Example project',path:'/home/you/project',createdAt:1}]})};
+      listProjects:async()=>({ok:true,data:[{id:'project-a',name:'Example project',path:'/home/you/project',createdAt:1},
+        // A folder name with no space or hyphen to break at must wrap, not widen its column past By model's.
+        {id:'project-b',name:'example_project_folder_name_without_any_spaces_or_hyphens_that_runs_on_past_the_width_of_its_column',path:'/home/you/example',createdAt:1}]})};
     const language = await import('/i18n.ts'); language.initLanguage(); window.setFixtureLanguage=language.setLanguage;
     const usage = await import('/usage.ts'); usage.initUsage(); await usage.refreshUsage();
     const panel = document.querySelector('[data-panel="usage"]'); panel.classList.add('is-active');
@@ -51,7 +53,7 @@ app.whenReady().then(async () => {
     assert.equal(await js(`document.getElementById('usageSummary').previousElementSibling.className`), 'settings-page-head', 'Usage opens directly with the summary');
     assert.equal(await js(`document.querySelector('.usage-panel').lastElementChild.contains(document.getElementById('usageMessageCounts'))`), true, 'Message counts belong to the bottom section');
     assert.equal(await js(`document.getElementById('usageStatus').getBoundingClientRect().height`), 0, 'Successful loading leaves no status gap');
-    assert.deepEqual(await js(`[...document.querySelectorAll('.usage-days-project tr td:first-child')].map(n=>n.textContent)`), ['Example project', 'No project'], 'Usage breaks the estimate down by project');
+    assert.deepEqual(await js(`[...document.querySelectorAll('.usage-days-project tr td:first-child')].map(n=>n.textContent)`), ['Example project', 'example_project_folder_name_without_any_spaces_or_hyphens_that_runs_on_past_the_width_of_its_column', 'No project'], 'Usage breaks the estimate down by project');
     const capture = async (name, bottom = true) => {
       await js(bottom ? `document.querySelector('.usage-messages').scrollIntoView({block:'end'})` : `document.querySelector('.usage-panel').scrollTop=0`);
       const bounds = await js(`(() => {

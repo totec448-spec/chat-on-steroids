@@ -366,13 +366,33 @@ it('breaks the estimate down by project, naming each from the project list, and 
   expect(rows()[1]![0]).toBe('Kein Projekt');
   setLanguage('en');
   expect(getUsage).toHaveBeenCalledTimes(1);
-  // An unreadable project list leaves the rows unnamed, and the page still loads.
+  // An unreadable project list keeps the names already shown, and the page still loads.
   listProjects.mockRejectedValueOnce(new Error('IPC disconnected'));
-  await usage.refreshUsage();
-  expect(rows().slice(1).map(row => row[0])).toEqual(['No project', 'Unknown project', 'Unknown project']);
+  await usage.refreshUsage(); await new Promise(resolve => setTimeout(resolve));
+  expect(rows().slice(1).map(row => row[0])).toEqual(['No project', 'Website', 'Unknown project']);
   expect(dom.window.document.getElementById('usageStatus')!.textContent).toBe('');
   // Someone who never uses projects gets no table holding one "No project" row.
   data.projects = [{ projectId: null, tokens: 3.5e6, models }];
   await usage.refreshUsage();
   expect(dom.window.document.querySelector('.usage-days-project')).toBeNull();
+});
+
+it('shows usage while the project list is still loading, then names the By project rows', async () => {
+  dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
+  const models = [{ model: 'gpt-5.6-sol', reasoningEffort: 'high', assumed: false, tokens: 1e6 }];
+  const data: UsageOverview = { contextTokenCap: 256_000, messages: { through: Date.now(), days: [] }, tokens: 1e6, models, days: [{ date: '2026-09-08', tokens: 1e6, models }], sessions: 1, limits: [],
+    projects: [{ projectId: 'project-a', tokens: 1e6, models }] };
+  let answer!: (reply: unknown) => void;
+  const listProjects = vi.fn(() => new Promise(resolve => { answer = resolve; }));
+  Object.assign(dom.window, { api: { getUsage: async () => ({ ok: true, data }), listProjects, getChatModels: async () => ({ ok: true, data: { models: [] } }) } });
+  const usage = await import('../src/renderer/usage.js'); usage.initUsage();
+  // A project list that never answers must not hold the Usage page in its loading state.
+  await usage.refreshUsage();
+  const document = dom.window.document;
+  expect(document.getElementById('usageStatus')!.textContent).toBe('');
+  expect(document.querySelector('[data-usage-metric="Conversations"] strong')!.textContent).toBe('1');
+  expect(document.querySelector('.usage-days-project td')!.textContent).toBe('Unknown project');
+  answer({ ok: true, data: [{ id: 'project-a', name: 'Website', path: '/home/you/website', createdAt: 1 }] });
+  await vi.waitFor(() => expect(document.querySelector('.usage-days-project td')!.textContent).toBe('Website'));
 });

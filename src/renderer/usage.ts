@@ -22,11 +22,11 @@ const count = { format: (value: number) => new Intl.NumberFormat(currentLanguage
 const money = { format: (value: number) => new Intl.NumberFormat(currentLanguage(), { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value) };
 const featureLabels: Record<string, string> = { deep_research: "Deep research", file_upload: "File uploads", paste_text_to_file: "Pasted text files", image_gen: "Image generation" };
 // Names only label the By project rows: an unreadable list must not keep the page from loading.
-async function readProjectNames(): Promise<Map<string, string>> {
+async function readProjectNames(): Promise<Map<string, string> | null> {
   try {
     const reply = await window.api.listProjects();
-    return new Map(reply.ok ? reply.data.map(project => [project.id, project.name]) : []);
-  } catch { return new Map(); }
+    return reply.ok ? new Map(reply.data.map(project => [project.id, project.name])) : null;
+  } catch { return null; }
 }
 function usageHint(node: HTMLElement, text: string | (() => string)): void {
   ui(node, 'data-usage-hint', typeof text === 'function' ? text : () => text);
@@ -73,10 +73,11 @@ export async function refreshUsage(fresh = false): Promise<void> {
   ui(status, 'textContent', () => t("Updating usage in the background. After an update, this can take a few minutes. You can keep using the app."));
   status.setAttribute('role', 'status');
   try {
-    const [value, names] = await Promise.all([run(window.api.getUsage()), readProjectNames()]);
+    const names = readProjectNames();
+    const value = await run(window.api.getUsage());
     if (generation !== loadGeneration) return;
     if (!value) { ui(status, 'textContent', () => t("Usage could not be loaded. Try Refresh.")); return; }
-    snapshot = value; projectNames = names;
+    snapshot = value;
     paintMessages();
     const summary = $('usageSummary'); summary.replaceChildren();
     for (const [label, number] of [['Processed tokens · est.', value.tokens], ['Peak daily tokens', Math.max(0, ...value.days.map((day) => day.tokens))], ['Conversations', value.sessions], ['Active days', value.days.filter((day) => day.tokens > 0).length]] as const) {
@@ -105,6 +106,11 @@ export async function refreshUsage(fresh = false): Promise<void> {
     paintRates();
     paintCost();
     ui(status, 'textContent', () => '');
+    // The rows wait for names, never the page. They keep the last names until a list answers.
+    void names.then(found => {
+      if (!found || generation !== loadGeneration || (found.size === projectNames.size && [...found].every(([id, name]) => projectNames.get(id) === name))) return;
+      projectNames = found; paintCost();
+    });
   } catch {
     if (generation === loadGeneration) ui(status, 'textContent', () => t("Usage could not be loaded. Try Refresh."));
   } finally { if (generation === loadGeneration) $('refreshUsage').removeAttribute('disabled'); }
