@@ -229,7 +229,10 @@
 .usage-days-model { padding: 0 18px 18px; }
 .usage-days-daily { padding: 18px; border-top: 1px solid var(--line); }
 .usage-days-project { border-top: 1px solid var(--line); }
-/* By model and By project stack; one set of column widths keeps their numbers in line. */
+/* By model and By project stack; one set of column widths keeps their numbers in line, and a
+   long project name wraps inside its column instead of widening it. */
+.usage-days-model .usage-table { table-layout: fixed; }
+.usage-days-model .usage-table td:first-child { overflow-wrap: anywhere; }
 .usage-days-model .usage-table th:first-child { width: 40%; }
 .usage-days-model .usage-table th:not(:first-child) { width: 30%; }
 .usage-cost-subhead { margin: 0 0 12px; color: var(--ink); font-size: calc(13px * var(--text-scale, 1)); font-weight: 600; line-height: 1.4; }

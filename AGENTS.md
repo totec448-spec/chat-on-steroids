@@ -2164,8 +2164,9 @@ token consumption or proof of current prices/entitlements.
 chat's current `projectId`, largest first; `projectId: null` is the chats outside every project.
 The cache holds no project, so moving a chat moves its whole history without a reread or a cache
 version change. The renderer names rows from `listProjects()` (a sidebar-removed project keeps its
-record and name); an id missing from that list, or a list that cannot be read, shows Unknown
-project. The table is left out when no chat has a project.
+record and name), and the usage paints without waiting for that list. An id missing from it
+shows Unknown project; a list that cannot be read keeps the names already shown. The table is
+left out when no chat has a project.
 
 The bottom **Messages and limits** section counts native user-message IDs with recorded
 model selection proof for GPT-5.6 and GPT-6. It uses provider `authoredAt`, otherwise the
