@@ -6,7 +6,8 @@
  */
 const STORAGE_KEY = 'chat-on-steroids.composer-drafts';
 const MAX_SAVED = 100;
-const MAX_SAVED_CHARS = 1_000_000;
+// Counted as stored: JSON escaping can make one typed character six.
+const MAX_STORED_CHARS = 1_000_000;
 const MAX_KEY = 200;
 const SAVE_DELAY_MS = 400;
 
@@ -26,7 +27,7 @@ export function createComposerDrafts({ onDraftedChange = () => {}, savedText = (
   const host = window;
   try {
     const raw = host.localStorage.getItem(STORAGE_KEY);
-    const saved: unknown = raw && raw.length <= MAX_SAVED_CHARS * 4 ? JSON.parse(raw) : [];
+    const saved: unknown = raw && raw.length <= MAX_STORED_CHARS + 2 ? JSON.parse(raw) : [];
     if (Array.isArray(saved)) {
       for (const entry of saved.slice(-MAX_SAVED)) {
         if (!Array.isArray(entry) || entry.length !== 2) continue;
@@ -45,9 +46,11 @@ export function createComposerDrafts({ onDraftedChange = () => {}, savedText = (
     for (const [key, current] of [...drafts].reverse()) {
       if (kept.length >= MAX_SAVED) break;
       const text = savedText(key, current);
-      // One draft too long to fit leaves room for the shorter, older ones.
-      if (!drafted(text) || key.length > MAX_KEY || chars + text.length > MAX_SAVED_CHARS) continue;
-      kept.push([key, text]); chars += text.length;
+      if (!drafted(text) || key.length > MAX_KEY) continue;
+      // `["key","text"],` as stored. One draft too long to fit leaves room for the shorter, older ones.
+      const stored = JSON.stringify(key).length + JSON.stringify(text).length + 4;
+      if (chars + stored > MAX_STORED_CHARS) continue;
+      kept.push([key, text]); chars += stored;
     }
     try { host.localStorage.setItem(STORAGE_KEY, JSON.stringify(kept.reverse())); }
     catch { /* The draft stays in this window when storage is full or unavailable. */ }
