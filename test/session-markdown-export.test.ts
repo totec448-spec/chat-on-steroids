@@ -89,3 +89,33 @@ it('copies an answer recorded without a turn by its message id, and only such an
   await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', messageId: 'a1', target: 'clipboard' }, null)).rejects.toThrow('no answer to export');
   await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', target: 'clipboard' }, null)).rejects.toThrow('has not completed');
 });
+
+it('saves the session as a self-contained HTML page with credential shapes masked', async () => {
+  store.readOverflowText.mockResolvedValue('Use the key sk-proj-abcdefghijklmnopqrstuvwx and <b>bold</b>.');
+  electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/Explain it.html' });
+  await expect(exportSessionMarkdown({ id: 'session-1', scope: 'session', target: 'file', format: 'html' }, null))
+    .resolves.toEqual({ done: 'saved', name: 'Explain it.html' });
+  expect(electron.dialog.showSaveDialog.mock.calls[0]![0]).toMatchObject({
+    defaultPath: expect.stringContaining('Explain it.html'), filters: [{ name: 'HTML files', extensions: ['html'] }]
+  });
+  const [file, page, encoding] = files.writeFile.mock.calls[0] as unknown as [string, string, string];
+  expect([file, encoding]).toEqual(['/downloads/Explain it.html', 'utf8']);
+  expect(page).toContain('<title>Explain: it?</title>');
+  expect(page).toContain('<p class="said" dir="auto">Explain it</p>');
+  expect(page).toContain('Use the key [redacted] and &lt;b&gt;bold&lt;/b&gt;.');
+  expect(page).not.toContain('sk-proj-');
+});
+
+it('refuses an HTML export of one answer or to the clipboard', async () => {
+  await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't1', target: 'file', format: 'html' }, null)).rejects.toThrow('whole session');
+  await expect(exportSessionMarkdown({ id: 'session-1', scope: 'session', target: 'clipboard', format: 'html' }, null)).rejects.toThrow('whole session');
+  expect(electron.dialog.showSaveDialog).not.toHaveBeenCalled();
+  expect(electron.clipboard.writeText).not.toHaveBeenCalled();
+});
+
+it('masks a credential in the chat title of an HTML page and of its suggested file name', async () => {
+  store.getSession.mockResolvedValue({ id: 'session-1', title: 'Rotate sk-proj-abcdefghijklmnopqrstuvwx' });
+  electron.dialog.showSaveDialog.mockResolvedValue({ canceled: true });
+  await expect(exportSessionMarkdown({ id: 'session-1', scope: 'session', target: 'file', format: 'html' }, null)).resolves.toEqual({ done: 'cancelled' });
+  expect(electron.dialog.showSaveDialog.mock.calls[0]![0].defaultPath).toMatch(/Rotate \[redacted\]\.html$/);
+});
