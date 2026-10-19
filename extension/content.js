@@ -3725,13 +3725,6 @@
   let fiberAsking = null;
   /** Off until the helper answers once, so a browser without it behaves exactly as before. */
   let fiberPresent = null; // Unknown until this document gets a reply or a definitive repair failure.
-  /**
-   * An automatic attempt this page stopped before asking while the page-model helper could not be
-   * read (#1643). Its receipts and the turn's messages are read through the helper, so whatever the
-   * stated reason, the attempt is tried again the moment the helper answers, instead of only at the
-   * app's next pickup, which can be ten minutes away.
-   */
-  let helperDeferral = null;
   /** Avoid turning a missing MAIN-world helper into one script injection per observer tick. */
   let fiberRepairAt = -Infinity;
   let fiberRepairing = null;
@@ -4707,9 +4700,7 @@
       traceStage(call.requestId, 'read');
       traceStage(call.requestId, 'tool', call.tool);
     }
-    const helperReturned = fiberPresent !== true;
     fiberPresent = true;
-    if (helperReturned) retryAfterHelperReturned();
     fiberRows = answer.rows;
     fiberScanToken = answer.scanToken;
     const previousFiberTurns = [...fiberTurns.values()];
@@ -9608,21 +9599,8 @@
    * why, so its log and the chat's Compact & Resume row say what it is waiting on instead of
    * "asking ChatGPT" (#1643: twenty minutes of pickups, each stopped here, none of it logged).
    */
-  function retryAfterHelperReturned() {
-    const deferral = helperDeferral;
-    helperDeferral = null;
-    if (!deferral || deferral.forId !== conversationId || deferral.forEpoch !== epoch) return;
-    // After this scan has been taken in; only the error that deferral left is cleared, never a newer one.
-    setTimeout(() => {
-      if (nativeBusy || localError !== deferral.why || conversationId !== deferral.forId || epoch !== deferral.forEpoch) return;
-      localError = '';
-      void maybeResumePendingCompaction(deferral.forId, deferral.forEpoch);
-    }, 0);
-  }
-
   function reportDeferredCompaction(forId, token, why) {
     if (!token || !why) return;
-    helperDeferral = fiberPresent === true ? null : { forId, forEpoch: epoch, why };
     void ask({ type: 'compact', conversationId: forId, token, sourceDeferred: true, sourceError: why }).catch(() => undefined);
   }
 
@@ -9751,14 +9729,8 @@
         box.getAttribute('aria-disabled') !== 'true' ? box : null;
     };
     const expectedQuestionId = stoppedQuestionId || policyData.recordedQuestionId || null;
-    // A chat's first turn can run without ChatGPT showing its question anywhere, page model
-    // included (2026-10-19), so it never matched and an automatic run waited for the turn to end.
-    // The app recorded that question as the conversation's first, and the page's only exchange is
-    // the conversation's first: that is the same question, by place rather than by its id.
-    const firstQuestionShown = () => !stoppedQuestionId && policyData.recordedQuestionFirst === true &&
-      expectedQuestionId === policyData.recordedQuestionId && CLF_DOM.firstQuestionPending();
     const sourceReady = () => editableSource() && (!expectedQuestionId ||
-      CLF_DOM.messages().filter(message => message.role === 'user').at(-1)?.id === expectedQuestionId || firstQuestionShown());
+      CLF_DOM.messages().filter(message => message.role === 'user').at(-1)?.id === expectedQuestionId);
     if (!sourceReady()) {
       const hydrationCurrent = () => current() && userSendReceipt === initialSendReceipt &&
         (!stoppedQuestionId || (CLF_DOM.messages().filter(message => message.role === 'user').at(-1)?.id ?? null) === stoppedQuestionId) &&
@@ -10015,11 +9987,7 @@
       const awaitingResults = new Map();
       const awaitingRequests = new Set();
       const sourceNodes = new Set();
-      // What the last complete scan showed: this turn's calls, and whether ChatGPT shows any of
-      // them answered. Reset by every scan; an ambiguous or failed one leaves nothing to rely on.
-      let seen = { calls: 0, answered: false };
       const received = () => {
-        seen = { calls: 0, answered: false };
         const pageTurn = generationTurn();
         const source = fiberTurnFor(pageTurn);
         if (!source) return false;
@@ -10055,7 +10023,6 @@
             if (call.requestId) awaitingRequests.delete(call.requestId);
           } else if (!pending) awaitingResults.set(call.messageId, call);
         }
-        seen = { calls: [...sources].reduce((total, turn) => total + turn.calls.length, 0), answered: calls.some(call => call.answered) };
         // A missing row or a failed scan cannot acknowledge a call seen earlier.
         return awaitingResults.size === 0 && awaitingRequests.size === 0;
       };
@@ -10063,12 +10030,9 @@
       nativePhase = 'settling';
       renderControl();
       let endedPolls = 0;
-      let sent = null;
       const ready = await waitUntil(async () => {
         if (!current()) return true;
-        const peek = await peekCompactionActivity(forId);
-        const count = peek ? peek.pendingTools : null;
-        sent = peek ? peek.sentResults : null;
+        const count = await peekPendingTools(forId);
         if (!current()) return true;
         if (count !== 0) {
           endedPolls = 0;
@@ -10084,15 +10048,7 @@
         } else endedPolls = 0;
         const fresh = await refreshFiber(null, true);
         if (!current()) return true;
-        if (fresh && received()) return true;
-        // ChatGPT's page no longer sees a running turn's tool results until the turn ends
-        // (2026-10-19: none of 25 finished calls answered), so its receipt cannot be read mid-turn.
-        // Only when it shows this turn's calls and not one of them answered, the app's delivery
-        // stands in: nothing running or unsent, every result sent at least 1.5 s ago, and
-        // at least as many sent results as calls shown. A call the app never served (another app's
-        // tool) keeps the count short, and a request still without its row keeps waiting.
-        return !!fresh && seen.calls > 0 && !seen.answered && awaitingRequests.size === 0 &&
-          sent?.settled === true && Number.isInteger(sent.count) && sent.count >= seen.calls;
+        return fresh && received();
       }, AUTO_RECEIPT_SETTLE_MS);
       if (!current()) return t(
         'content_compact_chat_changed_waiting_results',
@@ -11306,19 +11262,10 @@
    * the answer. Null means the app could not be asked, which is not the same as zero.
    */
   async function peekPendingTools(forId = conversationId) {
-    return (await peekCompactionActivity(forId))?.pendingTools ?? null;
-  }
-
-  /** The app's running-call count, and its delivery of this turn's results when it has one. */
-  async function peekCompactionActivity(forId = conversationId) {
     const reply = await ask({ type: 'activity', conversationId: forId, since });
     if (!reply || reply.ok !== true || !reply.data) return null;
     const count = Number(reply.data.pendingTools);
-    const sent = reply.data.sentResults;
-    return {
-      pendingTools: Number.isFinite(count) && count >= 0 ? count : null,
-      sentResults: sent && typeof sent === 'object' ? { count: Number(sent.count), settled: sent.settled === true } : null
-    };
+    return Number.isFinite(count) && count >= 0 ? count : null;
   }
 
   /** Polls a condition. Resolves true when it holds, false when the budget runs out. */

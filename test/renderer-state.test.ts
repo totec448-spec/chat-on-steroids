@@ -587,23 +587,20 @@ it('draws the sidebar layout saved in Appearance, Projects by default, and repai
     listSessions: async () => ({ ok: true, data: { sessions: [session], activeId: null, pressure: [], blocked: [] } })
   });
   const doc = mounted.window.document;
-  const list = doc.getElementById('sessionList')!;
-  const option = (value: string) => doc.querySelector<HTMLInputElement>(`input[name="appearanceSidebarLayout"][value="${value}"]`)!;
-  const chosen = () => doc.querySelector<HTMLInputElement>('input[name="appearanceSidebarLayout"]:checked')?.value;
+  const list = doc.getElementById('sessionList')!, select = doc.getElementById('appearanceSidebarLayout') as HTMLSelectElement;
   // A config saved before the setting existed has no appearance at all: today's project tree.
   await vi.waitFor(() => expect(doc.querySelector(`[data-project-id="${project.id}"]`)).not.toBeNull());
   expect(list.classList.contains('is-inbox')).toBe(false);
-  expect(chosen()).toBe('projects');
+  expect(select.value).toBe('projects');
   // The choice lives in the app's config, so it arrives with a state push (another window, a restart).
   const { defaultAppearance } = await import('../src/shared/appearance.js');
   mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, appearance: { ...defaultAppearance(), sidebarLayout: 'inbox' } } };
   mounted.push(structuredClone(mounted.state));
   expect(list.classList.contains('is-inbox')).toBe(true);
-  expect(chosen()).toBe('inbox');
+  expect(select.value).toBe('inbox');
   expect(window.localStorage.getItem('chat-on-steroids.sidebar-layout')).toBeNull();
   // Choosing Projects saves through Settings with the rest of Appearance and redraws the tree.
-  // A click on its picture, as a person chooses it.
-  option('projects').click();
+  select.value = 'projects'; select.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
   await vi.waitFor(() => expect(mounted.calls.find(call => call.ui?.appearance?.sidebarLayout)?.ui.appearance).toMatchObject({ sidebarLayout: 'projects', font: 'system' }), { timeout: 5000 });
   await vi.waitFor(() => expect(list.classList.contains('is-inbox')).toBe(false), { timeout: 5000 });
   expect(doc.querySelector(`[data-project-id="${project.id}"]`)).not.toBeNull();
@@ -1823,16 +1820,16 @@ it('searches every settings page from the sidebar and opens the setting it finds
   (doc.getElementById('workspaceSettings') as HTMLButtonElement).click();
   expect(box.hidden).toBe(false);
   // While the field holds a query, its results take the page list's place.
-  type('developer mode');
+  type('privacy screenshots');
   expect([pages.hidden, results.hidden]).toEqual([true, false]);
-  expect(rows().map(row => [row.querySelector('b')!.textContent, row.querySelector('.search-snippet')!.textContent])).toEqual([['Developer mode', 'General › For developers']]);
+  expect(rows().map(row => [row.querySelector('b')!.textContent, row.querySelector('.search-snippet')!.textContent])).toEqual([['Privacy screenshots', 'General › Privacy']]);
   expect(rows()[0]!.querySelectorAll('mark')).toHaveLength(2);
   rows()[0]!.click(); await frame();
   // Its page opens with the list back, the setting marked and its control focused.
   expect(doc.querySelector('[data-panel="general"]')!.classList.contains('is-active')).toBe(true);
   expect([field.value, pages.hidden, results.hidden]).toEqual(['', false, true]);
-  expect(doc.getElementById('developerMode')!.closest('.setting')!.classList.contains('is-found')).toBe(true);
-  expect(doc.activeElement).toBe(doc.getElementById('developerMode'));
+  expect(doc.getElementById('privacyScreenshots')!.closest('.setting')!.classList.contains('is-found')).toBe(true);
+  expect(doc.activeElement).toBe(doc.getElementById('privacyScreenshots'));
   // Enter opens the best match, here on Agents & automation.
   type('session finish');
   field.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await frame();
@@ -2122,36 +2119,6 @@ it('shows the current host Desktop tools without rebuilding permission controls 
   mounted.push(mounted.state);
   expect(names()).toEqual(windowsNames);
   expect(mounted.calls).toHaveLength(0);
-});
-
-it('offers whole-screen privacy only where a screenshot can show the whole screen (macOS)', async () => {
-  const mounted = await mountChat({ platform: { family: 'windows', name: 'Windows', desktopAutomation: true } });
-  const row = mounted.window.document.getElementById('privacyScreenshotsSetting')!;
-  // Windows captures one window already; the switch would change nothing there.
-  expect(row.hidden).toBe(true);
-  mounted.push({ ...mounted.state, platform: { family: 'macos', name: 'macOS', desktopAutomation: true } });
-  expect(row.hidden).toBe(false);
-  mounted.push({ ...mounted.state, platform: { family: 'linux', name: 'Linux', desktopAutomation: false } });
-  expect(row.hidden).toBe(true);
-});
-
-it('says why an Activity list is empty, in the app language, and drops the note once a line arrives', async () => {
-  let addLine: ((entry: unknown) => void) | undefined;
-  const mounted = await mountChat({}, [], { onLogEntry: (fn: (entry: unknown) => void) => { addLine = fn; return () => undefined; } });
-  const doc = mounted.window.document;
-  const feed = doc.getElementById('fullFeed')!;
-  await vi.waitFor(() => expect(feed.classList.contains('is-empty')).toBe(true));
-  expect(feed.dataset.empty).toBe('Nothing has happened yet.');
-  const { setLanguage } = await import('../src/renderer/i18n.js');
-  setLanguage('de');
-  expect(feed.dataset.empty).toBe('Bisher ist nichts passiert.');
-  setLanguage('en');
-  addLine!({ time: Date.now(), level: 'info', message: 'tunnel connected' });
-  await vi.waitFor(() => expect(feed.classList.contains('is-empty')).toBe(false));
-  // Problems only, with no problem among the lines: the filter, not the log, is why it is empty.
-  (doc.querySelector('#logFilter [data-filter="bad"]') as HTMLButtonElement).click();
-  expect(feed.classList.contains('is-empty')).toBe(true);
-  expect(feed.dataset.empty).toBe('Nothing matches this filter.');
 });
 
 it('preserves native Desktop permissions when saving unrelated settings on Linux', async () => {
@@ -2710,11 +2677,11 @@ it("keeps a worker's delivery line in the app's language when the language chang
     createdAt: 1, activatedAt: 2, finishedAt: null, result: null, pending: 0, awaitingAck: 0, delivered: 1, conversationId: 'worker-chat', primeConversationId: 'prime-chat', detachedAt: null };
   const mounted = await mountChat({}, [], { getSwarm: async () => ({ ok: true, data: { enabled: true, running: true, runId: 'run-1', agents: [worker], maxWorkers: 2, pendingReports: 0 } }) });
   const line = () => mounted.window.document.querySelector('#swarmList .model-sub')?.textContent;
-  await vi.waitFor(() => expect(line()).toBe('0 pending · 1 delivered'));
+  await vi.waitFor(() => expect(line()).toBe('0 pending · 1 delivered · chat bound'));
   const { setLanguage } = await import('../src/renderer/i18n.js');
   setLanguage('de');
   // The line was joined once when the list was painted, so it stayed English.
-  expect(line()).toBe('0 ausstehend · 1 zugestellt');
+  expect(line()).toBe('0 ausstehend · 1 zugestellt · Chat verknüpft');
   setLanguage('en');
 });
 

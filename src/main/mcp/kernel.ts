@@ -92,7 +92,6 @@ import {
   noteOutcome,
   holdWhileSettling,
   runInCallContext,
-  noteCallReleased,
   runningToolProgress,
   setRequestOwner,
   trackInFlight,
@@ -669,15 +668,10 @@ export async function dispatch(
     );
     // In-process callers have no socket; resolving their outer invocation publishes it.
     if (!parent && !inboundPublication()) context.publication!.completedAt = Date.now();
-    // Only a provider request has a response ChatGPT receives; in-process callers prove nothing.
-    if (!parent && inboundPublication()) noteCallReleased(context);
     if (!result.isError) confirmUse?.();
     return result;
   } catch (error) {
-    if (!parent) {
-      context.publication!.failed = true;
-      if (inboundPublication()) noteCallReleased(context);
-    }
+    if (!parent) context.publication!.failed = true;
     throw error;
   }
 }
