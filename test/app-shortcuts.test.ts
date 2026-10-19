@@ -66,6 +66,17 @@ it('leaves the terminal, the file editor and open dialogs their keys', async () 
   expect(pressed).toEqual([]);
 });
 
+// The base-branch and project pickers (search-popup.ts) are role="dialog" popups, not <dialog>s.
+it('leaves a picker its keys while it has the focus', async () => {
+  const { doc, pressed, press } = await start('Win32');
+  const picker = doc.body.appendChild(doc.createElement('div'));
+  picker.setAttribute('role', 'dialog');
+  picker.innerHTML = '<input type="search">';
+  expect(press('n', { ctrlKey: true }, picker.firstElementChild!)).toBe(false);
+  expect(press(',', { ctrlKey: true }, picker.firstElementChild!)).toBe(false);
+  expect(pressed).toEqual([]);
+});
+
 it('starts one chat while the key is held, and keeps an open Settings page where it is', async () => {
   let shown = false;
   const { pressed, press } = await start('Win32', () => shown);
