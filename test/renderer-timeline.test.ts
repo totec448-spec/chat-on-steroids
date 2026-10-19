@@ -3641,6 +3641,28 @@ describe('Esc in the empty composer during a turn', () => {
     expect(live.sent).toEqual([]);
   });
 
+  it('disarms on the arrows prompt recall takes, even when they leave the composer empty again', async () => {
+    const asked = [{ kind: 'user_message', seq: 1, time: T0 + 1000, source: 'extension', turnId: 't1', messageId: 'q-1', message: text('An earlier question') },
+      { kind: 'assistant_message', seq: 2, time: T0 + 2000, source: 'extension', turnId: 't1', messageId: 'a-2', message: text('An answer'), final: true, state: 'final' }] as SessionEvent[];
+    const { w } = await boot(asked);
+    const stop = vi.fn(async () => ({ ok: true, data: {} }));
+    (w as any).api.stopSessionTurn = stop;
+    const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+    const arrow = (key: string) => { const event = new w.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }); input.dispatchEvent(event); return event.defaultPrevented; };
+    esc(w);
+    expect(arrow('ArrowUp')).toBe(true);
+    expect(input.value).toBe('An earlier question');
+    input.setSelectionRange(input.value.length, input.value.length);
+    expect(arrow('ArrowDown')).toBe(true);
+    expect(input.value).toBe('');
+    expect(status(w)).toBe('');
+    // A fresh first press: it only asks.
+    expect(esc(w)).toBe(true);
+    await settle();
+    expect(stop).not.toHaveBeenCalled();
+    expect(status(w)).toBe('Press Esc again to stop the turn');
+  });
+
   it('does not let an Esc armed for one turn stop the next turn', async () => {
     const { w, append } = await boot([]);
     const api = (w as any).api;
