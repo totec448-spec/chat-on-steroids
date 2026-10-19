@@ -6,7 +6,8 @@ beforeEach(() => {
   vi.resetModules();
   dom = new JSDOM('<main><div class="scroll" id="chatBody"><div id="timeline">' +
     '<div class="said"><b>ChatGPT</b><div class="msg rich"><p>The loader reads <code>config.port</code> first.</p><p>Then it checks the file.</p></div></div>' +
-    '<p class="meta" id="note">Worked for 2m</p></div></div>' +
+    '<p class="meta" id="note">Worked for 2m</p>' +
+    '<div class="said is-user"><p class="msg user-message-text">Thanks</p><span class="message-edited">Edited version</span></div></div></div>' +
     '<form id="composer"><textarea id="chatInput"></textarea></form></main>', { url: 'https://local.test/', pretendToBeVisual: true });
   for (const key of ['window', 'document', 'Node', 'NodeFilter', 'Event'] as const) vi.stubGlobal(key, key === 'window' ? dom.window : dom.window[key]);
   vi.stubGlobal('getComputedStyle', dom.window.getComputedStyle.bind(dom.window));
@@ -32,6 +33,9 @@ it('marks every selected line as a quote and leaves a line under it to write on'
   expect(markdownQuote('\n\nfirst line  \r\nsecond\u00a0line\n\n\n\nnext paragraph\n\n')).toBe('> first line\n> second line\n>\n> next paragraph');
   expect(markdownQuote('   \n\n')).toBe('');
   expect(draftWithQuote('', '> a')).toBe('> a\n\n');
+  expect(draftWithQuote('Why?  ', '> a')).toBe('Why?  \n\n> a\n\n');
+  expect(draftWithQuote('Why?  \n \n', '> a')).toBe('Why?  \n\n> a\n\n');
+  expect(draftWithQuote(' \n ', '> a')).toBe('> a\n\n');
   expect(draftWithQuote('Why is that?\n\n\n', '> a')).toBe('Why is that?\n\n> a\n\n');
 });
 
@@ -60,6 +64,17 @@ it('reads the selected words as the message shows them, without the code panel c
   document.getElementById('timeline')!.append(typed);
   range.selectNodeContents(typed);
   expect(selectedText(range)).toBe('first line\n  indented line');
+});
+
+it('keeps a line break the message draws with <br>', async () => {
+  const { selectedText } = await import('../src/renderer/quote-selection.js');
+  const box = document.createElement('div');
+  box.className = 'said';
+  box.innerHTML = '<div class="msg rich"><p>Roses are red,<br>violets are blue,<br><strong>sugar</strong> is sweet</p></div>';
+  document.getElementById('timeline')!.append(box);
+  const range = document.createRange();
+  range.selectNodeContents(box.querySelector('p')!);
+  expect(selectedText(range)).toBe('Roses are red,\nviolets are blue,\nsugar is sweet');
 });
 
 it('quotes the words selected in an answer into the composer, after what is typed, without sending', async () => {
@@ -98,7 +113,21 @@ it('offers nothing outside a message or while the selection is still being dragg
   await frame();
   expect(button().hidden).toBe(true);
 
+  // A selection from one message into the next carries the status rows between them; a label
+  // inside a message's row is not its text.
   const words = document.querySelector('.msg p')!.firstChild!;
+  const thanks = document.querySelector('.user-message-text')!.firstChild!;
+  select(words, 0, thanks, 3);
+  await frame();
+  expect(button().hidden).toBe(true);
+  const edited = document.querySelector('.message-edited')!.firstChild!;
+  select(edited, 0, edited, 6);
+  await frame();
+  expect(button().hidden).toBe(true);
+  select(thanks, 0, thanks, 6);
+  await frame();
+  expect(button().hidden).toBe(false);
+
   document.dispatchEvent(new dom.window.Event('pointerdown', { bubbles: true }));
   select(words, 0, words, 10);
   await frame();
