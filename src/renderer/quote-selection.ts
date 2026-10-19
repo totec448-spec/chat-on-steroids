@@ -20,7 +20,9 @@ const CONTROLS = '.tool-output-header, button';
  */
 export function selectedText(range: Range): string {
   const root = range.commonAncestorContainer;
-  const walker = document.createTreeWalker(root.nodeType === 3 ? root.parentNode ?? root : root, NodeFilter.SHOW_TEXT);
+  // Text, and the <br> elements that break its lines.
+  const walker = document.createTreeWalker(root.nodeType === 3 ? root.parentNode ?? root : root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
+    { acceptNode: node => node.nodeType === 3 || (node as Element).tagName === 'BR' ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP });
   const shown = new Map<Element, { visible: boolean; verbatim: boolean }>();
   const look = (element: Element) => {
     let seen = shown.get(element);
@@ -38,9 +40,16 @@ export function selectedText(range: Range): string {
   let block: Element | null | undefined;
   let cell: Element | null = null;
   let formula: Element | null = null;
-  for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+  for (let next = walker.nextNode(); next; next = walker.nextNode()) {
+    if (!range.intersectsNode(next)) continue;
+    if (next.nodeType !== 3) {
+      if (text && look(next as Element).visible) text = `${text.trimEnd()}
+`;
+      continue;
+    }
+    const node = next as Text;
     const parent = node.parentElement;
-    if (!parent || !range.intersectsNode(node)) continue;
+    if (!parent) continue;
     const math = parent.closest('.katex');
     const { visible, verbatim } = look(math ?? parent);
     if (!visible) continue;
@@ -77,7 +86,8 @@ export function markdownQuote(selected: string): string {
 
 /** The draft with the quote after what is typed, and an empty line under it to write on. */
 export function draftWithQuote(draft: string, quote: string): string {
-  const typed = draft.trimEnd();
+  // Only the empty lines at the end go; spaces the person typed on the last line stay.
+  const typed = draft.trim() ? draft.replace(/(?:\r?\n[ \t]*)+$/, '') : '';
   // Without the blank line, the next words typed would still belong to the quote.
   return `${typed ? `${typed}\n\n` : ''}${quote}\n\n`;
 }
@@ -102,15 +112,17 @@ export function initQuoteSelection({ timeline, input }: QuoteSelectionDeps): voi
   let frame = 0;
 
   const hide = (): void => { button.hidden = true; };
-  const inMessage = (node: Node | null): boolean => {
+  /** The message text a selection end is in, never its labels, receipts or the rows between messages. */
+  const messageOf = (node: Node | null): Element | null => {
     const element = node?.nodeType === 1 ? node as Element : node?.parentElement ?? null;
-    return !!element && timeline.contains(element) && !!element.closest('.said') && !element.closest('button, input, textarea');
+    const message = element?.closest('.said .msg') ?? null;
+    return message && timeline.contains(message) && !element!.closest('button, input, textarea') ? message : null;
   };
   const update = (): void => {
     frame = 0;
     const selection = document.getSelection();
     const range = selection && !selection.isCollapsed && selection.rangeCount ? selection.getRangeAt(0) : null;
-    if (!range || pressed || input.closest('[hidden]') || !inMessage(selection!.anchorNode) || !inMessage(selection!.focusNode)) { hide(); return; }
+    if (!range || pressed || input.closest('[hidden]') || !messageOf(selection!.anchorNode) || messageOf(selection!.anchorNode) !== messageOf(selection!.focusNode)) { hide(); return; }
     if (stale) { quote = markdownQuote(selectedText(range)); stale = false; }
     // The button sits under the selection's last line, while that line is in view.
     const end = quote && typeof range.getClientRects === 'function' ? [...range.getClientRects()].filter(rect => rect.width || rect.height).at(-1) : undefined;
