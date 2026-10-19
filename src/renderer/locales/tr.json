@@ -43,6 +43,8 @@
   "Continue until this objective is satisfied.": "Bu hedefe ulaşılana kadar devam et.",
   "Keep working within the brief until paused.": "Duraklatılana kadar istek kapsamında çalışmaya devam et.",
   "By model": "Modele göre",
+  "By project": "Projeye göre",
+  "Unknown project": "Bilinmeyen proje",
   "By day": "Güne göre",
   "Code": "Kod",
   "est.": "tah.",

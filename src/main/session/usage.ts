@@ -75,6 +75,7 @@ async function computeOverview(signal?: AbortSignal): Promise<UsageOverview> {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const days = new Map<string, Map<string, UsageModelTokens>>();
   const models = new Map<string, UsageModelTokens>();
+  const projects = new Map<string | null, Map<string, UsageModelTokens>>();
   const messages = new Map<string, VerifiedMessage | null>();
   for (const session of sessions) {
     signal?.throwIfAborted();
@@ -155,6 +156,13 @@ async function computeOverview(signal?: AbortSignal): Promise<UsageOverview> {
       const totals = days.get(date) ?? new Map<string, UsageModelTokens>();
       mergeModels(totals, rows); days.set(date, totals); mergeModels(models, rows);
     }
+    // Grouped by the chat's project now, not when it ran: the cache holds no project, so moving
+    // a chat moves its whole history without rereading it.
+    if (cached.days.size) {
+      const project = projects.get(session.projectId ?? null) ?? new Map<string, UsageModelTokens>();
+      for (const rows of cached.days.values()) mergeModels(project, rows);
+      projects.set(session.projectId ?? null, project);
+    }
     for (const message of cached.messages) {
       const previous = messages.get(message.id);
       // Re-observing the same native ID never adds a send, including copied history.
@@ -187,6 +195,8 @@ async function computeOverview(signal?: AbortSignal): Promise<UsageOverview> {
     messages: { through, days: [...messageDays.values()].sort((a, b) => a.date.localeCompare(b.date)) },
     limits: limits.filter((entry) => Date.now() - entry.observedAt <= FRESH_MS && (entry.resetAt === null || entry.resetAt > Date.now())).map((entry) => ({ ...entry })),
     days: [...days].sort(([a], [b]) => a.localeCompare(b)).map(([date, rows]) => ({ date, tokens: [...rows.values()].reduce((sum, row) => sum + row.tokens, 0), models: [...rows.values()] })),
-    models: [...models.values()], tokens: [...models.values()].reduce((sum, row) => sum + row.tokens, 0), sessions: sessions.length
+    models: [...models.values()],
+    projects: [...projects].map(([projectId, rows]) => ({ projectId, tokens: [...rows.values()].reduce((sum, row) => sum + row.tokens, 0), models: [...rows.values()] })).sort((a, b) => b.tokens - a.tokens),
+    tokens: [...models.values()].reduce((sum, row) => sum + row.tokens, 0), sessions: sessions.length
   };
 }

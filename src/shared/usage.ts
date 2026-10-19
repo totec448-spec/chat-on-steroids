@@ -26,9 +26,13 @@ export interface UsageOverview {
   limits: ModelUsage[];
   days: Array<{ date: string; tokens: number; models: UsageModelTokens[] }>;
   models: UsageModelTokens[];
+  /** The same totals grouped by each chat's current project, largest first. */
+  projects: UsageProjectTokens[];
   tokens: number;
   sessions: number;
 }
+/** `projectId: null` holds the chats outside every project. */
+export interface UsageProjectTokens { projectId: string | null; tokens: number; models: UsageModelTokens[] }
 
 export interface UsageMessageDay { date: string; gpt56: number; gpt6: number }
 export type UsageMessageFamily = 'gpt-5.6' | 'gpt-6';

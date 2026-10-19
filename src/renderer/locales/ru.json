@@ -49,6 +49,8 @@
   "Continue until this objective is satisfied.": "Продолжать, пока цель не будет достигнута.",
   "Keep working within the brief until paused.": "Продолжать работу по заданию, пока она не будет поставлена на паузу.",
   "By model": "По моделям",
+  "By project": "По проектам",
+  "Unknown project": "Неизвестный проект",
   "By day": "По дням",
   "Code": "Код",
   "est.": "оцен.",

@@ -46,6 +46,8 @@
   "Continue until this objective is satisfied.": "Continuar até atingir este objetivo.",
   "Keep working within the brief until paused.": "Continuar trabalhando dentro do pedido até pausar.",
   "By model": "Por modelo",
+  "By project": "Por projeto",
+  "Unknown project": "Projeto desconhecido",
   "By day": "Por dia",
   "Auto": "Automático",
   "Browser bridge port": "Porta da ponte do navegador",
