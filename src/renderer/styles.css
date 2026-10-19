@@ -4109,13 +4109,30 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 /* Heading: 8px padding + 17px folder + 9px gap. Rows already supply 10px padding. */
 .project-group > .sess, .project-group > .worker-group { margin-inline-start: 24px; }
 .project-show-more { margin-inline-start: 34px; color: var(--faint); font-size: calc(14px * var(--text-scale, 1)); padding: 6px 0; border: 0; background: transparent; }
+/* Chat groups inside a project (#1038): one step in, a heading like the project's, its chats one more step in. */
+.project-group > .chat-group { position: relative; margin: 2px 0 2px 24px; }
+.chat-group-heading { display: flex; align-items: center; gap: 9px; padding: 6px 6px 6px 10px; border-radius: 8px; list-style: none; cursor: grab; user-select: none; }
+.chat-group-heading::-webkit-details-marker { display: none; }
+.chat-group-heading:hover, .chat-group-heading:has(.chat-group-menu[aria-expanded='true']) { background: var(--hover); }
+.chat-group-heading:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.chat-group-heading > .ico { color: var(--soft); }
+.chat-group-name { min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-group-count { flex: none; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; }
+/* The menu takes the count's place on hover or focus, in the chats' "⋯" column. */
+.chat-group-menu { display: none; }
+.chat-group-heading:is(:hover, :focus-within, :has(.chat-group-menu[aria-expanded='true'])) .chat-group-count { display: none; }
+.chat-group-heading:is(:hover, :focus-within, :has(.chat-group-menu[aria-expanded='true'])) .chat-group-menu { display: grid; }
+/* Heading: 10px padding + 17px icon + 9px gap; a row's own 10px padding then puts its title under the group's name. */
+.chat-group > .sess, .chat-group > .worker-group { margin-inline-start: 26px; }
+.chat-group-empty { margin: 2px 0 6px 36px; color: var(--faint); font-size: calc(13px * var(--text-scale, 1)); }
+.project-show-more.chat-group-show-more { margin-inline-start: 36px; }
 .sess[data-sort-scope] .sess-top { cursor: grab; user-select: none; }
 .sess-top:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-radius: 5px; }
 #sessionList.is-sorting, #sessionList.is-sorting * { cursor: grabbing; user-select: none; }
-:is(.sess, .project-group).is-sorting { opacity: .45; }
-:is(.sess, .project-group).sort-before::before, :is(.sess, .project-group).sort-after::after { content: ''; position: absolute; inset-inline: 0; height: 2px; border-radius: 2px; background: var(--blue); pointer-events: none; }
-:is(.sess, .project-group).sort-before::before { top: -2px; }
-:is(.sess, .project-group).sort-after::after { bottom: -2px; }
+:is(.sess, .project-group, .chat-group).is-sorting { opacity: .45; }
+:is(.sess, .project-group, .chat-group).sort-before::before, :is(.sess, .project-group, .chat-group).sort-after::after { content: ''; position: absolute; inset-inline: 0; height: 2px; border-radius: 2px; background: var(--blue); pointer-events: none; }
+:is(.sess, .project-group, .chat-group).sort-before::before { top: -2px; }
+:is(.sess, .project-group, .chat-group).sort-after::after { bottom: -2px; }
 
 /* Right-side work panes. Files and Sub-agents are mutually exclusive projections of the
    current task; the ChatGPT browser remains the independent left dock. */

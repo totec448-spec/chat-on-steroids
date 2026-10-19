@@ -37,6 +37,7 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-file-text': 'file-text',
   'i-folder': 'folder',
   'i-gear': 'gear-six',
+  'i-group': 'folder-simple',
   'i-git-branch': 'git-branch',
   'i-git-diff': 'git-diff',
   'i-globe': 'globe-hemisphere-west',
