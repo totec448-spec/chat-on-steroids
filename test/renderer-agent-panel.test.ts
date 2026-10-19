@@ -488,7 +488,7 @@ it('keeps a failed worker\'s last action in the roster', () => {
   const panel = createAgentPanel({ host: document.querySelector('main')!, toggle, load: async () => null, render: () => [], openMain: vi.fn(), working: () => false,
     agent: () => ({ state: 'failed', task: 'Run the tests', conversationId: 'c' }) });
   panel.update('prime', [{ id: 'one', title: 'One', updatedAt: 1, startedAt: 0, conversationId: 'c', origin: { agentId: 'worker-1' },
-    lastToolActivity: { title: 'Ran npm test', kind: 'run', since: 1 } } as SessionSummary]);
+    lastToolActivity: { title: 'Ran npm test', kind: 'run', since: 1 } } as unknown as SessionSummary]);
   toggle.click();
   expect(document.querySelector('.agent-card-last')?.textContent).toBe('Last action: Ran npm test');
   expect(document.querySelector('.agent-card-activity')).toBeNull();
