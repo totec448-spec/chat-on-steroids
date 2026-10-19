@@ -73,7 +73,7 @@ export function rangesIn(root: ParentNode, phrase: string): Range[] {
   return ranges;
 }
 
-export function initChatFind(deps: ChatFindDeps): { selectionChanged(): void } {
+export function initChatFind(deps: ChatFindDeps): { open(): void; selectionChanged(): void } {
   const bar = $('chatFind');
   const field = $<HTMLInputElement>('chatFindField');
   const count = $('chatFindCount');
@@ -175,5 +175,5 @@ export function initChatFind(deps: ChatFindDeps): { selectionChanged(): void } {
     open();
   });
   paintCount();
-  return { selectionChanged: close };
+  return { open, selectionChanged: close };
 }
