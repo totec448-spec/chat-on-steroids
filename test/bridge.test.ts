@@ -267,7 +267,7 @@ interface Reply {
 function request(
   method: string,
   path: string,
-  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string; extensionVersion?: string; protocol?: number; extensionBuild?: string; browser?: string; host?: string; engine?: string } = {}
+  options: { body?: unknown; origin?: string | null; auth?: string | null; raw?: string; extensionVersion?: string; protocol?: number; extensionBuild?: string; browser?: string; host?: string; engine?: string; userAgent?: string } = {}
 ): Promise<Reply> {
   const url = new URL(path, base);
   const payload = options.raw ?? (options.body === undefined ? null : JSON.stringify(options.body));
@@ -281,6 +281,7 @@ function request(
   if (options.browser) headers['x-extension-browser'] = options.browser;
   if (options.host) headers['x-extension-host'] = options.host;
   if (options.engine) headers['x-extension-engine'] = options.engine;
+  if (options.userAgent) headers['user-agent'] = options.userAgent;
   if (payload !== null) {
     headers['content-type'] = 'application/json';
     headers['content-length'] = String(Buffer.byteLength(payload));
@@ -683,6 +684,22 @@ describe('who is allowed to talk to it', () => {
     await request('GET', '/status', { host: 'browser', origin: firefox, extensionVersion: '2.1.37.1002' });
     expect((await bridgeStatus()).externalExtension).toMatchObject({ present: true, engine: 'gecko' });
     expect(await bridgeStatus()).toMatchObject({ extensionVersion: '2.1.37.1002', extensionEngine: 'gecko' });
+  });
+
+  // VM, 2026-10-19: with #1669 installed the banner still asked Firefox for a folder reload. Like
+  // Chrome, Firefox leaves the Origin off some of an add-on's requests, and each request rewrote the
+  // record. Its user agent is on every one.
+  it('keeps an older Firefox add-on apart on requests that carry no origin', async () => {
+    await pair();
+    const firefox = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0';
+    await request('GET', '/status', { host: 'browser', origin: 'moz-extension://3f0e5b1a-0c1d-4e2f-8a9b-0c1d2e3f4a5b', extensionVersion: '2.1.37.1002', userAgent: firefox });
+    await request('GET', '/status', { host: 'browser', origin: null, extensionVersion: '2.1.37.1002', userAgent: firefox });
+    expect((await bridgeStatus()).externalExtension).toMatchObject({ present: true, engine: 'gecko' });
+    expect(await bridgeStatus()).toMatchObject({ extensionVersion: '2.1.37.1002', extensionEngine: 'gecko' });
+    // Chrome's user agent says "like Gecko"; that is not Firefox.
+    const chrome = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36';
+    await request('GET', '/status', { host: 'browser', origin: null, extensionVersion: '2.1.37.1002', userAgent: chrome });
+    expect((await bridgeStatus()).extensionEngine).toBeUndefined();
   });
 
   // Chrome and Firefox both connected (VM, 2026-10-14): Setup showed whichever polled last, not the
