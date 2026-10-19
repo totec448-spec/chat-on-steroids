@@ -2762,5 +2762,15 @@
   "{0} characters": "{0}자",
   "from {0} events": "이벤트 {0}개에서 생성",
   "(~{0} tokens)": "(~{0} 토큰)",
-  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}"
+  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}",
+  "Sub-agent view": "서브에이전트 보기",
+  "Conversation": "대화",
+  "Loading activity…": "활동 불러오는 중…",
+  "Activity unavailable": "활동을 사용할 수 없음",
+  "Task": "작업",
+  "Files changed": "변경된 파일",
+  "No actions yet": "아직 작업 없음",
+  "Earlier actions are in the conversation.": "이전 작업은 대화에 있습니다.",
+  "Last action: {0}": "마지막 작업: {0}",
+  "Moved": "이동됨"
 }

@@ -2762,5 +2762,15 @@
   "{0} characters": "{0} ký tự",
   "from {0} events": "từ {0} sự kiện",
   "(~{0} tokens)": "(~{0} token)",
-  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}"
+  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}",
+  "Sub-agent view": "Chế độ xem tác nhân phụ",
+  "Conversation": "Cuộc trò chuyện",
+  "Loading activity…": "Đang tải hoạt động…",
+  "Activity unavailable": "Hoạt động không khả dụng",
+  "Task": "Nhiệm vụ",
+  "Files changed": "Tệp đã thay đổi",
+  "No actions yet": "Chưa có hành động nào",
+  "Earlier actions are in the conversation.": "Các hành động trước đó nằm trong cuộc trò chuyện.",
+  "Last action: {0}": "Hành động cuối: {0}",
+  "Moved": "Đã di chuyển"
 }

@@ -2852,5 +2852,15 @@
   "(~{0} tokens)": "(~{0} tokens)",
   "(~{0} tokens)|one": "(~{0} token)",
   "(~{0} tokens)|many": "(~{0} de tokens)",
-  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}"
+  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}",
+  "Sub-agent view": "Vista del subagente",
+  "Conversation": "Conversación",
+  "Loading activity…": "Cargando actividad…",
+  "Activity unavailable": "Actividad no disponible",
+  "Task": "Tarea",
+  "Files changed": "Archivos modificados",
+  "No actions yet": "Aún no hay acciones",
+  "Earlier actions are in the conversation.": "Las acciones anteriores están en la conversación.",
+  "Last action: {0}": "Última acción: {0}",
+  "Moved": "Movido"
 }
