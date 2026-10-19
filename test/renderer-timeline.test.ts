@@ -6131,6 +6131,43 @@ it.each([
   expect((await sendDuringTurn(followUp, { ...modifier, shiftKey: true })).sent.mode).toBe(mode);
 });
 
+// A typed app command sent the other way with Cmd/Ctrl+Shift+Enter during a turn went out as a Skill
+// directive ("/goal …" as text); it now runs as Enter runs it, and its rest goes the other way.
+async function typedDuringTurn(text: string, skills: Array<{ id: string; name: string }> = []) {
+  const app = await boot([], true);
+  const api = (app.w as any).api;
+  api.getSessionControls = async () => ({ ok: true, data: { sessionId: summary([]).id, automation: app.live.automation, activeTurnId: 'running-turn', canInject: false, canSendDirectly: true, queueAtFinish: false } });
+  api.skillLibrary = async () => ({ ok: true, data: { skills: skills.map(skill => ({ ...skill, description: '', path: `/skills/${skill.id}/SKILL.md`, scope: 'user', source: 'user', managed: true })), roots: [], errors: [], includeInstructions: true } });
+  await app.append([]);
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = text;
+  input.dispatchEvent(new app.w.Event('input', { bubbles: true }));
+  const mac = /^Mac/.test(globalThis.navigator.platform);
+  input.dispatchEvent(new app.w.KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, ctrlKey: !mac, metaKey: mac, bubbles: true, cancelable: true }));
+  await settle(); await settle();
+  return { ...app, input };
+}
+
+it('runs a typed /goal sent with Cmd/Ctrl+Shift+Enter during a turn and sends the rest the other way', async () => {
+  const { w, live } = await typedDuringTurn('/goal Reply with exactly: done');
+  expect(w.document.getElementById('sendOptions')!.hidden).toBe(false);
+  expect((w.document.getElementById('chatAutomation') as HTMLSelectElement).value).toBe('goal');
+  expect(live.sent).toHaveLength(1);
+  expect(live.sent[0]).toMatchObject({ text: 'Reply with exactly: done', automation: 'goal', mode: 'after-turn' });
+});
+
+it('runs a typed /rename sent with Cmd/Ctrl+Shift+Enter during a turn without sending anything', async () => {
+  const { w, live, input } = await typedDuringTurn('/rename');
+  expect(w.document.querySelector('#sessionList .sess-rename')).not.toBeNull();
+  expect(live.sent).toHaveLength(0);
+  expect(input.value).toBe('');
+});
+
+it('keeps a Skill named like a command a directive with Cmd/Ctrl+Shift+Enter, sent the other way', async () => {
+  const { live } = await typedDuringTurn('/goal Reply with exactly: done', [{ id: 'goal', name: 'Goal' }]);
+  expect(live.sent.at(-1)).toMatchObject({ text: '/goal Reply with exactly: done', mode: 'after-turn' });
+});
+
 // Codex's slash commands, each opening what the app already has.
 async function slash(command: string, selectExisting = true) {
   const app = await boot([], selectExisting);
