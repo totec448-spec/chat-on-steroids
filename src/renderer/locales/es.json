@@ -2580,6 +2580,8 @@
   "This task was sent or removed before your edit was saved, so your edit is in the composer.": "Esta tarea se envió o se eliminó antes de que se guardara tu cambio, así que tu cambio está en el editor.",
   "Markdown files": "Archivos Markdown",
   "Text files": "Archivos de texto",
+  "Wrap": "Ajustar",
+  "Save code": "Guardar código",
   "Approve a folder for ChatGPT": "Aprobar una carpeta para ChatGPT",
   "Import Skill folder": "Importar carpeta de skill",
   "Markdown skills": "Skills en Markdown",

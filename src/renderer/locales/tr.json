@@ -2543,6 +2543,8 @@
   "This task was sent or removed before your edit was saved, so your edit is in the composer.": "Bu görev, düzenlemeniz kaydedilmeden önce gönderildi veya kaldırıldı; düzenlemeniz giriş alanında.",
   "Markdown files": "Markdown dosyaları",
   "Text files": "Metin dosyaları",
+  "Wrap": "Satırları kaydır",
+  "Save code": "Kodu kaydet",
   "Approve a folder for ChatGPT": "ChatGPT için bir klasörü onayla",
   "Import Skill folder": "Skill klasörünü içe aktar",
   "Markdown skills": "Markdown skill’leri",

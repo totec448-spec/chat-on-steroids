@@ -2506,6 +2506,8 @@
   "This task was sent or removed before your edit was saved, so your edit is in the composer.": "編集を保存する前に、このタスクは送信または削除されました。編集内容は入力欄にあります。",
   "Markdown files": "Markdown ファイル",
   "Text files": "テキストファイル",
+  "Wrap": "折り返し",
+  "Save code": "コードを保存",
   "Approve a folder for ChatGPT": "ChatGPT に許可するフォルダーを選択",
   "Import Skill folder": "スキルフォルダーをインポート",
   "Markdown skills": "Markdown スキル",
