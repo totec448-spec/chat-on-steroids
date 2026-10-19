@@ -16134,6 +16134,9 @@ describe('the goal loop over the bridge', () => {
         reply: humanReply('rewrite the parser in rust'),
         model: 'deepseek/deepseek-v4-flash'
       });
+      // The page types it into a chat that has no id yet: whichever new chat it arrives in marks it the app's.
+      const { takeAutomaticReply } = await import('../src/main/session/automatic-replies.js');
+      expect(takeAutomaticReply('c-any-new-chat', humanReply('rewrite the parser in rust'))).toBe(true);
       // The opening turn is the last *conversation* message; the closing reminder the goal
       // loop appends after the transcript is a system message and sits behind it.
       expect(seen.filter((message) => message.role !== 'system').at(-1)!.content).toContain(

@@ -13,6 +13,7 @@ import { goalErrorKey, goalErrorMessage } from '../shared/goal-errors.js';
 import { MAX_CHATGPT_MESSAGE_CHARS, userPromptText } from '../shared/user-prompt.js';
 import { CONVERSATION_DELETED } from '../shared/chat-error.js';
 import { prepareSessionPrompt } from './session/prompt.js';
+import { NEW_CHAT, noteAutomaticReply } from './session/automatic-replies.js';
 import { pendingChatModelRequest, observeChatModels, requestChatModels } from './chat-models.js';
 import { isDeliberateEffort, isProModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
@@ -4397,6 +4398,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (!(await goalKeyPresent(opening ?? goalModeFor()))) return goalJson(res, 409, { error: 'no_api_key' }, origin);
     const drafted = await draftOpeningMessage(text, opening);
     if ('error' in drafted) return goalJson(res, 502, drafted, origin);
+    // The page types it into a new chat; the message it comes back as is the app's (#1655).
+    noteAutomaticReply(NEW_CHAT, drafted.reply);
     return goalJson(res, 200, drafted, origin);
   }
 

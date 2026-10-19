@@ -1355,6 +1355,9 @@ whoever wrote it, so a message with an `inputId` whose row is gone is left out. 
 follow-up is typed by its page and has no row: when a draft is ready the app notes its text for that
 chat (`session/automatic-replies.ts`, kept an hour), and the recorder marks the one sent message that
 comes back with that text (compared without Markdown escapes) `automatic: true`, which recall skips.
+An opening message the ChatGPT page drafts through `/goal/open` has no chat yet: it is noted under
+`NEW_CHAT` and taken by whichever chat it arrives in. The app's own opening goes through the outbox,
+whose `objective` row records the person's request as `authoredText`, so recall brings that back.
 Any other message with no row and no `inputId` was sent in ChatGPT itself and counts as typed, except
 a worker's or helper's, whose tasks come from the app. Messages without text, stored cut short, Compact & Resume prompts, folded earlier versions and
 queued inputs are not recalled either. The list is read at the first press, so a message recorded
