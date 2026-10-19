@@ -2677,7 +2677,7 @@ describe('worker settings authority', () => {
     expect(posted).toEqual([{ autoCompact: false, conversationId: CHAT }]);
   });
 
-  it('forwards compaction ticket, safe source loss, and both irreversible dispatch checkpoints', async () => {
+  it('forwards compaction ticket, safe source loss, a deferred automatic attempt, and both irreversible dispatch checkpoints', async () => {
     const posted: Record<string, unknown>[] = [];
     const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
       const url = new URL(input);
@@ -2697,12 +2697,15 @@ describe('worker settings authority', () => {
     await worker.send({ type: 'compact', conversationId: CHAT, ticket: true, automatic: true }, 44);
     const sourceError = 'The browser could not insert the handoff request (native_edit_rejected).';
     await worker.send({ type: 'compact', conversationId: CHAT, token, sourceLost: true, sourceError }, 44);
+    const deferredError = 'ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted.';
+    await worker.send({ type: 'compact', conversationId: CHAT, token, sourceDeferred: true, sourceError: deferredError }, 44);
     await worker.send({ type: 'compact', conversationId: CHAT, token, sourceDispatch: true }, 44);
     await worker.send({ type: 'compact', conversationId: CHAT, token, destinationDispatch: true }, 44);
 
     expect(posted).toEqual([
       expect.objectContaining({ conversationId: CHAT, ticket: true, automatic: true }),
       expect.objectContaining({ conversationId: CHAT, token, sourceLost: true, sourceError }),
+      expect.objectContaining({ conversationId: CHAT, token, sourceDeferred: true, sourceError: deferredError }),
       expect.objectContaining({ conversationId: CHAT, token, sourceDispatch: true }),
       expect.objectContaining({ conversationId: CHAT, token, destinationDispatch: true })
     ]);
@@ -4459,6 +4462,37 @@ describe('extension observation journal', () => {
 
     for (const reply of replies) expect(reply).toMatchObject({ ok: true, durable: true });
     expect(journalOf(session).map((entry) => entry.event.text)).toEqual(['A', 'B']);
+  });
+
+  // #1648: on a slow Windows machine every events message rewrote the whole journal (up to 4 MiB),
+  // one write after another, and pages waited up to ~100 s for their acknowledgement. Messages that
+  // arrive while a write is in flight share the next write: it is taken when it starts, so it holds
+  // every one of them, and each reply still waits until its observations are stored.
+  it('stores observations that arrive during a slow journal write together in one following write', async () => {
+    const local = new FakeStorageArea();
+    const session = new FakeStorageArea();
+    const journalWrites: string[][] = [];
+    const set = session.set.bind(session);
+    session.set = async (values: Record<string, unknown>) => {
+      if (Array.isArray(values.journal)) {
+        journalWrites.push((values.journal as Array<{ event: { text: string } }>).map(entry => entry.event.text));
+        // The first journal write is slow, as on the loaded machine.
+        if (journalWrites.length === 1) await new Promise((resolve) => setTimeout(resolve, 80));
+      }
+      return set(values);
+    };
+    const worker = loadWorker({ local, session });
+    // Each message comes from its own ChatGPT tab, as with a main chat and its workers.
+    const send = (text: string, time: number) => worker.send(
+      { type: 'events', entries: [{ conversationId: null, event: { kind: 'user_message', time, text } }] }, time);
+    const first = send('A', 1);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const later = ['B', 'C', 'D', 'E'].map((text, index) => send(text, index + 2));
+    const replies = await Promise.all([first, ...later]);
+
+    for (const reply of replies) expect(reply).toMatchObject({ ok: true, durable: true });
+    expect(journalOf(session).map((entry) => entry.event.text)).toEqual(['A', 'B', 'C', 'D', 'E']);
+    expect(journalWrites).toEqual([['A'], ['A', 'B', 'C', 'D', 'E']]);
   });
 
   it('serializes live tab snapshots so a slow older write cannot forget a newer tab owner', async () => {

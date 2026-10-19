@@ -515,11 +515,24 @@ async function persistJournalNow() {
   }
 }
 
+/** The write queued behind the one in flight; it has not taken its snapshot yet. */
+let queuedJournalWrite = null;
+
 function persistJournal() {
   // storage.session.set is asynchronous and whole-snapshot writes may complete out of order.
   // Serialize them so an older snapshot can never land after a newer one while both callers
   // were already told their observations were durable.
-  const write = journalWriteQueue.then(() => persistJournalNow());
+  //
+  // Each write stores the whole journal (up to 4 MiB), and the snapshot is taken when the write
+  // starts. Callers arriving while one write is in flight therefore share the next one: it holds
+  // all of their observations. One write per message cost a slow Windows machine ~29 s of service
+  // worker time in seven minutes and made pages wait up to ~100 s (#1648).
+  if (queuedJournalWrite) return queuedJournalWrite;
+  const write = journalWriteQueue.then(() => {
+    queuedJournalWrite = null;
+    return persistJournalNow();
+  });
+  queuedJournalWrite = write;
   journalWriteQueue = write.then(
     () => undefined,
     () => undefined
@@ -3852,6 +3865,7 @@ const COMPACT_CHECKPOINT_FLAGS = [
   'sourceDispatch',
   'sourceUndelivered',
   'sourceLost',
+  'sourceDeferred',
   'destinationAttempt',
   'destinationDispatch',
   'destinationLost'
@@ -4050,7 +4064,7 @@ const HANDLERS = {
     }
     if (message.recoveryAction && message.owner !== owner) return { ok: false };
     const result = await call(typeof message.partial === 'string' ? '/input/progress' : typeof message.response === 'string' ? '/input/answer' : message.fail === true ? '/input/fail' : message.ack === true ? '/input/ack' : '/input/claim', {
-      method: 'POST', body: JSON.stringify({ id, owner, conversationId, recoveryAction: ['stop', 'stopped'].includes(message.recoveryAction) ? message.recoveryAction : undefined, silenceBusyTurnId: typeof message.silenceBusyTurnId === 'string' ? message.silenceBusyTurnId : undefined, recoveryVeto: message.recoveryVeto === 'page-final' ? 'page-final' : undefined, requiresAuthorization: message.requiresAuthorization === true, authorize: message.authorize === true, intoTurn: message.intoTurn === true ? true : undefined, partial: typeof message.partial === 'string' ? message.partial.slice(-8000) : undefined, messageId: typeof message.messageId === 'string' ? message.messageId : undefined, error: message.error, detail: typeof message.detail === 'string' && /^[a-z-]{1,40}$/.test(message.detail) ? message.detail : undefined, response: typeof message.response === 'string' ? message.response.slice(0, 16001) : undefined, project: typeof message.project === 'string' && /^g-p-[0-9a-f]{32}$/.test(message.project) ? message.project : undefined })
+      method: 'POST', body: JSON.stringify({ id, owner, conversationId, recoveryAction: ['stop', 'stopped'].includes(message.recoveryAction) ? message.recoveryAction : undefined, silenceBusyTurnId: typeof message.silenceBusyTurnId === 'string' ? message.silenceBusyTurnId : undefined, recoveryVeto: message.recoveryVeto === 'page-final' ? 'page-final' : undefined, requiresAuthorization: message.requiresAuthorization === true, authorize: message.authorize === true, partial: typeof message.partial === 'string' ? message.partial.slice(-8000) : undefined, messageId: typeof message.messageId === 'string' ? message.messageId : undefined, error: message.error, detail: typeof message.detail === 'string' && /^[a-z-]{1,40}$/.test(message.detail) ? message.detail : undefined, response: typeof message.response === 'string' ? message.response.slice(0, 16001) : undefined, project: typeof message.project === 'string' && /^g-p-[0-9a-f]{32}$/.test(message.project) ? message.project : undefined })
     });
     if (typeof message.response === 'string' && message.lifetime === 'temporary-planner' && result.ok && result.data?.ok === true && ownsDocument(source)) {
       // Acceptance retires this exact helper immediately. Fresh page proof still

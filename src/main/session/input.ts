@@ -829,6 +829,33 @@ export function fileRotationInput(sessionId: string, turnId: string): Promise<In
   });
 }
 
+/**
+ * Where a fresh-turn continue (#1402) stands, for the tool call held for it (#1662): not yet sent,
+ * being sent (Send is authorized), or settled either way.
+ */
+export async function rotationDelivery(id: string): Promise<'pending' | 'sending' | 'settled'> {
+  const row = (await load()).find(entry => entry.id === id);
+  if (!row || row.purpose !== 'rotation') return 'settled';
+  if (row.state === 'queued' || (row.state === 'browser' && row.sendAuthorizedAt === undefined)) return 'pending';
+  return row.state === 'browser' ? 'sending' : 'settled';
+}
+
+/**
+ * Withdraws a fresh-turn continue that has not been sent, once the call it was held for has to
+ * answer. Sent after that answer it would land in the gap where ChatGPT queues it behind the
+ * reply. Nobody's message, so it leaves no notice; the turn is tried again at a later call.
+ */
+export function withdrawUnsentRotation(id: string): Promise<boolean> {
+  return serial(async () => {
+    const current = await load();
+    const row = current.find(entry => entry.id === id && entry.purpose === 'rotation' &&
+      (entry.state === 'queued' || (entry.state === 'browser' && entry.sendAuthorizedAt === undefined)));
+    if (!row) return false;
+    await commit(current.map(entry => entry === row ? { ...entry, state: 'cancelled' as const } : entry));
+    return true;
+  });
+}
+
 export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwner']): Promise<InputEntry> {
   return serial(async () => {
     const input = inputArgs.parse(raw);
@@ -1186,24 +1213,6 @@ export function sendQueuedInputNow(id: string): Promise<boolean> {
 }
 
 /** Revalidate the same durable claim immediately before sending; never hand out text again. */
-/**
- * Retires a claimed fresh-turn continue (#1402) that would be sent into the running answer while no
- * tool call of the chat runs, and names its turn. Only during a call does a native send end the turn
- * and continue in a fresh one. Sent while the model writes its answer, ChatGPT kept it until the
- * answer was done, then posted it and never answered (2.1.41 release round, Windows). The continue
- * was nobody's message, so it leaves no notice behind.
- */
-export function declineRotationSteer(id: string, owner: string, conversationId: string): Promise<string | null> {
-  return serial(async () => {
-    const current = await load();
-    const row = current.find(entry => entry.id === id && entry.owner === owner && entry.state === 'browser' &&
-      entry.conversationId === conversationId && entry.purpose === 'rotation' && entry.sendAuthorizedAt === undefined);
-    if (!row?.directTurn) return null;
-    await commit(current.map(entry => entry === row ? { ...entry, state: 'cancelled' as const } : entry));
-    return row.directTurn.id;
-  });
-}
-
 export function authorizeBrowserInput(id: string, owner: string, conversationId: string | null): Promise<boolean> {
   return serial(async () => {
     const current = await load();

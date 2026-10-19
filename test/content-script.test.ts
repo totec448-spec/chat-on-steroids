@@ -436,6 +436,7 @@ const startedCompactions = (harness: Harness): any[] =>
       !message.summary &&
       !message.sourceAttempt &&
       !message.sourceLost &&
+      !message.sourceDeferred &&
       !message.sourceDispatch &&
       !message.sourceMessageId &&
       !message.destinationAttempt &&
@@ -697,11 +698,12 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.filter(message => message.ack)).toHaveLength(change === 'accepted' ? 1 : 0);
     if (change === 'draft') expect(composerText(live.document)).toBe('My own draft');
   });
-  // 2026-10-15, the user's Mac chat: while ChatGPT thinks or runs tools it offers only Stop, no
-  // Send (measured live), so every automatic continue for a long turn timed out unsent and the
-  // turns broke at 41 and 52 minutes anyway. A rotation then does what #1402 decided by hand:
-  // Stop right after the tool result and send Continue. A person's own message never stops a turn.
-  it.each(['rotation', 'user'] as const)('stops a thinking turn for its automatic continue only (%s)', async purpose => {
+  // 2026-10-15, the user's Mac chat: while ChatGPT thinks it offers only Stop, no Send. 2.1.39 then
+  // stopped the turn for a fresh-turn continue. Measured 2026-10-18 (#1662): a Stop while one of the
+  // turn's tool calls runs made the model run that call again. A continue is now sent only into a
+  // running call (the app holds that call's answer for it), so neither message ever stops a turn:
+  // with no Send offered the page sends nothing and the app withdraws the continue.
+  it.each(['rotation', 'user'] as const)('never stops a thinking turn to send a message into it (%s)', async purpose => {
     let directTurn: { id: string; startedAt: number };
     live = await nonProHarness(`https://chatgpt.com/c/${chatA}`, {
       desktop_input: message => {
@@ -726,10 +728,10 @@ describe('desktop input delivery and helper ownership', () => {
     const stops = vi.fn(() => { actions.append(send); void settleTurn(live!); });
     stop.addEventListener('click', stops);
     const result = await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA, directTurn });
-    expect(stops).toHaveBeenCalledTimes(purpose === 'rotation' ? 1 : 0);
-    expect(sends()).toBe(purpose === 'rotation' ? 1 : 0);
-    expect(result).toEqual({ ok: purpose === 'rotation' });
-    expect(live.sent.filter(message => message.ack)).toHaveLength(purpose === 'rotation' ? 1 : 0);
+    expect(stops).not.toHaveBeenCalled();
+    expect(sends()).toBe(0);
+    expect(result).toEqual({ ok: false });
+    expect(live.sent.filter(message => message.ack)).toHaveLength(0);
   });
   // 2026-10-15, live on the VM: in the first turn of a chat the app opened, ChatGPT shows no row
   // for the question (#942), and every automatic continue was refused before its claim because
@@ -757,36 +759,6 @@ describe('desktop input delivery and helper ownership', () => {
     expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA, directTurn })).toEqual({ ok: true });
     expect(sends()).toBe(1);
     expect(live.sent.filter(message => message.ack)).toHaveLength(1);
-  });
-  // 2.1.41 release round, Windows: Send was offered because the model was writing its answer, and a
-  // fresh-turn continue sent then landed after that answer, unanswered. The page says when its Send
-  // would go into the running turn; the app refuses a continue there unless a tool call runs, and
-  // the page then sends nothing and takes its text back out of the composer.
-  it.each([true, false])('asks to send an automatic continue into the running turn and sends nothing when refused (allowed: %s)', async allowed => {
-    let directTurn: { id: string; startedAt: number };
-    const authorizations: Array<Record<string, unknown>> = [];
-    live = await nonProHarness(`https://chatgpt.com/c/${chatA}`, {
-      desktop_input: message => {
-        if (message.authorize) { authorizations.push(message); return { ok: true, data: { ok: allowed } }; }
-        if (message.ack || message.fail) return { ok: true, data: { ok: true } };
-        return { ok: true, data: { input: claimed({ directTurn, purpose: 'rotation' }) } };
-      }
-    });
-    startGenerating(live.document);
-    live.hook.observe(); await live.hook.flush();
-    const start = emitted(live.sent, 'turn_start').at(-1)!;
-    directTurn = { id: start.event.turnId as string, startedAt: start.event.time as number };
-    const sends = watchSend(live.document);
-    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
-      userTurn(live!.document, 'rotation-continue', text, { sent: false });
-      live!.document.querySelector('#prompt-textarea')!.textContent = '';
-    });
-    const result = await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA, directTurn });
-    expect(authorizations).toEqual([expect.objectContaining({ intoTurn: true })]);
-    expect(sends()).toBe(allowed ? 1 : 0);
-    expect(result).toEqual({ ok: allowed });
-    expect(live.sent.filter(message => message.fail)).toEqual([]);
-    expect(live.document.querySelector('#prompt-textarea')!.textContent).toBe('');
   });
   it('clears its own automatic continue when the Send it clicked did not take it', async () => {
     // 2.1.40 release round, Windows: a rotation fired right after a tool result while the model
@@ -15003,6 +14975,8 @@ describe('the Compact & resume control', () => {
     expect(compacts[0]).toMatchObject({ ticket: true, automatic: true });
     expect(compacts.some((message) => message.cancel === true)).toBe(false);
     expect(live.document.querySelector('.clf-pill-text')!.textContent).toContain('message box is not ready (composer_missing)');
+    expect(compacts).toContainEqual(expect.objectContaining({ token: 'tok-auto-missing-composer', sourceDeferred: true,
+      sourceError: expect.stringContaining('message box is not ready (composer_missing)') }));
   });
 
   it('uses the current rich-text composer for handoff even while its form marker is absent', async () => {
@@ -18223,6 +18197,10 @@ describe('the context meter and automatic compaction', () => {
     expect(stopped).toHaveBeenCalledTimes(compacts ? 1 : 0);
     expect(sends()).toBe(compacts ? 1 : 0);
     if (!compacts) expect(live.document.querySelector('.clf-pill-text')?.textContent ?? '').toContain('has not confirmed receiving');
+    // #1643: the app is told why this attempt stopped, so it can log and show it; the ticket stays.
+    const deferred = live.sent.filter((message) => message.type === 'compact' && message.sourceDeferred === true);
+    expect(deferred).toEqual(compacts ? [] : [expect.objectContaining({ token: 'receipt-token', sourceError: expect.stringContaining('has not confirmed receiving') })]);
+    expect(live.sent.some((message) => message.type === 'compact' && message.sourceLost === true)).toBe(false);
   });
 
   it.each(['distinct-pre-row', 'same-request-running', 'same-request-code-pending'])('waits for another outstanding call beside an answered native call (%s)', async mode => {
