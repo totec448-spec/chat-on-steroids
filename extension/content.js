@@ -9993,7 +9993,11 @@
       const awaitingResults = new Map();
       const awaitingRequests = new Set();
       const sourceNodes = new Set();
+      // What the last complete scan showed: this turn's calls, and whether ChatGPT shows any of
+      // them answered. Reset by every scan; an ambiguous or failed one leaves nothing to rely on.
+      let seen = { calls: 0, answered: false };
       const received = () => {
+        seen = { calls: 0, answered: false };
         const pageTurn = generationTurn();
         const source = fiberTurnFor(pageTurn);
         if (!source) return false;
@@ -10029,6 +10033,7 @@
             if (call.requestId) awaitingRequests.delete(call.requestId);
           } else if (!pending) awaitingResults.set(call.messageId, call);
         }
+        seen = { calls: [...sources].reduce((total, turn) => total + turn.calls.length, 0), answered: calls.some(call => call.answered) };
         // A missing row or a failed scan cannot acknowledge a call seen earlier.
         return awaitingResults.size === 0 && awaitingRequests.size === 0;
       };
@@ -10036,9 +10041,12 @@
       nativePhase = 'settling';
       renderControl();
       let endedPolls = 0;
+      let sent = null;
       const ready = await waitUntil(async () => {
         if (!current()) return true;
-        const count = await peekPendingTools(forId);
+        const peek = await peekCompactionActivity(forId);
+        const count = peek ? peek.pendingTools : null;
+        sent = peek ? peek.sentResults : null;
         if (!current()) return true;
         if (count !== 0) {
           endedPolls = 0;
@@ -10054,7 +10062,15 @@
         } else endedPolls = 0;
         const fresh = await refreshFiber(null, true);
         if (!current()) return true;
-        return fresh && received();
+        if (fresh && received()) return true;
+        // ChatGPT's page no longer sees a running turn's tool results until the turn ends
+        // (2026-10-19: none of 25 finished calls answered), so its receipt cannot be read mid-turn.
+        // Only when it shows this turn's calls and not one of them answered, the app's delivery
+        // stands in: nothing running or unsent, every result sent at least five seconds ago, and
+        // at least as many sent results as calls shown. A call the app never served (another app's
+        // tool) keeps the count short, and a request still without its row keeps waiting.
+        return !!fresh && seen.calls > 0 && !seen.answered && awaitingRequests.size === 0 &&
+          sent?.settled === true && Number.isInteger(sent.count) && sent.count >= seen.calls;
       }, AUTO_RECEIPT_SETTLE_MS);
       if (!current()) return t(
         'content_compact_chat_changed_waiting_results',
@@ -11268,10 +11284,19 @@
    * the answer. Null means the app could not be asked, which is not the same as zero.
    */
   async function peekPendingTools(forId = conversationId) {
+    return (await peekCompactionActivity(forId))?.pendingTools ?? null;
+  }
+
+  /** The app's running-call count, and its delivery of this turn's results when it has one. */
+  async function peekCompactionActivity(forId = conversationId) {
     const reply = await ask({ type: 'activity', conversationId: forId, since });
     if (!reply || reply.ok !== true || !reply.data) return null;
     const count = Number(reply.data.pendingTools);
-    return Number.isFinite(count) && count >= 0 ? count : null;
+    const sent = reply.data.sentResults;
+    return {
+      pendingTools: Number.isFinite(count) && count >= 0 ? count : null,
+      sentResults: sent && typeof sent === 'object' ? { count: Number(sent.count), settled: sent.settled === true } : null
+    };
   }
 
   /** Polls a condition. Resolves true when it holds, false when the budget runs out. */

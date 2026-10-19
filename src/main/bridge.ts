@@ -146,7 +146,7 @@ import {
   turnEndedDurably,
   requestTurnOwnershipCutoff
 } from './session/store.js';
-import { inFlightMcpRequests, inFlightToolCalls, runningToolCalls, runningToolProgress, settlingToolCalls } from './mcp/call-context.js';
+import { inFlightMcpRequests, inFlightToolCalls, runningToolCalls, runningToolProgress, sentResults, settlingToolCalls } from './mcp/call-context.js';
 import { nativeHandoffPrompt } from './session/handoff-prompt.js';
 import { DEFAULT_HANDOFF_PROMPT } from '../shared/handoff.js';
 import { briefShortfall, resumeBootstrapText } from './session/handoff.js';
@@ -3690,6 +3690,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // REQUEST_ID_GRACE_MS to file its history cannot change the workspace and must not add
         // a cross-chat 15-second tax to the machine-settle barrier.
         pendingTools: runningToolCalls(live.conversationId),
+        // Results this app has fully sent to ChatGPT in the open turn, at least five seconds ago.
+        // ChatGPT's page no longer sees a running turn's results, so the compaction barrier falls
+        // back to this when the page can see none at all (#1643 follow-up).
+        ...(live.activeTurnId && live.activeTurnStartedAt !== null
+          ? { sentResults: sentResults(live.conversationId, live.activeTurnStartedAt, SENT_RESULT_GRACE_MS) } : {}),
         progress: conversationProgress(live.conversationId),
         // Diagnostic only. A finished unattributed call is still being placed into durable
         // history; unknown ownership is conservatively projected onto every chat until that
@@ -9069,6 +9074,9 @@ const AUTOMATIC_ASKING_RETRY_PAUSE_MS = 10 * 60_000;
  * next working turn opens a fresh ticket, as before.
  */
 const AUTOMATIC_ASKING_RETRY_BURSTS = 2;
+
+/** How long a fully sent result must have been out before the compaction barrier counts it as received. */
+const SENT_RESULT_GRACE_MS = 5_000;
 
 /** Whether a recorded question is its conversation's first, by ChatGPT's own parent ("root"), by question. */
 const firstQuestions = new Map<string, boolean>();
