@@ -5294,7 +5294,8 @@ work must name the original PR/author and carry appropriate GitHub-linked `Co-au
 trailers; update `CONTRIBUTORS.md` and distinguish incorporated code from reports/proposals.
 Closing a PR or rewriting its implementation does not remove the contributor's credit.
 
-Record changes and actual checks in a focused worklog. Keep security reproductions/private
+Record changes and actual checks in the PR description (Test, Live proof), never as a worklog
+file in the PR (CONTRIBUTING.md "Clean contents"). Keep security reproductions/private
 session material out of public docs and fixtures; follow `SECURITY.md`. Do not package, install,
 commit or publish merely because a source/documentation task was requested.
 
