@@ -6310,6 +6310,25 @@ it('drops a typed /export when another chat opens while the Skills load', async 
   expect(app.live.sent).toHaveLength(0);
 });
 
+it('drops a typed /export and keeps the new draft when the draft changes while the Skills load', async () => {
+  const app = await boot([]);
+  const api = (app.w as any).api;
+  let release!: (value: unknown) => void;
+  api.skillLibrary = () => new Promise(resolve => { release = resolve; });
+  api.exportMarkdown = vi.fn(async () => ({ ok: true, data: { done: 'saved', name: 'chat.md' } }));
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = '/export';
+  app.w.document.getElementById('composer')!.dispatchEvent(new app.w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  input.value = 'Keep this draft';
+  input.dispatchEvent(new app.w.Event('input', { bubbles: true }));
+  release({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+  await settle(); await settle();
+  expect(api.exportMarkdown).not.toHaveBeenCalled();
+  expect(input.value).toBe('Keep this draft');
+  expect(app.live.sent).toHaveLength(0);
+});
+
 it('opens Find in chat with /find, its field focused', async () => {
   const { w, row, input } = await slash('find');
   row!.click(); await settle();
