@@ -2752,5 +2752,13 @@
   "{0} characters": "{0} ký tự",
   "from {0} events": "từ {0} sự kiện",
   "(~{0} tokens)": "(~{0} token)",
-  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}"
+  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}",
+  "Keyboard shortcuts": "Phím tắt",
+  "Message box": "Ô tin nhắn",
+  "New line": "Xuống dòng",
+  "Send the other way while ChatGPT works": "Gửi theo cách còn lại khi ChatGPT đang làm việc",
+  "Earlier messages, in an empty message box": "Tin nhắn trước đây, khi ô tin nhắn trống",
+  "Sidebar": "Thanh bên",
+  "Move the focused chat or project": "Di chuyển cuộc trò chuyện hoặc dự án đang chọn",
+  "Workspace panels": "Các bảng của không gian làm việc"
 }

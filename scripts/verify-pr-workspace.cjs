@@ -303,6 +303,18 @@ app.whenReady().then(async () => {
     await until(`${viewItem('zoom-reset')}?.querySelector('.row-menu-hint').textContent==='100%'`);
     await js(`document.getElementById('viewMenu').click()`);
     await until(`!document.querySelector('.row-menu')`);
+    // Keyboard shortcuts from a real Ctrl+/ (⌘/ on a Mac): every row's keys inside the card; Escape closes it.
+    win.webContents.sendInputEvent({type:'keyDown',keyCode:'/',modifiers:[process.platform==='darwin'?'meta':'control']});
+    await until(`document.getElementById('shortcutsDialog').open`);
+    const shortcuts=await js(`(()=>{const d=document.getElementById('shortcutsDialog'),b=d.getBoundingClientRect();return {rows:d.querySelectorAll('dt').length,outside:[...d.querySelectorAll('dt, kbd')].filter(n=>{const r=n.getBoundingClientRect();return r.left<b.left-1||r.right>b.right+1}).length}})()`);
+    assert.deepEqual(shortcuts,{rows:18,outside:0}); await screenshot('shortcuts-dialog');
+    win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});
+    await until(`!document.getElementById('shortcutsDialog').open`);
+    await js(`document.getElementById('viewMenu').click()`);
+    await js(`${viewItem('shortcuts')}.click()`);
+    await until(`document.getElementById('shortcutsDialog').open&&!document.querySelector('.row-menu')`);
+    await js(`document.getElementById('shortcutsClose').click()`);
+    await until(`!document.getElementById('shortcutsDialog').open`);
     await js(`document.querySelector('[data-tab=appearance]').click();window.fixture.setLanguage('en')`);
     const heights=await js(`['appearanceFont','appearanceSize','setupProfile'].map(id=>{const n=document.getElementById(id).closest('.setting');return n.getBoundingClientRect().height})`);
     assert.ok(Math.max(...heights)-Math.min(...heights)<2,JSON.stringify(heights));

@@ -2842,5 +2842,13 @@
   "(~{0} tokens)": "(~{0} tokens)",
   "(~{0} tokens)|one": "(~{0} token)",
   "(~{0} tokens)|many": "(~{0} de tokens)",
-  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}"
+  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}",
+  "Keyboard shortcuts": "Atalhos de teclado",
+  "Message box": "Caixa de mensagem",
+  "New line": "Nova linha",
+  "Send the other way while ChatGPT works": "Enviar do outro jeito enquanto o ChatGPT trabalha",
+  "Earlier messages, in an empty message box": "Mensagens anteriores, com a caixa de mensagem vazia",
+  "Sidebar": "Barra lateral",
+  "Move the focused chat or project": "Mover o chat ou projeto em foco",
+  "Workspace panels": "Painéis da área de trabalho"
 }

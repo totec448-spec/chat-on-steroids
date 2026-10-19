@@ -2,7 +2,8 @@
  * The title bar's View menu: one icon button opening the same menu as a sidebar row's (its look,
  * motion and keyboard), with each action's icon and shortcut. Zoom steps keep it open, their value
  * updating in place once the zoom is applied (`refresh`). Show browser (the built-in CoS browser,
- * as the tray says it) is there only while that browser is the one ChatGPT runs in.
+ * as the tray says it) is there only while that browser is the one ChatGPT runs in. Keyboard
+ * shortcuts opens the dialog that lists every key (shortcuts-dialog.ts).
  */
 import { t, ui } from './i18n.js';
 import { refreshRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem } from './row-menu.js';
@@ -10,6 +11,7 @@ import { primaryShortcut } from './shortcuts.js';
 
 export interface ViewMenuActions {
   search(): void;
+  shortcuts(): void;
   /** Whether the built-in CoS browser is the selected ChatGPT browser. */
   cosBrowser(): boolean;
   showCosBrowser(): void;
@@ -48,6 +50,10 @@ export function initViewMenu(actions: ViewMenuActions): { refresh(): void } {
       action: 'zoom-reset', icon: 'i-zoom-reset', keepOpen: true,
       shortcut: () => primaryShortcut('0'), label: () => t('Actual size'),
       hint: () => `${Math.round(actions.zoom.percent())}%`, run: () => void actions.zoom.reset()
+    },
+    {
+      action: 'shortcuts', icon: 'i-keyboard', separated: true,
+      shortcut: () => primaryShortcut('/'), label: () => t('Keyboard shortcuts'), run: actions.shortcuts
     }
   ];
   button.addEventListener('click', () => toggleRowMenu({ owner: OWNER, anchor: () => button, label: () => t('View'), items }));

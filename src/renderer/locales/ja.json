@@ -2752,5 +2752,13 @@
   "{0} characters": "{0}文字",
   "from {0} events": "{0}件のイベントから",
   "(~{0} tokens)": "（約{0}トークン）",
-  "{0} · {1} {2} · {3}": "{0} · {1}{2} · {3}"
+  "{0} · {1} {2} · {3}": "{0} · {1}{2} · {3}",
+  "Keyboard shortcuts": "キーボードショートカット",
+  "Message box": "メッセージ欄",
+  "New line": "改行",
+  "Send the other way while ChatGPT works": "ChatGPT の作業中にもう一方の方法で送信",
+  "Earlier messages, in an empty message box": "以前のメッセージ（メッセージ欄が空のとき）",
+  "Sidebar": "サイドバー",
+  "Move the focused chat or project": "フォーカス中のチャットやプロジェクトを移動",
+  "Workspace panels": "ワークスペースのパネル"
 }
