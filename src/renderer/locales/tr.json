@@ -2807,5 +2807,15 @@
   "from {0} events|one": "{0} olaydan",
   "(~{0} tokens)": "(~{0} token)",
   "(~{0} tokens)|one": "(~{0} token)",
-  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}"
+  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}",
+  "Sub-agent view": "Yardımcı ajan görünümü",
+  "Conversation": "Sohbet",
+  "Loading activity…": "Etkinlik yükleniyor…",
+  "Activity unavailable": "Etkinlik kullanılamıyor",
+  "Task": "Görev",
+  "Files changed": "Değişen dosyalar",
+  "No actions yet": "Henüz eylem yok",
+  "Earlier actions are in the conversation.": "Önceki eylemler sohbette.",
+  "Last action: {0}": "Son eylem: {0}",
+  "Moved": "Taşındı"
 }

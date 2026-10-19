@@ -2852,5 +2852,15 @@
   "(~{0} tokens)": "(~{0} jetons)",
   "(~{0} tokens)|one": "(~{0} jeton)",
   "(~{0} tokens)|many": "(~{0} de jetons)",
-  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}"
+  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}",
+  "Sub-agent view": "Vue du sous-agent",
+  "Conversation": "Conversation",
+  "Loading activity…": "Chargement de l’activité…",
+  "Activity unavailable": "Activité indisponible",
+  "Task": "Tâche",
+  "Files changed": "Fichiers modifiés",
+  "No actions yet": "Aucune action pour l’instant",
+  "Earlier actions are in the conversation.": "Les actions précédentes sont dans la conversation.",
+  "Last action: {0}": "Dernière action : {0}",
+  "Moved": "Déplacé"
 }
