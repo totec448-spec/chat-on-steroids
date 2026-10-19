@@ -2806,5 +2806,15 @@
   "from {0} events|one": "aus {0} Ereignis",
   "(~{0} tokens)": "(ca. {0} Tokens)",
   "(~{0} tokens)|one": "(ca. {0} Token)",
-  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}"
+  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}",
+  "Sub-agent view": "Ansicht des Unteragenten",
+  "Conversation": "Unterhaltung",
+  "Loading activity…": "Aktivität wird geladen …",
+  "Activity unavailable": "Aktivität nicht verfügbar",
+  "Task": "Aufgabe",
+  "Files changed": "Geänderte Dateien",
+  "No actions yet": "Noch keine Aktionen",
+  "Earlier actions are in the conversation.": "Frühere Aktionen stehen in der Unterhaltung.",
+  "Last action: {0}": "Letzte Aktion: {0}",
+  "Moved": "Verschoben"
 }
