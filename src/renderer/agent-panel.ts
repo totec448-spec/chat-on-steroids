@@ -21,6 +21,11 @@ export function workerName(id: string, label: string | undefined): string {
   return number ? t('Worker {0}', [number]) : id;
 }
 
+/** One word per agent state, the same in the panel, Settings and Activity (English catalog keys). */
+export const AGENT_STATE_WORDS: Readonly<Record<string, string>> = {
+  active: 'Working', invited: 'Opening', waking: 'Waking', detached: 'No tab', sleeping: 'Idle', failed: 'Failed', finished: 'Finished'
+};
+
 /** How long a round's workers glow as the panel opens on them (`agent-arrive` in styles.css). */
 const ARRIVAL_MS = 1600;
 
@@ -156,10 +161,7 @@ export function createAgentPanel(options: {
         const content = el('span', 'agent-card-content');
         const heading = el('span', 'agent-card-heading');
         heading.append(el('strong', 'agent-card-name', name), el('span', 'agent-card-time', elapsed));
-        const statusLabel: Record<string, string> = {
-          working: 'Working', active: 'Working', invited: 'Opening', waking: 'Waking', detached: 'No tab',
-          sleeping: 'Idle', failed: 'Failed', history: 'Finished'
-        };
+        const statusLabel: Record<string, string> = { ...AGENT_STATE_WORDS, working: 'Working', history: 'Finished' };
         const meta = el('span', 'agent-card-meta');
         const part = (className: string, text: string | (() => string)): void => {
           if (meta.childElementCount) meta.append(el('span', 'agent-card-sep', '·'));

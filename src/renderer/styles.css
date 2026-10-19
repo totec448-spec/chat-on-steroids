@@ -1793,6 +1793,16 @@ main {
   display: none;
 }
 
+/* Said in the interface's font, not the log's. */
+.feed.is-empty::before {
+  content: attr(data-empty);
+  display: block;
+  padding: 12px 8px;
+  color: var(--faint);
+  font-family: var(--ui-font, system-ui, sans-serif);
+  font-size: calc(13px * var(--text-scale, 1));
+}
+
 [data-panel='activity'] .card {
   grid-template-rows: auto minmax(0, 1fr) auto;
 }
