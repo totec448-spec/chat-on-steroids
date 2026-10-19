@@ -10066,7 +10066,7 @@
         // ChatGPT's page no longer sees a running turn's tool results until the turn ends
         // (2026-10-19: none of 25 finished calls answered), so its receipt cannot be read mid-turn.
         // Only when it shows this turn's calls and not one of them answered, the app's delivery
-        // stands in: nothing running or unsent, every result sent at least five seconds ago, and
+        // stands in: nothing running or unsent, every result sent at least 1.5 s ago, and
         // at least as many sent results as calls shown. A call the app never served (another app's
         // tool) keeps the count short, and a request still without its row keeps waiting.
         return !!fresh && seen.calls > 0 && !seen.answered && awaitingRequests.size === 0 &&

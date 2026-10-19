@@ -3690,7 +3690,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // REQUEST_ID_GRACE_MS to file its history cannot change the workspace and must not add
         // a cross-chat 15-second tax to the machine-settle barrier.
         pendingTools: runningToolCalls(live.conversationId),
-        // Results this app has fully sent to ChatGPT in the open turn, at least five seconds ago.
+        // Results this app has fully sent to ChatGPT in the open turn, at least SENT_RESULT_GRACE_MS ago.
         // ChatGPT's page no longer sees a running turn's results, so the compaction barrier falls
         // back to this when the page can see none at all (#1643 follow-up).
         ...(live.activeTurnId && live.activeTurnStartedAt !== null
@@ -9075,8 +9075,12 @@ const AUTOMATIC_ASKING_RETRY_PAUSE_MS = 10 * 60_000;
  */
 const AUTOMATIC_ASKING_RETRY_BURSTS = 2;
 
-/** How long a fully sent result must have been out before the compaction barrier counts it as received. */
-const SENT_RESULT_GRACE_MS = 5_000;
+/**
+ * How long a fully sent result must have been out before the compaction barrier counts it as received.
+ * ChatGPT starts its next call 4–7 s after a result (measured live, 2026-10-19), so a longer grace
+ * never sees a moment with nothing running; delivery through the tunnel takes well under a second.
+ */
+const SENT_RESULT_GRACE_MS = 1_500;
 
 /** Whether a recorded question is its conversation's first, by ChatGPT's own parent ("root"), by question. */
 const firstQuestions = new Map<string, boolean>();
