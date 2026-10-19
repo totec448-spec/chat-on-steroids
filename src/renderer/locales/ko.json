@@ -512,6 +512,7 @@
   "Provider busy · retry {0}{1}": "공급자 사용 중 · 재시도 {0}{1}",
   "Stop requested": "중지 요청됨",
   "Stop turn": "턴 중지",
+  "Press Esc again to stop the turn": "턴을 중지하려면 Esc를 한 번 더 누르세요",
   "Cancel delivery": "전달 취소",
   "Queue plan at Session finish": "세션 종료 시 플랜을 대기열에 추가",
   "Start full plan": "전체 플랜 시작",

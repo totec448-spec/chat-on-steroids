@@ -3598,6 +3598,55 @@ it('stops directly from the empty composer without a second Stop menu action', a
   expect(input.value).toBe('');
 });
 
+describe('Esc in the empty composer during a turn', () => {
+  const esc = (w: JSDOM['window'], init: KeyboardEventInit = {}) => {
+    const event = new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...init });
+    w.document.getElementById('chatInput')!.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  const status = (w: JSDOM['window']) => w.document.getElementById('composerStatus')!.textContent;
+
+  it('stops the running turn on a second Esc, and only says so on the first', async () => {
+    const { w } = await boot([]);
+    const stop = vi.fn(async () => ({ ok: true, data: {} }));
+    (w as any).api.stopSessionTurn = stop;
+    expect(esc(w)).toBe(true);
+    await settle();
+    expect(stop).not.toHaveBeenCalled();
+    expect(status(w)).toBe('Press Esc again to stop the turn');
+    expect(esc(w)).toBe(true);
+    await settle();
+    expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'held-turn');
+    expect(status(w)).toBe('');
+  });
+
+  it('does not stop for Esc with a draft, a held Esc, a key between, modifiers or a late second Esc', async () => {
+    const { w } = await boot([]);
+    const stop = vi.fn(async () => ({ ok: true, data: {} }));
+    (w as any).api.stopSessionTurn = stop;
+    const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+    input.value = 'Keep this draft'; input.dispatchEvent(new w.Event('input'));
+    expect(esc(w)).toBe(false); esc(w);
+    expect(status(w)).toBe('');
+    input.value = ''; input.dispatchEvent(new w.Event('input'));
+    esc(w); esc(w, { repeat: true }); esc(w, { repeat: true });
+    input.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Shift', bubbles: true, cancelable: true }));
+    expect(status(w)).toBe('');
+    esc(w); expect(esc(w, { ctrlKey: true })).toBe(false);
+    const now = performance.now.bind(performance);
+    let skew = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now() + skew);
+    try {
+      esc(w); skew = 1_600;
+      // Too late to stop: this press only asks again.
+      expect(esc(w)).toBe(true);
+      expect(status(w)).toBe('Press Esc again to stop the turn');
+    } finally { clock.mockRestore(); }
+    await settle();
+    expect(stop).not.toHaveBeenCalled();
+  });
+});
+
 it('shows Stop immediately for a queued first send, switches to Send for a new draft, and cancels through the same button', async () => {
   const { w, live } = await boot([], false);
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;

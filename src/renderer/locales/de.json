@@ -522,6 +522,7 @@
   "Provider busy · retry {0}{1}": "Anbieter ausgelastet · neuer Versuch {0}{1}",
   "Stop requested": "Stopp angefordert",
   "Stop turn": "Durchlauf stoppen",
+  "Press Esc again to stop the turn": "Zum Stoppen des Durchlaufs erneut Esc drücken",
   "Cancel delivery": "Zustellung abbrechen",
   "Queue plan at Session finish": "Plan zum Sitzungsende einreihen",
   "Start full plan": "Ganzen Plan starten",

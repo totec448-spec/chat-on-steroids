@@ -518,6 +518,7 @@
   "Provider busy · retry {0}{1}": "Nhà cung cấp đang bận · thử lại {0}{1}",
   "Stop requested": "Đã yêu cầu dừng",
   "Stop turn": "Dừng lượt",
+  "Press Esc again to stop the turn": "Nhấn Esc lần nữa để dừng lượt",
   "Cancel delivery": "Hủy gửi",
   "Queue plan at Session finish": "Xếp Plan khi kết thúc phiên",
   "Start full plan": "Bắt đầu toàn bộ Plan",
