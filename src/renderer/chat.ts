@@ -2211,6 +2211,8 @@ let recall: { generation: number; draft: number; prompts: readonly string[]; bac
  * is yours, unless it is a worker's: its tasks come from the app.
  */
 function typedPrompt(event: Extract<SessionEvent, { kind: 'user_message' }>): boolean {
+  // A Goal or Loop follow-up its page typed has no outbox row; the recorder marked it.
+  if (event.automatic) return false;
   // The recorded row id is exact; the message id also finds a row this window read before its receipt.
   const rows = pendingComposerInputs.filter(row => row.id === event.inputId ||
     (!!event.messageId && (row.messageId ? row.messageId === event.messageId : event.messageId === `input:${row.id}`)));
