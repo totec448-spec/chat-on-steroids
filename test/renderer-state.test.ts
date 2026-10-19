@@ -846,6 +846,45 @@ it('keeps keyboard focus on the same card, worker arrow or filter across a live 
   expect(doc.activeElement).toBe(cardTop());
 });
 
+it("opens the next and previous chat in the sidebar's drawn order with Ctrl+Tab and Ctrl+Shift+Tab, wrapping at the ends", async () => {
+  const { project, session } = projectSidebarFixture();
+  const mounted = await mountChat({}, [], {
+    listProjects: async () => ({ ok: true, data: [project] }),
+    listSessions: async () => listed([session, inboxChat('c1'), inboxChat('c2'), inboxChat('c3')])
+  });
+  const doc = mounted.window.document, w = mounted.window;
+  await vi.waitFor(() => expect(doc.querySelector('#chatList .sess[data-id="c3"]')).not.toBeNull());
+  const selected = () => doc.querySelector<HTMLElement>('#sessionList .sess.is-sel')?.dataset.id;
+  const press = (shiftKey = false, target: EventTarget = doc.body, repeat = false) => {
+    const event = new w.KeyboardEvent('keydown', { key: 'Tab', ctrlKey: true, shiftKey, repeat, bubbles: true, cancelable: true });
+    target.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  expect(selected()).toBeUndefined();
+  // From a new chat: the first chat drawn. The collapsed project's chat is not on the way.
+  expect(press()).toBe(true);
+  expect(selected()).toBe('c1');
+  press(); expect(selected()).toBe('c2');
+  press(true); expect(selected()).toBe('c1');
+  // The ends wrap, as a browser's tabs do; a held key does not race through the list.
+  press(true); expect(selected()).toBe('c3');
+  expect(press(false, doc.body, true)).toBe(true); expect(selected()).toBe('c3');
+  press(); expect(selected()).toBe('c1');
+  // An opened project's chat takes its place in the order, above the chats outside projects.
+  doc.querySelector<HTMLElement>(`[data-project-id="${project.id}"] > .project-heading`)!.click();
+  press(true); expect(selected()).toBe('project-session');
+  // From a library page the step shows the chat, as a click on its row does.
+  doc.getElementById('sidebarPlugins')!.click();
+  expect(doc.querySelector<HTMLElement>('.app')!.dataset.screen).toBe('library');
+  press(); expect(selected()).toBe('c1');
+  expect(doc.querySelector<HTMLElement>('.app')!.dataset.screen).toBe('chat');
+  // The terminal keeps its keys; Settings hides the list, so there is nothing to walk.
+  const terminal = doc.createElement('div'); terminal.className = 'xterm'; doc.body.append(terminal);
+  expect(press(false, terminal)).toBe(false); expect(selected()).toBe('c1');
+  doc.getElementById('workspaceSettings')!.click();
+  expect(press()).toBe(false); expect(selected()).toBe('c1');
+});
+
 /** The inbox's cards, top to bottom, by session id. */
 const inboxCardIds = (doc: Document) => [...doc.querySelectorAll<HTMLElement>('.inbox-cards > .sess-card')].map(row => row.dataset.id);
 /** One card's state on its meta line: its words, and the card itself for its title and accessible text. */
