@@ -2290,6 +2290,27 @@ it('saves a code block where the save dialog says, offering only its bare name i
   expect(await save({ text: 'x', name: 'snippet.txt' })).toEqual({ ok: true, data: { done: 'cancelled' } });
 });
 
+it('leaves a code file the person chose to replace whole when writing the new one fails', async () => {
+  const folder = path.join(dir, 'code-replace');
+  const target = path.join(folder, 'kept.ts');
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(target, 'const kept = true;\n', 'utf8');
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: target } as never);
+  const writeFile = fs.writeFile.bind(fs);
+  // The disk fills up partway: whatever file is being written ends up cut short.
+  const write = vi.spyOn(fs, 'writeFile').mockImplementationOnce(async (file) => {
+    await writeFile(file, 'const half', 'utf8');
+    throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' });
+  });
+  try {
+    expect(await handlers.get('code:save')!(null, { text: 'const replaced = true;\n', name: 'snippet.ts' })).toMatchObject({ ok: false });
+  } finally {
+    write.mockRestore();
+  }
+  expect(await fs.readFile(target, 'utf8')).toBe('const kept = true;\n');
+  expect(await fs.readdir(folder)).toEqual(['kept.ts']);
+});
+
 describe('native worker checkout cleanup confirmation', () => {
   const offer = {
     runId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',

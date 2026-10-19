@@ -1,4 +1,5 @@
 import { promises as fs } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { app, dialog, type BrowserWindow } from 'electron';
 import { dialogLabel, mainText } from './main-texts.js';
@@ -18,6 +19,14 @@ export async function saveCodeFile(text: string, name: string, owner: BrowserWin
   };
   const result = owner ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options);
   if (result.canceled || !result.filePath) return { done: 'cancelled' };
-  await fs.writeFile(result.filePath, text, 'utf8');
+  // A file the person chose to replace stays whole until the new one is: write beside it, then rename over it.
+  const temporary = `${result.filePath}.${randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(temporary, text, 'utf8');
+    await fs.rename(temporary, result.filePath);
+  } catch (error) {
+    await fs.rm(temporary, { force: true });
+    throw error;
+  }
   return { done: 'saved', name: path.basename(result.filePath) };
 }
