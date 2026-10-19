@@ -256,6 +256,31 @@ describe('what leaves this machine', () => {
     expect(JSON.stringify(projected)).not.toMatch(/exec_command|SECRET_ARGUMENT|SECRET_RESULT/);
   });
 
+  // 2.1.43, live on Windows: a Goal step split by two fresh turns ran its five commands as 2 + 2 + 1.
+  // The rotated turns have no answer, so the helper saw "1 tool call" and asked three more times.
+  it('counts the calls of the turns a fresh turn continued into the answer that finished them', async () => {
+    const { rotationMessage } = await import('../src/shared/recovery.js');
+    const session = await createSession({ title: 'rotated count', conversationId: 'rotated-count' });
+    await appendEvent(session.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'Run five commands', chars: 17, truncated: false } });
+    let time = 110, index = 0;
+    const call = async (turnId: string) => appendEvent(session.id, { time: time++, source: 'mcp', kind: 'tool_call', turnId, call: {
+      callId: `rot-call-${index}`, tool: 'exec_command', attribution: 'request_id', requestId: `rot-request-${index++}`, conversationId: session.conversationId,
+      attributionMethod: 'request_id', outcome: 'ok', durationMs: 1, args: { text: '{}', chars: 2, truncated: false },
+      result: { text: 'ok', chars: 2, truncated: false }, summary: { kind: 'run', tone: 'neutral', title: 'Ran a command' } } });
+    const rotation = async () => appendEvent(session.id, { time: time++, source: 'extension', kind: 'user_message', authoredText: '',
+      message: { text: rotationMessage(), chars: rotationMessage().length, truncated: false } });
+    await call('rot-1'); await call('rot-1'); await rotation();
+    await call('rot-2'); await call('rot-2'); await rotation();
+    await call('rot-3');
+    await appendEvent(session.id, { time: time++, source: 'extension', kind: 'assistant_message', turnId: 'rot-3', messageId: 'rot-final', final: true,
+      message: { text: 'rotation-goal-done', chars: 18, truncated: false } });
+    const projected = await goal.conversationMessages(session.id);
+    expect(projected).toEqual([
+      { role: 'user', content: 'Run five commands' },
+      { role: 'assistant', content: 'rotation-goal-done\n\n[Chat On Steroids: 5 tool calls ran in this turn, 4 of them before Chat On Steroids continued it in a fresh turn. Arguments and results are not shown.]' }
+    ]);
+  });
+
   it('gives the helper the reply a content-reference pointer stands for, not the pointer (#574)', async () => {
     const session = await createSession({ title: 'pointer replies', conversationId: 'pointer-replies' });
     await appendEvent(session.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'Hi', chars: 2, truncated: false } });
