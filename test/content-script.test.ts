@@ -18177,6 +18177,34 @@ describe('the context meter and automatic compaction', () => {
     expect(sends()).toBe(1);
   });
 
+  it.each([
+    ['sent and settled', { count: 1, settled: true }, false, true],
+    ['still within the grace', { count: 1, settled: false }, false, false],
+    ['a call the app never served', { count: 0, settled: true }, false, false],
+    ['the page sees results itself', { count: 2, settled: true }, true, false]
+  ] as const)('lets the app\'s delivery stand in for a receipt the page cannot read (%s)', async (_case, sentResults, pageSeesResults, compacts) => {
+    // 2026-10-19: ChatGPT's page no longer sees a running turn's tool results until the turn ends,
+    // so the receipt wait ran out mid-turn every time and automatic compaction waited for the end.
+    live = await harness(undefined, {
+      activity: () => withContext(205_000, settings({ auto: true }), { pendingTools: 0, sentResults }),
+      compact: () => ({ ok: true, data: { token: 'sent-token', prompt: 'Write the brief.', ...automaticTicket('not-attempted') } })
+    });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'sent-source', []);
+    const unanswered = compactionCall(false);
+    compactionFiber(section, () => pageSeesResults
+      ? [{ ...compactionCall(true), messageId: 'native-answered', requestId: 'wfr-native-answered' }, unanswered]
+      : [unanswered], () => []);
+    const stopped = vi.fn(() => stopGenerating(live!.document));
+    live.document.querySelector('[data-testid="stop-button"]')!.addEventListener('click', stopped);
+    const sends = watchSend(live.document);
+    await live.hook.startCompact(true);
+    expect(stopped).toHaveBeenCalledTimes(compacts ? 1 : 0);
+    expect(sends()).toBe(compacts ? 1 : 0);
+    if (!compacts) expect(live.sent.filter((message) => message.type === 'compact' && message.sourceDeferred === true))
+      .toEqual([expect.objectContaining({ sourceError: expect.stringContaining('has not confirmed receiving') })]);
+  });
+
   it.each([[120_000, true], [8 * 60_000, false]])('lets a local poll of %i ms finish before stopping an automatic source (compacts: %s)', async (pollMs, compacts) => {
     // #825: long unit tests are polled with write_stdin, and one poll can run for five minutes.
     // The automatic barrier gave up after 30 seconds, so a busy turn never compacted.

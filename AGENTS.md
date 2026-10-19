@@ -2521,6 +2521,18 @@ projection. Restart/reinstallation cannot mint a new turn for that same answer a
 detach its recorded MCP proof; adopting the recorded identity emits no new `turn_start`.
 `recordedQuestionId` carries that same response's native question across a partial transcript
 load. Adoption consumes an already-matching Send receipt instead of opening the response again.
+`recordedQuestionFirst: true` (absent otherwise) says that question's recorded parent is ChatGPT's
+`root`. A chat's first exchange can run with no question anywhere, page model included; MAIN then
+stamps it `data-clf-fiber-first` (valid only under its current turn stamp) when it is the
+conversation's first entry, in progress, with no user slot or user message. Compact & Resume's
+source check accepts that place as the recorded first question only while the page shows that one
+exchange and no user message at all; any shown question still has to match by id.
+`sentResults: { count, settled }` (open turns only) is the app's delivery of that turn's results:
+outer provider calls whose HTTP response finished at least 1.5 s ago, and `settled` false while one
+of the chat's calls runs, is unsent, failed to send or is within that grace (an unproven owner
+counts against every chat). ChatGPT's page does not see a running turn's tool results until the
+turn ends, so the automatic barrier accepts this only when its complete scan shows this turn's
+calls with none answered, no request waiting for its row, and `count` at least that call count.
 An empty or refused first activity reply does not permanently consume adoption: until this
 document has owned a generation, a later feed may restore the recorded turn when its exact
 question is the current native question. Manual Stop, a newer local generation, bootstrap
