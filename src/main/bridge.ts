@@ -1047,12 +1047,14 @@ export async function bridgeStatus(): Promise<BridgeStatus> {
 }
 
 /**
- * Whether the request comes from Firefox's add-on. It says so in `x-extension-engine` since 2.1.38;
- * an older add-on still has its moz-extension:// origin, and its update banner must not ask for a
- * reload from the app's folder, which a signed add-on cannot do.
+ * Whether the request comes from Firefox's add-on. It says so in `x-extension-engine` since 2.1.38.
+ * An older add-on is told by its moz-extension:// origin or, on requests Firefox sends without one
+ * (see originOf), by its user agent; its update banner must not ask for a reload from the app's
+ * folder, which a signed add-on cannot do.
  */
 function geckoExtension(req: http.IncomingMessage): boolean {
-  return req.headers['x-extension-engine'] === 'gecko' || String(req.headers.origin ?? '').startsWith('moz-extension://');
+  return req.headers['x-extension-engine'] === 'gecko' || String(req.headers.origin ?? '').startsWith('moz-extension://') ||
+    /\bFirefox\/\d/.test(String(req.headers['user-agent'] ?? ''));
 }
 
 function versionStatus(): Pick<BridgeStatus, 'extensionVersion' | 'extensionEngine'> {
