@@ -6,6 +6,7 @@ import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js
 import { initDurableStore, flushDurable, resetDurableForTests } from '../src/main/durable.js';
 import { observeRequestCorrelation, requestCorrelation } from '../src/main/session/correlation.js';
 import { recordToolCall, recordChatObservations, recordRequestEvidence, sessionForConversation, flushRecorder, resetRecorderForTests } from '../src/main/session/recorder.js';
+import { noteAutomaticReply, resetAutomaticRepliesForTests } from '../src/main/session/automatic-replies.js';
 import { appendEvent, createSession, flushSessions, initSessionStore, readActivityEvents, readAsset, readEvents, readRecentEvents, resetSessionStoreForTests, unsetSessionRootForTests, upsertMessageEvent } from '../src/main/session/store.js';
 
 let dir = '';
@@ -178,6 +179,31 @@ it('an old canonical message cannot hide a gap before a byte-bounded cold journa
   expect(tail.events.some((event) => event.seq === 2)).toBe(false);
   // General explicit history must still fall back to disk instead of trusting that gap.
   expect((await readEvents(session.id, { from: 2, limit: 1 }))[0]?.seq).toBe(2);
+});
+
+// Prompt recall (#1655): a Goal or Loop follow-up is typed by its page, so it reaches ChatGPT with no
+// outbox row and came back from Up as if the person had typed it (Mac release round, 2026-10-19).
+it('marks the message a Goal or Loop follow-up came back as, and only that one', async () => {
+  resetAutomaticRepliesForTests();
+  const id = await sessionForConversation('conv-auto');
+  const at = Date.now();
+  const user = (messageId: string, text: string, time: number) => ({ kind: 'user_message' as const, time, messageId, text });
+  noteAutomaticReply('conv-auto', 'continue with `step two` and *check* it', at);
+  noteAutomaticReply('conv-other', 'typed by a person here', at);
+  await recordChatObservations('conv-auto', [
+    user('q-1', 'typed by a person here', at + 1),
+    // ChatGPT stores text the page inserted with Markdown escaped.
+    user('q-2', 'continue with \\`step two\\` and \\*check\\* it', at + 2)
+  ]);
+  // A re-observation without the mark keeps it, and the same text later is the person's.
+  await recordChatObservations('conv-auto', [user('q-2', 'continue with \\`step two\\` and \\*check\\* it', at + 2),
+    user('q-3', 'continue with `step two` and *check* it', at + 3)]);
+  await flushRecorder();
+  const latest = new Map((await readEvents(id!, { kinds: ['user_message'] })).map(event => [event.kind === 'user_message' ? event.messageId : '', event]));
+  const automatic = (messageId: string) => { const event = latest.get(messageId); return event?.kind === 'user_message' ? event.automatic : 'missing'; };
+  expect(automatic('q-1')).toBeUndefined();
+  expect(automatic('q-2')).toBe(true);
+  expect(automatic('q-3')).toBeUndefined();
 });
 
 // Edit & resubmit (#365): ChatGPT keeps an edited question as a new version beside the old one,
