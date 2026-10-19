@@ -1711,6 +1711,18 @@ describe('the message a person would have typed', () => {
     expect(typed).toContain('https://example.com/build/latest');
   });
 
+  // VM, 2026-10-19: a Goal follow-up said "run powershel -NoProfile -Command ...". A command
+  // written without backticks is still a command, and a word the reply must contain is literal.
+  it.each([
+    // In each draft the protected word is the only one a mistake could go into.
+    ['a command line without backticks', 'ok, run powershell -NoProfile now', 'powershell -NoProfile'],
+    ['a command after run', 'pls run npm install now', 'npm install'],
+    ['quoted text', 'say "checked" now', '"checked"'],
+    ['the word a reply must be', 'say the word ready now', 'the word ready']
+  ])('keeps %s exact', (_, written, kept) => {
+    expect(goal.humanReply(written)).toContain(kept);
+  });
+
   it('leaves a message with nothing to spoil exactly as it was', () => {
     expect(goal.humanReply('ok cool')).toBe('ok cool');
   });
