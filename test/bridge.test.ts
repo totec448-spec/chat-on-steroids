@@ -9785,6 +9785,15 @@ describe('unattributed activity recovery', () => {
     expect(second.body).not.toHaveProperty('recordedQuestionFirst');
   });
 
+  it('reports the open turn\'s sent results, and none without an open turn', async () => {
+    await pair();
+    const chat = randomUUID();
+    await events(chat, [{ kind: 'user_message', messageId: 'sent-question', parentId: 'root', text: 'Work on it', time: Date.now(), authoredNow: true }]);
+    expect((await request('GET', `/activity?conversationId=${chat}&since=0`)).body).not.toHaveProperty('sentResults');
+    await events(chat, [openTurn('sent-turn')]);
+    expect((await request('GET', `/activity?conversationId=${chat}&since=0`)).body.sentResults).toEqual({ count: 0, settled: true });
+  });
+
   it.each(['normal', 'pro'] as const)('does not continue or reload a %s final observed by another document of the same response', async model => {
     const previous = getConfig();
     const input = await import('../src/main/session/input.js');
