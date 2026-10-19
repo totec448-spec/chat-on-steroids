@@ -3972,7 +3972,8 @@ dictates with Windows' own `Windows.Media.SpeechRecognition` engine (online, wit
 punctuation) and falls back to offline `System.Speech` when that cannot run;
 `status: 'listening'` carries `engine: 'modern' | 'legacy'`, and the renderer tells
 the person when only the basic engine listens. Its fixed error sentences are catalog
-keys. Only an explicit microphone click starts it;
+keys. Only an explicit microphone click, or holding Ctrl+Space in the composer, starts it;
+letting go of the held keys (or the window losing focus) stops it like a second click.
 the renderer owns the current composer draft, stops on manual edits/navigation,
 and never sends recognized text automatically. Stop creates a per-session stop file
 that the child polls; it then finishes the phrase in progress and exits, with 4 s

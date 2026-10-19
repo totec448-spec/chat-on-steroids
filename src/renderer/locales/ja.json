@@ -5,6 +5,8 @@
   "Stopping dictation": "音声入力を停止しています",
   "Retry dictation": "音声入力を再試行",
   "Start dictation": "音声入力を開始",
+  "hold {0}": "{0} を長押し",
+  "Space": "Space",
   "Dictation did not stop normally. Please try again.": "音声入力を正常に停止できませんでした。もう一度お試しください。",
   "Stopping dictation…": "音声入力を停止しています…",
   "Dictation could not start. Check microphone access and try again.": "音声入力を開始できませんでした。マイクへのアクセスを確認して再試行してください。",

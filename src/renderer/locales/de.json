@@ -5,6 +5,8 @@
   "Stopping dictation": "Diktat wird beendet",
   "Retry dictation": "Diktat erneut versuchen",
   "Start dictation": "Diktat starten",
+  "hold {0}": "{0} halten",
+  "Space": "Leertaste",
   "Dictation did not stop normally. Please try again.": "Das Diktat wurde nicht ordnungsgemäß beendet. Bitte erneut versuchen.",
   "Stopping dictation…": "Diktat wird beendet…",
   "Dictation could not start. Check microphone access and try again.": "Diktat konnte nicht gestartet werden. Bitte Mikrofonzugriff prüfen und erneut versuchen.",

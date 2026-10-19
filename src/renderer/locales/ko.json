@@ -5,6 +5,8 @@
   "Stopping dictation": "받아쓰기 중지 중",
   "Retry dictation": "받아쓰기 다시 시도",
   "Start dictation": "받아쓰기 시작",
+  "hold {0}": "{0} 길게 누르기",
+  "Space": "Space",
   "Dictation did not stop normally. Please try again.": "받아쓰기가 정상적으로 중지되지 않았습니다. 다시 시도하세요.",
   "Stopping dictation…": "받아쓰기 중지 중…",
   "Dictation could not start. Check microphone access and try again.": "받아쓰기를 시작할 수 없습니다. 마이크 접근 권한을 확인한 후 다시 시도하세요.",
