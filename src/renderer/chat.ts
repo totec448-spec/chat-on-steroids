@@ -3,6 +3,7 @@ import { completedDilText } from '../shared/dil-tables.js';
 import { initChatSearch, type ChatSearch } from './chat-search.js';
 import { initChatFind } from './chat-find.js';
 import { createWorkspaceTerminal } from './workspace-terminal.js';
+import { sendTerminalSelection } from './terminal-selection.js';
 import { createWorkspaceDocks } from './workspace-docks.js';
 import { currentLanguage, ui, t, tn } from './i18n.js';
 import { APP_COMMANDS, initSkills } from './skills.js';
@@ -8144,11 +8145,12 @@ export function initChat(next: Deps): void {
     onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); }
   });
   reviewPanel.update(selectedLocalProject());
+  const onSendSelection = (text: string): boolean => sendTerminalSelection($<HTMLTextAreaElement>('chatInput'), text);
   workspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.bottomBody,
-    { onEmpty: () => docks.setBottomOpen(false), onClosePanel: () => docks.setBottomOpen(false) });
+    { onEmpty: () => docks.setBottomOpen(false), onClosePanel: () => docks.setBottomOpen(false), onSendSelection });
   workspaceTerminal.update(selectedLocalProject());
   rightWorkspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.body,
-    { id: 'workspaceTerminalRight', dockedTabs: true, onTabsChanged: () => docks.sync() });
+    { id: 'workspaceTerminalRight', dockedTabs: true, onTabsChanged: () => docks.sync(), onSendSelection });
   rightWorkspaceTerminal.update(selectedLocalProject());
   docks.register('review', 'Review', 'i-git-diff', mount => {
     reviewPanel?.mountAt(mount); void reviewPanel?.show();
