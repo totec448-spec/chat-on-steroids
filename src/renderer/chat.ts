@@ -11,6 +11,7 @@ import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedCo
 import { marked, Marked, type TokenizerAndRendererExtension } from 'marked';
 import { safeExternalLink } from '../shared/external-link.js';
 import { createAgentPanel, workerName } from './agent-panel.js';
+import { KIND_ICON } from './agent-activity.js';
 import { createFilePanel } from './file-panel.js';
 import { renderAgentPlan } from './agent-plan.js';
 import { userPromptText } from '../shared/user-prompt.js';
@@ -54,7 +55,6 @@ import type { RunningExecProcess } from '../shared/background-exec.js';
  */
 
 import type {
-  ActivitySummary,
   AgentState,
   Handoff,
   MessageReference,
@@ -102,24 +102,6 @@ const api = window.api;
 let chatSearch: ChatSearch | null = null;
 let chatFind: ReturnType<typeof initChatFind> | null = null;
 
-/** Sprite id per tool-call family. Deliberately reuses the existing icon set. */
-const KIND_ICON: Record<ActivitySummary['kind'], string> = {
-  edit: 'i-pencil',
-  create: 'i-plus',
-  delete: 'i-trash',
-  move: 'i-out',
-  read: 'i-eye',
-  search: 'i-search',
-  browse: 'i-folder',
-  run: 'i-terminal',
-  process: 'i-terminal',
-  screen: 'i-monitor',
-  input: 'i-monitor',
-  clipboard: 'i-copy',
-  session: 'i-steps',
-  agent: 'i-bolt',
-  other: 'i-bolt'
-};
 
 /**
  * How close to the end of the model list counts as asking for the next page, in pixels.
@@ -7941,6 +7923,7 @@ export function initChat(next: Deps): void {
       const outlined = await api.turnTraces(id, traceTurnIds(detail.events)).catch(() => null);
       return { events: detail.events, traces: outlined?.ok ? outlined.data ?? {} : {} };
     },
+    loadActivity: async id => (await run(api.getSession(id, { limit: 400, actions: true })))?.events ?? null,
     openMain: selectSession, working: sessionWorking,
     modelLabel: chatModelName,
     agent: worker => [...(swarm?.agents ?? []), ...(swarm?.retainedWorkers ?? [])].find(entry => entry.role === 'worker' && entry.id === worker.origin?.agentId &&

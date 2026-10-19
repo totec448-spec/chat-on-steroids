@@ -2761,5 +2761,15 @@
   "{0} characters": "{0} 个字符",
   "from {0} events": "来自 {0} 个事件",
   "(~{0} tokens)": "（约 {0} Token）",
-  "{0} · {1} {2} · {3}": "{0} · {1}{2} · {3}"
+  "{0} · {1} {2} · {3}": "{0} · {1}{2} · {3}",
+  "Sub-agent view": "子智能体视图",
+  "Conversation": "对话",
+  "Loading activity…": "正在加载活动…",
+  "Activity unavailable": "活动不可用",
+  "Task": "任务",
+  "Files changed": "已更改的文件",
+  "No actions yet": "暂无操作",
+  "Earlier actions are in the conversation.": "更早的操作在对话中。",
+  "Last action: {0}": "最后操作：{0}",
+  "Moved": "已移动"
 }

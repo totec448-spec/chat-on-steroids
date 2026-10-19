@@ -2761,5 +2761,15 @@
   "{0} characters": "{0}文字",
   "from {0} events": "{0}件のイベントから",
   "(~{0} tokens)": "（約{0}トークン）",
-  "{0} · {1} {2} · {3}": "{0} · {1}{2} · {3}"
+  "{0} · {1} {2} · {3}": "{0} · {1}{2} · {3}",
+  "Sub-agent view": "サブエージェントの表示",
+  "Conversation": "会話",
+  "Loading activity…": "アクティビティを読み込み中…",
+  "Activity unavailable": "アクティビティを利用できません",
+  "Task": "タスク",
+  "Files changed": "変更されたファイル",
+  "No actions yet": "まだアクションはありません",
+  "Earlier actions are in the conversation.": "それ以前のアクションは会話にあります。",
+  "Last action: {0}": "最後のアクション: {0}",
+  "Moved": "移動済み"
 }
