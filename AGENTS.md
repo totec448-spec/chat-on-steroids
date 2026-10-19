@@ -4097,6 +4097,20 @@ unpinned groups and a drag never crosses between them. Only recorded chats are p
 workers or unattributed activity. Pinned rows carry a quiet pin mark at rest (it makes way for the
 row's "⋯" on hover, focus or while its menu is open), and Pin chat/Unpin chat is the first item of
 the chat's row menu, keeping keyboard focus on the rebuilt row's menu button.
+Chat groups (#1038) are named groups inside a project, one level deep, for sorting its chats; they
+never change a chat's project, folder, permissions or anything a tool call sees. `main/chat-groups.ts`
+keeps them in the durable store `chat-groups` (`{ version: 1, groups: [{ id, projectId, name,
+createdAt }], members: { sessionId: groupId } }`; names trimmed and folded, 1–60 characters; up to
+100 groups per project and 5000 grouped chats; a corrupt store starts empty). IPC `chatGroups:get`,
+`chatGroups:create` (project must exist and not be removed; returns `{ group, state }`),
+`chatGroups:rename`, `chatGroups:delete` (its chats stay in the project, ungrouped) and
+`chatGroups:assign { sessionId, groupId | null }` (only a non-worker chat of the group's own project);
+deleting a chat forgets its membership. A membership counts only while its chat is a non-worker chat
+of the group's project (`chatGroupOf`). The sidebar draws a project's groups first, ordered with the
+drag scope `groups:<projectId>`, each with its chats in scope `group:<groupId>` (pinned first, paged
+like the project), then the project's ungrouped chats. A group holding the open chat shows open.
+Project menu: New group; chat menu: Move to group (this project's groups, New group…) and Remove
+from group. Names use the shared in-app dialog `renderer/name-dialog.ts`.
 The worker drawer is a read-only split view of the selected worker's own recorded conversation;
 opening it never switches the prime composer. Its cards show the scoped worker id, task, observed
 current-conversation model and broker status when known, falling back to recorded session activity.
