@@ -2366,7 +2366,6 @@
   "Keep plugin URLs across restarts": "재시작 후에도 플러그인 URL 유지",
   "For your own tunnel, such as a named Cloudflare tunnel, whose URL ChatGPT stores. Anyone with that URL can use your Chat On Steroids plugins until you turn this off. Needs secure storage.": "이름이 지정된 Cloudflare 터널처럼 ChatGPT가 URL을 저장하는 직접 운영하는 터널용입니다. 이 설정을 끌 때까지 그 URL을 가진 사람은 누구나 Chat On Steroids 플러그인을 사용할 수 있습니다. 보안 저장소가 필요합니다.",
   "Start a fresh turn after": "새 턴 시작 간격",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Not used with Pro models, Goal, Loop or sub-agents.": "긴 작업은 도구 결과 직후 자동 계속으로 새 턴에서 이어집니다. 턴이 짧을수록 덜 끊깁니다. Pro 모델, Goal, Loop, 하위 에이전트에는 사용되지 않습니다.",
   "20 minutes": "20분",
   "30 minutes": "30분",
   "45 minutes": "45분",
@@ -2777,5 +2776,6 @@
   "Switch at any time. Your chats stay as they are.": "언제든지 바꿀 수 있습니다. 채팅은 그대로 유지됩니다.",
   "Chats sit under their project folders.": "채팅이 프로젝트 폴더 아래에 놓입니다.",
   "All chats in one list, active ones on top.": "모든 채팅을 한 목록에, 활성 채팅은 맨 위에.",
-  "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "한 채팅이 동시에 실행할 수 있는 서브에이전트 채팅의 최대 수. 연결된 브라우저 확장 프로그램이 필요합니다."
+  "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "한 채팅이 동시에 실행할 수 있는 서브에이전트 채팅의 최대 수. 연결된 브라우저 확장 프로그램이 필요합니다.",
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "긴 작업은 도구 결과 직후 자동 계속으로 새 턴에서 이어집니다. 턴이 짧을수록 덜 끊깁니다. Goal 및 Loop 채팅에서도 사용됩니다. Pro 모델과 서브에이전트 자체 채팅에서는 사용되지 않습니다."
 }
