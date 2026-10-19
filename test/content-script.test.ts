@@ -18232,6 +18232,37 @@ describe('the context meter and automatic compaction', () => {
     expect(live.sent.some((message) => message.type === 'compact' && message.sourceLost === true)).toBe(false);
   });
 
+  it('tries again once the helper answers whatever stopped the attempt while it was down, and only once', async () => {
+    // Live 2026-10-19 (VM): with the helper unreadable, a pickup stopped at a different check ("The
+    // original question has not loaded yet"). The reason is the page's; the retry follows the helper.
+    let readable = false;
+    live = await harness(undefined, {
+      activity: () => withContext(205_000, settings({ auto: true }), { pendingTools: 0 }),
+      compact: () => ({ ok: true, data: { token: 'helper-any-token', prompt: 'Write the brief.',
+        ...automaticTicket('not-attempted') } })
+    });
+    const section = assistantTurn(live.document, 'helper-any-source', []);
+    compactionFiber(section, () => readable ? [compactionCall(true)] : null, () => []);
+    const composer = live.document.querySelector('#prompt-textarea')!;
+    const parent = composer.parentElement!;
+    composer.remove();
+    const sends = watchSend(live.document);
+    const deferred = () => live!.sent.filter((message) => message.type === 'compact' && message.sourceDeferred === true);
+    await live.hook.startCompact(true);
+    expect(deferred()).toEqual([expect.objectContaining({ token: 'helper-any-token', sourceError: expect.stringContaining('composer_missing') })]);
+
+    // The helper answers while the message box is still missing: one retry, deferred again, and no more.
+    readable = true;
+    await live.hook.refreshFiber();
+    await settle(); await settle();
+    expect(deferred()).toHaveLength(2);
+    parent.append(composer);
+    await live.hook.refreshFiber();
+    await settle(); await settle();
+    expect(deferred()).toHaveLength(2);
+    expect(sends()).toBe(0);
+  });
+
   it.each(['distinct-pre-row', 'same-request-running', 'same-request-code-pending'])('waits for another outstanding call beside an answered native call (%s)', async mode => {
     let received = false;
     live = await harness(undefined, {
