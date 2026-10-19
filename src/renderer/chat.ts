@@ -1088,7 +1088,10 @@ async function sendTypedCommand(controlAction: boolean): Promise<void> {
   const typed = /^\s*\/([a-z][a-z-]*)(?=\s|$)/i.exec(input.value);
   const name = typed?.[1]!.toLowerCase();
   const known = name && APP_COMMANDS.some(row => row.command === name) && (!CHAT_COMMANDS.has(name) || openChatSummary() !== null);
+  const selection = selectionGeneration, draft = input.value;
   const library = known ? await run(api.skillLibrary({ sessionId: selectedId, projectId: selectedLocalProject()?.id ?? selectedProjectId })) : null;
+  // Another chat opened or the draft changed while the Skills loaded: this command was typed for neither.
+  if (known && (selection !== selectionGeneration || input.value !== draft)) return;
   if (!typed || !known || !library || library.skills.some(skill => skill.id === name)) {
     if (taskPlans.has(draftKey())) { if (!$('createPlan').dataset.busy) void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt'); }
     else void sendComposer(undefined, undefined, undefined, controlAction);

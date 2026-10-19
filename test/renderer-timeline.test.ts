@@ -6292,6 +6292,24 @@ it('saves the whole chat as Markdown with a typed /export, sending nothing', asy
   expect(app.live.sent).toHaveLength(0);
 });
 
+it('drops a typed /export when another chat opens while the Skills load', async () => {
+  const first = summary([]), second = { ...summary([]), id: '2026-09-02-test0002', title: 'Other session' };
+  const app = await boot([], true, [], [], { sessions: [first, second] });
+  const api = (app.w as any).api;
+  let release!: (value: unknown) => void;
+  api.skillLibrary = () => new Promise(resolve => { release = resolve; });
+  api.exportMarkdown = vi.fn(async () => ({ ok: true, data: { done: 'saved', name: 'chat.md' } }));
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = '/export';
+  app.w.document.getElementById('composer')!.dispatchEvent(new app.w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  (app.w.document.querySelector(`#sessionList [data-id="${second.id}"]`) as HTMLElement).click();
+  release({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+  await settle(); await settle();
+  expect(api.exportMarkdown).not.toHaveBeenCalled();
+  expect(app.live.sent).toHaveLength(0);
+});
+
 it('opens Find in chat with /find, its field focused', async () => {
   const { w, row, input } = await slash('find');
   row!.click(); await settle();
