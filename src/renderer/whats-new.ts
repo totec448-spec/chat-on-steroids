@@ -14,6 +14,15 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.42': {
+    lead: () => t('Bring back earlier messages, calmer answers, and long work that keeps going.'),
+    highlights: [
+      { icon: 'i-arrow-up', title: () => t('Bring back earlier messages'), text: () => t('Press Up in an empty message box to bring back what you sent in this chat.') },
+      { icon: 'i-file-text', title: () => t('Answers that read calmly'), text: () => t('While ChatGPT writes, whole paragraphs fade in instead of the text jumping.') },
+      { icon: 'i-retry', title: () => t('Long work keeps going'), text: () => t('A fresh turn now keeps every tool result and never runs a command twice.') },
+      { icon: 'i-agents', title: () => t('Sub-agents start reliably'), text: () => t('Also on a slow computer, and with a second browser that is not updated yet.') }
+    ]
+  },
   '2.1.41': {
     lead: () => t('Edit your earlier messages, branch a chat, and sub-agents that start every time.'),
     highlights: [
