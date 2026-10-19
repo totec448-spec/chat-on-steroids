@@ -1351,9 +1351,12 @@ outbox row with the event's `inputId` or `messageId` decides, and `authoredSourc
 `finishOwner`, a `recovery` or a `rotation`/`decision` purpose marks the app's own send. Until the
 window has read the outbox once, recall leaves the arrows to the caret. The outbox keeps only its
 newest 50 finished rows and the recorded message keeps the same fields (`inputId`, `authoredText`)
-whoever wrote it, so a message with an `inputId` whose row is gone is left out. A message with no row
-and no `inputId` was sent in ChatGPT itself and counts as typed, except a worker's or helper's, whose
-tasks come from the app. Messages without text, stored cut short, Compact & Resume prompts, folded earlier versions and
+whoever wrote it, so a message with an `inputId` whose row is gone is left out. A Goal or Loop
+follow-up is typed by its page and has no row: when a draft is ready the app notes its text for that
+chat (`session/automatic-replies.ts`, kept an hour), and the recorder marks the one sent message that
+comes back with that text (compared without Markdown escapes) `automatic: true`, which recall skips.
+Any other message with no row and no `inputId` was sent in ChatGPT itself and counts as typed, except
+a worker's or helper's, whose tasks come from the app. Messages without text, stored cut short, Compact & Resume prompts, folded earlier versions and
 queued inputs are not recalled either. The list is read at the first press, so a message recorded
 while paging doesn't shift it. Each recalled message is announced through the sr-only polite region
 `#recallAnnounce`. Recall only fills the composer; nothing is stored and nothing is sent.
