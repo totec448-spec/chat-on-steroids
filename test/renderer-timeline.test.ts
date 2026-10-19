@@ -3620,6 +3620,27 @@ describe('Esc in the empty composer during a turn', () => {
     expect(status(w)).toBe('');
   });
 
+  it('does not let an Esc armed for one turn stop the next turn', async () => {
+    const { w, append } = await boot([]);
+    const api = (w as any).api;
+    const stop = vi.fn(async () => ({ ok: true, data: {} }));
+    api.stopSessionTurn = stop;
+    esc(w);
+    const controls = api.getSessionControls;
+    api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await controls(id)).data, activeTurnId: 'next-turn' } });
+    await append([]);
+    expect(w.document.getElementById('chatSend')!.dataset.action).toBe('stop');
+    // The press after the new turn started only asks again; the next one stops that turn.
+    expect(esc(w)).toBe(true);
+    await settle();
+    expect(stop).not.toHaveBeenCalled();
+    expect(status(w)).toBe('Press Esc again to stop the turn');
+    esc(w);
+    await settle();
+    expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'next-turn');
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
   it('does not stop for Esc with a draft, a held Esc, a key between, modifiers or a late second Esc', async () => {
     const { w } = await boot([]);
     const stop = vi.fn(async () => ({ ok: true, data: {} }));
