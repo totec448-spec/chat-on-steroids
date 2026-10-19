@@ -151,7 +151,8 @@ export function goalProviderKey(kind: GoalProviderKind): Promise<string | null> 
 const MAX_CONTEXT_MESSAGES = 120;
 /** Recent CoS calls read to count per turn; a busy turn can make hundreds. */
 const MAX_TOOL_CALLS_COUNTED = 500;
-const HOLD_TOOLS = new Set(['session_finish', 'keep_astra_on_forever']);
+/** Calls that wait for the app (Session Finish, keep-on): their result is Loop's next instruction, not work. */
+export const GOAL_HOLD_TOOLS: ReadonlySet<string> = new Set(['session_finish', 'keep_astra_on_forever']);
 /** …and how many characters of them, so one 200k-character answer cannot be the whole prompt. */
 const MAX_CONTEXT_CHARS = 120_000;
 /** The per-message cut. Long enough to carry an answer's substance, short enough to fit many. */
@@ -2619,7 +2620,7 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
   const callsByTurn = new Map<string, number>();
   for (const call of toolCalls) {
     // Hold calls are waiting, not work, exactly as the finish boundary counts them.
-    if (call.kind === 'tool_call' && call.source === 'mcp' && call.turnId && !HOLD_TOOLS.has(call.call.tool)) {
+    if (call.kind === 'tool_call' && call.source === 'mcp' && call.turnId && !GOAL_HOLD_TOOLS.has(call.call.tool)) {
       callsByTurn.set(call.turnId, (callsByTurn.get(call.turnId) ?? 0) + 1);
     }
   }

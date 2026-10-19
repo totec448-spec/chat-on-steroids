@@ -89,6 +89,7 @@ import {
   goalProgressFor,
   goalDraftBusy,
   goalArmedFor,
+  GOAL_HOLD_TOOLS,
   goalObjectiveFor,
   goalPendingReplyFor,
   goalReplySourceTurn,
@@ -9613,7 +9614,8 @@ function noteCallAttribution(
   completedFinalAt: number | null = null,
   requestId: string | null = null,
   reopenedTurnId: string | null = null,
-  filedSession: SessionSummary | null = null
+  filedSession: SessionSummary | null = null,
+  tool: string | null = null
 ): void {
   if (conversationId) {
     // MCP truth can grow while a Pro page emits no new observation. The just-filed
@@ -9683,12 +9685,14 @@ function noteCallAttribution(
     grantActivity(conversationId, sessionId, continuingMcp ? Date.now() : pro ? Math.min(Date.now(), startedAt) : Date.now(), CHAT_SILENCE_MS,
       { turnId: sourceTurnId, model: pro ? 'pro' : previous?.model ?? 'unknown', mcpBacked: true });
     // #1402: a long turn continues in a fresh one, right after this tool result. Pro thinks long on
-    // purpose; a worker's or helper's turn end is its report, and Goal/Loop decide on turn ends.
+    // purpose, and a worker's or helper's turn end is its report. Goal and Loop chats rotate too
+    // (2.1.43): the rotated turn ends with no final answer, so they decide only at the fresh turn's
+    // end. Never at a hold tool's result, which is Loop's next instruction (GOAL_HOLD_TOOLS).
     // #1662: only while this call's answer is still held (callHoldOpen), so the continue goes in
     // while the call runs; the answer waits until it is sent or withdrawn.
     if (!pro && sourceTurnId && filedSession?.activeTurnId === sourceTurnId &&
         filedSession.origin?.kind !== 'worker' && filedSession.origin?.kind !== 'helper' &&
-        !isWorkerConversation(conversationId) && !goalArmedFor(conversationId) && callHoldOpen(conversationId)) {
+        !isWorkerConversation(conversationId) && !(tool && GOAL_HOLD_TOOLS.has(tool)) && callHoldOpen(conversationId)) {
       let filedId: string | null = null;
       const deps: RotationDeps = { ...turnRotationDeps, file: async (session, turn) => {
         const row = await fileRotationInput(session, turn);
