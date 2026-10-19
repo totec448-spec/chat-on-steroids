@@ -1357,6 +1357,12 @@ tasks come from the app. Messages without text, stored cut short, Compact & Resu
 queued inputs are not recalled either. The list is read at the first press, so a message recorded
 while paging doesn't shift it. Each recalled message is announced through the sr-only polite region
 `#recallAnnounce`. Recall only fills the composer; nothing is stored and nothing is sent.
+Quote a selection (`quote-selection.ts`): words selected inside the open chat's messages (`.said`
+in `#timeline`, not the read-only agent pane) get a floating Quote button once the pointer is up.
+It appends them to the draft as a Markdown quote after what is typed, with an empty line below and
+the caret there. The text is read from the DOM by `selectedText`, not the selection's own string:
+lines per block, code and plain messages verbatim, a KaTeX formula as its TeX, and the panels'
+`.tool-output-header` controls and hidden nodes left out. It only fills the composer; nothing is sent.
 
 `session/start-input.ts` returns durable local admission before waiting for connector readiness
 or browser delivery. Each New Chat opening reserves its own local session in the outbox, then
