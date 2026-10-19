@@ -2887,5 +2887,13 @@
   "(~{0} tokens)|one": "(~{0} токен)",
   "(~{0} tokens)|few": "(~{0} токена)",
   "(~{0} tokens)|many": "(~{0} токенов)",
-  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}"
+  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}",
+  "Keyboard shortcuts": "Сочетания клавиш",
+  "Message box": "Поле сообщения",
+  "New line": "Новая строка",
+  "Send the other way while ChatGPT works": "Отправить другим способом, пока ChatGPT работает",
+  "Earlier messages, in an empty message box": "Прежние сообщения, в пустом поле сообщения",
+  "Sidebar": "Боковая панель",
+  "Move the focused chat or project": "Переместить выбранный чат или проект",
+  "Workspace panels": "Панели рабочего пространства"
 }

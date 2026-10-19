@@ -2797,5 +2797,13 @@
   "from {0} events|one": "aus {0} Ereignis",
   "(~{0} tokens)": "(ca. {0} Tokens)",
   "(~{0} tokens)|one": "(ca. {0} Token)",
-  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}"
+  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}",
+  "Keyboard shortcuts": "Tastenkürzel",
+  "Message box": "Nachrichtenfeld",
+  "New line": "Neue Zeile",
+  "Send the other way while ChatGPT works": "Andersherum senden, während ChatGPT arbeitet",
+  "Earlier messages, in an empty message box": "Frühere Nachrichten, in einem leeren Nachrichtenfeld",
+  "Sidebar": "Seitenleiste",
+  "Move the focused chat or project": "Fokussierten Chat oder fokussiertes Projekt verschieben",
+  "Workspace panels": "Leisten des Arbeitsbereichs"
 }

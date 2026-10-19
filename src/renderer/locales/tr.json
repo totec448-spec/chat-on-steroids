@@ -2797,5 +2797,13 @@
   "from {0} events|one": "{0} olaydan",
   "(~{0} tokens)": "(~{0} token)",
   "(~{0} tokens)|one": "(~{0} token)",
-  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}"
+  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}",
+  "Keyboard shortcuts": "Klavye kısayolları",
+  "Message box": "Mesaj kutusu",
+  "New line": "Yeni satır",
+  "Send the other way while ChatGPT works": "ChatGPT çalışırken diğer şekilde gönder",
+  "Earlier messages, in an empty message box": "Önceki mesajlar, mesaj kutusu boşken",
+  "Sidebar": "Kenar çubuğu",
+  "Move the focused chat or project": "Odaktaki sohbeti veya projeyi taşı",
+  "Workspace panels": "Çalışma alanı panelleri"
 }

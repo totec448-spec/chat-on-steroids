@@ -5016,7 +5016,10 @@ one icon button (≡) in the title bar opening the row menus' menu (`row-menu.ts
 each action with its icon and this keyboard's shortcut (not the sidebar toggle, which sits beside it), a
 pets label that says what it will do (Show/Hide pets), zoom steps that keep it open with Actual size's value updating
 (a zoom's resize repositions it instead of closing it), and Show browser (the CoS browser) only while the
-built-in browser is the ChatGPT browser. Appearance rows align controls at a shared minimum height and Setup uses a stable
+built-in browser is the ChatGPT browser. Its last item, Keyboard shortcuts, and ⌘/ (macOS) / Ctrl+/ (not in the
+terminal or the file editor, nor over another dialog) open `#shortcutsDialog` (`renderer/shortcuts-dialog.ts`): only keys the
+renderer handles, labelled by `shortcuts.ts`, the message box's Enter rows following `ui.enterSends`. A new
+shortcut adds its row there in the same change. Appearance rows align controls at a shared minimum height and Setup uses a stable
 responsive title/language grid across locales.
 The companion sends a bounded snapshot on the authenticated `/diagnostics` route, outside the
 authority-bearing `/status` response. One pending diagnostic page read is shared; current

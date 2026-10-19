@@ -549,6 +549,23 @@ code {
 @media (prefers-reduced-motion: reduce) {
   .search-dialog[open], .search-dialog.is-closing, .search-dialog[open]::backdrop, .search-dialog.is-closing::backdrop { animation: none; }
 }
+/* Keyboard shortcuts (Ctrl/⌘+/): the search window's card, as tall as its rows, scrolling inside on a short window.
+   Where two columns fit, each group sits in its own (`column` in shortcuts-dialog.ts). */
+.shortcuts-dialog { width: min(760px, calc(100vw - 40px)); height: fit-content; max-height: min(640px, calc(100dvh - 80px)); margin: 8vh auto auto; }
+.shortcuts-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: none; min-height: 0; padding: 12px 10px 10px 20px; border-bottom: 1px solid var(--line); }
+.shortcuts-head h2 { margin: 0; font-size: calc(14px * var(--text-scale, 1)); font-weight: 600; line-height: calc(20px * var(--text-scale, 1)); }
+.shortcuts-close { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 8px; color: var(--faint); }
+.shortcuts-close:hover { color: var(--ink); }
+.shortcuts-list { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; align-content: start; column-gap: 36px; flex: 1; min-height: 0; overflow-y: auto; padding: 6px 20px 16px; }
+@media (min-width: 720px) { .shortcuts-list { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); } }
+.shortcuts-group { padding-top: 12px; }
+.shortcuts-group h3 { margin: 0 0 4px; color: var(--faint); font-size: calc(11.5px * var(--text-scale, 1)); font-weight: 500; line-height: calc(16px * var(--text-scale, 1)); }
+.shortcuts-rows { display: grid; grid-template-columns: minmax(0, 1fr) auto; margin: 0; }
+.shortcuts-rows dt, .shortcuts-rows dd { display: flex; align-items: center; min-height: 30px; margin: 0; padding-block: 3px; box-sizing: border-box; }
+.shortcuts-rows dt { padding-inline-end: 16px; font-size: calc(13px * var(--text-scale, 1)); line-height: calc(18px * var(--text-scale, 1)); }
+.shortcuts-keys { justify-content: flex-end; gap: 4px; }
+.shortcuts-keys kbd { min-width: 14px; padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--hover); color: var(--soft); font: inherit;
+  font-size: calc(11.5px * var(--text-scale, 1)); line-height: calc(17px * var(--text-scale, 1)); text-align: center; white-space: nowrap; font-variant-numeric: tabular-nums; }
 /*
  * What's New (#1172), in the language of the browser sign-in card (cos-browser-sign-in.css): a card
  * whose hairline catches light along its top edge over two soft shadows, rising in on a spring; the

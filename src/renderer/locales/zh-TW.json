@@ -2752,5 +2752,13 @@
   "{0} characters": "{0} 個字元",
   "from {0} events": "來自 {0} 個事件",
   "(~{0} tokens)": "（約 {0} Token）",
-  "{0} · {1} {2} · {3}": "{0} · {1}{2} · {3}"
+  "{0} · {1} {2} · {3}": "{0} · {1}{2} · {3}",
+  "Keyboard shortcuts": "鍵盤快速鍵",
+  "Message box": "訊息框",
+  "New line": "換行",
+  "Send the other way while ChatGPT works": "在 ChatGPT 工作時以另一種方式傳送",
+  "Earlier messages, in an empty message box": "之前的訊息（訊息框為空時）",
+  "Sidebar": "側邊欄",
+  "Move the focused chat or project": "移動目前聚焦的聊天或專案",
+  "Workspace panels": "工作區面板"
 }

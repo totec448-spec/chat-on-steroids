@@ -2752,5 +2752,13 @@
   "{0} characters": "{0}자",
   "from {0} events": "이벤트 {0}개에서 생성",
   "(~{0} tokens)": "(~{0} 토큰)",
-  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}"
+  "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}",
+  "Keyboard shortcuts": "키보드 단축키",
+  "Message box": "메시지 상자",
+  "New line": "줄 바꿈",
+  "Send the other way while ChatGPT works": "ChatGPT가 작업하는 동안 다른 방식으로 보내기",
+  "Earlier messages, in an empty message box": "이전 메시지 (메시지 상자가 비어 있을 때)",
+  "Sidebar": "사이드바",
+  "Move the focused chat or project": "포커스된 채팅이나 프로젝트 이동",
+  "Workspace panels": "워크스페이스 패널"
 }
