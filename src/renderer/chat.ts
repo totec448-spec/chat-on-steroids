@@ -2292,7 +2292,7 @@ function disarmEscapeStop(): void {
  * IME composition and an Esc another control took (dictation, the slash menu) don't count.
  */
 function escapeStopsTurn(event: KeyboardEvent): boolean {
-  if (event.key !== 'Escape') { disarmEscapeStop(); return false; }
+  if (event.key !== 'Escape') return false;
   const send = $<HTMLButtonElement>('chatSend');
   const running = selectedId !== null && controlledSessionId === selectedId && controlledSelection === selectionGeneration && controlledTurnId !== null;
   // A held key repeats: it neither counts as the second press nor disarms the first.
@@ -8321,7 +8321,10 @@ export function initChat(next: Deps): void {
     // A slash or @file menu on screen keeps its arrows, also while it loads, has no choices, or is
     // closed by this very key because the caret left its fragment.
     const menuShown = !!skillPicker?.open();
-    if (skillPicker?.keydown(event) || (!menuShown && (recallPrompt(event) || escapeStopsTurn(event)))) return;
+    // Any key but Esc ends an armed Esc-to-stop, also one the menu or prompt recall takes.
+    if (event.key !== 'Escape') disarmEscapeStop();
+    if (skillPicker?.keydown(event)) { disarmEscapeStop(); return; }
+    if (!menuShown && (recallPrompt(event) || escapeStopsTurn(event))) return;
     // Codex's "Enter key behavior": Enter sends, or only Cmd/Ctrl+Enter does and Enter adds a line.
     const enterSends = deps.state()?.config.ui.enterSends !== false || event.metaKey || event.ctrlKey;
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && enterSends) { event.preventDefault(); if (currentPreparedPlan() || authoredComposerText().trim() || imageDrafts.get(draftKey())?.length) $<HTMLFormElement>('composer').requestSubmit(); }
