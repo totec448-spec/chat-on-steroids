@@ -9,6 +9,31 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.42] — Bring back earlier messages, smoother answers, and long work that keeps going
+
+Press Up in an empty message box to bring back what you asked before. Answers appear paragraph by paragraph instead of jumping while they're written. Long work moves on to a fresh turn without losing a result or running a command twice, and sub-agents start reliably even with a second browser around.
+
+### 👉 After updating
+
+- Nothing to do. The browser extension updates itself once no chat is busy.
+
+### ✨ New
+
+- **Bring back your earlier messages.** In an empty message box, press **Up** to bring back the last message you sent in this chat, and again for the one before. **Down** goes forward again, and past the newest one the box is empty. Only messages you typed come back, never the app's own Goal, Loop or fresh-turn messages. Nothing is sent until you send it.
+
+### 💪 Better
+
+- **Answers read calmly.** While ChatGPT writes, the answer shows whole paragraphs and fades each new one in, instead of jumping and reflowing with every word.
+- **Long work keeps going.** When a turn has run long, Chat On Steroids continues it in a fresh turn right after a tool result. That result is no longer lost and no command runs twice, in a new chat as well as later in a conversation. A message you send while ChatGPT is still answering no longer leaves the chat stuck afterwards.
+- **Sub-agents on slower computers.** The browser extension does far less work while sub-agents run, so their chats no longer wait on it.
+- **Compact & Resume says why it waits.** When an automatic Compact & Resume can't ask ChatGPT for the summary yet, the chat says so instead of "asking ChatGPT", and the app log records the reason.
+
+### 🛠 Fixed
+
+- **Sub-agents with two browsers.** With the extension in a second browser that isn't updated yet, sub-agents no longer fail to start because that browser opened their chats.
+- **Updating from an older Firefox add-on.** The update notice now tells you how to update it in Firefox, instead of asking for a reload from the app's folder.
+- **Goal follow-ups** no longer put a typo into a command or into a word ChatGPT is asked to reply with.
+
 ## [2.1.41] — Edit your earlier messages, branch a chat, and sub-agents that start every time
 
 Change something you asked earlier and continue from there, or take a chat in a new direction from any answer without losing the original. Sort your chats in an optional Inbox. Sub-agents now start reliably even on a busy computer, and every count reads right in your language.
