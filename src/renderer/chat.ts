@@ -2344,12 +2344,20 @@ function canonicalMessageKey(event: SessionEvent): string | null {
  * empties the region, so the same words are read again when that one ends.
  */
 function announceFinishedTurns(delta: readonly SessionEvent[]): void {
-  const region = $('turnAnnounce');
+  const region = $('turnAnnounce'), before = region.textContent, text = t("Reply finished");
+  let finished = false;
   for (const event of delta) {
     if (event.kind === 'user_message' || event.kind === 'turn_start') region.textContent = '';
-    else if (event.kind === 'turn_end' && event.outcome === 'completed' && deps.state()?.config.ui.announceTurns === true)
-      region.textContent = t("Reply finished");
+    else if (event.kind === 'turn_end' && event.outcome === 'completed') finished = true;
   }
+  // A Goal or Loop continue can start the next turn in the same read: the end still counts.
+  if (!finished || deps.state()?.config.ui.announceTurns !== true) return;
+  if (before !== text) { region.textContent = text; return; }
+  // The region held these words when the read began; a screen reader hears no change unless it
+  // is emptied first and filled in a later task.
+  region.textContent = '';
+  const selection = selectionGeneration;
+  window.setTimeout(() => { if (selection === selectionGeneration) region.textContent = text; }, 100);
 }
 
 /** Merge one sequence-cursor delta without letting canonical message revisions duplicate rows. */

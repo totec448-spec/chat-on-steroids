@@ -4398,13 +4398,14 @@ rest of the appearance is kept, and the state push after a save repaints the sid
 scales the existing typography hierarchy, including code, independently of window zoom. System font retains the locale-specific fallback stack.
 Line spacing (`ui.appearance.lineSpacing`, 100–200 percent in steps of 10, default 100) multiplies
 the chat's own line heights through `--line-spacing`: messages, outbox rows and the sample chat.
-A save without it or out of range loads as 100. The Atkinson Hyperlegible font (`font: 'legible'`)
+A save without it, out of range or off those steps loads as 100. The Atkinson Hyperlegible font (`font: 'legible'`)
 is Atkinson Hyperlegible Next, bundled as WOFF2 because `font-src` is `'self'`; its OFL licence is
 in `docs/licenses/atkinson-hyperlegible-next/` and the third-party notices. Reset appearance
 restores both. Appearance → Accessibility → Announce finished replies (`ui.announceTurns`, off
 unless true, not part of Reset) puts "Reply finished" in the polite `#turnAnnounce` region when a
-live delta of the open chat carries a completed `turn_end`; a `user_message` or `turn_start`, and
-every chat switch, empty it first. A chat opened after its reply finished, or a stopped turn, says nothing.
+live delta of the open chat carries a completed `turn_end`, also when the same delta starts the
+next turn; a `user_message` or `turn_start`, and every chat switch, empty it first, and words still
+in the region are emptied and written again in a later task. A chat opened after its reply finished, or a stopped turn, says nothing.
 The Appearance sample chat reflects the same semantic color and typography tokens immediately;
 it contains no session data. The composer context dialog and accessible label identify local
 estimates; its toolbar toggles percentage/token values. Compact and Cancel remain the original
