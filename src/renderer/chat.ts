@@ -93,6 +93,7 @@ import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HA
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
 import { $, ago, clockTime, compactNumber, disclosureChevron, el, icon, run, setIcon, toast } from './dom.js';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
+import { STRICT_REFUSAL_PROGRESS_PREFIX, UNPROVEN_WORKER_NOTICE, UNTRUSTED_NOTICE, UNTRUSTED_WORKER_NOTICE } from '../shared/trust-notices.js';
 import { openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
 import { createSearchPopup } from './search-popup.js';
 import { primaryShortcut } from './shortcuts.js';
@@ -1875,6 +1876,18 @@ function workerGroup(key: string, workers: SessionSummary[], parentRow: HTMLElem
   button.setAttribute('type', 'button'); button.setAttribute('aria-expanded', String(expandedWorkers.has(key)));
   button.addEventListener('click', (event) => { event.stopPropagation(); expandedWorkers.has(key) ? expandedWorkers.delete(key) : expandedWorkers.add(key); paintSessions(); });
   if (parentRow) { parentRow.append(button); parentRow.title += ` · ${button.title}`; } else target.push(button);
+  // Folded away, a sub-agent that needs the person (an approval card, a block, a failure) marks the
+  // chat itself, over its own spinner: needing someone outranks working, as in the Inbox's order.
+  const needing = workers.filter(worker => workerState(worker) === 'attention').length;
+  const top = parentRow?.querySelector<HTMLElement>('.sess-top');
+  if (needing && top && !expandedWorkers.has(key)) {
+    const label = () => tn('{0} sub-agent needs attention', '{0} sub-agents need attention', needing);
+    const mark = el('span', 'session-status is-failed');
+    ui(mark, 'title', label); ui(mark, 'aria-label', label);
+    const own = top.querySelector('.session-status');
+    if (own) own.replaceWith(mark); else top.append(mark);
+    parentRow!.title += ` · ${label()}`;
+  }
   if (expandedWorkers.has(key)) { const box = el('div', 'worker-group'); box.append(...workers.map(sessionRow)); target.push(box); }
 }
 
@@ -4351,6 +4364,14 @@ function approvalRowText(text: string): string {
   return text;
 }
 
+/** A strict-trust notice in the interface language; older wordings stay as recorded. Literal keys for the catalog audit. */
+function trustNoticeText(text: string): string {
+  if (text === UNTRUSTED_NOTICE) return t("A tool call from an untrusted chat was refused. To allow it, open this chat's ⋯ menu in the sidebar (or right-click its row) and choose Trust chat.");
+  if (text === UNTRUSTED_WORKER_NOTICE) return t("A tool call from a worker whose main chat is not currently allowed was refused. Open that main chat's ⋯ menu in the sidebar and choose Trust chat if it is untrusted, or Release chat if it is blocked.");
+  if (text === UNPROVEN_WORKER_NOTICE) return t("A tool call from an app-created worker was refused because the main chat that started it is not proven yet. Return to that main chat in the sidebar; once its row is there, open its ⋯ menu and choose Trust chat, or Release chat if it is blocked, then retry after the worker is attached or recovered there.");
+  return text;
+}
+
 function eventBody(event: SessionEvent, context?: { id: string; current: () => boolean; history: readonly SessionEvent[] }): HTMLElement {
   switch (event.kind) {
     case 'session_start':
@@ -4437,7 +4458,8 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
         if (event.previewError === 'oversized') return t("Image preview unavailable — image exceeds the recording limit");
         return t("Image preview unavailable");
         }));
-        if (event.previewStatus !== 'pending') frame.append(imageStorageButton());
+        // Freeing storage helps only a full store or a removed picture; it cannot shrink one or load it.
+        if (event.previewStatus !== 'pending' && (event.previewError === 'quota' || event.previewError === 'removed')) frame.append(imageStorageButton());
       };
       if (event.asset) frame.append(el('p', 'meta', () => t("Image preview is loading")));
       else unavailable();
@@ -4464,12 +4486,19 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
       return box;
     }
     case 'progress': {
+      if (event.progressId?.startsWith(STRICT_REFUSAL_PROGRESS_PREFIX)) return el('p', 'meta is-progress', () => trustNoticeText(event.message.text));
       if (!event.progressId?.startsWith(APPROVAL_PROGRESS_PREFIX)) return el('p', 'meta is-progress', event.message.text);
       // ChatGPT's own tool approval card stands in this chat's page (approval-wait.ts). The app
       // writes the English source; only the user can answer the card, so the row opens the page.
-      const waiting = event.message.text === APPROVAL_WAITING_TEXT;
+      // A later episode's row takes over: an app restart or a lost page starts a new one while the
+      // earlier row still says waiting (VM, 2026-10-20: three live cards for one). That row was never
+      // answered here, so it reads as past, without buttons.
+      const later = event.message.text === APPROVAL_WAITING_TEXT && (context?.history ?? events).some(other =>
+        other.kind === 'progress' && other.seq > event.seq && other.progressId !== event.progressId && !!other.progressId?.startsWith(APPROVAL_PROGRESS_PREFIX));
+      const waiting = event.message.text === APPROVAL_WAITING_TEXT && !later;
       const line = el('p', `meta is-progress thinking-line approval-wait${waiting ? ' is-waiting' : ''}`);
-      line.append(icon(waiting ? 'i-lock' : 'i-check-circle', 'ico thinking-ico'), el('span', '', () => approvalRowText(event.message.text)));
+      line.append(icon(waiting || later ? 'i-lock' : 'i-check-circle', 'ico thinking-ico'),
+        el('span', '', () => later ? t('ChatGPT asked for a tool approval in this chat.') : approvalRowText(event.message.text)));
       const owner = context?.id ?? selectedId;
       if (waiting && owner) {
         const open = el('button', 'btn') as HTMLButtonElement;
@@ -6625,7 +6654,11 @@ export function chatSettingsPatch(current: Config): {
   mcp: Config['mcp'];
 } {
   const number = (id: string, fallback: number, min: number, max: number): number => {
-    const raw = Number($<HTMLInputElement>(id).value);
+    // An emptied field means no new value, not 0: Number('') is 0, and an emptied threshold was
+    // saved as its 10,000-token minimum.
+    const text = $<HTMLInputElement>(id).value.trim();
+    if (!text) return fallback;
+    const raw = Number(text);
     if (!Number.isFinite(raw)) return fallback;
     return Math.min(max, Math.max(min, Math.round(raw)));
   };
