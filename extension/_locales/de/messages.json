@@ -93,7 +93,7 @@
     "message": "Chat blockiert"
   },
   "content_chat_blocked_tip": {
-    "message": "Dieser Chat ist in der App Chat On Steroids blockiert: Seine Tool-Aufrufe werden abgelehnt, und Goal, Loop und automatisches Komprimieren sind aus. Zum Freigeben öffnest du in der App den Tab „Chat“, zeigst in der Sitzungsliste auf diesen Chat und klickst auf sein Blockiersymbol."
+    "message": "Dieser Chat ist in der App Chat On Steroids blockiert: Seine Tool-Aufrufe werden abgelehnt, und Goal, Loop und automatisches Komprimieren sind aus. Zum Freigeben öffnest du in der Seitenleiste der App das ⋯-Menü dieses Chats und wählst „Chat freigeben“."
   },
   "content_chat_still_opening": {
     "message": "dieser Chat wird noch geöffnet – versuch es gleich noch einmal"
