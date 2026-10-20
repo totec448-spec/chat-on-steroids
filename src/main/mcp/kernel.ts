@@ -1,4 +1,5 @@
 import { offerToolInput, acknowledgeToolInput, TOOL_INPUT_HEADER } from '../session/input.js';
+import { STRICT_REFUSAL_PROGRESS_PREFIX, UNPROVEN_WORKER_NOTICE, UNTRUSTED_NOTICE, UNTRUSTED_WORKER_NOTICE } from '../../shared/trust-notices.js';
 import { noteConnectorUse } from '../connector-proof.js';
 import { beginPluginToolCall } from '../plugin-refresh.js';
 import { pluginManager } from '../plugins/manager.js';
@@ -138,12 +139,6 @@ import type { ToolOutcome } from '../../shared/session.js';
 /** The page's exact proof of a request id, by which a running call counts for its chat. */
 const requestOwner = (requestId: string): string | null => requestCorrelation(requestId)?.conversationId ?? null;
 
-const UNTRUSTED_NOTICE =
-  'A tool call from an untrusted chat was refused. In the chat list, hover this chat in the sidebar and choose Trust (✓) to allow it.';
-const UNTRUSTED_WORKER_NOTICE =
-  'A tool call from a worker whose owning prime is not currently allowed was refused. In the chat list, hover the owning prime row in the sidebar and choose Trust (✓) if it is untrusted, or Release there if it is blocked.';
-const UNPROVEN_WORKER_NOTICE =
-  'A tool call from an app-created worker was refused because no unique owning prime is currently proven. Return to the owning prime in the chat list; once its row is known, hover it in the sidebar and choose Trust (✓), or Release there if it is blocked, then retry after the worker is attached or recovered there.';
 const WORKER_CONNECTION_PROFILE_REFUSAL =
   'WORKER_CONNECTION_PROFILE_MISMATCH: this worker belongs to a different Chat On Steroids Setup profile. ' +
   'No local tool was run. Return to the owning prime and switch back to the connection that created this worker family; ' +
@@ -198,7 +193,7 @@ async function recordUntrustedRefusalNotice(context: CallContext): Promise<void>
   // A progress id is a presentation identity: reusing it would make foldProgress() collapse a
   // later refusal episode into the old row. The in-memory exact-pair map does deduplication;
   // the durable row therefore gets a fresh identity for each episode.
-  const recorded = await recordProgress(caller.sessionId, `strict-chat-refusal:${randomUUID()}`, message);
+  const recorded = await recordProgress(caller.sessionId, `${STRICT_REFUSAL_PROGRESS_PREFIX}${randomUUID()}`, message);
   if (!recorded) {
     untrustedNoticeEpisodes.delete(key);
     return;
