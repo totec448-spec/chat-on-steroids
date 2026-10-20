@@ -68,6 +68,7 @@ import {
   silentCeilingWorkerNotice,
   endedWorkerNotice,
   hasDormantWorkerLeases,
+  pendingWorkerSpawns,
   sleepSilentWorkers,
   noteAgentAlive,
   agentForCaller,
@@ -750,7 +751,7 @@ async function dispatchTracked(
     name === 'exec' || name === 'update_plan' || (identitySensitive && swarmRunning())
   ));
   if (!context.caller.conversationId && needsExactIdentity && requestId) {
-    const wait = name === 'session_finish'
+    const wait = name === 'session_finish' || (workerStarting() && !desktopContext)
       ? SPAWN_EVIDENCE_MS
       : desktopContext && allowUnattributed
       ? UNATTRIBUTED_DESKTOP_EVIDENCE_MS
@@ -777,7 +778,7 @@ async function dispatchTracked(
   if (!context.caller.conversationId && hasDormantWorkerLeases() && requestId) {
     setCallerConversation(
       context,
-      await awaitFreshCallOrigin(name, startedAt, identityWindow(IDENTITY_EVIDENCE_MS), { requestId })
+      await awaitFreshCallOrigin(name, startedAt, identityWindow(workerStarting() ? SPAWN_EVIDENCE_MS : IDENTITY_EVIDENCE_MS), { requestId })
     );
   }
   // And the user's own block, which needs identity resolved to the same depth as everything
@@ -1034,12 +1035,16 @@ async function dispatchTracked(
               'CALLER_IDENTITY_REQUIRED: a recently retired worker tab may still be open, and the connector could not prove this call belongs to a different chat. No local tool was run. For a browser chat, restore the companion connection and retry. Scheduled or headless runs may have no browser identity: the user can enable "Allow unattributed calls" in the app settings to permit self-contained calls recorded as Unattributed. Exact retired-worker restrictions still apply.'
             )
           )
+        : dormantLeaseAmbiguous && workerStarting()
+        ? Promise.resolve(failIdentity(WORKER_STARTING_REFUSAL))
         : dormantLeaseAmbiguous
         ? Promise.resolve(
             failIdentity(
               'CALLER_IDENTITY_REQUIRED: a dormant worker chat still belongs to its prime history, and the connector could not prove this call belongs to a different conversation. No local tool was run. For a browser chat, restore the companion connection and retry. Scheduled or headless runs may have no browser identity: the user can enable "Allow unattributed calls" in the app settings to permit self-contained calls recorded as Unattributed. This does not identify the caller or grant access to another chat’s workspace or processes.'
             )
           )
+        : !allowUnattributed && swarmRunning() && identitySensitive && !context.caller.conversationId && workerStarting()
+        ? Promise.resolve(failIdentity(WORKER_STARTING_REFUSAL))
         : !allowUnattributed && swarmRunning() && identitySensitive && !context.caller.conversationId
         ? Promise.resolve(
             failIdentity(
@@ -1590,6 +1595,18 @@ export const PRIME_EVIDENCE_MS = evidenceWindow(2_500);
  * seconds are only ever spent by a call that was going to be refused anyway.
  */
 export const IDENTITY_EVIDENCE_MS = evidenceWindow(15_000);
+
+/**
+ * A worker the app started whose chat has not reported in yet (its page proves its calls late on
+ * a busy computer). Its first calls arrive unproven; waiting `SPAWN_EVIDENCE_MS` for them, and
+ * saying to call again rather than to restore a connection, keeps a slow start from ending a
+ * worker's task (VM, 2026-10-20: proof 138 s after the first command; the model gave up after one retry).
+ */
+function workerStarting(): boolean {
+  return pendingWorkerSpawns().length > 0;
+}
+const WORKER_STARTING_REFUSAL =
+  'CALLER_IDENTITY_REQUIRED: this chat is not proven yet. A sub-agent chat that has just started reports in late on a busy computer, and until it does the app cannot tell which chat made this call. No local tool was run. Call this tool again in about 30 seconds with the same arguments; repeat a few times if needed.';
 
 /** Brief exact-proof preference before allowed Desktop calls fall back to request-scoped state. */
 export const UNATTRIBUTED_DESKTOP_EVIDENCE_MS = evidenceWindow(250);
