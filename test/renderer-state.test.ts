@@ -1125,6 +1125,28 @@ it('marks a collapsed chat whose sub-agent needs you, over its own spinner, in t
   expect(marks('parent').map(mark => mark.className)).toEqual(['session-status is-active']);
 });
 
+it('keeps a number setting as it was when its field is left empty', async () => {
+  // Number('') is 0: an emptied threshold field was saved as its 10,000-token minimum, so every
+  // chat would compact almost at once, and an emptied worker limit fell to 1.
+  const mounted = await mountChat();
+  await settle();
+  const doc = mounted.window.document;
+  const before = structuredClone(mounted.state.config);
+  for (const id of ['autoCompactTokens', 'maWorkers', 'globalMaWorkers']) {
+    const field = doc.getElementById(id) as HTMLInputElement;
+    field.value = '   ';
+    field.dispatchEvent(new mounted.window.Event('change'));
+  }
+  await vi.waitFor(() => expect(mounted.calls.length).toBeGreaterThan(0));
+  await settle();
+  const last = mounted.calls.at(-1);
+  expect(last.compaction.autoTokens).toBe(before.compaction.autoTokens);
+  expect(last.multiAgent.maxWorkers).toBe(before.multiAgent.maxWorkers);
+  expect(last.multiAgent.globalMaxWorkers ?? 0).toBe(before.multiAgent.globalMaxWorkers ?? 0);
+  // The field shows the kept value again, not an empty box.
+  expect((doc.getElementById('autoCompactTokens') as HTMLInputElement).value).toBe(String(before.compaction.autoTokens));
+});
+
 it('draws the inbox when the layout changes before any chat is loaded, and the tree again when it changes back', async () => {
   const mounted = await mountChat();
   await settle();

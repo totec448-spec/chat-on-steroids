@@ -6633,7 +6633,11 @@ export function chatSettingsPatch(current: Config): {
   mcp: Config['mcp'];
 } {
   const number = (id: string, fallback: number, min: number, max: number): number => {
-    const raw = Number($<HTMLInputElement>(id).value);
+    // An emptied field means no new value, not 0: Number('') is 0, and an emptied threshold was
+    // saved as its 10,000-token minimum.
+    const text = $<HTMLInputElement>(id).value.trim();
+    if (!text) return fallback;
+    const raw = Number(text);
     if (!Number.isFinite(raw)) return fallback;
     return Math.min(max, Math.max(min, Math.round(raw)));
   };
