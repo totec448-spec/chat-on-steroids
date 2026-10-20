@@ -162,6 +162,11 @@ const UNCONFIRMED_SEND = 'Stopped waiting for delivery confirmation. The message
 const RECEIPT_UNCONFIRMED = 'Native Send receipt was not confirmed.';
 /** extension/content.js reports this, word for word, when ChatGPT offered no Send for a fresh-turn continue. */
 export const ROTATION_DECLINED = 'Fresh-turn continue declined: no Send while ChatGPT works.';
+/**
+ * Continues the page declined, for the call held for each to answer at once. Kept here, not as the
+ * row's error: a cancelled continue with an error is shown in the chat as a failed message.
+ */
+const declinedRotations = new Set<string>();
 /** The page clicked Send, yet its exact text stayed in the composer and no new user row appeared. */
 const SEND_NOT_TAKEN = 'Native Send did not take the message.';
 const NOT_TAKEN_FAILED = 'Not sent: ChatGPT did not accept the message.';
@@ -838,7 +843,7 @@ export function fileRotationInput(sessionId: string, turnId: string): Promise<In
 export async function rotationDelivery(id: string): Promise<'pending' | 'sending' | 'declined' | 'settled'> {
   const row = (await load()).find(entry => entry.id === id);
   if (!row || row.purpose !== 'rotation') return 'settled';
-  if (row.state === 'cancelled' && row.error === ROTATION_DECLINED) return 'declined';
+  if (row.state === 'cancelled' && declinedRotations.has(id)) return 'declined';
   if (row.state === 'queued' || (row.state === 'browser' && row.sendAuthorizedAt === undefined)) return 'pending';
   return row.state === 'browser' ? 'sending' : 'settled';
 }
@@ -1968,7 +1973,7 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
   });
 }
 
-export function resetInputForTests(): void { entries = null; chain = Promise.resolve(); offered.clear(); decisionWaiters.clear(); }
+export function resetInputForTests(): void { entries = null; chain = Promise.resolve(); offered.clear(); decisionWaiters.clear(); declinedRotations.clear(); }
 
 export async function pausedBrowserHelpers(): Promise<Array<{ id: string; sourceSessionId: string }>> {
   return (await listInputs()).filter(row => row.purpose === 'decision' && row.state === 'cancelled' && row.cancelledByUser === true && !row.conversationId && row.decisionSourceSessionId)
@@ -2055,7 +2060,9 @@ export function failBrowserInput(id: string, owner: string, error: string, detai
     // held for it answers now, and a later tool result may try again (turn-rotation.ts).
     if (entry.purpose === 'rotation' && entry.sendAuthorizedAt === undefined && error === ROTATION_DECLINED) {
       logInfo(`input ${entry.id}: ChatGPT offered no Send for the fresh-turn continue; a later tool result tries again`);
-      await commit(current.map(row => row === entry ? { ...row, state: 'cancelled', owner: null, error: ROTATION_DECLINED } : row));
+      await commit(current.map(row => row === entry ? { ...row, state: 'cancelled', owner: null } : row));
+      declinedRotations.add(entry.id);
+      if (declinedRotations.size > 200) declinedRotations.delete(declinedRotations.values().next().value!);
       return true;
     }
     // The page clicked Send and could not prove the result (#821). This is the outcome an

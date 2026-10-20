@@ -278,7 +278,10 @@ describe('turn rotation (#1402)', () => {
     await answer;
     expect(answered).toBe(true);
     expect(Date.now() - started).toBeLessThan(1_500);
-    expect((await listInputs()).find(entry => entry.id === row.id)?.state).toBe('cancelled');
+    // Cancelled like one that timed out, with no error: the chat shows nothing for it.
+    const declined = (await listInputs()).find(entry => entry.id === row.id)!;
+    expect(declined.state).toBe('cancelled');
+    expect(declined.error).toBeUndefined();
   });
 
   it('files no continue for a call whose answer has already gone out', async () => {
