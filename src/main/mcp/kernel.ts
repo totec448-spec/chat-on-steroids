@@ -1606,7 +1606,7 @@ function workerStarting(): boolean {
   return pendingWorkerSpawns().length > 0;
 }
 const WORKER_STARTING_REFUSAL =
-  'CALLER_IDENTITY_REQUIRED: this chat is not proven yet. A sub-agent chat that has just started reports in late on a busy computer, and until it does the app cannot tell which chat made this call. No local tool was run. Call this tool again in about 30 seconds with the same arguments; repeat a few times if needed.';
+  'CALLER_IDENTITY_REQUIRED: this chat is not proven yet. A sub-agent chat that has just started reports in late on a busy computer, and until it does the app cannot tell which chat made this call. No local tool was run. Call this tool again in about 30 seconds with this same app and the same arguments; repeat a few times if needed.';
 
 /** Brief exact-proof preference before allowed Desktop calls fall back to request-scoped state. */
 export const UNATTRIBUTED_DESKTOP_EVIDENCE_MS = evidenceWindow(250);
