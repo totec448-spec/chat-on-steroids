@@ -2321,6 +2321,44 @@ it.runIf(process.platform !== 'win32')('keeps a replaced script runnable when a 
   expect((await fs.stat(target)).mode & 0o777).toBe(0o750);
 });
 
+it.runIf(process.platform !== 'win32')('never leaves the new text of a private file readable to others while a code block is saved over it', async () => {
+  const target = path.join(dir, 'private.env');
+  await fs.writeFile(target, 'TOKEN=old\n', 'utf8');
+  await fs.chmod(target, 0o600);
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: target } as never);
+  const writeFile = fs.writeFile.bind(fs);
+  let modeWhileWriting: number | undefined;
+  const write = vi.spyOn(fs, 'writeFile').mockImplementationOnce(async (file, data, options) => {
+    await writeFile(file, data, options);
+    modeWhileWriting = (await fs.stat(String(file))).mode & 0o777;
+  });
+  try {
+    expect(await handlers.get('code:save')!(null, { text: 'TOKEN=new\n', name: 'snippet.env' })).toMatchObject({ ok: true });
+  } finally {
+    write.mockRestore();
+  }
+  expect(modeWhileWriting).toBe(0o600);
+  expect((await fs.stat(target)).mode & 0o777).toBe(0o600);
+});
+
+it.runIf(process.platform !== 'win32')('leaves a code file alone when its permissions cannot be read', async () => {
+  const folder = path.join(dir, 'code-unreadable-mode');
+  const target = path.join(folder, 'run.sh');
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(target, 'echo old\n', 'utf8');
+  await fs.chmod(target, 0o750);
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: target } as never);
+  const stat = vi.spyOn(fs, 'stat').mockRejectedValueOnce(Object.assign(new Error('i/o error'), { code: 'EIO' }));
+  try {
+    expect(await handlers.get('code:save')!(null, { text: 'echo new\n', name: 'snippet.sh' })).toMatchObject({ ok: false });
+  } finally {
+    stat.mockRestore();
+  }
+  expect(await fs.readFile(target, 'utf8')).toBe('echo old\n');
+  expect((await fs.stat(target)).mode & 0o777).toBe(0o750);
+  expect(await fs.readdir(folder)).toEqual(['run.sh']);
+});
+
 describe('native worker checkout cleanup confirmation', () => {
   const offer = {
     runId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',

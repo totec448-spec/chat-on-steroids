@@ -22,9 +22,18 @@ export async function saveCodeFile(text: string, name: string, owner: BrowserWin
   // A file the person chose to replace stays whole until the new one is: write beside it, then rename over it.
   const temporary = `${result.filePath}.${randomUUID()}.tmp`;
   // The new file keeps a replaced file's permissions, such as a script's execute bit; Windows has none to keep.
-  const mode = process.platform === 'win32' ? undefined : await fs.stat(result.filePath).then(stat => stat.mode & 0o7777, () => undefined);
+  // Only a missing file has none; any other stat error stops the save before the old file is touched.
+  const mode = process.platform === 'win32' ? undefined : await fs.stat(result.filePath).then(
+    stat => stat.mode & 0o7777,
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined;
+      throw error;
+    }
+  );
   try {
-    await fs.writeFile(temporary, text, 'utf8');
+    // Created with that mode, so a private file's new text is never readable to others; the chmod
+    // then restores any bits the umask stripped, such as the execute bit.
+    await fs.writeFile(temporary, text, { encoding: 'utf8', mode: mode ?? 0o666 });
     if (mode !== undefined) await fs.chmod(temporary, mode);
     await fs.rename(temporary, result.filePath);
   } catch (error) {
