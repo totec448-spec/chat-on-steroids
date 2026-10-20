@@ -335,3 +335,28 @@ it('shows other apps’ reported limits apart from tokens counted here, and says
   expect(host.textContent).toContain('Off');
   expect(host.textContent).not.toContain('Codex ·');
 });
+
+it('exports the page as CSV beside Refresh, with the page divisor, and says where it saved', async () => {
+  dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
+  let finish!: (reply: unknown) => void;
+  const exportUsage = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+  Object.assign(dom.window, { api: { exportUsage } });
+  const { initUsage } = await import('../src/renderer/usage.js');
+  initUsage();
+  const element = (id: string) => dom.window.document.getElementById(id)!;
+  const button = element('exportUsage') as HTMLButtonElement;
+  expect(button.closest('.settings-section-head')).toBe(element('refreshUsage').closest('.settings-section-head'));
+  expect(button.textContent).toBe('Export CSV');
+  const divisor = element('usageDivisor') as HTMLInputElement;
+  divisor.value = '4'; divisor.dispatchEvent(new dom.window.Event('input'));
+  button.click();
+  // A second click while the dialog is open asks for nothing more.
+  button.click();
+  expect(exportUsage).toHaveBeenCalledTimes(1);
+  expect(exportUsage).toHaveBeenCalledWith(4);
+  expect(button.disabled).toBe(true);
+  finish({ ok: true, data: { saved: true, name: 'chat-on-steroids-usage-2026-10-20.csv' } });
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  expect(dom.window.document.querySelector('.toast')!.textContent).toBe('Saved chat-on-steroids-usage-2026-10-20.csv');
+});
