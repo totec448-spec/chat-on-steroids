@@ -6,7 +6,7 @@ const { fixtureConfigSource } = require('./app-defaults.cjs');
 
 const root = path.resolve(__dirname, '..', '..');
 
-const fixture = demo => `
+const fixture = (demo, sidebar) => `
   addEventListener('error', event => console.error(event.error?.stack || event.message));
   addEventListener('unhandledrejection', event => console.error(event.reason?.stack || event.reason));
   try { localStorage.setItem('cos.ui.language', 'en'); } catch {}
@@ -81,10 +81,24 @@ const fixture = demo => `
     { id: 'gpt-6', label: 'GPT-6', efforts: ['none', 'medium', 'high', 'xhigh'], aliases: ['gpt-6', 'gpt-6-thinking'] },
     { id: 'gpt-5-6', label: 'GPT-5.6', efforts: ['none', 'medium', 'high', 'xhigh'], aliases: ['gpt-5-6-instant', 'gpt-5-6-thinking'] },
     { id: 'gpt-5-5', label: 'GPT-5.5', efforts: ['none', 'medium', 'high', 'xhigh'], aliases: ['gpt-5-5-instant', 'gpt-5-5-thinking'] } ] };
+  // The Sidebar layout pictures (scripts/capture-layout-previews.cjs): three projects and their chats.
+  const SIDEBAR = ${sidebar};
+  const H = 3600e3, now = Date.now();
+  const demoProjects = [
+    { id: 'p-web', name: 'website', path: '/Users/you/Projects/website', createdAt: 3, color: 'blue' },
+    { id: 'p-app', name: 'mobile-app', path: '/Users/you/Projects/mobile-app', createdAt: 2, color: 'green' },
+    { id: 'p-docs', name: 'docs', path: '/Users/you/Projects/docs', createdAt: 1, color: 'amber' } ];
+  const sidebarChat = (id, title, projectId, hoursAgo, active) => ({ ...summary, id, title, projectId, conversationId: 'c-' + id, chatIds: ['c-' + id],
+    startedAt: now - hoursAgo * H - 600e3, updatedAt: now - hoursAgo * H, ...(active ? { activityExpiresAt: now + H } : {}) });
+  const demoSessions = [
+    sidebarChat('website', 'Dark mode for settings', 'p-web', 0.05, true), sidebarChat('w2', 'Fix the contact form', 'p-web', 3),
+    sidebarChat('w3', 'Speed up image loading', 'p-web', 26), sidebarChat('a1', 'Login screen crash on iOS', 'p-app', 0.1, true),
+    sidebarChat('a2', 'Push notification settings', 'p-app', 30), sidebarChat('d1', 'Release notes for 1.4', 'p-docs', 5),
+    sidebarChat('d2', 'Rewrite the setup guide', 'p-docs', 50), sidebarChat('n1', 'Plan the team offsite', null, 8) ];
   const ok = data => Promise.resolve({ ok: true, data });
   window.api = new Proxy({
-    getState: () => ok(state), getLog: () => ok([]), listProjects: () => ok([]),
-    listSessions: () => ok({ sessions: [...(window.stage.listed ? [{ ...summary, ...(${demo} ? { updatedAt: Date.now(), activityExpiresAt: ended() ? null : Date.now() + 60000 } : {}) }] : []), ...(window.stage.workers ? workerChats() : []), ...others],
+    getState: () => ok(state), getLog: () => ok([]), listProjects: () => ok(SIDEBAR ? demoProjects : []),
+    listSessions: () => SIDEBAR ? ok({ sessions: demoSessions, activeId: null, pressure: [], blocked: [] }) : ok({ sessions: [...(window.stage.listed ? [{ ...summary, ...(${demo} ? { updatedAt: Date.now(), activityExpiresAt: ended() ? null : Date.now() + 60000 } : {}) }] : []), ...(window.stage.workers ? workerChats() : []), ...others],
       activeId: window.stage.listed && !ended() ? 'demo' : null, pressure: [], blocked: [] }),
     // As the app's store answers: everything on opening, then only rows from the cursor on.
     getSession: (_id, options = {}) => { const rows = shown().filter(row => row.seq >= (options.from ?? 0));
@@ -108,15 +122,15 @@ const fixture = demo => `
 
 
 /** A Vite server for the production renderer whose /fixture.html runs the fixture in place of the app's entry script. */
-async function fixtureServer({ demo = false } = {}) {
+async function fixtureServer({ demo = false, sidebar = false } = {}) {
   const { createServer } = await import('vite');
-  const server = await createServer({ configFile: false, logLevel: 'error', root: path.join(root, 'src/renderer'), server: { host: '127.0.0.1', port: 0, hmr: false },
+  const server = await createServer({ configFile: false, logLevel: 'error', root: path.join(root, 'src/renderer'), server: { host: '127.0.0.1', port: 0, hmr: false, fs: { allow: [root, fs.realpathSync(path.join(root, 'node_modules'))] } },
     plugins: [{ name: 'readme-fixture', configureServer(vite) { vite.middlewares.use('/fixture.html', async (_req, res) => {
       // The production page without its entry script, which the fixture replaces.
       const entry = '<script type="module" src="./main.ts"></script>';
       const page = fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8');
       if (page.split(entry).length !== 2) throw new Error('index.html has exactly one entry script');
-      const html = page.replace(entry, '').replace('</body>', '<script type="module">' + fixture(demo) + '</script></body>');
+      const html = page.replace(entry, '').replace('</body>', '<script type="module">' + fixture(demo, sidebar) + '</script></body>');
       res.setHeader('Content-Type', 'text/html'); res.end(await vite.transformIndexHtml('/fixture.html', html));
     }); } }] });
   await server.listen();

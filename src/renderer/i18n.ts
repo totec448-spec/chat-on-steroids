@@ -98,7 +98,7 @@ export function tn(one: string, other: string, count: number, args: readonly unk
   return fill(translated, args);
 }
 
-type Property = 'textContent' | 'title' | 'placeholder' | 'aria-label' | 'aria-valuetext' | 'data-usage-hint';
+type Property = 'textContent' | 'title' | 'placeholder' | 'aria-label' | 'aria-valuetext' | 'data-usage-hint' | 'data-empty';
 type Binding = { read: () => string; last: string };
 const bindings = new WeakMap<Node, Map<Property, Binding>>();
 
