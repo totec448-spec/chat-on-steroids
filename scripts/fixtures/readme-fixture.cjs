@@ -9,7 +9,9 @@ const root = path.resolve(__dirname, '..', '..');
 const fixture = (demo, sidebar) => `
   addEventListener('error', event => console.error(event.error?.stack || event.message));
   addEventListener('unhandledrejection', event => console.error(event.reason?.stack || event.reason));
-  try { localStorage.setItem('cos.ui.language', 'en'); } catch {}
+  // ?lang=de and so on: the Sidebar layout pictures are taken once per language.
+  const LANG = new URLSearchParams(location.search).get('lang') || 'en';
+  try { localStorage.setItem('cos.ui.language', LANG); } catch {}
   // The stills look at a task four minutes in; the demo starts it now.
   const T0 = ${demo} ? Date.now() : Date.now() - 4 * 60_000;
   const text = text => ({ text, chars: text.length, truncated: false });
@@ -88,6 +90,22 @@ const fixture = (demo, sidebar) => `
     { id: 'p-web', name: 'website', path: '/Users/you/Projects/website', createdAt: 3, color: 'blue' },
     { id: 'p-app', name: 'mobile-app', path: '/Users/you/Projects/mobile-app', createdAt: 2, color: 'green' },
     { id: 'p-docs', name: 'docs', path: '/Users/you/Projects/docs', createdAt: 1, color: 'amber' } ];
+  // The made-up chat names in each app language, so a picture reads like that language's sidebar.
+  // Project names are folder names and stay as they are.
+  const SIDEBAR_TITLES = {
+    de: ['Dunkelmodus einbauen', 'Kontaktformular reparieren', 'Bilder schneller laden', 'Login-Absturz auf iOS', 'Push-Einstellungen', 'Versionshinweise für 1.4', 'Anleitung überarbeiten', 'Team-Offsite planen'],
+    es: ['Modo oscuro para los ajustes', 'Arreglar el formulario de contacto', 'Cargar las imágenes más rápido', 'Fallo de la pantalla de inicio de sesión en iOS', 'Ajustes de notificaciones push', 'Notas de la versión 1.4', 'Reescribir la guía de instalación', 'Planificar la salida del equipo'],
+    fr: ['Mode sombre pour les réglages', 'Corriger le formulaire de contact', 'Accélérer le chargement des images', "Plantage de l'écran de connexion sur iOS", 'Réglages des notifications push', 'Notes de version 1.4', "Réécrire le guide d'installation", "Organiser le séminaire d'équipe"],
+    'pt-BR': ['Modo escuro nas configurações', 'Corrigir o formulário de contato', 'Acelerar o carregamento de imagens', 'Falha na tela de login no iOS', 'Configurações de notificações push', 'Notas da versão 1.4', 'Reescrever o guia de configuração', 'Planejar o encontro da equipe'],
+    'pt-PT': ['Modo escuro nas definições', 'Corrigir o formulário de contacto', 'Acelerar o carregamento de imagens', 'Falha no ecrã de início de sessão no iOS', 'Definições de notificações push', 'Notas da versão 1.4', 'Reescrever o guia de configuração', 'Planear o encontro da equipa'],
+    ru: ['Тёмная тема для настроек', 'Исправить форму обратной связи', 'Ускорить загрузку изображений', 'Сбой экрана входа на iOS', 'Настройки push-уведомлений', 'Примечания к выпуску 1.4', 'Переписать руководство по настройке', 'Спланировать выезд команды'],
+    tr: ['Ayarlar için koyu mod', 'İletişim formunu düzelt', 'Görsellerin yüklenmesini hızlandır', "iOS'ta giriş ekranı çökmesi", 'Anlık bildirim ayarları', '1.4 sürüm notları', 'Kurulum kılavuzunu yeniden yaz', 'Ekip gezisini planla'],
+    vi: ['Chế độ tối cho phần cài đặt', 'Sửa biểu mẫu liên hệ', 'Tăng tốc tải hình ảnh', 'Lỗi màn hình đăng nhập trên iOS', 'Cài đặt thông báo đẩy', 'Ghi chú phát hành 1.4', 'Viết lại hướng dẫn cài đặt', 'Lên kế hoạch dã ngoại cho nhóm'],
+    ja: ['設定画面のダークモード', 'お問い合わせフォームを修正', '画像の読み込みを高速化', 'iOS でログイン画面がクラッシュ', 'プッシュ通知の設定', 'バージョン 1.4 のリリースノート', 'セットアップガイドを書き直す', 'チーム合宿を計画'],
+    ko: ['설정 화면 다크 모드', '문의 양식 수정', '이미지 로딩 속도 개선', 'iOS 로그인 화면 충돌', '푸시 알림 설정', '1.4 릴리스 노트', '설치 가이드 다시 쓰기', '팀 워크숍 계획'],
+    'zh-CN': ['设置页面的深色模式', '修复联系表单', '加快图片加载', 'iOS 登录界面崩溃', '推送通知设置', '1.4 版本说明', '重写安装指南', '策划团队团建'],
+    'zh-TW': ['設定頁面的深色模式', '修正聯絡表單', '加快圖片載入', 'iOS 登入畫面當機', '推播通知設定', '1.4 版本說明', '重寫安裝指南', '規劃團隊外出活動']
+  };
   const sidebarChat = (id, title, projectId, hoursAgo, active) => ({ ...summary, id, title, projectId, conversationId: 'c-' + id, chatIds: ['c-' + id],
     startedAt: now - hoursAgo * H - 600e3, updatedAt: now - hoursAgo * H, ...(active ? { activityExpiresAt: now + H } : {}) });
   const demoSessions = [
@@ -95,6 +113,7 @@ const fixture = (demo, sidebar) => `
     sidebarChat('w3', 'Speed up image loading', 'p-web', 26), sidebarChat('a1', 'Login screen crash on iOS', 'p-app', 0.1, true),
     sidebarChat('a2', 'Push notification settings', 'p-app', 30), sidebarChat('d1', 'Release notes for 1.4', 'p-docs', 5),
     sidebarChat('d2', 'Rewrite the setup guide', 'p-docs', 50), sidebarChat('n1', 'Plan the team offsite', null, 8) ];
+  for (const [index, title] of (SIDEBAR_TITLES[LANG] ?? []).entries()) demoSessions[index].title = title;
   const ok = data => Promise.resolve({ ok: true, data });
   window.api = new Proxy({
     getState: () => ok(state), getLog: () => ok([]), listProjects: () => ok(SIDEBAR ? demoProjects : []),
