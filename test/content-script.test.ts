@@ -10265,6 +10265,51 @@ describe('a stop button that goes missing while the turn is still running', () =
     expect(emitted(live.sent, 'native_image')).toHaveLength(6);
   });
 
+  it.each([
+    ['fits after smaller or lighter tries', 0.4, 'available'],
+    ['never fits', 50, 'unavailable']
+  ] as const)('keeps trying a smaller preview when a detailed generated image %s', async (_case, bytesPerPixelAtFullQuality, status) => {
+    // VM, 2026-10-20: a 1448x1086 concept art came out above 384 KB as WebP at 0.8, and the app
+    // showed "image exceeds the recording limit" for a 3.4 MB picture.
+    live = await harness();
+    const section = assistantTurn(live.document, 'turn-detailed-image', []);
+    section.setAttribute('data-clf-fiber-turn', '0');
+    const messageId = '5150f756-bf2d-45fa-ac0f-45010b2239fb';
+    const assetId = 'file_00000000aa58821198efef946a9ade33';
+    const tries: Array<[number, number]> = [];
+    (live.window.HTMLCanvasElement.prototype as any).getContext = function () { return { drawImage: () => undefined }; };
+    (live.window.HTMLCanvasElement.prototype as any).toBlob = function (callback: (blob: any) => void, _type: string, quality: number) {
+      tries.push([Math.max(this.width, this.height), quality]);
+      const size = Math.round(this.width * this.height * quality * bytesPerPixelAtFullQuality);
+      const bytes = new Uint8Array(Math.min(size, 600_000));
+      callback({ type: 'image/webp', size, arrayBuffer: async () => bytes.buffer });
+    };
+    const group = live.document.createElement('div'); group.className = 'group/imagegen-image';
+    const image = live.document.createElement('img');
+    image.src = `blob:https://chatgpt.com/${assetId}`;
+    image.setAttribute('data-clf-fiber-image-source', image.src);
+    image.setAttribute('data-clf-fiber-image', `0:${encodeURIComponent(messageId)}:${encodeURIComponent(assetId)}`);
+    Object.defineProperties(image, {
+      complete: { configurable: true, value: true },
+      naturalWidth: { configurable: true, value: 1448 },
+      naturalHeight: { configurable: true, value: 1086 }
+    });
+    image.getBoundingClientRect = () => ({ width: 480, height: 360 } as DOMRect);
+    group.append(image); section.append(group);
+    const images = [{ messageId, assetId, providerRole: 'tool', providerChannel: 'final', providerStatus: 'finished_successfully',
+      width: 1448, height: 1086, order: 0, partOrder: 0, createTime: Date.now() - 1_000 }];
+    await replyFiber([], [{ turnId: 'turn-detailed-image', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', messages: [], activities: [], images }]);
+    await settle(); await live.hook.flush(); await settle(); await live.hook.flush();
+    const done = emitted(live.sent, 'native_image').map(entry => entry.event).filter(event => event.previewStatus !== 'pending');
+    expect(done.map(event => event.previewStatus)).toEqual([status]);
+    expect(tries.length).toBeGreaterThan(1);
+    expect(tries.length).toBeLessThanOrEqual(6);
+    if (status === 'available') {
+      expect(done[0]!.previewDataUrl.length).toBeLessThanOrEqual(512_100);
+      expect(Math.max(done[0]!.previewWidth, done[0]!.previewHeight)).toBe(tries.at(-1)![0]);
+    } else expect(done[0]!.previewError).toBe('oversized');
+  });
+
   it('drops a late generated-image encode after an A to B to A navigation epoch change', async () => {
     live = await harness();
     const section = assistantTurn(live.document, 'turn-stale-generated-image', []);

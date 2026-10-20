@@ -1268,6 +1268,22 @@ it('keeps generated-image metadata visible when recording storage is full', asyn
   expect(row.querySelector('button')?.textContent).toBe('Free storage');
 });
 
+it.each([
+  ['oversized', 'exceeds the recording limit', false],
+  ['not_loaded', 'Image preview unavailable', false],
+  ['removed', 'removed from local storage', true]
+] as const)('offers Free storage only where storage is the reason (%s)', async (previewError, says, offers) => {
+  // VM, 2026-10-20: a picture the page could not shrink showed Free storage, which cannot help.
+  const app = await boot([]);
+  await app.append([{ seq: 1, time: T0, source: 'extension', kind: 'native_image',
+    messageId: '5150f756-bf2d-45fa-ac0f-45010b2239fb', providerAssetId: `file_${previewError}_fixture`,
+    providerRole: 'tool', providerChannel: 'final', providerStatus: 'finished_successfully',
+    width: 1448, height: 1086, previewStatus: 'unavailable', previewError }]);
+  const row = app.w.document.querySelector('.said.native-image')!;
+  expect(row.textContent).toContain(says);
+  expect(!!row.querySelector('button')).toBe(offers);
+});
+
 it('does not group images across an intervening authored message or another turn', async () => {
   const app = await boot([]);
   const image = (seq: number, turnId: string): SessionEvent => ({ seq, time: T0 + seq,
