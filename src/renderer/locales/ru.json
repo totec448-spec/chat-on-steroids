@@ -2921,5 +2921,9 @@
   "Plain words throughout, and the sidebar layout picked from a picture.": "Простые слова повсюду, а вид боковой панели выбирается по картинке.",
   "Meet Whip": "Знакомьтесь: Whip",
   "A cheeky new pet that cracks its whip so the work goes faster.": "Дерзкий новый питомец щёлкает кнутом, чтобы работа шла быстрее.",
-  "ChatGPT asked for a tool approval in this chat.": "ChatGPT запросил в этом чате разрешение на инструмент."
+  "ChatGPT asked for a tool approval in this chat.": "ChatGPT запросил в этом чате разрешение на инструмент.",
+  "{0} sub-agents need attention": "Субагентов, требующих внимания: {0}",
+  "{0} sub-agents need attention|one": "Субагентов, требующих внимания: {0}",
+  "{0} sub-agents need attention|few": "Субагентов, требующих внимания: {0}",
+  "{0} sub-agents need attention|many": "Субагентов, требующих внимания: {0}"
 }
