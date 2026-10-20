@@ -339,9 +339,11 @@ export function initUsage(): void {
   exportButton.addEventListener('click', async () => {
     if (exportButton.disabled) return;
     exportButton.disabled = true;
+    // Not run(): main's error names the chosen file's full path, which the page never shows.
     try {
-      const result = await run(window.api.exportUsage(formula.divisor));
-      if (result?.saved) toast(t('Saved {0}', [result.name]));
+      const reply = await window.api.exportUsage(formula.divisor);
+      if (!reply.ok) toast(t('Usage could not be exported.'));
+      else if (reply.data.saved) toast(t('Saved {0}', [reply.data.name]));
     } catch { toast(t('Usage could not be exported.')); } finally { exportButton.disabled = false; }
   });
 }

@@ -360,3 +360,17 @@ it('exports the page as CSV beside Refresh, with the page divisor, and says wher
   await vi.waitFor(() => expect(button.disabled).toBe(false));
   expect(dom.window.document.querySelector('.toast')!.textContent).toBe('Saved chat-on-steroids-usage-2026-10-20.csv');
 });
+
+// The IPC reply carries main's error, which names the chosen file's full path (2.1.42 review).
+it('says a failed export could not be saved, without the error that names the file path', async () => {
+  dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
+  const exportUsage = vi.fn(async () => ({ ok: false, error: "EBUSY: resource busy or locked, open 'C:\\Users\\you\\Downloads\\usage.csv'" }));
+  Object.assign(dom.window, { api: { exportUsage } });
+  const { initUsage } = await import('../src/renderer/usage.js');
+  initUsage();
+  const button = dom.window.document.getElementById('exportUsage') as HTMLButtonElement;
+  button.click();
+  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  expect(dom.window.document.querySelector('.toast')!.textContent).toBe('Usage could not be exported.');
+});
