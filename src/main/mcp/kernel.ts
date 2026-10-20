@@ -125,6 +125,7 @@ import { DEFAULT_MAX_OUTPUT_TOKENS } from '../codex/unified-exec-constants.js';
 import { unattributedRepairEta } from '../bridge.js';
 import {
   conversationAttachment,
+  replacementOf,
   findSessionByConversation,
   getSession,
   requestBelongsToActiveTurn,
@@ -816,6 +817,11 @@ async function dispatchTracked(
   const supersededConversation = context.caller.conversationId
     ? (await conversationAttachment(context.caller.conversationId, context.caller.sessionId ?? null)) === 'superseded'
     : false;
+  // Named so ChatGPT can send the person on: without it, a replaced chat only learns it is dead (#1688).
+  // A lookup that fails leaves the refusal as it was; it never turns into an error of its own.
+  const replacement = supersededConversation
+    ? await replacementOf(context.caller.conversationId!, context.caller.sessionId ?? null).catch(() => null)
+    : null;
   // Preserve the pre-strict fast path exactly: when strict mode is off, Block is a synchronous
   // exact-chat lookup and ordinary calls do not acquire extra microtask yields. Interactive PTYs
   // are timing-sensitive enough that needless awaits can change which terminal frame a poll sees.
@@ -1009,7 +1015,10 @@ async function dispatchTracked(
         : supersededConversation
         ? Promise.resolve(
             fail(
-              'CONVERSATION_SUPERSEDED: Compact & Resume replaced this ChatGPT conversation. Its transcript remains readable, but it can no longer execute local tools. Continue only in the replacement chat; no local tool was run.'
+              'CONVERSATION_SUPERSEDED: Compact & Resume replaced this ChatGPT conversation. Its transcript remains readable, but it can no longer execute local tools. ' +
+                (replacement
+                  ? `The work continues in https://chatgpt.com/c/${replacement.conversationId}${replacement.title.trim() ? `, shown in Chat On Steroids as ${JSON.stringify(replacement.title.trim())}` : ''}. Tell the user to continue there; no local tool was run.`
+                  : 'Continue only in the replacement chat; no local tool was run.')
             )
           )
         : silentCeilingWorker

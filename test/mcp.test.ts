@@ -3681,6 +3681,38 @@ describe('exec sessions belong to the chat that opened them', () => {
     expect(textOf(stale)).toContain('no local tool was run');
   });
 
+  it('tells a replaced chat where its work continues, also after a second Compact & Resume', async () => {
+    const chatA = 'f0f00011-1111-4111-8111-111111111111';
+    const chatB = 'f0f00012-1111-4111-8111-111111111111';
+    const chatC = 'f0f00013-1111-4111-8111-111111111111';
+    const summary = await createSession({ title: 'Portfolio site', conversationId: chatA });
+    expect(prove('wfr_where_a', chatA, summary.id)).toBe('stored');
+    expect(await rebindSession(summary.id, chatA, chatB)).toBe(true);
+
+    const once = await asChat('wfr_where_a', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(failed(once)).toBe(true);
+    expect(textOf(once)).toContain('CONVERSATION_SUPERSEDED');
+    expect(textOf(once)).toContain(`https://chatgpt.com/c/${chatB}`);
+    expect(textOf(once)).toContain('"Portfolio site"');
+    expect(textOf(once)).toContain('no local tool was run');
+
+    // A second move sends the oldest chat straight to the newest one, never to the middle one.
+    expect(await rebindSession(summary.id, chatB, chatC)).toBe(true);
+    const twice = await asChat('wfr_where_a', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(textOf(twice)).toContain(`https://chatgpt.com/c/${chatC}`);
+    expect(textOf(twice)).not.toContain(chatB);
+
+    // A chat not yet named (the store's placeholder title) is named by its link alone.
+    const chatD = 'f0f00014-1111-4111-8111-111111111111';
+    const chatE = 'f0f00015-1111-4111-8111-111111111111';
+    const untitled = await createSession({ title: '  ', conversationId: chatD });
+    expect(prove('wfr_where_d', chatD, untitled.id)).toBe('stored');
+    expect(await rebindSession(untitled.id, chatD, chatE)).toBe(true);
+    const bare = await asChat('wfr_where_d', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(textOf(bare)).toContain(`https://chatgpt.com/c/${chatE}. Tell the user to continue there`);
+    expect(textOf(bare)).not.toContain('shown in Chat On Steroids as');
+  });
+
   it('refuses every tool from a chat whose handoff brief has been asked for, until the move is over', async () => {
     resetContinuationsForTests();
     const chatA = 'f0f00007-1111-4111-8111-111111111111';
