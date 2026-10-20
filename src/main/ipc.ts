@@ -32,6 +32,7 @@ import { stageInputAttachment, stageInputAttachments, type AttachmentSource } fr
 import { recordDeliveredInput, recordedInputImage } from './session/input-history.js';
 import { UI_BASE_ZOOM, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
 import { usageOverview } from './session/usage.js';
+import { exportUsageCsv } from './session/usage-export.js';
 import { readProviderUsage } from './provider-usage.js';
 import { inputArgs, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs } from './session/input.js';
 import { draftOpeningMessage, onGoalChange, nativeGoalFailure } from './goal.js';
@@ -674,6 +675,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('usage:get', () => usageOverview());
   handle('usage:providers', (payload) => readProviderUsage({ fresh: z.object({ fresh: z.boolean() }).parse(payload).fresh }));
+  // The page sends only its divisor, so the file's tokens match the page; main reads the numbers.
+  handle('usage:export', (payload) => exportUsageCsv(z.object({ divisor: z.number().finite().positive() }).parse(payload).divisor, getWindow()));
   handle('plugin-refresh:reset', async () => {
     await resetPluginRefreshLedger();
     return buildState();

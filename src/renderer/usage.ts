@@ -1,5 +1,5 @@
 import { currentLanguage, ui, t, tn } from './i18n.js';
-import { $, el, run } from './dom.js';
+import { $, el, run, toast } from './dom.js';
 import { DEFAULT_USAGE_FORMULA, usageDateKey as dateKey, usageEstimate, usageMessageTotals, usageModelGroups, usageRate, usageWeekStart, type UsageFormula, type UsageOverview } from '../shared/usage.js';
 import type { ProviderUsage } from '../shared/provider-usage.js';
 let snapshot: UsageOverview | null = null;
@@ -335,4 +335,13 @@ export function initUsage(): void {
     input.addEventListener('input', () => { if (input.value !== '' && input.validity.valid && Number.isFinite(input.valueAsNumber)) { formula[key] = input.valueAsNumber; saveFormula(); paintCost(); } });
   }
   $('refreshUsage').addEventListener('click', () => void refreshUsage(true));
+  const exportButton = $<HTMLButtonElement>('exportUsage');
+  exportButton.addEventListener('click', async () => {
+    if (exportButton.disabled) return;
+    exportButton.disabled = true;
+    try {
+      const result = await run(window.api.exportUsage(formula.divisor));
+      if (result?.saved) toast(t('Saved {0}', [result.name]));
+    } catch { toast(t('Usage could not be exported.')); } finally { exportButton.disabled = false; }
+  });
 }
