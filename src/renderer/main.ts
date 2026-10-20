@@ -1,5 +1,7 @@
 import { initBrowserSetup } from './setup-browser.js';
 import { currentLanguage, ui, uiText, t, tn, initLanguage, onLanguageChange } from './i18n.js';
+import { initLayoutPreviews } from './layout-previews.js';
+import { workerName } from './agent-panel.js';
 import { primaryShiftShortcut, primaryShortcut } from './shortcuts.js';
 import { desktopAccessProblem, paintDesktopAccessNotice } from './desktop-access-notice.js';
 import { chatgptNameLine } from './connector-name.js';
@@ -73,6 +75,7 @@ const api = window.api;
 // First: main announces a Keychain read before it starts and may not get through again until it ends.
 initKeychainNotice(api);
 initLanguage();
+initLayoutPreviews();
 // Composer key hints name this computer's keys only: a Windows user never reads ⌘ first.
 ui($('followUpHint'), 'textContent', () => t('What a message you send while ChatGPT works does by default. {0} sends it the other way.', [primaryShiftShortcut(t('Enter'))]));
 ui($('enterSendsHint'), 'textContent', () => t('Which key sends what you type. With {0}, Enter starts a new line.', [primaryShortcut(t('Enter'))]));
@@ -622,7 +625,7 @@ function paintGroups(): void {
   // focused/dirty-field guard. Recopying state here undid that protection and visibly
   // flipped a user's just-clicked toggle back when an unsolicited stale state push
   // arrived before save completed, so this only reads them.
-  for (const [id, onText] of [['agents', 'agents tool exposed']] as Array<[string, string]>) {
+  for (const [id, onText] of [['agents', 'on']] as Array<[string, string]>) {
     const root = document.querySelector<HTMLElement>(`[data-group="${id}"]`);
     if (!root) continue;
     const box = root.querySelector<HTMLInputElement>('.sw input')!;
@@ -1718,7 +1721,9 @@ function apply(next: AppState): void {
     config.ui.privacyScreenshots,
     previousState?.config.ui.privacyScreenshots
   );
-  $('privacyScreenshotsSetting').hidden = !(next.platform?.desktopAutomation ?? true);
+  // Only macOS screenshots can show the whole screen; on Windows every capture is one window
+  // already, so the switch would change nothing there.
+  $('privacyScreenshotsSetting').hidden = !(next.platform?.desktopAutomation ?? true) || next.platform?.family !== 'macos';
   if (next.platform?.family === 'macos') {
     ui($('backgroundRunningCopy'), 'textContent', () => t("Leave it running while you use its plugins in ChatGPT. It stays available from the menu bar and Dock when you close the window."));
     ui($('minimizeToTrayCopy'), 'textContent', () => t("Hide the window to the menu bar when closed"));
@@ -2359,6 +2364,18 @@ for (const id of FEEDS) {
   });
 }
 
+/** A feed with no row to show says why, instead of an empty box. */
+function paintFeedEmpty(): void {
+  for (const id of FEEDS) {
+    const view = $(id);
+    const rows = [...view.querySelectorAll<HTMLElement>('p')];
+    const onlyBad = view.classList.contains('only-bad');
+    const visible = rows.some(row => !row.hidden && (!onlyBad || row.classList.contains('bad')));
+    view.classList.toggle('is-empty', !visible);
+    ui(view, 'data-empty', () => rows.length ? t('Nothing matches this filter.') : t('Nothing has happened yet.'));
+  }
+}
+
 function addLogLine(entry: LogEntry): void {
   let evicted = false;
   for (const id of FEEDS) {
@@ -2377,6 +2394,7 @@ function addLogLine(entry: LogEntry): void {
   // A quiet run of 500 info lines retires old problems just as surely as a new one adds
   // to them, so both directions have to repaint.
   if (entry.level !== 'info' || evicted) paintProblems();
+  paintFeedEmpty();
 }
 
 $('logFilter').addEventListener('click', (event) => {
@@ -2386,6 +2404,7 @@ $('logFilter').addEventListener('click', (event) => {
     other.classList.toggle('is-sel', other === button);
   }
   $('fullFeed').classList.toggle('only-bad', button.dataset.filter === 'bad');
+  paintFeedEmpty();
   // Hiding most of the rows changes what "the bottom" is, so re-pin rather than leaving
   // the view parked at an offset that now belongs to a line the filter removed.
   stickToNewest('fullFeed');
@@ -2403,6 +2422,7 @@ function applyAgentFilter(): void {
   for (const row of $('fullFeed').querySelectorAll<HTMLElement>('p')) {
     row.hidden = agentFilter !== null && (row.dataset.agent ?? null) !== agentFilter;
   }
+  paintFeedEmpty();
 }
 
 function paintAgentFilter(swarm: SwarmState): void {
@@ -2417,8 +2437,10 @@ function paintAgentFilter(swarm: SwarmState): void {
     return;
   }
   // Prime first, then workers in creation order — the order the broker reports them.
-  const choices: Array<{ id: string | null; label: string }> = [{ id: null, label: t("All") }];
-  for (const agent of swarm.agents) choices.push({ id: agent.id, label: agent.label || agent.id });
+  const choices: Array<{ id: string | null; label: () => string }> = [{ id: null, label: () => t("All") }];
+  for (const agent of swarm.agents) {
+    choices.push({ id: agent.id, label: () => agent.role === 'prime' ? t('Main chat') : workerName(agent.id, agent.label) });
+  }
   if (agentFilter !== null && !swarm.agents.some((agent) => agent.id === agentFilter)) {
     agentFilter = null;
   }
@@ -2426,7 +2448,7 @@ function paintAgentFilter(swarm: SwarmState): void {
     ...choices.map((choice) => {
       const button = document.createElement('button');
       button.type = 'button';
-      button.textContent = choice.label;
+      ui(button, 'textContent', choice.label);
       button.classList.toggle('is-sel', choice.id === agentFilter);
       button.addEventListener('click', () => {
         agentFilter = choice.id;
@@ -2854,6 +2876,7 @@ void (async () => {
     const left = shown.get(key(entry)) ?? 0;
     if (left > 0) shown.set(key(entry), left - 1); else addLogLine(entry);
   }
+  paintFeedEmpty();
   const swarm = await run(api.getSwarm());
   if (swarm) paintAgentFilter(swarm);
 })();

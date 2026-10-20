@@ -3725,6 +3725,13 @@
   let fiberAsking = null;
   /** Off until the helper answers once, so a browser without it behaves exactly as before. */
   let fiberPresent = null; // Unknown until this document gets a reply or a definitive repair failure.
+  /**
+   * An automatic attempt this page stopped before asking while the page-model helper could not be
+   * read (#1643). Its receipts and the turn's messages are read through the helper, so whatever the
+   * stated reason, the attempt is tried again the moment the helper answers, instead of only at the
+   * app's next pickup, which can be ten minutes away.
+   */
+  let helperDeferral = null;
   /** Avoid turning a missing MAIN-world helper into one script injection per observer tick. */
   let fiberRepairAt = -Infinity;
   let fiberRepairing = null;
@@ -4216,6 +4223,9 @@
     return { data: btoa(binary) };
   }
 
+  /** Preview sizes and WebP qualities tried in turn, until one fits the preview's 384 KB. */
+  const NATIVE_PREVIEW_TRIES = [[1600, 0.8], [1600, 0.6], [1200, 0.7], [1200, 0.5], [900, 0.6], [700, 0.5]];
+
   /** Captures one already-rendered native image without fetching or retaining its signed URL. */
   async function captureNativeImage(task) {
     const { key, image, observation, heldEpoch, heldConversation } = task;
@@ -4239,26 +4249,36 @@
           prior.fingerprint.complete === fingerprint.complete && prior.fingerprint.sourceUrl === sourceUrl)) return;
     const pendingCapture = { status: 'pending', fingerprint, task };
     nativeImageCaptures.set(key, pendingCapture);
-    const scale = Math.min(1, 1600 / Math.max(sourceWidth, sourceHeight));
-    const width = Math.max(1, Math.round(sourceWidth * scale));
-    const height = Math.max(1, Math.round(sourceHeight * scale));
-    if (width * height > 2_560_000) {
+    const sized = side => {
+      const scale = Math.min(1, side / Math.max(sourceWidth, sourceHeight));
+      return { width: Math.max(1, Math.round(sourceWidth * scale)), height: Math.max(1, Math.round(sourceHeight * scale)) };
+    };
+    if (sized(1600).width * sized(1600).height > 2_560_000) {
       return nativeImageUnavailable(key, image, observation, 'oversized', fingerprint, heldEpoch, heldConversation);
     }
     try {
-      const canvas = document.createElement('canvas');
-      canvas.width = width; canvas.height = height;
-      const context = canvas.getContext('2d');
-      if (!context) throw new Error('tainted');
-      context.drawImage(node, 0, 0, width, height);
-      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', 0.8));
-      if (!nativeImageCaptureOwnerCurrent(key, image, observation, heldEpoch, heldConversation) || nativeImageNode(image) !== node ||
-          !node.complete || node.naturalWidth !== sourceWidth || node.naturalHeight !== sourceHeight || (node.currentSrc || node.src) !== sourceUrl) {
-        if (nativeImageCaptures.get(key) === pendingCapture) nativeImageCaptures.delete(key);
-        return;
+      // A detailed picture can come out above the preview's 384 KB at the first size (VM, 2026-10-20:
+      // concept art, 1448x1086). Smaller and lighter tries follow, so only a picture that fits
+      // none of them is called oversized.
+      let blob = null, width = 0, height = 0;
+      for (const [side, quality] of NATIVE_PREVIEW_TRIES) {
+        ({ width, height } = sized(side));
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('tainted');
+        context.drawImage(node, 0, 0, width, height);
+        blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', quality));
+        if (!nativeImageCaptureOwnerCurrent(key, image, observation, heldEpoch, heldConversation) || nativeImageNode(image) !== node ||
+            !node.complete || node.naturalWidth !== sourceWidth || node.naturalHeight !== sourceHeight || (node.currentSrc || node.src) !== sourceUrl) {
+          if (nativeImageCaptures.get(key) === pendingCapture) nativeImageCaptures.delete(key);
+          return;
+        }
+        if (!blob) throw new Error('tainted');
+        if (blob.type !== 'image/webp' || blob.size <= 0) throw new Error('oversized');
+        if (blob.size <= 384_000) break;
       }
-      if (!blob) throw new Error('tainted');
-      if (blob.type !== 'image/webp' || blob.size <= 0 || blob.size > 384_000) throw new Error('oversized');
+      if (blob.size > 384_000) throw new Error('oversized');
       const bytes = new Uint8Array(await blob.arrayBuffer());
       if (!nativeImageCaptureOwnerCurrent(key, image, observation, heldEpoch, heldConversation) || nativeImageNode(image) !== node ||
           !node.complete || node.naturalWidth !== sourceWidth || node.naturalHeight !== sourceHeight || (node.currentSrc || node.src) !== sourceUrl) {
@@ -4700,7 +4720,9 @@
       traceStage(call.requestId, 'read');
       traceStage(call.requestId, 'tool', call.tool);
     }
+    const helperReturned = fiberPresent !== true;
     fiberPresent = true;
+    if (helperReturned) retryAfterHelperReturned();
     fiberRows = answer.rows;
     fiberScanToken = answer.scanToken;
     const previousFiberTurns = [...fiberTurns.values()];
@@ -8046,7 +8068,7 @@
       'data-clf-tip',
       t(
         'content_chat_blocked_tip',
-        'This chat is blocked in the Chat On Steroids app: its tool calls are refused and Goal, Loop and auto-compaction are off. To release it, open the app’s Chat tab, hover this chat in the sessions list and press its block symbol.'
+        'This chat is blocked in the Chat On Steroids app: its tool calls are refused and Goal, Loop and auto-compaction are off. To release it, open this chat’s ⋯ menu in the app’s sidebar and choose “Release chat”.'
       )
     );
     blocked.hidden = true;
@@ -9599,8 +9621,21 @@
    * why, so its log and the chat's Compact & Resume row say what it is waiting on instead of
    * "asking ChatGPT" (#1643: twenty minutes of pickups, each stopped here, none of it logged).
    */
+  function retryAfterHelperReturned() {
+    const deferral = helperDeferral;
+    helperDeferral = null;
+    if (!deferral || deferral.forId !== conversationId || deferral.forEpoch !== epoch) return;
+    // After this scan has been taken in; only the error that deferral left is cleared, never a newer one.
+    setTimeout(() => {
+      if (nativeBusy || localError !== deferral.why || conversationId !== deferral.forId || epoch !== deferral.forEpoch) return;
+      localError = '';
+      void maybeResumePendingCompaction(deferral.forId, deferral.forEpoch);
+    }, 0);
+  }
+
   function reportDeferredCompaction(forId, token, why) {
     if (!token || !why) return;
+    helperDeferral = fiberPresent === true ? null : { forId, forEpoch: epoch, why };
     void ask({ type: 'compact', conversationId: forId, token, sourceDeferred: true, sourceError: why }).catch(() => undefined);
   }
 
@@ -9729,8 +9764,14 @@
         box.getAttribute('aria-disabled') !== 'true' ? box : null;
     };
     const expectedQuestionId = stoppedQuestionId || policyData.recordedQuestionId || null;
+    // A chat's first turn can run without ChatGPT showing its question anywhere, page model
+    // included (2026-10-19), so it never matched and an automatic run waited for the turn to end.
+    // The app recorded that question as the conversation's first, and the page's only exchange is
+    // the conversation's first: that is the same question, by place rather than by its id.
+    const firstQuestionShown = () => !stoppedQuestionId && policyData.recordedQuestionFirst === true &&
+      expectedQuestionId === policyData.recordedQuestionId && CLF_DOM.firstQuestionPending();
     const sourceReady = () => editableSource() && (!expectedQuestionId ||
-      CLF_DOM.messages().filter(message => message.role === 'user').at(-1)?.id === expectedQuestionId);
+      CLF_DOM.messages().filter(message => message.role === 'user').at(-1)?.id === expectedQuestionId || firstQuestionShown());
     if (!sourceReady()) {
       const hydrationCurrent = () => current() && userSendReceipt === initialSendReceipt &&
         (!stoppedQuestionId || (CLF_DOM.messages().filter(message => message.role === 'user').at(-1)?.id ?? null) === stoppedQuestionId) &&
@@ -9987,7 +10028,11 @@
       const awaitingResults = new Map();
       const awaitingRequests = new Set();
       const sourceNodes = new Set();
+      // What the last complete scan showed: this turn's calls, and whether ChatGPT shows any of
+      // them answered. Reset by every scan; an ambiguous or failed one leaves nothing to rely on.
+      let seen = { calls: 0, answered: false };
       const received = () => {
+        seen = { calls: 0, answered: false };
         const pageTurn = generationTurn();
         const source = fiberTurnFor(pageTurn);
         if (!source) return false;
@@ -10023,6 +10068,7 @@
             if (call.requestId) awaitingRequests.delete(call.requestId);
           } else if (!pending) awaitingResults.set(call.messageId, call);
         }
+        seen = { calls: [...sources].reduce((total, turn) => total + turn.calls.length, 0), answered: calls.some(call => call.answered) };
         // A missing row or a failed scan cannot acknowledge a call seen earlier.
         return awaitingResults.size === 0 && awaitingRequests.size === 0;
       };
@@ -10030,9 +10076,12 @@
       nativePhase = 'settling';
       renderControl();
       let endedPolls = 0;
+      let sent = null;
       const ready = await waitUntil(async () => {
         if (!current()) return true;
-        const count = await peekPendingTools(forId);
+        const peek = await peekCompactionActivity(forId);
+        const count = peek ? peek.pendingTools : null;
+        sent = peek ? peek.sentResults : null;
         if (!current()) return true;
         if (count !== 0) {
           endedPolls = 0;
@@ -10048,8 +10097,16 @@
         } else endedPolls = 0;
         const fresh = await refreshFiber(null, true);
         if (!current()) return true;
-        return fresh && received();
-      }, AUTO_RECEIPT_SETTLE_MS);
+        if (fresh && received()) return true;
+        // ChatGPT's page no longer sees a running turn's tool results until the turn ends
+        // (2026-10-19: none of 25 finished calls answered), so its receipt cannot be read mid-turn.
+        // Only when it shows this turn's calls and not one of them answered, the app's delivery
+        // stands in: nothing running or unsent, every result sent at least 1.5 s ago, and
+        // at least as many sent results as calls shown. A call the app never served (another app's
+        // tool) keeps the count short, and a request still without its row keeps waiting.
+        return !!fresh && seen.calls > 0 && !seen.answered && awaitingRequests.size === 0 &&
+          sent?.settled === true && Number.isInteger(sent.count) && sent.count >= seen.calls;
+      }, AUTO_RECEIPT_SETTLE_MS, AUTO_RECEIPT_QUICK_MS);
       if (!current()) return t(
         'content_compact_chat_changed_waiting_results',
         'This chat changed while compaction was waiting for tool results.'
@@ -11249,6 +11306,8 @@
    * turn is stopped inside that gap. Still bounded: a call that runs longer is refused as before.
    */
   const AUTO_RECEIPT_SETTLE_MS = 6 * 60_000;
+  /** The first stretch of that wait, checked quickly; most receipts land within seconds. */
+  const AUTO_RECEIPT_QUICK_MS = 10_000;
   /** How many silent answers about pending calls to sit through before refusing. */
   const SETTLE_UNKNOWN_TRIES = 3;
 
@@ -11262,15 +11321,29 @@
    * the answer. Null means the app could not be asked, which is not the same as zero.
    */
   async function peekPendingTools(forId = conversationId) {
+    return (await peekCompactionActivity(forId))?.pendingTools ?? null;
+  }
+
+  /** The app's running-call count, and its delivery of this turn's results when it has one. */
+  async function peekCompactionActivity(forId = conversationId) {
     const reply = await ask({ type: 'activity', conversationId: forId, since });
     if (!reply || reply.ok !== true || !reply.data) return null;
     const count = Number(reply.data.pendingTools);
-    return Number.isFinite(count) && count >= 0 ? count : null;
+    const sent = reply.data.sentResults;
+    return {
+      pendingTools: Number.isFinite(count) && count >= 0 ? count : null,
+      sentResults: sent && typeof sent === 'object' ? { count: Number(sent.count), settled: sent.settled === true } : null
+    };
   }
 
   /** Polls a condition. Resolves true when it holds, false when the budget runs out. */
-  async function waitUntil(test, budgetMs) {
-    const until = Date.now() + budgetMs;
+  /**
+   * Checks every 250 ms. A long wait passes `slowAfterMs`: after that it checks every 2 s, since
+   * each check reads the page and minutes of quarter-second checks weigh most on slow machines.
+   */
+  async function waitUntil(test, budgetMs, slowAfterMs = Infinity) {
+    const started = Date.now();
+    const until = started + budgetMs;
     for (;;) {
       let held = false;
       try {
@@ -11280,7 +11353,7 @@
       }
       if (held) return true;
       if (Date.now() >= until) return false;
-      await sleep(250);
+      await sleep(Date.now() - started >= slowAfterMs ? 2000 : 250);
     }
   }
 
@@ -13449,6 +13522,10 @@
       if (intoTurn && input.purpose === 'rotation' && CLF_DOM.generating() &&
           !await waitPageView(() => !!CLF_DOM.sendButton(), onTarget, 3000)) {
         noteWithdraw('no-send');
+        // Say so at once: the app holds the due call's answer for this continue, and a later tool
+        // result, usually one without Stop, tries again (measured on Loop chats, 2026-10-20).
+        await ask({ type: 'desktop_input', id: input.id, owner: input.owner, fail: true,
+          error: 'Fresh-turn continue declined: no Send while ChatGPT works.', detail: 'no-send' }).catch(() => undefined);
         return false;
       }
       const nativeSend = () => sendSubmittedText(sendingTarget, false, async sendCurrent => {
@@ -13659,11 +13736,12 @@
    */
   let projectCreateBusy = false;
   /**
-   * Archives one retired worker chat with ChatGPT's own reversible archive (#1460): the chat
-   * leaves the chat list and can be restored from ChatGPT's settings. One request for one exact
-   * chat of the signed-in account; nothing is deleted and nothing else is touched.
+   * Archives one worker chat with ChatGPT's own reversible archive (#1460): the chat leaves the
+   * chat list and can be restored from ChatGPT's settings. With `archive` false it restores one
+   * the app archived, before that worker is woken (#1701). One request for one exact chat of the
+   * signed-in account; nothing is deleted and nothing else is touched.
    */
-  async function archiveWorkerChat(conversationId) {
+  async function archiveWorkerChat(conversationId, archive = true) {
     const id = String(conversationId || '').toLowerCase();
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) return 'failed';
     const signedIn = await fetch(`${location.origin}/api/auth/session`, { credentials: 'include' });
@@ -13674,9 +13752,10 @@
     // A workspace chat belongs to that workspace's account, which ChatGPT names in this header.
     if (typeof session.account?.id === 'string' && session.account.id) headers['ChatGPT-Account-Id'] = session.account.id;
     const archived = await fetch(`${location.origin}/backend-api/conversation/${id}`, {
-      method: 'PATCH', credentials: 'include', headers, body: JSON.stringify({ is_archived: true })
+      method: 'PATCH', credentials: 'include', headers, body: JSON.stringify({ is_archived: archive })
     });
-    return archived.ok ? 'archived' : 'failed';
+    if (!archived.ok) return 'failed';
+    return archive ? 'archived' : 'unarchived';
   }
 
   async function createChatgptProject(request) {
@@ -13988,7 +14067,7 @@
       // dead context Chrome leaves behind when an unpacked extension is reloaded while the
       // ChatGPT document stays open. No page/session data crosses in this health check.
       if (message.type === 'clf-archive-chat') {
-        void archiveWorkerChat(message.conversationId).then(outcome => sendResponse({ outcome })).catch(() => sendResponse({ outcome: 'failed' }));
+        void archiveWorkerChat(message.conversationId, message.archive !== false).then(outcome => sendResponse({ outcome })).catch(() => sendResponse({ outcome: 'failed' }));
         return true;
       }
       if (message.type === 'clf-stop-turn') {
