@@ -2867,5 +2867,7 @@
   "Chats sit under their project folders.": "Los chats aparecen bajo las carpetas de sus proyectos.",
   "All chats in one list, active ones on top.": "Todos los chats en una lista, los activos arriba.",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "El máximo de chats de subagentes que un chat puede tener a la vez. Necesita la extensión del navegador conectada.",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "El trabajo largo sigue en un turno nuevo con un Continuar automático, justo después de un resultado de herramienta. Los turnos cortos se cortan menos. También en los chats con Objetivo y Bucle; no con modelos Pro ni en los chats de los subagentes."
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "El trabajo largo sigue en un turno nuevo con un Continuar automático, justo después de un resultado de herramienta. Los turnos cortos se cortan menos. También en los chats con Objetivo y Bucle; no con modelos Pro ni en los chats de los subagentes.",
+  "Mark all as seen": "Marcar todo como visto",
+  "Clear New response from this project's finished chats": "Quitar «Nueva respuesta» de los chats terminados de este proyecto"
 }

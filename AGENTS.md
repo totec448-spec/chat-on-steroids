@@ -4122,7 +4122,10 @@ a completed background chat gets a static accent marker until selected, and a se
 completion is acknowledged locally without writing session metadata. The receipt advances only after
 the current selection/load generation has successfully rendered that conversation at the live tail;
 failed or stale selection loads leave it unseen. A first-run baseline prevents historical completions
-from appearing unread after an update, and the stored receipts stay bounded.
+from appearing unread after an update, and the stored receipts stay bounded. Mark all as seen
+(`markAllSeen`, one write) acknowledges every row that shows New response: the sidebar header's
+check button, shown only while one does, covers all chats, and a project's menu, holding the item only
+while one of its chats does, covers that project. A working chat has no completion to acknowledge and keeps its spinner.
 `sessions:list` (`readSessionList`, `SessionList`) carries per-chat states only the main process
 holds, as ChatGPT conversation ids, each keyed like `blocked`: `approval` (`approvalWaitingChats()`,
 the recovery hold's own 75 s freshness rule) and `recoveryStopped` (`recoveryStoppedChats()` in

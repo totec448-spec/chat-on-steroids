@@ -2777,5 +2777,7 @@
   "Chats sit under their project folders.": "聊天显示在各自的项目文件夹下。",
   "All chats in one list, active ones on top.": "所有聊天在同一列表中，进行中的排在最前。",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "一个聊天可同时运行的子智能体聊天上限。需要已连接的浏览器扩展。",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "长时间的工作会在工具结果之后，通过自动“继续”在新轮次中接着进行。轮次越短越不容易中断。也用于目标和循环聊天；不用于 Pro 模型或子智能体自己的聊天。"
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "长时间的工作会在工具结果之后，通过自动“继续”在新轮次中接着进行。轮次越短越不容易中断。也用于目标和循环聊天；不用于 Pro 模型或子智能体自己的聊天。",
+  "Mark all as seen": "全部标为已读",
+  "Clear New response from this project's finished chats": "清除此项目已完成聊天的“新回复”"
 }

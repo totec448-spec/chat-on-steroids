@@ -39,6 +39,22 @@ it('baselines existing history, marks only newer completed turns unseen and pers
   expect(reloaded.state.isUnseen(completed('another-chat', 1_150))).toBe(true);
 });
 
+it('marks every finished completion seen in one write and leaves an open turn and older work alone', () => {
+  const { w, state } = fixture(undefined, 1_000);
+  const writes = vi.spyOn(w.localStorage.__proto__, 'setItem');
+  const running = { ...completed('running', 1_150), activeTurnId: 'turn-2' };
+  const chats = [completed('a', 1_100), completed('b', 1_200), completed('old', 900), running];
+  expect(state.markAllSeen(chats)).toBe(2);
+  expect(writes).toHaveBeenCalledTimes(1);
+  expect(chats.map(chat => state.isUnseen(chat))).toEqual([false, false, false, false]);
+  // The open turn had nothing to acknowledge: once it finishes, its reply is new.
+  expect(state.isUnseen({ ...running, activeTurnId: null, lastTurnEndAt: 1_300 })).toBe(true);
+  expect(state.markAllSeen(chats)).toBe(0);
+  expect(writes).toHaveBeenCalledTimes(1);
+  const saved = JSON.parse(w.localStorage.getItem('chat-on-steroids.sidebar-completion-seen')!) as { seen: Array<[string, number]> };
+  expect(saved.seen).toEqual([['a', 1_100], ['b', 1_200]]);
+});
+
 it.each(['failed', 'stopped', 'interrupted', 'stalled', 'unknown'])(
   'does not turn a %s terminal outcome into a generic unread completion',
   outcome => {

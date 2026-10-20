@@ -193,6 +193,11 @@ function projectMenuItems(id: string): RowMenuItem[] {
         : t('Create this project in ChatGPT again'),
       run: () => void retryChatgptProject(id)
     } satisfies RowMenuItem] : []),
+    // Only while one of its chats shows New response, so the menu does not offer what does nothing.
+    ...(sessions.some(entry => newResponse(entry) && projectGroup(entry.projectId) === id) ? [{
+      action: 'mark-seen', icon: 'i-checks', label: () => t('Mark all as seen'),
+      title: () => t("Clear New response from this project's finished chats"), run: () => markAllSeen(id)
+    } satisfies RowMenuItem] : []),
     {
       action: 'color', icon: 'i-palette', label: () => t('Color'), title: () => t('Change project color'),
       submenu: () => ([null, ...PROJECT_COLORS] as const).map(choice => ({
@@ -835,8 +840,22 @@ function sessionBadges(summary: SessionSummary): Badge[] {
   else if (!agent && workerReportedFinish(summary)) badges.push(AGENT_BADGE.sleeping);
   else if (sessionWorking(summary)) badges.push(AGENT_BADGE.active);
   else if (agent && agent.role !== 'prime') badges.push(AGENT_BADGE[agent.state]);
-  if (!sessionWorking(summary) && sidebarCompletion?.isUnseen(summary)) badges.push({ text: 'New response', tone: 'is-unseen' });
+  if (newResponse(summary)) badges.push({ text: 'New response', tone: 'is-unseen' });
   return badges;
+}
+
+/** The row's New response badge: a finished reply not yet seen on this device. A chat working again shows its spinner instead. */
+function newResponse(summary: SessionSummary): boolean {
+  return !sessionWorking(summary) && sidebarCompletion?.isUnseen(summary) === true;
+}
+
+/**
+ * Mark all as seen: clears New response from every chat that shows it, or from one project's chats,
+ * as opening each would. A working chat keeps its spinner and its next reply still arrives as new.
+ */
+function markAllSeen(projectId?: string): void {
+  const shown = sessions.filter(entry => newResponse(entry) && (projectId === undefined || projectGroup(entry.projectId) === projectId));
+  if (sidebarCompletion?.markAllSeen(shown)) paintSessions();
 }
 
 /** The chat whose tooltip a click put away, until the pointer leaves its row. */
@@ -1898,6 +1917,8 @@ function paintSessions(): void {
   if (renaming && (document.activeElement as HTMLElement | null)?.classList.contains('sess-rename')) return;
   const layout = sidebarLayout();
   paintedLayout = layout;
+  // The header's Mark all as seen shows only while a chat shows New response.
+  $('markAllSeen').hidden = !sessions.some(newResponse);
   $('sessionList').classList.toggle('is-inbox', layout === 'inbox');
   if (layout !== 'inbox') inboxPicker.close();
   if (layout === 'inbox') {
@@ -8535,6 +8556,12 @@ export function initChat(next: Deps): void {
   });
 
   $('chatRefresh').addEventListener('click', event => { event.preventDefault(); void refreshAll(); });
+  $('markAllSeen').addEventListener('click', () => {
+    const button = $('markAllSeen'), focused = document.activeElement === button;
+    markAllSeen();
+    // The button hides with the last New response; the keyboard goes on to search, beside it in either layout.
+    if (focused && button.hidden) (paintedLayout === 'inbox' ? $('chatList').querySelector<HTMLElement>('[data-inbox-control="search"]') : $('searchChatsButton'))?.focus({ preventScroll: true });
+  });
 
   $('copyHandoff').addEventListener('click', async () => {
     if (!handoff) return;
