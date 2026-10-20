@@ -4405,6 +4405,8 @@ describe('blocked chats', () => {
     expect(textOf(untrusted)).toContain('CHAT_NOT_TRUSTED');
     expect(textOf(untrusted)).toMatch(/⋯ menu in the app's sidebar/);
     expect(textOf(untrusted)).toContain('Trust chat');
+    // VM, 2026-10-20: refused here, the model ran the same command through the other computer's app.
+    expect(textOf(untrusted)).toContain('Do not send it to another app or connector instead');
     expect(textOf(untrusted)).not.toContain('Sessions');
     expect(textOf(untrusted)).not.toContain('/workspace/notes.txt');
 
