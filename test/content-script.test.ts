@@ -18229,6 +18229,28 @@ describe('the context meter and automatic compaction', () => {
       .toEqual([expect.objectContaining({ sourceError: expect.stringContaining('has not confirmed receiving') })]);
   });
 
+  it('checks less often once a receipt wait has run for a while', async () => {
+    // The release build's slow Intel runner timed the 6-minute wait out: 1,440 checks at 250 ms,
+    // each reading the page. On a real page that is minutes of needless work on the slowest machines.
+    let checks = 0;
+    live = await harness(undefined, {
+      activity: () => { checks++; return withContext(205_000, settings({ auto: true }), { pendingTools: 0, sentResults: { count: 0, settled: true } }); },
+      compact: () => ({ ok: true, data: { token: 'paced-token', prompt: 'Write the brief.', ...automaticTicket('not-attempted') } })
+    });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'paced-source', []);
+    compactionFiber(section, () => [compactionCall(false)], () => []);
+    const sends = watchSend(live.document);
+    checks = 0;
+    await live.hook.startCompact(true);
+    expect(sends()).toBe(0);
+    expect(live.sent.filter((message) => message.type === 'compact' && message.sourceDeferred === true))
+      .toEqual([expect.objectContaining({ sourceError: expect.stringContaining('has not confirmed receiving') })]);
+    // Quick at first (a receipt usually lands within seconds), then every 2 s: about 215 checks.
+    expect(checks).toBeGreaterThan(100);
+    expect(checks).toBeLessThan(300);
+  });
+
   it.each([[120_000, true], [8 * 60_000, false]])('lets a local poll of %i ms finish before stopping an automatic source (compacts: %s)', async (pollMs, compacts) => {
     // #825: long unit tests are polled with write_stdin, and one poll can run for five minutes.
     // The automatic barrier gave up after 30 seconds, so a busy turn never compacted.
