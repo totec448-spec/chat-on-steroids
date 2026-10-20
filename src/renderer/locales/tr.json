@@ -2836,5 +2836,12 @@
   "{0} sub-agents need attention|one": "{0} yardımcı ajan ilgi bekliyor",
   "A tool call from an untrusted chat was refused. To allow it, open this chat's ⋯ menu in the sidebar (or right-click its row) and choose Trust chat.": "Güvenilmeyen bir sohbetten gelen araç çağrısı reddedildi. İzin vermek için kenar çubuğunda bu sohbetin ⋯ menüsünü açın (veya satırına sağ tıklayın) ve “Sohbete güven”i seçin.",
   "A tool call from a worker whose main chat is not currently allowed was refused. Open that main chat's ⋯ menu in the sidebar and choose Trust chat if it is untrusted, or Release chat if it is blocked.": "Ana sohbetine şu anda izin verilmeyen bir çalışanın araç çağrısı reddedildi. Kenar çubuğunda o ana sohbetin ⋯ menüsünü açın; güvenilmiyorsa “Sohbete güven”i, engelliyse “Engeli kaldır”ı seçin.",
-  "A tool call from an app-created worker was refused because the main chat that started it is not proven yet. Return to that main chat in the sidebar; once its row is there, open its ⋯ menu and choose Trust chat, or Release chat if it is blocked, then retry after the worker is attached or recovered there.": "Uygulamanın oluşturduğu bir çalışanın araç çağrısı reddedildi, çünkü onu başlatan ana sohbet henüz kanıtlanmadı. Kenar çubuğunda o ana sohbete dönün; satırı görününce ⋯ menüsünü açıp “Sohbete güven”i (engelliyse “Engeli kaldır”ı) seçin ve çalışan orada bağlanınca veya kurtarılınca yeniden deneyin."
+  "A tool call from an app-created worker was refused because the main chat that started it is not proven yet. Return to that main chat in the sidebar; once its row is there, open its ⋯ menu and choose Trust chat, or Release chat if it is blocked, then retry after the worker is attached or recovered there.": "Uygulamanın oluşturduğu bir çalışanın araç çağrısı reddedildi, çünkü onu başlatan ana sohbet henüz kanıtlanmadı. Kenar çubuğunda o ana sohbete dönün; satırı görününce ⋯ menüsünü açıp “Sohbete güven”i (engelliyse “Engeli kaldır”ı) seçin ve çalışan orada bağlanınca veya kurtarılınca yeniden deneyin.",
+  "Bookmark answer": "Yanıtı yer imlerine ekle",
+  "Remove bookmark": "Yer imini kaldır",
+  "Bookmarks": "Yer imleri",
+  "Answer": "Yanıt",
+  "This answer is no longer in the chat.": "Bu yanıt artık sohbette değil.",
+  "{0} bookmarks in this chat": "Bu sohbette {0} yer imi",
+  "{0} bookmarks in this chat|one": "Bu sohbette {0} yer imi"
 }

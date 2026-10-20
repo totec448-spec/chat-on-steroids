@@ -135,6 +135,7 @@ import {
 } from './session/store.js';
 import { forgetSession, notifyChanged, onSessionChange } from './session/recorder.js';
 import { findInSession, locateMessage, locateSearchMatch, searchSessions } from './session/search.js';
+import { listBookmarks, setBookmark } from './session/bookmarks.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
 import { exportSessionMarkdown } from './session/markdown-export.js';
 import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
@@ -1684,6 +1685,22 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('sessions:locate-message', async (payload) => {
     const { id, messageId } = sessionIdArg.extend({ messageId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i) }).parse(payload);
     return locateMessage(id, messageId);
+  });
+  // Bookmarked answers: marked under an answer, listed in the chat's header to jump back to them.
+  handle('sessions:bookmarks', async (payload) => {
+    const { id } = sessionIdArg.parse(payload);
+    if (!await getSession(id)) return [];
+    return listBookmarks(id);
+  });
+  handle('sessions:bookmark', async (payload) => {
+    const { id, messageId, excerpt, messageTime, on } = sessionIdArg.extend({
+      messageId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i),
+      excerpt: z.string().max(4000),
+      messageTime: z.number().finite().nonnegative(),
+      on: z.boolean()
+    }).parse(payload);
+    if (!await getSession(id)) throw new Error('Session not found');
+    return setBookmark(id, { messageId, excerpt, messageTime }, on);
   });
   handle('sessions:rename', async (payload) => {
     const { id, title } = sessionNameArg.parse(payload);

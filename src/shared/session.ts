@@ -1295,6 +1295,18 @@ export interface SessionSearchResult {
   snippet?: { text: string; matches: Array<[number, number]> };
 }
 /** The message a text match was found in, to open the chat there (`sessions:locate-match`). */
+/** An answer you bookmarked in a chat, to jump back to it from the chat's header. */
+export interface SessionBookmark {
+  /** ChatGPT's id of the answer. */
+  messageId: string;
+  /** The start of the answer as plain text, one line. */
+  excerpt: string;
+  /** When the answer appeared: the list is in this order, like the chat. */
+  messageTime: number;
+  /** When it was bookmarked. */
+  at: number;
+}
+
 export interface SessionSearchLocation {
   /** The message's event, as the timeline holds it. */
   seq: number;

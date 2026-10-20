@@ -2882,5 +2882,13 @@
   "{0} sub-agents need attention|many": "{0} sous-agents demandent votre attention",
   "A tool call from an untrusted chat was refused. To allow it, open this chat's ⋯ menu in the sidebar (or right-click its row) and choose Trust chat.": "Un appel d’outil d’un chat non approuvé a été refusé. Pour l’autoriser, ouvrez le menu ⋯ de ce chat dans la barre latérale (ou faites un clic droit sur sa ligne) et choisissez « Faire confiance au chat ».",
   "A tool call from a worker whose main chat is not currently allowed was refused. Open that main chat's ⋯ menu in the sidebar and choose Trust chat if it is untrusted, or Release chat if it is blocked.": "Un appel d’outil d’un worker dont le chat principal n’est pas autorisé actuellement a été refusé. Ouvrez le menu ⋯ de ce chat principal dans la barre latérale et choisissez « Faire confiance au chat » s’il n’est pas approuvé, ou « Débloquer le chat » s’il est bloqué.",
-  "A tool call from an app-created worker was refused because the main chat that started it is not proven yet. Return to that main chat in the sidebar; once its row is there, open its ⋯ menu and choose Trust chat, or Release chat if it is blocked, then retry after the worker is attached or recovered there.": "Un appel d’outil d’un worker créé par l’application a été refusé, car le chat principal qui l’a lancé n’est pas encore prouvé. Revenez à ce chat principal dans la barre latérale ; une fois sa ligne affichée, ouvrez son menu ⋯ et choisissez « Faire confiance au chat », ou « Débloquer le chat » s’il est bloqué, puis réessayez une fois le worker rattaché ou rétabli."
+  "A tool call from an app-created worker was refused because the main chat that started it is not proven yet. Return to that main chat in the sidebar; once its row is there, open its ⋯ menu and choose Trust chat, or Release chat if it is blocked, then retry after the worker is attached or recovered there.": "Un appel d’outil d’un worker créé par l’application a été refusé, car le chat principal qui l’a lancé n’est pas encore prouvé. Revenez à ce chat principal dans la barre latérale ; une fois sa ligne affichée, ouvrez son menu ⋯ et choisissez « Faire confiance au chat », ou « Débloquer le chat » s’il est bloqué, puis réessayez une fois le worker rattaché ou rétabli.",
+  "Bookmark answer": "Ajouter la réponse aux signets",
+  "Remove bookmark": "Retirer le signet",
+  "Bookmarks": "Signets",
+  "Answer": "Réponse",
+  "This answer is no longer in the chat.": "Cette réponse n'est plus dans le chat.",
+  "{0} bookmarks in this chat": "{0} signets dans ce chat",
+  "{0} bookmarks in this chat|one": "{0} signet dans ce chat",
+  "{0} bookmarks in this chat|many": "{0} de signets dans ce chat"
 }

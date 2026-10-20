@@ -2488,6 +2488,12 @@ input[readonly] {
 .chat-branch-origin:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
 .chat-branch-origin:disabled { cursor: default; }
 .chat-branch-origin:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
+/* Bookmarked answers of the open chat: the count, and the shared menu that lists them. */
+.chat-bookmarks { display: inline-flex; align-items: center; gap: 4px; flex: none; padding: 4px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--soft); font: inherit; font-size: calc(12.5px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; cursor: pointer; }
+.chat-bookmarks[hidden] { display: none; }
+.chat-bookmarks .ico { --ico: 14px; --glyph: 14px; flex: none; }
+.chat-bookmarks:hover, .chat-bookmarks[aria-expanded="true"] { background: var(--hover); color: var(--ink); }
+.chat-bookmarks:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
 /* The new chat being written starts from a reply: one row of the composer dock, drawn like its
    neighbours (the dock draws the frame, the row adds none of its own). */
 .branch-draft[hidden], .edit-draft[hidden] { display: none; }
@@ -2816,6 +2822,7 @@ input[readonly] {
 .answer-action:hover, .answer-export[open] > .answer-action { background: var(--hover); color: var(--ink); }
 .answer-action:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
 .answer-action.is-done { color: var(--green); }
+.answer-bookmark.is-on { color: var(--accent); }
 .answer-export { anchor-scope: --answer-export; }
 .answer-export > summary { anchor-name: --answer-export; }
 .answer-export::details-content { transition: content-visibility 120ms allow-discrete; }

@@ -7058,3 +7058,57 @@ describe('prompt recall in the composer', () => {
     expect(composer(w).value).toBe('Second question');
   });
 });
+
+describe('bookmarked answers', () => {
+  const chat = '6ad337fe-47a4-83ed-a21f-c2e24d5829a4';
+  const replyId = '2b06482d-0dc6-4847-bf7a-2e1a0f671e89';
+  const ask: SessionEvent = { kind: 'user_message', seq: 1, origin: 1, time: T0, source: 'extension', turnId: 'done-turn', messageId: 'ask', message: text('Plan the release') };
+  const reply: SessionEvent = { kind: 'assistant_message', seq: 2, time: T0 + 1_000, source: 'extension', turnId: 'done-turn', messageId: replyId, message: text('**Tag first**, then build.\n\nMore detail.'), final: true, state: 'final' };
+  const end: SessionEvent = { seq: 3, time: T0 + 2_000, source: 'extension', kind: 'turn_end', turnId: 'done-turn', outcome: 'completed' };
+  const mark = { messageId: replyId, excerpt: 'Tag first, then build.', messageTime: T0 + 1_000, at: T0 + 5_000 };
+
+  it('bookmarks an answer, lists it in the header and jumps back to it', async () => {
+    const { w } = await boot([ask, reply, end], true, [], [], { summary: { conversationId: chat } });
+    const api = (w as any).api;
+    api.setBookmark = vi.fn(async (_id: string, _messageId: string, _excerpt: string, _time: number, on: boolean) => ({ ok: true, data: on ? [mark] : [] }));
+    api.locateMessage = vi.fn(async () => ({ ok: true, data: { seq: 2, kind: 'assistant_message', messageId: replyId, position: 2 } }));
+    const header = w.document.getElementById('chatBookmarks') as HTMLButtonElement;
+    const toggle = w.document.querySelector<HTMLButtonElement>('.answer-actions .answer-bookmark')!;
+    expect(header.hidden).toBe(true);
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    expect(toggle.getAttribute('aria-label')).toBe('Bookmark answer');
+
+    toggle.click(); await settle();
+    expect(api.setBookmark).toHaveBeenCalledWith(summary([]).id, replyId, 'Tag first, then build.', T0 + 1_000, true);
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(toggle.getAttribute('aria-label')).toBe('Remove bookmark');
+    expect(header.hidden).toBe(false);
+    expect(header.textContent!.trim()).toBe('1');
+    expect(header.getAttribute('aria-label')).toBe('1 bookmark in this chat');
+
+    header.click(); await settle();
+    expect(header.getAttribute('aria-expanded')).toBe('true');
+    const item = w.document.querySelector<HTMLButtonElement>('[data-row-action="bookmark"]')!;
+    expect(item.textContent).toContain('Tag first, then build.');
+    item.click(); await settle();
+    expect(api.locateMessage).toHaveBeenCalledWith(summary([]).id, replyId);
+    expect(header.getAttribute('aria-expanded')).toBe('false');
+
+    toggle.click(); await settle();
+    expect(api.setBookmark).toHaveBeenLastCalledWith(summary([]).id, replyId, 'Tag first, then build.', T0 + 1_000, false);
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    expect(header.hidden).toBe(true);
+  });
+
+  it('shows a chat\'s saved bookmarks when it is opened', async () => {
+    const { w } = await boot([ask, reply, end], true, [], [], { summary: { conversationId: chat } });
+    const api = (w as any).api;
+    api.listBookmarks = vi.fn(async () => ({ ok: true, data: [mark] }));
+    // Open another view and come back: the chat loads its marks again.
+    w.document.getElementById('newChat')!.click(); await settle();
+    w.document.querySelector<HTMLElement>(`.sess[data-id="${summary([]).id}"]`)!.click(); await settle();
+    expect(api.listBookmarks).toHaveBeenCalledWith(summary([]).id);
+    expect((w.document.getElementById('chatBookmarks') as HTMLButtonElement).hidden).toBe(false);
+    expect(w.document.querySelector('.answer-actions .answer-bookmark')!.getAttribute('aria-pressed')).toBe('true');
+  });
+});

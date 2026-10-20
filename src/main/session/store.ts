@@ -196,6 +196,12 @@ export function sessionSearchIndexPath(id: string): string {
   return path.join(sessionDir(id), 'search.txt');
 }
 
+/** The chat's bookmarked answers (bookmarks.ts); they live and are deleted with the session. */
+export function sessionBookmarksPath(id: string): string {
+  assertSessionId(id);
+  return path.join(sessionDir(id), 'bookmarks.json');
+}
+
 function sessionDir(id: string): string {
   assertReady();
   return path.join(root, id);
