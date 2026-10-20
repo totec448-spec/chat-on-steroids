@@ -2438,7 +2438,6 @@
   "Keep plugin URLs across restarts": "Manter as URLs dos plugins após reinícios",
   "For your own tunnel, such as a named Cloudflare tunnel, whose URL ChatGPT stores. Anyone with that URL can use your Chat On Steroids plugins until you turn this off. Needs secure storage.": "Para o seu próprio túnel, como um túnel nomeado do Cloudflare, cuja URL o ChatGPT guarda. Quem tiver essa URL pode usar seus plugins do Chat On Steroids até você desativar isto. Requer armazenamento seguro.",
   "Start a fresh turn after": "Iniciar um novo turno após",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Not used with Pro models, Goal, Loop or sub-agents.": "Um trabalho longo continua em um novo turno com um Continuar automático, logo após um resultado de ferramenta. Turnos mais curtos falham menos. Não é usado com modelos Pro, Goal, Loop nem subagentes.",
   "20 minutes": "20 minutos",
   "30 minutes": "30 minutos",
   "45 minutes": "45 minutos",
@@ -2869,5 +2868,6 @@
   "Switch at any time. Your chats stay as they are.": "Você pode trocar quando quiser. Seus chats continuam iguais.",
   "Chats sit under their project folders.": "Os chats ficam sob as pastas dos projetos.",
   "All chats in one list, active ones on top.": "Todos os chats em uma lista, os ativos no topo.",
-  "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "O máximo de chats de subagentes que um chat pode ter ao mesmo tempo. Requer a extensão do navegador conectada."
+  "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "O máximo de chats de subagentes que um chat pode ter ao mesmo tempo. Requer a extensão do navegador conectada.",
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Um trabalho longo continua em um novo turno com um Continuar automático, logo após um resultado de ferramenta. Turnos mais curtos falham menos. Também em chats com Goal e Loop; não com modelos Pro nem nos chats dos subagentes."
 }
