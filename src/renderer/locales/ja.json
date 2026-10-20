@@ -2777,5 +2777,7 @@
   "Chats sit under their project folders.": "チャットはプロジェクトのフォルダーの下に並びます。",
   "All chats in one list, active ones on top.": "すべてのチャットを 1 つのリストに。作業中のものが上に来ます。",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "1 つのチャットが同時に実行できるサブエージェントのチャットの上限。ブラウザー拡張機能の接続が必要です。",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "長い作業はツール結果の直後に、自動の「続ける」で新しいターンに引き継がれます。短いターンほど途切れにくくなります。ゴールとループのチャットでも使われます。Pro モデルとサブエージェント自身のチャットでは使われません。"
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "長い作業はツール結果の直後に、自動の「続ける」で新しいターンに引き継がれます。短いターンほど途切れにくくなります。ゴールとループのチャットでも使われます。Pro モデルとサブエージェント自身のチャットでは使われません。",
+  "Mark all as seen": "すべて既読にする",
+  "Clear New response from this project's finished chats": "このプロジェクトの完了したチャットから「新しい返信」を消す"
 }

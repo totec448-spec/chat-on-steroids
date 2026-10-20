@@ -2197,6 +2197,55 @@ it('keeps working state per chat and marks only completed background chats as un
   expect(row('chat-b').querySelector('.session-status.is-unseen')).toBeNull();
 });
 
+it("marks every New response seen from the header, or one project's from its menu, and leaves a working chat working", async () => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: '/workspace', createdAt: 1 };
+  const startedAt = Date.now();
+  const chat = (id: string, projectId?: string): SessionSummary => ({ ...summary([]), id, title: id, conversationId: `conversation-${id}`, chatIds: [`conversation-${id}`],
+    projectId, updatedAt: startedAt, lastToolCallAt: startedAt, activityExpiresAt: startedAt + 60_000 });
+  const chats = [chat('p1', project.id), chat('p2', project.id), chat('p3', project.id), chat('u1')];
+  const { w } = await boot([], false, [], [project], { sessions: chats });
+  const row = (id: string) => w.document.querySelector<HTMLElement>(`.sess[data-id="${id}"]`)!;
+  const unseen = () => chats.map(entry => entry.id).filter(id => row(id).querySelector('.session-status.is-unseen'));
+  const header = () => w.document.getElementById('markAllSeen') as HTMLButtonElement;
+  const actions = () => [...w.document.querySelectorAll<HTMLElement>('.row-menu .row-menu-item')].map(item => item.dataset.rowAction);
+  const refresh = async () => { (w.document.getElementById('chatRefresh') as HTMLButtonElement).click(); await settle(); };
+  expect(header().hidden).toBe(true);
+  projectMenu(w, project.id);
+  expect(actions()).toEqual(['color', 'remove']);
+  w.document.querySelector<HTMLElement>('.row-menu')!.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+  // p1, p2 and u1 finish in the background; p3 is still running.
+  let at = Date.now();
+  for (const entry of [chats[0]!, chats[1]!, chats[3]!]) {
+    const done = ++at;
+    Object.assign(entry, { activityExpiresAt: null, lastAssistantFinalAt: done, lastTurnEndAt: done, lastTurnOutcome: 'completed', updatedAt: done });
+  }
+  await refresh();
+  expect(unseen()).toEqual(['p1', 'p2', 'u1']);
+  expect(header().hidden).toBe(false);
+
+  projectMenu(w, project.id);
+  expect(actions()).toEqual(['mark-seen', 'color', 'remove']);
+  menuItem(w, 'mark-seen').click();
+  await settle();
+  expect(unseen()).toEqual(['u1']);
+  expect(row('p3').querySelector('.session-status.is-active')).not.toBeNull();
+  projectMenu(w, project.id);
+  expect(actions()).toEqual(['color', 'remove']);
+  w.document.querySelector<HTMLElement>('.row-menu')!.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+
+  header().focus();
+  header().click();
+  await settle();
+  expect(unseen()).toEqual([]);
+  expect(header().hidden).toBe(true);
+  expect(w.document.activeElement?.id).toBe('searchChatsButton');
+  expect(row('p3').querySelector('.session-status.is-active')).not.toBeNull();
+  const saved = w.localStorage.getItem('chat-on-steroids.sidebar-completion-seen')!;
+  for (const id of ['p1', 'p2', 'u1']) expect(saved).toContain(`"${id}"`);
+  expect(saved).not.toContain('"p3"');
+});
+
 it('keeps the sidebar working spinner on one continuous phase across activity repaints', async () => {
   const clock = vi.spyOn(Date, 'now').mockReturnValue(10_000);
   try {
