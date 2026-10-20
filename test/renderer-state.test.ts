@@ -3670,6 +3670,28 @@ it('opens, saves and restores the editable handoff prompt', async () => {
   expect(mounted.calls.at(-1)?.compaction.handoffPrompt).toBe(DEFAULT_HANDOFF_PROMPT);
 });
 
+it('saves the Continue prompt from its editor, and Restore default sends the built-in phrases again', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const automation = doc.querySelector('[data-view="settings"]')!;
+  const panel = doc.getElementById('customContinuePanel')!;
+  const prompt = doc.getElementById('customContinue') as HTMLTextAreaElement;
+  expect(automation.contains(prompt)).toBe(true);
+  expect(prompt.maxLength).toBe(500);
+  expect(panel.hidden).toBe(true);
+  (doc.getElementById('customContinueEdit') as HTMLButtonElement).click();
+  expect(panel.hidden).toBe(false);
+  expect(prompt.value).toBe('');
+
+  prompt.value = '  Keep going and run the tests at the end.  ';
+  prompt.dispatchEvent(new mounted.window.Event('change'));
+  await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui.customContinue).toBe('Keep going and run the tests at the end.'));
+
+  (doc.getElementById('customContinueReset') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui).toMatchObject({ customContinue: undefined }));
+  expect(prompt.value).toBe('');
+});
+
 it('offers the handoff length, starting at the thorough default, and saves a shorter choice', async () => {
   const mounted = await mountChat({ hasGoalKey: true });
   const length = mounted.window.document.getElementById('handoffLength') as HTMLSelectElement;
