@@ -88,6 +88,31 @@ describe('approval card episodes', () => {
     expect(deps.rows.filter(row => row[2] === APPROVAL_ANSWERED_TEXT)).toHaveLength(2);
   });
 
+  it('takes over the row an earlier app run left waiting instead of adding another', async () => {
+    // VM, 2026-10-20: every restart while one card waited added a "waiting" row, five in the end.
+    const lookups: string[] = [];
+    deps.previous = async sessionId => {
+      lookups.push(sessionId);
+      return { progressId: 'approval-wait:chat:earlier-run', anchor: { seq: 3, time: 5 } };
+    };
+    await noteApprovalCard('chat', true, 'session', deps, 1_000);
+    expect(lookups).toEqual(['session']);
+    expect(deps.rows).toEqual([]);
+    await noteApprovalCard('chat', false, 'session', deps, 2_000);
+    expect(deps.rows).toEqual([['session', 'approval-wait:chat:earlier-run', APPROVAL_ANSWERED_TEXT, { seq: 3, time: 5 }]]);
+  });
+
+  it('starts its own row when the last one was answered, belongs to another chat, or is missing', async () => {
+    for (const previous of [null, { progressId: 'approval-wait:other-chat:1', anchor: { seq: 3, time: 5 } }]) {
+      resetApprovalWaits();
+      deps.rows.length = 0;
+      deps.previous = async () => previous;
+      await noteApprovalCard('chat', true, 'session', deps, 1_000);
+      expect(deps.rows.map(row => row[2])).toEqual([APPROVAL_WAITING_TEXT]);
+      expect(deps.rows[0]![1]).toMatch(/^approval-wait:chat:/);
+    }
+  });
+
   it('holds recovery for a chat the app has not recorded, without a row or notice', async () => {
     await noteApprovalCard('chat', true, null, deps, 1_000);
     await noteApprovalCard('chat', true, null, deps, 1_000 + APPROVAL_NOTICE_GRACE_MS);
