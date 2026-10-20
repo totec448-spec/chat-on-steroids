@@ -138,11 +138,11 @@ import type { ToolOutcome } from '../../shared/session.js';
 const requestOwner = (requestId: string): string | null => requestCorrelation(requestId)?.conversationId ?? null;
 
 const UNTRUSTED_NOTICE =
-  'A tool call from an untrusted chat was refused. In the chat list, hover this chat in the sidebar and choose Trust (✓) to allow it.';
+  'A tool call from an untrusted chat was refused. To allow it, open this chat\'s ⋯ menu in the sidebar (or right-click its row) and choose Trust chat.';
 const UNTRUSTED_WORKER_NOTICE =
-  'A tool call from a worker whose owning prime is not currently allowed was refused. In the chat list, hover the owning prime row in the sidebar and choose Trust (✓) if it is untrusted, or Release there if it is blocked.';
+  'A tool call from a worker whose main chat is not currently allowed was refused. Open that main chat\'s ⋯ menu in the sidebar and choose Trust chat if it is untrusted, or Release chat if it is blocked.';
 const UNPROVEN_WORKER_NOTICE =
-  'A tool call from an app-created worker was refused because no unique owning prime is currently proven. Return to the owning prime in the chat list; once its row is known, hover it in the sidebar and choose Trust (✓), or Release there if it is blocked, then retry after the worker is attached or recovered there.';
+  'A tool call from an app-created worker was refused because the main chat that started it is not proven yet. Return to that main chat in the sidebar; once its row is there, open its ⋯ menu and choose Trust chat, or Release chat if it is blocked, then retry after the worker is attached or recovered there.';
 const WORKER_CONNECTION_PROFILE_REFUSAL =
   'WORKER_CONNECTION_PROFILE_MISMATCH: this worker belongs to a different Chat On Steroids Setup profile. ' +
   'No local tool was run. Return to the owning prime and switch back to the connection that created this worker family; ' +
