@@ -21,8 +21,11 @@ export async function saveCodeFile(text: string, name: string, owner: BrowserWin
   if (result.canceled || !result.filePath) return { done: 'cancelled' };
   // A file the person chose to replace stays whole until the new one is: write beside it, then rename over it.
   const temporary = `${result.filePath}.${randomUUID()}.tmp`;
+  // The new file keeps a replaced file's permissions, such as a script's execute bit; Windows has none to keep.
+  const mode = process.platform === 'win32' ? undefined : await fs.stat(result.filePath).then(stat => stat.mode & 0o7777, () => undefined);
   try {
     await fs.writeFile(temporary, text, 'utf8');
+    if (mode !== undefined) await fs.chmod(temporary, mode);
     await fs.rename(temporary, result.filePath);
   } catch (error) {
     await fs.rm(temporary, { force: true });

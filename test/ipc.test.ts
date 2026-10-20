@@ -2311,6 +2311,16 @@ it('leaves a code file the person chose to replace whole when writing the new on
   expect(await fs.readdir(folder)).toEqual(['kept.ts']);
 });
 
+it.runIf(process.platform !== 'win32')('keeps a replaced script runnable when a code block is saved over it', async () => {
+  const target = path.join(dir, 'run.sh');
+  await fs.writeFile(target, 'echo old\n', 'utf8');
+  await fs.chmod(target, 0o750);
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: target } as never);
+  expect(await handlers.get('code:save')!(null, { text: 'echo new\n', name: 'snippet.sh' })).toEqual({ ok: true, data: { done: 'saved', name: 'run.sh' } });
+  expect(await fs.readFile(target, 'utf8')).toBe('echo new\n');
+  expect((await fs.stat(target)).mode & 0o777).toBe(0o750);
+});
+
 describe('native worker checkout cleanup confirmation', () => {
   const offer = {
     runId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
