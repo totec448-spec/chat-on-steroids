@@ -59,8 +59,8 @@ describe('custom appearance', () => {
     delete old.lineSpacing;
     expect(appearanceSchema.parse(old).lineSpacing).toBe(100);
     expect(appearanceSchema.parse({ ...old, lineSpacing: 140, font: 'legible' })).toMatchObject({ lineSpacing: 140, font: 'legible' });
-    // Out of range or not a whole percent: normal spacing, the rest of the appearance is kept.
-    for (const bad of [99, 201, 142.5, '140', null]) expect(appearanceSchema.parse({ ...old, lineSpacing: bad, font: 'serif' })).toMatchObject({ lineSpacing: 100, font: 'serif' });
+    // Out of range or off the 10-percent steps: normal spacing, the rest of the appearance is kept.
+    for (const bad of [99, 201, 142.5, 145, '140', null]) expect(appearanceSchema.parse({ ...old, lineSpacing: bad, font: 'serif' })).toMatchObject({ lineSpacing: 100, font: 'serif' });
     const base = defaultAppearance(), live = { ...defaultAppearance(), lineSpacing: 150 };
     // A stale window saving its text size keeps the spacing another window chose.
     expect(mergeAppearance(live, base, { ...base, fontSize: 16 })).toMatchObject({ lineSpacing: 150, fontSize: 16 });
