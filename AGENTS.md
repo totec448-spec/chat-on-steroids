@@ -249,7 +249,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Finish/planning | `src/main/session/finish.ts`, `task-request.ts`, `goal.ts`, `src/shared/{finish,task-progress}.ts`: held turn, decision/plan invocation and cancellation. |
 | Continuation | `src/main/session/{continuation,resume-gate,handoff,handoff-prompt}.ts`: A→B transaction, send ambiguity and exact brief. |
 | Automation | `src/main/goal.ts`, `src/shared/{goal,goal-templates}.ts`: objectives, switches, obligations, provider/helper decisions. |
-| Agents | `src/main/agents.ts`, `src/renderer/{agent-panel,agent-communication}.ts`: independent prime families, staged mutations and addressed messages. |
+| Agents | `src/main/agents.ts`, `src/renderer/{agent-panel,agent-communication,agent-activity}.ts`: independent prime families, staged mutations and addressed messages. A worker opens on its Activity (#105): its task, its tool calls once each in first-appearance order with their latest record, and the files its successful calls changed; `sessions:events` with `actions: true` reads only `session_start` and `tool_call` rows for it, and a window without `session_start` says earlier actions are in the conversation. |
 | Worker Git worktrees | `src/main/worktrees/`, `src/main/workspace.ts`: approved isolated checkouts, marker-verified ownership and exact worker workspace resolution. |
 | Browser orchestration | `src/main/bridge.ts`, `browser.ts`, `browser-startup.ts`, `browser-wake.ts`, `browser-window-layout.ts`, `browser-preferences.ts`; `src/shared/browser-preferences.ts`. |
 | Built-in browser | `src/main/cos-browser/` (`selection.ts` opt-in loading, `index.ts` lifecycle, `host.ts` windows/tabs/extension/sign-in, `tab-model.ts`, `chrome-api.ts`, `extension-worker.ts`, `match-pattern.ts`, `sign-in.ts`, `sign-in-transfer.ts`); `src/preload/cos-browser{,-worker,-sign-in}.ts`; `src/renderer/cos-browser.{html,ts,css}` toolbar and `cos-browser-sign-in.{html,ts,css}` Google sign-in card; `src/shared/cos-browser-sites.ts`. See §13 Built-in browser. |
@@ -2521,6 +2521,18 @@ projection. Restart/reinstallation cannot mint a new turn for that same answer a
 detach its recorded MCP proof; adopting the recorded identity emits no new `turn_start`.
 `recordedQuestionId` carries that same response's native question across a partial transcript
 load. Adoption consumes an already-matching Send receipt instead of opening the response again.
+`recordedQuestionFirst: true` (absent otherwise) says that question's recorded parent is ChatGPT's
+`root`. A chat's first exchange can run with no question anywhere, page model included; MAIN then
+stamps it `data-clf-fiber-first` (valid only under its current turn stamp) when it is the
+conversation's first entry, in progress, with no user slot or user message. Compact & Resume's
+source check accepts that place as the recorded first question only while the page shows that one
+exchange and no user message at all; any shown question still has to match by id.
+`sentResults: { count, settled }` (open turns only) is the app's delivery of that turn's results:
+outer provider calls whose HTTP response finished at least 1.5 s ago, and `settled` false while one
+of the chat's calls runs, is unsent, failed to send or is within that grace (an unproven owner
+counts against every chat). ChatGPT's page does not see a running turn's tool results until the
+turn ends, so the automatic barrier accepts this only when its complete scan shows this turn's
+calls with none answered, no request waiting for its row, and `count` at least that call count.
 An empty or refused first activity reply does not permanently consume adoption: until this
 document has owned a generation, a later feed may restore the recorded turn when its exact
 question is the current native question. Manual Stop, a newer local generation, bootstrap
@@ -5301,7 +5313,8 @@ work must name the original PR/author and carry appropriate GitHub-linked `Co-au
 trailers; update `CONTRIBUTORS.md` and distinguish incorporated code from reports/proposals.
 Closing a PR or rewriting its implementation does not remove the contributor's credit.
 
-Record changes and actual checks in a focused worklog. Keep security reproductions/private
+Record changes and actual checks in the PR description (Test, Live proof), never as a worklog
+file in the PR (CONTRIBUTING.md "Clean contents"). Keep security reproductions/private
 session material out of public docs and fixtures; follow `SECURITY.md`. Do not package, install,
 commit or publish merely because a source/documentation task was requested.
 

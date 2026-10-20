@@ -253,6 +253,20 @@ describe('session finish turn identity', () => {
     expect(notify).toHaveBeenCalledOnce();
     expect((await getSession(sessionId))?.finishTurn?.released).toBe(false);
   });
+  it('reports an unrecorded unverified finish result while retaining the hold', async () => {
+    await configureUnverifiedHelperStop(true);
+    const recorder = await import('../src/main/session/recorder.js');
+    const logger = await import('../src/main/logger.js');
+    const record = recorder.recordProgress;
+    const progress = vi.spyOn(recorder, 'recordProgress').mockImplementation((...args) =>
+      args[6] === 'helper_stop_unverified' ? Promise.resolve(null) : record(...args));
+    const warning = vi.spyOn(logger, 'logWarn');
+    try {
+      expect(await announceSessionFinish(sessionId, 'Requested work is complete', Date.now() + 1500)).toContain('HELD:');
+      expect((await getSession(sessionId))?.finishTurn?.released).toBe(false);
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining('unverified stop could not be recorded'));
+    } finally { progress.mockRestore(); warning.mockRestore(); }
+  });
   it.each(['goal', 'loop'] as const)('revokes an in-flight %s decision across a mode switch and switch back', async mode => {
     await setGoalSwitchNow(hooks.caller.conversationId, mode, true);
     let complete!: (text: string) => void;

@@ -87,16 +87,91 @@ describe('bounded asynchronous diagnostic mirror', () => {
     }
   });
 
-  it('isolates file errors and saves forensic context on the narrow failure path', async () => {
+  it('isolates file errors, saves forensic context, and keeps writing once the disk recovers (#1682)', async () => {
     const file = await logFile();
     vi.spyOn(fs, 'appendFile').mockRejectedValueOnce(new Error('disk failure'));
     expect(() => logInfo('before failure')).not.toThrow();
-    await expect(flushLogFile()).rejects.toThrow('disk failure');
+    await vi.waitFor(async () => expect(await fs.readFile(`${file}.crash`, 'utf8')).toContain('disk failure'));
+    expect(await fs.readFile(`${file}.crash`, 'utf8')).toContain('before failure');
     expect(() => logInfo('UI still works')).not.toThrow();
-    await flushLogBeforeExit();
-    const crash = await fs.readFile(`${file}.crash`, 'utf8');
-    expect(crash).toContain('before failure');
-    expect(crash).toContain('UI still works');
+    // Nothing reached the file, so the batch is written once the next attempt succeeds, in order.
+    await flushLogFile();
+    const text = await fs.readFile(file, 'utf8');
+    expect(text.indexOf('before failure')).toBeGreaterThanOrEqual(0);
+    expect(text.indexOf('UI still works')).toBeGreaterThan(text.indexOf('before failure'));
+    expect(text.split('before failure').length).toBe(2);
+  });
+
+  it('retries a failed write by itself after a short delay, without a flush (#1682)', async () => {
+    const file = await logFile();
+    vi.spyOn(fs, 'appendFile').mockRejectedValueOnce(new Error('busy'));
+    logInfo('written by the retry');
+    await vi.waitFor(async () => expect(await fs.readFile(file, 'utf8').catch(() => '')).toContain('written by the retry'), { timeout: 3000, interval: 50 });
+  });
+
+  it('keeps every line when rotation cannot rename the full log, and rotates once it can (#1682)', async () => {
+    const file = await logFile();
+    await fs.writeFile(file, 'x'.repeat(4 * 1024 * 1024));
+    // A real rename failure on every platform: a directory sits where the old log would go.
+    await fs.mkdir(`${file}.1`);
+    initLogFile(file);
+    logInfo('while the old log is in the way');
+    await flushLogFile();
+    // The file grows past its limit for now instead of losing the line or going silent, and says why once.
+    expect(await fs.readFile(file, 'utf8')).toContain('while the old log is in the way');
+    expect((await fs.readFile(file, 'utf8')).split('log rotation failed').length).toBe(2);
+    logInfo('still writing');
+    await flushLogFile();
+    expect(await fs.readFile(file, 'utf8')).toContain('still writing');
+    expect((await fs.readFile(file, 'utf8')).split('log rotation failed').length).toBe(2);
+    await fs.rmdir(`${file}.1`);
+    logInfo('rotated at last');
+    await flushLogFile();
+    expect(await fs.readFile(`${file}.1`, 'utf8')).toContain('still writing');
+    expect(await fs.readFile(file, 'utf8')).toContain('rotated at last');
+  });
+
+  it('holds lines in order while a log far past its limit cannot rotate, then writes them once (#1682)', async () => {
+    const file = await logFile();
+    await fs.writeFile(file, 'x'.repeat(8 * 1024 * 1024));
+    await fs.mkdir(`${file}.1`);
+    initLogFile(file);
+    logInfo('first held'); logInfo('second held');
+    await expect(flushLogFile()).rejects.toThrow();
+    expect((await fs.stat(file)).size).toBe(8 * 1024 * 1024);
+    await fs.rmdir(`${file}.1`);
+    logInfo('third');
+    await flushLogFile();
+    const text = await fs.readFile(file, 'utf8');
+    expect(text.indexOf('first held')).toBeLessThan(text.indexOf('second held'));
+    expect(text.indexOf('second held')).toBeLessThan(text.indexOf('third'));
+    expect(text.split('first held').length).toBe(2);
+  });
+
+  it('writes a line an append cut off again in full, after a note, and repeats no complete line (#1682)', async () => {
+    const file = await logFile();
+    const realAppend = fs.appendFile.bind(fs);
+    logInfo('reached the file before the cut');
+    await flushLogFile();
+    vi.spyOn(fs, 'appendFile').mockImplementationOnce(async (target: any, data: any) => {
+      const text = String(data);
+      // The first line of the batch lands whole, the second only in part.
+      await realAppend(target, text.slice(0, text.indexOf('\n') + 1 + 20));
+      throw new Error('short write');
+    });
+    logInfo('first in the batch'); logInfo('cut off part-way'); logInfo('never started');
+    await vi.waitFor(async () => expect(await fs.readFile(`${file}.crash`, 'utf8').catch(() => '')).toContain('short write'));
+    await flushLogFile();
+    const text = await fs.readFile(file, 'utf8');
+    for (const line of ['reached the file before the cut', 'first in the batch', 'cut off part-way', 'never started']) {
+      expect(text.split(line).length, line).toBe(2);
+    }
+    expect(text).toContain('failed part-way: the cut-off line above follows again in full');
+    expect(text.indexOf('first in the batch')).toBeLessThan(text.indexOf('failed part-way'));
+    expect(text.indexOf('failed part-way')).toBeLessThan(text.indexOf('cut off part-way'));
+    expect(text.indexOf('cut off part-way')).toBeLessThan(text.indexOf('never started'));
+    // Each line starts on its own line, the note included.
+    expect(text.split('\n').filter(l => l.includes('warn') && l.includes('failed part-way'))[0]).toMatch(/^\d{4}-/);
   });
 
   it('includes the final shutdown line before completing the exit barrier', async () => {
