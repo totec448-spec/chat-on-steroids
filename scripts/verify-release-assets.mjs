@@ -65,11 +65,14 @@ export async function verifyReleaseAssets({ dir, tag }) {
   if (existsSync(firefox) && existsSync(updates)) {
     const entries = unzipSync(readFileSync(firefox));
     const version = entries['manifest.json'] ? JSON.parse(strFromU8(entries['manifest.json'])).version ?? null : null;
-    if (version !== wanted) problems.push(`The add-on in ${FIREFOX} is version ${version ?? 'unknown'}, not ${wanted}.`);
+    // A fourth part is the same release signed under another number, because Mozilla never signs
+    // one twice (publish.yml `firefox_build`; v2.1.43 shipped add-on 2.1.43.1).
+    const ours = typeof version === 'string' && (version === wanted || (version.startsWith(`${wanted}.`) && /^[1-9]\d{0,2}$/.test(version.slice(wanted.length + 1))));
+    if (!ours) problems.push(`The add-on in ${FIREFOX} is version ${version ?? 'unknown'}, not ${wanted}.`);
     let offered = [];
     try { offered = Object.values(JSON.parse(readFileSync(updates, 'utf8')).addons ?? {}).flatMap(addon => addon.updates ?? []); } catch { /* reported below */ }
     const hash = `sha256:${await sha256(firefox)}`;
-    if (!offered.some(update => update.version === wanted && update.update_hash === hash && String(update.update_link).endsWith(`/v${wanted}/${FIREFOX}`))) {
+    if (!offered.some(update => update.version === (ours ? version : wanted) && update.update_hash === hash && String(update.update_link).endsWith(`/v${wanted}/${FIREFOX}`))) {
       problems.push(`${FIREFOX_UPDATES} does not offer ${FIREFOX} of ${tag} with its checksum.`);
     }
   }
