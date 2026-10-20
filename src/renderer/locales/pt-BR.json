@@ -2867,5 +2867,13 @@
   "Chats sit under their project folders.": "Os chats ficam sob as pastas dos projetos.",
   "All chats in one list, active ones on top.": "Todos os chats em uma lista, os ativos no topo.",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "O máximo de chats de subagentes que um chat pode ter ao mesmo tempo. Requer a extensão do navegador conectada.",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Um trabalho longo continua em um novo turno com um Continuar automático, logo após um resultado de ferramenta. Turnos mais curtos falham menos. Também em chats com Goal e Loop; não com modelos Pro nem nos chats dos subagentes."
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Um trabalho longo continua em um novo turno com um Continuar automático, logo após um resultado de ferramenta. Turnos mais curtos falham menos. Também em chats com Goal e Loop; não com modelos Pro nem nos chats dos subagentes.",
+  "See what sub-agents do, long work that keeps going, and clearer Settings.": "Veja o que os subagentes fazem, trabalho longo que continua e configurações mais claras.",
+  "See what a sub-agent does": "Veja o que um subagente faz",
+  "Opening a sub-agent shows each action with its result and the files it changed.": "Ao abrir um subagente, você vê cada ação com o resultado e os arquivos que ele alterou.",
+  "Compact & Resume steps in during long answers, and Goal and Loop continue in a fresh turn.": "Compactar e retomar entra em ação durante respostas longas, e Goal e Loop continuam em um novo turno.",
+  "Clearer Settings": "Configurações mais claras",
+  "Plain words throughout, and the sidebar layout picked from a picture.": "Palavras claras em toda parte, e o layout da barra lateral escolhido por imagem.",
+  "Meet Whip": "Conheça o Whip",
+  "A cheeky new pet that cracks its whip so the work goes faster.": "Um novo pet atrevido que estala o chicote para o trabalho andar mais rápido."
 }

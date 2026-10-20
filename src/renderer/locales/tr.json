@@ -2495,7 +2495,7 @@
   "Press Up in an empty message box to bring back what you sent in this chat.": "Bu sohbette gönderdiklerini geri getirmek için boş bir mesaj kutusunda ↑ tuşuna bas.",
   "Answers that read calmly": "Sakin okunan yanıtlar",
   "While ChatGPT writes, whole paragraphs fade in instead of the text jumping.": "ChatGPT yazarken metin zıplamak yerine paragraflar bütün olarak yavaşça belirir.",
-  "Long work keeps going": "Uzun işler sürüyor",
+  "Long work keeps going": "Uzun işler sürer",
   "A fresh turn now keeps every tool result and never runs a command twice.": "Yeni bir tur artık her araç sonucunu korur ve hiçbir komutu iki kez çalıştırmaz.",
   "Sub-agents start reliably": "Yardımcı ajanlar güvenle başlar",
   "Also on a slow computer, and with a second browser that is not updated yet.": "Yavaş bir bilgisayarda ve henüz güncellenmemiş ikinci bir tarayıcıyla da.",
@@ -2822,5 +2822,13 @@
   "Chats sit under their project folders.": "Sohbetler proje klasörlerinin altında durur.",
   "All chats in one list, active ones on top.": "Tüm sohbetler tek listede, etkin olanlar üstte.",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "Bir sohbetin aynı anda çalıştırabileceği en fazla yardımcı ajan sohbeti sayısı. Bağlı tarayıcı eklentisi gerekir.",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Uzun işler, bir araç sonucundan hemen sonra otomatik Devam ile yeni bir turda sürer. Kısa turlar daha az kesilir. Hedef ve Döngü sohbetlerinde de kullanılır; Pro modellerde ve yardımcı ajanların kendi sohbetlerinde kullanılmaz."
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Uzun işler, bir araç sonucundan hemen sonra otomatik Devam ile yeni bir turda sürer. Kısa turlar daha az kesilir. Hedef ve Döngü sohbetlerinde de kullanılır; Pro modellerde ve yardımcı ajanların kendi sohbetlerinde kullanılmaz.",
+  "See what sub-agents do, long work that keeps going, and clearer Settings.": "Yardımcı ajanların ne yaptığını görün, uzun işler sürsün ve ayarlar daha anlaşılır olsun.",
+  "See what a sub-agent does": "Bir yardımcı ajanın ne yaptığını görün",
+  "Opening a sub-agent shows each action with its result and the files it changed.": "Bir yardımcı ajanı açınca her işlemi sonucuyla ve değiştirdiği dosyaları görürsünüz.",
+  "Compact & Resume steps in during long answers, and Goal and Loop continue in a fresh turn.": "Sıkıştır ve sürdür uzun yanıtlar sırasında da devreye girer; Hedef ve Döngü yeni bir turda sürer.",
+  "Clearer Settings": "Daha anlaşılır ayarlar",
+  "Plain words throughout, and the sidebar layout picked from a picture.": "Her yerde sade bir dil ve kenar çubuğu düzeni bir resimden seçilir.",
+  "Meet Whip": "Whip ile tanışın",
+  "A cheeky new pet that cracks its whip so the work goes faster.": "İşler hızlansın diye kırbacını şaklatan şımarık yeni bir evcil hayvan."
 }

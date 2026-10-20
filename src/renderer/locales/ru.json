@@ -2912,5 +2912,13 @@
   "Chats sit under their project folders.": "Чаты лежат в папках своих проектов.",
   "All chats in one list, active ones on top.": "Все чаты в одном списке, активные сверху.",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "Сколько чатов субагентов один чат может запускать одновременно. Нужно подключённое расширение браузера.",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Долгая работа продолжается в новом ходе с автоматическим «Продолжить» сразу после результата инструмента. Короткие ходы реже обрываются. Также в чатах с «Целью» и «Циклом»; не используется с моделями Pro и в собственных чатах субагентов."
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Долгая работа продолжается в новом ходе с автоматическим «Продолжить» сразу после результата инструмента. Короткие ходы реже обрываются. Также в чатах с «Целью» и «Циклом»; не используется с моделями Pro и в собственных чатах субагентов.",
+  "See what sub-agents do, long work that keeps going, and clearer Settings.": "Видно, что делают субагенты, долгая работа продолжается, а настройки стали понятнее.",
+  "See what a sub-agent does": "Что делает субагент",
+  "Opening a sub-agent shows each action with its result and the files it changed.": "Откройте субагента — увидите каждое действие с результатом и изменённые файлы.",
+  "Compact & Resume steps in during long answers, and Goal and Loop continue in a fresh turn.": "«Сжать и продолжить» срабатывает и во время длинных ответов, а Цель и Цикл продолжают в новом ходе.",
+  "Clearer Settings": "Понятные настройки",
+  "Plain words throughout, and the sidebar layout picked from a picture.": "Простые слова повсюду, а вид боковой панели выбирается по картинке.",
+  "Meet Whip": "Знакомьтесь: Whip",
+  "A cheeky new pet that cracks its whip so the work goes faster.": "Дерзкий новый питомец щёлкает кнутом, чтобы работа шла быстрее."
 }
