@@ -1856,6 +1856,18 @@ function workerGroup(key: string, workers: SessionSummary[], parentRow: HTMLElem
   button.setAttribute('type', 'button'); button.setAttribute('aria-expanded', String(expandedWorkers.has(key)));
   button.addEventListener('click', (event) => { event.stopPropagation(); expandedWorkers.has(key) ? expandedWorkers.delete(key) : expandedWorkers.add(key); paintSessions(); });
   if (parentRow) { parentRow.append(button); parentRow.title += ` · ${button.title}`; } else target.push(button);
+  // Folded away, a sub-agent that needs the person (an approval card, a block, a failure) marks the
+  // chat itself, over its own spinner: needing someone outranks working, as in the Inbox's order.
+  const needing = workers.filter(worker => workerState(worker) === 'attention').length;
+  const top = parentRow?.querySelector<HTMLElement>('.sess-top');
+  if (needing && top && !expandedWorkers.has(key)) {
+    const label = () => tn('{0} sub-agent needs attention', '{0} sub-agents need attention', needing);
+    const mark = el('span', 'session-status is-failed');
+    ui(mark, 'title', label); ui(mark, 'aria-label', label);
+    const own = top.querySelector('.session-status');
+    if (own) own.replaceWith(mark); else top.append(mark);
+    parentRow!.title += ` · ${label()}`;
+  }
   if (expandedWorkers.has(key)) { const box = el('div', 'worker-group'); box.append(...workers.map(sessionRow)); target.push(box); }
 }
 

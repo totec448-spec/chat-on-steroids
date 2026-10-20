@@ -2876,5 +2876,8 @@
   "Plain words throughout, and the sidebar layout picked from a picture.": "Des mots simples partout, et la disposition de la barre latérale se choisit sur une image.",
   "Meet Whip": "Voici Whip",
   "A cheeky new pet that cracks its whip so the work goes faster.": "Un nouveau compagnon effronté qui fait claquer son fouet pour que le travail avance plus vite.",
-  "ChatGPT asked for a tool approval in this chat.": "ChatGPT a demandé une autorisation d’outil dans ce chat."
+  "ChatGPT asked for a tool approval in this chat.": "ChatGPT a demandé une autorisation d’outil dans ce chat.",
+  "{0} sub-agents need attention": "{0} sous-agents demandent votre attention",
+  "{0} sub-agents need attention|one": "{0} sous-agent demande votre attention",
+  "{0} sub-agents need attention|many": "{0} sous-agents demandent votre attention"
 }

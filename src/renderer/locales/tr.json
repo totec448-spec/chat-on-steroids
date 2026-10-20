@@ -2831,5 +2831,7 @@
   "Plain words throughout, and the sidebar layout picked from a picture.": "Her yerde sade bir dil ve kenar çubuğu düzeni bir resimden seçilir.",
   "Meet Whip": "Whip ile tanışın",
   "A cheeky new pet that cracks its whip so the work goes faster.": "İşler hızlansın diye kırbacını şaklatan şımarık yeni bir evcil hayvan.",
-  "ChatGPT asked for a tool approval in this chat.": "ChatGPT bu sohbette bir araç onayı istedi."
+  "ChatGPT asked for a tool approval in this chat.": "ChatGPT bu sohbette bir araç onayı istedi.",
+  "{0} sub-agents need attention": "{0} yardımcı ajan ilgi bekliyor",
+  "{0} sub-agents need attention|one": "{0} yardımcı ajan ilgi bekliyor"
 }
