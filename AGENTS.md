@@ -1298,6 +1298,12 @@ prevent a late spawn after close. IPC accepts only the current main-frame sender
 named requests. Output pauses at 256 KiB until xterm parser acknowledgements drain it; scrollback
 is limited to 5,000 lines and queued input to 256 KiB. Ctrl+C interrupts unless copying a selection;
 Ctrl+Shift+C copies. Native terminal escape handling stays in xterm, not HTML rendering.
+`renderer/terminal-memory.ts` keeps each dock's started and not-yet-restarted tabs (project id,
+title and folder; at most eight per dock) as a localStorage list, so the next launch or reload
+shows them as inert "previous session" tabs, right-dock ones as dock tabs. No shell starts by
+itself: Start shell here sends the saved project id, never the folder, so main still resolves the
+cwd and the Command permission still applies. Closed, exited and failed tabs are forgotten; no
+output or scrollback is stored.
 Appearance application refreshes all existing xterm palettes, including hidden tabs, from the
 current page/ink tokens without recreating shells; cursor colors follow the same palette.
 `scripts/verify-workspace-terminal.cjs` tests real Electron/PTY input, cwd/environment persistence,

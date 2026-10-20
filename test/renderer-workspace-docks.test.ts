@@ -140,6 +140,23 @@ it('interleaves individual terminal sessions with tools and keeps one selected d
   expect(right.querySelector('.work-dock-tab:not([data-terminal-id])')).not.toBeNull();
 });
 
+it('lists right terminal tabs remembered from the last launch as dock tabs marked previous session', () => {
+  const { docks } = setup();
+  const terminalTabs = [{ id: 'pty-1', title: 'project · bash', exited: false, previous: true }];
+  const show = vi.fn(), selectTab = vi.fn();
+  docks.registerTerminal({ show, hide: vi.fn(), canCreate: () => true, newTab: () => null,
+    tabs: () => terminalTabs, selectTab, closeTab: vi.fn() }, { show: vi.fn(), hide: vi.fn() });
+  const right = document.getElementById('workDockRight')!;
+  document.getElementById('rightDockToggle')!.click();
+  expect(right.querySelector('.work-dock-bar')!.hasAttribute('hidden')).toBe(false);
+  expect(right.querySelector('[data-terminal-id=pty-1] [role=tab]')?.textContent).toBe('project · bash · previous session');
+  // The Terminal quick action opens the remembered tab instead of starting another shell.
+  right.querySelector<HTMLButtonElement>('.work-dock-quick[data-view=terminal]')!.click();
+  expect(selectTab).toHaveBeenCalledWith('pty-1'); expect(show).toHaveBeenCalledWith(docks.body, false);
+  terminalTabs[0]!.previous = false; docks.sync();
+  expect(right.querySelector('[data-terminal-id=pty-1] [role=tab]')?.textContent).toBe('project · bash');
+});
+
 it('hides the old right view when a recorded edit directly adopts Review', () => {
   const { docks } = setup();
   const hideFiles = vi.fn();
