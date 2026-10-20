@@ -8553,7 +8553,7 @@ export function initChat(next: Deps): void {
   });
 
   $('chatBookmarks').addEventListener('click', () => toggleRowMenu({
-    owner: 'bookmarks', anchor: () => $('chatBookmarks'), label: () => t('Bookmarks'), items: bookmarkMenuItems
+    owner: 'bookmarks', anchor: () => $('chatBookmarks'), label: () => t('Bookmarks'), items: bookmarkMenuItems, wide: true
   }));
   onRowMenuChange(() => $('chatBookmarks').setAttribute('aria-expanded', String(rowMenuOpenFor('bookmarks'))));
   chatFind = initChatFind({

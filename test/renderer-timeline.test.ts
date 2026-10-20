@@ -7090,6 +7090,8 @@ describe('bookmarked answers', () => {
     expect(header.getAttribute('aria-expanded')).toBe('true');
     const item = w.document.querySelector<HTMLButtonElement>('[data-row-action="bookmark"]')!;
     expect(item.textContent).toContain('Tag first, then build.');
+    expect(item.closest('.row-menu')!.classList.contains('is-wide')).toBe(true);
+    expect(item.querySelector('.row-menu-hint')!.textContent).not.toBe('');
     item.click(); await settle();
     expect(api.locateMessage).toHaveBeenCalledWith(summary([]).id, replyId);
     expect(header.getAttribute('aria-expanded')).toBe('false');
