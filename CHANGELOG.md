@@ -15,7 +15,7 @@ Opening a sub-agent now shows what it did: each action with its result and the f
 
 ### 👉 After updating
 
-- Nothing to do. The browser extension updates itself once no chat is busy.
+- Nothing to do. The browser extension updates itself once no chat is busy. In Firefox the add-on of this release is numbered 2.1.43.1; it is the same build.
 
 ### ✨ New
 
@@ -41,6 +41,9 @@ Opening a sub-agent now shows what it did: each action with its result and the f
 - **Uninstalling a plugin** now asks with a Cancel button, like removing a skill.
 - **A chat that Compact & Resume replaced** now tells you which chat the work continues in, with a link, if you keep using it. Before, ChatGPT could only say that it could no longer use your computer.
 - **A tool approval card that ChatGPT redraws** no longer shows in the app as answered and then asked again.
+- **A tool approval request shows once.** After the app restarts while ChatGPT waits for your approval, the chat no longer shows the same request again, each with its own buttons.
+- **Asking for sprites, concept art or pixel art** gets you a picture. Before, ChatGPT could answer that its image tool was not available in this chat.
+- **Detailed generated pictures show in the app** instead of "image exceeds the recording limit", and Free storage is offered only where it helps.
 - **Screenshot only the active window** is offered on macOS only. On Windows every screenshot already shows one window, so the switch did nothing there.
 
 ## [2.1.42] — Bring back earlier messages, smoother answers, and long work that keeps going
