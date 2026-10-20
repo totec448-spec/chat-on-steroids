@@ -1127,6 +1127,59 @@ it('shows unattributed activity at the end of the inbox, as the tree does, with 
   expect(doc.activeElement).toBe(box()!.querySelector('summary'));
 });
 
+it('marks a collapsed chat whose sub-agent needs you, over its own spinner, in the project tree', async () => {
+  // VM, 2026-10-20: a worker waited on ChatGPT's approval card for half an hour; its chat's row in
+  // the tree showed only the arrow, so nothing said it needed anyone until the row was opened.
+  const old = Date.now() - 3 * DAY;
+  const sessions = [
+    inboxChat('parent', { title: 'Parent task', startedAt: old, updatedAt: old, activityExpiresAt: Date.now() + 60 * 60_000 }),
+    inboxChat('w-needs', { startedAt: old, updatedAt: old, origin: { kind: 'worker', fromSessionId: 'parent', agentId: 'worker-1', task: '' } }),
+    inboxChat('w-runs', { startedAt: old, updatedAt: old, activityExpiresAt: Date.now() + 60 * 60_000,
+      origin: { kind: 'worker', fromSessionId: 'parent', agentId: 'worker-2', task: '' } }),
+    inboxChat('calm', { title: 'Calm parent', startedAt: old, updatedAt: old }),
+    inboxChat('w-calm', { startedAt: old, updatedAt: old, activityExpiresAt: Date.now() + 60 * 60_000,
+      origin: { kind: 'worker', fromSessionId: 'calm', agentId: 'worker-3', task: '' } })
+  ];
+  const mounted = await mountChat({}, [], { listSessions: async () => listed(sessions, { approval: ['c-w-needs'] }) });
+  const doc = mounted.window.document;
+  const row = (id: string) => doc.querySelector<HTMLElement>(`#chatList .sess[data-id="${id}"]`);
+  await vi.waitFor(() => expect(row('parent')).not.toBeNull());
+  const marks = (id: string) => [...row(id)!.querySelectorAll<HTMLElement>('.sess-top .session-status')];
+  // One mark, the sub-agent's need, in place of the chat's own spinner, and the row's title says it.
+  expect(marks('parent').map(mark => [mark.className, mark.getAttribute('aria-label')]))
+    .toEqual([['session-status is-failed', '1 sub-agent needs attention']]);
+  expect(row('parent')!.title).toContain('1 sub-agent needs attention');
+  // Workers that only run leave their chat as it is.
+  expect(marks('calm').map(mark => mark.className)).toEqual([]);
+  // Opened, the worker's own row carries the mark, and the chat shows its own state again.
+  row('parent')!.querySelector<HTMLButtonElement>('.worker-toggle')!.click();
+  await vi.waitFor(() => expect(row('w-needs')).not.toBeNull());
+  expect(marks('w-needs').map(mark => mark.className)).toEqual(['session-status is-failed']);
+  expect(marks('parent').map(mark => mark.className)).toEqual(['session-status is-active']);
+});
+
+it('keeps a number setting as it was when its field is left empty', async () => {
+  // Number('') is 0: an emptied threshold field was saved as its 10,000-token minimum, so every
+  // chat would compact almost at once, and an emptied worker limit fell to 1.
+  const mounted = await mountChat();
+  await settle();
+  const doc = mounted.window.document;
+  const before = structuredClone(mounted.state.config);
+  for (const id of ['autoCompactTokens', 'maWorkers', 'globalMaWorkers']) {
+    const field = doc.getElementById(id) as HTMLInputElement;
+    field.value = '   ';
+    field.dispatchEvent(new mounted.window.Event('change'));
+  }
+  await vi.waitFor(() => expect(mounted.calls.length).toBeGreaterThan(0));
+  await settle();
+  const last = mounted.calls.at(-1);
+  expect(last.compaction.autoTokens).toBe(before.compaction.autoTokens);
+  expect(last.multiAgent.maxWorkers).toBe(before.multiAgent.maxWorkers);
+  expect(last.multiAgent.globalMaxWorkers ?? 0).toBe(before.multiAgent.globalMaxWorkers ?? 0);
+  // The field shows the kept value again, not an empty box.
+  expect((doc.getElementById('autoCompactTokens') as HTMLInputElement).value).toBe(String(before.compaction.autoTokens));
+});
+
 it('draws the inbox when the layout changes before any chat is loaded, and the tree again when it changes back', async () => {
   const mounted = await mountChat();
   await settle();

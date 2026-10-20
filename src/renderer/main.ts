@@ -1,5 +1,6 @@
 import { initBrowserSetup } from './setup-browser.js';
 import { currentLanguage, ui, uiText, t, tn, initLanguage, onLanguageChange } from './i18n.js';
+import { initLayoutPreviews } from './layout-previews.js';
 import { workerName } from './agent-panel.js';
 import { primaryShiftShortcut, primaryShortcut } from './shortcuts.js';
 import { desktopAccessProblem, paintDesktopAccessNotice } from './desktop-access-notice.js';
@@ -73,6 +74,7 @@ const api = window.api;
 // First: main announces a Keychain read before it starts and may not get through again until it ends.
 initKeychainNotice(api);
 initLanguage();
+initLayoutPreviews();
 // Composer key hints name this computer's keys only: a Windows user never reads ⌘ first.
 ui($('followUpHint'), 'textContent', () => t('What a message you send while ChatGPT works does by default. {0} sends it the other way.', [primaryShiftShortcut(t('Enter'))]));
 ui($('enterSendsHint'), 'textContent', () => t('Which key sends what you type. With {0}, Enter starts a new line.', [primaryShortcut(t('Enter'))]));
