@@ -2458,7 +2458,7 @@
   "Press Up in an empty message box to bring back what you sent in this chat.": "빈 메시지 입력란에서 ↑ 키를 누르면 이 채팅에서 보낸 내용을 불러옵니다.",
   "Answers that read calmly": "차분하게 읽히는 답변",
   "While ChatGPT writes, whole paragraphs fade in instead of the text jumping.": "ChatGPT가 작성하는 동안 텍스트가 튀지 않고 문단 단위로 서서히 나타납니다.",
-  "Long work keeps going": "긴 작업이 계속 이어짐",
+  "Long work keeps going": "긴 작업이 계속됩니다",
   "A fresh turn now keeps every tool result and never runs a command twice.": "새 턴은 이제 모든 도구 결과를 유지하며 명령을 두 번 실행하지 않습니다.",
   "Sub-agents start reliably": "서브에이전트가 확실히 시작됨",
   "Also on a slow computer, and with a second browser that is not updated yet.": "느린 컴퓨터에서도, 아직 업데이트되지 않은 두 번째 브라우저가 있어도 시작됩니다.",
@@ -2777,5 +2777,13 @@
   "Chats sit under their project folders.": "채팅이 프로젝트 폴더 아래에 놓입니다.",
   "All chats in one list, active ones on top.": "모든 채팅을 한 목록에, 활성 채팅은 맨 위에.",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "한 채팅이 동시에 실행할 수 있는 서브에이전트 채팅의 최대 수. 연결된 브라우저 확장 프로그램이 필요합니다.",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "긴 작업은 도구 결과 직후 자동 계속으로 새 턴에서 이어집니다. 턴이 짧을수록 덜 끊깁니다. Goal 및 Loop 채팅에서도 사용됩니다. Pro 모델과 서브에이전트 자체 채팅에서는 사용되지 않습니다."
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "긴 작업은 도구 결과 직후 자동 계속으로 새 턴에서 이어집니다. 턴이 짧을수록 덜 끊깁니다. Goal 및 Loop 채팅에서도 사용됩니다. Pro 모델과 서브에이전트 자체 채팅에서는 사용되지 않습니다.",
+  "See what sub-agents do, long work that keeps going, and clearer Settings.": "서브에이전트가 하는 일을 보고, 긴 작업은 계속 이어지며, 설정이 더 명확해졌습니다.",
+  "See what a sub-agent does": "서브에이전트가 하는 일 보기",
+  "Opening a sub-agent shows each action with its result and the files it changed.": "서브에이전트를 열면 각 작업과 결과, 변경한 파일이 표시됩니다.",
+  "Compact & Resume steps in during long answers, and Goal and Loop continue in a fresh turn.": "압축 후 계속이 긴 답변 도중에도 작동하고, Goal과 Loop는 새 턴에서 이어집니다.",
+  "Clearer Settings": "더 명확한 설정",
+  "Plain words throughout, and the sidebar layout picked from a picture.": "어디서나 쉬운 말로, 사이드바 레이아웃은 그림으로 고릅니다.",
+  "Meet Whip": "Whip을 만나 보세요",
+  "A cheeky new pet that cracks its whip so the work goes faster.": "일이 더 빨리 되도록 채찍을 휘두르는 건방진 새 펫."
 }

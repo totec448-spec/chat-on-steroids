@@ -2867,5 +2867,13 @@
   "Chats sit under their project folders.": "Les chats se rangent sous le dossier de leur projet.",
   "All chats in one list, active ones on top.": "Tous les chats dans une seule liste, les actifs en haut.",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "Le nombre maximal de chats de sous-agents qu’un chat peut lancer en même temps. Nécessite l'extension du navigateur connectée.",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Un long travail continue dans un nouveau tour avec un Continuer automatique, juste après un résultat d’outil. Les tours plus courts s’interrompent moins souvent. Aussi dans les chats avec Goal et Loop ; pas avec les modèles Pro ni dans les chats des sous-agents."
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Un long travail continue dans un nouveau tour avec un Continuer automatique, juste après un résultat d’outil. Les tours plus courts s’interrompent moins souvent. Aussi dans les chats avec Goal et Loop ; pas avec les modèles Pro ni dans les chats des sous-agents.",
+  "See what sub-agents do, long work that keeps going, and clearer Settings.": "Voyez ce que font les sous-agents, un long travail qui continue et des réglages plus clairs.",
+  "See what a sub-agent does": "Voyez ce que fait un sous-agent",
+  "Opening a sub-agent shows each action with its result and the files it changed.": "En ouvrant un sous-agent, vous voyez chaque action avec son résultat et les fichiers modifiés.",
+  "Compact & Resume steps in during long answers, and Goal and Loop continue in a fresh turn.": "Compacter et reprendre intervient pendant les longues réponses, et Goal et Loop continuent dans un nouveau tour.",
+  "Clearer Settings": "Des réglages plus clairs",
+  "Plain words throughout, and the sidebar layout picked from a picture.": "Des mots simples partout, et la disposition de la barre latérale se choisit sur une image.",
+  "Meet Whip": "Voici Whip",
+  "A cheeky new pet that cracks its whip so the work goes faster.": "Un nouveau compagnon effronté qui fait claquer son fouet pour que le travail avance plus vite."
 }
