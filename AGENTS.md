@@ -4006,8 +4006,8 @@ and Copy, Wrap and Save. Wrap folds only that block's long lines and is not reme
 `saveCode({ text, name })` → `code:save`: `name` is a bare `snippet.<ext>` (the extension from the
 language, else `txt`; `ipc.ts` refuses anything else) that `main/code-file.ts` only suggests in
 Downloads; the native save dialog picks the path, the text is written beside it and renamed over it
-(a replaced file stays whole if the write fails), and the reply is `{ done: 'saved', name }` or
-`{ done: 'cancelled' }`.
+(a replaced file keeps its permissions and stays whole if the write fails), and the reply is
+`{ done: 'saved', name }` or `{ done: 'cancelled' }`.
 
 Interface icons use one system: the bundled Phosphor font (`renderer/icons.css`, built from
 `@phosphor-icons/web`). Code names an icon by meaning (`icon('i-retry')`) and `dom.ts` `ICONS`
