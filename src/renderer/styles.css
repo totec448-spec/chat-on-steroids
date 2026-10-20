@@ -4605,6 +4605,12 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .terminal-screen .xterm { height: 100%; }
 .terminal-empty { margin: 20px; }
 .terminal-empty[hidden] { display: none; }
+/* A tab remembered from the last launch: no shell yet, only where it was and how to start one. */
+.terminal-previous { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 20px; background: var(--page); font-size: calc(13px * var(--text-scale, 1)); }
+.terminal-previous strong { font-weight: 600; }
+.terminal-previous-cwd { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--soft); font-family: 'Cascadia Code', Consolas, monospace; font-size: calc(12px * var(--text-scale, 1)); }
+.terminal-previous .btn { margin-top: 6px; background: var(--hover); color: var(--ink); }
+.terminal-previous .btn:hover { background: color-mix(in srgb, var(--ink) 12%, transparent); }
 
 /* One quiet frame for right-side tools; the tool owners keep their own content state. */
 [data-panel='chat'].has-work-dock { grid-template-columns: minmax(0, 1fr) var(--work-panel-width, minmax(340px, 42%)); }
