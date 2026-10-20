@@ -1,4 +1,4 @@
-import { nextWorkerArchive, settleWorkerArchive } from './worker-archive.js';
+import { nextWorkerArchive, onWorkerChatReady, readyForWake, settleWorkerArchive } from './worker-archive.js';
 import { considerTurnRotation, noteRotationDeclined, type RotationDeps } from './turn-rotation.js';
 import { conversationProgress } from './session/progress.js';
 import { cosSignInTransfer, SignInTransferError } from './cos-browser/sign-in-transfer.js';
@@ -2803,16 +2803,20 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     return json(res, 200, { ok: true, ended }, origin);
   }
 
-  // Worker chats of ended runs, archived in ChatGPT from one of the browser's ChatGPT tabs (#1460).
+  // Worker chats archived in ChatGPT from one of the browser's ChatGPT tabs (#1460), and restored
+  // before a wake (#1701). A restore travels as `unarchive`: an extension that predates it reads
+  // no chat to archive and leaves the job for a newer one.
   if (route === '/worker-archive/next' && req.method === 'POST') {
-    return json(res, 200, { conversationId: nextWorkerArchive() }, origin);
+    const job = nextWorkerArchive();
+    if (job && !job.archive) return json(res, 200, { conversationId: null, unarchive: job.conversationId }, origin);
+    return json(res, 200, { conversationId: job?.conversationId ?? null }, origin);
   }
   if (route === '/worker-archive/result' && req.method === 'POST') {
     const raw = await readBody(req);
     const body = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
     const id = conversationId(body['conversationId']);
     const outcome = body['outcome'];
-    if (!id || (outcome !== 'archived' && outcome !== 'failed' && outcome !== 'deferred')) return json(res, 400, { error: 'invalid_request' }, origin);
+    if (!id || (outcome !== 'archived' && outcome !== 'unarchived' && outcome !== 'failed' && outcome !== 'deferred')) return json(res, 400, { error: 'invalid_request' }, origin);
     settleWorkerArchive(id, outcome);
     return json(res, 200, { ok: true }, origin);
   }
@@ -5549,6 +5553,7 @@ let bridgeError: string | null = null;
 const bridgeDrains = new Set<Promise<void>>();
 let dropSpawnRequestListener: (() => void) | null = null;
 let dropReviveRequestListener: (() => void) | null = null;
+let dropWorkerChatReadyListener: (() => void) | null = null;
 
 function runStaleSwarmSweep(): Promise<boolean> {
   if (staleSweepInFlight) return staleSweepInFlight;
@@ -5767,7 +5772,17 @@ async function startBridgeOnce(epoch: number, prepared?: PreparedBridge): Promis
   // is the first moment anything can reopen that tab for it.
   dropReviveRequestListener?.();
   dropReviveRequestListener = onReviveRequest((revivals: WorkerRevival[]) => {
-    for (const revival of revivals) queueWorkerRevival(revival.id, revival.conversationId, revival.messageIds, revival.runId);
+    for (const revival of revivals) {
+      // ChatGPT shows no message box in an archived chat: one this app archived is restored first.
+      if (!readyForWake(revival.conversationId)) continue;
+      queueWorkerRevival(revival.id, revival.conversationId, revival.messageIds, revival.runId);
+    }
+  });
+  dropWorkerChatReadyListener?.();
+  dropWorkerChatReadyListener = onWorkerChatReady((conversationId) => {
+    for (const revival of pendingWorkerRevivals()) {
+      if (revival.conversationId === conversationId) queueWorkerRevival(revival.id, revival.conversationId, revival.messageIds, revival.runId);
+    }
   });
   // When a run ends — cleared in the app, finished, or taken over by another chat —
   // its worker chats must stop existing everywhere at once. A queued bootstrap that
@@ -5918,6 +5933,8 @@ export async function stopBridge(): Promise<void> {
     dropSpawnRequestListener = null;
     dropReviveRequestListener?.();
     dropReviveRequestListener = null;
+    dropWorkerChatReadyListener?.();
+    dropWorkerChatReadyListener = null;
     if (staleSwarmTimer) clearInterval(staleSwarmTimer);
     staleSwarmTimer = null;
     if (silenceTimer) clearTimeout(silenceTimer);

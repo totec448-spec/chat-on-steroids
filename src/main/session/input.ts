@@ -33,6 +33,7 @@ import { invokedSkills } from '../../shared/skill-invocation.js';
 import { SKILL_ID_PATTERN } from '../../shared/skills.js';
 import { autoSelectManagedSkills } from '../skill-routing.js';
 import { asksForImage } from './image-request.js';
+import { readyForWake } from '../worker-archive.js';
 
 /** ChatGPT's own conversation and message ids; synthetic interim ids never name a branch point. */
 const NATIVE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -1659,6 +1660,8 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
       if (!(await browserInputAllowed(entry))) continue;
       try {
         const conversationId = await target(entry);
+        // A worker chat this app archived in ChatGPT has no message box until it is restored (#1701).
+        if (conversationId && !readyForWake(conversationId)) continue;
         // A new chat of a project with a native ChatGPT Project opens in that Project and nowhere
         // else: it waits while the Project is being created or could not be, never the root.
         // A branch is made where its source chat lives in ChatGPT, never on a Project's page.
