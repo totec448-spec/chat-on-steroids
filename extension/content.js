@@ -10093,7 +10093,7 @@
         // tool) keeps the count short, and a request still without its row keeps waiting.
         return !!fresh && seen.calls > 0 && !seen.answered && awaitingRequests.size === 0 &&
           sent?.settled === true && Number.isInteger(sent.count) && sent.count >= seen.calls;
-      }, AUTO_RECEIPT_SETTLE_MS);
+      }, AUTO_RECEIPT_SETTLE_MS, AUTO_RECEIPT_QUICK_MS);
       if (!current()) return t(
         'content_compact_chat_changed_waiting_results',
         'This chat changed while compaction was waiting for tool results.'
@@ -11293,6 +11293,8 @@
    * turn is stopped inside that gap. Still bounded: a call that runs longer is refused as before.
    */
   const AUTO_RECEIPT_SETTLE_MS = 6 * 60_000;
+  /** The first stretch of that wait, checked quickly; most receipts land within seconds. */
+  const AUTO_RECEIPT_QUICK_MS = 10_000;
   /** How many silent answers about pending calls to sit through before refusing. */
   const SETTLE_UNKNOWN_TRIES = 3;
 
@@ -11322,8 +11324,13 @@
   }
 
   /** Polls a condition. Resolves true when it holds, false when the budget runs out. */
-  async function waitUntil(test, budgetMs) {
-    const until = Date.now() + budgetMs;
+  /**
+   * Checks every 250 ms. A long wait passes `slowAfterMs`: after that it checks every 2 s, since
+   * each check reads the page and minutes of quarter-second checks weigh most on slow machines.
+   */
+  async function waitUntil(test, budgetMs, slowAfterMs = Infinity) {
+    const started = Date.now();
+    const until = started + budgetMs;
     for (;;) {
       let held = false;
       try {
@@ -11333,7 +11340,7 @@
       }
       if (held) return true;
       if (Date.now() >= until) return false;
-      await sleep(250);
+      await sleep(Date.now() - started >= slowAfterMs ? 2000 : 250);
     }
   }
 
