@@ -760,6 +760,30 @@ describe('desktop input delivery and helper ownership', () => {
     expect(sends()).toBe(1);
     expect(live.sent.filter(message => message.ack)).toHaveLength(1);
   });
+  // 2026-10-20, Loop chats on the VM: when ChatGPT shows only Stop at the tool result, it offers no
+  // Send for the continue. The page declines at once, in the app's words, so the call held for it
+  // answers now instead of waiting out the hold, and a later tool result tries again.
+  it('declines an automatic continue at once when ChatGPT offers only Stop', async () => {
+    const { ROTATION_DECLINED } = await import('../src/main/session/input.js');
+    let directTurn: { id: string; startedAt: number };
+    live = await nonProHarness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => {
+        if (message.authorize || message.ack || message.fail) return { ok: true, data: { ok: true } };
+        return { ok: true, data: { input: claimed({ directTurn, purpose: 'rotation' }) } };
+      }
+    });
+    startGenerating(live.document);
+    live.hook.observe(); await live.hook.flush();
+    const start = emitted(live.sent, 'turn_start').at(-1)!;
+    directTurn = { id: start.event.turnId as string, startedAt: start.event.time as number };
+    // Only Stop: no Send appears for the continue.
+    live.document.querySelector('[data-testid="send-button"]')?.remove();
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA, directTurn })).toEqual({ ok: false });
+    expect(live.sent.filter(message => message.ack || message.authorize)).toHaveLength(0);
+    expect(live.sent.filter(message => message.fail)).toContainEqual(expect.objectContaining({ error: ROTATION_DECLINED, detail: 'no-send' }));
+    // Its own text does not stay behind in ChatGPT's box.
+    expect(live.document.querySelector('#prompt-textarea')!.textContent!.trim()).toBe('');
+  });
   it('clears its own automatic continue when the Send it clicked did not take it', async () => {
     // 2.1.40 release round, Windows: a rotation fired right after a tool result while the model
     // was already finishing. Its Send click delivered nothing, the receipt could not be confirmed,

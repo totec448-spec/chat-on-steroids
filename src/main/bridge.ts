@@ -1,5 +1,5 @@
 import { nextWorkerArchive, settleWorkerArchive } from './worker-archive.js';
-import { considerTurnRotation, type RotationDeps } from './turn-rotation.js';
+import { considerTurnRotation, noteRotationDeclined, type RotationDeps } from './turn-rotation.js';
 import { conversationProgress } from './session/progress.js';
 import { cosSignInTransfer, SignInTransferError } from './cos-browser/sign-in-transfer.js';
 import { externalBrowserProof, noteExternalInstalled, noteExternalSignedIn, resetBrowserProofForTests } from './browser-proof.js';
@@ -9605,6 +9605,12 @@ async function awaitRotationDelivery(conversationId: string, id: string): Promis
   for (;;) {
     const state = await rotationDelivery(id);
     if (state === 'settled') return;
+    if (state === 'declined') {
+      const turnId = (await listInputs()).find(row => row.id === id)?.queuedTurn?.turnId;
+      if (turnId) noteRotationDeclined(conversationId, turnId);
+      changed();
+      return;
+    }
     const waited = Date.now() - started;
     if (state === 'pending' && waited >= rotationHoldMs) {
       if (await withdrawUnsentRotation(id)) {

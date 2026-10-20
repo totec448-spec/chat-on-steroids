@@ -13502,6 +13502,10 @@
       if (intoTurn && input.purpose === 'rotation' && CLF_DOM.generating() &&
           !await waitPageView(() => !!CLF_DOM.sendButton(), onTarget, 3000)) {
         noteWithdraw('no-send');
+        // Say so at once: the app holds the due call's answer for this continue, and a later tool
+        // result, usually one without Stop, tries again (measured on Loop chats, 2026-10-20).
+        await ask({ type: 'desktop_input', id: input.id, owner: input.owner, fail: true,
+          error: 'Fresh-turn continue declined: no Send while ChatGPT works.', detail: 'no-send' }).catch(() => undefined);
         return false;
       }
       const nativeSend = () => sendSubmittedText(sendingTarget, false, async sendCurrent => {
