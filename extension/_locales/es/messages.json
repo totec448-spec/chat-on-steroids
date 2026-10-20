@@ -93,7 +93,7 @@
     "message": "Chat bloqueado"
   },
   "content_chat_blocked_tip": {
-    "message": "Este chat está bloqueado en la aplicación Chat On Steroids: se rechazan sus llamadas a herramientas y Objetivo, Bucle y la compactación automática están desactivados. Para desbloquearlo, abre la pestaña Chat de la aplicación, pasa el cursor sobre este chat en la lista de sesiones y pulsa su símbolo de bloqueo."
+    "message": "Este chat está bloqueado en la aplicación Chat On Steroids: se rechazan sus llamadas a herramientas y Objetivo, Bucle y la compactación automática están desactivados. Para desbloquearlo, abre el menú ⋯ de este chat en la barra lateral de la aplicación y elige «Desbloquear chat»."
   },
   "content_chat_still_opening": {
     "message": "este chat aún se está abriendo — inténtalo de nuevo"

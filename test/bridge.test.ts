@@ -9323,6 +9323,22 @@ describe('unattributed activity recovery', () => {
    * reloaded three times before it was born. The bootstrap this app typed is the durable
    * boundary: reloads before it are A's and leave the feed, reloads after it stay.
    */
+  it('finds the newest approval row only while it still says waiting', async () => {
+    // A restart while ChatGPT's card waited must take that row over, not add another (VM, 2026-10-20).
+    const { latestWaitingApprovalRow } = await import('../src/main/bridge.js');
+    const { APPROVAL_ANSWERED_TEXT, APPROVAL_WAITING_TEXT } = await import('../src/shared/approval-wait.js');
+    const session = await createSession({ conversationId: 'approval-rows-chat' });
+    expect(await latestWaitingApprovalRow(session.id)).toBeNull();
+    const first = await recordProgress(session.id, 'approval-wait:approval-rows-chat:1', APPROVAL_WAITING_TEXT);
+    await recordProgress(session.id, 'approval-wait:approval-rows-chat:1', APPROVAL_ANSWERED_TEXT, first!);
+    expect(await latestWaitingApprovalRow(session.id)).toBeNull();
+    await recordProgress(session.id, 'browser-repair:between', 'Reloaded chat to recover an interrupted response.');
+    const second = await recordProgress(session.id, 'approval-wait:approval-rows-chat:2', APPROVAL_WAITING_TEXT);
+    expect(await latestWaitingApprovalRow(session.id)).toEqual({ progressId: 'approval-wait:approval-rows-chat:2', anchor: second });
+    await recordProgress(session.id, 'approval-wait:approval-rows-chat:2', APPROVAL_ANSWERED_TEXT, second!);
+    expect(await latestWaitingApprovalRow(session.id)).toBeNull();
+  });
+
   it('keeps an earlier chat’s reload notices out of the chat that resumed it', async () => {
     await pair();
     await events(PRIME, [
@@ -9785,6 +9801,38 @@ describe('unattributed activity recovery', () => {
         vi.useRealTimers();
       }
     }
+  });
+
+  it('tells the page when the running turn answers its conversation\'s first question', async () => {
+    // A chat's first turn can run without ChatGPT showing its question; the page then proves the
+    // question by place, which needs the app's word that the recorded question is the first one.
+    await pair();
+    const chat = randomUUID();
+    await events(chat, [
+      { kind: 'user_message', messageId: 'first-question', parentId: 'root', text: 'Start the long task', time: Date.now(), authoredNow: true },
+      openTurn('first-turn')
+    ]);
+    const first = await request('GET', `/activity?conversationId=${chat}&since=0`);
+    expect(first.body.recordedQuestionId).toBe('first-question');
+    expect(first.body.recordedQuestionFirst).toBe(true);
+
+    await events(chat, [
+      { kind: 'turn_end', turnId: 'first-turn', outcome: 'completed', time: Date.now() + 1 },
+      { kind: 'user_message', messageId: 'second-question', parentId: 'first-answer-id', text: 'Go on', time: Date.now() + 2, authoredNow: true },
+      openTurn('second-turn')
+    ]);
+    const second = await request('GET', `/activity?conversationId=${chat}&since=0`);
+    expect(second.body.recordedQuestionId).toBe('second-question');
+    expect(second.body).not.toHaveProperty('recordedQuestionFirst');
+  });
+
+  it('reports the open turn\'s sent results, and none without an open turn', async () => {
+    await pair();
+    const chat = randomUUID();
+    await events(chat, [{ kind: 'user_message', messageId: 'sent-question', parentId: 'root', text: 'Work on it', time: Date.now(), authoredNow: true }]);
+    expect((await request('GET', `/activity?conversationId=${chat}&since=0`)).body).not.toHaveProperty('sentResults');
+    await events(chat, [openTurn('sent-turn')]);
+    expect((await request('GET', `/activity?conversationId=${chat}&since=0`)).body.sentResults).toEqual({ count: 0, settled: true });
   });
 
   it.each(['normal', 'pro'] as const)('does not continue or reload a %s final observed by another document of the same response', async model => {

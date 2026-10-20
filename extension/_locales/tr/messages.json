@@ -93,7 +93,7 @@
     "message": "Sohbet engellendi"
   },
   "content_chat_blocked_tip": {
-    "message": "Bu sohbet Chat On Steroids uygulamasında engellenmiş: araç çağrıları reddedilir; Hedef, Döngü ve otomatik sıkıştırma kapalıdır. Engeli kaldırmak için uygulamanın Sohbet sekmesini açın, oturum listesindeki bu sohbetin üzerine gelin ve engelleme simgesine basın."
+    "message": "Bu sohbet Chat On Steroids uygulamasında engellenmiş: araç çağrıları reddedilir; Hedef, Döngü ve otomatik sıkıştırma kapalıdır. Engeli kaldırmak için uygulamanın kenar çubuğunda bu sohbetin ⋯ menüsünü açın ve “Engeli kaldır”ı seçin."
   },
   "content_chat_still_opening": {
     "message": "bu sohbet hâlâ açılıyor — yeniden deneyin"
