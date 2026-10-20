@@ -3367,3 +3367,27 @@ it('holds a message to a worker chat the app archived until that chat is restore
   archive.settleWorkerArchive(conversationId, 'unarchived');
   expect((await input.pendingBrowserInputs()).some(item => item.id === row.id)).toBe(true);
 });
+
+it.each(['GPT-5.6 Sol', 'gpt-6-pro'])('sends a message typed after Stop once ChatGPT shows the turn stopped (%s)', async model => {
+  // Measured 2026-10-20 on Windows: Stop a second after a command's result, ChatGPT confirmed the
+  // stop, and the message typed next waited 3 minutes (10 for Pro) behind the stopped turn's
+  // activity window. That window stays for the app's own automatic sends.
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Stopped then typed', conversationId });
+  const time = Date.now();
+  await post('/events', { conversationId, events: [
+    { kind: 'model_selection', model, time },
+    { kind: 'user_message', messageId: 'stop-question', text: 'Work', authoredNow: true, time },
+    { kind: 'turn_start', turnId: 'stopped-turn', time }
+  ] });
+  await attributedMcp(conversationId);
+  await post('/events', { conversationId, events: [{ kind: 'turn_end', turnId: 'stopped-turn', outcome: 'stopped', time: Date.now() }] });
+  expect(await input.sessionInputPolicy(session.id)).toMatchObject({ browserAllowed: false, stoppedIdle: true });
+  const typed = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto' as const });
+  expect((await input.pendingBrowserInputs()).some(item => item.id === typed.id)).toBe(true);
+  await input.cancelInput(typed.id);
+  // An automatic after-turn message still waits for the window.
+  const queued = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'after-turn' as const });
+  expect((await input.pendingBrowserInputs()).some(item => item.id === queued.id)).toBe(false);
+});
+
