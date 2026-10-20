@@ -2787,5 +2787,8 @@
   "Meet Whip": "认识 Whip",
   "A cheeky new pet that cracks its whip so the work goes faster.": "一只调皮的新宠物，甩响鞭子让工作快点完成。",
   "ChatGPT asked for a tool approval in this chat.": "ChatGPT 在此聊天中请求了工具批准。",
-  "{0} sub-agents need attention": "{0} 个子智能体需要处理"
+  "{0} sub-agents need attention": "{0} 个子智能体需要处理",
+  "A tool call from an untrusted chat was refused. To allow it, open this chat's ⋯ menu in the sidebar (or right-click its row) and choose Trust chat.": "来自未受信任聊天的工具调用已被拒绝。要允许它，请在侧边栏中打开此聊天的 ⋯ 菜单（或右键点击其所在行），然后选择“信任聊天”。",
+  "A tool call from a worker whose main chat is not currently allowed was refused. Open that main chat's ⋯ menu in the sidebar and choose Trust chat if it is untrusted, or Release chat if it is blocked.": "一个工作者的工具调用已被拒绝，因为它的主聊天当前未被允许。请在侧边栏中打开该主聊天的 ⋯ 菜单，若未受信任则选择“信任聊天”，若已被阻止则选择“解除阻止”。",
+  "A tool call from an app-created worker was refused because the main chat that started it is not proven yet. Return to that main chat in the sidebar; once its row is there, open its ⋯ menu and choose Trust chat, or Release chat if it is blocked, then retry after the worker is attached or recovered there.": "一个由应用创建的工作者的工具调用已被拒绝，因为启动它的主聊天尚未得到确认。请回到侧边栏中的该主聊天；其所在行出现后，打开 ⋯ 菜单并选择“信任聊天”（若已被阻止则选择“解除阻止”），待工作者在那里连接或恢复后再重试。"
 }
