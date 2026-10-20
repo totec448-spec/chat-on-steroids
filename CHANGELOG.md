@@ -9,6 +9,37 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.43] — See what sub-agents do, long work that keeps going, and clearer Settings
+
+Opening a sub-agent now shows what it did: each action with its result and the files it changed. Compact & Resume steps in during long answers again, and Goal and Loop chats continue long turns in a fresh one. Settings use plainer words throughout, and you pick the sidebar layout from a picture.
+
+### 👉 After updating
+
+- Nothing to do. The browser extension updates itself once no chat is busy.
+
+### ✨ New
+
+- **See what a sub-agent does.** Open a sub-agent in the Sub-agents panel and its **Activity** comes first: its task, every action with its result, and the files it changed. Its conversation is one tab away, unchanged.
+- **Pick the sidebar layout from a picture.** Settings → Appearance → Sidebar layout shows the real Projects and Inbox sidebars side by side. Click one, or use the arrow keys.
+- **Meet Whip.** A cheeky new pet that cracks its whip so the work goes faster. It doesn't, but it tries.
+
+### 💪 Better
+
+- **Compact & Resume during long answers.** An automatic Compact & Resume steps in again while ChatGPT is still working, also in a chat's first answer, and tries again as soon as the page is readable after a moment it wasn't.
+- **Goal and Loop keep long turns going.** Like other chats, a Goal or Loop chat that has worked a long time continues in a fresh turn right after a tool result, without a second Goal or Loop message.
+- **Clearer Settings.** Plain words throughout. Agents & automation is regrouped: Goal and Loop settings together, a new **Chat access** section, and the worker list names the main chat and each worker.
+- **Chat names read properly.** A chat named after a long first message ends at a word with "…" instead of stopping mid-word.
+- **Tidier pages.** Plugin and pet cards line up with their neighbors, an empty Activity list says why it's empty, and Usage no longer shows empty boxes while it loads.
+
+### 🛠 Fixed
+
+- **A queued message no longer waits forever** when the answer it waited for had already finished before you queued it.
+- **Prompt recall** (Up in an empty message box) no longer brings back a Goal opening that ChatGPT typed for you.
+- **The app log keeps writing** when Windows briefly blocks the log file, for example while another program has it open. No lines are lost.
+- **A stopped answer** shows a stop sign instead of a success check.
+- **Uninstalling a plugin** now asks with a Cancel button, like removing a skill.
+- **Screenshot only the active window** is offered on macOS only. On Windows every screenshot already shows one window, so the switch did nothing there.
+
 ## [2.1.42] — Bring back earlier messages, smoother answers, and long work that keeps going
 
 Press Up in an empty message box to bring back what you asked before. Answers appear paragraph by paragraph instead of jumping while they're written. Long work moves on to a fresh turn without losing a result or running a command twice, and sub-agents start reliably even with a second browser around.

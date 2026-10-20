@@ -2458,7 +2458,7 @@
   "Press Up in an empty message box to bring back what you sent in this chat.": "Nhấn ↑ trong ô tin nhắn trống để gọi lại những gì bạn đã gửi trong cuộc trò chuyện này.",
   "Answers that read calmly": "Câu trả lời đọc êm hơn",
   "While ChatGPT writes, whole paragraphs fade in instead of the text jumping.": "Khi ChatGPT đang viết, từng đoạn văn hiện dần lên thay vì chữ nhảy liên tục.",
-  "Long work keeps going": "Công việc dài tiếp tục chạy",
+  "Long work keeps going": "Công việc dài tiếp tục",
   "A fresh turn now keeps every tool result and never runs a command twice.": "Lượt mới giờ giữ mọi kết quả công cụ và không bao giờ chạy một lệnh hai lần.",
   "Sub-agents start reliably": "Tác nhân phụ khởi động ổn định",
   "Also on a slow computer, and with a second browser that is not updated yet.": "Kể cả trên máy tính chậm và khi có trình duyệt thứ hai chưa được cập nhật.",
@@ -2777,5 +2777,13 @@
   "Chats sit under their project folders.": "Các cuộc trò chuyện nằm dưới thư mục dự án của chúng.",
   "All chats in one list, active ones on top.": "Tất cả cuộc trò chuyện trong một danh sách, cái đang hoạt động ở trên cùng.",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "Số cuộc trò chuyện tác nhân phụ tối đa mà một cuộc trò chuyện có thể chạy cùng lúc. Cần tiện ích mở rộng trình duyệt đã kết nối.",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Công việc dài tiếp tục trong một lượt mới với Tiếp tục tự động, ngay sau một kết quả công cụ. Lượt ngắn hơn ít bị ngắt hơn. Cũng dùng trong các cuộc trò chuyện có Goal và Loop; không dùng với mô hình Pro hay trong cuộc trò chuyện riêng của tác nhân phụ."
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Công việc dài tiếp tục trong một lượt mới với Tiếp tục tự động, ngay sau một kết quả công cụ. Lượt ngắn hơn ít bị ngắt hơn. Cũng dùng trong các cuộc trò chuyện có Goal và Loop; không dùng với mô hình Pro hay trong cuộc trò chuyện riêng của tác nhân phụ.",
+  "See what sub-agents do, long work that keeps going, and clearer Settings.": "Xem tác nhân phụ làm gì, công việc dài tiếp tục và phần Cài đặt rõ ràng hơn.",
+  "See what a sub-agent does": "Xem tác nhân phụ làm gì",
+  "Opening a sub-agent shows each action with its result and the files it changed.": "Mở một tác nhân phụ để xem từng thao tác cùng kết quả và các tệp đã thay đổi.",
+  "Compact & Resume steps in during long answers, and Goal and Loop continue in a fresh turn.": "Compact & Resume can thiệp cả trong lúc trả lời dài, và Goal cùng Loop tiếp tục trong một lượt mới.",
+  "Clearer Settings": "Cài đặt rõ ràng hơn",
+  "Plain words throughout, and the sidebar layout picked from a picture.": "Ngôn từ dễ hiểu ở mọi nơi, và bố cục thanh bên được chọn bằng hình ảnh.",
+  "Meet Whip": "Làm quen với Whip",
+  "A cheeky new pet that cracks its whip so the work goes faster.": "Thú cưng mới tinh nghịch quất roi để công việc chạy nhanh hơn."
 }

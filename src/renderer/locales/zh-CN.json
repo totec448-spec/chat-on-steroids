@@ -2458,7 +2458,7 @@
   "Press Up in an empty message box to bring back what you sent in this chat.": "在空白的消息框中按 ↑，即可找回你在此聊天中发送过的内容。",
   "Answers that read calmly": "读起来更平稳的回答",
   "While ChatGPT writes, whole paragraphs fade in instead of the text jumping.": "ChatGPT 书写时，整段文字渐次显示，不再跳动。",
-  "Long work keeps going": "长任务持续进行",
+  "Long work keeps going": "长时间工作持续进行",
   "A fresh turn now keeps every tool result and never runs a command twice.": "新轮次现在会保留每个工具结果，并且绝不会重复执行命令。",
   "Sub-agents start reliably": "子智能体可靠启动",
   "Also on a slow computer, and with a second browser that is not updated yet.": "在较慢的电脑上，以及存在尚未更新的第二个浏览器时也能启动。",
@@ -2777,5 +2777,13 @@
   "Chats sit under their project folders.": "聊天显示在各自的项目文件夹下。",
   "All chats in one list, active ones on top.": "所有聊天在同一列表中，进行中的排在最前。",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "一个聊天可同时运行的子智能体聊天上限。需要已连接的浏览器扩展。",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "长时间的工作会在工具结果之后，通过自动“继续”在新轮次中接着进行。轮次越短越不容易中断。也用于目标和循环聊天；不用于 Pro 模型或子智能体自己的聊天。"
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "长时间的工作会在工具结果之后，通过自动“继续”在新轮次中接着进行。轮次越短越不容易中断。也用于目标和循环聊天；不用于 Pro 模型或子智能体自己的聊天。",
+  "See what sub-agents do, long work that keeps going, and clearer Settings.": "查看子智能体在做什么，长时间工作持续进行，设置也更清晰。",
+  "See what a sub-agent does": "查看子智能体在做什么",
+  "Opening a sub-agent shows each action with its result and the files it changed.": "打开子智能体即可看到每个操作及其结果，以及它更改的文件。",
+  "Compact & Resume steps in during long answers, and Goal and Loop continue in a fresh turn.": "压缩并继续会在长回答进行中介入，目标和循环会在新轮次中继续。",
+  "Clearer Settings": "更清晰的设置",
+  "Plain words throughout, and the sidebar layout picked from a picture.": "处处用词浅显，侧边栏布局可通过图片选择。",
+  "Meet Whip": "认识 Whip",
+  "A cheeky new pet that cracks its whip so the work goes faster.": "一只调皮的新宠物，甩响鞭子让工作快点完成。"
 }

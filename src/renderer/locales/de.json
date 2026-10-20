@@ -2822,5 +2822,13 @@
   "Chats sit under their project folders.": "Chats stehen unter ihren Projektordnern.",
   "All chats in one list, active ones on top.": "Alle Chats in einer Liste, aktive oben.",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "Wie viele Unteragenten-Chats ein Chat höchstens gleichzeitig ausführen darf. Benötigt die verbundene Browser-Erweiterung.",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Lange Arbeit läuft direkt nach einem Tool-Ergebnis in einem neuen Durchlauf mit automatischem Weiter weiter. Kürzere Durchläufe brechen seltener ab. Auch in Goal- und Loop-Chats; nicht bei Pro-Modellen und nicht in den Chats von Unteragenten."
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Lange Arbeit läuft direkt nach einem Tool-Ergebnis in einem neuen Durchlauf mit automatischem Weiter weiter. Kürzere Durchläufe brechen seltener ab. Auch in Goal- und Loop-Chats; nicht bei Pro-Modellen und nicht in den Chats von Unteragenten.",
+  "See what sub-agents do, long work that keeps going, and clearer Settings.": "Sieh, was Unteragenten tun, lange Arbeit, die weiterläuft, und klarere Einstellungen.",
+  "See what a sub-agent does": "Sieh, was ein Unteragent tut",
+  "Opening a sub-agent shows each action with its result and the files it changed.": "Öffnest du einen Unteragenten, siehst du jede Aktion mit ihrem Ergebnis und die geänderten Dateien.",
+  "Compact & Resume steps in during long answers, and Goal and Loop continue in a fresh turn.": "Komprimieren & Fortsetzen greift auch während langer Antworten ein, und Goal und Loop machen in einem neuen Durchlauf weiter.",
+  "Clearer Settings": "Klarere Einstellungen",
+  "Plain words throughout, and the sidebar layout picked from a picture.": "Überall klare Worte, und das Layout der Seitenleiste wählst du per Bild.",
+  "Meet Whip": "Das ist Whip",
+  "A cheeky new pet that cracks its whip so the work goes faster.": "Ein frecher neuer Begleiter, der die Peitsche knallen lässt, damit die Arbeit schneller geht."
 }
