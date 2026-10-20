@@ -1150,6 +1150,27 @@ it('refuses restored recovery tickets without MCP proof but still delivers a rea
   expect((await post('/input/claim', { id: row.id, owner: 'page', conversationId, requiresAuthorization: true })).body.input?.id).toBe(row.id);
 });
 
+it('delivers a message queued after the silent turn it waits for had already completed', async () => {
+  // Live 2026-10-19 (VM): the page could not read ChatGPT's answer for a while, so the app still
+  // took the chat for busy when a message was queued, and silence recovery tied it to that turn.
+  // The turn had completed two minutes earlier; the message waited for a newer end forever.
+  const { readRecentEvents } = await import('../src/main/session/store.js');
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Completed before queueing', conversationId });
+  const started = Date.now() - 120_000;
+  await post('/events', { conversationId, events: [
+    { kind: 'turn_start', turnId: 'silent-done', time: started },
+    { kind: 'assistant_message', turnId: 'silent-done', messageId: 'silent-final', text: 'done', state: 'final', final: true, time: started + 1 },
+    { kind: 'turn_end', turnId: 'silent-done', outcome: 'completed', time: started + 2 }
+  ] });
+  const [end] = await readRecentEvents(session.id, 1);
+  const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto' as const });
+  await writeDurableNow('session-input', [{ ...row, state: 'queued',
+    silenceBoundary: { turnId: 'silent-done', conversationId, workSeq: end!.seq, acceptedAt: Date.now() - 1_000, listenUntil: Date.now() - 500 } }]);
+  input.resetInputForTests();
+  expect((await post('/input/claim', { id: row.id, owner: 'page', conversationId, requiresAuthorization: true })).body.input?.id).toBe(row.id);
+});
+
 it('does not turn generic failed/error prose or an unknown wire reason into queue authority', async () => {
   const { readEvents } = await import('../src/main/session/store.js');
   const conversationId = randomUUID();

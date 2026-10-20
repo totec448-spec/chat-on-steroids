@@ -1993,10 +1993,14 @@ async function run(draft: GoalDraft): Promise<void> {
         return settle(draft, 'failed', 'loop_stop_refused');
       }
       if (getConfig().ui.finishHoldOnStop === true) {
-        logWarn(`goal: ${draft.model} says the goal is met in ${draft.conversationId}; unverified, nothing was sent and the reply remains pending`);
         const { recordProgress } = await import('./session/recorder.js');
-        await recordProgress(draft.sessionId, `goal-helper-stop:${draft.turnId}`, goalErrorMessage('goal_helper_stop_unverified'),
-          undefined, await goalReplySourceTurn(draft.sessionId, draft.turnId), undefined, 'helper_stop_unverified');
+        const sourceTurn = await goalReplySourceTurn(draft.sessionId, draft.turnId);
+        if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return;
+        logWarn(`goal: ${draft.model} says the goal is met in ${draft.conversationId}; unverified, nothing was sent and the reply remains pending`);
+        const recorded = await recordProgress(draft.sessionId, `goal-helper-stop:${draft.turnId}`, goalErrorMessage('goal_helper_stop_unverified'),
+          undefined, sourceTurn, undefined, 'helper_stop_unverified');
+        if (!recorded) logWarn(`goal: unverified stop could not be recorded in ${draft.conversationId}`);
+        if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return;
         return settle(draft, 'failed', 'goal_helper_stop_unverified');
       }
       logInfo(`goal: ${draft.model} says the goal is met in ${draft.conversationId}; nothing was sent`);

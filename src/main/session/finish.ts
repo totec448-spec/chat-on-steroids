@@ -195,7 +195,8 @@ async function prepareNotice(sessionId: string, summary: string, userRequested =
     } catch (error) {
       result = `${notification} Goal follow-up was not available: ${(error as Error).message}. ${REMAINING}`;
     } finally { stopInput(); stopSession(); stopGoal(); }
-    await recordProgress(sessionId, progressId, result, anchor, turnId, undefined, unverifiedStop ? 'helper_stop_unverified' : undefined);
+    const recorded = await recordProgress(sessionId, progressId, result, anchor, turnId, undefined, unverifiedStop ? 'helper_stop_unverified' : undefined);
+    if (unverifiedStop && !recorded) logWarn(`finish: unverified stop could not be recorded in ${session.conversationId}`);
     return result;
   })();
   // Notification-only holds are not pending automatic continuations.

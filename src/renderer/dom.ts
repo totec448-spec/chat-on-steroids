@@ -68,7 +68,7 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-sparkle': 'sparkle',
   'i-star': 'star',
   'i-star-fill': 'fill:star',
-  'i-steps': 'list-checks',
+  'i-steps': 'list-checks', 'i-stop': 'stop-circle',
   'i-sun': 'sun',
   'i-target': 'target',
   'i-terminal': 'terminal-window',
