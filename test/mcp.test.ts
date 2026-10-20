@@ -4403,9 +4403,8 @@ describe('blocked chats', () => {
     const untrusted = await readAs(owned(BYSTANDER));
     expect(failed(untrusted)).toBe(true);
     expect(textOf(untrusted)).toContain('CHAT_NOT_TRUSTED');
-    expect(textOf(untrusted)).toMatch(/chat list/i);
-    expect(textOf(untrusted)).toMatch(/sidebar/i);
-    expect(textOf(untrusted)).toContain('Trust');
+    expect(textOf(untrusted)).toMatch(/⋯ menu in the app's sidebar/);
+    expect(textOf(untrusted)).toContain('Trust chat');
     expect(textOf(untrusted)).not.toContain('Sessions');
     expect(textOf(untrusted)).not.toContain('/workspace/notes.txt');
 
@@ -4458,7 +4457,7 @@ describe('blocked chats', () => {
     expect(textOf(parentBlocked)).toContain('CHAT_NOT_TRUSTED');
   });
 
-  it('tells a refused worker to use the owning prime row in the sidebar', async () => {
+  it('tells a refused worker to use its main chat\'s menu in the sidebar', async () => {
     const prime = 'strict-worker-notice-prime';
     const worker = 'strict-worker-notice-child';
     const primeSession = await createSession({ title: 'strict worker notice prime', conversationId: prime });
@@ -4473,13 +4472,12 @@ describe('blocked chats', () => {
     const refused = await readAs(ownedSession(worker, workerSession.id));
     expect(failed(refused)).toBe(true);
     const notices = (await readRecentEvents(workerSession.id, 20))
-      .filter(event => event.kind === 'progress' && /owning prime/i.test(event.message.text));
+      .filter(event => event.kind === 'progress' && /worker whose main chat/i.test(event.message.text));
     expect(notices).toHaveLength(1);
     const copy = notices[0]?.kind === 'progress' ? notices[0].message.text : '';
-    expect(copy).toMatch(/owning prime row/i);
-    expect(copy).toMatch(/sidebar/i);
-    expect(copy).toContain('Trust');
-    expect(copy).toContain('Release');
+    expect(copy).toMatch(/main chat's ⋯ menu in the sidebar/);
+    expect(copy).toContain('Trust chat');
+    expect(copy).toContain('Release chat');
     expect(copy).not.toContain('Sessions');
   });
 
@@ -4501,7 +4499,7 @@ describe('blocked chats', () => {
     const notices = (await readRecentEvents(session.id, 20))
       .filter(event => event.kind === 'progress' && /app-created worker/.test(event.message.text));
     expect(notices).toHaveLength(1);
-    expect(notices[0]?.kind === 'progress' && notices[0].message.text).toContain('no unique owning prime');
+    expect(notices[0]?.kind === 'progress' && notices[0].message.text).toContain('the main chat that started it is not proven yet');
   });
 
   it('keeps a trusted chat authorized only after its Compact & Resume successor commits', async () => {
@@ -4565,9 +4563,10 @@ describe('blocked chats', () => {
       .filter(event => event.kind === 'progress' && /untrusted chat was refused/.test(event.message.text));
     expect(notes).toHaveLength(1);
     const copy = notes[0]?.kind === 'progress' ? notes[0].message.text : '';
-    expect(copy).toMatch(/chat list/i);
-    expect(copy).toMatch(/hover.*sidebar/i);
-    expect(copy).toContain('Trust (✓)');
+    // The sidebar has one ⋯ menu per row since 7a023be7; there is no ✓ to hover for.
+    expect(copy).toMatch(/⋯ menu in the sidebar/);
+    expect(copy).toContain('Trust chat');
+    expect(copy).not.toContain('Trust (✓)');
     expect(copy).not.toContain('Sessions');
 
     await setChatTrusted(conversationId, true);
