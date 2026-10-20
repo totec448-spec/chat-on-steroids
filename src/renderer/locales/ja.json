@@ -2786,5 +2786,6 @@
   "Plain words throughout, and the sidebar layout picked from a picture.": "どこでも平易な言葉に。サイドバーのレイアウトは画像で選べます。",
   "Meet Whip": "Whip が登場",
   "A cheeky new pet that cracks its whip so the work goes faster.": "仕事が速く進むようにムチを鳴らす、生意気な新しいペット。",
-  "ChatGPT asked for a tool approval in this chat.": "このチャットで ChatGPT がツールの承認を求めました。"
+  "ChatGPT asked for a tool approval in this chat.": "このチャットで ChatGPT がツールの承認を求めました。",
+  "{0} sub-agents need attention": "対応が必要なサブエージェント {0}件"
 }
