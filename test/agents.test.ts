@@ -3996,6 +3996,7 @@ describe('through the MCP endpoint', () => {
     expect(refused).toContain('CALLER_IDENTITY_REQUIRED');
     expect(refused).toMatch(/sub-agent.*just started/i);
     expect(refused).toMatch(/call .* again in about 30 seconds/i);
+    expect(refused).toContain('with this same app');
     expect(refused).not.toContain('restore the companion connection');
     expect(refused).toContain('No local tool was run');
   });
