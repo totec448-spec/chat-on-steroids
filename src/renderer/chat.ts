@@ -8130,6 +8130,7 @@ export function initChat(next: Deps): void {
   reviewPanel = createFilePanel({
     host: chatHost, mount: docks.body, reviewOnly: true,
     onShow: () => docks.adopt('review'),
+    onAskChat: prefillComposer,
     onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); }
   });
   reviewPanel.update(selectedLocalProject());

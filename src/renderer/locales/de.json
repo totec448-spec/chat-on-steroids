@@ -2822,5 +2822,12 @@
   "Chats sit under their project folders.": "Chats stehen unter ihren Projektordnern.",
   "All chats in one list, active ones on top.": "Alle Chats in einer Liste, aktive oben.",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "Wie viele Unteragenten-Chats ein Chat höchstens gleichzeitig ausführen darf. Benötigt die verbundene Browser-Erweiterung.",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Lange Arbeit läuft direkt nach einem Tool-Ergebnis in einem neuen Durchlauf mit automatischem Weiter weiter. Kürzere Durchläufe brechen seltener ab. Auch in Goal- und Loop-Chats; nicht bei Pro-Modellen und nicht in den Chats von Unteragenten."
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Lange Arbeit läuft direkt nach einem Tool-Ergebnis in einem neuen Durchlauf mit automatischem Weiter weiter. Kürzere Durchläufe brechen seltener ab. Auch in Goal- und Loop-Chats; nicht bei Pro-Modellen und nicht in den Chats von Unteragenten.",
+  "Three-way view": "Dreiwege-Ansicht",
+  "Ask chat to resolve": "Chat um Lösung bitten",
+  "Help me resolve the merge conflict in {0}. Read the common base, ours and theirs with git show :1:./{0}, :2:./{0} and :3:./{0}, then write a version that keeps what both sides meant and tell me what you chose. Do not stage or commit it.": "Hilf mir, den Merge-Konflikt in {0} zu lösen. Lies die gemeinsame Basis, unsere und ihre Version mit git show :1:./{0}, :2:./{0} und :3:./{0}, schreibe dann eine Fassung, die die Absicht beider Seiten bewahrt, und sag mir, wofür du dich entschieden hast. Nicht stagen oder committen.",
+  "Ours (HEAD)": "Unsere (HEAD)",
+  "Common base": "Gemeinsame Basis",
+  "Theirs (incoming)": "Ihre (eingehend)",
+  "Not in this version": "Nicht in dieser Version"
 }

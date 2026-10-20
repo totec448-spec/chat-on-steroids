@@ -2867,5 +2867,12 @@
   "Chats sit under their project folders.": "Les chats se rangent sous le dossier de leur projet.",
   "All chats in one list, active ones on top.": "Tous les chats dans une seule liste, les actifs en haut.",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "Le nombre maximal de chats de sous-agents qu’un chat peut lancer en même temps. Nécessite l'extension du navigateur connectée.",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Un long travail continue dans un nouveau tour avec un Continuer automatique, juste après un résultat d’outil. Les tours plus courts s’interrompent moins souvent. Aussi dans les chats avec Goal et Loop ; pas avec les modèles Pro ni dans les chats des sous-agents."
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Un long travail continue dans un nouveau tour avec un Continuer automatique, juste après un résultat d’outil. Les tours plus courts s’interrompent moins souvent. Aussi dans les chats avec Goal et Loop ; pas avec les modèles Pro ni dans les chats des sous-agents.",
+  "Three-way view": "Vue à trois voies",
+  "Ask chat to resolve": "Demander au chat de résoudre",
+  "Help me resolve the merge conflict in {0}. Read the common base, ours and theirs with git show :1:./{0}, :2:./{0} and :3:./{0}, then write a version that keeps what both sides meant and tell me what you chose. Do not stage or commit it.": "Aide-moi à résoudre le conflit de fusion dans {0}. Lis la base commune, notre version et la leur avec git show :1:./{0}, :2:./{0} et :3:./{0}, puis écris une version qui garde l’intention des deux côtés et dis-moi ce que tu as choisi. Ne l’indexe pas et ne le valide pas.",
+  "Ours (HEAD)": "La nôtre (HEAD)",
+  "Common base": "Base commune",
+  "Theirs (incoming)": "La leur (entrante)",
+  "Not in this version": "Absent de cette version"
 }

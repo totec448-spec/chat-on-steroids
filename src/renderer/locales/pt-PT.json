@@ -2867,5 +2867,12 @@
   "Chats sit under their project folders.": "Os chats ficam sob as pastas dos projetos.",
   "All chats in one list, active ones on top.": "Todos os chats numa só lista, os ativos no topo.",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "O máximo de chats de subagentes que um chat pode ter ao mesmo tempo. Requer a extensão do navegador ligada.",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Um trabalho longo continua num novo turno com um Continuar automático, logo após um resultado de ferramenta. Turnos mais curtos falham menos. Também em chats com Goal e Loop; não com modelos Pro nem nos chats dos subagentes."
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Um trabalho longo continua num novo turno com um Continuar automático, logo após um resultado de ferramenta. Turnos mais curtos falham menos. Também em chats com Goal e Loop; não com modelos Pro nem nos chats dos subagentes.",
+  "Three-way view": "Vista de três vias",
+  "Ask chat to resolve": "Pedir ao chat para resolver",
+  "Help me resolve the merge conflict in {0}. Read the common base, ours and theirs with git show :1:./{0}, :2:./{0} and :3:./{0}, then write a version that keeps what both sides meant and tell me what you chose. Do not stage or commit it.": "Ajuda-me a resolver o conflito de merge em {0}. Lê a base comum, a nossa versão e a deles com git show :1:./{0}, :2:./{0} e :3:./{0}, depois escreve uma versão que mantenha a intenção dos dois lados e diz-me o que escolheste. Não adiciones ao stage nem faças commit.",
+  "Ours (HEAD)": "Nossa (HEAD)",
+  "Common base": "Base comum",
+  "Theirs (incoming)": "Deles (recebida)",
+  "Not in this version": "Não existe nesta versão"
 }

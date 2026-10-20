@@ -2912,5 +2912,12 @@
   "Chats sit under their project folders.": "Чаты лежат в папках своих проектов.",
   "All chats in one list, active ones on top.": "Все чаты в одном списке, активные сверху.",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "Сколько чатов субагентов один чат может запускать одновременно. Нужно подключённое расширение браузера.",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Долгая работа продолжается в новом ходе с автоматическим «Продолжить» сразу после результата инструмента. Короткие ходы реже обрываются. Также в чатах с «Целью» и «Циклом»; не используется с моделями Pro и в собственных чатах субагентов."
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Долгая работа продолжается в новом ходе с автоматическим «Продолжить» сразу после результата инструмента. Короткие ходы реже обрываются. Также в чатах с «Целью» и «Циклом»; не используется с моделями Pro и в собственных чатах субагентов.",
+  "Three-way view": "Трёхстороннее сравнение",
+  "Ask chat to resolve": "Попросить чат разрешить",
+  "Help me resolve the merge conflict in {0}. Read the common base, ours and theirs with git show :1:./{0}, :2:./{0} and :3:./{0}, then write a version that keeps what both sides meant and tell me what you chose. Do not stage or commit it.": "Помоги разрешить конфликт слияния в {0}. Прочитай общую базу, нашу и их версии через git show :1:./{0}, :2:./{0} и :3:./{0}, затем напиши версию, которая сохраняет замысел обеих сторон, и расскажи, что ты выбрал. Не индексируй и не коммить её.",
+  "Ours (HEAD)": "Наша (HEAD)",
+  "Common base": "Общая база",
+  "Theirs (incoming)": "Их (входящая)",
+  "Not in this version": "Нет в этой версии"
 }

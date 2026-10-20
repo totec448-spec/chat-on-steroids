@@ -4552,7 +4552,12 @@ read-only: it strips inherited Git repository/index redirects, uses optional-loc
 subprocesses and exposes no stage, commit, reset,
 checkout or push authority. Review projects `M/A/D/R/U`, plus `C` for every unmerged index state
 (`DD/AU/UD/UA/DU/AA/UU`) so an unfinished merge is never shown as an ordinary edit; a conflicted
-file missing from the worktree diffs as empty. It also projects ancestor-folder markers and
+file missing from the worktree diffs as empty. A working-tree conflict's diff also carries
+`conflict`: index stages 1-3 (base, ours/HEAD, theirs) through the same bounded `cat-file` reads,
+null for a side without the file and absent when a side is binary or too large. Review shows them
+as three read-only panes with a toggle back to the diff; Ask chat to resolve only prefills the
+composer with a request naming the file, and nothing writes, stages or marks it resolved.
+It also projects ancestor-folder markers and
 bounded unified diffs; Files may open it from its toolbar. Files and Review are alternate right
 tabs; Review does not add a second file watcher or expose file-write actions.
 Review also identifies the checked-out branch and offers a searchable, read-only comparison
