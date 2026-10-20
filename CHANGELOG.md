@@ -30,6 +30,7 @@ Opening a sub-agent now shows what it did: each action with its result and the f
 - **Clearer Settings.** Plain words throughout. Agents & automation is regrouped: Goal and Loop settings together, a new **Chat access** section, and the worker list names the main chat and each worker.
 - **Chat names read properly.** A chat named after a long first message ends at a word with "…" instead of stopping mid-word.
 - **Tidier pages.** Plugin and pet cards line up with their neighbors, an empty Activity list says why it's empty, and Usage no longer shows empty boxes while it loads.
+- **Lighter waits before Compact & Resume.** While Chat On Steroids waits for ChatGPT to confirm the latest tool results, it checks every 2 seconds after the first 10 instead of four times a second, which matters most on slower computers.
 
 ### 🛠 Fixed
 
@@ -38,6 +39,8 @@ Opening a sub-agent now shows what it did: each action with its result and the f
 - **The app log keeps writing** when Windows briefly blocks the log file, for example while another program has it open. No lines are lost.
 - **A stopped answer** shows a stop sign instead of a success check.
 - **Uninstalling a plugin** now asks with a Cancel button, like removing a skill.
+- **A chat that Compact & Resume replaced** now tells you which chat the work continues in, with a link, if you keep using it. Before, ChatGPT could only say that it could no longer use your computer.
+- **A tool approval card that ChatGPT redraws** no longer shows in the app as answered and then asked again.
 - **Screenshot only the active window** is offered on macOS only. On Windows every screenshot already shows one window, so the switch did nothing there.
 
 ## [2.1.42] — Bring back earlier messages, smoother answers, and long work that keeps going

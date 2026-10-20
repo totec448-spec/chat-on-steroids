@@ -4447,9 +4447,15 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
       if (!event.progressId?.startsWith(APPROVAL_PROGRESS_PREFIX)) return el('p', 'meta is-progress', event.message.text);
       // ChatGPT's own tool approval card stands in this chat's page (approval-wait.ts). The app
       // writes the English source; only the user can answer the card, so the row opens the page.
-      const waiting = event.message.text === APPROVAL_WAITING_TEXT;
+      // A later episode's row takes over: an app restart or a lost page starts a new one while the
+      // earlier row still says waiting (VM, 2026-10-20: three live cards for one). That row was never
+      // answered here, so it reads as past, without buttons.
+      const later = event.message.text === APPROVAL_WAITING_TEXT && (context?.history ?? events).some(other =>
+        other.kind === 'progress' && other.seq > event.seq && other.progressId !== event.progressId && !!other.progressId?.startsWith(APPROVAL_PROGRESS_PREFIX));
+      const waiting = event.message.text === APPROVAL_WAITING_TEXT && !later;
       const line = el('p', `meta is-progress thinking-line approval-wait${waiting ? ' is-waiting' : ''}`);
-      line.append(icon(waiting ? 'i-lock' : 'i-check-circle', 'ico thinking-ico'), el('span', '', () => approvalRowText(event.message.text)));
+      line.append(icon(waiting || later ? 'i-lock' : 'i-check-circle', 'ico thinking-ico'),
+        el('span', '', () => later ? t('ChatGPT asked for a tool approval in this chat.') : approvalRowText(event.message.text)));
       const owner = context?.id ?? selectedId;
       if (waiting && owner) {
         const open = el('button', 'btn') as HTMLButtonElement;

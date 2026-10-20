@@ -44,6 +44,11 @@ export interface ApprovalWaitDeps {
   log(message: string): void;
   /** A chat started or stopped waiting, so the session list's `approval` changed. */
   changed?(): void;
+  /**
+   * The session's latest approval row if it still says waiting: one an earlier app run wrote and
+   * never rewrote. A new wait takes it over instead of adding a row after every restart.
+   */
+  previous?(sessionId: string): Promise<{ progressId: string; anchor: { seq: number; time: number } } | null>;
 }
 
 interface Wait {
@@ -151,7 +156,18 @@ export async function noteApprovalCard(
   }
   if (sessionId && !wait.sessionId) {
     wait.sessionId = sessionId;
-    wait.row = deps.record(sessionId, wait.progressId, APPROVAL_WAITING_TEXT).catch(() => null);
+    const current = wait;
+    const own = `${APPROVAL_PROGRESS_PREFIX}${conversationId}:`;
+    current.row = (async () => {
+      // Only this chat's row: after Compact & Resume the session's earlier rows belong to the chat it left.
+      const earlier = deps.previous ? await deps.previous(sessionId).catch(() => null) : null;
+      if (earlier?.progressId.startsWith(own)) {
+        current.progressId = earlier.progressId;
+        return earlier.anchor;
+      }
+      return deps.record(sessionId, current.progressId, APPROVAL_WAITING_TEXT).catch(() => null);
+    })();
+    await current.row;
   }
   if (wait.sessionId && !wait.noticed && now - wait.since >= APPROVAL_NOTICE_GRACE_MS) {
     wait.noticed = true;
