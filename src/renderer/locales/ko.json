@@ -2777,5 +2777,12 @@
   "Chats sit under their project folders.": "채팅이 프로젝트 폴더 아래에 놓입니다.",
   "All chats in one list, active ones on top.": "모든 채팅을 한 목록에, 활성 채팅은 맨 위에.",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "한 채팅이 동시에 실행할 수 있는 서브에이전트 채팅의 최대 수. 연결된 브라우저 확장 프로그램이 필요합니다.",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "긴 작업은 도구 결과 직후 자동 계속으로 새 턴에서 이어집니다. 턴이 짧을수록 덜 끊깁니다. Goal 및 Loop 채팅에서도 사용됩니다. Pro 모델과 서브에이전트 자체 채팅에서는 사용되지 않습니다."
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "긴 작업은 도구 결과 직후 자동 계속으로 새 턴에서 이어집니다. 턴이 짧을수록 덜 끊깁니다. Goal 및 Loop 채팅에서도 사용됩니다. Pro 모델과 서브에이전트 자체 채팅에서는 사용되지 않습니다.",
+  "Add to .gitignore": ".gitignore에 추가",
+  "Add “{0}” to .gitignore": "“{0}”을(를) .gitignore에 추가",
+  ".gitignore is too large or not plain text, so it cannot be changed here.": ".gitignore가 너무 크거나 일반 텍스트가 아니어서 여기서 변경할 수 없습니다.",
+  "Add to .gitignore?": ".gitignore에 추가할까요?",
+  "Add the line “{0}” to .gitignore?": "“{0}” 줄을 .gitignore에 추가할까요?",
+  "This project has no .gitignore yet. One is created in the project folder.": "이 프로젝트에는 아직 .gitignore가 없습니다. 프로젝트 폴더에 새로 만듭니다.",
+  "Added {0} to .gitignore": "{0}을(를) .gitignore에 추가했습니다"
 }

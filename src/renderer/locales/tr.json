@@ -2822,5 +2822,12 @@
   "Chats sit under their project folders.": "Sohbetler proje klasörlerinin altında durur.",
   "All chats in one list, active ones on top.": "Tüm sohbetler tek listede, etkin olanlar üstte.",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "Bir sohbetin aynı anda çalıştırabileceği en fazla yardımcı ajan sohbeti sayısı. Bağlı tarayıcı eklentisi gerekir.",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Uzun işler, bir araç sonucundan hemen sonra otomatik Devam ile yeni bir turda sürer. Kısa turlar daha az kesilir. Hedef ve Döngü sohbetlerinde de kullanılır; Pro modellerde ve yardımcı ajanların kendi sohbetlerinde kullanılmaz."
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Uzun işler, bir araç sonucundan hemen sonra otomatik Devam ile yeni bir turda sürer. Kısa turlar daha az kesilir. Hedef ve Döngü sohbetlerinde de kullanılır; Pro modellerde ve yardımcı ajanların kendi sohbetlerinde kullanılmaz.",
+  "Add to .gitignore": ".gitignore'a ekle",
+  "Add “{0}” to .gitignore": "“{0}” öğesini .gitignore'a ekle",
+  ".gitignore is too large or not plain text, so it cannot be changed here.": ".gitignore çok büyük ya da düz metin değil, bu yüzden burada değiştirilemez.",
+  "Add to .gitignore?": ".gitignore'a eklensin mi?",
+  "Add the line “{0}” to .gitignore?": "“{0}” satırı .gitignore'a eklensin mi?",
+  "This project has no .gitignore yet. One is created in the project folder.": "Bu projede henüz .gitignore yok. Proje klasöründe bir tane oluşturulacak.",
+  "Added {0} to .gitignore": "{0} .gitignore'a eklendi"
 }

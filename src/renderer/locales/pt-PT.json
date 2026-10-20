@@ -2867,5 +2867,12 @@
   "Chats sit under their project folders.": "Os chats ficam sob as pastas dos projetos.",
   "All chats in one list, active ones on top.": "Todos os chats numa só lista, os ativos no topo.",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "O máximo de chats de subagentes que um chat pode ter ao mesmo tempo. Requer a extensão do navegador ligada.",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Um trabalho longo continua num novo turno com um Continuar automático, logo após um resultado de ferramenta. Turnos mais curtos falham menos. Também em chats com Goal e Loop; não com modelos Pro nem nos chats dos subagentes."
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Um trabalho longo continua num novo turno com um Continuar automático, logo após um resultado de ferramenta. Turnos mais curtos falham menos. Também em chats com Goal e Loop; não com modelos Pro nem nos chats dos subagentes.",
+  "Add to .gitignore": "Adicionar ao .gitignore",
+  "Add “{0}” to .gitignore": "Adicionar «{0}» ao .gitignore",
+  ".gitignore is too large or not plain text, so it cannot be changed here.": "O .gitignore é demasiado grande ou não é texto simples, por isso não pode ser alterado aqui.",
+  "Add to .gitignore?": "Adicionar ao .gitignore?",
+  "Add the line “{0}” to .gitignore?": "Adicionar a linha «{0}» ao .gitignore?",
+  "This project has no .gitignore yet. One is created in the project folder.": "Este projeto ainda não tem .gitignore. Será criado um na pasta do projeto.",
+  "Added {0} to .gitignore": "{0} adicionado ao .gitignore"
 }
