@@ -51,6 +51,8 @@ export interface RowMenuOptions {
   items: () => RowMenuItem[];
   /** A right click opens the menu at the pointer instead of beside the button. */
   at?: { x: number; y: number };
+  /** Items that are lines of text (a chat's bookmarks), not commands: the menu may be wider. */
+  wide?: boolean;
 }
 
 const EDGE = 8;
@@ -106,6 +108,7 @@ export function openRowMenu(options: RowMenuOptions): void {
   // opened from the keyboard must measure the button where it is, not where it is hidden.
   options.anchor()?.setAttribute('aria-expanded', 'true');
   const menu = level(options.items(), options.label, 0);
+  menu.classList.toggle('is-wide', options.wide === true);
   document.body.append(menu);
   current.levels.push(menu);
   place(menu, options);
