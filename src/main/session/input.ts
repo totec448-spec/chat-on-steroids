@@ -196,7 +196,7 @@ let deliveryHooks: InputDeliveryHooks | null = null;
 /** Installed once by IPC before bridge/MCP startup; avoids a Goal/input import cycle. */
 export function configureInputDelivery(hooks: InputDeliveryHooks): void { deliveryHooks = hooks; }
 /** One delivery policy for composer presentation, admission and the final send fence. */
-export async function sessionInputPolicy(sessionId: string, observedActivity?: InputActivity): Promise<{ queueAtFinish: boolean; canInject: boolean; injectionTurnId: string | null; directTurn: InputEntry['directTurn'] | null; browserAllowed: boolean; settled: boolean }> {
+export async function sessionInputPolicy(sessionId: string, observedActivity?: InputActivity): Promise<{ queueAtFinish: boolean; canInject: boolean; injectionTurnId: string | null; directTurn: InputEntry['directTurn'] | null; browserAllowed: boolean; settled: boolean; stoppedIdle?: boolean; stoppedWait?: string }> {
   const [end] = await readRecentEvents(sessionId, 1, { kinds: ['turn_start', 'turn_end'] });
   const session = await getSession(sessionId);
   if (!session?.conversationId || isChatBlocked(session.conversationId)) return { queueAtFinish: false, canInject: false, injectionTurnId: null, directTurn: null, browserAllowed: false, settled: false };
@@ -232,6 +232,13 @@ export async function sessionInputPolicy(sessionId: string, observedActivity?: I
     // An adopted idle chat may have no recorded turn boundary. Explicit input can
     // use its native composer; queued checkpoints still require `settled` below.
     browserAllowed: !session.activeTurnId && !activity.possible && !activity.exact && !executing,
+    // ChatGPT showed the turn stopped and nothing runs. The stopped turn's work keeps its activity
+    // window for the app's own sends (ChatGPT may still be working on its side), but a message you
+    // typed goes out now: it waited out that window, 3 minutes or 10 for Pro (measured 2026-10-20).
+    stoppedIdle: !session.activeTurnId && terminal && end.outcome === 'stopped' && !activity.exact && !executing,
+    // Why a typed message still waits after a stopped end, for the log.
+    ...(!session.activeTurnId && terminal && end.outcome === 'stopped' && (activity.exact || executing)
+      ? { stoppedWait: executing ? 'a tool call still runs' : 'ChatGPT or a running command still shows work' } : {}),
     // Completion already reconciles trailing same-request calls. A separate time
     // comparison would leave the composer unsettled after the activity clock stopped.
     settled: settled && !executing && (!!completed || (session.lastToolCallAt ?? 0) <= (end?.time ?? 0)) };
@@ -267,14 +274,26 @@ async function browserInputAllowed(entry: InputEntry): Promise<boolean> {
     if (!session || session.conversationId !== entry.conversationId) return false;
     if (session.activeTurnId) return policy.directTurn?.id === entry.directTurn.id;
     const [end] = await readRecentEvents(entry.sessionId, 1, { kinds: ['turn_start', 'turn_end'] });
-    return policy.browserAllowed && end?.kind === 'turn_end' && end.turnId === entry.directTurn.id;
+    return (policy.browserAllowed || typedAfterStop(entry, policy)) && end?.kind === 'turn_end' && end.turnId === entry.directTurn.id;
   }
   // Only a never-offered ordinary input may change routes after positive terminal evidence.
   // A tool handout or ambiguous browser claim retains its original exclusive custody.
-  return policy.browserAllowed && (entry.transportIntent !== 'tool' ||
+  const allowed = policy.browserAllowed || typedAfterStop(entry, policy);
+  return allowed && (entry.transportIntent !== 'tool' ||
     (entry.mode === 'auto' && !entry.finishOwner && entry.purpose !== 'decision' && entry.state === 'queued' &&
       entry.owner === null && entry.offeredAt === undefined && policy.settled));
 }
+/** A message you typed, for a chat ChatGPT shows stopped with nothing running: it need not wait. */
+function typedAfterStop(entry: InputEntry, policy: { stoppedIdle?: boolean; stoppedWait?: string }): boolean {
+  const typed = manualInput(entry) && !entry.recovery;
+  if (typed && policy.stoppedWait && stoppedWaitTold.get(entry.id) !== policy.stoppedWait) {
+    stoppedWaitTold.set(entry.id, policy.stoppedWait);
+    if (stoppedWaitTold.size > 200) stoppedWaitTold.delete(stoppedWaitTold.keys().next().value!);
+    logInfo(`input ${entry.id}: waits after Stop: ${policy.stoppedWait}`);
+  }
+  return policy.stoppedIdle === true && typed;
+}
+const stoppedWaitTold = new Map<string, string>();
 /** The last release reason said out loud per ticket, so a loop is visible without being noisy. */
 const recoveryReleaseTold = new Map<string, string>();
 
