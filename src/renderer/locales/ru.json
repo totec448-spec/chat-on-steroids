@@ -2912,5 +2912,12 @@
   "Chats sit under their project folders.": "Чаты лежат в папках своих проектов.",
   "All chats in one list, active ones on top.": "Все чаты в одном списке, активные сверху.",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "Сколько чатов субагентов один чат может запускать одновременно. Нужно подключённое расширение браузера.",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Долгая работа продолжается в новом ходе с автоматическим «Продолжить» сразу после результата инструмента. Короткие ходы реже обрываются. Также в чатах с «Целью» и «Циклом»; не используется с моделями Pro и в собственных чатах субагентов."
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Долгая работа продолжается в новом ходе с автоматическим «Продолжить» сразу после результата инструмента. Короткие ходы реже обрываются. Также в чатах с «Целью» и «Циклом»; не используется с моделями Pro и в собственных чатах субагентов.",
+  "Add to .gitignore": "Добавить в .gitignore",
+  "Add “{0}” to .gitignore": "Добавить «{0}» в .gitignore",
+  ".gitignore is too large or not plain text, so it cannot be changed here.": ".gitignore слишком большой или не является обычным текстом, поэтому его нельзя изменить здесь.",
+  "Add to .gitignore?": "Добавить в .gitignore?",
+  "Add the line “{0}” to .gitignore?": "Добавить строку «{0}» в .gitignore?",
+  "This project has no .gitignore yet. One is created in the project folder.": "В этом проекте ещё нет .gitignore. Он будет создан в папке проекта.",
+  "Added {0} to .gitignore": "{0} добавлено в .gitignore"
 }
