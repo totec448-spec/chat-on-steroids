@@ -54,6 +54,7 @@ const {
   onSpawnRequest,
   onSwarmEnd,
   onWorkerChatsRetired,
+  onWorkerFinished,
   onSwarmPersist,
   onSwarmPersistNow,
   pendingCount,
@@ -5529,6 +5530,42 @@ it('archives accepted renamed assignments before broker expiry and restores save
     resetSessionStoreForTests();
     expect((await getSession(session.id))?.workerAssignment).toMatchObject({ label: 'Review', task: 'New task' });
   } finally { vi.useRealTimers(); }
+});
+
+/** A worker that reported its task done, for archiving its chat right away (#1701). */
+describe('finished worker chats', () => {
+  it('names a worker chat once when its worker finishes, and not for a repeated finish or the prime', () => {
+    const finished: string[] = [];
+    onWorkerFinished((id) => finished.push(id));
+    startSwarm(2);
+    const one = startWorker('worker-1');
+    startWorker('worker-2');
+    finishAgent(one.caller, 'done');
+    finishAgent(one.caller, 'done again');
+    expect(finished).toEqual(['c-worker-1']);
+  });
+
+  it('names a worker chat when the browser finishes it from its settled answer', () => {
+    const finished: string[] = [];
+    onWorkerFinished((id) => finished.push(id));
+    startSwarm(1);
+    startWorker('worker-1');
+    finishWorkerConversation('c-worker-1', 'answered');
+    expect(finished).toEqual(['c-worker-1']);
+  });
+
+  it('names a worker chat only once a staged finish commits', () => {
+    const finished: string[] = [];
+    onWorkerFinished((id) => finished.push(id));
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    const rolledBack = stageFinishAgent(worker.caller, 'done');
+    rolledBack.rollback();
+    expect(finished).toEqual([]);
+    const staged = stageFinishAgent(worker.caller, 'done');
+    staged.commit();
+    expect(finished).toEqual(['c-worker-1']);
+  });
 });
 
 /** Worker chats the broker will never use again, for archiving them in ChatGPT (#1460). */
