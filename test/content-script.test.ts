@@ -15428,7 +15428,7 @@ describe('the Compact & resume control', () => {
     const label = live.document.querySelector('.clf-blocked') as HTMLElement;
     expect(label.hidden).toBe(false);
     expect(label.textContent).toBe('Chat blocked');
-    expect(label.getAttribute('data-clf-tip')).toMatch(/hover this chat in the sessions list and press its block symbol/);
+    expect(label.getAttribute('data-clf-tip')).toMatch(/open this chat’s ⋯ menu in the app’s sidebar and choose “Release chat”/);
 
     // Released in the app: the next poll takes the word away.
     blocked = '';

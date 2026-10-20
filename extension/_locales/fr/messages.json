@@ -93,7 +93,7 @@
     "message": "Chat bloqué"
   },
   "content_chat_blocked_tip": {
-    "message": "Ce chat est bloqué dans l’application Chat On Steroids : ses appels d’outils sont refusés et Goal, Loop ainsi que le compactage automatique sont désactivés. Pour le débloquer, ouvrez l’onglet Chat de l’application, survolez ce chat dans la liste des sessions et cliquez sur son symbole de blocage."
+    "message": "Ce chat est bloqué dans l’application Chat On Steroids : ses appels d’outils sont refusés et Goal, Loop ainsi que le compactage automatique sont désactivés. Pour le débloquer, ouvrez le menu ⋯ de ce chat dans la barre latérale de l’application et choisissez « Débloquer le chat »."
   },
   "content_chat_still_opening": {
     "message": "ce chat est encore en cours d’ouverture — réessayez"

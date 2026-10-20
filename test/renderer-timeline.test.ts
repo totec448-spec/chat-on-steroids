@@ -3308,6 +3308,21 @@ describe('ChatGPT\'s approval card in the timeline', () => {
   });
 });
 
+it('shows a strict-mode refusal notice in the interface language', async () => {
+  // VM, 2026-10-20: a German interface showed this notice in English; the app records it in English.
+  const { UNTRUSTED_NOTICE } = await import('../src/shared/trust-notices.js');
+  const { w } = await boot([{ seq: 1, time: T0, source: 'app', kind: 'progress', progressId: 'strict-chat-refusal:one',
+    message: text(UNTRUSTED_NOTICE) } as SessionEvent]);
+  const timeline = w.document.getElementById('timeline')!;
+  await vi.waitFor(() => expect(timeline.textContent).toContain('untrusted chat was refused'));
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  try {
+    await vi.waitFor(() => expect(timeline.textContent).toContain('Chat vertrauen'));
+    expect(timeline.textContent).not.toContain('untrusted chat was refused');
+  } finally { setLanguage('en'); }
+});
+
 it('never titles a tool group with the app\'s own recovery note', async () => {
   // #882: after a run of reloads, every tool group read "Reloaded chat to recover an interrupted
   // response.", because the note in front of a group was taken for ChatGPT's phase caption.
