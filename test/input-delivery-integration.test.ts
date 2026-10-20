@@ -3351,3 +3351,19 @@ it('copies only the chat a branch was made from, not the chat a Compact & Resume
     expect(said).toEqual(['new-ask', reply]);
   } finally { clock.mockRestore(); }
 });
+
+it('holds a message to a worker chat the app archived until that chat is restored (#1701)', async () => {
+  const archive = await import('../src/main/worker-archive.js');
+  archive.resetWorkerArchiveForTests();
+  await saveConfig({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, archiveWorkerChats: true } });
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Archived worker', conversationId });
+  archive.queueWorkerArchives([conversationId]);
+  expect(archive.nextWorkerArchive()).toEqual({ conversationId, archive: true });
+  archive.settleWorkerArchive(conversationId, 'archived');
+  const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto' as const });
+  expect((await input.pendingBrowserInputs()).some(item => item.id === row.id)).toBe(false);
+  expect(archive.nextWorkerArchive()).toEqual({ conversationId, archive: false });
+  archive.settleWorkerArchive(conversationId, 'unarchived');
+  expect((await input.pendingBrowserInputs()).some(item => item.id === row.id)).toBe(true);
+});

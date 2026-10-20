@@ -13736,11 +13736,12 @@
    */
   let projectCreateBusy = false;
   /**
-   * Archives one retired worker chat with ChatGPT's own reversible archive (#1460): the chat
-   * leaves the chat list and can be restored from ChatGPT's settings. One request for one exact
-   * chat of the signed-in account; nothing is deleted and nothing else is touched.
+   * Archives one worker chat with ChatGPT's own reversible archive (#1460): the chat leaves the
+   * chat list and can be restored from ChatGPT's settings. With `archive` false it restores one
+   * the app archived, before that worker is woken (#1701). One request for one exact chat of the
+   * signed-in account; nothing is deleted and nothing else is touched.
    */
-  async function archiveWorkerChat(conversationId) {
+  async function archiveWorkerChat(conversationId, archive = true) {
     const id = String(conversationId || '').toLowerCase();
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) return 'failed';
     const signedIn = await fetch(`${location.origin}/api/auth/session`, { credentials: 'include' });
@@ -13751,9 +13752,10 @@
     // A workspace chat belongs to that workspace's account, which ChatGPT names in this header.
     if (typeof session.account?.id === 'string' && session.account.id) headers['ChatGPT-Account-Id'] = session.account.id;
     const archived = await fetch(`${location.origin}/backend-api/conversation/${id}`, {
-      method: 'PATCH', credentials: 'include', headers, body: JSON.stringify({ is_archived: true })
+      method: 'PATCH', credentials: 'include', headers, body: JSON.stringify({ is_archived: archive })
     });
-    return archived.ok ? 'archived' : 'failed';
+    if (!archived.ok) return 'failed';
+    return archive ? 'archived' : 'unarchived';
   }
 
   async function createChatgptProject(request) {
@@ -14065,7 +14067,7 @@
       // dead context Chrome leaves behind when an unpacked extension is reloaded while the
       // ChatGPT document stays open. No page/session data crosses in this health check.
       if (message.type === 'clf-archive-chat') {
-        void archiveWorkerChat(message.conversationId).then(outcome => sendResponse({ outcome })).catch(() => sendResponse({ outcome: 'failed' }));
+        void archiveWorkerChat(message.conversationId, message.archive !== false).then(outcome => sendResponse({ outcome })).catch(() => sendResponse({ outcome: 'failed' }));
         return true;
       }
       if (message.type === 'clf-stop-turn') {
