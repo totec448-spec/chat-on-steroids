@@ -417,15 +417,26 @@ function textFromBytes(bytes: Buffer): string | null {
   try { return decode(bytes); } catch { return null; }
 }
 
-async function readHeadFile(context: RepositoryContext, relative: string, oid = 'HEAD'): Promise<{ text: string | null; tooLarge: boolean }> {
-  const object = `${oid}:${repositoryPath(context, relative)}`;
+/** One bounded blob, or null when the object does not exist. */
+async function readBlob(context: RepositoryContext, object: string): Promise<{ text: string | null; tooLarge: boolean } | null> {
   const size = await runGit(context.projectReal, ['cat-file', '-s', object], 128);
-  if (size.code !== 0) return { text: '', tooLarge: false };
+  if (size.code !== 0) return null;
   const bytes = Number(decode(size.stdout).trim());
   if (!Number.isFinite(bytes) || bytes > MAX_DIFF_SIDE_BYTES) return { text: null, tooLarge: true };
   const content = await runGit(context.projectReal, ['cat-file', 'blob', object], MAX_DIFF_SIDE_BYTES + 1);
   if (content.code !== 0) throw new Error(content.stderr || 'The Git base could not be read');
   return { text: textFromBytes(content.stdout), tooLarge: false };
+}
+
+async function readHeadFile(context: RepositoryContext, relative: string, oid = 'HEAD'): Promise<{ text: string | null; tooLarge: boolean }> {
+  return await readBlob(context, `${oid}:${repositoryPath(context, relative)}`) ?? { text: '', tooLarge: false };
+}
+
+/** Index stages 1-3 of an unmerged path; none when a present side is binary or too large. */
+async function readConflictStages(context: RepositoryContext, relative: string): Promise<ProjectGitDiff['conflict']> {
+  const [base, ours, theirs] = await Promise.all([1, 2, 3].map(stage => readBlob(context, `:${stage}:${repositoryPath(context, relative)}`)));
+  if ([base, ours, theirs].some(side => side && (side.tooLarge || side.text === null))) return undefined;
+  return { base: base?.text ?? null, ours: ours?.text ?? null, theirs: theirs?.text ?? null };
 }
 
 async function readWorkingFile(projectId: string, relative: string): Promise<{ text: string | null; tooLarge: boolean }> {
@@ -457,12 +468,14 @@ export async function readProjectGitDiff(projectId: string, relativePath: string
         : await readWorkingFile(projectId, change.path);
   const tooLarge = base.tooLarge || current.tooLarge;
   const binary = change.binary || (!tooLarge && (base.text === null || current.text === null));
+  const conflict = change.status === 'C' && !snapshot.comparison ? await readConflictStages(context, change.path) : undefined;
   return {
     projectId, status: change.status, path: change.path, previousPath: change.previousPath,
     additions: change.additions, deletions: change.deletions, binary, tooLarge,
     baseText: binary || tooLarge ? null : base.text,
     currentText: binary || tooLarge ? null : current.text,
-    note: tooLarge ? 'This diff is too large to display.' : binary ? 'Binary diff · preview unavailable' : undefined
+    note: tooLarge ? 'This diff is too large to display.' : binary ? 'Binary diff · preview unavailable' : undefined,
+    ...(conflict ? { conflict } : {})
   };
 }
 

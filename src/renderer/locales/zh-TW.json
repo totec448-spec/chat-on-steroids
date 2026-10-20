@@ -2777,5 +2777,12 @@
   "Chats sit under their project folders.": "聊天顯示在各自的專案資料夾下。",
   "All chats in one list, active ones on top.": "所有聊天在同一清單中，進行中的排在最前。",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "一個聊天可同時執行的子代理聊天上限。需要已連線的瀏覽器擴充功能。",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "長時間的工作會在工具結果之後，透過自動「繼續」在新回合中接著進行。回合越短越不容易中斷。也用於目標和循環聊天；不用於 Pro 模型或子代理自己的聊天。"
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "長時間的工作會在工具結果之後，透過自動「繼續」在新回合中接著進行。回合越短越不容易中斷。也用於目標和循環聊天；不用於 Pro 模型或子代理自己的聊天。",
+  "Three-way view": "三方檢視",
+  "Ask chat to resolve": "請聊天協助解決",
+  "Help me resolve the merge conflict in {0}. Read the common base, ours and theirs with git show :1:./{0}, :2:./{0} and :3:./{0}, then write a version that keeps what both sides meant and tell me what you chose. Do not stage or commit it.": "請幫我解決 {0} 中的合併衝突。用 git show :1:./{0}, :2:./{0} 和 :3:./{0} 讀取共同基礎、我方與對方的版本，然後寫出保留雙方意圖的版本，並告訴我你做了哪些選擇。不要暫存或提交。",
+  "Ours (HEAD)": "我方 (HEAD)",
+  "Common base": "共同基礎",
+  "Theirs (incoming)": "對方 (傳入)",
+  "Not in this version": "此版本中不存在"
 }
