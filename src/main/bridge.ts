@@ -127,6 +127,7 @@ import {
 } from './session/recorder.js';
 import { noticeApprovalWaiting, noticeChatStopped } from './stuck-notice.js';
 import { approvalAnswerFor, approvalCardWaiting, noteApprovalCard, parseApprovalCard, parseApprovalResult, resetApprovalWaits, settleApprovalAnswer, type ApprovalWaitDeps } from './approval-wait.js';
+import { APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT } from '../shared/approval-wait.js';
 import {
   autoCompactionReady,
   automaticCompactionAllowed,
@@ -7030,8 +7031,25 @@ const approvalWaitDeps: ApprovalWaitDeps = {
   notify: noticeApprovalWaiting,
   log: logInfo,
   // The session list's `approval`; a catalog-only push, since no transcript changed.
-  changed: () => notifyChanged()
+  changed: () => notifyChanged(),
+  previous: latestWaitingApprovalRow
 };
+
+/** The session's newest approval row, if its latest text still says waiting (see `ApprovalWaitDeps.previous`). */
+export async function latestWaitingApprovalRow(sessionId: string): Promise<{ progressId: string; anchor: { seq: number; time: number } } | null> {
+  const rows = (await readRecentEvents(sessionId, 256, { kinds: ['progress'] }))
+    .filter(event => event.kind === 'progress' && !!event.progressId?.startsWith(APPROVAL_PROGRESS_PREFIX))
+    .sort((a, b) => a.seq - b.seq);
+  // A rewrite is a later event naming its row's first snapshot as `origin`; that snapshot keeps the place.
+  const byRow = new Map<string, { anchor: { seq: number; time: number }; text: string }>();
+  for (const event of rows) {
+    if (event.kind !== 'progress' || !event.progressId) continue;
+    const first = byRow.get(event.progressId)?.anchor ?? { seq: event.origin ?? event.seq, time: event.time };
+    byRow.set(event.progressId, { anchor: first, text: event.message.text });
+  }
+  const newest = [...byRow].sort(([, a], [, b]) => b.anchor.seq - a.anchor.seq)[0];
+  return newest && newest[1].text === APPROVAL_WAITING_TEXT ? { progressId: newest[0], anchor: newest[1].anchor } : null;
+}
 /**
  * How long tool calls of no known chat may hold one silent chat's recovery (#1086).
  *

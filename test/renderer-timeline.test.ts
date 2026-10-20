@@ -3257,6 +3257,28 @@ describe('ChatGPT\'s approval card in the timeline', () => {
     await vi.waitFor(() => expect(timeline.querySelector('.approval-card')?.textContent).toContain('Nothing was pressed'), { timeout: 4000 });
   });
 
+  it('keeps only the newest unanswered approval row live; older ones read as past, without buttons', async () => {
+    // VM, 2026-10-20: two app restarts while one card waited left three "waiting" rows, each with
+    // its own Deny and Allow once for the same card. A row from an earlier episode was never answered
+    // there, so it says ChatGPT asked, not that it is waiting or answered.
+    const older = { ...waitingRow, seq: 1, progressId: 'approval-wait:chat-a:1' } as SessionEvent;
+    const middle = { ...waitingRow, seq: 2, progressId: 'approval-wait:chat-a:2' } as SessionEvent;
+    const newest = { ...waitingRow, seq: 3, progressId: 'approval-wait:chat-a:3' } as SessionEvent;
+    const { w } = await boot([older, middle, newest], true, [], [], {
+      approvalCard: () => ({ id: 'card-1', lines: ['Allow ChatGPT to use Chat On Steroids Core?', 'Start a worker.'], allow: true, answer: null })
+    });
+    const timeline = w.document.getElementById('timeline')!;
+    await vi.waitFor(() => expect(timeline.querySelectorAll('.approval-card')).toHaveLength(1));
+    const rows = [...timeline.querySelectorAll('.approval-wait')];
+    expect(rows).toHaveLength(3);
+    expect(rows.filter(row => row.classList.contains('is-waiting'))).toHaveLength(1);
+    expect(rows[2]!.classList.contains('is-waiting')).toBe(true);
+    for (const row of rows.slice(0, 2)) {
+      expect(row.textContent).toBe('ChatGPT asked for a tool approval in this chat.');
+      expect(row.querySelector('button')).toBeNull();
+    }
+  });
+
   it('offers only Deny where ChatGPT itself disabled Allow once', async () => {
     const { w } = await boot([waitingRow], true, [], [], {
       approvalCard: () => ({ id: 'card-7654321', lines: ['Gmail', 'Allow ChatGPT to use Gmail?', 'External app access is unavailable in this conversation'], allow: false, answer: null })
