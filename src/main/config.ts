@@ -343,6 +343,7 @@ const configSchema = z.object({
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
     playfulContinue: z.boolean().optional(),
+    announceTurns: z.boolean().optional(),
     /** Keep the chat at its end while it grows, in the app and on ChatGPT, until the reader scrolls up. */
     followOutput: z.boolean().optional().default(true),
     mentionCore: z.boolean().optional().default(true),

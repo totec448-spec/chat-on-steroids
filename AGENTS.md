@@ -257,7 +257,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Models/usage | `src/main/chat-models.ts`, `session/usage.ts`, `provider-usage.ts`, `usage-tool.ts`; `src/shared/{chat-models,usage,provider-usage}.ts`; `src/renderer/{chat-models,context-meter,usage}.ts`: account observations vs local estimates. |
 | External plugins | `src/main/plugins/{catalog,installer,manager,exposure,oauth}.ts`, `plugins-ipc.ts`, `plugin-refresh.ts`, `src/shared/{plugins,plugin-refresh}.ts`, `src/renderer/plugins.ts`. |
 | Renderer boundary | `src/main/ipc.ts`, `edit-context-menu.ts`, `src/preload/index.ts`; `src/renderer/{main,chat,dom,tool-result,timeline-scroll,sidebar-resize,browser-preferences,i18n}.ts`, `locales/{es,zh-CN,zh-TW,ja,tr,fr,pt-PT}.json`, `index.html`, `styles.css`. |
-| Appearance | `src/shared/appearance.ts`, `src/main/appearance-schema.ts`, `src/renderer/appearance.ts`: bounded saved colors/typography, field-wise Settings merge, immediate semantic CSS projection. `window-layout.ts` shares native caption/backing colors. |
+| Appearance | `src/shared/appearance.ts`, `src/main/appearance-schema.ts`, `src/renderer/appearance.ts`: bounded saved colors/typography (including line spacing and the bundled Atkinson Hyperlegible Next in `src/renderer/fonts/`), field-wise Settings merge, immediate semantic CSS projection. `window-layout.ts` shares native caption/backing colors. |
 | Native Desktop | `src/main/computer/{index,helper,browser-chords,windows-api,windows-capture,windows-apps,windows-keys}.ts`, `src/shared/windows-computer.ts`, `mcp/tools-desktop-{windows,macos}.ts`, `native/macos-desktop-helper/*`, `native/macos-desktop-addon/*`. |
 | Direct browser control | `src/main/browser-control.ts`, `mcp/tools-browser.ts`, `src/shared/browser-control.ts`, `extension/browser-control{,-page}.js`: short-lived RPCs, session-owned debugger tabs, bounded DOM/diagnostics and background input. |
 | Delivery/build | `src/main/{update,extension-path,version,logger,durable}.ts`, `electron.vite.config.ts`, `electron-builder.yml`, `scripts/*`, `.github/workflows/*`, `vitest.config.ts`. |
@@ -4396,6 +4396,15 @@ layout: `'projects'`, the default project tree, or `'inbox'`) is read by `chat.t
 never browser storage; a save without it or with another value loads as `'projects'` while the
 rest of the appearance is kept, and the state push after a save repaints the sidebar. Text size
 scales the existing typography hierarchy, including code, independently of window zoom. System font retains the locale-specific fallback stack.
+Line spacing (`ui.appearance.lineSpacing`, 100–200 percent in steps of 10, default 100) multiplies
+the chat's own line heights through `--line-spacing`: messages, outbox rows and the sample chat.
+A save without it or out of range loads as 100. The Atkinson Hyperlegible font (`font: 'legible'`)
+is Atkinson Hyperlegible Next, bundled as WOFF2 because `font-src` is `'self'`; its OFL licence is
+in `docs/licenses/atkinson-hyperlegible-next/` and the third-party notices. Reset appearance
+restores both. Appearance → Accessibility → Announce finished replies (`ui.announceTurns`, off
+unless true, not part of Reset) puts "Reply finished" in the polite `#turnAnnounce` region when a
+live delta of the open chat carries a completed `turn_end`; a `user_message` or `turn_start`, and
+every chat switch, empty it first. A chat opened after its reply finished, or a stopped turn, says nothing.
 The Appearance sample chat reflects the same semantic color and typography tokens immediately;
 it contains no session data. The composer context dialog and accessible label identify local
 estimates; its toolbar toggles percentage/token values. Compact and Cancel remain the original

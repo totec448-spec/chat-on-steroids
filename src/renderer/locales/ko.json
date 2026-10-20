@@ -2777,5 +2777,13 @@
   "Chats sit under their project folders.": "채팅이 프로젝트 폴더 아래에 놓입니다.",
   "All chats in one list, active ones on top.": "모든 채팅을 한 목록에, 활성 채팅은 맨 위에.",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "한 채팅이 동시에 실행할 수 있는 서브에이전트 채팅의 최대 수. 연결된 브라우저 확장 프로그램이 필요합니다.",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "긴 작업은 도구 결과 직후 자동 계속으로 새 턴에서 이어집니다. 턴이 짧을수록 덜 끊깁니다. Goal 및 Loop 채팅에서도 사용됩니다. Pro 모델과 서브에이전트 자체 채팅에서는 사용되지 않습니다."
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "긴 작업은 도구 결과 직후 자동 계속으로 새 턴에서 이어집니다. 턴이 짧을수록 덜 끊깁니다. Goal 및 Loop 채팅에서도 사용됩니다. Pro 모델과 서브에이전트 자체 채팅에서는 사용되지 않습니다.",
+  "Atkinson Hyperlegible": "Atkinson Hyperlegible",
+  "Line spacing": "줄 간격",
+  "Space between the lines of chat messages.": "채팅 메시지의 줄 사이 간격입니다.",
+  "Accessibility": "접근성",
+  "Help for screen readers.": "화면 낭독기를 위한 설정입니다.",
+  "Announce finished replies": "답변 완료 알리기",
+  "Your screen reader says “Reply finished” when a reply in the open chat ends.": "열린 채팅에서 답변이 끝나면 화면 낭독기가 “답변 완료”라고 읽어 줍니다.",
+  "Reply finished": "답변 완료"
 }

@@ -580,6 +580,39 @@ it('starts project groups collapsed and deliberately expands the project selecte
   expect(group().open).toBe(true);
 });
 
+it('applies line spacing and the legible font from Appearance at once, and saves them with the announcement switch', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document, root = doc.documentElement;
+  const panel = doc.querySelector('[data-panel="appearance"]')!;
+  const spacing = doc.getElementById('appearanceLineSpacing') as HTMLInputElement;
+  expect(panel.contains(spacing)).toBe(true);
+  expect([spacing.min, spacing.max, spacing.step, spacing.value]).toEqual(['100', '200', '10', '100']);
+  expect(doc.getElementById('appearanceLineSpacingValue')!.textContent).toBe('1.0×');
+  spacing.value = '140';
+  spacing.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
+  // The drag repaints before anything is saved.
+  expect(root.style.getPropertyValue('--line-spacing')).toBe('1.4');
+  expect(doc.getElementById('appearanceLineSpacingValue')!.textContent).toBe('1.4×');
+  spacing.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui.appearance).toMatchObject({ lineSpacing: 140 }));
+  const font = doc.getElementById('appearanceFont') as HTMLSelectElement;
+  font.value = 'legible';
+  font.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  expect(root.style.getPropertyValue('--ui-font')).toMatch(/^"CoS Atkinson Hyperlegible Next", /);
+  await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui.appearance).toMatchObject({ lineSpacing: 140, font: 'legible' }));
+  // Off unless chosen; a plain ui switch, so Reset appearance leaves it alone.
+  const announce = doc.getElementById('announceTurns') as HTMLInputElement;
+  expect(panel.contains(announce)).toBe(true);
+  expect(announce.checked).toBe(false);
+  announce.checked = true;
+  announce.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui.announceTurns).toBe(true));
+  doc.getElementById('appearanceReset')!.click();
+  await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui.appearance).toMatchObject({ lineSpacing: 100, font: 'system' }));
+  expect(mounted.calls.at(-1)?.ui.announceTurns).toBe(true);
+  expect(root.style.getPropertyValue('--line-spacing')).toBe('1');
+});
+
 it('draws the sidebar layout saved in Appearance, Projects by default, and repaints when it changes', async () => {
   const { project, session } = projectSidebarFixture();
   const mounted = await mountChat({}, [], {

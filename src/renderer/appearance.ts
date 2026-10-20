@@ -4,7 +4,8 @@ import { $ } from './dom.js';
 
 const FONT_FAMILIES = {
   system: '', sans: 'Arial, Helvetica, sans-serif',
-  serif: 'Georgia, "Times New Roman", serif', mono: '"Cascadia Mono", Consolas, monospace'
+  serif: 'Georgia, "Times New Roman", serif', mono: '"Cascadia Mono", Consolas, monospace',
+  legible: '"CoS Atkinson Hyperlegible Next", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
 };
 const appearanceListeners = new Set<() => void>();
 /** Canvas/terminal renderers must refresh after the CSS palette has been applied. */
@@ -22,6 +23,7 @@ export function applyAppearance(theme: AppearanceTheme, settings?: AppearanceSet
   root.dataset.translucentSidebar = String(value.translucentSidebar);
   tokens(root, paletteTokens(palette.background, palette.accent, palette.contrast));
   root.style.setProperty('--text-scale', String(value.fontSize / 14));
+  root.style.setProperty('--line-spacing', String(value.lineSpacing / 100));
   if (value.font === 'system') root.style.removeProperty('--ui-font');
   else root.style.setProperty('--ui-font', FONT_FAMILIES[value.font]);
   root.style.setProperty('--sidebar-color', palette.sidebar);
@@ -48,6 +50,8 @@ export function initAppearance(save: (patch: { theme?: AppearanceTheme; appearan
     for (const option of panel.querySelectorAll<HTMLInputElement>('input[name="appearanceSidebarLayout"]')) option.checked = option.value === current.sidebarLayout;
     $<HTMLInputElement>('appearanceSize').value = String(current.fontSize);
     $('appearanceSizeValue').textContent = `${current.fontSize} px`;
+    $<HTMLInputElement>('appearanceLineSpacing').value = String(current.lineSpacing);
+    $('appearanceLineSpacingValue').textContent = `${(current.lineSpacing / 100).toLocaleString(document.documentElement.lang || undefined, { minimumFractionDigits: 1 })}×`;
     $<HTMLInputElement>('appearanceContrast').value = String(current[theme].contrast);
     $('appearanceContrastValue').textContent = String(current[theme].contrast);
     $<HTMLInputElement>('appearanceTranslucent').checked = current.translucentSidebar;
@@ -71,6 +75,7 @@ export function initAppearance(save: (patch: { theme?: AppearanceTheme; appearan
       // Keep the hex text in sync with native picker gestures too.
       if (control.dataset.color) panel.querySelector<HTMLInputElement>(`[data-hex="${key}"]`)!.value = value.toUpperCase();
     } else if (control.id === 'appearanceSize') current = { ...current, fontSize: Number(control.value) };
+    else if (control.id === 'appearanceLineSpacing') current = { ...current, lineSpacing: Number(control.value) };
     else if (control.id === 'appearanceContrast') current = { ...current, [theme]: { ...current[theme], contrast: Number(control.value) } };
     else if (control.id === 'appearanceFont') current = { ...current, font: control.value as AppearanceSettings['font'] };
     else if (control.name === 'appearanceSidebarLayout' && (control as HTMLInputElement).checked) current = { ...current, sidebarLayout: control.value as AppearanceSettings['sidebarLayout'] };

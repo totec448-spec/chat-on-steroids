@@ -2822,5 +2822,13 @@
   "Chats sit under their project folders.": "Chats stehen unter ihren Projektordnern.",
   "All chats in one list, active ones on top.": "Alle Chats in einer Liste, aktive oben.",
   "The most sub-agent chats one chat may run at once. Needs the browser extension to be connected.": "Wie viele Unteragenten-Chats ein Chat höchstens gleichzeitig ausführen darf. Benötigt die verbundene Browser-Erweiterung.",
-  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Lange Arbeit läuft direkt nach einem Tool-Ergebnis in einem neuen Durchlauf mit automatischem Weiter weiter. Kürzere Durchläufe brechen seltener ab. Auch in Goal- und Loop-Chats; nicht bei Pro-Modellen und nicht in den Chats von Unteragenten."
+  "Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.": "Lange Arbeit läuft direkt nach einem Tool-Ergebnis in einem neuen Durchlauf mit automatischem Weiter weiter. Kürzere Durchläufe brechen seltener ab. Auch in Goal- und Loop-Chats; nicht bei Pro-Modellen und nicht in den Chats von Unteragenten.",
+  "Atkinson Hyperlegible": "Atkinson Hyperlegible",
+  "Line spacing": "Zeilenabstand",
+  "Space between the lines of chat messages.": "Abstand zwischen den Zeilen von Chatnachrichten.",
+  "Accessibility": "Bedienungshilfen",
+  "Help for screen readers.": "Hilfen für Screenreader.",
+  "Announce finished replies": "Fertige Antworten ansagen",
+  "Your screen reader says “Reply finished” when a reply in the open chat ends.": "Dein Screenreader sagt „Antwort fertig“, wenn eine Antwort im offenen Chat endet.",
+  "Reply finished": "Antwort fertig"
 }

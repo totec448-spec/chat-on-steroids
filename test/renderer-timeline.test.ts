@@ -166,7 +166,7 @@ async function settleHistoryFrame(w: Pick<Window, 'requestAnimationFrame'>): Pro
   await settle();
 }
 
-async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; followUp?: 'steer' | 'queue'; enterSends?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean; approvalCard?: () => unknown; answerApproval?: (id: string, cardId: string, choice: string) => unknown; summary?: Partial<SessionSummary>; holdInputs?: Promise<void> } = {}) {
+async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; announceTurns?: boolean; followOutput?: boolean; followUp?: 'steer' | 'queue'; enterSends?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean; approvalCard?: () => unknown; answerApproval?: (id: string, cardId: string, choice: string) => unknown; summary?: Partial<SessionSummary>; holdInputs?: Promise<void> } = {}) {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
@@ -197,7 +197,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
     },
     commandAllowlist: { enabled: false, mode: 'allow' as const, rules: [] as string[] },
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false, playfulStatus: options.playfulStatus ?? false, ...(options.followOutput === undefined ? {} : { followOutput: options.followOutput }), ...(options.followUp === undefined ? {} : { followUp: options.followUp }), ...(options.enterSends === undefined ? {} : { enterSends: options.enterSends }),
+    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false, playfulStatus: options.playfulStatus ?? false, ...(options.announceTurns === undefined ? {} : { announceTurns: options.announceTurns }), ...(options.followOutput === undefined ? {} : { followOutput: options.followOutput }), ...(options.followUp === undefined ? {} : { followUp: options.followUp }), ...(options.enterSends === undefined ? {} : { enterSends: options.enterSends }),
       ...(options.defaultChatModel ? { defaultChatModel: options.defaultChatModel, defaultChatReasoning: 'high' } : {}) },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
     compaction: { auto: true, autoTokens: 300000 },
@@ -7003,5 +7003,43 @@ describe('prompt recall in the composer', () => {
     live.inputs = [sentInput('q-5')]; await append([]);
     expect(press(w, 'ArrowUp')).toBe(true);
     expect(composer(w).value).toBe('Second question');
+  });
+});
+
+describe('the finished-reply announcement', () => {
+  const ask = (seq: number, turnId: string): SessionEvent =>
+    ({ kind: 'user_message', seq, time: T0 + seq * 1000, source: 'extension', turnId, messageId: `q-${seq}`, message: text('Check the build') }) as SessionEvent;
+  const start = (seq: number, turnId: string): SessionEvent => ({ seq, time: T0 + seq * 1000, source: 'extension', kind: 'turn_start', turnId });
+  const end = (seq: number, turnId: string, outcome: 'completed' | 'stopped' = 'completed'): SessionEvent =>
+    ({ seq, time: T0 + seq * 1000, source: 'extension', kind: 'turn_end', turnId, outcome }) as SessionEvent;
+  const region = (w: JSDOM['window']) => w.document.getElementById('turnAnnounce')!;
+
+  it('reads out once that a reply finished in the open chat, when it is turned on', async () => {
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns: true });
+    expect(region(w).getAttribute('role')).toBe('status');
+    expect(region(w).getAttribute('aria-live')).toBe('polite');
+    expect(region(w).classList.contains('sr-only')).toBe(true);
+    expect(region(w).textContent).toBe('');
+    await append([end(3, 't1')]);
+    expect(region(w).textContent).toBe('Reply finished');
+    // The next turn empties it first, so the same words are read again when that one ends.
+    await append([ask(4, 't2'), start(5, 't2')]);
+    expect(region(w).textContent).toBe('');
+    await append([end(6, 't2')]);
+    expect(region(w).textContent).toBe('Reply finished');
+  });
+
+  it.each([
+    ['when it is off', false, end(3, 't1')],
+    ['for a stopped reply', true, end(3, 't1', 'stopped')]
+  ] as const)('stays quiet %s', async (_, announceTurns, last) => {
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns });
+    await append([last]);
+    expect(region(w).textContent).toBe('');
+  });
+
+  it('stays quiet for a chat whose reply had finished before it was opened', async () => {
+    const { w } = await boot([ask(1, 't1'), start(2, 't1'), end(3, 't1')], true, [], [], { announceTurns: true });
+    expect(region(w).textContent).toBe('');
   });
 });

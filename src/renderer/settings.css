@@ -50,7 +50,7 @@
 :root[data-theme="dark"] .layout-preview .for-light, :root:not([data-theme="dark"]) .layout-preview .for-dark { display: none; }
 @media (max-width: 640px) { .layout-choice { grid-template-columns: minmax(0, 1fr); } }
 .appearance-preview-sidebar .is-selected { width: 100%; height: 24px; margin: 0 -4px; border: 1px solid var(--accent-edge); background: var(--accent-wash); opacity: 1; }
-.appearance-preview-chat { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 22px; font-size: calc(13px * var(--text-scale, 1)); }
+.appearance-preview-chat { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 22px; font-size: calc(13px * var(--text-scale, 1)); line-height: calc(1.5 * var(--line-spacing, 1)); }
 .appearance-preview-composer { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding: 9px 12px; border-radius: 12px; background: var(--card); color: var(--faint); }
 .appearance-preview-composer b { display: grid; place-items: center; flex: 0 0 26px; height: 26px; border-radius: 50%; background: var(--accent-fill); color: var(--on-accent); }
 @media (max-width: 1100px) {
