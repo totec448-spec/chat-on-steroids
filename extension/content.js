@@ -4223,6 +4223,9 @@
     return { data: btoa(binary) };
   }
 
+  /** Preview sizes and WebP qualities tried in turn, until one fits the preview's 384 KB. */
+  const NATIVE_PREVIEW_TRIES = [[1600, 0.8], [1600, 0.6], [1200, 0.7], [1200, 0.5], [900, 0.6], [700, 0.5]];
+
   /** Captures one already-rendered native image without fetching or retaining its signed URL. */
   async function captureNativeImage(task) {
     const { key, image, observation, heldEpoch, heldConversation } = task;
@@ -4246,26 +4249,36 @@
           prior.fingerprint.complete === fingerprint.complete && prior.fingerprint.sourceUrl === sourceUrl)) return;
     const pendingCapture = { status: 'pending', fingerprint, task };
     nativeImageCaptures.set(key, pendingCapture);
-    const scale = Math.min(1, 1600 / Math.max(sourceWidth, sourceHeight));
-    const width = Math.max(1, Math.round(sourceWidth * scale));
-    const height = Math.max(1, Math.round(sourceHeight * scale));
-    if (width * height > 2_560_000) {
+    const sized = side => {
+      const scale = Math.min(1, side / Math.max(sourceWidth, sourceHeight));
+      return { width: Math.max(1, Math.round(sourceWidth * scale)), height: Math.max(1, Math.round(sourceHeight * scale)) };
+    };
+    if (sized(1600).width * sized(1600).height > 2_560_000) {
       return nativeImageUnavailable(key, image, observation, 'oversized', fingerprint, heldEpoch, heldConversation);
     }
     try {
-      const canvas = document.createElement('canvas');
-      canvas.width = width; canvas.height = height;
-      const context = canvas.getContext('2d');
-      if (!context) throw new Error('tainted');
-      context.drawImage(node, 0, 0, width, height);
-      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', 0.8));
-      if (!nativeImageCaptureOwnerCurrent(key, image, observation, heldEpoch, heldConversation) || nativeImageNode(image) !== node ||
-          !node.complete || node.naturalWidth !== sourceWidth || node.naturalHeight !== sourceHeight || (node.currentSrc || node.src) !== sourceUrl) {
-        if (nativeImageCaptures.get(key) === pendingCapture) nativeImageCaptures.delete(key);
-        return;
+      // A detailed picture can come out above the preview's 384 KB at the first size (VM, 2026-10-20:
+      // concept art, 1448x1086). Smaller and lighter tries follow, so only a picture that fits
+      // none of them is called oversized.
+      let blob = null, width = 0, height = 0;
+      for (const [side, quality] of NATIVE_PREVIEW_TRIES) {
+        ({ width, height } = sized(side));
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('tainted');
+        context.drawImage(node, 0, 0, width, height);
+        blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', quality));
+        if (!nativeImageCaptureOwnerCurrent(key, image, observation, heldEpoch, heldConversation) || nativeImageNode(image) !== node ||
+            !node.complete || node.naturalWidth !== sourceWidth || node.naturalHeight !== sourceHeight || (node.currentSrc || node.src) !== sourceUrl) {
+          if (nativeImageCaptures.get(key) === pendingCapture) nativeImageCaptures.delete(key);
+          return;
+        }
+        if (!blob) throw new Error('tainted');
+        if (blob.type !== 'image/webp' || blob.size <= 0) throw new Error('oversized');
+        if (blob.size <= 384_000) break;
       }
-      if (!blob) throw new Error('tainted');
-      if (blob.type !== 'image/webp' || blob.size <= 0 || blob.size > 384_000) throw new Error('oversized');
+      if (blob.size > 384_000) throw new Error('oversized');
       const bytes = new Uint8Array(await blob.arrayBuffer());
       if (!nativeImageCaptureOwnerCurrent(key, image, observation, heldEpoch, heldConversation) || nativeImageNode(image) !== node ||
           !node.complete || node.naturalWidth !== sourceWidth || node.naturalHeight !== sourceHeight || (node.currentSrc || node.src) !== sourceUrl) {
