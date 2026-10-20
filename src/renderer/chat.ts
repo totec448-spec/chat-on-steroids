@@ -321,6 +321,8 @@ function replaceComposerDraft(): void {
   retireDictation(); composerDraftGeneration++; skillPicker?.close();
   // A recall ends here too; the same message recalled next must change the live region to be read.
   $('recallAnnounce').textContent = '';
+  // So does a finished reply: every chat switch passes here.
+  $('turnAnnounce').textContent = '';
 }
 let pendingNewInput: { id: string; generation: number } | null = null;
 let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
@@ -2336,6 +2338,20 @@ function canonicalMessageKey(event: SessionEvent): string | null {
   return null;
 }
 
+/**
+ * Opt-in (Appearance → Accessibility): a reply that completes in the open chat is read out once.
+ * Only live deltas arrive here, so a chat opened after its reply finished stays quiet. The next turn
+ * empties the region, so the same words are read again when that one ends.
+ */
+function announceFinishedTurns(delta: readonly SessionEvent[]): void {
+  const region = $('turnAnnounce');
+  for (const event of delta) {
+    if (event.kind === 'user_message' || event.kind === 'turn_start') region.textContent = '';
+    else if (event.kind === 'turn_end' && event.outcome === 'completed' && deps.state()?.config.ui.announceTurns === true)
+      region.textContent = t("Reply finished");
+  }
+}
+
 /** Merge one sequence-cursor delta without letting canonical message revisions duplicate rows. */
 function mergeDetailDelta(delta: SessionEvent[]): void {
   if (delta.length === 0) return;
@@ -2937,7 +2953,7 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
   // their stable progressId/messageId names, then chronology places that row at its first
   // appearance. This helper existed already but was never wired into the desktop reader,
   // which is why "Inspecting…" and "Inspected…" still appeared as siblings.
-  if (incremental) mergeDetailDelta(detail.events);
+  if (incremental) { mergeDetailDelta(detail.events); announceFinishedTurns(detail.events); }
   else {
     const folded = chronological(foldProgress(detail.events));
     if (newerFrom !== undefined) {

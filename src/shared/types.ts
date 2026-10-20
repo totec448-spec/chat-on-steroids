@@ -170,6 +170,8 @@ export interface UiPrefs {
   developerMode?: boolean;
   /** Rotating joke words instead of "Working" in a chat's status line. Off by default. */
   playfulStatus?: boolean;
+  /** Screen readers hear "Reply finished" when a turn completes in the open chat. Off by default. */
+  announceTurns?: boolean;
   /** A random fun-fact aside at the end of each automatic Continue, marked for the model to ignore. Off by default. */
   playfulContinue?: boolean;
   /** Keep the chat at its end while it grows, here and on ChatGPT, until the reader scrolls up. On unless false. */

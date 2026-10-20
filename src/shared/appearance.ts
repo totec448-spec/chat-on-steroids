@@ -1,5 +1,6 @@
 /** Saved appearance is presentation only. Theme remains the existing ui.theme choice. */
-export const APPEARANCE_FONTS = ['system', 'sans', 'serif', 'mono'] as const;
+/** 'legible' is the bundled Atkinson Hyperlegible Next (font-src is 'self', so it ships with the app). */
+export const APPEARANCE_FONTS = ['system', 'sans', 'serif', 'mono', 'legible'] as const;
 /** 'projects' is the project tree; 'inbox' is one list of chats, active ones first. */
 export const SIDEBAR_LAYOUTS = ['projects', 'inbox'] as const;
 export type AppearanceTheme = 'light' | 'dark';
@@ -14,6 +15,8 @@ export interface AppearanceSettings {
   dark: AppearancePalette;
   font: typeof APPEARANCE_FONTS[number];
   fontSize: number;
+  /** Chat text line height in percent of the normal one, 100–200. */
+  lineSpacing: number;
   translucentSidebar: boolean;
   sidebarLayout: typeof SIDEBAR_LAYOUTS[number];
 }
@@ -21,7 +24,7 @@ export function defaultAppearance(): AppearanceSettings {
   return {
     light: { background: '#f4f4f5', sidebar: '#e9edf2', accent: '#486f9d', contrast: 45 },
     dark: { background: '#181818', sidebar: '#1a2129', accent: '#b0cbed', contrast: 60 },
-    font: 'system', fontSize: 14, translucentSidebar: true, sidebarLayout: 'projects'
+    font: 'system', fontSize: 14, lineSpacing: 100, translucentSidebar: true, sidebarLayout: 'projects'
   };
 }
 
@@ -39,6 +42,7 @@ export function mergeAppearance(live: AppearanceSettings | undefined, base: Appe
   });
   return { light: palette('light'), dark: palette('dark'), font: pick(current.font, before.font, wanted.font),
     fontSize: pick(current.fontSize, before.fontSize, wanted.fontSize),
+    lineSpacing: pick(current.lineSpacing, before.lineSpacing, wanted.lineSpacing),
     translucentSidebar: pick(current.translucentSidebar, before.translucentSidebar, wanted.translucentSidebar),
     sidebarLayout: pick(current.sidebarLayout, before.sidebarLayout, wanted.sidebarLayout) };
 }
