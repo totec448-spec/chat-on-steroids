@@ -322,7 +322,7 @@ function replaceComposerDraft(): void {
   // A recall ends here too; the same message recalled next must change the live region to be read.
   $('recallAnnounce').textContent = '';
   // So does a finished reply: every chat switch passes here.
-  $('turnAnnounce').textContent = '';
+  $('turnAnnounce').textContent = ''; turnAnnounceWrite++;
 }
 let pendingNewInput: { id: string; generation: number } | null = null;
 let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
@@ -2338,6 +2338,8 @@ function canonicalMessageKey(event: SessionEvent): string | null {
   return null;
 }
 
+/** Bumped by every clear and delayed write of #turnAnnounce, so a stale delayed write is dropped. */
+let turnAnnounceWrite = 0;
 /**
  * Opt-in (Appearance → Accessibility): a reply that completes in the open chat is read out once.
  * Only live deltas arrive here, so a chat opened after its reply finished stays quiet. The next turn
@@ -2347,17 +2349,19 @@ function announceFinishedTurns(delta: readonly SessionEvent[]): void {
   const region = $('turnAnnounce'), before = region.textContent, text = t("Reply finished");
   let finished = false;
   for (const event of delta) {
-    if (event.kind === 'user_message' || event.kind === 'turn_start') region.textContent = '';
+    if (event.kind === 'user_message' || event.kind === 'turn_start') { region.textContent = ''; turnAnnounceWrite++; }
     else if (event.kind === 'turn_end' && event.outcome === 'completed') finished = true;
   }
   // A Goal or Loop continue can start the next turn in the same read: the end still counts.
   if (!finished || deps.state()?.config.ui.announceTurns !== true) return;
   if (before !== text) { region.textContent = text; return; }
   // The region held these words when the read began; a screen reader hears no change unless it
-  // is emptied first and filled in a later task.
+  // is emptied first and filled in a later task. A later read or chat switch in between wins.
   region.textContent = '';
-  const selection = selectionGeneration;
-  window.setTimeout(() => { if (selection === selectionGeneration) region.textContent = text; }, 100);
+  const selection = selectionGeneration, write = ++turnAnnounceWrite;
+  window.setTimeout(() => {
+    if (selection === selectionGeneration && write === turnAnnounceWrite && deps.state()?.config.ui.announceTurns === true) region.textContent = text;
+  }, 100);
 }
 
 /** Merge one sequence-cursor delta without letting canonical message revisions duplicate rows. */
