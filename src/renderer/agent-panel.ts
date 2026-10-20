@@ -1,6 +1,7 @@
 import type { TurnTrace } from '../shared/turn-trace.js';
 import { ui, t, tn } from './i18n.js';
 import type { AgentInfo, SessionSummary, SessionEvent } from '../shared/session.js';
+import type { MultiAgentSettings } from '../shared/types.js';
 import { workerReportedFinish } from '../shared/session-activity.js';
 import { evaluateWorkerOverviewHealth } from '../shared/agent-health.js';
 import { workerOwnTask } from '../shared/worker-brief.js';
@@ -26,6 +27,17 @@ export const AGENT_STATE_WORDS: Readonly<Record<string, string>> = {
   active: 'Working', invited: 'Opening', waking: 'Waking', detached: 'No tab', sleeping: 'Idle', failed: 'Failed', finished: 'Finished'
 };
 
+/**
+ * How many workers one chat may have holding a slot at once: Settings' per-chat maximum, or the
+ * all-chats cap when that is set and lower. Slots other chats hold under that cap are not
+ * subtracted. Null while multi-agent mode is off.
+ */
+export function workerSlotLimit(settings: Pick<MultiAgentSettings, 'enabled' | 'maxWorkers' | 'globalMaxWorkers'> | undefined): number | null {
+  if (!settings?.enabled) return null;
+  const global = settings.globalMaxWorkers ?? 0;
+  return global > 0 ? Math.min(settings.maxWorkers, global) : settings.maxWorkers;
+}
+
 /** How long a round's workers glow as the panel opens on them (`agent-arrive` in styles.css). */
 const ARRIVAL_MS = 1600;
 
@@ -45,6 +57,8 @@ export function createAgentPanel(options: {
   agent?: (summary: SessionSummary) => (Pick<AgentInfo, 'state' | 'task'> & Partial<Pick<AgentInfo, 'label'>> & { conversationId?: string | null }) | null;
   /** The model as the composer names it ("GPT-6 Sol · Instant"); the raw id without a catalog. */
   modelLabel?: (model: string, reasoningEffort: string | undefined) => string;
+  /** The Active heading's slot count ("Active · 2 / 3"), from `workerSlotLimit`; none without it. */
+  slotLimit?: () => number | null;
 }) {
   const pane = el('aside', 'agent-panel'); pane.hidden = true;
   ui(pane, 'aria-label', () => t("Sub-agents"));
@@ -117,8 +131,9 @@ export function createAgentPanel(options: {
     for (const active of [true, false]) {
       const group = workers.filter(worker => isActive(worker) === active);
       const failed = active ? 0 : group.filter(worker => options.agent?.(worker)?.state === 'failed').length;
+      const limit = active ? options.slotLimit?.() ?? null : null;
       body.append(el('h3', '', () =>
-        `${active ? t("Active") : t("History")} · ${group.length}${failed ? ` · ${tn('{0} failed', '{0} failed', failed)}` : ''}`));
+        `${active ? t("Active") : t("History")} · ${group.length}${limit === null ? '' : ` / ${limit}`}${failed ? ` · ${tn('{0} failed', '{0} failed', failed)}` : ''}`));
       if (!group.length) { body.append(el('p', 'meta', () => active ? t("No active sub-agents") : t("No recorded sub-agents"))); continue; }
       for (const worker of group) {
         const row = el('button', 'agent-panel-row'); row.setAttribute('type', 'button');
@@ -244,6 +259,8 @@ export function createAgentPanel(options: {
       if (focus) body.querySelector<HTMLButtonElement>('.is-round-worker')?.focus({ preventScroll: true });
     },
     open,
+    /** Repaints the overview after a Settings change to the slot limit; an open worker stays open. */
+    refreshSlots(): void { if (!pane.hidden && !selected) list(); },
     update(id: string | null, next: SessionSummary[]): void {
       if (parent !== id) { hide(); parent = id; }
       const previous = workers.find(worker => worker.id === selected);

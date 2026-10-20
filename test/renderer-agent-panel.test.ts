@@ -1,6 +1,6 @@
 import { JSDOM } from 'jsdom';
 import { afterEach, expect, it, vi } from 'vitest';
-import { createAgentPanel } from '../src/renderer/agent-panel.js';
+import { createAgentPanel, workerSlotLimit } from '../src/renderer/agent-panel.js';
 import type { SessionSummary } from '../src/shared/session.js';
 import { workerBrief } from '../src/shared/worker-brief.js';
 
@@ -360,6 +360,37 @@ it('adds failures to the existing History heading without a standalone summary r
   expect(host.textContent).not.toContain('4 workers · 2 running · 1 done · 1 failed');
 });
 
+
+it('counts slot-holding workers against the slot limit in the Active heading', () => {
+  dom = new JSDOM('<main></main><button></button>');
+  Object.assign(globalThis, { document: dom.window.document });
+  const host = document.querySelector('main')!, toggle = document.querySelector('button')!;
+  let limit: number | null = 3;
+  const states: Record<string, 'active' | 'detached' | 'sleeping'> = { one: 'active', two: 'detached', three: 'sleeping' };
+  const panel = createAgentPanel({
+    host, toggle, load: async () => ({ events: [] }), render: () => [], openMain: vi.fn(), working: () => false,
+    agent: worker => ({ state: states[worker.id]!, task: 'Task', conversationId: `chat-${worker.id}` }),
+    slotLimit: () => limit
+  });
+  panel.update('prime', ['one', 'two', 'three'].map(id => ({ id, title: id, conversationId: `chat-${id}`, startedAt: 1, updatedAt: 2 } as SessionSummary)));
+  toggle.click();
+  const headings = (): string[] => [...host.querySelectorAll('h3')].map(heading => heading.textContent ?? '');
+  // A sleeping worker holds no slot: it counts under History, with no limit beside it.
+  expect(headings()).toEqual(['Active · 2 / 3', 'History · 1']);
+  limit = 2; panel.refreshSlots();
+  expect(headings()).toEqual(['Active · 2 / 2', 'History · 1']);
+  limit = null; panel.refreshSlots();
+  expect(headings()).toEqual(['Active · 2', 'History · 1']);
+});
+
+it('takes the lower of the per-chat and all-chats worker limits, and none while multi-agent is off', () => {
+  expect(workerSlotLimit(undefined)).toBeNull();
+  expect(workerSlotLimit({ enabled: false, maxWorkers: 3 })).toBeNull();
+  expect(workerSlotLimit({ enabled: true, maxWorkers: 3 })).toBe(3);
+  expect(workerSlotLimit({ enabled: true, maxWorkers: 3, globalMaxWorkers: 0 })).toBe(3);
+  expect(workerSlotLimit({ enabled: true, maxWorkers: 3, globalMaxWorkers: 2 })).toBe(2);
+  expect(workerSlotLimit({ enabled: true, maxWorkers: 3, globalMaxWorkers: 6 })).toBe(3);
+});
 
 it('shows bounded worker health in the overview without changing lifecycle ownership', () => {
   dom = new JSDOM('<main></main><button></button>');
