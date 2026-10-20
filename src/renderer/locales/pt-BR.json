@@ -2882,5 +2882,13 @@
   "{0} sub-agents need attention|many": "{0} subagentes precisam de atenção",
   "A tool call from an untrusted chat was refused. To allow it, open this chat's ⋯ menu in the sidebar (or right-click its row) and choose Trust chat.": "Uma chamada de ferramenta de um chat não confiável foi recusada. Para permitir, abra o menu ⋯ deste chat na barra lateral (ou clique com o botão direito na linha) e escolha “Confiar no chat”.",
   "A tool call from a worker whose main chat is not currently allowed was refused. Open that main chat's ⋯ menu in the sidebar and choose Trust chat if it is untrusted, or Release chat if it is blocked.": "Uma chamada de ferramenta de um worker cujo chat principal não está permitido agora foi recusada. Abra o menu ⋯ desse chat principal na barra lateral e escolha “Confiar no chat” se ele não for confiável, ou “Liberar chat” se estiver bloqueado.",
-  "A tool call from an app-created worker was refused because the main chat that started it is not proven yet. Return to that main chat in the sidebar; once its row is there, open its ⋯ menu and choose Trust chat, or Release chat if it is blocked, then retry after the worker is attached or recovered there.": "Uma chamada de ferramenta de um worker criado pelo app foi recusada porque o chat principal que o iniciou ainda não foi comprovado. Volte a esse chat principal na barra lateral; quando a linha dele aparecer, abra o menu ⋯ e escolha “Confiar no chat”, ou “Liberar chat” se estiver bloqueado, e tente de novo quando o worker estiver conectado ou recuperado ali."
+  "A tool call from an app-created worker was refused because the main chat that started it is not proven yet. Return to that main chat in the sidebar; once its row is there, open its ⋯ menu and choose Trust chat, or Release chat if it is blocked, then retry after the worker is attached or recovered there.": "Uma chamada de ferramenta de um worker criado pelo app foi recusada porque o chat principal que o iniciou ainda não foi comprovado. Volte a esse chat principal na barra lateral; quando a linha dele aparecer, abra o menu ⋯ e escolha “Confiar no chat”, ou “Liberar chat” se estiver bloqueado, e tente de novo quando o worker estiver conectado ou recuperado ali.",
+  "Bookmark answer": "Adicionar resposta aos favoritos",
+  "Remove bookmark": "Remover favorito",
+  "Bookmarks": "Favoritos",
+  "Answer": "Resposta",
+  "This answer is no longer in the chat.": "Esta resposta não está mais no chat.",
+  "{0} bookmarks in this chat": "{0} favoritos neste chat",
+  "{0} bookmarks in this chat|one": "{0} favorito neste chat",
+  "{0} bookmarks in this chat|many": "{0} de favoritos neste chat"
 }

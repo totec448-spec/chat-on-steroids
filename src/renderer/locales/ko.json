@@ -2790,5 +2790,11 @@
   "{0} sub-agents need attention": "확인이 필요한 서브에이전트 {0}개",
   "A tool call from an untrusted chat was refused. To allow it, open this chat's ⋯ menu in the sidebar (or right-click its row) and choose Trust chat.": "신뢰하지 않는 채팅의 도구 호출이 거부되었습니다. 허용하려면 사이드바에서 이 채팅의 ⋯ 메뉴를 열고(또는 행을 마우스 오른쪽 버튼으로 클릭하고) ‘채팅 신뢰’를 선택하세요.",
   "A tool call from a worker whose main chat is not currently allowed was refused. Open that main chat's ⋯ menu in the sidebar and choose Trust chat if it is untrusted, or Release chat if it is blocked.": "메인 채팅이 현재 허용되지 않은 워커의 도구 호출이 거부되었습니다. 사이드바에서 그 메인 채팅의 ⋯ 메뉴를 열고, 신뢰하지 않은 상태면 ‘채팅 신뢰’를, 차단된 상태면 ‘차단 해제’를 선택하세요.",
-  "A tool call from an app-created worker was refused because the main chat that started it is not proven yet. Return to that main chat in the sidebar; once its row is there, open its ⋯ menu and choose Trust chat, or Release chat if it is blocked, then retry after the worker is attached or recovered there.": "앱이 만든 워커의 도구 호출이 거부되었습니다. 이 워커를 시작한 메인 채팅이 아직 확인되지 않았기 때문입니다. 사이드바에서 그 메인 채팅으로 돌아가 행이 보이면 ⋯ 메뉴를 열고 ‘채팅 신뢰’(차단된 경우 ‘차단 해제’)를 선택한 뒤, 워커가 연결되거나 복구되면 다시 시도하세요."
+  "A tool call from an app-created worker was refused because the main chat that started it is not proven yet. Return to that main chat in the sidebar; once its row is there, open its ⋯ menu and choose Trust chat, or Release chat if it is blocked, then retry after the worker is attached or recovered there.": "앱이 만든 워커의 도구 호출이 거부되었습니다. 이 워커를 시작한 메인 채팅이 아직 확인되지 않았기 때문입니다. 사이드바에서 그 메인 채팅으로 돌아가 행이 보이면 ⋯ 메뉴를 열고 ‘채팅 신뢰’(차단된 경우 ‘차단 해제’)를 선택한 뒤, 워커가 연결되거나 복구되면 다시 시도하세요.",
+  "Bookmark answer": "답변 북마크",
+  "Remove bookmark": "북마크 해제",
+  "Bookmarks": "북마크",
+  "Answer": "답변",
+  "This answer is no longer in the chat.": "이 답변은 더 이상 채팅에 없습니다.",
+  "{0} bookmarks in this chat": "이 채팅의 북마크 {0}개"
 }
