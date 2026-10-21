@@ -278,3 +278,30 @@ No edge cases: a one-line wording change in a log message.
     expect(checkAt({ body: good, files: fix, maintainer: true, createdAt: '2026-10-20T09:00:00Z', addedTests: ['+ setTimeout(r, 5000)'] })).toEqual([]);
   });
 });
+
+// @ts-expect-error The checker is a plain Node script without type declarations.
+import { LARGE_FILE_BYTES, largeFileFindings } from '../scripts/pr-check.mjs';
+
+// The size rule is about what a PR adds: a 634 KB source file that was already that size is not
+// news, and asking for "Size:" on every edit of it (#1741, src/main/bridge.ts) only teaches people
+// to paste the line. A file that is new and large, crosses the limit, or grows by more than the
+// limit at once still needs a reason.
+describe('which files count as large', () => {
+  const kb = (n: number) => n * 1024;
+  it('asks for a new large file', () => {
+    expect(largeFileFindings([{ path: 'docs/shot.png', bytes: kb(900), baseBytes: null }])).toEqual([{ path: 'docs/shot.png', bytes: kb(900) }]);
+  });
+  it('asks for a file that crosses the limit in this PR', () => {
+    expect(largeFileFindings([{ path: 'a.webp', bytes: kb(600), baseBytes: kb(400) }])).toEqual([{ path: 'a.webp', bytes: kb(600) }]);
+  });
+  it('does not ask for an edit of a file that was already large', () => {
+    expect(largeFileFindings([{ path: 'src/main/bridge.ts', bytes: kb(634), baseBytes: kb(633) }])).toEqual([]);
+  });
+  it('asks when an already large file grows by more than the limit at once', () => {
+    expect(largeFileFindings([{ path: 'big.png', bytes: kb(600) + LARGE_FILE_BYTES + 1, baseBytes: kb(600) }]))
+      .toEqual([{ path: 'big.png', bytes: kb(600) + LARGE_FILE_BYTES + 1 }]);
+  });
+  it('leaves small files and files that shrank alone', () => {
+    expect(largeFileFindings([{ path: 'small.ts', bytes: kb(10), baseBytes: null }, { path: 'was-big.png', bytes: kb(300), baseBytes: kb(900) }])).toEqual([]);
+  });
+});
