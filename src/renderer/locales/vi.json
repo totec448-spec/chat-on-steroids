@@ -2866,5 +2866,11 @@
   "Quicker after Stop": "Nhanh hơn sau khi Dừng",
   "A message you send right after Stop goes out at once.": "Tin nhắn bạn gửi ngay sau khi Dừng sẽ đi ngay lập tức.",
   "Sub-agent chats tidy up": "Cuộc trò chuyện của tác tử phụ tự dọn",
-  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Khi bật lưu trữ, cuộc trò chuyện của worker được lưu trữ hai phút sau khi xong nhiệm vụ."
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Khi bật lưu trữ, cuộc trò chuyện của worker được lưu trữ hai phút sau khi xong nhiệm vụ.",
+  "Bookmark answer": "Đánh dấu câu trả lời",
+  "Remove bookmark": "Bỏ đánh dấu",
+  "Bookmarks": "Dấu trang",
+  "Answer": "Câu trả lời",
+  "This answer is no longer in the chat.": "Câu trả lời này không còn trong chat.",
+  "{0} bookmarks in this chat": "{0} dấu trang trong chat này"
 }

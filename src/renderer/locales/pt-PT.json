@@ -2958,5 +2958,13 @@
   "Quicker after Stop": "Mais rápido depois de Parar",
   "A message you send right after Stop goes out at once.": "Uma mensagem enviada logo depois de Parar segue de imediato.",
   "Sub-agent chats tidy up": "Os chats de subagentes arrumam-se",
-  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Com o arquivo ativado, o chat de um worker é arquivado dois minutos depois de a tarefa terminar."
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Com o arquivo ativado, o chat de um worker é arquivado dois minutos depois de a tarefa terminar.",
+  "Bookmark answer": "Adicionar resposta aos marcadores",
+  "Remove bookmark": "Remover marcador",
+  "Bookmarks": "Marcadores",
+  "Answer": "Resposta",
+  "This answer is no longer in the chat.": "Esta resposta já não está no chat.",
+  "{0} bookmarks in this chat": "{0} marcadores neste chat",
+  "{0} bookmarks in this chat|one": "{0} marcador neste chat",
+  "{0} bookmarks in this chat|many": "{0} de marcadores neste chat"
 }
