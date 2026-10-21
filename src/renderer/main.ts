@@ -1710,6 +1710,12 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('mcpPersistentUrls'), config.mcp?.persistentUrls === true, previousState?.config.mcp?.persistentUrls);
   // Stable URLs live only in the OS-backed secret store; without it they keep rotating.
   $<HTMLInputElement>('mcpPersistentUrls').disabled = next.secureStorage?.available === false && config.mcp?.persistentUrls !== true;
+  // Another program held the kept port at this start: the tunnel must follow the new one.
+  const moved = config.mcp?.persistentUrls === true ? next.status.keptPortMoved ?? null : null;
+  $('mcpPortMoved').hidden = moved === null;
+  ui($('mcpPortMoved'), 'textContent', () => moved
+    ? t('Port {0} was in use when the app started, so it now listens on port {1}. Point your tunnel at port {1}.', [moved.from, moved.to])
+    : '');
   applyChecked($<HTMLInputElement>('controlApiAllowActions'), config.controlApi?.allowActions === true, previousState?.config.controlApi?.allowActions);
   // Actions need the API itself, so the switch stays off and disabled until it is on.
   $<HTMLInputElement>('controlApiAllowActions').disabled = config.controlApi?.enabled !== true;
