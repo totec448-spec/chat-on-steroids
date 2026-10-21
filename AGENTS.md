@@ -205,6 +205,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Archive worker chats | Off (`multiAgent.archiveWorkerChats`). | #1460, #1701. A worker chat queues 2 min after its worker reports done (`onWorkerFinished`, from `publishFinish`; `dueAt`), and every chat the broker retires for good queues at once (`onWorkerChatsRetired`: an ended run, Clear workers retiring parked histories, or a parked history expiring after 7 days), in `worker-archive.ts` (`state/worker-archive.json`, which also remembers the chats it archived). A wake for such a chat is held in the bridge's `onReviveRequest` (`readyForWake`): a not-yet-started archive is dropped; an archived (or being-archived) chat gets an unarchive job first, handed out before archives as `{ conversationId: null, unarchive }` (an old extension reads nothing), retried from 15 s, and the wake is queued on `onWorkerChatReady` (unarchived, given up, or 90 s at most). Unarchiving ignores the setting. The extension's alarm pass takes one via `POST /worker-archive/next` (leased 2 min), asks any registered ChatGPT page (`clf-archive-chat`) to `PATCH /backend-api/conversation/<id>` `{ is_archived: true }` with the signed-in account, and reports `archived`/`unarchived`/`failed`/`deferred` to `POST /worker-archive/result`. `deferred` (no page) costs no attempt; failures back off from 5 min, 6 attempts or a week at most. ChatGPT's own reversible archive: nothing is deleted. Temporary Chats were rejected: tools work there, but a reload loses the conversation (2026-10-14). |
 | Recover ordinary/agent tabs | Off. | Goal/Loop can independently justify recovery; history alone cannot. |
 | Automatic Continue | On. | Unfinished-response recovery also serves enabled Goal/Loop. This switch controls ordinary chats; explicit Off survives and malformed config disables it. See §14. |
+| Continue prompt | Built-in phrases (`ui.customContinue` unset). | Settings › Agents & automation. The person's text (trimmed, at most 500 characters, `CUSTOM_CONTINUE_MAX_CHARS`) replaces only the Continue phrase of a silence-recovery Continue (`recoveryMessage({ custom })`, frozen in the outbox row when it is filed); the notice to check existing work and the optional playful aside stay. Empty, too long or damaged reads as unset. Fresh-turn rotation keeps `rotationMessage()`, which `goal.ts` recognises by its text. |
 | Goal / Loop | Off, preferred mode Goal. Both decision backends default to ChatGPT, helper `gpt-6` High (`DEFAULT_HELPER_CHAT_MODEL`, which High runs on its thinking lane); a config holding a superseded helper (`SUPERSEDED_HELPER_CHAT_MODELS`: `gpt-5.6-sol`, `gpt-6-thinking`) adopts it on load. | API uses the configured OpenRouter/custom endpoint and stored model. These defaults are not account-availability proof. |
 | Ordinary new-chat model | Automatic: no persisted model or reasoning override. | Optional `ui.defaultChatModel` / `ui.defaultChatReasoning` apply only to a fresh ordinary chat before it has a conversation selection. A recorded conversation or accepted opening input wins. Worker and Goal/Loop/Plan defaults remain separate. |
 | Desktop | Windows on; macOS retains its off default and separate native OS consent; Linux supports extension browser control. | Existing screen/control grants also govern browser tools; unsupported native clipboard remains masked. No new per-tab permission dialog. |
@@ -478,7 +479,7 @@ Local Project via the existing project-files listing authority and inserts a pro
 reference; it does not upload a file or broaden filesystem access. Commands, Skills and project
 files are separate compact sections; there is no sidebar entry, modal library or native import/remove UI.
 Commands: `/plan`, `/goal`, `/loop`, `/compact`, plus Codex's `/model` and `/reasoning` (open the model picker), `/new`, `/rename`, `/pin`, `/status` (the context meter's panel), `/review` and `/init` (put a review or AGENTS.md request in front of the draft, unsent), `/usage`, `/plugins`, `/pet` and `/feedback` (Settings → Activity, the diagnostics report). `/rename`, `/pin`, `/status` and `/compact` are offered only while a chat is open (`commandAvailable`); popups open after the choosing click has passed the outside-click handlers.
-The same commands typed at the start of a message and sent without the menu (`APP_COMMANDS` in `renderer/skills.ts`) run as if picked, unless a Skill has that id; `/plan`, `/goal` and `/loop` then send the rest of the text as their mode would, any other command leaves the rest in the composer.
+The same commands typed at the start of a message and sent without the menu (`APP_COMMANDS` in `renderer/skills.ts`) run as if picked, unless a Skill has that id; `/plan`, `/goal` and `/loop` then send the rest of the text as their mode would, any other command leaves the rest in the composer. Cmd/Ctrl+Shift+Enter during a turn runs them the same way and sends that rest the other way than the Follow-up default.
 A small plus icon to the right of that Skills button inserts `Please add the following skills to my COS skills:`
 into the authored draft without sending it. ChatGPT can create Markdown instructions through
 the existing permission-checked `/skills` filesystem root. Leading `/id` or `/prompt id` completion projects selected
@@ -1363,6 +1364,15 @@ a worker's or helper's, whose tasks come from the app. Messages without text, st
 queued inputs are not recalled either. The list is read at the first press, so a message recorded
 while paging doesn't shift it. Each recalled message is announced through the sr-only polite region
 `#recallAnnounce`. Recall only fills the composer; nothing is stored and nothing is sent.
+Esc to stop (`escapeStopsTurn` in `chat.ts`): while the open chat's turn runs and Send shows Stop
+(composer empty, no files, no prepared plan), a first plain Esc in the composer only arms Stop and
+says "Press Esc again to stop the turn" in `#composerStatus`; a second plain Esc within 1.5 s stops
+that exact turn with `stopCurrentTurn`, the Stop button's own request (§14), not through a form
+submit, so an armed Plan cannot take it and no controls refresh can swap the turn. The armed press
+belongs to its turn: after a new turn starts, the next Esc only arms again. Any other key, a chat
+switch or the timeout disarms it; a held key's repeats, modifiers, IME composition, an Esc the
+dictation or slash/file menu took, a stop already requested and Cancel delivery (no running turn)
+never count.
 
 `session/start-input.ts` returns durable local admission before waiting for connector readiness
 or browser delivery. Each New Chat opening reserves its own local session in the outbox, then
@@ -2932,7 +2942,9 @@ cannot delete a new pickup repair belonging to its durable ticket.
 
 Continue text, source question/work, busy deadline and exclusive send custody live in the
 outbox. One combination of ten Continue phrases and ten notices is frozen once; notices ask
-to inspect existing work before repeating it. One of eleven playful asides (marked to be ignored)
+to inspect existing work before repeating it. With `ui.customContinue` (the Continue prompt in
+Settings › Agents & automation) the person's text takes the phrase's place; the notice stays.
+One of eleven playful asides (marked to be ignored)
 is added only with `ui.playfulContinue` (Settings › General, off by default): they have no
 technical role, since receipts use ChatGPT's message ids. Unsent eligible tickets survive restart. A never-authorized lost or failed
 browser preparation releases the same ticket, without replaying a possibly consumed Stop.
@@ -4105,6 +4117,12 @@ dragging or Alt+Up/Down moves a parent and its worker children within its curren
 unfiled group. A drag beyond the group clamps to its first/last visible slot; it cannot change
 project ownership. Pointer custody defers row replacement during live refresh and revalidates
 membership before saving. Off-page order survives partial list refreshes.
+`renderer/chat-cycle.ts`: Ctrl+Tab / Ctrl+Shift+Tab (Ctrl on macOS too, as in browsers) open the
+next/previous chat in the drawn sidebar order, tree or Inbox, wrapping at the ends. Rows inside a
+closed disclosure (a collapsed project, Settled) are skipped. The step clicks the row, so selection
+and the Chat screen follow the click path; keyboard focus in the list moves to the new row. It does
+nothing inside the terminal, the file editor, a rename field, an open dialog or a picker popup, nor
+while Settings hides the list.
 `renderer/sidebar-pins.ts` keeps pinned chats (#1133) as a bounded localStorage preference (500 ids;
 the oldest gives way, a pin is never refused). A pinned chat leads its own list (main Chats or its
 project) and has its own drag scope `pinned:<scope>`, so manual order is kept inside the pinned and
@@ -4232,7 +4250,8 @@ inline and `\[ … \]` or `$$ … $$` as a block, the shapes ChatGPT writes; a l
 Markdown pass leaves only a placeholder, the message is sanitised as usual, and each placeholder
 then becomes KaTeX's rendering of the original source with `trust` off, so a formula cannot add
 links, classes or styles. Source KaTeX cannot parse, or longer than 8,000 characters, shows as
-written; a wide block formula scrolls on its own.
+written; a wide block formula scrolls on its own. A right click on a drawn formula offers Copy LaTeX
+and Copy MathML (`renderer/formula-menu.ts`), read from the MathML KaTeX draws and its TeX annotation.
 Setup's Show/Hide guide button stays available even while setup is incomplete. Manual collapse
 survives status pushes. Profile management stays out of first-run Setup: a compact row below
 Language in Appearance has a dropdown, a plus button with a name dialog and a delete button
@@ -4314,7 +4333,9 @@ Opening a text match calls `sessions:locate-match { id, query }` → `SessionSea
 (the first user/assistant message holding a query word, read from the recording only then); the
 timeline shows it from the loaded page or loads the page around it as history, centered and briefly
 marked. Jump to latest from a history page whose end is not loaded opens the chat at its end. Timeline pages (`readSessionEvents`, store option `byResidence`) and the renderer's window floor, trimming and paging cursors use `residenceOf`: an entry's position, except that a turn's final answer (`final: true`) lives at its `contentSeq`, beside its turn's end where it is drawn. ChatGPT can open the answer early in a long turn and fill it last; paged by first appearance it was never on the newest page and live updates dropped it as an old revision. Display order and turn identity keep `positionOf`. Find in chat (⌘F / Ctrl+F while a chat is open; `renderer/chat-find.ts`) asks `sessions:find { id, query }` → `SessionSearchLocation[]` (`findInSession`: every user/assistant message holding the phrase, case and white space ignored, full overflow text included, in spoken order, at most 500) and steps through them with the same reveal as search results (`revealChatLocation`), newest first; Enter/Shift+Enter and the arrows move, Escape or a chat switch closes it. Matches in the loaded rows are marked with the CSS Custom Highlight API (`chat-find`, `chat-find-current`), refreshed by a MutationObserver while the bar is open. Primary-shortcut labels (`kbd[data-shortcut]`, the sidebar tooltip)
-come from `renderer/shortcuts.ts`: ⌘ on macOS, the localized Ctrl ("Strg") elsewhere.
+come from `renderer/shortcuts.ts`: ⌘ on macOS, the localized Ctrl ("Strg") elsewhere. ⌘N / Ctrl+N (New chat) and ⌘, / Ctrl+, (Settings, unless
+they are open) press the sidebar's buttons (`renderer/app-shortcuts.ts`), except inside the terminal, the
+file editor or an open dialog; the buttons' tooltips name them.
 
 Captured ChatGPT HTML passes a strict allowlist; authored plain text stays text. Provider
 citation ranges use Unicode code points and map to UTF-16 before slicing. Exact uploaded-file
@@ -4517,6 +4538,9 @@ covers the column, header included, and takes the sidebar's rounded corner while
 or moves to or from it.
 The sub-agent overview starts directly with Active and History, without a heading or close X.
 History appends the failed-worker count only when it is nonzero; the existing group counts remain unchanged.
+While multi-agent mode is on, Active shows the chat's slot limit beside its count (`Active · 2 / 3`):
+`maxWorkers`, or `globalMaxWorkers` when that is set and lower. Slots other chats hold under the
+all-chats cap are not subtracted; sleeping workers hold none and stay under History.
 Each worker is one plain row, not a boxed card: its tinted identity avatar carries the state (a
 presence dot; while working, the connection capsule's traveling light around it), then name and
 elapsed time, the task, and one line of facts: state, the model as the composer names it (no

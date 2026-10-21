@@ -849,6 +849,70 @@ it('keeps keyboard focus on the same card, worker arrow or filter across a live 
   expect(doc.activeElement).toBe(cardTop());
 });
 
+it("opens the next and previous chat in the sidebar's drawn order with Ctrl+Tab and Ctrl+Shift+Tab, wrapping at the ends", async () => {
+  const { project, session } = projectSidebarFixture();
+  const mounted = await mountChat({}, [], {
+    listProjects: async () => ({ ok: true, data: [project] }),
+    listSessions: async () => listed([session, inboxChat('c1'), inboxChat('c2'), inboxChat('c3')])
+  });
+  const doc = mounted.window.document, w = mounted.window;
+  await vi.waitFor(() => expect(doc.querySelector('#chatList .sess[data-id="c3"]')).not.toBeNull());
+  const selected = () => doc.querySelector<HTMLElement>('#sessionList .sess.is-sel')?.dataset.id;
+  const press = (shiftKey = false, target: EventTarget = doc.body, repeat = false) => {
+    const event = new w.KeyboardEvent('keydown', { key: 'Tab', ctrlKey: true, shiftKey, repeat, bubbles: true, cancelable: true });
+    target.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  expect(selected()).toBeUndefined();
+  // From a new chat: the first chat drawn. The collapsed project's chat is not on the way.
+  expect(press()).toBe(true);
+  expect(selected()).toBe('c1');
+  press(); expect(selected()).toBe('c2');
+  press(true); expect(selected()).toBe('c1');
+  // The ends wrap, as a browser's tabs do; a held key does not race through the list.
+  press(true); expect(selected()).toBe('c3');
+  expect(press(false, doc.body, true)).toBe(true); expect(selected()).toBe('c3');
+  press(); expect(selected()).toBe('c1');
+  // An opened project's chat takes its place in the order, above the chats outside projects.
+  doc.querySelector<HTMLElement>(`[data-project-id="${project.id}"] > .project-heading`)!.click();
+  press(true); expect(selected()).toBe('project-session');
+  // From a library page the step shows the chat, as a click on its row does.
+  doc.getElementById('sidebarPlugins')!.click();
+  expect(doc.querySelector<HTMLElement>('.app')!.dataset.screen).toBe('library');
+  press(); expect(selected()).toBe('c1');
+  expect(doc.querySelector<HTMLElement>('.app')!.dataset.screen).toBe('chat');
+  // The terminal keeps its keys; Settings hides the list, so there is nothing to walk.
+  const terminal = doc.createElement('div'); terminal.className = 'xterm'; doc.body.append(terminal);
+  expect(press(false, terminal)).toBe(false); expect(selected()).toBe('c1');
+  doc.getElementById('workspaceSettings')!.click();
+  expect(press()).toBe(false); expect(selected()).toBe('c1');
+});
+
+it('keeps keyboard focus with the chat Ctrl+Tab opens in the Inbox, and leaves the keys to the open project picker', async () => {
+  const mounted = await mountInbox({ listSessions: async () => listed(['c1', 'c2', 'c3'].map(id => inboxChat(id, { updatedAt: Date.now() }))) });
+  const doc = mounted.window.document, w = mounted.window;
+  await vi.waitFor(() => expect(inboxCardIds(doc)).toHaveLength(3));
+  const [first, second] = inboxCardIds(doc);
+  const top = (id: string) => doc.querySelector<HTMLElement>(`#sessionList .sess[data-id="${id}"] > .sess-top`)!;
+  const selected = () => doc.querySelector<HTMLElement>('#sessionList .sess.is-sel')?.dataset.id;
+  const press = (target: EventTarget) => {
+    const event = new w.KeyboardEvent('keydown', { key: 'Tab', ctrlKey: true, bubbles: true, cancelable: true });
+    target.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  top(first!).click(); top(first!).focus();
+  expect(press(doc.activeElement!)).toBe(true);
+  expect(selected()).toBe(second);
+  // Focus follows the chat that opened, so Enter does not reopen the one before it.
+  expect(doc.activeElement).toBe(top(second!));
+  // The picker is a popup, not a native dialog: its search field keeps Ctrl+Tab.
+  doc.querySelector<HTMLButtonElement>('#chatList [data-inbox-control="picker"]')!.click();
+  const search = doc.querySelector<HTMLInputElement>('.inbox-project-picker input')!;
+  expect(doc.activeElement).toBe(search);
+  expect(press(search)).toBe(false);
+  expect(selected()).toBe(second);
+});
+
 /** The inbox's cards, top to bottom, by session id. */
 const inboxCardIds = (doc: Document) => [...doc.querySelectorAll<HTMLElement>('.inbox-cards > .sess-card')].map(row => row.dataset.id);
 /** One card's state on its meta line: its words, and the card itself for its title and accessible text. */
@@ -3721,6 +3785,28 @@ it('opens, saves and restores the editable handoff prompt', async () => {
   await settle();
   expect(prompt.value).toBe(DEFAULT_HANDOFF_PROMPT);
   expect(mounted.calls.at(-1)?.compaction.handoffPrompt).toBe(DEFAULT_HANDOFF_PROMPT);
+});
+
+it('saves the Continue prompt from its editor, and Restore default sends the built-in phrases again', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const automation = doc.querySelector('[data-view="settings"]')!;
+  const panel = doc.getElementById('customContinuePanel')!;
+  const prompt = doc.getElementById('customContinue') as HTMLTextAreaElement;
+  expect(automation.contains(prompt)).toBe(true);
+  expect(prompt.maxLength).toBe(500);
+  expect(panel.hidden).toBe(true);
+  (doc.getElementById('customContinueEdit') as HTMLButtonElement).click();
+  expect(panel.hidden).toBe(false);
+  expect(prompt.value).toBe('');
+
+  prompt.value = '  Keep going and run the tests at the end.  ';
+  prompt.dispatchEvent(new mounted.window.Event('change'));
+  await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui.customContinue).toBe('Keep going and run the tests at the end.'));
+
+  (doc.getElementById('customContinueReset') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui).toMatchObject({ customContinue: undefined }));
+  expect(prompt.value).toBe('');
 });
 
 it('offers the handoff length, starting at the thorough default, and saves a shorter choice', async () => {
