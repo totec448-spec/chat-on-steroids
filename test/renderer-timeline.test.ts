@@ -1865,7 +1865,9 @@ it('keeps the project visible when its removal fails, and lets the removal be tr
 });
 
 it('offers a new chat beside a project\'s menu, and its color as a submenu and removal inside it', async () => {
-  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary', createdAt: 1 };
+  // Linked to its ChatGPT Project: a project without one also offers choosing it (#1756, tested on its own).
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary', createdAt: 1,
+    chatgpt: { state: 'linked' as const, id: `g-p-${'d'.repeat(32)}`, updatedAt: 1 } };
   const { w } = await boot([], false, [], [project]);
   const group = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
   // Two buttons on the row: the primary new chat, then one "⋯"; a right click opens the same menu.
