@@ -1795,8 +1795,9 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
       ...request.system.map((content) => ({ role: 'system', content })),
       { role: 'system', content: request.mode === 'loop' ? LOOP_OUTPUT_PROTOCOL : GOAL_OUTPUT_PROTOCOL },
       ...(request.original ? [{ role: 'system', content: originalReferenceContract }] : []),
-      { role: 'user', content: referenceContract + '\n\n' + JSON.stringify(request.messages) },
       ...(request.original ? [{ role: 'user', content: request.original }] : []),
+      // Supplemental history comes first; later human corrections in the transcript remain newer.
+      { role: 'user', content: referenceContract + '\n\n' + JSON.stringify(request.messages) },
       { role: 'system', content: request.trailer }
     ],
     response_format: request.mode === 'loop' ? LOOP_RESPONSE_FORMAT : GOAL_RESPONSE_FORMAT,
