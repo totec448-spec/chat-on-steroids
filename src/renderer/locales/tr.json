@@ -2789,6 +2789,7 @@
   "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Hedef yardımcısı işin tamamlandığını düşünüyor, ancak bu henüz kontrol edilmedi. Sohbeti gözden geçirin veya yeni bir talimat gönderin.",
   "Review Goal completion": "Hedef tamamlanmasını gözden geçir",
   "Off by default. When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you.": "Varsayılan olarak kapalıdır. Hedef kanıt olmadan tamamlandığını bildirirse sonuç doğrulanmamış, yanıt beklemede kalır. Session finish mevcut bekletmeyi sürdürür, modelden turu açık tutmasını ister ve bildirim gönderebilir.",
+  "When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you. Off by default.": "Hedef kanıt olmadan tamamlandığını bildirirse sonuç doğrulanmamış, yanıt beklemede kalır. Session finish mevcut bekletmeyi sürdürür, modelden turu açık tutmasını ister ve bildirim gönderebilir. Varsayılan olarak kapalıdır.",
   "Sub-agent view": "Yardımcı ajan görünümü",
   "Conversation": "Sohbet",
   "Loading activity…": "Etkinlik yükleniyor…",

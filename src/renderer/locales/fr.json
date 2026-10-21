@@ -2834,6 +2834,7 @@
   "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "L’assistant Goal pense que le travail est terminé, mais cela n’a pas encore été vérifié. Vérifiez la conversation ou envoyez une autre instruction.",
   "Review Goal completion": "Vérifier la fin de Goal",
   "Off by default. When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you.": "Désactivé par défaut. Si Goal signale la fin sans preuve, le résultat reste non vérifié et la réponse en attente. Session finish maintient son attente active, demande au modèle de garder le tour ouvert et peut vous avertir.",
+  "When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you. Off by default.": "Si Goal signale la fin sans preuve, le résultat reste non vérifié et la réponse en attente. Session finish maintient son attente active, demande au modèle de garder le tour ouvert et peut vous avertir. Désactivé par défaut.",
   "Sub-agent view": "Vue du sous-agent",
   "Conversation": "Conversation",
   "Loading activity…": "Chargement de l’activité…",

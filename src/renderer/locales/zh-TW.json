@@ -2744,6 +2744,7 @@
   "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "目標輔助工具認為工作已完成，但尚未檢查。請查看對話或傳送下一項指示。",
   "Review Goal completion": "檢查目標完成情況",
   "Off by default. When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you.": "預設為關閉。若目標在沒有證據時回報完成，結果仍未經確認，回覆會保持待處理。Session finish 會維持目前的等待狀態，要求模型保持目前回合開啟，並可能傳送通知。",
+  "When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you. Off by default.": "若目標在沒有證據時回報完成，結果仍未經確認，回覆會保持待處理。Session finish 會維持目前的等待狀態，要求模型保持目前回合開啟，並可能傳送通知。 預設為關閉。",
   "Sub-agent view": "子代理檢視",
   "Conversation": "對話",
   "Loading activity…": "正在載入活動…",

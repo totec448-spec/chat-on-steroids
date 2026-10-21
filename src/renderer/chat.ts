@@ -4443,6 +4443,10 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
       return box;
     }
     case 'progress': {
+      if (event.source === 'app' && event.progressId?.startsWith('goal-helper-stop:') &&
+          event.message.text === goalErrorMessage('goal_helper_stop_unverified')) {
+        return el('p', 'meta is-progress', () => t(goalErrorMessage('goal_helper_stop_unverified')));
+      }
       if (!event.progressId?.startsWith(APPROVAL_PROGRESS_PREFIX)) return el('p', 'meta is-progress', event.message.text);
       // ChatGPT's own tool approval card stands in this chat's page (approval-wait.ts). The app
       // writes the English source; only the user can answer the card, so the row opens the page.

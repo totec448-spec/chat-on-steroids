@@ -2744,6 +2744,7 @@
   "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Trợ lý Goal cho rằng công việc đã hoàn tất, nhưng điều này chưa được kiểm tra. Hãy xem lại cuộc trò chuyện hoặc gửi chỉ dẫn tiếp theo.",
   "Review Goal completion": "Xem lại kết quả Goal",
   "Off by default. When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you.": "Mặc định là tắt. Nếu Goal báo hoàn thành mà không có bằng chứng, kết quả vẫn chưa được xác minh và câu trả lời vẫn chờ xử lý. Session finish giữ nguyên trạng thái chờ, yêu cầu mô hình giữ lượt mở và có thể gửi thông báo.",
+  "When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you. Off by default.": "Nếu Goal báo hoàn thành mà không có bằng chứng, kết quả vẫn chưa được xác minh và câu trả lời vẫn chờ xử lý. Session finish giữ nguyên trạng thái chờ, yêu cầu mô hình giữ lượt mở và có thể gửi thông báo. Mặc định là tắt.",
   "Sub-agent view": "Chế độ xem tác nhân phụ",
   "Conversation": "Cuộc trò chuyện",
   "Loading activity…": "Đang tải hoạt động…",
