@@ -305,3 +305,33 @@ describe('which files count as large', () => {
     expect(largeFileFindings([{ path: 'small.ts', bytes: kb(10), baseBytes: null }, { path: 'was-big.png', bytes: kb(300), baseBytes: kb(900) }])).toEqual([]);
   });
 });
+
+// @ts-expect-error The checker is a plain Node script without type declarations.
+import { largeFilesOf } from '../scripts/pr-check.mjs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+// CodeRabbit on #1745: a file renamed and grown in the same PR has git status R, which an A/M-only
+// filter skipped, and the size before is the old name's.
+describe('the sizes the checker reads from git', () => {
+  it('counts a renamed file that grew past the limit, against its old name at the merge base', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'pr-check-'));
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' });
+    try {
+      git('init', '-q', '-b', 'main'); git('config', 'user.name', 'probe'); git('config', 'user.email', 'probe@example.invalid');
+      // A 600 KB file, renamed and grown by just over the limit: still more than half the same, so
+      // git reports a rename (R), not a new file.
+      const lines = (count: number, tag: string) => Array.from({ length: count }, (_, n) => `${tag} ${n} `.padEnd(99, 'x') + '\n').join('');
+      const old = lines(6000, 'old');
+      writeFileSync(path.join(dir, 'old.txt'), old);
+      git('add', '-A'); git('commit', '-qm', 'base'); git('branch', 'base');
+      renameSync(path.join(dir, 'old.txt'), path.join(dir, 'new.txt'));
+      writeFileSync(path.join(dir, 'new.txt'), old + lines(5300, 'new'));
+      git('add', '-A'); git('commit', '-qm', 'rename and grow');
+      expect(git('diff', '--name-status', 'base...HEAD')).toMatch(/^R\d*\told\.txt\tnew\.txt/m);
+      expect(largeFilesOf('base', dir)).toEqual([{ path: 'new.txt', bytes: expect.any(Number) }]);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
