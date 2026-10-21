@@ -15,6 +15,7 @@ import { initUpdateReadiness, paintUpdateReadiness } from './update-readiness.js
 import { updateErrorText } from './update-error.js';
 import { initUsage, refreshOtherApps, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
+import { initAppShortcuts } from './app-shortcuts.js';
 import { initViewMenu } from './view-menu.js';
 import { initPlugins, applyPluginsState } from './plugins.js';
 import { initBrowserPreferences } from './browser-preferences.js';
@@ -760,6 +761,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       developerMode: $<HTMLInputElement>('developerMode').checked,
       playfulStatus: $<HTMLInputElement>('playfulStatus').checked,
       playfulContinue: $<HTMLInputElement>('playfulContinue').checked,
+      customContinue: $<HTMLTextAreaElement>('customContinue').value.trim() || undefined,
       followOutput: $<HTMLInputElement>('followOutput').checked,
       mentionCore: $<HTMLInputElement>('mentionCore').checked,
       mentionPlugins: $<HTMLInputElement>('mentionPlugins').checked,
@@ -1700,6 +1702,7 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('developerMode'), config.ui.developerMode === true, previousState?.config.ui.developerMode);
   applyChecked($<HTMLInputElement>('playfulStatus'), config.ui.playfulStatus === true, previousState?.config.ui.playfulStatus);
   applyChecked($<HTMLInputElement>('playfulContinue'), config.ui.playfulContinue === true, previousState?.config.ui.playfulContinue);
+  applyValue($<HTMLTextAreaElement>('customContinue'), config.ui.customContinue ?? '', previousState ? previousState.config.ui.customContinue ?? '' : undefined);
   applyChecked($<HTMLInputElement>('followOutput'), config.ui.followOutput !== false, previousState?.config.ui.followOutput);
   applyChecked($<HTMLInputElement>('mentionCore'), config.ui.mentionCore !== false, previousState?.config.ui.mentionCore);
   applyChecked($<HTMLInputElement>('mentionPlugins'), config.ui.mentionPlugins === true, previousState?.config.ui.mentionPlugins);
@@ -2842,6 +2845,11 @@ async function refresh(): Promise<void> {
 
 buildGroups();
 initSidebarResize();
+initAppShortcuts({
+  newChat: $('newChat'),
+  settings: $('workspaceSettings'),
+  settingsShown: () => document.querySelector<HTMLElement>('.app')?.dataset.screen === 'settings'
+});
 const viewMenu = initViewMenu({
   search: openChatSearch,
   cosBrowser: () => state?.config.ui.chatBrowser === 'cos',
