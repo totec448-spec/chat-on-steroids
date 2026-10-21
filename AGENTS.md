@@ -4244,7 +4244,8 @@ inline and `\[ … \]` or `$$ … $$` as a block, the shapes ChatGPT writes; a l
 Markdown pass leaves only a placeholder, the message is sanitised as usual, and each placeholder
 then becomes KaTeX's rendering of the original source with `trust` off, so a formula cannot add
 links, classes or styles. Source KaTeX cannot parse, or longer than 8,000 characters, shows as
-written; a wide block formula scrolls on its own.
+written; a wide block formula scrolls on its own. A right click on a drawn formula offers Copy LaTeX
+and Copy MathML (`renderer/formula-menu.ts`), read from the MathML KaTeX draws and its TeX annotation.
 Setup's Show/Hide guide button stays available even while setup is incomplete. Manual collapse
 survives status pushes. Profile management stays out of first-run Setup: a compact row below
 Language in Appearance has a dropdown, a plus button with a name dialog and a delete button
