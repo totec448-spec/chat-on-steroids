@@ -83,6 +83,7 @@ const {
   WORKER_BOOTSTRAP_LIMIT_MS,
   WORKER_REDEEM_MS,
   BROWSER_RECOVERY_COOLDOWN_MS,
+  NAVIGATION_RECOVERY_COOLDOWN_MS,
   DEFAULT_PORTS,
   revealChatInBrowser,
   followChatInBackground,
@@ -8613,7 +8614,7 @@ describe('unattributed activity recovery', () => {
         await failWhileNavigating(first!);
 
         expect(await maintenance()).toBeNull();
-        await vi.advanceTimersByTimeAsync(BROWSER_RECOVERY_COOLDOWN_MS - 1);
+        await vi.advanceTimersByTimeAsync(NAVIGATION_RECOVERY_COOLDOWN_MS - 1);
         expect(await maintenance()).toBeNull();
         await vi.advanceTimersByTimeAsync(1);
         const retry = await maintenance();
@@ -8622,7 +8623,7 @@ describe('unattributed activity recovery', () => {
 
         await failWhileNavigating(retry!);
         expect(await maintenance()).toBeNull();
-        await vi.advanceTimersByTimeAsync(BROWSER_RECOVERY_COOLDOWN_MS - 1);
+        await vi.advanceTimersByTimeAsync(NAVIGATION_RECOVERY_COOLDOWN_MS - 1);
         expect(await maintenance()).toBeNull();
         await vi.advanceTimersByTimeAsync(1);
         expect(await maintenance()).toMatchObject({ conversationId, reason });
