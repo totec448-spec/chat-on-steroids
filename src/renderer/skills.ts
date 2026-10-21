@@ -96,6 +96,7 @@ export const APP_COMMANDS = [
   { command: 'goal', name: 'Goal', description: 'Pursue a saved objective and stop when it is complete.', glyph: 'i-target' },
   { command: 'loop', name: 'Loop', description: 'Keep continuing toward the saved objective.', glyph: 'i-loop' },
   { command: 'compact', name: 'Compact', description: 'Compact this chat and resume it in a fresh conversation.', glyph: 'i-copy' },
+  { command: 'image', name: 'Image', description: 'Ask ChatGPT for a picture: this message goes without the app, so ChatGPT can draw.', glyph: 'i-image' },
   // Codex's slash commands, each opening what the app already has.
   { command: 'model', name: 'Model', description: 'Choose the model for this chat.', glyph: 'i-sparkle' },
   { command: 'reasoning', name: 'Reasoning', description: 'Choose how long the model thinks.', glyph: 'i-bolt' },

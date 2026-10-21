@@ -44,6 +44,8 @@ export const inputArgs = z.object({
   objective: z.string().trim().max(16000).optional(),
   /** Which existing field holds the human request, before generated workflow wrapping. */
   authoredSource: z.enum(['text', 'objective', 'none']).optional(),
+  /** Sent with /image (#1701): the person asked for a picture, so it goes without the Core mention. */
+  imageRequest: z.literal(true).optional(),
   stages: z.array(z.string().trim().min(1).max(16000)).max(11).optional(),
   images: z.array(z.object({ name: z.string().min(1).max(110), dataUrl: z.string().max(512100).regex(/^data:image\/webp;base64,[A-Za-z0-9+/]+={0,2}$/) })).max(MAX_INPUT_IMAGES).optional(),
   attachments: z.array(attachmentSchema).max(20).optional(),
@@ -1792,6 +1794,8 @@ async function imageRequestWithoutMention(entry: InputEntry, session: SessionSum
   // A combined message also carries the next queued instruction, which may need the app.
   if (companion || entry.purpose === 'decision' || entry.recovery || entry.finishOwner || (entry.authoredSource ?? 'text') !== 'text') return false;
   if (session?.origin?.kind === 'worker' || session?.origin?.kind === 'helper') return false;
+  // /image: asked for outright, in whatever words ("you have the concept, design it").
+  if (entry.imageRequest === true) return true;
   const attachedImage = (entry.images?.length ?? 0) > 0 || (entry.attachments ?? []).some(file => file.mimeType.startsWith('image/'));
   // Shortly after ChatGPT made a picture, "make it brighter" changes that picture: the picture
   // answered one of the last two questions, so one failed edit in between still counts.
