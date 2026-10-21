@@ -1089,7 +1089,10 @@ sidebar lists (`CLF_DOM.projectsShown`: rows' `data-app-action-sidebar-project-i
 links to a Project home; content.js `reportProjectList` every 15 s, only when the list changed and
 never empty) through worker `project_catalog` to `/chatgpt-projects`; `chatgpt-project-catalog.ts`
 keeps up to 200 (durable `chatgpt-projects`), a shorter report never removes one, entries leave
-after 30 days unseen, names are labels only. Adding a folder with Projects to choose from passes
+after 30 days unseen, names are labels only. Each report carries the workspace ChatGPT lists them
+in (the `_account` cookie, null for a personal account); the catalog keeps a 16-hex SHA-256 prefix
+of it per entry, never the id, and offers or links only entries of the last reported workspace,
+because ChatGPT opens a Project only in its own workspace. Adding a folder with Projects to choose from passes
 `chatgpt: 'later'` (no link yet) and opens `chatgpt-project-picker.ts` on the new row: New (the
 default, also on Escape or when the row is not drawn) or an existing Project; one held by another
 listed project is shown disabled. `linkChatgptProject` accepts only a listed id, never one another
