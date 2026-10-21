@@ -199,13 +199,34 @@ function addedLines(base, paths) {
   return raw.split('\n').filter((line) => line.startsWith('+') && !line.startsWith('+++'));
 }
 
-/** Files this PR adds or changes that are now larger than LARGE_FILE_BYTES; lockfiles excepted. */
-function largeFilesOf(base) {
-  const names = execFileSync('git', ['diff', '--name-only', '--diff-filter=AM', `${base}...HEAD`], { encoding: 'utf8' }).split('\n').filter(Boolean);
-  return names.filter((name) => !/(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(name)).flatMap((name) => {
-    const bytes = Number(execFileSync('git', ['cat-file', '-s', `HEAD:${name}`], { encoding: 'utf8' }).trim());
-    return bytes > LARGE_FILE_BYTES ? [{ path: name, bytes }] : [];
+/**
+ * The files whose size a PR has to explain: new and over LARGE_FILE_BYTES, crossing it in this PR,
+ * or growing by more than it at once. Editing a file that was already that large (a big source
+ * file, #1741) is not news. `baseBytes` is null for a file the base does not have.
+ */
+export function largeFileFindings(entries) {
+  return entries.filter(({ bytes, baseBytes }) => bytes > LARGE_FILE_BYTES &&
+    (baseBytes === null || baseBytes <= LARGE_FILE_BYTES || bytes - baseBytes > LARGE_FILE_BYTES))
+    .map(({ path, bytes }) => ({ path, bytes }));
+}
+
+/**
+ * The added, changed and renamed files' sizes now and at the merge base (a renamed file under its old
+ * name there); lockfiles excepted. A size that can't be read now is an error, not 0 bytes.
+ */
+export function largeFilesOf(base, cwd = process.cwd()) {
+  const git = (args, options = {}) => execFileSync('git', args, { encoding: 'utf8', cwd, ...options });
+  const changes = git(['diff', '--name-status', '--diff-filter=AMR', `${base}...HEAD`]).split('\n').filter(Boolean).map((line) => {
+    const [status, first, second] = line.split('\t');
+    return status.startsWith('R') ? { path: second, basePath: first } : { path: first, basePath: first };
   });
+  const mergeBase = git(['merge-base', base, 'HEAD']).trim();
+  const baseSize = (name) => {
+    try { return Number(git(['cat-file', '-s', `${mergeBase}:${name}`], { stdio: ['ignore', 'pipe', 'ignore'] }).trim()); }
+    catch { return null; }
+  };
+  return largeFileFindings(changes.filter(({ path }) => !/(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(path))
+    .map(({ path, basePath }) => ({ path, bytes: Number(git(['cat-file', '-s', `HEAD:${path}`]).trim()), baseBytes: baseSize(basePath) })));
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
