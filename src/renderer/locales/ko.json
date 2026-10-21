@@ -2811,5 +2811,14 @@
   "Ask ChatGPT for a picture: this message goes without the app, so ChatGPT can draw.": "ChatGPT에 그림을 요청합니다. 이 메시지는 앱 없이 보내져서 ChatGPT가 그릴 수 있습니다.",
   "Port {0} was in use when the app started, so it now listens on port {1}. Point your tunnel at port {1}.": "앱을 시작할 때 포트 {0}이(가) 사용 중이어서 지금은 포트 {1}에서 수신합니다. 터널이 포트 {1}을(를) 가리키게 하세요.",
   "Stop and continue when ChatGPT offers no Send": "ChatGPT에 보내기가 없으면 중지 후 계속",
-  "Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run. Experimental.": "일부 채팅은 도구 결과에서 중지만 보여 줘서 새 턴의 계속을 거기서 보낼 수 없습니다. 한 턴에서 두 번 그렇게 되면 앱이 결과 직후에 턴을 중지하고 중지가 표시되면 계속을 보냅니다. Goal과 Loop는 켜진 채로 유지되고, 그사이에 온 단계는 실행되지 않습니다. 실험적 기능입니다."
+  "Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run. Experimental.": "일부 채팅은 도구 결과에서 중지만 보여 줘서 새 턴의 계속을 거기서 보낼 수 없습니다. 한 턴에서 두 번 그렇게 되면 앱이 결과 직후에 턴을 중지하고 중지가 표시되면 계속을 보냅니다. Goal과 Loop는 켜진 채로 유지되고, 그사이에 온 단계는 실행되지 않습니다. 실험적 기능입니다.",
+  "Pictures with /image, keyboard shortcuts, and a quicker message after Stop.": "/image로 그림 요청, 키보드 단축키, 중지 후 더 빨리 보내지는 메시지.",
+  "Ask for a picture": "그림 요청하기",
+  "Start a message with /image, and ChatGPT draws it with its own image tool.": "메시지를 /image로 시작하면 ChatGPT가 자체 이미지 도구로 그립니다.",
+  "Keyboard shortcuts": "키보드 단축키",
+  "{0} starts a new chat, Ctrl+Tab moves between chats, and Esc twice stops an answer.": "{0}로 새 채팅을 시작하고, Ctrl+Tab으로 채팅을 전환하며, Esc를 두 번 누르면 답변이 중지됩니다.",
+  "Quicker after Stop": "중지 후 더 빠르게",
+  "A message you send right after Stop goes out at once.": "중지 직후 보낸 메시지가 바로 전송됩니다.",
+  "Sub-agent chats tidy up": "하위 에이전트 채팅 정리",
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "보관을 켜면 작업자의 채팅이 작업을 마친 지 2분 후에 보관됩니다."
 }

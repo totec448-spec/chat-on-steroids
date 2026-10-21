@@ -2903,5 +2903,14 @@
   "Ask ChatGPT for a picture: this message goes without the app, so ChatGPT can draw.": "Demander une image à ChatGPT : ce message part sans l'app, pour que ChatGPT puisse dessiner.",
   "Port {0} was in use when the app started, so it now listens on port {1}. Point your tunnel at port {1}.": "Le port {0} était occupé au démarrage de l’app, elle écoute donc maintenant sur le port {1}. Faites pointer votre tunnel vers le port {1}.",
   "Stop and continue when ChatGPT offers no Send": "Arrêter et continuer quand ChatGPT ne propose pas Envoyer",
-  "Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run. Experimental.": "Certains chats n'affichent que Arrêter après un résultat d'outil, si bien que le Continuer du nouveau tour ne peut pas y être envoyé. Si cela arrive deux fois dans un tour, l'app arrête le tour juste après un résultat et envoie le Continuer dès que l'arrêt s'affiche. Goal et Loop restent actifs, et une étape qui arrive entre-temps n'est pas exécutée. Expérimental."
+  "Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run. Experimental.": "Certains chats n'affichent que Arrêter après un résultat d'outil, si bien que le Continuer du nouveau tour ne peut pas y être envoyé. Si cela arrive deux fois dans un tour, l'app arrête le tour juste après un résultat et envoie le Continuer dès que l'arrêt s'affiche. Goal et Loop restent actifs, et une étape qui arrive entre-temps n'est pas exécutée. Expérimental.",
+  "Pictures with /image, keyboard shortcuts, and a quicker message after Stop.": "Des images avec /image, des raccourcis clavier et un message plus rapide après Arrêter.",
+  "Ask for a picture": "Demander une image",
+  "Start a message with /image, and ChatGPT draws it with its own image tool.": "Commencez un message par /image, et ChatGPT le dessine avec son propre outil d’images.",
+  "Keyboard shortcuts": "Raccourcis clavier",
+  "{0} starts a new chat, Ctrl+Tab moves between chats, and Esc twice stops an answer.": "{0} démarre un nouveau chat, Ctrl+Tab passe d’un chat à l’autre, et Échap deux fois arrête une réponse.",
+  "Quicker after Stop": "Plus rapide après Arrêter",
+  "A message you send right after Stop goes out at once.": "Un message envoyé juste après Arrêter part aussitôt.",
+  "Sub-agent chats tidy up": "Les chats des sous-agents se rangent",
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Avec l’archivage activé, le chat d’un worker est archivé deux minutes après la fin de sa tâche."
 }

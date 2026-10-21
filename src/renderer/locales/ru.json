@@ -2949,5 +2949,14 @@
   "Ask ChatGPT for a picture: this message goes without the app, so ChatGPT can draw.": "Попросить ChatGPT нарисовать: это сообщение уходит без приложения, чтобы ChatGPT мог рисовать.",
   "Port {0} was in use when the app started, so it now listens on port {1}. Point your tunnel at port {1}.": "Порт {0} был занят при запуске приложения, поэтому теперь оно слушает порт {1}. Направьте туннель на порт {1}.",
   "Stop and continue when ChatGPT offers no Send": "Останавливать и продолжать, когда ChatGPT не предлагает «Отправить»",
-  "Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run. Experimental.": "Некоторые чаты после результата инструмента показывают только «Остановить», поэтому «Продолжить» для нового хода там отправить нельзя. Если это случилось дважды за ход, приложение останавливает ход сразу после результата и отправляет «Продолжить», когда остановка отобразится. Цель и Цикл остаются включены, а шаг, пришедший за это время, не выполняется. Экспериментально."
+  "Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run. Experimental.": "Некоторые чаты после результата инструмента показывают только «Остановить», поэтому «Продолжить» для нового хода там отправить нельзя. Если это случилось дважды за ход, приложение останавливает ход сразу после результата и отправляет «Продолжить», когда остановка отобразится. Цель и Цикл остаются включены, а шаг, пришедший за это время, не выполняется. Экспериментально.",
+  "Pictures with /image, keyboard shortcuts, and a quicker message after Stop.": "Картинки через /image, сочетания клавиш и быстрое сообщение после остановки.",
+  "Ask for a picture": "Попросите картинку",
+  "Start a message with /image, and ChatGPT draws it with its own image tool.": "Начните сообщение с /image, и ChatGPT нарисует это своим инструментом для картинок.",
+  "Keyboard shortcuts": "Сочетания клавиш",
+  "{0} starts a new chat, Ctrl+Tab moves between chats, and Esc twice stops an answer.": "{0} начинает новый чат, Ctrl+Tab переключает чаты, а двойной Esc останавливает ответ.",
+  "Quicker after Stop": "Быстрее после остановки",
+  "A message you send right after Stop goes out at once.": "Сообщение, отправленное сразу после остановки, уходит сразу.",
+  "Sub-agent chats tidy up": "Чаты субагентов убираются сами",
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Если архивирование включено, чат воркера архивируется через две минуты после завершения задачи."
 }
