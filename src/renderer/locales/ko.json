@@ -2750,6 +2750,7 @@
   "Restore all": "모두 복원",
   "Restore file": "파일 복원",
   "Restored {0} of {1} files": "파일 {1}개 중 {0}개를 복원했습니다",
+  "Skipped {0} paths because files and folders share a name": "??? ??? ??? ?? ?? {0}?? ???????",
   "This checkpoint is no longer available": "이 체크포인트는 더 이상 사용할 수 없습니다",
   "The comparison changed. Refresh Review and try again.": "비교 내용이 바뀌었습니다. 리뷰를 새로고침한 뒤 다시 시도하세요.",
   "These files no longer differ from the checkpoint": "이 파일들은 더 이상 체크포인트와 다르지 않습니다",

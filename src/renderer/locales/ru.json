@@ -2885,6 +2885,7 @@
   "Restore all": "Восстановить всё",
   "Restore file": "Восстановить файл",
   "Restored {0} of {1} files": "Восстановлено файлов: {0} из {1}",
+  "Skipped {0} paths because files and folders share a name": "????????? ?????: {0}, ????????? ???? ? ????? ????? ?????????? ???",
   "This checkpoint is no longer available": "Эта контрольная точка больше недоступна",
   "The comparison changed. Refresh Review and try again.": "Сравнение изменилось. Обновите «Проверку» и попробуйте ещё раз.",
   "These files no longer differ from the checkpoint": "Эти файлы больше не отличаются от контрольной точки",

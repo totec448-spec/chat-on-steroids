@@ -142,6 +142,28 @@ it('checkpoints the project once per turn, before the first patch, without touch
   expect((await readProjectGitSnapshot(projectId)).checkpoints).toHaveLength(2);
 });
 
+it('does not take a second Before turn checkpoint after the first is evicted from the ledger', async () => {
+  await applyPatch(editApp('export const value = 1;', 'export const value = 2;'));
+  expect(await listCheckpoints(projectId)).toHaveLength(1);
+
+  const tree = (await git(root, 'rev-parse', 'HEAD^{tree}')).trim();
+  const firstCreatedAt = Date.now() + 1;
+  for (let index = 0; index < MAX_CHECKPOINTS_PER_PROJECT; index++) {
+    await addCheckpoint({
+      id: (index + 100).toString(16).padStart(32, '0'),
+      projectId, sessionId: `other-session-${index}`, key: `turn:${index}`,
+      reason: 'turn', treeOid: tree, headOid: null, createdAt: firstCreatedAt + index
+    });
+  }
+  expect(await listCheckpoints(projectId)).toHaveLength(MAX_CHECKPOINTS_PER_PROJECT);
+  expect((await listCheckpoints(projectId)).some(entry => entry.sessionId === SESSION)).toBe(false);
+
+  // The successful turn marker is independent of the 20-entry visible ledger.
+  await applyPatch(editApp('export const value = 2;', 'export const value = 3;'));
+  expect(await listCheckpoints(projectId)).toHaveLength(MAX_CHECKPOINTS_PER_PROJECT);
+  expect((await listCheckpoints(projectId)).some(entry => entry.sessionId === SESSION)).toBe(false);
+});
+
 it('is Off in a fresh config', () => {
   expect(defaultConfig().projects).toEqual({ codeCheckpoints: false });
 });
@@ -282,6 +304,52 @@ it('restores all listed files: recreates deleted ones, removes created ones and 
   expect(await fs.readFile(path.join(root, 'run.sh'), 'utf8')).toBe('#!/bin/sh\necho one\n');
   if (!IS_WINDOWS) expect((await fs.stat(path.join(root, 'run.sh'))).mode & 0o111).not.toBe(0);
   expect((await compare(`${CHECKPOINT_REF_PREFIX}${id}`)).changes).toEqual([]);
+});
+
+it('skips a file-to-folder checkpoint swap before confirmation and leaves the file intact', async () => {
+  await fs.mkdir(path.join(root, 'a'));
+  await fs.writeFile(path.join(root, 'a', 'child.ts'), 'from checkpoint\n');
+  const id = await checkpointNow();
+
+  await fs.rm(path.join(root, 'a'), { recursive: true });
+  await fs.writeFile(path.join(root, 'a'), 'current file\n');
+  const { revision } = await compare(`${CHECKPOINT_REF_PREFIX}${id}`);
+  const confirm = vi.fn(async () => true);
+
+  const result = await restoreCheckpoint(projectId, id, null, revision, confirm);
+  expect(confirm).not.toHaveBeenCalled();
+  expect(result).toMatchObject({ confirmed: false, restored: [], undoRef: null });
+  expect(result.skipped.sort((a, b) => a.path.localeCompare(b.path))).toEqual([
+    { path: 'a', reason: 'conflict' },
+    { path: 'a/child.ts', reason: 'conflict' }
+  ]);
+  expect(await fs.readFile(path.join(root, 'a'), 'utf8')).toBe('current file\n');
+});
+
+it('confirms only non-conflicting files and keeps a non-empty folder in a folder-to-file swap', async () => {
+  await fs.writeFile(path.join(root, 'a'), 'from checkpoint\n');
+  const id = await checkpointNow();
+
+  await fs.rm(path.join(root, 'a'));
+  await fs.mkdir(path.join(root, 'a'));
+  await fs.writeFile(path.join(root, 'a', 'child.ts'), 'current child\n');
+  await fs.writeFile(path.join(root, 'a', 'keep.txt'), 'unrelated content\n');
+  await fs.writeFile(path.join(root, 'app.ts'), 'export const value = 2;\n');
+  const { revision } = await compare(`${CHECKPOINT_REF_PREFIX}${id}`);
+  const confirm = vi.fn(async () => true);
+
+  const result = await restoreCheckpoint(projectId, id, null, revision, confirm);
+  expect(confirm).toHaveBeenCalledWith(['app.ts']);
+  expect(result.restored).toEqual(['app.ts']);
+  expect(result.skipped.sort((a, b) => a.path.localeCompare(b.path))).toEqual([
+    { path: 'a', reason: 'conflict' },
+    { path: 'a/child.ts', reason: 'conflict' },
+    { path: 'a/keep.txt', reason: 'conflict' }
+  ]);
+  expect(await fs.readFile(path.join(root, 'app.ts'), 'utf8')).toBe('export const value = 1;\n');
+  expect(await fs.readFile(path.join(root, 'a', 'child.ts'), 'utf8')).toBe('current child\n');
+  expect(await fs.readFile(path.join(root, 'a', 'keep.txt'), 'utf8')).toBe('unrelated content\n');
+  expect((await fs.lstat(path.join(root, 'a'))).isDirectory()).toBe(true);
 });
 
 it('recreates a file whose parent folders were removed since the checkpoint', async () => {

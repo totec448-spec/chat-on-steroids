@@ -2750,6 +2750,7 @@
   "Restore all": "全部還原",
   "Restore file": "還原檔案",
   "Restored {0} of {1} files": "已還原 {0}/{1} 個檔案",
+  "Skipped {0} paths because files and folders share a name": "????????????? {0} ???",
   "This checkpoint is no longer available": "此檢查點已無法使用",
   "The comparison changed. Refresh Review and try again.": "比較內容已變更。請重新整理檢閱後再試一次。",
   "These files no longer differ from the checkpoint": "這些檔案與檢查點已沒有差異",

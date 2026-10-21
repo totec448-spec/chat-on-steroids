@@ -2750,6 +2750,7 @@
   "Restore all": "すべて復元",
   "Restore file": "ファイルを復元",
   "Restored {0} of {1} files": "{1} 件中 {0} 件のファイルを復元しました",
+  "Skipped {0} paths because files and folders share a name": "???????????????????{0} ?????????????",
   "This checkpoint is no longer available": "このチェックポイントは利用できなくなりました",
   "The comparison changed. Refresh Review and try again.": "比較内容が変わりました。レビューを更新してもう一度お試しください。",
   "These files no longer differ from the checkpoint": "これらのファイルはもうチェックポイントと違いがありません",

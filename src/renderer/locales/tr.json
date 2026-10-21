@@ -2795,6 +2795,7 @@
   "Restore all": "Tümünü geri yükle",
   "Restore file": "Dosyayı geri yükle",
   "Restored {0} of {1} files": "{1} dosyadan {0} tanesi geri yüklendi",
+  "Skipped {0} paths because files and folders share a name": "Dosya ve klas?r ayn? ad? kulland??? i?in {0} yol atland?",
   "This checkpoint is no longer available": "Bu denetim noktası artık kullanılamıyor",
   "The comparison changed. Refresh Review and try again.": "Karşılaştırma değişti. İncelemeyi yenileyip tekrar deneyin.",
   "These files no longer differ from the checkpoint": "Bu dosyalar artık denetim noktasından farklı değil",

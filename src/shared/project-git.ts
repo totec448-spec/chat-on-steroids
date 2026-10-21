@@ -39,7 +39,7 @@ export const CHECKPOINT_REF_PREFIX = 'checkpoint:';
 export interface CheckpointRestoreResult {
   confirmed: boolean;
   restored: string[];
-  skipped: Array<{ path: string; reason: 'changed' | 'unsupported' | 'failed' }>;
+  skipped: Array<{ path: string; reason: 'changed' | 'conflict' | 'unsupported' | 'failed' }>;
   undoRef: string | null;
 }
 

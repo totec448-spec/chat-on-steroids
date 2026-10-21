@@ -1075,7 +1075,13 @@ export function createFilePanel(options: FilePanelOptions) {
     restoring = true;
     try {
       const result = await run(window.api.restoreCheckpoint(current.id, ref.slice(CHECKPOINT_REF_PREFIX.length), paths, snapshot.revision));
-      if (result?.confirmed) toast(t('Restored {0} of {1} files', [result.restored.length, result.restored.length + result.skipped.length]));
+      if (result) {
+        const conflicts = result.skipped.filter(item => item.reason === 'conflict').length;
+        const messages: string[] = [];
+        if (result.confirmed) messages.push(t('Restored {0} of {1} files', [result.restored.length, result.restored.length + result.skipped.length]));
+        if (conflicts) messages.push(t('Skipped {0} paths because files and folders share a name', [conflicts]));
+        if (messages.length) toast(messages.join(' · '));
+      }
     } finally {
       restoring = false;
       if (project?.id === current.id) void reconcileGitChanges(true);
