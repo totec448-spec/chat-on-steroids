@@ -7208,3 +7208,49 @@ describe('prompt recall in the composer', () => {
     expect(composer(w).value).toBe('Second question');
   });
 });
+
+describe('a formula in an answer', () => {
+  const answer = (seq: number, body: string): SessionEvent => ({
+    seq, origin: 1, time: T0, source: 'extension', kind: 'assistant_message', messageId: 'math-answer', message: text(body),
+    state: 'streaming', final: false });
+  const rightClick = (w: any, target: Element) => {
+    const event = new w.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 60 });
+    target.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+
+  it('copies its LaTeX source and its MathML from a right click, also on a block a later revision adds', async () => {
+    const tex = String.raw`x=\frac{-b\pm\sqrt{b^2-4ac}}{2a}`;
+    const first = ['Solve:', '', String.raw`\[`, tex, String.raw`\]`, '', String.raw`with \(a\neq 0\).`, '', 'More'].join('\n');
+    const { w, append } = await boot([answer(1, first)]);
+    const writeClipboard = vi.fn(async () => ({ ok: true, data: true }));
+    (w as any).api.writeClipboard = writeClipboard;
+    const display = w.document.querySelector('.ev-assistant_message .math-display')!;
+    // Anywhere in the drawing, not only on its outer box.
+    expect(rightClick(w, display.querySelector('.katex-html .mord')!)).toBe(true);
+    expect([...w.document.querySelectorAll<HTMLElement>('.row-menu .row-menu-item')].map(item => item.textContent)).toEqual(['Copy LaTeX', 'Copy MathML']);
+    menuItem(w, 'copy-latex').click();
+    await vi.waitFor(() => expect(writeClipboard).toHaveBeenLastCalledWith(tex));
+    expect(w.document.querySelector('.row-menu')).toBeNull();
+
+    rightClick(w, w.document.querySelector('.ev-assistant_message .math-inline')!);
+    menuItem(w, 'copy-mathml').click();
+    await vi.waitFor(() => expect(writeClipboard).toHaveBeenCalledTimes(2));
+    const mathml = String((writeClipboard.mock.calls as unknown as string[][])[1]![0]);
+    expect(mathml).toMatch(/^<math xmlns="http:\/\/www\.w3\.org\/1998\/Math\/MathML">/);
+    expect(mathml).toContain(String.raw`<annotation encoding="application/x-tex">a\neq 0</annotation>`);
+
+    await append([answer(2, [first, '', String.raw`\[`, String.raw`e^{i\pi}+1=0`, String.raw`\]`, '', 'End'].join('\n'))]);
+    rightClick(w, w.document.querySelectorAll('.ev-assistant_message .math-display')[1]!);
+    menuItem(w, 'copy-latex').click();
+    await vi.waitFor(() => expect(writeClipboard).toHaveBeenLastCalledWith(String.raw`e^{i\pi}+1=0`));
+  });
+
+  it('leaves a right click on prose, or on LaTeX it could not draw, without a formula menu', async () => {
+    const { w } = await boot([answer(1, String.raw`Plain words and \(\frac{1}{\) as written.`)]);
+    const paragraph = w.document.querySelector('.ev-assistant_message .msg.rich p')!;
+    expect(rightClick(w, paragraph)).toBe(false);
+    expect(rightClick(w, paragraph.querySelector('.math-inline.is-source')!)).toBe(false);
+    expect(w.document.querySelector('.row-menu')).toBeNull();
+  });
+});

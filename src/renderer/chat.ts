@@ -38,6 +38,7 @@ import { initContextMeter, paintContextMeter } from './context-meter.js';
 import { installComposerDockMotion, installComposerHeightMotion } from './composer-motion.js';
 import { sanitizeHtmlTree } from './sanitize-html.js';
 import { drawMath, mathExtensions, separateDisplayMath, type MathSlots } from './math.js';
+import { installFormulaMenu } from './formula-menu.js';
 import { DEFAULT_HELPER_CHAT_MODEL, isAstraModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
 import { answerAnchors, messageAnswerAnchors } from '../shared/markdown-export.js';
@@ -8570,6 +8571,7 @@ export function initChat(next: Deps): void {
       lastHeight = height;
     }).observe(historyPane);
   }
+  installFormulaMenu($('timeline'));
   $('timeline').addEventListener('click', event => {
     // Disclosure changes deliberately change geometry. Padding retained for an
     // earlier reconciliation is not part of the collapsed headline's height.
