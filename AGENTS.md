@@ -4514,6 +4514,9 @@ covers the column, header included, and takes the sidebar's rounded corner while
 or moves to or from it.
 The sub-agent overview starts directly with Active and History, without a heading or close X.
 History appends the failed-worker count only when it is nonzero; the existing group counts remain unchanged.
+While multi-agent mode is on, Active shows the chat's slot limit beside its count (`Active · 2 / 3`):
+`maxWorkers`, or `globalMaxWorkers` when that is set and lower. Slots other chats hold under the
+all-chats cap are not subtracted; sleeping workers hold none and stay under History.
 Each worker is one plain row, not a boxed card: its tinted identity avatar carries the state (a
 presence dot; while working, the connection capsule's traveling light around it), then name and
 elapsed time, the task, and one line of facts: state, the model as the composer names it (no
