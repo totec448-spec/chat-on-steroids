@@ -2335,7 +2335,7 @@
       entry.turn.items.filter(item => item?.type === 'generated-image').every(item =>
         images.has(item) && item.status === 'completed' && item.isPreview !== true)
       ? lastAnswer.chatGptMessageId : null;
-    return { entry, messages, calls, slots, callSources, executionIds, images,
+    return { entry, place, messages, calls, slots, callSources, executionIds, images,
       endMessageId: imageAnswer ? imageEnd : turnEndMessageId(messages) };
   }
   /**
@@ -2372,6 +2372,8 @@
     const desiredMessageStamps = new Map();
     // An exchange whose user slot the shell did not render (see below, `data-clf-fiber-user`).
     const desiredUserStamps = new Map();
+    // A chat's first exchange while it runs without its question (see below, `data-clf-fiber-first`).
+    const desiredFirstStamps = new Map();
     const desiredThoughtStamps = new Map();
     const desiredImageStamps = new Map();
     const groups = [];
@@ -2512,6 +2514,12 @@
           if (!conversation.conflict && !userSlot && users.length === 1 && users[0].rawMessageId) {
             desiredUserStamps.set(section, `${scanToken}:${index}:${encodeURIComponent(users[0].rawMessageId)}`);
           }
+          // A chat's first exchange can hold no user message at all while it runs (2026-10-19:
+          // ChatGPT draws it under `fallback-turn-0` with only its reasoning group until the turn
+          // completes). Its place is exact even so: the conversation's first exchange answers the
+          // conversation's first question. Say only that; the question's id stays the app's.
+          if (!conversation.conflict && !userSlot && !users.length && shell.place?.parentId === 'root' &&
+              shell.entry.turn.status === 'in_progress') desiredFirstStamps.set(section, `${scanToken}:${index}`);
           // Busy hint only, never a completion receipt or a Stop action target.
           const running = shell.entry.turn.status === 'in_progress' ? location.pathname : null;
           if (running && section.getAttribute('data-clf-shell-running') !== running) section.setAttribute('data-clf-shell-running', running);
@@ -2599,6 +2607,11 @@
         if (wantedUser === undefined) {
           if (currentUser !== null) section.removeAttribute('data-clf-fiber-user');
         } else if (currentUser !== wantedUser) section.setAttribute('data-clf-fiber-user', wantedUser);
+        const wantedFirst = desiredFirstStamps.get(section);
+        const currentFirst = section.getAttribute('data-clf-fiber-first');
+        if (wantedFirst === undefined) {
+          if (currentFirst !== null) section.removeAttribute('data-clf-fiber-first');
+        } else if (currentFirst !== wantedFirst) section.setAttribute('data-clf-fiber-first', wantedFirst);
         for (const stamped of [section, ...section.querySelectorAll('[data-content-search-unit-key], [data-chatgpt-search-unit-key]')]) {
           const wanted = desiredTurnStamps.get(stamped);
           const current = stamped.getAttribute('data-clf-fiber-turn');

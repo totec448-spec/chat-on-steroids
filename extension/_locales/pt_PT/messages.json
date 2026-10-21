@@ -93,7 +93,7 @@
     "message": "Chat bloqueado"
   },
   "content_chat_blocked_tip": {
-    "message": "Este chat está bloqueado na app Chat On Steroids: as chamadas de ferramenta são recusadas e Goal, Loop e a compactação automática ficam desativados. Para o libertar, abra o separador Chat da app, passe o rato sobre este chat na lista de sessões e clique no símbolo de bloqueio."
+    "message": "Este chat está bloqueado na app Chat On Steroids: as chamadas de ferramenta são recusadas e Goal, Loop e a compactação automática ficam desativados. Para o libertar, abra o menu ⋯ deste chat na barra lateral da app e escolha “Libertar chat”."
   },
   "content_chat_still_opening": {
     "message": "este chat ainda está a abrir — tente novamente"

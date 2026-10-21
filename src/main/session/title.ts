@@ -3,11 +3,25 @@ import { userPromptText } from '../../shared/user-prompt.js';
 
 const contextPrefix = /^\s*(?:\[\[CLF-(?:HANDOFF|RESUME):[A-Za-z0-9_-]{16,64}\]\]\s*)?\[\[COS_CONTEXT:\d{1,6}\]\]/;
 
-/** Presentation only: never reinterpret a damaged frame as delivery/receipt evidence. */
+const TITLE_MAX = 80;
+
+/**
+ * Presentation only: never reinterpret a damaged frame as delivery/receipt evidence.
+ * One line of at most 80 characters; a longer message ends at a word with "…", so the name
+ * says it goes on instead of stopping mid-word.
+ */
 export function userTitle(text: string, authoredText?: string): string {
   const authored = authoredText ?? userPromptText(text);
   if (authored === null && contextPrefix.test(text)) return '';
-  return (authored ?? text).trim().slice(0, 80).trim();
+  const line = (authored ?? text).replace(/\s+/g, ' ').trim();
+  // Characters, not UTF-16 units: an emoji is never split in half.
+  const characters = [...line];
+  if (characters.length <= TITLE_MAX) return line;
+  const cut = characters.slice(0, TITLE_MAX - 1).join('');
+  const space = cut.lastIndexOf(' ');
+  // Without a space in its second half (Chinese, Japanese, one long word) it ends at the length.
+  const words = space >= cut.length / 2 ? cut.slice(0, space) : cut;
+  return words.replace(/[\s,;:.–—-]+$/u, '') + '…';
 }
 
 export function legacyContextTitle(summary: SessionSummary): boolean {
@@ -37,7 +51,7 @@ export function automaticTitle(summary: SessionSummary, first?: Extract<SessionE
   if (summary.origin?.kind === 'desktop' && summary.title === 'New chat') return true;
   if (!first) return false;
   return [first.authoredText, userPromptText(first.message.text), first.message.text].some(text =>
-    text != null && [80, 120].some(length => [text.slice(0, length).trim(), text.trim().slice(0, length), text.trim().slice(0, length).trim()].includes(summary.title)));
+    text != null && (userTitle(text, text) === summary.title || [80, 120].some(length => [text.slice(0, length).trim(), text.trim().slice(0, length), text.trim().slice(0, length).trim()].includes(summary.title))));
 }
 
 /**
