@@ -254,7 +254,7 @@ export async function locateMessage(id: string, messageId: string): Promise<Sess
   const events = await readEvents(id, { kinds: ['assistant_message'] });
   // Bookmarks keep ids in lower case; the recorded id is compared the same way.
   const wanted = messageId.toLowerCase();
-  const revisions = events.filter(event => event.kind === 'assistant_message' && event.messageId?.toLowerCase() === wanted);
+  const revisions = events.filter(event => event.kind === 'assistant_message' && typeof event.messageId === 'string' && event.messageId.toLowerCase() === wanted);
   const latest = revisions.at(-1);
   if (!latest || latest.kind !== 'assistant_message') return null;
   // A revised message keeps the place where it first appeared.

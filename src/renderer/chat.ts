@@ -79,6 +79,7 @@ import type {
 } from '../shared/session.js';
 import {
   ATTRIBUTION_LABELS,
+  BOOKMARK_EXCERPT_MAX,
   CHAT_ACTIVE_MS,
   committedResumeAncestorsFromSummary,
   continuationMarkerOf,
@@ -2581,10 +2582,12 @@ function bookmarked(sessionId: string, messageId: string): boolean {
   return bookmarks?.sessionId === sessionId && bookmarks.marks.some(mark => mark.messageId === messageId.toLowerCase());
 }
 
-/** The answer's start as one plain line, as its bookmark is listed. */
+/** The answer's start as one plain line, as its bookmark is listed; cut here so a long one is still accepted. */
 function bookmarkExcerpt(text: string): string {
-  return markdownVisibleText(providerEntitiesAsMarkdown(withoutMessageReaction(text)), { codeBlocks: false })
+  const line = markdownVisibleText(providerEntitiesAsMarkdown(withoutMessageReaction(text)), { codeBlocks: false })
     .split(/\n\s*\n/).map(part => part.replace(/\s+/g, ' ').trim()).find(Boolean) ?? '';
+  // A cut never leaves half of an emoji (a lone high surrogate) before the ellipsis.
+  return line.length <= BOOKMARK_EXCERPT_MAX ? line : `${line.slice(0, BOOKMARK_EXCERPT_MAX - 1).replace(/[\uD800-\uDBFF]$/, '').trimEnd()}…`;
 }
 
 function bookmarkButton(sessionId: string, messageId: string, answer: { text: string; time: number }): HTMLButtonElement {
