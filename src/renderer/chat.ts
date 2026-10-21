@@ -387,6 +387,21 @@ let dictationPhase: 'idle' | 'starting' | 'listening' | 'stopping' | 'error' = '
 let dictationNotice = '';
 let writingDictation = false;
 let dictationStopGuard: number | null = null;
+// Hold-to-talk: Ctrl+Shift+Space held in the composer records; letting go stops it the way the
+// microphone button does, so the phrase in progress is kept and nothing is sent.
+let heldDictation: DictationSession | null = null;
+
+/**
+ * Only Windows gets the chord, and only Windows names it. There Ctrl+Space toggles Chinese IMEs,
+ * Shift+Space switches their character width and Alt+Space opens the window menu, while
+ * Ctrl+Shift+Space is no Windows or IME default (pressing Space cancels a Ctrl+Shift layout switch,
+ * as with the docks' Ctrl+Shift+1–4). macOS owns Ctrl+Space, Ctrl+Option+Space, Cmd+Space and
+ * Ctrl+Cmd+Space, and IBus/Fcitx own Super+Space and Ctrl+Space on Linux; dictation is Windows-only
+ * today, so those platforms would need their own pick.
+ */
+function holdToTalkSupported(): boolean {
+  return /^Win/.test(navigator.platform);
+}
 
 function clearDictationStopGuard(): void {
   if (dictationStopGuard === null) return;
@@ -412,12 +427,16 @@ function guardDictationStop(): void {
   }, 5_500);
 }
 
+function dictationAvailable(): boolean {
+  return dictationBridge.dictationSupported === true &&
+    typeof dictationBridge.startDictation === 'function' &&
+    typeof dictationBridge.stopDictation === 'function' && typeof dictationBridge.onDictationEvent === 'function';
+}
+
 function paintDictation(): void {
   const button = $<HTMLButtonElement>('dictationButton');
   const status = $('dictationStatus');
-  const available = dictationBridge.dictationSupported === true &&
-    typeof dictationBridge.startDictation === 'function' &&
-    typeof dictationBridge.stopDictation === 'function' && typeof dictationBridge.onDictationEvent === 'function';
+  const available = dictationAvailable();
   button.hidden = !available;
   const active = dictationPhase === 'starting' || dictationPhase === 'listening' || dictationPhase === 'stopping';
   const label = !available ? 'Dictation unavailable' : dictationPhase === 'starting' ? 'Cancel dictation' :
@@ -427,7 +446,8 @@ function paintDictation(): void {
   button.dataset.state = dictationPhase;
   button.setAttribute('aria-pressed', String(active));
   button.setAttribute('aria-label', t(label));
-  button.title = t(label);
+  button.title = available && holdToTalkSupported() && (dictationPhase === 'idle' || dictationPhase === 'error')
+    ? `${t(label)} (${t('hold {0}', [`${t('Ctrl')}+${t('Shift')}+${t('Space')}`])})` : t(label);
   // Native Windows errors remain verbatim; known UI labels/statuses use the
   // existing locale catalog with English fallback until translations are merged.
   status.textContent = dictationNotice ? t(dictationNotice) : '';
@@ -607,9 +627,32 @@ export function initComposerDictation(): void {
   paintDictation();
   $<HTMLButtonElement>('dictationButton').addEventListener('click', () => { void toggleDictation(); });
   $('chatInput').addEventListener('input', () => { if (!writingDictation && dictation) retireDictation(); });
+  // Letting go of Ctrl or Shift first leaves Space auto-repeating without them. Those presses would
+  // type spaces, and as an edit drop the phrase the recognizer is still finishing.
+  let spaceStillHeld = false;
   $('chatInput').addEventListener('keydown', event => {
     if (event.key === 'Escape' && dictation) { event.preventDefault(); retireDictation(); }
+    if (spaceStillHeld && event.code === 'Space') { event.preventDefault(); return; }
+    if (event.code !== 'Space' || !event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey ||
+      event.isComposing || !holdToTalkSupported() || !dictationAvailable()) return;
+    event.preventDefault();
+    spaceStillHeld = true;
+    // Auto-repeat while held is the same press. A press during a clicked-on session stops it.
+    if (event.repeat || dictation && dictation === heldDictation) return;
+    const running = dictation;
+    void toggleDictation();
+    heldDictation = running ? null : dictation;
   });
+  const releaseHeld = (): void => {
+    const session = heldDictation;
+    heldDictation = null;
+    if (session && dictation === session && !session.stopping) void toggleDictation();
+  };
+  window.addEventListener('keyup', event => {
+    if (event.code === 'Space') spaceStillHeld = false;
+    if (heldDictation && (event.code === 'Space' || event.key === 'Control' || event.key === 'Shift')) releaseHeld();
+  }, true);
+  window.addEventListener('blur', () => { spaceStillHeld = false; releaseHeld(); });
   document.addEventListener('visibilitychange', () => { if (document.hidden) retireDictation(); });
   let unsubscribe: (() => void) | void;
   try { unsubscribe = dictationBridge.onDictationEvent?.(onDictationEvent); }
