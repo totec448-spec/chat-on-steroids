@@ -3897,9 +3897,13 @@ describe('the ChatGPT Projects a page lists (#1756)', () => {
     });
     await worker.registerTab(61);
     const listed = `g-p-${'a'.repeat(32)}`;
-    expect(await worker.send({ type: 'project_catalog', projects: [{ id: listed, name: 'Kunden' }, { id: 'g-p-bad', name: 'x' }, { id: `g-p-${'b'.repeat(32)}` }] }, 61))
+    expect(await worker.send({ type: 'project_catalog', projects: [{ id: listed, name: 'Kunden' }, { id: 'g-p-bad', name: 'x' }, { id: `g-p-${'b'.repeat(32)}` }], workspace: 'team-account-0001' }, 61))
       .toEqual({ ok: true });
-    expect(posted).toEqual([{ projects: [{ id: listed, name: 'Kunden' }] }]);
+    expect(posted).toEqual([{ projects: [{ id: listed, name: 'Kunden' }], workspace: 'team-account-0001' }]);
+    // No workspace, or something that is not one, goes on as none.
+    expect(await worker.send({ type: 'project_catalog', projects: [{ id: listed, name: 'Kunden' }], workspace: { x: 1 } }, 61)).toEqual({ ok: true });
+    expect(posted[1]).toEqual({ projects: [{ id: listed, name: 'Kunden' }], workspace: null });
+    posted.pop();
     expect(await worker.send({ type: 'project_catalog', projects: [{ id: 'g-p-bad', name: 'x' }] }, 61)).toEqual({ ok: false });
     expect(await worker.send({ type: 'project_catalog', projects: 'nope' }, 61)).toEqual({ ok: false });
     expect(posted).toHaveLength(1);

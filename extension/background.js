@@ -4010,7 +4010,8 @@ const HANDLERS = {
       .filter((project) => project && typeof project.id === 'string' && /^g-p-[0-9a-f]{32}$/.test(project.id) && typeof project.name === 'string')
       .map((project) => ({ id: project.id, name: project.name.slice(0, 200) }));
     if (!projects.length) return { ok: false };
-    const result = await call('/chatgpt-projects', { method: 'POST', body: JSON.stringify({ projects }) });
+    const workspace = typeof message.workspace === 'string' && message.workspace.length <= 200 ? message.workspace : null;
+    const result = await call('/chatgpt-projects', { method: 'POST', body: JSON.stringify({ projects, workspace }) });
     return { ok: result.ok === true };
   },
   async model_catalog(message, _sender, source) {
