@@ -6334,6 +6334,32 @@ it('keeps a Skill named like a command a directive with Cmd/Ctrl+Shift+Enter, se
   expect(live.sent.at(-1)).toMatchObject({ text: '/goal Reply with exactly: done', mode: 'after-turn' });
 });
 
+// /image (#1701): a picture request in words the app can't recognize goes without the app, so
+// ChatGPT's own image tool is on for that one message.
+it('sends a typed /image message as a picture request, without the command', async () => {
+  const { w, live, input } = await slash('image');
+  input.value = '/image You have the concept now, design it';
+  w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle(); await settle();
+  expect(live.sent.at(-1)).toMatchObject({ text: 'You have the concept now, design it', imageRequest: true });
+  // The next ordinary message is not one.
+  input.value = 'Thanks, now describe it';
+  w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle(); await settle();
+  expect(live.sent.at(-1)).toMatchObject({ text: 'Thanks, now describe it' });
+  expect(live.sent.at(-1)).not.toHaveProperty('imageRequest');
+});
+
+it('puts /image in front of the draft when picked from the menu, and sends nothing for a bare /image', async () => {
+  const { w, live, input, row } = await slash('image');
+  row!.click(); await settle();
+  expect(input.value).toBe('/image ');
+  w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle(); await settle();
+  expect(live.sent).toHaveLength(0);
+  expect(input.value).toBe('/image ');
+});
+
 // Codex's slash commands, each opening what the app already has.
 async function slash(command: string, selectExisting = true) {
   const app = await boot([], selectExisting);

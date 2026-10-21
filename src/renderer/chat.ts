@@ -1092,6 +1092,8 @@ let renaming: { id: string; original: string; value: string; start: number; end:
 const CHAT_COMMANDS = new Set(['rename', 'pin', 'status', 'compact', 'copy', 'export', 'find']);
 /** The commands that switch how the next message is sent; their rest is that message. */
 const MODE_COMMANDS = new Set(['plan', 'goal', 'loop']);
+/** The draft a typed /image is being sent from (#1701): that one message asks for a picture. */
+let pictureRequestFor: string | null = null;
 
 /** What a slash command does, picked from the composer menu or typed at the start of a message. */
 function runComposerCommand(name: string): void {
@@ -1129,6 +1131,13 @@ async function sendTypedCommand(controlAction: boolean, delivery?: 'auto' | 'aft
   input.value = rest;
   input.dispatchEvent(new Event('input', { bubbles: true }));
   // The menu's Plan is a toggle; a typed /plan only arms, so an armed Plan stays armed.
+  if (name === 'image') {
+    // The rest is the picture request; a bare /image waits for one.
+    if (!rest.trim()) { input.value = '/image '; input.dispatchEvent(new Event('input', { bubbles: true })); return; }
+    pictureRequestFor = draftKey();
+    void sendComposer(delivery, undefined, undefined, controlAction);
+    return;
+  }
   if (name !== 'plan' || !taskPlans.has(draftKey())) runComposerCommand(name);
   if (!MODE_COMMANDS.has(name) || !rest.trim()) return;
   // Cmd/Ctrl+Shift+Enter's other way reaches the rest too; a typed /plan drafts the plan as Enter does.
@@ -1163,6 +1172,14 @@ function runSlashCommand(name: string): void {
     menu.querySelector<HTMLElement>('summary')?.focus();
   });
   else if (name === 'new') $('newChat').click();
+  else if (name === 'image') {
+    // In front of the draft, for the person to finish: sent, it asks ChatGPT for a picture.
+    const input = $<HTMLTextAreaElement>('chatInput');
+    input.value = `/image ${input.value.replace(/^\s+/, '')}`;
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus();
+  }
   else if (name === 'rename' && chat) startRename(chat);
   else if (name === 'pin' && chat && pinnable(chat)) {
     sidebarPins?.toggle(chat.id);
@@ -7791,6 +7808,9 @@ let composerDiscoveryGeneration = 0;
 async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: string[], planObjective?: string, controlAction = false): Promise<boolean | void> {
   const input = $<HTMLTextAreaElement>('chatInput');
   const key = draftKey();
+  // Taken by this send whatever happens next, so a send that stops early marks no later message.
+  const picture = pictureRequestFor === key;
+  pictureRequestFor = null;
   const projectId = selectedId ? sessions.find(row => row.id === selectedId)?.projectId ?? null : selectedProjectId;
   const images = imageDrafts.get(key) ?? [];
   const text = plan?.[0] ?? (authoredComposerText().trim() || (images.length ? 'Please look at the attached files.' : ''));
@@ -7879,7 +7899,7 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
   void refreshInputQueue();
   paintDeliveryControls();
   try {
-    const result = await run(api.sendInput({ id, sessionId, projectId, text, ...attachmentPayload, ...(branch ? { branch } : {}), ...(edit ? { edit } : {}), stages: plan?.slice(1), objective, authoredSource, automation: mode === 'finish' ? undefined : $<HTMLSelectElement>('chatAutomation').value as InputAutomation, loopAfterTurn: openingLoopDelivery(), mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn', dueAt, ...modelSettings }));
+    const result = await run(api.sendInput({ id, sessionId, projectId, text, ...attachmentPayload, ...(picture ? { imageRequest: true as const } : {}), ...(branch ? { branch } : {}), ...(edit ? { edit } : {}), stages: plan?.slice(1), objective, authoredSource, automation: mode === 'finish' ? undefined : $<HTMLSelectElement>('chatAutomation').value as InputAutomation, loopAfterTurn: openingLoopDelivery(), mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn', dueAt, ...modelSettings }));
     if (cancelledStarts.has(id)) return;
     if (!result) {
       // A disk failure after outbox commit still owns this input. Keep its exact
