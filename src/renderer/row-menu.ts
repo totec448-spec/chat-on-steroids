@@ -274,14 +274,17 @@ function checkedIndex(menu: HTMLElement): number {
 
 function focusItem(menu: HTMLElement, index: number): void {
   const items = enabledItems(menu);
-  items[Math.min(Math.max(0, index), items.length - 1)]?.focus({ preventScroll: true });
+  const item = items[Math.min(Math.max(0, index), items.length - 1)];
+  item?.focus({ preventScroll: true });
+  // A long menu scrolls: keep the focused item in view inside it (the page itself never scrolls).
+  if (item && menu.scrollHeight > menu.clientHeight) item.scrollIntoView({ block: 'nearest' });
 }
 
 function keyboard(event: KeyboardEvent, menu: HTMLElement, depth: number): void {
   if (!current) return;
   const items = enabledItems(menu);
   const at = items.indexOf(document.activeElement as HTMLButtonElement);
-  const move = (index: number): void => { event.preventDefault(); items[(index + items.length) % items.length]?.focus({ preventScroll: true }); };
+  const move = (index: number): void => { event.preventDefault(); focusItem(menu, (index + items.length) % items.length); };
   switch (event.key) {
     case 'ArrowDown': return move(at + 1);
     case 'ArrowUp': return move(at < 0 ? items.length - 1 : at - 1);
@@ -318,12 +321,19 @@ function placeAt(menu: HTMLElement, x: number, y: number): void {
 /** Below a button (opening upwards without room), or beside a submenu's item, inside the window. */
 function placeBeside(menu: HTMLElement, box: DOMRect, side: 'below' | 'right'): void {
   // Its layout size: the opening animation must not make it look smaller than it is.
-  const width = menu.offsetWidth, height = menu.offsetHeight;
+  const width = menu.offsetWidth;
+  let height = menu.offsetHeight;
   let left: number, top: number;
   if (side === 'below') {
     left = box.left;
     top = box.bottom + 4;
-    if (top + height > window.innerHeight - EDGE) top = box.top - height - 4;
+    const below = window.innerHeight - EDGE - top, above = box.top - 4 - EDGE;
+    if (height > below && height > above) {
+      // Too long for either side: it scrolls in the larger one, still next to its button.
+      height = Math.max(below, above);
+      menu.style.maxHeight = `${height}px`;
+      if (above > below) top = box.top - 4 - height;
+    } else if (height > below) top = box.top - height - 4;
   } else {
     left = box.right + 2;
     if (left + width > window.innerWidth - EDGE) left = box.left - width - 2;
