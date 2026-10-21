@@ -2968,6 +2968,146 @@ input[readonly] {
 .msg.rich .native-prompt-readonly li { margin: 0.2em 0; }
 .msg.rich .native-prompt-readonly em { color: var(--soft); font-size: 0.9em; }
 
+/* A static DIL card whose complete words match the canonical Markdown. Provider CSS is
+   never replayed; these classes are assigned by the renderer after HTML sanitisation. */
+.msg.rich .markdown-dil-card {
+  box-sizing: border-box;
+  container-type: inline-size;
+  max-width: 100%;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--card);
+  color: var(--ink);
+  line-height: 1.4;
+}
+.msg.rich .markdown-dil-card :is(p, h1, h2, h3, h4, h5, h6) { margin: 0; }
+.msg.rich .markdown-dil-card > * + * { margin-top: 13px; }
+.msg.rich .markdown-dil-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.msg.rich .markdown-dil-row-between { justify-content: space-between; }
+.msg.rich .markdown-dil-col { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.msg.rich .markdown-dil-strong { font-weight: 650; }
+.msg.rich .markdown-dil-badge {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  border-radius: 99px;
+  background: var(--wash);
+  color: var(--soft);
+  font-size: calc(11px * var(--text-scale, 1));
+  font-weight: 600;
+}
+.msg.rich .markdown-dil-badge.markdown-dil-success {
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+  color: var(--green);
+}
+.msg.rich .markdown-dil-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 18px;
+  row-gap: 14px;
+}
+.msg.rich .markdown-dil-grid-item { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.msg.rich .markdown-dil-grid-item > .markdown-dil-text:first-child {
+  color: var(--soft);
+  font-size: calc(12px * var(--text-scale, 1));
+}
+.msg.rich .markdown-dil-grid-item > .markdown-dil-title {
+  font-size: calc(22px * var(--text-scale, 1));
+  font-weight: 650;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+.msg.rich .markdown-dil-divider { height: 1px; background: var(--line); }
+.msg.rich .markdown-dil-success-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  color: var(--green);
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1;
+}
+.msg.rich .markdown-dil-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 12px;
+  max-width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  container-type: inline-size;
+}
+.msg.rich .markdown-dil-panel .markdown-dil-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.msg.rich .markdown-dil-panel .markdown-dil-grid-item { gap: 7px; }
+.msg.rich .markdown-dil-panel .markdown-dil-grid-item .markdown-table { margin: 0; }
+.msg.rich .markdown-dil-panel .markdown-dil-grid-item table { font-size: calc(12px * var(--text-scale, 1)); }
+.msg.rich .markdown-dil-panel .markdown-dil-grid-item td,
+.msg.rich .markdown-dil-panel .markdown-dil-grid-item th { padding: 5px; }
+.msg.rich .markdown-dil-panel .markdown-dil-box { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.msg.rich .markdown-dil-centered { text-align: center; align-items: center; }
+.msg.rich .markdown-dil-panel .markdown-dil-bordered {
+  padding: 12px;
+  border: 1px solid var(--accent-edge);
+  border-radius: var(--r-sm);
+  background: var(--accent-wash);
+}
+.msg.rich .markdown-dil-panel .markdown-dil-row { justify-content: center; }
+.msg.rich .markdown-dil-down-icon { display: block; text-align: center; color: var(--soft); }
+.msg.rich .markdown-dil-steps { display: flex; flex-direction: column; gap: 14px; }
+.msg.rich .markdown-dil-steps > .markdown-dil-row { align-items: flex-start; gap: 16px; }
+.msg.rich .markdown-dil-steps > .markdown-dil-row > .markdown-dil-box:first-child {
+  flex: 0 0 44px; min-width: 44px; text-align: center;
+  background: var(--sunk); border-radius: var(--r-sm); padding: 5px;
+}
+.msg.rich .markdown-dil-steps > .markdown-dil-row > .markdown-dil-box:first-child h2 { margin: 0; font-size: 18px; }
+.msg.rich .markdown-dil-steps > .markdown-dil-row > .markdown-dil-box:last-child { min-width: 0; flex: 1; }
+.msg.rich .markdown-dil-panel > :is(.markdown-dil-text, .markdown-dil-box) { margin: 0; }
+.msg.rich .markdown-dil-panel .markdown-dil-svg {
+  width: 100%; height: auto; max-height: 340px; object-fit: contain;
+}
+.msg.rich .markdown-dil-photo-row { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.msg.rich .markdown-dil-photo-row > .markdown-dil-box:first-child { flex: 0 0 140px; width: 140px; min-width: 0; }
+.msg.rich .markdown-dil-photo-row > .markdown-dil-box:last-child { min-width: 0; flex: 1; }
+.msg.rich .markdown-dil-photo-row .markdown-dil-photo {
+  display: block; width: 140px; height: 140px; max-width: 100%; object-fit: cover; border-radius: var(--r-md);
+}
+.msg.rich .markdown-dil-chart {
+  border: 1px solid var(--line); border-radius: var(--r-md); margin: 12px 0;
+  padding: 14px; background: var(--card); min-width: 0;
+}
+.msg.rich .markdown-dil-chart-heading { font-weight: 650; font-size: calc(13px * var(--text-scale, 1)); }
+.msg.rich .markdown-dil-chart-plot { display: flex; gap: 12px; height: 230px; margin-top: 14px; }
+.msg.rich .markdown-dil-chart-guide {
+  flex: 0 0 36px; display: flex; flex-direction: column; justify-content: space-between;
+  text-align: end; padding-bottom: 26px; color: var(--soft); font-size: calc(11px * var(--text-scale, 1));
+}
+.msg.rich .markdown-dil-chart-bars {
+  display: flex; flex: 1; gap: 10px; align-items: stretch; min-width: 0;
+  background: repeating-linear-gradient(to top, var(--line) 0 1px, transparent 1px 25%);
+}
+.msg.rich .markdown-dil-chart-column {
+  display: flex; flex: 1; flex-direction: column; justify-content: flex-end; align-items: center;
+  min-width: 0; height: 100%;
+}
+.msg.rich .markdown-dil-chart-bar {
+  width: min(80%, 120px); min-height: 1px; border-radius: 7px 7px 0 0;
+  background: #245aa0; max-height: calc(100% - 26px);
+}
+.msg.rich .markdown-dil-chart-x { height: 26px; font-size: calc(11px * var(--text-scale, 1)); text-align: center; padding-top: 5px; }
+.msg.rich .markdown-dil-chart-note { color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); margin: 8px 0 0; }
+@container (max-width: 330px) {
+  .msg.rich .markdown-dil-grid { grid-template-columns: 1fr; }
+  .msg.rich .markdown-dil-photo-row { flex-direction: column; }
+}
+
 .msg.rich code {
   font-family: var(--mono);
   font-size: 0.94em;

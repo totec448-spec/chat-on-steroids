@@ -7921,6 +7921,193 @@ describe('bookmarked answers', () => {
   });
 });
 
+describe('recorded DIL cards inside a Markdown answer', () => {
+  const source = [
+    'Introduction remains ordinary Markdown.', '',
+    '**Sample archive verification** (Passed)', '',
+    'Documents indexed', '', '# 1,234', '',
+    'Collections checked', '', '# 28', '',
+    'Records verified', '', '# 45,678', '',
+    'Index witnesses', '', '# 11', '', '---', '',
+    'Integrity and consistency checks passed', '',
+    'Original examples were not modified', '',
+    'The explanation after the card stays in the reply.'
+  ].join('\n');
+  const metric = (label: string, value: string): string =>
+    `<div data-d-component="grid-item"><p data-d-component="text" data-d-size="xs">${label}</p>` +
+    `<h1 data-d-component="title" data-d-size="xl">${value}</h1></div>`;
+  const card = '<div data-d-component="card" onclick="alert(1)" style="background: hotpink">' +
+    '<div data-d-component="row" data-d-justify="between"><p data-d-component="text">' +
+    '<span data-d-component="text" data-d-default-strong="">Sample archive verification</span></p>' +
+    '<div data-d-component="badge" data-color="success">Passed</div></div>' +
+    '<div data-d-component="grid" style="grid-template-columns: repeat(2,1fr)">' +
+    metric('Documents indexed', '1,234') + metric('Collections checked', '28') +
+    metric('Records verified', '45,678') + metric('Index witnesses', '11') +
+    '</div><div data-d-component="divider"></div>' +
+    '<div data-d-component="row"><svg data-d-component="icon" style="color: var(--color-text-success)"><path d="M0 0"/></svg>' +
+    '<p data-d-component="text">Integrity and consistency checks passed</p></div>' +
+    '<div data-d-component="row"><svg data-d-component="icon" style="color: var(--color-text-success)"></svg>' +
+    '<p data-d-component="text">Original examples were not modified</p></div></div>';
+  const captured = (markup = card): string =>
+    `<div><p>Introduction remains ordinary Markdown.</p>${markup}` +
+    '<p>The explanation after the card stays in the reply.</p></div>';
+  const answer = (body: string, markup = captured()): SessionEvent => ({
+    seq: 1, origin: 1, time: T0, source: 'extension', kind: 'assistant_message', messageId: 'dil-card',
+    message: text(body), renderedHtml: text(markup), state: 'final', final: true
+  });
+
+  it('restores the compact grid, success badge and static icons without replacing surrounding prose', async () => {
+    const { w } = await boot([answer(source)]);
+    const message = w.document.querySelector('.ev-assistant_message .msg.rich')!;
+    const panel = message.querySelector('.markdown-dil-card')!;
+    expect(panel).not.toBeNull();
+    expect(panel.querySelectorAll('.markdown-dil-grid-item')).toHaveLength(4);
+    expect([...panel.querySelectorAll('.markdown-dil-title')].map(node => node.textContent)).toEqual(['1,234', '28', '45,678', '11']);
+    expect(panel.querySelector('.markdown-dil-badge.markdown-dil-success')?.textContent).toBe('Passed');
+    expect(panel.querySelectorAll('.markdown-dil-success-icon')).toHaveLength(2);
+    expect(message.firstElementChild?.textContent).toBe('Introduction remains ordinary Markdown.');
+    expect(message.lastElementChild?.textContent).toBe('The explanation after the card stays in the reply.');
+    expect([...message.querySelectorAll('h1')]).toHaveLength(4);
+    expect(message.querySelector('[onclick], [style], svg, script')).toBeNull();
+  });
+
+  it('rejects an out-of-date card whose metric no longer matches the canonical answer', async () => {
+    const changed = source.replace('45,678', '45,679');
+    const { w } = await boot([answer(changed)]);
+    const message = w.document.querySelector('.ev-assistant_message .msg.rich')!;
+    expect(message.querySelector('.markdown-dil-card')).toBeNull();
+    expect(message.textContent).toContain('45,679');
+    expect(message.textContent).not.toContain('45,678');
+  });
+
+  it('does not restore captured cards that contain active controls or links', async () => {
+    const { w } = await boot([answer(source, captured(card.replace('</div></div>', '<button>Click</button></div></div>')))]);
+    const message = w.document.querySelector('.ev-assistant_message .msg.rich')!;
+    expect(message.querySelector('.markdown-dil-card')).toBeNull();
+    expect(message.querySelector('button')).toBeNull();
+    expect(message.textContent).toContain('Documents indexed');
+  });
+
+  it('does not reveal hidden captured text when sanitized layout would remove its visibility attributes', async () => {
+    const hidden = card.replace('<div data-d-component="divider"></div>',
+      '<div data-d-component="divider" aria-hidden="true">Unrecorded hidden text</div>');
+    const { w } = await boot([answer(source, captured(hidden))]);
+    const message = w.document.querySelector('.ev-assistant_message .msg.rich')!;
+    expect(message.querySelector('.markdown-dil-card')).toBeNull();
+    expect(message.textContent).not.toContain('Unrecorded hidden text');
+  });
+
+  it('does not guess which identical canonical span to replace', async () => {
+    const cardSource = source.split('Introduction remains ordinary Markdown.\n\n')[1]!
+      .split('\n\nThe explanation after the card stays in the reply.')[0]!;
+    const { w } = await boot([answer(`${cardSource}\n\n${cardSource}`)]);
+    expect(w.document.querySelector('.markdown-dil-card')).toBeNull();
+  });
+});
+
+describe('charts, diagrams and illustrated Markdown from recorded DIL', () => {
+  const observation = (body: string, html = '<p>Unrelated provider drawing.</p>'): SessionEvent => ({
+    seq: 1, origin: 1, time: T0, source: 'extension', kind: 'assistant_message', messageId: 'rich-layout',
+    message: text(body), renderedHtml: text(html), state: 'final', final: true
+  });
+  const message = (w: { document: Document }): Element => w.document.querySelector('.ev-assistant_message .msg.rich')!;
+
+  it('renders bounded chart data from the canonical widget rather than trusting a captured plot', async () => {
+    const directive = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value', label: 'Sample values', valueSuffix: '%' }],
+      data: [{ group: 'A', value: 4 }, { group: 'B', value: 9 }, { group: 'C', value: 15 }],
+      meta: { footer: 'Illustrative values only' }
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Intro.\n\n${directive}\n\nAfter the chart.`)]);
+    const root = message(w);
+    expect(root.querySelector('.markdown-dil-chart')).not.toBeNull();
+    expect([...root.querySelectorAll('.markdown-dil-chart-x')].map(item => item.textContent)).toEqual(['A', 'B', 'C']);
+    expect([...root.querySelectorAll<HTMLElement>('.markdown-dil-chart-bar')].map(item => item.style.height)).toEqual(['26.666666666666668%', '60%', '100%']);
+    expect(root.querySelector('.markdown-dil-chart')?.getAttribute('aria-label')).toContain('C 15%');
+    expect(root.lastElementChild?.textContent).toBe('After the chart.');
+  });
+
+  it('ignores malformed chart payloads without crashing the timeline', async () => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [null], data: [{ group: 'A', value: 1 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Start.\n\n${widget}\n\nEnd.`)]);
+    const root = message(w);
+    expect(root.querySelector('.markdown-dil-chart')).toBeNull();
+    expect(root.textContent).toContain('Start.');
+    expect(root.textContent).toContain('End.');
+  });
+
+  it('uses the original chart data as its accessible label without adding English text', async () => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }],
+      data: [{ group: 'Échantillon A', value: 2 }, { group: 'Échantillon B', value: 5 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Before.\n\n${widget}\n\nAfter.`)]);
+    expect(message(w).querySelector('.markdown-dil-chart')?.getAttribute('aria-label'))
+      .toBe('Échantillon A 2, Échantillon B 5');
+  });
+
+  it('recovers the side-by-side table workflow only when its entire text matches', async () => {
+    const body = [
+      'Before.', '', '**Genetics**', '', 'Variants', '', '| ID | SNP |', '| --- | --- |', '| P1 | 0 |', '| P2 | 1 |', '',
+      '**Microbiome**', '', 'Species', '', '| ID | Bacteria |', '| --- | --- |', '| P1 | 4% |', '| P2 | 9% |', '',
+      'Match by ID', '', '**Association test**', '', 'Test each SNP.', '', 'After.'
+    ].join('\n');
+    const table = (title: string, subtitle: string, last: string, a: string, b: string) =>
+      `<div data-d-component="grid-item"><p><strong>${title}</strong></p><p>${subtitle}</p>` +
+      `<table><tr><th>ID</th><th>${last}</th></tr><tr><td>P1</td><td>${a}</td></tr><tr><td>P2</td><td>${b}</td></tr></table></div>`;
+    const workflow = `<div data-d-component="box" data-d-has-border=""><div data-d-component="grid">` +
+      table('Genetics', 'Variants', 'SNP', '0', '1') + table('Microbiome', 'Species', 'Bacteria', '4%', '9%') +
+      `</div><p>Match by ID</p><div data-d-component="box" data-d-has-border=""><p><strong>Association test</strong></p>` +
+      `<p>Test each SNP.</p></div></div>`;
+    const { w } = await boot([observation(body, `<p>Before.</p>${workflow}<p>After.</p>`)]);
+    const root = message(w);
+    expect(root.querySelector('.markdown-dil-panel .markdown-dil-grid')).not.toBeNull();
+    expect(root.querySelectorAll('.markdown-dil-panel .markdown-dil-grid-item')).toHaveLength(2);
+    expect(root.querySelector('.markdown-dil-panel .markdown-dil-bordered')).not.toBeNull();
+    expect(root.firstElementChild?.textContent).toBe('Before.');
+    expect(root.lastElementChild?.textContent).toBe('After.');
+  });
+
+  it('rebuilds an ordered two-step panel without turning step numbers into oversized headings', async () => {
+    const body = '1\n\n**Step one**\n\nStart here.\n\n2\n\n**Step two**\n\nFinish here.';
+    const step = (number: number, heading: string, text: string) => `<div data-d-component="row"><div data-d-component="box">` +
+      `<h2 data-d-component="title">${number}</h2></div><div data-d-component="box"><p><strong>${heading}</strong></p><p>${text}</p></div></div>`;
+    const { w } = await boot([observation(body, `<div data-d-component="box">${step(1, 'Step one', 'Start here.')}${step(2, 'Step two', 'Finish here.')}</div>`)]);
+    expect(message(w).querySelectorAll('.markdown-dil-steps > .markdown-dil-row')).toHaveLength(2);
+  });
+
+  it('restores a local vector figure after excluding all external SVG capabilities', async () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50" width="100" height="50"><line x1="0" y1="0" x2="100" y2="50" stroke="currentColor"/><circle cx="60" cy="25" r="4" fill="blue"/></svg>';
+    const captured = (image: string): string => `<div data-d-component="box" data-d-has-border=""><p>Illustrative plot</p>` +
+      `<img data-d-component="svg" src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(image)}">` +
+      `<p>Schematic only.</p></div>`;
+    const body = 'Illustrative plot\n\nSchematic only.';
+    const { w } = await boot([observation(body, captured(svg))]);
+    const restored = message(w).querySelector<HTMLImageElement>('.markdown-dil-panel img.markdown-dil-svg');
+    expect(restored?.src).toContain('data:image/svg+xml;charset=utf-8,');
+    expect(decodeURIComponent(restored!.src)).toContain('<circle');
+    const poisoned = svg.replace('</svg>', '<script>alert(1)</script></svg>');
+    dom?.window.close(); dom = null; vi.resetModules();
+    const { w: other } = await boot([observation(body, captured(poisoned))]);
+    expect(message(other).querySelector('.markdown-dil-panel')).toBeNull();
+    expect(message(other).querySelector('script, img')).toBeNull();
+  });
+
+  it('allows only static first-party search illustrations, not arbitrary recorded image requests', async () => {
+    const html = (url: string): string => `<div data-d-component="row"><div data-d-component="box">` +
+      `<div data-d-component="image"><img src="${url}" alt=""></div></div>` +
+      `<div data-d-component="box"><p><strong>Example item</strong></p><p>Short explanation.</p></div></div>`;
+    const body = '**Example item**\n\nShort explanation.';
+    const { w } = await boot([observation(body, html('https://images.openai.com/static-rsc-4/Example01234'))]);
+    expect(message(w).querySelector('.markdown-dil-photo-row img.markdown-dil-photo')).not.toBeNull();
+    dom?.window.close(); dom = null; vi.resetModules();
+    const { w: other } = await boot([observation(body, html('https://untrusted.invalid/track'))]);
+    expect(message(other).querySelector('.markdown-dil-photo-row')).toBeNull();
+  });
+});
+
 describe('a formula in an answer', () => {
   const answer = (seq: number, body: string): SessionEvent => ({
     seq, origin: 1, time: T0, source: 'extension', kind: 'assistant_message', messageId: 'math-answer', message: text(body),
