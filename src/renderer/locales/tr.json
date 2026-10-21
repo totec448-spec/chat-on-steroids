@@ -525,6 +525,7 @@
   "Provider busy · retry {0}{1}": "Sağlayıcı meşgul · yeniden deneme {0}{1}",
   "Stop requested": "Durdurma istendi",
   "Stop turn": "Turu durdur",
+  "Press Esc again to stop the turn": "Turu durdurmak için Esc'ye yeniden basın",
   "Cancel delivery": "İletimi iptal et",
   "Queue plan at Session finish": "Planı Oturum bitişi için sıraya al",
   "Start full plan": "Tüm planı başlat",

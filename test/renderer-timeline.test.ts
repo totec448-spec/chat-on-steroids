@@ -3651,6 +3651,119 @@ it('stops directly from the empty composer without a second Stop menu action', a
   expect(input.value).toBe('');
 });
 
+describe('Esc in the empty composer during a turn', () => {
+  const esc = (w: JSDOM['window'], init: KeyboardEventInit = {}) => {
+    const event = new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...init });
+    w.document.getElementById('chatInput')!.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  const status = (w: JSDOM['window']) => w.document.getElementById('composerStatus')!.textContent;
+
+  it('stops the running turn on a second Esc, and only says so on the first', async () => {
+    const { w } = await boot([]);
+    const stop = vi.fn(async () => ({ ok: true, data: {} }));
+    (w as any).api.stopSessionTurn = stop;
+    expect(esc(w)).toBe(true);
+    await settle();
+    expect(stop).not.toHaveBeenCalled();
+    expect(status(w)).toBe('Press Esc again to stop the turn');
+    expect(esc(w)).toBe(true);
+    await settle();
+    expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'held-turn');
+    expect(status(w)).toBe('');
+  });
+
+  it.each([false, true])('stops the turn it was pressed for before the controls are read again (Plan armed: %s)', async (armPlan) => {
+    const { w, live } = await boot([]);
+    const api = (w as any).api;
+    const stop = vi.fn(async () => ({ ok: true, data: {} }));
+    api.stopSessionTurn = stop;
+    const plan = vi.fn(async () => ({ ok: true, data: null }));
+    api.draftTaskPlan = plan;
+    if (armPlan) (w.document.getElementById('createPlan') as HTMLButtonElement).click();
+    await settle();
+    expect(w.document.getElementById('chatSend')!.dataset.action).toBe('stop');
+    // A turn the window has not seen yet: Stop goes to the turn on screen, not to whatever a reread finds.
+    const controls = api.getSessionControls;
+    api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await controls(id)).data, activeTurnId: 'unseen-turn' } });
+    esc(w); esc(w);
+    await settle();
+    expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'held-turn');
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(plan).not.toHaveBeenCalled();
+    expect(live.sent).toEqual([]);
+  });
+
+  it('disarms on the arrows prompt recall takes, even when they leave the composer empty again', async () => {
+    const asked = [{ kind: 'user_message', seq: 1, time: T0 + 1000, source: 'extension', turnId: 't1', messageId: 'q-1', message: text('An earlier question') },
+      { kind: 'assistant_message', seq: 2, time: T0 + 2000, source: 'extension', turnId: 't1', messageId: 'a-2', message: text('An answer'), final: true, state: 'final' }] as SessionEvent[];
+    const { w } = await boot(asked);
+    const stop = vi.fn(async () => ({ ok: true, data: {} }));
+    (w as any).api.stopSessionTurn = stop;
+    const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+    const arrow = (key: string) => { const event = new w.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }); input.dispatchEvent(event); return event.defaultPrevented; };
+    esc(w);
+    expect(arrow('ArrowUp')).toBe(true);
+    expect(input.value).toBe('An earlier question');
+    input.setSelectionRange(input.value.length, input.value.length);
+    expect(arrow('ArrowDown')).toBe(true);
+    expect(input.value).toBe('');
+    expect(status(w)).toBe('');
+    // A fresh first press: it only asks.
+    expect(esc(w)).toBe(true);
+    await settle();
+    expect(stop).not.toHaveBeenCalled();
+    expect(status(w)).toBe('Press Esc again to stop the turn');
+  });
+
+  it('does not let an Esc armed for one turn stop the next turn', async () => {
+    const { w, append } = await boot([]);
+    const api = (w as any).api;
+    const stop = vi.fn(async () => ({ ok: true, data: {} }));
+    api.stopSessionTurn = stop;
+    esc(w);
+    const controls = api.getSessionControls;
+    api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await controls(id)).data, activeTurnId: 'next-turn' } });
+    await append([]);
+    expect(w.document.getElementById('chatSend')!.dataset.action).toBe('stop');
+    // The press after the new turn started only asks again; the next one stops that turn.
+    expect(esc(w)).toBe(true);
+    await settle();
+    expect(stop).not.toHaveBeenCalled();
+    expect(status(w)).toBe('Press Esc again to stop the turn');
+    esc(w);
+    await settle();
+    expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'next-turn');
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not stop for Esc with a draft, a held Esc, a key between, modifiers or a late second Esc', async () => {
+    const { w } = await boot([]);
+    const stop = vi.fn(async () => ({ ok: true, data: {} }));
+    (w as any).api.stopSessionTurn = stop;
+    const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+    input.value = 'Keep this draft'; input.dispatchEvent(new w.Event('input'));
+    expect(esc(w)).toBe(false); esc(w);
+    expect(status(w)).toBe('');
+    input.value = ''; input.dispatchEvent(new w.Event('input'));
+    esc(w); esc(w, { repeat: true }); esc(w, { repeat: true });
+    input.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Shift', bubbles: true, cancelable: true }));
+    expect(status(w)).toBe('');
+    esc(w); expect(esc(w, { ctrlKey: true })).toBe(false);
+    const now = performance.now.bind(performance);
+    let skew = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now() + skew);
+    try {
+      esc(w); skew = 1_600;
+      // Too late to stop: this press only asks again.
+      expect(esc(w)).toBe(true);
+      expect(status(w)).toBe('Press Esc again to stop the turn');
+    } finally { clock.mockRestore(); }
+    await settle();
+    expect(stop).not.toHaveBeenCalled();
+  });
+});
+
 it('shows Stop immediately for a queued first send, switches to Send for a new draft, and cancels through the same button', async () => {
   const { w, live } = await boot([], false);
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;

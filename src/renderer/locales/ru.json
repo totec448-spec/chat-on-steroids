@@ -533,6 +533,7 @@
   "Provider busy · retry {0}{1}": "Провайдер занят · повтор {0}{1}",
   "Stop requested": "Запрошена остановка",
   "Stop turn": "Остановить ход",
+  "Press Esc again to stop the turn": "Нажмите Esc ещё раз, чтобы остановить ход",
   "Cancel delivery": "Отменить доставку",
   "Queue plan at Session finish": "Поставить план в очередь при завершении сессии",
   "Start full plan": "Запустить полный план",
