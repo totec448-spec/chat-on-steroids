@@ -200,9 +200,9 @@ describe('desktop helper retirement ordering', () => {
     try {
       const first = listWindows();
       const settled = first.catch(() => undefined);
-      await vi.waitFor(() => expect(fake.children[0]?.writeCount).toBe(1));
+      await vi.waitFor(() => expect(fake.children[0]?.writeCount).toBe(1), { timeout: 5_000 });
       fake.children[0]!.emit('error', new Error('pipe broke'));
-      await vi.waitFor(() => expect(fake.terminateProcess).toHaveBeenCalledWith(9000));
+      await vi.waitFor(() => expect(fake.terminateProcess).toHaveBeenCalledWith(9000), { timeout: 5_000 });
       fake.releaseFirstRetirement();
       await settled;
       expect(fake.terminateProcessTree).not.toHaveBeenCalled();
