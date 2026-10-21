@@ -18,12 +18,14 @@ const RELEASES = 'https://github.com/totec448-spec/chat-on-steroids/releases';
 export const FIREFOX_UPDATE_URL = `${RELEASES}/latest/download/${FIREFOX_UPDATES}`;
 
 export function firefoxUpdateManifest({ version, sha256 }) {
-  if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error(`Not a release version: ${version}`);
+  // A fourth part is a Firefox-only build of the release named by the first three (2.1.43.1 → v2.1.43).
+  if (!/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(version)) throw new Error(`Not a release version: ${version}`);
   if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error('Not a sha256 digest');
+  const release = version.split('.').slice(0, 3).join('.');
   return {
     addons: {
       [FIREFOX_ADDON_ID]: {
-        updates: [{ version, update_link: `${RELEASES}/download/v${version}/${FIREFOX_XPI}`, update_hash: `sha256:${sha256}` }]
+        updates: [{ version, update_link: `${RELEASES}/download/v${release}/${FIREFOX_XPI}`, update_hash: `sha256:${sha256}` }]
       }
     }
   };

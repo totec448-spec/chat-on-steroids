@@ -265,11 +265,11 @@
               <div class="setting layout-setting"><span class="setting-text"><b id="sidebarLayoutTitle">Sidebar layout</b><em>Switch at any time. Your chats stay as they are.</em></span>
                 <div class="layout-choice" role="radiogroup" aria-labelledby="sidebarLayoutTitle">
                   <label class="layout-option"><input type="radio" name="appearanceSidebarLayout" id="appearanceLayoutProjects" value="projects" />
-                    <span class="layout-preview" aria-hidden="true"><img class="for-light" src="./layout-previews/projects-light.png" alt="" /><img class="for-dark" src="./layout-previews/projects-dark.png" alt="" /></span>
+                    <span class="layout-preview" aria-hidden="true"><img class="for-light" data-layout-preview="projects-light" width="272" height="330" alt="" /><img class="for-dark" data-layout-preview="projects-dark" width="272" height="330" alt="" /></span>
                     <span class="layout-option-text"><b>Projects</b><em>Chats sit under their project folders.</em></span>
                   </label>
                   <label class="layout-option"><input type="radio" name="appearanceSidebarLayout" id="appearanceLayoutInbox" value="inbox" />
-                    <span class="layout-preview" aria-hidden="true"><img class="for-light" src="./layout-previews/inbox-light.png" alt="" /><img class="for-dark" src="./layout-previews/inbox-dark.png" alt="" /></span>
+                    <span class="layout-preview" aria-hidden="true"><img class="for-light" data-layout-preview="inbox-light" width="272" height="330" alt="" /><img class="for-dark" data-layout-preview="inbox-dark" width="272" height="330" alt="" /></span>
                     <span class="layout-option-text"><b>Inbox</b><em>All chats in one list, active ones on top.</em></span>
                   </label>
                 </div>
@@ -1021,7 +1021,7 @@
                     <input id="autoContinue" type="checkbox" />
                   </label>
                   <details class="setting-timing"><summary><svg class="disclosure-chevron sum-chev" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Recovery timing details</summary><p>Recover unfinished answers, including in Goal and Loop. Reload after 2 minutes without progress (Pro: 10). If still generating, wait 1 more minute (Pro: 5), then stop and send. A final answer selects Goal or Loop instead of Continue. Undelivered steps get at most three page reloads (after 2, 5, and 10 minutes); recovery then stops visibly while the original pending work remains saved.</p></details>
-                  <div class="setting"><span class="setting-text"><b id="rotateTurnMinutesTitle">Start a fresh turn after</b><em>Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Not used with Pro models, Goal, Loop or sub-agents.</em></span><select id="rotateTurnMinutes" aria-labelledby="rotateTurnMinutesTitle"><option value="0">Off</option><option value="20">20 minutes</option><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option></select></div>
+                  <div class="setting"><span class="setting-text"><b id="rotateTurnMinutesTitle">Start a fresh turn after</b><em>Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.</em></span><select id="rotateTurnMinutes" aria-labelledby="rotateTurnMinutesTitle"><option value="0">Off</option><option value="20">20 minutes</option><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option></select></div>
                   <div class="setting"><span class="setting-text"><b id="goalBackendTitle">Goal response source</b><em>Where Goal's next message comes from: a separate ChatGPT chat in your account, your API key (most reliable), or Offline (prepared messages, no API cost).</em></span><select id="goalBackend" aria-labelledby="goalBackendTitle"><option value="chatgpt">Separate ChatGPT chat</option><option value="api">API key · Most reliable</option><option value="templates">Offline · No API cost</option></select></div>
                   <div class="setting"><span class="setting-text"><b id="loopBackendTitle">Loop response source</b><em>Where Loop's next message comes from: your API key (most reliable) or a separate ChatGPT chat in your account. Loop keeps going until you turn it off.</em></span><select id="loopBackend" aria-labelledby="loopBackendTitle"><option value="api">API key · Most reliable</option><option value="chatgpt">Separate ChatGPT chat</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan model</b><em>Model for ChatGPT-generated messages and plans.</em></span><select id="helperModel" aria-label="Goal, Loop and Plan model"></select></div>
@@ -1111,8 +1111,8 @@
 
                   <label class="setting">
                     <span class="setting-text">
-                      <b>Archive worker chats in ChatGPT when they are retired</b>
-                      <em>Once a worker can't be used again (you cleared the workers, the main chat closed, or its finished task sat for a week), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.</em>
+                      <b>Archive worker chats in ChatGPT when their task is done</b>
+                      <em>A couple of minutes after a worker reports its task done, its chat is archived in ChatGPT and leaves your chat list. If the main chat gives that worker more work, the app restores its chat first. Chats of cleared workers are archived too. You can restore any of them from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.</em>
                     </span>
                     <input id="archiveWorkerChats" type="checkbox" />
                   </label>
