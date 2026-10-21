@@ -239,8 +239,8 @@ describe('terminateProcess', () => {
     const started = IS_WINDOWS
       ? spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
         `$s = New-Object System.Diagnostics.ProcessStartInfo; $s.FileName = 'ping.exe'; $s.Arguments = '-n 600 127.0.0.1'; $s.UseShellExecute = $false; $s.CreateNoWindow = $true; ` +
-        `$p = [System.Diagnostics.Process]::Start($s); Set-Content -LiteralPath '${pidFile.replace(/'/g, "''")}' -Value $p.Id; Start-Sleep 600`],
-      { stdio: 'ignore', windowsHide: true })
+        '$p = [System.Diagnostics.Process]::Start($s); Set-Content -LiteralPath $env:COS_TEST_PID_FILE -Value $p.Id; Start-Sleep 600'],
+      { stdio: 'ignore', windowsHide: true, env: { ...process.env, COS_TEST_PID_FILE: pidFile } })
       : spawn(node, ['-e', `const {spawn}=require('node:child_process'); const fs=require('node:fs'); const child=spawn(${JSON.stringify(node)}, ['-e', 'setInterval(() => {}, 1000)'], {stdio:'ignore'}); fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid)); setInterval(() => {}, 1000);`], { stdio: 'ignore' });
     const exited = new Promise((resolve) => started.once('exit', resolve));
     let childPid = 0;
