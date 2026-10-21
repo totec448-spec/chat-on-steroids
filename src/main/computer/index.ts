@@ -446,6 +446,12 @@ async function startHelper(): Promise<HelperRuntime> {
               continue;
             }
             const reply = parsed as Record<string, any>;
+            // The Windows helper says when a window came forward only on its second attempt.
+            if (Array.isArray(reply['focusNotes'])) {
+              for (const note of reply['focusNotes'].slice(0, 4)) {
+                if (typeof note === 'string') logInfo(`desktop focus: ${note.slice(0, 200)}`);
+              }
+            }
             runtime.ready = true;
             clearTimeout(pending.timer);
             runtime.pending = null;

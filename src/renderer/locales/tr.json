@@ -2801,6 +2801,12 @@
   "(~{0} tokens)": "(~{0} token)",
   "(~{0} tokens)|one": "(~{0} token)",
   "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}",
+  "The helper says the goal is met, but this has not been checked. No follow-up was sent. Review the chat and continue if work remains.": "Yardımcı hedefe ulaşıldığını söylüyor, ancak bu kontrol edilmedi. Takip yanıtı gönderilmedi. Sohbeti kontrol edin ve iş kaldıysa devam edin.",
+  "Goal result needs review": "Hedef sonucunu gözden geçirin",
+  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Hedef yardımcısı işin tamamlandığını düşünüyor, ancak bu henüz kontrol edilmedi. Sohbeti gözden geçirin veya yeni bir talimat gönderin.",
+  "Review Goal completion": "Hedef tamamlanmasını gözden geçir",
+  "Off by default. When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you.": "Varsayılan olarak kapalıdır. Hedef kanıt olmadan tamamlandığını bildirirse sonuç doğrulanmamış, yanıt beklemede kalır. Session finish mevcut bekletmeyi sürdürür, modelden turu açık tutmasını ister ve bildirim gönderebilir.",
+  "When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you. Off by default.": "Hedef kanıt olmadan tamamlandığını bildirirse sonuç doğrulanmamış, yanıt beklemede kalır. Session finish mevcut bekletmeyi sürdürür, modelden turu açık tutmasını ister ve bildirim gönderebilir. Varsayılan olarak kapalıdır.",
   "Sub-agent view": "Yardımcı ajan görünümü",
   "Conversation": "Sohbet",
   "Loading activity…": "Etkinlik yükleniyor…",
@@ -2912,5 +2918,12 @@
   "Quicker after Stop": "Durdur'dan sonra daha hızlı",
   "A message you send right after Stop goes out at once.": "Durdur'dan hemen sonra gönderdiğin mesaj anında gider.",
   "Sub-agent chats tidy up": "Alt ajan sohbetleri toparlanır",
-  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Arşivleme açıkken bir çalışanın sohbeti, görevi bittikten iki dakika sonra arşivlenir."
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Arşivleme açıkken bir çalışanın sohbeti, görevi bittikten iki dakika sonra arşivlenir.",
+  "Bookmark answer": "Yanıtı yer imlerine ekle",
+  "Remove bookmark": "Yer imini kaldır",
+  "Bookmarks": "Yer imleri",
+  "Answer": "Yanıt",
+  "This answer is no longer in the chat.": "Bu yanıt artık sohbette değil.",
+  "{0} bookmarks in this chat": "Bu sohbette {0} yer imi",
+  "{0} bookmarks in this chat|one": "Bu sohbette {0} yer imi"
 }

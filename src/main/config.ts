@@ -358,6 +358,7 @@ const configSchema = z.object({
     finishTool: z.boolean().optional(),
     planBackend: z.enum(['chatgpt', 'api']).optional(),
     finishAction: z.enum(['notify', 'goal']).optional(),
+    finishHoldOnStop: z.boolean().optional(),
     finishLeadMinutes: z.number().int().min(3).max(5).optional(),
     backgroundChats: z.boolean().optional().default(true),
     backgroundPlacement: z.enum(['window', 'group']).optional().default('window').catch('window'),

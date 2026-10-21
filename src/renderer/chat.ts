@@ -1,5 +1,7 @@
 import { hasProviderDirective, resolvedCapture, withoutProviderDirectives } from '../shared/content-reference.js';
 import { completedDilText } from '../shared/dil-tables.js';
+import { markdownVisibleText } from '../shared/markdown-text.js';
+import { providerEntitiesAsMarkdown } from '../shared/content-reference.js';
 import { initChatSearch, type ChatSearch } from './chat-search.js';
 import { initChatFind } from './chat-find.js';
 import { initChatCycle } from './chat-cycle.js';
@@ -64,6 +66,7 @@ import type {
   Handoff,
   MessageReference,
   RunningToolActivity,
+  SessionBookmark,
   SessionChange,
   SessionEvent,
   SessionSearchLocation,
@@ -76,6 +79,7 @@ import type {
 } from '../shared/session.js';
 import {
   ATTRIBUTION_LABELS,
+  BOOKMARK_EXCERPT_MAX,
   CHAT_ACTIVE_MS,
   committedResumeAncestorsFromSummary,
   continuationMarkerOf,
@@ -99,7 +103,7 @@ import { browserExtensionRequired, type AppState, type Config } from '../shared/
 import { $, ago, clockTime, compactNumber, disclosureChevron, el, icon, run, setIcon, toast } from './dom.js';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
 import { STRICT_REFUSAL_PROGRESS_PREFIX, UNPROVEN_WORKER_NOTICE, UNTRUSTED_NOTICE, UNTRUSTED_WORKER_NOTICE } from '../shared/trust-notices.js';
-import { openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
+import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
 import { createSearchPopup } from './search-popup.js';
 import { primaryShortcut } from './shortcuts.js';
 import { initSshProjectDialog } from './ssh-project-dialog.js';
@@ -2331,6 +2335,7 @@ function syncSelectedWorkspace(): void {
   // Branch in new chat and Edit: the composer notices and the link back follow the selection in either layout.
   paintBranchNotices();
   paintEditNotice();
+  syncBookmarks();
 }
 
 /**
@@ -2564,6 +2569,107 @@ function laterMessageCounts(items: readonly TimelineItem[]): Map<number, number>
 function olderHistoryPending(): boolean {
   const oldest = events.reduce((least, event) => Math.min(least, residenceOf(event)), Infinity);
   return Number.isFinite(oldest) && oldest > 1 && oldest !== historyStart;
+}
+
+/**
+ * Bookmarked answers of the open chat: marked with the bookmark under an answer, listed by the
+ * header's bookmark button to jump back to them. Kept by main in the chat's own folder.
+ */
+let bookmarks: { sessionId: string; marks: SessionBookmark[] } | null = null;
+let bookmarksLoading: string | null = null;
+
+function bookmarked(sessionId: string, messageId: string): boolean {
+  return bookmarks?.sessionId === sessionId && bookmarks.marks.some(mark => mark.messageId === messageId.toLowerCase());
+}
+
+/** The answer's start as one plain line, as its bookmark is listed; cut here so a long one is still accepted. */
+function bookmarkExcerpt(text: string): string {
+  const line = markdownVisibleText(providerEntitiesAsMarkdown(withoutMessageReaction(text)), { codeBlocks: false })
+    .split(/\n\s*\n/).map(part => part.replace(/\s+/g, ' ').trim()).find(Boolean) ?? '';
+  // A cut never leaves half of an emoji (a lone high surrogate) before the ellipsis.
+  return line.length <= BOOKMARK_EXCERPT_MAX ? line : `${line.slice(0, BOOKMARK_EXCERPT_MAX - 1).replace(/[\uD800-\uDBFF]$/, '').trimEnd()}…`;
+}
+
+function bookmarkButton(sessionId: string, messageId: string, answer: { text: string; time: number }): HTMLButtonElement {
+  const button = el('button', 'answer-action answer-bookmark') as HTMLButtonElement;
+  button.type = 'button';
+  button.dataset.bookmarkFor = messageId.toLowerCase();
+  button.append(icon('i-bookmark'));
+  paintBookmarkButton(button, bookmarked(sessionId, messageId));
+  button.addEventListener('click', async () => {
+    if (selectedId !== sessionId || button.dataset.busy) return;
+    const on = !bookmarked(sessionId, messageId);
+    button.dataset.busy = 'true';
+    try {
+      const marks = await run(api.setBookmark(sessionId, messageId, bookmarkExcerpt(answer.text) || t('Answer'), answer.time, on));
+      if (Array.isArray(marks) && selectedId === sessionId) { bookmarks = { sessionId, marks }; paintBookmarks(); }
+    } finally { delete button.dataset.busy; }
+  });
+  return button;
+}
+
+function paintBookmarkButton(button: HTMLElement, on: boolean): void {
+  if (button.classList.contains('is-on') === on && button.dataset.painted) return;
+  button.dataset.painted = 'true';
+  button.classList.toggle('is-on', on);
+  button.setAttribute('aria-pressed', String(on));
+  setIcon(button.querySelector<HTMLElement>('i')!, on ? 'i-bookmark-fill' : 'i-bookmark');
+  const label = () => on ? t('Remove bookmark') : t('Bookmark answer');
+  ui(button, 'title', label); ui(button, 'aria-label', label);
+}
+
+/** Loads the open chat's bookmarks each time it is opened, then paints them. */
+function syncBookmarks(): void {
+  const id = !newChatSelected ? selectedId : null;
+  if (bookmarks && bookmarks.sessionId !== id) bookmarks = null;
+  if (!id) { paintBookmarks(); return; }
+  if (bookmarks?.sessionId === id || bookmarksLoading === id) { paintBookmarks(); return; }
+  bookmarksLoading = id;
+  paintBookmarks();
+  void Promise.resolve(api.listBookmarks(id)).catch(() => null).then(result => {
+    if (bookmarksLoading === id) bookmarksLoading = null;
+    if (selectedId !== id) return;
+    // An unreadable list shows no marks; the answers still offer theirs.
+    bookmarks = { sessionId: id, marks: result?.ok && Array.isArray(result.data) ? result.data : [] };
+    paintBookmarks();
+  });
+}
+
+/** The header's bookmark button and every answer's bookmark, for the open chat. */
+function paintBookmarks(): void {
+  const id = !newChatSelected ? selectedId : null;
+  const marks = id && bookmarks?.sessionId === id ? bookmarks.marks : [];
+  const button = $<HTMLButtonElement>('chatBookmarks');
+  button.hidden = marks.length === 0;
+  button.querySelector('.chat-bookmarks-count')!.textContent = String(marks.length);
+  const label = () => tn('{0} bookmark in this chat', '{0} bookmarks in this chat', marks.length);
+  ui(button, 'title', label); ui(button, 'aria-label', label);
+  if (!marks.length && rowMenuOpenFor('bookmarks')) closeRowMenu();
+  for (const answer of $('timeline').querySelectorAll<HTMLElement>('.answer-bookmark[data-bookmark-for]'))
+    paintBookmarkButton(answer, marks.some(mark => mark.messageId === answer.dataset.bookmarkFor));
+}
+
+function bookmarkMenuItems(): RowMenuItem[] {
+  const id = selectedId;
+  if (!id || bookmarks?.sessionId !== id) return [];
+  return bookmarks.marks.map(mark => ({
+    action: 'bookmark',
+    icon: 'i-bookmark-fill',
+    label: () => mark.excerpt || t('Answer'),
+    title: () => mark.excerpt,
+    hint: () => clockTime(mark.messageTime),
+    data: { bookmark: mark.messageId },
+    run: () => void openBookmark(id, mark.messageId)
+  }));
+}
+
+/** Scrolls the open chat to a bookmarked answer, loading the history around it when needed. */
+async function openBookmark(sessionId: string, messageId: string): Promise<void> {
+  const selection = selectionGeneration;
+  const location = await run(api.locateMessage(sessionId, messageId));
+  if (selection !== selectionGeneration || selectedId !== sessionId) return;
+  if (!location) { toast(t('This answer is no longer in the chat.')); return; }
+  await revealChatLocation(sessionId, location);
 }
 
 /** The Edit action under one of your questions. */
@@ -4738,6 +4844,10 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
       return box;
     }
     case 'progress': {
+      if (event.source === 'app' && event.progressId?.startsWith('goal-helper-stop:') &&
+          event.message.text === goalErrorMessage('goal_helper_stop_unverified')) {
+        return el('p', 'meta is-progress', () => t(goalErrorMessage('goal_helper_stop_unverified')));
+      }
       if (event.progressId?.startsWith(STRICT_REFUSAL_PROGRESS_PREFIX)) return el('p', 'meta is-progress', () => trustNoticeText(event.message.text));
       if (!event.progressId?.startsWith(APPROVAL_PROGRESS_PREFIX)) return el('p', 'meta is-progress', event.message.text);
       // ChatGPT's own tool approval card stands in this chat's page (approval-wait.ts). The app
@@ -4853,7 +4963,7 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
  * builds the text from the log, reading back answers that were cut there, so a long answer
  * copies and exports whole; the timeline only decides where the actions appear.
  */
-function answerActions(turnId: string | null, messageId?: string): HTMLElement {
+function answerActions(turnId: string | null, messageId?: string, answer?: { text: string; time: number }): HTMLElement {
   const bar = el('div', 'answer-actions');
   const sessionId = selectedId;
   // A turn's answer is named by its turn; one recorded outside any turn by its message.
@@ -4899,6 +5009,7 @@ function answerActions(turnId: string | null, messageId?: string): HTMLElement {
   });
   menu.addEventListener('keydown', event => { if (event.key === 'Escape') { menu.open = false; trigger.focus(); } });
   bar.append(copy, menu);
+  if (sessionId && messageId && NATIVE_ID.test(messageId) && answer) bar.append(bookmarkButton(sessionId, messageId, answer));
   const branch = branchPoint(messageId);
   if (branch) {
     // Branch in new chat (#482): ChatGPT's own branch at this reply, made with the first message.
@@ -5918,7 +6029,8 @@ function paintDetail(followBottom = historyBefore === null): void {
     const built = item.kind === 'compaction' ? compactionRow(item.block, cached?.row, item === latestCompaction)
       : item.kind === 'earlier' ? earlierVersionsRow(item.fold, key) : eventRow(held ?? item.event);
     if (answerTurn || looseAnswer) built.querySelector('.said')?.append(answerActions(answerTurn,
-      item.kind === 'event' && item.event.kind === 'assistant_message' ? item.event.messageId : undefined));
+      item.kind === 'event' && item.event.kind === 'assistant_message' ? item.event.messageId : undefined,
+      item.kind === 'event' && item.event.kind === 'assistant_message' ? { text: item.event.message.text, time: item.event.time } : undefined));
     if (item.kind === 'event' && editableQuestion(item.event, events)) {
       built.querySelector('.ev-body')?.append(questionActions(item.event, laterMessages.get(item.event.seq) ?? 0));
       built.dataset.questionId = item.event.messageId;
@@ -7356,7 +7468,7 @@ const CHAT_INPUTS = [
   'chatBrowser', 'cosBrowserMinimize', 'browserBridgePort',
   'goalIncludeToolCalls',
   'planBackend',
-  'finishTool', 'finishLeadMinutes', 'rotateTurnMinutes', 'rotateStopFallback', 'localAppUsage', 'defaultChatModel', 'defaultChatReasoning', 'workerModel', 'workerReasoning', 'autoSelectSkills', 'backgroundChats', 'backgroundPlacement', 'browserOnly', 'autoRefreshPlugins',
+  'finishTool', 'finishHoldOnStop', 'finishLeadMinutes', 'rotateTurnMinutes', 'rotateStopFallback', 'localAppUsage', 'defaultChatModel', 'defaultChatReasoning', 'workerModel', 'workerReasoning', 'autoSelectSkills', 'backgroundChats', 'backgroundPlacement', 'browserOnly', 'autoRefreshPlugins',
   'goalBackend',
   'loopBackend',
   'helperModel', 'helperReasoning',
@@ -8747,6 +8859,10 @@ export function initChat(next: Deps): void {
     } else void sendComposer(undefined, undefined, undefined, controlAction);
   });
 
+  $('chatBookmarks').addEventListener('click', () => toggleRowMenu({
+    owner: 'bookmarks', anchor: () => $('chatBookmarks'), label: () => t('Bookmarks'), items: bookmarkMenuItems, wide: true
+  }));
+  onRowMenuChange(() => $('chatBookmarks').setAttribute('aria-expanded', String(rowMenuOpenFor('bookmarks'))));
   chatFind = initChatFind({
     selectedId: () => selectedId,
     find: async (id, query) => (await run(api.findInChat(id, query))) ?? null,

@@ -2593,7 +2593,8 @@ export async function recordProgress(
   text: string,
   anchor?: { seq: number; time: number },
   turnId?: string | null,
-  finishControl?: { state: 'released' | 'notified' | 'decision'; conversationId: string; revision?: string; inputRevision?: string; workSeq?: number }
+  finishControl?: { state: 'released' | 'notified' | 'decision'; conversationId: string; revision?: string; inputRevision?: string; workSeq?: number },
+  reason?: 'helper_stop_unverified'
 ): Promise<{ seq: number; time: number } | null> {
   if (!recordingEnabled() || !progressId) return null;
   const time = anchor?.time ?? Date.now();
@@ -2607,6 +2608,7 @@ export async function recordProgress(
     kind: 'progress',
     progressId,
     ...(finishControl ? { finishControl } : {}),
+    ...(reason ? { reason } : {}),
     ...(anchor ? { origin: anchor.seq } : {}),
     ...(turnId ? { turnId } : {}),
     message: await storeText(sessionId, text, 4000)

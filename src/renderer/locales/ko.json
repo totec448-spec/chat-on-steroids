@@ -2756,6 +2756,12 @@
   "from {0} events": "이벤트 {0}개에서 생성",
   "(~{0} tokens)": "(~{0} 토큰)",
   "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}",
+  "The helper says the goal is met, but this has not been checked. No follow-up was sent. Review the chat and continue if work remains.": "보조 도구는 목표를 달성했다고 했지만 확인되지 않았습니다. 후속 답변은 전송되지 않았습니다. 채팅을 확인하고 남은 작업이 있으면 계속하세요.",
+  "Goal result needs review": "Goal 결과를 확인하세요",
+  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Goal 보조 도구는 작업이 끝났다고 판단했지만 아직 확인되지 않았습니다. 채팅을 확인하거나 다음 지시를 보내세요.",
+  "Review Goal completion": "Goal 완료 확인",
+  "Off by default. When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you.": "기본값은 꺼짐입니다. Goal이 증거 없이 완료를 보고하면 결과는 확인되지 않은 상태로, 답변은 대기 상태로 유지됩니다. Session finish는 현재 대기를 유지하고 모델에 턴을 열린 상태로 유지하도록 요청하며 알림을 보낼 수 있습니다.",
+  "When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you. Off by default.": "Goal이 증거 없이 완료를 보고하면 결과는 확인되지 않은 상태로, 답변은 대기 상태로 유지됩니다. Session finish는 현재 대기를 유지하고 모델에 턴을 열린 상태로 유지하도록 요청하며 알림을 보낼 수 있습니다. 기본값은 꺼짐입니다.",
   "Sub-agent view": "서브에이전트 보기",
   "Conversation": "대화",
   "Loading activity…": "활동 불러오는 중…",
@@ -2866,5 +2872,11 @@
   "Quicker after Stop": "중지 후 더 빠르게",
   "A message you send right after Stop goes out at once.": "중지 직후 보낸 메시지가 바로 전송됩니다.",
   "Sub-agent chats tidy up": "하위 에이전트 채팅 정리",
-  "With archiving on, a worker's chat is archived two minutes after its task is done.": "보관을 켜면 작업자의 채팅이 작업을 마친 지 2분 후에 보관됩니다."
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "보관을 켜면 작업자의 채팅이 작업을 마친 지 2분 후에 보관됩니다.",
+  "Bookmark answer": "답변 북마크",
+  "Remove bookmark": "북마크 해제",
+  "Bookmarks": "북마크",
+  "Answer": "답변",
+  "This answer is no longer in the chat.": "이 답변은 더 이상 채팅에 없습니다.",
+  "{0} bookmarks in this chat": "이 채팅의 북마크 {0}개"
 }
