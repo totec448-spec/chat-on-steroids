@@ -64,6 +64,7 @@ export function addProject(folderPath: string): Promise<LocalProject> {
     const project: LocalProject = { id: randomUUID(), name: (path.basename(resolved.real) || resolved.real).slice(0, 160), path: resolved.real, createdAt: Date.now(),
       chatgpt: { state: 'requested', requestId: randomUUID(), updatedAt: Date.now() } };
     await writeDurableNow('projects', [...projects, project]);
+    logInfo(`projects: project ${project.id} asks for a new ChatGPT Project`);
     return project;
   });
   mutations = operation.catch(() => undefined);
@@ -111,6 +112,7 @@ export function addRemoteProject(address: string, folder: string, deps: { connec
     const project: LocalProject = { id: randomUUID(), name: (path.posix.basename(realPath) || identity).slice(0, 160), path: identity, remote,
       createdAt: Date.now(), chatgpt: { state: 'requested', requestId: randomUUID(), updatedAt: Date.now() } };
     await writeDurableNow('projects', [...projects, project]);
+    logInfo(`projects: project ${project.id} asks for a new ChatGPT Project`);
     return project;
   });
   mutations = operation.catch(() => undefined);
@@ -253,6 +255,9 @@ function updateChatgptLink(match: (link: ChatgptProjectLink, project: LocalProje
     if (!changed) return null;
     const updated: LocalProject = { ...project, chatgpt: changed };
     await writeDurableNow('projects', projects.map(row => row.id === project.id ? updated : row));
+    // Every step, so a Project that never appeared shows where it stopped (#1759); ids only, no names.
+    const why = 'error' in changed ? `: ${changed.error.slice(0, 200)}` : '';
+    logInfo(`projects: project ${project.id}'s ChatGPT Project went from ${project.chatgpt.state} to ${changed.state}${why}`);
     for (const listener of linkListeners) { try { listener(); } catch { /* presentation only */ } }
     return updated;
   });
