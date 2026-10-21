@@ -13,7 +13,8 @@ import { MAX_CHAT_GROUP_MEMBERS, MAX_CHAT_GROUPS_PER_PROJECT, chatGroupName } fr
  */
 const STORE = 'chat-groups';
 let state: ChatGroupsState = { version: 1, groups: [], members: {} };
-let loaded = false;
+/** The one load of the store; every caller waits for the same one (two early actions once both loaded it). */
+let loading: Promise<void> | null = null;
 
 export interface ChatGroupSession { id: string; projectId?: string | null; origin?: { kind?: string } | null }
 
@@ -41,11 +42,10 @@ function clean(raw: unknown): ChatGroupsState {
   return out;
 }
 
-async function ready(): Promise<void> {
-  if (loaded) return;
+function ready(): Promise<void> {
   // A corrupt or unreadable store starts empty: grouping is never worth a sidebar that will not open.
-  state = clean(await readDurable<unknown>(STORE).catch(() => null));
-  loaded = true;
+  loading ??= readDurable<unknown>(STORE).catch(() => null).then(raw => { state = clean(raw); });
+  return loading;
 }
 
 function save(): ChatGroupsState {
@@ -127,5 +127,5 @@ export async function forgetChatGroupMember(sessionId: string): Promise<void> {
 
 export function resetChatGroupsForTests(): void {
   state = { version: 1, groups: [], members: {} };
-  loaded = false;
+  loading = null;
 }

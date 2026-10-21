@@ -1,8 +1,13 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 
-const durable = vi.hoisted(() => ({ value: null as unknown, writes: 0 }));
+const durable = vi.hoisted(() => ({ value: null as unknown, writes: 0, reads: 0, slowSecondRead: false }));
 vi.mock('../src/main/durable.js', () => ({
-  readDurable: async () => durable.value,
+  readDurable: async () => {
+    const value = structuredClone(durable.value);
+    durable.reads++;
+    if (durable.slowSecondRead && durable.reads === 2) await new Promise(resolve => setTimeout(resolve, 20));
+    return value;
+  },
   writeDurableSoon: (_name: string, value: unknown) => { durable.value = structuredClone(value); durable.writes++; }
 }));
 
@@ -11,7 +16,7 @@ const { chatGroupName, chatGroupOf } = await import('../src/shared/chat-groups.j
 const exists = (id: string) => id === 'project-a' || id === 'project-b';
 const chat = (id: string, projectId: string | null = 'project-a', worker = false) => ({ id, projectId, origin: worker ? { kind: 'worker' } : null });
 
-beforeEach(() => { durable.value = null; durable.writes = 0; groups.resetChatGroupsForTests(); });
+beforeEach(() => { durable.value = null; durable.writes = 0; durable.reads = 0; durable.slowSecondRead = false; groups.resetChatGroupsForTests(); });
 
 it('names a group trimmed and folded, and refuses an empty or overlong name', async () => {
   expect(chatGroupName('  Spanish\n\t round  ')).toBe('Spanish round');
@@ -85,4 +90,17 @@ it('forgets a deleted chat\'s membership and writes only when it had one', async
   await groups.forgetChatGroupMember('s1');
   expect((await groups.chatGroupsState()).members).toEqual({});
   expect(durable.writes).toBe(before + 1);
+});
+
+// CodeRabbit on #1687: two group actions right after start both loaded the store; the slower load
+// replaced the state the first action had already changed, and its new group was lost.
+it('keeps both changes when two actions arrive before the store has loaded', async () => {
+  durable.slowSecondRead = true;
+  const [first, second] = await Promise.all([
+    groups.createChatGroup('project-a', 'Spanish', exists),
+    groups.createChatGroup('project-a', 'Italian', exists)
+  ]);
+  const state = await groups.chatGroupsState();
+  expect(state.groups.map(group => group.id).sort()).toEqual([first.group.id, second.group.id].sort());
+  expect(durable.reads).toBe(1);
 });
