@@ -261,6 +261,29 @@ describe('turn rotation (#1402)', () => {
     expect((await request('POST', '/input/claim', { body: { id: row.id, owner: 'late-page', conversationId: chat, requiresAuthorization: true } })).body.input).toBeNull();
   });
 
+  // 2026-10-20: when ChatGPT shows Stop it offers no Send for the continue; the page says so at
+  // once instead of the call's answer waiting out the hold.
+  it('answers the call at once when the page declines the continue for want of Send', async () => {
+    setRotationHoldForTests(5_000);
+    const chat = 'f0f00003-1111-4111-8111-000000000204';
+    const sessionId = await turnFor(chat, 'g-rot-hold-4', 31);
+    let answered = false;
+    const answer = (await heldCall(chat))().then(() => { answered = true; });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    const row = (await listInputs()).find(entry => entry.sessionId === sessionId && entry.purpose === 'rotation')!;
+    const page = { id: row.id, owner: 'rotation-page', conversationId: chat };
+    expect((await request('POST', '/input/claim', { body: { ...page, requiresAuthorization: true } })).body.input).toMatchObject({ id: row.id });
+    const started = Date.now();
+    expect((await request('POST', '/input/fail', { body: { ...page, error: 'Fresh-turn continue declined: no Send while ChatGPT works.', detail: 'no-send' } })).body).toEqual({ ok: true });
+    await answer;
+    expect(answered).toBe(true);
+    expect(Date.now() - started).toBeLessThan(1_500);
+    // Cancelled like one that timed out, with no error: the chat shows nothing for it.
+    const declined = (await listInputs()).find(entry => entry.id === row.id)!;
+    expect(declined.state).toBe('cancelled');
+    expect(declined.error).toBeUndefined();
+  });
+
   it('files no continue for a call whose answer has already gone out', async () => {
     const chat = 'f0f00003-1111-4111-8111-000000000203';
     const sessionId = await turnFor(chat, 'g-rot-hold-3', 31);

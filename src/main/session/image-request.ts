@@ -34,6 +34,7 @@ const words = (list: string): string => list.trim().split(/\s*\|\s*/).join('|');
 const NOUN = words(`
   images? | pictures? | pics? | photos? | photographs? | illustrations? | drawings? | paintings? | artworks? | logos? | icons? |
   posters? | wallpapers? | banners? | stickers? | portraits? | cartoons? | comics? | memes? | avatars? | thumbnails? | renders? | sketch(?:es)? |
+  sprites? | sprite ?sheets? | concept art | pixel art | key art | splash art | character designs? |
   \\p{L}*bild(?:er)? | \\p{L}*fotos? | \\p{L}*zeichnung(?:en)? | \\p{L}*gemalde | grafik(?:en)? | \\p{L}*plakat(?:e)? | \\p{L}*logos? | portrat |
   imagen(?:es)? | ilustracion(?:es)? | dibujos? | pinturas? | logotipos? | iconos? | cartel(?:es)? | fondo de pantalla | retratos? | caricaturas? | comic |
   dessins? | peintures? | icones? | affiches? | fond d'ecran | bande dessinee |
@@ -120,6 +121,11 @@ const aboutRe = anyOf(ABOUT_PICTURES), filesRe = anyOf(FILES);
 const identifierRe = new RegExp(`${WORD_EDGE}(?:${NOUN})[-_](?!(?:style|like|realistic|real|quality|ready|perfect|based|inspired)${WORD_END})[\\p{L}\\p{N}]`, 'u');
 // Tool and variable names built on a picture word ("save_image", "view_image") are technical text.
 const toolNameRe = new RegExp(`[\\p{L}\\p{N}]_(?:${NOUN})${WORD_END}`, 'u');
+// ChatGPT's own image tool named outright, beside a making word: "use your image generator to make …" (#1701).
+const imageToolRe = anyOf(words(`image (?:generation|generator|gen|creation)(?: tool)? | image tool | bildgenerator\\p{L}* | bildgenerierung`));
+const imageToolAll = new RegExp(imageToolRe.source, 'gu');
+/** The tool's own name holds a making stem ("genera…"), so the making word must stand outside it. */
+const namesImageTool = (form: string): boolean => imageToolRe.test(form) && createRe.test(form.replace(imageToolAll, ' '));
 const nounRe = anyOf(NOUN), codeRe = anyOf(CODE), taskRe = anyOf(TASK), processRe = anyOf(PROCESS), editRe = anyOf(EDIT), createRe = anyOf(CREATE);
 // A request: a creating verb, then a picture noun within a few words ("create a small watercolor image").
 const DEFINITE = 'the|these|those|this|that|my|our|your|its|their|die|den|das|diese|dieses|meine|unsere|las|los|estas|estos|mis|nuestras|les|ces|mes|nos|as|os|estas|estes|minhas|nossas';
@@ -189,7 +195,7 @@ export function asksForImage(text: string, context: ImageRequestContext = {}): b
     const existing = has(definiteRequestRe) && !context.afterImage && !context.attachedImage;
     const creates = (has(requestRe) && !existing) || has(pictureOfRe) || has(drawRe) || has(verbLastRe) || has(drawLastRe) ||
       has(wantRe) || has(bareWantRe) || has(germanLastRe) || has(drawAnywhereRe) ||
-      CJK_DRAW.test(sentence) || (CJK_NOUN.test(sentence) && CJK_CREATE.test(sentence));
+      CJK_DRAW.test(sentence) || (CJK_NOUN.test(sentence) && CJK_CREATE.test(sentence)) || variants.some(namesImageTool);
     if (creates && !processing) return true;
     // A picture that is already there, attached or just made, being changed: "make it brighter".
     // Only short messages without files or everyday work count: "now run the tests" is not an edit.
