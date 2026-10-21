@@ -78,3 +78,19 @@ it('applies toggles in the order they were made', async () => {
   ]);
   expect((await listBookmarks(id)).map(mark => mark.messageId)).toEqual([B]);
 });
+
+// CodeRabbit on #1719: a file with more than the limit (written by hand, or by another version) was
+// returned whole. Reading keeps the limit too: the ones bookmarked first, as adding would have.
+it('keeps at most the limit when a saved file holds more, the ones bookmarked first', async () => {
+  const { id } = await createSession({ conversationId: 'bookmarks-many', title: 'Many' });
+  const { sessionBookmarksPath } = await import('../src/main/session/store.js');
+  const { writeFile } = await import('node:fs/promises');
+  const idOf = (n: number) => `${n.toString(16).padStart(8, '0')}-1111-4222-8333-444444444444`;
+  const marks = Array.from({ length: MAX_BOOKMARKS + 5 }, (_, n) => ({ messageId: idOf(n), excerpt: `Answer ${n}`, messageTime: 1000 - n, at: n }));
+  await writeFile(sessionBookmarksPath(id), JSON.stringify({ version: 1, bookmarks: marks }), 'utf8');
+  const listed = await listBookmarks(id);
+  expect(listed).toHaveLength(MAX_BOOKMARKS);
+  // The five bookmarked last (highest `at`) are the ones left out; the list is still in chat order.
+  expect(listed.some(mark => mark.messageId === idOf(MAX_BOOKMARKS))).toBe(false);
+  expect(listed.map(mark => mark.messageTime)).toEqual([...listed.map(mark => mark.messageTime)].sort((a, b) => a - b));
+});

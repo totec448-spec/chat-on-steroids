@@ -46,7 +46,10 @@ async function read(id: string): Promise<SessionBookmark[]> {
     const number = (n: unknown) => (typeof n === 'number' && Number.isFinite(n) ? n : 0);
     marks.push({ messageId, excerpt: oneLine(typeof mark.excerpt === 'string' ? mark.excerpt : ''), messageTime: number(mark.messageTime), at: number(mark.at) });
   }
-  return marks.sort((a, b) => a.messageTime - b.messageTime || a.at - b.at);
+  // A file with more than the limit (written by hand, or by another version) keeps the ones
+  // bookmarked first, as adding would have: past the limit a new bookmark is refused.
+  const kept = marks.length > MAX_BOOKMARKS ? [...marks].sort((a, b) => a.at - b.at).slice(0, MAX_BOOKMARKS) : marks;
+  return kept.sort((a, b) => a.messageTime - b.messageTime || a.at - b.at);
 }
 
 export function listBookmarks(id: string): Promise<SessionBookmark[]> {

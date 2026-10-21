@@ -1124,7 +1124,7 @@ and `sessions:bookmark { id, messageId, excerpt, messageTime, on }` → the chat
 session; at most `MAX_BOOKMARKS` (200) per chat, excerpts one line of at most 160 characters. A
 missing or damaged file reads as no bookmarks; damaged entries are dropped. Nothing is sent to
 ChatGPT. The header list jumps through `sessions:locate-message`; a reply no longer in the chat
-shows a notice instead of scrolling. Long row menus scroll inside the window (`row-menu.ts`).
+shows a notice instead of scrolling. Long row menus scroll inside the window (`row-menu.ts`). A file holding more than the limit keeps the ones bookmarked first. Tests: `test/session-bookmarks.test.ts` (storage, limit, damaged files), the "bookmarked answers" cases in `test/renderer-timeline.test.ts` (answer action, header list, jump), and `scripts/verify-bookmark-list.cjs` (200 bookmarks in a short window, real Electron).
 
 Edit & resubmit (#365): ChatGPT keeps an edited question as a new version beside the old one, under
 the same parent, and continues from the new one. The page reports each question's place in that tree
