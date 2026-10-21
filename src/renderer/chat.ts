@@ -1066,7 +1066,7 @@ function runComposerCommand(name: string): void {
  * menu, unless a Skill has the name. Plan, Goal and Loop then send the rest the way their mode does;
  * any other command runs and leaves the rest in the composer.
  */
-async function sendTypedCommand(controlAction: boolean): Promise<void> {
+async function sendTypedCommand(controlAction: boolean, delivery?: 'auto' | 'after-turn'): Promise<void> {
   const input = $<HTMLTextAreaElement>('chatInput');
   const typed = /^\s*\/([a-z][a-z-]*)(?=\s|$)/i.exec(input.value);
   const name = typed?.[1]!.toLowerCase();
@@ -1074,7 +1074,7 @@ async function sendTypedCommand(controlAction: boolean): Promise<void> {
   const library = known ? await run(api.skillLibrary({ sessionId: selectedId, projectId: selectedLocalProject()?.id ?? selectedProjectId })) : null;
   if (!typed || !known || !library || library.skills.some(skill => skill.id === name)) {
     if (taskPlans.has(draftKey())) { if (!$('createPlan').dataset.busy) void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt'); }
-    else void sendComposer(undefined, undefined, undefined, controlAction);
+    else void sendComposer(delivery, undefined, undefined, controlAction);
     return;
   }
   const rest = input.value.slice(typed[0].length).replace(/^\s+/, '');
@@ -1082,7 +1082,10 @@ async function sendTypedCommand(controlAction: boolean): Promise<void> {
   input.dispatchEvent(new Event('input', { bubbles: true }));
   // The menu's Plan is a toggle; a typed /plan only arms, so an armed Plan stays armed.
   if (name !== 'plan' || !taskPlans.has(draftKey())) runComposerCommand(name);
-  if (MODE_COMMANDS.has(name) && rest.trim()) $<HTMLFormElement>('composer').requestSubmit();
+  if (!MODE_COMMANDS.has(name) || !rest.trim()) return;
+  // Cmd/Ctrl+Shift+Enter's other way reaches the rest too; a typed /plan drafts the plan as Enter does.
+  if (delivery && name !== 'plan') void sendComposer(delivery);
+  else $<HTMLFormElement>('composer').requestSubmit();
 }
 function openChatSummary(): SessionSummary | null {
   return selectedId === null ? null : sessions.find(row => row.id === selectedId) ?? null;
@@ -8317,7 +8320,10 @@ export function initChat(next: Deps): void {
       if (!authoredComposerText().trim() && !imageDrafts.get(draftKey())?.length) return;
       if ($('sendOptions').hidden || currentPreparedPlan() || taskPlans.has(draftKey())) { $<HTMLFormElement>('composer').requestSubmit(); return; }
       retireDictation();
-      void sendComposer($<HTMLSelectElement>('sendMode').value === 'after-turn' ? 'auto' : 'after-turn');
+      const other = $<HTMLSelectElement>('sendMode').value === 'after-turn' ? 'auto' : 'after-turn';
+      // A leading app command runs as Enter would run it, not as a Skill directive.
+      if (/^\s*\/[a-z]/i.test($<HTMLTextAreaElement>('chatInput').value)) void sendTypedCommand(false, other);
+      else void sendComposer(other);
     }
   });
   $('composerSettings').addEventListener('toggle', paintTaskActions);
