@@ -270,6 +270,48 @@ export async function trackInFlight<T>(context: CallContext, fn: () => Promise<T
   }
 }
 
+/**
+ * Outer calls whose result has left dispatch, kept so the app can say which results it has
+ * fully sent to ChatGPT (#1643 follow-up). ChatGPT's page no longer sees a running turn's tool
+ * results until the turn ends, so the compaction barrier can no longer read ChatGPT's own receipt
+ * mid-turn; a response the transport finished sending some seconds ago is the evidence left.
+ */
+const released = new Set<CallContext>();
+const RELEASED_KEEP_MS = 30 * 60_000;
+const RELEASED_MAX = 512;
+
+/** An outer call's result left dispatch; its publication says whether and when it was sent. */
+export function noteCallReleased(context: CallContext, now = Date.now()): void {
+  released.add(context);
+  for (const call of released) {
+    if (released.size <= RELEASED_MAX && now - call.startedAt <= RELEASED_KEEP_MS) break;
+    released.delete(call);
+  }
+}
+
+/**
+ * This chat's results since `since`, as far as the app delivered them: how many were fully sent
+ * at least `graceMs` ago, and whether anything of this chat is still running, unsent, failed to
+ * send or within that grace. A call whose owner is not proven yet counts against every chat,
+ * like `runningToolCalls`.
+ */
+export function sentResults(conversationId: string, since: number, graceMs: number, now = Date.now()): { count: number; settled: boolean } {
+  let count = 0, settled = countFor(running, conversationId) === 0;
+  for (const call of released) {
+    if (call.startedAt < since) continue;
+    const owner = exactOwner(call);
+    if (owner !== null && owner !== conversationId) continue;
+    const sentAt = call.publication?.completedAt ?? null;
+    if (call.publication?.failed || sentAt === null || now - sentAt < graceMs) { settled = false; continue; }
+    if (owner === conversationId) count += 1;
+  }
+  return { count, settled };
+}
+
+export function resetReleasedCallsForTests(): void {
+  released.clear();
+}
+
 export function currentCall(): CallContext | null {
   return storage.getStore() ?? null;
 }
