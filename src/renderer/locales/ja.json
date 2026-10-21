@@ -2808,5 +2808,6 @@
   "A tool call from an untrusted chat was refused. To allow it, open this chat's ⋯ menu in the sidebar (or right-click its row) and choose Trust chat.": "信頼されていないチャットからのツール呼び出しが拒否されました。許可するには、サイドバーでこのチャットの ⋯ メニューを開き（または行を右クリックし）、「チャットを信頼」を選んでください。",
   "A tool call from a worker whose main chat is not currently allowed was refused. Open that main chat's ⋯ menu in the sidebar and choose Trust chat if it is untrusted, or Release chat if it is blocked.": "メインチャットが現在許可されていないワーカーからのツール呼び出しが拒否されました。サイドバーでそのメインチャットの ⋯ メニューを開き、信頼されていなければ「チャットを信頼」、ブロックされていれば「ブロックを解除」を選んでください。",
   "A tool call from an app-created worker was refused because the main chat that started it is not proven yet. Return to that main chat in the sidebar; once its row is there, open its ⋯ menu and choose Trust chat, or Release chat if it is blocked, then retry after the worker is attached or recovered there.": "アプリが作成したワーカーからのツール呼び出しが、それを開始したメインチャットがまだ確認できないため拒否されました。サイドバーでそのメインチャットに戻り、行が表示されたら ⋯ メニューを開いて「チャットを信頼」（ブロックされていれば「ブロックを解除」）を選び、ワーカーがそこで接続または復旧してから再試行してください。",
-  "Ask ChatGPT for a picture: this message goes without the app, so ChatGPT can draw.": "ChatGPT に画像を頼みます。このメッセージはアプリなしで送られるので、ChatGPT が描けます。"
+  "Ask ChatGPT for a picture: this message goes without the app, so ChatGPT can draw.": "ChatGPT に画像を頼みます。このメッセージはアプリなしで送られるので、ChatGPT が描けます。",
+  "Port {0} was in use when the app started, so it now listens on port {1}. Point your tunnel at port {1}.": "アプリの起動時にポート {0} が使用中だったため、現在はポート {1} で待ち受けています。トンネルの接続先をポート {1} に変更してください。"
 }
