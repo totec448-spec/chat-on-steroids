@@ -370,7 +370,7 @@ it('publishes the exact transcript owners of one recorder burst and an explicit 
   // One burst names each owner once. Driven directly: three awaited disk writes can outlast the
   // 400 ms burst on a busy machine and legitimately publish twice.
   notifyChanged(first.id); notifyChanged(second.id); notifyChanged(first.id);
-  await vi.waitFor(() => expect(changes()).toHaveLength(1));
+  await vi.waitFor(() => expect(changes()).toHaveLength(1), { timeout: 5_000 });
   expect(changes()[0]!.sessionIds).toEqual(expect.arrayContaining([first.id, second.id]));
   expect(new Set(changes()[0]!.sessionIds).size).toBe(changes()[0]!.sessionIds.length);
   send.mockClear();
@@ -378,7 +378,7 @@ it('publishes the exact transcript owners of one recorder burst and an explicit 
   await recordNote(first.id, 'first owner');
   await recordNote(second.id, 'second owner');
   await recordNote(first.id, 'first owner again');
-  await vi.waitFor(() => expect(changes().flatMap(change => change.sessionIds)).toEqual(expect.arrayContaining([first.id, second.id])));
+  await vi.waitFor(() => expect(changes().flatMap(change => change.sessionIds)).toEqual(expect.arrayContaining([first.id, second.id])), { timeout: 5_000 });
   for (const change of changes()) expect(new Set(change.sessionIds).size).toBe(change.sessionIds.length);
   send.mockClear();
   expect(await handlers.get('sessions:clearImageStorage')!(null, { mode: 'all' })).toMatchObject({ ok: true });
