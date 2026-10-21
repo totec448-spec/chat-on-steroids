@@ -1363,6 +1363,15 @@ a worker's or helper's, whose tasks come from the app. Messages without text, st
 queued inputs are not recalled either. The list is read at the first press, so a message recorded
 while paging doesn't shift it. Each recalled message is announced through the sr-only polite region
 `#recallAnnounce`. Recall only fills the composer; nothing is stored and nothing is sent.
+Esc to stop (`escapeStopsTurn` in `chat.ts`): while the open chat's turn runs and Send shows Stop
+(composer empty, no files, no prepared plan), a first plain Esc in the composer only arms Stop and
+says "Press Esc again to stop the turn" in `#composerStatus`; a second plain Esc within 1.5 s stops
+that exact turn with `stopCurrentTurn`, the Stop button's own request (§14), not through a form
+submit, so an armed Plan cannot take it and no controls refresh can swap the turn. The armed press
+belongs to its turn: after a new turn starts, the next Esc only arms again. Any other key, a chat
+switch or the timeout disarms it; a held key's repeats, modifiers, IME composition, an Esc the
+dictation or slash/file menu took, a stop already requested and Cancel delivery (no running turn)
+never count.
 
 `session/start-input.ts` returns durable local admission before waiting for connector readiness
 or browser delivery. Each New Chat opening reserves its own local session in the outbox, then

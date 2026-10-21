@@ -529,6 +529,7 @@
   "Provider busy · retry {0}{1}": "提供商繁忙 · 重试 {0}{1}",
   "Stop requested": "已请求停止",
   "Stop turn": "停止本轮",
+  "Press Esc again to stop the turn": "再按一次 Esc 停止本轮",
   "Cancel delivery": "取消发送",
   "Queue plan at Session finish": "在轮次结束时将计划排队",
   "Start full plan": "启动完整计划",
