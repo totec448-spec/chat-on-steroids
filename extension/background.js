@@ -3843,15 +3843,18 @@ function projectFromUrl(value) {
 const CHATGPT_PROJECT_ID = /^g-p-[0-9a-f]{32}$/;
 
 /**
- * The ChatGPT Project the recording tab shows this chat in (#1744), from the tab's own URL: a
- * Project chat (`/g/g-p-…/c/<id>`) or, before ChatGPT names a fresh chat, the Project home it was
- * started on. Null when the tab is on another chat, outside any Project, or cannot be read.
+ * The ChatGPT Project the recording tab shows this chat in (#1744), from the tab's own URL: the
+ * chat's own Project route (`/g/g-p-…/c/<id>`) or, for a fresh chat's first observations before
+ * ChatGPT names it, the Project home it was started on. Null when the tab is on another chat,
+ * on a route without a chat for a named one, outside any Project, or cannot be read.
  */
 async function tabChatgptProject(source, conversationId) {
   const tab = await chrome.tabs.get(source.tab).catch(() => null);
   if (!tab || tab.pendingUrl) return null;
   const shown = conversationFromUrl(tab.url);
-  if (shown && shown !== conversationId) return null;
+  // A named chat counts only on its own route; a route without a chat (the Project home) only
+  // for a fresh chat's first observations, so a late batch never takes the Project shown by then.
+  if (shown ? shown !== conversationId : Boolean(conversationId)) return null;
   return projectFromUrl(tab.url);
 }
 
