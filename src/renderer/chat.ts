@@ -1046,7 +1046,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
 let renaming: { id: string; original: string; value: string; start: number; end: number } | null = null;
 
 /** Slash commands that act on the open chat; New Chat does not offer them. */
-const CHAT_COMMANDS = new Set(['rename', 'pin', 'status', 'compact']);
+const CHAT_COMMANDS = new Set(['rename', 'pin', 'status', 'compact', 'copy', 'export', 'find']);
 /** The commands that switch how the next message is sent; their rest is that message. */
 const MODE_COMMANDS = new Set(['plan', 'goal', 'loop']);
 
@@ -1073,7 +1073,10 @@ async function sendTypedCommand(controlAction: boolean, delivery?: 'auto' | 'aft
   const typed = /^\s*\/([a-z][a-z-]*)(?=\s|$)/i.exec(input.value);
   const name = typed?.[1]!.toLowerCase();
   const known = name && APP_COMMANDS.some(row => row.command === name) && (!CHAT_COMMANDS.has(name) || openChatSummary() !== null);
+  const selection = selectionGeneration, draft = input.value;
   const library = known ? await run(api.skillLibrary({ sessionId: selectedId, projectId: selectedLocalProject()?.id ?? selectedProjectId })) : null;
+  // Another chat opened or the draft changed while the Skills loaded: this command was typed for neither.
+  if (known && (selection !== selectionGeneration || input.value !== draft)) return;
   if (!typed || !known || !library || library.skills.some(skill => skill.id === name)) {
     if (taskPlans.has(draftKey())) { if (!$('createPlan').dataset.busy) void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt'); }
     else void sendComposer(delivery, undefined, undefined, controlAction);
@@ -1130,6 +1133,11 @@ function runSlashCommand(name: string): void {
   else if (name === 'feedback') openSettingsTab('activity');
   else if (name === 'plugins') $('sidebarPlugins').click();
   else if (name === 'pet') $('sidebarPets').click();
+  else if (name === 'copy' && chat) void run(api.exportMarkdown({ id: chat.id, scope: 'latest', target: 'clipboard' }))
+    .then(result => { if (result?.done === 'copied') toast(t('Answer copied')); });
+  else if (name === 'export' && chat) void run(api.exportMarkdown({ id: chat.id, scope: 'session', target: 'file' }))
+    .then(result => { if (result?.done === 'saved') toast(t('Saved {0}', [result.name])); });
+  else if (name === 'find' && chat) afterClick(() => chatFind?.open());
 }
 
 function startRename(summary: SessionSummary): void {

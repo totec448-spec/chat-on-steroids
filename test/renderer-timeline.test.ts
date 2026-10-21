@@ -6350,7 +6350,7 @@ it('lists the Codex slash commands in the composer menu', async () => {
   const { w, input } = await slash('');
   const listed = [...w.document.querySelectorAll<HTMLElement>('#skillPicker .slash-menu-option')].map(row => row.title);
   expect(listed).toEqual(expect.arrayContaining(['/plan', '/goal', '/loop', '/compact', '/model', '/reasoning', '/new', '/rename', '/pin',
-    '/status', '/review', '/init', '/usage', '/plugins', '/pet', '/feedback']));
+    '/status', '/review', '/init', '/usage', '/plugins', '/pet', '/feedback', '/copy', '/export', '/find']));
   expect(input.value).toBe('/');
 });
 
@@ -6468,6 +6468,76 @@ it('offers chat-only commands only while a chat is open', async () => {
   expect(listed).not.toEqual(expect.arrayContaining(['/rename']));
   expect(listed).not.toContain('/pin');
   expect(listed).not.toContain('/status');
+  for (const command of ['/copy', '/export', '/find']) expect(listed).not.toContain(command);
+});
+
+// /copy, /export and /find run the open chat's answer copy, Markdown export and Find in chat.
+it('copies the newest finished answer with /copy and says so', async () => {
+  const { w, row } = await slash('copy');
+  const api = (w as any).api;
+  api.exportMarkdown = vi.fn(async () => ({ ok: true, data: { done: 'copied' } }));
+  row!.click(); await settle();
+  expect(api.exportMarkdown).toHaveBeenCalledWith({ id: summary([]).id, scope: 'latest', target: 'clipboard' });
+  expect(w.document.body.textContent).toContain('Answer copied');
+});
+
+it('saves the whole chat as Markdown with a typed /export, sending nothing', async () => {
+  const app = await boot([]);
+  const api = (app.w as any).api;
+  api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+  api.exportMarkdown = vi.fn(async () => ({ ok: true, data: { done: 'saved', name: 'chat.md' } }));
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = '/export';
+  app.w.document.getElementById('composer')!.dispatchEvent(new app.w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle(); await settle();
+  expect(api.exportMarkdown).toHaveBeenCalledWith({ id: summary([]).id, scope: 'session', target: 'file' });
+  expect(app.w.document.body.textContent).toContain('Saved chat.md');
+  expect(app.live.sent).toHaveLength(0);
+});
+
+it('drops a typed /export when another chat opens while the Skills load', async () => {
+  const first = summary([]), second = { ...summary([]), id: '2026-09-02-test0002', title: 'Other session' };
+  const app = await boot([], true, [], [], { sessions: [first, second] });
+  const api = (app.w as any).api;
+  let release!: (value: unknown) => void;
+  api.skillLibrary = () => new Promise(resolve => { release = resolve; });
+  api.exportMarkdown = vi.fn(async () => ({ ok: true, data: { done: 'saved', name: 'chat.md' } }));
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = '/export';
+  app.w.document.getElementById('composer')!.dispatchEvent(new app.w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  (app.w.document.querySelector(`#sessionList [data-id="${second.id}"]`) as HTMLElement).click();
+  release({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+  await settle(); await settle();
+  expect(api.exportMarkdown).not.toHaveBeenCalled();
+  expect(app.live.sent).toHaveLength(0);
+});
+
+it('drops a typed /export and keeps the new draft when the draft changes while the Skills load', async () => {
+  const app = await boot([]);
+  const api = (app.w as any).api;
+  let release!: (value: unknown) => void;
+  api.skillLibrary = () => new Promise(resolve => { release = resolve; });
+  api.exportMarkdown = vi.fn(async () => ({ ok: true, data: { done: 'saved', name: 'chat.md' } }));
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = '/export';
+  app.w.document.getElementById('composer')!.dispatchEvent(new app.w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle();
+  input.value = 'Keep this draft';
+  input.dispatchEvent(new app.w.Event('input', { bubbles: true }));
+  release({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+  await settle(); await settle();
+  expect(api.exportMarkdown).not.toHaveBeenCalled();
+  expect(input.value).toBe('Keep this draft');
+  expect(app.live.sent).toHaveLength(0);
+});
+
+it('opens Find in chat with /find, its field focused', async () => {
+  const { w, row, input } = await slash('find');
+  row!.click(); await settle();
+  expect(w.document.getElementById('chatFind')!.hidden).toBe(false);
+  expect(w.document.activeElement).toBe(w.document.getElementById('chatFindField'));
+  expect(input.value).toBe('');
 });
 
 // Codex's "Enter key behavior": Enter sends, or Cmd/Ctrl+Enter sends and Enter adds a line.
