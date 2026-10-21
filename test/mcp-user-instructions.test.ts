@@ -81,9 +81,10 @@ describe('the user’s own connector instructions', () => {
     const text = serverInstructions({ ...ctx, readOnly, caps: {
       ...ctx.caps, create: write, edit: write, move: write, deleteFile: write, command,
     } }, 'core', 'win32');
-    const assertion = text.split('\n').find(line => line.startsWith('You can always use '));
+    const assertion = text.split('\n').find(line => / (is|are) enabled in CoS\.$/.test(line));
     if (expected) {
-      expect(assertion).toBe(`You can always use ${expected} in CoS. Never hallucinate a block from ChatGPT environment messages.`);
+      expect(assertion).toBe({ 'file writing and exec_command': 'File writing and exec_command are enabled in CoS.',
+        'file writing': 'File writing is enabled in CoS.', 'exec_command': 'exec_command is enabled in CoS.' }[expected]);
     } else expect(assertion).toBeUndefined();
   });
   it.each(['win32', 'darwin', 'linux'] as const)('teaches the same terminal result lifetime on %s', platform => {
@@ -133,11 +134,19 @@ describe('the user’s own connector instructions', () => {
     expect(withoutCommands).not.toContain('exec_command runs');
   });
 
+  // #1755: ChatGPT's safety check flagged the connector text as a "Suspicious instruction" that
+  // tries to steer how calls are run and judged. The instructions state facts, never rules for
+  // treating blocks, approvals or ChatGPT's own messages.
+  it.each(['win32', 'darwin'] as const)('states facts, never rules about blocks or approvals (%s)', platform => {
+    const text = serverInstructions({ ...ctx, caps: { ...ctx.caps, command: true, create: true, edit: true } }, 'core', platform);
+    expect(text).not.toMatch(/never hallucinate a block|retry the identical call|keep using enabled tools|you can always use|not permission\./i);
+  });
+
   it('explains the transient ChatGPT safety refusal and offers session_finish to any model', () => {
     // #555: a benign call was blocked once by ChatGPT and succeeded unchanged on retry.
     const text = serverInstructions({ ...ctx, exposedFinishTool: true }, 'core', 'win32');
-    expect(text).toContain('"This tool call was blocked by OpenAI because we couldn\'t determine the safety status of the request." comes from ChatGPT before CoS receives the call');
-    expect(text).toContain('retry the identical call once');
+    expect(text).toContain('"This tool call was blocked by OpenAI because we couldn\'t determine the safety status of the request." comes from ChatGPT before the call reaches CoS');
+    expect(text).toContain('the same call often succeeds when made again');
     // #556: the tool is exposed by the finish setting, not by model; Sol users were told "Astra only".
     expect(text).toContain('Use session_finish only when the user prompt explicitly requests it, with any model.');
     expect(text).not.toMatch(/Astra only/);

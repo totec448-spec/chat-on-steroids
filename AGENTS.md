@@ -1220,6 +1220,8 @@ custody entries; retained ids cannot be reallocated. Unread results keep their s
 Tool descriptions and result markers say what a tool does, never how its output should be treated or
 that a call is harmless: ChatGPT's safety check flagged `write_stdin`'s "including automatic delivery;
 never reruns work" as a Suspicious Instruction and held a long run on an approval card (2026-10-15).
+The connector instructions follow the same rule (#1755): they say what is enabled and what a ChatGPT
+message means, never how to treat blocks, approvals or ChatGPT's own messages (`test/mcp-user-instructions.test.ts`).
 
 The owner is the **durable local session principal**, or `request:<id>` while permitted work
 awaits correlation. Only that request can initially continue its process. Exact proof makes
