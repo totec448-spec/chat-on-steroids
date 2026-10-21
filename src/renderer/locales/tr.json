@@ -5,6 +5,8 @@
   "Stopping dictation": "Sesle yazma durduruluyor",
   "Retry dictation": "Sesle yazmayı yeniden dene",
   "Start dictation": "Sesle yazmayı başlat",
+  "hold {0}": "{0} basılı tutun",
+  "Space": "Boşluk",
   "Dictation did not stop normally. Please try again.": "Sesle yazma düzgün durdurulamadı. Lütfen tekrar deneyin.",
   "Stopping dictation…": "Sesle yazma durduruluyor…",
   "Dictation could not start. Check microphone access and try again.": "Sesle yazma başlatılamadı. Mikrofon erişimini kontrol edip tekrar deneyin.",

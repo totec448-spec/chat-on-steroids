@@ -5,6 +5,8 @@
   "Stopping dictation": "正在停止聽寫",
   "Retry dictation": "重試聽寫",
   "Start dictation": "開始聽寫",
+  "hold {0}": "按住 {0}",
+  "Space": "空白鍵",
   "Dictation did not stop normally. Please try again.": "聽寫未正常停止，請再試一次。",
   "Stopping dictation…": "正在停止聽寫…",
   "Dictation could not start. Check microphone access and try again.": "無法開始聽寫，請檢查麥克風存取權限後再試。",

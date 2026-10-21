@@ -5,6 +5,8 @@
   "Stopping dictation": "Đang dừng đọc chính tả",
   "Retry dictation": "Thử lại đọc chính tả",
   "Start dictation": "Bắt đầu đọc chính tả",
+  "hold {0}": "giữ {0}",
+  "Space": "Space",
   "Dictation did not stop normally. Please try again.": "Đọc chính tả không dừng bình thường. Vui lòng thử lại.",
   "Stopping dictation…": "Đang dừng đọc chính tả…",
   "Dictation could not start. Check microphone access and try again.": "Không thể bắt đầu đọc chính tả. Hãy kiểm tra quyền truy cập micrô rồi thử lại.",

@@ -5,6 +5,8 @@
   "Stopping dictation": "Остановка голосового ввода",
   "Retry dictation": "Повторить голосовой ввод",
   "Start dictation": "Начать голосовой ввод",
+  "hold {0}": "удерживайте {0}",
+  "Space": "Пробел",
   "Dictation did not stop normally. Please try again.": "Не удалось корректно остановить голосовой ввод. Попробуйте ещё раз.",
   "Stopping dictation…": "Остановка голосового ввода…",
   "Dictation could not start. Check microphone access and try again.": "Не удалось начать голосовой ввод. Проверьте доступ к микрофону и повторите попытку.",
