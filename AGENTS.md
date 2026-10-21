@@ -4803,8 +4803,9 @@ a newer endpoint. Secret paths/tokens are not public diagnostics.
 Each surface's secret path token rotates on every start. `mcp.persistentUrls` (Settings → For
 developers, off by default, #924) keeps them for a tunnel of the user's own whose URL ChatGPT stores
 (a named Cloudflare tunnel; #1401): `mcp/persistent-paths.ts` stores one token per surface only
-in the OS-backed secret store (`mcp:path:<surface>`), `connection.ts` passes the stored ones to
-`startMcpServer` and remembers the running ones after each start. Turning it on keeps the URLs that
+in the OS-backed secret store (`mcp:path:<surface>`), plus the local port (`mcp:path:port`, #1550:
+the tunnel points at a fixed port), `connection.ts` passes the stored ones to `startMcpServer`
+(the port is retried 5×200 ms, then any free port with a warning) and remembers the running ones after each start. Turning it on keeps the URLs that
 are running, so nothing has to be re-entered in ChatGPT; turning it off forgets the tokens and the
 next start rotates again. Without secure storage they keep rotating and the switch is disabled
 (unless already on, so it can always be turned off).
