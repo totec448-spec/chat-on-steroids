@@ -478,7 +478,7 @@ the input while preserving existing draft text. `@` completion browses entries u
 Local Project via the existing project-files listing authority and inserts a project-relative text
 reference; it does not upload a file or broaden filesystem access. Commands, Skills and project
 files are separate compact sections; there is no sidebar entry, modal library or native import/remove UI.
-Commands: `/plan`, `/goal`, `/loop`, `/compact`, plus Codex's `/model` and `/reasoning` (open the model picker), `/new`, `/rename`, `/pin`, `/status` (the context meter's panel), `/review` and `/init` (put a review or AGENTS.md request in front of the draft, unsent), `/usage`, `/plugins`, `/pet` and `/feedback` (Settings → Activity, the diagnostics report). `/rename`, `/pin`, `/status` and `/compact` are offered only while a chat is open (`commandAvailable`); popups open after the choosing click has passed the outside-click handlers.
+Commands: `/plan`, `/goal`, `/loop`, `/compact`, plus Codex's `/model` and `/reasoning` (open the model picker), `/new`, `/rename`, `/pin`, `/status` (the context meter's panel), `/review` and `/init` (put a review or AGENTS.md request in front of the draft, unsent), `/usage`, `/plugins`, `/pet`, `/feedback` (Settings → Activity, the diagnostics report), `/copy` (the newest finished answer to the clipboard, `sessions:exportMarkdown { scope: 'latest' }`), `/export` (the whole chat as a Markdown file) and `/find` (Find in chat). `/rename`, `/pin`, `/status`, `/compact`, `/copy`, `/export` and `/find` are offered only while a chat is open (`commandAvailable`); popups open after the choosing click has passed the outside-click handlers.
 The same commands typed at the start of a message and sent without the menu (`APP_COMMANDS` in `renderer/skills.ts`) run as if picked, unless a Skill has that id; `/plan`, `/goal` and `/loop` then send the rest of the text as their mode would, any other command leaves the rest in the composer. Cmd/Ctrl+Shift+Enter during a turn runs them the same way and sends that rest the other way than the Follow-up default.
 A small plus icon to the right of that Skills button inserts `Please add the following skills to my COS skills:`
 into the authored draft without sending it. ChatGPT can create Markdown instructions through
@@ -1113,7 +1113,8 @@ shows it, and links back through `sessions:locate-message { id, messageId }` →
 while the branch is a draft turns the draft into a plain new chat. Final answers recorded outside any
 turn (copied branch history, an adopted chat's history, replies to messages typed in the tab) carry
 the same actions as a turn's answer (`messageAnswerAnchors`); `sessions:exportMarkdown` names them
-by `messageId` instead of `turnId`, and refuses a turn's own answer named that way.
+by `messageId` instead of `turnId`, and refuses a turn's own answer named that way. `scope: 'latest'` names
+no answer: main picks the newest one that offers these actions (`latestAnswer`), a completed turn's or a turnless one.
 
 Edit & resubmit (#365): ChatGPT keeps an edited question as a new version beside the old one, under
 the same parent, and continues from the new one. The page reports each question's place in that tree
