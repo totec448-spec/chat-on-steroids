@@ -1084,6 +1084,14 @@ row says so ("Creating this project in ChatGPT…", or the unavailable line poin
 deleted Project's page redirects to ChatGPT's home and drops the marker: the worker reports
 `gone` for the tab it opened for that Project, the link becomes `failed`, and nothing is sent.
 An opening remembers its Project, so a retry's new Project gets its own tab.
+A chat the person starts on chatgpt.com inside a linked Project joins that CoS project (#1744):
+the service worker's `events` handler reads the recording tab's URL (`tabChatgptProject`: the
+chat's own Project route, or the Project home only for a fresh chat's first, still unnamed
+observations; never a tab on another chat)
+and journals it as `chatgptProject`; `/events` sends it, and `bindChatToLinkedProject` binds a chat
+that has no project, is no worker or helper, has learned no workspace, and matches exactly one
+listed linked project. Worker-labelled batches never bind. Tests: `test/projects.test.ts`,
+`test/bridge.test.ts` and `test/extension.test.ts` (#1744).
 
 Branch in new chat (#482): the answer action under a completed reply with native ids (not in worker
 or helper chats) starts a new chat whose first message carries `branch { sessionId, conversationId,
