@@ -5021,6 +5021,18 @@ describe('delivering a bootstrap', () => {
     expect(command.text).not.toContain('SCOPED_AGENTS_TAIL');
   });
 
+  it('records the Projects a ChatGPT page lists and refuses anything else (#1756)', async () => {
+    const { chatgptProjectChoices } = await import('../src/main/chatgpt-project-catalog.js');
+    await pair();
+    const listed = `g-p-${'f'.repeat(32)}`;
+    const sent = await request('POST', '/chatgpt-projects', { body: { projects: [{ id: listed, name: 'From the sidebar' }, { id: '../x', name: 'Bad' }] } });
+    expect(sent.body).toMatchObject({ ok: true, changed: true });
+    expect((await chatgptProjectChoices()).map(choice => choice.id)).toEqual([listed]);
+    expect((await request('POST', '/chatgpt-projects', { body: { projects: 'nope' } })).status).toBe(400);
+    expect((await request('POST', '/chatgpt-projects', { body: { projects: [{ id: listed, name: 'From the sidebar' }] } })).body).toMatchObject({ ok: true, changed: false });
+    expect((await request('POST', '/chatgpt-projects', { auth: null, body: { projects: [] } })).status).toBe(401);
+  });
+
   it('puts a chat recorded inside a linked ChatGPT Project into its project before it runs commands (#1744)', async () => {
     const fs = await import('node:fs/promises');
     const path = await import('node:path');

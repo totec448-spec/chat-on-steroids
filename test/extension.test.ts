@@ -3880,6 +3880,32 @@ describe('extension revival delivery', () => {
   });
 });
 
+describe('the ChatGPT Projects a page lists (#1756)', () => {
+  it('passes only valid Projects from a registered page to the app', async () => {
+    const posted: Array<Record<string, unknown>> = [];
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }),
+      session: new FakeStorageArea(),
+      fetch: async (input, init = {}) => {
+        const pathname = new URL(input).pathname;
+        if (pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (pathname !== '/chatgpt-projects') return response(404, {});
+        posted.push(JSON.parse(String(init.body)));
+        return response(200, { ok: true, changed: true });
+      },
+      tabsGet: async (id) => ({ id, url: 'https://chatgpt.com/' })
+    });
+    await worker.registerTab(61);
+    const listed = `g-p-${'a'.repeat(32)}`;
+    expect(await worker.send({ type: 'project_catalog', projects: [{ id: listed, name: 'Kunden' }, { id: 'g-p-bad', name: 'x' }, { id: `g-p-${'b'.repeat(32)}` }] }, 61))
+      .toEqual({ ok: true });
+    expect(posted).toEqual([{ projects: [{ id: listed, name: 'Kunden' }] }]);
+    expect(await worker.send({ type: 'project_catalog', projects: [{ id: 'g-p-bad', name: 'x' }] }, 61)).toEqual({ ok: false });
+    expect(await worker.send({ type: 'project_catalog', projects: 'nope' }, 61)).toEqual({ ok: false });
+    expect(posted).toHaveLength(1);
+  });
+});
+
 describe('extension observation journal', () => {
   // #1744: a chat started inside a ChatGPT Project joins the CoS project linked to it; the app
   // learns the Project from the tab that recorded the chat, never from the page's own report.

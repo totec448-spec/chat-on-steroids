@@ -1435,6 +1435,24 @@
     return Boolean(keepAwakeRelease);
   }
 
+  const PROJECT_LIST_MS = 15_000;
+  let reportedProjects = '';
+  /**
+   * Tells the app which Projects ChatGPT's sidebar lists (#1756), only when that list changed: the
+   * app offers them when a project is linked. An empty list (sidebar collapsed) is not reported.
+   */
+  function reportProjectList() {
+    if (globalThis.top !== globalThis) return;
+    const projects = CLF_DOM.projectsShown();
+    if (!projects.length) return;
+    const signature = JSON.stringify(projects);
+    if (signature === reportedProjects) return;
+    reportedProjects = signature;
+    void ask({ type: 'project_catalog', projects }).then(reply => {
+      if (!reply || reply.ok !== true) reportedProjects = '';
+    }, () => { reportedProjects = ''; });
+  }
+
   /** Talks to the service worker. Returns null once the extension is reloaded. */
   async function ask(message, current = null) {
     // A new/reloaded document claims its browser-supplied MessageSender.documentId before
@@ -14363,6 +14381,7 @@
   watchToolRows();
   watchTranscript();
   watchChatEnd();
+  every(PROJECT_LIST_MS, reportProjectList);
 
   every(OBSERVE_MS, () => {
     recoverConversationLoad();

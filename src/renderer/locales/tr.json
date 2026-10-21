@@ -86,7 +86,6 @@
   "Chats": "Sohbetler",
   "Loading projects…": "Projeler yükleniyor…",
   "Loading chats…": "Sohbetler yükleniyor…",
-  "No projects yet.": "Henüz proje yok.",
   "No chats outside projects yet.": "Henüz proje dışında sohbet yok.",
   "Refresh chats": "Sohbetleri yenile",
   "Reusable instructions for your chats.": "Sohbetleriniz için tekrar kullanılabilir talimatlar.",
@@ -2925,5 +2924,19 @@
   "Answer": "Yanıt",
   "This answer is no longer in the chat.": "Bu yanıt artık sohbette değil.",
   "{0} bookmarks in this chat": "Bu sohbette {0} yer imi",
-  "{0} bookmarks in this chat|one": "Bu sohbette {0} yer imi"
+  "{0} bookmarks in this chat|one": "Bu sohbette {0} yer imi",
+  "Choose a ChatGPT Project…": "ChatGPT projesi seç…",
+  "Use a new or an existing ChatGPT Project for this project's chats": "Bu projenin sohbetleri için yeni ya da mevcut bir ChatGPT projesi kullan",
+  "New ChatGPT Project “{0}”": "Yeni ChatGPT projesi “{0}”",
+  "ChatGPT Project for {0}": "{0} için ChatGPT projesi",
+  "Search ChatGPT Projects": "ChatGPT projelerinde ara",
+  "Linked to {0}": "{0} ile bağlı",
+  "No ChatGPT Project matches": "Eşleşen ChatGPT projesi yok",
+  "Projects ChatGPT shows in its sidebar. Open chatgpt.com to update this list.": "ChatGPT'nin kenar çubuğunda gösterdiği projeler. Bu listeyi güncellemek için chatgpt.com'u açın.",
+  "No projects yet. A project is a folder on this computer; adding one links it to a new or an existing ChatGPT Project.": "Henüz proje yok. Proje, bu bilgisayardaki bir klasördür; eklendiğinde yeni ya da mevcut bir ChatGPT projesine bağlanır.",
+  "That is not a ChatGPT Project": "Bu bir ChatGPT projesi değil",
+  "This project already has a ChatGPT Project": "Bu projenin zaten bir ChatGPT projesi var",
+  "Its ChatGPT Project is being created": "ChatGPT projesi oluşturuluyor",
+  "That Project is not one ChatGPT lists for this account": "ChatGPT bu hesap için o projeyi listelemiyor",
+  "That ChatGPT Project is already linked to another project": "Bu ChatGPT projesi zaten başka bir projeye bağlı"
 }

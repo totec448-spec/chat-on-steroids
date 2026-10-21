@@ -92,7 +92,6 @@
   "Chats": "Чаты",
   "Loading projects…": "Загрузка проектов…",
   "Loading chats…": "Загрузка чатов…",
-  "No projects yet.": "Проектов пока нет.",
   "No chats outside projects yet.": "Чатов вне проектов пока нет.",
   "Refresh chats": "Обновить чаты",
   "Reusable instructions for your chats.": "Инструкции, которые можно использовать в разных чатах.",
@@ -3019,5 +3018,19 @@
   "{0} bookmarks in this chat": "{0} закладки в этом чате",
   "{0} bookmarks in this chat|one": "{0} закладка в этом чате",
   "{0} bookmarks in this chat|few": "{0} закладки в этом чате",
-  "{0} bookmarks in this chat|many": "{0} закладок в этом чате"
+  "{0} bookmarks in this chat|many": "{0} закладок в этом чате",
+  "Choose a ChatGPT Project…": "Выбрать проект ChatGPT…",
+  "Use a new or an existing ChatGPT Project for this project's chats": "Использовать новый или существующий проект ChatGPT для чатов этого проекта",
+  "New ChatGPT Project “{0}”": "Новый проект ChatGPT «{0}»",
+  "ChatGPT Project for {0}": "Проект ChatGPT для {0}",
+  "Search ChatGPT Projects": "Искать проекты ChatGPT",
+  "Linked to {0}": "Связан с {0}",
+  "No ChatGPT Project matches": "Нет подходящих проектов ChatGPT",
+  "Projects ChatGPT shows in its sidebar. Open chatgpt.com to update this list.": "Проекты, которые ChatGPT показывает на боковой панели. Откройте chatgpt.com, чтобы обновить этот список.",
+  "No projects yet. A project is a folder on this computer; adding one links it to a new or an existing ChatGPT Project.": "Проектов пока нет. Проект — это папка на этом компьютере; при добавлении она связывается с новым или существующим проектом ChatGPT.",
+  "That is not a ChatGPT Project": "Это не проект ChatGPT",
+  "This project already has a ChatGPT Project": "У этого проекта уже есть проект ChatGPT",
+  "Its ChatGPT Project is being created": "Его проект ChatGPT сейчас создаётся",
+  "That Project is not one ChatGPT lists for this account": "ChatGPT не показывает этот проект для этой учётной записи",
+  "That ChatGPT Project is already linked to another project": "Этот проект ChatGPT уже связан с другим проектом"
 }

@@ -70,7 +70,6 @@
   "Chats": "Cuộc trò chuyện",
   "Loading projects…": "Đang tải dự án…",
   "Loading chats…": "Đang tải cuộc trò chuyện…",
-  "No projects yet.": "Chưa có dự án.",
   "No chats outside projects yet.": "Chưa có cuộc trò chuyện nào ngoài dự án.",
   "Refresh chats": "Làm mới cuộc trò chuyện",
   "Reusable instructions for your chats.": "Hướng dẫn dùng lại cho các cuộc trò chuyện.",
@@ -2878,5 +2877,19 @@
   "Bookmarks": "Dấu trang",
   "Answer": "Câu trả lời",
   "This answer is no longer in the chat.": "Câu trả lời này không còn trong chat.",
-  "{0} bookmarks in this chat": "{0} dấu trang trong chat này"
+  "{0} bookmarks in this chat": "{0} dấu trang trong chat này",
+  "Choose a ChatGPT Project…": "Chọn dự án ChatGPT…",
+  "Use a new or an existing ChatGPT Project for this project's chats": "Dùng một dự án ChatGPT mới hoặc có sẵn cho các cuộc trò chuyện của dự án này",
+  "New ChatGPT Project “{0}”": "Dự án ChatGPT mới “{0}”",
+  "ChatGPT Project for {0}": "Dự án ChatGPT cho {0}",
+  "Search ChatGPT Projects": "Tìm dự án ChatGPT",
+  "Linked to {0}": "Đã liên kết với {0}",
+  "No ChatGPT Project matches": "Không có dự án ChatGPT nào khớp",
+  "Projects ChatGPT shows in its sidebar. Open chatgpt.com to update this list.": "Các dự án ChatGPT hiển thị trong thanh bên. Mở chatgpt.com để cập nhật danh sách này.",
+  "No projects yet. A project is a folder on this computer; adding one links it to a new or an existing ChatGPT Project.": "Chưa có dự án. Dự án là một thư mục trên máy tính này; khi thêm, nó được liên kết với một dự án ChatGPT mới hoặc có sẵn.",
+  "That is not a ChatGPT Project": "Đó không phải là dự án ChatGPT",
+  "This project already has a ChatGPT Project": "Dự án này đã có dự án ChatGPT",
+  "Its ChatGPT Project is being created": "Dự án ChatGPT của nó đang được tạo",
+  "That Project is not one ChatGPT lists for this account": "ChatGPT không liệt kê dự án đó cho tài khoản này",
+  "That ChatGPT Project is already linked to another project": "Dự án ChatGPT đó đã được liên kết với dự án khác"
 }
