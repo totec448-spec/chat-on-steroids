@@ -361,6 +361,58 @@ describe('Goal decision backends', () => {
     expect(browser.request.mock.calls[0]?.[2]).toMatchObject({ model: 'gpt-5.6-sol', reasoningEffort: 'high' });
     expect(fetch).not.toHaveBeenCalled();
   });
+  describe('the original request in the ChatGPT helper prompt', () => {
+    async function chatWithStarter(conversationId: string, starter: string): Promise<string> {
+      await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, backend: 'chatgpt', loopBackend: 'chatgpt' } });
+      const session = await createSession({ title: 'starter', conversationId });
+      const rows = [['user', starter], ['assistant', 'a'.repeat(11_000)], ['user', 'b'.repeat(40_000)], ['assistant', 'Latest result']] as const;
+      for (const [index, [role, text]] of rows.entries()) {
+        await appendEvent(session.id, { time: 1000 + index, source: 'extension',
+          ...(role === 'assistant' ? { kind: 'assistant_message' as const, final: true } : { kind: 'user_message' as const }),
+          message: { text, chars: text.length, truncated: false } });
+      }
+      return session.id;
+    }
+    it.each(['goal', 'loop'] as const)('supplements only an absent original in the %s ChatGPT transport', async mode => {
+      const starter = 'Exact original task with constraints.';
+      const sessionId = await chatWithStarter('browser-original-presence', starter);
+      await recordLoopMcpProof(sessionId, 'original-presence-turn');
+      browser.request.mockResolvedValue('{"action":"continue","reply":"Next"}');
+      for (const present of [true, false]) {
+        const messages = [{ role: 'user' as const, content: present ? starter : 'Summary' }];
+        expect(await goal.draftFastFollowup(sessionId, undefined, messages, undefined, mode)).toBe('Next');
+        const prompt = browser.request.mock.calls.at(-1)![0] as string;
+        expect(prompt.includes('Original request (reference):')).toBe(!present);
+        expect(prompt).toContain(starter);
+      }
+    });
+    it.each(['goal', 'loop'] as const)('drops the supplemental original before shortening conversation history in %s', async mode => {
+      const length = 60_000;
+      const starter = `HEAD ${'s'.repeat(length)} TAIL`;
+      const sessionId = await chatWithStarter('browser-starter-fits', starter);
+      await recordLoopMcpProof(sessionId, 'drop-first-turn');
+      browser.request.mockResolvedValue('{"action":"continue","reply":"Next"}');
+      const prepared = [{ role: 'user' as const, content: 'First preserved row ' + 'q'.repeat(40_000) }, { role: 'user' as const, content: 'b'.repeat(40_000) }, { role: 'assistant' as const, content: 'Latest result' }];
+      expect(await goal.draftFastFollowup(sessionId, undefined, prepared, undefined, mode)).toBe('Next');
+      const prompt = browser.request.mock.calls[0]![0] as string;
+      expect(prompt.length).toBeLessThanOrEqual(96_000);
+      expect(prompt).toContain(prepared[0]!.content);
+      expect(prompt).toContain('b'.repeat(40_000));
+      expect(prompt).toContain('Latest result');
+      expect(prompt).not.toContain('Original request (reference):');
+    });
+    it('still decides within a learned helper budget when the original cannot fit', async () => {
+      const { noteGoalHelperUnanswered } = await import('../src/main/goal-helper-size.js');
+      noteGoalHelperUnanswered(30_000);
+      const sessionId = await chatWithStarter('browser-starter-too-big', 'z'.repeat(20_000));
+      browser.request.mockResolvedValue('{"action":"continue","reply":"Next"}');
+      expect(await goal.draftFastFollowup(sessionId, undefined, undefined, undefined, 'goal')).toBe('Next');
+      const prompt = browser.request.mock.calls[0]![0] as string;
+      expect(prompt.length).toBeLessThanOrEqual(18_000);
+      expect(prompt).toContain('Latest result');
+      expect(prompt).not.toContain('Original request (reference):');
+    });
+  });
   it('uses the Loop driver even when offline Goal marked the last answer complete', async () => {
     await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, backend: 'templates', loopBackend: 'chatgpt' } });
     const sessionId = await recording('finish-offline', 'Done\n[[COS_GOAL:COMPLETE]]');
