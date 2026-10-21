@@ -328,8 +328,10 @@ function retireHelper(runtime: HelperRuntime): Promise<void> {
       const closed = new Promise<void>((resolve) => runtime.child.once('close', () => resolve()));
       // On Windows every app launch_app started is this helper's child, and taskkill /T would
       // close those apps (and their unsaved work) with it. The helper starts nothing of its own.
-      if (process.platform === 'win32') await terminateProcess(runtime.child.pid);
-      else await terminateProcessTree(runtime.child.pid);
+      if (process.platform === 'win32') {
+        logInfo(`desktop helper ${runtime.child.pid} retired alone: apps it launched keep running`);
+        await terminateProcess(runtime.child.pid);
+      } else await terminateProcessTree(runtime.child.pid);
       await Promise.race([closed, new Promise<void>((resolve) => setTimeout(resolve, 2_000))]);
     }
     await cleanupHelperScript(runtime);
