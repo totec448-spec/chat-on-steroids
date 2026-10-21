@@ -361,19 +361,25 @@ it('publishes Goal draft progress through the session refresh channel without a 
 });
 
 it('publishes the exact transcript owners of one recorder burst and an explicit global invalidation', async () => {
-  const { recordNote } = await import('../src/main/session/recorder.js');
+  const { notifyChanged, recordNote } = await import('../src/main/session/recorder.js');
   const first = await createSession({ title: 'Changed A', conversationId: 'ipc-changed-a' });
   const second = await createSession({ title: 'Changed B', conversationId: 'ipc-changed-b' });
   const send = vi.fn();
   currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send } };
+  const changes = () => send.mock.calls.filter(([channel]) => channel === 'session:changed').map(([, change]) => change as { sessionIds: string[] });
+  // One burst names each owner once. Driven directly: three awaited disk writes can outlast the
+  // 400 ms burst on a busy machine and legitimately publish twice.
+  notifyChanged(first.id); notifyChanged(second.id); notifyChanged(first.id);
+  await vi.waitFor(() => expect(changes()).toHaveLength(1));
+  expect(changes()[0]!.sessionIds).toEqual(expect.arrayContaining([first.id, second.id]));
+  expect(new Set(changes()[0]!.sessionIds).size).toBe(changes()[0]!.sessionIds.length);
+  send.mockClear();
+  // Recorder writes publish their owners, each publish naming an owner at most once.
   await recordNote(first.id, 'first owner');
   await recordNote(second.id, 'second owner');
   await recordNote(first.id, 'first owner again');
-  await vi.waitFor(() => expect(send.mock.calls.filter(([channel]) => channel === 'session:changed')).toHaveLength(1));
-  const [, change] = send.mock.calls.find(([channel]) => channel === 'session:changed')!;
-  // Earlier fixtures may share this burst; each owner is still named exactly once.
-  expect(change.sessionIds).toEqual(expect.arrayContaining([first.id, second.id]));
-  expect(new Set(change.sessionIds).size).toBe(change.sessionIds.length);
+  await vi.waitFor(() => expect(changes().flatMap(change => change.sessionIds)).toEqual(expect.arrayContaining([first.id, second.id])));
+  for (const change of changes()) expect(new Set(change.sessionIds).size).toBe(change.sessionIds.length);
   send.mockClear();
   expect(await handlers.get('sessions:clearImageStorage')!(null, { mode: 'all' })).toMatchObject({ ok: true });
   expect(send).toHaveBeenCalledWith('session:changed', { allTranscripts: true });
