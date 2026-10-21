@@ -6,6 +6,7 @@ import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js
 import { initDurableStore, flushDurable, resetDurableForTests } from '../src/main/durable.js';
 import { observeRequestCorrelation, requestCorrelation } from '../src/main/session/correlation.js';
 import { recordToolCall, recordChatObservations, recordRequestEvidence, sessionForConversation, flushRecorder, resetRecorderForTests } from '../src/main/session/recorder.js';
+import { NEW_CHAT, noteAutomaticReply, resetAutomaticRepliesForTests } from '../src/main/session/automatic-replies.js';
 import { appendEvent, createSession, flushSessions, initSessionStore, readActivityEvents, readAsset, readEvents, readRecentEvents, resetSessionStoreForTests, unsetSessionRootForTests, upsertMessageEvent } from '../src/main/session/store.js';
 
 let dir = '';
@@ -180,6 +181,47 @@ it('an old canonical message cannot hide a gap before a byte-bounded cold journa
   expect((await readEvents(session.id, { from: 2, limit: 1 }))[0]?.seq).toBe(2);
 });
 
+// Prompt recall (#1655): a Goal or Loop follow-up is typed by its page, so it reaches ChatGPT with no
+// outbox row and came back from Up as if the person had typed it (Mac release round, 2026-10-19).
+it('marks the message a Goal or Loop follow-up came back as, and only that one', async () => {
+  resetAutomaticRepliesForTests();
+  const id = await sessionForConversation('conv-auto');
+  const at = Date.now();
+  const user = (messageId: string, text: string, time: number) => ({ kind: 'user_message' as const, time, messageId, text });
+  noteAutomaticReply('conv-auto', 'continue with `step two` and *check* it', at);
+  noteAutomaticReply('conv-other', 'typed by a person here', at);
+  await recordChatObservations('conv-auto', [
+    user('q-1', 'typed by a person here', at + 1),
+    // ChatGPT stores text the page inserted with Markdown escaped.
+    user('q-2', 'continue with \\`step two\\` and \\*check\\* it', at + 2)
+  ]);
+  // A re-observation without the mark keeps it, and the same text later is the person's.
+  await recordChatObservations('conv-auto', [user('q-2', 'continue with \\`step two\\` and \\*check\\* it', at + 2),
+    user('q-3', 'continue with `step two` and *check* it', at + 3)]);
+  await flushRecorder();
+  const latest = new Map((await readEvents(id!, { kinds: ['user_message'] })).map(event => [event.kind === 'user_message' ? event.messageId : '', event]));
+  const automatic = (messageId: string) => { const event = latest.get(messageId); return event?.kind === 'user_message' ? event.automatic : 'missing'; };
+  expect(automatic('q-1')).toBeUndefined();
+  expect(automatic('q-2')).toBe(true);
+  expect(automatic('q-3')).toBeUndefined();
+});
+
+// A Goal started from the ChatGPT page's own new-chat sheet: the page types the drafted opening
+// message into a chat that has no id yet, so it is noted for whichever new chat it arrives in.
+it('marks a Goal opening message the ChatGPT page typed into a new chat', async () => {
+  resetAutomaticRepliesForTests();
+  const id = await sessionForConversation('conv-opening');
+  const at = Date.now();
+  noteAutomaticReply(NEW_CHAT, 'start by listing the open issues', at);
+  await recordChatObservations('conv-opening', [{ kind: 'user_message' as const, time: at + 1, messageId: 'q-open', text: 'start by listing the open issues' }]);
+  await recordChatObservations('conv-opening-2', [{ kind: 'user_message' as const, time: at + 2, messageId: 'q-again', text: 'start by listing the open issues' }]);
+  await flushRecorder();
+  const opened = (await readEvents(id!, { kinds: ['user_message'] })).at(-1);
+  expect(opened?.kind === 'user_message' && opened.automatic).toBe(true);
+  const other = (await readEvents((await sessionForConversation('conv-opening-2'))!, { kinds: ['user_message'] })).at(-1);
+  expect(other?.kind === 'user_message' && other.automatic).toBeFalsy();
+});
+
 // Edit & resubmit (#365): ChatGPT keeps an edited question as a new version beside the old one,
 // under the same parent. Recorded linearly, the edit read as one more question at the end.
 it('records an edited question as replacing the version it was made from', async () => {
@@ -209,6 +251,31 @@ it('records an edited question as replacing the version it was made from', async
   expect(replaces('q-2b')).toBe('q-2');
   expect(replaces('q-2c')).toBe('q-2b');
   expect(replaces('q-1b')).toBe('q-1');
+});
+
+it('keeps an edit replacing the question it was made from when ChatGPT re-reports the older version', async () => {
+  const id = await sessionForConversation('conv-edit-flip');
+  const at = Date.now();
+  const user = (messageId: string, text: string, time: number) =>
+    ({ kind: 'user_message' as const, time, messageId, text, parentId: 'a-1', parentExact: true });
+  await recordChatObservations('conv-edit-flip', [
+    { kind: 'user_message', time: at, messageId: 'q-1', text: 'First question', parentId: 'root', parentExact: false },
+    { kind: 'assistant_message', time: at + 1, messageId: 'a-1', text: 'First answer', final: true, state: 'final' } as any,
+    user('q-2', 'Second question', at + 2),
+    user('q-2b', 'Second question, edited', at + 4)
+  ]);
+  // The user flips the versions control back to 1/2 (or reloads on it): the older version is reported again.
+  await recordChatObservations('conv-edit-flip', [user('q-2', 'Second question', at + 2)]);
+  await flushRecorder();
+  const latest = async () => new Map((await readEvents(id!, { kinds: ['user_message'] }))
+    .map(event => [event.kind === 'user_message' ? event.messageId : '', event.kind === 'user_message' ? event.replaces : undefined]));
+  expect((await latest()).get('q-2')).toBeUndefined();
+  expect((await latest()).get('q-2b')).toBe('q-2');
+  // A genuinely new edit after the flip still replaces the newest version, not the one re-reported.
+  await recordChatObservations('conv-edit-flip', [user('q-2c', 'Second question, edited twice', at + 6)]);
+  await flushRecorder();
+  expect((await latest()).get('q-2c')).toBe('q-2b');
+  expect((await latest()).get('q-2')).toBeUndefined();
 });
 
 it('never takes a question with the same parent for an edit without ChatGPT\'s versions proof', async () => {

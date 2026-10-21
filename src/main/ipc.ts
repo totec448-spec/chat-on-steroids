@@ -71,6 +71,7 @@ import {
 } from '../shared/types.js';
 import { MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
 import { DEFAULT_HANDOFF_LENGTH, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
+import { CUSTOM_CONTINUE_MAX_CHARS } from '../shared/recovery.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange, rememberRunningSurfaceTokens } from './connection.js';
 import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema, settingsRecovered } from './config.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
@@ -224,6 +225,7 @@ const settingsPatch = z.object({
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
     playfulContinue: z.boolean().optional(),
+    customContinue: z.string().trim().max(CUSTOM_CONTINUE_MAX_CHARS).optional(),
     followOutput: z.boolean().optional(),
     mentionCore: z.boolean().optional(),
     mentionPlugins: z.boolean().optional(),
@@ -414,6 +416,8 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       developerMode: pick(current.ui.developerMode, base.ui.developerMode, wanted.ui.developerMode),
       playfulStatus: pick(current.ui.playfulStatus, base.ui.playfulStatus, wanted.ui.playfulStatus),
       playfulContinue: pick(current.ui.playfulContinue, base.ui.playfulContinue, wanted.ui.playfulContinue),
+      // An emptied field means the built-in phrases again.
+      customContinue: pick(current.ui.customContinue, base.ui.customContinue, wanted.ui.customContinue || undefined),
       followOutput: pick(current.ui.followOutput, base.ui.followOutput, wanted.ui.followOutput),
       mentionCore: pick(current.ui.mentionCore, base.ui.mentionCore, wanted.ui.mentionCore),
       mentionPlugins: pick(current.ui.mentionPlugins, base.ui.mentionPlugins, wanted.ui.mentionPlugins),
@@ -1312,7 +1316,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('sessions:exportMarkdown', async (payload) => {
     const request = z.object({
       id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
-      scope: z.enum(['answer', 'session']),
+      scope: z.enum(['answer', 'latest', 'session']),
       turnId: z.string().min(1).max(200).optional(),
       messageId: z.string().min(1).max(200).optional(),
       target: z.enum(['clipboard', 'file'])
@@ -1435,10 +1439,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         from: z.number().int().min(0).max(10_000_000).optional(),
         before: z.number().int().min(1).max(10_000_000).optional(),
         after: z.number().int().min(0).max(10_000_000).optional(),
-        limit: z.number().int().min(1).max(1000).optional()
+        limit: z.number().int().min(1).max(1000).optional(),
+        /** Only the chat's tool calls (and its start, to tell a whole history from a window): a sub-agent's Activity. */
+        actions: z.boolean().optional()
       })
       .parse(payload);
-    const page = await readSessionEvents(id, options);
+    const { actions, ...paging } = options;
+    const page = await readSessionEvents(id, actions ? { ...paging, kinds: ['session_start', 'tool_call'] } : paging);
     if (!page) throw new Error('Session not found');
     return page;
   });

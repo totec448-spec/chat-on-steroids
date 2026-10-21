@@ -1205,6 +1205,125 @@ it('names no unrendered user message for a stale or foreign stamp', async () => 
   expect(named()).toEqual([]);
 });
 
+/** A chat's first exchange as ChatGPT draws it while it runs: no question anywhere, only its work (2026-10-19). */
+function runningFirstExchange(f: ReturnType<typeof fixture>) {
+  const exchange = f.doc.querySelector('[data-turn-key]')!;
+  exchange.querySelector('[data-content-search-unit-key$=":user"]')!.remove();
+  f.entry.turn.items = f.entry.turn.items.filter((item: any) => item.type !== 'user-message');
+  f.entry.turn.messageIds = [CALL, ANSWER];
+  const thread = f.chain({ entries: [f.entry] }, f.top);
+  f.row.return = thread;
+  return { exchange, thread };
+}
+
+it('marks a chat\'s first exchange that runs without its question, and nothing else', async () => {
+  const f = fixture();
+  const { exchange, thread } = runningFirstExchange(f);
+  await f.ask();
+  expect(f.api.messages().filter((m: any) => m.role === 'user')).toEqual([]);
+  expect(exchange.getAttribute('data-clf-fiber-first')).toBe(exchange.getAttribute('data-clf-fiber-turn'));
+  expect(f.api.firstQuestionPending()).toBe(true);
+
+  // A stamp from another scan is no evidence.
+  exchange.setAttribute('data-clf-fiber-first', 'other-scan:0');
+  expect(f.api.firstQuestionPending()).toBe(false);
+  await f.ask();
+  expect(f.api.firstQuestionPending()).toBe(true);
+
+  // Once the turn has completed, the question is ChatGPT's to show again; no stamp stands in for it.
+  f.entry.turn.status = 'complete';
+  await f.ask();
+  expect(exchange.hasAttribute('data-clf-fiber-first')).toBe(false);
+  expect(f.api.firstQuestionPending()).toBe(false);
+
+  // Only the first exchange: a later one running without its question has a parent, not the root.
+  f.entry.turn.status = 'in_progress';
+  const second = addExchange(f, 3, 'Second question', { userSlot: false });
+  second.entry.turn.items = second.entry.turn.items.filter((item: any) => item.type !== 'user-message');
+  const node = f.doc.querySelectorAll('[data-turn-key]')[1]!;
+  (node as any).__reactFiber$fixture = f.chain({ entry: second.entry }, f.chain({ entries: [f.entry, second.entry] }, f.top));
+  thread.memoizedProps.entries = [f.entry, second.entry];
+  await f.ask();
+  expect(node.hasAttribute('data-clf-fiber-first')).toBe(false);
+  expect(f.api.firstQuestionPending()).toBe(false);
+});
+
+it.each([true, false])('lets an automatic Compact & Resume start in a chat\'s first turn that hides its question (recorded first: %s)', async first => {
+  // 2026-10-19, Windows: every automatic attempt in a chat's first turn stopped at "The original
+  // question has not loaded yet", because ChatGPT showed that question nowhere while it ran.
+  // It compacted only after the turn had ended.
+  const f = fixture();
+  runningFirstExchange(f);
+  const job = { sessionId: 's-first', stage: 'handoff-pending', busy: true, automatic: true, handoffId: null, error: null,
+    sourceSend: { state: 'not-attempted', messageId: null } };
+  const r = await recorder(f, {
+    activity: () => ({ ok: true, data: { entries: [], stream: [], pendingTools: 0, recordedQuestionId: USER,
+      ...(first ? { recordedQuestionFirst: true } : {}) } }),
+    compact: m => m.ticket ? { ok: true, data: { started: true, token: 'tok-first', sourceSend: job.sourceSend, prompt: null, job } }
+      : m.resume ? { ok: true, data: { token: 'tok-first', prompt: 'Write the brief.', job } }
+      : { ok: true, data: { deferred: true, job } }
+  });
+  // The turn's one call has its result; Stop completes the turn, as on the live page.
+  const call = (f.entry.turn.items[0] as any).items[1];
+  call.completed = true; call.result = { content: [{ type: 'text', text: 'ok' }] };
+  const stop = f.doc.createElement('button');
+  stop.type = 'button'; stop.setAttribute('aria-label', 'Stop streaming'); stop.setAttribute('data-testid', 'stop-button');
+  stop.addEventListener('click', () => { f.entry.turn.status = 'complete'; stop.remove(); });
+  f.doc.querySelector('[data-chatgpt-composer]')!.append(stop);
+  try {
+    await f.ask();
+    const done = r.hook.startCompact(true);
+    const compacts = () => r.sent.filter(m => m.type === 'compact');
+    if (first) {
+      await vi.waitFor(() => expect(compacts().some(m => m.resume === true)).toBe(true), { timeout: 20000 });
+      expect(compacts().some(m => m.sourceDeferred === true)).toBe(false);
+      expect(f.doc.contains(stop)).toBe(false);
+    } else {
+      await done;
+      expect(compacts().some(m => m.resume === true)).toBe(false);
+      expect(compacts()).toContainEqual(expect.objectContaining({ sourceDeferred: true, sourceError: expect.stringContaining('original question has not loaded') }));
+      expect(f.doc.contains(stop)).toBe(true);
+    }
+  } finally { (f.win as any).__CLF_CONTENT_RECORDER__?.stop(); }
+}, 30000);
+
+// 2.1.41 release round and #1662, Windows: in a chat's later turns ChatGPT keeps a message sent
+// into the running answer (a fresh-turn continue, or the person's own follow-up) in the same
+// exchange as the question it followed, as its own user slot. The whole exchange was skipped as
+// ambiguous, so the fresh turn's answer was never read and its turn never ended (stalled after
+// ten minutes). Distinct slots are distinct questions; only a duplicated slot stays ambiguous.
+it('reads an exchange whose later message was sent into the running answer', async () => {
+  const f = fixture();
+  f.entry.turn.status = 'complete';
+  const second = addExchange(f, 2, 'Second question');
+  const interim = '99999999-1111-4111-8111-000000000024', steered = '99999999-1111-4111-8111-000000000025';
+  const [question, answer] = second.entry.turn.items;
+  second.entry.turn.items = [question!,
+    { type: 'assistant-message', messageId: interim, content: 'Running step two', phase: 'commentary', completed: true } as any,
+    { type: 'user-message', messageId: steered, serverMessageId: steered, message: 'Continue the task from where you are.' } as any,
+    answer!];
+  second.entry.turn.messageIds = [second.userId, interim, steered, second.answerId];
+  const node = f.doc.querySelectorAll('[data-turn-key]')[1]!;
+  const turnKey = second.entry.id;
+  const slots = node.querySelector('[data-content-search-turn-key]')!;
+  slots.querySelector(`[data-content-search-unit-key="${turnKey}:1:assistant"]`)!.setAttribute('data-content-search-unit-key', `${turnKey}:3:assistant`);
+  const interimSlot = f.doc.createElement('div');
+  interimSlot.setAttribute('data-content-search-unit-key', `${turnKey}:1:assistant`);
+  interimSlot.innerHTML = '<div data-markdown-text-style="assistant-message">Running step two</div>';
+  const steeredSlot = f.doc.createElement('div');
+  steeredSlot.setAttribute('data-content-search-unit-key', `${turnKey}:2:user`);
+  steeredSlot.innerHTML = '<div data-user-message-bubble><div class="whitespace-pre-wrap">Continue the task from where you are.</div></div>';
+  slots.querySelector(`[data-content-search-unit-key="${turnKey}:0:user"]`)!.after(interimSlot, steeredSlot);
+  const thread = f.chain({ entries: [f.entry, second.entry] }, f.top);
+  f.row.return = thread;
+  (node as any).__reactFiber$fixture = f.chain({ entry: second.entry }, thread);
+  await f.ask();
+  const roles = f.api.turns().map((turn: any) => turn.role);
+  expect(roles).toEqual(['user', 'assistant', 'user', 'user', 'assistant']);
+  const users = f.api.messages().filter((m: any) => m.role === 'user').map((m: any) => m.id);
+  expect(users).toEqual([USER, second.userId, steered]);
+});
+
 it('still refuses an exchange whose user slot is ambiguous (#910)', () => {
   const f = fixture();
   const exchange = f.doc.querySelector('[data-turn-key]')!;
@@ -1660,6 +1779,30 @@ it('reports an app sighting for a shell result outside the turn\'s message ids, 
 // Edit & resubmit (#365): the shell model has no parent ids. A question follows the previous turn's
 // last message in the thread's ordered entries (the first follows the root), and only ChatGPT's own
 // versions control proves that two questions with the same place are versions of one message.
+// 2.1.41 release round, Windows: a message sent into the running answer (a fresh-turn continue, or
+// a person's own follow-up) sits in the same shell turn as the question it followed. Given that
+// turn's place, it looked like a second version of the question, and Edit & resubmit folded the
+// person's question away as "Earlier version". It follows the message before it in its own turn.
+it('places a message sent into a running turn after the message it followed, not beside the turn\'s question', async () => {
+  const f = fixture();
+  f.entry.turn.status = 'complete';
+  const second = addExchange(f, 2, 'Second question');
+  const interim = '99999999-1111-4111-8111-000000000024', steered = '99999999-1111-4111-8111-000000000025';
+  const [question, answer] = second.entry.turn.items;
+  second.entry.turn.items = [question!,
+    { type: 'assistant-message', messageId: interim, content: 'Running step two', phase: 'commentary', completed: true } as any,
+    { type: 'user-message', messageId: steered, serverMessageId: steered, message: 'Continue the task from where you are.' } as any,
+    answer!];
+  second.entry.turn.messageIds = [second.userId, interim, steered, second.answerId];
+  const thread = f.chain({ entries: [f.entry, second.entry] }, f.top);
+  f.row.return = thread;
+  const secondNode = f.doc.querySelectorAll('[data-turn-key]')[1] as any;
+  secondNode.__reactFiber$fixture = f.chain({ entry: second.entry }, thread);
+  const questions = (await f.ask()).turns.flatMap((turn: any) => turn.messages.filter((m: any) => m.role === 'user')
+    .map((m: any) => [m.rawMessageId, m.parentId, m.parentExact]));
+  expect(questions).toEqual([[USER, 'root', false], [second.userId, ANSWER, true], [steered, interim, true]]);
+});
+
 it('places each question in ChatGPT\'s message tree, with the versions control as proof of an edit', async () => {
   const f = fixture();
   f.entry.turn.status = 'complete';

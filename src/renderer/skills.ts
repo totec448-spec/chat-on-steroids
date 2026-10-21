@@ -90,6 +90,33 @@ const scopeLabel = (skill: LibrarySkill): string => skill.scope === 'repo' ? t('
   : skill.scope === 'system' ? t('System') : skill.scope === 'admin' ? t('Admin') : t('Personal');
 
 /** PR #260's library/chips are projections of the existing authored draft, not a second selection ledger. */
+/** The app's own slash commands, offered in the composer menu and recognized when typed at the start of a message. */
+export const APP_COMMANDS = [
+  { command: 'plan', name: 'Plan', description: 'Turn the next composer request into editable stages.', glyph: 'i-steps' },
+  { command: 'goal', name: 'Goal', description: 'Pursue a saved objective and stop when it is complete.', glyph: 'i-target' },
+  { command: 'loop', name: 'Loop', description: 'Keep continuing toward the saved objective.', glyph: 'i-loop' },
+  { command: 'compact', name: 'Compact', description: 'Compact this chat and resume it in a fresh conversation.', glyph: 'i-copy' },
+  { command: 'image', name: 'Image', description: 'Ask ChatGPT for a picture: this message goes without the app, so ChatGPT can draw.', glyph: 'i-image' },
+  // Codex's slash commands, each opening what the app already has.
+  { command: 'model', name: 'Model', description: 'Choose the model for this chat.', glyph: 'i-sparkle' },
+  { command: 'reasoning', name: 'Reasoning', description: 'Choose how long the model thinks.', glyph: 'i-bolt' },
+  { command: 'new', name: 'New chat', description: 'Start a new chat.', glyph: 'i-plus' },
+  { command: 'rename', name: 'Rename', description: 'Rename this chat in the app.', glyph: 'i-pencil' },
+  { command: 'pin', name: 'Pin', description: 'Pin or unpin this chat at the top of its list.', glyph: 'i-pin' },
+  { command: 'status', name: 'Status', description: 'Show how full this chat is.', glyph: 'i-pulse' },
+  { command: 'review', name: 'Review', description: 'Ask for a review of the uncommitted changes.', glyph: 'i-git-diff' },
+  { command: 'init', name: 'Init', description: 'Ask for an AGENTS.md that describes this project.', glyph: 'i-file-text' },
+  { command: 'usage', name: 'Usage', description: 'Open usage and token statistics.', glyph: 'i-chart' },
+  { command: 'plugins', name: 'Plugins', description: 'Open the plugins and their status.', glyph: 'i-plug' },
+  { command: 'pet', name: 'Pet', description: 'Open the pets.', glyph: 'i-paw' },
+  { command: 'feedback', name: 'Feedback', description: 'Open the diagnostics report to attach to a bug report.', glyph: 'i-warning' },
+  // The open chat's answer copy, Markdown export and Find in chat.
+  { command: 'copy', name: 'Copy', description: 'Copy the newest answer in this chat.', glyph: 'i-copy' },
+  { command: 'export', name: 'Export', description: 'Save this chat as a Markdown file.', glyph: 'i-export' },
+  { command: 'find', name: 'Find', description: 'Find text in this chat.', glyph: 'i-search' }
+  // The command or the name the menu shows: a German menu says "Umbenennen" for /rename.
+] as const;
+
 export function initSkills(options: Options) {
   const { input, host, selectedHost } = options;
   const control = (label: string, className = 'btn'): HTMLButtonElement => {
@@ -216,26 +243,7 @@ export function initSkills(options: Options) {
     const range = fragment();
     if (!range) { hideInline(); return; }
     const query = range?.query ?? '';
-    const commands = range.kind === 'command' && options.command ? [
-      { command: 'plan', name: 'Plan', description: 'Turn the next composer request into editable stages.', glyph: 'i-steps' },
-      { command: 'goal', name: 'Goal', description: 'Pursue a saved objective and stop when it is complete.', glyph: 'i-target' },
-      { command: 'loop', name: 'Loop', description: 'Keep continuing toward the saved objective.', glyph: 'i-loop' },
-      { command: 'compact', name: 'Compact', description: 'Compact this chat and resume it in a fresh conversation.', glyph: 'i-copy' },
-      // Codex's slash commands, each opening what the app already has.
-      { command: 'model', name: 'Model', description: 'Choose the model for this chat.', glyph: 'i-sparkle' },
-      { command: 'reasoning', name: 'Reasoning', description: 'Choose how long the model thinks.', glyph: 'i-bolt' },
-      { command: 'new', name: 'New chat', description: 'Start a new chat.', glyph: 'i-plus' },
-      { command: 'rename', name: 'Rename', description: 'Rename this chat in the app.', glyph: 'i-pencil' },
-      { command: 'pin', name: 'Pin', description: 'Pin or unpin this chat at the top of its list.', glyph: 'i-pin' },
-      { command: 'status', name: 'Status', description: 'Show how full this chat is.', glyph: 'i-pulse' },
-      { command: 'review', name: 'Review', description: 'Ask for a review of the uncommitted changes.', glyph: 'i-git-diff' },
-      { command: 'init', name: 'Init', description: 'Ask for an AGENTS.md that describes this project.', glyph: 'i-file-text' },
-      { command: 'usage', name: 'Usage', description: 'Open usage and token statistics.', glyph: 'i-chart' },
-      { command: 'plugins', name: 'Plugins', description: 'Open the plugins and their status.', glyph: 'i-plug' },
-      { command: 'pet', name: 'Pet', description: 'Open the pets.', glyph: 'i-paw' },
-      { command: 'feedback', name: 'Feedback', description: 'Open the diagnostics report to attach to a bug report.', glyph: 'i-warning' }
-      // The command or the name the menu shows: a German menu says "Umbenennen" for /rename.
-    ].filter(row => (row.command.includes(query) || t(row.name).toLocaleLowerCase().includes(query)) &&
+    const commands = range.kind === 'command' && options.command ? APP_COMMANDS.filter(row => (row.command.includes(query) || t(row.name).toLocaleLowerCase().includes(query)) &&
       (options.commandAvailable?.(row.command) ?? true)) : [];
     const matchingSkills = range.kind !== 'file' && !(loading && !library) ? filtered(query).slice(0, 64) : [];
     const matchingFiles = range.kind === 'file' && files !== null && files.projectId === options.scope().projectId && files.directory === (range.directory ?? '')
@@ -356,7 +364,7 @@ export function initSkills(options: Options) {
     const retained = split(displayedPrefix).ids.filter(value => value !== name);
     project(`${retained.map(value => `/${value}\n`).join('')}${input.value}`);
   };
-  return { close, restore, authoredText, hasCommand, removeCommand, keydown: (event: KeyboardEvent): boolean => {
+  return { close, restore, open: (): boolean => !host.hidden, authoredText, hasCommand, removeCommand, keydown: (event: KeyboardEvent): boolean => {
     if (host.hidden || !current() || composing || event.isComposing) return false;
     if (!fragment() || painted !== selectionKey()) { hideInline(); return false; }
     if (event.key === 'Escape') { hideInline(); event.preventDefault(); return true; }

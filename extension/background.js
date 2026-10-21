@@ -515,11 +515,24 @@ async function persistJournalNow() {
   }
 }
 
+/** The write queued behind the one in flight; it has not taken its snapshot yet. */
+let queuedJournalWrite = null;
+
 function persistJournal() {
   // storage.session.set is asynchronous and whole-snapshot writes may complete out of order.
   // Serialize them so an older snapshot can never land after a newer one while both callers
   // were already told their observations were durable.
-  const write = journalWriteQueue.then(() => persistJournalNow());
+  //
+  // Each write stores the whole journal (up to 4 MiB), and the snapshot is taken when the write
+  // starts. Callers arriving while one write is in flight therefore share the next one: it holds
+  // all of their observations. One write per message cost a slow Windows machine ~29 s of service
+  // worker time in seven minutes and made pages wait up to ~100 s (#1648).
+  if (queuedJournalWrite) return queuedJournalWrite;
+  const write = journalWriteQueue.then(() => {
+    queuedJournalWrite = null;
+    return persistJournalNow();
+  });
+  queuedJournalWrite = write;
   journalWriteQueue = write.then(
     () => undefined,
     () => undefined
@@ -3852,6 +3865,7 @@ const COMPACT_CHECKPOINT_FLAGS = [
   'sourceDispatch',
   'sourceUndelivered',
   'sourceLost',
+  'sourceDeferred',
   'destinationAttempt',
   'destinationDispatch',
   'destinationLost'
@@ -5662,23 +5676,27 @@ if (chrome.runtime.onStartup && typeof chrome.runtime.onStartup.addListener === 
 }
 
 /**
- * Archives one retired worker chat the app has queued (#1460), from any ChatGPT page of this
- * extension: the archive is an account-level request, so it needs no tab of that chat. At most
- * one per pass. Without such a page the app hears `deferred`, which costs no attempt.
+ * Archives one worker chat the app has queued (#1460), or restores one before its worker is woken
+ * (#1701), from any ChatGPT page of this extension: both are account-level requests, so they need
+ * no tab of that chat. At most one per pass. Without such a page the app hears `deferred`, which
+ * costs no attempt.
  */
 async function drainWorkerArchive() {
   await load();
   const next = await call('/worker-archive/next', { method: 'POST', body: '{}' });
-  const conversationId = next.ok ? cleanConversationId(next.data?.conversationId) : null;
+  const unarchive = next.ok ? cleanConversationId(next.data?.unarchive) : null;
+  const conversationId = unarchive || (next.ok ? cleanConversationId(next.data?.conversationId) : null);
   if (!conversationId) return;
+  const archive = !unarchive;
+  const done = archive ? 'archived' : 'unarchived';
   let outcome = 'deferred';
   for (const tab of await chrome.tabs.query({ url: ['https://chatgpt.com/*'] })) {
     const documentId = tab.id === undefined ? null : tabDocuments[String(tab.id)];
     if (!documentId) continue;
     let reply;
-    try { reply = await chrome.tabs.sendMessage(tab.id, { type: 'clf-archive-chat', conversationId }, { documentId }); }
+    try { reply = await chrome.tabs.sendMessage(tab.id, { type: 'clf-archive-chat', conversationId, archive }, { documentId }); }
     catch { continue; } // that document is gone; another page may still do it
-    outcome = reply?.outcome === 'archived' ? 'archived' : 'failed';
+    outcome = reply?.outcome === done ? done : 'failed';
     break;
   }
   await call('/worker-archive/result', { method: 'POST', body: JSON.stringify({ conversationId, outcome }) });

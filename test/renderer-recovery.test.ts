@@ -181,4 +181,9 @@ it('says where an automatic Compact & Resume stands before its request goes out,
   renderRecoveryCountdowns(host, [{ kind: 'compaction', phase: 'asking', deadline: 120_000 }], 0);
   expect(host.textContent).toContain('Compact & Resume · asking ChatGPT for the handoff');
   expect(host.textContent).not.toContain('Check in');
+  // #1643: the ChatGPT tab tried and could not ask; "asking" stayed up for twenty minutes.
+  renderRecoveryCountdowns(host, [{ kind: 'compaction', phase: 'held', deadline: 120_000 }], 0);
+  expect(host.textContent).toContain('Compact & Resume · the ChatGPT tab could not ask yet');
+  expect(host.textContent).not.toContain('Check in');
+  expect(host.querySelector('.recovery-notice')!.getAttribute('title')).toContain('tries again on its own');
 });

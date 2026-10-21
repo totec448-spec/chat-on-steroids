@@ -16,14 +16,16 @@ export async function replacedQuestion(sessionId: string, messageId: string, par
   if (questions.some(event => event.kind === 'user_message' && event.messageId === messageId && event.replaces)) return {};
   const firstSeen = new Map<string, { at: number; parentId?: string; time: number }>();
   for (const event of questions) {
-    if (event.kind !== 'user_message' || !event.messageId || event.messageId === messageId) continue;
+    if (event.kind !== 'user_message' || !event.messageId) continue;
     const known = firstSeen.get(event.messageId);
     const at = event.origin ?? event.seq;
     firstSeen.set(event.messageId, { at: Math.min(known?.at ?? at, at), parentId: known?.parentId ?? event.parentId, time: Math.min(known?.time ?? event.time, event.time) });
   }
+  // A message already recorded can only have replaced a question seen before it.
+  const own = firstSeen.get(messageId);
   let replaced: { id: string; at: number } | null = null;
   for (const [id, seen] of firstSeen) {
-    if (seen.parentId !== parentId || seen.time < since) continue;
+    if (id === messageId || seen.parentId !== parentId || seen.time < since || (own && seen.at >= own.at)) continue;
     if (!replaced || seen.at > replaced.at) replaced = { id, at: seen.at };
   }
   return replaced ? { replaces: replaced.id } : {};

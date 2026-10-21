@@ -90,6 +90,14 @@ app.whenReady().then(async () => {
     for(let i=0;i<100 && !(await js('!!window.fixtureReady && document.querySelectorAll(".project-group > .sess").length === 5'));i++) await new Promise(r=>setTimeout(r,25));
     assert.equal(await js(`Promise.all(['CoS Phosphor','CoS Phosphor Fill'].map(name=>document.fonts.load('16px "'+name+'"'))).then(faces=>faces.every(face=>face.length>0))`),true,
       'The actual bundled icon faces must load before visual evidence is captured');
+    // The list's scrollbar room stays reserved: rows keep their width whether or not the list
+    // needs a scrollbar (a project filter or collapsed sections made the Inbox toolbar jump).
+    const headingRight = () => js(`Math.round(document.querySelector('.project-heading').getBoundingClientRect().right)`);
+    const shortList = await headingRight();
+    await js(`(() => {const s=document.querySelector('.sidebar-sessions > .scroll');const spacer=document.createElement('div');spacer.id='overflowSpacer';spacer.style.height='4000px';s.append(spacer);return s.scrollHeight>s.clientHeight})()`);
+    const longList = await headingRight();
+    await js(`document.getElementById('overflowSpacer').remove()`);
+    assert.equal(longList, shortList, 'A scrolling chat list keeps the width of a short one');
     await js(`window.disclosureEvents=[]; for(const type of ['keydown','keypress','keyup','click']) document.addEventListener(type,e=>window.disclosureEvents.push({type,key:e.key,tag:e.target.tagName,cls:e.target.className,open:document.querySelector('.project-group')?.open}),true)`);
     // Project groups start closed. Exercise native summary activation before the
     // existing visible-row geometry, drag ordering and pagination checks.

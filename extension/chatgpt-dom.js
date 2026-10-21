@@ -615,6 +615,21 @@ var CLF_DOM = (() => {
     if (!turn || !stamp?.startsWith(`${turn}:`)) return null;
     try { return decodeURIComponent(stamp.slice(turn.length + 1)) || null; } catch { return null; }
   }
+  /**
+   * Whether the page shows exactly one exchange, the chat's first, running without its question
+   * (fiber.js `data-clf-fiber-first`), and no user message anywhere. The stamp counts only under
+   * the exchange's current turn stamp, like every other MAIN stamp; a stale one is no evidence.
+   */
+  function firstQuestionPending() {
+    return safe(() => {
+      const all = turns();
+      if (all.length !== 1 || all[0].role !== 'assistant' || messages().some(message => message.role === 'user')) return false;
+      const section = all[0].node;
+      if (!section?.matches?.(SHELL_TURN)) return false;
+      const turn = section.getAttribute('data-clf-fiber-turn'), stamp = section.getAttribute('data-clf-fiber-first');
+      return !!turn && stamp === turn;
+    }, false);
+  }
   function turns() {
     return safe(() => {
       const out = [];
@@ -629,13 +644,17 @@ var CLF_DOM = (() => {
         if (node.matches?.(SHELL_TURN)) {
           const users = [...node.querySelectorAll('[data-content-search-unit-key$=":user"]')].filter(slot => slot.closest('[data-turn-key]') === node);
           const answered = node.querySelector('[data-chatgpt-agent-turn-start], [data-content-search-unit-key$=":assistant"]');
-          // Two user slots in one exchange are ambiguous and stay unread. A missing one is not: ChatGPT
-          // unmounts the question while its answer stays (#900), and skipping the whole exchange then
-          // hid that answer's final, so its turn never ended (#910). The answer keeps the exchange's
-          // own key; nothing here is joined by text or position.
+          // Two slots with the same key in one exchange are ambiguous and stay unread. Slots with
+          // their own keys are not: in a chat's later turns ChatGPT keeps a message sent into the
+          // running answer in the question's exchange, as its own slot (#1662). Skipping such an
+          // exchange hid the fresh turn's answer, and that turn never ended. A missing slot is not
+          // ambiguous either: ChatGPT unmounts the question while its answer stays (#900), and
+          // skipping the whole exchange then hid that answer's final, so its turn never ended (#910).
+          // The answer keeps the exchange's own key; nothing here is joined by text or position.
+          const keys = users.map(slot => slot.getAttribute('data-content-search-unit-key'));
           const unrendered = users.length ? null : unrenderedUserIdOf(node);
-          if (users.length > 1 || !id || (!users.length && !answered && !unrendered)) continue;
-          if (users.length) out.push({ node: users[0], nodes: [users[0]], id, role: 'user' });
+          if (new Set(keys).size !== keys.length || !id || (!users.length && !answered && !unrendered)) continue;
+          if (users.length) for (const slot of users) out.push({ node: slot, nodes: [slot], id, role: 'user' });
           else if (unrendered) out.push({ node, nodes: [node], id, role: 'user', unrenderedUserId: unrendered });
           if (answered) out.push({ node, nodes: [node], id, role: 'assistant' });
           previous = null; continue;
@@ -3738,6 +3757,7 @@ var CLF_DOM = (() => {
     turns,
     presentationTurns,
     messages,
+    firstQuestionPending,
     messagesIn,
     sectionSignature,
     generating,
