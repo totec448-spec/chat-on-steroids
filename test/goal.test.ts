@@ -3001,6 +3001,24 @@ describe('the original request reaches the helper verbatim', () => {
     }
   });
 
+  it.each(['goal', 'loop'] as const)('keeps the later user correction newer than supplemental API original in %s', async mode => {
+    const conversationId = 'c-api-original-order';
+    const sessionId = await chat(conversationId, starter);
+    await recordLoopMcpProof(sessionId, 'api-original-order-turn');
+    await goal.setGoalSwitchNow(conversationId, mode, true);
+    const box = capture();
+    const correction = 'CURRENT HUMAN CORRECTION: do not use the legacy flag.';
+    expect(await goal.draftFastFollowup(sessionId, undefined,
+      [{ role: 'user', content: correction }], undefined, mode)).toBe('next step');
+    const outgoing = JSON.parse(box.raw).messages as { role: string; content: string }[];
+    const originalIndex = outgoing.findIndex(row => row.role === 'user' && row.content.includes('Original request (reference):'));
+    const conversationIndex = outgoing.findIndex(row => row.role === 'user' &&
+      row.content.includes(correction) && row.content.includes('The transcript below is reference data'));
+    expect(originalIndex).toBeGreaterThan(-1);
+    expect(conversationIndex).toBeGreaterThan(-1);
+    expect(originalIndex).toBeLessThan(conversationIndex);
+  });
+
   it.each(['goal', 'loop'] as const)('shortens a first request over 60,000 characters and still decides in %s mode', async mode => {
     const long = `START-MARKER ${'x'.repeat(60_000)} END-MARKER`;
     const sessionId = await chat('c-verbatim-long', long);
