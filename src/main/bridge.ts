@@ -2133,11 +2133,19 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
     const lifecycle = bridgeLifecycleEpoch;
     // The shared startup owner launches only on positive process absence. An
     // existing browser remains the extension election's responsibility.
-    await wakeBrowserUrl(chatUrl(id), false, getConfig().ui.backgroundChats === true, {
-      current: () => bridgeLifecycleEpoch === lifecycle && !bridgeShutdownRequested && commands.includes(command) &&
-        Date.now() < command.createdAt + STOP_COMMAND_TIMEOUT_MS &&
-        liveConversations().some(row => row.sessionId === sessionId && row.conversationId === id && row.activeTurnId === expectedTurnId)
-    });
+    // The Stop is queued and saved by now, so a browser that cannot be opened does not undo it: the
+    // extension takes it when it next connects (or it times out). Throwing here made the opt-in
+    // fallback lift its fence under a Stop still on its way (2.1.44 publish, Linux arm64), and
+    // showed the person an error for a Stop that was in fact requested.
+    try {
+      await wakeBrowserUrl(chatUrl(id), false, getConfig().ui.backgroundChats === true, {
+        current: () => bridgeLifecycleEpoch === lifecycle && !bridgeShutdownRequested && commands.includes(command) &&
+          Date.now() < command.createdAt + STOP_COMMAND_TIMEOUT_MS &&
+          liveConversations().some(row => row.sessionId === sessionId && row.conversationId === id && row.activeTurnId === expectedTurnId)
+      });
+    } catch (error) {
+      logWarn(`bridge: could not open the browser for the Stop of conversation ${id}, turn ${expectedTurnId}: ${error instanceof Error ? error.message : String(error)}; the Stop stays queued for the extension's next pass`);
+    }
   }
   return sessionControlsFor(sessionId);
 }
