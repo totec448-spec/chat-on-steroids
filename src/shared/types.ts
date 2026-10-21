@@ -503,6 +503,11 @@ export interface ConnectionStatus {
   /** Epoch ms of the last request ChatGPT sent to this app, end-to-end proof. */
   lastRequestAt: number | null;
   /**
+   * With "Keep plugin URLs across restarts" on: the kept local port was taken at this start, so the
+   * endpoint listens on another one and a tunnel of the user's own must point there. Null otherwise.
+   */
+  keptPortMoved?: { from: number; to: number } | null;
+  /**
    * Epoch ms of the last tool ChatGPT actually ran. Requests arriving with no tool
    * call ever following is the signature of Developer mode being off in ChatGPT.
    */
