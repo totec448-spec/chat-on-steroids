@@ -2969,28 +2969,36 @@ describe('the original request reaches the helper verbatim', () => {
     return box;
   }
 
-  it('includes the first user message as user reference content in the helper prompt', async () => {
-    const sessionId = await chat('c-verbatim-run', starter);
-    goal.setGoalObjective('c-verbatim-run', 'ship the importer');
+  it.each(['goal', 'loop'] as const)('does not supplement a first user message already in the %s transcript', async mode => {
+    const conversationId = 'c-present-original';
+    const sessionId = await chat(conversationId, starter);
+    await recordLoopMcpProof(sessionId, 'g-present-original');
+    await goal.setGoalSwitchNow(conversationId, mode, true);
     const box = capture();
-    goal.startGoalDraft({ sessionId, conversationId: 'c-verbatim-run', turnId: 'g-verbatim-run' });
-    expect((await settled('c-verbatim-run')).stage).toBe('ready');
-    expect(box.system.some(content => content.includes('Original request contains the first user message as best-effort reference material'))).toBe(true);
-    const messages = (JSON.parse(box.raw) as { messages: { role: string; content: string }[] }).messages;
-    expect(messages.some(message => message.role === 'user' && message.content === `Original request (reference): the first user message of this chat. It may be shortened; omissions do not prove completion. Judge against its requirements, not only the saved objective or a later summary:\n\n${starter}`)).toBe(true);
-    expect(messages.some(message => message.role === 'system' && message.content.includes(starter))).toBe(false);
-    // The saved objective is still sent next to it, and the later correction stays in the transcript.
-    expect(box.system.some(content => content.includes('ship the importer'))).toBe(true);
-    expect(box.raw).toContain('also handle empty files');
+    goal.startGoalDraft({ sessionId, conversationId, turnId: 'g-present-original' });
+    expect((await settled(conversationId)).stage).toBe('ready');
+    expect(box.raw).not.toContain('Original request (reference):');
+    expect(referenceTranscript(JSON.parse(box.raw).messages)).toContainEqual({ role: 'user', content: starter.trim() });
+    expect(await goal.draftFastFollowup(sessionId, undefined, undefined, undefined, mode)).toBe('next step');
+    expect(box.raw).not.toContain('Original request (reference):');
   });
 
-  it('includes the first user message as user reference content in a Goal finish follow-up', async () => {
-    const sessionId = await chat('c-verbatim-finish', starter);
+  it.each(['goal', 'loop'] as const)('supplements only an absent human original in %s prepared context', async mode => {
+    const sessionId = await chat('c-prepared-original', starter);
+    await recordLoopMcpProof(sessionId, 'g-prepared-original');
     const box = capture();
-    expect(await goal.draftFastFollowup(sessionId, undefined, undefined, undefined, 'goal')).toBe('next step');
-    const messages = (JSON.parse(box.raw) as { messages: { role: string; content: string }[] }).messages;
-    expect(messages.some(message => message.role === 'user' && message.content === `Original request (reference): the first user message of this chat. It may be shortened; omissions do not prove completion. Judge against its requirements, not only the saved objective or a later summary:\n\n${starter}`)).toBe(true);
-    expect(messages.some(message => message.role === 'system' && message.content.includes(starter))).toBe(false);
+    for (const message of [
+      { role: 'user' as const, content: starter, present: true },
+      { role: 'user' as const, content: starter.trim(), present: true },
+      { role: 'user' as const, content: starter.replace('  1.', ' 1.'), present: false },
+      { role: 'assistant' as const, content: starter, present: false },
+      { role: 'user' as const, origin: 'automatic' as const, content: starter, present: false }
+    ]) {
+      const { present, ...row } = message;
+      const prepared = row.role === 'assistant' ? [row, { role: 'user' as const, content: 'Summary' }] : [row];
+      expect(await goal.draftFastFollowup(sessionId, undefined, prepared, undefined, mode)).toBe('next step');
+      expect(box.raw.includes('Original request (reference):')).toBe(!present);
+    }
   });
 
   it.each(['goal', 'loop'] as const)('shortens a first request over 60,000 characters and still decides in %s mode', async mode => {
@@ -3002,6 +3010,8 @@ describe('the original request reaches the helper verbatim', () => {
     goal.startGoalDraft({ sessionId, conversationId: 'c-verbatim-long', turnId: 'g-verbatim-long' });
     expect((await settled('c-verbatim-long')).stage).toBe('ready');
     expect(await goal.draftFastFollowup(sessionId, undefined, undefined, undefined, mode)).toBe('next step');
+    expect(box.raw).not.toContain('Original request (reference):');
+    expect(await goal.draftFastFollowup(sessionId, undefined, [{ role: 'user', content: 'Summary' }], undefined, mode)).toBe('next step');
     const messages = JSON.parse(box.raw).messages as { content: string }[];
     const original = messages.find(message => message.content.startsWith('Original request (reference)'))!.content;
     expect(original).toContain('START-MARKER');
@@ -3017,6 +3027,8 @@ describe('the original request reaches the helper verbatim', () => {
     goal.startGoalDraft({ sessionId: session.id, conversationId: 'c-truncated-original', turnId: 'g-truncated-original' });
     expect((await settled('c-truncated-original')).stage).toBe('ready');
     expect(box.raw).toContain('saved fragment');
+    expect(box.raw).not.toContain('Original request (reference):');
+    expect(await goal.draftFastFollowup(session.id, undefined, [{ role: 'user', content: 'Summary' }], undefined, 'goal')).toBe('next step');
     expect(box.raw).toContain('recorder');
     expect(box.raw).toContain('full text is unavailable in this reference');
     expect(box.raw).not.toContain('characters omitted before storage');

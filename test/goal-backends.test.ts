@@ -373,13 +373,30 @@ describe('Goal decision backends', () => {
       }
       return session.id;
     }
-    it.each([50_000, 60_000])('drops the supplemental original before shortening conversation history for a %i-character starter', async length => {
+    it.each(['goal', 'loop'] as const)('supplements only an absent original in the %s ChatGPT transport', async mode => {
+      const starter = 'Exact original task with constraints.';
+      const sessionId = await chatWithStarter('browser-original-presence', starter);
+      await recordLoopMcpProof(sessionId, 'original-presence-turn');
+      browser.request.mockResolvedValue('{"action":"continue","reply":"Next"}');
+      for (const present of [true, false]) {
+        const messages = [{ role: 'user' as const, content: present ? starter : 'Summary' }];
+        expect(await goal.draftFastFollowup(sessionId, undefined, messages, undefined, mode)).toBe('Next');
+        const prompt = browser.request.mock.calls.at(-1)![0] as string;
+        expect(prompt.includes('Original request (reference):')).toBe(!present);
+        expect(prompt).toContain(starter);
+      }
+    });
+    it.each(['goal', 'loop'] as const)('drops the supplemental original before shortening conversation history in %s', async mode => {
+      const length = 60_000;
       const starter = `HEAD ${'s'.repeat(length)} TAIL`;
       const sessionId = await chatWithStarter('browser-starter-fits', starter);
+      await recordLoopMcpProof(sessionId, 'drop-first-turn');
       browser.request.mockResolvedValue('{"action":"continue","reply":"Next"}');
-      expect(await goal.draftFastFollowup(sessionId, undefined, undefined, undefined, 'goal')).toBe('Next');
+      const prepared = [{ role: 'user' as const, content: 'First preserved row ' + 'q'.repeat(40_000) }, { role: 'user' as const, content: 'b'.repeat(40_000) }, { role: 'assistant' as const, content: 'Latest result' }];
+      expect(await goal.draftFastFollowup(sessionId, undefined, prepared, undefined, mode)).toBe('Next');
       const prompt = browser.request.mock.calls[0]![0] as string;
       expect(prompt.length).toBeLessThanOrEqual(96_000);
+      expect(prompt).toContain(prepared[0]!.content);
       expect(prompt).toContain('b'.repeat(40_000));
       expect(prompt).toContain('Latest result');
       expect(prompt).not.toContain('Original request (reference):');
