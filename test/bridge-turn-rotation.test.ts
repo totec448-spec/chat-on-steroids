@@ -28,6 +28,7 @@ const { recordToolCall, resetRecorderForTests } = await import('../src/main/sess
 const { listInputs, resetInputForTests } = await import('../src/main/session/input.js');
 const { resetTurnRotationForTests } = await import('../src/main/turn-rotation.js');
 const { openCallHold, resetCallHoldsForTests } = await import('../src/main/rotation-hold.js');
+const logger = await import('../src/main/logger.js');
 const { setGoalSwitchNow, resetGoalStateForTests } = await import('../src/main/goal.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
 
@@ -259,6 +260,36 @@ describe('turn rotation (#1402)', () => {
     expect(row.error).toBeUndefined();
     // A page that claims it now is refused: it would send into the gap after the call's result.
     expect((await request('POST', '/input/claim', { body: { id: row.id, owner: 'late-page', conversationId: chat, requiresAuthorization: true } })).body.input).toBeNull();
+  });
+
+  // 2026-10-21, Loop chats on Windows: twice a continue was withdrawn with only "the page did not
+  // send it". Whether the page never picked it up (its browser worker had stopped answering) or
+  // picked it up and never reached Send are different faults; the log line now says which.
+  it('says in the log that the page never picked the continue up, and whether the browser was connected', async () => {
+    const logged = vi.spyOn(logger, 'logInfo');
+    try {
+      const chat = 'f0f00003-1111-4111-8111-000000000205';
+      await turnFor(chat, 'g-rot-hold-5', 31);
+      await (await heldCall(chat))();
+      const lines = logged.mock.calls.map(([line]) => String(line)).filter(line => line.includes(chat) && line.includes('within'));
+      expect(lines).toEqual([expect.stringContaining('the page did not pick up the continue within 0 s (the browser is not connected)')]);
+    } finally { logged.mockRestore(); }
+  });
+
+  it('says in the log that the page picked the continue up but did not reach Send', async () => {
+    setRotationHoldForTests(400);
+    const logged = vi.spyOn(logger, 'logInfo');
+    try {
+      const chat = 'f0f00003-1111-4111-8111-000000000206';
+      const sessionId = await turnFor(chat, 'g-rot-hold-6', 31);
+      const answer = (await heldCall(chat))();
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const row = (await listInputs()).find(entry => entry.sessionId === sessionId && entry.purpose === 'rotation')!;
+      expect((await request('POST', '/input/claim', { body: { id: row.id, owner: 'slow-page', conversationId: chat, requiresAuthorization: true } })).body.input).toMatchObject({ id: row.id });
+      await answer;
+      const lines = logged.mock.calls.map(([line]) => String(line)).filter(line => line.includes(chat) && line.includes('within'));
+      expect(lines).toEqual([expect.stringContaining('the page picked up the continue but did not reach Send within 0 s')]);
+    } finally { logged.mockRestore(); }
   });
 
   // 2026-10-20: when ChatGPT shows Stop it offers no Send for the continue; the page says so at

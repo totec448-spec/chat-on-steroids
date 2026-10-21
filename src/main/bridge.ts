@@ -9648,8 +9648,15 @@ async function awaitRotationDelivery(conversationId: string, id: string): Promis
     }
     const waited = Date.now() - started;
     if (state === 'pending' && waited >= rotationHoldMs) {
-      if (await withdrawUnsentRotation(id)) {
-        logInfo(`turn rotation: ${conversationId} — the page did not send the continue within ${Math.round(rotationHoldMs / 1000)} s; the call answers and a later one tries again`);
+      const where = await withdrawUnsentRotation(id);
+      if (where) {
+        const seconds = Math.round(rotationHoldMs / 1000);
+        // Two different faults (2026-10-21): a page that never picked the continue up, often a
+        // browser worker that had stopped answering, and one that picked it up but never reached Send.
+        const why = where === 'queued'
+          ? `the page did not pick up the continue within ${seconds} s (the browser is ${browserWakeConnected() ? 'connected' : 'not connected'})`
+          : `the page picked up the continue but did not reach Send within ${seconds} s`;
+        logInfo(`turn rotation: ${conversationId} — ${why}; the call answers and a later one tries again`);
         changed();
       }
       return;
