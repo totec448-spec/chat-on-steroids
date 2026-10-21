@@ -2811,5 +2811,14 @@
   "Ask ChatGPT for a picture: this message goes without the app, so ChatGPT can draw.": "Nhờ ChatGPT tạo hình: tin nhắn này gửi đi không kèm ứng dụng để ChatGPT có thể vẽ.",
   "Port {0} was in use when the app started, so it now listens on port {1}. Point your tunnel at port {1}.": "Cổng {0} đang được dùng khi ứng dụng khởi động, nên giờ ứng dụng lắng nghe trên cổng {1}. Hãy trỏ đường hầm của bạn tới cổng {1}.",
   "Stop and continue when ChatGPT offers no Send": "Dừng rồi tiếp tục khi ChatGPT không cho Gửi",
-  "Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run. Experimental.": "Một số chat chỉ hiện nút Dừng ở kết quả công cụ, nên lệnh Tiếp tục của lượt mới không gửi được ở đó. Nếu điều này xảy ra hai lần trong một lượt, ứng dụng sẽ dừng lượt ngay sau một kết quả và gửi Tiếp tục khi việc dừng hiển thị. Goal và Loop vẫn bật, và bước nào đến trong lúc đó sẽ không được chạy. Thử nghiệm."
+  "Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run. Experimental.": "Một số chat chỉ hiện nút Dừng ở kết quả công cụ, nên lệnh Tiếp tục của lượt mới không gửi được ở đó. Nếu điều này xảy ra hai lần trong một lượt, ứng dụng sẽ dừng lượt ngay sau một kết quả và gửi Tiếp tục khi việc dừng hiển thị. Goal và Loop vẫn bật, và bước nào đến trong lúc đó sẽ không được chạy. Thử nghiệm.",
+  "Pictures with /image, keyboard shortcuts, and a quicker message after Stop.": "Ảnh với /image, phím tắt và tin nhắn gửi nhanh hơn sau khi Dừng.",
+  "Ask for a picture": "Yêu cầu một bức ảnh",
+  "Start a message with /image, and ChatGPT draws it with its own image tool.": "Bắt đầu tin nhắn bằng /image, ChatGPT sẽ vẽ bằng công cụ hình ảnh của chính nó.",
+  "Keyboard shortcuts": "Phím tắt",
+  "{0} starts a new chat, Ctrl+Tab moves between chats, and Esc twice stops an answer.": "{0} bắt đầu cuộc trò chuyện mới, Ctrl+Tab chuyển giữa các cuộc trò chuyện, nhấn Esc hai lần để dừng câu trả lời.",
+  "Quicker after Stop": "Nhanh hơn sau khi Dừng",
+  "A message you send right after Stop goes out at once.": "Tin nhắn bạn gửi ngay sau khi Dừng sẽ đi ngay lập tức.",
+  "Sub-agent chats tidy up": "Cuộc trò chuyện của tác tử phụ tự dọn",
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Khi bật lưu trữ, cuộc trò chuyện của worker được lưu trữ hai phút sau khi xong nhiệm vụ."
 }

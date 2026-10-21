@@ -2857,5 +2857,14 @@
   "Ask ChatGPT for a picture: this message goes without the app, so ChatGPT can draw.": "ChatGPT um ein Bild bitten: Diese Nachricht geht ohne die App raus, damit ChatGPT zeichnen kann.",
   "Port {0} was in use when the app started, so it now listens on port {1}. Point your tunnel at port {1}.": "Port {0} war beim Start der App belegt, deshalb lauscht sie jetzt auf Port {1}. Richte deinen Tunnel auf Port {1} aus.",
   "Stop and continue when ChatGPT offers no Send": "Stoppen und fortsetzen, wenn ChatGPT kein Senden anbietet",
-  "Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run. Experimental.": "Manche Chats zeigen bei einem Tool-Ergebnis nur „Stoppen“, sodass das Fortsetzen des neuen Durchlaufs dort nicht gesendet werden kann. Passiert das zweimal in einem Durchlauf, stoppt die App ihn direkt nach einem Ergebnis und sendet das Fortsetzen, sobald der Stopp angezeigt wird. Goal und Loop bleiben an, und ein Schritt, der in der Zwischenzeit kommt, wird nicht ausgeführt. Experimentell."
+  "Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run. Experimental.": "Manche Chats zeigen bei einem Tool-Ergebnis nur „Stoppen“, sodass das Fortsetzen des neuen Durchlaufs dort nicht gesendet werden kann. Passiert das zweimal in einem Durchlauf, stoppt die App ihn direkt nach einem Ergebnis und sendet das Fortsetzen, sobald der Stopp angezeigt wird. Goal und Loop bleiben an, und ein Schritt, der in der Zwischenzeit kommt, wird nicht ausgeführt. Experimentell.",
+  "Pictures with /image, keyboard shortcuts, and a quicker message after Stop.": "Bilder mit /image, Tastenkürzel und eine schnellere Nachricht nach Stopp.",
+  "Ask for a picture": "Ein Bild anfordern",
+  "Start a message with /image, and ChatGPT draws it with its own image tool.": "Beginne eine Nachricht mit /image, und ChatGPT zeichnet sie mit seinem eigenen Bildwerkzeug.",
+  "Keyboard shortcuts": "Tastenkürzel",
+  "{0} starts a new chat, Ctrl+Tab moves between chats, and Esc twice stops an answer.": "{0} startet einen neuen Chat, Strg+Tab wechselt zwischen Chats, und zweimal Esc stoppt eine Antwort.",
+  "Quicker after Stop": "Schneller nach Stopp",
+  "A message you send right after Stop goes out at once.": "Eine Nachricht, die du direkt nach Stopp sendest, geht sofort raus.",
+  "Sub-agent chats tidy up": "Sub-Agent-Chats räumen auf",
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Mit Archivieren an wird der Chat eines Workers zwei Minuten nach Erledigung seiner Aufgabe archiviert."
 }
