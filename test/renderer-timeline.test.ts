@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_GOAL_SYSTEM_PROMPT } from '../src/shared/goal.js';
 import { prependUserPrompt } from '../src/shared/user-prompt.js';
 import type { Handoff, SessionEvent, SessionSummary } from '../src/shared/session.js';
+import { BOOKMARK_EXCERPT_MAX } from '../src/shared/session.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import type { LocalProject } from '../src/shared/projects.js';
 vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTerminal: () => ({
@@ -7348,6 +7349,18 @@ describe('bookmarked answers', () => {
     expect(api.setBookmark).toHaveBeenLastCalledWith(summary([]).id, replyId, 'Tag first, then build.', T0 + 1_000, false);
     expect(toggle.getAttribute('aria-pressed')).toBe('false');
     expect(header.hidden).toBe(true);
+  });
+
+  it('bookmarks an answer whose first paragraph is very long, with a short excerpt', async () => {
+    const long: SessionEvent = { ...reply, message: text(`${'word '.repeat(1_200)}end.`) };
+    const { w } = await boot([ask, long, end], true, [], [], { summary: { conversationId: chat } });
+    const api = (w as any).api;
+    api.setBookmark = vi.fn(async (_id: string, _messageId: string, _excerpt: string, _time: number, on: boolean) => ({ ok: true, data: on ? [mark] : [] }));
+    w.document.querySelector<HTMLButtonElement>('.answer-actions .answer-bookmark')!.click(); await settle();
+    const excerpt = api.setBookmark.mock.calls[0]![2] as string;
+    expect(excerpt.length).toBeLessThanOrEqual(BOOKMARK_EXCERPT_MAX);
+    expect(excerpt.startsWith('word word')).toBe(true);
+    expect(excerpt.endsWith('…')).toBe(true);
   });
 
   it('shows a chat\'s saved bookmarks when it is opened', async () => {

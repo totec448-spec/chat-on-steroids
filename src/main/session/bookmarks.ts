@@ -4,11 +4,11 @@
  * never written into a chat that is gone.
  */
 import { promises as fs } from 'node:fs';
-import type { SessionBookmark } from '../../shared/session.js';
+import { BOOKMARK_EXCERPT_MAX, type SessionBookmark } from '../../shared/session.js';
+import { logInfo } from '../logger.js';
 import { sessionBookmarksPath } from './store.js';
 
 export const MAX_BOOKMARKS = 200;
-const MAX_EXCERPT = 160;
 const NATIVE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** One write after another per chat: two quick toggles must not undo each other. */
@@ -24,7 +24,7 @@ function serial<T>(id: string, work: () => Promise<T>): Promise<T> {
 
 function oneLine(text: string): string {
   const plain = text.replace(/\s+/g, ' ').trim();
-  return plain.length <= MAX_EXCERPT ? plain : `${plain.slice(0, MAX_EXCERPT - 1).trimEnd()}…`;
+  return plain.length <= BOOKMARK_EXCERPT_MAX ? plain : `${plain.slice(0, BOOKMARK_EXCERPT_MAX - 1).trimEnd()}…`;
 }
 
 async function read(id: string): Promise<SessionBookmark[]> {
@@ -64,7 +64,10 @@ export function setBookmark(id: string, mark: { messageId: string; excerpt: stri
     const marks = await read(id);
     const kept = marks.filter(other => other.messageId !== messageId);
     if (on) {
-      if (kept.length === marks.length && marks.length >= MAX_BOOKMARKS) throw new Error(`A chat keeps at most ${MAX_BOOKMARKS} bookmarks`);
+      if (kept.length === marks.length && marks.length >= MAX_BOOKMARKS) {
+        logInfo(`bookmarks: chat ${id} already keeps ${MAX_BOOKMARKS} bookmarks, so a new one was refused`);
+        throw new Error(`A chat keeps at most ${MAX_BOOKMARKS} bookmarks`);
+      }
       const previous = marks.find(other => other.messageId === messageId);
       kept.push(previous ?? { messageId, excerpt: oneLine(mark.excerpt), messageTime: Number.isFinite(mark.messageTime) ? mark.messageTime : 0, at: Date.now() });
     } else if (kept.length === marks.length) return marks;
