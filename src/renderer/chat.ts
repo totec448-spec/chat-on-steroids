@@ -4499,6 +4499,13 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
     image.alt = '';
     image.loading = 'lazy';
     image.referrerPolicy = 'no-referrer';
+    // A missing/offline illustration is decorative: leave the canonical reply
+    // readable rather than keeping an empty media column or a broken icon.
+    image.addEventListener('error', () => {
+      const photoColumn = image.closest('.markdown-dil-photo-row > .markdown-dil-box:first-child');
+      if (photoColumn) photoColumn.remove();
+      else image.remove();
+    });
     slot.replaceWith(image);
   }
   // Only reapply our own presentation class, after the capture's untrusted classes are gone.

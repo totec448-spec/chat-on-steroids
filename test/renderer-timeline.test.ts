@@ -8106,6 +8106,20 @@ describe('charts, diagrams and illustrated Markdown from recorded DIL', () => {
     const { w: other } = await boot([observation(body, html('https://untrusted.invalid/track'))]);
     expect(message(other).querySelector('.markdown-dil-photo-row')).toBeNull();
   });
+
+  it('keeps the canonical answer readable if a recorded illustration cannot load', async () => {
+    const captured = '<div data-d-component="row"><div data-d-component="box">' +
+      '<div data-d-component="image"><img src="https://images.openai.com/static-rsc-4/Example01234"></div></div>' +
+      '<div data-d-component="box"><p><strong>Example item</strong></p><p>Short explanation.</p></div></div>';
+    const { w } = await boot([observation('**Example item**\n\nShort explanation.', captured)]);
+    const row = message(w).querySelector('.markdown-dil-photo-row')!;
+    const image = row.querySelector<HTMLImageElement>('img.markdown-dil-photo')!;
+    expect(image.referrerPolicy).toBe('no-referrer');
+    image.dispatchEvent(new w.Event('error'));
+    expect(row.querySelector('.markdown-dil-photo, .markdown-dil-box:first-child:empty')).toBeNull();
+    expect(row.textContent).toContain('Example item');
+    expect(row.textContent).toContain('Short explanation.');
+  });
 });
 
 describe('a formula in an answer', () => {
