@@ -627,8 +627,12 @@ export function initComposerDictation(): void {
   paintDictation();
   $<HTMLButtonElement>('dictationButton').addEventListener('click', () => { void toggleDictation(); });
   $('chatInput').addEventListener('input', () => { if (!writingDictation && dictation) retireDictation(); });
+  // Letting go of Ctrl or Shift first leaves Space auto-repeating without them. Those presses would
+  // type spaces, and as an edit drop the phrase the recognizer is still finishing.
+  let spaceStillHeld = false;
   $('chatInput').addEventListener('keydown', event => {
     if (event.key === 'Escape' && dictation) { event.preventDefault(); retireDictation(); }
+    if (spaceStillHeld && event.code === 'Space') { event.preventDefault(); return; }
     if (event.code !== 'Space' || !event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey ||
       event.isComposing || !holdToTalkSupported() || !dictationAvailable()) return;
     event.preventDefault();
@@ -644,9 +648,11 @@ export function initComposerDictation(): void {
     if (session && dictation === session && !session.stopping) void toggleDictation();
   };
   window.addEventListener('keyup', event => {
+    if (event.code === 'Space') spaceStillHeld = false;
+    else if (heldDictation && (event.key === 'Control' || event.key === 'Shift')) spaceStillHeld = true;
     if (heldDictation && (event.code === 'Space' || event.key === 'Control' || event.key === 'Shift')) releaseHeld();
   }, true);
-  window.addEventListener('blur', releaseHeld);
+  window.addEventListener('blur', () => { spaceStillHeld = false; releaseHeld(); });
   document.addEventListener('visibilitychange', () => { if (document.hidden) retireDictation(); });
   let unsubscribe: (() => void) | void;
   try { unsubscribe = dictationBridge.onDictationEvent?.(onDictationEvent); }
