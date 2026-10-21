@@ -269,6 +269,18 @@ async function silentTurnContinue(title: string, advance: (ms: number) => number
   return { conversationId, turnId, session, row };
 }
 
+it("files an automatic Continue in the person's own words when they set a Continue prompt", async () => {
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      ui: { ...defaultConfig().ui, customContinue: 'Bitte weitermachen: finish the open steps.' } });
+    const { row } = await silentTurnContinue('Own Continue words', ms => now += ms);
+    expect(row.text.startsWith('Bitte weitermachen: finish the open steps. ')).toBe(true);
+    // The notice to check existing work stays after the person's words.
+    expect(row.text.slice('Bitte weitermachen: finish the open steps. '.length)).toMatch(/check|inspect|verify|look for/i);
+  } finally { clock.mockRestore(); }
+});
+
 it('ends a Continue the page refuses before claiming because its answer is finished', async () => {
   // Measured 2026-10-02: a Continue filed for a turn whose final the app had missed was refused by
   // every page before claiming, because ChatGPT showed that final. Nothing was reported, so the
@@ -3367,3 +3379,27 @@ it('holds a message to a worker chat the app archived until that chat is restore
   archive.settleWorkerArchive(conversationId, 'unarchived');
   expect((await input.pendingBrowserInputs()).some(item => item.id === row.id)).toBe(true);
 });
+
+it.each(['GPT-5.6 Sol', 'gpt-6-pro'])('sends a message typed after Stop once ChatGPT shows the turn stopped (%s)', async model => {
+  // Measured 2026-10-20 on Windows: Stop a second after a command's result, ChatGPT confirmed the
+  // stop, and the message typed next waited 3 minutes (10 for Pro) behind the stopped turn's
+  // activity window. That window stays for the app's own automatic sends.
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Stopped then typed', conversationId });
+  const time = Date.now();
+  await post('/events', { conversationId, events: [
+    { kind: 'model_selection', model, time },
+    { kind: 'user_message', messageId: 'stop-question', text: 'Work', authoredNow: true, time },
+    { kind: 'turn_start', turnId: 'stopped-turn', time }
+  ] });
+  await attributedMcp(conversationId);
+  await post('/events', { conversationId, events: [{ kind: 'turn_end', turnId: 'stopped-turn', outcome: 'stopped', time: Date.now() }] });
+  expect(await input.sessionInputPolicy(session.id)).toMatchObject({ browserAllowed: false, stoppedIdle: true });
+  const typed = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto' as const });
+  expect((await input.pendingBrowserInputs()).some(item => item.id === typed.id)).toBe(true);
+  await input.cancelInput(typed.id);
+  // An automatic after-turn message still waits for the window.
+  const queued = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'after-turn' as const });
+  expect((await input.pendingBrowserInputs()).some(item => item.id === queued.id)).toBe(false);
+});
+

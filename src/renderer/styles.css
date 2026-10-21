@@ -2272,6 +2272,9 @@ textarea {
   font-size: calc(12px * var(--text-scale, 1));
 }
 
+/* One instruction, not a whole prompt: a few lines are enough. */
+#customContinue { min-height: 88px; }
+
 input[readonly] {
   background: var(--sunk);
   color: var(--soft);
