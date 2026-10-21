@@ -1537,7 +1537,7 @@ export function fileRecoveryInput(sessionId: string, conversationId: string, tur
     const now = Date.now();
     const row: InputEntry = { id: randomUUID(), sessionId, conversationId, owner: null, state: 'queued',
       mode: 'after-turn', dueAt: now, createdAt: now, model: null, reasoningEffort: null,
-      text: recoveryMessage({ playful: getConfig().ui.playfulContinue === true }),
+      text: recoveryMessage({ playful: getConfig().ui.playfulContinue === true, custom: getConfig().ui.customContinue }),
       recovery: { questionId: question.messageId, episode, pro, busyUntil, phase: 'ready' },
       silenceBoundary: { turnId, conversationId, workSeq: workSequence(work), acceptedAt: now } };
     if (!await recoveryCurrent(row)) {
