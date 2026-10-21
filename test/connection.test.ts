@@ -1043,5 +1043,24 @@ describe('persistent connector URLs', () => {
     expect(paths.remembered).toEqual([]);
     await connection.disconnect();
   });
+
+  // #1733 edge: the kept port can be taken by another program; the endpoint then listens on
+  // another one, and a tunnel of the user's own still points at the old one until they change it.
+  it('says when the kept port was taken and the endpoint moved, and clears that on disconnect', async () => {
+    vi.resetModules();
+    const connection = await import('../src/main/connection.js');
+    paths.kept = { core: 'k'.repeat(43) }; paths.port = 50123;
+    mocks.config.mcp.persistentUrls = true;
+    try {
+      await connection.connect();
+      expect(connection.getStatus().keptPortMoved).toEqual({ from: 50123, to: 45678 });
+      await connection.disconnect();
+      expect(connection.getStatus().keptPortMoved).toBeNull();
+      paths.port = 45678;
+      await connection.connect();
+      expect(connection.getStatus().keptPortMoved).toBeNull();
+      await connection.disconnect();
+    } finally { mocks.config.mcp.persistentUrls = false; }
+  });
 });
 

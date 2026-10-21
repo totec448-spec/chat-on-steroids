@@ -435,7 +435,8 @@ async function connectImpl(current: () => boolean = () => true): Promise<void> {
       await disconnectImpl();
       return;
     }
-    setStatus({ localUrl: endpoint.url, surfaces: describeSurfaces() });
+    setStatus({ localUrl: endpoint.url, keptPortMoved: keptPort && endpoint.port !== keptPort ? { from: keptPort, to: endpoint.port } : null,
+      surfaces: describeSurfaces() });
     if (desktopAutomationSupported() && (caps.screen || caps.control)) void prewarmComputerHelper();
     updateSurface('core', { state: 'starting', detail: 'Connecting…' });
 
@@ -694,6 +695,7 @@ async function disconnectResources(endpointForceAfterMs?: number): Promise<void>
     detail: '',
     publicUrl: null,
     localUrl: null,
+    keptPortMoved: null,
     handshakeAt: null,
     health: null,
     surfaces: describeSurfaces()
