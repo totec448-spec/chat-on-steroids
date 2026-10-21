@@ -1305,19 +1305,28 @@ const EXTENSION_UPDATE_HOLDS: Record<string, string> = {
   'browser-updates-itself': 'Firefox updates the signed add-on itself (about:addons → Check for Updates)'
 };
 /**
- * The hold last logged per browser. With two browsers reporting in turn, one shared value made the
- * browser without a hold reset the other's, and the same reason was logged every round (2.1.39).
+ * The hold last logged per browser, for the build this app ships. With two browsers reporting in turn,
+ * one shared value made the browser without a hold reset the other's (2.1.39). A report without a hold
+ * no longer resets it either: Firefox suspends the add-on between polls, each wake first reported no
+ * hold, and the same reason was logged 907 times in 36 hours (VM, 2026-10-21).
  */
-const extensionUpdateHoldLogged = new Map<string, string | null>();
+const extensionUpdateHoldLogged = new Map<string, { reason: string; build: string | null; at: number }>();
+/** The same reason is said again after this long, so a long wait still shows in a recent log. */
+const EXTENSION_UPDATE_HOLD_RELOG_MS = 6 * 60 * 60_000;
 
-/** Logs once per change and browser why an offered extension update is waiting; silence resets it. */
+/** Logs once per browser and shipped build why an offered extension update is waiting, again when the reason changes. */
 export function noteExtensionUpdateHold(hold: unknown, browser: string | null = null): void {
   const reason = typeof hold === 'string' && Object.hasOwn(EXTENSION_UPDATE_HOLDS, hold) ? hold : null;
+  if (!reason) return;
   const key = browser ?? '';
-  if (reason === (extensionUpdateHoldLogged.get(key) ?? null)) return;
-  extensionUpdateHoldLogged.set(key, reason);
+  const build = shippedExtensionBuild();
+  const last = extensionUpdateHoldLogged.get(key);
+  const now = Date.now();
+  if (last && last.reason === reason && last.build === build && now - last.at < EXTENSION_UPDATE_HOLD_RELOG_MS) return;
+  extensionUpdateHoldLogged.delete(key);
+  extensionUpdateHoldLogged.set(key, { reason, build, at: now });
   if (extensionUpdateHoldLogged.size > 16) extensionUpdateHoldLogged.delete(extensionUpdateHoldLogged.keys().next().value!);
-  if (reason) logInfo(`bridge: the browser extension waits to update: ${EXTENSION_UPDATE_HOLDS[reason]}`);
+  logInfo(`bridge: the browser extension waits to update: ${EXTENSION_UPDATE_HOLDS[reason]}`);
 }
 
 /**

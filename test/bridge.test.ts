@@ -1350,9 +1350,42 @@ describe('extension update holds', () => {
     expect(lines().at(-1)!.message).toContain('already tried this update once; reload it in chrome://extensions');
     await status('browser-updates-itself');
     expect(lines().at(-1)!.message).toContain('Firefox updates the signed add-on itself');
-    // An unknown reason is not logged, and a report without a hold resets it.
+    // An unknown reason is not logged; going back to an earlier reason is a change and is logged.
     await status('made-up'); await status(); await status('chat-busy');
     expect(lines().slice(before)).toHaveLength(4);
+  });
+
+  // VM, 2026-10-20/21: Firefox suspends the add-on's background page between polls, and each wake
+  // reported no hold first, so the same "Firefox updates the signed add-on itself" was logged 907
+  // times in 36 hours. A report without a hold no longer forgets the reason already logged.
+  it('logs a hold once while its browser keeps reporting no hold in between, and again after six hours', async () => {
+    await pair();
+    const lines = () => getLog().filter(entry => entry.message.includes('browser extension waits to update'));
+    const before = lines().length;
+    const status = (updateHold?: string) => request('POST', '/status', { browser: 'firefoxbrowser0000002',
+      body: { openConversations: [], ...(updateHold ? { updateHold } : {}) } });
+    for (let round = 0; round < 5; round += 1) { await status(); await status('browser-updates-itself'); }
+    expect(lines().slice(before)).toHaveLength(1);
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 6 * 60 * 60_000 + 1);
+    try {
+      await status('browser-updates-itself');
+      expect(lines().slice(before)).toHaveLength(2);
+    } finally { clock.mockRestore(); }
+  });
+
+  it('logs the same hold again when this app ships a different extension build', async () => {
+    await pair();
+    const lines = () => getLog().filter(entry => entry.message.includes('browser extension waits to update'));
+    const before = lines().length;
+    const status = () => request('POST', '/status', { browser: 'firefoxbrowser0000003', body: { openConversations: [], updateHold: 'browser-updates-itself' } });
+    try {
+      setShippedExtensionBuildForTest('aaaaaaaaaaaa');
+      await status(); await status();
+      setShippedExtensionBuildForTest('bbbbbbbbbbbb');
+      await status(); await status();
+      expect(lines().slice(before)).toHaveLength(2);
+    } finally { setShippedExtensionBuildForTest(); }
   });
 
   // 2.1.39 release round: Chrome (updated) and Firefox (waiting for its signed add-on) both report
