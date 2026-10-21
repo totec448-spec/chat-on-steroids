@@ -49,6 +49,7 @@ vi.mock('electron', () => ({
 const { safeStorage } = await import('electron');
 
 const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
+const { queueWorkerArchives, resetWorkerArchiveForTests } = await import('../src/main/worker-archive.js');
 const { initSecretsPath, resetSecretsCacheForTests, setSecret } = await import('../src/main/secrets.js');
 const {
   bridgePort,
@@ -5661,6 +5662,34 @@ describe('delivering a bootstrap', () => {
     expect(Date.now() - createdAt).toBeLessThan(30_000);
   });
 
+  it('unarchives a worker chat the app archived before it types the wake into it (#1701)', async () => {
+    await saveConfig({ ...suiteConfig, multiAgent: { ...suiteConfig.multiAgent, archiveWorkerChats: true } });
+    resetWorkerArchiveForTests();
+    await pair();
+    spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
+    const bootstrap = await redeem();
+    const conversationId = 'acacacac-7654-4210-8edc-ba9876543210';
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' }
+    });
+    finishAgent({ conversationId }, 'the first half is done');
+    // The finished worker's chat was archived in the meantime.
+    queueWorkerArchives([conversationId]);
+    expect((await request('POST', '/worker-archive/next', { body: {} })).body).toEqual({ conversationId });
+    await request('POST', '/worker-archive/result', { body: { conversationId, outcome: 'archived' } });
+
+    wake([{ to: 'worker-1', text: 'now do the second half' }]);
+    // Nothing is opened or typed while the chat is still archived. An extension without
+    // unarchive support reads no chat to archive here.
+    expect((await request('GET', '/status')).body.revival ?? null).toBeNull();
+    expect(opened, 'only the bootstrap opened a page').toHaveLength(1);
+    expect((await request('POST', '/worker-archive/next', { body: {} })).body).toEqual({ conversationId: null, unarchive: conversationId });
+    expect((await request('POST', '/worker-archive/result', { body: { conversationId, outcome: 'unarchived' } })).status).toBe(200);
+
+    const revival = await waitForRevival();
+    expect(revival.conversationId).toBe(conversationId);
+  });
+
   it('wakes the same worker again after it has called, well inside the first wake', async () => {
     await pair();
     spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
@@ -9323,6 +9352,22 @@ describe('unattributed activity recovery', () => {
    * reloaded three times before it was born. The bootstrap this app typed is the durable
    * boundary: reloads before it are A's and leave the feed, reloads after it stay.
    */
+  it('finds the newest approval row only while it still says waiting', async () => {
+    // A restart while ChatGPT's card waited must take that row over, not add another (VM, 2026-10-20).
+    const { latestWaitingApprovalRow } = await import('../src/main/bridge.js');
+    const { APPROVAL_ANSWERED_TEXT, APPROVAL_WAITING_TEXT } = await import('../src/shared/approval-wait.js');
+    const session = await createSession({ conversationId: 'approval-rows-chat' });
+    expect(await latestWaitingApprovalRow(session.id)).toBeNull();
+    const first = await recordProgress(session.id, 'approval-wait:approval-rows-chat:1', APPROVAL_WAITING_TEXT);
+    await recordProgress(session.id, 'approval-wait:approval-rows-chat:1', APPROVAL_ANSWERED_TEXT, first!);
+    expect(await latestWaitingApprovalRow(session.id)).toBeNull();
+    await recordProgress(session.id, 'browser-repair:between', 'Reloaded chat to recover an interrupted response.');
+    const second = await recordProgress(session.id, 'approval-wait:approval-rows-chat:2', APPROVAL_WAITING_TEXT);
+    expect(await latestWaitingApprovalRow(session.id)).toEqual({ progressId: 'approval-wait:approval-rows-chat:2', anchor: second });
+    await recordProgress(session.id, 'approval-wait:approval-rows-chat:2', APPROVAL_ANSWERED_TEXT, second!);
+    expect(await latestWaitingApprovalRow(session.id)).toBeNull();
+  });
+
   it('keeps an earlier chat’s reload notices out of the chat that resumed it', async () => {
     await pair();
     await events(PRIME, [

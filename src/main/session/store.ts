@@ -3145,6 +3145,34 @@ export async function conversationAttachment(
 }
 
 /**
+ * Where the work of a replaced ChatGPT conversation continues: the current chat and title of the
+ * session that left it. A chat left twice points at the newest chat, never the middle one, since
+ * a session holds one current conversation. The placeholder title of a chat not yet named is no
+ * name, so it comes back empty. Null when no retained session left this one.
+ */
+export async function replacementOf(
+  conversationId: string,
+  sessionId: string | null = null
+): Promise<{ conversationId: string; title: string } | null> {
+  if (!conversationId) return null;
+  const from = (summary: SessionSummary | null | undefined) =>
+    summary && summary.chatIds.includes(conversationId) && summary.conversationId && summary.conversationId !== conversationId
+      ? { conversationId: summary.conversationId, title: summary.title === 'ChatGPT session' ? '' : summary.title }
+      : null;
+  if (sessionId) return from(await getSession(sessionId));
+  const catalog = await ensureAttachmentCatalog();
+  const sessionIds = new Set(catalog.historical.get(conversationId) ?? []);
+  for (const [id, entry] of open) {
+    if (entry.summary.chatIds.includes(conversationId)) sessionIds.add(id);
+  }
+  for (const id of sessionIds) {
+    const found = from(open.get(id)?.summary ?? catalog.summaries.get(id));
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
  * Filesystem time of the newest durable mutation belonging to a session.
  *
  * Session event timestamps describe when an action happened, not when it finally reached
