@@ -141,3 +141,77 @@ describe('live proof for behavior changes', () => {
     expect(checkLive({ body: good, files: [{ path: 'scripts/pr-check.mjs', changes: 10 }, { path: 'test/pr-check.test.ts', changes: 10 }], ...contributor })).toEqual([]);
   });
 });
+
+// From 2026-10-21 (user): every PR that changes code says which rare and edge cases it handles.
+// @ts-expect-error The checker is a plain Node script without type declarations.
+import { EDGE_CASES_SINCE } from '../scripts/pr-check.mjs';
+
+describe('edge and rare cases', () => {
+  const opened = '2026-10-22T09:00:00Z';
+  // Only this rule's own problems: the other rules of the same date have their own tests below.
+  const checkAt = (pr: Parameters<typeof check>[0] & { maintainer?: boolean; createdAt?: string }) =>
+    (check as (pr: Parameters<typeof check>[0] & { maintainer?: boolean; createdAt?: string }) => string[])(pr).filter(problem => /Edge cases/.test(problem));
+  const fix = [{ path: 'src/main/bridge.ts', changes: 30 }, { path: 'test/bridge.test.ts', changes: 40 }];
+  const edges = `${good}
+## Edge cases
+
+- A restart while the message waits: it is kept and sent once (test "keeps it across a restart").
+- Two sends at once: the second waits for the first.
+`;
+
+  it('asks a code change for its edge cases, maintainers included', () => {
+    expect(Date.parse(EDGE_CASES_SINCE)).toBeLessThan(Date.parse(opened));
+    for (const maintainer of [false, true]) {
+      const problems = checkAt({ body: good, files: fix, maintainer, createdAt: opened });
+      expect(problems.join('\n')).toMatch(/## Edge cases/);
+    }
+  });
+
+  it('passes with the edge cases listed, or with a reason there are none', () => {
+    expect(checkAt({ body: edges, files: fix, maintainer: true, createdAt: opened })).toEqual([]);
+    expect(checkAt({ body: `${good}\nNo edge cases: only a wording change in one log line.\n`, files: fix, maintainer: true, createdAt: opened })).toEqual([]);
+    // The template's hint alone is not an answer.
+    const hint = `${good}\n## Edge cases\n\n<!-- The rare and edge cases this handles -->\n`;
+    expect(checkAt({ body: hint, files: fix, maintainer: true, createdAt: opened }).join('\n')).toMatch(/## Edge cases/);
+  });
+
+  it('asks nothing of docs or test-only changes, nor of PRs opened before the rule', () => {
+    expect(checkAt({ body: good, files: [{ path: 'docs/setup.md', changes: 4 }], maintainer: true, createdAt: opened })).toEqual([]);
+    expect(checkAt({ body: good, files: [{ path: 'test/bridge.test.ts', changes: 40 }], maintainer: true, createdAt: opened })).toEqual([]);
+    expect(checkAt({ body: good, files: fix, maintainer: true, createdAt: '2026-10-20T09:00:00Z' })).toEqual([]);
+  });
+});
+
+// From 2026-10-21 (user): new text in every language, and OS-level changes thought through on both platforms.
+describe('languages and platforms', () => {
+  const opened = '2026-10-22T09:00:00Z';
+  const checkAt = check as (pr: Parameters<typeof check>[0] & { maintainer?: boolean; createdAt?: string }) => string[];
+  const complete = `${good}
+## Edge cases
+
+No edge cases: a one-line wording change in a log message.
+
+## Checklist
+
+- [x] Every new text a person sees is in all 12 languages, or there is none.
+`;
+  const fix = [{ path: 'src/main/bridge.ts', changes: 30 }, { path: 'test/bridge.test.ts', changes: 40 }];
+
+  it('asks a code change to confirm its text is in all 12 languages', () => {
+    const unticked = complete.replace('- [x] Every new text', '- [ ] Every new text');
+    expect(checkAt({ body: unticked, files: fix, maintainer: true, createdAt: opened }).join('\n')).toMatch(/12 languages/);
+    expect(checkAt({ body: complete, files: fix, maintainer: true, createdAt: opened })).toEqual([]);
+  });
+
+  it('asks an OS-level change how it behaves on Windows and macOS, without requiring a Mac', () => {
+    const native = [{ path: 'src/main/tray-image.ts', changes: 20 }, { path: 'test/tray.test.ts', changes: 20 }];
+    expect(checkAt({ body: complete, files: native, maintainer: true, createdAt: opened }).join('\n')).toMatch(/## Platforms/);
+    const platforms = `${complete}\n## Platforms\n\nWindows: tried on Windows 11. macOS: not tested on a Mac; the tray API is the same there and the icon is a template image.\n`;
+    expect(checkAt({ body: platforms, files: native, maintainer: true, createdAt: opened })).toEqual([]);
+    expect(checkAt({ body: `${complete}\nNo platform difference: only a comment in the tray module changed.\n`, files: native, maintainer: true, createdAt: opened })).toEqual([]);
+    // A shortcut in the renderer counts too.
+    expect(checkAt({ body: complete, files: [{ path: 'src/renderer/app-shortcuts.ts', changes: 10 }, { path: 'test/app-shortcuts.test.ts', changes: 10 }], maintainer: true, createdAt: opened }).join('\n')).toMatch(/## Platforms/);
+    // Not for other code.
+    expect(checkAt({ body: complete, files: fix, maintainer: true, createdAt: opened })).toEqual([]);
+  });
+});
