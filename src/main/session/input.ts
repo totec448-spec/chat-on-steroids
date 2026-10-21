@@ -77,6 +77,8 @@ export const inputArgs = z.object({
 });
 export type InputArgs = z.infer<typeof inputArgs>;
 const entrySchema = inputArgs.extend({
+  /** A fresh-turn continue sent as an ordinary message after the app stopped the turn (`ui.rotateStopFallback`). */
+  afterStop: z.literal(true).optional(),
   /** An edit of the chat's first question: its new version carries the chat's setup again. */
   editFramed: z.literal(true).optional(),
   /** This exact outbox row owns the first native send of its reserved local session. */
@@ -287,7 +289,8 @@ async function browserInputAllowed(entry: InputEntry): Promise<boolean> {
 }
 /** A message you typed, for a chat ChatGPT shows stopped with nothing running: it need not wait. */
 function typedAfterStop(entry: InputEntry, policy: { stoppedIdle?: boolean; stoppedWait?: string }): boolean {
-  const typed = manualInput(entry) && !entry.recovery;
+  // The app's own continue after it stopped the turn to start a fresh one goes the same way.
+  const typed = (manualInput(entry) && !entry.recovery) || (entry.purpose === 'rotation' && entry.afterStop === true);
   if (typed && policy.stoppedWait && stoppedWaitTold.get(entry.id) !== policy.stoppedWait) {
     stoppedWaitTold.set(entry.id, policy.stoppedWait);
     if (stoppedWaitTold.size > 200) stoppedWaitTold.delete(stoppedWaitTold.keys().next().value!);
@@ -851,6 +854,26 @@ export function fileRotationInput(sessionId: string, turnId: string): Promise<In
     const now = Date.now();
     const entry: InputEntry = { id: randomUUID(), sessionId, text: rotationMessage(), mode: 'auto', dueAt: now, model: null, reasoningEffort: null,
       authoredSource: 'none', purpose: 'rotation', directTurn: policy.directTurn, transportIntent: 'browser',
+      queuedTurn: { conversationId: session.conversationId, turnId }, state: 'queued', owner: null, createdAt: now,
+      conversationId: session.conversationId };
+    await commit(append(current, entry));
+    return { ...entry };
+  });
+}
+
+/**
+ * The fresh-turn continue for a turn the app stopped (`ui.rotateStopFallback`): an ordinary message,
+ * sent once ChatGPT shows the stop and nothing runs. Nothing else of the person's may be waiting.
+ */
+export function fileRotationContinueAfterStop(sessionId: string, turnId: string): Promise<InputEntry | null> {
+  return serial(async () => {
+    const current = await load();
+    if (current.some(row => row.sessionId === sessionId && !terminal(row))) return null;
+    const session = await getSession(sessionId);
+    if (!session?.conversationId || session.activeTurnId || isChatBlocked(session.conversationId)) return null;
+    const now = Date.now();
+    const entry: InputEntry = { id: randomUUID(), sessionId, text: rotationMessage(), mode: 'auto', dueAt: now, model: null, reasoningEffort: null,
+      authoredSource: 'none', purpose: 'rotation', afterStop: true, transportIntent: 'browser',
       queuedTurn: { conversationId: session.conversationId, turnId }, state: 'queued', owner: null, createdAt: now,
       conversationId: session.conversationId };
     await commit(append(current, entry));

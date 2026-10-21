@@ -174,6 +174,16 @@ describe('settings migration', () => {
     await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, rotateTurnMinutes: 0 } });
     expect((await loadConfig()).ui.rotateTurnMinutes).toBe(0);
   });
+  it('keeps the stop fallback for fresh turns off unless chosen, also for legacy and malformed settings', async () => {
+    expect(defaultConfig().ui.rotateStopFallback).toBe(false);
+    const legacy = defaultConfig(); delete legacy.ui.rotateStopFallback;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
+    expect((await loadConfig()).ui.rotateStopFallback).toBe(false);
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...legacy, ui: { ...legacy.ui, rotateStopFallback: 'yes', startAtLogin: true } }), 'utf8');
+    expect((await loadConfig()).ui).toMatchObject({ rotateStopFallback: false, startAtLogin: true });
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, rotateStopFallback: true } });
+    expect((await loadConfig()).ui.rotateStopFallback).toBe(true);
+  });
   it('reads other apps’ usage for fresh and legacy settings and keeps it off once switched off', async () => {
     expect(defaultConfig().ui.localAppUsage).toBe(true);
     const legacy = defaultConfig(); delete legacy.ui.localAppUsage;

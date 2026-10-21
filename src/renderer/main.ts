@@ -742,6 +742,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       planBackend: $<HTMLSelectElement>('planBackend').value as 'chatgpt' | 'api',
       finishLeadMinutes: Number($<HTMLSelectElement>('finishLeadMinutes').value),
       rotateTurnMinutes: Number($<HTMLSelectElement>('rotateTurnMinutes').value),
+      rotateStopFallback: $<HTMLInputElement>('rotateStopFallback').checked,
       backgroundChats: $<HTMLInputElement>('backgroundChats').checked,
       backgroundPlacement: $<HTMLSelectElement>('backgroundPlacement').value === 'group' ? 'group' : 'window',
       followUp: $<HTMLSelectElement>('followUp').value === 'queue' ? 'queue' : 'steer',
@@ -1675,6 +1676,8 @@ function apply(next: AppState): void {
     rotate.add(option);
   }
   applyValue(rotate, rotateMinutes, previousState ? String(previousState.config.ui.rotateTurnMinutes ?? 30) : undefined);
+  applyChecked($<HTMLInputElement>('rotateStopFallback'), config.ui.rotateStopFallback === true, previousState?.config.ui.rotateStopFallback);
+  $<HTMLInputElement>('rotateStopFallback').disabled = (config.ui.rotateTurnMinutes ?? 30) === 0;
   applyChecked($<HTMLInputElement>('backgroundChats'), config.ui.backgroundChats === true, previousState?.config.ui.backgroundChats);
   applyValue($<HTMLSelectElement>('backgroundPlacement'), config.ui.backgroundPlacement ?? 'window', previousState?.config.ui.backgroundPlacement ?? 'window');
   applyValue($<HTMLSelectElement>('followUp'), config.ui.followUp ?? 'steer', previousState?.config.ui.followUp ?? 'steer');
