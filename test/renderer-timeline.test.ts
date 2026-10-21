@@ -8003,6 +8003,17 @@ describe('recorded DIL cards inside a Markdown answer', () => {
     const { w } = await boot([answer(`${cardSource}\n\n${cardSource}`)]);
     expect(w.document.querySelector('.markdown-dil-card')).toBeNull();
   });
+
+  it.each(['missing', 'truncated'] as const)('keeps the canonical Markdown when a recorded layout is %s', async kind => {
+    const capture = kind === 'missing' ? undefined : { ...text(captured()), truncated: true };
+    const event = { ...answer(source), renderedHtml: capture };
+    const { w } = await boot([event]);
+    const root = w.document.querySelector('.ev-assistant_message .msg.rich')!;
+    expect(root.querySelector('.markdown-dil-card')).toBeNull();
+    expect(root.textContent).toContain('Introduction remains ordinary Markdown.');
+    expect(root.textContent).toContain('Documents indexed');
+    expect(root.textContent).toContain('The explanation after the card stays in the reply.');
+  });
 });
 
 describe('charts, diagrams and illustrated Markdown from recorded DIL', () => {
@@ -8024,7 +8035,46 @@ describe('charts, diagrams and illustrated Markdown from recorded DIL', () => {
     expect([...root.querySelectorAll('.markdown-dil-chart-x')].map(item => item.textContent)).toEqual(['A', 'B', 'C']);
     expect([...root.querySelectorAll<HTMLElement>('.markdown-dil-chart-bar')].map(item => item.style.height)).toEqual(['26.666666666666668%', '60%', '100%']);
     expect(root.querySelector('.markdown-dil-chart')?.getAttribute('aria-label')).toContain('C 15%');
+    expect(root.querySelectorAll('.markdown-dil-chart-column')).toHaveLength(3);
     expect(root.lastElementChild?.textContent).toBe('After the chart.');
+  });
+
+  it('formats chart values, axis guides, tooltips and accessibility text in the chosen app language', async () => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value', label: 'Vergleich' }],
+      data: [{ group: 'Erste', value: 45678 }, { group: 'Zweite', value: 7.5 }], yAxisMax: 45678
+    } } })}\uE201`;
+    await boot([observation('Initial message.')]);
+    const { setLanguage } = await import('../src/renderer/i18n.js');
+    const { renderedMarkdown } = await import('../src/renderer/chat.js');
+    setLanguage('de');
+    try {
+      const figure = renderedMarkdown(widget).querySelector('.markdown-dil-chart')!;
+      expect(figure.getAttribute('aria-label')).toBe('Vergleich: Erste 45.678, Zweite 7,5');
+      expect([...figure.querySelectorAll('.markdown-dil-chart-guide span')].map(node => node.textContent))
+        .toEqual(['45.678', '22.839', '0']);
+      expect([...figure.querySelectorAll<HTMLElement>('.markdown-dil-chart-bar')].map(bar => bar.title))
+        .toEqual(['Erste: 45.678', 'Zweite: 7,5']);
+    } finally { setLanguage('en'); }
+  });
+
+  it.each([
+    { label: 'negative', data: [{ group: 'A', value: -1 }] },
+    { label: 'non-numeric', data: [{ group: 'A', value: 'many' }] },
+    { label: 'non-finite', data: [{ group: 'A', value: Number.POSITIVE_INFINITY }] },
+    { label: 'oversized', data: [{ group: 'A', value: 1e13 }] },
+    { label: 'invalid minimum', data: [{ group: 'A', value: 1 }], yAxisMin: -2 },
+    { label: 'invalid maximum', data: [{ group: 'A', value: 5 }], yAxisMax: 4 },
+    { label: 'non-numeric maximum', data: [{ group: 'A', value: 5 }], yAxisMax: '100' }
+  ])('rejects $label chart values without changing the canonical surrounding text', async content => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], ...content
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Before.\n\n${widget}\n\nAfter.`)]);
+    const root = message(w);
+    expect(root.querySelector('.markdown-dil-chart')).toBeNull();
+    expect(root.textContent).toContain('Before.');
+    expect(root.textContent).toContain('After.');
   });
 
   it('ignores malformed chart payloads without crashing the timeline', async () => {

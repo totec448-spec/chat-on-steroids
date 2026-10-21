@@ -3091,17 +3091,22 @@ input[readonly] {
 }
 .msg.rich .markdown-dil-chart-bars {
   display: flex; flex: 1; gap: 10px; align-items: stretch; min-width: 0;
+  box-sizing: border-box; padding-bottom: 26px;
   background: repeating-linear-gradient(to top, var(--line) 0 1px, transparent 1px 25%);
+  background-size: 100% calc(100% - 26px); background-repeat: no-repeat;
 }
 .msg.rich .markdown-dil-chart-column {
   display: flex; flex: 1; flex-direction: column; justify-content: flex-end; align-items: center;
-  min-width: 0; height: 100%;
+  min-width: 0; height: 100%; position: relative;
 }
 .msg.rich .markdown-dil-chart-bar {
   width: min(80%, 120px); min-height: 1px; border-radius: 7px 7px 0 0;
-  background: #245aa0; max-height: calc(100% - 26px);
+  background: #245aa0; max-height: 100%;
 }
-.msg.rich .markdown-dil-chart-x { height: 26px; font-size: calc(11px * var(--text-scale, 1)); text-align: center; padding-top: 5px; }
+.msg.rich .markdown-dil-chart-x {
+  position: absolute; top: 100%; left: 0; width: 100%; height: 26px;
+  font-size: calc(11px * var(--text-scale, 1)); text-align: center; padding-top: 5px;
+}
 .msg.rich .markdown-dil-chart-note { color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); margin: 8px 0 0; }
 @container (max-width: 330px) {
   .msg.rich .markdown-dil-grid { grid-template-columns: 1fr; }
