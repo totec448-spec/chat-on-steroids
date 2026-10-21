@@ -2744,6 +2744,7 @@
   "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "ゴールヘルパーは作業が完了したと判断していますが、まだ確認されていません。チャットを確認するか、次の指示を送信してください。",
   "Review Goal completion": "ゴールの完了を確認",
   "Off by default. When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you.": "デフォルトではオフです。ゴールが証拠なしに完了を報告した場合、結果は未確認のままで返信は保留されます。Session finish は現在の保留を維持し、モデルにターンを開いたままにするよう求め、通知を送ることがあります。",
+  "When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you. Off by default.": "ゴールが証拠なしに完了を報告した場合、結果は未確認のままで返信は保留されます。Session finish は現在の保留を維持し、モデルにターンを開いたままにするよう求め、通知を送ることがあります。 デフォルトではオフです。",
   "Sub-agent view": "サブエージェントの表示",
   "Conversation": "会話",
   "Loading activity…": "アクティビティを読み込み中…",
