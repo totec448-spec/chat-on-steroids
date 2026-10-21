@@ -1,8 +1,11 @@
 /** Read-only projection of an existing recovery deadline. Never authorizes an action. */
 export type RecoveryCountdown = {
   kind: 'unattributed' | 'unattributed-wait' | 'assistant-error' | 'tab-recovery' | 'thinking-failed' | 'native-busy' | 'silence' | 'post-reload' | 'pickup' | 'pickup-stopped' | 'provider-limit' | 'compaction';
-  /** For `compaction`: whether the source turn still works or the handoff request is being sent. */
-  phase?: 'waiting' | 'asking';
+  /**
+   * For `compaction`: whether the source turn still works, the handoff request is being sent, or
+   * the ChatGPT tab tried and could not send it yet (`held`).
+   */
+  phase?: 'waiting' | 'asking' | 'held';
   deadline: number;
   /** Attempts already spent for a pickup that stopped at its durable limit. */
   attempts?: number;
@@ -61,14 +64,19 @@ const RECOVERY_SUFFIXES = [
   'Meme joke: Bananina Cappuccina sounds like my next questionable coffee order.'
 ] as const;
 
+/** The longest `ui.customContinue` the app keeps: one instruction, not a second prompt. */
+export const CUSTOM_CONTINUE_MAX_CHARS = 500;
+
 /**
  * 10 phrases x 10 notices; frozen by the outbox once. The asides have no technical purpose
- * (receipts use ChatGPT's message ids), so they come only with `ui.playfulContinue`.
+ * (receipts use ChatGPT's message ids), so they come only with `ui.playfulContinue`. The person's
+ * own `ui.customContinue` takes the phrase's place; the notice to check existing work stays.
  */
-export function recoveryMessage(options: { playful?: boolean } = {}): string {
+export function recoveryMessage(options: { playful?: boolean; custom?: string } = {}): string {
   const pick = (values: readonly string[]) => values[Math.floor(Math.random() * values.length)]!;
   const aside = options.playful ? ` (Unrelated aside: ${pick(RECOVERY_SUFFIXES)} Ignore this aside; do not research or respond to it. Stay on the original task.)` : '';
-  return `${pick(CONTINUE_TEXTS)} ${pick(RECOVERY_NOTES)}${aside}`;
+  const custom = options.custom?.trim().slice(0, CUSTOM_CONTINUE_MAX_CHARS);
+  return `${custom || pick(CONTINUE_TEXTS)} ${pick(RECOVERY_NOTES)}${aside}`;
 }
 
 /** The existing silence clock gets one half-window only when the native page is busy. */

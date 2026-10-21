@@ -587,20 +587,23 @@ it('draws the sidebar layout saved in Appearance, Projects by default, and repai
     listSessions: async () => ({ ok: true, data: { sessions: [session], activeId: null, pressure: [], blocked: [] } })
   });
   const doc = mounted.window.document;
-  const list = doc.getElementById('sessionList')!, select = doc.getElementById('appearanceSidebarLayout') as HTMLSelectElement;
+  const list = doc.getElementById('sessionList')!;
+  const option = (value: string) => doc.querySelector<HTMLInputElement>(`input[name="appearanceSidebarLayout"][value="${value}"]`)!;
+  const chosen = () => doc.querySelector<HTMLInputElement>('input[name="appearanceSidebarLayout"]:checked')?.value;
   // A config saved before the setting existed has no appearance at all: today's project tree.
   await vi.waitFor(() => expect(doc.querySelector(`[data-project-id="${project.id}"]`)).not.toBeNull());
   expect(list.classList.contains('is-inbox')).toBe(false);
-  expect(select.value).toBe('projects');
+  expect(chosen()).toBe('projects');
   // The choice lives in the app's config, so it arrives with a state push (another window, a restart).
   const { defaultAppearance } = await import('../src/shared/appearance.js');
   mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, appearance: { ...defaultAppearance(), sidebarLayout: 'inbox' } } };
   mounted.push(structuredClone(mounted.state));
   expect(list.classList.contains('is-inbox')).toBe(true);
-  expect(select.value).toBe('inbox');
+  expect(chosen()).toBe('inbox');
   expect(window.localStorage.getItem('chat-on-steroids.sidebar-layout')).toBeNull();
   // Choosing Projects saves through Settings with the rest of Appearance and redraws the tree.
-  select.value = 'projects'; select.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  // A click on its picture, as a person chooses it.
+  option('projects').click();
   await vi.waitFor(() => expect(mounted.calls.find(call => call.ui?.appearance?.sidebarLayout)?.ui.appearance).toMatchObject({ sidebarLayout: 'projects', font: 'system' }), { timeout: 5000 });
   await vi.waitFor(() => expect(list.classList.contains('is-inbox')).toBe(false), { timeout: 5000 });
   expect(doc.querySelector(`[data-project-id="${project.id}"]`)).not.toBeNull();
@@ -846,6 +849,70 @@ it('keeps keyboard focus on the same card, worker arrow or filter across a live 
   expect(doc.activeElement).toBe(cardTop());
 });
 
+it("opens the next and previous chat in the sidebar's drawn order with Ctrl+Tab and Ctrl+Shift+Tab, wrapping at the ends", async () => {
+  const { project, session } = projectSidebarFixture();
+  const mounted = await mountChat({}, [], {
+    listProjects: async () => ({ ok: true, data: [project] }),
+    listSessions: async () => listed([session, inboxChat('c1'), inboxChat('c2'), inboxChat('c3')])
+  });
+  const doc = mounted.window.document, w = mounted.window;
+  await vi.waitFor(() => expect(doc.querySelector('#chatList .sess[data-id="c3"]')).not.toBeNull());
+  const selected = () => doc.querySelector<HTMLElement>('#sessionList .sess.is-sel')?.dataset.id;
+  const press = (shiftKey = false, target: EventTarget = doc.body, repeat = false) => {
+    const event = new w.KeyboardEvent('keydown', { key: 'Tab', ctrlKey: true, shiftKey, repeat, bubbles: true, cancelable: true });
+    target.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  expect(selected()).toBeUndefined();
+  // From a new chat: the first chat drawn. The collapsed project's chat is not on the way.
+  expect(press()).toBe(true);
+  expect(selected()).toBe('c1');
+  press(); expect(selected()).toBe('c2');
+  press(true); expect(selected()).toBe('c1');
+  // The ends wrap, as a browser's tabs do; a held key does not race through the list.
+  press(true); expect(selected()).toBe('c3');
+  expect(press(false, doc.body, true)).toBe(true); expect(selected()).toBe('c3');
+  press(); expect(selected()).toBe('c1');
+  // An opened project's chat takes its place in the order, above the chats outside projects.
+  doc.querySelector<HTMLElement>(`[data-project-id="${project.id}"] > .project-heading`)!.click();
+  press(true); expect(selected()).toBe('project-session');
+  // From a library page the step shows the chat, as a click on its row does.
+  doc.getElementById('sidebarPlugins')!.click();
+  expect(doc.querySelector<HTMLElement>('.app')!.dataset.screen).toBe('library');
+  press(); expect(selected()).toBe('c1');
+  expect(doc.querySelector<HTMLElement>('.app')!.dataset.screen).toBe('chat');
+  // The terminal keeps its keys; Settings hides the list, so there is nothing to walk.
+  const terminal = doc.createElement('div'); terminal.className = 'xterm'; doc.body.append(terminal);
+  expect(press(false, terminal)).toBe(false); expect(selected()).toBe('c1');
+  doc.getElementById('workspaceSettings')!.click();
+  expect(press()).toBe(false); expect(selected()).toBe('c1');
+});
+
+it('keeps keyboard focus with the chat Ctrl+Tab opens in the Inbox, and leaves the keys to the open project picker', async () => {
+  const mounted = await mountInbox({ listSessions: async () => listed(['c1', 'c2', 'c3'].map(id => inboxChat(id, { updatedAt: Date.now() }))) });
+  const doc = mounted.window.document, w = mounted.window;
+  await vi.waitFor(() => expect(inboxCardIds(doc)).toHaveLength(3));
+  const [first, second] = inboxCardIds(doc);
+  const top = (id: string) => doc.querySelector<HTMLElement>(`#sessionList .sess[data-id="${id}"] > .sess-top`)!;
+  const selected = () => doc.querySelector<HTMLElement>('#sessionList .sess.is-sel')?.dataset.id;
+  const press = (target: EventTarget) => {
+    const event = new w.KeyboardEvent('keydown', { key: 'Tab', ctrlKey: true, bubbles: true, cancelable: true });
+    target.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  top(first!).click(); top(first!).focus();
+  expect(press(doc.activeElement!)).toBe(true);
+  expect(selected()).toBe(second);
+  // Focus follows the chat that opened, so Enter does not reopen the one before it.
+  expect(doc.activeElement).toBe(top(second!));
+  // The picker is a popup, not a native dialog: its search field keeps Ctrl+Tab.
+  doc.querySelector<HTMLButtonElement>('#chatList [data-inbox-control="picker"]')!.click();
+  const search = doc.querySelector<HTMLInputElement>('.inbox-project-picker input')!;
+  expect(doc.activeElement).toBe(search);
+  expect(press(search)).toBe(false);
+  expect(selected()).toBe(second);
+});
+
 /** The inbox's cards, top to bottom, by session id. */
 const inboxCardIds = (doc: Document) => [...doc.querySelectorAll<HTMLElement>('.inbox-cards > .sess-card')].map(row => row.dataset.id);
 /** One card's state on its meta line: its words, and the card itself for its title and accessible text. */
@@ -1089,6 +1156,59 @@ it('shows unattributed activity at the end of the inbox, as the tree does, with 
   changed();
   await vi.waitFor(() => expect(box()!.querySelector('summary')).not.toBe(before));
   expect(doc.activeElement).toBe(box()!.querySelector('summary'));
+});
+
+it('marks a collapsed chat whose sub-agent needs you, over its own spinner, in the project tree', async () => {
+  // VM, 2026-10-20: a worker waited on ChatGPT's approval card for half an hour; its chat's row in
+  // the tree showed only the arrow, so nothing said it needed anyone until the row was opened.
+  const old = Date.now() - 3 * DAY;
+  const sessions = [
+    inboxChat('parent', { title: 'Parent task', startedAt: old, updatedAt: old, activityExpiresAt: Date.now() + 60 * 60_000 }),
+    inboxChat('w-needs', { startedAt: old, updatedAt: old, origin: { kind: 'worker', fromSessionId: 'parent', agentId: 'worker-1', task: '' } }),
+    inboxChat('w-runs', { startedAt: old, updatedAt: old, activityExpiresAt: Date.now() + 60 * 60_000,
+      origin: { kind: 'worker', fromSessionId: 'parent', agentId: 'worker-2', task: '' } }),
+    inboxChat('calm', { title: 'Calm parent', startedAt: old, updatedAt: old }),
+    inboxChat('w-calm', { startedAt: old, updatedAt: old, activityExpiresAt: Date.now() + 60 * 60_000,
+      origin: { kind: 'worker', fromSessionId: 'calm', agentId: 'worker-3', task: '' } })
+  ];
+  const mounted = await mountChat({}, [], { listSessions: async () => listed(sessions, { approval: ['c-w-needs'] }) });
+  const doc = mounted.window.document;
+  const row = (id: string) => doc.querySelector<HTMLElement>(`#chatList .sess[data-id="${id}"]`);
+  await vi.waitFor(() => expect(row('parent')).not.toBeNull());
+  const marks = (id: string) => [...row(id)!.querySelectorAll<HTMLElement>('.sess-top .session-status')];
+  // One mark, the sub-agent's need, in place of the chat's own spinner, and the row's title says it.
+  expect(marks('parent').map(mark => [mark.className, mark.getAttribute('aria-label')]))
+    .toEqual([['session-status is-failed', '1 sub-agent needs attention']]);
+  expect(row('parent')!.title).toContain('1 sub-agent needs attention');
+  // Workers that only run leave their chat as it is.
+  expect(marks('calm').map(mark => mark.className)).toEqual([]);
+  // Opened, the worker's own row carries the mark, and the chat shows its own state again.
+  row('parent')!.querySelector<HTMLButtonElement>('.worker-toggle')!.click();
+  await vi.waitFor(() => expect(row('w-needs')).not.toBeNull());
+  expect(marks('w-needs').map(mark => mark.className)).toEqual(['session-status is-failed']);
+  expect(marks('parent').map(mark => mark.className)).toEqual(['session-status is-active']);
+});
+
+it('keeps a number setting as it was when its field is left empty', async () => {
+  // Number('') is 0: an emptied threshold field was saved as its 10,000-token minimum, so every
+  // chat would compact almost at once, and an emptied worker limit fell to 1.
+  const mounted = await mountChat();
+  await settle();
+  const doc = mounted.window.document;
+  const before = structuredClone(mounted.state.config);
+  for (const id of ['autoCompactTokens', 'maWorkers', 'globalMaWorkers']) {
+    const field = doc.getElementById(id) as HTMLInputElement;
+    field.value = '   ';
+    field.dispatchEvent(new mounted.window.Event('change'));
+  }
+  await vi.waitFor(() => expect(mounted.calls.length).toBeGreaterThan(0));
+  await settle();
+  const last = mounted.calls.at(-1);
+  expect(last.compaction.autoTokens).toBe(before.compaction.autoTokens);
+  expect(last.multiAgent.maxWorkers).toBe(before.multiAgent.maxWorkers);
+  expect(last.multiAgent.globalMaxWorkers ?? 0).toBe(before.multiAgent.globalMaxWorkers ?? 0);
+  // The field shows the kept value again, not an empty box.
+  expect((doc.getElementById('autoCompactTokens') as HTMLInputElement).value).toBe(String(before.compaction.autoTokens));
 });
 
 it('draws the inbox when the layout changes before any chat is loaded, and the tree again when it changes back', async () => {
@@ -1820,16 +1940,16 @@ it('searches every settings page from the sidebar and opens the setting it finds
   (doc.getElementById('workspaceSettings') as HTMLButtonElement).click();
   expect(box.hidden).toBe(false);
   // While the field holds a query, its results take the page list's place.
-  type('privacy screenshots');
+  type('developer mode');
   expect([pages.hidden, results.hidden]).toEqual([true, false]);
-  expect(rows().map(row => [row.querySelector('b')!.textContent, row.querySelector('.search-snippet')!.textContent])).toEqual([['Privacy screenshots', 'General › Privacy']]);
+  expect(rows().map(row => [row.querySelector('b')!.textContent, row.querySelector('.search-snippet')!.textContent])).toEqual([['Developer mode', 'General › For developers']]);
   expect(rows()[0]!.querySelectorAll('mark')).toHaveLength(2);
   rows()[0]!.click(); await frame();
   // Its page opens with the list back, the setting marked and its control focused.
   expect(doc.querySelector('[data-panel="general"]')!.classList.contains('is-active')).toBe(true);
   expect([field.value, pages.hidden, results.hidden]).toEqual(['', false, true]);
-  expect(doc.getElementById('privacyScreenshots')!.closest('.setting')!.classList.contains('is-found')).toBe(true);
-  expect(doc.activeElement).toBe(doc.getElementById('privacyScreenshots'));
+  expect(doc.getElementById('developerMode')!.closest('.setting')!.classList.contains('is-found')).toBe(true);
+  expect(doc.activeElement).toBe(doc.getElementById('developerMode'));
   // Enter opens the best match, here on Agents & automation.
   type('session finish');
   field.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await frame();
@@ -2139,6 +2259,36 @@ it('shows the current host Desktop tools without rebuilding permission controls 
   mounted.push(mounted.state);
   expect(names()).toEqual(windowsNames);
   expect(mounted.calls).toHaveLength(0);
+});
+
+it('offers whole-screen privacy only where a screenshot can show the whole screen (macOS)', async () => {
+  const mounted = await mountChat({ platform: { family: 'windows', name: 'Windows', desktopAutomation: true } });
+  const row = mounted.window.document.getElementById('privacyScreenshotsSetting')!;
+  // Windows captures one window already; the switch would change nothing there.
+  expect(row.hidden).toBe(true);
+  mounted.push({ ...mounted.state, platform: { family: 'macos', name: 'macOS', desktopAutomation: true } });
+  expect(row.hidden).toBe(false);
+  mounted.push({ ...mounted.state, platform: { family: 'linux', name: 'Linux', desktopAutomation: false } });
+  expect(row.hidden).toBe(true);
+});
+
+it('says why an Activity list is empty, in the app language, and drops the note once a line arrives', async () => {
+  let addLine: ((entry: unknown) => void) | undefined;
+  const mounted = await mountChat({}, [], { onLogEntry: (fn: (entry: unknown) => void) => { addLine = fn; return () => undefined; } });
+  const doc = mounted.window.document;
+  const feed = doc.getElementById('fullFeed')!;
+  await vi.waitFor(() => expect(feed.classList.contains('is-empty')).toBe(true));
+  expect(feed.dataset.empty).toBe('Nothing has happened yet.');
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  expect(feed.dataset.empty).toBe('Bisher ist nichts passiert.');
+  setLanguage('en');
+  addLine!({ time: Date.now(), level: 'info', message: 'tunnel connected' });
+  await vi.waitFor(() => expect(feed.classList.contains('is-empty')).toBe(false));
+  // Problems only, with no problem among the lines: the filter, not the log, is why it is empty.
+  (doc.querySelector('#logFilter [data-filter="bad"]') as HTMLButtonElement).click();
+  expect(feed.classList.contains('is-empty')).toBe(true);
+  expect(feed.dataset.empty).toBe('Nothing matches this filter.');
 });
 
 it('preserves native Desktop permissions when saving unrelated settings on Linux', async () => {
@@ -2697,11 +2847,11 @@ it("keeps a worker's delivery line in the app's language when the language chang
     createdAt: 1, activatedAt: 2, finishedAt: null, result: null, pending: 0, awaitingAck: 0, delivered: 1, conversationId: 'worker-chat', primeConversationId: 'prime-chat', detachedAt: null };
   const mounted = await mountChat({}, [], { getSwarm: async () => ({ ok: true, data: { enabled: true, running: true, runId: 'run-1', agents: [worker], maxWorkers: 2, pendingReports: 0 } }) });
   const line = () => mounted.window.document.querySelector('#swarmList .model-sub')?.textContent;
-  await vi.waitFor(() => expect(line()).toBe('0 pending · 1 delivered · chat bound'));
+  await vi.waitFor(() => expect(line()).toBe('0 pending · 1 delivered'));
   const { setLanguage } = await import('../src/renderer/i18n.js');
   setLanguage('de');
   // The line was joined once when the list was painted, so it stayed English.
-  expect(line()).toBe('0 ausstehend · 1 zugestellt · Chat verknüpft');
+  expect(line()).toBe('0 ausstehend · 1 zugestellt');
   setLanguage('en');
 });
 
@@ -3655,6 +3805,28 @@ it('opens, saves and restores the editable handoff prompt', async () => {
   await settle();
   expect(prompt.value).toBe(DEFAULT_HANDOFF_PROMPT);
   expect(mounted.calls.at(-1)?.compaction.handoffPrompt).toBe(DEFAULT_HANDOFF_PROMPT);
+});
+
+it('saves the Continue prompt from its editor, and Restore default sends the built-in phrases again', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const automation = doc.querySelector('[data-view="settings"]')!;
+  const panel = doc.getElementById('customContinuePanel')!;
+  const prompt = doc.getElementById('customContinue') as HTMLTextAreaElement;
+  expect(automation.contains(prompt)).toBe(true);
+  expect(prompt.maxLength).toBe(500);
+  expect(panel.hidden).toBe(true);
+  (doc.getElementById('customContinueEdit') as HTMLButtonElement).click();
+  expect(panel.hidden).toBe(false);
+  expect(prompt.value).toBe('');
+
+  prompt.value = '  Keep going and run the tests at the end.  ';
+  prompt.dispatchEvent(new mounted.window.Event('change'));
+  await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui.customContinue).toBe('Keep going and run the tests at the end.'));
+
+  (doc.getElementById('customContinueReset') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui).toMatchObject({ customContinue: undefined }));
+  expect(prompt.value).toBe('');
 });
 
 it('offers the handoff length, starting at the thorough default, and saves a shorter choice', async () => {

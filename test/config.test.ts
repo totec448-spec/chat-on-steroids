@@ -1123,6 +1123,15 @@ it('persists optional ordinary new-chat model defaults without inventing them fo
   expect(loaded.ui.defaultChatReasoning).toBe('xhigh');
 });
 
+it('keeps a Continue prompt, and reads an empty or overlong one as the built-in phrases', async () => {
+  const config = defaultConfig();
+  expect(config.ui.customContinue).toBeUndefined();
+  for (const [stored, read] of [['Keep going.', 'Keep going.'], ['   ', undefined], ['x'.repeat(501), undefined], [42, undefined]] as const) {
+    await saveConfig({ ...config, ui: { ...config.ui, customContinue: stored as string } });
+    expect((await loadConfig()).ui.customContinue, String(stored).slice(0, 20)).toBe(read);
+  }
+});
+
 describe('a settings file the app cannot read as is', () => {
   // VM test, 2026-10-06: Windows PowerShell 5.1 wrote config.json with a byte-order mark. The app
   // fell back to recovery defaults and the next settings save overwrote the user's folders and tunnel.

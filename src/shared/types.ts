@@ -172,6 +172,8 @@ export interface UiPrefs {
   playfulStatus?: boolean;
   /** A random fun-fact aside at the end of each automatic Continue, marked for the model to ignore. Off by default. */
   playfulContinue?: boolean;
+  /** The person's own words in place of the built-in automatic Continue phrase (silence recovery only). Unset means the built-in phrases. */
+  customContinue?: string;
   /** Keep the chat at its end while it grows, here and on ChatGPT, until the reader scrolls up. On unless false. */
   followOutput?: boolean;
   /** Add the Chat On Steroids Core mention to the user's own prompts sent from the app. On unless false. */
@@ -511,6 +513,11 @@ export interface ConnectionStatus {
   offlineCause?: 'service' | null;
   /** Epoch ms of the last request ChatGPT sent to this app, end-to-end proof. */
   lastRequestAt: number | null;
+  /**
+   * With "Keep plugin URLs across restarts" on: the kept local port was taken at this start, so the
+   * endpoint listens on another one and a tunnel of the user's own must point there. Null otherwise.
+   */
+  keptPortMoved?: { from: number; to: number } | null;
   /**
    * Epoch ms of the last tool ChatGPT actually ran. Requests arriving with no tool
    * call ever following is the signature of Developer mode being off in ChatGPT.

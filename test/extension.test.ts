@@ -2677,7 +2677,7 @@ describe('worker settings authority', () => {
     expect(posted).toEqual([{ autoCompact: false, conversationId: CHAT }]);
   });
 
-  it('forwards compaction ticket, safe source loss, and both irreversible dispatch checkpoints', async () => {
+  it('forwards compaction ticket, safe source loss, a deferred automatic attempt, and both irreversible dispatch checkpoints', async () => {
     const posted: Record<string, unknown>[] = [];
     const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
       const url = new URL(input);
@@ -2697,12 +2697,15 @@ describe('worker settings authority', () => {
     await worker.send({ type: 'compact', conversationId: CHAT, ticket: true, automatic: true }, 44);
     const sourceError = 'The browser could not insert the handoff request (native_edit_rejected).';
     await worker.send({ type: 'compact', conversationId: CHAT, token, sourceLost: true, sourceError }, 44);
+    const deferredError = 'ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted.';
+    await worker.send({ type: 'compact', conversationId: CHAT, token, sourceDeferred: true, sourceError: deferredError }, 44);
     await worker.send({ type: 'compact', conversationId: CHAT, token, sourceDispatch: true }, 44);
     await worker.send({ type: 'compact', conversationId: CHAT, token, destinationDispatch: true }, 44);
 
     expect(posted).toEqual([
       expect.objectContaining({ conversationId: CHAT, ticket: true, automatic: true }),
       expect.objectContaining({ conversationId: CHAT, token, sourceLost: true, sourceError }),
+      expect.objectContaining({ conversationId: CHAT, token, sourceDeferred: true, sourceError: deferredError }),
       expect.objectContaining({ conversationId: CHAT, token, sourceDispatch: true }),
       expect.objectContaining({ conversationId: CHAT, token, destinationDispatch: true })
     ]);
@@ -4461,6 +4464,37 @@ describe('extension observation journal', () => {
     expect(journalOf(session).map((entry) => entry.event.text)).toEqual(['A', 'B']);
   });
 
+  // #1648: on a slow Windows machine every events message rewrote the whole journal (up to 4 MiB),
+  // one write after another, and pages waited up to ~100 s for their acknowledgement. Messages that
+  // arrive while a write is in flight share the next write: it is taken when it starts, so it holds
+  // every one of them, and each reply still waits until its observations are stored.
+  it('stores observations that arrive during a slow journal write together in one following write', async () => {
+    const local = new FakeStorageArea();
+    const session = new FakeStorageArea();
+    const journalWrites: string[][] = [];
+    const set = session.set.bind(session);
+    session.set = async (values: Record<string, unknown>) => {
+      if (Array.isArray(values.journal)) {
+        journalWrites.push((values.journal as Array<{ event: { text: string } }>).map(entry => entry.event.text));
+        // The first journal write is slow, as on the loaded machine.
+        if (journalWrites.length === 1) await new Promise((resolve) => setTimeout(resolve, 80));
+      }
+      return set(values);
+    };
+    const worker = loadWorker({ local, session });
+    // Each message comes from its own ChatGPT tab, as with a main chat and its workers.
+    const send = (text: string, time: number) => worker.send(
+      { type: 'events', entries: [{ conversationId: null, event: { kind: 'user_message', time, text } }] }, time);
+    const first = send('A', 1);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const later = ['B', 'C', 'D', 'E'].map((text, index) => send(text, index + 2));
+    const replies = await Promise.all([first, ...later]);
+
+    for (const reply of replies) expect(reply).toMatchObject({ ok: true, durable: true });
+    expect(journalOf(session).map((entry) => entry.event.text)).toEqual(['A', 'B', 'C', 'D', 'E']);
+    expect(journalWrites).toEqual([['A'], ['A', 'B', 'C', 'D', 'E']]);
+  });
+
   it('serializes live tab snapshots so a slow older write cannot forget a newer tab owner', async () => {
     const local = new FakeStorageArea();
     const session = new FakeStorageArea();
@@ -6007,15 +6041,15 @@ describe('this install\'s connector names', () => {
 
 describe('archiving retired worker chats (#1460)', () => {
   const chat = 'aaaaaaaa-1111-4222-8333-444444444444';
-  function archiveWorker(outcome: unknown) {
+  function archiveWorker(outcome: unknown, job: Record<string, unknown> = { conversationId: chat }) {
     const results: unknown[] = [];
-    let next: string | null = chat;
+    let next: Record<string, unknown> | null = job;
     const worker = loadWorker({
       local: new FakeStorageArea({ port: 8765, token: 'paired-token' }), session: new FakeStorageArea(),
       fetch: async (input, init = {}) => {
         const route = new URL(input).pathname;
         if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
-        if (route === '/worker-archive/next') { const id = next; next = null; return response(200, { conversationId: id }); }
+        if (route === '/worker-archive/next') { const body = next ?? { conversationId: null }; next = null; return response(200, body); }
         if (route === '/worker-archive/result') { results.push(JSON.parse(String(init.body))); return response(200, { ok: true }); }
         return response(200, {});
       },
@@ -6029,7 +6063,7 @@ describe('archiving retired worker chats (#1460)', () => {
     await worker.createTab({ id: 1, url: 'https://chatgpt.com/' });
     await worker.registerTab(1);
     await worker.fireAlarm();
-    expect(worker.tabsSendMessage).toHaveBeenCalledWith(1, { type: 'clf-archive-chat', conversationId: chat }, expect.objectContaining({ documentId: expect.any(String) }));
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(1, { type: 'clf-archive-chat', conversationId: chat, archive: true }, expect.objectContaining({ documentId: expect.any(String) }));
     expect(results).toEqual([{ conversationId: chat, outcome: 'archived' }]);
   });
 
@@ -6038,6 +6072,28 @@ describe('archiving retired worker chats (#1460)', () => {
     await worker.fireAlarm();
     expect(worker.tabsSendMessage).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ type: 'clf-archive-chat' }), expect.anything());
     expect(results).toEqual([{ conversationId: chat, outcome: 'deferred' }]);
+  });
+
+  it('restores a chat the app archived before its worker is woken (#1701)', async () => {
+    const { worker, results } = archiveWorker({ outcome: 'unarchived' }, { conversationId: null, unarchive: chat });
+    await worker.createTab({ id: 1, url: 'https://chatgpt.com/' });
+    await worker.registerTab(1);
+    await worker.fireAlarm();
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(1, { type: 'clf-archive-chat', conversationId: chat, archive: false }, expect.objectContaining({ documentId: expect.any(String) }));
+    expect(results).toEqual([{ conversationId: chat, outcome: 'unarchived' }]);
+  });
+
+  it('never reports a restore as an archive, or the other way round', async () => {
+    const restoring = archiveWorker({ outcome: 'archived' }, { conversationId: null, unarchive: chat });
+    await restoring.worker.createTab({ id: 1, url: 'https://chatgpt.com/' });
+    await restoring.worker.registerTab(1);
+    await restoring.worker.fireAlarm();
+    expect(restoring.results).toEqual([{ conversationId: chat, outcome: 'failed' }]);
+    const archiving = archiveWorker({ outcome: 'unarchived' });
+    await archiving.worker.createTab({ id: 1, url: 'https://chatgpt.com/' });
+    await archiving.worker.registerTab(1);
+    await archiving.worker.fireAlarm();
+    expect(archiving.results).toEqual([{ conversationId: chat, outcome: 'failed' }]);
   });
 
   it('reports a failure the page could not explain as failed', async () => {

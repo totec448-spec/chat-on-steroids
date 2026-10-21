@@ -57,3 +57,38 @@ it('serves each surface on the kept token, and a fresh one for a surface without
     expect(endpoint.urls.desktop).not.toContain(token('b'));
   } finally { await endpoint.stop(); }
 });
+
+// #1550: a named tunnel points at a fixed local port, but the server took a new random port on
+// every start, so the kept URL still went dead after a restart.
+const { loadKeptPort } = await import('../src/main/mcp/persistent-paths.js');
+
+it('remembers the local port with the tokens, and forgets it with them', async () => {
+  await rememberSurfaceTokens({ core: `http://127.0.0.1:50123/mcp/core/${token('a')}`, desktop: `http://127.0.0.1:50123/mcp/desktop/${token('b')}`, plugins: `http://127.0.0.1:50123/mcp/plugins/${token('c')}` });
+  expect(await loadKeptPort()).toBe(50123);
+  store.set('mcp:path:port', 'eighty');
+  expect(await loadKeptPort()).toBeNull();
+  store.set('mcp:path:port', '70000');
+  expect(await loadKeptPort()).toBeNull();
+  await rememberSurfaceTokens(urls);
+  await forgetSurfaceTokens();
+  expect(await loadKeptPort()).toBeNull();
+});
+
+it('serves on the kept port when it is free, and on a fresh one when it is taken', async () => {
+  dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clf-mcp-port-'));
+  initConfigPath(dir);
+  const cfg = defaultConfig();
+  const context = () => ({ roots: [], caps: cfg.capabilities, readOnly: true });
+  const first = await startMcpServer(context, {});
+  const port = Number(new URL(first.urls.core).port);
+  await first.stop();
+  const again = await startMcpServer(context, {}, { port });
+  try {
+    expect(Number(new URL(again.urls.core).port)).toBe(port);
+    // Another program has the port now: the app still starts, on another one.
+    const taken = await startMcpServer(context, {}, { port });
+    try {
+      expect(Number(new URL(taken.urls.core).port)).not.toBe(port);
+    } finally { await taken.stop(); }
+  } finally { await again.stop(); }
+});
