@@ -73,7 +73,8 @@ vi.mock('../src/main/env.js', () => ({
 }));
 vi.mock('../src/main/exec.js', () => ({
   findWindowsPowerShell: () => 'powershell.exe',
-  terminateProcessTree: vi.fn(async () => undefined)
+  terminateProcessTree: vi.fn(async () => undefined),
+  terminateProcess: vi.fn(async () => undefined)
 }));
 vi.mock('../src/main/logger.js', () => ({ logInfo: vi.fn(), logWarn: vi.fn() }));
 
