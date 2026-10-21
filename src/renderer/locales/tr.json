@@ -2857,5 +2857,14 @@
   "Ask ChatGPT for a picture: this message goes without the app, so ChatGPT can draw.": "ChatGPT'den görsel isteyin: bu mesaj uygulama olmadan gider, böylece ChatGPT çizebilir.",
   "Port {0} was in use when the app started, so it now listens on port {1}. Point your tunnel at port {1}.": "Uygulama başlarken {0} numaralı bağlantı noktası kullanımdaydı, bu yüzden artık {1} numaralı bağlantı noktasını dinliyor. Tünelini {1} numaralı bağlantı noktasına yönlendir.",
   "Stop and continue when ChatGPT offers no Send": "ChatGPT Gönder sunmadığında durdur ve devam et",
-  "Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run. Experimental.": "Bazı sohbetler bir araç sonucunda yalnızca Durdur gösterir, bu yüzden yeni turun Devam mesajı orada gönderilemez. Bir turda bu iki kez olursa uygulama turu bir sonucun hemen ardından durdurur ve durma görünür görünmez Devam mesajını gönderir. Hedef ve Döngü açık kalır, bu arada gelen bir adım çalıştırılmaz. Deneysel."
+  "Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run. Experimental.": "Bazı sohbetler bir araç sonucunda yalnızca Durdur gösterir, bu yüzden yeni turun Devam mesajı orada gönderilemez. Bir turda bu iki kez olursa uygulama turu bir sonucun hemen ardından durdurur ve durma görünür görünmez Devam mesajını gönderir. Hedef ve Döngü açık kalır, bu arada gelen bir adım çalıştırılmaz. Deneysel.",
+  "Pictures with /image, keyboard shortcuts, and a quicker message after Stop.": "/image ile resimler, klavye kısayolları ve Durdur'dan sonra daha hızlı giden mesaj.",
+  "Ask for a picture": "Resim iste",
+  "Start a message with /image, and ChatGPT draws it with its own image tool.": "Mesaja /image ile başla; ChatGPT onu kendi görsel aracıyla çizer.",
+  "Keyboard shortcuts": "Klavye kısayolları",
+  "{0} starts a new chat, Ctrl+Tab moves between chats, and Esc twice stops an answer.": "{0} yeni sohbet başlatır, Ctrl+Tab sohbetler arasında geçer, iki kez Esc bir yanıtı durdurur.",
+  "Quicker after Stop": "Durdur'dan sonra daha hızlı",
+  "A message you send right after Stop goes out at once.": "Durdur'dan hemen sonra gönderdiğin mesaj anında gider.",
+  "Sub-agent chats tidy up": "Alt ajan sohbetleri toparlanır",
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Arşivleme açıkken bir çalışanın sohbeti, görevi bittikten iki dakika sonra arşivlenir."
 }

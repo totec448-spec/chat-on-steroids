@@ -2811,5 +2811,14 @@
   "Ask ChatGPT for a picture: this message goes without the app, so ChatGPT can draw.": "请 ChatGPT 生成图片：这条消息不带应用发送，ChatGPT 就能绘图。",
   "Port {0} was in use when the app started, so it now listens on port {1}. Point your tunnel at port {1}.": "应用启动时端口 {0} 已被占用，因此现在监听端口 {1}。请将你的隧道指向端口 {1}。",
   "Stop and continue when ChatGPT offers no Send": "ChatGPT 不提供发送时停止并继续",
-  "Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run. Experimental.": "有些聊天在工具结果处只显示“停止”，新一轮的“继续”无法在那里发送。若同一轮中发生两次，应用会在某个结果后立即停止该轮，并在停止显示后发送“继续”。目标和循环保持开启，期间到来的步骤不会执行。实验性功能。"
+  "Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run. Experimental.": "有些聊天在工具结果处只显示“停止”，新一轮的“继续”无法在那里发送。若同一轮中发生两次，应用会在某个结果后立即停止该轮，并在停止显示后发送“继续”。目标和循环保持开启，期间到来的步骤不会执行。实验性功能。",
+  "Pictures with /image, keyboard shortcuts, and a quicker message after Stop.": "用 /image 生成图片、键盘快捷键，以及停止后更快发出的消息。",
+  "Ask for a picture": "请求一张图片",
+  "Start a message with /image, and ChatGPT draws it with its own image tool.": "以 /image 开头发送消息，ChatGPT 会用它自己的图像工具来画。",
+  "Keyboard shortcuts": "键盘快捷键",
+  "{0} starts a new chat, Ctrl+Tab moves between chats, and Esc twice stops an answer.": "{0} 新建聊天，Ctrl+Tab 在聊天之间切换，连按两次 Esc 停止回答。",
+  "Quicker after Stop": "停止后更快",
+  "A message you send right after Stop goes out at once.": "停止后立即发送的消息会马上发出。",
+  "Sub-agent chats tidy up": "子代理聊天自动整理",
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "开启归档后，worker 的聊天会在任务完成两分钟后归档。"
 }
