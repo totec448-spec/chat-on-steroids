@@ -729,6 +729,9 @@ function enqueue(entries) {
       provisional: typeof entry.provisional === 'string' ? entry.provisional : null,
       agent: typeof entry.agent === 'string' ? entry.agent : null,
       agentCommandId: typeof entry.agentCommandId === 'string' ? entry.agentCommandId : null,
+      // The ChatGPT Project the recording tab showed (#1744); the app puts the chat into the
+      // CoS project linked to it. Read from the tab's URL here, never from the page's report.
+      chatgptProject: typeof entry.chatgptProject === 'string' && CHATGPT_PROJECT_ID.test(entry.chatgptProject) ? entry.chatgptProject : null,
       event: entry.event
     });
   }
@@ -815,6 +818,7 @@ function nextJournalBatch(preferredConversationId = null, excluded = []) {
       : null;
   let agent;
   let agentCommandId;
+  let chatgptProject;
   const mine = [];
   for (const entry of journal) {
     if (!conversationId) {
@@ -830,13 +834,14 @@ function nextJournalBatch(preferredConversationId = null, excluded = []) {
       agent = entry.agent;
       agentCommandId = entry.agentCommandId;
     }
+    if (!chatgptProject && entry.chatgptProject) chatgptProject = entry.chatgptProject;
     if (mine.length >= BATCH) break;
   }
-  return conversationId ? { conversationId, mine, agent, agentCommandId } : null;
+  return conversationId ? { conversationId, mine, agent, agentCommandId, chatgptProject } : null;
 }
 
 async function deliverJournalBatch(batch) {
-  const { conversationId, mine, agent, agentCommandId } = batch;
+  const { conversationId, mine, agent, agentCommandId, chatgptProject } = batch;
   const result = await call('/events', {
     method: 'POST',
     timeoutMs: EVENTS_REQUEST_TIMEOUT_MS,
@@ -844,6 +849,7 @@ async function deliverJournalBatch(batch) {
       conversationId,
       agent,
       agentCommandId,
+      chatgptProject,
       events: mine.map((entry) => entry.event)
     })
   });
@@ -854,7 +860,7 @@ async function deliverJournalBatch(batch) {
     const retry = await call('/events', {
       method: 'POST',
       timeoutMs: EVENTS_REQUEST_TIMEOUT_MS,
-      body: JSON.stringify({ conversationId, agent, agentCommandId, events: half.map((entry) => entry.event) })
+      body: JSON.stringify({ conversationId, agent, agentCommandId, chatgptProject, events: half.map((entry) => entry.event) })
     });
     noteDelivery(retry, half.length, conversationId);
     if (!retry.ok) return false;
@@ -3834,6 +3840,21 @@ function projectFromUrl(value) {
   }
 }
 
+const CHATGPT_PROJECT_ID = /^g-p-[0-9a-f]{32}$/;
+
+/**
+ * The ChatGPT Project the recording tab shows this chat in (#1744), from the tab's own URL: a
+ * Project chat (`/g/g-p-…/c/<id>`) or, before ChatGPT names a fresh chat, the Project home it was
+ * started on. Null when the tab is on another chat, outside any Project, or cannot be read.
+ */
+async function tabChatgptProject(source, conversationId) {
+  const tab = await chrome.tabs.get(source.tab).catch(() => null);
+  if (!tab || tab.pendingUrl) return null;
+  const shown = conversationFromUrl(tab.url);
+  if (shown && shown !== conversationId) return null;
+  return projectFromUrl(tab.url);
+}
+
 function isChatGptUrl(value) {
   try {
     const url = new URL(String(value || ''));
@@ -4354,9 +4375,12 @@ const HANDLERS = {
     if (!ownsDocument(source) || (binding.projectBound && !await currentConversationDocument(source, conversationId)))
       return { ok: false, error: 'stale_document' };
     const key = tabKey(source);
-    const entries = (Array.isArray(message.entries) ? message.entries : []).map((entry) =>
-      entry && !entry.conversationId ? { ...entry, provisional: key } : entry
-    );
+    const chatgptProject = await tabChatgptProject(source, conversationId);
+    const entries = (Array.isArray(message.entries) ? message.entries : []).map((entry) => {
+      if (!entry || typeof entry !== 'object') return entry;
+      const placed = chatgptProject ? { ...entry, chatgptProject } : entry;
+      return placed.conversationId ? placed : { ...placed, provisional: key };
+    });
     enqueue(entries);
     let ackBound = 0;
     if (message.conversationId) {
