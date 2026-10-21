@@ -739,6 +739,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       chatBrowser: $<HTMLSelectElement>('chatBrowser').value as ChatBrowser,
       cosBrowserMinimize: $<HTMLSelectElement>('cosBrowserMinimize').value === 'tray' ? 'tray' : 'taskbar',
       finishTool: $<HTMLInputElement>('finishTool').checked,
+      finishHoldOnStop: $<HTMLInputElement>('finishHoldOnStop').checked,
       planBackend: $<HTMLSelectElement>('planBackend').value as 'chatgpt' | 'api',
       finishLeadMinutes: Number($<HTMLSelectElement>('finishLeadMinutes').value),
       rotateTurnMinutes: Number($<HTMLSelectElement>('rotateTurnMinutes').value),
@@ -1663,6 +1664,7 @@ function apply(next: AppState): void {
   $('cosBrowserMinimizeRow').hidden = (config.ui.chatBrowser ?? 'chrome') !== 'cos';
   $<HTMLSelectElement>('planBackend').value = config.ui.planBackend ?? 'chatgpt';
   applyChecked($<HTMLInputElement>('finishTool'), config.ui.finishTool === true, previousState?.config.ui.finishTool);
+  applyChecked($<HTMLInputElement>('finishHoldOnStop'), config.ui.finishHoldOnStop === true, previousState?.config.ui.finishHoldOnStop);
   applyValue($<HTMLSelectElement>('finishLeadMinutes'), String(config.ui.finishLeadMinutes ?? 5), String(previousState?.config.ui.finishLeadMinutes ?? 5));
   $<HTMLSelectElement>('finishLeadMinutes').disabled = config.ui.finishTool !== true;
   // A value the list does not offer (set in the config) gets its own option; without one the select

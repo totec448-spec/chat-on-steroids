@@ -1084,6 +1084,14 @@ row says so ("Creating this project in ChatGPT…", or the unavailable line poin
 deleted Project's page redirects to ChatGPT's home and drops the marker: the worker reports
 `gone` for the tab it opened for that Project, the link becomes `failed`, and nothing is sent.
 An opening remembers its Project, so a retry's new Project gets its own tab.
+A chat the person starts on chatgpt.com inside a linked Project joins that CoS project (#1744):
+the service worker's `events` handler reads the recording tab's URL (`tabChatgptProject`: the
+chat's own Project route, or the Project home only for a fresh chat's first, still unnamed
+observations; never a tab on another chat)
+and journals it as `chatgptProject`; `/events` sends it, and `bindChatToLinkedProject` binds a chat
+that has no project, is no worker or helper, has learned no workspace, and matches exactly one
+listed linked project. Worker-labelled batches never bind. Tests: `test/projects.test.ts`,
+`test/bridge.test.ts` and `test/extension.test.ts` (#1744).
 
 Branch in new chat (#482): the answer action under a completed reply with native ids (not in worker
 or helper chats) starts a new chat whose first message carries `branch { sessionId, conversationId,
@@ -1116,6 +1124,15 @@ turn (copied branch history, an adopted chat's history, replies to messages type
 the same actions as a turn's answer (`messageAnswerAnchors`); `sessions:exportMarkdown` names them
 by `messageId` instead of `turnId`, and refuses a turn's own answer named that way. `scope: 'latest'` names
 no answer: main picks the newest one that offers these actions (`latestAnswer`), a completed turn's or a turnless one.
+
+
+Bookmarked answers (#1719): `sessions:bookmarks { id }` → `SessionBookmark[]` (oldest answer first)
+and `sessions:bookmark { id, messageId, excerpt, messageTime, on }` → the chat's new list, in
+`src/main/session/bookmarks.ts`, kept in `bookmarks.json` in the session's folder and written serially per
+session; at most `MAX_BOOKMARKS` (200) per chat, excerpts one line of at most 160 characters. A
+missing or damaged file reads as no bookmarks; damaged entries are dropped. Nothing is sent to
+ChatGPT. The header list jumps through `sessions:locate-message`; a reply no longer in the chat
+shows a notice instead of scrolling. Long row menus scroll inside the window (`row-menu.ts`). A file holding more than the limit keeps the ones bookmarked first. Tests: `test/session-bookmarks.test.ts` (storage, limit, damaged files), the "bookmarked answers" cases in `test/renderer-timeline.test.ts` (answer action, header list, jump), and `scripts/verify-bookmark-list.cjs` (200 bookmarks in a short window, real Electron).
 
 Edit & resubmit (#365): ChatGPT keeps an edited question as a new version beside the old one, under
 the same parent, and continues from the new one. The page reports each question's place in that tree
@@ -3966,6 +3983,13 @@ explanation in app and browser. Missing MCP evidence explains that the previous 
 local tool call, so lost tool connectivity cannot be established; Loop remains enabled. Do not
 claim login is missing or the tunnel is off without evidence. Distinguish input size, helper output
 size, provider failures and uncertain delivery. Browser error text wraps instead of truncating.
+
+The `Review Goal completion` setting is off by default. When enabled, a Goal helper reporting
+completion without proof is shown as unverified. For an ordinary Goal reply, keep the reply
+pending without retrying. At Session finish, keep the existing hold active, ask the model to keep
+the turn open, and try to show one notice; record the event as `helper_stop_unverified`.
+Missing/false keeps the prior behavior, and Loop's refusal handling is unchanged. The optional
+progress `reason` labels this event; it does not prove the Goal is complete.
 
 Provider progress updates one existing timeline row and is never sendable text. Validate the
 final bounded decision schema before publication. Goal may return stop/no reply. Loop requires

@@ -2801,6 +2801,12 @@
   "(~{0} tokens)": "(ca. {0} Tokens)",
   "(~{0} tokens)|one": "(ca. {0} Token)",
   "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}",
+  "The helper says the goal is met, but this has not been checked. No follow-up was sent. Review the chat and continue if work remains.": "Der Helfer sagt, das Ziel sei erreicht, aber das wurde nicht überprüft. Es wurde keine Folgeantwort gesendet. Prüfe den Chat und fahre fort, falls noch Arbeit offen ist.",
+  "Goal result needs review": "Goal-Ergebnis muss geprüft werden",
+  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Der Goal-Helfer hält die Arbeit für abgeschlossen, aber das wurde noch nicht überprüft. Prüfe den Chat oder sende eine weitere Anweisung.",
+  "Review Goal completion": "Goal-Abschluss prüfen",
+  "Off by default. When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you.": "Standardmäßig aus. Meldet Goal den Abschluss ohne Belege, bleibt das Ergebnis ungeprüft und die Antwort ausstehend. Session finish hält die bestehende Sperre aktiv, bittet das Modell, den Turn offen zu halten, und kann dich benachrichtigen.",
+  "When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you. Off by default.": "Meldet Goal den Abschluss ohne Belege, bleibt das Ergebnis ungeprüft und die Antwort ausstehend. Session finish hält die bestehende Sperre aktiv, bittet das Modell, den Turn offen zu halten, und kann dich benachrichtigen. Standardmäßig aus.",
   "Sub-agent view": "Ansicht des Unteragenten",
   "Conversation": "Unterhaltung",
   "Loading activity…": "Aktivität wird geladen …",
@@ -2912,5 +2918,12 @@
   "Quicker after Stop": "Schneller nach Stopp",
   "A message you send right after Stop goes out at once.": "Eine Nachricht, die du direkt nach Stopp sendest, geht sofort raus.",
   "Sub-agent chats tidy up": "Sub-Agent-Chats räumen auf",
-  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Mit Archivieren an wird der Chat eines Workers zwei Minuten nach Erledigung seiner Aufgabe archiviert."
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Mit Archivieren an wird der Chat eines Workers zwei Minuten nach Erledigung seiner Aufgabe archiviert.",
+  "Bookmark answer": "Antwort als Lesezeichen speichern",
+  "Remove bookmark": "Lesezeichen entfernen",
+  "Bookmarks": "Lesezeichen",
+  "Answer": "Antwort",
+  "This answer is no longer in the chat.": "Diese Antwort ist nicht mehr im Chat.",
+  "{0} bookmarks in this chat": "{0} Lesezeichen in diesem Chat",
+  "{0} bookmarks in this chat|one": "{0} Lesezeichen in diesem Chat"
 }

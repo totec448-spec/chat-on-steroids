@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_GOAL_SYSTEM_PROMPT } from '../src/shared/goal.js';
 import { prependUserPrompt } from '../src/shared/user-prompt.js';
 import type { Handoff, SessionEvent, SessionSummary } from '../src/shared/session.js';
+import { BOOKMARK_EXCERPT_MAX } from '../src/shared/session.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import type { LocalProject } from '../src/shared/projects.js';
 vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTerminal: () => ({
@@ -590,6 +591,27 @@ it.each(['compaction', 'blocked', 'worker'])('retires %s control status when lea
   expect(status.textContent).toBe('');
   release({ ok: true, data: controls }); await settle();
   expect(status.textContent).not.toBe('');
+});
+
+it('localizes only the exact app-authored Goal helper stop note at draw time', async () => {
+  const source = 'The helper says the goal is met, but this has not been checked. No follow-up was sent. Review the chat and continue if work remains.';
+  const rows = [
+    { progressId: 'goal-helper-stop:turn-1', source: 'app' as const, value: source },
+    { progressId: 'unrelated:turn-1', source: 'app' as const, value: source },
+    { progressId: 'goal-helper-stop:turn-2', source: 'app' as const, value: source + ' Historical detail.' },
+    { progressId: 'goal-helper-stop:turn-3', source: 'extension' as const, value: source }
+  ];
+  const { w } = await boot(rows.map((row, at) => ({
+    seq: at + 1, time: T0 + at, source: row.source, kind: 'progress' as const,
+    progressId: row.progressId, message: text(row.value)
+  })));
+  const { setLanguage, t } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  const notes = [...w.document.querySelectorAll('.ev-progress .meta')];
+  expect(notes.map(note => note.textContent)).toEqual([t(source), source, rows[2]!.value, source]);
+  expect(notes[0]!.textContent).not.toBe(source);
+  setLanguage('en');
+  expect(notes.map(note => note.textContent)).toEqual(rows.map(row => row.value));
 });
 
 it('asks for the selected chat\'s background tab once per switch (#1249)', async () => {
@@ -7304,6 +7326,74 @@ describe('prompt recall in the composer', () => {
     live.inputs = [sentInput('q-5')]; await append([]);
     expect(press(w, 'ArrowUp')).toBe(true);
     expect(composer(w).value).toBe('Second question');
+  });
+});
+
+describe('bookmarked answers', () => {
+  const chat = '6ad337fe-47a4-83ed-a21f-c2e24d5829a4';
+  const replyId = '2b06482d-0dc6-4847-bf7a-2e1a0f671e89';
+  const ask: SessionEvent = { kind: 'user_message', seq: 1, origin: 1, time: T0, source: 'extension', turnId: 'done-turn', messageId: 'ask', message: text('Plan the release') };
+  const reply: SessionEvent = { kind: 'assistant_message', seq: 2, time: T0 + 1_000, source: 'extension', turnId: 'done-turn', messageId: replyId, message: text('**Tag first**, then build.\n\nMore detail.'), final: true, state: 'final' };
+  const end: SessionEvent = { seq: 3, time: T0 + 2_000, source: 'extension', kind: 'turn_end', turnId: 'done-turn', outcome: 'completed' };
+  const mark = { messageId: replyId, excerpt: 'Tag first, then build.', messageTime: T0 + 1_000, at: T0 + 5_000 };
+
+  it('bookmarks an answer, lists it in the header and jumps back to it', async () => {
+    const { w } = await boot([ask, reply, end], true, [], [], { summary: { conversationId: chat } });
+    const api = (w as any).api;
+    api.setBookmark = vi.fn(async (_id: string, _messageId: string, _excerpt: string, _time: number, on: boolean) => ({ ok: true, data: on ? [mark] : [] }));
+    api.locateMessage = vi.fn(async () => ({ ok: true, data: { seq: 2, kind: 'assistant_message', messageId: replyId, position: 2 } }));
+    const header = w.document.getElementById('chatBookmarks') as HTMLButtonElement;
+    const toggle = w.document.querySelector<HTMLButtonElement>('.answer-actions .answer-bookmark')!;
+    expect(header.hidden).toBe(true);
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    expect(toggle.getAttribute('aria-label')).toBe('Bookmark answer');
+
+    toggle.click(); await settle();
+    expect(api.setBookmark).toHaveBeenCalledWith(summary([]).id, replyId, 'Tag first, then build.', T0 + 1_000, true);
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    expect(toggle.getAttribute('aria-label')).toBe('Remove bookmark');
+    expect(header.hidden).toBe(false);
+    expect(header.textContent!.trim()).toBe('1');
+    expect(header.getAttribute('aria-label')).toBe('1 bookmark in this chat');
+
+    header.click(); await settle();
+    expect(header.getAttribute('aria-expanded')).toBe('true');
+    const item = w.document.querySelector<HTMLButtonElement>('[data-row-action="bookmark"]')!;
+    expect(item.textContent).toContain('Tag first, then build.');
+    expect(item.closest('.row-menu')!.classList.contains('is-wide')).toBe(true);
+    expect(item.querySelector('.row-menu-hint')!.textContent).not.toBe('');
+    item.click(); await settle();
+    expect(api.locateMessage).toHaveBeenCalledWith(summary([]).id, replyId);
+    expect(header.getAttribute('aria-expanded')).toBe('false');
+
+    toggle.click(); await settle();
+    expect(api.setBookmark).toHaveBeenLastCalledWith(summary([]).id, replyId, 'Tag first, then build.', T0 + 1_000, false);
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    expect(header.hidden).toBe(true);
+  });
+
+  it('bookmarks an answer whose first paragraph is very long, with a short excerpt', async () => {
+    const long: SessionEvent = { ...reply, message: text(`${'word '.repeat(1_200)}end.`) };
+    const { w } = await boot([ask, long, end], true, [], [], { summary: { conversationId: chat } });
+    const api = (w as any).api;
+    api.setBookmark = vi.fn(async (_id: string, _messageId: string, _excerpt: string, _time: number, on: boolean) => ({ ok: true, data: on ? [mark] : [] }));
+    w.document.querySelector<HTMLButtonElement>('.answer-actions .answer-bookmark')!.click(); await settle();
+    const excerpt = api.setBookmark.mock.calls[0]![2] as string;
+    expect(excerpt.length).toBeLessThanOrEqual(BOOKMARK_EXCERPT_MAX);
+    expect(excerpt.startsWith('word word')).toBe(true);
+    expect(excerpt.endsWith('…')).toBe(true);
+  });
+
+  it('shows a chat\'s saved bookmarks when it is opened', async () => {
+    const { w } = await boot([ask, reply, end], true, [], [], { summary: { conversationId: chat } });
+    const api = (w as any).api;
+    api.listBookmarks = vi.fn(async () => ({ ok: true, data: [mark] }));
+    // Open another view and come back: the chat loads its marks again.
+    w.document.getElementById('newChat')!.click(); await settle();
+    w.document.querySelector<HTMLElement>(`.sess[data-id="${summary([]).id}"]`)!.click(); await settle();
+    expect(api.listBookmarks).toHaveBeenCalledWith(summary([]).id);
+    expect((w.document.getElementById('chatBookmarks') as HTMLButtonElement).hidden).toBe(false);
+    expect(w.document.querySelector('.answer-actions .answer-bookmark')!.getAttribute('aria-pressed')).toBe('true');
   });
 });
 

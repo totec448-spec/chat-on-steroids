@@ -2756,6 +2756,12 @@
   "from {0} events": "từ {0} sự kiện",
   "(~{0} tokens)": "(~{0} token)",
   "{0} · {1} {2} · {3}": "{0} · {1} {2} · {3}",
+  "The helper says the goal is met, but this has not been checked. No follow-up was sent. Review the chat and continue if work remains.": "Trợ lý cho biết mục tiêu đã hoàn thành nhưng điều đó chưa được kiểm tra. Chưa gửi phản hồi tiếp theo. Hãy kiểm tra cuộc trò chuyện và tiếp tục nếu còn việc.",
+  "Goal result needs review": "Cần xem lại kết quả Goal",
+  "The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.": "Trợ lý Goal cho rằng công việc đã hoàn tất, nhưng điều này chưa được kiểm tra. Hãy xem lại cuộc trò chuyện hoặc gửi chỉ dẫn tiếp theo.",
+  "Review Goal completion": "Xem lại kết quả Goal",
+  "Off by default. When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you.": "Mặc định là tắt. Nếu Goal báo hoàn thành mà không có bằng chứng, kết quả vẫn chưa được xác minh và câu trả lời vẫn chờ xử lý. Session finish giữ nguyên trạng thái chờ, yêu cầu mô hình giữ lượt mở và có thể gửi thông báo.",
+  "When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you. Off by default.": "Nếu Goal báo hoàn thành mà không có bằng chứng, kết quả vẫn chưa được xác minh và câu trả lời vẫn chờ xử lý. Session finish giữ nguyên trạng thái chờ, yêu cầu mô hình giữ lượt mở và có thể gửi thông báo. Mặc định là tắt.",
   "Sub-agent view": "Chế độ xem tác nhân phụ",
   "Conversation": "Cuộc trò chuyện",
   "Loading activity…": "Đang tải hoạt động…",
@@ -2866,5 +2872,11 @@
   "Quicker after Stop": "Nhanh hơn sau khi Dừng",
   "A message you send right after Stop goes out at once.": "Tin nhắn bạn gửi ngay sau khi Dừng sẽ đi ngay lập tức.",
   "Sub-agent chats tidy up": "Cuộc trò chuyện của tác tử phụ tự dọn",
-  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Khi bật lưu trữ, cuộc trò chuyện của worker được lưu trữ hai phút sau khi xong nhiệm vụ."
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Khi bật lưu trữ, cuộc trò chuyện của worker được lưu trữ hai phút sau khi xong nhiệm vụ.",
+  "Bookmark answer": "Đánh dấu câu trả lời",
+  "Remove bookmark": "Bỏ đánh dấu",
+  "Bookmarks": "Dấu trang",
+  "Answer": "Câu trả lời",
+  "This answer is no longer in the chat.": "Câu trả lời này không còn trong chat.",
+  "{0} bookmarks in this chat": "{0} dấu trang trong chat này"
 }

@@ -15,12 +15,14 @@ describe.runIf(process.platform === 'win32')('Windows focus attachment ownership
 using System.Collections.Generic;
 public static class FocusProbe {
   public static List<string> Calls = new List<string>();
-  public static bool AttachAllowed = true, ActivationAllowed = true, ThrowActivation, Arrives;
+  public static bool AttachAllowed = true, ActivationAllowed = true, ThrowActivation, Arrives, AllowedAfterNudge;
   public static int FocusChecks;
   public static uint Fore = 2, Target = 3;
   public static string DeniedPair, ThrowPair;
-  public static void Reset() { Calls.Clear(); AttachAllowed=true; ActivationAllowed=true; ThrowActivation=false; Fore=2; Target=3; Arrives=false; FocusChecks=0; DeniedPair=null; ThrowPair=null; }
-  public static bool InputIsFocused(long h) { FocusChecks++; return Arrives && FocusChecks>2; }
+  public static void Reset() { Calls.Clear(); AttachAllowed=true; ActivationAllowed=true; ThrowActivation=false; Fore=2; Target=3; Arrives=false; AllowedAfterNudge=false; FocusChecks=0; DeniedPair=null; ThrowPair=null; }
+  public static bool InputIsFocused(long h) { FocusChecks++; return (Arrives && FocusChecks>2) || (AllowedAfterNudge && Calls.Contains("nudge") && Calls.LastIndexOf("activate") > Calls.LastIndexOf("nudge")); }
+  // Windows lets a process activate another window right after it sent input (2026-10-21).
+  public static bool NudgeForeground() { Calls.Add("nudge"); if (AllowedAfterNudge) ActivationAllowed = true; return true; }
   static IntPtr InputRoot(IntPtr h) { return h; }
   static bool IsWindow(IntPtr h) { return true; }
   static bool IsIconic(IntPtr h) { return false; }
@@ -91,7 +93,15 @@ Check 'attach:1-2,attach:1-3,attach:2-3,activate,detach:2-3,detach:1-3,detach:1-
 [FocusProbe]::Reset()
 [FocusProbe]::ActivationAllowed=$false
 if (Try-Focus 3) { throw 'persistent wrong foreground was accepted' }
-Check 'attach:1-2,attach:1-3,attach:2-3,activate,detach:2-3,detach:1-3,detach:1-2'
+Check 'attach:1-2,attach:1-3,attach:2-3,activate,detach:2-3,detach:1-3,detach:1-2,nudge,attach:1-2,attach:1-3,attach:2-3,activate,detach:2-3,detach:1-3,detach:1-2'
+# The app's own window in front (the person just sent from it) refuses a Store app until the helper sent input.
+[FocusProbe]::Reset()
+[FocusProbe]::ActivationAllowed=$false
+[FocusProbe]::AllowedAfterNudge=$true
+$script:FocusNotes = New-Object 'System.Collections.Generic.List[string]'
+if (-not (Try-Focus 3)) { throw 'activation after the input nudge was not retried' }
+if ($script:FocusNotes.Count -ne 1 -or $script:FocusNotes[0] -notmatch 'after an input nudge') { throw "missing focus note: $($script:FocusNotes -join '|')" }
+Check 'attach:1-2,attach:1-3,attach:2-3,activate,detach:2-3,detach:1-3,detach:1-2,nudge,attach:1-2,attach:1-3,attach:2-3,activate,detach:2-3,detach:1-3,detach:1-2'
 'focus ownership passed'
 `;
     const directory = mkdtempSync(path.join(tmpdir(), 'cos-focus-'));
