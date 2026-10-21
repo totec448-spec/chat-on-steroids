@@ -93,7 +93,7 @@
     "message": "대화 차단됨"
   },
   "content_chat_blocked_tip": {
-    "message": "이 대화는 Chat On Steroids 앱에서 차단되었습니다. 도구 호출이 거부되고 Goal, Loop, 자동 압축이 꺼집니다. 해제하려면 앱의 대화 탭을 열고 세션 목록에서 이 대화에 마우스를 올린 뒤 차단 아이콘을 누르세요."
+    "message": "이 대화는 Chat On Steroids 앱에서 차단되었습니다. 도구 호출이 거부되고 Goal, Loop, 자동 압축이 꺼집니다. 해제하려면 앱 사이드바에서 이 대화의 ⋯ 메뉴를 열고 ‘차단 해제’를 선택하세요."
   },
   "content_chat_still_opening": {
     "message": "이 대화가 아직 열리는 중입니다 — 다시 시도하세요"

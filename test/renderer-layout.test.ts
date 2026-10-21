@@ -47,7 +47,10 @@ it('finds settings on every settings page by name, description and section, neve
   expect([finish!.title, finish!.page, finish!.section, finish!.tab]).toEqual(['Session finish', 'Agents & automation', 'Keep the turn open', 'settings']);
   expect(finish!.target.contains(document.getElementById('finishTool'))).toBe(true);
   // Names come before descriptions; words match in any order, across a name and its section.
-  expect(searchSettings(entries, 'privacy', 'en').map(entry => entry.title).slice(0, 2)).toEqual(['Privacy', 'Privacy screenshots']);
+  const privacy = searchSettings(entries, 'privacy', 'en').map(entry => entry.title);
+  expect(privacy[0]).toBe('Privacy');
+  // Its one setting is found by its description ("For privacy, …"), after every name.
+  expect(privacy).toContain('Screenshot only the active window');
   expect(searchSettings(entries, 'typography font', 'en').map(entry => entry.title)).toEqual(['Font']);
   // A Setup step is found by its name, although only the open step shows.
   expect(searchSettings(entries, 'api key', 'en')[0]!.target.dataset.railStep).toBe('key');
@@ -417,7 +420,7 @@ describe('the session-row chat actions', () => {
 
 describe('the live worker list', () => {
   it('shows the exact broker id instead of a generic worker role chip', () => {
-    expect(chatSource).toMatch(/if \(label !== agent\.id\)[^\n]*agent\.id/);
+    expect(chatSource).toMatch(/!== agent\.id\)[^\n]*'chip', agent\.id/);
     expect(chatSource).not.toContain("el('span', 'chip', agent.role)");
   });
 });

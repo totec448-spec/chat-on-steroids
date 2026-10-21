@@ -367,3 +367,20 @@ it('names this computer\'s own Plugins connector everywhere the page tells the u
   applyPluginsState({ config: { tunnel: { kind: 'openai', pluginsTunnelId: '' } }, status: { surfaces: [] } } as unknown as AppState);
   expect(document.querySelector('.plugin-refresh-guide strong')!.textContent).toBe('Chat On Steroids Plugins');
 });
+
+it('asks before uninstalling like removing a skill: Cancel first and focused, the destructive step last', async () => {
+  await refreshPlugins();
+  [...document.querySelectorAll<HTMLButtonElement>('.plugin-card button')].find(node => node.textContent === 'Uninstall')!.click();
+  const box = document.getElementById('pluginDialog')!;
+  const buttons = [...box.querySelectorAll<HTMLButtonElement>('.pet-delete-actions button')];
+  expect(buttons.map(node => node.textContent)).toEqual(['Cancel', 'Uninstall plugin']);
+  expect(buttons[1]!.classList.contains('plugin-destructive')).toBe(true);
+  expect(document.activeElement).toBe(buttons[0]);
+  // Cancel closes it and uninstalls nothing.
+  buttons[0]!.click(); await tick();
+  expect(document.getElementById('pluginDialog')).toBeNull();
+  expect(api.pluginsUninstall).not.toHaveBeenCalled();
+  [...document.querySelectorAll<HTMLButtonElement>('.plugin-card button')].find(node => node.textContent === 'Uninstall')!.click();
+  [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog .pet-delete-actions button')].find(node => node.textContent === 'Uninstall plugin')!.click(); await tick();
+  expect(api.pluginsUninstall).toHaveBeenCalledExactlyOnceWith('one');
+});

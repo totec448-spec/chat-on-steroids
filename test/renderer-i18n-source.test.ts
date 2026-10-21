@@ -100,6 +100,7 @@ it('translates every delivery error a queued message can show', () => {
   const internal = new Set([
     'Native Send did not take the message.',
     'Native Send receipt was not confirmed.',
+    'Fresh-turn continue declined: no Send while ChatGPT works.',
     'User authorized a new helper',
     'session-input',
     '\\n--- New instructions from the user ---\\n'
