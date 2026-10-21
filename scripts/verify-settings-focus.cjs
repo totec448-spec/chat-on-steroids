@@ -33,7 +33,9 @@ app.whenReady().then(async () => {
     await js('document.fonts.ready');
     for (const theme of ['dark', 'light']) for (const zoom of [1, 1.17, 1.5]) for (const id of ['uiLanguage', 'goalBackend']) {
       win.webContents.setZoomFactor(zoom);
-      await js(`document.documentElement.dataset.theme='${theme}'; document.activeElement.blur(); new Promise(r=>setTimeout(r,250))`);
+      // In view first: focusing a control below the fold scrolls it there, which moves every row and
+      // every pixel together without being the shift this check looks for.
+      await js(`document.documentElement.dataset.theme='${theme}'; document.activeElement.blur(); document.getElementById('${id}').scrollIntoView({ block: 'nearest' }); new Promise(r=>setTimeout(r,250))`);
       await settle();
       const before = await js('geometry()');
       const baseline = await win.webContents.capturePage();

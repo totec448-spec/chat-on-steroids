@@ -126,6 +126,18 @@ it('saves Auto-select Skills through Settings and preserves it across a stale un
   expect(getConfig().ui.autoSelectSkills).toBe(wanted);
 });
 
+it('saves the Continue prompt from Settings, keeps it through a stale save, and clears it when emptied', async () => {
+  const base = getConfig();
+  expect(await save({ ...base, ui: { ...base.ui, customContinue: '  Keep going, and run the tests at the end.  ' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.customContinue).toBe('Keep going, and run the tests at the end.');
+  expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.customContinue).toBe('Keep going, and run the tests at the end.');
+  const saved = getConfig();
+  expect(await save({ ...saved, ui: { ...saved.ui, customContinue: 'x'.repeat(501) } }, saved)).toMatchObject({ ok: false });
+  expect(await save({ ...saved, ui: { ...saved.ui, customContinue: '   ' } }, saved)).toMatchObject({ ok: true });
+  expect(getConfig().ui.customContinue).toBeUndefined();
+});
+
 it('names a chat with one clean line, and clears the name for an empty one (#1107)', async () => {
   expect(cleanSessionName('  Release\nprep\t\u0000now  ')).toBe('Release prep now');
   expect(cleanSessionName('x'.repeat(300))).toHaveLength(120);

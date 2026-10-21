@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  APPROVAL_ANSWER_MS, APPROVAL_FRESH_MS, APPROVAL_NOTICE_GRACE_MS, approvalAnswerFor, approvalCardView, approvalCardWaiting, approvalWaitingChats, noteApprovalCard,
+  APPROVAL_ANSWER_MS, APPROVAL_FRESH_MS, APPROVAL_GONE_MS, APPROVAL_NOTICE_GRACE_MS, approvalAnswerFor, approvalCardView, approvalCardWaiting, approvalWaitingChats, noteApprovalCard,
   requestApprovalAnswer, resetApprovalWaits, settleApprovalAnswer, type ApprovalWaitDeps
 } from '../src/main/approval-wait.js';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_WAITING_TEXT } from '../src/shared/approval-wait.js';
@@ -51,6 +51,66 @@ describe('approval card episodes', () => {
     await noteApprovalCard('chat', true, 'session', deps, 1_000 + APPROVAL_FRESH_MS + 5_000);
     expect(deps.rows.map(row => row[2])).toEqual([APPROVAL_WAITING_TEXT, APPROVAL_WAITING_TEXT]);
     expect(deps.rows[0]![1]).not.toBe(deps.rows[1]![1]);
+  });
+
+  it('takes back "answered" when the same card returns at once, so a redrawn card stays one request', async () => {
+    // VM, 2026-10-20: ChatGPT redrew the card; it was gone for 1.2 s. The chat said the approval
+    // was answered (nobody had answered) and showed the same request again below.
+    const card = { id: 'node-1', lines: ['Allow ChatGPT to use Chat On Steroids Core?', 'Start a worker.'], allow: true };
+    await noteApprovalCard('chat', true, 'session', deps, 1_000, card);
+    await noteApprovalCard('chat', true, 'session', deps, 1_000 + APPROVAL_NOTICE_GRACE_MS, card);
+    expect(deps.notices).toEqual(['session']);
+    await noteApprovalCard('chat', false, 'session', deps, 40_000);
+    await noteApprovalCard('chat', true, 'session', deps, 40_000 + APPROVAL_GONE_MS - 1, { ...card, id: 'node-2' });
+    const id = deps.rows[0]![1];
+    expect(deps.rows.every(row => row[1] === id)).toBe(true);
+    expect(deps.rows.at(-1)![2]).toBe(APPROVAL_WAITING_TEXT);
+    expect(deps.notices).toEqual(['session']);
+    expect(approvalCardWaiting('chat', 40_000 + APPROVAL_GONE_MS)).toBe(true);
+    expect(approvalCardView('chat', 40_000 + APPROVAL_GONE_MS)?.id).toBe('node-2');
+
+    // A real answer later still reads as answered.
+    await noteApprovalCard('chat', false, 'session', deps, 60_000);
+    expect(deps.rows.at(-1)![2]).toBe(APPROVAL_ANSWERED_TEXT);
+    expect(approvalCardWaiting('chat', 60_000)).toBe(false);
+  });
+
+  it('keeps an answer when a different card follows it, or the same one only after a while', async () => {
+    const first = { id: 'a', lines: ['Allow ChatGPT to use Chat On Steroids Core?', 'Run one command.'], allow: true };
+    const second = { id: 'b', lines: ['Allow ChatGPT to use Chat On Steroids Core?', 'Write one file.'], allow: true };
+    await noteApprovalCard('chat', true, 'session', deps, 1_000, first);
+    await noteApprovalCard('chat', false, 'session', deps, 2_000);
+    await noteApprovalCard('chat', true, 'session', deps, 3_000, second);
+    await noteApprovalCard('chat', false, 'session', deps, 4_000);
+    await noteApprovalCard('chat', true, 'session', deps, 4_000 + APPROVAL_GONE_MS, { ...second, id: 'c' });
+    const episodes = new Set(deps.rows.map(row => row[1]));
+    expect(episodes.size).toBe(3);
+    expect(deps.rows.filter(row => row[2] === APPROVAL_ANSWERED_TEXT)).toHaveLength(2);
+  });
+
+  it('takes over the row an earlier app run left waiting instead of adding another', async () => {
+    // VM, 2026-10-20: every restart while one card waited added a "waiting" row, five in the end.
+    const lookups: string[] = [];
+    deps.previous = async sessionId => {
+      lookups.push(sessionId);
+      return { progressId: 'approval-wait:chat:earlier-run', anchor: { seq: 3, time: 5 } };
+    };
+    await noteApprovalCard('chat', true, 'session', deps, 1_000);
+    expect(lookups).toEqual(['session']);
+    expect(deps.rows).toEqual([]);
+    await noteApprovalCard('chat', false, 'session', deps, 2_000);
+    expect(deps.rows).toEqual([['session', 'approval-wait:chat:earlier-run', APPROVAL_ANSWERED_TEXT, { seq: 3, time: 5 }]]);
+  });
+
+  it('starts its own row when the last one was answered, belongs to another chat, or is missing', async () => {
+    for (const previous of [null, { progressId: 'approval-wait:other-chat:1', anchor: { seq: 3, time: 5 } }]) {
+      resetApprovalWaits();
+      deps.rows.length = 0;
+      deps.previous = async () => previous;
+      await noteApprovalCard('chat', true, 'session', deps, 1_000);
+      expect(deps.rows.map(row => row[2])).toEqual([APPROVAL_WAITING_TEXT]);
+      expect(deps.rows[0]![1]).toMatch(/^approval-wait:chat:/);
+    }
   });
 
   it('holds recovery for a chat the app has not recorded, without a row or notice', async () => {

@@ -93,7 +93,7 @@
     "message": "Chat blocked"
   },
   "content_chat_blocked_tip": {
-    "message": "This chat is blocked in the Chat On Steroids app: its tool calls are refused and Goal, Loop and auto-compaction are off. To release it, open the app’s Chat tab, hover this chat in the sessions list and press its block symbol."
+    "message": "This chat is blocked in the Chat On Steroids app: its tool calls are refused and Goal, Loop and auto-compaction are off. To release it, open this chat’s ⋯ menu in the app’s sidebar and choose “Release chat”."
   },
   "content_chat_still_opening": {
     "message": "this chat is still opening — try again"
