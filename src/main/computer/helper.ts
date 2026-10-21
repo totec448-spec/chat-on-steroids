@@ -491,8 +491,8 @@ public static class Clf {
    * (Windows VM, 2026-10-21). A zero-distance relative move is input with no visible effect. A
    * refused SendInput (an elevated window in front) leaves the activation to fail as before.
    */
-  public static void NudgeForeground() {
-    try { Send(new INPUT[] { Mouse(MOUSEEVENTF_MOVE, 0, 0, 0) }); } catch { }
+  public static bool NudgeForeground() {
+    try { Send(new INPUT[] { Mouse(MOUSEEVENTF_MOVE, 0, 0, 0) }); return true; } catch { return false; }
   }
 
   /**
@@ -582,17 +582,25 @@ function Try-Focus([int64]$id) {
   if ([Clf]::InputIsFocused($id)) { return $true }
   # A second attempt follows one input nudge: Windows refuses a background helper the
   # foreground until it has sent input (see NudgeForeground).
+  # The app logs each note (desktop focus: …) from the reply's focusNotes.
+  $nudged = $false
   foreach ($attempt in 0, 1) {
-    if ($attempt -eq 1) { [Clf]::NudgeForeground() }
+    if ($attempt -eq 1) { $nudged = [Clf]::NudgeForeground() }
     $null = [Clf]::Focus($id)
     # Activation is asynchronous for some windows. Confirm the actual foreground state and
     # stop as soon as it lands, including when SetForegroundWindow returned false. That
     # immediate result does not replace the target's actual foreground postcondition.
     $timer = [Diagnostics.Stopwatch]::StartNew()
     do {
-      if ([Clf]::InputIsFocused($id)) { return $true }
+      if ([Clf]::InputIsFocused($id)) {
+        if ($attempt -eq 1 -and $null -ne $script:FocusNotes) { [void]$script:FocusNotes.Add("window $id came forward only after an input nudge; Windows refused the first activation") }
+        return $true
+      }
       Start-Sleep -Milliseconds 10
     } while ($timer.ElapsedMilliseconds -lt 250)
+  }
+  if ($null -ne $script:FocusNotes) {
+    [void]$script:FocusNotes.Add($(if ($nudged) { "window $id stayed behind after a retry with an input nudge" } else { "window $id stayed behind; Windows refused the input nudge (an elevated window may be in front)" }))
   }
   return $false
 }
@@ -1315,8 +1323,10 @@ function Handle-Request($request) {
   return $result
 }
 
+$script:FocusNotes = New-Object 'System.Collections.Generic.List[string]'
 while (($line = [Console]::In.ReadLine()) -ne $null) {
   if ([string]::IsNullOrWhiteSpace($line)) { continue }
+  $script:FocusNotes.Clear()
   try {
     $request = $line | ConvertFrom-Json
     $reply = Handle-Request $request
@@ -1329,6 +1339,7 @@ while (($line = [Console]::In.ReadLine()) -ne $null) {
     }
     $reply = @{ ok = $false; error_code = $code; message = $message }
   }
+  if ($script:FocusNotes.Count -gt 0 -and $reply -is [hashtable]) { $reply.focusNotes = @($script:FocusNotes) }
   [Console]::Out.WriteLine(($reply | ConvertTo-Json -Depth 8 -Compress))
   [Console]::Out.Flush()
 }
