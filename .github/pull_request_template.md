@@ -10,6 +10,22 @@
 
 <!-- The behavior change, in a few sentences. One topic per PR. -->
 
+## Edge cases
+
+<!-- Required when code changes: the rare and edge cases this handles, and how. Think of empty or
+     missing input, a restart or reload midway, two things happening at once, a slow or failed
+     network, Windows and macOS, other languages, old saved data or an older extension.
+     Name the tests that cover them where you can.
+     If none apply (say, a wording change), write: No edge cases: <reason> -->
+
+## Platforms
+
+<!-- Required when the change touches the operating system (native helpers, windows and tray,
+     keyboard shortcuts, the terminal and processes, dictation, secure storage, updates):
+     how it behaves on Windows and on macOS, including keys the system or an input method
+     takes first (Ctrl+Space switches the input source on many Macs). Trying it on a Mac is welcome
+     but not required; then say why it works there. Otherwise delete this section. -->
+
 ## Test
 
 <!-- Name the test you added or changed. The "Fail-first test" check runs it against main's code
@@ -36,5 +52,6 @@ Release note: <!-- Optional: one sentence for users, used to draft the release n
 - [ ] The branch is up to date with `main`, and the PR contains nothing unrelated (no notes, logs or formatting-only changes).
 - [ ] Screenshots, logs and examples contain no real names, paths, chat text, IDs or credentials.
 - [ ] Every change serves the linked issue; nothing depends on ChatGPT's English wording.
+- [ ] Every new text a person sees is in all 12 languages, or there is none.
 - [ ] Contract changes (preload, IPC, `src/shared`, recorded fields, extension messages) are described in AGENTS.md, or I wrote "No contract change: <reason>".
 - [ ] "Allow edits by maintainers" is on. If this builds on another PR, it says "Depends on #N" and is a draft.
