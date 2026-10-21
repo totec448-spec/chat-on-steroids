@@ -5030,6 +5030,10 @@ describe('delivering a bootstrap', () => {
     expect((await chatgptProjectChoices()).map(choice => choice.id)).toEqual([listed]);
     expect((await request('POST', '/chatgpt-projects', { body: { projects: 'nope' } })).status).toBe(400);
     expect((await request('POST', '/chatgpt-projects', { body: { projects: [{ id: listed, name: 'From the sidebar' }] } })).body).toMatchObject({ ok: true, changed: false });
+    // The same Project id reported from a workspace: the choices follow the workspace in use.
+    const team = `g-p-${'e'.repeat(32)}`;
+    expect((await request('POST', '/chatgpt-projects', { body: { projects: [{ id: team, name: 'Team' }], workspace: 'team-account-0001' } })).body).toMatchObject({ ok: true, changed: true });
+    expect((await chatgptProjectChoices()).map(choice => choice.id)).toEqual([team]);
     expect((await request('POST', '/chatgpt-projects', { auth: null, body: { projects: [] } })).status).toBe(401);
   });
 

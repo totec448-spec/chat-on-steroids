@@ -2583,7 +2583,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       return json(res, 400, { error: 'bad_request' }, origin);
     }
     if (!Array.isArray(body?.['projects']) || body['projects'].length > 400) return json(res, 400, { error: 'bad_request' }, origin);
-    const changed = await noteChatgptProjects(body['projects'] as Array<{ id: unknown; name: unknown }>);
+    const changed = await noteChatgptProjects(body['projects'] as Array<{ id: unknown; name: unknown }>, Date.now(), body['workspace']);
     return json(res, 200, { ok: true, changed }, origin);
   }
   if (route === '/models' && req.method === 'POST') {

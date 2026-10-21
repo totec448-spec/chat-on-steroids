@@ -55,7 +55,8 @@ it('reports the sidebar Projects to the worker only when the list changed, and a
   let shown: Array<{ id: string; name: string }> = [];
   let reply: unknown = { ok: true };
   const ask = vi.fn(async () => reply);
-  const context = vm.createContext({ CLF_DOM: { projectsShown: () => shown }, ask });
+  const document = { cookie: 'oai-did=1; _account=team-account-0001; other=2' };
+  const context = vm.createContext({ CLF_DOM: { projectsShown: () => shown }, ask, document });
   context.globalThis = context;
   context.top = context;
   vm.runInContext(`${section}\nglobalThis.report = reportProjectList;`, context);
@@ -65,16 +66,22 @@ it('reports the sidebar Projects to the worker only when the list changed, and a
   shown = [{ id: id('a'), name: 'Kunden' }];
   await report(); await report();
   expect(ask).toHaveBeenCalledTimes(1);
-  expect(ask).toHaveBeenLastCalledWith({ type: 'project_catalog', projects: shown });
+  // The workspace ChatGPT shows them in comes along: its Projects open only there.
+  expect(ask).toHaveBeenLastCalledWith({ type: 'project_catalog', projects: shown, workspace: 'team-account-0001' });
   shown = [{ id: id('a'), name: 'Kunden' }, { id: id('b'), name: 'New' }];
   reply = { ok: false };
   await report();
   reply = { ok: true };
   await report();
   expect(ask).toHaveBeenCalledTimes(3);
+  // The same list in another workspace (no workspace cookie: a personal account) is reported again.
+  document.cookie = 'oai-did=1';
+  await report();
+  expect(ask).toHaveBeenCalledTimes(4);
+  expect(ask).toHaveBeenLastCalledWith({ type: 'project_catalog', projects: shown, workspace: null });
   // A frame inside the page never reports.
   context.top = {};
   shown = [{ id: id('c'), name: 'Other' }];
   await report();
-  expect(ask).toHaveBeenCalledTimes(3);
+  expect(ask).toHaveBeenCalledTimes(4);
 });

@@ -1445,10 +1445,14 @@
     if (globalThis.top !== globalThis) return;
     const projects = CLF_DOM.projectsShown();
     if (!projects.length) return;
-    const signature = JSON.stringify(projects);
+    // The workspace these are listed in: ChatGPT opens a Project only in its own workspace, and
+    // names the one in use in this cookie (absent for a personal account). Read, never sent elsewhere.
+    const cookie = String(document.cookie || '').split(';').map(part => part.trim()).find(part => part.startsWith('_account='));
+    const workspace = cookie ? decodeURIComponent(cookie.slice('_account='.length)) || null : null;
+    const signature = JSON.stringify([workspace, projects]);
     if (signature === reportedProjects) return;
     reportedProjects = signature;
-    void ask({ type: 'project_catalog', projects }).then(reply => {
+    void ask({ type: 'project_catalog', projects, workspace }).then(reply => {
       if (!reply || reply.ok !== true) reportedProjects = '';
     }, () => { reportedProjects = ''; });
   }

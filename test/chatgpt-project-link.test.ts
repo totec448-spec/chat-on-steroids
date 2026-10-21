@@ -43,6 +43,27 @@ it('keeps the Projects ChatGPT lists, in its order, with clean names and nothing
   expect((await readDurable<{ projects: unknown[] }>(CHATGPT_PROJECT_CATALOG))!.projects).toHaveLength(200);
 });
 
+it('offers only the Projects of the workspace the browser is in now', async () => {
+  // A person with a Team and a Personal workspace: ChatGPT opens a Project only in its own one.
+  expect(await noteChatgptProjects([{ id: id('a'), name: 'Team project' }], 1_000, 'team-account-0001')).toBe(true);
+  expect(await noteChatgptProjects([{ id: id('b'), name: 'Personal project' }], 2_000, null)).toBe(true);
+  expect((await chatgptProjectChoices(2_000)).map(choice => choice.name)).toEqual(['Personal project']);
+  // The same list from the same workspace changes nothing; back in the Team workspace, its own list.
+  expect(await noteChatgptProjects([{ id: id('b'), name: 'Personal project' }], 2_500, null)).toBe(false);
+  expect(await noteChatgptProjects([{ id: id('a'), name: 'Team project' }], 3_000, 'team-account-0001')).toBe(true);
+  expect((await chatgptProjectChoices(3_000)).map(choice => choice.name)).toEqual(['Team project']);
+  // A Project of the other workspace cannot be linked while the browser is in this one.
+  await noteChatgptProjects([{ id: id('b'), name: 'Personal project' }], Date.now() - 1_000, null);
+  await noteChatgptProjects([{ id: id('a'), name: 'Team project' }], Date.now(), 'team-account-0001');
+  const project = await addProject(path.join(approved, 'first'), { chatgpt: 'later' });
+  await expect(linkChatgptProject(project.id, id('b'))).rejects.toThrow(/not one ChatGPT lists/);
+  expect((await linkChatgptProject(project.id, id('a'))).chatgpt).toMatchObject({ state: 'linked', id: id('a') });
+  // Only a hash of the account id is kept, never the id itself; an odd value counts as no workspace.
+  expect(JSON.stringify(await readDurable(CHATGPT_PROJECT_CATALOG))).not.toContain('team-account-0001');
+  expect(await noteChatgptProjects([{ id: id('c'), name: 'Odd' }], Date.now(), 'x'.repeat(500))).toBe(true);
+  expect((await chatgptProjectChoices()).map(choice => choice.name)).toEqual(['Odd', 'Personal project']);
+});
+
 it('links a project without a ChatGPT Project to one the person already has, one to one', async () => {
   await noteChatgptProjects([{ id: id('a'), name: 'Kunden' }, { id: id('b'), name: 'Other' }]);
   const first = await addProject(path.join(approved, 'first'), { chatgpt: 'later' });
