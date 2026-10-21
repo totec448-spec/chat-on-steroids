@@ -1389,7 +1389,13 @@ export async function resolveCwd(ctx: ToolContext, virtualPath: string | undefin
   const { workspace, missing } = await liveWorkspace();
   // Codex treats an explicitly empty workdir exactly like an omitted one.
   const provided = virtualPath !== undefined && virtualPath !== '';
-  if (!provided && !workspace && swarmRunning()) {
+  // Only a chat that is part of a sub-agent run must name its folder: there the first approved one
+  // may be another agent's. Any other chat falls back as usual, even while another chat has a run
+  // (2026-10-21: with one run anywhere, every new chat outside a project had its first command
+  // refused). A call without a known chat stays as strict as before.
+  const conversationId = currentCall()?.caller.conversationId ?? null;
+  const inRun = conversationId ? currentRunId(conversationId) !== null : swarmRunning();
+  if (!provided && !workspace && inRun) {
     throw new SandboxError(
       missing
         ? `WORKSPACE_REQUIRED: the folder this chat was working in (${missing}) no longer exists. Supply an explicit approved workdir before running a command.`
