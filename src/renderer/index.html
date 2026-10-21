@@ -265,11 +265,11 @@
               <div class="setting layout-setting"><span class="setting-text"><b id="sidebarLayoutTitle">Sidebar layout</b><em>Switch at any time. Your chats stay as they are.</em></span>
                 <div class="layout-choice" role="radiogroup" aria-labelledby="sidebarLayoutTitle">
                   <label class="layout-option"><input type="radio" name="appearanceSidebarLayout" id="appearanceLayoutProjects" value="projects" />
-                    <span class="layout-preview" aria-hidden="true"><img class="for-light" src="./layout-previews/projects-light.png" alt="" /><img class="for-dark" src="./layout-previews/projects-dark.png" alt="" /></span>
+                    <span class="layout-preview" aria-hidden="true"><img class="for-light" data-layout-preview="projects-light" width="272" height="330" alt="" /><img class="for-dark" data-layout-preview="projects-dark" width="272" height="330" alt="" /></span>
                     <span class="layout-option-text"><b>Projects</b><em>Chats sit under their project folders.</em></span>
                   </label>
                   <label class="layout-option"><input type="radio" name="appearanceSidebarLayout" id="appearanceLayoutInbox" value="inbox" />
-                    <span class="layout-preview" aria-hidden="true"><img class="for-light" src="./layout-previews/inbox-light.png" alt="" /><img class="for-dark" src="./layout-previews/inbox-dark.png" alt="" /></span>
+                    <span class="layout-preview" aria-hidden="true"><img class="for-light" data-layout-preview="inbox-light" width="272" height="330" alt="" /><img class="for-dark" data-layout-preview="inbox-dark" width="272" height="330" alt="" /></span>
                     <span class="layout-option-text"><b>Inbox</b><em>All chats in one list, active ones on top.</em></span>
                   </label>
                 </div>
@@ -1126,8 +1126,8 @@
 
                   <label class="setting">
                     <span class="setting-text">
-                      <b>Archive worker chats in ChatGPT when they are retired</b>
-                      <em>Once a worker can't be used again (you cleared the workers, the main chat closed, or its finished task sat for a week), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.</em>
+                      <b>Archive worker chats in ChatGPT when their task is done</b>
+                      <em>A couple of minutes after a worker reports its task done, its chat is archived in ChatGPT and leaves your chat list. If the main chat gives that worker more work, the app restores its chat first. Chats of cleared workers are archived too. You can restore any of them from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.</em>
                     </span>
                     <input id="archiveWorkerChats" type="checkbox" />
                   </label>
