@@ -45,7 +45,7 @@ export function initAppearance(save: (patch: { theme?: AppearanceTheme; appearan
     applyAppearance(theme, current);
     $<HTMLSelectElement>('appearanceTheme').value = theme;
     $<HTMLSelectElement>('appearanceFont').value = current.font;
-    $<HTMLSelectElement>('appearanceSidebarLayout').value = current.sidebarLayout;
+    for (const option of panel.querySelectorAll<HTMLInputElement>('input[name="appearanceSidebarLayout"]')) option.checked = option.value === current.sidebarLayout;
     $<HTMLInputElement>('appearanceSize').value = String(current.fontSize);
     $('appearanceSizeValue').textContent = `${current.fontSize} px`;
     $<HTMLInputElement>('appearanceContrast').value = String(current[theme].contrast);
@@ -73,7 +73,7 @@ export function initAppearance(save: (patch: { theme?: AppearanceTheme; appearan
     } else if (control.id === 'appearanceSize') current = { ...current, fontSize: Number(control.value) };
     else if (control.id === 'appearanceContrast') current = { ...current, [theme]: { ...current[theme], contrast: Number(control.value) } };
     else if (control.id === 'appearanceFont') current = { ...current, font: control.value as AppearanceSettings['font'] };
-    else if (control.id === 'appearanceSidebarLayout') current = { ...current, sidebarLayout: control.value as AppearanceSettings['sidebarLayout'] };
+    else if (control.name === 'appearanceSidebarLayout' && (control as HTMLInputElement).checked) current = { ...current, sidebarLayout: control.value as AppearanceSettings['sidebarLayout'] };
     else if (control.id === 'appearanceTranslucent') current = { ...current, translucentSidebar: (control as HTMLInputElement).checked };
     else return false;
     paint();

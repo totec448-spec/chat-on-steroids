@@ -7,6 +7,7 @@ import { workerOwnTask } from '../shared/worker-brief.js';
 import { compactNumber, el, icon } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
 import { workerAvatar } from './agent-communication.js';
+import { renderWorkerActivity } from './agent-activity.js';
 
 /**
  * What to call a worker: the name the prime gave it for this job ("Security review"), else
@@ -20,6 +21,11 @@ export function workerName(id: string, label: string | undefined): string {
   return number ? t('Worker {0}', [number]) : id;
 }
 
+/** One word per agent state, the same in the panel, Settings and Activity (English catalog keys). */
+export const AGENT_STATE_WORDS: Readonly<Record<string, string>> = {
+  active: 'Working', invited: 'Opening', waking: 'Waking', detached: 'No tab', sleeping: 'Idle', failed: 'Failed', finished: 'Finished'
+};
+
 /** How long a round's workers glow as the panel opens on them (`agent-arrive` in styles.css). */
 const ARRIVAL_MS = 1600;
 
@@ -32,6 +38,8 @@ export function createAgentPanel(options: {
   onEscape?: () => void;
   load: (id: string) => Promise<{ events: SessionEvent[]; traces?: Record<string, TurnTrace> } | null>;
   render: (events: SessionEvent[], id: string, current: () => boolean, traces: Record<string, TurnTrace>) => HTMLElement[];
+  /** A worker's tool calls for its Activity view (#105); without it a worker opens on its conversation. */
+  loadActivity?: (id: string) => Promise<SessionEvent[] | null>;
   openMain: (id: string) => void;
   working: (summary: SessionSummary) => boolean;
   agent?: (summary: SessionSummary) => (Pick<AgentInfo, 'state' | 'task'> & Partial<Pick<AgentInfo, 'label'>> & { conversationId?: string | null }) | null;
@@ -48,6 +56,33 @@ export function createAgentPanel(options: {
   const title = el('strong');
   const body = el('div', 'agent-panel-body');
   head.append(back, title); pane.append(head, body); (options.mount ?? options.host).append(pane);
+  // A worker opens on what it did; its conversation is one tab away. The choice holds from worker to worker.
+  type View = 'activity' | 'conversation';
+  let view: View = options.loadActivity ? 'activity' : 'conversation';
+  const views = el('div', 'agent-panel-views'); views.setAttribute('role', 'tablist');
+  ui(views, 'aria-label', () => t('Sub-agent view'));
+  const viewTabs = new Map<View, HTMLButtonElement>();
+  for (const [key, label] of [['activity', () => t('Activity')], ['conversation', () => t('Conversation')]] as const) {
+    const tab = el('button', 'agent-panel-view', label) as HTMLButtonElement;
+    tab.type = 'button'; tab.setAttribute('role', 'tab'); tab.dataset.view = key;
+    tab.onclick = () => { if (view !== key && selected) { view = key; void open(selected); } };
+    viewTabs.set(key, tab); views.append(tab);
+  }
+  views.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || !selected) return;
+    event.preventDefault();
+    const next: View = event.key === 'Home' ? 'activity' : event.key === 'End' ? 'conversation' : view === 'activity' ? 'conversation' : 'activity';
+    if (next !== view) { view = next; void open(selected); }
+    viewTabs.get(view)?.focus();
+  });
+  if (options.loadActivity) head.append(views);
+  const paintViews = (): void => {
+    for (const [key, tab] of viewTabs) {
+      tab.setAttribute('aria-selected', String(key === view));
+      tab.tabIndex = key === view ? 0 : -1;
+      tab.classList.toggle('is-selected', key === view);
+    }
+  };
   let parent: string | null = null, workers: SessionSummary[] = [], selected: string | null = null;
   let generation = 0;
   let highlighted = new Set<string>();
@@ -63,6 +98,15 @@ export function createAgentPanel(options: {
     pane.hidden = false;
     if (!options.mount) options.host.classList.add('has-agent-panel');
     options.toggle?.setAttribute('aria-expanded', 'true');
+  }
+  /** Who a worker is and its own task: the run's shared context, the same for every worker, left out. */
+  function describe(worker: SessionSummary): { identity: string; task: string; name: string } {
+    const owner = options.agent?.(worker);
+    const identity = worker.origin?.agentId ?? worker.title.split(' · ')[0] ?? worker.title;
+    const saved = worker.workerAssignment?.agentId === identity && worker.workerAssignment.conversationId === worker.conversationId
+      ? worker.workerAssignment : null;
+    const task = workerOwnTask(owner?.task?.trim() || saved?.task || worker.origin?.task || worker.title);
+    return { identity, task, name: workerName(identity, owner?.label ?? saved?.label) };
   }
   function list(): void {
     generation++; selected = null; head.hidden = true; body.replaceChildren();
@@ -100,12 +144,7 @@ export function createAgentPanel(options: {
           activeTurn: worker.activeTurnId !== null && worker.activeTurnId !== undefined
         });
         row.dataset.health = health.health;
-        const identity = worker.origin?.agentId ?? worker.title.split(' · ')[0] ?? worker.title;
-        // The worker's own task: the run's shared context, the same for every worker, left out.
-        const saved = worker.workerAssignment?.agentId === identity && worker.workerAssignment.conversationId === worker.conversationId
-          ? worker.workerAssignment : null;
-        const task = workerOwnTask(owner?.task?.trim() || saved?.task || worker.origin?.task || worker.title);
-        const name = workerName(identity, owner?.label ?? saved?.label);
+        const { identity, task, name } = describe(worker);
         // A worker still opening has no conversation yet; undefined === undefined must not read a model.
         const observed = worker.selectedModel && worker.conversationId && worker.selectedModel.conversationId === worker.conversationId
           ? worker.selectedModel : null;
@@ -122,10 +161,7 @@ export function createAgentPanel(options: {
         const content = el('span', 'agent-card-content');
         const heading = el('span', 'agent-card-heading');
         heading.append(el('strong', 'agent-card-name', name), el('span', 'agent-card-time', elapsed));
-        const statusLabel: Record<string, string> = {
-          working: 'Working', active: 'Working', invited: 'Opening', waking: 'Waking', detached: 'No tab',
-          sleeping: 'Idle', failed: 'Failed', history: 'Finished'
-        };
+        const statusLabel: Record<string, string> = { ...AGENT_STATE_WORDS, working: 'Working', history: 'Finished' };
         const meta = el('span', 'agent-card-meta');
         const part = (className: string, text: string | (() => string)): void => {
           if (meta.childElementCount) meta.append(el('span', 'agent-card-sep', '·'));
@@ -142,12 +178,15 @@ export function createAgentPanel(options: {
         const activityBoundary = Math.max(worker.lastFinishReportAt ?? 0, worker.lastTurnEndAt ?? 0);
         const currentActivity = worker.lastToolCallAt != null && worker.lastToolCallAt > activityBoundary &&
           worker.lastToolCallAt >= (worker.finishTurn?.startedAt ?? 0);
+        // A failed worker keeps its last action in view: where it stopped is the first thing to know.
+        const lastAction = state === 'failed' && worker.lastToolActivity
+          ? el('span', 'agent-card-last', () => t('Last action: {0}', [worker.lastToolActivity!.title])) : null;
         const activity = working && currentActivity && worker.lastToolActivity ? el('span', 'agent-card-activity', worker.lastToolActivity.title) : null;
         if (activity) {
           activity.dataset.kind = worker.lastToolActivity!.kind;
           activity.style.setProperty('--phase', `${-(Date.now() % 1800)}ms`);
         }
-        content.append(heading, el('span', 'agent-card-task', task), ...(activity ? [activity] : []), meta);
+        content.append(heading, el('span', 'agent-card-task', task), ...(activity ? [activity] : lastAction ? [lastAction] : []), meta);
         row.append(portrait, content);
         // The id the prime and the chat use for it (worker-2) stays one hover away, and in its avatar.
         row.title = `${identity} · ${task}`;
@@ -163,15 +202,25 @@ export function createAgentPanel(options: {
     const preserve = refresh && selected === id && !pane.hidden;
     if (!refresh) show();
     selected = id; const request = ++generation;
-    head.hidden = false; title.textContent = worker.title;
-    if (!preserve) body.replaceChildren(el('p', 'meta', () => t("Loading conversation…")));
-    const current = () => request === generation && selected === id && !pane.hidden;
-    const detail = await options.load(id);
-    if (!current()) return;
-    if (!detail) { body.replaceChildren(el('p', 'meta', () => t("Conversation unavailable"))); return; }
+    head.hidden = false; title.textContent = worker.title; paintViews();
+    const shown = view;
+    if (!preserve) body.replaceChildren(el('p', 'meta', () => shown === 'activity' ? t("Loading activity…") : t("Loading conversation…")));
+    const current = () => request === generation && selected === id && view === shown && !pane.hidden;
     const openMain = el('button', 'btn', () => t("Open full chat")); openMain.setAttribute('type', 'button');
     openMain.onclick = () => { if (current()) { hide(); options.openMain(id); } };
     const position = body.scrollTop;
+    if (shown === 'activity' && options.loadActivity) {
+      const events = await options.loadActivity(id);
+      if (!current()) return;
+      if (!events) { body.replaceChildren(el('p', 'meta', () => t("Activity unavailable"))); return; }
+      const follow = !preserve || position + body.clientHeight >= body.scrollHeight - 40;
+      body.replaceChildren(openMain, ...renderWorkerActivity(events, describe(worker).task));
+      body.scrollTop = follow ? body.scrollHeight : position;
+      return;
+    }
+    const detail = await options.load(id);
+    if (!current()) return;
+    if (!detail) { body.replaceChildren(el('p', 'meta', () => t("Conversation unavailable"))); return; }
     const follow = !preserve || position + body.clientHeight >= body.scrollHeight - 40;
     body.replaceChildren(openMain, ...options.render(detail.events, id, current, detail.traces ?? {}));
     body.scrollTop = follow ? body.scrollHeight : position;
