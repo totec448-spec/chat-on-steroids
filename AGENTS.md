@@ -5138,6 +5138,8 @@ its indexes/geometry. Late proof aliases a request's state only to its own sessi
 unresolved requests cannot borrow observations. Headerless calls retain a separate legacy
 anonymous context; opting out refuses indexed/coordinate input without exact identity.
 Explicit activation consumes observation state too; ordinary input already activates its target.
+Apps `launch_app` starts on Windows are the helper's child processes, so a retired helper (timeout,
+crash, quit) ends only itself (`terminateProcess`), never its tree; `test/computer-helper-retirement.test.ts`.
 Late observations and replaced principals cannot lend another call their state.
 Single-window capture includes the cursor only when ScreenCaptureKit reports the window on
 screen: requesting the current desktop cursor for an off-Space window fails with -3811.

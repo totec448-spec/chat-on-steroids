@@ -20,7 +20,7 @@ import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { Worker } from 'node:worker_threads';
 import { ensureUsablePath, normalizeEnvironment } from '../env.js';
-import { findWindowsPowerShell, terminateProcessTree } from '../exec.js';
+import { findWindowsPowerShell, terminateProcess, terminateProcessTree } from '../exec.js';
 import { logInfo, logWarn } from '../logger.js';
 import type { MacOSDesktopAccessStatus, MacOSPermissionState } from '../../shared/types.js';
 import { noteMacOSGrants } from './macos-grants.js';
@@ -326,7 +326,10 @@ function retireHelper(runtime: HelperRuntime): Promise<void> {
   const task = (async () => {
     if (runtime.child.exitCode === null && runtime.child.pid !== undefined) {
       const closed = new Promise<void>((resolve) => runtime.child.once('close', () => resolve()));
-      await terminateProcessTree(runtime.child.pid);
+      // On Windows every app launch_app started is this helper's child, and taskkill /T would
+      // close those apps (and their unsaved work) with it. The helper starts nothing of its own.
+      if (process.platform === 'win32') await terminateProcess(runtime.child.pid);
+      else await terminateProcessTree(runtime.child.pid);
       await Promise.race([closed, new Promise<void>((resolve) => setTimeout(resolve, 2_000))]);
     }
     await cleanupHelperScript(runtime);
