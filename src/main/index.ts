@@ -628,6 +628,9 @@ void app.whenReady().then(async () => {
   // Do not let the new img-src origin permit arbitrary paths, tracking parameters,
   // or requests of another type to that host. Redirects are checked again by CSP:
   // an image cannot follow a Location header to a different remote origin.
+  // Electron supports only one onBeforeRequest listener per session: registering
+  // another one anywhere on defaultSession would replace this URL safety gate.
+  // Keep future request checks inside this listener rather than adding a second.
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['https://images.openai.com/*'] }, (details, callback) => {
     const allowed = approvedChatGptImageRequest(details.url, details.resourceType, details.method);
     if (!allowed) logWarn('static ChatGPT image request refused: unapproved URL or resource type');
