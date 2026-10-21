@@ -210,16 +210,23 @@ export function largeFileFindings(entries) {
     .map(({ path, bytes }) => ({ path, bytes }));
 }
 
-/** The added and changed files' sizes now and at the merge base; lockfiles excepted. */
-function largeFilesOf(base) {
-  const names = execFileSync('git', ['diff', '--name-only', '--diff-filter=AM', `${base}...HEAD`], { encoding: 'utf8' }).split('\n').filter(Boolean);
-  const mergeBase = execFileSync('git', ['merge-base', base, 'HEAD'], { encoding: 'utf8' }).trim();
-  const size = (ref) => {
-    try { return Number(execFileSync('git', ['cat-file', '-s', ref], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()); }
+/**
+ * The added, changed and renamed files' sizes now and at the merge base (a renamed file under its old
+ * name there); lockfiles excepted. A size that can't be read now is an error, not 0 bytes.
+ */
+export function largeFilesOf(base, cwd = process.cwd()) {
+  const git = (args, options = {}) => execFileSync('git', args, { encoding: 'utf8', cwd, ...options });
+  const changes = git(['diff', '--name-status', '--diff-filter=AMR', `${base}...HEAD`]).split('\n').filter(Boolean).map((line) => {
+    const [status, first, second] = line.split('\t');
+    return status.startsWith('R') ? { path: second, basePath: first } : { path: first, basePath: first };
+  });
+  const mergeBase = git(['merge-base', base, 'HEAD']).trim();
+  const baseSize = (name) => {
+    try { return Number(git(['cat-file', '-s', `${mergeBase}:${name}`], { stdio: ['ignore', 'pipe', 'ignore'] }).trim()); }
     catch { return null; }
   };
-  return largeFileFindings(names.filter((name) => !/(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(name))
-    .map((name) => ({ path: name, bytes: size(`HEAD:${name}`) ?? 0, baseBytes: size(`${mergeBase}:${name}`) })));
+  return largeFileFindings(changes.filter(({ path }) => !/(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(path))
+    .map(({ path, basePath }) => ({ path, bytes: Number(git(['cat-file', '-s', `HEAD:${path}`]).trim()), baseBytes: baseSize(basePath) })));
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
