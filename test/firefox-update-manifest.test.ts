@@ -29,6 +29,23 @@ describe('Firefox update manifest', () => {
     });
   });
 
+  it('names a Firefox-only fourth version part, still linking to the release it belongs to', () => {
+    // 2.1.43 (2026-10-20): Mozilla had signed 2.1.43 from a tag that moved, and never signs a
+    // version twice, so the add-on of that release is 2.1.43.1 while the release stays v2.1.43.
+    expect(firefoxUpdateManifest({ version: '2.1.43.1', sha256: 'b'.repeat(64) })).toEqual({
+      addons: {
+        [FIREFOX_ADDON_ID]: {
+          updates: [{
+            version: '2.1.43.1',
+            update_link: `https://github.com/totec448-spec/chat-on-steroids/releases/download/v2.1.43/${FIREFOX_XPI}`,
+            update_hash: `sha256:${'b'.repeat(64)}`
+          }]
+        }
+      }
+    });
+    expect(() => firefoxUpdateManifest({ version: '2.1.43.1.2', sha256: 'b'.repeat(64) })).toThrow();
+  });
+
   it('refuses anything that is not a release version or a sha256', () => {
     expect(() => firefoxUpdateManifest({ version: '2.1', sha256: 'a'.repeat(64) })).toThrow();
     expect(() => firefoxUpdateManifest({ version: '2.1.38', sha256: 'xyz' })).toThrow();
