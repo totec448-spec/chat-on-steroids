@@ -4252,21 +4252,23 @@ function staticBarChart(raw: string): HTMLElement | null {
   if (typeof maximum !== 'number' || !Number.isFinite(maximum) || maximum <= 0 || maximum < Math.max(...items.map(item => item.value))) return null;
   const unit = typeof series.valueSuffix === 'string' && series.valueSuffix.length <= 8 ? series.valueSuffix : '';
   const title = typeof series.label === 'string' && series.label.length <= 120 ? series.label : '';
+  const numbers = new Intl.NumberFormat(currentLanguage());
+  const valueText = (value: number): string => `${numbers.format(value)}${unit}`;
   const figure = el('figure', 'markdown-dil-chart');
   figure.setAttribute('role', 'img');
   // Reuse source labels instead of introducing a hard-coded English fallback.
-  const valuesLabel = items.map(item => `${item.label} ${item.value}${unit}`).join(', ');
+  const valuesLabel = items.map(item => `${item.label} ${valueText(item.value)}`).join(', ');
   figure.setAttribute('aria-label', title ? `${title}: ${valuesLabel}` : valuesLabel);
   if (title) figure.append(el('figcaption', 'markdown-dil-chart-heading', title));
   const plot = el('div', 'markdown-dil-chart-plot');
   const guide = el('div', 'markdown-dil-chart-guide');
-  guide.append(el('span', '', `${maximum}${unit}`), el('span', '', `${maximum / 2}${unit}`), el('span', '', `0${unit}`));
+  guide.append(el('span', '', valueText(maximum)), el('span', '', valueText(maximum / 2)), el('span', '', valueText(0)));
   const columns = el('div', 'markdown-dil-chart-bars');
   for (const item of items) {
     const column = el('div', 'markdown-dil-chart-column');
     const bar = el('div', 'markdown-dil-chart-bar');
     bar.style.height = `${item.value / maximum * 100}%`;
-    bar.title = `${item.label}: ${item.value}${unit}`;
+    bar.title = `${item.label}: ${valueText(item.value)}`;
     column.append(bar, el('span', 'markdown-dil-chart-x', item.label));
     columns.append(column);
   }
