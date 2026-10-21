@@ -2750,6 +2750,7 @@
   "Restore all": "Khôi phục tất cả",
   "Restore file": "Khôi phục tệp",
   "Restored {0} of {1} files": "Đã khôi phục {0}/{1} tệp",
+  "Skipped {0} paths because files and folders share a name": "?? b? qua {0} ???ng d?n v? t?p v? th? m?c tr?ng t?n",
   "This checkpoint is no longer available": "Điểm kiểm tra này không còn khả dụng",
   "The comparison changed. Refresh Review and try again.": "Phần so sánh đã thay đổi. Hãy làm mới Xem lại rồi thử lại.",
   "These files no longer differ from the checkpoint": "Các tệp này không còn khác với điểm kiểm tra",

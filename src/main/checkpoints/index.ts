@@ -22,10 +22,13 @@ const CAPTURE_BUDGET_MS = 10_000;
 const MAX_RESTORE_FILE_BYTES = 64 * 1024 * 1024;
 
 const MAX_FAILED_TURNS = 256;
+const MAX_CAPTURED_TURNS = 512;
 
 const captures = new Map<string, Promise<void>>();
 /** Turns whose capture failed; their patches already ran, so a later capture would not be "before". */
 const failedTurns = new Set<string>();
+/** Successful turn keys stay fenced after their visible ledger entry is evicted. */
+const capturedTurns = new Set<string>();
 const restores = new Map<string, Promise<unknown>>();
 
 function rememberFailedTurn(flight: string): void {
@@ -33,6 +36,14 @@ function rememberFailedTurn(flight: string): void {
   for (const oldest of failedTurns) {
     if (failedTurns.size <= MAX_FAILED_TURNS) break;
     failedTurns.delete(oldest);
+  }
+}
+
+function rememberCapturedTurn(flight: string): void {
+  capturedTurns.add(flight);
+  for (const oldest of capturedTurns) {
+    if (capturedTurns.size <= MAX_CAPTURED_TURNS) break;
+    capturedTurns.delete(oldest);
   }
 }
 
@@ -145,7 +156,7 @@ export async function checkpointBeforePatch(realPaths: readonly string[]): Promi
       : caller.requestId ? `request:${caller.requestId}` : null;
     if (!key) return;
     const flight = `${session.projectId}\0${sessionId}\0${key}`;
-    if (failedTurns.has(flight)) return;
+    if (capturedTurns.has(flight) || failedTurns.has(flight)) return;
     let context: RepositoryContext | null;
     try { context = await repositoryContext(session.projectId); }
     catch (error) { rememberFailedTurn(flight); throw error; }
@@ -153,6 +164,7 @@ export async function checkpointBeforePatch(realPaths: readonly string[]): Promi
     let work = captures.get(flight);
     if (!work) {
       work = captureWithinBudget(context, sessionId, key)
+        .then(() => { rememberCapturedTurn(flight); })
         .catch(error => { rememberFailedTurn(flight); throw error; })
         .finally(() => captures.delete(flight));
       captures.set(flight, work);
@@ -179,10 +191,50 @@ async function hashFile(git: Git, repoPath: string, real: string): Promise<strin
   return oid;
 }
 
+function repositoryPath(context: RepositoryContext, relative: string): string {
+  return context.prefix ? context.prefix + '/' + relative : relative;
+}
+
+/**
+ * A Git tree cannot be restored as a file path. If a checkpoint wants a folder where the
+ * working tree has a file, or a file where it has a folder, skip that whole path group before
+ * asking for confirmation. In particular, never remove a non-empty conflicting folder.
+ */
+async function conflictingFileDirectoryPaths(context: RepositoryContext, fromTree: string, paths: readonly string[]): Promise<Set<string>> {
+  const git: Git = (args, maxBytes = 4096) => runGit(context.root, args, maxBytes, { noReplaceObjects: true });
+  const candidates = new Set<string>();
+  for (const relative of paths) {
+    const parts = relative.split('/');
+    for (let length = parts.length; length > 0; length--) candidates.add(parts.slice(0, length).join('/'));
+  }
+  const roots = new Set<string>();
+  for (const candidate of candidates) {
+    const wanted = await treeEntry(git, fromTree, repositoryPath(context, candidate));
+    let currentKind: 'file' | 'directory' | 'other' | null = null;
+    try { currentKind = (await projectRestoreTarget(context.projectId, candidate)).kind; }
+    catch { /* A blocked descendant is handled by checking its existing ancestors. */ }
+    const wantedFile = wanted !== null && wanted.mode !== '040000';
+    if ((wantedFile && currentKind === 'directory') || (wanted?.mode === '040000' && currentKind === 'file')) {
+      roots.add(candidate);
+    }
+  }
+  const skipped = new Set<string>();
+  for (const relative of paths) {
+    let candidate = relative;
+    while (true) {
+      if (roots.has(candidate)) { skipped.add(relative); break; }
+      const separator = candidate.lastIndexOf('/');
+      if (separator < 0) break;
+      candidate = candidate.slice(0, separator);
+    }
+  }
+  return skipped;
+}
+
 /** Writes one file back only while its content still matches what `guardTree` captured. */
 async function restoreFile(context: RepositoryContext, fromTree: string, guardTree: string, relative: string):
   Promise<'restored' | CheckpointRestoreResult['skipped'][number]['reason']> {
-  const repoPath = context.prefix ? `${context.prefix}/${relative}` : relative;
+  const repoPath = repositoryPath(context, relative);
   const git: Git = (args, maxBytes = 4096) => runGit(context.root, args, maxBytes, { noReplaceObjects: true });
   const currentOid = async (): Promise<string | null> => {
     const target = await projectRestoreTarget(context.projectId, relative);
@@ -240,14 +292,20 @@ export function restoreCheckpoint(projectId: string, checkpointId: string, paths
     const selected = snapshot.changes.filter(change => !wanted || wanted.has(change.path)).map(change => change.path);
     if (!selected.length || (wanted && selected.length !== wanted.size)) throw new Error('These files no longer differ from the checkpoint');
     if (!wanted && snapshot.truncated) throw new Error('Too many changes to restore at once. Restore files one by one.');
-    if (!(await confirm(selected))) return { confirmed: false, restored: [], skipped: [], undoRef: null };
-    // The dialog can stay open for a long time; what is restored must still be what was confirmed.
-    await current();
     const context = await repositoryContext(projectId);
     if (!context) throw new Error('This folder is not a Git repository');
+    const conflictPaths = await conflictingFileDirectoryPaths(context, source!.treeOid, selected);
+    const restorable = selected.filter(relative => !conflictPaths.has(relative));
+    const skipped = [...conflictPaths].map(file => ({ path: file, reason: 'conflict' as const }));
+    // Preflight may take time. Do not confirm a list based on a comparison that changed meanwhile.
+    await current();
+    if (!restorable.length) return { confirmed: false, restored: [], skipped, undoRef: null };
+    if (!(await confirm(restorable))) return { confirmed: false, restored: [], skipped: [], undoRef: null };
+    // The dialog can stay open for a long time; what is restored must still be what was confirmed.
+    await current();
     const undo = (await createCheckpoint(context, source!.sessionId, `restore:${randomBytes(8).toString('hex')}`, 'restore'))!;
-    const result: CheckpointRestoreResult = { confirmed: true, restored: [], skipped: [], undoRef: `${CHECKPOINT_REF_PREFIX}${undo.id}` };
-    for (const relative of selected) {
+    const result: CheckpointRestoreResult = { confirmed: true, restored: [], skipped, undoRef: `${CHECKPOINT_REF_PREFIX}${undo.id}` };
+    for (const relative of restorable) {
       let outcome: Awaited<ReturnType<typeof restoreFile>>;
       try { outcome = await restoreFile(context, source!.treeOid, undo.treeOid, relative); }
       catch (error) {

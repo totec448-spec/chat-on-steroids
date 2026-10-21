@@ -2795,6 +2795,7 @@
   "Restore all": "Alle wiederherstellen",
   "Restore file": "Datei wiederherstellen",
   "Restored {0} of {1} files": "{0} von {1} Dateien wiederhergestellt",
+  "Skipped {0} paths because files and folders share a name": "{0} Pfade wurden ?bersprungen, weil Dateien und Ordner denselben Namen haben",
   "This checkpoint is no longer available": "Dieser Checkpoint ist nicht mehr verfügbar",
   "The comparison changed. Refresh Review and try again.": "Der Vergleich hat sich geändert. Aktualisiere Review und versuche es erneut.",
   "These files no longer differ from the checkpoint": "Diese Dateien unterscheiden sich nicht mehr vom Checkpoint",

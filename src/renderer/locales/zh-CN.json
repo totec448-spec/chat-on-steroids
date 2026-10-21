@@ -2750,6 +2750,7 @@
   "Restore all": "全部恢复",
   "Restore file": "恢复文件",
   "Restored {0} of {1} files": "已恢复 {0}/{1} 个文件",
+  "Skipped {0} paths because files and folders share a name": "????????????? {0} ???",
   "This checkpoint is no longer available": "此检查点已不可用",
   "The comparison changed. Refresh Review and try again.": "比较内容已变化。请刷新审阅后重试。",
   "These files no longer differ from the checkpoint": "这些文件与检查点已没有差异",

@@ -2840,6 +2840,7 @@
   "Restore all": "Restaurar tudo",
   "Restore file": "Restaurar ficheiro",
   "Restored {0} of {1} files": "{0} de {1} ficheiros restaurados",
+  "Skipped {0} paths because files and folders share a name": "Foram ignorados {0} caminhos porque ficheiros e pastas t?m o mesmo nome",
   "This checkpoint is no longer available": "Este ponto de controlo já não está disponível",
   "The comparison changed. Refresh Review and try again.": "A comparação mudou. Atualize a Revisão e tente novamente.",
   "These files no longer differ from the checkpoint": "Estes ficheiros já não diferem do ponto de controlo",
