@@ -201,6 +201,12 @@ export interface UiPrefs {
    * automatic continue (0 = off). Missing means 30.
    */
   rotateTurnMinutes?: number;
+  /**
+   * Opt-in: where ChatGPT offers no Send for a fresh-turn continue at a tool result (it shows only
+   * Stop there), stop the turn right after a result instead and send the continue as an ordinary
+   * message once the stop shows. Missing means off.
+   */
+  rotateStopFallback?: boolean;
   /** Usage › Other apps: read Codex's and Claude Code's local logs (numbers only). Missing means on. */
   localAppUsage?: boolean;
   /** Codex's "Follow-up behavior": a message typed during a turn joins it (`steer`, the default) or waits for its end (`queue`). */
