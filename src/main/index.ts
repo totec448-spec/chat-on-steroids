@@ -11,7 +11,7 @@ import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme,
 import { createKeepAwake, installKeepAwake } from './keep-awake.js';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { initConnectorProofPath, loadConnectorProof, notePluginInstalled } from './connector-proof.js';
-import { initWorkerArchivePath, loadWorkerArchive, queueWorkerArchives } from './worker-archive.js';
+import { initWorkerArchivePath, loadWorkerArchive, queueWorkerArchives, WORKER_ARCHIVE_AFTER_FINISH_MS } from './worker-archive.js';
 import { initBrowserProofPath, loadBrowserProof } from './browser-proof.js';
 import { enrolledPluginSurfaces } from './plugin-refresh.js';
 import {
@@ -61,6 +61,7 @@ import {
   onRetiredWorkersPersist,
   onRetiredWorkersPersistNow,
   onWorkerChatsRetired,
+  onWorkerFinished,
   onSwarmPersist,
   onSwarmPersistNow,
   pauseSwarmForDisable,
@@ -455,7 +456,9 @@ void app.whenReady().then(async () => {
   setRecordingStorageLimit(getConfig().sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB);
   await loadConnectorProof();
   await loadWorkerArchive();
-  // Worker chats the broker retired for good are archived in ChatGPT when the setting is on (#1460).
+  // Worker chats are archived in ChatGPT when the setting is on: a little after their worker reports
+  // its task done (#1701), and once the broker retired them for good (#1460).
+  onWorkerFinished((conversationId) => queueWorkerArchives([conversationId], Date.now(), WORKER_ARCHIVE_AFTER_FINISH_MS));
   onWorkerChatsRetired((conversationIds) => queueWorkerArchives(conversationIds));
   await loadBrowserProof();
   // Plugins ChatGPT already showed the refresh feature are created: Setup need not wait for a call.

@@ -760,6 +760,30 @@ describe('desktop input delivery and helper ownership', () => {
     expect(sends()).toBe(1);
     expect(live.sent.filter(message => message.ack)).toHaveLength(1);
   });
+  // 2026-10-20, Loop chats on the VM: when ChatGPT shows only Stop at the tool result, it offers no
+  // Send for the continue. The page declines at once, in the app's words, so the call held for it
+  // answers now instead of waiting out the hold, and a later tool result tries again.
+  it('declines an automatic continue at once when ChatGPT offers only Stop', async () => {
+    const { ROTATION_DECLINED } = await import('../src/main/session/input.js');
+    let directTurn: { id: string; startedAt: number };
+    live = await nonProHarness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => {
+        if (message.authorize || message.ack || message.fail) return { ok: true, data: { ok: true } };
+        return { ok: true, data: { input: claimed({ directTurn, purpose: 'rotation' }) } };
+      }
+    });
+    startGenerating(live.document);
+    live.hook.observe(); await live.hook.flush();
+    const start = emitted(live.sent, 'turn_start').at(-1)!;
+    directTurn = { id: start.event.turnId as string, startedAt: start.event.time as number };
+    // Only Stop: no Send appears for the continue.
+    live.document.querySelector('[data-testid="send-button"]')?.remove();
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA, directTurn })).toEqual({ ok: false });
+    expect(live.sent.filter(message => message.ack || message.authorize)).toHaveLength(0);
+    expect(live.sent.filter(message => message.fail)).toContainEqual(expect.objectContaining({ error: ROTATION_DECLINED, detail: 'no-send' }));
+    // Its own text does not stay behind in ChatGPT's box.
+    expect(live.document.querySelector('#prompt-textarea')!.textContent!.trim()).toBe('');
+  });
   it('clears its own automatic continue when the Send it clicked did not take it', async () => {
     // 2.1.40 release round, Windows: a rotation fired right after a tool result while the model
     // was already finishing. Its Send click delivered nothing, the receipt could not be confirmed,
@@ -10241,6 +10265,51 @@ describe('a stop button that goes missing while the turn is still running', () =
     expect(emitted(live.sent, 'native_image')).toHaveLength(6);
   });
 
+  it.each([
+    ['fits after smaller or lighter tries', 0.4, 'available'],
+    ['never fits', 50, 'unavailable']
+  ] as const)('keeps trying a smaller preview when a detailed generated image %s', async (_case, bytesPerPixelAtFullQuality, status) => {
+    // VM, 2026-10-20: a 1448x1086 concept art came out above 384 KB as WebP at 0.8, and the app
+    // showed "image exceeds the recording limit" for a 3.4 MB picture.
+    live = await harness();
+    const section = assistantTurn(live.document, 'turn-detailed-image', []);
+    section.setAttribute('data-clf-fiber-turn', '0');
+    const messageId = '5150f756-bf2d-45fa-ac0f-45010b2239fb';
+    const assetId = 'file_00000000aa58821198efef946a9ade33';
+    const tries: Array<[number, number]> = [];
+    (live.window.HTMLCanvasElement.prototype as any).getContext = function () { return { drawImage: () => undefined }; };
+    (live.window.HTMLCanvasElement.prototype as any).toBlob = function (callback: (blob: any) => void, _type: string, quality: number) {
+      tries.push([Math.max(this.width, this.height), quality]);
+      const size = Math.round(this.width * this.height * quality * bytesPerPixelAtFullQuality);
+      const bytes = new Uint8Array(Math.min(size, 600_000));
+      callback({ type: 'image/webp', size, arrayBuffer: async () => bytes.buffer });
+    };
+    const group = live.document.createElement('div'); group.className = 'group/imagegen-image';
+    const image = live.document.createElement('img');
+    image.src = `blob:https://chatgpt.com/${assetId}`;
+    image.setAttribute('data-clf-fiber-image-source', image.src);
+    image.setAttribute('data-clf-fiber-image', `0:${encodeURIComponent(messageId)}:${encodeURIComponent(assetId)}`);
+    Object.defineProperties(image, {
+      complete: { configurable: true, value: true },
+      naturalWidth: { configurable: true, value: 1448 },
+      naturalHeight: { configurable: true, value: 1086 }
+    });
+    image.getBoundingClientRect = () => ({ width: 480, height: 360 } as DOMRect);
+    group.append(image); section.append(group);
+    const images = [{ messageId, assetId, providerRole: 'tool', providerChannel: 'final', providerStatus: 'finished_successfully',
+      width: 1448, height: 1086, order: 0, partOrder: 0, createTime: Date.now() - 1_000 }];
+    await replyFiber([], [{ turnId: 'turn-detailed-image', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', messages: [], activities: [], images }]);
+    await settle(); await live.hook.flush(); await settle(); await live.hook.flush();
+    const done = emitted(live.sent, 'native_image').map(entry => entry.event).filter(event => event.previewStatus !== 'pending');
+    expect(done.map(event => event.previewStatus)).toEqual([status]);
+    expect(tries.length).toBeGreaterThan(1);
+    expect(tries.length).toBeLessThanOrEqual(6);
+    if (status === 'available') {
+      expect(done[0]!.previewDataUrl.length).toBeLessThanOrEqual(512_100);
+      expect(Math.max(done[0]!.previewWidth, done[0]!.previewHeight)).toBe(tries.at(-1)![0]);
+    } else expect(done[0]!.previewError).toBe('oversized');
+  });
+
   it('drops a late generated-image encode after an A to B to A navigation epoch change', async () => {
     live = await harness();
     const section = assistantTurn(live.document, 'turn-stale-generated-image', []);
@@ -15359,7 +15428,7 @@ describe('the Compact & resume control', () => {
     const label = live.document.querySelector('.clf-blocked') as HTMLElement;
     expect(label.hidden).toBe(false);
     expect(label.textContent).toBe('Chat blocked');
-    expect(label.getAttribute('data-clf-tip')).toMatch(/hover this chat in the sessions list and press its block symbol/);
+    expect(label.getAttribute('data-clf-tip')).toMatch(/open this chat’s ⋯ menu in the app’s sidebar and choose “Release chat”/);
 
     // Released in the app: the next poll takes the word away.
     blocked = '';
@@ -18177,6 +18246,56 @@ describe('the context meter and automatic compaction', () => {
     expect(sends()).toBe(1);
   });
 
+  it.each([
+    ['sent and settled', { count: 1, settled: true }, false, true],
+    ['still within the grace', { count: 1, settled: false }, false, false],
+    ['a call the app never served', { count: 0, settled: true }, false, false],
+    ['the page sees results itself', { count: 2, settled: true }, true, false]
+  ] as const)('lets the app\'s delivery stand in for a receipt the page cannot read (%s)', async (_case, sentResults, pageSeesResults, compacts) => {
+    // 2026-10-19: ChatGPT's page no longer sees a running turn's tool results until the turn ends,
+    // so the receipt wait ran out mid-turn every time and automatic compaction waited for the end.
+    live = await harness(undefined, {
+      activity: () => withContext(205_000, settings({ auto: true }), { pendingTools: 0, sentResults }),
+      compact: () => ({ ok: true, data: { token: 'sent-token', prompt: 'Write the brief.', ...automaticTicket('not-attempted') } })
+    });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'sent-source', []);
+    const unanswered = compactionCall(false);
+    compactionFiber(section, () => pageSeesResults
+      ? [{ ...compactionCall(true), messageId: 'native-answered', requestId: 'wfr-native-answered' }, unanswered]
+      : [unanswered], () => []);
+    const stopped = vi.fn(() => stopGenerating(live!.document));
+    live.document.querySelector('[data-testid="stop-button"]')!.addEventListener('click', stopped);
+    const sends = watchSend(live.document);
+    await live.hook.startCompact(true);
+    expect(stopped).toHaveBeenCalledTimes(compacts ? 1 : 0);
+    expect(sends()).toBe(compacts ? 1 : 0);
+    if (!compacts) expect(live.sent.filter((message) => message.type === 'compact' && message.sourceDeferred === true))
+      .toEqual([expect.objectContaining({ sourceError: expect.stringContaining('has not confirmed receiving') })]);
+  });
+
+  it('checks less often once a receipt wait has run for a while', async () => {
+    // The release build's slow Intel runner timed the 6-minute wait out: 1,440 checks at 250 ms,
+    // each reading the page. On a real page that is minutes of needless work on the slowest machines.
+    let checks = 0;
+    live = await harness(undefined, {
+      activity: () => { checks++; return withContext(205_000, settings({ auto: true }), { pendingTools: 0, sentResults: { count: 0, settled: true } }); },
+      compact: () => ({ ok: true, data: { token: 'paced-token', prompt: 'Write the brief.', ...automaticTicket('not-attempted') } })
+    });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'paced-source', []);
+    compactionFiber(section, () => [compactionCall(false)], () => []);
+    const sends = watchSend(live.document);
+    checks = 0;
+    await live.hook.startCompact(true);
+    expect(sends()).toBe(0);
+    expect(live.sent.filter((message) => message.type === 'compact' && message.sourceDeferred === true))
+      .toEqual([expect.objectContaining({ sourceError: expect.stringContaining('has not confirmed receiving') })]);
+    // Quick at first (a receipt usually lands within seconds), then every 2 s: about 215 checks.
+    expect(checks).toBeGreaterThan(100);
+    expect(checks).toBeLessThan(300);
+  });
+
   it.each([[120_000, true], [8 * 60_000, false]])('lets a local poll of %i ms finish before stopping an automatic source (compacts: %s)', async (pollMs, compacts) => {
     // #825: long unit tests are polled with write_stdin, and one poll can run for five minutes.
     // The automatic barrier gave up after 30 seconds, so a busy turn never compacted.
@@ -18201,6 +18320,66 @@ describe('the context meter and automatic compaction', () => {
     const deferred = live.sent.filter((message) => message.type === 'compact' && message.sourceDeferred === true);
     expect(deferred).toEqual(compacts ? [] : [expect.objectContaining({ token: 'receipt-token', sourceError: expect.stringContaining('has not confirmed receiving') })]);
     expect(live.sent.some((message) => message.type === 'compact' && message.sourceLost === true)).toBe(false);
+  });
+
+  it.each([true, false])('tries an automatic source again once the page helper answers after its receipt wait ran out (helper down: %s)', async helperDown => {
+    // #1643: a reopened tab's helper was unreadable for nine minutes, so the receipt wait ran
+    // out; it answered again the very second the app began a ten-minute pause between pickups.
+    let readable = !helperDown;
+    let received = false;
+    live = await harness(undefined, {
+      activity: () => withContext(205_000, settings({ auto: true }), { pendingTools: 0 }),
+      compact: () => ({ ok: true, data: { token: 'receipt-token', prompt: 'Write the brief.',
+        ...automaticTicket('not-attempted') } })
+    });
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'helper-source', []);
+    compactionFiber(section, () => readable ? [compactionCall(received)] : null, () => []);
+    const stopped = vi.fn(() => stopGenerating(live!.document));
+    live.document.querySelector('[data-testid="stop-button"]')!.addEventListener('click', stopped);
+    const sends = watchSend(live.document);
+    await live.hook.startCompact(true);
+    expect(stopped).not.toHaveBeenCalled();
+    expect(live.sent.filter((message) => message.type === 'compact' && message.sourceDeferred === true)).toHaveLength(1);
+
+    readable = true; received = true;
+    await live.hook.refreshFiber();
+    await settle(); await settle();
+    // Only a helper that came back retries here; one that answered throughout leaves it to the app's pickup.
+    expect(stopped).toHaveBeenCalledTimes(helperDown ? 1 : 0);
+    expect(sends()).toBe(helperDown ? 1 : 0);
+    expect(live.sent.some((message) => message.type === 'compact' && message.sourceLost === true)).toBe(false);
+  });
+
+  it('tries again once the helper answers whatever stopped the attempt while it was down, and only once', async () => {
+    // Live 2026-10-19 (VM): with the helper unreadable, a pickup stopped at a different check ("The
+    // original question has not loaded yet"). The reason is the page's; the retry follows the helper.
+    let readable = false;
+    live = await harness(undefined, {
+      activity: () => withContext(205_000, settings({ auto: true }), { pendingTools: 0 }),
+      compact: () => ({ ok: true, data: { token: 'helper-any-token', prompt: 'Write the brief.',
+        ...automaticTicket('not-attempted') } })
+    });
+    const section = assistantTurn(live.document, 'helper-any-source', []);
+    compactionFiber(section, () => readable ? [compactionCall(true)] : null, () => []);
+    const composer = live.document.querySelector('#prompt-textarea')!;
+    const parent = composer.parentElement!;
+    composer.remove();
+    const sends = watchSend(live.document);
+    const deferred = () => live!.sent.filter((message) => message.type === 'compact' && message.sourceDeferred === true);
+    await live.hook.startCompact(true);
+    expect(deferred()).toEqual([expect.objectContaining({ token: 'helper-any-token', sourceError: expect.stringContaining('composer_missing') })]);
+
+    // The helper answers while the message box is still missing: one retry, deferred again, and no more.
+    readable = true;
+    await live.hook.refreshFiber();
+    await settle(); await settle();
+    expect(deferred()).toHaveLength(2);
+    parent.append(composer);
+    await live.hook.refreshFiber();
+    await settle(); await settle();
+    expect(deferred()).toHaveLength(2);
+    expect(sends()).toBe(0);
   });
 
   it.each(['distinct-pre-row', 'same-request-running', 'same-request-code-pending'])('waits for another outstanding call beside an answered native call (%s)', async mode => {
@@ -24023,8 +24202,14 @@ describe('archiving a retired worker chat', () => {
         body: JSON.stringify({ is_archived: true }) }
     ]);
 
+    // Restoring it before its worker is woken (#1701) is the same request, the other way round.
+    calls.length = 0;
+    expect(await live.runtimeMessage({ type: 'clf-archive-chat', conversationId: chat, archive: false })).toEqual({ outcome: 'unarchived' });
+    expect(calls[1]).toMatchObject({ url: `https://chatgpt.com/backend-api/conversation/${chat}`, method: 'PATCH', body: JSON.stringify({ is_archived: false }) });
+
     patchStatus = 429;
     expect(await live.runtimeMessage({ type: 'clf-archive-chat', conversationId: chat })).toEqual({ outcome: 'failed' });
+    expect(await live.runtimeMessage({ type: 'clf-archive-chat', conversationId: chat, archive: false })).toEqual({ outcome: 'failed' });
     calls.length = 0;
     expect(await live.runtimeMessage({ type: 'clf-archive-chat', conversationId: '../conversations' })).toEqual({ outcome: 'failed' });
     expect(calls).toEqual([]);
