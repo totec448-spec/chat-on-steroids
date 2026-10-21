@@ -45,6 +45,7 @@ Type /image to ask ChatGPT for a picture, move around with new keyboard shortcut
 - **"Trust only selected chats"** now tells you where to trust a chat (its ⋯ menu in the sidebar), in your language.
 - **Emptying a number field** in Agents & automation keeps the old value instead of jumping to the minimum, such as a 10,000-token Compact & Resume threshold.
 - **/goal or /rename** typed at the start of a message now also runs when you send it with Cmd/Ctrl+Shift+Enter during an answer.
+- **Pressing Stop when the browser can't be opened** no longer shows an error. The Stop still reaches ChatGPT once the browser connects.
 
 ## [2.1.43] — See what sub-agents do, long work that keeps going, and clearer Settings
 
