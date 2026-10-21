@@ -1268,6 +1268,22 @@ it('keeps generated-image metadata visible when recording storage is full', asyn
   expect(row.querySelector('button')?.textContent).toBe('Free storage');
 });
 
+it.each([
+  ['oversized', 'exceeds the recording limit', false],
+  ['not_loaded', 'Image preview unavailable', false],
+  ['removed', 'removed from local storage', true]
+] as const)('offers Free storage only where storage is the reason (%s)', async (previewError, says, offers) => {
+  // VM, 2026-10-20: a picture the page could not shrink showed Free storage, which cannot help.
+  const app = await boot([]);
+  await app.append([{ seq: 1, time: T0, source: 'extension', kind: 'native_image',
+    messageId: '5150f756-bf2d-45fa-ac0f-45010b2239fb', providerAssetId: `file_${previewError}_fixture`,
+    providerRole: 'tool', providerChannel: 'final', providerStatus: 'finished_successfully',
+    width: 1448, height: 1086, previewStatus: 'unavailable', previewError }]);
+  const row = app.w.document.querySelector('.said.native-image')!;
+  expect(row.textContent).toContain(says);
+  expect(!!row.querySelector('button')).toBe(offers);
+});
+
 it('does not group images across an intervening authored message or another turn', async () => {
   const app = await boot([]);
   const image = (seq: number, turnId: string): SessionEvent => ({ seq, time: T0 + seq,
@@ -3257,6 +3273,28 @@ describe('ChatGPT\'s approval card in the timeline', () => {
     await vi.waitFor(() => expect(timeline.querySelector('.approval-card')?.textContent).toContain('Nothing was pressed'), { timeout: 4000 });
   });
 
+  it('keeps only the newest unanswered approval row live; older ones read as past, without buttons', async () => {
+    // VM, 2026-10-20: two app restarts while one card waited left three "waiting" rows, each with
+    // its own Deny and Allow once for the same card. A row from an earlier episode was never answered
+    // there, so it says ChatGPT asked, not that it is waiting or answered.
+    const older = { ...waitingRow, seq: 1, progressId: 'approval-wait:chat-a:1' } as SessionEvent;
+    const middle = { ...waitingRow, seq: 2, progressId: 'approval-wait:chat-a:2' } as SessionEvent;
+    const newest = { ...waitingRow, seq: 3, progressId: 'approval-wait:chat-a:3' } as SessionEvent;
+    const { w } = await boot([older, middle, newest], true, [], [], {
+      approvalCard: () => ({ id: 'card-1', lines: ['Allow ChatGPT to use Chat On Steroids Core?', 'Start a worker.'], allow: true, answer: null })
+    });
+    const timeline = w.document.getElementById('timeline')!;
+    await vi.waitFor(() => expect(timeline.querySelectorAll('.approval-card')).toHaveLength(1));
+    const rows = [...timeline.querySelectorAll('.approval-wait')];
+    expect(rows).toHaveLength(3);
+    expect(rows.filter(row => row.classList.contains('is-waiting'))).toHaveLength(1);
+    expect(rows[2]!.classList.contains('is-waiting')).toBe(true);
+    for (const row of rows.slice(0, 2)) {
+      expect(row.textContent).toBe('ChatGPT asked for a tool approval in this chat.');
+      expect(row.querySelector('button')).toBeNull();
+    }
+  });
+
   it('offers only Deny where ChatGPT itself disabled Allow once', async () => {
     const { w } = await boot([waitingRow], true, [], [], {
       approvalCard: () => ({ id: 'card-7654321', lines: ['Gmail', 'Allow ChatGPT to use Gmail?', 'External app access is unavailable in this conversation'], allow: false, answer: null })
@@ -3268,6 +3306,21 @@ describe('ChatGPT\'s approval card in the timeline', () => {
     expect(allow!.disabled).toBe(true);
     expect(timeline.querySelector('.approval-card')?.textContent).toContain('ChatGPT does not allow it in this chat');
   });
+});
+
+it('shows a strict-mode refusal notice in the interface language', async () => {
+  // VM, 2026-10-20: a German interface showed this notice in English; the app records it in English.
+  const { UNTRUSTED_NOTICE } = await import('../src/shared/trust-notices.js');
+  const { w } = await boot([{ seq: 1, time: T0, source: 'app', kind: 'progress', progressId: 'strict-chat-refusal:one',
+    message: text(UNTRUSTED_NOTICE) } as SessionEvent]);
+  const timeline = w.document.getElementById('timeline')!;
+  await vi.waitFor(() => expect(timeline.textContent).toContain('untrusted chat was refused'));
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  try {
+    await vi.waitFor(() => expect(timeline.textContent).toContain('Chat vertrauen'));
+    expect(timeline.textContent).not.toContain('untrusted chat was refused');
+  } finally { setLanguage('en'); }
 });
 
 it('never titles a tool group with the app\'s own recovery note', async () => {
@@ -7061,6 +7114,15 @@ describe('prompt recall in the composer', () => {
   ])('skips %s whose row the outbox no longer keeps', async (_, value) => {
     // The recorder keeps the input id and the sent text on the message, whoever wrote it.
     const { w, live, append } = await boot([...chat(), ask(7, value, { inputId: 'trimmed-row', inputDelivery: 'confirmed', authoredText: value }), answer(8, 'Next step done.')]);
+    live.inputs = [sentInput('q-5')]; await append([]);
+    expect(press(w, 'ArrowUp')).toBe(true);
+    expect(composer(w).value).toBe('Second question');
+  });
+
+  // Mac release round, 2026-10-19: a Goal follow-up came back first. Its page types it, so it has
+  // no outbox row or input id at all; the recorder marks it `automatic` instead.
+  it('skips a Goal or Loop follow-up its page typed', async () => {
+    const { w, live, append } = await boot([...chat(), ask(7, 'Continue with step two of the goal', { automatic: true }), answer(8, 'Step two done.')]);
     live.inputs = [sentInput('q-5')]; await append([]);
     expect(press(w, 'ArrowUp')).toBe(true);
     expect(composer(w).value).toBe('Second question');
