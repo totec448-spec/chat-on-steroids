@@ -1419,12 +1419,15 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
     lastToolCallAt: null, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
     estimatedTokens: 0, contextTokens: 0, lastTurnOutcome: null, activeTurnId: null, agents: [], origin: null };
   const chat = { ...base, id: 'menu-chat-0001', title: 'A chat', conversationId: 'menu-conversation-0001', chatIds: ['menu-conversation-0001'] };
-  const loose = { ...base, id: 'menu-loose-0001', title: '', conversationId: null, chatIds: [] };
+  const loose = { ...base, id: 'menu-loose-0001', title: 'Unattributed activity', conversationId: null, chatIds: [] };
+  // #1759: a new chat whose first message is still held (its ChatGPT Project is being created, or
+  // could not be) has no conversation yet either, but it is a chat, not the unattributed bucket.
+  const pending = { ...base, id: 'menu-pending-0001', title: 'Buenas!', conversationId: null, chatIds: [] };
   const deleteSession = vi.fn(async () => ({ ok: true, data: true }));
   const openSessionChat = vi.fn(async () => ({ ok: true, data: true }));
   const mounted = await mountChat({}, [], {
     listProjects: async () => ({ ok: true, data: [] }),
-    listSessions: async () => ({ ok: true, data: { sessions: [chat, loose], activeId: null, pressure: [], blocked: [], trusted: [] } }),
+    listSessions: async () => ({ ok: true, data: { sessions: [chat, loose, pending], activeId: null, pressure: [], blocked: [], trusted: [] } }),
     deleteSession, openSessionChat
   });
   const doc = mounted.window.document;
@@ -1441,6 +1444,19 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
   await waitFor(() => expect(row(loose.id)).not.toBeNull());
   rowMenuItem(row(loose.id), 'block');
   expect(actions()).toEqual(['block', 'remove']);
+  closeRowMenus(doc);
+  const shown = (id: string) => `${row(id).textContent} ${[...row(id).querySelectorAll<HTMLElement>('[title]'), row(id)].map(node => node.getAttribute('title') ?? '').join(' ')}`;
+  expect(shown(loose.id)).toContain('not a chat');
+  // A chat still waiting for its ChatGPT conversation: no "not a chat", no unattributed switch,
+  // and nothing that needs a ChatGPT link yet (open, copy link, block).
+  await waitFor(() => expect(row(pending.id)).not.toBeNull());
+  expect(shown(pending.id)).not.toContain('not a chat');
+  expect(shown(pending.id)).not.toContain('blocked');
+  // It is listed with the chats, not under "Unattributed activity" (which still holds the bucket).
+  expect(row(pending.id).closest('.session-diagnostics')).toBeNull();
+  expect(row(loose.id).closest('.session-diagnostics')).not.toBeNull();
+  rowMenuItem(row(pending.id), 'rename');
+  expect(actions()).toEqual(['rename', 'remove']);
   closeRowMenus(doc);
   // A right click opens the same menu; its items run their action.
   row(chat.id).dispatchEvent(new mounted.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 40 }));
