@@ -109,6 +109,7 @@ What reviews look for, beyond the checks:
 - **Every change serves the linked issue.** No extra behavior changes "while at it", even small ones; open a separate issue for them.
 - **Nothing depends on ChatGPT's wording.** Decide behavior from structure, ids and machine fields, never from visible English text. ChatGPT is used in many languages; if text is unavoidable, include a non-English case in the test.
 - **Interface changes are checked in the real app.** Besides `npm run verify:ui`, run the change in a real build and show it in the screenshots or a short clip.
+- **Automatic reviews come first.** CodeRabbit reviews every pull request that is not a draft (Dependabot's excepted), and every push to it, within a few minutes. It only comments; it never pushes to your branch. Its settings are in [`.coderabbit.yaml`](.coderabbit.yaml). Fix what it finds, or answer in its thread why not (you can reply to it there, and `@coderabbitai review` asks for a fresh review). Its comments don't block a merge on their own, but a maintainer reads them before merging.
 - **Answer review comments or fix red checks when you can.** After 3 quiet days a bot leaves one friendly reminder, and 3 days later it closes the PR. If only a small fix is missing, a maintainer may finish it instead. Any push or reply, even "I need more time", resets the clock, and a closed PR can be reopened at any time.
 
 ## Credit and attribution
