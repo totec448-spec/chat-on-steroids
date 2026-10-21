@@ -25,6 +25,12 @@ const BEHAVIOR = /^(src|extension|native)\//;
  */
 export const LIVE_PROOF_SINCE = '2026-10-15T16:00:00Z';
 
+/**
+ * Every PR that changes code opened from here on (user, 2026-10-21), maintainers' included, says
+ * which rare and edge cases it handles and how, so they are thought through before review.
+ */
+export const EDGE_CASES_SINCE = '2026-10-21T05:00:00Z';
+
 /** Files that define contracts between processes, the extension and stored data; AGENTS.md maps them. */
 const CONTRACT = /^(src\/preload\/index\.ts|src\/main\/(ipc|plugins-ipc)\.ts|src\/shared\/[^/]+\.ts)$/;
 /** The template's headings and the names contributors already use for the same thing. */
@@ -33,7 +39,8 @@ const HEADINGS = {
   what: ['what changed', 'what changes', 'what', 'change', 'changes', 'fix'],
   test: ['test', 'tests', 'testing', 'validation', 'verification'],
   screenshots: ['screenshots', 'screenshot', 'before and after', 'ui'],
-  proof: ['live proof', 'proof', 'live test', 'manual test']
+  proof: ['live proof', 'proof', 'live test', 'manual test'],
+  edges: ['edge cases', 'edge and rare cases', 'rare and edge cases', 'edge cases handled', 'rare cases', 'edge-cases']
 };
 
 
@@ -96,6 +103,11 @@ export function checkPullRequest({ body, files, draft = false, fromFork = false,
       !/!\[[^\]]*\]\(|<img\s|<video\s|https:\/\/github\.com\/user-attachments\/|```[^\n]*\n\s*\S/i.test(section(text, 'proof')) &&
       !/^(?:[-*]\s+(?:\[[ xX]\]\s+)?)?no behavior changes?:\s*\S.{10,}/im.test(text)) {
     problems.push('This changes what the app does: show it working in the real app under "## Live proof" (a screenshot, a recording, or an excerpt of the app log in a code block), or write "No behavior change: <reason>".');
+  }
+
+  if (Date.parse(createdAt) >= Date.parse(EDGE_CASES_SINCE) && code.length && section(text, 'edges').length < 20 &&
+      !/^(?:[-*]\s+(?:\[[ xX]\]\s+)?)?no edge cases?:\s*\S.{10,}/im.test(text)) {
+    problems.push('Say which rare and edge cases this handles under "## Edge cases" (for example empty or missing input, a restart or reload midway, two things at once, a slow or failed network, another platform or language, old data or an older extension) and how, ideally naming the tests that cover them. When none apply, write "No edge cases: <reason>".');
   }
 
   if (files.some((file) => CONTRACT.test(file.path)) && !files.some((file) => file.path === 'AGENTS.md') &&
