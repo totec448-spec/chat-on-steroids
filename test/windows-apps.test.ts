@@ -8,14 +8,15 @@ import { WINDOWS_APPS_SCRIPT } from '../src/main/computer/windows-apps.js';
 
 const execute = promisify(execFile);
 
-async function run(script: string): Promise<string> {
+async function run(script: string, timeoutMs = 15_000): Promise<string> {
   const directory = await mkdtemp(path.join(tmpdir(), 'cos-app-catalog-test-'));
   try {
     const file = path.join(directory, 'test.ps1');
     await writeFile(file, `$ErrorActionPreference='Stop'\nfunction Get-WindowRows { return @() }\n${WINDOWS_APPS_SCRIPT}\n${script}`, 'utf8');
-    const { stdout } = await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', file], {
-      windowsHide: true, timeout: 15_000, maxBuffer: 32_768
+    const { stdout, stderr } = await execute('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', file], {
+      windowsHide: true, timeout: timeoutMs, maxBuffer: 32_768
     });
+    if (stderr.includes('CHILD_STDERR_MUST_NOT_LEAK')) throw new Error('Launched app inherited the helper stderr');
     return stdout.trim();
   } finally { await rm(directory, { recursive: true, force: true }); }
 }
@@ -99,7 +100,10 @@ Write-Output 'APP_CATALOG_VERIFIED'
   it('resolves and launches an owned executable by path or PATH basename without arguments', async () => {
     expect(await run(String.raw`
 $executable=Join-Path $PSScriptRoot 'cos-owned-app.exe'
-Add-Type -TypeDefinition 'public static class OwnedApp { public static void Main(string[] args) { System.IO.File.WriteAllText(System.IO.Path.Combine(System.AppDomain.CurrentDomain.BaseDirectory,"launched.txt"), args.Length.ToString()); } }' -OutputAssembly $executable -OutputType ConsoleApplication
+Add-Type -TypeDefinition 'using System; using System.IO; using System.Diagnostics; using System.Runtime.InteropServices; public static class OwnedApp { [DllImport("kernel32.dll")] static extern IntPtr GetConsoleWindow(); [DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int kind); [DllImport("kernel32.dll")] static extern bool GetConsoleMode(IntPtr handle, out uint mode); [DllImport("kernel32.dll")] static extern bool GetHandleInformation(IntPtr handle, out uint flags); public static void Main(string[] args) { Console.WriteLine("CHILD_STDOUT_MUST_NOT_LEAK"); Console.Error.WriteLine("CHILD_STDERR_MUST_NOT_LEAK"); uint mode, flags; bool hasOwnConsole = GetConsoleWindow() != IntPtr.Zero && GetConsoleMode(GetStdHandle(-10), out mode) && GetConsoleMode(GetStdHandle(-11), out mode) && GetConsoleMode(GetStdHandle(-12), out mode); long parentHandle=long.Parse(File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"inheritable-parent-stdout.txt"))); bool leakedParentPipe=GetHandleInformation(new IntPtr(parentHandle),out flags); string marker=Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "launched-" + Process.GetCurrentProcess().Id + ".txt"); string staged=marker+".pending"; File.WriteAllText(staged, args.Length + "|" + hasOwnConsole + "|" + leakedParentPipe); File.Move(staged,marker); } }' -OutputAssembly $executable -OutputType ConsoleApplication
+Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class ParentStdoutProbe { [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess(); [DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int kind); [DllImport("kernel32.dll")] static extern uint GetFileType(IntPtr handle); [DllImport("kernel32.dll", SetLastError=true)] static extern bool DuplicateHandle(IntPtr sourceProcess,IntPtr source,IntPtr targetProcess,out IntPtr target,uint access,bool inheritable,uint options); [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr handle); public static IntPtr InheritableStdout() { IntPtr stdout=GetStdHandle(-11); if(GetFileType(stdout)!=3) throw new Exception("Parent stdout was not a transport pipe"); IntPtr copy; if(!DuplicateHandle(GetCurrentProcess(),stdout,GetCurrentProcess(),out copy,0,true,2)) throw new Exception("Could not create inheritable transport handle"); return copy; } }'
+$inheritable=[ParentStdoutProbe]::InheritableStdout()
+[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'inheritable-parent-stdout.txt'),$inheritable.ToInt64().ToString())
 if ((Resolve-AppExecutable $executable) -cne $executable) { throw 'Explicit path did not resolve' }
 $env:PATH=$PSScriptRoot+';'+$env:PATH
 if ((Resolve-AppExecutable 'cos-owned-app.exe') -cne $executable) { throw 'PATH executable did not resolve' }
@@ -112,14 +116,64 @@ function New-Object { param([string]$TypeName,[string]$ComObject)
 }
 $result=Launch-WindowsApp @{app=$executable}
 if ($result.status -ne 'launch_requested' -or $result.windowConfirmed -ne $false -or !$result.processId) { throw 'Wrong executable launch result' }
-$marker=Join-Path $PSScriptRoot 'launched.txt'
-for ($attempt=0;$attempt -lt 100 -and !(Test-Path -LiteralPath $marker);$attempt++) { Start-Sleep -Milliseconds 20 }
-if (!(Test-Path -LiteralPath $marker) -or [IO.File]::ReadAllText($marker) -ne '0') { throw 'Owned executable did not launch with exactly zero arguments' }
+$marker=Join-Path $PSScriptRoot ('launched-'+$result.processId+'.txt')
+for ($attempt=0;$attempt -lt 200 -and !(Test-Path -LiteralPath $marker);$attempt++) { Start-Sleep -Milliseconds 25 }
+if (!(Test-Path -LiteralPath $marker) -or [IO.File]::ReadAllText($marker) -ne '0|True|False') { throw 'Owned console must have zero arguments and independent stdio, without inheriting an explicitly inheritable helper stdout pipe' }
 $result=Launch-WindowsApp @{app='cos-owned-app.exe'}
 if ($result.status -ne 'launch_requested' -or $result.windowConfirmed -ne $false -or !$result.processId) { throw 'PATH launch depended on unavailable app catalog' }
+$marker=Join-Path $PSScriptRoot ('launched-'+$result.processId+'.txt')
+for ($attempt=0;$attempt -lt 200 -and !(Test-Path -LiteralPath $marker);$attempt++) { Start-Sleep -Milliseconds 25 }
+if (!(Test-Path -LiteralPath $marker) -or [IO.File]::ReadAllText($marker) -ne '0|True|False') { throw 'PATH launch did not preserve console, zero-argument and pipe-isolation semantics' }
 $launched=Get-Process -Id $result.processId -ErrorAction SilentlyContinue
 if ($null -ne $launched) { if (!$launched.WaitForExit(3000)) { throw 'Owned PATH executable failed to finish' }; $launched.Dispose() }
+$null=[ParentStdoutProbe]::CloseHandle($inheritable)
 Write-Output 'APP_EXECUTABLE_VERIFIED'
 `)).toBe('APP_EXECUTABLE_VERIFIED');
+  });
+
+  it('keeps an exact-path GUI executable visible without adding arguments or a console', async () => {
+    expect(await run(String.raw`
+$executable=Join-Path $PSScriptRoot 'owned gui & app.exe'
+$source=@'
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Windows.Forms;
+public static class OwnedGuiApp {
+  [STAThread] public static void Main(string[] args) {
+    Application.EnableVisualStyles();
+    using (var form = new Form { Text = "CoS owned GUI launch fixture", Width = 250, Height = 110, StartPosition = FormStartPosition.Manual, Left = 60, Top = 60 }) {
+      var timer = new Timer { Interval = 2000 };
+      timer.Tick += (sender, eventArgs) => { timer.Stop(); form.Close(); };
+      form.Shown += (sender, eventArgs) => {
+        var marker = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "gui-" + Process.GetCurrentProcess().Id + ".txt");
+        var staged = marker + ".pending";
+        File.WriteAllText(staged, args.Length.ToString());
+        File.Move(staged, marker);
+        timer.Start();
+      };
+      Application.Run(form);
+    }
+  }
+}
+'@
+Add-Type -TypeDefinition $source -ReferencedAssemblies @('System.dll','System.Windows.Forms.dll','System.Drawing.dll') -OutputAssembly $executable -OutputType WindowsApplication
+$reply=Launch-WindowsApp @{app=$executable}
+if ($reply.status -cne 'launch_requested' -or $reply.windowConfirmed -ne $false -or !$reply.processId) { throw 'GUI launch acknowledgment changed' }
+$child=Get-Process -Id $reply.processId -ErrorAction Stop
+try {
+  $marker=Join-Path $PSScriptRoot ('gui-'+$reply.processId+'.txt')
+  for ($attempt=0;$attempt -lt 200 -and !(Test-Path -LiteralPath $marker);$attempt++) { Start-Sleep -Milliseconds 30 }
+  if (!(Test-Path -LiteralPath $marker) -or [IO.File]::ReadAllText($marker) -ne '0') { throw 'GUI fixture did not start with zero arguments' }
+  $child.Refresh()
+  if (![string]::Equals($child.Path,$executable,[StringComparison]::OrdinalIgnoreCase) -or $child.MainWindowHandle -eq 0) { throw 'Exact GUI executable did not create its own window' }
+  $exited=$child.WaitForExit(5000)
+  if (!$exited) { throw 'Owned GUI fixture did not exit within its bounded deadline' }
+} finally {
+  if (!$child.HasExited -and [string]::Equals($child.Path,$executable,[StringComparison]::OrdinalIgnoreCase)) { $child.Kill(); $null=$child.WaitForExit(2000) }
+  $child.Dispose()
+}
+Write-Output 'APP_GUI_VERIFIED'
+  `, 30_000)).toBe('APP_GUI_VERIFIED');
   });
 });

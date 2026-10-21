@@ -22,7 +22,7 @@ const fake = vi.hoisted(() => {
   const requests: Array<Record<string, any>> = [];
   const children: Array<Transport> = [];
   const clipboard = { writeText: vi.fn(async (_text: string) => {}), readText: vi.fn(async () => '') };
-  const overrides = { focusFailure: false, geometry: false, semanticOnly: false };
+  const overrides = { focusFailure: false, geometry: false, semanticOnly: false, cursorFailure: false, popupIdentitySwap: false, popupParentFence: false, popupParentSwap: false, popupParentNativeReject: false, parentChanged: false };
   class Transport extends Emitter {
     readonly pid = 9000 + children.length;
     exitCode: number | null = null;
@@ -64,8 +64,63 @@ const fake = vi.hoisted(() => {
         elements: [{ runtimeKey: 'button', name: 'Example', role: 'Button', enabled: true,
           offscreen: false, bounds: { x: 10, y: 10, width: 20, height: 20 } }],
         cursor: { x: 20, y: 20 },
-        routes: (request.actions ?? []).map(() => 'uia')
+        routes: (request.actions ?? []).map(() => 'uia'),
+        ...(request.__cosRequestId ? { __cosRequestId: request.__cosRequestId } : {})
       };
+      if (overrides.popupIdentitySwap && request.op === 'snapshot' && request.id === 77) {
+        Object.assign(reply, {
+          window: { ...window, processStartTime: '133000000000000505' },
+          relatedWindows: [{ ...window, id: 43, processStartTime: '133000000000000101' }]
+        });
+      }
+      if (overrides.popupParentFence && request.op === 'snapshot' && request.id === 77) {
+        Object.assign(reply, {
+          window: { ...window, processStartTime: '133000000000000505' },
+          relatedWindows: [{ ...window, id: 43, processStartTime: '133000000000000101' }]
+        });
+      }
+      if (overrides.popupParentFence && request.op === 'capture' && request.id === 43) {
+        Object.assign(reply, { window: { ...window, id: 43, processStartTime: '133000000000000101' } });
+      }
+      if (overrides.popupParentSwap && request.op === 'snapshot' && request.id === 77) {
+        Object.assign(reply, {
+          window: { ...window, processStartTime: '133000000000000505' },
+          relatedWindows: [{ ...window, id: 43, processStartTime: '133000000000000101' }]
+        });
+      }
+      if (overrides.popupParentSwap && request.op === 'capture' && request.id === 43) {
+        Object.assign(reply, {
+          window: { ...window, id: 43, processStartTime: '133000000000000101' },
+          region: { x: 250, y: 350, width: 100, height: 100 },
+          windowGeometry: { x: 250, y: 350, width: 100, height: 100 }
+        });
+        overrides.parentChanged = true;
+      }
+      if (overrides.popupParentNativeReject && request.op === 'snapshot' && request.id === 77) {
+        Object.assign(reply, {
+          window: { ...window, processStartTime: '133000000000000505' },
+          relatedWindows: [{ ...window, id: 43, processStartTime: '133000000000000101' }]
+        });
+      }
+      if (overrides.popupParentNativeReject && request.op === 'capture' && request.id === 43) {
+        Object.assign(reply, { ok: false, error_code: 'STALE_FRAME',
+          message: 'related popup parent process incarnation changed during capture' });
+      }
+      if (overrides.popupParentSwap && request.op === 'identity' && request.id === 77) {
+        Object.assign(reply, { window: { ...window, processStartTime: overrides.parentChanged
+          ? '133000000000000606' : '133000000000000505' } });
+      }
+      if ((overrides.popupIdentitySwap || overrides.popupParentFence) && request.op === 'identity' && request.id === 77) {
+        Object.assign(reply, { window: { ...window, processStartTime: '133000000000000505' } });
+      }
+      if (overrides.popupIdentitySwap && request.op === 'capture' && request.id === 43) {
+        Object.assign(reply, { window: { ...window, id: 43, processStartTime: '133000000000000202' },
+          region: { x: 250, y: 350, width: 100, height: 100 },
+          windowGeometry: { x: 250, y: 350, width: 100, height: 100 } });
+      }
+      if (overrides.cursorFailure && request.op === 'cursor') {
+        Object.assign(reply, { ok: false, error_code: 'HELPER_EXITED', message: 'cursor transport failed after paste' });
+      }
       if (overrides.focusFailure && request.actions?.some((action: any) => action.type === 'focus')) {
         Object.assign(reply, { ok: false, error_code: 'FOCUS_FAILED', message: 'requested target is not foreground', completed_count: 0, failed_index: 0, routes: [] });
       }
@@ -122,6 +177,12 @@ describe.each(['stdio', 'addon'] as const)('Desktop reply provenance (%s)', (tra
     fake.overrides.focusFailure = false;
     fake.overrides.geometry = false;
     fake.overrides.semanticOnly = false;
+    fake.overrides.cursorFailure = false;
+    fake.overrides.popupIdentitySwap = false;
+    fake.overrides.popupParentFence = false;
+    fake.overrides.popupParentSwap = false;
+    fake.overrides.popupParentNativeReject = false;
+    fake.overrides.parentChanged = false;
     Object.defineProperty(process, 'platform', { ...platform, value: transport === 'addon' ? 'darwin' : 'linux' });
     vi.stubEnv('COS_MACOS_DESKTOP_HELPER', '');
     computer = await import('../src/main/computer/index.js');
@@ -137,6 +198,72 @@ describe.each(['stdio', 'addon'] as const)('Desktop reply provenance (%s)', (tra
     fake.children.at(-1)!.close();
     await computer.listWindows();
   };
+
+  it.runIf(transport === 'stdio')('does not publish a popup snapshot with an older enumeration incarnation', async () => {
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+    fake.overrides.popupIdentitySwap = true;
+    const state = await computer.getWindowState({ window: 77, includeRelated: true });
+    expect(state.related).toHaveLength(1);
+    expect(state.related?.[0]).toMatchObject({
+      window: { id: 43, processStartTime: '133000000000000101' },
+      screenshot: null, error: expect.stringMatching(/STALE_FRAME/)
+    });
+    // The rejected popup must not replace the main picture as default crop frame,
+    // nor leave a guessable unpublished frame id valid for later input.
+    expect(state.screenshot?.region.x).toBe(0);
+    const cropped = await computer.screenshot({ crop: { x: 0, y: 0, width: 10, height: 10 } });
+    expect(cropped.region.x).toBe(0);
+    expect(cropped.region.y).toBe(0);
+    await expect(computer.act([{ type: 'move', x: 10, y: 10 }], { frameId: state.screenshot!.frameId + 1 }))
+      .rejects.toThrow(/STALE_FRAME/);
+  });
+
+  it.runIf(transport === 'stdio')('pins the original parent incarnation for each separately captured popup', async () => {
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+    fake.overrides.popupParentFence = true;
+    const state = await computer.getWindowState({ window: 77, includeRelated: true });
+    // Capture order makes the rejected-popup test's attempted frame id
+    // deterministic rather than an arbitrary unallocated guess.
+    expect(state.related?.[0]?.screenshot?.frameId).toBe(state.screenshot!.frameId + 1);
+    const capture = fake.requests.find((request) => request.op === 'capture' && request.id === 43);
+    expect(capture).toMatchObject({
+      ownerWindow: 77,
+      expectedOwnerProcessStartTime: '133000000000000505'
+    });
+  });
+
+  it.runIf(transport === 'stdio')('rejects the entire observation when parent reincarnates after popup pixels', async () => {
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+    fake.overrides.popupParentSwap = true;
+    await expect(computer.getWindowState({ window: 77, includeRelated: true }))
+      .rejects.toThrow(/STALE_FRAME.*parent process incarnation/);
+    expect(fake.requests.find((request) => request.op === 'capture' && request.id === 43))
+      .toMatchObject({ ownerWindow: 77, expectedOwnerProcessStartTime: '133000000000000505' });
+    expect(fake.requests.some((request) => request.op === 'identity' && request.id === 77)).toBe(true);
+  });
+
+  it.runIf(transport === 'stdio')('rolls back unreturned frames after a rejected popup parent', async () => {
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+    const published = await computer.screenshot({ window: 77 });
+    fake.overrides.popupParentSwap = true;
+    await expect(computer.getWindowState({ window: 77, includeRelated: true }))
+      .rejects.toThrow(/STALE_FRAME.*parent process incarnation/);
+    const cropped = await computer.screenshot({ crop: { x: 0, y: 0, width: 10, height: 10 } });
+    expect(cropped.region.x).toBe(0);
+    expect(cropped.region.y).toBe(0);
+    expect(fake.requests.at(-1)).toMatchObject({
+      op: 'capture', region: { x: 0, y: 0, width: 10, height: 10 }
+    });
+    await expect(computer.act([{ type: 'move', x: 10, y: 10 }], { frameId: published.frameId }))
+      .resolves.toBeTruthy();
+  });
+
+  it.runIf(transport === 'stdio')('never downgrades native parent-replacement errors to an optional popup failure', async () => {
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+    fake.overrides.popupParentNativeReject = true;
+    await expect(computer.getWindowState({ window: 77, includeRelated: true }))
+      .rejects.toThrow(/STALE_FRAME.*parent process incarnation/);
+  });
 
   it('keeps older frames and refs usable while the same helper remains active', async () => {
     expect((await computer.listWindows()).windows[0]!.title).toBe('Example ä😀');
@@ -250,6 +377,9 @@ describe.each(['stdio', 'addon'] as const)('Desktop reply provenance (%s)', (tra
     const result = await computer.act([{ type: 'paste', text }], { window: 77 });
     expect(fake.clipboard.writeText).toHaveBeenCalledExactlyOnceWith(text);
     expect(result.completedCount).toBe(1);
+    // Native Ctrl+V acknowledgement already contains its cursor; a second
+    // diagnostic helper round-trip cannot be allowed to lose completed input.
+    expect(fake.requests.filter(request => request.op === 'cursor')).toHaveLength(0);
     expect(fake.requests.filter(request => request.op === 'act')).toMatchObject([
       { targetWindow: 77, actions: [{ type: 'focus', window: 77 }] },
       { targetWindow: 77, actions: [{ type: 'keypress', keys: ['ctrl', 'v'] }] }
@@ -257,6 +387,16 @@ describe.each(['stdio', 'addon'] as const)('Desktop reply provenance (%s)', (tra
     fake.clipboard.writeText.mockClear();
     await expect(computer.act([{ type: 'paste', text }, { type: 'write_clipboard', text: 'later' }], { window: 77 })).rejects.toThrow(/PASTE_SEQUENCE/);
     expect(fake.clipboard.writeText).not.toHaveBeenCalled();
+  });
+
+  it.runIf(transport === 'stdio')('preserves acknowledged paste after trailing cursor diagnostics fail', async () => {
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+    fake.overrides.cursorFailure = true;
+    const result = await computer.act([{ type: 'paste', text: 'sent once' }, { type: 'wait', ms: 0 }], { window: 77 });
+    expect(result).toMatchObject({ completedCount: 2, routes: ['uia', 'local'], cursor: null });
+    expect(fake.clipboard.writeText).toHaveBeenCalledExactlyOnceWith('sent once');
+    expect(fake.requests.filter(request => request.op === 'cursor')).toHaveLength(1);
+    expect(fake.requests.filter(request => request.op === 'act')).toHaveLength(2);
   });
 
   it.runIf(transport === 'stdio')('waits for asynchronous clipboard publication before injecting paste', async () => {
@@ -285,9 +425,13 @@ describe.each(['stdio', 'addon'] as const)('Desktop reply provenance (%s)', (tra
     await expect(computer.act([{ type: 'paste', text: 'must not replace clipboard' }], { window: 77, app: 'fixture.exe' }))
       .rejects.toMatchObject({ completedCount: 0, failedIndex: 0, message: expect.stringMatching(/FOCUS_FAILED/) });
     expect(fake.clipboard.writeText).not.toHaveBeenCalled();
-    expect(fake.requests.filter(request => request.op === 'act')).toEqual([
-      { op: 'act', targetWindow: 77, targetApp: 'fixture.exe', actions: [{ type: 'focus', window: 77 }] }
-    ]);
+    const nativeRequests = fake.requests.filter(request => request.op === 'act');
+    expect(nativeRequests).toHaveLength(1);
+    const { __cosRequestId, ...nativeRequest } = nativeRequests[0]!;
+    expect(__cosRequestId).toMatch(/^[A-Za-z0-9_-]{1,80}$/);
+    expect(nativeRequest).toEqual({
+      op: 'act', targetWindow: 77, targetApp: 'fixture.exe', actions: [{ type: 'focus', window: 77 }]
+    });
   });
 
   it('does not mutate clipboard after a pending ref owner retires during a local wait', async () => {

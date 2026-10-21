@@ -115,9 +115,10 @@ async function refuseBrowserChord(key: string, window: { id: number }): Promise<
 /** Describe a usable next observation without dispatching another action. */
 function nativeFailure(error: unknown): ToolResult | null {
   if (!(error instanceof ComputerError)) return null;
-  // Partial completion wraps the native code. Keep the original message and exact
-  // completed-action evidence; zero completed actions does not prove zero effects.
-  const code = /^(?:PARTIAL_BATCH:[^\r\n]*?\. )?([A-Z][A-Z0-9_]*):/.exec(error.message)?.[1];
+  // Preserve original native codes inside partial or unconfirmed outcomes.
+  const unconfirmed = error.message.startsWith('OUTCOME_UNCONFIRMED:');
+  const code = /^(?:(?:PARTIAL_BATCH:[^\r\n]*?\. )|(?:OUTCOME_UNCONFIRMED:[^\r\n]*?Do not repeat the unacknowledged input\. ))?([A-Z][A-Z0-9_]*):/.exec(error.message)?.[1]
+    ?? (unconfirmed ? 'OUTCOME_UNCONFIRMED' : undefined);
   if (!code) return null;
   let recovery: string;
   switch (code) {
@@ -132,6 +133,9 @@ function nativeFailure(error: unknown): ToolResult | null {
       break;
     case 'FOCUS_FAILED':
       recovery = 'Call list_windows to inspect the foreground and get_window_state on the target and its owned dialogs. Resolve the relevant dialog or window state before another action.';
+      break;
+    case 'OCCLUDED_TARGET':
+      recovery = 'Call get_window_state to observe the current target and its covering popup or dialog. Resolve the covering window before attempting a fresh input.';
       break;
     case 'STALE_FRAME':
     case 'STALE_SCREENSHOT':
@@ -148,9 +152,14 @@ function nativeFailure(error: unknown): ToolResult | null {
     case 'UIA_FAILED':
       recovery = 'Use get_window_state({window,include_text:false}) to inspect the target pixels. An unavailable accessibility provider does not imply screenshots or other tools are disabled.';
       break;
+    case 'UIA_PROCESS_CRASH':
+      recovery = "Call get_window_state({ window, include_text:false }) to inspect the current window without UI Automation using a fresh helper. If its identity may be stale, use list_windows or get_window to choose a current window first. An unseeded first crash cannot establish a per-window breaker; do not repeat include_text:true blindly. The semantic input's completion is unknown; do not retry it automatically.";
+      break;
     default:
-      return null;
+      if (!unconfirmed) return null;
+      recovery = 'Call get_window_state to inspect the current result. Native input completion was not acknowledged; do not repeat the input automatically.';
   }
+  if (unconfirmed) recovery += ' Do not repeat unacknowledged input even if the observation has become stale.';
   const detail = { code, message: error.message, recovery, completed_count: error.completedCount ?? null,
     failed_index: error.failedIndex ?? null, completed_routes: error.completedRoutes ?? null };
   return { ...fail(`${error.message}\nNext step: ${recovery}\nDo not repeat completed input. Inspect the current result before deciding which action is still needed.`),

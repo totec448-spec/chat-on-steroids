@@ -17,6 +17,9 @@ public static class CosWindowsAppIdentity {
   [DllImport("ole32.dll")] static extern int PropVariantClear(ref PROPVARIANT value);
   [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint process);
   [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+  [StructLayout(LayoutKind.Sequential)] struct FILETIME { public uint Low; public uint High; }
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetProcessTimes(
+    IntPtr process, out FILETIME created, out FILETIME exited, out FILETIME kernel, out FILETIME user);
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern bool QueryFullProcessImageNameW(IntPtr process, uint flags, StringBuilder path, ref uint length);
   [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern int GetApplicationUserModelId(IntPtr process, ref uint length, StringBuilder value);
 
@@ -42,12 +45,16 @@ public static class CosWindowsAppIdentity {
   public static string[] Read(long handle, uint processId) {
     string appId = WindowAppId(new IntPtr(handle));
     string path = "";
+    string started = "";
     IntPtr process = OpenProcess(0x1000, false, processId); // PROCESS_QUERY_LIMITED_INFORMATION
     if (process != IntPtr.Zero) {
       try {
         uint size = 32768;
         var buffer = new StringBuilder((int)size);
         if (QueryFullProcessImageNameW(process, 0, buffer, ref size)) path = Bounded(buffer.ToString());
+        FILETIME created, exited, kernel, user;
+        if (GetProcessTimes(process, out created, out exited, out kernel, out user))
+          started = (((ulong)created.High << 32) | created.Low).ToString();
         if (appId.Length == 0) {
           size = 2048;
           buffer = new StringBuilder((int)size);
@@ -55,7 +62,7 @@ public static class CosWindowsAppIdentity {
         }
       } finally { CloseHandle(process); }
     }
-    return new string[] { appId.Length > 0 ? appId : path.ToLowerInvariant(), path, appId };
+    return new string[] { appId.Length > 0 ? appId : path.ToLowerInvariant(), path, appId, started };
   }
 }
 `;
@@ -107,7 +114,10 @@ function Start-AppExecutable([string]$path) {
   $start = New-Object System.Diagnostics.ProcessStartInfo
   $start.FileName = $path
   $start.Arguments = ''
-  $start.UseShellExecute = $false
+  # ShellExecute opens an exact resolved executable, not a shell command or argument string.
+  # Unlike CREATE_NO_WINDOW, it gives console apps their own visible console instead of
+  # hiding them; launch through the shell rather than inheriting this helper's stdio pipes.
+  $start.UseShellExecute = $true
   $start.WorkingDirectory = [IO.Path]::GetDirectoryName($path)
   $process = [System.Diagnostics.Process]::Start($start)
   if ($null -eq $process) { throw 'APP_LAUNCH_FAILED: Windows did not start the executable' }
@@ -159,7 +169,7 @@ function Invoke-WindowsAppsCatalog($request, [bool]$launch) {
         throw 'APP_NOT_FOUND: app ID or executable was not found; list apps or provide an existing .exe path/name'
       }
       # Catalog items keep their native launch verb; explicit executables above use
-      # ProcessStartInfo with no shell and no command-line arguments.
+      # ProcessStartInfo ShellExecute on a validated executable path, without arguments.
       $selected.InvokeVerb('open')
       return @{ app = $appId; displayName = $selectedName; status = 'launch_requested'; windowConfirmed = $false }
     }

@@ -30,10 +30,11 @@ describe('the desktop helper leaves the app\'s own windows out', () => {
         pid: 9100, exitCode: null, listeners, on, once: on, removeListener: () => child, kill: () => true,
         stdout, stderr: { on: () => child.stderr, listeners: new Map() },
         stdin: {
-          write(_line: string, _encoding: string, callback: (error?: Error | null) => void) {
+          write(line: string, _encoding: string, callback: (error?: Error | null) => void) {
             callback(null);
+            const request = JSON.parse(line) as { __cosRequestId?: string };
             queueMicrotask(() => emit(stdout as never, 'data',
-              Buffer.from(`${JSON.stringify({ ok: true, windows: [], screen: { x: 0, y: 0, width: 100, height: 100 } })}\n`)));
+              Buffer.from(`${JSON.stringify({ ok: true, __cosRequestId: request.__cosRequestId, windows: [], screen: { x: 0, y: 0, width: 100, height: 100 } })}\n`)));
             return true;
           },
           end() {}

@@ -38,16 +38,17 @@ const fake = vi.hoisted(() => {
     child.stdout = new Emitter();
     child.stderr = new Emitter();
     child.stdin = {
-      write(_line: string, _encoding: string, callback: (error?: Error | null) => void) {
+      write(line: string, _encoding: string, callback: (error?: Error | null) => void) {
         child.writeCount = (child.writeCount ?? 0) + 1;
         callback(null);
+        const request = JSON.parse(line) as { __cosRequestId?: string };
         // The first helper deliberately hangs. A replacement helper answers normally.
         if (index > 0) {
           queueMicrotask(() => {
             child.stdout.emit(
               'data',
               Buffer.from(
-                `${JSON.stringify({ ok: true, windows: [], screen: { x: 0, y: 0, width: 100, height: 100 } })}\n`
+                `${JSON.stringify({ ok: true, __cosRequestId: request.__cosRequestId, windows: [], screen: { x: 0, y: 0, width: 100, height: 100 } })}\n`
               )
             );
             child.exitCode = 0;

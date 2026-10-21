@@ -73,6 +73,7 @@ public static class Clf {
   [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
   [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT p);
+  [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT p);
   [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr lp);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)]
   static extern int GetWindowTextW(IntPtr h, StringBuilder s, int max);
@@ -119,7 +120,8 @@ public static class Clf {
 
   static void Send(INPUT[] inputs) {
     uint sent = SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(INPUT)));
-    if (sent != inputs.Length) throw new Exception("SendInput was blocked (sent " + sent + " of " + inputs.Length + "). A window running as administrator can refuse synthetic input.");
+    if (sent != inputs.Length) throw new Exception((sent > 0 ? "INPUT_EFFECT_UNCONFIRMED: " : "") +
+      "SendInput was blocked (sent " + sent + " of " + inputs.Length + "). A window running as administrator can refuse synthetic input.");
   }
 
   static INPUT Mouse(uint flags, int dx, int dy, uint data) {
@@ -174,8 +176,46 @@ public static class Clf {
   }
 
   public static void Click(int x, int y, string button, int times) {
+    Click(x, y, button, times, 0);
+  }
+
+  // The caller's first hit test precedes pointer movement. Moving can open a
+  // tooltip/overlay or change mouse capture; recheck after Move, immediately
+  // before the irreversible button/wheel input, without restricting drag drops.
+  static void GuardPointerReceiver(long target, int x, int y) {
+    POINT actual = new POINT();
+    // SendInput's accepted MOVE is not proof the cursor arrived at the desired
+    // location (ClipCursor and desktop policies can constrain its landing).
+    // The OS button/wheel packet uses the real cursor, never the requested P.
+    // Permit a bounded compositor/input-queue settling interval, not a blind
+    // second movement or an indefinite wait for a permanently confined cursor.
+    bool landed = false;
+    for (int attempt = 0; attempt < 4; attempt++) {
+      if (GetCursorPos(out actual) && Math.Abs((long)actual.X - x) <= 1 && Math.Abs((long)actual.Y - y) <= 1) {
+        landed = true;
+        break;
+      }
+      if (attempt < 3) System.Threading.Thread.Sleep(1);
+    }
+    if (!landed)
+      throw new InvalidOperationException("OCCLUDED_TARGET: pointer did not reach the requested location");
+    if (target > 0 && (!InputIsFocused(target) || !HitTargetsWindow(target, actual.X, actual.Y))) {
+      throw new InvalidOperationException("OCCLUDED_TARGET: receiver changed after pointer movement; observe again");
+    }
+  }
+
+  public static void Click(int x, int y, string button, int times, long target) {
+    Click(x, y, button, times, target, null);
+  }
+
+  public static void Click(int x, int y, string button, int times, long target, Action afterMove) {
     if (times < 1 || times > 3) throw new ArgumentException("BAD_ACTION: click count must be between 1 and 3");
     Move(x, y);
+    if (afterMove != null) {
+      GuardPointerReceiver(target, x, y); // Wait for actual landing before native identity postflight.
+      afterMove();
+    }
+    GuardPointerReceiver(target, x, y);
     uint down, up;
     ButtonFlags(button, out down, out up);
     List<INPUT> batch = new List<INPUT>();
@@ -196,7 +236,20 @@ public static class Clf {
   }
 
   public static void Scroll(int x, int y, int dx, int dy, bool rawWheel) {
+    Scroll(x, y, dx, dy, rawWheel, 0);
+  }
+
+  public static void Scroll(int x, int y, int dx, int dy, bool rawWheel, long target) {
+    Scroll(x, y, dx, dy, rawWheel, target, null);
+  }
+
+  public static void Scroll(int x, int y, int dx, int dy, bool rawWheel, long target, Action afterMove) {
     Move(x, y);
+    if (afterMove != null) {
+      GuardPointerReceiver(target, x, y);
+      afterMove();
+    }
+    GuardPointerReceiver(target, x, y);
     List<INPUT> batch = new List<INPUT>();
     // Positive scroll_y means "scroll down" for the caller; the wheel API is the
     // other way round, hence the negation.
@@ -211,6 +264,14 @@ public static class Clf {
   }
 
   public static void Drag(int[] xs, int[] ys, string button, int durationMs) {
+    Drag(xs, ys, button, durationMs, 0);
+  }
+
+  public static void Drag(int[] xs, int[] ys, string button, int durationMs, long target) {
+    Drag(xs, ys, button, durationMs, target, null);
+  }
+
+  public static void Drag(int[] xs, int[] ys, string button, int durationMs, long target, Action afterMove) {
     if (xs == null || ys == null || xs.Length != ys.Length || xs.Length < 2 || xs.Length > 64 || durationMs < 50 || durationMs > 2000)
       throw new ArgumentException("BAD_ACTION: drag requires 2-64 points and a 50-2000 ms duration");
     double[] distance = new double[xs.Length];
@@ -221,8 +282,16 @@ public static class Clf {
     uint down, up;
     ButtonFlags(button, out down, out up);
     Move(xs[0], ys[0]);
+    if (afterMove != null) {
+      GuardPointerReceiver(target, xs[0], ys[0]);
+      afterMove();
+    }
+    GuardPointerReceiver(target, xs[0], ys[0]);
+    bool pressed = false;
+    Exception failure = null;
     try {
       Send(new INPUT[] { Mouse(down, 0, 0, 0) });
+      pressed = true;
       int steps = Math.Min(256, Math.Max(2, (int)Math.Ceiling(durationMs / 10.0)));
       int segment = 1;
       var clock = System.Diagnostics.Stopwatch.StartNew();
@@ -237,8 +306,16 @@ public static class Clf {
         int remaining = (int)Math.Ceiling((double)durationMs * step / steps - clock.ElapsedMilliseconds);
         if (remaining > 0) System.Threading.Thread.Sleep(Math.Min(10, remaining));
       }
-    } finally {
-      Send(new INPUT[] { Mouse(up, 0, 0, 0) });
+    } catch (Exception error) {
+      failure = error;
+    }
+    // Always attempt release. Never let a failed cleanup disguise earlier effects.
+    try { Send(new INPUT[] { Mouse(up, 0, 0, 0) }); }
+    catch (Exception error) { if (failure == null) failure = error; }
+    if (failure != null) {
+      if (pressed && !failure.GetBaseException().Message.StartsWith("INPUT_EFFECT_UNCONFIRMED:"))
+        throw new InvalidOperationException("INPUT_EFFECT_UNCONFIRMED: drag accepted button-down before failing: " + failure.GetBaseException().Message);
+      System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
     }
   }
 
@@ -265,13 +342,20 @@ public static class Clf {
     if (text.IndexOf('\r') >= 0 || text.IndexOf('\n') >= 0)
       throw new InvalidOperationException("MULTILINE_REQUIRES_PASTE: literal multiline text requires the clipboard paste action");
     List<INPUT> batch = new List<INPUT>();
-    foreach (char c in text) {
-      batch.Add(Unicode(c, false));
-      batch.Add(Unicode(c, true));
-      // SendInput caps out on very long batches; flush in chunks.
-      if (batch.Count >= 200) { SendText(batch); batch.Clear(); }
+    bool priorChunkSent = false;
+    try {
+      foreach (char c in text) {
+        batch.Add(Unicode(c, false));
+        batch.Add(Unicode(c, true));
+        // SendInput caps out on very long batches; flush in chunks.
+        if (batch.Count >= 200) { SendText(batch); priorChunkSent = true; batch.Clear(); }
+      }
+      if (batch.Count > 0) SendText(batch);
+    } catch (Exception error) {
+      if (priorChunkSent && !error.GetBaseException().Message.StartsWith("INPUT_EFFECT_UNCONFIRMED:"))
+        throw new InvalidOperationException("INPUT_EFFECT_UNCONFIRMED: earlier text chunks were accepted before failure: " + error.GetBaseException().Message);
+      throw;
     }
-    if (batch.Count > 0) SendText(batch);
   }
 
   static void SendText(List<INPUT> batch) {
@@ -299,11 +383,21 @@ public static class Clf {
     List<INPUT> up = new List<INPUT>();
     for (int i = 0; i < vks.Length; i++) down.Add(Key(vks[i], false));
     for (int i = vks.Length - 1; i >= 0; i--) up.Add(Key(vks[i], true));
+    bool pressed = false;
+    Exception failure = null;
     try {
       Send(down.ToArray());
+      pressed = true;
       System.Threading.Thread.Sleep(35);
-    } finally {
-      Send(up.ToArray());
+    } catch (Exception error) {
+      failure = error;
+    }
+    try { Send(up.ToArray()); }
+    catch (Exception error) { if (failure == null) failure = error; }
+    if (failure != null) {
+      if (pressed && !failure.GetBaseException().Message.StartsWith("INPUT_EFFECT_UNCONFIRMED:"))
+        throw new InvalidOperationException("INPUT_EFFECT_UNCONFIRMED: key-down sequence was accepted before failure: " + failure.GetBaseException().Message);
+      System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();
     }
   }
 
@@ -346,7 +440,7 @@ public static class Clf {
       h.ToInt64().ToString(), sb.ToString().Replace((char)31, ' '), proc,
       r.Left.ToString(), r.Top.ToString(), (r.Right - r.Left).ToString(), (r.Bottom - r.Top).ToString(),
       IsIconic(h) ? "minimized" : (h == GetForegroundWindow() ? "foreground" : "open"),
-      identity[0], pid.ToString(), identity[1], identity[2], dpi.ToString()
+      identity[0], pid.ToString(), identity[1], identity[2], dpi.ToString(), identity[3]
     });
   }
 
@@ -412,6 +506,72 @@ public static class Clf {
       owner = GetWindow(owner, 4);
     }
     return owner != IntPtr.Zero && IsRelatedWindow(window.ToInt64(), owner.ToInt64()) ? owner : IntPtr.Zero;
+  }
+
+  // A top-level window that never takes activation: no-activate popups, #32768 menus,
+  // desktop-child lists (ComboLBox) and captionless popups (toolkit menus, Auto-Suggest).
+  static bool IsTransientPopup(IntPtr window) {
+    int style = GetWindowLong(window, -16);
+    int exStyle = GetWindowLong(window, -20);
+    if ((exStyle & 0x08000000) != 0 || IsMenu(window) || (style & 0x40000000) != 0) return true;
+    // A plain borderless WS_POPUP can be an activatable app window whose pixels
+    // were not observed. Require a toolwindow/topmost popup hint as well.
+    return (exStyle & 0x88) != 0 && (style & unchecked((int)0x80000000)) != 0 && (style & 0x00C00000) != 0x00C00000;
+  }
+
+  // Menus, dropdown lists and autocomplete popups of the target cover its pixels while it stays
+  // foreground. Only such a popup from the target's own process may receive its input: owned by
+  // the target, or ownerless on its GUI thread. Never another process, an activatable dialog,
+  // or the owner/sibling of a popup target.
+  static bool ReceiverIsTarget(IntPtr receiver, IntPtr target) {
+    if (receiver == IntPtr.Zero) return false;
+    IntPtr receiverRoot = GetAncestor(receiver, 2), targetRoot = GetAncestor(target, 2);
+    if (receiverRoot == IntPtr.Zero || targetRoot == IntPtr.Zero) return false;
+    // GA_ROOT can be the target even when a different process hosts the hit
+    // child (or owns mouse capture). Check the actual receiver, not only root.
+    uint actualProcess, rootProcess, targetOwnProcess;
+    GetWindowThreadProcessId(receiver, out actualProcess);
+    GetWindowThreadProcessId(targetRoot, out rootProcess);
+    GetWindowThreadProcessId(target, out targetOwnProcess);
+    // A child target can itself be reparented under a foreign top-level HWND.
+    // Neither that foreign root nor its own children are authorized receivers.
+    if (actualProcess == 0 || rootProcess == 0 || targetOwnProcess == 0 ||
+        rootProcess != targetOwnProcess || actualProcess != targetOwnProcess) return false;
+    if (receiverRoot == targetRoot) return true;
+    uint receiverProcess, targetProcess;
+    uint receiverThread = GetWindowThreadProcessId(receiverRoot, out receiverProcess);
+    uint targetThread = GetWindowThreadProcessId(targetRoot, out targetProcess);
+    if (receiverProcess == 0 || receiverProcess != targetProcess || !IsTransientPopup(receiverRoot) || InputRoot(targetRoot) != targetRoot) return false;
+    if (OwnedBy(receiverRoot, targetRoot)) return true;
+    if (GetWindow(receiverRoot, 4) != IntPtr.Zero || receiverThread != targetThread) return false;
+    if (!IsMenu(receiverRoot)) return true;
+    // A second top-level window on the very same GUI thread can own an
+    // ownerless #32768 menu. Attribute that menu by its live GUI menuOwner.
+    GUITHREADINFO gui = new GUITHREADINFO();
+    gui.cbSize = (uint)Marshal.SizeOf(typeof(GUITHREADINFO));
+    return GetGUIThreadInfo(receiverThread, ref gui) && gui.menuOwner != IntPtr.Zero && OwnedBy(gui.menuOwner, targetRoot);
+  }
+
+  // WindowFromPoint resolves the top-level receiver, but mouse capture on the foreground
+  // thread overrides it, so both must belong to the target.
+  public static bool HitTargetsWindow(long handle, int x, int y) {
+    IntPtr target = new IntPtr(handle);
+    POINT p = new POINT(); p.X = x; p.Y = y;
+    if (!ReceiverIsTarget(WindowFromPoint(p), target)) return false;
+    GUITHREADINFO gui = new GUITHREADINFO();
+    gui.cbSize = (uint)Marshal.SizeOf(typeof(GUITHREADINFO));
+    return GetGUIThreadInfo(0, ref gui) && (gui.capture == IntPtr.Zero || ReceiverIsTarget(gui.capture, target));
+  }
+
+  // Activation and keys for a no-activate popup reach its input root. Returns that root when it
+  // belongs to another process, whose incarnation the popup's own identity does not prove.
+  public static long ForeignInputRoot(long handle) {
+    IntPtr window = new IntPtr(handle), root = InputRoot(window);
+    if (root == IntPtr.Zero || root == window) return 0;
+    uint windowProcess, rootProcess;
+    GetWindowThreadProcessId(window, out windowProcess);
+    GetWindowThreadProcessId(root, out rootProcess);
+    return rootProcess == windowProcess ? 0 : root.ToInt64();
   }
 
   public static bool InputIsFocused(long handle) {
@@ -552,6 +712,7 @@ function Convert-WindowRow([string]$line) {
     id = [int64]$f[0]; title = $f[1]; process = $f[2]
     x = [int]$f[3]; y = [int]$f[4]; width = [int]$f[5]; height = [int]$f[6]; state = $f[7]
     app = $f[8]; processId = [uint32]$f[9]; processPath = $f[10]; appUserModelId = $f[11]; dpi = [int]$f[12]
+    processStartTime = if ($f.Count -gt 13) { $f[13] } else { '' }
   }
 }
 
@@ -592,7 +753,26 @@ function Ui-RuntimeKey($element) {
   try { return (@($element.GetRuntimeId()) -join '.') } catch { return '' }
 }
 
+$script:LastUiaStage = ''
+$script:CurrentUiaRequestId = ''
+function Write-UiaStage([string]$stage) {
+  if ([string]::IsNullOrWhiteSpace($script:CurrentUiaRequestId)) { return }
+  if ($script:LastUiaStage -eq $stage) { return }
+  $script:LastUiaStage = $stage
+  try { [Console]::Error.WriteLine("UIA_STAGE:$($script:CurrentUiaRequestId):$stage") } catch { }
+}
+
+function Test-SelectedRangeUnsafe($element) {
+  # Only an explicitly identified non-WPF provider may perform selected-range
+  # GetText. Absent or throwing metadata cannot certify a safe provider.
+  try {
+    $frameworkId = [string]$element.Current.FrameworkId
+    return [string]::IsNullOrWhiteSpace($frameworkId) -or $frameworkId -eq 'WPF'
+  } catch { return $true }
+}
+
 function Get-UiRoot([int64]$id) {
+  Write-UiaStage 'uia.root'
   $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$id)
   if ($null -eq $root) { throw "UIA_FAILED: no accessible window with id $id" }
   if ($root.Current.ClassName -ne 'Chrome_WidgetWin_1') { return $root }
@@ -661,11 +841,13 @@ function Resolve-UiElement([int64]$id, [int]$snapshotId, [string]$runtimeKey) {
     throw "UI_ELEMENT_GONE: the referenced UI element is not part of snapshot $snapshotId. Use a ref printed by that snapshot, or observe the window again."
   }
   try {
+    Write-UiaStage 'uia.resolve.root'
     $root = Get-UiRoot $id
   } catch {
     throw "UIA_FAILED: cannot inspect window $id. $($_.Exception.Message)"
   }
   try {
+    Write-UiaStage 'uia.resolve.liveness'
     if ((Ui-RuntimeKey $root) -ne [string]$snapshot.rootRuntimeKey) {
       throw "STALE_UI_SNAPSHOT: window $id no longer has the UIA root from snapshot $snapshotId. Call observe on the window again and use a ref from that reply."
     }
@@ -677,6 +859,7 @@ function Resolve-UiElement([int64]$id, [int]$snapshotId, [string]$runtimeKey) {
     }
     # A live legacy provider is not proof that its old tab is still displayed.
     # Revalidate membership in the same current UI root before semantic input.
+    Write-UiaStage 'uia.resolve.membership'
     $parent = $element
     $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
     for ($depth = 0; $depth -le 64 -and $null -ne $parent; $depth++) {
@@ -715,7 +898,8 @@ function Get-UiActions($element, $current) {
   return @($actions.ToArray())
 }
 
-function Invoke-UiAction($element, [string]$action) {
+function Invoke-UiAction($element, [string]$action, [int64]$id, $owner, $targetApp, $ownerApp) {
+  Write-UiaStage ("uia.action." + $action)
   # Explicit semantic actions never degrade to a click at guessed coordinates.
   $patternId = switch ($action) {
     'invoke' { [System.Windows.Automation.InvokePattern]::Pattern }
@@ -729,6 +913,7 @@ function Invoke-UiAction($element, [string]$action) {
   }
   if ($action -eq 'focus') {
     if (-not $element.Current.IsKeyboardFocusable) { throw 'UI_ACTION_UNSUPPORTED: element is not keyboard focusable' }
+    Assert-InputOwner $id $owner $targetApp $ownerApp
     $element.SetFocus()
     return
   }
@@ -736,6 +921,8 @@ function Invoke-UiAction($element, [string]$action) {
   if (-not $element.TryGetCurrentPattern($patternId, [ref]$pattern)) {
     throw "UI_ACTION_UNSUPPORTED: element does not currently support $action"
   }
+  # Acquiring a pattern may invoke a hostile provider. Check after all reads.
+  Assert-InputOwner $id $owner $targetApp $ownerApp
   switch ($action) {
     'invoke' { ([System.Windows.Automation.InvokePattern]$pattern).Invoke() }
     'toggle' { ([System.Windows.Automation.TogglePattern]$pattern).Toggle() }
@@ -754,6 +941,7 @@ function Invoke-UiAction($element, [string]$action) {
         if (-not $scroll.Current.HorizontallyScrollable) { throw 'UI_ACTION_UNSUPPORTED: element is not horizontally scrollable' }
         $horizontal = if ($action -eq 'scroll_left') { [System.Windows.Automation.ScrollAmount]::LargeDecrement } else { [System.Windows.Automation.ScrollAmount]::LargeIncrement }
       }
+      Assert-InputOwner $id $owner $targetApp $ownerApp
       $scroll.Scroll($horizontal, $vertical)
     }
   }
@@ -773,9 +961,14 @@ function Act-UiElement($request) {
   }
   $id = [int64]$request.id
   Assert-InputOwner $id $request.ownerWindow $request.targetApp $request.ownerApp
+  Write-UiaStage 'uia.action.resolve'
   $element = Resolve-UiElement $id ([int]$request.snapshotId) ([string]$request.runtimeKey)
   if (-not $element.Current.IsEnabled) { throw "UI_ELEMENT_DISABLED: the referenced element is disabled" }
+  # Cache diagnostic metadata before the mutation; Invoke can destroy its own provider.
+  $completedElementName = try { [string]$element.Current.Name } catch { '' }
+  $completedRuntimeKey = [string]$request.runtimeKey
   if ($action -eq 'set_value') {
+    Write-UiaStage 'uia.action.set_value'
     $pattern = $null
     if (-not $element.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$pattern)) {
       throw "UI_VALUE_UNSUPPORTED: the referenced element does not expose ValuePattern"
@@ -792,14 +985,17 @@ function Act-UiElement($request) {
     $semanticClick = $button -eq 'left' -and $count -eq 1
     $pattern = $null
     if ($semanticClick -and $element.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$pattern)) {
+      Write-UiaStage 'uia.action.invoke'
       Assert-InputOwner $id $request.ownerWindow $request.targetApp $request.ownerApp
       ([System.Windows.Automation.InvokePattern]$pattern).Invoke()
       $route = 'uia'
     } elseif ($semanticClick -and $element.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$pattern)) {
+      Write-UiaStage 'uia.action.toggle'
       Assert-InputOwner $id $request.ownerWindow $request.targetApp $request.ownerApp
       ([System.Windows.Automation.TogglePattern]$pattern).Toggle()
       $route = 'uia'
     } elseif ($semanticClick -and $element.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$pattern)) {
+      Write-UiaStage 'uia.action.select'
       Assert-InputOwner $id $request.ownerWindow $request.targetApp $request.ownerApp
       ([System.Windows.Automation.SelectionItemPattern]$pattern).Select()
       $route = 'uia'
@@ -807,24 +1003,38 @@ function Act-UiElement($request) {
       # A semantic control without InvokePattern has to fall back to physical input. Make
       # that last resort explicit and safe: the referenced window, not an overlay at the
       # same desktop coordinates, must be foreground before the pointer goes down.
+      Write-UiaStage 'uia.action.bounds'
+      # UIA resolution/metadata can run arbitrary provider code and recycle the HWND.
+      # Verify the actual process incarnation before *any* fallback focus side effect.
+      Assert-InputOwner $id $request.ownerWindow $request.targetApp $request.ownerApp
       Assert-Focused $id
+      Assert-InputOwner $id $request.ownerWindow $request.targetApp $request.ownerApp
       $r = $element.Current.BoundingRectangle
       if ($r.Width -le 0 -or $r.Height -le 0) { throw "UI_ELEMENT_OFFSCREEN: the referenced element has no clickable bounds" }
       Assert-InputOwner $id $request.ownerWindow $request.targetApp $request.ownerApp
-      [Clf]::Click([int][Math]::Round($r.X + $r.Width / 2), [int][Math]::Round($r.Y + $r.Height / 2), $button, $count)
+      # Bounds reads can also switch foreground. Revalidate before pointer-down.
+      Assert-Focused $id
+      Assert-InputOwner $id $request.ownerWindow $request.targetApp $request.ownerApp
+      $px = [int][Math]::Round($r.X + $r.Width / 2)
+      $py = [int][Math]::Round($r.Y + $r.Height / 2)
+      Assert-PhysicalHit $id $px $py
+      [Clf]::Click($px, $py, $button, $count, $id, [Action]{
+        Assert-InputOwner $id $request.ownerWindow $request.targetApp $request.ownerApp
+      })
       $route = 'sendinput'
     }
   } else {
     Assert-InputOwner $id $request.ownerWindow $request.targetApp $request.ownerApp
-    Invoke-UiAction $element $action
+    Invoke-UiAction $element $action $id $request.ownerWindow $request.targetApp $request.ownerApp
     $route = 'uia'
   }
-  return @{ runtimeKey = (Ui-RuntimeKey $element); name = [string]$element.Current.Name; route = $route }
+  return @{ runtimeKey = $completedRuntimeKey; name = $completedElementName; route = $route }
 }
 
 function Find-UiElements($request) {
   $id = if ($request.id) { [int64]$request.id } else { [Clf]::ForegroundId() }
   try {
+    Write-UiaStage 'uia.find.root'
     $root = Get-UiRoot $id
   } catch {
     throw "UIA_FAILED: cannot inspect window $id. $($_.Exception.Message)"
@@ -842,9 +1052,11 @@ function Find-UiElements($request) {
   $focusedElement = $null
   $textPattern = $null
   $textPriority = 0
+  $skipSelectedRange = $true
   $browserDocument = $root.Current.ClassName -eq 'BrowserRootView'
   $depthLimited = $false
   try {
+    Write-UiaStage 'uia.find.traversal'
     # ControlView avoids the enormous raw Chromium implementation tree. TreeWalker lets the
     # limit bound traversal work as well as output; FindAll(Descendants) materialised the full
     # tree before maxResults could stop it. CacheRequest fetches the projection properties in
@@ -920,7 +1132,9 @@ function Find-UiElements($request) {
               try {
                 $candidate = $null
                 if ($element.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$candidate)) {
+                  $candidateSelectionUnsafe = Test-SelectedRangeUnsafe $element
                   $textPattern = [System.Windows.Automation.TextPattern]$candidate
+                  $skipSelectedRange = $candidateSelectionUnsafe
                   $textPriority = $priority
                 }
               } catch { }
@@ -950,20 +1164,27 @@ function Find-UiElements($request) {
   }
   if ($null -ne $textPattern) {
     try {
+      Write-UiaStage 'uia.find.text'
       $budget = 8000
-      $selection = New-Object System.Text.StringBuilder
-      $ranges = @($textPattern.GetSelection())
-      foreach ($range in ($ranges | Select-Object -First 4)) {
-        $remaining = [Math]::Min(2000 - $selection.Length, $budget)
-        if ($remaining -le 0) { break }
-        $part = $range.GetText($remaining)
-        $null = $selection.Append($part)
-        $budget -= $part.Length
+      # WPF TextPattern selected-range GetText can terminate the entire PowerShell
+      # host with an uncatchable provider AV (including WPF editor/document peers).
+      # Preserve document text; keep selected text available for non-WPF providers.
+      if (-not $skipSelectedRange) {
+        $selection = New-Object System.Text.StringBuilder
+        $ranges = @($textPattern.GetSelection())
+        foreach ($range in ($ranges | Select-Object -First 4)) {
+          $remaining = [Math]::Min(2000 - $selection.Length, $budget)
+          if ($remaining -le 0) { break }
+          $part = $range.GetText($remaining)
+          $null = $selection.Append($part)
+          $budget -= $part.Length
+        }
+        $selectedText = $selection.ToString()
       }
-      $selectedText = $selection.ToString()
       $documentText = $textPattern.DocumentRange.GetText($budget)
     } catch { }
   }
+  Write-UiaStage 'uia.find.snapshot'
   $snapshotId = Remember-UiSnapshot $id $root $handles
   return @{
     window = $id
@@ -1008,6 +1229,7 @@ function Capture-Target($request, [Nullable[int64]]$forcedWindow) {
     if ($request.ownerWindow -and -not [Clf]::IsRelatedWindow([int64]$id, [int64]$request.ownerWindow)) {
       throw 'RELATED_WINDOW_GONE: popup no longer belongs to the observed window'
     }
+    Assert-CaptureParent $request
     Initialize-WindowsCapture
     try {
       $direct = [CosWindowsCapture]::Capture([int64]$id, $maxW, [string]$request.file) -split ','
@@ -1024,6 +1246,7 @@ function Capture-Target($request, [Nullable[int64]]$forcedWindow) {
     if ($request.ownerWindow -and -not [Clf]::IsRelatedWindow([int64]$id, [int64]$request.ownerWindow)) {
       throw 'RELATED_WINDOW_GONE: popup ownership changed during capture'
     }
+    Assert-CaptureParent $request
     $x = [int]$direct[0]; $y = [int]$direct[1]; $w = [int]$direct[2]; $h = [int]$direct[3]
     $out = @($direct[4], $direct[5])
     $mode = 'window'
@@ -1042,10 +1265,29 @@ function Capture-Target($request, [Nullable[int64]]$forcedWindow) {
 }
 
 function Assert-InputOwner([int64]$target, $owner, $targetApp, $ownerApp) {
+  # The exact creation time established by the previous observation stays attached
+  # to all native input, not merely pointer frames. Verify before every side effect.
+  if ($script:ExpectedInputStartTime -and $target -eq [int64]$script:ExpectedInputWindow) {
+    $now = Get-WindowRow $target
+    if ([string]$script:ExpectedInputStartTime -notmatch '^[0-9]{8,20}$' -or
+        $null -eq $now -or [string]$now.processStartTime -cne [string]$script:ExpectedInputStartTime) {
+      throw 'STALE_WINDOW: target process incarnation changed before input'
+    }
+  }
   if ($targetApp) {
     $targetRow = Get-WindowRow $target
     if ($null -eq $targetRow -or $targetRow.app -cne [string]$targetApp) {
       throw 'WINDOW_APP_MISMATCH: input target no longer belongs to the observed application'
+    }
+  }
+  if ($owner -and $script:ExpectedInputStartTime -and -not $script:ExpectedOwnerStartTime) {
+    throw 'STALE_WINDOW: popup owner process incarnation proof is unavailable'
+  }
+  if ($owner -and $script:ExpectedOwnerStartTime) {
+    $ownerCurrent = Get-WindowRow ([int64]$owner)
+    if ([string]$script:ExpectedOwnerStartTime -notmatch '^[0-9]{8,20}$' -or $null -eq $ownerCurrent -or
+        [string]$ownerCurrent.processStartTime -cne [string]$script:ExpectedOwnerStartTime) {
+      throw 'STALE_WINDOW: owner process incarnation changed before popup input'
     }
   }
   if ($ownerApp) {
@@ -1059,7 +1301,22 @@ function Assert-InputOwner([int64]$target, $owner, $targetApp, $ownerApp) {
   }
 }
 
-function Assert-CoordinateFrame($frame) {
+function Assert-InputRootOwner([int64]$id) {
+  # Assert-InputOwner has already proven the request's owner incarnation, so only that exact
+  # owner may be the foreign root that receives activation and keys.
+  $root = [Clf]::ForeignInputRoot($id)
+  if ($root -ne 0 -and ($root -ne $script:ExpectedOwnerWindow -or -not $script:ExpectedOwnerStartTime)) {
+    throw 'STALE_WINDOW: popup owner process incarnation proof is unavailable'
+  }
+}
+
+function Assert-PhysicalHit([int64]$id, [int]$x, [int]$y) {
+  if (-not [Clf]::InputIsFocused($id) -or -not [Clf]::HitTargetsWindow($id, $x, $y)) {
+    throw 'OCCLUDED_TARGET: another window covers this point and would receive the input. Observe again, then close it or act on the window in front.'
+  }
+}
+
+function Assert-CoordinateFrame($frame, [bool]$noFocus = $false) {
   $region = $frame.region
   if ($frame.window) {
     $id = [int64]$frame.window
@@ -1069,15 +1326,23 @@ function Assert-CoordinateFrame($frame) {
     if ($null -eq $row -or $row.state -eq 'minimized') {
       throw "STALE_FRAME: target window $id is no longer drawable"
     }
+    if ([string]$frame.processStartTime -notmatch '^[0-9]{8,20}$' -or
+        [string]$row.processStartTime -cne [string]$frame.processStartTime) {
+      throw "STALE_FRAME: target process incarnation changed since frame $($frame.id)"
+    }
     if ($row.x -ne [int]$geometry.x -or $row.y -ne [int]$geometry.y -or $row.width -ne [int]$geometry.width -or $row.height -ne [int]$geometry.height) {
       throw "STALE_FRAME: target window $id moved or resized after frame $($frame.id)"
     }
+    # Executed inside the native after-Move callback: authorization only.
+    # Never focus here, and never move twice before injecting the button.
+    if ($noFocus) { return }
     # A background snapshot is safe to observe, but physical coordinates must land on that
     # exact window rather than on an overlay. Focus only here, on the mutating path.
     Assert-Focused $id
     Assert-InputOwner $id $frame.ownerWindow $frame.targetApp $frame.ownerApp
     $after = Get-WindowRow $id
-    if ($null -eq $after -or $after.x -ne [int]$geometry.x -or $after.y -ne [int]$geometry.y -or $after.width -ne [int]$geometry.width -or $after.height -ne [int]$geometry.height) {
+    if ($null -eq $after -or [string]$after.processStartTime -cne [string]$frame.processStartTime -or
+        $after.x -ne [int]$geometry.x -or $after.y -ne [int]$geometry.y -or $after.width -ne [int]$geometry.width -or $after.height -ne [int]$geometry.height) {
       throw "STALE_FRAME: target window $id changed geometry while it was activated"
     }
     return
@@ -1094,14 +1359,50 @@ function Assert-CoordinateFrame($frame) {
 
 ${WINDOWS_APPS_SCRIPT}
 
+# Require an identical live process incarnation for an entire UIA/pixel snapshot.
+function Assert-SnapshotOwner($original, $current) {
+  if ($null -eq $original -or $null -eq $current -or
+      [string]$original.processStartTime -notmatch '^[0-9]{8,20}$' -or
+      [string]$current.processStartTime -cne [string]$original.processStartTime -or
+      [uint32]$current.processId -ne [uint32]$original.processId -or
+      [string]$current.app -cne [string]$original.app -or
+      [string]$current.processPath -cne [string]$original.processPath) {
+    throw 'STALE_WINDOW: process owner changed during native snapshot'
+  }
+}
+
+function Assert-CaptureParent($request) {
+  if (-not $request.ownerWindow) { return }
+  # Ownership of a reused HWND is not proof that the parent is the *observed*
+  # process. Require its FILETIME independently of the popup's own incarnation.
+  $expected = [string]$request.expectedOwnerProcessStartTime
+  $parent = Get-WindowRow ([int64]$request.ownerWindow)
+  if ($expected -notmatch '^[0-9]{8,20}$' -or $null -eq $parent -or
+      [string]$parent.processStartTime -cne $expected) {
+    throw 'STALE_FRAME: related popup parent process incarnation changed during capture'
+  }
+}
+
 function Handle-Request($request) {
   [Clf]::EnsureDpiAware()
+  # Clear request-scoped input proof even if a prior helper request failed.
+  $script:ExpectedInputStartTime = if ($request.op -eq 'act') { [string]$request.expectedProcessStartTime } else { '' }
+  $script:ExpectedOwnerStartTime = if ($request.op -eq 'act') { [string]$request.expectedOwnerProcessStartTime } else { '' }
+  $script:ExpectedInputWindow = if ($request.op -eq 'act' -and $request.targetWindow) { [int64]$request.targetWindow } else { 0 }
+  $script:ExpectedOwnerWindow = if ($request.op -eq 'act' -and $request.ownerWindow) { [int64]$request.ownerWindow } else { 0 }
+  # UIA stage evidence belongs to one request only. stdout replies and stderr diagnostics are
+  # independent pipes, so every stage carries the nonce minted by the parent transport for this
+  # exact request. Unknown/malformed request ids deliberately disable UIA crash classification.
+  $candidateRequestId = [string]$request.__cosRequestId
+  $script:CurrentUiaRequestId = if ($candidateRequestId -match '^[A-Za-z0-9_-]{1,80}$') { $candidateRequestId } else { '' }
+  $script:LastUiaStage = ''
   $result = @{ ok = $true }
   switch ($request.op) {
     'warm' {
       # Touch both Win32 and UIA without reading pixels or changing focus. Connector startup
       # can pay Add-Type and provider initialization before the first model-facing action.
       $null = [Clf]::ForegroundId()
+      Write-UiaStage 'uia.warm.root'
       $null = [System.Windows.Automation.AutomationElement]::RootElement.Current.ProcessId
       $result.ready = $true
     }
@@ -1125,6 +1426,11 @@ function Handle-Request($request) {
       $result.window = Get-WindowRow $foreground
       $result.screen = $screen.virtual
     }
+    'identity' {
+      # Read-only postflight for multi-round-trip related popup observation.
+      # Never focus the parent or invoke a potentially crashing UIA provider.
+      $result.window = Get-WindowRow ([int64]$request.id)
+    }
     'find_ui' {
       $ui = Find-UiElements $request
       $result.window = $ui.window
@@ -1143,7 +1449,15 @@ function Handle-Request($request) {
       $result.route = $ui.route
     }
     'capture' {
+      Assert-CaptureParent $request
+      $captureOwner = if ($request.id) { Get-WindowRow ([int64]$request.id) } else { $null }
       $capture = Capture-Target $request $null
+      Assert-CaptureParent $request
+      if ($request.id) {
+        $latestOwner = Get-WindowRow ([int64]$request.id)
+        Assert-SnapshotOwner $captureOwner $latestOwner
+        $result.window = $latestOwner
+      }
       foreach ($key in $capture.Keys) { $result[$key] = $capture[$key] }
     }
     'snapshot' {
@@ -1158,6 +1472,8 @@ function Handle-Request($request) {
         try {
           $capture = Capture-Target $request ([Nullable[int64]]$id)
           foreach ($key in $capture.Keys) { $result[$key] = $capture[$key] }
+          # Capture/overlay can recycle the HWND between metadata and pixels.
+          Assert-SnapshotOwner $window (Get-WindowRow $id)
         } catch {
           $message = $_.Exception.GetBaseException().Message
           # A missing compositor surface does not invalidate this window's UIA provider.
@@ -1191,6 +1507,9 @@ function Handle-Request($request) {
           $result.elements = @()
         }
       }
+      # The full native transaction, including accessibility traversal, belongs to
+      # the original process instance or no image/ref may be published.
+      Assert-SnapshotOwner $window (Get-WindowRow $id)
       if ($result.screenshotUnavailable -and $result.uiUnavailable) {
         throw ($result.screenshotUnavailable.message + '; UIA_FAILED: ' + $result.uiUnavailable.message)
       }
@@ -1231,7 +1550,12 @@ function Handle-Request($request) {
         try {
           $actionTarget = if ($a.type -in @('click_ui','set_value_ui','ui_action','focus')) { [int64]$a.window } elseif ($request.targetWindow) { [int64]$request.targetWindow } elseif ($request.frame.window) { [int64]$request.frame.window } else { 0 }
           Assert-InputOwner $actionTarget $request.ownerWindow $request.targetApp $request.ownerApp
-          if ($request.targetWindow -and $a.type -in @('move','click','double_click','scroll','drag','type','keypress')) {
+          # Window-frame coordinates must prove incarnation BEFORE any focus change.
+          # Assert-CoordinateFrame owns activation; non-coordinate input keeps its
+          # established focus path.
+          $frameCoordinates = $request.frame -and $a.type -in @('move','click','double_click','scroll','drag')
+          if ($request.targetWindow -and $a.type -in @('move','click','double_click','scroll','drag','type','keypress') -and -not $frameCoordinates) {
+            Assert-InputRootOwner ([int64]$request.targetWindow)
             Assert-Focused ([int64]$request.targetWindow)
             Assert-InputOwner $actionTarget $request.ownerWindow $request.targetApp $request.ownerApp
           }
@@ -1241,6 +1565,17 @@ function Handle-Request($request) {
             Assert-CoordinateFrame $request.frame
           }
           Assert-InputOwner $actionTarget $request.ownerWindow $request.targetApp $request.ownerApp
+          # Foreground is not proof of the pixels under an owned/no-activate popup.
+          # Validate the top-level pointer receiver immediately before physical effects.
+          if ($actionTarget -gt 0 -and $a.type -in @('move','click','double_click','scroll')) {
+            Assert-PhysicalHit $actionTarget ([int]$a.x) ([int]$a.y)
+          } elseif ($actionTarget -gt 0 -and $a.type -eq 'drag') {
+            Assert-PhysicalHit $actionTarget ([int]$a.xs[0]) ([int]$a.ys[0])
+          }
+          $postMove = [Action]{
+            Assert-InputOwner $actionTarget $request.ownerWindow $request.targetApp $request.ownerApp
+            if ($request.frame) { Assert-CoordinateFrame $request.frame $true }
+          }
           switch ($a.type) {
             'click_ui' {
               $ui = Act-UiElement @{ id = $a.window; snapshotId = $a.snapshotId; runtimeKey = $a.runtimeKey; action = 'click'; button = $a.button; count = (Get-RequestedClickCount $a); ownerWindow = $request.ownerWindow; targetApp = $request.targetApp; ownerApp = $request.ownerApp }
@@ -1259,18 +1594,20 @@ function Handle-Request($request) {
               $routes += 'shell'
             }
             'move'         { [Clf]::Move([int]$a.x, [int]$a.y); $routes += 'sendinput' }
-            'click'        { [Clf]::Click([int]$a.x, [int]$a.y, $a.button, (Get-RequestedClickCount $a)); $routes += 'sendinput' }
-            'double_click' { [Clf]::Click([int]$a.x, [int]$a.y, $a.button, 2); $routes += 'sendinput' }
-            'scroll'       { [Clf]::Scroll([int]$a.x, [int]$a.y, [int]$a.scroll_x, [int]$a.scroll_y, [bool]$a.rawWheel); $routes += 'sendinput' }
-            'drag'         { $duration = if ($null -ne $a.durationMs) { [int]$a.durationMs } else { 350 }; [Clf]::Drag([int[]]$a.xs, [int[]]$a.ys, $a.button, $duration); $routes += 'sendinput' }
+            'click'        { [Clf]::Click([int]$a.x, [int]$a.y, $a.button, (Get-RequestedClickCount $a), $actionTarget, $postMove); $routes += 'sendinput' }
+            'double_click' { [Clf]::Click([int]$a.x, [int]$a.y, $a.button, 2, $actionTarget, $postMove); $routes += 'sendinput' }
+            'scroll'       { [Clf]::Scroll([int]$a.x, [int]$a.y, [int]$a.scroll_x, [int]$a.scroll_y, [bool]$a.rawWheel, $actionTarget, $postMove); $routes += 'sendinput' }
+            'drag'         { $duration = if ($null -ne $a.durationMs) { [int]$a.durationMs } else { 350 }; [Clf]::Drag([int[]]$a.xs, [int[]]$a.ys, $a.button, $duration, $actionTarget, $postMove); $routes += 'sendinput' }
             'type'         { [Clf]::Type([string]$a.text); $routes += 'sendinput' }
             'keypress'     { [Clf]::Press([int[]]$a.resolvedKeys); $routes += 'sendinput' }
-            'focus'        { Assert-Focused ([int64]$a.window); Assert-InputOwner ([int64]$a.window) $request.ownerWindow $request.targetApp $request.ownerApp; $routes += 'focus' }
+            'focus'        { Assert-InputRootOwner ([int64]$a.window); Assert-Focused ([int64]$a.window); Assert-InputOwner ([int64]$a.window) $request.ownerWindow $request.targetApp $request.ownerApp; $routes += 'focus' }
             default        { throw "BAD_ACTION: Unknown action: $($a.type)" }
           }
           $completed += 1
         } catch {
-          $message = $_.Exception.Message
+          # .NET method invocation wraps OCCLUDED_TARGET and similar deliberate
+          # guards; retain the source error code instead of HELPER_ERROR.
+          $message = $_.Exception.GetBaseException().Message
           $code = 'HELPER_ERROR'
           if ($message -match '^([A-Z0-9_]+):\s*(.+)') {
             $code = $Matches[1]
@@ -1301,11 +1638,16 @@ function Handle-Request($request) {
 
 while (($line = [Console]::In.ReadLine()) -ne $null) {
   if ([string]::IsNullOrWhiteSpace($line)) { continue }
+  $requestId = ''
   try {
     $request = $line | ConvertFrom-Json
+    $candidateRequestId = [string]$request.__cosRequestId
+    if ($candidateRequestId -match '^[A-Za-z0-9_-]{1,80}$') { $requestId = $candidateRequestId }
     $reply = Handle-Request $request
   } catch {
-    $message = $_.Exception.Message
+    # A direct act_ui mutation reaches this protocol boundary wrapped by
+    # PowerShell MethodInvocationException. Preserve the native source code.
+    $message = $_.Exception.GetBaseException().Message
     $code = 'HELPER_ERROR'
     if ($message -match '^([A-Z0-9_]+):\s*(.+)') {
       $code = $Matches[1]
@@ -1313,6 +1655,7 @@ while (($line = [Console]::In.ReadLine()) -ne $null) {
     }
     $reply = @{ ok = $false; error_code = $code; message = $message }
   }
+  if (![string]::IsNullOrWhiteSpace($requestId)) { $reply.__cosRequestId = $requestId }
   [Console]::Out.WriteLine(($reply | ConvertTo-Json -Depth 8 -Compress))
   [Console]::Out.Flush()
 }

@@ -34,13 +34,14 @@ const fake = vi.hoisted(() => {
     child.stdout = new Emitter();
     child.stderr = new Emitter();
     child.stdin = {
-      write(_line: string, _encoding: string, callback: (error?: Error | null) => void) {
+      write(line: string, _encoding: string, callback: (error?: Error | null) => void) {
         callback(null);
+        const request = JSON.parse(line) as { __cosRequestId?: string };
         queueMicrotask(() =>
           child.stdout.emit(
             'data',
             Buffer.from(
-              `${JSON.stringify({ ok: 'not-a-boolean', windows: [], screen: { x: 0, y: 0, width: 100, height: 100 } })}\n`
+              `${JSON.stringify({ ok: 'not-a-boolean', __cosRequestId: request.__cosRequestId, windows: [], screen: { x: 0, y: 0, width: 100, height: 100 } })}\n`
             )
           )
         );

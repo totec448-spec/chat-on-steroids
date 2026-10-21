@@ -5163,6 +5163,50 @@ preserves a usable screenshot and its explicit diagnostic. Conversely, `CAPTURE_
 requested UIA controls in the same transaction and reports `screenshot_error` with no image/frame
 authority. Screenshot-only requests, stale geometry and identity failures still fail explicitly;
 two failed observation channels are not success. Offscreen/disabled controls are marked.
+Windows UIA crash containment uses request-bound helper stage/nonce evidence; only an
+attributed native provider crash retires the helper generation. A previously seeded
+explicit HWND may recover one read-only, UI-free observation with exact process
+identity; implicit foreground or unseeded observations never recover by guessing.
+A short per-owner circuit breaker suppresses another UIA call to a crashed provider.
+A native process-creation FILETIME distinguishes recycled PID/HWND tuples; snapshots recheck
+that owner after capture/UI traversal, and window-bound coordinate input rechecks it
+before its first focus and again after focus. Owned popup screenshot frames use the
+actual target process's FILETIME, not an unrelated owner process's token. Indexed
+UIA click fallbacks also recheck process identity immediately before and after
+focus, including when provider reads have changed the owner. Each window-targeted
+keyboard, text, focus or paste request carries a freshly verified process-creation
+identity into the native dispatcher; an owner change fails before native focus/input.
+Acknowledged paste completion is not undone by later cursor diagnostics; any
+missing pointer sample must not induce input replay.
+Cross-process popup input proves both the observed owner and target process
+incarnations before focus/input; keys or activation for a popup whose input root is
+another process need that exact owner's proof. Frames captured separately from popup enumeration
+must not reuse an outdated enumeration owner. Physical coordinate and indexed
+clicks validate the actual pointer hit receiver and foreground mouse capture, not just
+the foreground owner. Only the target or a non-activating popup of its own process
+(owned by it, or ownerless on its GUI thread: menus, dropdown lists, autocomplete)
+may receive them; another process's overlay, even one owned by the target, an
+activatable dialog, or a popup target's owner/sibling fails closed. The native guard checks
+the target HWND's own PID against its root PID, rejecting a target reparented
+under a foreign root; an ordinary captionless owned popup needs an additional
+tool-window/topmost hint and cannot rely on WS_POPUP alone. A drag checks
+only its pointer-down point, so it may end over another window inside the frame. Explicit UIA
+secondary actions verify the owner after provider property and pattern reads and
+before mutation. Lost native input acknowledgements retain an ambiguous completion
+status and must never be reported as exact zero or replayed.
+Once a semantic UI action succeeds, later provider metadata reads must not turn
+its completion receipt into a failure. When both screenshot and accessibility
+channels fail, report an explicit observation failure even if metadata is available;
+preserve the native crash breaker. Recovery fails closed when this process-incarnation
+identity cannot be proved.
+An optional related-popup capture rejected after publication checks must also
+discard its unpublished frame and restore the previous crop-frame selection.
+The standalone native `act_ui` protocol must preserve the original error code
+through PowerShell's method-invocation exception wrapper.
+If HWND reuse is proved by a UI-free breaker preflight, the replacement owner is
+the recovery identity for that observation; changing it again during the crash
+fails `STALE_WINDOW`. Semantic input is never replayed. WPF and unidentified
+providers do not expose selected-range text through the unsafe native read.
 
 The Window2 result also retains native `state` (foreground/open/minimized). `get_window_state`
 accepts bounded `query` (name/automation id), `role` and `max_elements` search options. They imply

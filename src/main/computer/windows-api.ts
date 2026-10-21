@@ -39,8 +39,8 @@ export interface WindowsComputerBackend {
   listWindows: typeof listWindows;
 }
 const labels: Record<UiActionName, string> = { invoke: 'Invoke', toggle: 'Toggle', select: 'Select', expand: 'Expand', collapse: 'Collapse', focus: 'Raise', scroll_up: 'Scroll Up', scroll_down: 'Scroll Down', scroll_left: 'Scroll Left', scroll_right: 'Scroll Right', scroll_into_view: 'Scroll Into View' };
-type Frame = Pick<Screenshot, 'frameId' | 'width' | 'height' | 'windowId'> & { app: string };
-type State = { app: string; frames: Map<string, Frame>; primary?: string; refs: Array<{ ref: string; actions: UiActionName[] }> };
+type Frame = Pick<Screenshot, 'frameId' | 'width' | 'height' | 'windowId'> & { app: string; processStartTime?: string };
+type State = { app: string; processStartTime?: string; frames: Map<string, Frame>; primary?: string; refs: Array<{ ref: string; actions: UiActionName[] }> };
 function publicWindow(value: WindowInfo): WindowsWindow {
   const app = value.app || value.appUserModelId || value.processPath;
   if (!app) throw new ComputerError('WINDOW_IDENTITY_UNAVAILABLE: observe a window with an exact native app identity.');
@@ -66,9 +66,13 @@ export function createWindowsComputerApi(backend: WindowsComputerBackend = { act
   // Pending observations occupy the same bounded map. Replacing an entry fences late results.
   const states = new Map<number, { state?: State }>();
   const parse = <K extends keyof typeof WINDOWS_API_SCHEMAS>(method: K, input: unknown): z.infer<(typeof WINDOWS_API_SCHEMAS)[K]> => WINDOWS_API_SCHEMAS[method].parse(input ?? {}) as z.infer<(typeof WINDOWS_API_SCHEMAS)[K]>;
-  async function current(window: WindowsWindow): Promise<void> {
-    const found = publicWindow((await backend.getWindowState({ window: window.id, includeScreenshot: false, includeUi: false, includeRelated: false })).window);
+  async function current(window: WindowsWindow): Promise<string | undefined> {
+    const live = (await backend.getWindowState({ window: window.id, includeScreenshot: false, includeUi: false, includeRelated: false })).window;
+    const found = publicWindow(live);
     if (found.app !== window.app) throw new ComputerError('STALE_WINDOW: app identity changed; get the window again.');
+    const observed = states.get(window.id)?.state?.processStartTime;
+    if (observed && live.processStartTime !== observed) throw new ComputerError('STALE_WINDOW: native process incarnation changed; get a fresh window state.');
+    return live.processStartTime;
   }
   function stateFor(window: WindowsWindow): State {
     const state = states.get(window.id)?.state;
@@ -90,16 +94,26 @@ export function createWindowsComputerApi(backend: WindowsComputerBackend = { act
     if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x >= frame.width || y >= frame.height) {
       throw new ComputerError('COORDINATE_OUT_OF_BOUNDS: use coordinates inside the selected screenshot region.');
     }
-    const opts = { frameId: frame.frameId, window: frame.windowId, app: frame.app, ...(frame.windowId === window.id ? {} : { ownerWindow: window.id, ownerApp: window.app }) };
+    if (frame.windowId !== window.id && frame.processStartTime && !state.processStartTime) {
+      throw new ComputerError('STALE_WINDOW_STATE: related popup owner process incarnation is unavailable');
+    }
+    const opts = { frameId: frame.frameId, window: frame.windowId, app: frame.app, ...(frame.processStartTime ? { expectedProcessStartTime: frame.processStartTime } : {}), ...(frame.windowId === window.id ? {} : { ownerWindow: window.id, ownerApp: window.app, ...(state.processStartTime ? { expectedOwnerProcessStartTime: state.processStartTime } : {}) }) };
     return { x, y, opts };
   }
   async function mutate(window: WindowsWindow | undefined, action: Action, opts?: Parameters<typeof act>[1]) {
     const expected = window ? states.get(window.id) : undefined;
-    if (window) await current(window);
+    const validatedProcessStartTime = window ? await current(window) : undefined;
     if (window && states.get(window.id) !== expected) throw new ComputerError('STALE_WINDOW_STATE: observation changed before input.');
     // A submitted input consumes observation authority even if the native operation fails.
     states.clear();
-    await backend.act([action], opts ?? (window ? { window: window.id, app: window.app } : {}));
+    const nativeOpts = opts ?? (window ? { window: window.id, app: window.app } : {});
+    // The facade owner is checked above, but related screenshot frames may target a
+    // different process. Never substitute the owner's creation time for that target.
+    const targetProcessStartTime = opts?.expectedProcessStartTime ??
+      (!opts || opts.window === window?.id ? validatedProcessStartTime : undefined);
+    await backend.act([action], window && targetProcessStartTime
+      ? { ...nativeOpts, expectedProcessStartTime: targetProcessStartTime }
+      : nativeOpts);
   }
   return {
     target: 'windows' as const,
@@ -137,7 +151,7 @@ export function createWindowsComputerApi(backend: WindowsComputerBackend = { act
       if (states.get(args.window.id) !== pending) throw new ComputerError('STALE_WINDOW_STATE: observation was superseded.');
       const window = publicWindow(result.window);
       if (window.app !== args.window.app) throw new ComputerError('STALE_WINDOW: app identity changed.');
-      const state: State = { app: window.app, frames: new Map(), refs: result.elements.map(e => ({ ref: e.ref, actions: [...(e.actions ?? [])] })) };
+      const state: State = { app: window.app, processStartTime: result.window.processStartTime, frames: new Map(), refs: result.elements.map(e => ({ ref: e.ref, actions: [...(e.actions ?? [])] })) };
       const screenshots: WindowsWindowState['screenshots'] = [];
       // EnumWindows supplies related windows from highest to lowest z-order.
       const shots = [result.screenshot, ...(result.related ?? []).map(r => r.screenshot).reverse()];
@@ -146,7 +160,7 @@ export function createWindowsComputerApi(backend: WindowsComputerBackend = { act
         const id = `frame-${shot.frameId}`;
         const frameWindow = shot === result.screenshot ? result.window : result.related?.find(r => r.screenshot === shot)?.window;
         if (!frameWindow) throw new ComputerError('WINDOW_IDENTITY_UNAVAILABLE: screenshot has no window owner.');
-        state.frames.set(id, { frameId: shot.frameId, width: shot.width, height: shot.height, windowId: shot.windowId, app: publicWindow(frameWindow).app });
+        state.frames.set(id, { frameId: shot.frameId, width: shot.width, height: shot.height, windowId: shot.windowId, app: publicWindow(frameWindow).app, processStartTime: frameWindow.processStartTime });
         if (shot === result.screenshot) state.primary = id;
         screenshots.push({ id, url: `data:image/png;base64,${shot.data}`, width: shot.width, height: shot.height, originX: shot.region.x, originY: shot.region.y, zIndex: screenshots.length });
       }

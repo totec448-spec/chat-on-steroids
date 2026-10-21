@@ -66,10 +66,11 @@ public static class AccessibilityFixture {
       popup.RootVisual = new Border { Width = 100, Height = 50, Background = Brushes.Green, Child = new TextBlock { Text = "Owned popup" } };
       var unrelated = new Window { Title = "Same process unrelated fixture", Width = 100, Height = 100, Left = -11000, Top = -11000, ShowActivated = false, ShowInTaskbar = false }; unrelated.Show();
       Console.WriteLine(targetHandle.ToInt64() + "," + popup.Handle.ToInt64() + "," + new WindowInteropHelper(unrelated).Handle.ToInt64()); Console.Out.Flush();
+      Action closeOwnedWindows = delegate { popup.Dispose(); unrelated.Close(); window.Close(); };
       var reader = new Thread(delegate() {
         string command;
         while ((command = Console.ReadLine()) != null) {
-          if (command == "quit") { window.Dispatcher.Invoke(new Action(delegate { popup.Dispose(); unrelated.Close(); window.Close(); })); return; }
+          if (command == "quit") { window.Dispatcher.Invoke(closeOwnedWindows); return; }
           window.Dispatcher.Invoke(new Action(delegate {
             if (command == "document") { document.Visibility = Visibility.Visible; window.UpdateLayout(); }
             if (command == "browser") { window.BrowserRoot = true; document.Visibility = Visibility.Collapsed; window.UpdateLayout(); }
@@ -77,6 +78,9 @@ public static class AccessibilityFixture {
             Console.Out.Flush();
           }));
         }
+        // A crashed probe closes its redirected stdin. Treat EOF exactly like quit so the
+        // owned WPF windows cannot outlive the host and keep inherited stdio handles open.
+        window.Dispatcher.Invoke(closeOwnedWindows);
       }); reader.IsBackground = true; reader.Start();
     };
     application.Run(window);
@@ -94,6 +98,16 @@ describe.runIf(process.platform === 'win32')('Windows semantic accessibility act
 $runtime = [System.Runtime.InteropServices.RuntimeEnvironment]::GetRuntimeDirectory()
 $wpf = Join-Path $runtime 'WPF'
 $refs = @('System.dll', (Join-Path $runtime 'System.Xaml.dll'), (Join-Path $wpf 'PresentationFramework.dll'), (Join-Path $wpf 'PresentationCore.dll'), (Join-Path $wpf 'WindowsBase.dll'), (Join-Path $wpf 'UIAutomationProvider.dll'), (Join-Path $wpf 'UIAutomationTypes.dll'))
+$wpfProvider = [pscustomobject]@{ Current = [pscustomobject]@{ FrameworkId = 'WPF' } }
+$otherProvider = [pscustomobject]@{ Current = [pscustomobject]@{ FrameworkId = 'Win32' } }
+$unknownProvider = [pscustomobject]@{ Current = [pscustomobject]@{ FrameworkId = '' } }
+$unreadableCurrent = New-Object PSObject
+$unreadableCurrent | Add-Member -MemberType ScriptProperty -Name FrameworkId -Value { throw 'provider unavailable' }
+$unreadableProvider = [pscustomobject]@{ Current = $unreadableCurrent }
+if (-not (Test-SelectedRangeUnsafe $wpfProvider)) { throw 'WPF selected-range read was not suppressed' }
+if (Test-SelectedRangeUnsafe $otherProvider) { throw 'known non-WPF selected-range read was suppressed' }
+if (-not (Test-SelectedRangeUnsafe $unknownProvider)) { throw 'unknown provider allowed selected-range read' }
+if (-not (Test-SelectedRangeUnsafe $unreadableProvider)) { throw 'throwing provider allowed selected-range read' }
 $exe = Join-Path $PSScriptRoot 'fixture.exe'
 Add-Type -TypeDefinition ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'fixture.cs'))) -ReferencedAssemblies $refs -OutputAssembly $exe -OutputType WindowsApplication
 $info = New-Object System.Diagnostics.ProcessStartInfo
@@ -125,8 +139,9 @@ try {
   }
   if ('invoke' -notin $rows.invoke.actions -or 'toggle' -notin $rows.toggle.actions -or 'select' -notin $rows.second.actions -or 'expand' -notin $rows.expand.actions -or 'scroll_down' -notin $rows.scroll.actions) { throw 'supported semantic actions not projected' }
   if ($rows.second.depth -le $rows.list.depth) { throw 'hierarchy depth not retained' }
-  if ($snapshot.document_text -notmatch 'first' -or $snapshot.selected_text -ne 'first') { throw ('text context missing: ' + ($snapshot | ConvertTo-Json -Depth 8 -Compress)) }
-  if (($snapshot.document_text.Length + $snapshot.selected_text.Length) -ne 8000) { throw 'long document text was not bounded to the shared budget' }
+  # WPF TextBox selection-range reads can hard-crash UIA; full document text remains readable.
+  if ($snapshot.document_text -notmatch '^first' -or $null -ne $snapshot.selected_text) { throw ('text context missing: ' + ($snapshot | ConvertTo-Json -Depth 8 -Compress)) }
+  if ($snapshot.document_text.Length -ne 8000) { throw 'long document text was not bounded to the shared budget' }
   function Act([string]$key, [string]$action) {
     $row = $rows[$key]
     return Handle-Request @{ op = 'act'; actions = @(@{ type = 'ui_action'; window = $id; snapshotId = $snapshot.snapshotId; runtimeKey = $row.runtimeKey; action = $action }) }
@@ -182,6 +197,7 @@ try {
   $page = Handle-Request @{ op = 'snapshot'; id = $id; includeScreenshot = $false; includeUi = $true; maxResults = 100 }
   if (-not @($page.elements | Where-Object { $_.automationId -eq 'document' -and $_.role -eq 'Document' }).Count) { throw 'document fixture provider missing' }
   if ($page.document_text -notmatch '^Page document body') { throw 'earlier editor displaced the page document text' }
+  if ($null -ne $page.selected_text) { throw 'WPF document selected-range guard was not applied' }
   if (($page.document_text.Length + $page.selected_text.Length) -gt 8000) { throw 'document text exceeded shared budget' }
   # A browser without an observed page must not label its toolbar editor as
   # document text. The same real UIA editor remains available in the tree.

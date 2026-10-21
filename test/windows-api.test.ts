@@ -40,12 +40,39 @@ describe('Windows Window2 interface', () => {
     expect(backend.act).toHaveBeenLastCalledWith([{ type: 'click', x: 15, y: 15, button: 'right', count: 2 }], { frameId: 2, window: 43, app: window.app, ownerWindow: 42, ownerApp: window.app });
     await expect(api.click({ window, x: 5, y: 5 })).rejects.toThrow('STALE_WINDOW_STATE');
   });
+  it('uses the popup process incarnation rather than the unchanged owner for cross-process popup coordinates', async () => {
+    const { api, backend, result } = fixture();
+    const ownerStart = '133000000000000101';
+    const popupStart = '133000000000000202';
+    result.window = { ...nativeWindow, processStartTime: ownerStart };
+    result.related = [{
+      window: { ...nativeWindow, id: 43, processStartTime: popupStart },
+      screenshot: { ...shot, frameId: 2, windowId: 43, region: { x: 250, y: 350, width: 150, height: 150 }, width: 75, height: 75 }
+    }];
+    await api.get_window_state({ window });
+    await api.click({ window, screenshotId: 'frame-2', x: 15, y: 15 });
+    expect(backend.act).toHaveBeenCalledWith(
+      [expect.objectContaining({ type: 'click', x: 15, y: 15 })],
+      expect.objectContaining({ window: 43, ownerWindow: 42, expectedProcessStartTime: popupStart, expectedOwnerProcessStartTime: ownerStart })
+    );
+  });
+  it('rejects native popup input when its target token exists but its owner incarnation is unproven', async () => {
+    const { api, backend, result } = fixture();
+    result.window = { ...nativeWindow };
+    result.related = [{ window: { ...nativeWindow, id: 43, processStartTime: '133000000000000303' }, screenshot: { ...shot, frameId: 2, windowId: 43 } }];
+    await api.get_window_state({ window });
+    await expect(api.click({ window, screenshotId: 'frame-2', x: 15, y: 15 })).rejects.toThrow('STALE_WINDOW_STATE');
+    expect(backend.act).not.toHaveBeenCalled();
+  });
   it('reports focus, incomplete accessibility and unavailable text while retaining usable pixels', async () => {
     const { api, result, backend } = fixture();
     Object.assign(result, { uiTruncated: true });
     result.elements[0] = { ...result.elements[0]!, offscreen: true, enabled: false };
     const state = await api.get_window_state({ window, include_text: true });
-    expect(state).toMatchObject({ focused: false, accessibility: { truncated: true } });
+    expect(state).toMatchObject({
+      focused: false,
+      accessibility: { truncated: true, document_text: 'Document', selected_text: 'Doc' }
+    });
     expect(state.accessibility?.tree).toContain('[offscreen]');
     expect(state.accessibility?.tree).toContain('[disabled]');
     // Keep frame ids/dimensions before the possibly long accessibility body.
@@ -97,6 +124,43 @@ describe('Windows Window2 interface', () => {
     await api.type_text({ window, text: 'first\nsecond' });
     expect(backend.act).toHaveBeenLastCalledWith([{ type: 'paste', text: 'first\nsecond' }], { window: 42, app: window.app });
   });
+  it('carries the observed process incarnation across keyboard and focus action preflight', async () => {
+    const { api, backend, result } = fixture();
+    const incarnation = '133000000000000101';
+    result.window = { ...nativeWindow, processStartTime: incarnation };
+    await api.get_window_state({ window });
+    await api.press_key({ window, key: 'Control_L+A' });
+    expect(backend.act).toHaveBeenLastCalledWith(
+      [{ type: 'keypress', keys: ['Control_L', 'A'] }],
+      expect.objectContaining({ window: 42, app: window.app, expectedProcessStartTime: incarnation })
+    );
+    await api.type_text({ window, text: 'new text' });
+    expect(backend.act).toHaveBeenLastCalledWith(
+      [{ type: 'type', text: 'new text' }],
+      expect.objectContaining({ window: 42, app: window.app, expectedProcessStartTime: incarnation })
+    );
+    await api.activate_window({ window });
+    expect(backend.act).toHaveBeenLastCalledWith(
+      [{ type: 'focus', window: 42 }],
+      expect.objectContaining({ window: 42, app: window.app, expectedProcessStartTime: incarnation })
+    );
+  });
+  it('rejects a coordinate click when the same HWND, PID and app refer to a new process incarnation', async () => {
+    const { api, backend } = fixture();
+    const original = '133000000000000101';
+    const recycled = '133000000000000202';
+    const prior = nativeWindow.processStartTime;
+    nativeWindow.processStartTime = original;
+    await api.get_window_state({ window });
+    vi.mocked(backend.getWindowState).mockResolvedValueOnce({
+      window: { ...nativeWindow, processStartTime: recycled },
+      screenshot: null, snapshotId: 0, uiUnavailable: null, elements: []
+    });
+    await expect(api.click({ window, screenshotId: 'frame-1', x: 10, y: 10 })).rejects.toThrow('STALE_WINDOW');
+    expect(backend.act).not.toHaveBeenCalled();
+    nativeWindow.processStartTime = prior;
+  });
+
   it('rejects wrong app identities and screenshot ids from a replaced observation', async () => {
     const { api, result, backend } = fixture();
     await expect(api.get_window({ id: 42, app: 'wrong' })).rejects.toThrow('WINDOW_NOT_FOUND');

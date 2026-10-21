@@ -14,6 +14,7 @@
  */
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -32,6 +33,7 @@ export const MAX_SCREENSHOT_WIDTH = 2560;
 const HELPER_TIMEOUT_MS = 30_000;
 const HELPER_STARTUP_GRACE_MS = 10_000;
 const MAX_FRAMES = 16;
+const WINDOWS_UIA_CRASH_BREAKER_MS = 60_000;
 /** Per-image ceiling; the final Desktop tool layer separately measures text + image together. */
 export const MAX_SCREENSHOT_PNG_BYTES = Math.floor((((8 * 1024 * 1024) - (64 * 1024)) * 3) / 4);
 
@@ -73,6 +75,8 @@ export class ComputerError extends Error {
   }
 }
 
+class UiaProcessCrashError extends ComputerError {}
+
 export interface Rect {
   x: number;
   y: number;
@@ -85,6 +89,8 @@ export interface WindowInfo {
   /** Windows native app identity (AUMID or exact process image path). */
   app?: string;
   processId?: number;
+  /** Native creation FILETIME distinguishes recycled process IDs. */
+  processStartTime?: string;
   processPath?: string;
   appUserModelId?: string;
   dpi?: number;
@@ -208,6 +214,8 @@ interface PendingHelperRequest {
   resolve: (value: Record<string, any>) => void;
   reject: (reason: Error) => void;
   timer: NodeJS.Timeout;
+  /** Windows helper only: transport-owned nonce correlating stderr UIA stages to this request. */
+  requestId?: string;
 }
 
 interface HelperRuntime {
@@ -241,6 +249,8 @@ const helperRetirements = new Set<Promise<void>>();
 // Transport-owned metadata, never accepted from the native protocol. Capture it before
 // resolving a reply: image I/O may yield long enough for another helper to start.
 const helperReplyGeneration = new WeakMap<object, number>();
+const windowsUiaCrashBreakers = new Map<number, { identity: string; until: number; message: string }>();
+const windowsKnownWindowIdentities = new Map<number, string>();
 
 function stampHelperReply(reply: Record<string, any>, generation: number): Record<string, any> {
   helperReplyGeneration.set(reply, generation);
@@ -341,8 +351,98 @@ function readableHelperFailure(stderr: string): string {
     .replace(/^#< CLIXML[\s\S]*/m, '')
     .trim()
     .split(/\r?\n/)
-    .find((line) => line.trim().length > 0);
+    .find((line) => line.trim().length > 0 && !line.startsWith('UIA_STAGE:'));
   return clean?.slice(0, 300) ?? 'the helper process exited unexpectedly';
+}
+
+function windowsUiaAccessViolationStage(stderr: string, requestId: string): string | null {
+  if (!/(?:System\.)?AccessViolationException|Attempted to read or write protected memory|protected memory/i.test(stderr)) {
+    return null;
+  }
+  const stages = [...stderr.matchAll(/UIA_STAGE:([A-Za-z0-9_-]+):([A-Za-z0-9_.-]+)/g)];
+  // stdout replies and stderr diagnostics are independent pipes, so clearing stderr at a request
+  // boundary is not enough provenance: a late stage line from request N can arrive during N+1.
+  // Only a stage carrying the transport-owned nonce for the pending request may classify its AV.
+  return stages.filter((match) => match[1] === requestId).at(-1)?.[2] ?? null;
+}
+
+function windowsHelperProcessFailure(stderr: string, requestId: string): ComputerError {
+  const stage = windowsUiaAccessViolationStage(stderr, requestId);
+  if (stage) {
+    return new UiaProcessCrashError(
+      `UIA_PROCESS_CRASH: Windows UI Automation helper terminated after an access violation at ${stage}.`
+    );
+  }
+  return new ComputerError(`Desktop helper failed: ${readableHelperFailure(stderr)}`);
+}
+
+function windowsUiaCrashUnavailable(error: unknown): { code: string; message: string } | null {
+  // Transport-owned provenance: protocol-visible error_code/message text can never authorize
+  // crash recovery. Only the private error subclass minted after helper exit/retirement does.
+  if (!(error instanceof UiaProcessCrashError)) return null;
+  const message = error.message;
+  const stage = /access violation at ([A-Za-z0-9_.-]+)/i.exec(message)?.[1];
+  return {
+    code: 'UIA_PROCESS_CRASH',
+    message: (
+      `Windows UI Automation crashed${stage ? ` during ${stage}` : ''}. ` +
+      'The window remains available, but accessibility text and semantic controls are temporarily disabled for this exact window.'
+    ).slice(0, 500)
+  };
+}
+
+function windowsWindowIdentity(window: WindowInfo): string {
+  return [
+    window.id,
+    window.processId ?? '',
+    window.app ?? '',
+    window.processPath ?? '',
+    window.appUserModelId ?? '',
+    window.process ?? '',
+    window.processStartTime ?? ''
+  ].join('\u001f');
+}
+
+function rememberWindowsUiaCrashIdentity(
+  windowId: number,
+  identity: string,
+  unavailable: { code: string; message: string }
+): void {
+  windowsUiaCrashBreakers.delete(windowId);
+  windowsUiaCrashBreakers.set(windowId, {
+    identity,
+    until: Date.now() + WINDOWS_UIA_CRASH_BREAKER_MS,
+    message: unavailable.message
+  });
+  while (windowsUiaCrashBreakers.size > 64) {
+    const oldest = windowsUiaCrashBreakers.keys().next().value as number | undefined;
+    if (oldest === undefined) break;
+    windowsUiaCrashBreakers.delete(oldest);
+  }
+}
+
+function rememberWindowsUiaCrash(window: WindowInfo, unavailable: { code: string; message: string }): void {
+  rememberWindowsUiaCrashIdentity(window.id, windowsWindowIdentity(window), unavailable);
+}
+
+function rememberWindowsWindowIdentity(window: WindowInfo): void {
+  windowsKnownWindowIdentities.delete(window.id);
+  windowsKnownWindowIdentities.set(window.id, windowsWindowIdentity(window));
+  while (windowsKnownWindowIdentities.size > 256) {
+    const oldest = windowsKnownWindowIdentities.keys().next().value as number | undefined;
+    if (oldest === undefined) break;
+    windowsKnownWindowIdentities.delete(oldest);
+  }
+}
+
+function activeWindowsUiaCrash(windowId: number): { identity: string; until: number; message: string } | null {
+  const breaker = windowsUiaCrashBreakers.get(windowId);
+  if (!breaker) return null;
+  if (breaker.until <= Date.now()) {
+    windowsUiaCrashBreakers.delete(windowId);
+    return null;
+  }
+  return breaker;
 }
 
 /**
@@ -432,8 +532,7 @@ async function startHelper(): Promise<HelperRuntime> {
             if (
               parsed === null ||
               typeof parsed !== 'object' ||
-              Array.isArray(parsed) ||
-              (((parsed as Record<string, unknown>)['ok'] !== true) && (parsed as Record<string, unknown>)['ok'] !== false)
+              Array.isArray(parsed)
             ) {
               rejectAfterHelperRetirement(
                 runtime,
@@ -443,6 +542,23 @@ async function startHelper(): Promise<HelperRuntime> {
               continue;
             }
             const reply = parsed as Record<string, any>;
+            if (reply['__cosRequestId'] !== pending.requestId) {
+              rejectAfterHelperRetirement(
+                runtime,
+                pending,
+                new ComputerError('The desktop helper returned a response for a different request.')
+              );
+              continue;
+            }
+            delete reply['__cosRequestId'];
+            if (reply['ok'] !== true && reply['ok'] !== false) {
+              rejectAfterHelperRetirement(
+                runtime,
+                pending,
+                new ComputerError('The desktop helper returned a malformed protocol response.')
+              );
+              continue;
+            }
             runtime.ready = true;
             clearTimeout(pending.timer);
             runtime.pending = null;
@@ -484,7 +600,9 @@ async function startHelper(): Promise<HelperRuntime> {
             rejectAfterHelperRetirement(
               runtime,
               pending,
-              new ComputerError(`Desktop helper process error: ${error.message}`)
+              windowsUiaAccessViolationStage(runtime.stderrTail, pending.requestId ?? '')
+                ? windowsHelperProcessFailure(runtime.stderrTail, pending.requestId ?? '')
+                : new ComputerError(`Desktop helper process error: ${error.message}`)
             );
           } else {
             void retireHelper(runtime);
@@ -497,7 +615,7 @@ async function startHelper(): Promise<HelperRuntime> {
           if (pending) {
             clearTimeout(pending.timer);
             runtime.pending = null;
-            pending.reject(new ComputerError(`Desktop helper failed: ${readableHelperFailure(runtime.stderrTail)}`));
+            pending.reject(windowsHelperProcessFailure(runtime.stderrTail, pending.requestId ?? ''));
           }
         });
       });
@@ -755,6 +873,8 @@ export async function stopComputerHelper(): Promise<void> {
   macOSAddonStarting = null;
   uiRefs.clear();
   frames.clear();
+  windowsUiaCrashBreakers.clear();
+  windowsKnownWindowIdentities.clear();
   lastFrame = null;
   if (addonRuntime) {
     const pending = addonRuntime.pending;
@@ -793,13 +913,22 @@ async function sendHelperRequest(request: Record<string, unknown>, expected?: Ex
 
   return new Promise<Record<string, any>>((resolve, reject) => {
     let pending: PendingHelperRequest;
+    // Windows UIA crash provenance crosses independent stdout/stderr pipes, and a launched child
+    // can even inherit the helper's stdio if launch isolation regresses. Give each Windows stdio
+    // request a transport-owned nonce instead of inferring provenance from ordering. macOS's
+    // subprocess helper has a separate protocol and does not participate in Windows UIA recovery.
+    const requestId = process.platform === 'win32' ? randomUUID() : undefined;
     const timer = setTimeout(() => {
       if (runtime.pending !== pending) return;
       rejectAfterHelperRetirement(runtime, pending, new ComputerError('The desktop helper did not answer in time.'));
     }, helperTimeoutMs(request) + (runtime.ready ? 0 : HELPER_STARTUP_GRACE_MS));
-    pending = { resolve, reject, timer };
+    pending = { resolve, reject, timer, requestId };
+    // stderr is diagnostic state for the in-flight request. Do not let a prior request's UIA
+    // stage marker classify a later capture/input process crash as UIA corruption.
+    runtime.stderrTail = '';
     runtime.pending = pending;
-    runtime.child.stdin.write(`${JSON.stringify(request)}\n`, 'utf8', (error) => {
+    const wireRequest = requestId ? { ...request, __cosRequestId: requestId } : request;
+    runtime.child.stdin.write(`${JSON.stringify(wireRequest)}\n`, 'utf8', (error) => {
       if (!error) return;
       if (runtime.pending !== pending) return;
       rejectAfterHelperRetirement(
@@ -845,6 +974,7 @@ interface Frame {
   width: number;
   height: number;
   windowId: number | null;
+  processStartTime: string | null;
   windowGeometry: Rect | null;
   /** Exact active-display rectangles captured with a screen frame; null for window frames. */
   displayTopology: Rect[] | null;
@@ -939,7 +1069,9 @@ function frameById(id: number | undefined): Frame | null {
 
 export async function listWindows(): Promise<{ windows: WindowInfo[]; screen: Rect }> {
   const reply = await runHelper({ op: 'windows' });
-  return { windows: (reply['windows'] as WindowInfo[]) ?? [], screen: reply['screen'] as Rect };
+  const windows = (reply['windows'] as WindowInfo[]) ?? [];
+  if (process.platform === 'win32') for (const window of windows) rememberWindowsWindowIdentity(window);
+  return { windows, screen: reply['screen'] as Rect };
 }
 
 /** Installed app identities come from the Windows Shell, never model-supplied paths. */
@@ -947,7 +1079,11 @@ export async function listDesktopApps(opts: { match?: string; limit?: number } =
   if (process.platform !== 'win32') throw new ComputerError('APPS_UNSUPPORTED: installed app discovery is currently Windows only.');
   return exclusive(async () => {
     const reply = await runHelper({ op: 'apps', match: opts.match ?? '', limit: Math.min(4096, Math.max(1, opts.limit ?? 60)) });
-    return { apps: Array.isArray(reply['apps']) ? reply['apps'] : [], truncated: reply['truncated'] === true };
+    const apps = Array.isArray(reply['apps']) ? (reply['apps'] as DesktopApp[]) : [];
+    for (const app of apps) {
+      for (const window of app.windows ?? []) rememberWindowsWindowIdentity(window);
+    }
+    return { apps, truncated: reply['truncated'] === true };
   });
 }
 
@@ -960,6 +1096,7 @@ export async function activeWindow(): Promise<{ window: WindowInfo | null; scree
   const reply = await runHelper({ op: 'active' });
   const value = reply['window'];
   const window = value && typeof value === 'object' ? (value as WindowInfo) : null;
+  if (process.platform === 'win32' && window) rememberWindowsWindowIdentity(window);
   return { window, screen: reply['screen'] as Rect };
 }
 
@@ -1094,41 +1231,134 @@ export async function getWindowState(opts: {
   return exclusive(async () => {
     const includeScreenshot = opts.includeScreenshot !== false;
     const includeUi = opts.includeUi !== false;
+    const requestedWindowsIdentity = process.platform === 'win32' && opts.window !== undefined
+      ? windowsKnownWindowIdentities.get(opts.window) ?? null
+      : null;
     const limit = Math.min(MAX_SCREENSHOT_WIDTH, Math.max(320, Math.floor(opts.maxWidth ?? DEFAULT_SCREENSHOT_WIDTH)));
     const dir = includeScreenshot ? await fs.mkdtemp(path.join(os.tmpdir(), 'clf-shot-')) : null;
     const file = dir ? path.join(dir, 'screen.png') : null;
+    // Snapshot replies are one externally atomic observation. Failed later
+    // popup/parent validation must not expose image frames or semantic refs
+    // which were created earlier but never returned to the caller.
+    const priorFrames = new Map(frames);
+    const priorLastFrame = lastFrame;
+    const priorUiRefs = new Map(uiRefs);
     try {
-      // Target lookup, pixels and UIA are one helper transaction. Besides saving two native
-      // round trips, this is what gives every semantic ref and pixel coordinate one shared
-      // snapshot identity instead of stitching together observations from different moments.
-      const reply = await runHelper({
+      const snapshotRequest = (requestUi: boolean, requestScreenshot = includeScreenshot): Record<string, unknown> => ({
         op: 'snapshot',
         ...(opts.window === undefined ? {} : { id: opts.window }),
-        includeScreenshot,
-        includeUi,
+        includeScreenshot: requestScreenshot,
+        includeUi: requestUi,
         ...(opts.query === undefined ? {} : { query: opts.query }),
         ...(opts.role === undefined ? {} : { role: opts.role }),
         includeRelated: process.platform === 'win32' && opts.includeRelated === true,
         maxWidth: limit,
         maxResults: Math.min(100, Math.max(1, Math.floor(opts.maxElements ?? 60))),
-        ...(file ? { file } : {})
+        ...(requestScreenshot && file ? { file } : {})
       });
+      let reply: Record<string, any> | null = null;
+      let forcedUiUnavailable: { code: string; message: string } | null = null;
+      // A breaker preflight can establish a replacement HWND owner for this observation.
+      // Keep the entry-time identity for the unseeded guard; pin recovery to the newly
+      // proved owner only after a successful UI-free preflight.
+      let recoveryWindowsIdentity = requestedWindowsIdentity;
+      let recoveryScreenshotFailure: { code: string; message: string } | undefined;
+      const hasIncarnation = (row: WindowInfo): boolean => /^\d{8,20}$/.test(row.processStartTime ?? '');
+
+      // An access-violating UIA provider can corrupt the PowerShell/.NET helper process.
+      // Do not keep invoking that exact provider in a crash loop. Re-prove the HWND's app/process
+      // identity with a UI-free snapshot; only the same identity inherits the short breaker.
+      if (process.platform === 'win32' && includeUi && opts.window !== undefined) {
+        const breaker = activeWindowsUiaCrash(opts.window);
+        if (breaker) {
+          // Resolve owner identity without relying on a working compositor.
+          const candidate = await runHelper(snapshotRequest(false, false));
+          const candidateWindow = candidate['window'];
+          if (!candidateWindow || typeof candidateWindow !== 'object') {
+            throw new ComputerError('WINDOW_NOT_FOUND: no matching visible window is available');
+          }
+          if (!hasIncarnation(candidateWindow as WindowInfo)) {
+            throw new ComputerError('STALE_WINDOW: native process incarnation is unavailable; refresh window discovery before observing.');
+          }
+          if (windowsWindowIdentity(candidateWindow as WindowInfo) === breaker.identity) {
+            // Retain requested pixels, but reject an owner change after the identity preflight.
+            reply = includeScreenshot ? await runHelper(snapshotRequest(false)) : candidate;
+            if (windowsWindowIdentity(reply['window'] as WindowInfo) !== breaker.identity) {
+              throw new ComputerError('STALE_WINDOW: window identity changed during UIA breaker observation.');
+            }
+            forcedUiUnavailable = { code: 'UIA_PROCESS_CRASH', message: breaker.message };
+          } else {
+            windowsUiaCrashBreakers.delete(opts.window);
+            recoveryWindowsIdentity = windowsWindowIdentity(candidateWindow as WindowInfo);
+          }
+        }
+      }
+
+      // Target lookup, pixels and UIA are one helper transaction. Besides saving two native
+      // round trips, this is what gives every semantic ref and pixel coordinate one shared
+      // snapshot identity instead of stitching together observations from different moments.
+      if (!reply) {
+        try {
+          reply = await runHelper(snapshotRequest(includeUi));
+        } catch (error) {
+          const crash = process.platform === 'win32' && includeUi ? windowsUiaCrashUnavailable(error) : null;
+          if (!crash) throw error;
+
+          // A first direct HWND observation (or an implicit foreground target) may not
+          // have a previously observed native owner. Re-resolving after helper death
+          // cannot prove it is the same process. Fail closed instead of publishing a
+          // replacement owner's pixels/window under the crashed provider's receipt.
+          if (opts.window === undefined || requestedWindowsIdentity === null ||
+              !/^\d{8,20}$/.test(requestedWindowsIdentity.split('\u001f').at(-1) ?? '')) throw error;
+
+          // The corrupted helper has already exited/been retired. Start a fresh generation and
+          // retry this observation exactly once without UIA. This preserves truthful pixels and
+          // window metadata while never continuing execution inside the corrupted process.
+          try {
+            reply = await runHelper(snapshotRequest(false));
+          } catch (captureError) {
+            // A compositor failure must not erase the original provider crash.
+            if (!includeScreenshot || !String(captureError).includes('CAPTURE_FAILED')) throw captureError;
+            recoveryScreenshotFailure = { code: 'CAPTURE_FAILED', message: String(captureError).slice(0, 500) };
+            reply = await runHelper(snapshotRequest(false, false));
+          }
+          const safeWindow = reply['window'];
+          if (!safeWindow || typeof safeWindow !== 'object') {
+            throw new ComputerError('WINDOW_NOT_FOUND: no matching visible window is available');
+          }
+          if (!hasIncarnation(safeWindow as WindowInfo) ||
+              windowsWindowIdentity(safeWindow as WindowInfo) !== recoveryWindowsIdentity) {
+            throw new ComputerError(
+              'STALE_WINDOW: window identity changed during UIA crash recovery. Get the current window again before observing or acting.'
+            );
+          }
+          forcedUiUnavailable = crash;
+          rememberWindowsUiaCrash(safeWindow as WindowInfo, crash);
+        }
+      }
       const value = reply['window'];
       const window = value && typeof value === 'object' ? (value as WindowInfo) : null;
       if (!window) throw new ComputerError('WINDOW_NOT_FOUND: no matching visible window is available');
+      if (process.platform === 'win32') rememberWindowsWindowIdentity(window);
       const pixelFailure = reply['screenshotUnavailable'] as Record<string, unknown> | undefined;
-      const screenshotUnavailable = includeScreenshot && includeUi && pixelFailure?.code === 'CAPTURE_FAILED' && typeof pixelFailure.message === 'string'
-        ? { code: 'CAPTURE_FAILED', message: pixelFailure.message.slice(0, 500) } : undefined;
+      const screenshotUnavailable = recoveryScreenshotFailure ?? (includeScreenshot && includeUi && pixelFailure?.code === 'CAPTURE_FAILED' && typeof pixelFailure.message === 'string'
+        ? { code: 'CAPTURE_FAILED', message: pixelFailure.message.slice(0, 500) } : undefined);
       const shot = file && !screenshotUnavailable ? await screenshotFromReply(reply, file, window.id) : null;
       const frame = shot ? frameById(shot.frameId) : null;
       const unavailableValue = reply['uiUnavailable'];
-      const uiUnavailable =
+      const uiUnavailable = forcedUiUnavailable ?? (
         unavailableValue && typeof unavailableValue === 'object'
           ? {
               code: String((unavailableValue as Record<string, unknown>)['code'] ?? 'UI_UNAVAILABLE'),
               message: String((unavailableValue as Record<string, unknown>)['message'] ?? 'UI controls are unavailable')
             }
-          : null;
+          : null
+      );
+      if (includeScreenshot && includeUi && screenshotUnavailable && uiUnavailable) {
+        // A metadata-only fallback is not successful observation when both requested
+        // channels failed. Install the UIA crash breaker first, then fail explicitly.
+        throw new ComputerError(`OBSERVATION_FAILED: ${screenshotUnavailable.code}: ${screenshotUnavailable.message}; ${uiUnavailable.code}: ${uiUnavailable.message}`);
+      }
       const found = includeUi && uiUnavailable === null
         ? await findUiLocked({ window: window.id, maxResults: opts.maxElements ?? 60 }, frame, reply)
         : { window: window.id, snapshotId: null, elements: [] as UiElementInfo[], accessibility: undefined };
@@ -1136,16 +1366,48 @@ export async function getWindowState(opts: {
       if (process.platform === 'win32' && opts.includeRelated && !screenshotUnavailable && Array.isArray(reply['relatedWindows'])) {
         for (const relatedWindow of (reply['relatedWindows'] as WindowInfo[]).slice(0, 3)) {
           if (!Number.isSafeInteger(relatedWindow.id) || relatedWindow.id <= 0 || relatedWindow.id === window.id) continue;
+          // A rejected optional popup capture is not part of the published observation.
+          // In particular, screenshotLocked already remembers its frame before we compare
+          // its process incarnation with the earlier popup enumeration.
+          const beforeRelatedFrames = new Map(frames);
+          const beforeRelatedLastFrame = lastFrame;
           try {
             const relatedShot = includeScreenshot
-              ? await screenshotLocked({ window: relatedWindow.id, ownerWindow: window.id, maxWidth: limit }, undefined,
+              ? await screenshotLocked({ window: relatedWindow.id, ownerWindow: window.id,
+                  expectedOwnerProcessStartTime: window.processStartTime, maxWidth: limit }, undefined,
                   { generation: generationOfReply(reply), code: 'STALE_FRAME' })
               : null;
+            // Enumeration precedes this distinct native capture; reject an
+            // incarnation swap instead of publishing B2 pixels under B1 metadata.
+            if (relatedShot && (!/^\d{8,20}$/.test(relatedWindow.processStartTime ?? '') ||
+                (frameById(relatedShot.frameId)?.processStartTime ?? null) !== relatedWindow.processStartTime)) {
+              throw new ComputerError('STALE_FRAME: related popup changed process incarnation between enumeration and capture');
+            }
             related.push({ window: relatedWindow, screenshot: relatedShot });
           } catch (err) {
+            // An expired child alone is optional. A recycled *original parent*
+            // invalidates the identity of the complete observation, including
+            // already captured primary pixels, refs and related metadata.
+            if (String(err).includes('parent process incarnation')) throw err;
+            // Restore only this rejected popup's unpublished frame effects. Do not
+            // resurrect frames if the native helper generation changed mid-capture.
+            if (isHelperGenerationActive(generationOfReply(reply))) {
+              frames.clear();
+              for (const [id, frame] of beforeRelatedFrames) frames.set(id, frame);
+              lastFrame = beforeRelatedLastFrame;
+            }
             // A disappearing popup must not discard the useful main-window observation.
             // Capture rechecks native ownership; never substitute arbitrary screen pixels.
             related.push({ window: relatedWindow, screenshot: null, error: (err instanceof Error ? err.message : String(err)).slice(0, 500) });
+          }
+        }
+        if (related.length > 0 && includeScreenshot) {
+          const proof = await runHelper({ op: 'identity', id: window.id },
+            { generation: generationOfReply(reply), code: 'STALE_FRAME' });
+          const parentNow = proof['window'] as WindowInfo | null;
+          if (!hasIncarnation(window) || !parentNow || !hasIncarnation(parentNow) ||
+              windowsWindowIdentity(parentNow) !== windowsWindowIdentity(window)) {
+            throw new ComputerError('STALE_FRAME: related popup parent process incarnation changed before observation returned');
           }
         }
       }
@@ -1160,6 +1422,13 @@ export async function getWindowState(opts: {
         ...(found.accessibility ? { accessibility: found.accessibility } : {}),
         ...(related.length > 0 ? { related } : {})
       };
+    } catch (error) {
+      frames.clear();
+      for (const [id, frame] of priorFrames) frames.set(id, frame);
+      lastFrame = priorLastFrame;
+      uiRefs.clear();
+      for (const [id, ref] of priorUiRefs) uiRefs.set(id, ref);
+      throw error;
     } finally {
       if (dir) await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
     }
@@ -1288,6 +1557,7 @@ async function screenshotFromReply(
     width: size.width,
     height: size.height,
     windowId: frameWindow,
+    processStartTime: frameWindow === null ? null : (reply['window'] as WindowInfo | undefined)?.processStartTime ?? null,
     windowGeometry: frameWindow === null ? null : replyWindowGeometry ?? { ...region },
     displayTopology: frameWindow === null ? displayTopology : null,
     captureMode
@@ -1321,6 +1591,8 @@ async function screenshotLocked(
     window?: number;
     /** Native capture rechecks the exact ownership of a related menu/popup. */
     ownerWindow?: number;
+    /** Observed parent FILETIME, independent from the related popup's identity. */
+    expectedOwnerProcessStartTime?: string;
     full?: boolean;
     maxWidth?: number;
     crop?: Rect;
@@ -1378,6 +1650,9 @@ async function screenshotLocked(
       ? Math.max(1, requestedWidth)
       : Math.max(320, Math.floor(requestedWidth))
   );
+  if (opts.ownerWindow !== undefined && !/^\d{8,20}$/.test(opts.expectedOwnerProcessStartTime ?? '')) {
+    throw new ComputerError('STALE_FRAME: related popup parent process incarnation is unavailable');
+  }
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'clf-shot-'));
   const file = path.join(dir, 'screen.png');
   try {
@@ -1388,6 +1663,7 @@ async function screenshotLocked(
       ...(cropRegion === undefined ? {} : { region: cropRegion }),
       ...(opts.window === undefined ? {} : { id: opts.window }),
       ...(opts.ownerWindow === undefined ? {} : { ownerWindow: opts.ownerWindow }),
+      ...(opts.expectedOwnerProcessStartTime === undefined ? {} : { expectedOwnerProcessStartTime: opts.expectedOwnerProcessStartTime }),
       ...(opts.full === true ? { full: true } : {})
     }, expected);
     // A crop is a fresh capture of visible display pixels, even when its coordinates came
@@ -1416,7 +1692,7 @@ export interface PointerResult {
 
 export async function act(
   actions: Action[],
-  opts: { frameId?: number; window?: number; ownerWindow?: number; app?: string; ownerApp?: string } = {}
+  opts: { frameId?: number; window?: number; ownerWindow?: number; app?: string; ownerApp?: string; expectedProcessStartTime?: string; expectedOwnerProcessStartTime?: string } = {}
 ): Promise<ActionResult> {
   return exclusive(() => actLocked(actions, opts));
 }
@@ -1576,8 +1852,13 @@ async function verifyDesktopLocked(spec: VerificationSpec): Promise<Verification
 
 async function actLocked(
   actions: Action[],
-  opts: { frameId?: number; window?: number; ownerWindow?: number; app?: string; ownerApp?: string }
+  opts: { frameId?: number; window?: number; ownerWindow?: number; app?: string; ownerApp?: string; expectedProcessStartTime?: string; expectedOwnerProcessStartTime?: string }
 ): Promise<ActionResult> {
+  const requestedWindowsIdentity = process.platform === 'win32' && opts.window !== undefined
+    ? windowsKnownWindowIdentities.get(opts.window) ?? null
+    : null;
+  const expectedInputStartTime = opts.expectedProcessStartTime ??
+    (requestedWindowsIdentity?.split('\u001f').at(-1) || undefined);
   if (process.platform !== 'win32' && actions.some(action => action.type === 'paste' || action.type === 'launch_app' || action.type === 'ui_action')) {
     throw new ComputerError('ACTION_UNSUPPORTED: paste, launch_app and ui_action are currently Windows only.');
   }
@@ -1613,6 +1894,9 @@ async function actLocked(
       'FRAME_REQUIRED: coordinate actions must include the frameId returned with the screenshot they came from.'
     );
   }
+  if (opts.ownerWindow !== undefined && opts.expectedProcessStartTime && !opts.expectedOwnerProcessStartTime) {
+    throw new ComputerError('STALE_WINDOW: popup owner process incarnation must be proven independently from the target');
+  }
   const requestedFrame = frameById(opts.frameId);
   // Keep a small immutable history so an unrelated observation does not invalidate a
   // caller's coordinates. The helper revalidates a window-bound frame's exact geometry
@@ -1634,6 +1918,7 @@ async function actLocked(
       width: 1,
       height: 1,
       windowId: null,
+      processStartTime: null,
       windowGeometry: null,
       displayTopology: null,
       captureMode: 'screen' as const
@@ -1772,6 +2057,7 @@ async function actLocked(
   let batchIndices: number[] = [];
   let reply: Record<string, any> | null = null;
   let helperUsed = false;
+  let needsCursorResample = false;
   const flush = async (): Promise<void> => {
     if (batch.length === 0) return;
     const sending = batch;
@@ -1784,13 +2070,16 @@ async function actLocked(
         actions: sending,
         ...(opts.window === undefined ? {} : { targetWindow: opts.window }),
         ...(opts.ownerWindow === undefined ? {} : { ownerWindow: opts.ownerWindow }),
+        ...(opts.expectedOwnerProcessStartTime === undefined ? {} : { expectedOwnerProcessStartTime: opts.expectedOwnerProcessStartTime }),
         ...(opts.app === undefined ? {} : { targetApp: opts.app }),
         ...(opts.ownerApp === undefined ? {} : { ownerApp: opts.ownerApp }),
+        ...(expectedInputStartTime === undefined ? {} : { expectedProcessStartTime: expectedInputStartTime }),
         ...(needsFrame
           ? {
               frame: {
                 id: frame.id,
                 window: frame.windowId,
+                ...(frame.windowId === null ? {} : { processStartTime: frame.processStartTime }),
                 ...(opts.ownerWindow === undefined ? {} : { ownerWindow: opts.ownerWindow }),
                 ...(opts.app === undefined ? {} : { targetApp: opts.app }),
                 ...(opts.ownerApp === undefined ? {} : { ownerApp: opts.ownerApp }),
@@ -1803,6 +2092,7 @@ async function actLocked(
           : {})
       }, expected);
       helperUsed = true;
+      needsCursorResample = false;
       const helperRoutes = Array.isArray(reply['routes']) ? reply['routes'].map(String) : [];
       for (let index = 0; index < sending.length; index++) {
         const route = helperRoutes[index];
@@ -1810,8 +2100,29 @@ async function actLocked(
       }
       completedCount += sending.length;
     } catch (err) {
-      const partial = err instanceof ComputerError ? (err.completedCount ?? 0) : 0;
-      const failedBatchIndex = err instanceof ComputerError ? (err.failedIndex ?? partial) : partial;
+      const uiaCrash = windowsUiaCrashUnavailable(err);
+      if (
+        uiaCrash &&
+        process.platform === 'win32' &&
+        opts.window !== undefined &&
+        requestedWindowsIdentity !== null
+      ) {
+        // No input is retried. This only protects the next read-only accessibility observation
+        // from immediately crashing a fresh helper on the same proven provider identity.
+        rememberWindowsUiaCrashIdentity(opts.window, requestedWindowsIdentity, uiaCrash);
+      }
+      // Missing native acknowledgement is not evidence that no action executed.
+      // An exact partial receipt may be counted; a transport failure is ambiguous.
+      const exactPartial = err instanceof ComputerError && err.completedCount !== null && err.failedIndex !== null;
+      if (!exactPartial) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new ComputerError(
+          `OUTCOME_UNCONFIRMED: acknowledged_prefix=${completedCount} routes=${routes.join('+') || 'none'}; native action completion is unknown. Do not repeat the unacknowledged input. ${message}`,
+          { ...(routes.length ? { completedRoutes: [...routes] } : {}) }
+        );
+      }
+      const partial = err.completedCount!;
+      const failedBatchIndex = err.failedIndex!;
       const helperRoutes = err instanceof ComputerError ? err.completedRoutes : null;
       const hasExactPartialRoutes = helperRoutes !== null && helperRoutes.length === partial;
       if (hasExactPartialRoutes) routes.push(...helperRoutes);
@@ -1824,6 +2135,16 @@ async function actLocked(
           ? exactRoutes.join('+')
           : 'none'
         : 'unavailable';
+      // A native SendInput may have accepted a prefix inside the failed
+      // logical action. Those OS effects do not count as an acknowledged
+      // completed action, but retrying that action can duplicate mutations.
+      if (/^INPUT_EFFECT_UNCONFIRMED:/.test(message)) {
+        throw new ComputerError(
+          `OUTCOME_UNCONFIRMED: acknowledged_prefix=${totalCompleted} failed_index=${originalFailed} routes=${routeEvidence}; native action may be partially applied. Do not repeat the unacknowledged input. ${message}`,
+          { completedCount: totalCompleted, failedIndex: originalFailed,
+            ...(exactRoutes ? { completedRoutes: exactRoutes } : {}) }
+        );
+      }
       throw new ComputerError(
         `PARTIAL_BATCH: completed_count=${totalCompleted} failed_index=${originalFailed} routes=${routeEvidence}. ${message}`,
         {
@@ -1843,7 +2164,9 @@ async function actLocked(
         await runHelper({ op: 'act', actions: [{ type: 'focus', window: opts.window }],
           targetWindow: opts.window,
           ...(opts.app === undefined ? {} : { targetApp: opts.app }),
+          ...(expectedInputStartTime === undefined ? {} : { expectedProcessStartTime: expectedInputStartTime }),
           ...(opts.ownerWindow === undefined ? {} : { ownerWindow: opts.ownerWindow }),
+          ...(opts.expectedOwnerProcessStartTime === undefined ? {} : { expectedOwnerProcessStartTime: opts.expectedOwnerProcessStartTime }),
           ...(opts.ownerApp === undefined ? {} : { ownerApp: opts.ownerApp }) }, expected);
         // Clipboard publication remains owned by Electron. The next native action targets
         // the explicitly selected window; it is one authored paste, not two counted steps.
@@ -1861,7 +2184,8 @@ async function actLocked(
         const partial = err instanceof ComputerError ? err : null;
         throw new ComputerError(
           `${err instanceof Error ? err.message : String(err)}. Clipboard text was replaced; paste delivery is not confirmed.`,
-          { completedCount: partial?.completedCount ?? completedCount, failedIndex: partial?.failedIndex ?? index,
+          { ...(partial?.completedCount === null ? {} : { completedCount: partial?.completedCount ?? completedCount }),
+            ...(partial?.failedIndex === null ? {} : { failedIndex: partial?.failedIndex ?? index }),
             ...(partial?.completedRoutes ? { completedRoutes: partial.completedRoutes } : {}) }
         );
       }
@@ -1873,6 +2197,7 @@ async function actLocked(
       if (ms > 0) await new Promise((resolve) => setTimeout(resolve, ms));
       routes.push('local');
       completedCount += 1;
+      if (helperUsed) needsCursorResample = true;
       continue;
     }
     if (action.type === 'read_clipboard') {
@@ -1887,6 +2212,7 @@ async function actLocked(
       }
       routes.push('local');
       completedCount += 1;
+      if (helperUsed) needsCursorResample = true;
       continue;
     }
     if (action.type === 'write_clipboard') {
@@ -1900,6 +2226,7 @@ async function actLocked(
       }
       routes.push('local');
       completedCount += 1;
+      if (helperUsed) needsCursorResample = true;
       continue;
     }
     batch.push(mapOne(action));
@@ -1907,12 +2234,19 @@ async function actLocked(
   }
   // A pure clipboard/wait batch must not depend on a native accessibility helper at all. This is
   // what makes the connector genuinely useful when the user granted only clipboard access or
-  // when the desktop helper is unavailable. Mixed desktop batches still take one final cursor
-  // sample after any trailing local wait/clipboard work so the pointer report remains current.
+  // when the desktop helper is unavailable. Native action acknowledgements already
+  // include a cursor; querying again after paste risks losing confirmed completion.
+  // Only local work after the last native reply can require a fresh pointer sample.
   if (batch.length > 0) {
     await flush();
-  } else if (helperUsed) {
-    reply = await runHelper({ op: 'cursor' });
+  } else if (helperUsed && needsCursorResample) {
+    try {
+      reply = await runHelper({ op: 'cursor' });
+    } catch {
+      // Cursor diagnostics are non-authoritative after acknowledged input.
+      // Never erase the completed routes or invite a replay of those mutations.
+      return { cursor: null, clipboard, completedCount, routes };
+    }
   }
 
   if (reply === null) return { cursor: null, clipboard, completedCount, routes };
@@ -1921,7 +2255,8 @@ async function actLocked(
   const sx = Number(raw?.x);
   const sy = Number(raw?.y);
   if (!Number.isFinite(sx) || !Number.isFinite(sy)) {
-    throw new ComputerError('The desktop helper returned an invalid pointer position.');
+    // The mutation may already have completed; only pointer metadata is missing.
+    return { cursor: null, clipboard, completedCount, routes };
   }
   const current = qualifiedFrame(requestedFrame ?? lastFrame, generationOfReply(reply));
   const image = current

@@ -45,12 +45,13 @@ const fake = vi.hoisted(() => {
     child.stdout = new Emitter();
     child.stderr = new Emitter();
     child.stdin = {
-      write(_line: string, _encoding: string, callback: (error?: Error | null) => void) {
+      write(line: string, _encoding: string, callback: (error?: Error | null) => void) {
         callback(null);
+        const request = JSON.parse(line) as { __cosRequestId?: string };
         queueMicrotask(() =>
           child.stdout.emit(
             'data',
-            Buffer.from(`${JSON.stringify(response)}\n`)
+            Buffer.from(`${JSON.stringify({ ...response, __cosRequestId: request.__cosRequestId })}\n`)
           )
         );
         return true;
@@ -97,6 +98,27 @@ describe('desktop partial batch result', () => {
       completedRoutes: ['sendinput'],
       message: expect.stringMatching(/completed_count=1 failed_index=1 routes=sendinput/)
     });
+  });
+
+  it('marks a missing native mutation receipt as ambiguous rather than an exact zero', async () => {
+    fake.setResponse({ ok: false, error_code: 'HELPER_EXITED', message: 'reply lost after input' });
+    await expect(act([{ type: 'type', text: 'may already be delivered' }])).rejects.toMatchObject({
+      completedCount: null, failedIndex: null, completedRoutes: null,
+      message: expect.stringMatching(/OUTCOME_UNCONFIRMED.*Do not repeat the unacknowledged input/)
+    });
+  });
+
+  it('does not treat partially accepted native packets as a safe zero-effect retry', async () => {
+    fake.setResponse({
+      ok: false, error_code: 'INPUT_EFFECT_UNCONFIRMED',
+      message: 'SendInput was blocked (sent 5 of 6); third down may already have executed',
+      completed_count: 0, failed_index: 0, routes: []
+    });
+    await expect(act([{ type: 'type', text: 'may have a partial accepted prefix' }]))
+      .rejects.toMatchObject({
+        completedCount: 0, failedIndex: 0, completedRoutes: [],
+        message: expect.stringMatching(/OUTCOME_UNCONFIRMED:.*partially applied.*Do not repeat the unacknowledged input/)
+      });
   });
 
   it('does not invent route evidence when the helper route list is malformed', async () => {

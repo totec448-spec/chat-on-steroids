@@ -38,7 +38,7 @@ const fake = vi.hoisted(() => {
     child.stdin = {
       write(line: string, _encoding: string, callback: (error?: Error | null) => void) {
         callback(null);
-        const request = JSON.parse(line) as { op: string; maxResults?: number };
+        const request = JSON.parse(line) as { op: string; maxResults?: number; __cosRequestId?: string };
         requests.push(request);
         const reply =
           request.op === 'snapshot'
@@ -107,7 +107,7 @@ const fake = vi.hoisted(() => {
             : request.op === 'act'
               ? { ok: true, cursor: { x: 0, y: 0 }, completed_count: 1, routes: ['uia'] }
               : { ok: true, cursor: { x: 0, y: 0 } };
-        queueMicrotask(() => child.stdout.emit('data', Buffer.from(`${JSON.stringify(reply)}\n`)));
+        queueMicrotask(() => child.stdout.emit('data', Buffer.from(`${JSON.stringify({ ...reply, __cosRequestId: request.__cosRequestId })}\n`)));
         return true;
       },
       end() {}
