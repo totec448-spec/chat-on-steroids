@@ -2866,5 +2866,11 @@
   "Quicker after Stop": "停止後更快",
   "A message you send right after Stop goes out at once.": "停止後立即傳送的訊息會馬上送出。",
   "Sub-agent chats tidy up": "子代理聊天自動整理",
-  "With archiving on, a worker's chat is archived two minutes after its task is done.": "開啟封存後，worker 的聊天會在任務完成兩分鐘後封存。"
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "開啟封存後，worker 的聊天會在任務完成兩分鐘後封存。",
+  "Bookmark answer": "將回答加入書籤",
+  "Remove bookmark": "移除書籤",
+  "Bookmarks": "書籤",
+  "Answer": "回答",
+  "This answer is no longer in the chat.": "這個回答已不在聊天中。",
+  "{0} bookmarks in this chat": "此聊天中有 {0} 個書籤"
 }

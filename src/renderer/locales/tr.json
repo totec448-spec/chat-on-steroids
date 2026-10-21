@@ -2912,5 +2912,12 @@
   "Quicker after Stop": "Durdur'dan sonra daha hızlı",
   "A message you send right after Stop goes out at once.": "Durdur'dan hemen sonra gönderdiğin mesaj anında gider.",
   "Sub-agent chats tidy up": "Alt ajan sohbetleri toparlanır",
-  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Arşivleme açıkken bir çalışanın sohbeti, görevi bittikten iki dakika sonra arşivlenir."
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Arşivleme açıkken bir çalışanın sohbeti, görevi bittikten iki dakika sonra arşivlenir.",
+  "Bookmark answer": "Yanıtı yer imlerine ekle",
+  "Remove bookmark": "Yer imini kaldır",
+  "Bookmarks": "Yer imleri",
+  "Answer": "Yanıt",
+  "This answer is no longer in the chat.": "Bu yanıt artık sohbette değil.",
+  "{0} bookmarks in this chat": "Bu sohbette {0} yer imi",
+  "{0} bookmarks in this chat|one": "Bu sohbette {0} yer imi"
 }

@@ -22,6 +22,8 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-back': 'arrow-left',
   'i-ban': 'prohibit',
   'i-bolt': 'lightning',
+  'i-bookmark': 'bookmark-simple',
+  'i-bookmark-fill': 'fill:bookmark-simple',
   'i-browser': 'browser',
   'i-chart': 'chart-line',
   'i-chat': 'chat-circle',

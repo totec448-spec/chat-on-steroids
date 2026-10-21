@@ -2866,5 +2866,11 @@
   "Quicker after Stop": "중지 후 더 빠르게",
   "A message you send right after Stop goes out at once.": "중지 직후 보낸 메시지가 바로 전송됩니다.",
   "Sub-agent chats tidy up": "하위 에이전트 채팅 정리",
-  "With archiving on, a worker's chat is archived two minutes after its task is done.": "보관을 켜면 작업자의 채팅이 작업을 마친 지 2분 후에 보관됩니다."
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "보관을 켜면 작업자의 채팅이 작업을 마친 지 2분 후에 보관됩니다.",
+  "Bookmark answer": "답변 북마크",
+  "Remove bookmark": "북마크 해제",
+  "Bookmarks": "북마크",
+  "Answer": "답변",
+  "This answer is no longer in the chat.": "이 답변은 더 이상 채팅에 없습니다.",
+  "{0} bookmarks in this chat": "이 채팅의 북마크 {0}개"
 }

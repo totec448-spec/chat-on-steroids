@@ -2866,5 +2866,11 @@
   "Quicker after Stop": "停止後すぐに",
   "A message you send right after Stop goes out at once.": "停止の直後に送ったメッセージがすぐに送信されます。",
   "Sub-agent chats tidy up": "サブエージェントのチャットを片付け",
-  "With archiving on, a worker's chat is archived two minutes after its task is done.": "アーカイブをオンにすると、ワーカーのチャットはタスク完了の 2 分後にアーカイブされます。"
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "アーカイブをオンにすると、ワーカーのチャットはタスク完了の 2 分後にアーカイブされます。",
+  "Bookmark answer": "回答をブックマーク",
+  "Remove bookmark": "ブックマークを解除",
+  "Bookmarks": "ブックマーク",
+  "Answer": "回答",
+  "This answer is no longer in the chat.": "この回答はもうチャットにありません。",
+  "{0} bookmarks in this chat": "このチャットのブックマーク: {0}"
 }
