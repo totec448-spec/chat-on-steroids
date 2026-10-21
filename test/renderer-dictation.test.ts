@@ -11,8 +11,11 @@ let emit: (event: DictationEvent) => void;
 const start = vi.fn(async () => ({ ok: true as const, data: { status: 'starting' } }));
 const stop = vi.fn(async () => ({ ok: true as const, data: undefined }));
 const unsubscribe = vi.fn();
+// The hold-to-talk chord follows the platform; the suite runs as Windows unless a test says otherwise.
+const setPlatform = (platform: string) => Object.defineProperty(globalThis.navigator, 'platform', { value: platform, configurable: true });
 
 beforeAll(async () => {
+  setPlatform('Win32');
   dom = new JSDOM(`<!doctype html><html><body>
     <form id="composer"><textarea id="chatInput"></textarea>
       <button id="dictationButton" type="button" disabled aria-pressed="false"></button>
@@ -32,7 +35,10 @@ beforeAll(async () => {
   initComposerDictation();
 });
 
-afterAll(() => dom?.window.close());
+afterAll(() => {
+  delete (globalThis.navigator as { platform?: string }).platform;
+  dom?.window.close();
+});
 
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
 
@@ -138,15 +144,16 @@ describe('renderer microphone draft ownership', () => {
   });
 
   const holdKey = (type: 'keydown' | 'keyup', options: KeyboardEventInit = {}) => {
-    const event = new dom.window.KeyboardEvent(type, { code: 'Space', key: ' ', ctrlKey: type === 'keydown', bubbles: true, cancelable: true, ...options });
+    const held = type === 'keydown';
+    const event = new dom.window.KeyboardEvent(type, { code: 'Space', key: ' ', ctrlKey: held, shiftKey: held, bubbles: true, cancelable: true, ...options });
     input.dispatchEvent(event);
     return event;
   };
 
-  it('records while Ctrl+Space is held in the composer, and letting go keeps the words without sending', async () => {
+  it('records while Ctrl+Shift+Space is held in the composer, and letting go keeps the words without sending', async () => {
     let sends = 0;
     dom.window.document.getElementById('composer')!.addEventListener('submit', () => sends++);
-    expect(button.title).toBe('Start dictation (hold Ctrl+Space)');
+    expect(button.title).toBe('Start dictation (hold Ctrl+Shift+Space)');
     input.value = 'Note: '; input.setSelectionRange(6, 6);
     const starts = start.mock.calls.length, stops = stop.mock.calls.length;
     expect(holdKey('keydown').defaultPrevented).toBe(true);
@@ -181,6 +188,35 @@ describe('renderer microphone draft ownership', () => {
     expect(stop).toHaveBeenCalledTimes(stops + 2);
     emit({ type: 'status', status: 'stopped' });
     expect(button.getAttribute('data-state')).toBe('idle');
+  });
+
+  it('leaves Ctrl+Space, Shift+Space and Alt+Space to Windows and its IMEs', async () => {
+    const starts = start.mock.calls.length;
+    for (const chord of [{ shiftKey: false }, { ctrlKey: false }, { ctrlKey: false, shiftKey: false, altKey: true }]) {
+      expect(holdKey('keydown', chord).defaultPrevented).toBe(false);
+      await flush();
+    }
+    expect(start).toHaveBeenCalledTimes(starts);
+    expect(button.getAttribute('data-state')).toBe('idle');
+  });
+
+  it('does not promise a hold shortcut in the tooltip on a platform that does not get one', async () => {
+    const repaintIdle = async () => { button.click(); await flush(); emit({ type: 'status', status: 'stopped' }); };
+    try {
+      for (const platform of ['MacIntel', 'Linux x86_64']) {
+        setPlatform(platform);
+        await repaintIdle();
+        expect(button.title).toBe('Start dictation');
+        const starts = start.mock.calls.length;
+        expect(holdKey('keydown').defaultPrevented).toBe(false);
+        await flush();
+        expect(start).toHaveBeenCalledTimes(starts);
+      }
+    } finally {
+      setPlatform('Win32');
+    }
+    await repaintIdle();
+    expect(button.title).toBe('Start dictation (hold Ctrl+Shift+Space)');
   });
 
   it('unsubscribes on page unload without sending a message', () => {
