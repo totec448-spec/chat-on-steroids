@@ -10,7 +10,8 @@ import { imageStorageButton } from './image-storage.js';
 import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, composerSendModel, ensureComposerModel, chatModelName } from './chat-models.js';
 import { marked, Marked, type TokenizerAndRendererExtension } from 'marked';
 import { safeExternalLink } from '../shared/external-link.js';
-import { createAgentPanel, workerName } from './agent-panel.js';
+import { AGENT_STATE_WORDS, createAgentPanel, workerName } from './agent-panel.js';
+import { KIND_ICON } from './agent-activity.js';
 import { createFilePanel } from './file-panel.js';
 import { renderAgentPlan } from './agent-plan.js';
 import { userPromptText } from '../shared/user-prompt.js';
@@ -54,7 +55,6 @@ import type { RunningExecProcess } from '../shared/background-exec.js';
  */
 
 import type {
-  ActivitySummary,
   AgentState,
   Handoff,
   MessageReference,
@@ -93,6 +93,7 @@ import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HA
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
 import { $, ago, clockTime, compactNumber, disclosureChevron, el, icon, run, setIcon, toast } from './dom.js';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
+import { STRICT_REFUSAL_PROGRESS_PREFIX, UNPROVEN_WORKER_NOTICE, UNTRUSTED_NOTICE, UNTRUSTED_WORKER_NOTICE } from '../shared/trust-notices.js';
 import { openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
 import { createSearchPopup } from './search-popup.js';
 import { primaryShortcut } from './shortcuts.js';
@@ -102,24 +103,6 @@ const api = window.api;
 let chatSearch: ChatSearch | null = null;
 let chatFind: ReturnType<typeof initChatFind> | null = null;
 
-/** Sprite id per tool-call family. Deliberately reuses the existing icon set. */
-const KIND_ICON: Record<ActivitySummary['kind'], string> = {
-  edit: 'i-pencil',
-  create: 'i-plus',
-  delete: 'i-trash',
-  move: 'i-out',
-  read: 'i-eye',
-  search: 'i-search',
-  browse: 'i-folder',
-  run: 'i-terminal',
-  process: 'i-terminal',
-  screen: 'i-monitor',
-  input: 'i-monitor',
-  clipboard: 'i-copy',
-  session: 'i-steps',
-  agent: 'i-bolt',
-  other: 'i-bolt'
-};
 
 /**
  * How close to the end of the model list counts as asking for the next page, in pixels.
@@ -1874,6 +1857,18 @@ function workerGroup(key: string, workers: SessionSummary[], parentRow: HTMLElem
   button.setAttribute('type', 'button'); button.setAttribute('aria-expanded', String(expandedWorkers.has(key)));
   button.addEventListener('click', (event) => { event.stopPropagation(); expandedWorkers.has(key) ? expandedWorkers.delete(key) : expandedWorkers.add(key); paintSessions(); });
   if (parentRow) { parentRow.append(button); parentRow.title += ` · ${button.title}`; } else target.push(button);
+  // Folded away, a sub-agent that needs the person (an approval card, a block, a failure) marks the
+  // chat itself, over its own spinner: needing someone outranks working, as in the Inbox's order.
+  const needing = workers.filter(worker => workerState(worker) === 'attention').length;
+  const top = parentRow?.querySelector<HTMLElement>('.sess-top');
+  if (needing && top && !expandedWorkers.has(key)) {
+    const label = () => tn('{0} sub-agent needs attention', '{0} sub-agents need attention', needing);
+    const mark = el('span', 'session-status is-failed');
+    ui(mark, 'title', label); ui(mark, 'aria-label', label);
+    const own = top.querySelector('.session-status');
+    if (own) own.replaceWith(mark); else top.append(mark);
+    parentRow!.title += ` · ${label()}`;
+  }
   if (expandedWorkers.has(key)) { const box = el('div', 'worker-group'); box.append(...workers.map(sessionRow)); target.push(box); }
 }
 
@@ -2211,6 +2206,8 @@ let recall: { generation: number; draft: number; prompts: readonly string[]; bac
  * is yours, unless it is a worker's: its tasks come from the app.
  */
 function typedPrompt(event: Extract<SessionEvent, { kind: 'user_message' }>): boolean {
+  // A Goal or Loop follow-up its page typed has no outbox row; the recorder marked it.
+  if (event.automatic) return false;
   // The recorded row id is exact; the message id also finds a row this window read before its receipt.
   const rows = pendingComposerInputs.filter(row => row.id === event.inputId ||
     (!!event.messageId && (row.messageId ? row.messageId === event.messageId : event.messageId === `input:${row.id}`)));
@@ -4346,6 +4343,14 @@ function approvalRowText(text: string): string {
   return text;
 }
 
+/** A strict-trust notice in the interface language; older wordings stay as recorded. Literal keys for the catalog audit. */
+function trustNoticeText(text: string): string {
+  if (text === UNTRUSTED_NOTICE) return t("A tool call from an untrusted chat was refused. To allow it, open this chat's ⋯ menu in the sidebar (or right-click its row) and choose Trust chat.");
+  if (text === UNTRUSTED_WORKER_NOTICE) return t("A tool call from a worker whose main chat is not currently allowed was refused. Open that main chat's ⋯ menu in the sidebar and choose Trust chat if it is untrusted, or Release chat if it is blocked.");
+  if (text === UNPROVEN_WORKER_NOTICE) return t("A tool call from an app-created worker was refused because the main chat that started it is not proven yet. Return to that main chat in the sidebar; once its row is there, open its ⋯ menu and choose Trust chat, or Release chat if it is blocked, then retry after the worker is attached or recovered there.");
+  return text;
+}
+
 function eventBody(event: SessionEvent, context?: { id: string; current: () => boolean; history: readonly SessionEvent[] }): HTMLElement {
   switch (event.kind) {
     case 'session_start':
@@ -4432,7 +4437,8 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
         if (event.previewError === 'oversized') return t("Image preview unavailable — image exceeds the recording limit");
         return t("Image preview unavailable");
         }));
-        if (event.previewStatus !== 'pending') frame.append(imageStorageButton());
+        // Freeing storage helps only a full store or a removed picture; it cannot shrink one or load it.
+        if (event.previewStatus !== 'pending' && (event.previewError === 'quota' || event.previewError === 'removed')) frame.append(imageStorageButton());
       };
       if (event.asset) frame.append(el('p', 'meta', () => t("Image preview is loading")));
       else unavailable();
@@ -4459,12 +4465,19 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
       return box;
     }
     case 'progress': {
+      if (event.progressId?.startsWith(STRICT_REFUSAL_PROGRESS_PREFIX)) return el('p', 'meta is-progress', () => trustNoticeText(event.message.text));
       if (!event.progressId?.startsWith(APPROVAL_PROGRESS_PREFIX)) return el('p', 'meta is-progress', event.message.text);
       // ChatGPT's own tool approval card stands in this chat's page (approval-wait.ts). The app
       // writes the English source; only the user can answer the card, so the row opens the page.
-      const waiting = event.message.text === APPROVAL_WAITING_TEXT;
+      // A later episode's row takes over: an app restart or a lost page starts a new one while the
+      // earlier row still says waiting (VM, 2026-10-20: three live cards for one). That row was never
+      // answered here, so it reads as past, without buttons.
+      const later = event.message.text === APPROVAL_WAITING_TEXT && (context?.history ?? events).some(other =>
+        other.kind === 'progress' && other.seq > event.seq && other.progressId !== event.progressId && !!other.progressId?.startsWith(APPROVAL_PROGRESS_PREFIX));
+      const waiting = event.message.text === APPROVAL_WAITING_TEXT && !later;
       const line = el('p', `meta is-progress thinking-line approval-wait${waiting ? ' is-waiting' : ''}`);
-      line.append(icon(waiting ? 'i-lock' : 'i-check-circle', 'ico thinking-ico'), el('span', '', () => approvalRowText(event.message.text)));
+      line.append(icon(waiting || later ? 'i-lock' : 'i-check-circle', 'ico thinking-ico'),
+        el('span', '', () => later ? t('ChatGPT asked for a tool approval in this chat.') : approvalRowText(event.message.text)));
       const owner = context?.id ?? selectedId;
       if (waiting && owner) {
         const open = el('button', 'btn') as HTMLButtonElement;
@@ -4488,7 +4501,8 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
     case 'turn_end': {
       if (stoppedTurnEnd(event, context?.history ?? events)) {
         const line = el('p', 'meta is-progress thinking-line turn-stopped');
-        line.append(icon('i-check-circle', 'ico thinking-ico'), el('span', '', () => t("Stopped. ChatGPT no longer shows this turn running.")));
+        // A stop, not a success: the turn ended without finishing its work.
+        line.append(icon('i-stop', 'ico thinking-ico'), el('span', '', () => t("Stopped. ChatGPT no longer shows this turn running.")));
         return line;
       }
       const line = el(
@@ -6489,10 +6503,14 @@ function paintSwarm(state: SwarmState): void {
       ...state.agents.map((agent) => {
         const row = el('div', 'agent');
         const top = el('div', 'model-top');
-        const label = agent.label || agent.id;
-        top.append(el('b', '', label));
-        if (label !== agent.id) top.append(el('span', 'chip', agent.id));
-        top.append(el('span', `chip is-${agent.state}`, agent.state));
+        // The prime is the chat the person started; its internal id says nothing to them.
+        if (agent.role === 'prime') top.append(el('b', '', () => t('Main chat')));
+        else {
+          top.append(el('b', '', () => workerName(agent.id, agent.label)));
+          // The id is what the main chat calls it; worth showing beside a name of its own.
+          if (agent.label?.trim() && agent.label.trim() !== agent.id) top.append(el('span', 'chip', agent.id));
+        }
+        top.append(el('span', `chip is-${agent.state}`, () => t(AGENT_STATE_WORDS[agent.state] ?? agent.state)));
         // Clearing is offered where the agent is, not only as one global reset at the
         // bottom of a settings form. The two rows mean different things and the tooltip
         // says which: the prime is the run, a worker is one slot.
@@ -6508,8 +6526,7 @@ function paintSwarm(state: SwarmState): void {
           top.append(clear);
         }
         const sub = el('div', 'model-sub');
-        ui(sub, 'textContent', () => [tn("{0} pending", "{0} pending", agent.pending), tn("{0} delivered", "{0} delivered", agent.delivered),
-          ...(agent.conversationId ? [t("chat bound")] : [])].join(' · '));
+        ui(sub, 'textContent', () => [tn("{0} pending", "{0} pending", agent.pending), tn("{0} delivered", "{0} delivered", agent.delivered)].join(' · '));
         row.append(top, sub);
         if (agent.task) row.append(el('p', 'hint', agent.task));
         // Why it failed, not just that it did. A worker only reaches this state when its
@@ -6616,7 +6633,11 @@ export function chatSettingsPatch(current: Config): {
   mcp: Config['mcp'];
 } {
   const number = (id: string, fallback: number, min: number, max: number): number => {
-    const raw = Number($<HTMLInputElement>(id).value);
+    // An emptied field means no new value, not 0: Number('') is 0, and an emptied threshold was
+    // saved as its 10,000-token minimum.
+    const text = $<HTMLInputElement>(id).value.trim();
+    if (!text) return fallback;
+    const raw = Number(text);
     if (!Number.isFinite(raw)) return fallback;
     return Math.min(max, Math.max(min, Math.round(raw)));
   };
@@ -7939,6 +7960,7 @@ export function initChat(next: Deps): void {
       const outlined = await api.turnTraces(id, traceTurnIds(detail.events)).catch(() => null);
       return { events: detail.events, traces: outlined?.ok ? outlined.data ?? {} : {} };
     },
+    loadActivity: async id => (await run(api.getSession(id, { limit: 400, actions: true })))?.events ?? null,
     openMain: selectSession, working: sessionWorking,
     modelLabel: chatModelName,
     agent: worker => [...(swarm?.agents ?? []), ...(swarm?.retainedWorkers ?? [])].find(entry => entry.role === 'worker' && entry.id === worker.origin?.agentId &&
