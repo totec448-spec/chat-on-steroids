@@ -16,11 +16,24 @@ vi.mock('electron', () => ({
   clipboard: {},
   shell: {}
 }));
+// Whether a browser is running decides whether a Stop also launches one (browser-startup.ts). The
+// real probe answers differently per machine, so the tests say: a browser is running, unless a
+// test makes it absent with a launch that fails, as on the Linux arm64 release runner (2.1.44).
+const browserProbe = vi.hoisted(() => ({ running: true as boolean | null, launches: 0, launchError: null as Error | null }));
+vi.mock('../src/main/browser.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/main/browser.js')>()),
+  isPreferredBrowserRunning: async () => browserProbe.running,
+  openInPreferredBrowser: async () => {
+    browserProbe.launches += 1;
+    if (browserProbe.launchError) throw browserProbe.launchError;
+  }
+}));
 
 const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { APP_VERSION, BRIDGE_PROTOCOL } = await import('../src/main/version.js');
 const { initSecretsPath, setSecret } = await import('../src/main/secrets.js');
-const { resetBridgeForTests, setRotationHoldForTests, shutdownBridge, startBridge, sessionInputActivity } = await import('../src/main/bridge.js');
+const { resetBridgeForTests, setRotationHoldForTests, shutdownBridge, startBridge, sessionInputActivity, stopSessionTurn } = await import('../src/main/bridge.js');
+const { resetBrowserStartupForTests } = await import('../src/main/browser-startup.js');
 const { getSession } = await import('../src/main/session/store.js');
 const { flushDurable, initDurableStore, writeDurableSoon } = await import('../src/main/durable.js');
 const { findSessionByConversation, initSessionStore, resetSessionStoreForTests } = await import('../src/main/session/store.js');
@@ -28,6 +41,7 @@ const { recordToolCall, resetRecorderForTests } = await import('../src/main/sess
 const { listInputs, resetInputForTests } = await import('../src/main/session/input.js');
 const { resetTurnRotationForTests } = await import('../src/main/turn-rotation.js');
 const { openCallHold, resetCallHoldsForTests } = await import('../src/main/rotation-hold.js');
+const logger = await import('../src/main/logger.js');
 const { setGoalSwitchNow, resetGoalStateForTests } = await import('../src/main/goal.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
 
@@ -261,6 +275,36 @@ describe('turn rotation (#1402)', () => {
     expect((await request('POST', '/input/claim', { body: { id: row.id, owner: 'late-page', conversationId: chat, requiresAuthorization: true } })).body.input).toBeNull();
   });
 
+  // 2026-10-21, Loop chats on Windows: twice a continue was withdrawn with only "the page did not
+  // send it". Whether the page never picked it up (its browser worker had stopped answering) or
+  // picked it up and never reached Send are different faults; the log line now says which.
+  it('says in the log that the page never picked the continue up, and whether the browser was connected', async () => {
+    const logged = vi.spyOn(logger, 'logInfo');
+    try {
+      const chat = 'f0f00003-1111-4111-8111-000000000205';
+      await turnFor(chat, 'g-rot-hold-5', 31);
+      await (await heldCall(chat))();
+      const lines = logged.mock.calls.map(([line]) => String(line)).filter(line => line.includes(chat) && line.includes('within'));
+      expect(lines).toEqual([expect.stringContaining('the page did not pick up the continue within 0 s (the browser is not connected)')]);
+    } finally { logged.mockRestore(); }
+  });
+
+  it('says in the log that the page picked the continue up but did not reach Send', async () => {
+    setRotationHoldForTests(400);
+    const logged = vi.spyOn(logger, 'logInfo');
+    try {
+      const chat = 'f0f00003-1111-4111-8111-000000000206';
+      const sessionId = await turnFor(chat, 'g-rot-hold-6', 31);
+      const answer = (await heldCall(chat))();
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const row = (await listInputs()).find(entry => entry.sessionId === sessionId && entry.purpose === 'rotation')!;
+      expect((await request('POST', '/input/claim', { body: { id: row.id, owner: 'slow-page', conversationId: chat, requiresAuthorization: true } })).body.input).toMatchObject({ id: row.id });
+      await answer;
+      const lines = logged.mock.calls.map(([line]) => String(line)).filter(line => line.includes(chat) && line.includes('within'));
+      expect(lines).toEqual([expect.stringContaining('the page picked up the continue but did not reach Send within 0 s')]);
+    } finally { logged.mockRestore(); }
+  });
+
   // 2026-10-20: when ChatGPT shows Stop it offers no Send for the continue; the page says so at
   // once instead of the call's answer waiting out the hold.
   it('answers the call at once when the page declines the continue for want of Send', async () => {
@@ -302,5 +346,137 @@ describe('turn rotation (#1402)', () => {
     } finally {
       await saveConfig({ ...config, sessions: { ...config.sessions, record: true } });
     }
+  });
+});
+
+/**
+ * Opt-in fallback (user, 2026-10-20): where ChatGPT offers no Send for the continue at a tool
+ * result (it shows only Stop there), the app stops the turn right after a result instead and sends
+ * the continue as an ordinary message once the stop shows. Loop stays on, and a call that arrives
+ * while the stop lands is refused rather than run, so no command can run twice.
+ */
+const { armRotationFence, rotationFenced } = await import('../src/main/rotation-fence.js');
+const { goalSwitchFor } = await import('../src/main/goal.js');
+const { rotationMessage } = await import('../src/shared/recovery.js');
+describe('stop fallback for fresh turns', () => {
+
+  async function declineTwice(chat: string, sessionId: string, clock: { now: number }): Promise<void> {
+    for (let round = 0; round < 2; round += 1) {
+      const answer = (await heldCall(chat))();
+      await new Promise(resolve => setTimeout(resolve, 150));
+      const row = (await listInputs()).find(entry => entry.sessionId === sessionId && entry.purpose === 'rotation' && entry.state === 'queued')!;
+      const page = { id: row.id, owner: 'rotation-page', conversationId: chat };
+      expect((await request('POST', '/input/claim', { body: { ...page, requiresAuthorization: true } })).body.input).toMatchObject({ id: row.id });
+      await request('POST', '/input/fail', { body: { ...page, error: 'Fresh-turn continue declined: no Send while ChatGPT works.', detail: 'no-send' } });
+      await answer;
+      clock.now += 61_000;
+    }
+  }
+
+  it('stops after a result once ChatGPT offered no Send twice, keeps Loop on, and continues after the stopped end', async () => {
+    const config = defaultConfig();
+    await saveConfig({ ...config, sessions: { ...config.sessions, record: true }, ui: { ...config.ui, rotateStopFallback: true } });
+    setRotationHoldForTests(5_000);
+    const clock = { now: Date.now() };
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock.now);
+    try {
+      const chat = 'f0f00003-1111-4111-8111-000000000401', turn = 'g-stopfb-0-1';
+      const sessionId = await turnFor(chat, turn, 31);
+      await setGoalSwitchNow(chat, 'loop', true);
+      await declineTwice(chat, sessionId, clock);
+      const before = (await listInputs()).filter(entry => entry.sessionId === sessionId && entry.purpose === 'rotation').length;
+      await (await heldCall(chat))();
+      // The Stop goes out half a second after the result's answer: wait for it rather than a fixed
+      // time, which ran out on a slow runner (2.1.44 publish, Linux arm64).
+      await vi.waitFor(async () => {
+        expect((await request('GET', '/status')).body.stopTurns).toEqual([expect.objectContaining({ conversationId: chat, turnId: turn })]);
+      }, { timeout: 10_000, interval: 50 });
+      // No third continue into the turn: a Stop for exactly this turn instead, and Loop still on.
+      expect((await listInputs()).filter(entry => entry.sessionId === sessionId && entry.purpose === 'rotation').length).toBe(before);
+      expect(rotationFenced(chat)).toBe(true);
+      expect(goalSwitchFor(chat)).toMatchObject({ enabled: true, mode: 'loop' });
+      // ChatGPT shows the turn stopped: the continue goes as an ordinary message, at once.
+      await events(chat, [{ kind: 'turn_end', time: clock.now, turnId: turn, outcome: 'stopped' }]);
+      await vi.waitFor(async () => {
+        expect(rotationFenced(chat)).toBe(false);
+        expect((await listInputs()).some(entry => entry.sessionId === sessionId && entry.purpose === 'rotation' && entry.afterStop === true)).toBe(true);
+      }, { timeout: 10_000, interval: 50 });
+      const next = (await listInputs()).find(entry => entry.sessionId === sessionId && entry.purpose === 'rotation' && entry.afterStop === true)!;
+      expect(next).toMatchObject({ state: 'queued', text: rotationMessage() });
+      expect(next).not.toHaveProperty('directTurn');
+      expect((await request('GET', '/status')).body.inputs.map((input: { id: string }) => input.id)).toContain(next.id);
+    } finally { spy.mockRestore(); setRotationHoldForTests(15_000); await saveConfig({ ...config, sessions: { ...config.sessions, record: true } }); }
+  });
+
+  // 2.1.44 publish, Linux arm64 (twice): no browser was running there and launching one failed.
+  // stopSessionTurn had already queued the Stop, then threw on the launch, and the fallback lifted
+  // the fence: a call arriving before the Stop landed would have run, the double run the fence is for.
+  it('keeps the fence up when the browser cannot be opened for an already queued Stop', async () => {
+    const config = defaultConfig();
+    await saveConfig({ ...config, sessions: { ...config.sessions, record: true }, ui: { ...config.ui, rotateStopFallback: true } });
+    setRotationHoldForTests(5_000);
+    browserProbe.running = false; browserProbe.launches = 0; browserProbe.launchError = new Error('no browser on this computer');
+    resetBrowserStartupForTests();
+    const clock = { now: Date.now() };
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock.now);
+    try {
+      const chat = 'f0f00003-1111-4111-8111-000000000404', turn = 'g-stopfb-0-4';
+      const sessionId = await turnFor(chat, turn, 31);
+      await setGoalSwitchNow(chat, 'loop', true);
+      await declineTwice(chat, sessionId, clock);
+      await (await heldCall(chat))();
+      await vi.waitFor(async () => {
+        expect((await request('GET', '/status')).body.stopTurns).toEqual([expect.objectContaining({ conversationId: chat, turnId: turn })]);
+        expect(browserProbe.launches).toBeGreaterThan(0);
+      }, { timeout: 10_000, interval: 50 });
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect(rotationFenced(chat)).toBe(true);
+    } finally {
+      spy.mockRestore(); setRotationHoldForTests(15_000);
+      browserProbe.running = true; browserProbe.launchError = null; resetBrowserStartupForTests();
+      await saveConfig({ ...config, sessions: { ...config.sessions, record: true } });
+    }
+  });
+
+  it("answers the person's own Stop once it is queued, even when the browser cannot be opened", async () => {
+    browserProbe.running = false; browserProbe.launches = 0; browserProbe.launchError = new Error('no browser on this computer');
+    resetBrowserStartupForTests();
+    const warned = vi.spyOn(logger, 'logWarn');
+    try {
+      const chat = 'f0f00003-1111-4111-8111-000000000405', turn = 'g-stopfb-0-5';
+      const sessionId = await turnFor(chat, turn, 5);
+      // A recorded call is what makes the turn a running one for the Stop button.
+      await attributedCall(chat);
+      await expect(stopSessionTurn(sessionId, turn)).resolves.toBeDefined();
+      expect(browserProbe.launches).toBe(1);
+      expect((await request('GET', '/status')).body.stopTurns).toEqual([expect.objectContaining({ conversationId: chat, turnId: turn })]);
+      expect(warned.mock.calls.map(([line]) => String(line))).toContainEqual(expect.stringContaining('could not open the browser for the Stop'));
+    } finally { warned.mockRestore(); browserProbe.running = true; browserProbe.launchError = null; resetBrowserStartupForTests(); }
+  });
+
+  it('does none of it with the setting off', async () => {
+    setRotationHoldForTests(1_000);
+    const clock = { now: Date.now() };
+    // Ticking, so the ordinary continue's hold can run out.
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => (clock.now += 5));
+    try {
+      const chat = 'f0f00003-1111-4111-8111-000000000402', turn = 'g-stopfb-0-2';
+      const sessionId = await turnFor(chat, turn, 31);
+      await declineTwice(chat, sessionId, clock);
+      await (await heldCall(chat))();
+      await new Promise(resolve => setTimeout(resolve, 900));
+      expect((await request('GET', '/status')).body.stopTurns ?? []).toEqual([]);
+      expect(rotationFenced(chat)).toBe(false);
+    } finally { spy.mockRestore(); setRotationHoldForTests(15_000); }
+  });
+
+  it('gives the turn back when ChatGPT never shows the stop', async () => {
+    vi.useFakeTimers();
+    try {
+      armRotationFence('f0f00003-1111-4111-8111-000000000403', 'g-stopfb-0-3');
+      expect(rotationFenced('f0f00003-1111-4111-8111-000000000403')).toBe(true);
+      vi.advanceTimersByTime(60_001);
+      expect(rotationFenced('f0f00003-1111-4111-8111-000000000403')).toBe(false);
+    } finally { vi.useRealTimers(); }
   });
 });

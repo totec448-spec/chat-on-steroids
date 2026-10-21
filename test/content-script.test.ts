@@ -24202,8 +24202,14 @@ describe('archiving a retired worker chat', () => {
         body: JSON.stringify({ is_archived: true }) }
     ]);
 
+    // Restoring it before its worker is woken (#1701) is the same request, the other way round.
+    calls.length = 0;
+    expect(await live.runtimeMessage({ type: 'clf-archive-chat', conversationId: chat, archive: false })).toEqual({ outcome: 'unarchived' });
+    expect(calls[1]).toMatchObject({ url: `https://chatgpt.com/backend-api/conversation/${chat}`, method: 'PATCH', body: JSON.stringify({ is_archived: false }) });
+
     patchStatus = 429;
     expect(await live.runtimeMessage({ type: 'clf-archive-chat', conversationId: chat })).toEqual({ outcome: 'failed' });
+    expect(await live.runtimeMessage({ type: 'clf-archive-chat', conversationId: chat, archive: false })).toEqual({ outcome: 'failed' });
     calls.length = 0;
     expect(await live.runtimeMessage({ type: 'clf-archive-chat', conversationId: '../conversations' })).toEqual({ outcome: 'failed' });
     expect(calls).toEqual([]);
