@@ -636,6 +636,7 @@ export function initComposerDictation(): void {
     if (event.code !== 'Space' || !event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey ||
       event.isComposing || !holdToTalkSupported() || !dictationAvailable()) return;
     event.preventDefault();
+    spaceStillHeld = true;
     // Auto-repeat while held is the same press. A press during a clicked-on session stops it.
     if (event.repeat || dictation && dictation === heldDictation) return;
     const running = dictation;
@@ -649,7 +650,6 @@ export function initComposerDictation(): void {
   };
   window.addEventListener('keyup', event => {
     if (event.code === 'Space') spaceStillHeld = false;
-    else if (heldDictation && (event.key === 'Control' || event.key === 'Shift')) spaceStillHeld = true;
     if (heldDictation && (event.code === 'Space' || event.key === 'Control' || event.key === 'Shift')) releaseHeld();
   }, true);
   window.addEventListener('blur', () => { spaceStillHeld = false; releaseHeld(); });

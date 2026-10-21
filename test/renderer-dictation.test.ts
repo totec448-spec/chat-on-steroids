@@ -206,6 +206,19 @@ describe('renderer microphone draft ownership', () => {
       holdKey('keyup');
       expect(holdKey('keydown', { ctrlKey: false, shiftKey: false }).defaultPrevented).toBe(false);
     }
+    // The same when the chord stops a recording that a click started.
+    input.value = 'Note: '; input.setSelectionRange(6, 6);
+    button.click(); await flush();
+    emit({ type: 'status', status: 'listening' });
+    emit({ type: 'partial', text: 'clicked' });
+    holdKey('keydown'); await flush();
+    expect(button.getAttribute('data-state')).toBe('stopping');
+    holdKey('keyup', { code: 'ShiftLeft', key: 'Shift' });
+    expect(holdKey('keydown', { ctrlKey: false, shiftKey: false, repeat: true }).defaultPrevented).toBe(true);
+    emit({ type: 'final', text: 'clicked on' });
+    emit({ type: 'status', status: 'stopped' });
+    expect(input.value).toBe('Note: clicked on');
+    holdKey('keyup');
   });
 
   it('leaves Ctrl+Space, Shift+Space and Alt+Space to Windows and its IMEs', async () => {
