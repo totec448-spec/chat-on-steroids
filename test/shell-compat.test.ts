@@ -1205,6 +1205,88 @@ it('names no unrendered user message for a stale or foreign stamp', async () => 
   expect(named()).toEqual([]);
 });
 
+/** A chat's first exchange as ChatGPT draws it while it runs: no question anywhere, only its work (2026-10-19). */
+function runningFirstExchange(f: ReturnType<typeof fixture>) {
+  const exchange = f.doc.querySelector('[data-turn-key]')!;
+  exchange.querySelector('[data-content-search-unit-key$=":user"]')!.remove();
+  f.entry.turn.items = f.entry.turn.items.filter((item: any) => item.type !== 'user-message');
+  f.entry.turn.messageIds = [CALL, ANSWER];
+  const thread = f.chain({ entries: [f.entry] }, f.top);
+  f.row.return = thread;
+  return { exchange, thread };
+}
+
+it('marks a chat\'s first exchange that runs without its question, and nothing else', async () => {
+  const f = fixture();
+  const { exchange, thread } = runningFirstExchange(f);
+  await f.ask();
+  expect(f.api.messages().filter((m: any) => m.role === 'user')).toEqual([]);
+  expect(exchange.getAttribute('data-clf-fiber-first')).toBe(exchange.getAttribute('data-clf-fiber-turn'));
+  expect(f.api.firstQuestionPending()).toBe(true);
+
+  // A stamp from another scan is no evidence.
+  exchange.setAttribute('data-clf-fiber-first', 'other-scan:0');
+  expect(f.api.firstQuestionPending()).toBe(false);
+  await f.ask();
+  expect(f.api.firstQuestionPending()).toBe(true);
+
+  // Once the turn has completed, the question is ChatGPT's to show again; no stamp stands in for it.
+  f.entry.turn.status = 'complete';
+  await f.ask();
+  expect(exchange.hasAttribute('data-clf-fiber-first')).toBe(false);
+  expect(f.api.firstQuestionPending()).toBe(false);
+
+  // Only the first exchange: a later one running without its question has a parent, not the root.
+  f.entry.turn.status = 'in_progress';
+  const second = addExchange(f, 3, 'Second question', { userSlot: false });
+  second.entry.turn.items = second.entry.turn.items.filter((item: any) => item.type !== 'user-message');
+  const node = f.doc.querySelectorAll('[data-turn-key]')[1]!;
+  (node as any).__reactFiber$fixture = f.chain({ entry: second.entry }, f.chain({ entries: [f.entry, second.entry] }, f.top));
+  thread.memoizedProps.entries = [f.entry, second.entry];
+  await f.ask();
+  expect(node.hasAttribute('data-clf-fiber-first')).toBe(false);
+  expect(f.api.firstQuestionPending()).toBe(false);
+});
+
+it.each([true, false])('lets an automatic Compact & Resume start in a chat\'s first turn that hides its question (recorded first: %s)', async first => {
+  // 2026-10-19, Windows: every automatic attempt in a chat's first turn stopped at "The original
+  // question has not loaded yet", because ChatGPT showed that question nowhere while it ran.
+  // It compacted only after the turn had ended.
+  const f = fixture();
+  runningFirstExchange(f);
+  const job = { sessionId: 's-first', stage: 'handoff-pending', busy: true, automatic: true, handoffId: null, error: null,
+    sourceSend: { state: 'not-attempted', messageId: null } };
+  const r = await recorder(f, {
+    activity: () => ({ ok: true, data: { entries: [], stream: [], pendingTools: 0, recordedQuestionId: USER,
+      ...(first ? { recordedQuestionFirst: true } : {}) } }),
+    compact: m => m.ticket ? { ok: true, data: { started: true, token: 'tok-first', sourceSend: job.sourceSend, prompt: null, job } }
+      : m.resume ? { ok: true, data: { token: 'tok-first', prompt: 'Write the brief.', job } }
+      : { ok: true, data: { deferred: true, job } }
+  });
+  // The turn's one call has its result; Stop completes the turn, as on the live page.
+  const call = (f.entry.turn.items[0] as any).items[1];
+  call.completed = true; call.result = { content: [{ type: 'text', text: 'ok' }] };
+  const stop = f.doc.createElement('button');
+  stop.type = 'button'; stop.setAttribute('aria-label', 'Stop streaming'); stop.setAttribute('data-testid', 'stop-button');
+  stop.addEventListener('click', () => { f.entry.turn.status = 'complete'; stop.remove(); });
+  f.doc.querySelector('[data-chatgpt-composer]')!.append(stop);
+  try {
+    await f.ask();
+    const done = r.hook.startCompact(true);
+    const compacts = () => r.sent.filter(m => m.type === 'compact');
+    if (first) {
+      await vi.waitFor(() => expect(compacts().some(m => m.resume === true)).toBe(true), { timeout: 20000 });
+      expect(compacts().some(m => m.sourceDeferred === true)).toBe(false);
+      expect(f.doc.contains(stop)).toBe(false);
+    } else {
+      await done;
+      expect(compacts().some(m => m.resume === true)).toBe(false);
+      expect(compacts()).toContainEqual(expect.objectContaining({ sourceDeferred: true, sourceError: expect.stringContaining('original question has not loaded') }));
+      expect(f.doc.contains(stop)).toBe(true);
+    }
+  } finally { (f.win as any).__CLF_CONTENT_RECORDER__?.stop(); }
+}, 30000);
+
 // 2.1.41 release round and #1662, Windows: in a chat's later turns ChatGPT keeps a message sent
 // into the running answer (a fresh-turn continue, or the person's own follow-up) in the same
 // exchange as the question it followed, as its own user slot. The whole exchange was skipped as

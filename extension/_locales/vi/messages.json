@@ -93,7 +93,7 @@
     "message": "Cuộc trò chuyện bị chặn"
   },
   "content_chat_blocked_tip": {
-    "message": "Cuộc trò chuyện này bị chặn trong ứng dụng Chat On Steroids: các lệnh gọi công cụ bị từ chối, còn Goal, Loop và tự động thu gọn đều tắt. Để bỏ chặn, mở tab Chat của ứng dụng, di chuột lên cuộc trò chuyện này trong danh sách phiên rồi nhấn biểu tượng chặn."
+    "message": "Cuộc trò chuyện này bị chặn trong ứng dụng Chat On Steroids: các lệnh gọi công cụ bị từ chối, còn Goal, Loop và tự động thu gọn đều tắt. Để bỏ chặn, mở menu ⋯ của cuộc trò chuyện này ở thanh bên của ứng dụng và chọn “Bỏ chặn”."
   },
   "content_chat_still_opening": {
     "message": "cuộc trò chuyện này vẫn đang mở — hãy thử lại"

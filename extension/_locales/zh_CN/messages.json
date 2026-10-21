@@ -93,7 +93,7 @@
     "message": "聊天已阻止"
   },
   "content_chat_blocked_tip": {
-    "message": "此聊天已在 Chat On Steroids 应用中被阻止：其工具调用会被拒绝，目标、循环 和自动压缩均已关闭。要解除阻止，请打开应用的“聊天”标签页，在会话列表中将鼠标悬停在此聊天上，然后点击其阻止图标。"
+    "message": "此聊天已在 Chat On Steroids 应用中被阻止：其工具调用会被拒绝，目标、循环 和自动压缩均已关闭。要解除阻止，请在应用侧边栏中打开此聊天的 ⋯ 菜单，然后选择“解除阻止”。"
   },
   "content_chat_still_opening": {
     "message": "此聊天仍在打开中，请重试"

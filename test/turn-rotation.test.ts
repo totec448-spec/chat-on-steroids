@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { considerTurnRotation, resetTurnRotationForTests, type RotationDeps } from '../src/main/turn-rotation.js';
+import { considerTurnRotation, noteRotationDeclined, resetTurnRotationForTests, type RotationDeps } from '../src/main/turn-rotation.js';
 
 /**
  * #1402: turns past ~35 minutes almost always broke; a fresh turn every 30 minutes, started right
@@ -80,4 +80,53 @@ it('files at most two automatic continues for one turn', async () => {
   // The next turn starts over.
   startedAt = now; now += 31 * 60_000;
   expect(await considerTurnRotation('chat', 'session', 'turn-2', logged())).toBe(true);
+});
+
+// 2026-10-20, Loop chats on the Windows VM: a continue is filed right after a tool result. When
+// ChatGPT shows Stop at that moment it offers no Send for it, so the page declines it at once. A
+// later tool result is usually a moment without Stop; waiting five minutes and giving up after two
+// meant a Loop step never got its fresh turn.
+it('tries again a minute later when the page declined for want of Send, without spending the two filings', async () => {
+  now = 31 * 60_000;
+  expect(await considerTurnRotation('chat', 'session', 'turn', deps())).toBe(true);
+  noteRotationDeclined('chat', 'turn');
+  now += 30_000;
+  expect(await considerTurnRotation('chat', 'session', 'turn', deps())).toBe(false);
+  now += 31_000;
+  expect(await considerTurnRotation('chat', 'session', 'turn', deps())).toBe(true);
+  noteRotationDeclined('chat', 'turn');
+  now += 61_000;
+  expect(await considerTurnRotation('chat', 'session', 'turn', deps())).toBe(true);
+  // Taken at last: one fresh turn per turn, as before.
+  now += 61_000;
+  expect(await considerTurnRotation('chat', 'session', 'turn', deps())).toBe(false);
+  expect(filed).toHaveLength(3);
+});
+
+it('gives up on a turn after six declines, and the next turn starts over', async () => {
+  const lines: string[] = [];
+  const logged = (): RotationDeps => ({ ...deps(), log: line => lines.push(line) });
+  now = 31 * 60_000;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    expect(await considerTurnRotation('chat', 'session', 'turn', logged())).toBe(true);
+    noteRotationDeclined('chat', 'turn');
+    now += 61_000;
+  }
+  expect(await considerTurnRotation('chat', 'session', 'turn', logged())).toBe(false);
+  now += 10 * 60_000;
+  expect(await considerTurnRotation('chat', 'session', 'turn', logged())).toBe(false);
+  expect(filed).toHaveLength(6);
+  expect(lines.filter(line => line.includes('giving up on fresh turns'))).toHaveLength(1);
+  startedAt = now; now += 31 * 60_000;
+  expect(await considerTurnRotation('chat', 'session', 'turn-2', logged())).toBe(true);
+});
+
+it('ignores a decline for another turn or chat', async () => {
+  now = 31 * 60_000;
+  expect(await considerTurnRotation('chat', 'session', 'turn', deps())).toBe(true);
+  noteRotationDeclined('chat', 'older-turn');
+  noteRotationDeclined('other-chat', 'turn');
+  now += 61_000;
+  // Still the filed-and-not-taken wait of five minutes.
+  expect(await considerTurnRotation('chat', 'session', 'turn', deps())).toBe(false);
 });
