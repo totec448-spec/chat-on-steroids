@@ -194,6 +194,8 @@ No edge cases: a one-line wording change in a log message.
 ## Checklist
 
 - [x] Every new text a person sees is in all 12 languages, or there is none.
+- [x] Every decision the app makes (it waits, refuses, skips or retries) writes one log line saying which and why, or there is none.
+- [x] It sends no more to ChatGPT or other providers per step, or the PR says how much more and why.
 `;
   const fix = [{ path: 'src/main/bridge.ts', changes: 30 }, { path: 'test/bridge.test.ts', changes: 40 }];
 
@@ -213,5 +215,66 @@ No edge cases: a one-line wording change in a log message.
     expect(checkAt({ body: complete, files: [{ path: 'src/renderer/app-shortcuts.ts', changes: 10 }, { path: 'test/app-shortcuts.test.ts', changes: 10 }], maintainer: true, createdAt: opened }).join('\n')).toMatch(/## Platforms/);
     // Not for other code.
     expect(checkAt({ body: complete, files: fix, maintainer: true, createdAt: opened })).toEqual([]);
+  });
+});
+
+// From 2026-10-21 (user): old saved data, logged decisions, no fixed waits in tests, cost and size.
+// @ts-expect-error The checker is a plain Node script without type declarations.
+import { QUALITY_SINCE } from '../scripts/pr-check.mjs';
+
+describe('saved data, logs, waits, cost and size', () => {
+  const opened = '2026-10-22T09:00:00Z';
+  type Extra = { maintainer?: boolean; createdAt?: string; addedCode?: string[]; addedTests?: string[]; largeFiles?: Array<{ path: string; bytes: number }> };
+  const checkAt = check as (pr: Parameters<typeof check>[0] & Extra) => string[];
+  const fix = [{ path: 'src/main/bridge.ts', changes: 30 }, { path: 'test/bridge.test.ts', changes: 40 }];
+  const complete = `${good}
+## Edge cases
+
+No edge cases: a one-line wording change in a log message.
+
+## Checklist
+
+- [x] Every new text a person sees is in all 12 languages, or there is none.
+- [x] Every decision the app makes (it waits, refuses, skips or retries) writes one log line saying which and why, or there is none.
+- [x] It sends no more to ChatGPT or other providers per step, or the PR says how much more and why.
+`;
+  const at = (extra: Extra & { body?: string; files?: Array<{ path: string; changes: number }> } = {}) =>
+    checkAt({ body: extra.body ?? complete, files: extra.files ?? fix, maintainer: true, createdAt: opened, ...extra });
+
+  it('passes a complete code PR', () => {
+    expect(Date.parse(QUALITY_SINCE)).toBeLessThan(Date.parse(opened));
+    expect(at()).toEqual([]);
+  });
+
+  it('asks for the log and cost lines to be ticked', () => {
+    expect(at({ body: complete.replace('- [x] Every decision', '- [ ] Every decision') }).join('\n')).toMatch(/log line/);
+    expect(at({ body: complete.replace('- [x] It sends no more', '- [ ] It sends no more') }).join('\n')).toMatch(/per step/);
+  });
+
+  it('asks a change to what the app saves for a test with the previous version\'s data', () => {
+    const saving = ['+    await writeDurableNow(\'worker-archive\', { version: 2, entries });'];
+    expect(at({ addedCode: saving }).join('\n')).toMatch(/## Saved data/);
+    expect(at({ addedCode: saving, body: `${complete}\n## Saved data\n\n"loads a version 1 file" reads a queue saved before this change, and a damaged one.\n` })).toEqual([]);
+    expect(at({ addedCode: saving, body: `${complete}\nNo saved-data change: the write already existed, only its log line changed.\n` })).toEqual([]);
+    expect(at({ addedCode: ['+  logInfo(`saved ${count}`);'] })).toEqual([]);
+    // An IPC argument schema is not saved data.
+    expect(at({ addedCode: ["+    const args = z.object({ id: z.string() }).parse(payload);"] })).toEqual([]);
+  });
+
+  it('flags fixed waits over a second in new tests, unless a reason is given', () => {
+    const slow = ['+    await new Promise(resolve => setTimeout(resolve, 1500));'];
+    expect(at({ addedTests: slow }).join('\n')).toMatch(/wait a fixed time/i);
+    expect(at({ addedTests: ['+    await new Promise(resolve => setTimeout(resolve, 150));', '+    vi.advanceTimersByTime(60_000);'] })).toEqual([]);
+    expect(at({ addedTests: slow, body: `${complete}\nLong wait: the real child process needs two seconds to exit on Windows.\n` })).toEqual([]);
+  });
+
+  it('asks large added files for their size reason', () => {
+    const big = [{ path: 'src/renderer/assets/hero.png', bytes: 900_000 }];
+    expect(at({ largeFiles: big }).join('\n')).toMatch(/Size:/);
+    expect(at({ largeFiles: big, body: `${complete}\nSize: 900 KB, the full-resolution picture the Setup guide zooms into.\n` })).toEqual([]);
+  });
+
+  it('asks nothing of PRs opened before these rules', () => {
+    expect(checkAt({ body: good, files: fix, maintainer: true, createdAt: '2026-10-20T09:00:00Z', addedTests: ['+ setTimeout(r, 5000)'] })).toEqual([]);
   });
 });
