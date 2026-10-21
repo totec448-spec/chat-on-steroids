@@ -7358,6 +7358,8 @@ describe('bookmarked answers', () => {
     expect(api.listBookmarks).toHaveBeenCalledWith(summary([]).id);
     expect((w.document.getElementById('chatBookmarks') as HTMLButtonElement).hidden).toBe(false);
     expect(w.document.querySelector('.answer-actions .answer-bookmark')!.getAttribute('aria-pressed')).toBe('true');
+  });
+});
 
 describe('a formula in an answer', () => {
   const answer = (seq: number, body: string): SessionEvent => ({

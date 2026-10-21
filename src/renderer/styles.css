@@ -446,6 +446,9 @@ code {
   background: var(--popover, var(--card)); border: 1px solid var(--edge); border-radius: 10px; box-shadow: 0 8px 28px #0003;
   transform-origin: top left; animation: row-menu-in 140ms cubic-bezier(.2, .8, .2, 1); }
 .row-menu-leaving { pointer-events: none; animation: row-menu-out 100ms ease-in forwards; }
+/* A long menu (a chat's bookmarks, up to 200) scrolls inside the window instead of running past it;
+   placeBeside() narrows it further to the room beside its button. */
+.row-menu { max-height: calc(100vh - 16px); overflow-y: auto; overscroll-behavior: contain; }
 .row-menu.is-wide { max-width: min(440px, calc(100vw - 16px)); }
 /* A wide list's live value (a bookmark's time) lines up at the end of each line. */
 .row-menu.is-wide .row-menu-label:has(+ .row-menu-hint) { flex: 1 1 auto; }
