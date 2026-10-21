@@ -190,6 +190,24 @@ describe('renderer microphone draft ownership', () => {
     expect(button.getAttribute('data-state')).toBe('idle');
   });
 
+  it('keeps the last phrase and types no spaces when Ctrl or Shift is let go before Space', async () => {
+    for (const modifier of ['Control', 'Shift']) {
+      input.value = 'Note: '; input.setSelectionRange(6, 6);
+      holdKey('keydown'); await flush();
+      emit({ type: 'status', status: 'listening' });
+      emit({ type: 'partial', text: 'still talk' });
+      holdKey('keyup', { code: `${modifier}Left`, key: modifier });
+      expect(button.getAttribute('data-state')).toBe('stopping');
+      // Space is still down, so Windows keeps repeating it, now without the modifier.
+      expect(holdKey('keydown', { ctrlKey: false, shiftKey: false, repeat: true }).defaultPrevented).toBe(true);
+      emit({ type: 'final', text: 'still talking' });
+      emit({ type: 'status', status: 'stopped' });
+      expect(input.value).toBe('Note: still talking');
+      holdKey('keyup');
+      expect(holdKey('keydown', { ctrlKey: false, shiftKey: false }).defaultPrevented).toBe(false);
+    }
+  });
+
   it('leaves Ctrl+Space, Shift+Space and Alt+Space to Windows and its IMEs', async () => {
     const starts = start.mock.calls.length;
     for (const chord of [{ shiftKey: false }, { ctrlKey: false }, { ctrlKey: false, shiftKey: false, altKey: true }]) {
