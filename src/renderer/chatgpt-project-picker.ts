@@ -44,6 +44,8 @@ export function createChatgptProjectPicker(deps: {
       const decide = (work: () => Promise<Reply<LocalProject>>) => { decided = true; void settle(work()); };
       const fresh: SearchPopupChoice[] = !project.chatgpt ? [{
         label: t('New ChatGPT Project “{0}”', [project.name]),
+        // Long names are cut in the list; the whole label stays readable on hover.
+        title: t('New ChatGPT Project “{0}”', [project.name]),
         lead: icon('i-plus'),
         pick: () => decide(() => deps.api.createChatgptProject(project.id))
       }] : [];
@@ -58,6 +60,7 @@ export function createChatgptProjectPicker(deps: {
           const elsewhere = choice.linkedTo && choice.linkedTo.id !== project.id ? choice.linkedTo : null;
           return {
             label: choice.name,
+            title: elsewhere ? `${choice.name}\n${t('Linked to {0}', [elsewhere.name])}` : choice.name,
             lead: icon('i-folder'),
             selected: choice.linkedTo?.id === project.id,
             disabled: !!elsewhere,

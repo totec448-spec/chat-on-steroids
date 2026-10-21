@@ -2091,6 +2091,7 @@ describe('choosing a ChatGPT Project for a project', () => {
     expect(api.addProject).toHaveBeenCalledWith({ chatgpt: 'later' });
     expect(options().map(option => option.textContent)).toEqual(['New ChatGPT Project “Local”', 'Existing', 'TakenLinked to Other']);
     expect(options()[2]!.disabled).toBe(true);
+    expect(options().map(option => option.title)).toEqual(['New ChatGPT Project “Local”', 'Existing', 'Taken\nLinked to Other']);
     options()[1]!.click();
     await settle();
     expect(api.linkChatgptProject).toHaveBeenCalledWith(local.id, existing);
