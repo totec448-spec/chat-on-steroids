@@ -232,14 +232,21 @@ describe('terminateProcess', () => {
   // The desktop helper launches apps for the person; retiring the helper must not close them.
   it('ends only the process it names, and what that process started keeps running', async () => {
     const pidFile = path.join(cwd, 'terminate-one-child.pid');
-    const parent = `const {spawn}=require('node:child_process'); const fs=require('node:fs'); const child=spawn(${JSON.stringify(node)}, ['-e', 'setInterval(() => {}, 1000)'], {stdio:'ignore'}); fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid)); setInterval(() => {}, 1000);`;
     const { spawn } = await import('node:child_process');
-    const started = spawn(node, ['-e', parent], { stdio: 'ignore', windowsHide: true });
+    // On Windows the parent is PowerShell starting a program the way the desktop helper does. A
+    // node parent would not do: libuv puts a node process's children in a kill-on-close job, so
+    // they end with it however it is ended.
+    const started = IS_WINDOWS
+      ? spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+        `$s = New-Object System.Diagnostics.ProcessStartInfo; $s.FileName = 'ping.exe'; $s.Arguments = '-n 600 127.0.0.1'; $s.UseShellExecute = $false; $s.CreateNoWindow = $true; ` +
+        `$p = [System.Diagnostics.Process]::Start($s); Set-Content -LiteralPath '${pidFile.replace(/'/g, "''")}' -Value $p.Id; Start-Sleep 600`],
+      { stdio: 'ignore', windowsHide: true })
+      : spawn(node, ['-e', `const {spawn}=require('node:child_process'); const fs=require('node:fs'); const child=spawn(${JSON.stringify(node)}, ['-e', 'setInterval(() => {}, 1000)'], {stdio:'ignore'}); fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid)); setInterval(() => {}, 1000);`], { stdio: 'ignore' });
     const exited = new Promise((resolve) => started.once('exit', resolve));
     let childPid = 0;
     try {
       for (let tries = 0; tries < 200 && !childPid; tries++) {
-        childPid = Number.parseInt(await fs.readFile(pidFile, 'utf8').catch(() => '0'), 10) || 0;
+        childPid = Number.parseInt((await fs.readFile(pidFile, 'utf8').catch(() => '0')).trim(), 10) || 0;
         if (!childPid) await new Promise((resolve) => setTimeout(resolve, 50));
       }
       expect(childPid).toBeGreaterThan(0);
