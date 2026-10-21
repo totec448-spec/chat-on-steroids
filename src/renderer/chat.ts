@@ -30,7 +30,7 @@ import { toolResultText } from './tool-result.js';
 import { renderEditCards } from './tool-artifacts.js';
 import { chatErrorPresentation, duplicateChatErrors } from './chat-error.js';
 import { renderRecoveryCountdowns } from './recovery.js';
-import type { RecoveryCountdown } from '../shared/recovery.js';
+import { CUSTOM_CONTINUE_MAX_CHARS, type RecoveryCountdown } from '../shared/recovery.js';
 import { communicationTitle, foldAgentCommunication, participatingWorkers, workerAvatar } from './agent-communication.js';
 import { structureTimeline, type RoundPart } from './timeline-rounds.js';
 import type { TurnTrace } from '../shared/turn-trace.js';
@@ -6970,6 +6970,19 @@ function wireGoal(save: () => Promise<void>): void {
     await save();
     toast('Handoff prompt restored to default');
   });
+  // Empty means the built-in phrases; main.ts owns the ui field it saves into.
+  $<HTMLTextAreaElement>('customContinue').maxLength = CUSTOM_CONTINUE_MAX_CHARS;
+  $('customContinueEdit').addEventListener('click', () => {
+    const panel = $('customContinuePanel');
+    panel.hidden = !panel.hidden;
+    ui($('customContinueEdit'), 'textContent', () => panel.hidden ? t('Edit prompt') : t('Close prompt'));
+    if (!panel.hidden) $<HTMLTextAreaElement>('customContinue').focus();
+  });
+  $('customContinueReset').addEventListener('click', async () => {
+    $<HTMLTextAreaElement>('customContinue').value = '';
+    await save();
+    toast(t('Continue prompt restored to default'));
+  });
   $<HTMLTextAreaElement>('goalPrompt').maxLength = MAX_GOAL_SYSTEM_PROMPT_CHARS;
   $('goalPromptEdit').addEventListener('click', () => {
     const panel = $('goalPromptPanel');
@@ -7126,6 +7139,7 @@ const CHAT_INPUTS = [
   'endSleepingWorkerProcesses',
   'archiveWorkerChats',
   'autoContinue',
+  'customContinue',
   'goalProvider',
   'goalBaseUrl',
   'goalCustomModel',

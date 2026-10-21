@@ -172,6 +172,8 @@ export interface UiPrefs {
   playfulStatus?: boolean;
   /** A random fun-fact aside at the end of each automatic Continue, marked for the model to ignore. Off by default. */
   playfulContinue?: boolean;
+  /** The person's own words in place of the built-in automatic Continue phrase (silence recovery only). Unset means the built-in phrases. */
+  customContinue?: string;
   /** Keep the chat at its end while it grows, here and on ChatGPT, until the reader scrolls up. On unless false. */
   followOutput?: boolean;
   /** Add the Chat On Steroids Core mention to the user's own prompts sent from the app. On unless false. */
