@@ -10,6 +10,14 @@
 
 <!-- The behavior change, in a few sentences. One topic per PR. -->
 
+## Edge cases
+
+<!-- Required when code changes: the rare and edge cases this handles, and how. Think of empty or
+     missing input, a restart or reload midway, two things happening at once, a slow or failed
+     network, Windows and macOS, other languages, old saved data or an older extension.
+     Name the tests that cover them where you can.
+     If none apply (say, a wording change), write: No edge cases: <reason> -->
+
 ## Test
 
 <!-- Name the test you added or changed. The "Fail-first test" check runs it against main's code
