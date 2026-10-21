@@ -30,6 +30,11 @@ reviews:
   auto_review:
     enabled: true
     drafts: false
+    # Every push of a PR, however many: the default pauses after five reviewed commits.
+    auto_pause_after_reviewed_commits: 0
+    # PRs into any branch, not only main.
+    base_branches:
+      - ".*"
     ignore_usernames:
       - dependabot[bot]
   path_filters:
@@ -85,6 +90,21 @@ reviews:
           exercises it. Warn, naming the case, when a listed case has no handling or no test, or
           when the diff plainly misses a common one: restart or crash mid-operation, empty or
           very large input, two browsers or two computers at once, a slow machine, old saved data.
+  # Review only: none of its commands may commit to a PR branch (Autofix, Fix CI, merge conflicts,
+  # generated tests or docstrings). Contributors push their own changes.
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+    simplify:
+      enabled: false
+    autofix:
+      enabled: false
+    fix_ci:
+      enabled: false
+    resolve_merge_conflict:
+      enabled: false
   tools:
     # The repository's own ESLint and TypeScript run in CI; these would add overlapping noise.
     biome:
@@ -112,5 +132,6 @@ issue_enrichment:
   auto_enrich:
     enabled: false
   planning:
+    enabled: false
     auto_planning:
       enabled: false
