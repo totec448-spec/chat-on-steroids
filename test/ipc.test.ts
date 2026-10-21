@@ -555,6 +555,31 @@ it('adds picker-selected projects, reuses containing approval, and leaves cancel
   })).toMatchObject({ ok: false });
 });
 
+it('adds a folder whose ChatGPT Project the person picks next, and links or creates it (#1756)', async () => {
+  currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
+  const folder = path.join(dir, 'link-project');
+  await fs.mkdir(path.join(folder, 'other'), { recursive: true });
+  await saveConfig({ ...defaultConfig(), roots: [] });
+  await writeDurableNow('projects', []);
+  const { noteChatgptProjects } = await import('../src/main/chatgpt-project-catalog.js');
+  const listed = `g-p-${'e'.repeat(32)}`;
+  await noteChatgptProjects([{ id: listed, name: 'Existing' }]);
+  vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: false, filePaths: [folder] });
+  const later = await handlers.get('projects:add')!(null, { chatgpt: 'later' }) as any;
+  expect(later.ok, later.error).toBe(true);
+  expect(later.data.chatgpt).toBeUndefined();
+  expect(await handlers.get('projects:add')!(null, { chatgpt: 'now' })).toMatchObject({ ok: false });
+  expect((await handlers.get('projects:chatgpt-choices')!(null, {}) as any).data).toEqual([{ id: listed, name: 'Existing', linkedTo: null }]);
+  expect(await handlers.get('projects:chatgpt-link')!(null, { id: later.data.id, chatgptId: 'g-p-x' })).toMatchObject({ ok: false });
+  const linked = await handlers.get('projects:chatgpt-link')!(null, { id: later.data.id, chatgptId: listed }) as any;
+  expect(linked).toMatchObject({ ok: true, data: { chatgpt: { state: 'linked', id: listed } } });
+  expect((await handlers.get('projects:chatgpt-choices')!(null, {}) as any).data[0].linkedTo).toEqual({ id: later.data.id, name: 'link-project' });
+  vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: false, filePaths: [path.join(folder, 'other')] });
+  const second = await handlers.get('projects:add')!(null, { chatgpt: 'later' }) as any;
+  const created = await handlers.get('projects:chatgpt-create')!(null, { id: second.data.id }) as any;
+  expect(created).toMatchObject({ ok: true, data: { chatgpt: { state: 'requested' } } });
+});
+
 it('does not install a stale Git watch after a newer Files project watch', async () => {
   const { ProjectFileWatchSet } = await import('../src/main/project-file-watcher.js');
   const { ProjectGitWatchSet } = await import('../src/main/project-git.js');

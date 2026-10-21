@@ -89,7 +89,6 @@
   "Chats": "Chats",
   "Loading projects…": "A carregar projetos…",
   "Loading chats…": "A carregar chats…",
-  "No projects yet.": "Ainda não existem projetos.",
   "No chats outside projects yet.": "Ainda não existem chats fora dos projetos.",
   "Refresh chats": "Atualizar chats",
   "Reusable instructions for your chats.": "Instruções reutilizáveis para os seus chats.",
@@ -2972,5 +2971,19 @@
   "This answer is no longer in the chat.": "Esta resposta já não está no chat.",
   "{0} bookmarks in this chat": "{0} marcadores neste chat",
   "{0} bookmarks in this chat|one": "{0} marcador neste chat",
-  "{0} bookmarks in this chat|many": "{0} de marcadores neste chat"
+  "{0} bookmarks in this chat|many": "{0} de marcadores neste chat",
+  "Choose a ChatGPT Project…": "Escolher um projeto no ChatGPT…",
+  "Use a new or an existing ChatGPT Project for this project's chats": "Usar um projeto do ChatGPT novo ou existente para os chats deste projeto",
+  "New ChatGPT Project “{0}”": "Novo projeto do ChatGPT “{0}”",
+  "ChatGPT Project for {0}": "Projeto do ChatGPT para {0}",
+  "Search ChatGPT Projects": "Pesquisar projetos do ChatGPT",
+  "Linked to {0}": "Ligado a {0}",
+  "No ChatGPT Project matches": "Nenhum projeto do ChatGPT corresponde",
+  "Projects ChatGPT shows in its sidebar. Open chatgpt.com to update this list.": "Projetos que o ChatGPT mostra na barra lateral. Abra chatgpt.com para atualizar esta lista.",
+  "No projects yet. A project is a folder on this computer; adding one links it to a new or an existing ChatGPT Project.": "Ainda não existem projetos. Um projeto é uma pasta neste computador; ao adicioná-la, fica ligada a um projeto do ChatGPT novo ou existente.",
+  "That is not a ChatGPT Project": "Isso não é um projeto do ChatGPT",
+  "This project already has a ChatGPT Project": "Este projeto já tem um projeto do ChatGPT",
+  "Its ChatGPT Project is being created": "O respetivo projeto do ChatGPT está a ser criado",
+  "That Project is not one ChatGPT lists for this account": "O ChatGPT não lista esse projeto para esta conta",
+  "That ChatGPT Project is already linked to another project": "Esse projeto do ChatGPT já está ligado a outro projeto"
 }

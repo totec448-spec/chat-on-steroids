@@ -2064,6 +2064,72 @@ it('offers a local folder and a server folder from the sidebar +, and marks a se
   expect(badge?.getAttribute('title')).toBe('me@devbox');
 });
 
+// #1756: with ChatGPT Projects to choose from, a new project's own is picked right after adding it.
+describe('choosing a ChatGPT Project for a project', () => {
+  const existing = `g-p-${'a'.repeat(32)}`, taken = `g-p-${'b'.repeat(32)}`;
+  const local = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee3', name: 'Local', path: '/local', createdAt: 3 };
+  async function adding(choices: unknown[]) {
+    const { w } = await boot([], false);
+    const api = (w as any).api;
+    api.chatgptProjectChoices = vi.fn(async () => ({ ok: true, data: choices }));
+    api.addProject = vi.fn(async () => ({ ok: true, data: local }));
+    api.linkChatgptProject = vi.fn(async (id: string, chatgptId: string) => ({ ok: true, data: { ...local, id, chatgpt: { state: 'linked', id: chatgptId, updatedAt: 4 } } }));
+    api.createChatgptProject = vi.fn(async (id: string) => ({ ok: true, data: { ...local, id, chatgpt: { state: 'requested', requestId: 'cccccccc-bbbb-4ccc-8ddd-eeeeeeeeeeee', updatedAt: 4 } } }));
+    (w.document.getElementById('addProject') as HTMLButtonElement).click();
+    await settle();
+    w.document.querySelector<HTMLButtonElement>('[data-row-action="add-local-project"]')!.click();
+    await settle(); await settle();
+    const options = () => [...w.document.querySelectorAll<HTMLButtonElement>('.chatgpt-project-picker [role="option"]')];
+    return { w, api, options };
+  }
+  const listed = [{ id: existing, name: 'Existing', linkedTo: null }, { id: taken, name: 'Taken', linkedTo: { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee9', name: 'Other' } }];
+
+  it('links the new project to a Project the account already has', async () => {
+    const { w, api, options } = await adding(listed);
+    expect(api.addProject).toHaveBeenCalledWith({ chatgpt: 'later' });
+    expect(options().map(option => option.textContent)).toEqual(['New ChatGPT Project “Local”', 'Existing', 'TakenLinked to Other']);
+    expect(options()[2]!.disabled).toBe(true);
+    options()[1]!.click();
+    await settle();
+    expect(api.linkChatgptProject).toHaveBeenCalledWith(local.id, existing);
+    expect(api.createChatgptProject).not.toHaveBeenCalled();
+    expect(w.document.querySelector('.chatgpt-project-picker')).toBeNull();
+  });
+
+  it('keeps the default, a new ChatGPT Project, when the choice is closed', async () => {
+    const { w, api } = await adding(listed);
+    w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(api.createChatgptProject).toHaveBeenCalledWith(local.id);
+    expect(api.linkChatgptProject).not.toHaveBeenCalled();
+  });
+
+  it('adds as before when ChatGPT listed nothing to choose', async () => {
+    const { w, api } = await adding([listed[1]]);
+    expect(api.addProject).toHaveBeenCalledWith();
+    expect(w.document.querySelector('.chatgpt-project-picker')).toBeNull();
+    expect(api.createChatgptProject).not.toHaveBeenCalled();
+  });
+
+  it('offers the choice from the menu of a project without one, and closing it there changes nothing', async () => {
+    const { w } = await boot([], false, [], [local]);
+    const api = (w as any).api;
+    api.chatgptProjectChoices = vi.fn(async () => ({ ok: true, data: listed }));
+    api.createChatgptProject = vi.fn();
+    const menuButton = w.document.querySelector<HTMLButtonElement>(`[data-row-menu="project:${local.id}"]`)!;
+    menuButton.click();
+    w.document.querySelector<HTMLButtonElement>('.row-menu [data-row-action="chatgpt-link"]')!.click();
+    await settle();
+    // A project with no ChatGPT Project can also start a new one from here.
+    expect([...w.document.querySelectorAll('.chatgpt-project-picker [role="option"]')].map(option => option.textContent))
+      .toEqual(['New ChatGPT Project “Local”', 'Existing', 'TakenLinked to Other']);
+    w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(w.document.querySelector('.chatgpt-project-picker')).toBeNull();
+    expect(api.createChatgptProject).not.toHaveBeenCalled();
+  });
+});
+
 it('sends a new chat at once with Automatic when no model list is readable and none was asked for (#864)', async () => {
   // ChatGPT Go and Free show no model picker, so Send used to wait two minutes for a list that never came.
   const { w, live } = await boot([], false, [], [], { noModels: true });

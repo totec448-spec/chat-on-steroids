@@ -107,6 +107,7 @@ import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMe
 import { createSearchPopup } from './search-popup.js';
 import { primaryShortcut } from './shortcuts.js';
 import { initSshProjectDialog } from './ssh-project-dialog.js';
+import { createChatgptProjectPicker } from './chatgpt-project-picker.js';
 
 const api = window.api;
 let chatSearch: ChatSearch | null = null;
@@ -275,6 +276,13 @@ function projectMenuItems(id: string): RowMenuItem[] {
   return [
     { action: 'group-new', icon: 'i-group', label: () => t('New group'), title: () => t('Add a group to sort this project\'s chats'),
       run: () => void newChatGroup(id) },
+    // A project without a ChatGPT Project, or whose creation failed, can take a new or an existing one (#1756).
+    ...(!link || link.state === 'failed' || link.state === 'uncertain' ? [{
+      action: 'chatgpt-link', icon: 'i-folder',
+      label: () => t('Choose a ChatGPT Project…'),
+      title: () => t('Use a new or an existing ChatGPT Project for this project\'s chats'),
+      run: () => { const project = projects.find(row => row.id === id); if (project) void chatgptProjectPicker.offer(project, 'menu'); }
+    } satisfies RowMenuItem] : []),
     // Only when its native ChatGPT Project could not be created; otherwise nothing about it shows.
     ...(link?.state === 'failed' || link?.state === 'uncertain' ? [{
       action: 'chatgpt-retry', icon: 'i-retry', disabled: retryingChatgptProject.has(id),
@@ -298,6 +306,18 @@ function projectMenuItems(id: string): RowMenuItem[] {
     }
   ];
 }
+
+const chatgptProjectPicker = createChatgptProjectPicker({
+  api,
+  anchor: id => rowMenuButton(`project:${id}`),
+  onUpdated: updated => {
+    ++sessionsLoadGeneration;
+    projects = projects.map(row => row.id === updated.id ? updated : row);
+    paintSessions();
+    void refreshInputQueue();
+  },
+  onError: message => toast(message)
+});
 
 const retryingChatgptProject = new Set<string>();
 async function retryChatgptProject(id: string): Promise<void> {
@@ -8666,18 +8686,27 @@ export function initChat(next: Deps): void {
     expandedProjects.add(project.id);
     if (generation === selectionGeneration) selectNewChat(project.id); else paintSessions();
   };
+  // With ChatGPT Projects to choose from, a new project's own is decided right after it is added (#1756).
+  const offerChatgptProject = (project: LocalProject, known: ReadonlySet<string>, asked: boolean) => {
+    if (asked && !known.has(project.id) && !project.chatgpt) setTimeout(() => void chatgptProjectPicker.offer(project, 'added'), 0);
+  };
   const addLocalProject = async () => {
     const button = $<HTMLButtonElement>('addProject'); button.disabled = true;
     const generation = selectionGeneration;
     try {
-      const project = await run(api.addProject());
-      if (project) showAddedProject(project, generation);
+      const asked = await chatgptProjectPicker.hasChoices();
+      const known = new Set(projects.map(row => row.id));
+      const project = await run(asked ? api.addProject({ chatgpt: 'later' }) : api.addProject());
+      if (project) { showAddedProject(project, generation); offerChatgptProject(project, known, asked); }
     } finally { button.disabled = false; }
   };
   // The composer's Share a folder means a folder on this computer: straight to the picker.
   $('composerFolder').addEventListener('click', () => void addLocalProject());
   let sshDialogGeneration = 0;
-  const sshProjectDialog = initSshProjectDialog(api, project => showAddedProject(project, sshDialogGeneration));
+  const sshProjectDialog = initSshProjectDialog(api, (project, known, asked) => {
+    showAddedProject(project, sshDialogGeneration);
+    offerChatgptProject(project, known, asked);
+  }, async () => ({ asked: await chatgptProjectPicker.hasChoices(), known: new Set(projects.map(row => row.id)) }));
   // A folder on this computer, or one on a server (#1469).
   $('addProject').addEventListener('click', event => {
     event.preventDefault();

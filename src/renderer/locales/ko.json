@@ -70,7 +70,6 @@
   "Chats": "채팅",
   "Loading projects…": "프로젝트 불러오는 중…",
   "Loading chats…": "채팅 불러오는 중…",
-  "No projects yet.": "아직 프로젝트가 없습니다.",
   "No chats outside projects yet.": "아직 프로젝트 밖의 채팅이 없습니다.",
   "Refresh chats": "채팅 새로고침",
   "Reusable instructions for your chats.": "채팅에서 재사용할 수 있는 지침입니다.",
@@ -2878,5 +2877,19 @@
   "Bookmarks": "북마크",
   "Answer": "답변",
   "This answer is no longer in the chat.": "이 답변은 더 이상 채팅에 없습니다.",
-  "{0} bookmarks in this chat": "이 채팅의 북마크 {0}개"
+  "{0} bookmarks in this chat": "이 채팅의 북마크 {0}개",
+  "Choose a ChatGPT Project…": "ChatGPT 프로젝트 선택…",
+  "Use a new or an existing ChatGPT Project for this project's chats": "이 프로젝트의 채팅에 새 ChatGPT 프로젝트 또는 기존 프로젝트 사용",
+  "New ChatGPT Project “{0}”": "새 ChatGPT 프로젝트 “{0}”",
+  "ChatGPT Project for {0}": "{0}의 ChatGPT 프로젝트",
+  "Search ChatGPT Projects": "ChatGPT 프로젝트 검색",
+  "Linked to {0}": "{0}에 연결됨",
+  "No ChatGPT Project matches": "일치하는 ChatGPT 프로젝트가 없습니다",
+  "Projects ChatGPT shows in its sidebar. Open chatgpt.com to update this list.": "ChatGPT 사이드바에 표시되는 프로젝트입니다. 이 목록을 업데이트하려면 chatgpt.com을 여세요.",
+  "No projects yet. A project is a folder on this computer; adding one links it to a new or an existing ChatGPT Project.": "아직 프로젝트가 없습니다. 프로젝트는 이 컴퓨터의 폴더이며, 추가하면 새 ChatGPT 프로젝트나 기존 프로젝트에 연결됩니다.",
+  "That is not a ChatGPT Project": "ChatGPT 프로젝트가 아닙니다",
+  "This project already has a ChatGPT Project": "이 프로젝트에는 이미 ChatGPT 프로젝트가 있습니다",
+  "Its ChatGPT Project is being created": "ChatGPT 프로젝트를 만드는 중입니다",
+  "That Project is not one ChatGPT lists for this account": "ChatGPT가 이 계정에 표시하는 프로젝트가 아닙니다",
+  "That ChatGPT Project is already linked to another project": "이 ChatGPT 프로젝트는 이미 다른 프로젝트에 연결되어 있습니다"
 }

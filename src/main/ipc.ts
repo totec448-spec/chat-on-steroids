@@ -75,7 +75,8 @@ import { CUSTOM_CONTINUE_MAX_CHARS } from '../shared/recovery.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange, rememberRunningSurfaceTokens } from './connection.js';
 import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema, settingsRecovered } from './config.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
-import { PROJECT_COLORS } from '../shared/projects.js';
+import { CHATGPT_PROJECT_ID, PROJECT_COLORS } from '../shared/projects.js';
+import { chatgptProjectChoices } from './chatgpt-project-catalog.js';
 import { bridgePortSelection } from './bridge-ports.js';
 import { clearAllGoalSwitches, draftTaskPlan, listGoalModels, MODEL_PAGE_SIZE, retireGoalDrafts, goalBackendFor, goalSwitchFor, setGoalSwitchNow, setGoalReplyActiveNow, setGoalObjectiveNow } from './goal.js';
 import { forgetExposedSurface } from './mcp/server.js';
@@ -92,7 +93,7 @@ import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { inFlightToolCalls } from './mcp/call-context.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, addRemoteProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor } from './projects.js';
+import { addProject, addRemoteProject, createChatgptProjectFor, linkChatgptProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor } from './projects.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile, serverFileSnapshot } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
@@ -998,7 +999,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     push('session:changed');
     return project;
   });
-  handle('projects:add', async () => {
+  handle('projects:add', async (payload) => {
+    const { chatgpt } = z.object({ chatgpt: z.literal('later').optional() }).strict().parse(payload ?? {});
     const window = getWindow();
     if (!window) throw new Error('No window');
     const result = await dialog.showOpenDialog(window, { ...dialogLabel('Choose a project folder for ChatGPT'), properties: ['openDirectory'] });
@@ -1010,7 +1012,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       const state = await approveRoot(folder);
       push('state:changed', state);
     }
-    const project = await addProject(folder);
+    const project = await addProject(folder, chatgpt ? { chatgpt } : {});
     push('session:changed');
     // Its native ChatGPT Project is created by the browser; tell it there is work.
     if (project.chatgpt?.state === 'requested') wakeBrowserWork();
@@ -1018,9 +1020,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   // A folder on a server (#1469): the address and folder as typed; the server is asked once.
   handle('projects:addRemote', async payload => {
-    const { address, folder } = (payload ?? {}) as { address?: unknown; folder?: unknown };
+    const { address, folder, chatgpt } = (payload ?? {}) as { address?: unknown; folder?: unknown; chatgpt?: unknown };
     if (typeof address !== 'string' || typeof folder !== 'string' || address.length > 300 || folder.length > 4096) throw new Error('Enter an SSH address and a folder');
-    const project = await addRemoteProject(address, folder);
+    const project = await addRemoteProject(address, folder, {}, chatgpt === 'later' ? { chatgpt: 'later' } : {});
     push('session:changed');
     if (project.chatgpt?.state === 'requested') wakeBrowserWork();
     return project;
@@ -1029,6 +1031,21 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
     const project = await retryProjectCreate(id);
     if (project) wakeBrowserWork();
+    push('session:changed');
+    return project;
+  });
+  // Linking a project to a ChatGPT Project the account already has (#1756).
+  handle('projects:chatgpt-choices', async () => chatgptProjectChoices());
+  handle('projects:chatgpt-link', async payload => {
+    const { id, chatgptId } = z.object({ id: z.string().uuid(), chatgptId: z.string().regex(CHATGPT_PROJECT_ID) }).strict().parse(payload);
+    const project = await linkChatgptProject(id, chatgptId);
+    push('session:changed');
+    return project;
+  });
+  handle('projects:chatgpt-create', async payload => {
+    const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
+    const project = await createChatgptProjectFor(id);
+    if (project.chatgpt?.state === 'requested') wakeBrowserWork();
     push('session:changed');
     return project;
   });
