@@ -16,8 +16,14 @@ const defaultOutput = path.join(releaseRoot, 'firefox-extension');
  *
  * Adapted from @nabeel2k11's Firefox package groundwork in PR #47.
  */
-export function firefoxManifest(source) {
+export function firefoxManifest(source, build = '') {
   const manifest = structuredClone(source);
+  // Mozilla signs each version once. When it already holds this one (2.1.43 was signed from a tag
+  // that later moved), the release names a Firefox-only fourth part: 2.1.43.1, same code.
+  if (build) {
+    if (!/^[1-9]\d{0,2}$/.test(build)) throw new Error(`Not a Firefox build number: ${build}`);
+    manifest.version = `${source.version}.${build}`;
+  }
   delete manifest.minimum_chrome_version;
   // Firefox has no DevTools protocol for extensions; Browser control and focus emulation say so at runtime.
   manifest.permissions = manifest.permissions.filter(permission => permission !== 'debugger');
@@ -62,14 +68,14 @@ async function safeOutput(output) {
   return resolved;
 }
 
-export async function stageFirefoxExtension(output = defaultOutput) {
+export async function stageFirefoxExtension(output = defaultOutput, build = process.env.FIREFOX_BUILD ?? '') {
   const target = await safeOutput(output);
   const sourceManifest = JSON.parse(await readFile(path.join(extensionRoot, 'manifest.json'), 'utf8'));
 
   await mkdir(releaseRoot, { recursive: true });
   await rm(target, { recursive: true, force: true });
   await cp(extensionRoot, target, { recursive: true, force: true });
-  await writeFile(path.join(target, 'manifest.json'), `${JSON.stringify(firefoxManifest(sourceManifest), null, 2)}\n`, 'utf8');
+  await writeFile(path.join(target, 'manifest.json'), `${JSON.stringify(firefoxManifest(sourceManifest, build), null, 2)}\n`, 'utf8');
   await copyFile(path.join(root, 'LICENSE'), path.join(target, 'LICENSE'));
   return target;
 }
