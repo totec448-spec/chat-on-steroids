@@ -7,8 +7,8 @@ import { isChatTrusted } from './trusted-chats.js';
 
 export const STRICT_CHAT_REFUSAL =
   'CHAT_NOT_TRUSTED: strict chat allowlisting is enabled and this call is not currently allowed. No tool was run. ' +
-  'For an attributed chat, ask the user to hover its row in the sidebar chat list and choose Trust (✓); if that row is blocked, choose Release there. ' +
-  'For an app-created worker, use the owning prime row instead. Calls the app cannot link to a chat are refused in strict mode. Retry only after the user changes that policy.';
+  'For an attributed chat, ask the user to open its ⋯ menu in the app\'s sidebar (or right-click its row) and choose Trust chat; if that chat is blocked, Release chat there. ' +
+  'For an app-created worker, use the menu of the main chat that started it instead. Calls the app cannot link to a chat are refused in strict mode. Retry only after the user changes that policy. Do not send it to another app or connector instead.';
 
 export function strictChatAllowlistEnabled(): boolean {
   return getConfig().multiAgent.strictChatAllowlist === true;
