@@ -177,16 +177,18 @@ describe('PowerShell exit status', () => {
         ['Get-Location; cmd /c exit 5', /Path\s+-+\s+\S/, 5],
         ["Get-Location; Write-Error 'boom'", /Path\s+-+\s+\S/, 1]
       ];
+      // PowerShell 7 colors table headers; the text between the colors is what matters.
+      const plain = (text: string) => text.replace(/\u001b\[[0-9;]*m/g, '');
       for (const [command, table, code] of cases) {
         const args = withPowershellExitStatus(deriveExecArgs(shell!, command, false));
         const result = spawnSync(args[0]!, args.slice(1), { encoding: 'utf8', windowsHide: true });
-        expect(result.stdout, command).toMatch(table);
+        expect(plain(result.stdout), command).toMatch(table);
         expect(result.status, command).toBe(code);
       }
       const batch = composeCommandBatch(['Get-Location', 'Write-Output second', 'Get-Item . | Select-Object Name'], shell!.shellType);
       const args = withPowershellExitStatus(deriveExecArgs(shell!, batch.command, false));
       const sections = parseCommandBatchSections(spawnSync(args[0]!, args.slice(1), { encoding: 'utf8', windowsHide: true }).stdout, batch.marker);
-      expect(sections.map(section => section.text.trim().split(/\s+/)[0])).toEqual(['Path', 'second', 'Name']);
+      expect(sections.map(section => plain(section.text).trim().split(/\s+/)[0])).toEqual(['Path', 'second', 'Name']);
     });
   }
 });
