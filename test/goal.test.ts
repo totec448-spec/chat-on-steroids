@@ -2975,9 +2975,9 @@ describe('the original request reaches the helper verbatim', () => {
     const box = capture();
     goal.startGoalDraft({ sessionId, conversationId: 'c-verbatim-run', turnId: 'g-verbatim-run' });
     expect((await settled('c-verbatim-run')).stage).toBe('ready');
-    expect(box.system.some(content => content.includes('Original request (verbatim) contains the full first user message as reference material'))).toBe(true);
+    expect(box.system.some(content => content.includes('Original request contains the first user message as best-effort reference material'))).toBe(true);
     const messages = (JSON.parse(box.raw) as { messages: { role: string; content: string }[] }).messages;
-    expect(messages.some(message => message.role === 'user' && message.content === `Original request (verbatim): the first user message of this chat, exactly as typed. Judge whether the work is complete against all of it, not only the saved objective or a later summary:\n\n${starter}`)).toBe(true);
+    expect(messages.some(message => message.role === 'user' && message.content === `Original request (reference): the first user message of this chat. It may be shortened; omissions do not prove completion. Judge against its requirements, not only the saved objective or a later summary:\n\n${starter}`)).toBe(true);
     expect(messages.some(message => message.role === 'system' && message.content.includes(starter))).toBe(false);
     // The saved objective is still sent next to it, and the later correction stays in the transcript.
     expect(box.system.some(content => content.includes('ship the importer'))).toBe(true);
@@ -2989,46 +2989,63 @@ describe('the original request reaches the helper verbatim', () => {
     const box = capture();
     expect(await goal.draftFastFollowup(sessionId, undefined, undefined, undefined, 'goal')).toBe('next step');
     const messages = (JSON.parse(box.raw) as { messages: { role: string; content: string }[] }).messages;
-    expect(messages.some(message => message.role === 'user' && message.content === `Original request (verbatim): the first user message of this chat, exactly as typed. Judge whether the work is complete against all of it, not only the saved objective or a later summary:\n\n${starter}`)).toBe(true);
+    expect(messages.some(message => message.role === 'user' && message.content === `Original request (reference): the first user message of this chat. It may be shortened; omissions do not prove completion. Judge against its requirements, not only the saved objective or a later summary:\n\n${starter}`)).toBe(true);
     expect(messages.some(message => message.role === 'system' && message.content.includes(starter))).toBe(false);
   });
 
-  it('fails without retry when the first request exceeds 60,000 characters', async () => {
+  it.each(['goal', 'loop'] as const)('shortens a first request over 60,000 characters and still decides in %s mode', async mode => {
     const long = `START-MARKER ${'x'.repeat(60_000)} END-MARKER`;
     const sessionId = await chat('c-verbatim-long', long);
-    const fetch = vi.fn(async () => decision('continue', 'must not be asked'));
-    globalThis.fetch = fetch as never;
+    const box = capture();
+    await recordLoopMcpProof(sessionId, 'g-verbatim-long');
+    await goal.setGoalSwitchNow('c-verbatim-long', mode, true);
     goal.startGoalDraft({ sessionId, conversationId: 'c-verbatim-long', turnId: 'g-verbatim-long' });
-    const view = await settled('c-verbatim-long');
-    expect(view.stage).toBe('failed');
-    expect(view.error).toMatch(/^original_request_too_large/);
-    expect(view.retryable).toBe(false);
-    await expect(goal.draftFastFollowup(sessionId, undefined, undefined, undefined, 'goal')).rejects.toMatchObject({ message: expect.stringMatching(/^original_request_too_large/), retryable: false });
-    expect(fetch).not.toHaveBeenCalled();
+    expect((await settled('c-verbatim-long')).stage).toBe('ready');
+    expect(await goal.draftFastFollowup(sessionId, undefined, undefined, undefined, mode)).toBe('next step');
+    const messages = JSON.parse(box.raw).messages as { content: string }[];
+    const original = messages.find(message => message.content.startsWith('Original request (reference)'))!.content;
+    expect(original).toContain('START-MARKER');
+    expect(original).toContain('END-MARKER');
+    expect(original).toMatch(/\d+ characters omitted/);
+    expect(original.length).toBeLessThan(20_300);
   });
 
-  it('reports a truncated saved first request even when its stored text is short', async () => {
+  it.each(['saved fragment', 'saved fragment\n…[986 more characters stored in full as abcdef12.txt]'])('includes a recorder-truncated first request (%s) and still decides', async text => {
     const session = await createSession({ title: 'truncated original', conversationId: 'c-truncated-original' });
-    await appendEvent(session.id, { time: 1_000, source: 'extension', kind: 'user_message', message: { text: 'saved fragment', truncated: true, chars: 14 } });
-    const fetch = vi.fn(async () => decision('continue', 'must not be asked'));
-    globalThis.fetch = fetch as never;
+    await appendEvent(session.id, { time: 1_000, source: 'extension', kind: 'user_message', message: { text, truncated: true, chars: 1000 } });
+    const box = capture();
     goal.startGoalDraft({ sessionId: session.id, conversationId: 'c-truncated-original', turnId: 'g-truncated-original' });
-    const view = await settled('c-truncated-original');
-    expect(view.stage).toBe('failed');
-    expect(view.error).toMatch(/^original_request_too_large: the first message is truncated/);
-    expect(view.retryable).toBe(false);
-    expect(fetch).not.toHaveBeenCalled();
+    expect((await settled('c-truncated-original')).stage).toBe('ready');
+    expect(box.raw).toContain('saved fragment');
+    expect(box.raw).toContain('recorder');
+    expect(box.raw).toContain('full text is unavailable in this reference');
+    expect(box.raw).not.toContain('characters omitted before storage');
+    if (text.includes('986 more characters')) expect(box.raw).toContain('986 more characters');
   });
 
-  it('keeps a large first request intact when prepared context is a summary', async () => {
+  it.each(['', 'x'])('clips Unicode at whole surrogate pairs with prefix %j and an exact omitted count', async prefix => {
+    const sessionId = await chat('c-unicode-original', prefix + '\u{1F600}'.repeat(20_000));
+    const box = capture();
+    expect(await goal.draftFastFollowup(sessionId, undefined, [{ role: 'user', content: 'Summary' }], undefined, 'goal')).toBe('next step');
+    const original = (JSON.parse(box.raw).messages as { content: string }[]).find(message => message.content.startsWith('Original request (reference)'))!.content;
+    expect(Buffer.from(original, 'utf8').toString('utf8')).toBe(original);
+    const kept = [...original.matchAll(/\u{1F600}/gu)].length * 2;
+    expect(original).toContain(`${40_000 - kept} characters omitted`);
+    expect(kept).toBeGreaterThan(19_000);
+  });
+
+  it('shortens a large first request when prepared context is a summary', async () => {
     const big = `BEGIN ${'x'.repeat(58_000)} ${starter} FINISH`;
     const sessionId = await chat('c-verbatim-big', big);
     goal.setGoalObjective('c-verbatim-big', 'ship the importer');
     const box = capture();
     const prepared = [{ role: 'user' as const, content: 'Summary: importer work in progress' }];
     expect(await goal.draftFastFollowup(sessionId, undefined, prepared, undefined, 'goal')).toBe('next step');
-    const original = (JSON.parse(box.raw) as { messages: { role: string; content: string }[] }).messages.find(message => message.role === 'user' && message.content.includes('Original request (verbatim)'));
-    expect(original?.content).toBe(`Original request (verbatim): the first user message of this chat, exactly as typed. Judge whether the work is complete against all of it, not only the saved objective or a later summary:\n\n${big}`);
+    const original = (JSON.parse(box.raw) as { messages: { role: string; content: string }[] }).messages.find(message => message.role === 'user' && message.content.startsWith('Original request (reference)'));
+    expect(original?.content).toContain('BEGIN');
+    expect(original?.content).toContain('FINISH');
+    expect(original?.content).toMatch(/\d+ characters omitted/);
+    expect(original!.content.length).toBeLessThan(20_300);
     expect(box.system.some(content => content.includes('[… cut …]'))).toBe(false);
   });
 });

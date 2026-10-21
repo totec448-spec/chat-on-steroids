@@ -373,23 +373,27 @@ describe('Goal decision backends', () => {
       }
       return session.id;
     }
-    it('shortens the transcript as needed while keeping the first request intact', async () => {
-      const starter = `HEAD ${'s'.repeat(50_000)} TAIL`;
+    it.each([50_000, 60_000])('drops the supplemental original before shortening conversation history for a %i-character starter', async length => {
+      const starter = `HEAD ${'s'.repeat(length)} TAIL`;
       const sessionId = await chatWithStarter('browser-starter-fits', starter);
       browser.request.mockResolvedValue('{"action":"continue","reply":"Next"}');
       expect(await goal.draftFastFollowup(sessionId, undefined, undefined, undefined, 'goal')).toBe('Next');
       const prompt = browser.request.mock.calls[0]![0] as string;
       expect(prompt.length).toBeLessThanOrEqual(96_000);
-      expect(prompt).toContain(`exactly as typed. Judge whether the work is complete against all of it, not only the saved objective or a later summary:\n\n${starter}`);
-      expect(prompt).not.toContain('b'.repeat(40_000));
+      expect(prompt).toContain('b'.repeat(40_000));
+      expect(prompt).toContain('Latest result');
+      expect(prompt).not.toContain('Original request (reference):');
     });
-    it('fails visibly, without retry or a helper call, when the original cannot fit the helper budget', async () => {
+    it('still decides within a learned helper budget when the original cannot fit', async () => {
       const { noteGoalHelperUnanswered } = await import('../src/main/goal-helper-size.js');
       noteGoalHelperUnanswered(30_000);
       const sessionId = await chatWithStarter('browser-starter-too-big', 'z'.repeat(20_000));
-      await expect(goal.draftFastFollowup(sessionId, undefined, undefined, undefined, 'goal'))
-        .rejects.toMatchObject({ message: expect.stringMatching(/^original_request_too_large/), retryable: false });
-      expect(browser.request).not.toHaveBeenCalled();
+      browser.request.mockResolvedValue('{"action":"continue","reply":"Next"}');
+      expect(await goal.draftFastFollowup(sessionId, undefined, undefined, undefined, 'goal')).toBe('Next');
+      const prompt = browser.request.mock.calls[0]![0] as string;
+      expect(prompt.length).toBeLessThanOrEqual(18_000);
+      expect(prompt).toContain('Latest result');
+      expect(prompt).not.toContain('Original request (reference):');
     });
   });
   it('uses the Loop driver even when offline Goal marked the last answer complete', async () => {
