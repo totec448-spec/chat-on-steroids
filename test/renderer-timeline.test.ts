@@ -593,6 +593,27 @@ it.each(['compaction', 'blocked', 'worker'])('retires %s control status when lea
   expect(status.textContent).not.toBe('');
 });
 
+it('localizes only the exact app-authored Goal helper stop note at draw time', async () => {
+  const source = 'The helper says the goal is met, but this has not been checked. No follow-up was sent. Review the chat and continue if work remains.';
+  const rows = [
+    { progressId: 'goal-helper-stop:turn-1', source: 'app' as const, value: source },
+    { progressId: 'unrelated:turn-1', source: 'app' as const, value: source },
+    { progressId: 'goal-helper-stop:turn-2', source: 'app' as const, value: source + ' Historical detail.' },
+    { progressId: 'goal-helper-stop:turn-3', source: 'extension' as const, value: source }
+  ];
+  const { w } = await boot(rows.map((row, at) => ({
+    seq: at + 1, time: T0 + at, source: row.source, kind: 'progress' as const,
+    progressId: row.progressId, message: text(row.value)
+  })));
+  const { setLanguage, t } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  const notes = [...w.document.querySelectorAll('.ev-progress .meta')];
+  expect(notes.map(note => note.textContent)).toEqual([t(source), source, rows[2]!.value, source]);
+  expect(notes[0]!.textContent).not.toBe(source);
+  setLanguage('en');
+  expect(notes.map(note => note.textContent)).toEqual(rows.map(row => row.value));
+});
+
 it('asks for the selected chat\'s background tab once per switch (#1249)', async () => {
   const first = summary([]), second = { ...summary([]), id: '2026-09-02-test0002', title: 'Other session' };
   const { w } = await boot([], true, [], [], { sessions: [first, second] });

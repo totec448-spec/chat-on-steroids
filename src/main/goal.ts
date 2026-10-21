@@ -174,7 +174,7 @@ const REQUEST_TIMEOUT_MS = 180_000;
  * belongs to the page's Goal loop, which is the only place that can tell whether the turn is
  * still the one being answered. This is what that loop reads, published as `retryable`.
  */
-const SETTLED_FAILURE = /^(?:auth_rejected|out_of_credit|unknown_model|no_api_key|no_conversation|no_objective|invalid_provider|goal_marker_missing|goal_browser_cancelled|goal_browser_send_unconfirmed|goal_browser_send_failed)(?:$|:)/;
+const SETTLED_FAILURE = /^(?:auth_rejected|out_of_credit|unknown_model|no_api_key|no_conversation|no_objective|invalid_provider|goal_marker_missing|goal_browser_cancelled|goal_browser_send_unconfirmed|goal_browser_send_failed|goal_helper_stop_unverified)(?:$|:)/;
 
 /** One failure classification shared by ordinary drafts and the conversation-less opening request. */
 function retryableGoalFailure(error: string): boolean {
@@ -1991,6 +1991,17 @@ async function run(draft: GoalDraft): Promise<void> {
       if (draft.mode === 'loop') {
         logWarn(`goal: the loop would not write a message in ${draft.conversationId} with ${draft.model}`);
         return settle(draft, 'failed', 'loop_stop_refused');
+      }
+      if (getConfig().ui.finishHoldOnStop === true) {
+        const { recordProgress } = await import('./session/recorder.js');
+        const sourceTurn = await goalReplySourceTurn(draft.sessionId, draft.turnId);
+        if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return;
+        logWarn(`goal: ${draft.model} says the goal is met in ${draft.conversationId}; unverified, nothing was sent and the reply remains pending`);
+        const recorded = await recordProgress(draft.sessionId, `goal-helper-stop:${draft.turnId}`, goalErrorMessage('goal_helper_stop_unverified'),
+          undefined, sourceTurn, undefined, 'helper_stop_unverified');
+        if (!recorded) logWarn(`goal: unverified stop could not be recorded in ${draft.conversationId}`);
+        if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return;
+        return settle(draft, 'failed', 'goal_helper_stop_unverified');
       }
       logInfo(`goal: ${draft.model} says the goal is met in ${draft.conversationId}; nothing was sent`);
       // Reaching the goal ends this Goal run, not the user's saved objective. Keeping the text

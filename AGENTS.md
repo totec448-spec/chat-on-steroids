@@ -3976,6 +3976,13 @@ local tool call, so lost tool connectivity cannot be established; Loop remains e
 claim login is missing or the tunnel is off without evidence. Distinguish input size, helper output
 size, provider failures and uncertain delivery. Browser error text wraps instead of truncating.
 
+The `Review Goal completion` setting is off by default. When enabled, a Goal helper reporting
+completion without proof is shown as unverified. For an ordinary Goal reply, keep the reply
+pending without retrying. At Session finish, keep the existing hold active, ask the model to keep
+the turn open, and try to show one notice; record the event as `helper_stop_unverified`.
+Missing/false keeps the prior behavior, and Loop's refusal handling is unchanged. The optional
+progress `reason` labels this event; it does not prove the Goal is complete.
+
 Provider progress updates one existing timeline row and is never sendable text. Validate the
 final bounded decision schema before publication. Goal may return stop/no reply. Loop requires
 a continuation and has a bounded three-retry invalid-stop policy. API SSE is used when publishing

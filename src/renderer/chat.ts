@@ -4844,6 +4844,10 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
       return box;
     }
     case 'progress': {
+      if (event.source === 'app' && event.progressId?.startsWith('goal-helper-stop:') &&
+          event.message.text === goalErrorMessage('goal_helper_stop_unverified')) {
+        return el('p', 'meta is-progress', () => t(goalErrorMessage('goal_helper_stop_unverified')));
+      }
       if (event.progressId?.startsWith(STRICT_REFUSAL_PROGRESS_PREFIX)) return el('p', 'meta is-progress', () => trustNoticeText(event.message.text));
       if (!event.progressId?.startsWith(APPROVAL_PROGRESS_PREFIX)) return el('p', 'meta is-progress', event.message.text);
       // ChatGPT's own tool approval card stands in this chat's page (approval-wait.ts). The app
@@ -7464,7 +7468,7 @@ const CHAT_INPUTS = [
   'chatBrowser', 'cosBrowserMinimize', 'browserBridgePort',
   'goalIncludeToolCalls',
   'planBackend',
-  'finishTool', 'finishLeadMinutes', 'rotateTurnMinutes', 'rotateStopFallback', 'localAppUsage', 'defaultChatModel', 'defaultChatReasoning', 'workerModel', 'workerReasoning', 'autoSelectSkills', 'backgroundChats', 'backgroundPlacement', 'browserOnly', 'autoRefreshPlugins',
+  'finishTool', 'finishHoldOnStop', 'finishLeadMinutes', 'rotateTurnMinutes', 'rotateStopFallback', 'localAppUsage', 'defaultChatModel', 'defaultChatReasoning', 'workerModel', 'workerReasoning', 'autoSelectSkills', 'backgroundChats', 'backgroundPlacement', 'browserOnly', 'autoRefreshPlugins',
   'goalBackend',
   'loopBackend',
   'helperModel', 'helperReasoning',

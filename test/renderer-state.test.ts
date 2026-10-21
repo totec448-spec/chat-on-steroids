@@ -4307,6 +4307,41 @@ it('notifies when a chat finishes unless switched off', async () => {
   expect(mounted.calls.at(-1)?.ui.turnNotifications).toBe(false);
 });
 
+it('saves and restores Review Goal completion, off by default', async () => {
+  const first = await mountChat({});
+  let setting = first.window.document.getElementById('finishHoldOnStop') as HTMLInputElement;
+  expect(setting.checked).toBe(false);
+  const firstSaveCount = first.calls.length;
+  setting.checked = true;
+  setting.dispatchEvent(new first.window.Event('change', { bubbles: true }));
+  await settle();
+  expect(first.calls).toHaveLength(firstSaveCount + 1);
+  expect(first.calls.at(-1)?.ui.finishHoldOnStop).toBe(true);
+
+  const firstSaved = first.calls.at(-1)!;
+  const secondConfig = structuredClone(first.state.config);
+  secondConfig.ui = { ...secondConfig.ui, ...firstSaved.ui };
+  first.window.close();
+  vi.resetModules();
+  const second = await mountChat({ config: secondConfig });
+  setting = second.window.document.getElementById('finishHoldOnStop') as HTMLInputElement;
+  expect(setting.checked).toBe(true);
+  const secondSaveCount = second.calls.length;
+  setting.checked = false;
+  setting.dispatchEvent(new second.window.Event('change', { bubbles: true }));
+  await settle();
+  expect(second.calls).toHaveLength(secondSaveCount + 1);
+  expect(second.calls.at(-1)?.ui.finishHoldOnStop).toBe(false);
+
+  const secondSaved = second.calls.at(-1)!;
+  const thirdConfig = structuredClone(second.state.config);
+  thirdConfig.ui = { ...thirdConfig.ui, ...secondSaved.ui };
+  second.window.close();
+  vi.resetModules();
+  const third = await mountChat({ config: thirdConfig });
+  expect((third.window.document.getElementById('finishHoldOnStop') as HTMLInputElement).checked).toBe(false);
+});
+
 // #1402: long turns continue in a fresh one, every 30 minutes unless changed or off.
 it('starts a fresh turn after 30 minutes unless changed, and saves Off', async () => {
   const mounted = await mountChat({});
