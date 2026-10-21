@@ -874,15 +874,17 @@ export async function rotationDelivery(id: string): Promise<'pending' | 'sending
  * Withdraws a fresh-turn continue that has not been sent, once the call it was held for has to
  * answer. Sent after that answer it would land in the gap where ChatGPT queues it behind the
  * reply. Nobody's message, so it leaves no notice; the turn is tried again at a later call.
+ * Says where it was: still `queued` (no page picked it up) or claimed by a `browser` page that
+ * had not reached Send; null when there was nothing left to withdraw.
  */
-export function withdrawUnsentRotation(id: string): Promise<boolean> {
+export function withdrawUnsentRotation(id: string): Promise<'queued' | 'browser' | null> {
   return serial(async () => {
     const current = await load();
     const row = current.find(entry => entry.id === id && entry.purpose === 'rotation' &&
       (entry.state === 'queued' || (entry.state === 'browser' && entry.sendAuthorizedAt === undefined)));
-    if (!row) return false;
+    if (!row) return null;
     await commit(current.map(entry => entry === row ? { ...entry, state: 'cancelled' as const } : entry));
-    return true;
+    return row.state === 'queued' ? 'queued' : 'browser';
   });
 }
 
