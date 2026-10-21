@@ -2811,5 +2811,14 @@
   "Ask ChatGPT for a picture: this message goes without the app, so ChatGPT can draw.": "ChatGPT に画像を頼みます。このメッセージはアプリなしで送られるので、ChatGPT が描けます。",
   "Port {0} was in use when the app started, so it now listens on port {1}. Point your tunnel at port {1}.": "アプリの起動時にポート {0} が使用中だったため、現在はポート {1} で待ち受けています。トンネルの接続先をポート {1} に変更してください。",
   "Stop and continue when ChatGPT offers no Send": "ChatGPT に送信ボタンがないときは停止して続行",
-  "Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run. Experimental.": "一部のチャットではツール結果の時点で「停止」しか表示されず、新しいターンの続行をそこで送れません。1 つのターンで 2 回そうなると、アプリは結果の直後にターンを停止し、停止が表示されたら続行を送ります。ゴールとループはオンのままで、その間に届いたステップは実行されません。試験的機能です。"
+  "Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run. Experimental.": "一部のチャットではツール結果の時点で「停止」しか表示されず、新しいターンの続行をそこで送れません。1 つのターンで 2 回そうなると、アプリは結果の直後にターンを停止し、停止が表示されたら続行を送ります。ゴールとループはオンのままで、その間に届いたステップは実行されません。試験的機能です。",
+  "Pictures with /image, keyboard shortcuts, and a quicker message after Stop.": "/image で画像、キーボードショートカット、停止後すぐに届くメッセージ。",
+  "Ask for a picture": "画像を頼む",
+  "Start a message with /image, and ChatGPT draws it with its own image tool.": "メッセージを /image で始めると、ChatGPT が自分の画像ツールで描きます。",
+  "Keyboard shortcuts": "キーボードショートカット",
+  "{0} starts a new chat, Ctrl+Tab moves between chats, and Esc twice stops an answer.": "{0} で新しいチャット、Ctrl+Tab でチャットの切り替え、Esc を 2 回で回答を停止します。",
+  "Quicker after Stop": "停止後すぐに",
+  "A message you send right after Stop goes out at once.": "停止の直後に送ったメッセージがすぐに送信されます。",
+  "Sub-agent chats tidy up": "サブエージェントのチャットを片付け",
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "アーカイブをオンにすると、ワーカーのチャットはタスク完了の 2 分後にアーカイブされます。"
 }
