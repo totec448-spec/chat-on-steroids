@@ -43,6 +43,7 @@ import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser } from '.
 import { wakeBrowserUrl } from './browser-startup.js';
 import { registerPluginIpc } from './plugins-ipc.js';
 import { deletePet, importPet, loadPetAsset, petLibraryState, setPetEnabled, setPetFavorite } from './pet-library.js';
+import { assignChatGroup, chatGroupsState, createChatGroup, deleteChatGroup, forgetChatGroupMember, renameChatGroup } from './chat-groups.js';
 import { petOverlayControlState, refreshPetOverlayActivities, refreshPetOverlayAppearance, setPetOverlayVisible } from './pet-overlay.js';
 import { confirmedPluginSchemas, pluginRefreshPublications, pluginRefreshStatuses, onPluginRefreshChange, pluginRefreshUnreadable, resetPluginRefreshLedger } from './plugin-refresh.js';
 /**
@@ -881,6 +882,27 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // The bound follows the list: a fixed 32 refused the whole set once it grew past that.
     setMainTextTranslations(z.record(z.string().max(200), z.string().max(200))
       .refine(value => Object.keys(value).length <= MAIN_TEXTS.length).parse(payload));
+  });
+  // Chat groups (#1038): organisation inside a project only; see chat-groups.ts.
+  const groupId = z.string().min(1).max(64);
+  handle('chatGroups:get', async () => chatGroupsState());
+  handle('chatGroups:create', async payload => {
+    const { projectId, name } = z.object({ projectId: z.string().min(1).max(160), name: z.string().max(400) }).strict().parse(payload);
+    const projects = await listProjects();
+    return createChatGroup(projectId, name, id => projects.some(project => project.id === id && !project.ungrouped));
+  });
+  handle('chatGroups:rename', async payload => {
+    const { id, name } = z.object({ id: groupId, name: z.string().max(400) }).strict().parse(payload);
+    return renameChatGroup(id, name);
+  });
+  handle('chatGroups:delete', async payload => {
+    const { id } = z.object({ id: groupId }).strict().parse(payload);
+    return deleteChatGroup(id);
+  });
+  handle('chatGroups:assign', async payload => {
+    const { sessionId, groupId: target } = z.object({ sessionId: sessionIdArg.shape.id, groupId: groupId.nullable() }).strict().parse(payload);
+    const session = await getSession(sessionId);
+    return assignChatGroup(session ? { id: session.id, projectId: session.projectId ?? null, origin: session.origin ?? null } : null, target);
   });
   handle('pets:list', async () => petLibraryState());
   handle('pets:overlayState', async () => petOverlayControlState());
@@ -1730,6 +1752,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         ], false);
       }
       await deleteSession(id);
+      // A deleted chat leaves its group too; the group itself stays.
+      await forgetChatGroupMember(id);
       logInfo(
         detached.length > 0
           ? `session ${id} deleted; ${detached.length} live conversation(s) will start a new session`
