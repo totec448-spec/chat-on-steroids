@@ -1,3 +1,4 @@
+import type { ChatGroup, ChatGroupsState } from '../shared/chat-groups.js';
 import type { WorkspaceTerminalEvent, WorkspaceTerminalInfo } from '../shared/workspace-terminal.js';
 import type { ApprovalCardView } from '../shared/approval-wait.js';
 import type { DictationEvent } from '../shared/dictation.js';
@@ -145,6 +146,11 @@ const api = {
     return () => ipcRenderer.removeListener('plugins:changed', wrapped);
   },
   chooseFiles: () => call<InputAttachment[]>('sessions:files'),
+  chatGroups: () => call<ChatGroupsState>('chatGroups:get'),
+  createChatGroup: (projectId: string, name: string) => call<{ group: ChatGroup; state: ChatGroupsState }>('chatGroups:create', { projectId, name }),
+  renameChatGroup: (id: string, name: string) => call<ChatGroupsState>('chatGroups:rename', { id, name }),
+  deleteChatGroup: (id: string) => call<ChatGroupsState>('chatGroups:delete', { id }),
+  assignChatGroup: (sessionId: string, groupId: string | null) => call<ChatGroupsState>('chatGroups:assign', { sessionId, groupId }),
   petsList: () => call<PetLibraryState>('pets:list'),
   petsOverlayState: () => call<PetOverlayControlState>('pets:overlayState'),
   petsSetOverlayVisible: (visible: boolean) => call<PetOverlayControlState>('pets:overlayVisible', { visible }),

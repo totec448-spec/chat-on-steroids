@@ -1852,10 +1852,12 @@ it('offers a new chat beside a project\'s menu, and its color as a submenu and r
   expect(button.getAttribute('aria-expanded')).toBe('true');
   const menu = w.document.querySelector<HTMLElement>('.row-menu')!;
   expect(menu.getAttribute('role')).toBe('menu');
-  expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['color', 'remove']);
+  expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['group-new', 'color', 'remove']);
   expect(menuItem(w, 'remove').classList.contains('is-danger')).toBe(true);
-  expect(w.document.activeElement).toBe(menuItem(w, 'color'));
+  expect(w.document.activeElement).toBe(menuItem(w, 'group-new'));
   // Keyboard: Down and Up move, Right opens the color submenu on the current choice, Left comes back.
+  menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  expect(w.document.activeElement).toBe(menuItem(w, 'color'));
   menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
   expect(w.document.activeElement).toBe(menuItem(w, 'remove'));
   menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
