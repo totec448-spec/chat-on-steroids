@@ -4316,6 +4316,22 @@ describe('blocked chats', () => {
     getConfig().multiAgent.strictChatAllowlist = false;
   });
 
+  // `ui.rotateStopFallback`: while the app stops a turn to continue it in a fresh one, a call of that
+  // chat is refused, not run, so a Stop landing mid-call cannot make the model run it twice.
+  it('refuses, without running it, a call of a chat whose turn is being continued in a fresh one', async () => {
+    const { armRotationFence, clearRotationFence } = await import('../src/main/rotation-fence.js');
+    armRotationFence(ROGUE, 'turn-being-stopped');
+    try {
+      const reply = await readAs(owned(ROGUE));
+      expect(failed(reply)).toBe(true);
+      expect(textOf(reply)).toContain('TURN_CONTINUING');
+      expect(textOf(reply)).toMatch(/was not run/i);
+      expect(textOf(reply)).not.toContain('/workspace/notes.txt');
+    } finally { clearRotationFence(ROGUE); }
+    // Lifted: the same call runs again.
+    expect(failed(await readAs(owned(ROGUE)))).toBe(false);
+  });
+
   it('refuses a blocked chat’s call and tells the model to stop instead of retrying', async () => {
     setChatBlocked(ROGUE, true);
     const reply = await readAs(owned(ROGUE));
