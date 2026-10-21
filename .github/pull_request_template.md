@@ -53,7 +53,7 @@ Release note: <!-- Optional: one sentence for users, used to draft the release n
 
 <!-- Required when the interface changes: before and after, with placeholder data. Otherwise delete this section. -->
 
-<!-- A file over 500 KB (a picture, a binary) needs a line: Size: <reason> -->
+<!-- A new file over 500 KB (a picture, a binary), or one that crosses 500 KB or grows by more than that here, needs a line: Size: <reason> -->
 
 ## Checklist
 

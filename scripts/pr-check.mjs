@@ -199,13 +199,27 @@ function addedLines(base, paths) {
   return raw.split('\n').filter((line) => line.startsWith('+') && !line.startsWith('+++'));
 }
 
-/** Files this PR adds or changes that are now larger than LARGE_FILE_BYTES; lockfiles excepted. */
+/**
+ * The files whose size a PR has to explain: new and over LARGE_FILE_BYTES, crossing it in this PR,
+ * or growing by more than it at once. Editing a file that was already that large (a big source
+ * file, #1741) is not news. `baseBytes` is null for a file the base does not have.
+ */
+export function largeFileFindings(entries) {
+  return entries.filter(({ bytes, baseBytes }) => bytes > LARGE_FILE_BYTES &&
+    (baseBytes === null || baseBytes <= LARGE_FILE_BYTES || bytes - baseBytes > LARGE_FILE_BYTES))
+    .map(({ path, bytes }) => ({ path, bytes }));
+}
+
+/** The added and changed files' sizes now and at the merge base; lockfiles excepted. */
 function largeFilesOf(base) {
   const names = execFileSync('git', ['diff', '--name-only', '--diff-filter=AM', `${base}...HEAD`], { encoding: 'utf8' }).split('\n').filter(Boolean);
-  return names.filter((name) => !/(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(name)).flatMap((name) => {
-    const bytes = Number(execFileSync('git', ['cat-file', '-s', `HEAD:${name}`], { encoding: 'utf8' }).trim());
-    return bytes > LARGE_FILE_BYTES ? [{ path: name, bytes }] : [];
-  });
+  const mergeBase = execFileSync('git', ['merge-base', base, 'HEAD'], { encoding: 'utf8' }).trim();
+  const size = (ref) => {
+    try { return Number(execFileSync('git', ['cat-file', '-s', ref], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()); }
+    catch { return null; }
+  };
+  return largeFileFindings(names.filter((name) => !/(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$/.test(name))
+    .map((name) => ({ path: name, bytes: size(`HEAD:${name}`) ?? 0, baseBytes: size(`${mergeBase}:${name}`) })));
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
