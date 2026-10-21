@@ -373,16 +373,21 @@ describe('stop fallback for fresh turns', () => {
       await declineTwice(chat, sessionId, clock);
       const before = (await listInputs()).filter(entry => entry.sessionId === sessionId && entry.purpose === 'rotation').length;
       await (await heldCall(chat))();
-      await new Promise(resolve => setTimeout(resolve, 900));
+      // The Stop goes out half a second after the result's answer: wait for it rather than a fixed
+      // time, which ran out on a slow runner (2.1.44 publish, Linux arm64).
+      await vi.waitFor(async () => {
+        expect((await request('GET', '/status')).body.stopTurns).toEqual([expect.objectContaining({ conversationId: chat, turnId: turn })]);
+      }, { timeout: 10_000, interval: 50 });
       // No third continue into the turn: a Stop for exactly this turn instead, and Loop still on.
       expect((await listInputs()).filter(entry => entry.sessionId === sessionId && entry.purpose === 'rotation').length).toBe(before);
-      expect((await request('GET', '/status')).body.stopTurns).toEqual([expect.objectContaining({ conversationId: chat, turnId: turn })]);
       expect(rotationFenced(chat)).toBe(true);
       expect(goalSwitchFor(chat)).toMatchObject({ enabled: true, mode: 'loop' });
       // ChatGPT shows the turn stopped: the continue goes as an ordinary message, at once.
       await events(chat, [{ kind: 'turn_end', time: clock.now, turnId: turn, outcome: 'stopped' }]);
-      await new Promise(resolve => setTimeout(resolve, 300));
-      expect(rotationFenced(chat)).toBe(false);
+      await vi.waitFor(async () => {
+        expect(rotationFenced(chat)).toBe(false);
+        expect((await listInputs()).some(entry => entry.sessionId === sessionId && entry.purpose === 'rotation' && entry.afterStop === true)).toBe(true);
+      }, { timeout: 10_000, interval: 50 });
       const next = (await listInputs()).find(entry => entry.sessionId === sessionId && entry.purpose === 'rotation' && entry.afterStop === true)!;
       expect(next).toMatchObject({ state: 'queued', text: rotationMessage() });
       expect(next).not.toHaveProperty('directTurn');
