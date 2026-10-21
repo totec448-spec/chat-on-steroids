@@ -1973,7 +1973,7 @@ async function run(draft: GoalDraft): Promise<void> {
             ? [draft.objectiveSystemPrompt, goalObjectiveMessage(draft.objective)]
             : [draft.systemPrompt],
       messages: messages.length > 0 ? messages : [{ role: 'user', content: GOAL_OBJECTIVE_OPENING_TURN }],
-      original: await originalRequestBlock(draft.sessionId),
+      original: await originalRequestBlock(draft.sessionId, messages),
       trailer:
         draft.mode === 'loop'
           ? GOAL_LOOP_TRAILER
@@ -2085,7 +2085,7 @@ export async function draftFastFollowup(sessionId: string, signal: AbortSignal =
     : await requestDrivingDecision({ sourceSessionId: sessionId, backend, endpoint, reasoning: settings.reasoning, key: key ?? '', model: settings.model, mode,
     system: objective ? [prompt, goalObjectiveMessage(objective)] : [prompt],
     messages,
-    original: await originalRequestBlock(sessionId),
+    original: await originalRequestBlock(sessionId, messages),
     trailer: mode === 'loop' ? GOAL_LOOP_TRAILER : objective ? GOAL_OBJECTIVE_TRAILER : GOAL_SYSTEM_TRAILER, signal, publish })
       .catch(error => {
         if (signal.aborted && signal.reason?.name === 'TimeoutError') throw nativeGoalFailure('timeout_or_cancelled: Goal request timed out', backend);
@@ -2555,9 +2555,11 @@ function clipOriginalRequest(text: string, limit: number): string {
   return text.slice(0, head) + marker(tail - head) + text.slice(tail);
 }
 
-async function originalRequestBlock(sessionId: string): Promise<string | undefined> {
+async function originalRequestBlock(sessionId: string, messages: readonly ChatMessage[]): Promise<string | undefined> {
   const { listInputs } = await import('./session/input.js');
   const automaticIds = new Set((await listInputs()).filter(input => input.sessionId === sessionId && input.finishOwner).map(input => input.id));
+  const represented = await firstUserMessage(sessionId, automaticIds);
+  if (represented && messages.some(message => message.role === 'user' && message.origin !== 'automatic' && message.content.trim() === represented.content)) return undefined;
   const first = await firstUserMessage(sessionId, automaticIds, MAX_ORIGINAL_REQUEST_CHARS);
   return first
     ? 'Original request (reference): the first user message of this chat. It may be shortened; omissions do not prove completion. Judge against its requirements, not only the saved objective or a later summary:\n\n' + first.content
