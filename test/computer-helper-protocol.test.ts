@@ -68,7 +68,9 @@ vi.mock('../src/main/env.js', () => ({
 }));
 vi.mock('../src/main/exec.js', () => ({
   findWindowsPowerShell: () => 'powershell.exe',
-  terminateProcessTree: fake.terminateProcessTree
+  terminateProcessTree: fake.terminateProcessTree,
+  // Windows ends the helper alone; the same fake counts either way.
+  terminateProcess: fake.terminateProcessTree
 }));
 vi.mock('../src/main/logger.js', () => ({ logInfo: vi.fn(), logWarn: vi.fn() }));
 
