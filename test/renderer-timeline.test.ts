@@ -3651,6 +3651,119 @@ it('stops directly from the empty composer without a second Stop menu action', a
   expect(input.value).toBe('');
 });
 
+describe('Esc in the empty composer during a turn', () => {
+  const esc = (w: JSDOM['window'], init: KeyboardEventInit = {}) => {
+    const event = new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...init });
+    w.document.getElementById('chatInput')!.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  const status = (w: JSDOM['window']) => w.document.getElementById('composerStatus')!.textContent;
+
+  it('stops the running turn on a second Esc, and only says so on the first', async () => {
+    const { w } = await boot([]);
+    const stop = vi.fn(async () => ({ ok: true, data: {} }));
+    (w as any).api.stopSessionTurn = stop;
+    expect(esc(w)).toBe(true);
+    await settle();
+    expect(stop).not.toHaveBeenCalled();
+    expect(status(w)).toBe('Press Esc again to stop the turn');
+    expect(esc(w)).toBe(true);
+    await settle();
+    expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'held-turn');
+    expect(status(w)).toBe('');
+  });
+
+  it.each([false, true])('stops the turn it was pressed for before the controls are read again (Plan armed: %s)', async (armPlan) => {
+    const { w, live } = await boot([]);
+    const api = (w as any).api;
+    const stop = vi.fn(async () => ({ ok: true, data: {} }));
+    api.stopSessionTurn = stop;
+    const plan = vi.fn(async () => ({ ok: true, data: null }));
+    api.draftTaskPlan = plan;
+    if (armPlan) (w.document.getElementById('createPlan') as HTMLButtonElement).click();
+    await settle();
+    expect(w.document.getElementById('chatSend')!.dataset.action).toBe('stop');
+    // A turn the window has not seen yet: Stop goes to the turn on screen, not to whatever a reread finds.
+    const controls = api.getSessionControls;
+    api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await controls(id)).data, activeTurnId: 'unseen-turn' } });
+    esc(w); esc(w);
+    await settle();
+    expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'held-turn');
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(plan).not.toHaveBeenCalled();
+    expect(live.sent).toEqual([]);
+  });
+
+  it('disarms on the arrows prompt recall takes, even when they leave the composer empty again', async () => {
+    const asked = [{ kind: 'user_message', seq: 1, time: T0 + 1000, source: 'extension', turnId: 't1', messageId: 'q-1', message: text('An earlier question') },
+      { kind: 'assistant_message', seq: 2, time: T0 + 2000, source: 'extension', turnId: 't1', messageId: 'a-2', message: text('An answer'), final: true, state: 'final' }] as SessionEvent[];
+    const { w } = await boot(asked);
+    const stop = vi.fn(async () => ({ ok: true, data: {} }));
+    (w as any).api.stopSessionTurn = stop;
+    const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+    const arrow = (key: string) => { const event = new w.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }); input.dispatchEvent(event); return event.defaultPrevented; };
+    esc(w);
+    expect(arrow('ArrowUp')).toBe(true);
+    expect(input.value).toBe('An earlier question');
+    input.setSelectionRange(input.value.length, input.value.length);
+    expect(arrow('ArrowDown')).toBe(true);
+    expect(input.value).toBe('');
+    expect(status(w)).toBe('');
+    // A fresh first press: it only asks.
+    expect(esc(w)).toBe(true);
+    await settle();
+    expect(stop).not.toHaveBeenCalled();
+    expect(status(w)).toBe('Press Esc again to stop the turn');
+  });
+
+  it('does not let an Esc armed for one turn stop the next turn', async () => {
+    const { w, append } = await boot([]);
+    const api = (w as any).api;
+    const stop = vi.fn(async () => ({ ok: true, data: {} }));
+    api.stopSessionTurn = stop;
+    esc(w);
+    const controls = api.getSessionControls;
+    api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await controls(id)).data, activeTurnId: 'next-turn' } });
+    await append([]);
+    expect(w.document.getElementById('chatSend')!.dataset.action).toBe('stop');
+    // The press after the new turn started only asks again; the next one stops that turn.
+    expect(esc(w)).toBe(true);
+    await settle();
+    expect(stop).not.toHaveBeenCalled();
+    expect(status(w)).toBe('Press Esc again to stop the turn');
+    esc(w);
+    await settle();
+    expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'next-turn');
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not stop for Esc with a draft, a held Esc, a key between, modifiers or a late second Esc', async () => {
+    const { w } = await boot([]);
+    const stop = vi.fn(async () => ({ ok: true, data: {} }));
+    (w as any).api.stopSessionTurn = stop;
+    const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+    input.value = 'Keep this draft'; input.dispatchEvent(new w.Event('input'));
+    expect(esc(w)).toBe(false); esc(w);
+    expect(status(w)).toBe('');
+    input.value = ''; input.dispatchEvent(new w.Event('input'));
+    esc(w); esc(w, { repeat: true }); esc(w, { repeat: true });
+    input.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Shift', bubbles: true, cancelable: true }));
+    expect(status(w)).toBe('');
+    esc(w); expect(esc(w, { ctrlKey: true })).toBe(false);
+    const now = performance.now.bind(performance);
+    let skew = 0;
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now() + skew);
+    try {
+      esc(w); skew = 1_600;
+      // Too late to stop: this press only asks again.
+      expect(esc(w)).toBe(true);
+      expect(status(w)).toBe('Press Esc again to stop the turn');
+    } finally { clock.mockRestore(); }
+    await settle();
+    expect(stop).not.toHaveBeenCalled();
+  });
+});
+
 it('shows Stop immediately for a queued first send, switches to Send for a new draft, and cancels through the same button', async () => {
   const { w, live } = await boot([], false);
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
@@ -6184,6 +6297,43 @@ it.each([
   expect((await sendDuringTurn(followUp, { ...modifier, shiftKey: true })).sent.mode).toBe(mode);
 });
 
+// A typed app command sent the other way with Cmd/Ctrl+Shift+Enter during a turn went out as a Skill
+// directive ("/goal …" as text); it now runs as Enter runs it, and its rest goes the other way.
+async function typedDuringTurn(text: string, skills: Array<{ id: string; name: string }> = []) {
+  const app = await boot([], true);
+  const api = (app.w as any).api;
+  api.getSessionControls = async () => ({ ok: true, data: { sessionId: summary([]).id, automation: app.live.automation, activeTurnId: 'running-turn', canInject: false, canSendDirectly: true, queueAtFinish: false } });
+  api.skillLibrary = async () => ({ ok: true, data: { skills: skills.map(skill => ({ ...skill, description: '', path: `/skills/${skill.id}/SKILL.md`, scope: 'user', source: 'user', managed: true })), roots: [], errors: [], includeInstructions: true } });
+  await app.append([]);
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = text;
+  input.dispatchEvent(new app.w.Event('input', { bubbles: true }));
+  const mac = /^Mac/.test(globalThis.navigator.platform);
+  input.dispatchEvent(new app.w.KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, ctrlKey: !mac, metaKey: mac, bubbles: true, cancelable: true }));
+  await settle(); await settle();
+  return { ...app, input };
+}
+
+it('runs a typed /goal sent with Cmd/Ctrl+Shift+Enter during a turn and sends the rest the other way', async () => {
+  const { w, live } = await typedDuringTurn('/goal Reply with exactly: done');
+  expect(w.document.getElementById('sendOptions')!.hidden).toBe(false);
+  expect((w.document.getElementById('chatAutomation') as HTMLSelectElement).value).toBe('goal');
+  expect(live.sent).toHaveLength(1);
+  expect(live.sent[0]).toMatchObject({ text: 'Reply with exactly: done', automation: 'goal', mode: 'after-turn' });
+});
+
+it('runs a typed /rename sent with Cmd/Ctrl+Shift+Enter during a turn without sending anything', async () => {
+  const { w, live, input } = await typedDuringTurn('/rename');
+  expect(w.document.querySelector('#sessionList .sess-rename')).not.toBeNull();
+  expect(live.sent).toHaveLength(0);
+  expect(input.value).toBe('');
+});
+
+it('keeps a Skill named like a command a directive with Cmd/Ctrl+Shift+Enter, sent the other way', async () => {
+  const { live } = await typedDuringTurn('/goal Reply with exactly: done', [{ id: 'goal', name: 'Goal' }]);
+  expect(live.sent.at(-1)).toMatchObject({ text: '/goal Reply with exactly: done', mode: 'after-turn' });
+});
+
 // Codex's slash commands, each opening what the app already has.
 async function slash(command: string, selectExisting = true) {
   const app = await boot([], selectExisting);
@@ -7056,5 +7206,51 @@ describe('prompt recall in the composer', () => {
     live.inputs = [sentInput('q-5')]; await append([]);
     expect(press(w, 'ArrowUp')).toBe(true);
     expect(composer(w).value).toBe('Second question');
+  });
+});
+
+describe('a formula in an answer', () => {
+  const answer = (seq: number, body: string): SessionEvent => ({
+    seq, origin: 1, time: T0, source: 'extension', kind: 'assistant_message', messageId: 'math-answer', message: text(body),
+    state: 'streaming', final: false });
+  const rightClick = (w: any, target: Element) => {
+    const event = new w.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 60 });
+    target.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+
+  it('copies its LaTeX source and its MathML from a right click, also on a block a later revision adds', async () => {
+    const tex = String.raw`x=\frac{-b\pm\sqrt{b^2-4ac}}{2a}`;
+    const first = ['Solve:', '', String.raw`\[`, tex, String.raw`\]`, '', String.raw`with \(a\neq 0\).`, '', 'More'].join('\n');
+    const { w, append } = await boot([answer(1, first)]);
+    const writeClipboard = vi.fn(async () => ({ ok: true, data: true }));
+    (w as any).api.writeClipboard = writeClipboard;
+    const display = w.document.querySelector('.ev-assistant_message .math-display')!;
+    // Anywhere in the drawing, not only on its outer box.
+    expect(rightClick(w, display.querySelector('.katex-html .mord')!)).toBe(true);
+    expect([...w.document.querySelectorAll<HTMLElement>('.row-menu .row-menu-item')].map(item => item.textContent)).toEqual(['Copy LaTeX', 'Copy MathML']);
+    menuItem(w, 'copy-latex').click();
+    await vi.waitFor(() => expect(writeClipboard).toHaveBeenLastCalledWith(tex));
+    expect(w.document.querySelector('.row-menu')).toBeNull();
+
+    rightClick(w, w.document.querySelector('.ev-assistant_message .math-inline')!);
+    menuItem(w, 'copy-mathml').click();
+    await vi.waitFor(() => expect(writeClipboard).toHaveBeenCalledTimes(2));
+    const mathml = String((writeClipboard.mock.calls as unknown as string[][])[1]![0]);
+    expect(mathml).toMatch(/^<math xmlns="http:\/\/www\.w3\.org\/1998\/Math\/MathML">/);
+    expect(mathml).toContain(String.raw`<annotation encoding="application/x-tex">a\neq 0</annotation>`);
+
+    await append([answer(2, [first, '', String.raw`\[`, String.raw`e^{i\pi}+1=0`, String.raw`\]`, '', 'End'].join('\n'))]);
+    rightClick(w, w.document.querySelectorAll('.ev-assistant_message .math-display')[1]!);
+    menuItem(w, 'copy-latex').click();
+    await vi.waitFor(() => expect(writeClipboard).toHaveBeenLastCalledWith(String.raw`e^{i\pi}+1=0`));
+  });
+
+  it('leaves a right click on prose, or on LaTeX it could not draw, without a formula menu', async () => {
+    const { w } = await boot([answer(1, String.raw`Plain words and \(\frac{1}{\) as written.`)]);
+    const paragraph = w.document.querySelector('.ev-assistant_message .msg.rich p')!;
+    expect(rightClick(w, paragraph)).toBe(false);
+    expect(rightClick(w, paragraph.querySelector('.math-inline.is-source')!)).toBe(false);
+    expect(w.document.querySelector('.row-menu')).toBeNull();
   });
 });
