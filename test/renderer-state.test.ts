@@ -12,6 +12,14 @@ import { DEFAULT_GOAL_MODEL, DEFAULT_GOAL_SYSTEM_PROMPT } from '../src/shared/go
 import { DEFAULT_HANDOFF_PROMPT } from '../src/shared/handoff.js';
 import { BROWSER_READ_TOOLS, BROWSER_WRITE_TOOLS } from '../src/shared/browser-control.js';
 
+/**
+ * `vi.waitFor` with room for the slow release runners. Its default second ran out on the Intel
+ * macOS publish runner while a freshly mounted renderer was still saving (2.1.42, 2.1.44 publish);
+ * a condition that holds still returns at once.
+ */
+const waitFor = <T>(check: () => T | Promise<T>, options: { timeout?: number; interval?: number } = {}) =>
+  vi.waitFor(check, { timeout: 10_000, ...options });
+
 /** jsdom has no modal dialogs: enough of showModal/close for the app's dialogs, close event included. */
 function installDialog(w: any): void {
   const proto = w.HTMLDialogElement.prototype;
@@ -359,7 +367,7 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
   // First save toggles a value that has no form control of its own. Keep the IPC unresolved,
   // matching a real save that is waiting for bridge/tunnel lifecycle work in the main process.
   (w.document.getElementById('readOnlyBtn') as HTMLButtonElement).click();
-  await vi.waitFor(() => expect(calls).toHaveLength(1));
+  await waitFor(() => expect(calls).toHaveLength(1));
   expect(calls[0].readOnly).toBe(true);
 
   // A second click before the first acknowledgement means "back off". The old handler derived
@@ -377,7 +385,7 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
 
   current = appState({ ...baseConfig, readOnly: true });
   pending.shift()!({ ok: true, data: current });
-  await vi.waitFor(() => expect(calls).toHaveLength(2));
+  await waitFor(() => expect(calls).toHaveLength(2));
   expect(calls[1].readOnly).toBe(false);
   // The toggle tells assistive technology which state is saved, not just its colour.
   expect(w.document.getElementById('readOnlyBtn')?.getAttribute('aria-pressed')).toBe('true');
@@ -387,7 +395,7 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
 
   current = appState({ ...baseConfig, readOnly: false });
   pending.shift()!({ ok: true, data: current });
-  await vi.waitFor(() => expect(calls).toHaveLength(3));
+  await waitFor(() => expect(calls).toHaveLength(3));
   expect(calls[2].readOnly).toBe(false);
   expect(w.document.getElementById('readOnlyBtn')?.getAttribute('aria-pressed')).toBe('false');
   expect(w.document.getElementById('readOnlyBtn')?.title).toMatch(/^Switch to read-only: ChatGPT can still look at files and the screen, but can’t create, edit, move or delete files/);
@@ -401,14 +409,14 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
   // even though the first dark save has not answered yet.
   const theme = w.document.getElementById('appearanceTheme') as HTMLSelectElement;
   theme.value = 'dark'; theme.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(calls).toHaveLength(4));
+  await waitFor(() => expect(calls).toHaveLength(4));
   expect(calls[3].ui.theme).toBe('dark');
   theme.value = 'light'; theme.dispatchEvent(new w.Event('change', { bubbles: true }));
   expect(calls).toHaveLength(4);
 
   current = appState({ ...baseConfig, readOnly: false, ui: { ...baseConfig.ui, autoConnect: true, theme: 'dark' } });
   pending.shift()!({ ok: true, data: current });
-  await vi.waitFor(() => expect(calls).toHaveLength(5));
+  await waitFor(() => expect(calls).toHaveLength(5));
   expect(calls[4].ui.theme).toBe('light');
 
   current = appState({ ...baseConfig, readOnly: false, ui: { ...baseConfig.ui, autoConnect: true, theme: 'light' } });
@@ -569,7 +577,7 @@ it('starts project groups collapsed and deliberately expands the project selecte
     listSessions: async () => ({ ok: true, data: { sessions: [session], activeId: null, pressure: [], blocked: [] } })
   });
   const group = () => mounted.window.document.querySelector<HTMLDetailsElement>(`[data-project-id="${project.id}"]`)!;
-  await vi.waitFor(() => expect(group()).not.toBeNull());
+  await waitFor(() => expect(group()).not.toBeNull());
   expect(group().open).toBe(false);
   // A new chat is the row's own button, beside its menu, not an item inside it.
   expect(rowMenuItem(group().querySelector('.project-heading')!, 'new-chat')).toBeNull();
@@ -591,7 +599,7 @@ it('draws the sidebar layout saved in Appearance, Projects by default, and repai
   const option = (value: string) => doc.querySelector<HTMLInputElement>(`input[name="appearanceSidebarLayout"][value="${value}"]`)!;
   const chosen = () => doc.querySelector<HTMLInputElement>('input[name="appearanceSidebarLayout"]:checked')?.value;
   // A config saved before the setting existed has no appearance at all: today's project tree.
-  await vi.waitFor(() => expect(doc.querySelector(`[data-project-id="${project.id}"]`)).not.toBeNull());
+  await waitFor(() => expect(doc.querySelector(`[data-project-id="${project.id}"]`)).not.toBeNull());
   expect(list.classList.contains('is-inbox')).toBe(false);
   expect(chosen()).toBe('projects');
   // The choice lives in the app's config, so it arrives with a state push (another window, a restart).
@@ -604,8 +612,8 @@ it('draws the sidebar layout saved in Appearance, Projects by default, and repai
   // Choosing Projects saves through Settings with the rest of Appearance and redraws the tree.
   // A click on its picture, as a person chooses it.
   option('projects').click();
-  await vi.waitFor(() => expect(mounted.calls.find(call => call.ui?.appearance?.sidebarLayout)?.ui.appearance).toMatchObject({ sidebarLayout: 'projects', font: 'system' }), { timeout: 5000 });
-  await vi.waitFor(() => expect(list.classList.contains('is-inbox')).toBe(false), { timeout: 5000 });
+  await waitFor(() => expect(mounted.calls.find(call => call.ui?.appearance?.sidebarLayout)?.ui.appearance).toMatchObject({ sidebarLayout: 'projects', font: 'system' }), { timeout: 5000 });
+  await waitFor(() => expect(list.classList.contains('is-inbox')).toBe(false), { timeout: 5000 });
   expect(doc.querySelector(`[data-project-id="${project.id}"]`)).not.toBeNull();
 });
 
@@ -647,7 +655,7 @@ it('draws sub-agents under their parent card with one line of counts, and a busy
   const mounted = await mountInbox({ listSessions: async () => listed(sessions, { blocked: ['c-w-blocked'] }) });
   const doc = mounted.window.document;
   const card = () => doc.querySelector<HTMLElement>('.inbox-cards > .sess-card[data-id="parent"]');
-  await vi.waitFor(() => expect(card()).not.toBeNull());
+  await waitFor(() => expect(card()).not.toBeNull());
   // Quiet for days, but its workers are running: it stays a card. A chat as quiet without them settles.
   expect(doc.querySelector('.inbox-settled .sess[data-id="parent"]')).toBeNull();
   expect(doc.querySelector('.inbox-settled .sess[data-id="quiet"]')).not.toBeNull();
@@ -690,7 +698,7 @@ it('filters the inbox with a searchable project picker, by keyboard, and reads t
   const options = () => [...popup()!.querySelectorAll<HTMLButtonElement>('[role="option"]')];
   const search = () => popup()!.querySelector<HTMLInputElement>('input[type="search"]')!;
   const key = (target: Element, name: string) => target.dispatchEvent(new w.KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }));
-  await vi.waitFor(() => expect(doc.querySelector('.sess-card[data-id="a1"]')).not.toBeNull());
+  await waitFor(() => expect(doc.querySelector('.sess-card[data-id="a1"]')).not.toBeNull());
   // No sideways chips: one button saying what is shown.
   expect(doc.querySelector('.inbox-chips, .inbox-chip')).toBeNull();
   expect(trigger().textContent).toBe('All');
@@ -730,7 +738,7 @@ it('filters the inbox with a searchable project picker, by keyboard, and reads t
   expect(doc.querySelector('.sess[data-id="a1"]')).toBeNull();
   expect(doc.querySelector('.sess-card[data-id="b1"]')).not.toBeNull();
   // The project's own history, the read opening it in the tree makes.
-  await vi.waitFor(() => expect(listSessions.mock.calls.filter(([options]) => options?.projectId === beta.id)).toHaveLength(1));
+  await waitFor(() => expect(listSessions.mock.calls.filter(([options]) => options?.projectId === beta.id)).toHaveLength(1));
   await settle();
   // As many chats as the tree's section would hold, then the tree's "Show more".
   const settledIds = () => [...doc.querySelectorAll<HTMLElement>('.inbox-settled .sess')].map(row => row.dataset.id);
@@ -742,9 +750,9 @@ it('filters the inbox with a searchable project picker, by keyboard, and reads t
   expect(more.previousElementSibling?.classList.contains('inbox-settled')).toBe(true);
   expect(more.getAttribute('aria-label')).toBe('Show more tasks in Bêta');
   more.click();
-  await vi.waitFor(() => expect(listSessions.mock.calls.filter(([options]) => options?.projectId === beta.id)).toHaveLength(2));
+  await waitFor(() => expect(listSessions.mock.calls.filter(([options]) => options?.projectId === beta.id)).toHaveLength(2));
   expect(listSessions.mock.calls.at(-1)?.[0]).toMatchObject({ projectId: beta.id, cursor: { id: 'b-old-4' } });
-  await vi.waitFor(() => expect(settledIds()).toHaveLength(7));
+  await waitFor(() => expect(settledIds()).toHaveLength(7));
   expect(doc.querySelector('.project-show-more')).toBeNull();
   // A new chat from here opens in the chosen project.
   doc.querySelector<HTMLButtonElement>('#chatList [data-inbox-control="compose"]')!.click();
@@ -755,9 +763,9 @@ it('opens the add-project menu at the inbox\'s own add button, with a folder her
   const mounted = await mountInbox({ listSessions: async () => listed([inboxChat('a1', { updatedAt: Date.now() })]) });
   const doc = mounted.window.document;
   const add = () => doc.querySelector<HTMLButtonElement>('#chatList [data-inbox-control="add"]')!;
-  await vi.waitFor(() => expect(doc.querySelector('.sess-card[data-id="a1"]')).not.toBeNull());
+  await waitFor(() => expect(doc.querySelector('.sess-card[data-id="a1"]')).not.toBeNull());
   add().click();
-  await vi.waitFor(() => expect(doc.querySelector('.row-menu [data-row-action="add-ssh-project"]')).not.toBeNull());
+  await waitFor(() => expect(doc.querySelector('.row-menu [data-row-action="add-ssh-project"]')).not.toBeNull());
   expect(doc.querySelector('.row-menu [data-row-action="add-local-project"]')).not.toBeNull();
   // The menu belongs to the button the person used, not the hidden Projects heading.
   expect(add().getAttribute('aria-expanded')).toBe('true');
@@ -777,7 +785,7 @@ it('offers the chosen project\'s own menu in the inbox: Retry ChatGPT Project fo
   const doc = mounted.window.document, w = mounted.window;
   const trigger = () => doc.querySelector<HTMLButtonElement>('#chatList [data-inbox-control="picker"]')!;
   const menuButton = () => doc.querySelector<HTMLButtonElement>(`#chatList [data-row-menu="project:${alpha.id}"]`);
-  await vi.waitFor(() => expect(doc.querySelector('.sess-card[data-id="a1"]')).not.toBeNull());
+  await waitFor(() => expect(doc.querySelector('.sess-card[data-id="a1"]')).not.toBeNull());
   expect(menuButton()).toBeNull();
   trigger().click();
   const option = [...doc.querySelectorAll<HTMLButtonElement>('.inbox-project-picker [role="option"]')].find(entry => entry.textContent?.startsWith('Alpha'))!;
@@ -797,8 +805,8 @@ it('offers the chosen project\'s own menu in the inbox: Retry ChatGPT Project fo
   expect(doc.activeElement).toBe(menuButton());
   menuButton()!.click();
   doc.querySelector<HTMLButtonElement>('.row-menu [data-row-action="chatgpt-retry"]')!.click();
-  await vi.waitFor(() => expect(retryChatgptProject).toHaveBeenCalledWith(alpha.id));
-  await vi.waitFor(() => expect(trigger().title).toContain('Creating this project in ChatGPT…'));
+  await waitFor(() => expect(retryChatgptProject).toHaveBeenCalledWith(alpha.id));
+  await waitFor(() => expect(trigger().title).toContain('Creating this project in ChatGPT…'));
   expect(trigger().querySelector('.session-status.is-active')).not.toBeNull();
   trigger().click();
   expect(doc.querySelector('.inbox-project-picker [role="option"][aria-selected="true"] .file-branch-hint')?.textContent).toBe('Creating in ChatGPT…');
@@ -806,8 +814,8 @@ it('offers the chosen project\'s own menu in the inbox: Retry ChatGPT Project fo
   // Removing the chosen project returns the list to All, and the keyboard to the filter.
   menuButton()!.focus(); menuButton()!.click();
   doc.querySelector<HTMLButtonElement>('.row-menu [data-row-action="remove"]')!.click();
-  await vi.waitFor(() => expect(removeProject).toHaveBeenCalledWith(alpha.id));
-  await vi.waitFor(() => expect(trigger().textContent).toBe('All'));
+  await waitFor(() => expect(removeProject).toHaveBeenCalledWith(alpha.id));
+  await waitFor(() => expect(trigger().textContent).toBe('All'));
   expect(menuButton()).toBeNull();
   expect(doc.activeElement).toBe(trigger());
 });
@@ -821,7 +829,7 @@ it('keeps keyboard focus on the same card, worker arrow or filter across a live 
   });
   const doc = mounted.window.document, w = mounted.window;
   const cardTop = () => doc.querySelector<HTMLElement>('.sess-card[data-id="a1"] > .sess-top')!;
-  await vi.waitFor(() => expect(doc.querySelector('.sess-card[data-id="a1"]')).not.toBeNull());
+  await waitFor(() => expect(doc.querySelector('.sess-card[data-id="a1"]')).not.toBeNull());
   const repaint = async () => { mounted.push(structuredClone(mounted.state)); await settle(); };
   const before = cardTop();
   before.focus();
@@ -856,7 +864,7 @@ it("opens the next and previous chat in the sidebar's drawn order with Ctrl+Tab 
     listSessions: async () => listed([session, inboxChat('c1'), inboxChat('c2'), inboxChat('c3')])
   });
   const doc = mounted.window.document, w = mounted.window;
-  await vi.waitFor(() => expect(doc.querySelector('#chatList .sess[data-id="c3"]')).not.toBeNull());
+  await waitFor(() => expect(doc.querySelector('#chatList .sess[data-id="c3"]')).not.toBeNull());
   const selected = () => doc.querySelector<HTMLElement>('#sessionList .sess.is-sel')?.dataset.id;
   const press = (shiftKey = false, target: EventTarget = doc.body, repeat = false) => {
     const event = new w.KeyboardEvent('keydown', { key: 'Tab', ctrlKey: true, shiftKey, repeat, bubbles: true, cancelable: true });
@@ -891,7 +899,7 @@ it("opens the next and previous chat in the sidebar's drawn order with Ctrl+Tab 
 it('keeps keyboard focus with the chat Ctrl+Tab opens in the Inbox, and leaves the keys to the open project picker', async () => {
   const mounted = await mountInbox({ listSessions: async () => listed(['c1', 'c2', 'c3'].map(id => inboxChat(id, { updatedAt: Date.now() }))) });
   const doc = mounted.window.document, w = mounted.window;
-  await vi.waitFor(() => expect(inboxCardIds(doc)).toHaveLength(3));
+  await waitFor(() => expect(inboxCardIds(doc)).toHaveLength(3));
   const [first, second] = inboxCardIds(doc);
   const top = (id: string) => doc.querySelector<HTMLElement>(`#sessionList .sess[data-id="${id}"] > .sess-top`)!;
   const selected = () => doc.querySelector<HTMLElement>('#sessionList .sess.is-sel')?.dataset.id;
@@ -939,7 +947,7 @@ it('ranks the inbox by what each chat needs: approval, stopped recovery, blocked
     listSessions: async () => listed(sessions, { blocked: ['c-blocked'], approval: ['c-approval'], recoveryStopped: ['c-recovery'] })
   });
   const doc = mounted.window.document;
-  await vi.waitFor(() => expect(inboxCardIds(doc)).toHaveLength(8));
+  await waitFor(() => expect(inboxCardIds(doc)).toHaveLength(8));
   expect(inboxCardIds(doc)).toEqual(['approval', 'recovery', 'blocked', 'failed', 'stalled', 'working', 'unseen', 'rest']);
   // Each state in one word or two on the meta line, with its own glyph, the title and the button's own text saying it too.
   const expected: Array<[string, string, string]> = [
@@ -968,7 +976,7 @@ it('calls an unread reply a New response on its card, the word its row badge alr
     listSessions: async () => listed([inboxChat('unseen', { updatedAt: now, lastTurnOutcome: 'completed', lastTurnEndAt: now + 60_000 })])
   });
   const doc = mounted.window.document;
-  await vi.waitFor(() => expect(inboxCardIds(doc)).toEqual(['unseen']));
+  await waitFor(() => expect(inboxCardIds(doc)).toEqual(['unseen']));
   const { state, card } = inboxCardState(doc, 'unseen');
   expect(state.textContent).toBe('New response');
   expect(state.querySelector('.ico.ph-check-circle')).not.toBeNull();
@@ -983,7 +991,7 @@ it('writes a card and a settled line age in the app language', async () => {
     inboxChat('quiet', { startedAt: now - 2 * DAY, updatedAt: now - 2 * DAY })
   ]) });
   const doc = mounted.window.document;
-  await vi.waitFor(() => expect(inboxCardIds(doc)).toEqual(['recent']));
+  await waitFor(() => expect(inboxCardIds(doc)).toEqual(['recent']));
   const cardAge = () => inboxCardState(doc, 'recent').state.querySelector('.sess-age')!.textContent;
   const settledAge = () => doc.querySelector('.inbox-settled > .sess[data-id="quiet"] .sess-age')!.textContent;
   // The narrow form the platform has for each language: the exact words differ between ICU versions.
@@ -1007,7 +1015,7 @@ it('says No project on the card of a chat outside every project', async () => {
   const now = Date.now();
   const mounted = await mountInbox({ listSessions: async () => listed([inboxChat('loose', { updatedAt: now })]) });
   const doc = mounted.window.document;
-  await vi.waitFor(() => expect(inboxCardIds(doc)).toEqual(['loose']));
+  await waitFor(() => expect(inboxCardIds(doc)).toEqual(['loose']));
   const project = inboxCardState(doc, 'loose').card.querySelector<HTMLElement>('.sess-meta > .sess-project')!;
   expect(project.textContent).toBe('No project');
   expect(project.querySelector('.ico.ph-chat-circle, .ico.project-mark')).not.toBeNull();
@@ -1034,7 +1042,7 @@ it('never settles a chat waiting on approval, a stopped recovery or a block, nor
     blocked: ['c-blocked'], approval: ['c-approval', 'c-w-approval'], recoveryStopped: ['c-recovery', 'c-w-recovery']
   }) });
   const doc = mounted.window.document;
-  await vi.waitFor(() => expect(doc.querySelector('.inbox-settled')).not.toBeNull());
+  await waitFor(() => expect(doc.querySelector('.inbox-settled')).not.toBeNull());
   const settled = [...doc.querySelectorAll<HTMLElement>('.inbox-settled > .sess')].map(row => row.dataset.id);
   // Settled chats order by recency alone: a failed turn three days old is no longer a reason to lead.
   expect(settled).toEqual(['failed', 'stalled', 'plain', 'failed-then-more']);
@@ -1070,7 +1078,7 @@ it('limits a chosen project\'s inbox to its tree page across cards and settled l
   const doc = mounted.window.document;
   const row = (id: string) => doc.querySelector<HTMLElement>(`#chatList .sess[data-id="${id}"]`);
   const settledIds = () => [...doc.querySelectorAll<HTMLElement>('.inbox-settled > .sess')].map(entry => entry.dataset.id);
-  await vi.waitFor(() => expect(row('sel')).not.toBeNull());
+  await waitFor(() => expect(row('sel')).not.toBeNull());
   row('sel')!.querySelector<HTMLElement>('.sess-top')!.click();
   await settle();
   // Five pinned chats lead the list, so the blocked one comes after a whole page of them.
@@ -1110,17 +1118,17 @@ it('moves a card live when the session list reports a new state, keeping keyboar
     onSessionChanged: (fn: () => void) => { changed = fn; return () => undefined; }
   });
   const doc = mounted.window.document;
-  await vi.waitFor(() => expect(inboxCardIds(doc)).toEqual(['a2', 'a1']));
+  await waitFor(() => expect(inboxCardIds(doc)).toEqual(['a2', 'a1']));
   inboxCardState(doc, 'a1').top.focus();
   approval = ['c-a1'];
   changed();
-  await vi.waitFor(() => expect(inboxCardIds(doc)).toEqual(['a1', 'a2']));
+  await waitFor(() => expect(inboxCardIds(doc)).toEqual(['a1', 'a2']));
   expect(inboxCardState(doc, 'a1').state.textContent).toBe('Needs approval');
   expect(doc.activeElement).toBe(inboxCardState(doc, 'a1').top);
   // Approved: the card goes back to its place by recency, the keyboard still on it.
   approval = [];
   changed();
-  await vi.waitFor(() => expect(inboxCardIds(doc)).toEqual(['a2', 'a1']));
+  await waitFor(() => expect(inboxCardIds(doc)).toEqual(['a2', 'a1']));
   expect(inboxCardState(doc, 'a1').state.classList.contains('is-attention')).toBe(false);
   expect(doc.activeElement).toBe(inboxCardState(doc, 'a1').top);
 });
@@ -1136,7 +1144,7 @@ it('shows unattributed activity at the end of the inbox, as the tree does, with 
   const doc = mounted.window.document;
   const list = doc.getElementById('chatList')!;
   const box = () => list.querySelector<HTMLDetailsElement>(':scope > details.session-diagnostics');
-  await vi.waitFor(() => expect(box()).not.toBeNull());
+  await waitFor(() => expect(box()).not.toBeNull());
   expect(box()!.querySelector('summary')?.textContent).toBe('Unattributed activity · 1');
   // Only unattributed rows: the list is not empty, and does not say so.
   expect(list.querySelector('.empty')).toBeNull();
@@ -1146,7 +1154,7 @@ it('shows unattributed activity at the end of the inbox, as the tree does, with 
   // With a chat beside it, the disclosure is still the last thing in the list, and never a card.
   rows = [inboxChat('a1', { updatedAt: Date.now() }), loose];
   changed();
-  await vi.waitFor(() => expect(inboxCardIds(doc)).toEqual(['a1']));
+  await waitFor(() => expect(inboxCardIds(doc)).toEqual(['a1']));
   expect(list.lastElementChild).toBe(box());
   expect(doc.querySelectorAll('.sess[data-id="loose"]')).toHaveLength(1);
   // A live repaint keeps the keyboard on the disclosure it was on.
@@ -1154,7 +1162,7 @@ it('shows unattributed activity at the end of the inbox, as the tree does, with 
   before.focus();
   rows = [inboxChat('a1', { updatedAt: Date.now() + 1 }), loose];
   changed();
-  await vi.waitFor(() => expect(box()!.querySelector('summary')).not.toBe(before));
+  await waitFor(() => expect(box()!.querySelector('summary')).not.toBe(before));
   expect(doc.activeElement).toBe(box()!.querySelector('summary'));
 });
 
@@ -1174,7 +1182,7 @@ it('marks a collapsed chat whose sub-agent needs you, over its own spinner, in t
   const mounted = await mountChat({}, [], { listSessions: async () => listed(sessions, { approval: ['c-w-needs'] }) });
   const doc = mounted.window.document;
   const row = (id: string) => doc.querySelector<HTMLElement>(`#chatList .sess[data-id="${id}"]`);
-  await vi.waitFor(() => expect(row('parent')).not.toBeNull());
+  await waitFor(() => expect(row('parent')).not.toBeNull());
   const marks = (id: string) => [...row(id)!.querySelectorAll<HTMLElement>('.sess-top .session-status')];
   // One mark, the sub-agent's need, in place of the chat's own spinner, and the row's title says it.
   expect(marks('parent').map(mark => [mark.className, mark.getAttribute('aria-label')]))
@@ -1184,7 +1192,7 @@ it('marks a collapsed chat whose sub-agent needs you, over its own spinner, in t
   expect(marks('calm').map(mark => mark.className)).toEqual([]);
   // Opened, the worker's own row carries the mark, and the chat shows its own state again.
   row('parent')!.querySelector<HTMLButtonElement>('.worker-toggle')!.click();
-  await vi.waitFor(() => expect(row('w-needs')).not.toBeNull());
+  await waitFor(() => expect(row('w-needs')).not.toBeNull());
   expect(marks('w-needs').map(mark => mark.className)).toEqual(['session-status is-failed']);
   expect(marks('parent').map(mark => mark.className)).toEqual(['session-status is-active']);
 });
@@ -1201,7 +1209,7 @@ it('keeps a number setting as it was when its field is left empty', async () => 
     field.value = '   ';
     field.dispatchEvent(new mounted.window.Event('change'));
   }
-  await vi.waitFor(() => expect(mounted.calls.length).toBeGreaterThan(0));
+  await waitFor(() => expect(mounted.calls.length).toBeGreaterThan(0));
   await settle();
   const last = mounted.calls.at(-1);
   expect(last.compaction.autoTokens).toBe(before.compaction.autoTokens);
@@ -1239,25 +1247,25 @@ it('says a chosen project\'s chats are loading while its history is read, and of
   const mounted = await mountInbox({ listProjects: async () => ({ ok: true, data: [alpha] }), listSessions });
   const doc = mounted.window.document;
   const empty = () => doc.querySelector<HTMLElement>('#chatList > .empty');
-  await vi.waitFor(() => expect(inboxCardIds(doc)).toEqual(['loose']));
+  await waitFor(() => expect(inboxCardIds(doc)).toEqual(['loose']));
   doc.querySelector<HTMLButtonElement>('#chatList [data-inbox-control="picker"]')!.click();
   [...doc.querySelectorAll<HTMLButtonElement>('.inbox-project-picker [role="option"]')].find(option => option.textContent === 'Alpha')!.click();
   // Not known to be empty yet.
   expect(empty()?.textContent).toBe('Loading chats…');
   expect(empty()?.getAttribute('role')).toBe('status');
-  await vi.waitFor(() => expect(reads).toHaveLength(1));
+  await waitFor(() => expect(reads).toHaveLength(1));
   reads[0]!({ ok: false, error: 'boom' });
-  await vi.waitFor(() => expect(doc.querySelector('#chatList [data-inbox-control="retry"]')).not.toBeNull());
+  await waitFor(() => expect(doc.querySelector('#chatList [data-inbox-control="retry"]')).not.toBeNull());
   expect(empty()?.textContent).toContain("Could not load this project's chats.");
   expect(empty()?.textContent).not.toContain('No chats yet.');
   const retry = doc.querySelector<HTMLButtonElement>('#chatList [data-inbox-control="retry"]')!;
   expect(retry.textContent).toBe('Retry');
   retry.click();
   expect(empty()?.textContent).toBe('Loading chats…');
-  await vi.waitFor(() => expect(reads).toHaveLength(2));
+  await waitFor(() => expect(reads).toHaveLength(2));
   expect(listSessions.mock.calls.at(-1)?.[0]).toMatchObject({ projectId: alpha.id });
   reads[1]!(listed([inboxChat('a1', { projectId: alpha.id, updatedAt: Date.now() })], { nextCursor: null }));
-  await vi.waitFor(() => expect(inboxCardIds(doc)).toEqual(['a1']));
+  await waitFor(() => expect(inboxCardIds(doc)).toEqual(['a1']));
   expect(empty()).toBeNull();
 });
 
@@ -1270,10 +1278,10 @@ it('says No chats yet. once a chosen project\'s history is read and holds none',
   });
   const doc = mounted.window.document;
   const empty = () => doc.querySelector<HTMLElement>('#chatList > .empty');
-  await vi.waitFor(() => expect(inboxCardIds(doc)).toEqual(['loose']));
+  await waitFor(() => expect(inboxCardIds(doc)).toEqual(['loose']));
   doc.querySelector<HTMLButtonElement>('#chatList [data-inbox-control="picker"]')!.click();
   [...doc.querySelectorAll<HTMLButtonElement>('.inbox-project-picker [role="option"]')].find(option => option.textContent === 'Alpha')!.click();
-  await vi.waitFor(() => expect(empty()?.textContent).toBe('No chats yet.'));
+  await waitFor(() => expect(empty()?.textContent).toBe('No chats yet.'));
 });
 
 it('commits a project summary click before an immediate state repaint replaces its details node', async () => {
@@ -1283,7 +1291,7 @@ it('commits a project summary click before an immediate state repaint replaces i
     listSessions: async () => ({ ok: true, data: { sessions: [session], activeId: null, pressure: [], blocked: [] } })
   });
   const group = () => mounted.window.document.querySelector<HTMLDetailsElement>(`[data-project-id="${project.id}"]`)!;
-  await vi.waitFor(() => expect(group()).not.toBeNull());
+  await waitFor(() => expect(group()).not.toBeNull());
   (group().querySelector(`[data-id="${session.id}"]`) as HTMLButtonElement).click();
   expect(group().open).toBe(true);
   const clicked = group();
@@ -1320,14 +1328,14 @@ it("copies a chat's ChatGPT link from its row menu (#1107)", async () => {
   });
   const doc = mounted.window.document;
   const row = () => doc.querySelector<HTMLElement>(`[data-id="${session.id}"]`)!;
-  await vi.waitFor(() => expect(row()).not.toBeNull());
+  await waitFor(() => expect(row()).not.toBeNull());
   const item = rowMenuItem(row(), 'copy-link')!;
   expect(item.textContent).toContain('Copy link');
   // It sits right after Open in browser.
   expect(item.previousElementSibling?.getAttribute('data-row-action')).toBe('open');
   item.click();
-  await vi.waitFor(() => expect(writeClipboard).toHaveBeenCalledWith('https://chatgpt.com/c/linked-chat-0001'));
-  await vi.waitFor(() => expect(doc.querySelector('.toast')?.textContent).toBe('Link copied'));
+  await waitFor(() => expect(writeClipboard).toHaveBeenCalledWith('https://chatgpt.com/c/linked-chat-0001'));
+  await waitFor(() => expect(doc.querySelector('.toast')?.textContent).toBe('Link copied'));
 });
 
 it('keeps strict chat allowlisting separate from Block and exposes explicit Trust on session rows', async () => {
@@ -1359,18 +1367,18 @@ it('keeps strict chat allowlisting separate from Block and exposes explicit Trus
   mounted.push(structuredClone(mounted.state));
   const primeRow = () => doc.querySelector<HTMLElement>(`[data-id="${session.id}"]`)!;
   const workerRow = () => doc.querySelector<HTMLElement>(`[data-id="${workerSession.id}"]`)!;
-  await vi.waitFor(() => expect(rowMenuItem(primeRow(), 'trust')).not.toBeNull());
+  await waitFor(() => expect(rowMenuItem(primeRow(), 'trust')).not.toBeNull());
   closeRowMenus(doc);
   expect(rowMenuItem(workerRow(), 'trust')).toBeNull();
   expect(doc.querySelector('.row-menu [data-row-action="block"]')).not.toBeNull();
   closeRowMenus(doc);
 
   rowMenuItem(primeRow(), 'trust')!.click();
-  await vi.waitFor(() => expect(setSessionTrusted).toHaveBeenCalledWith(session.id, session.conversationId, true));
+  await waitFor(() => expect(setSessionTrusted).toHaveBeenCalledWith(session.id, session.conversationId, true));
   expect(setSessionBlocked).not.toHaveBeenCalled();
 
   rowMenuItem(primeRow(), 'block')!.click();
-  await vi.waitFor(() => expect(setSessionBlocked).toHaveBeenCalledWith(session.id, true));
+  await waitFor(() => expect(setSessionBlocked).toHaveBeenCalledWith(session.id, true));
 });
 
 it('shows committed resume inheritance as trusted and revokes it through the current row', async () => {
@@ -1398,12 +1406,12 @@ it('shows committed resume inheritance as trusted and revokes it through the cur
   mounted.state.config.multiAgent.strictChatAllowlist = true;
   mounted.push(structuredClone(mounted.state));
   const row = () => doc.querySelector<HTMLElement>(`[data-id="${session.id}"]`)!;
-  await vi.waitFor(() => expect(rowMenuItem(row(), 'trust')).not.toBeNull());
+  await waitFor(() => expect(rowMenuItem(row(), 'trust')).not.toBeNull());
   const trust = rowMenuItem(row(), 'trust')!;
   expect(trust.textContent).toBe('Untrust chat');
   expect(doc.querySelector('.row-menu [data-row-action="block"]')!.textContent).toBe('Block chat');
   trust.click();
-  await vi.waitFor(() => expect(setSessionTrusted).toHaveBeenCalledWith(session.id, current, false));
+  await waitFor(() => expect(setSessionTrusted).toHaveBeenCalledWith(session.id, current, false));
 });
 
 it('offers a chat\'s actions in one menu, by kind of row, and opens it with a right click too', async () => {
@@ -1421,7 +1429,7 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
   });
   const doc = mounted.window.document;
   const row = (id: string) => doc.querySelector<HTMLElement>(`[data-id="${id}"]`)!;
-  await vi.waitFor(() => expect(row(chat.id)).not.toBeNull());
+  await waitFor(() => expect(row(chat.id)).not.toBeNull());
   // One button on the row, no loose icons.
   expect(row(chat.id).querySelectorAll('.sess-actions button').length).toBe(1);
   const actions = (): Array<string | undefined> => [...doc.querySelectorAll<HTMLElement>('.row-menu .row-menu-item')].map(item => item.dataset.rowAction);
@@ -1430,14 +1438,14 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
   expect(doc.querySelector('.row-menu [data-row-action="remove"]')!.classList.contains('is-danger')).toBe(true);
   closeRowMenus(doc);
   // A row that is not a chat offers only what applies to it.
-  await vi.waitFor(() => expect(row(loose.id)).not.toBeNull());
+  await waitFor(() => expect(row(loose.id)).not.toBeNull());
   rowMenuItem(row(loose.id), 'block');
   expect(actions()).toEqual(['block', 'remove']);
   closeRowMenus(doc);
   // A right click opens the same menu; its items run their action.
   row(chat.id).dispatchEvent(new mounted.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 40 }));
   doc.querySelector<HTMLButtonElement>('.row-menu [data-row-action="open"]')!.click();
-  await vi.waitFor(() => expect(openSessionChat).toHaveBeenCalledWith(chat.id));
+  await waitFor(() => expect(openSessionChat).toHaveBeenCalledWith(chat.id));
   expect(doc.querySelector('.row-menu')).toBeNull();
 });
 
@@ -1457,24 +1465,24 @@ it('names a chat in place: Enter saves, Escape keeps the old name, empty restore
   const doc = mounted.window.document;
   const row = () => doc.querySelector<HTMLElement>(`[data-id="${session.id}"]`)!;
   const field = () => row().querySelector<HTMLInputElement>('.sess-rename');
-  await vi.waitFor(() => expect(row().querySelector('.row-menu-button')).not.toBeNull());
+  await waitFor(() => expect(row().querySelector('.row-menu-button')).not.toBeNull());
   expect(field()).toBeNull();
   const press = (key: string) => field()!.dispatchEvent(new mounted.window.KeyboardEvent('keydown', { key, bubbles: true }));
   const type = (text: string) => { field()!.value = text; field()!.dispatchEvent(new mounted.window.Event('input', { bubbles: true })); };
 
   // Escape: nothing is saved, the title is back.
   rowMenuItem(row(), 'rename')!.click();
-  await vi.waitFor(() => expect(field()).not.toBeNull());
+  await waitFor(() => expect(field()).not.toBeNull());
   expect(field()!.value).toBe('ChatGPT title');
   type('Never saved');
   press('Escape');
-  await vi.waitFor(() => expect(field()).toBeNull());
+  await waitFor(() => expect(field()).toBeNull());
   expect(renameSession).not.toHaveBeenCalled();
   expect(row().querySelector('.sess-top b')!.textContent).toBe('ChatGPT title');
 
   // The sidebar repaints while the user types; the field and its text survive.
   rowMenuItem(row(), 'rename')!.click();
-  await vi.waitFor(() => expect(field()).not.toBeNull());
+  await waitFor(() => expect(field()).not.toBeNull());
   type('  Release   prep  ');
   const editing = field();
   mounted.push(structuredClone(mounted.state));
@@ -1483,14 +1491,14 @@ it('names a chat in place: Enter saves, Escape keeps the old name, empty restore
   expect(field()).toBe(editing);
   expect(field()?.value).toBe('  Release   prep  ');
   press('Enter');
-  await vi.waitFor(() => expect(renameSession).toHaveBeenCalledWith(session.id, 'Release   prep'));
+  await waitFor(() => expect(renameSession).toHaveBeenCalledWith(session.id, 'Release   prep'));
 
   // Empty asks for ChatGPT's title again.
   rowMenuItem(row(), 'rename')!.click();
-  await vi.waitFor(() => expect(field()).not.toBeNull());
+  await waitFor(() => expect(field()).not.toBeNull());
   type('   ');
   press('Enter');
-  await vi.waitFor(() => expect(renameSession).toHaveBeenLastCalledWith(session.id, null));
+  await waitFor(() => expect(renameSession).toHaveBeenLastCalledWith(session.id, null));
 });
 
 it('searches chats in a dialog opened beside the app name: recent chats first, then marked matches (#1117)', async () => {
@@ -1514,7 +1522,7 @@ it('searches chats in a dialog opened beside the app name: recent chats first, t
   const results = doc.getElementById('searchResults')!;
   const lists = doc.getElementById('sessionList')!;
   const dialog = doc.getElementById('searchDialog') as HTMLDialogElement;
-  await vi.waitFor(() => expect(doc.querySelector('[data-id="search-listed-0001"]')).not.toBeNull());
+  await waitFor(() => expect(doc.querySelector('[data-id="search-listed-0001"]')).not.toBeNull());
   // No search field in the sidebar: one icon beside the app name opens the dialog.
   expect(doc.querySelector('.sidebar #chatSearch')).toBeNull();
   expect(dialog.open).toBe(false);
@@ -1522,12 +1530,12 @@ it('searches chats in a dialog opened beside the app name: recent chats first, t
   expect(dialog.open).toBe(true);
   expect(doc.activeElement).toBe(field);
   // Before anything is typed: the most recent chats.
-  await vi.waitFor(() => expect(results.querySelector('.search-heading')?.textContent).toBe('Recent'));
+  await waitFor(() => expect(results.querySelector('.search-heading')?.textContent).toBe('Recent'));
   expect([...results.querySelectorAll('.search-result b')].map(title => title.textContent)).toEqual(['Listed chat']);
 
   field.value = 'bridge';
   field.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
-  await vi.waitFor(() => expect(results.querySelector('.search-snippet')).not.toBeNull());
+  await waitFor(() => expect(results.querySelector('.search-snippet')).not.toBeNull());
   // The chat lists keep their place behind the dialog.
   expect(lists.hidden).toBe(false);
   expect((doc.getElementById('chatSearchClear') as HTMLButtonElement).hidden).toBe(false);
@@ -1536,30 +1544,30 @@ it('searches chats in a dialog opened beside the app name: recent chats first, t
   // Indexing is not done yet: the result says so, and asks again until it is.
   expect(results.querySelector('.search-status')!.textContent).toContain('1 of 3');
   indexed = 3;
-  await vi.waitFor(() => expect(results.querySelector('.search-status')).toBeNull());
+  await waitFor(() => expect(results.querySelector('.search-status')).toBeNull());
 
   // Opening a result closes the dialog and opens the chat.
   (results.querySelector('.search-result') as HTMLButtonElement).click();
-  await vi.waitFor(() => expect(dialog.open).toBe(false));
-  await vi.waitFor(() => expect(getSession).toHaveBeenCalledWith('search-hit-0001', expect.anything()));
+  await waitFor(() => expect(dialog.open).toBe(false));
+  await waitFor(() => expect(getSession).toHaveBeenCalledWith('search-hit-0001', expect.anything()));
 
   // Opened again (from the View menu), the last query is still there, selected, and the open chat is marked.
   (doc.getElementById('viewMenu') as HTMLButtonElement).click();
   (doc.querySelector('.row-menu [data-row-action="search"]') as HTMLButtonElement).click();
   expect(dialog.open).toBe(true);
-  await vi.waitFor(() => expect(results.querySelector('.search-result')!.classList.contains('is-sel')).toBe(true));
+  await waitFor(() => expect(results.querySelector('.search-result')!.classList.contains('is-sel')).toBe(true));
 
   field.value = 'nothing';
   field.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
-  await vi.waitFor(() => expect(results.textContent).toContain('No chats match'));
+  await waitFor(() => expect(results.textContent).toContain('No chats match'));
 
   // The clear button empties the query and brings the recent chats back.
   (doc.getElementById('chatSearchClear') as HTMLButtonElement).click();
-  await vi.waitFor(() => expect(results.querySelector('.search-heading')).not.toBeNull());
+  await waitFor(() => expect(results.querySelector('.search-heading')).not.toBeNull());
   expect(field.value).toBe('');
   // A click on the backdrop lands on the dialog itself and closes it.
   dialog.dispatchEvent(new mounted.window.MouseEvent('click', { bubbles: true }));
-  await vi.waitFor(() => expect(dialog.open).toBe(false));
+  await waitFor(() => expect(dialog.open).toBe(false));
 });
 
 it.each([['Win32', 'ctrlKey', 'metaKey'], ['MacIntel', 'metaKey', 'ctrlKey']] as const)(
@@ -1578,7 +1586,7 @@ it.each([['Win32', 'ctrlKey', 'metaKey'], ['MacIntel', 'metaKey', 'ctrlKey']] as
     });
     const doc = mounted.window.document;
     const field = doc.getElementById('chatSearch') as HTMLInputElement;
-    await vi.waitFor(() => expect(doc.querySelector('[data-id="search-shortcut-0001"]')).not.toBeNull());
+    await waitFor(() => expect(doc.querySelector('[data-id="search-shortcut-0001"]')).not.toBeNull());
     const press = (target: EventTarget, modifier: string) =>
       target.dispatchEvent(new mounted.window.KeyboardEvent('keydown', { key: 'k', [modifier]: true, bubbles: true, cancelable: true }));
     expect(press(doc.body, other)).toBe(true);
@@ -1597,7 +1605,7 @@ it.each([['Win32', 'ctrlKey', 'metaKey'], ['MacIntel', 'metaKey', 'ctrlKey']] as
 
     field.value = 'listed';
     field.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
-    await vi.waitFor(() => expect(doc.getElementById('searchResults')!.textContent)
+    await waitFor(() => expect(doc.getElementById('searchResults')!.textContent)
       .toContain('Showing the first 1 match. Add a word to narrow it down.'));
   } finally {
     vi.unstubAllGlobals();
@@ -1625,7 +1633,7 @@ it('shows an inherited Block ahead of Trust on a committed resumed row', async (
   mounted.state.config.multiAgent.strictChatAllowlist = true;
   mounted.push(structuredClone(mounted.state));
   const row = () => doc.querySelector<HTMLElement>(`[data-id="${session.id}"]`)!;
-  await vi.waitFor(() => expect(rowMenuItem(row(), 'trust')).not.toBeNull());
+  await waitFor(() => expect(rowMenuItem(row(), 'trust')).not.toBeNull());
   expect(doc.querySelector('.row-menu [data-row-action="block"]')!.textContent).toBe('Release chat');
   expect(doc.querySelector('.row-menu [data-row-action="trust"]')!.textContent).toBe('Trust chat');
 });
@@ -1643,7 +1651,7 @@ it('saves strict chat allowlisting and disables the unattributed switch while st
 
   strict.checked = true;
   strict.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls.some(call => call.multiAgent?.strictChatAllowlist === true)).toBe(true));
+  await waitFor(() => expect(mounted.calls.some(call => call.multiAgent?.strictChatAllowlist === true)).toBe(true));
 
   const next = structuredClone(mounted.state);
   next.config.multiAgent.strictChatAllowlist = true;
@@ -1659,7 +1667,7 @@ it('keeps project keyboard focus across activity repaint without taking composer
   });
   const doc = mounted.window.document;
   const heading = () => doc.querySelector<HTMLElement>(`[data-project-id="${project.id}"] > summary`)!;
-  await vi.waitFor(() => expect(heading()).not.toBeNull());
+  await waitFor(() => expect(heading()).not.toBeNull());
   await settle();
   // Reads of the whole list. Opening a project reads one page of that project itself (#1190),
   // which is not a reload of the sidebar.
@@ -1727,7 +1735,7 @@ it.each(['wizConnect', 'connectionPopoverToggle'])(
     expect((doc.getElementById(buttonId) as HTMLButtonElement).disabled).toBe(false);
     (doc.getElementById(buttonId) as HTMLButtonElement).click();
     // The Intel macOS release runner needs more than waitFor's default second for this chain.
-    await vi.waitFor(() => expect(connect).toHaveBeenCalledOnce(), { timeout: 10_000 });
+    await waitFor(() => expect(connect).toHaveBeenCalledOnce(), { timeout: 10_000 });
     expect(order).toEqual(['settings', 'key', 'connect']);
   }
 );
@@ -1798,7 +1806,7 @@ it('keeps a quick Disconnecting on screen long enough to read, then shows the re
   // Over in a blink: the window still says Disconnecting for a moment.
   mounted.push({ ...mounted.state, status: { ...mounted.state.status, state: 'disconnected' } });
   expect(title()).toBe('Disconnecting');
-  await vi.waitFor(() => expect(title()).toBe('Not connected'), { timeout: 2500 });
+  await waitFor(() => expect(title()).toBe('Not connected'), { timeout: 2500 });
   expect(doc.getElementById('sidebarConnectionLabel')!.textContent).toBe('Connect');
 });
 
@@ -1902,7 +1910,7 @@ it('adds and selects setup profiles and rejects an older profile status response
   expect(dialog.showModal).toHaveBeenCalled();
   (doc.getElementById('setupProfileName') as HTMLInputElement).value = 'Work';
   doc.getElementById('setupProfileForm')!.dispatchEvent(new mounted.window.Event('submit', { cancelable: true }));
-  await vi.waitFor(() => expect(doc.getElementById('setupProfileCurrent')!.textContent).toBe('Work'));
+  await waitFor(() => expect(doc.getElementById('setupProfileCurrent')!.textContent).toBe('Work'));
   expect(add).toHaveBeenCalledWith('Work');
   expect((doc.getElementById('tunnelId') as HTMLInputElement).value).toBe('');
   mounted.push(initial);
@@ -1910,8 +1918,8 @@ it('adds and selects setup profiles and rejects an older profile status response
   select.mockResolvedValue({ ok: true, data: { ...initial, config: { ...initial.config, tunnel: {
     ...initial.config.tunnel, profileId: 'default', profileEpoch: 2 }, setupProfiles: [] } } });
   (doc.querySelector('[data-profile-id="default"]') as HTMLButtonElement).click();
-  await vi.waitFor(() => expect(select).toHaveBeenCalledWith('default'));
-  await vi.waitFor(() => expect((doc.getElementById('tunnelId') as HTMLInputElement).value).toBe(initial.config.tunnel.tunnelId));
+  await waitFor(() => expect(select).toHaveBeenCalledWith('default'));
+  await waitFor(() => expect((doc.getElementById('tunnelId') as HTMLInputElement).value).toBe(initial.config.tunnel.tunnelId));
 });
 
 it('asks whether an update came out when Settings open, not on every page inside them', async () => {
@@ -1982,9 +1990,9 @@ it('attaches pasted screenshot files with previews while preserving ordinary tex
   const paste = new w.Event('paste', { bubbles: true, cancelable: true });
   Object.defineProperty(paste, 'clipboardData', { value: { files: [file] } });
   input.dispatchEvent(paste);
-  await vi.waitFor(() => expect(dropFiles).toHaveBeenCalledWith([file]));
+  await waitFor(() => expect(dropFiles).toHaveBeenCalledWith([file]));
   expect(paste.defaultPrevented).toBe(true);
-  await vi.waitFor(() => expect(w.document.querySelector('img[src="data:image/webp;base64,AAAA"]')).not.toBeNull());
+  await waitFor(() => expect(w.document.querySelector('img[src="data:image/webp;base64,AAAA"]')).not.toBeNull());
   const text = new w.Event('paste', { bubbles: true, cancelable: true });
   Object.defineProperty(text, 'clipboardData', { value: { files: [] } });
   input.dispatchEvent(text);
@@ -2005,11 +2013,11 @@ it('preserves the selected OpenRouter model through an unchanged custom-provider
   mounted.push(mounted.state);
   const provider = w.document.getElementById('goalProvider') as HTMLSelectElement;
   provider.value = 'custom'; provider.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  await waitFor(() => expect(mounted.calls).toHaveLength(1));
   // Repainting custom settings must not replace the hidden OpenRouter picker's model.
   mounted.push({ ...mounted.state, hasCustomProviderKey: false });
   provider.value = 'openrouter'; provider.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(2));
+  await waitFor(() => expect(mounted.calls).toHaveLength(2));
   expect(mounted.calls[1].goal).toMatchObject({ provider: { kind: 'openrouter' }, model: original });
   expect(w.document.getElementById('goalModelName')!.textContent).toBe(original);
 });
@@ -2019,7 +2027,7 @@ it('uses the OpenRouter default when opened directly on an unrelated custom depl
   const provider = mounted.window.document.getElementById('goalProvider') as HTMLSelectElement;
   provider.value = 'openrouter';
   provider.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  await waitFor(() => expect(mounted.calls).toHaveLength(1));
   expect(mounted.calls[0].goal).toMatchObject({ provider: { kind: 'openrouter' }, model: DEFAULT_GOAL_MODEL });
 });
 
@@ -2029,17 +2037,17 @@ it('saves a custom deployment id and returns to the known OpenRouter model', asy
   const provider = w.document.getElementById('goalProvider') as HTMLSelectElement;
   provider.value = 'custom';
   provider.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  await waitFor(() => expect(mounted.calls).toHaveLength(1));
   expect(mounted.calls[0].goal.provider.kind).toBe('custom');
   expect(w.document.getElementById('goalCustomPanel')?.hidden).toBe(false);
   const model = w.document.getElementById('goalCustomModel') as HTMLInputElement;
   model.value = 'llama3.1';
   model.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(2));
+  await waitFor(() => expect(mounted.calls).toHaveLength(2));
   expect(mounted.calls[1].goal.model).toBe('llama3.1');
   provider.value = 'openrouter';
   provider.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(3));
+  await waitFor(() => expect(mounted.calls).toHaveLength(3));
   expect(mounted.calls[2].goal).toMatchObject({ provider: { kind: 'openrouter' }, model: 'deepseek/deepseek-v4-flash' });
 });
 
@@ -2082,7 +2090,7 @@ it('restores a rejected focused port and prevents an unrelated queued save from 
   const background = w.document.getElementById('backgroundChats') as HTMLInputElement;
   background.checked = true; background.dispatchEvent(new w.Event('change', { bubbles: true }));
   release({ ok: false, error: 'Port 8767: EADDRINUSE' });
-  await vi.waitFor(() => expect(calls).toHaveLength(2)); await settle();
+  await waitFor(() => expect(calls).toHaveLength(2)); await settle();
   expect(calls[1].patch.ui.browserBridgePort).toBe(calls[1].base.ui.browserBridgePort);
   expect(select.value).toBe('auto'); expect(background.checked).toBe(true);
 });
@@ -2095,7 +2103,7 @@ it('saves the background placement from its settings control and restores it on 
   expect([...placement.options].map(option => option.value)).toEqual(['window', 'group']);
   placement.value = 'group';
   placement.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  await waitFor(() => expect(mounted.calls).toHaveLength(1));
   expect(mounted.calls[0].ui.backgroundPlacement).toBe('group');
   mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, backgroundPlacement: 'window' } } });
   expect(placement.value).toBe('window');
@@ -2108,7 +2116,7 @@ it('saves the ChatGPT browser choice from its settings control and restores it o
   expect(browser.value).toBe('chrome'); // older config has no field
   browser.value = 'edge';
   browser.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  await waitFor(() => expect(mounted.calls).toHaveLength(1));
   expect(mounted.calls[0].ui.chatBrowser).toBe('edge');
   expect(browser.value).toBe('edge');
   mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, chatBrowser: 'chrome' } } });
@@ -2123,7 +2131,7 @@ it('saves Auto-select Skills from Settings and restores it on state push', async
   expect(toggle.checked).toBe(false);
   toggle.checked = true;
   toggle.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  await waitFor(() => expect(mounted.calls).toHaveLength(1));
   expect(mounted.calls[0].ui.autoSelectSkills).toBe(true);
   mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, autoSelectSkills: false } } });
   expect(toggle.checked).toBe(false);
@@ -2137,7 +2145,7 @@ it('saves and restores the global worker admission cap from Settings', async () 
 
   globalWorkers.value = '5';
   globalWorkers.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  await waitFor(() => expect(mounted.calls).toHaveLength(1));
   expect(mounted.calls[0].multiAgent.globalMaxWorkers).toBe(5);
 
   mounted.push({
@@ -2159,20 +2167,20 @@ it('saves and clears ordinary new-chat model defaults from either selector indep
   const w = mounted.window;
   const model = w.document.getElementById('defaultChatModel') as HTMLSelectElement;
   const reasoning = w.document.getElementById('defaultChatReasoning') as HTMLSelectElement;
-  await vi.waitFor(() => expect([...model.options].map(option => option.value)).toContain('gpt-5.6-sol'));
+  await waitFor(() => expect([...model.options].map(option => option.value)).toContain('gpt-5.6-sol'));
   expect(model.value).toBe(''); expect(reasoning.value).toBe('');
 
   model.value = 'gpt-5.6-sol'; model.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  await waitFor(() => expect(mounted.calls).toHaveLength(1));
   expect(mounted.calls[0].ui).toMatchObject({ defaultChatModel: 'gpt-5.6-sol' });
   expect(mounted.calls[0].ui.defaultChatReasoning).toBeUndefined();
 
   reasoning.value = 'xhigh'; reasoning.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(2));
+  await waitFor(() => expect(mounted.calls).toHaveLength(2));
   expect(mounted.calls[1].ui).toMatchObject({ defaultChatModel: 'gpt-5.6-sol', defaultChatReasoning: 'xhigh' });
 
   model.value = ''; model.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(3));
+  await waitFor(() => expect(mounted.calls).toHaveLength(3));
   expect(mounted.calls[2].ui.defaultChatModel).toBeUndefined();
   expect(mounted.calls[2].ui.defaultChatReasoning).toBeUndefined();
 });
@@ -2206,18 +2214,18 @@ it('loads, explains and saves both command policy modes without losing rules', a
   rules.value = 'git status\ngit diff *';
   rules.dispatchEvent(new w.Event('input', { bubbles: true }));
   allow.click();
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  await waitFor(() => expect(mounted.calls).toHaveLength(1));
   expect(mounted.calls[0].commandAllowlist).toEqual({ enabled: false, mode: 'allow', rules: ['git status', 'git diff *'] });
   expect(description.textContent).toContain('Only commands matching');
   expect(label.textContent).toContain('Allowed commands');
 
   deny.click();
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(2));
+  await waitFor(() => expect(mounted.calls).toHaveLength(2));
   expect(mounted.calls[1].commandAllowlist).toEqual({ enabled: false, mode: 'deny', rules: ['git status', 'git diff *'] });
   expect(rules.value).toBe('git status\ngit diff *');
   enabled.checked = true;
   enabled.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(3));
+  await waitFor(() => expect(mounted.calls).toHaveLength(3));
   expect(mounted.calls[2].commandAllowlist).toEqual({ enabled: true, mode: 'deny', rules: ['git status', 'git diff *'] });
   expect(error.hidden).toBe(true);
 });
@@ -2257,14 +2265,14 @@ it('says why an Activity list is empty, in the app language, and drops the note 
   const mounted = await mountChat({}, [], { onLogEntry: (fn: (entry: unknown) => void) => { addLine = fn; return () => undefined; } });
   const doc = mounted.window.document;
   const feed = doc.getElementById('fullFeed')!;
-  await vi.waitFor(() => expect(feed.classList.contains('is-empty')).toBe(true));
+  await waitFor(() => expect(feed.classList.contains('is-empty')).toBe(true));
   expect(feed.dataset.empty).toBe('Nothing has happened yet.');
   const { setLanguage } = await import('../src/renderer/i18n.js');
   setLanguage('de');
   expect(feed.dataset.empty).toBe('Bisher ist nichts passiert.');
   setLanguage('en');
   addLine!({ time: Date.now(), level: 'info', message: 'tunnel connected' });
-  await vi.waitFor(() => expect(feed.classList.contains('is-empty')).toBe(false));
+  await waitFor(() => expect(feed.classList.contains('is-empty')).toBe(false));
   // Problems only, with no problem among the lines: the filter, not the log, is why it is empty.
   (doc.querySelector('#logFilter [data-filter="bad"]') as HTMLButtonElement).click();
   expect(feed.classList.contains('is-empty')).toBe(true);
@@ -2827,7 +2835,7 @@ it("keeps a worker's delivery line in the app's language when the language chang
     createdAt: 1, activatedAt: 2, finishedAt: null, result: null, pending: 0, awaitingAck: 0, delivered: 1, conversationId: 'worker-chat', primeConversationId: 'prime-chat', detachedAt: null };
   const mounted = await mountChat({}, [], { getSwarm: async () => ({ ok: true, data: { enabled: true, running: true, runId: 'run-1', agents: [worker], maxWorkers: 2, pendingReports: 0 } }) });
   const line = () => mounted.window.document.querySelector('#swarmList .model-sub')?.textContent;
-  await vi.waitFor(() => expect(line()).toBe('0 pending · 1 delivered'));
+  await waitFor(() => expect(line()).toBe('0 pending · 1 delivered'));
   const { setLanguage } = await import('../src/renderer/i18n.js');
   setLanguage('de');
   // The line was joined once when the list was painted, so it stayed English.
@@ -3108,7 +3116,7 @@ it('keeps the app-wide options on the General page, not in Setup, and saves them
   expect(follow.checked).toBe(true);
   follow.checked = false;
   follow.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui.followOutput).toBe(false));
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.followOutput).toBe(false));
 });
 
 // #924 / #1401: stable connector URLs for a tunnel of one's own, opt-in, only with secure storage.
@@ -3121,7 +3129,7 @@ it('saves the stable connector URL option from For developers, and only with sec
   const instructions = mounted.state.config.mcp?.instructions ?? '';
   box.checked = true;
   box.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls.at(-1)?.mcp).toEqual({ instructions, persistentUrls: true }));
+  await waitFor(() => expect(mounted.calls.at(-1)?.mcp).toEqual({ instructions, persistentUrls: true }));
   const unavailable = structuredClone(mounted.state) as any;
   unavailable.secureStorage = { available: false };
   unavailable.config.mcp = { instructions, persistentUrls: false };
@@ -3320,22 +3328,22 @@ it('asks in the app\'s own dialog before Update all restarts, with Keep working 
   const button = w.document.getElementById('updateAll') as HTMLButtonElement;
   const dialog = () => w.document.getElementById('updateRestartDialog') as HTMLDialogElement | null;
   button.click();
-  await vi.waitFor(() => expect(dialog()?.open).toBe(true));
+  await waitFor(() => expect(dialog()?.open).toBe(true));
   expect(updateAll).toHaveBeenNthCalledWith(1);
   expect(dialog()!.classList.contains('whats-new-dialog')).toBe(true);
   expect(dialog()!.textContent).toContain('2.1.99');
   expect(w.document.activeElement?.textContent).toBe('Keep working');
   (w.document.activeElement as HTMLButtonElement).click();
-  await vi.waitFor(() => expect(dialog()).toBeNull());
+  await waitFor(() => expect(dialog()).toBeNull());
   expect(updateAll).toHaveBeenCalledTimes(1);
-  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  await waitFor(() => expect(button.disabled).toBe(false));
   button.click();
-  await vi.waitFor(() => expect(dialog()?.open).toBe(true));
+  await waitFor(() => expect(dialog()?.open).toBe(true));
   const restart = [...dialog()!.querySelectorAll('button')].find(item => item.textContent === 'Restart and install')!;
   restart.click();
-  await vi.waitFor(() => expect(updateAll).toHaveBeenCalledTimes(3));
+  await waitFor(() => expect(updateAll).toHaveBeenCalledTimes(3));
   expect(updateAll).toHaveBeenLastCalledWith('2.1.99');
-  await vi.waitFor(() => expect(dialog()).toBeNull());
+  await waitFor(() => expect(dialog()).toBeNull());
 });
 
 it.each(['reply', 'transport'])('keeps an Update all %s failure visible across pushes until explicit retry', async kind => {
@@ -3348,7 +3356,7 @@ it.each(['reply', 'transport'])('keeps an Update all %s failure visible across p
   const details = w.document.getElementById('updateReadinessDetails') as HTMLDetailsElement;
   details.open = false;
   button.click();
-  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  await waitFor(() => expect(button.disabled).toBe(false));
   const error = w.document.getElementById('updateAllError')!;
   expect(error.hidden).toBe(false);
   expect(error.textContent).toContain('Network unavailable');
@@ -3365,7 +3373,7 @@ it.each(['reply', 'transport'])('keeps an Update all %s failure visible across p
   button.click();
   expect(error.hidden).toBe(true);
   resolve({ ok: true, data: 'checking-connectors' });
-  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  await waitFor(() => expect(button.disabled).toBe(false));
   expect(error.hidden).toBe(true);
 });
 
@@ -3388,7 +3396,7 @@ it.each(['en', 'de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi',
       expect(w.document.querySelector('[data-update-part="app"]')!.textContent).toContain(reason);
       for (const id of ['updateText', 'updateLine']) expect(w.document.getElementById(id)!.textContent).toContain(reason);
     }
-    button.click(); await vi.waitFor(() => expect(button.disabled).toBe(false));
+    button.click(); await waitFor(() => expect(button.disabled).toBe(false));
     expect(error.hidden).toBe(false);
     expect(error.textContent).toContain(reason);
     expect(error.textContent).toContain(t('Choose Update all to retry.'));
@@ -3396,7 +3404,7 @@ it.each(['en', 'de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi',
     expect(error.hidden).toBe(false);
     expect(updateAll).toHaveBeenCalledTimes(1);
     updateAll.mockResolvedValueOnce({ ok: true, data: 'checking-connectors' });
-    button.click(); await vi.waitFor(() => expect(button.disabled).toBe(false));
+    button.click(); await waitFor(() => expect(button.disabled).toBe(false));
     expect(error.hidden).toBe(true);
   } finally { setLanguage('en'); }
 });
@@ -3411,7 +3419,7 @@ it('translates updater reasons and retained recovery guidance when the language 
   push(next);
   expect(w.document.querySelector('[data-update-part="app"] .is-warn')!.textContent).toBe(t('Update check failed'));
   const button = w.document.getElementById('updateAll') as HTMLButtonElement;
-  button.click(); await vi.waitFor(() => expect(button.disabled).toBe(false));
+  button.click(); await waitFor(() => expect(button.disabled).toBe(false));
   const error = w.document.getElementById('updateAllError')!;
   expect(error.textContent).not.toContain('Could not read plugin-refresh state');
   expect(error.textContent).toContain(t('Save a Diagnostics report from Activity for help with recovery. The saved state has been kept.'));
@@ -3435,7 +3443,7 @@ it.each(['cancelled', 'failed', 'transport'])('offers the existing diagnostics a
   const shortcut = w.document.getElementById('updateDiagnosticsReport') as HTMLButtonElement;
   const original = w.document.getElementById('saveDiagnosticsReport') as HTMLButtonElement;
   expect(shortcut.hidden).toBe(true);
-  update.click(); await vi.waitFor(() => expect(update.disabled).toBe(false));
+  update.click(); await waitFor(() => expect(update.disabled).toBe(false));
   expect(shortcut.hidden).toBe(false);
   shortcut.click(); original.click();
   expect(saveDiagnosticsReport).toHaveBeenCalledTimes(1);
@@ -3444,11 +3452,11 @@ it.each(['cancelled', 'failed', 'transport'])('offers the existing diagnostics a
   expect(shortcut.disabled).toBe(true);
   if (outcome === 'transport') reject(new Error('Fixture report transport error'));
   else finish(outcome === 'cancelled' ? { ok: true, data: { saved: false } } : { ok: false, error: 'Fixture report error' });
-  await vi.waitFor(() => expect(shortcut.disabled).toBe(false));
+  await waitFor(() => expect(shortcut.disabled).toBe(false));
   expect(original.disabled).toBe(false);
   expect(w.document.getElementById('updateAllError')!.hidden).toBe(false);
   expect(updateAll).toHaveBeenCalledTimes(1);
-  update.click(); await vi.waitFor(() => expect(update.disabled).toBe(false));
+  update.click(); await waitFor(() => expect(update.disabled).toBe(false));
   expect(shortcut.hidden).toBe(true);
   expect(saveDiagnosticsReport).toHaveBeenCalledTimes(1);
 });
@@ -3465,14 +3473,14 @@ it('runs Update all once on explicit click and keeps it busy across state pushes
   expect(updateAll).toHaveBeenCalledTimes(1); expect(button.disabled).toBe(true);
   expect(button.textContent).toBe('Updating…'); expect(button.getAttribute('aria-busy')).toBe('true');
   resolve({ ok: false, error: 'Network unavailable' });
-  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  await waitFor(() => expect(button.disabled).toBe(false));
   expect(button.textContent).toBe('Update all');
   button.click(); expect(updateAll).toHaveBeenCalledTimes(2);
   resolve({ ok: true, data: 'manual' });
-  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  await waitFor(() => expect(button.disabled).toBe(false));
   expect(w.document.body.textContent).toContain('Download link opened. Install the app to continue');
   button.click(); resolve({ ok: true, data: 'checking-connectors' });
-  await vi.waitFor(() => expect(button.disabled).toBe(false));
+  await waitFor(() => expect(button.disabled).toBe(false));
   expect(w.document.querySelector('.toast')!.textContent).toContain(w.document.getElementById('updateReadinessCard') ? 'Update status' : 'Checking…');
 });
 
@@ -3482,7 +3490,7 @@ it.each(['reply', 'transport', 'read-state'])('localizes and retains the update 
   const { window: w, state, push } = await mountChat({}, [], { updateAll });
   w.document.querySelector<HTMLButtonElement>('[data-language="ja"]')!.click();
   const button = w.document.getElementById('updateAll') as HTMLButtonElement;
-  button.click(); await vi.waitFor(() => expect(button.disabled).toBe(false));
+  button.click(); await waitFor(() => expect(button.disabled).toBe(false));
   push(structuredClone(state));
   expect(w.document.getElementById('updateAllError')!.hidden).toBe(false);
   expect(w.document.getElementById('updateAllError')!.textContent).toContain(kind === 'read-state' ? '診断レポート' : '503');
@@ -3802,10 +3810,10 @@ it('saves the Continue prompt from its editor, and Restore default sends the bui
 
   prompt.value = '  Keep going and run the tests at the end.  ';
   prompt.dispatchEvent(new mounted.window.Event('change'));
-  await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui.customContinue).toBe('Keep going and run the tests at the end.'));
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.customContinue).toBe('Keep going and run the tests at the end.'));
 
   (doc.getElementById('customContinueReset') as HTMLButtonElement).click();
-  await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui).toMatchObject({ customContinue: undefined }));
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui).toMatchObject({ customContinue: undefined }));
   expect(prompt.value).toBe('');
 });
 
@@ -4086,8 +4094,8 @@ it('gives twenty rapid New Chat sends independent visible local chats before any
     (doc.getElementById('newChat') as HTMLButtonElement).click(); await settle();
     field.value = `Independent opening ${index}`;
     doc.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
-    await vi.waitFor(() => expect(sendInput).toHaveBeenCalledTimes(index + 1));
-    await vi.waitFor(() => expect(doc.querySelector(`.sess.is-sel[data-id="${rows[index]!.sessionId}"]`)).not.toBeNull());
+    await waitFor(() => expect(sendInput).toHaveBeenCalledTimes(index + 1));
+    await waitFor(() => expect(doc.querySelector(`.sess.is-sel[data-id="${rows[index]!.sessionId}"]`)).not.toBeNull());
     expect(doc.querySelector(`[data-input-id="${rows[index]!.id}"]`)?.textContent).toContain(rows[index]!.text);
     expect((doc.getElementById('composerModel') as HTMLSelectElement).value).toBe('gpt-5.6-sol');
   }
@@ -4146,8 +4154,8 @@ it('shows the frozen Auto-selected Skill receipt for an accepted ordinary send',
   await settle();
   field.value = 'Review this source code change for correctness.';
   doc.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
-  await vi.waitFor(() => expect(sendInput).toHaveBeenCalledTimes(1));
-  await vi.waitFor(() => expect(doc.querySelector('.toast')?.textContent).toContain('Auto-selected Skill: /code-review'));
+  await waitFor(() => expect(sendInput).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(doc.querySelector('.toast')?.textContent).toContain('Auto-selected Skill: /code-review'));
 });
 
 it('does not steal a newer New Chat draft when an older admission response arrives', async () => {
@@ -4168,7 +4176,7 @@ it('does not steal a newer New Chat draft when an older admission response arriv
   const w = mounted.window, doc = w.document, field = doc.getElementById('chatInput') as HTMLTextAreaElement;
   (doc.getElementById('newChat') as HTMLButtonElement).click(); await settle();
   field.value = 'Old admission'; doc.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
-  await vi.waitFor(() => expect(sendInput).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(sendInput).toHaveBeenCalledTimes(1));
   (doc.getElementById('newChat') as HTMLButtonElement).click(); field.value = 'Keep this newer draft';
   field.dispatchEvent(new w.Event('input', { bubbles: true })); release(undefined); await settle(); await settle();
   expect(field.value).toBe('Keep this newer draft');
@@ -4187,7 +4195,7 @@ it('shows each startup log line once and in order when lines arrive while the lo
     getLog: () => new Promise(resolve => { release = resolve; }),
     onLogEntry: (fn: any) => { live = fn; return () => undefined; }
   });
-  await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+  await waitFor(() => expect(release).toBeTypeOf('function'));
   live(line(2, 'session catalog ready'));
   live(line(3, 'renderer state ready'));
   release({ ok: true, data: [line(1, 'app started'), line(2, 'session catalog ready'), line(3, 'renderer state ready')] });
@@ -4195,7 +4203,7 @@ it('shows each startup log line once and in order when lines arrive while the lo
   live(line(4, 'window loaded'));
   // A row shows the line's source and text in separate cells; compare without the spacing.
   const rows = () => [...mounted.window.document.querySelectorAll('#fullFeed > *')].map(row => (row.textContent ?? '').replace(/\s/g, ''));
-  await vi.waitFor(() => expect(rows()).toHaveLength(4));
+  await waitFor(() => expect(rows()).toHaveLength(4));
   expect(rows().map(text => ['app started', 'session catalog ready', 'renderer state ready', 'window loaded'].find(m => text.includes(m.replace(/\s/g, '')))))
     .toEqual(['app started', 'session catalog ready', 'renderer state ready', 'window loaded']);
 });
@@ -4210,7 +4218,7 @@ it.each(['.project-menu'])('keeps keyboard focus on a project row button (%s) ac
   });
   const doc = mounted.window.document;
   const control = () => doc.querySelector<HTMLElement>(`[data-project-id="${project.id}"] ${selector}`)!;
-  await vi.waitFor(() => expect(control()).not.toBeNull());
+  await waitFor(() => expect(control()).not.toBeNull());
   await settle();
   const before = control();
   before.focus();
@@ -4233,7 +4241,7 @@ it('saves this computer\'s connector name, and keeps the saved one while the typ
 
   field.value = '  Windows   VM ';
   field.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls.at(-1)?.connectorSuffix).toBe('Windows VM'));
+  await waitFor(() => expect(mounted.calls.at(-1)?.connectorSuffix).toBe('Windows VM'));
 
   // An invalid name says why at once, and a save it rides in keeps the saved name.
   field.value = 'Win/VM';
@@ -4242,7 +4250,7 @@ it('saves this computer\'s connector name, and keeps the saved one while the typ
   expect(field.getAttribute('aria-invalid')).toBe('true');
   const saves = mounted.calls.length;
   field.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls.length).toBe(saves + 1));
+  await waitFor(() => expect(mounted.calls.length).toBe(saves + 1));
   expect(mounted.calls.at(-1)?.connectorSuffix).toBe('Windows VM');
   field.value = 'Mac';
   field.dispatchEvent(new w.Event('input', { bubbles: true }));
