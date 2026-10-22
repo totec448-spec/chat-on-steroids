@@ -12,6 +12,12 @@ import type { PluginPublication, PluginRefreshRequest, PluginRefreshStatus, Plug
 
 const app = z.string().regex(/^asdk_app_[a-zA-Z0-9_-]{1,160}$/);
 const LEGACY_PLUGIN_MAX_TOOLS = 64;
+/**
+ * A sanity bound for the app's own Core and Desktop connectors, not a catalog: they declare a few
+ * dozen tools at most (Windows Desktop 24 in 2.1.44, which the old bound of 16 refused, #1763). The
+ * extension's page readers use the same number; a test keeps it above what they declare.
+ */
+export const OWN_CONNECTOR_MAX_TOOLS = 64;
 const requestedVersion = z.string().regex(/^\d+\.\d+\.\d+$/).optional();
 const rowSchema = z.object({
   surface: z.enum(['core', 'desktop', 'plugins']), schemaId: z.string(), id: z.string().uuid(), appId: app.nullable(),
@@ -168,7 +174,7 @@ const hash = (value: unknown) => createHash('sha256').update(canonical(value)).d
 const declaration = (tools: PluginToolSchema[]) => tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })).sort((a, b) => a.name.localeCompare(b.name));
 function recognizable(tools: unknown, surface: PluginSurface = 'core'): tools is PluginToolSchema[] {
   // The registrar can append one local exec tool to the bounded upstream catalog.
-  if (!Array.isArray(tools) || (!tools.length && surface !== 'plugins') || tools.length > (surface === 'plugins' ? PLUGIN_MAX_TOOLS + 1 : 16) || JSON.stringify(tools).length > 300000) return false;
+  if (!Array.isArray(tools) || (!tools.length && surface !== 'plugins') || tools.length > (surface === 'plugins' ? PLUGIN_MAX_TOOLS + 1 : OWN_CONNECTOR_MAX_TOOLS) || JSON.stringify(tools).length > 300000) return false;
   if (tools.some(tool => !tool || typeof tool.name !== 'string' || typeof tool.description !== 'string' || !tool.inputSchema || typeof tool.inputSchema !== 'object')) return false;
   return tools.every(tool => tool.inputSchema.type === 'object') && new Set(tools.map(tool => tool.name)).size === tools.length;
 }
