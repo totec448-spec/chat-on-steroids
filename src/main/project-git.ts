@@ -438,9 +438,16 @@ async function readConflictStages(context: RepositoryContext, relative: string):
   const object = repositoryPath(context, relative);
   const skip = (reason: string): undefined => { logInfo(`review: no three-way view for ${relative}: ${reason}`); };
   // Which stages the index holds, apart from reading them: only an unlisted stage is a side without the file.
-  const listed = await runGit(context.projectReal, ['ls-files', '-u', '-z', '--full-name', '--', `:(top,literal)${object}`]);
-  if (listed.code !== 0) return skip('the index could not be read');
-  const stages = new Map(decode(listed.stdout).split('\0').map(entry => /^\d+ ([0-9a-f]+) ([123])\t(.*)$/s.exec(entry))
+  // A listing that fails, times out or is not UTF-8 leaves out only the three-way view, never the diff.
+  let listing: string;
+  try {
+    const listed = await runGit(context.projectReal, ['ls-files', '-u', '-z', '--full-name', '--', `:(top,literal)${object}`]);
+    if (listed.code !== 0) return skip('the index could not be read');
+    listing = decode(listed.stdout);
+  } catch (error) {
+    return skip(`the index could not be read (${error instanceof Error ? error.message : String(error)})`);
+  }
+  const stages = new Map(listing.split('\0').map(entry => /^\d+ ([0-9a-f]+) ([123])\t(.*)$/s.exec(entry))
     .filter(match => match?.[3] === object).map(match => [Number(match![2]), match![1]!] as const));
   if (!stages.size) return skip('it is no longer unmerged');
   const names = ['base', 'ours', 'theirs'];
