@@ -2506,6 +2506,8 @@
   "This task was sent or removed before your edit was saved, so your edit is in the composer.": "在你的修改儲存之前，此任務已傳送或被移除，因此你的修改已放入輸入框。",
   "Markdown files": "Markdown 檔案",
   "Text files": "文字檔案",
+  "Wrap": "自動換行",
+  "Save code": "儲存程式碼",
   "Approve a folder for ChatGPT": "核准 ChatGPT 使用的資料夾",
   "Import Skill folder": "匯入技能資料夾",
   "Markdown skills": "Markdown 技能",

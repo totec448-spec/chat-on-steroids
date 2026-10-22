@@ -4064,6 +4064,16 @@ app cannot leave an orphan recording. `scripts/fixtures/smoke-dictation-parent-w
 parses the whole script with PowerShell and runs its loop without a microphone. No audio enters IPC or storage;
 macOS/Linux hide this Windows-only control.
 
+A code block in a rendered answer (`renderedMessage`) gets a header naming the fence's language, read
+from its `code` element's `language-*` class before the sanitizer drops classes ("Code" without one),
+and Copy, Wrap and Save. Wrap folds only that block's long lines and is not remembered. Save calls
+`saveCode({ text, name })` → `code:save`: `name` is a bare `snippet.<ext>` (the extension from the
+language, else `txt`; `ipc.ts` refuses anything else) that `main/code-file.ts` only suggests in
+Downloads; the native save dialog picks the path, the text is written beside it and renamed over it
+(a replaced file keeps its permissions from the first byte written and stays whole if the write
+fails; a file whose permissions cannot be read is not touched), and the reply is
+`{ done: 'saved', name }` or `{ done: 'cancelled' }`.
+
 Interface icons use one system: the bundled Phosphor font (`renderer/icons.css`, built from
 `@phosphor-icons/web`). Code names an icon by meaning (`icon('i-retry')`) and `dom.ts` `ICONS`
 alone picks its glyph; static markup names the glyph class. `--ico` sizes the layout box and

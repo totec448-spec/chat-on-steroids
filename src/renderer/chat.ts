@@ -4095,6 +4095,18 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
   return box;
 }
 
+/** A fence's language (`language-ts`, written by marked and by ChatGPT's page alike), read before the sanitizer drops classes. */
+const CODE_LANGUAGE = /(?:^|\s)language-([\w+#.-]{1,32})(?=\s|$)/;
+/** The extension a block's Save offers; any other language saves as text. */
+// A Map, so a fence named `constructor` or `__proto__` finds nothing instead of Object's own members.
+const CODE_EXTENSIONS: ReadonlyMap<string, string> = new Map(Object.entries({
+  ts: 'ts', typescript: 'ts', tsx: 'tsx', js: 'js', javascript: 'js', jsx: 'jsx', mjs: 'mjs', json: 'json',
+  py: 'py', python: 'py', sh: 'sh', bash: 'sh', shell: 'sh', zsh: 'sh', ps1: 'ps1', powershell: 'ps1',
+  html: 'html', css: 'css', scss: 'scss', sql: 'sql', yaml: 'yml', yml: 'yml', toml: 'toml', xml: 'xml',
+  md: 'md', markdown: 'md', rs: 'rs', rust: 'rs', go: 'go', java: 'java', kt: 'kt', kotlin: 'kt',
+  swift: 'swift', c: 'c', cpp: 'cpp', 'c++': 'cpp', cs: 'cs', csharp: 'cs', rb: 'rb', ruby: 'rb', php: 'php', diff: 'diff'
+}));
+
 export function renderedMessage(html: StoredText | null | undefined, fallback: string): HTMLElement {
   const box = el('div', 'msg');
   // Same reason as textBlock, for the markdown path — and it is the fallback rather than the
@@ -4118,6 +4130,12 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
   // elements. These replacement nodes contain text only and undergo that same sanitizer.
   const prompts = nativePromptCards(template.content);
   for (const prompt of prompts) prompt.group.replaceWith(prompt.card);
+  // The sanitizer keeps each allowed `pre` as the same node, so its language can wait beside it.
+  const languages = new WeakMap<Element, string>();
+  for (const pre of template.content.querySelectorAll('pre')) {
+    const language = pre.querySelector('code')?.getAttribute('class')?.match(CODE_LANGUAGE)?.[1];
+    if (language) languages.set(pre, language);
+  }
   sanitizeHtmlTree(template.content, {
     allowedTags: RENDERED_TAGS,
     dropTags: DROP_RENDERED_TAGS,
@@ -4159,16 +4177,31 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
     // sanitizing and after the empty-capture fallback has been decided.
     for (const pre of box.querySelectorAll('pre')) {
       const value = pre.textContent ?? '';
+      const language = languages.get(pre);
       const panel = el('div', 'markdown-code');
       const header = el('div', 'tool-output-header');
-      header.append(icon('i-terminal', 'ico'), el('strong', '', () => t('Code')));
+      header.append(icon('i-terminal', 'ico'), el('strong', '', language ?? (() => t('Code'))));
       const copy = el('button', 'tool-copy', () => t('Copy')) as HTMLButtonElement;
       copy.type = 'button';
       copy.addEventListener('click', () => void (async () => {
         if (await run(api.writeClipboard(value))) ui(copy, 'textContent', () => t('Copied'));
         else toast(t('Could not copy text.'));
       })());
-      header.append(copy);
+      // Long lines scroll by default, as ChatGPT draws them; Wrap folds this block's lines to the column.
+      const wrap = el('button', 'tool-copy code-wrap', () => t('Wrap')) as HTMLButtonElement;
+      wrap.type = 'button';
+      wrap.setAttribute('aria-pressed', 'false');
+      wrap.addEventListener('click', () => {
+        wrap.setAttribute('aria-pressed', String(panel.classList.toggle('is-wrapped')));
+      });
+      const save = el('button', 'tool-copy code-save', () => t('Save')) as HTMLButtonElement;
+      save.type = 'button';
+      save.addEventListener('click', () => void (async () => {
+        const name = `snippet.${CODE_EXTENSIONS.get(language?.toLowerCase() ?? '') ?? 'txt'}`;
+        const result = await run(api.saveCode({ text: value, name }));
+        if (result?.done === 'saved') toast(t('Saved {0}', [result.name]));
+      })());
+      header.append(copy, wrap, save);
       pre.replaceWith(panel);
       panel.append(header, pre);
     }

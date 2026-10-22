@@ -2620,6 +2620,8 @@
   "This task was sent or removed before your edit was saved, so your edit is in the composer.": "Эта задача была отправлена или удалена до того, как ваше изменение сохранилось, поэтому изменение перенесено в поле ввода.",
   "Markdown files": "Файлы Markdown",
   "Text files": "Текстовые файлы",
+  "Wrap": "Перенос строк",
+  "Save code": "Сохранить код",
   "Approve a folder for ChatGPT": "Разрешить папку для ChatGPT",
   "Import Skill folder": "Импортировать папку навыка",
   "Markdown skills": "Навыки Markdown",
