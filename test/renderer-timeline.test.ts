@@ -7980,6 +7980,19 @@ describe('recorded DIL cards inside a Markdown answer', () => {
     expect(message.textContent).not.toContain('45,678');
   });
 
+  it.each([
+    { recorded: '+12%', current: '-12%' },
+    { recorded: '45,678', current: '45.678' },
+    { recorded: '45,678', current: '-45,678' },
+    { recorded: '12%', current: '12' },
+    { recorded: '$100', current: '€100' }
+  ])('refuses a recorded metric $recorded when the current reply says $current', async ({ recorded, current }) => {
+    const { w } = await boot([answer(source.replace('45,678', current), captured(card.replace('45,678', recorded)))]);
+    const root = w.document.querySelector('.ev-assistant_message .msg.rich')!;
+    expect(root.querySelector('.markdown-dil-card')).toBeNull();
+    expect(root.textContent).toContain(current);
+  });
+
   it('does not restore captured cards that contain active controls or links', async () => {
     const { w } = await boot([answer(source, captured(card.replace('</div></div>', '<button>Click</button></div></div>')))]);
     const message = w.document.querySelector('.ev-assistant_message .msg.rich')!;
@@ -8098,6 +8111,24 @@ describe('charts, diagrams and illustrated Markdown from recorded DIL', () => {
       .toBe('Échantillon A 2, Échantillon B 5');
   });
 
+  it('retains full 36-character chart labels and long guide values for tooltips and accessibility', async () => {
+    const label = 'Fictional group with a long label 12';
+    expect(label).toHaveLength(36);
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value', label: 'Example chart' }],
+      data: [{ group: label, value: 4 }, { group: 'Other', value: 12 }], yAxisMax: 1e12
+    } } })}\uE201`;
+    const { w } = await boot([observation(`A fictional chart.\n\n${widget}`)]);
+    const figure = message(w).querySelector('.markdown-dil-chart')!;
+    expect(figure.getAttribute('aria-label')).toContain(`${label} 4`);
+    const first = figure.querySelector<HTMLElement>('.markdown-dil-chart-x')!;
+    expect(first.textContent).toBe(label);
+    expect(first.title).toBe(label);
+    const guide = figure.querySelector<HTMLElement>('.markdown-dil-chart-guide span')!;
+    expect(guide.textContent).toBe('1,000,000,000,000');
+    expect(guide.title).toBe(guide.textContent);
+  });
+
   it('recovers the side-by-side table workflow only when its entire text matches', async () => {
     const body = [
       'Before.', '', '**Genetics**', '', 'Variants', '', '| ID | SNP |', '| --- | --- |', '| P1 | 0 |', '| P2 | 1 |', '',
@@ -8143,6 +8174,18 @@ describe('charts, diagrams and illustrated Markdown from recorded DIL', () => {
     const { w: other } = await boot([observation(body, captured(poisoned))]);
     expect(message(other).querySelector('.markdown-dil-panel')).toBeNull();
     expect(message(other).querySelector('script, img')).toBeNull();
+  });
+
+  it.each(['text', 'tspan'])('refuses a recorded SVG containing %s labels that cannot be revision-matched', async tag => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><g><${tag}>Old value 12</${tag}></g></svg>`;
+    const captured = `<div data-d-component="box" data-d-has-border=""><p>Illustrative plot</p>` +
+      `<img data-d-component="svg" src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}">` +
+      `<p>Schematic only.</p></div>`;
+    const { w } = await boot([observation('Illustrative plot\n\nSchematic only.', captured)]);
+    const root = message(w);
+    expect(root.querySelector('.markdown-dil-panel, .markdown-dil-svg')).toBeNull();
+    expect(root.textContent).toContain('Illustrative plot');
+    expect(root.textContent).not.toContain('Old value 12');
   });
 
   it('allows only static first-party search illustrations, not arbitrary recorded image requests', async () => {
