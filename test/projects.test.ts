@@ -7,8 +7,9 @@ import { bindBrowserInputProject, claimBrowserInput, enqueueInput, listInputs, p
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { createSession, getSession, initSessionStore, rebindSession, resetSessionStoreForTests, setSessionOrigin } from '../src/main/session/store.js';
-import { addProject, armProjectCreate, assignSessionProject, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, getSessionProject, inheritSessionProject, listProjects, markProjectGone, pendingProjectCreates, PROJECT_CREATE_ARMED_MS, PROJECT_CREATE_CLAIM_MS, projectWorkspace, removeProject, retryProjectCreate, setProjectColor } from '../src/main/projects.js';
+import { addProject, armProjectCreate, assignSessionProject, bindChatToLinkedProject, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, getSessionProject, inheritSessionProject, listProjects, markProjectGone, pendingProjectCreates, PROJECT_CREATE_ARMED_MS, PROJECT_CREATE_CLAIM_MS, projectWorkspace, removeProject, retryProjectCreate, setProjectColor } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
+import { resetWorkspaces, setWorkspaceFor } from '../src/main/workspace.js';
 
 let directory: string, approved: string;
 beforeEach(async () => {
@@ -235,4 +236,60 @@ it("turns an armed creation uncertain on the app's own clock, with no browser as
   // The sweep's catalog write is real disk I/O.
   for (let i = 0; i < 40 && (await getProject(project.id))?.chatgpt?.state !== 'uncertain'; i++) await new Promise(resolve => setTimeout(resolve, 25));
   expect((await getProject(project.id))?.chatgpt).toMatchObject({ state: 'uncertain' });
+});
+
+/** A project created here whose native ChatGPT Project now exists with the given id. */
+async function linkedProject(folder: string, chatgptId = nativeId) {
+  const project = await addProject(path.join(approved, folder));
+  const request = (project.chatgpt as { requestId: string }).requestId;
+  expect(await claimProjectCreate(request, 'page')).toBe(true);
+  expect(await armProjectCreate(request, 'page')).toBe(true);
+  expect(await completeProjectCreate(request, 'page', chatgptId)).toBe(true);
+  return project;
+}
+
+it('puts a chat started inside a linked ChatGPT Project into that project (#1744)', async () => {
+  const project = await linkedProject('first');
+  await addProject(path.join(approved, 'second'));
+  const chat = await createSession({ title: 'Started on chatgpt.com', conversationId: randomUUID() });
+  expect(await bindChatToLinkedProject(chat.id, nativeId)).toBe('bound');
+  expect((await getSession(chat.id))?.projectId).toBe(project.id);
+  expect(await getSessionProject(chat.id)).toMatchObject({ virtual: '/work/first' });
+  // Seen again, or seen in another Project later: a chat never changes project this way.
+  expect(await bindChatToLinkedProject(chat.id, nativeId)).toBe('kept');
+  expect(await bindChatToLinkedProject(chat.id, `g-p-${'b'.repeat(32)}`)).toBe('kept');
+  expect((await getSession(chat.id))?.projectId).toBe(project.id);
+});
+
+it('leaves a chat alone when nothing, or more than one project, is linked to its ChatGPT Project (#1744)', async () => {
+  const first = await linkedProject('first');
+  const chat = await createSession({ title: 'Elsewhere', conversationId: randomUUID() });
+  expect(await bindChatToLinkedProject(chat.id, `g-p-${'b'.repeat(32)}`)).toBe('none');
+  expect(await bindChatToLinkedProject(chat.id, 'g-p-not-an-id')).toBe('none');
+  // A removed project keeps its link row but is no longer a destination.
+  await removeProject(first.id);
+  expect(await bindChatToLinkedProject(chat.id, nativeId)).toBe('none');
+  // Two rows naming the same ChatGPT Project (an edited or restored catalog): never guess.
+  const second = await linkedProject('second');
+  const rows = await listProjects();
+  await (await import('../src/main/durable.js')).writeDurableNow('projects', rows.map(row =>
+    row.id === first.id ? { ...row, ungrouped: false, chatgpt: { ...row.chatgpt!, id: nativeId } } : row));
+  expect(second.id).not.toBe(first.id);
+  expect(await bindChatToLinkedProject(chat.id, nativeId)).toBe('ambiguous');
+  expect((await getSession(chat.id))?.projectId).toBeUndefined();
+  expect(await bindChatToLinkedProject('no-such-session', nativeId)).toBe('none');
+});
+
+it("never moves a worker, or a chat that already works in a folder, into a linked project (#1744)", async () => {
+  await linkedProject('first');
+  const prime = await createSession({ title: 'Prime', conversationId: randomUUID() });
+  const worker = await createSession({ title: 'Worker', conversationId: randomUUID(), origin: { kind: 'worker', fromSessionId: prime.id, agentId: 'worker-1', task: 'Inspect' } });
+  expect(await bindChatToLinkedProject(worker.id, nativeId)).toBe('kept');
+  expect((await getSession(worker.id))?.projectId).toBeUndefined();
+  const working = await createSession({ title: 'Already working', conversationId: randomUUID() });
+  setWorkspaceFor(`chat:${working.conversationId}`, { virtual: '/work/second', real: path.join(approved, 'second') });
+  try {
+    expect(await bindChatToLinkedProject(working.id, nativeId)).toBe('kept');
+    expect((await getSession(working.id))?.projectId).toBeUndefined();
+  } finally { resetWorkspaces(); }
 });
