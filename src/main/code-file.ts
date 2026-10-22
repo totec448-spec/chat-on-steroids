@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { app, dialog, type BrowserWindow } from 'electron';
+import { logWarn } from './logger.js';
 import { dialogLabel, mainText } from './main-texts.js';
 
 export type CodeFileResult = { done: 'saved'; name: string } | { done: 'cancelled' };
@@ -27,6 +28,7 @@ export async function saveCodeFile(text: string, name: string, owner: BrowserWin
     stat => stat.mode & 0o7777,
     (error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return undefined;
+      logWarn(`code save: refused, the chosen file's permissions could not be read (${error.code ?? 'unknown error'})`);
       throw error;
     }
   );

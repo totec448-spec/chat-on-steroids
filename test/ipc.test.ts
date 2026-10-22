@@ -2375,6 +2375,8 @@ it.runIf(process.platform !== 'win32')('leaves a code file alone when its permis
   expect(await fs.readFile(target, 'utf8')).toBe('echo old\n');
   expect((await fs.stat(target)).mode & 0o777).toBe(0o750);
   expect(await fs.readdir(folder)).toEqual(['run.sh']);
+  const { getLog } = await import('../src/main/logger.js');
+  expect(getLog().at(-1)).toMatchObject({ level: 'warn', message: "code save: refused, the chosen file's permissions could not be read (EIO)" });
 });
 
 describe('native worker checkout cleanup confirmation', () => {
