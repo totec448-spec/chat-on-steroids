@@ -1941,7 +1941,7 @@ describe('desktop input delivery and helper ownership', () => {
           if (message.authorize) {
             const editor = live!.document.querySelector('#prompt-textarea')!;
             editor.replaceWith(editor.cloneNode(true));
-            if (history) userTurn(live!.document, 'earlier-question', 'An earlier question in this chat');
+            if (history) userTurn(live!.document, 'earlier-question', 'An earlier question in this chat', { sent: false });
             await new Promise(resolve => live!.window.setTimeout(resolve, 0));
             return { ok: true, data: { ok: granted } };
           }
