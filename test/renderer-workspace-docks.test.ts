@@ -80,7 +80,7 @@ it('keeps right and bottom Terminal actions in their own dock', () => {
   const rightCloseTab = vi.fn((id: string) => terminalTabs.splice(terminalTabs.findIndex(tab => tab.id === id), 1));
   const rightSelectTab = vi.fn();
   docks.registerTerminal({ show: rightShow, hide: rightHide, canCreate: () => true, newTab: rightNewTab,
-    tabs: () => terminalTabs, selectTab: rightSelectTab, closeTab: rightCloseTab },
+    tabs: () => terminalTabs, selectTab: rightSelectTab, closeTab: rightCloseTab, moveTab: vi.fn() },
     { show: bottomShow, hide: bottomHide });
   const right = document.getElementById('workDockRight')!, bottom = document.getElementById('workDockBottom')!;
   document.getElementById('rightDockToggle')!.click();
@@ -119,7 +119,7 @@ it('interleaves individual terminal sessions with tools and keeps one selected d
   const selectTerminal = vi.fn(), showFiles = vi.fn(), hideFiles = vi.fn();
   docks.registerTerminal({ show: vi.fn(), hide: vi.fn(), canCreate: () => true,
     newTab: () => { const id = `pty-${terminalTabs.length + 1}`; terminalTabs.push({ id, title: `Shell ${id}`, exited: false }); return id; },
-    tabs: () => terminalTabs, selectTab: selectTerminal, closeTab: closeTerminal },
+    tabs: () => terminalTabs, selectTab: selectTerminal, closeTab: closeTerminal, moveTab: vi.fn() },
     { show: vi.fn(), hide: vi.fn() });
   docks.register('files', 'Files', 'i-folder', showFiles, hideFiles, () => true);
   const right = document.getElementById('workDockRight')!;
@@ -145,7 +145,7 @@ it('lists right terminal tabs remembered from the last launch as dock tabs marke
   const terminalTabs = [{ id: 'pty-1', title: 'project · bash', exited: false, previous: true }];
   const show = vi.fn(), selectTab = vi.fn();
   docks.registerTerminal({ show, hide: vi.fn(), canCreate: () => true, newTab: () => null,
-    tabs: () => terminalTabs, selectTab, closeTab: vi.fn() }, { show: vi.fn(), hide: vi.fn() });
+    tabs: () => terminalTabs, selectTab, closeTab: vi.fn(), moveTab: vi.fn() }, { show: vi.fn(), hide: vi.fn() });
   const right = document.getElementById('workDockRight')!;
   document.getElementById('rightDockToggle')!.click();
   expect(right.querySelector('.work-dock-bar')!.hasAttribute('hidden')).toBe(false);
@@ -199,7 +199,7 @@ it('keeps Ctrl+backtick for bottom visibility and Ctrl+Shift+1–4 for scoped ac
   const terminalTabs: { id: string; title: string; exited: boolean }[] = [];
   docks.registerTerminal({ show: rightTerminal, hide: vi.fn(), canCreate: () => true,
     newTab: () => { terminalTabs.push({ id: 'pty-1', title: 'powershell', exited: false }); return 'pty-1'; },
-    tabs: () => terminalTabs, selectTab: vi.fn(), closeTab: vi.fn() },
+    tabs: () => terminalTabs, selectTab: vi.fn(), closeTab: vi.fn(), moveTab: vi.fn() },
     { show: bottomTerminal, hide: vi.fn() });
   docks.register('files', 'Files', 'i-folder', files, vi.fn(), () => true);
   docks.register('agents', 'Sub-agents', 'i-agents', agents, vi.fn(), () => true);
