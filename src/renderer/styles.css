@@ -4650,6 +4650,12 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .terminal-screen .xterm { height: 100%; }
 .terminal-empty { margin: 20px; }
 .terminal-empty[hidden] { display: none; }
+/* A tab remembered from the last launch: no shell yet, only where it was and how to start one. */
+.terminal-previous { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 20px; background: var(--page); font-size: calc(13px * var(--text-scale, 1)); }
+.terminal-previous strong { font-weight: 600; }
+.terminal-previous-cwd { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--soft); font-family: 'Cascadia Code', Consolas, monospace; font-size: calc(12px * var(--text-scale, 1)); }
+.terminal-previous .btn { margin-top: 6px; background: var(--hover); color: var(--ink); }
+.terminal-previous .btn:hover { background: color-mix(in srgb, var(--ink) 12%, transparent); }
 /* Send to chat: over the shell's top right corner while it has a selection, above xterm's own layers (up to 11). */
 .terminal-send { position: absolute; top: 8px; right: 18px; z-index: 12; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--edge); border-radius: 8px; background: var(--card); color: var(--ink); font-size: calc(12.5px * var(--text-scale, 1)); box-shadow: 0 6px 20px #0003; }
 .terminal-send:hover { background: var(--hover); }

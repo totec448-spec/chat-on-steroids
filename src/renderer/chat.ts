@@ -8690,7 +8690,8 @@ export function initChat(next: Deps): void {
     hide: () => rightWorkspaceTerminal?.hide(), canCreate: () => true,
     newTab: () => rightWorkspaceTerminal?.newTab() ?? null,
     tabs: () => rightWorkspaceTerminal?.tabs() ?? [],
-    selectTab: id => rightWorkspaceTerminal?.selectTab(id), closeTab: id => rightWorkspaceTerminal?.closeTab(id)
+    selectTab: id => rightWorkspaceTerminal?.selectTab(id), closeTab: id => rightWorkspaceTerminal?.closeTab(id),
+    moveTab: (id, index) => rightWorkspaceTerminal?.moveTab(id, index)
   }, {
     show: (mount, createIfEmpty) => workspaceTerminal?.show(mount, createIfEmpty),
     hide: () => workspaceTerminal?.hide()

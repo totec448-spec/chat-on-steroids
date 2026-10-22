@@ -127,3 +127,34 @@ it('leaves Ctrl+Shift+Enter to an input method that is still composing', () => {
   expect(input.value).toBe('');
   expect(term.selection).toBe('Error: placeholder');
 });
+
+it('sends a selection from a shell started out of a previous-session tab, and shows no button while the tab is inert', async () => {
+  dom = new JSDOM('<div class="app"><div id="dock"></div><textarea id="chatInput"></textarea></div>', { url: 'https://local.test', pretendToBeVisual: true });
+  const { window } = dom;
+  vi.stubGlobal('window', window); vi.stubGlobal('document', window.document); vi.stubGlobal('Event', window.Event);
+  vi.stubGlobal('getComputedStyle', window.getComputedStyle.bind(window));
+  vi.stubGlobal('requestAnimationFrame', window.requestAnimationFrame.bind(window));
+  vi.stubGlobal('ResizeObserver', class { observe(): void {} disconnect(): void {} });
+  vi.stubGlobal('navigator', { platform: 'Win32' });
+  const create = vi.fn(async () => ({ ok: true, data: { shell: 'bash', cwd: '/home/you' } }));
+  Object.assign(window, { api: {
+    terminalCreate: create, terminalResize: vi.fn(), terminalClose: vi.fn(), terminalWrite: vi.fn(), terminalAck: vi.fn(),
+    writeClipboard: vi.fn(), onTerminalEvent: () => () => {}
+  } });
+  window.localStorage.setItem('chat-on-steroids.terminal-tabs.workspaceTerminal',
+    JSON.stringify([{ projectId: null, title: 'bash', cwd: '/home/you' }]));
+  const input = document.getElementById('chatInput') as HTMLTextAreaElement;
+  const terminal = createWorkspaceTerminal(() => {}, document.getElementById('dock')!,
+    { onSendSelection: text => sendTerminalSelection(input, text) });
+  const term = xterm.FakeTerminal.last!, send = document.querySelector<HTMLButtonElement>('.terminal-send')!;
+  expect(terminal.tabs().map(tab => tab.previous)).toEqual([true]);
+  terminal.selectTab(terminal.tabs()[0]!.id);
+  expect(send.hidden).toBe(true);
+  document.querySelector<HTMLButtonElement>('.terminal-previous .btn')!.click();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(create).toHaveBeenCalledOnce();
+  term.select('Error: boom');
+  expect(send.hidden).toBe(false);
+  send.click();
+  expect(input.value).toBe('```\nError: boom\n```\n\n');
+});
