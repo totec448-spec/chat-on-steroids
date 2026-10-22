@@ -409,9 +409,12 @@ it('shows a conflicted file as ours, base and theirs, and asks chat to resolve i
 
   const toggleView = host.querySelector<HTMLButtonElement>('.file-conflict-toggle')!;
   expect(toggleView.getAttribute('aria-pressed')).toBe('true');
-  toggleView.click(); await tick();
+  toggleView.focus(); toggleView.click(); await tick();
   expect(host.querySelector('.file-conflict-pane')).toBeNull();
   expect(host.querySelector('.test-diff-viewer')?.textContent).toContain('<<<<<<< HEAD');
+  // The header is rebuilt; a keyboard user stays on the toggle.
+  expect(document.activeElement).toBe(host.querySelector('.file-conflict-toggle'));
+  expect(document.activeElement?.getAttribute('aria-pressed')).toBe('false');
   host.querySelector<HTMLButtonElement>('.file-conflict-toggle')!.click(); await tick();
   expect(host.querySelectorAll('.file-conflict-pane')).toHaveLength(3);
 

@@ -8,6 +8,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { gitExecutable, ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from '../src/main/project-git.js';
+import { getLog } from '../src/main/logger.js';
 import { addProject } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 
@@ -358,6 +359,14 @@ it('reads the base, ours and theirs versions of a conflicted file, also from a p
     .toEqual({ base: 'base\n', ours: null, theirs: 'side change\n' });
   // A binary conflict keeps only the existing note, never invented text.
   expect((await readProjectGitDiff(id, 'binary.bin', undefined, snapshot.revision)).conflict).toBeUndefined();
+  expect(getLog().map(entry => entry.message)).toContain('review: no three-way view for binary.bin: base is binary');
+  // A side the index lists but whose object is gone is not "not in this version": the marker diff stays.
+  const { stdout: theirsOid } = await exec('git', ['rev-parse', ':3:app/both.txt'], { cwd: root });
+  await fs.rm(path.join(root, '.git', 'objects', theirsOid.trim().slice(0, 2), theirsOid.trim().slice(2)), { force: true });
+  const damaged = await readProjectGitDiff(id, 'both.txt', undefined, (await readProjectGitSnapshot(id)).revision);
+  expect(damaged.conflict).toBeUndefined();
+  expect(damaged).toMatchObject({ baseText: 'main\n', currentText: expect.stringContaining('<<<<<<<') });
+  expect(getLog().map(entry => entry.message)).toContain('review: no three-way view for both.txt: theirs could not be read');
 });
 
 it('shows a file renamed differently on both sides as conflicts, even with no working file left', async () => {
