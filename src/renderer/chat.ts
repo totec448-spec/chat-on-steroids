@@ -4107,7 +4107,7 @@ export function finishedBlocks(text: string): string {
   return text.slice(0, end);
 }
 
-/** Exclude fenced examples from chart extraction before Markdown tokenization. */
+/** Locate Markdown fences, including ones nested under blockquotes and list items. */
 function fencedMarkdownRanges(text: string): Array<{ start: number; end: number }> {
   const ranges: Array<{ start: number; end: number }> = [];
   let fence: { start: number; marker: string; width: number } | null = null;
@@ -4115,14 +4115,15 @@ function fencedMarkdownRanges(text: string): Array<{ start: number; end: number 
     const newline = text.indexOf('\n', start);
     const end = newline < 0 ? text.length : newline + 1;
     const line = text.slice(start, newline < 0 ? end : newline).replace(/\r$/, '');
+    const body = line.replace(/^(?:[ \t]*(?:>|[-*+]|\d{1,9}[.)])(?=[ \t]|$)[ \t]?)*/, '');
     if (fence) {
-      const close = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line)?.[1];
+      const close = /^[ \t]*(`{3,}|~{3,})[ \t]*$/.exec(body)?.[1];
       if (close && close[0] === fence.marker && close.length >= fence.width) {
         ranges.push({ start: fence.start, end });
         fence = null;
       }
     } else {
-      const open = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+      const open = /^[ \t]*(`{3,}|~{3,})(.*)$/.exec(body);
       if (open && (open[1]![0] === '~' || !open[2]!.includes('`'))) {
         fence = { start, marker: open[1]![0]!, width: open[1]!.length };
       }
@@ -4133,6 +4134,22 @@ function fencedMarkdownRanges(text: string): Array<{ start: number; end: number 
   return ranges;
 }
 
+/** Protect both fenced blocks and inline backtick spans before inserting chart slots. */
+function markdownCodeRanges(text: string): Array<{ start: number; end: number }> {
+  const fences = fencedMarkdownRanges(text);
+  const ranges = [...fences];
+  let start = 0;
+  for (const fence of [...fences, { start: text.length, end: text.length }]) {
+    const outside = text.slice(start, fence.start);
+    for (const span of outside.matchAll(/(?<![`\\])(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g)) {
+      const at = start + span.index;
+      ranges.push({ start: at, end: at + span[0].length });
+    }
+    start = fence.end;
+  }
+  return ranges;
+}
+
 export function renderedMarkdown(source: string, capture?: StoredText, references?: readonly MessageReference[]): HTMLElement {
   // Fiber's canonical text can be complete while a background provider tab still
   // paints its first words. Render this revision directly; captured DOM HTML is
@@ -4140,12 +4157,12 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
   // A table ChatGPT drew in full but wrote with only its header (#1477) gets its recorded rows.
   let text = completedDilText(withoutMessageReaction(source), capture).slice(0, MAX_RENDERED_HTML_CHARS);
   const charts: HTMLElement[] = [];
-  const codeFences = fencedMarkdownRanges(text);
+  const codeExamples = markdownCodeRanges(text);
   // This provider chart carries its own data in the canonical answer. Unlike a captured
   // drawing, that data is tied to the current revision and needs no recovery guesswork.
   text = text.replace(/\uE200genui\uE202([^\uE200\uE201]{1,16000})\uE201/g, (match, raw: string, at: number) => {
-    // A chart used as a fenced Markdown example must remain literal code, not an internal slot.
-    if (codeFences.some(fence => at < fence.end && at + match.length > fence.start)) return match;
+    // Fenced and inline code examples must remain literal, never a chart placeholder.
+    if (codeExamples.some(range => at < range.end && at + match.length > range.start)) return match;
     const chart = staticBarChart(raw);
     if (!chart) return match;
     return `\n\n\uE030${charts.push(chart) - 1}\uE031\n\n`;
