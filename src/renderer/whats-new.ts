@@ -14,6 +14,15 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.44': {
+    lead: () => t("Pictures with /image, keyboard shortcuts, and a quicker message after Stop."),
+    highlights: [
+      { icon: 'i-image', title: () => t("Ask for a picture"), text: () => t("Start a message with /image, and ChatGPT draws it with its own image tool.") },
+      { icon: 'i-bolt', title: () => t("Keyboard shortcuts"), text: () => t("{0} starts a new chat, Ctrl+Tab moves between chats, and Esc twice stops an answer.", [primaryShortcut('N')]) },
+      { icon: 'i-stop', title: () => t("Quicker after Stop"), text: () => t("A message you send right after Stop goes out at once.") },
+      { icon: 'i-agents', title: () => t("Sub-agent chats tidy up"), text: () => t("With archiving on, a worker's chat is archived two minutes after its task is done.") }
+    ]
+  },
   '2.1.43': {
     lead: () => t("See what sub-agents do, long work that keeps going, and clearer Settings."),
     highlights: [

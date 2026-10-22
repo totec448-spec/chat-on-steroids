@@ -86,6 +86,7 @@ const {
   WORKER_SENDING_GRACE_MS,
   WORKER_REDEEM_MS,
   BROWSER_RECOVERY_COOLDOWN_MS,
+  NAVIGATION_RECOVERY_COOLDOWN_MS,
   DEFAULT_PORTS,
   revealChatInBrowser,
   followChatInBackground,
@@ -1349,9 +1350,42 @@ describe('extension update holds', () => {
     expect(lines().at(-1)!.message).toContain('already tried this update once; reload it in chrome://extensions');
     await status('browser-updates-itself');
     expect(lines().at(-1)!.message).toContain('Firefox updates the signed add-on itself');
-    // An unknown reason is not logged, and a report without a hold resets it.
+    // An unknown reason is not logged; going back to an earlier reason is a change and is logged.
     await status('made-up'); await status(); await status('chat-busy');
     expect(lines().slice(before)).toHaveLength(4);
+  });
+
+  // VM, 2026-10-20/21: Firefox suspends the add-on's background page between polls, and each wake
+  // reported no hold first, so the same "Firefox updates the signed add-on itself" was logged 907
+  // times in 36 hours. A report without a hold no longer forgets the reason already logged.
+  it('logs a hold once while its browser keeps reporting no hold in between, and again after six hours', async () => {
+    await pair();
+    const lines = () => getLog().filter(entry => entry.message.includes('browser extension waits to update'));
+    const before = lines().length;
+    const status = (updateHold?: string) => request('POST', '/status', { browser: 'firefoxbrowser0000002',
+      body: { openConversations: [], ...(updateHold ? { updateHold } : {}) } });
+    for (let round = 0; round < 5; round += 1) { await status(); await status('browser-updates-itself'); }
+    expect(lines().slice(before)).toHaveLength(1);
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 6 * 60 * 60_000 + 1);
+    try {
+      await status('browser-updates-itself');
+      expect(lines().slice(before)).toHaveLength(2);
+    } finally { clock.mockRestore(); }
+  });
+
+  it('logs the same hold again when this app ships a different extension build', async () => {
+    await pair();
+    const lines = () => getLog().filter(entry => entry.message.includes('browser extension waits to update'));
+    const before = lines().length;
+    const status = () => request('POST', '/status', { browser: 'firefoxbrowser0000003', body: { openConversations: [], updateHold: 'browser-updates-itself' } });
+    try {
+      setShippedExtensionBuildForTest('aaaaaaaaaaaa');
+      await status(); await status();
+      setShippedExtensionBuildForTest('bbbbbbbbbbbb');
+      await status(); await status();
+      expect(lines().slice(before)).toHaveLength(2);
+    } finally { setShippedExtensionBuildForTest(); }
   });
 
   // 2.1.39 release round: Chrome (updated) and Firefox (waiting for its signed add-on) both report
@@ -4985,6 +5019,42 @@ describe('delivering a bootstrap', () => {
       expect(command.text).toContain('PROJECT_TASK_PRESERVED');
     }
     expect(command.text).not.toContain('SCOPED_AGENTS_TAIL');
+  });
+
+  it('puts a chat recorded inside a linked ChatGPT Project into its project before it runs commands (#1744)', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { addProject, armProjectCreate, claimProjectCreate, completeProjectCreate, getSessionProject } = await import('../src/main/projects.js');
+    const { getSession } = await import('../src/main/session/store.js');
+    const first = path.join(dir, 'first-root-1744');
+    const folder = path.join(dir, 'linked-project-1744');
+    await fs.mkdir(first, { recursive: true });
+    await fs.mkdir(folder, { recursive: true });
+    // Without the project, a command would run in the first approved folder.
+    await saveConfig({ ...suiteConfig, roots: [{ name: 'first', path: first }, { name: 'linked', path: folder }] });
+    const project = await addProject(folder);
+    const requestId = (project.chatgpt as { requestId: string }).requestId;
+    const chatgptProject = `g-p-${'c'.repeat(32)}`;
+    expect(await claimProjectCreate(requestId, 'page')).toBe(true);
+    expect(await armProjectCreate(requestId, 'page')).toBe(true);
+    expect(await completeProjectCreate(requestId, 'page', chatgptProject)).toBe(true);
+    await pair();
+    const record = (conversationId: string, extra: Record<string, unknown>) => request('POST', '/events', {
+      body: { conversationId, ...extra, events: [{ kind: 'user_message', time: Date.now(), text: 'list the files', messageId: `m-${conversationId}` }] }
+    });
+    const inside = await record('17440000-0000-4000-8000-000000000001', { chatgptProject });
+    expect(inside.body).toMatchObject({ stored: 1 });
+    expect((await getSession(inside.body.sessionId as string))?.projectId).toBe(project.id);
+    expect(await getSessionProject(inside.body.sessionId as string)).toMatchObject({ virtual: '/linked' });
+    // Outside any Project, or with a malformed value, a chat stays as it was.
+    const outside = await record('17440000-0000-4000-8000-000000000002', {});
+    expect((await getSession(outside.body.sessionId as string))?.projectId).toBeUndefined();
+    const odd = await record('17440000-0000-4000-8000-000000000003', { chatgptProject: 'g-p-../../x' });
+    expect(odd.status).toBe(200);
+    expect((await getSession(odd.body.sessionId as string))?.projectId).toBeUndefined();
+    // A worker's events (its origin may not be recorded yet) never pick a project this way.
+    const worker = await record('17440000-0000-4000-8000-000000000004', { chatgptProject, agent: 'worker-1' });
+    expect((await getSession(worker.body.sessionId as string))?.projectId).toBeUndefined();
   });
 
   it('redeems a restored broker-owned worktree as the worker cwd, preserves source instructions and rejects a lost lease', async () => {
@@ -8929,6 +8999,63 @@ describe('unattributed activity recovery', () => {
 
   /** The chat a pass was told to repair. */
   const chatOf = (repair: { conversationId: string } | null): string | null => repair?.conversationId ?? null;
+
+  it.each(['assistant-error', 'no-tab', 'compaction'] as const)(
+    'waits before retrying %s recovery after navigation', async reason => {
+      await pair();
+      let conversationId: string;
+
+      if (reason === 'assistant-error') {
+        conversationId = OTHER;
+        await events(conversationId, [openTurn('navigation-error-turn'), {
+          kind: 'chat_error', time: Date.now(), turnId: 'navigation-error-turn',
+          text: 'Connection interrupted', recoverable: true
+        }]);
+      } else if (reason === 'no-tab') {
+        conversationId = WORKER;
+        spawn({ workers: [{ task: 'check navigation recovery' }], caller: { conversationId: PRIME } });
+        const bootstrap = await redeem();
+        await request('POST', '/commands/ack', {
+          body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' }
+        });
+        await events(conversationId, [openTurn('navigation-missing-tab-turn')]);
+        await request('POST', '/closed', { body: { conversationId } });
+      } else {
+        conversationId = randomUUID();
+        const session = await createSession({ conversationId });
+        await compactSession(session.id);
+      }
+
+      const first = await maintenance();
+      expect(first).toMatchObject({ conversationId, reason });
+      vi.useFakeTimers();
+      try {
+        const failWhileNavigating = async (repair: { token: string }) => {
+          expect((await request('POST', '/repairs/claim', { body: { token: repair.token } })).body.allowed).toBe(true);
+          await request('GET', `/status?repairFailed=${encodeURIComponent(repair.token)}` +
+            '&repairAction=reloaded&why=changed&detail=navigating');
+        };
+        await failWhileNavigating(first!);
+
+        expect(await maintenance()).toBeNull();
+        await vi.advanceTimersByTimeAsync(NAVIGATION_RECOVERY_COOLDOWN_MS - 1);
+        expect(await maintenance()).toBeNull();
+        await vi.advanceTimersByTimeAsync(1);
+        const retry = await maintenance();
+        expect(retry).toMatchObject({ conversationId, reason });
+        expect(retry!.token).not.toBe(first!.token);
+
+        await failWhileNavigating(retry!);
+        expect(await maintenance()).toBeNull();
+        await vi.advanceTimersByTimeAsync(NAVIGATION_RECOVERY_COOLDOWN_MS - 1);
+        expect(await maintenance()).toBeNull();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(await maintenance()).toMatchObject({ conversationId, reason });
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
 
   it('H2 records the machine reason and immediately offers the existing assistant-error episode', async () => {
     await pair();
