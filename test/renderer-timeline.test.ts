@@ -3689,6 +3689,37 @@ it("retires the running turn's lines when the turn ends after its rows were draw
   expect(w.document.querySelector('#timeline .turn-now')).toBeNull();
 });
 
+// #1787: a chat's page stopped reporting, the app gave up recovering it and its activity window ran
+// out, but nothing new was written to the chat. The caption had read the controls once and went on
+// saying "Working for …" for six hours.
+it('stops counting a turn the app no longer sees running, even when nothing new arrives in the chat', async () => {
+  const { w } = await boot([{ seq: 1, time: Date.now() - 60_000, source: 'extension', kind: 'turn_start', turnId: 'held-turn' }]);
+  expect(w.document.getElementById('chatState')!.textContent).toMatch(/^Working for /);
+  const api = (w as any).api;
+  const original = api.getSessionControls;
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data, activeTurnId: null } });
+  try {
+    vi.setSystemTime(Date.now() + 5 * 60_000);
+    await vi.waitFor(() => expect(w.document.getElementById('chatState')!.textContent).not.toMatch(/^Working for /), { timeout: 5_000 });
+  } finally { vi.useRealTimers(); }
+});
+
+it('says a chat stopped when recovery gave up on its unfinished turn, and drops that once the page is back', async () => {
+  const { w, append } = await boot([{ seq: 1, time: Date.now() - 60_000, source: 'extension', kind: 'turn_start', turnId: 'held-turn' }]);
+  const api = (w as any).api;
+  const original = api.getSessionControls;
+  let stopped = true;
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data, activeTurnId: null, pageless: stopped } });
+  await append([]);
+  const caption = () => w.document.getElementById('chatState')!;
+  expect(caption().textContent).toBe("Stopped · open this chat's tab again to continue");
+  expect(caption().classList.contains('is-bad')).toBe(true);
+  expect(caption().classList.contains('is-working')).toBe(false);
+  stopped = false;
+  await append([]);
+  expect(caption().textContent).toBe('');
+});
+
 it('shows elapsed work for the exact recorded turn without exposing lifecycle rows', async () => {
   const { w, append } = await boot([{ seq: 1, time: T0, source: 'extension', kind: 'turn_start', turnId: 'held-turn' }]);
   expect(w.document.getElementById('chatState')!.textContent).toMatch(/^Working for /);

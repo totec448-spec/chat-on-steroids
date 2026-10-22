@@ -2977,5 +2977,6 @@
   "Drafts that wait": "기다려 주는 초안",
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "보내지 않은 메시지가 있는 채팅에 연필 표시가 붙고, 초안은 다시 시작한 뒤에도 돌아옵니다.",
   "A better Review": "더 나아진 리뷰",
-  "Right-click an untracked file to add it, or its folder, to .gitignore.": "추적되지 않는 파일을 마우스 오른쪽 버튼으로 클릭해 그 파일이나 폴더를 .gitignore에 추가하세요."
+  "Right-click an untracked file to add it, or its folder, to .gitignore.": "추적되지 않는 파일을 마우스 오른쪽 버튼으로 클릭해 그 파일이나 폴더를 .gitignore에 추가하세요.",
+  "Stopped · open this chat's tab again to continue": "중지됨 · 계속하려면 이 채팅의 탭을 다시 여세요"
 }
