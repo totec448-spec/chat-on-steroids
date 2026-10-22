@@ -138,13 +138,16 @@ it('blocks a worker relative write and command after its checked-out directory i
   const original = path.join(parent, 'owned');
   const relocated = path.join(parent, 'old-worktree');
   await fs.mkdir(original, { recursive: true });
-  const identity = await fs.stat(original);
+  // Exact 64-bit ids, as the manager reads them (worktrees/index.ts): an NTFS file id is a 48-bit
+  // record number plus a 16-bit sequence, so as a plain number a new directory made right after
+  // the rename could round to the old one's id and pass (failed on Windows CI, 2026-10-22).
+  const identity = await fs.stat(original, { bigint: true });
   const lease = { workspace: { virtual: '/work/swapped-owner-test/owned', real: original } };
   leaseLookup.mockReturnValue(lease);
   // Simulate the manager's checked inode lease. The real validator additionally checks the
   // marker, Git common-dir, branch and approved root; this tests that the kernel awaits it.
   leaseValidate.mockImplementation(async current => {
-    const now = await fs.stat(current.workspace.real);
+    const now = await fs.stat(current.workspace.real, { bigint: true });
     if (now.ino !== identity.ino || now.dev !== identity.dev) throw new Error('WORKTREE_PATH_CHANGED');
     return current;
   });
