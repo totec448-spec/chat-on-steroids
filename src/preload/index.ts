@@ -261,6 +261,8 @@ const api = {
   getLogText: () => call<string>('log:text'),
   getLogJson: () => call<string>('log:json'),
   writeClipboard: (text: string) => call<boolean>('clipboard:write', { text }),
+  // A code block's Save: main asks where, in a native dialog, and `name` is only its suggestion.
+  saveCode: (request: { text: string; name: string }) => call<{ done: 'saved'; name: string } | { done: 'cancelled' }>('code:save', request),
   exportMarkdown: (request: { id: string; scope: 'answer' | 'latest' | 'session'; turnId?: string; messageId?: string; target: 'clipboard' | 'file' }) =>
     call<{ done: 'copied' } | { done: 'saved'; name: string } | { done: 'cancelled' }>('sessions:exportMarkdown', request),
   // `external`: the system's own browser even for a page the CoS browser would open.

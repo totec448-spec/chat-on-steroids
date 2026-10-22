@@ -2565,8 +2565,8 @@ input[readonly] {
 @media (prefers-reduced-motion: reduce) { .sess-actions { transition: none; } }
 /* While a chat is being named, its field takes the actions' place (#1107). */
 .sess:has(.sess-rename) .sess-actions { display: none; }
-/* Pinned chats (#1133): a quiet mark that stays visible; it hides with the status while actions show. */
-.sess-pin-mark { flex: none; margin-left: 4px; font-size: 12px; color: var(--faint); }
+/* Pinned chats (#1133) and chats holding an unsent draft: a quiet mark that stays visible; it hides with the status while actions show. */
+.sess-pin-mark, .sess-draft-mark { flex: none; margin-left: 4px; font-size: 12px; color: var(--faint); }
 .session-diagnostics { margin-top: 20px; color: var(--faint); }
 .session-diagnostics > summary { padding: 8px 10px; cursor: pointer; font-size: calc(12px * var(--text-scale, 1)); }
 .session-diagnostics .sess-top b { font-size: calc(13px * var(--text-scale, 1)); }
@@ -2962,6 +2962,14 @@ input[readonly] {
   border: 0;
   border-radius: 0;
 }
+
+/* Copy, Wrap and Save sit together at the header's end. */
+.msg.rich .markdown-code .tool-copy + .tool-copy { margin-left: 0; }
+/* A long language name gives way (with an ellipsis) so the buttons keep their width and Save is never clipped. */
+.msg.rich .markdown-code .tool-output-header strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg.rich .markdown-code .tool-output-header .ico, .msg.rich .markdown-code .tool-copy { flex: none; white-space: nowrap; }
+.msg.rich .markdown-code .code-wrap[aria-pressed="true"] { background: var(--hover); color: var(--ink); }
+.msg.rich .markdown-code.is-wrapped pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* ChatGPT's writing block (#1477): the code panel's frame and header; its text reads as text, not a quote. */
 .msg.rich .markdown-writing {
@@ -4648,6 +4656,11 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .terminal-screen .xterm { height: 100%; }
 .terminal-empty { margin: 20px; }
 .terminal-empty[hidden] { display: none; }
+/* Send to chat: over the shell's top right corner while it has a selection, above xterm's own layers (up to 11). */
+.terminal-send { position: absolute; top: 8px; right: 18px; z-index: 12; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--edge); border-radius: 8px; background: var(--card); color: var(--ink); font-size: calc(12.5px * var(--text-scale, 1)); box-shadow: 0 6px 20px #0003; }
+.terminal-send:hover { background: var(--hover); }
+.terminal-send[hidden] { display: none; }
+.terminal-send .ico { --ico: 14px; --glyph: 14px; }
 
 /* One quiet frame for right-side tools; the tool owners keep their own content state. */
 [data-panel='chat'].has-work-dock { grid-template-columns: minmax(0, 1fr) var(--work-panel-width, minmax(340px, 42%)); }
