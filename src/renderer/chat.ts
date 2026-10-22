@@ -6326,7 +6326,7 @@ async function stopBackgroundProcess(row: RunningExecProcess, restoreFocus: bool
   backgroundProcessStopping = null;
   paintBackgroundProcessStops();
   if (!reply.ok || !reply.data) {
-    toast(reply.ok ? t('Background process is no longer running') : reply.error);
+    toast(reply.ok ? t('Background process is no longer running') : t(reply.error));
     refreshBackgroundProcesses();
     return;
   }
