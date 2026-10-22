@@ -123,6 +123,7 @@ function requestEntryName(options: { title: string; initial?: string; confirm: s
 
 function requestFileConfirmation(options: { title: string; message: string; detail?: string; confirm: string; danger?: boolean }): Promise<boolean> {
   document.querySelector('.file-confirm-dialog')?.remove();
+  const opener = document.activeElement as HTMLElement | null;
   return new Promise(resolve => {
     const box = document.createElement('dialog');
     box.className = 'file-confirm-dialog';
@@ -143,7 +144,10 @@ function requestFileConfirmation(options: { title: string; message: string; deta
     const finish = (value: boolean): void => {
       if (settled) return;
       settled = true;
+      // Closing a modal dialog hands focus back to where it was; removing it leaves focus on the page body.
+      if (typeof box.close === 'function' && box.open) box.close();
       box.remove();
+      if ((!document.activeElement || document.activeElement === document.body) && opener?.isConnected) opener.focus({ preventScroll: true });
       resolve(value);
     };
     cancel.addEventListener('click', () => finish(false));
@@ -1131,6 +1135,7 @@ export function createFilePanel(options: FilePanelOptions) {
     const entry = gitignoreEntry(path, folder);
     if (!current || current.remote || !entry) return;
     const expected = generation;
+    const rowPosition = [...changesList.querySelectorAll<HTMLElement>('.file-change-row')].findIndex(row => row.dataset.path === path);
     const read = await window.api.previewProjectFile(current.id, GITIGNORE);
     if (expected !== generation || project?.id !== current.id) return;
     let base: (ProjectFilePreview & { text: string; revision: string }) | null = null;
@@ -1164,6 +1169,11 @@ export function createFilePanel(options: FilePanelOptions) {
     if (expected !== generation || project?.id !== current.id) return;
     if (!options.reviewOnly) await reloadDirectory('');
     await reconcileGitChanges(true);
+    // The ignored row is gone after the refresh, taking focus with it: continue at the row now in its place.
+    if (document.activeElement && document.activeElement !== document.body) return;
+    const rows = [...changesList.querySelectorAll<HTMLElement>('.file-change-row')];
+    (rows.find(row => row.dataset.path === path) ?? rows[Math.min(Math.max(rowPosition, 0), rows.length - 1)]
+      ?? (options.reviewOnly ? refresh : backToFiles)).focus({ preventScroll: true });
   }
 
   function closeGitDiff(): void {

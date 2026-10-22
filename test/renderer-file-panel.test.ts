@@ -1309,6 +1309,57 @@ it('creates a missing .gitignore only after the dialog and reports a save confli
   expect(document.querySelector('.toast')?.textContent).toBe('File changed on disk. Reload it before saving your edits.');
 });
 
+it('closes the .gitignore dialog and gives focus back to the row on Cancel', async () => {
+  vi.mocked(window.api.getProjectGitSnapshot).mockImplementation(() => ok(untrackedGit()));
+  vi.mocked(window.api.previewProjectFile).mockImplementation((_projectId: string, path: string) =>
+    ok(path === '.gitignore' ? gitignorePreview('') : preview));
+  // jsdom has no modal dialog; a minimal one records that the dialog is closed rather than just removed.
+  const closed: string[] = [];
+  const proto = dom.window.HTMLDialogElement.prototype as unknown as Record<string, unknown>;
+  proto.showModal = function (this: HTMLElement) { this.setAttribute('open', ''); };
+  proto.close = function (this: HTMLElement) { closed.push(this.className); this.removeAttribute('open'); };
+  const review = createFilePanel({ host, mount: host, toggle, reviewOnly: true });
+  review.update(projectA); await review.show(); await tick();
+
+  openRowContextMenu('dist/app.js');
+  document.querySelector<HTMLButtonElement>('.row-menu [data-row-action="gitignore-file"]')!.click(); await tick();
+  const row = host.querySelector<HTMLElement>('.file-change-row[data-path="dist/app.js"]')!;
+  expect(document.activeElement).toBe(confirmButton());
+  [...document.querySelectorAll<HTMLButtonElement>('.file-confirm-dialog button')].find(button => button.textContent === 'Cancel')!.click();
+  await tick();
+  expect(closed).toEqual(['file-confirm-dialog']);
+  expect(document.querySelector('.file-confirm-dialog')).toBeNull();
+  expect(window.api.saveProjectFile).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(row);
+});
+
+it('moves focus to a surviving Review control when the saved .gitignore line removes the row', async () => {
+  let git = untrackedGit();
+  vi.mocked(window.api.getProjectGitSnapshot).mockImplementation(() => ok(git));
+  vi.mocked(window.api.previewProjectFile).mockImplementation((_projectId: string, path: string) =>
+    ok(path === '.gitignore' ? gitignorePreview('') : preview));
+  const review = createFilePanel({ host, mount: host, toggle, reviewOnly: true });
+  review.update(projectA); await review.show(); await tick();
+
+  openRowContextMenu('dist/app.js');
+  document.querySelector<HTMLButtonElement>('.row-menu [data-row-action="gitignore-file"]')!.click(); await tick();
+  git = { ...git, revision: 'untracked-2', changes: git.changes.filter(change => change.path !== 'dist/app.js') };
+  confirmButton().click(); await tick(); await tick();
+  expect(window.api.saveProjectFile).toHaveBeenCalledTimes(1);
+  expect(host.querySelector('.file-change-row[data-path="dist/app.js"]')).toBeNull();
+  expect(document.activeElement).toBe(host.querySelector('.file-change-row[data-path="README.md"]'));
+
+  // No row left: focus goes to the header's Refresh button instead of the page body.
+  git = { ...git, revision: 'untracked-3', changes: [{ status: 'U', path: 'tmp/x.log', additions: 1, deletions: 0, binary: false }] };
+  await review.show(); await tick();
+  openRowContextMenu('tmp/x.log');
+  document.querySelector<HTMLButtonElement>('.row-menu [data-row-action="gitignore-file"]')!.click(); await tick();
+  git = { ...git, revision: 'untracked-4', changes: [] };
+  confirmButton().click(); await tick(); await tick();
+  expect(host.querySelector('.file-change-row')).toBeNull();
+  expect(document.activeElement).toBe(host.querySelector('.file-panel-refresh'));
+});
+
 it('offers no .gitignore action on a server project or while comparing branches', async () => {
   vi.mocked(window.api.getProjectGitSnapshot).mockImplementation(() => ok(untrackedGit()));
   const review = createFilePanel({ host, mount: host, toggle, reviewOnly: true });
