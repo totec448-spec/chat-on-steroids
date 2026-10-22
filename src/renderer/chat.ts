@@ -2648,6 +2648,8 @@ function paintBookmarks(): void {
   const id = !newChatSelected ? selectedId : null;
   const marks = id && bookmarks?.sessionId === id ? bookmarks.marks : [];
   const button = $<HTMLButtonElement>('chatBookmarks');
+  // A button about to hide hands its focus to the message box, never to nothing.
+  if (!marks.length && !button.hidden && document.activeElement === button) $<HTMLTextAreaElement>('chatInput').focus();
   button.hidden = marks.length === 0;
   button.querySelector('.chat-bookmarks-count')!.textContent = String(marks.length);
   const label = () => tn('{0} bookmark in this chat', '{0} bookmarks in this chat', marks.length);
@@ -2682,9 +2684,12 @@ async function openBookmark(sessionId: string, mark: SessionBookmark): Promise<v
   if (selection !== selectionGeneration || selectedId !== sessionId) return;
   if (!reply.ok) { toast(t(reply.error)); return; }
   if (reply.data) { await revealChatLocation(sessionId, reply.data); return; }
-  const marks = await run(api.setBookmark(sessionId, mark.messageId, mark.excerpt, mark.messageTime, false));
-  if (marks && bookmarks?.sessionId === sessionId) { bookmarks = { sessionId, marks }; paintBookmarks(); }
-  toast(t(marks ? 'This answer is no longer in the chat, so its bookmark was removed.' : 'This answer is no longer in the chat.'));
+  const removed = await Promise.resolve(api.setBookmark(sessionId, mark.messageId, mark.excerpt, mark.messageTime, false))
+    .catch((error: unknown) => ({ ok: false as const, error: String(error) }));
+  // Another chat opened meanwhile: its view stays as it is, and it gets no message about this one.
+  if (selection !== selectionGeneration || selectedId !== sessionId) return;
+  if (removed.ok && bookmarks?.sessionId === sessionId) { bookmarks = { sessionId, marks: removed.data }; paintBookmarks(); }
+  toast(t(removed.ok ? 'This answer is no longer in the chat, so its bookmark was removed.' : 'This answer is no longer in the chat.'));
 }
 
 /** The Edit action under one of your questions. */
