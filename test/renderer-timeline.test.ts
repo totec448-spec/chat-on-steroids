@@ -2311,7 +2311,9 @@ it('keeps working state per chat and marks only completed background chats as un
 });
 
 it("marks every New response seen from the header, or one project's from its menu, and leaves a working chat working", async () => {
-  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: '/workspace', createdAt: 1 };
+  // Linked to a ChatGPT Project, so its menu holds no "Choose a ChatGPT Project…" (#1756).
+  const project: LocalProject = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: '/workspace', createdAt: 1,
+    chatgpt: { state: 'linked', id: `g-p-${'a'.repeat(32)}`, updatedAt: 1 } };
   const startedAt = Date.now();
   const chat = (id: string, projectId?: string): SessionSummary => ({ ...summary([]), id, title: id, conversationId: `conversation-${id}`, chatIds: [`conversation-${id}`],
     projectId, updatedAt: startedAt, lastToolCallAt: startedAt, activityExpiresAt: startedAt + 60_000 });
