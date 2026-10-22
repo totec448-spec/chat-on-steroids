@@ -13466,6 +13466,8 @@
       // #744: a recovery's own text survives a composer remount before Send is authorized. The
       // lease may follow it once; after authorization a lost editor stays a failure.
       let authorizing = false;
+      // The app's answer to this page's one authorization request, once asked.
+      let authorization = null;
       const draftCurrent = () => draft.current() ||
         (withdrawableRecoveryDraft && !authorizing && !sendAttempted && draft.rebind() && draft.current());
       const files = [];
@@ -13532,7 +13534,8 @@
         // Preserve the outbox's revocable claim until the actual native Send is ready.
         if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current(), withdrawWhy)) return false;
         authorizing = true;
-        const authorized = await ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, authorize: true });
+        authorization = ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, authorize: true });
+        const authorized = await authorization;
         if (authorized?.data?.ok !== true) noteWithdraw('app-refused');
         if (!sendCurrent() || authorized?.data?.ok !== true || !onTarget() || !draft.current()) { noteWithdraw(onTarget() ? 'lease-lost' : offTarget()); return false; }
         if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current(), withdrawWhy)) return false;
@@ -13591,6 +13594,23 @@
             try { await draft.clear(); } catch { /* An unclearable draft stays where it is. */ }
           }
           return fail('Native Send receipt was not confirmed.');
+        }
+        // Authorized, yet never clicked: ChatGPT drew the editor again while the app answered, as a
+        // fresh tab does when it moves to its project route (2.1.45 release round). Nothing went
+        // out, but the claim read as a send that may have, so the message was never sent at all.
+        // With this exact text taken back out of the composer the app sends it again. Continue and
+        // after-turn pickups keep their own withdrawal below. Send can give up before the app
+        // answers; its answer comes first, so a report never reaches the app ahead of its own
+        // record, and an explicit no needs none. A lost answer may still have been recorded as yes.
+        // No user row is compared: a fresh tab draws the chat's earlier questions after Send began.
+        // This page never clicked, and withdraw() takes back only the exact text it inserted, never
+        // touched by a person; a Send by anyone else would have taken that text or touched it.
+        const answer = authorizing ? await Promise.resolve(authorization).catch(() => null) : null;
+        if (authorizing && answer?.data?.ok !== false && !sendAttempted && !receipt && !input.recovery && !claimedSilence &&
+            onTarget()) {
+          let withdrawn = false;
+          try { withdrawn = draft.withdraw(); } catch { /* Text not proven ours stays where it is. */ }
+          if (withdrawn) return fail('Native Send was withdrawn before its click.');
         }
         return false;
       }

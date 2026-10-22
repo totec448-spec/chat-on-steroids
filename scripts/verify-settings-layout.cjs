@@ -30,7 +30,7 @@ app.whenReady().then(async () => {
     await js(code);
     await js(`(() => {
       const models = [{ model: 'gpt-6-astra', reasoningEffort: 'high', assumed: false, tokens: 1200000 }];
-      const data = { contextTokenCap: 533333, tokens: 1200000, sessions: 24, models,
+      const data = { contextTokenCap: 533333, tokens: 1200000, sessions: 24, models, projects: [],
         days: [{ date: new Date().toISOString().slice(0, 10), tokens: 1200000, models }],
         messages: { through: Date.now(), days: [] }, limits: [{ model: 'gpt-6-astra', scope: 'model',
           remaining: 12345, remainingPercent: 75, resetAt: Date.now() + 86400000,

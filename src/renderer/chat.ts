@@ -6,6 +6,7 @@ import { initChatSearch, type ChatSearch } from './chat-search.js';
 import { initChatFind } from './chat-find.js';
 import { initChatCycle } from './chat-cycle.js';
 import { createWorkspaceTerminal } from './workspace-terminal.js';
+import { sendTerminalSelection } from './terminal-selection.js';
 import { createWorkspaceDocks } from './workspace-docks.js';
 import { currentLanguage, ui, t, tn } from './i18n.js';
 import { APP_COMMANDS, initSkills } from './skills.js';
@@ -30,6 +31,7 @@ import { shownSessionTitle } from './session-title.js';
 import { preserveTimelineViewport, ROUNDING_PX } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
 import { createSidebarPins, pinnedSortScope } from './sidebar-pins.js';
+import { createComposerDrafts } from './composer-drafts.js';
 import { createSidebarCompletionState } from './sidebar-completion.js';
 import { toolResultText } from './tool-result.js';
 import { renderEditCards } from './tool-artifacts.js';
@@ -286,6 +288,11 @@ function projectMenuItems(id: string): RowMenuItem[] {
         : t('Create this project in ChatGPT again'),
       run: () => void retryChatgptProject(id)
     } satisfies RowMenuItem] : []),
+    // Only while one of its chats shows New response, so the menu does not offer what does nothing.
+    ...(sessions.some(entry => newResponse(entry) && projectGroup(entry.projectId) === id) ? [{
+      action: 'mark-seen', icon: 'i-checks', label: () => t('Mark all as seen'),
+      title: () => t("Clear New response from this project's finished chats"), run: () => markAllSeen(id)
+    } satisfies RowMenuItem] : []),
     {
       action: 'color', icon: 'i-palette', label: () => t('Color'), title: () => t('Change project color'),
       submenu: () => ([null, ...PROJECT_COLORS] as const).map(choice => ({
@@ -319,11 +326,15 @@ async function retryChatgptProject(id: string): Promise<void> {
  * Why a new chat of this project is still waiting, while its native ChatGPT Project is being
  * created or could not be; null once it exists or for a project without one.
  */
-function chatgptProjectWait(entry: InputEntry): 'chatgpt-project' | 'chatgpt-project-failed' | null {
+function chatgptProjectWait(entry: InputEntry): 'chatgpt-project' | 'chatgpt-project-failed' | 'project-removed' | null {
   if (!entry.projectId) return null;
   if (entry.sessionId && sessions.find(session => session.id === entry.sessionId)?.conversationId) return null;
-  const link = projects.find(row => row.id === entry.projectId)?.chatgpt;
+  const project = projects.find(row => row.id === entry.projectId);
+  const link = project?.chatgpt;
   if (!link || link.state === 'linked') return null;
+  // Removed from the sidebar: nothing creates its ChatGPT Project any more and it has no menu to
+  // retry from. Adding the folder again restores both, and the message goes out.
+  if (project.ungrouped) return 'project-removed';
   return link.state === 'failed' || link.state === 'uncertain' ? 'chatgpt-project-failed' : 'chatgpt-project';
 }
 
@@ -422,7 +433,13 @@ let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
 let filePanel: ReturnType<typeof createFilePanel> | null = null;
 let reviewPanel: ReturnType<typeof createFilePanel> | null = null;
 const expandedWorkers = new Set<string>();
-const inputDrafts = new Map<string, string>();
+const inputDrafts = createComposerDrafts({
+  // A chat's row shows whether it holds a draft, so a draft that comes or goes in a chat other
+  // than the open one repaints the list. The open chat's row shows no mark.
+  onDraftedChange: key => { if (key !== draftKey() && sessions.some(row => row.id === key)) paintSessions(); },
+  // A restart ends an edit the way leaving its chat does: the draft from before it comes back.
+  savedText: (key, text) => editingQuestion?.sessionId === key ? editingQuestion.previousDraft : text
+});
 const newChatTasks = new Map<string, { objective: string; automation: string; loopDelivery: string }>();
 const imageDrafts = new Map<string, Array<InputImage | InputAttachment>>();
 const startingInputs = new Map<string, InputEntry>();
@@ -975,8 +992,22 @@ function sessionBadges(summary: SessionSummary): Badge[] {
   else if (!agent && workerReportedFinish(summary)) badges.push(AGENT_BADGE.sleeping);
   else if (sessionWorking(summary)) badges.push(AGENT_BADGE.active);
   else if (agent && agent.role !== 'prime') badges.push(AGENT_BADGE[agent.state]);
-  if (!sessionWorking(summary) && sidebarCompletion?.isUnseen(summary)) badges.push({ text: 'New response', tone: 'is-unseen' });
+  if (newResponse(summary)) badges.push({ text: 'New response', tone: 'is-unseen' });
   return badges;
+}
+
+/** The row's New response badge: a finished reply not yet seen on this device. A chat working again shows its spinner instead. */
+function newResponse(summary: SessionSummary): boolean {
+  return !sessionWorking(summary) && sidebarCompletion?.isUnseen(summary) === true;
+}
+
+/**
+ * Mark all as seen: clears New response from every chat that shows it, or from one project's chats,
+ * as opening each would. A working chat keeps its spinner and its next reply still arrives as new.
+ */
+function markAllSeen(projectId?: string): void {
+  const shown = sessions.filter(entry => newResponse(entry) && (projectId === undefined || projectGroup(entry.projectId) === projectId));
+  if (sidebarCompletion?.markAllSeen(shown)) paintSessions();
 }
 
 /** The chat whose tooltip a click put away, until the pointer leaves its row. */
@@ -989,9 +1020,13 @@ function placeSessionTooltip(tip: HTMLElement, row: HTMLElement): void {
   tip.style.top = `${Math.min(bounds.top, window.innerHeight - 110)}px`;
 }
 
+/** Unsent text waits in this chat's composer. The open chat shows its draft itself, so it never counts. */
+function draftedChat(summary: SessionSummary): boolean { return summary.id !== selectedId && inputDrafts.has(summary.id); }
+
 /** A row's tooltip: its name, then `state` when a card says more than its badges, then the badges and its age. */
 function sessionRowTitle(summary: SessionSummary, pinned: boolean, badges: Badge[], state: string[] = []): string {
-  return [shownSessionTitle(summary), ...state, ...(pinned ? [t("Pinned")] : []), ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · ');
+  return [shownSessionTitle(summary), ...state, ...(pinned ? [t("Pinned")] : []), ...(draftedChat(summary) ? [t('Draft')] : []),
+    ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · ');
 }
 
 function sessionRow(summary: SessionSummary): HTMLElement {
@@ -1018,6 +1053,13 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   if (pinned) {
     row.classList.add('is-pinned');
     const mark = icon('i-pinned', 'ico sess-pin-mark');
+    top.append(mark);
+  }
+  if (draftedChat(summary)) {
+    // The row's tooltip says "Draft" to a pointer; the mark says it to a screen reader on the focused chat.
+    const mark = icon('i-pencil', 'ico sess-draft-mark');
+    mark.removeAttribute('aria-hidden'); mark.setAttribute('role', 'img');
+    ui(mark, 'aria-label', () => t('Draft'));
     top.append(mark);
   }
   ui(row, 'title', () => sessionRowTitle(summary, pinned, badges));
@@ -1387,6 +1429,8 @@ async function deleteSession(id: string): Promise<void> {
   const done = await run(api.deleteSession(id));
   if (done === null) return;
   sessions = sessions.filter((entry) => entry.id !== id);
+  // Its saved draft goes with the chat; text still on screen stays in the composer.
+  inputDrafts.delete(id);
   pressure.delete(id);
   sessionTotal = Math.max(0, sessionTotal - 1);
   if (selectedId === id) {
@@ -2151,10 +2195,19 @@ function paintSessions(): void {
   if (renaming && (document.activeElement as HTMLElement | null)?.classList.contains('sess-rename')) return;
   const layout = sidebarLayout();
   paintedLayout = layout;
+  // The header's Mark all as seen shows only while a chat shows New response.
+  const markAllSeenButton = $('markAllSeen'), markAllSeenFocused = document.activeElement === markAllSeenButton;
+  markAllSeenButton.hidden = !sessions.some(newResponse);
+  // It also hides when another path acknowledges the last one (an open chat's detail read), not only on its own click.
+  const keepFocus = () => {
+    // The keyboard goes on to search, beside it in either layout; the inbox draws its search control with the list.
+    if (markAllSeenFocused && markAllSeenButton.hidden) (layout === 'inbox' ? $('chatList').querySelector<HTMLElement>('[data-inbox-control="search"]') : $('searchChatsButton'))?.focus({ preventScroll: true });
+  };
   $('sessionList').classList.toggle('is-inbox', layout === 'inbox');
   if (layout !== 'inbox') inboxPicker.close();
   if (layout === 'inbox') {
     paintInbox();
+    keepFocus();
     syncSelectedWorkspace();
     scheduleToolActivityExpiry();
     return;
@@ -2325,6 +2378,7 @@ function paintSessions(): void {
   }
   restoreFocus();
   restoreGroupFocus();
+  keepFocus();
   syncSelectedWorkspace();
   $('projectsEmpty').hidden = projectSections.length > 0;
   $('sessionsEmpty').hidden = rows.length > 0;
@@ -4110,6 +4164,18 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
   return box;
 }
 
+/** A fence's language (`language-ts`, written by marked and by ChatGPT's page alike), read before the sanitizer drops classes. */
+const CODE_LANGUAGE = /(?:^|\s)language-([\w+#.-]{1,32})(?=\s|$)/;
+/** The extension a block's Save offers; any other language saves as text. */
+// A Map, so a fence named `constructor` or `__proto__` finds nothing instead of Object's own members.
+const CODE_EXTENSIONS: ReadonlyMap<string, string> = new Map(Object.entries({
+  ts: 'ts', typescript: 'ts', tsx: 'tsx', js: 'js', javascript: 'js', jsx: 'jsx', mjs: 'mjs', json: 'json',
+  py: 'py', python: 'py', sh: 'sh', bash: 'sh', shell: 'sh', zsh: 'sh', ps1: 'ps1', powershell: 'ps1',
+  html: 'html', css: 'css', scss: 'scss', sql: 'sql', yaml: 'yml', yml: 'yml', toml: 'toml', xml: 'xml',
+  md: 'md', markdown: 'md', rs: 'rs', rust: 'rs', go: 'go', java: 'java', kt: 'kt', kotlin: 'kt',
+  swift: 'swift', c: 'c', cpp: 'cpp', 'c++': 'cpp', cs: 'cs', csharp: 'cs', rb: 'rb', ruby: 'rb', php: 'php', diff: 'diff'
+}));
+
 export function renderedMessage(html: StoredText | null | undefined, fallback: string): HTMLElement {
   const box = el('div', 'msg');
   // Same reason as textBlock, for the markdown path — and it is the fallback rather than the
@@ -4133,6 +4199,12 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
   // elements. These replacement nodes contain text only and undergo that same sanitizer.
   const prompts = nativePromptCards(template.content);
   for (const prompt of prompts) prompt.group.replaceWith(prompt.card);
+  // The sanitizer keeps each allowed `pre` as the same node, so its language can wait beside it.
+  const languages = new WeakMap<Element, string>();
+  for (const pre of template.content.querySelectorAll('pre')) {
+    const language = pre.querySelector('code')?.getAttribute('class')?.match(CODE_LANGUAGE)?.[1];
+    if (language) languages.set(pre, language);
+  }
   sanitizeHtmlTree(template.content, {
     allowedTags: RENDERED_TAGS,
     dropTags: DROP_RENDERED_TAGS,
@@ -4174,16 +4246,31 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
     // sanitizing and after the empty-capture fallback has been decided.
     for (const pre of box.querySelectorAll('pre')) {
       const value = pre.textContent ?? '';
+      const language = languages.get(pre);
       const panel = el('div', 'markdown-code');
       const header = el('div', 'tool-output-header');
-      header.append(icon('i-terminal', 'ico'), el('strong', '', () => t('Code')));
+      header.append(icon('i-terminal', 'ico'), el('strong', '', language ?? (() => t('Code'))));
       const copy = el('button', 'tool-copy', () => t('Copy')) as HTMLButtonElement;
       copy.type = 'button';
       copy.addEventListener('click', () => void (async () => {
         if (await run(api.writeClipboard(value))) ui(copy, 'textContent', () => t('Copied'));
         else toast(t('Could not copy text.'));
       })());
-      header.append(copy);
+      // Long lines scroll by default, as ChatGPT draws them; Wrap folds this block's lines to the column.
+      const wrap = el('button', 'tool-copy code-wrap', () => t('Wrap')) as HTMLButtonElement;
+      wrap.type = 'button';
+      wrap.setAttribute('aria-pressed', 'false');
+      wrap.addEventListener('click', () => {
+        wrap.setAttribute('aria-pressed', String(panel.classList.toggle('is-wrapped')));
+      });
+      const save = el('button', 'tool-copy code-save', () => t('Save')) as HTMLButtonElement;
+      save.type = 'button';
+      save.addEventListener('click', () => void (async () => {
+        const name = `snippet.${CODE_EXTENSIONS.get(language?.toLowerCase() ?? '') ?? 'txt'}`;
+        const result = await run(api.saveCode({ text: value, name }));
+        if (result?.done === 'saved') toast(t('Saved {0}', [result.name]));
+      })());
+      header.append(copy, wrap, save);
       pre.replaceWith(panel);
       panel.append(header, pre);
     }
@@ -6342,7 +6429,7 @@ async function stopBackgroundProcess(row: RunningExecProcess, restoreFocus: bool
   backgroundProcessStopping = null;
   paintBackgroundProcessStops();
   if (!reply.ok || !reply.data) {
-    toast(reply.ok ? t('Background process is no longer running') : reply.error);
+    toast(reply.ok ? t('Background process is no longer running') : t(reply.error));
     refreshBackgroundProcesses();
     return;
   }
@@ -7576,7 +7663,7 @@ let bridgePresent = true;
  * ChatGPT would otherwise keep that call's result (#1231). Mid-turn sends do not wait for calls,
  * and an after-turn message also waits for the answer to end, so neither claims this reason.
  */
-function queuedWaitReason(entry: InputEntry): 'extension' | 'tool-call' | 'chatgpt-project' | 'chatgpt-project-failed' | null {
+function queuedWaitReason(entry: InputEntry): 'extension' | 'tool-call' | 'chatgpt-project' | 'chatgpt-project-failed' | 'project-removed' | null {
   if (entry.state !== 'queued' || entry.error || entry.dueAt > Date.now() || entry.delivery === 'tool') return null;
   if (!bridgePresent) return 'extension';
   const project = chatgptProjectWait(entry);
@@ -7751,7 +7838,7 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   if (!visibleInputIds.has(entry.id)) row.classList.add('is-entering');
   visibleInputIds.add(entry.id);
   if (visibleInputIds.size > 100) visibleInputIds.delete(visibleInputIds.values().next().value!);
-  const status = () => entry.error ? t(entry.error) : held ? t("Sending in a moment…") : waiting === 'extension' ? t("Waiting for the browser extension to connect") : waiting === 'tool-call' ? t("Waiting for the running tool call to finish") : waiting === 'chatgpt-project' ? t("Creating this project in ChatGPT…") : waiting === 'chatgpt-project-failed' ? t("This project's ChatGPT Project isn't available. Retry it from the project's menu.") : (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString(currentLanguage())]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
+  const status = () => entry.error ? t(entry.error) : held ? t("Sending in a moment…") : waiting === 'extension' ? t("Waiting for the browser extension to connect") : waiting === 'tool-call' ? t("Waiting for the running tool call to finish") : waiting === 'chatgpt-project' ? t("Creating this project in ChatGPT…") : waiting === 'chatgpt-project-failed' ? t("This project's ChatGPT Project isn't available. Retry it from the project's menu.") : waiting === 'project-removed' ? t("This chat's project was removed from the sidebar. Add its folder again to send this message, or cancel it.") : (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString(currentLanguage())]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
   const files = el('div', 'message-attachments');
   if (entry.attachments?.length) files.append(...entry.attachments.map(file => attachmentCard(file)));
   for (const image of entry.images ?? []) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; files.append(preview); }
@@ -8628,11 +8715,12 @@ export function initChat(next: Deps): void {
     onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); }
   });
   reviewPanel.update(selectedLocalProject());
+  const onSendSelection = (text: string): boolean => sendTerminalSelection($<HTMLTextAreaElement>('chatInput'), text);
   workspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.bottomBody,
-    { onEmpty: () => docks.setBottomOpen(false), onClosePanel: () => docks.setBottomOpen(false) });
+    { onEmpty: () => docks.setBottomOpen(false), onClosePanel: () => docks.setBottomOpen(false), onSendSelection });
   workspaceTerminal.update(selectedLocalProject());
   rightWorkspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.body,
-    { id: 'workspaceTerminalRight', dockedTabs: true, onTabsChanged: () => docks.sync() });
+    { id: 'workspaceTerminalRight', dockedTabs: true, onTabsChanged: () => docks.sync(), onSendSelection });
   rightWorkspaceTerminal.update(selectedLocalProject());
   docks.register('review', 'Review', 'i-git-diff', mount => {
     reviewPanel?.mountAt(mount); void reviewPanel?.show();
@@ -8642,7 +8730,8 @@ export function initChat(next: Deps): void {
     hide: () => rightWorkspaceTerminal?.hide(), canCreate: () => true,
     newTab: () => rightWorkspaceTerminal?.newTab() ?? null,
     tabs: () => rightWorkspaceTerminal?.tabs() ?? [],
-    selectTab: id => rightWorkspaceTerminal?.selectTab(id), closeTab: id => rightWorkspaceTerminal?.closeTab(id)
+    selectTab: id => rightWorkspaceTerminal?.selectTab(id), closeTab: id => rightWorkspaceTerminal?.closeTab(id),
+    moveTab: (id, index) => rightWorkspaceTerminal?.moveTab(id, index)
   }, {
     show: (mount, createIfEmpty) => workspaceTerminal?.show(mount, createIfEmpty),
     hide: () => workspaceTerminal?.hide()
@@ -9042,6 +9131,7 @@ export function initChat(next: Deps): void {
   });
 
   $('chatRefresh').addEventListener('click', event => { event.preventDefault(); void refreshAll(); });
+  $('markAllSeen').addEventListener('click', () => markAllSeen());
 
   $('copyHandoff').addEventListener('click', async () => {
     if (!handoff) return;
