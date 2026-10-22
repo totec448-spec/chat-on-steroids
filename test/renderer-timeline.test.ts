@@ -8052,6 +8052,16 @@ describe('charts, diagrams and illustrated Markdown from recorded DIL', () => {
     expect(root.lastElementChild?.textContent).toBe('After the chart.');
   });
 
+  it('restores chart placeholders whose zero-based index has three digits', async () => {
+    const directive = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(Array.from({ length: 101 }, (_, i) => `Chart ${i + 1}.\n\n${directive}`).join('\n\n'))]);
+    const root = message(w);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(101);
+    expect(root.textContent).not.toContain('\uE030100\uE031');
+  });
+
   it.each([
     { opening: '```json', closing: '```' },
     { opening: '~~~~example', closing: '~~~~' }
