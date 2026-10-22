@@ -239,7 +239,8 @@ async function deleteChatGroup(group: ChatGroup): Promise<void> {
 /** The chat menu's group items, for a main chat of a project. */
 function chatGroupMenuItems(summary: SessionSummary): RowMenuItem[] {
   const projectId = projectGroup(summary.projectId);
-  if (!projectId || summary.origin?.kind === 'worker' || !summary.conversationId) return [];
+  // Kept by session id: a new chat still waiting for its conversation can be grouped too (#1759).
+  if (!projectId || summary.origin?.kind === 'worker' || isUnattributedSession(summary)) return [];
   const current = chatGroupOf(chatGroups, summary);
   const groups = projectChatGroups(projectId);
   return [{

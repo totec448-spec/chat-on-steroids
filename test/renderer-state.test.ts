@@ -1422,11 +1422,12 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
   const loose = { ...base, id: 'menu-loose-0001', title: 'Unattributed activity', conversationId: null, chatIds: [] };
   // #1759: a new chat whose first message is still held (its ChatGPT Project is being created, or
   // could not be) has no conversation yet either, but it is a chat, not the unattributed bucket.
-  const pending = { ...base, id: 'menu-pending-0001', title: 'Buenas!', conversationId: null, chatIds: [] };
+  const projectId = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000001';
+  const pending = { ...base, id: 'menu-pending-0001', title: 'Buenas!', conversationId: null, chatIds: [], projectId };
   const deleteSession = vi.fn(async () => ({ ok: true, data: true }));
   const openSessionChat = vi.fn(async () => ({ ok: true, data: true }));
   const mounted = await mountChat({}, [], {
-    listProjects: async () => ({ ok: true, data: [] }),
+    listProjects: async () => ({ ok: true, data: [{ id: projectId, name: 'Website', path: '/work/website', createdAt: 1 }] }),
     listSessions: async () => ({ ok: true, data: { sessions: [chat, loose, pending], activeId: null, pressure: [], blocked: [], trusted: [] } }),
     deleteSession, openSessionChat
   });
@@ -1455,8 +1456,9 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
   // It is listed with the chats, not under "Unattributed activity" (which still holds the bucket).
   expect(row(pending.id).closest('.session-diagnostics')).toBeNull();
   expect(row(loose.id).closest('.session-diagnostics')).not.toBeNull();
+  // Groups are kept by the chat's own id, so it can be sorted into one of its project's groups already.
   rowMenuItem(row(pending.id), 'rename');
-  expect(actions()).toEqual(['rename', 'remove']);
+  expect(actions()).toEqual(['rename', 'move-to-group', 'remove']);
   closeRowMenus(doc);
   // A right click opens the same menu; its items run their action.
   row(chat.id).dispatchEvent(new mounted.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 40 }));
