@@ -48,6 +48,8 @@
   "Continue until this objective is satisfied.": "Continuar hasta alcanzar este objetivo.",
   "Keep working within the brief until paused.": "Seguir trabajando dentro del encargo hasta pausar.",
   "By model": "Por modelo",
+  "By project": "Por proyecto",
+  "Unknown project": "Proyecto desconocido",
   "By day": "Por día",
   "Code": "Código",
   "est.": "est.",
