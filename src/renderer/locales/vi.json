@@ -2878,5 +2878,6 @@
   "Bookmarks": "Dấu trang",
   "Answer": "Câu trả lời",
   "This answer is no longer in the chat.": "Câu trả lời này không còn trong chat.",
+  "This answer is no longer in the chat, so its bookmark was removed.": "Câu trả lời này không còn trong chat nên đánh dấu của nó đã được bỏ.",
   "{0} bookmarks in this chat": "{0} dấu trang trong chat này"
 }
