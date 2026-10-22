@@ -1084,7 +1084,8 @@ export function createFilePanel(options: FilePanelOptions) {
         row.title = `${gitStatusLabel(change.status)} · ${change.previousPath ? `${change.previousPath} → ` : ''}${change.path} · ${stats.textContent ?? ''}`;
         row.setAttribute('aria-label', row.title);
         row.addEventListener('click', () => void openGitDiff(change));
-        if (status === 'U' && !gitSnapshot.comparison && !project.remote) {
+        // A name no single .gitignore line can hold (a line break) gets no menu rather than one that does nothing.
+        if (status === 'U' && !gitSnapshot.comparison && !project.remote && gitignoreEntry(change.path, false)) {
           row.addEventListener('contextmenu', event => {
             event.preventDefault();
             // The context-menu key reports no pointer position; the menu then opens below the row.
