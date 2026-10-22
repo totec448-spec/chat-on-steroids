@@ -4188,7 +4188,7 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
   // A table ChatGPT drew in full but wrote with only its header (#1477) gets its recorded rows.
   let text = completedDilText(withoutMessageReaction(source), capture).slice(0, MAX_RENDERED_HTML_CHARS);
   const charts: HTMLElement[] = [];
-  const codeExamples = markdownCodeRanges(text);
+  const codeExamples = text.includes('\uE200genui\uE202') ? markdownCodeRanges(text) : [];
   // This provider chart carries its own data in the canonical answer. Unlike a captured
   // drawing, that data is tied to the current revision and needs no recovery guesswork.
   text = text.replace(/\uE200genui\uE202([^\uE200\uE201]{1,16000})\uE201/g, (match, raw: string, at: number) => {
