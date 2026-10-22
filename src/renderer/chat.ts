@@ -4261,7 +4261,7 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
   drawMath(box, math);
   writingPanels(box, writing);
   if (charts.length) for (const paragraph of box.querySelectorAll('p')) {
-    const index = paragraph.textContent?.match(/^\uE030(\d{1,2})\uE031$/)?.[1];
+    const index = paragraph.textContent?.match(/^\uE030(\d+)\uE031$/)?.[1];
     if (index !== undefined && charts[Number(index)]) paragraph.replaceWith(charts[Number(index)]!);
   }
   if (capture?.text && !capture.truncated && capture.text.length <= MAX_RENDERED_HTML_CHARS) {
