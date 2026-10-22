@@ -9,6 +9,8 @@ import { parseRemote, remoteIdentity, sftpFor } from './remote/ssh.js';
 import { SftpError, type SftpClient } from './remote/sftp.js';
 import type { RemoteFolder, Root } from '../shared/types.js';
 import { bindSessionProject, findSessionByConversation, getSession } from './session/store.js';
+import { workspaceForChat } from './workspace.js';
+import { logInfo } from './logger.js';
 import { CHATGPT_PROJECT_ID, PROJECT_COLORS, type ChatgptProjectLink, type LocalProject, type ProjectColor } from '../shared/projects.js';
 
 const at = z.number().finite().nonnegative();
@@ -62,6 +64,7 @@ export function addProject(folderPath: string): Promise<LocalProject> {
     const project: LocalProject = { id: randomUUID(), name: (path.basename(resolved.real) || resolved.real).slice(0, 160), path: resolved.real, createdAt: Date.now(),
       chatgpt: { state: 'requested', requestId: randomUUID(), updatedAt: Date.now() } };
     await writeDurableNow('projects', [...projects, project]);
+    logInfo(`projects: project ${project.id} asks for a new ChatGPT Project`);
     return project;
   });
   mutations = operation.catch(() => undefined);
@@ -109,6 +112,7 @@ export function addRemoteProject(address: string, folder: string, deps: { connec
     const project: LocalProject = { id: randomUUID(), name: (path.posix.basename(realPath) || identity).slice(0, 160), path: identity, remote,
       createdAt: Date.now(), chatgpt: { state: 'requested', requestId: randomUUID(), updatedAt: Date.now() } };
     await writeDurableNow('projects', [...projects, project]);
+    logInfo(`projects: project ${project.id} asks for a new ChatGPT Project`);
     return project;
   });
   mutations = operation.catch(() => undefined);
@@ -205,6 +209,30 @@ export async function inheritSessionProject(sessionId: string, primeConversation
   await assignSessionProject(sessionId, prime.projectId);
 }
 
+/**
+ * A chat the person started on chatgpt.com inside the native ChatGPT Project of a CoS project
+ * (#1744) joins that project, as one started from the project's New chat does, so its commands
+ * run in the project's folder rather than the first approved one. Only a chat with no project yet
+ * that has not already worked in a folder, never a worker or helper (they follow their prime), and
+ * only when exactly one listed project is linked to that ChatGPT Project.
+ */
+export async function bindChatToLinkedProject(sessionId: string, chatgptProjectId: string): Promise<'bound' | 'kept' | 'none' | 'ambiguous'> {
+  if (!CHATGPT_PROJECT_ID.test(chatgptProjectId)) return 'none';
+  const session = await getSession(sessionId);
+  if (!session) return 'none';
+  if (session.projectId || session.origin?.kind === 'worker' || session.origin?.kind === 'helper') return 'kept';
+  if (workspaceForChat(session.conversationId ?? null)) return 'kept';
+  const linked = (await listProjects()).filter(project =>
+    !project.ungrouped && project.chatgpt?.state === 'linked' && project.chatgpt.id === chatgptProjectId);
+  if (linked.length !== 1) {
+    if (linked.length > 1) logInfo(`projects: chat ${sessionId} is in ChatGPT Project ${chatgptProjectId}, which ${linked.length} projects are linked to; it stays outside them`);
+    return linked.length ? 'ambiguous' : 'none';
+  }
+  await assignSessionProject(sessionId, linked[0]!.id);
+  logInfo(`projects: chat ${sessionId} was started in ChatGPT Project ${chatgptProjectId}, so it joins project ${linked[0]!.id}`);
+  return 'bound';
+}
+
 /** A page may hold an unarmed claim this long before the request is offered to another. */
 export const PROJECT_CREATE_CLAIM_MS = 60_000;
 /** An armed creation whose id has not come back by then may or may not exist in ChatGPT. */
@@ -227,6 +255,11 @@ function updateChatgptLink(match: (link: ChatgptProjectLink, project: LocalProje
     if (!changed) return null;
     const updated: LocalProject = { ...project, chatgpt: changed };
     await writeDurableNow('projects', projects.map(row => row.id === project.id ? updated : row));
+    // Every step, so a Project that never appeared shows where it stopped (#1759); ids only, no names.
+    // A page reports the error text: one line, no control characters, so it can never split or forge a line.
+    // eslint-disable-next-line no-control-regex
+    const why = 'error' in changed ? `: ${changed.error.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200)}` : '';
+    logInfo(`projects: project ${project.id}'s ChatGPT Project went from ${project.chatgpt.state} to ${changed.state}${why}`);
     for (const listener of linkListeners) { try { listener(); } catch { /* presentation only */ } }
     return updated;
   });
