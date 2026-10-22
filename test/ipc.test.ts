@@ -2404,6 +2404,17 @@ it.runIf(process.platform !== 'win32')('writes through a symlink chosen in the s
   expect(getLog().at(-1)).toMatchObject({ level: 'warn', message: 'code save: refused, the chosen file could not be resolved (ENOENT)' });
 });
 
+it('refuses a usage export without a positive, finite divisor, and logs why', async () => {
+  const { getLog } = await import('../src/main/logger.js');
+  const dialogs = vi.mocked(dialog.showSaveDialog).mock.calls.length;
+  for (const payload of [null, {}, { divisor: 0 }, { divisor: -2 }, { divisor: Number.POSITIVE_INFINITY }, { divisor: '2' }]) {
+    const before = getLog().length;
+    expect(await handlers.get('usage:export')!(null, payload)).toMatchObject({ ok: false });
+    expect(getLog().slice(before)).toEqual([expect.objectContaining({ level: 'warn', message: 'usage export: refused, the page sent no positive, finite token divisor' })]);
+  }
+  expect(vi.mocked(dialog.showSaveDialog).mock.calls.length).toBe(dialogs);
+});
+
 describe('native worker checkout cleanup confirmation', () => {
   const offer = {
     runId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
