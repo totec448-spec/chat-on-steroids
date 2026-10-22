@@ -338,12 +338,17 @@ export function initUsage(): void {
   const exportButton = $<HTMLButtonElement>('exportUsage');
   exportButton.addEventListener('click', async () => {
     if (exportButton.disabled) return;
+    const restoreFocus = document.activeElement === exportButton;
     exportButton.disabled = true;
     // Not run(): main's error names the chosen file's full path, which the page never shows.
     try {
       const reply = await window.api.exportUsage(formula.divisor);
       if (!reply.ok) toast(t('Usage could not be exported.'));
       else if (reply.data.saved) toast(t('Saved {0}', [reply.data.name]));
-    } catch { toast(t('Usage could not be exported.')); } finally { exportButton.disabled = false; }
+    } catch { toast(t('Usage could not be exported.')); } finally {
+      exportButton.disabled = false;
+      // Disabling the button dropped keyboard focus to the page; give it back unless the person moved it.
+      if (restoreFocus && (document.activeElement === exportButton || document.activeElement === document.body || !document.activeElement)) exportButton.focus();
+    }
   });
 }

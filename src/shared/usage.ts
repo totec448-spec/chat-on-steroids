@@ -129,7 +129,7 @@ function usageCsvTime(time: number): string {
 /** RFC 4180 quoting; a text cell that a spreadsheet would run as a formula starts with `'`. */
 function usageCsvCell(value: string | number | null): string {
   if (value === null) return '';
-  const text = typeof value === 'number' ? String(value) : /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+  const text = typeof value === 'number' ? String(value) : /^[=+\-@\t\r\n]/.test(value) ? `'${value}` : value;
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 /**

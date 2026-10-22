@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { beforeEach, expect, it, vi } from 'vitest';
 import type { UsageOverview } from '../src/shared/usage.js';
 
@@ -6,8 +7,10 @@ const electron = vi.hoisted(() => ({
   app: { getPath: vi.fn(() => '/downloads') }
 }));
 const usage = vi.hoisted(() => ({ usageOverview: vi.fn() }));
-const files = vi.hoisted(() => ({ writeFile: vi.fn(async () => undefined) }));
+const files = vi.hoisted(() => ({ writeFile: vi.fn(async () => undefined), rename: vi.fn(async () => undefined), rm: vi.fn(async () => undefined) }));
+const logger = vi.hoisted(() => ({ logWarn: vi.fn() }));
 vi.mock('electron', () => electron);
+vi.mock('../src/main/logger.js', () => logger);
 vi.mock('../src/main/session/usage.js', () => usage);
 vi.mock('node:fs', () => ({ promises: files }));
 
@@ -44,7 +47,11 @@ it('saves daily estimated tokens, the last week of sends and the latest limits a
     filters: [{ name: 'CSV files', extensions: ['csv'] }]
   });
   const [file, csv, encoding] = files.writeFile.mock.calls[0]! as unknown as [string, string, string];
-  expect([file, encoding]).toEqual(['/downloads/usage.csv', 'utf8']);
+  // The whole file goes beside the chosen one first, then replaces it.
+  expect(file).toBe(path.join('/downloads', path.basename(file)));
+  expect(path.basename(file)).toMatch(/^\.usage\.csv\.[0-9a-f-]{36}\.tmp$/);
+  expect(encoding).toBe('utf8');
+  expect(files.rename).toHaveBeenCalledWith(file, '/downloads/usage.csv');
   // Excel reads UTF-8 only with a byte-order mark; rows end in CRLF as RFC 4180 has it.
   expect(csv.startsWith('﻿Chat On Steroids usage export,')).toBe(true);
   const lines = rows(csv);
@@ -73,11 +80,14 @@ it('follows the page divisor, so the file shows the tokens the page shows', () =
 
 it('quotes commas and quotes, and keeps a spreadsheet from running a reported name as a formula', () => {
   const lines = rows(usageCsv({ ...overview, days: [], messages: { through: at(20, 12), days: [] }, limits: [
-    { ...overview.limits[0]!, model: '=HYPERLINK("x"),1' }, { ...overview.limits[0]!, model: '-2+3' }
+    { ...overview.limits[0]!, model: '=HYPERLINK("x"),1' }, { ...overview.limits[0]!, model: '-2+3' },
+    // Some spreadsheets skip a leading line break and run what follows.
+    { ...overview.limits[0]!, model: '\n=1+1' }
   ] }, 2, at(20)));
-  expect(lines.slice(6, 8)).toEqual([
+  expect(lines.slice(6, 9)).toEqual([
     `"'=HYPERLINK(""x""),1",model,12,,3,2026-10-21 09:05,2026-10-20 11:58`,
-    `'-2+3,model,12,,3,2026-10-21 09:05,2026-10-20 11:58`
+    `'-2+3,model,12,,3,2026-10-21 09:05,2026-10-20 11:58`,
+    `"'\n=1+1",model,12,,3,2026-10-21 09:05,2026-10-20 11:58`
   ]);
 });
 
@@ -86,4 +96,16 @@ it('writes nothing when the save dialog is cancelled', async () => {
   await expect(exportUsageCsv(2, null)).resolves.toEqual({ saved: false });
   expect(files.writeFile).not.toHaveBeenCalled();
   expect(usage.usageOverview).not.toHaveBeenCalled();
+});
+
+// Writing the chosen file in place would empty an earlier export before the new one is whole.
+it('leaves an earlier export whole when the write fails, and logs why without the path', async () => {
+  electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/usage.csv' });
+  files.writeFile.mockRejectedValueOnce(Object.assign(new Error("ENOSPC: no space left on device, open '/downloads/.usage.csv.tmp'"), { code: 'ENOSPC' }));
+  await expect(exportUsageCsv(2, null)).rejects.toThrow('ENOSPC');
+  const [file] = files.writeFile.mock.calls[0]! as unknown as [string];
+  expect(file).not.toBe('/downloads/usage.csv');
+  expect(files.rename).not.toHaveBeenCalled();
+  expect(files.rm).toHaveBeenCalledWith(file, { force: true });
+  expect(logger.logWarn).toHaveBeenCalledWith('Usage export not saved: ENOSPC');
 });
