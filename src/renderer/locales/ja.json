@@ -1324,6 +1324,7 @@
   "Create this project in ChatGPT again": "このプロジェクトを ChatGPT でもう一度作成",
   "Creating this project in ChatGPT…": "このプロジェクトを ChatGPT に作成しています…",
   "This project's ChatGPT Project isn't available. Retry it from the project's menu.": "このプロジェクトの ChatGPT プロジェクトは利用できません。プロジェクトのメニューから再試行してください。",
+  "This chat's project was removed from the sidebar. Add its folder again to send this message, or cancel it.": "このチャットのプロジェクトはサイドバーから削除されました。このメッセージを送信するにはフォルダーをもう一度追加するか、メッセージを取り消してください。",
   "Sending in a moment…": "まもなく送信します…",
   "Image cleanup failed. No further cleanup was requested.": "画像の削除に失敗しました。追加の削除は要求していません。",
   "Collapse a folder before expanding more folders.": "さらにフォルダーを展開する前に、別のフォルダーを折りたたんでください。",
