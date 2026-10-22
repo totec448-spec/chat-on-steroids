@@ -66,7 +66,8 @@ export function setBookmark(id: string, mark: { messageId: string; excerpt: stri
     if (on) {
       if (kept.length === marks.length && marks.length >= MAX_BOOKMARKS) {
         logInfo(`bookmarks: chat ${id} already keeps ${MAX_BOOKMARKS} bookmarks, so a new one was refused`);
-        throw new Error(`A chat keeps at most ${MAX_BOOKMARKS} bookmarks`);
+        // Literal, so the window finds its translation (the limit test keeps it equal to MAX_BOOKMARKS).
+        throw new Error('A chat keeps at most 200 bookmarks');
       }
       const previous = marks.find(other => other.messageId === messageId);
       kept.push(previous ?? { messageId, excerpt: oneLine(mark.excerpt), messageTime: Number.isFinite(mark.messageTime) ? mark.messageTime : 0, at: Date.now() });
