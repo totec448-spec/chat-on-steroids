@@ -157,6 +157,31 @@ it('lists right terminal tabs remembered from the last launch as dock tabs marke
   expect(right.querySelector('[data-terminal-id=pty-1] [role=tab]')?.textContent).toBe('project · bash');
 });
 
+it('tells the terminal where a moved terminal tab sits among the terminals, so a restart keeps the order', () => {
+  const { docks } = setup();
+  const terminalTabs = ['pty-1', 'pty-2'].map(id => ({ id, title: id, exited: false }));
+  const moveTab = vi.fn();
+  docks.registerTerminal({ show: vi.fn(), hide: vi.fn(), canCreate: () => true, newTab: () => null,
+    tabs: () => terminalTabs, selectTab: vi.fn(), closeTab: vi.fn(), moveTab }, { show: vi.fn(), hide: vi.fn() });
+  docks.register('files', 'Files', 'i-folder', vi.fn(), vi.fn(), () => true);
+  docks.activate('files');
+  const right = document.getElementById('workDockRight')!;
+  expect([...right.querySelectorAll<HTMLElement>('.work-dock-tab')].map(tab => tab.dataset.terminalId ?? 'files'))
+    .toEqual(['pty-1', 'pty-2', 'files']);
+  right.querySelector<HTMLButtonElement>('[data-terminal-id=pty-1] [role=tab]')!.click();
+  const press = (key: 'ArrowLeft' | 'ArrowRight') => right.querySelector('[role=tablist]')!
+    .dispatchEvent(new dom.window.KeyboardEvent('keydown', { key, ctrlKey: true, shiftKey: true, bubbles: true }));
+  press('ArrowRight');
+  expect([...right.querySelectorAll<HTMLElement>('.work-dock-tab')].map(tab => tab.dataset.terminalId ?? 'files'))
+    .toEqual(['pty-2', 'pty-1', 'files']);
+  expect(moveTab).toHaveBeenLastCalledWith('pty-1', 1);
+  // Past the tool tab, the index counts terminals only.
+  press('ArrowRight'); press('ArrowRight');
+  expect(moveTab).toHaveBeenLastCalledWith('pty-1', 1);
+  press('ArrowLeft'); press('ArrowLeft'); press('ArrowLeft');
+  expect(moveTab).toHaveBeenLastCalledWith('pty-1', 0);
+});
+
 it('hides the old right view when a recorded edit directly adopts Review', () => {
   const { docks } = setup();
   const hideFiles = vi.fn();

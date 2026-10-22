@@ -226,6 +226,8 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
     tabs(): WorkspaceTerminalTab[] { return [...tabs.values()].map(tab => ({ id: tab.id, title: tab.title, exited: tab.exited, previous: tab.previous })); },
     selectTab(id: string): void { if (!tabs.has(id)) return; selected = id; paint(); fit(); if (open) focusTab(tabs.get(id)); },
     closeTab,
+    /** Moves a tab among this dock's terminals; the right dock calls it when a terminal tab is dragged past tools. */
+    moveTab,
     hide(): void { setOpen(false); },
     visible(): boolean { return open; },
     hasTabs(): boolean { return tabs.size > 0; }
