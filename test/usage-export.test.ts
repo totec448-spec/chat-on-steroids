@@ -19,7 +19,7 @@ const { usageCsv } = await import('../src/shared/usage.js');
 
 const at = (day: number, hour = 0, minute = 0) => new Date(2026, 9, day, hour, minute).getTime();
 const overview: UsageOverview = {
-  contextTokenCap: 256_000, tokens: 0, models: [], sessions: 2,
+  contextTokenCap: 256_000, tokens: 0, models: [], sessions: 2, projects: [],
   days: [
     { date: '2026-09-30', tokens: 1000.4, models: [] },
     { date: '2026-10-19', tokens: 250_000, models: [] }
