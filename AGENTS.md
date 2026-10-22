@@ -4477,7 +4477,7 @@ restores both. Appearance → Accessibility → Announce finished replies (`ui.a
 unless true, not part of Reset) puts "Reply finished" in the polite `#turnAnnounce` region when a
 live delta of the open chat carries a completed `turn_end`, also when the same delta starts the
 next turn; a `user_message` or `turn_start`, and every chat switch, empty it first, and words still
-in the region are emptied and written again in a later task, unless a later clear or chat switch came first. A chat opened after its reply finished, or a stopped turn, says nothing.
+in the region are emptied and written again in a later task, unless a later clear or chat switch came first. Several completed turns in one delta are each written in turn, one second apart, and a chat switch drops the ones still waiting. A chat opened after its reply finished, or a stopped turn, says nothing.
 The Appearance sample chat reflects the same semantic color and typography tokens immediately;
 it contains no session data. The composer context dialog and accessible label identify local
 estimates; its toolbar toggles percentage/token values. Compact and Cancel remain the original
