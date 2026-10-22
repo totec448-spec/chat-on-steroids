@@ -8052,6 +8052,31 @@ describe('charts, diagrams and illustrated Markdown from recorded DIL', () => {
     expect(root.lastElementChild?.textContent).toBe('After the chart.');
   });
 
+  it.each([
+    { opening: '```json', closing: '```' },
+    { opening: '~~~~example', closing: '~~~~' }
+  ])('keeps a chart example literal inside $opening but draws one outside the fence', async ({ opening, closing }) => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Example code:\n\n${opening}\n${widget}\n${closing}\n\n${widget}\n\nAfter.`)]);
+    const root = message(w);
+    expect(root.querySelector('pre code')?.textContent).toContain(widget);
+    expect(root.querySelector('pre code')?.textContent).not.toContain('\uE030');
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(root.lastElementChild?.textContent).toBe('After.');
+  });
+
+  it('keeps a chart example literal in an unclosed Markdown fence', async () => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Example:\n\n\`\`\`json\n${widget}`)]);
+    const root = message(w);
+    expect(root.querySelector('pre code')?.textContent).toContain(widget);
+    expect(root.querySelector('.markdown-dil-chart')).toBeNull();
+  });
+
   it('formats chart values, axis guides, tooltips and accessibility text in the chosen app language', async () => {
     const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
       chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value', label: 'Vergleich' }],
