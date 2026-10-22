@@ -2327,6 +2327,8 @@ it('leaves a code file the person chose to replace whole when writing the new on
   }
   expect(await fs.readFile(target, 'utf8')).toBe('const kept = true;\n');
   expect(await fs.readdir(folder)).toEqual(['kept.ts']);
+  const { getLog } = await import('../src/main/logger.js');
+  expect(getLog().at(-1)).toMatchObject({ level: 'warn', message: 'code save: refused, the file could not be written or replaced (ENOSPC)' });
 });
 
 it.runIf(process.platform !== 'win32')('keeps a replaced script runnable when a code block is saved over it', async () => {
@@ -2377,6 +2379,29 @@ it.runIf(process.platform !== 'win32')('leaves a code file alone when its permis
   expect(await fs.readdir(folder)).toEqual(['run.sh']);
   const { getLog } = await import('../src/main/logger.js');
   expect(getLog().at(-1)).toMatchObject({ level: 'warn', message: "code save: refused, the chosen file's permissions could not be read (EIO)" });
+});
+
+it.runIf(process.platform !== 'win32')('writes through a symlink chosen in the save dialog instead of replacing the link', async () => {
+  const folder = path.join(dir, 'code-symlink');
+  const real = path.join(folder, 'real.ts');
+  const link = path.join(folder, 'link.ts');
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(real, 'const old = true;\n', 'utf8');
+  await fs.symlink('real.ts', link);
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: link } as never);
+  expect(await handlers.get('code:save')!(null, { text: 'const fresh = true;\n', name: 'snippet.ts' })).toEqual({ ok: true, data: { done: 'saved', name: 'link.ts' } });
+  expect((await fs.lstat(link)).isSymbolicLink()).toBe(true);
+  expect(await fs.readFile(real, 'utf8')).toBe('const fresh = true;\n');
+  expect((await fs.readdir(folder)).sort()).toEqual(['link.ts', 'real.ts']);
+  // A link to nothing has no file to keep whole: the save stops and says why.
+  const dangling = path.join(folder, 'dangling.ts');
+  await fs.symlink('missing.ts', dangling);
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: dangling } as never);
+  expect(await handlers.get('code:save')!(null, { text: 'x', name: 'snippet.ts' })).toMatchObject({ ok: false });
+  expect((await fs.lstat(dangling)).isSymbolicLink()).toBe(true);
+  expect((await fs.readdir(folder)).sort()).toEqual(['dangling.ts', 'link.ts', 'real.ts']);
+  const { getLog } = await import('../src/main/logger.js');
+  expect(getLog().at(-1)).toMatchObject({ level: 'warn', message: 'code save: refused, the chosen file could not be resolved (ENOENT)' });
 });
 
 describe('native worker checkout cleanup confirmation', () => {
