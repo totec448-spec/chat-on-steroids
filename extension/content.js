@@ -13602,9 +13602,12 @@
         // after-turn pickups keep their own withdrawal below. Send can give up before the app
         // answers; its answer comes first, so a report never reaches the app ahead of its own
         // record, and an explicit no needs none. A lost answer may still have been recorded as yes.
+        // No user row is compared: a fresh tab draws the chat's earlier questions after Send began.
+        // This page never clicked, and withdraw() takes back only the exact text it inserted, never
+        // touched by a person; a Send by anyone else would have taken that text or touched it.
         const answer = authorizing ? await Promise.resolve(authorization).catch(() => null) : null;
         if (authorizing && answer?.data?.ok !== false && !sendAttempted && !receipt && !input.recovery && !claimedSilence &&
-            onTarget() && CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id === previousUserId) {
+            onTarget()) {
           let withdrawn = false;
           try { withdrawn = draft.withdraw(); } catch { /* Text not proven ours stays where it is. */ }
           if (withdrawn) return fail('Native Send was withdrawn before its click.');
