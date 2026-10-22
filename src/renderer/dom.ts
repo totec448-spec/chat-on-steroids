@@ -29,6 +29,7 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-chat': 'chat-circle',
   'i-check': 'check',
   'i-check-circle': 'check-circle',
+  'i-checks': 'checks',
   'i-clock': 'clock',
   'i-copy': 'copy',
   'i-dock-expand': 'corners-out',
