@@ -4819,6 +4819,7 @@ it('marks chats that hold an unsent draft, and gives drafts back after a restart
   row(second.id).querySelector<HTMLElement>('[data-session-select]')!.click(); await settle();
   expect(row(first.id).querySelector('.sess-draft-mark')).not.toBeNull();
   expect(row(first.id).title).toContain('Draft');
+  expect(row(first.id).querySelector('[data-session-select] .sess-draft-mark')!.getAttribute('aria-label')).toBe('Draft');
   expect(row(second.id).querySelector('.sess-draft-mark')).toBeNull();
 
   w.dispatchEvent(new w.Event('pagehide'));

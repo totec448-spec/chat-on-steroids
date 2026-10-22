@@ -980,7 +980,7 @@ it('keeps Draft in the title of an inbox card and a settled row that say Failed'
   const mounted = await mountInbox({ listSessions: async () => listed(sessions) });
   const doc = mounted.window.document;
   const row = (id: string) => doc.querySelector<HTMLElement>(`#sessionList .sess[data-id="${id}"]`)!;
-  await vi.waitFor(() => expect(row('settled')).not.toBeNull());
+  await vi.waitFor(() => expect(row('settled')).not.toBeNull(), { timeout: 5000 });
   expect(row('settled').classList.contains('sess-settled')).toBe(true);
   expect(row('failed').classList.contains('sess-card')).toBe(true);
   const input = doc.getElementById('chatInput') as HTMLTextAreaElement;

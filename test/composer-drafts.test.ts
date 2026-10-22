@@ -60,6 +60,12 @@ it('ignores broken storage and keeps only the newest drafts that fit', () => {
   expect(saved[0]![0]).toBe('chat-1');
   expect(saved.at(-1)).toEqual(['newest', 'kept']);
 
+  // Visiting chats records their blank composers; only drafts with text count toward the 100.
+  const visited = fixture();
+  visited.set('older', 'kept');
+  for (let index = 0; index < 150; index++) visited.set(`visited-${index}`, '');
+  expect(stored()).toEqual([['older', 'kept']]);
+
   const huge = fixture();
   huge.set('older', 'short');
   huge.set('pasted', 'x'.repeat(1_000_001));
