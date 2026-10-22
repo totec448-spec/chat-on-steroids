@@ -3072,5 +3072,5 @@
   "Drafts that wait": "Rascunhos que esperam",
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "Um lápis marca os chats com uma mensagem não enviada, e os rascunhos voltam após reiniciar.",
   "A better Review": "Uma Revisão melhor",
-  "See a merge conflict's three sides, and add an untracked file to .gitignore.": "Veja os três lados de um conflito de merge e adicione um arquivo não rastreado ao .gitignore."
+  "Right-click an untracked file to add it, or its folder, to .gitignore.": "Clique com o botão direito em um arquivo não rastreado para adicionar o arquivo ou a pasta dele ao .gitignore."
 }

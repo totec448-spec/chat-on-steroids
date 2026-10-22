@@ -2976,5 +2976,5 @@
   "Drafts that wait": "等你回來的草稿",
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "鉛筆標出有未傳送訊息的聊天，重新啟動後草稿也會回來。",
   "A better Review": "更好的檢閱",
-  "See a merge conflict's three sides, and add an untracked file to .gitignore.": "查看合併衝突的三方內容，並把未追蹤的檔案加入 .gitignore。"
+  "Right-click an untracked file to add it, or its folder, to .gitignore.": "在未追蹤的檔案上按右鍵，即可將它或其所在資料夾加入 .gitignore。"
 }

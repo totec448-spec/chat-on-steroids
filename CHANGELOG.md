@@ -11,7 +11,7 @@ the app refuses the extension and asks you to reload the matching copy.
 
 ## [2.1.45] — Chat groups, bookmarks, drafts that wait for you, and a better Review
 
-Sort a project's chats into groups, bookmark answers to find them again, and see at a glance which chats hold an unsent message. Review shows merge conflicts side by side, Compact & Resume works on the Free plan, and ChatGPT asks for permission less often.
+Sort a project's chats into groups, bookmark answers to find them again, and see at a glance which chats hold an unsent message. Review can add files to .gitignore, Compact & Resume works on the Free plan, and ChatGPT asks for permission less often.
 
 ### 👉 After updating
 
@@ -22,7 +22,7 @@ Sort a project's chats into groups, bookmark answers to find them again, and see
 - **Chat groups.** A project's ⋯ menu has **New group**. Move a chat into a group from its own ⋯ menu (**Move to group**), drag groups into the order you like, and rename or delete a group from its menu. Deleting a group keeps its chats in the project.
 - **Bookmarks.** Every finished answer has a bookmark button next to Copy. Once a chat has bookmarks, its header shows them with a count; pick one to jump back to that answer.
 - **Drafts that wait for you.** A chat with a half-written message shows a small pencil in the sidebar, and drafts come back after a restart or an update.
-- **Review: merge conflicts and .gitignore.** A conflicted file shows its base, ours and theirs side by side. Right-click an untracked file to add it, or its folder, to .gitignore.
+- **Review: add to .gitignore.** Right-click an untracked file to add it, or its folder, to .gitignore.
 - **Code blocks** show their language, wrap long lines on request, and can be saved as a file.
 - **Terminal:** select output and send it to the message box as a code block. Terminal tabs come back after a restart; press **Start shell here** to open one again.
 - **Usage by project, and as a file.** Settings → Usage shows how much went to each project, and **Export CSV** saves the page as a spreadsheet.
@@ -47,6 +47,7 @@ Sort a project's chats into groups, bookmark answers to find them again, and see
 - **A new chat waiting for its first message** was shown as "blocked · not a chat" under Unattributed activity. It now shows as a normal chat in its project.
 - **A new chat's first message after its project was removed** waited without saying why. It now says to add the folder again or cancel the message.
 - **A bookmark whose answer is no longer in the chat** can be removed: opening it removes it and says so.
+- **A message to a chat whose ChatGPT tab was closed** could wait 15 minutes and then say it "may already have been sent", without being sent. It now goes out.
 
 ## [2.1.44] — Pictures with /image, keyboard shortcuts, and a quicker message after Stop
 
