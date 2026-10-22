@@ -14,15 +14,21 @@ import type { ReasoningEffort } from '../shared/session.js';
 
 type Selection = { model: string | null; reasoningEffort: ReasoningEffort | null };
 
-/** The last decision logged: each resume can be rendered twice, and one line says it. */
-let logged: string | null = null;
+/** Decisions already logged, per resume: each resume's command is rendered twice, one line says it. */
+const logged = new Set<string>();
+let key = '';
 function note(line: string): void {
-  if (line === logged) return;
-  logged = line;
+  const entry = `${key}\u0000${line}`;
+  if (logged.has(entry)) return;
+  logged.add(entry);
+  // Bounded: a long-running app only needs to dedupe the resumes still being handed out.
+  if (logged.size > 64) logged.delete(logged.values().next().value!);
   logInfo(line);
 }
 
-export function resumeModelSelection(requested: { model: string; reasoningEffort: ReasoningEffort | null } | null | undefined): Selection {
+/** `resume` names the resume being handed out, so each one logs its own decision once. */
+export function resumeModelSelection(requested: { model: string; reasoningEffort: ReasoningEffort | null } | null | undefined, resume = ''): Selection {
+  key = resume;
   if (!requested) return { model: null, reasoningEffort: null };
   const catalog = getChatModels();
   if (!catalog.models.length) {
@@ -42,4 +48,4 @@ export function resumeModelSelection(requested: { model: string; reasoningEffort
   return { model: requested.model, reasoningEffort: requested.reasoningEffort };
 }
 
-export function resetResumeModelForTests(): void { logged = null; }
+export function resetResumeModelForTests(): void { logged.clear(); }

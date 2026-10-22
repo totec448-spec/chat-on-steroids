@@ -51,6 +51,16 @@ it('drops a model or reasoning the account does not offer, and says so', () => {
   ]);
 });
 
+it('logs each resume once, however often its command is rendered', () => {
+  state.models = [];
+  state.catalogState = 'unavailable';
+  const requested = { model: 'gpt-5-6-thinking', reasoningEffort: 'high' as const };
+  resumeModelSelection(requested, 'resume-a');
+  resumeModelSelection(requested, 'resume-a');
+  resumeModelSelection(requested, 'resume-b');
+  expect(logged).toHaveLength(2);
+});
+
 it('asks for nothing when the source chat had no known model', () => {
   expect(resumeModelSelection(null)).toEqual({ model: null, reasoningEffort: null });
   expect(resumeModelSelection(undefined)).toEqual({ model: null, reasoningEffort: null });
