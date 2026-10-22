@@ -1,5 +1,6 @@
 import { nextWorkerArchive, onWorkerChatReady, readyForWake, settleWorkerArchive } from './worker-archive.js';
-import { considerTurnRotation, noteRotationDeclined, type RotationDeps } from './turn-rotation.js';
+import { considerTurnRotation, noteRotationDeclined, noteStopFallback, stopFallbackDue, type RotationDeps } from './turn-rotation.js';
+import { armRotationFence, clearRotationFence, rotationFenced, rotationFenceTurn } from './rotation-fence.js';
 import { conversationProgress } from './session/progress.js';
 import { cosSignInTransfer, SignInTransferError } from './cos-browser/sign-in-transfer.js';
 import { externalBrowserProof, noteExternalInstalled, noteExternalSignedIn, resetBrowserProofForTests } from './browser-proof.js';
@@ -21,12 +22,12 @@ import { injectedUserMessage, recordedRequestTurn, responseTurnId, type Timeline
 import type { SessionSummary } from '../shared/session.js';
 import { messageReferences } from '../shared/session.js';
 import { turnTrace } from '../shared/turn-trace.js';
-import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, fileRotationInput, rotationDelivery, withdrawUnsentRotation, type InputActivity } from './session/input.js';
+import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, fileRotationInput, fileRotationContinueAfterStop, rotationDelivery, withdrawUnsentRotation, type InputActivity } from './session/input.js';
 import { callHoldOpen, holdCalls } from './rotation-hold.js';
 import { authorizedPluginRefreshPublications, hasRequestedPluginRefresh, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
 import { attachBrowserWake, wakeBrowserWork } from './browser-wake.js';
 import { tunnelRouteSettling } from './tunnel/route-settle.js';
-import { armProjectCreate, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, markProjectGone, pendingProjectCreates } from './projects.js';
+import { armProjectCreate, bindChatToLinkedProject, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, markProjectGone, pendingProjectCreates } from './projects.js';
 import { wakeBrowserUrl } from './browser-startup.js';
 let browserWake: ReturnType<typeof attachBrowserWake> | null = null;
 import { browserWindowBounds, currentBrowserWorkArea } from './browser-window-layout.js';
@@ -261,6 +262,8 @@ export const STALE_SWARM_MS = 2 * 60_000;
  */
 /** Per-conversation floor between browser reload/open actions, regardless of why they were requested. */
 export const BROWSER_RECOVERY_COOLDOWN_MS = 3 * 60_000;
+/** Navigation normally settles within seconds; retry after 20 seconds without stacking reloads. */
+export const NAVIGATION_RECOVERY_COOLDOWN_MS = 20_000;
 const STALE_SWARM_SWEEP_MS = 30_000;
 /** /events batches currently between parse and durable/session+worker lifecycle completion. */
 let observationWritesInFlight = 0;
@@ -1302,19 +1305,28 @@ const EXTENSION_UPDATE_HOLDS: Record<string, string> = {
   'browser-updates-itself': 'Firefox updates the signed add-on itself (about:addons → Check for Updates)'
 };
 /**
- * The hold last logged per browser. With two browsers reporting in turn, one shared value made the
- * browser without a hold reset the other's, and the same reason was logged every round (2.1.39).
+ * The hold last logged per browser, for the build this app ships. With two browsers reporting in turn,
+ * one shared value made the browser without a hold reset the other's (2.1.39). A report without a hold
+ * no longer resets it either: Firefox suspends the add-on between polls, each wake first reported no
+ * hold, and the same reason was logged 907 times in 36 hours (VM, 2026-10-21).
  */
-const extensionUpdateHoldLogged = new Map<string, string | null>();
+const extensionUpdateHoldLogged = new Map<string, { reason: string; build: string | null; at: number }>();
+/** The same reason is said again after this long, so a long wait still shows in a recent log. */
+const EXTENSION_UPDATE_HOLD_RELOG_MS = 6 * 60 * 60_000;
 
-/** Logs once per change and browser why an offered extension update is waiting; silence resets it. */
+/** Logs once per browser and shipped build why an offered extension update is waiting, again when the reason changes. */
 export function noteExtensionUpdateHold(hold: unknown, browser: string | null = null): void {
   const reason = typeof hold === 'string' && Object.hasOwn(EXTENSION_UPDATE_HOLDS, hold) ? hold : null;
+  if (!reason) return;
   const key = browser ?? '';
-  if (reason === (extensionUpdateHoldLogged.get(key) ?? null)) return;
-  extensionUpdateHoldLogged.set(key, reason);
+  const build = shippedExtensionBuild();
+  const last = extensionUpdateHoldLogged.get(key);
+  const now = Date.now();
+  if (last && last.reason === reason && last.build === build && now - last.at < EXTENSION_UPDATE_HOLD_RELOG_MS) return;
+  extensionUpdateHoldLogged.delete(key);
+  extensionUpdateHoldLogged.set(key, { reason, build, at: now });
   if (extensionUpdateHoldLogged.size > 16) extensionUpdateHoldLogged.delete(extensionUpdateHoldLogged.keys().next().value!);
-  if (reason) logInfo(`bridge: the browser extension waits to update: ${EXTENSION_UPDATE_HOLDS[reason]}`);
+  logInfo(`bridge: the browser extension waits to update: ${EXTENSION_UPDATE_HOLDS[reason]}`);
 }
 
 /**
@@ -2084,8 +2096,15 @@ async function stopUserAnchor(sessionId: string, turnId: string): Promise<string
   }
   return undefined;
 }
-/** Stop is a request against one exact live turn, never a predicted final boundary. */
-export async function stopSessionTurn(sessionId: string, expectedTurnId: string): Promise<SessionControlsView> {
+/** After a call is recorded, how long until its answer has gone out and the fallback's Stop may follow. */
+const ROTATION_STOP_DELAY_MS = 500;
+
+/**
+ * Stop is a request against one exact live turn, never a predicted final boundary. `rotation`: the
+ * app stops the turn to continue it in a fresh one (`ui.rotateStopFallback`), so Goal or Loop and a
+ * pending Compact & Resume stay as they are.
+ */
+export async function stopSessionTurn(sessionId: string, expectedTurnId: string, options: { rotation?: boolean } = {}): Promise<SessionControlsView> {
   const id = await controlledConversation(sessionId);
   const assertCurrent = async () => {
     const latest = await getSession(sessionId);
@@ -2093,9 +2112,11 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string)
         await conversationWasSuperseded(id) || (await sessionControlsFor(sessionId)).activeTurnId !== expectedTurnId) throw new Error('active_turn_changed');
   };
   await assertCurrent();
-  await setSessionAutomation(sessionId, 'off');
-  await assertCurrent();
-  if (continuationForSession(sessionId)) { await cancelResumeNow(sessionId); await assertCurrent(); }
+  if (!options.rotation) {
+    await setSessionAutomation(sessionId, 'off');
+    await assertCurrent();
+    if (continuationForSession(sessionId)) { await cancelResumeNow(sessionId); await assertCurrent(); }
+  }
   const userMessageId = await stopUserAnchor(sessionId, expectedTurnId);
   await assertCurrent();
   const alreadyQueued = commands.some(entry => entry.spec.type === 'stop' && entry.spec.sessionId === sessionId && entry.spec.turnId === expectedTurnId);
@@ -2114,18 +2135,26 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string)
   await revokeSilenceInputs(sessionId);
   endActivity(id);
   repairsInFlight.delete(id);
-  if (!alreadyQueued) logInfo(`bridge: desktop Stop requested for session ${sessionId}, conversation ${id}, turn ${expectedTurnId}, command ${command.id}; native cancellation is unconfirmed`);
+  if (!alreadyQueued) logInfo(`bridge: ${options.rotation ? 'fresh-turn' : 'desktop'} Stop requested for session ${sessionId}, conversation ${id}, turn ${expectedTurnId}, command ${command.id}; native cancellation is unconfirmed`);
   wakeBrowserWork();
   changed();
   if (!alreadyQueued) {
     const lifecycle = bridgeLifecycleEpoch;
     // The shared startup owner launches only on positive process absence. An
     // existing browser remains the extension election's responsibility.
-    await wakeBrowserUrl(chatUrl(id), false, getConfig().ui.backgroundChats === true, {
-      current: () => bridgeLifecycleEpoch === lifecycle && !bridgeShutdownRequested && commands.includes(command) &&
-        Date.now() < command.createdAt + STOP_COMMAND_TIMEOUT_MS &&
-        liveConversations().some(row => row.sessionId === sessionId && row.conversationId === id && row.activeTurnId === expectedTurnId)
-    });
+    // The Stop is queued and saved by now, so a browser that cannot be opened does not undo it: the
+    // extension takes it when it next connects (or it times out). Throwing here made the opt-in
+    // fallback lift its fence under a Stop still on its way (2.1.44 publish, Linux arm64), and
+    // showed the person an error for a Stop that was in fact requested.
+    try {
+      await wakeBrowserUrl(chatUrl(id), false, getConfig().ui.backgroundChats === true, {
+        current: () => bridgeLifecycleEpoch === lifecycle && !bridgeShutdownRequested && commands.includes(command) &&
+          Date.now() < command.createdAt + STOP_COMMAND_TIMEOUT_MS &&
+          liveConversations().some(row => row.sessionId === sessionId && row.conversationId === id && row.activeTurnId === expectedTurnId)
+      });
+    } catch (error) {
+      logWarn(`bridge: could not open the browser for the Stop of conversation ${id}, turn ${expectedTurnId}: ${error instanceof Error ? error.message : String(error)}; the Stop stays queued for the extension's next pass`);
+    }
   }
   return sessionControlsFor(sessionId);
 }
@@ -3185,6 +3214,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // silence ticket was already filed. Publish its receipt-anchored listening
     // deadline into that same outbox row before acknowledging the observation.
     if (activeUntil.get(id)?.thinkingFailed) await fileSilenceInputTicket(id, Date.now());
+    // #1744: the tab showed this chat inside a ChatGPT Project. When that Project is a CoS
+    // project's own, the chat joins it, so its commands run in that folder (projects.ts decides).
+    const chatgptProject = typeof body['chatgptProject'] === 'string' ? body['chatgptProject'] : null;
+    const recordedSession = committed?.sessionId;
+    // A worker's first events can land before its origin is recorded; workers follow their prime.
+    if (chatgptProject && recordedSession && (!reportedAgent || reportedAgent === PRIME_ID)) {
+      await bindChatToLinkedProject(recordedSession, chatgptProject).catch(error =>
+        logWarn(`projects: chat ${recordedSession} stays outside the project linked to ${chatgptProject}: ${error instanceof Error ? error.message : String(error)}`));
+    }
     if (committed?.wake) wakeBrowserWork();
     return json(res, 200, { sessionId: committed!.sessionId, stored: committed!.stored }, origin);
   }
@@ -8403,6 +8441,17 @@ async function noteRecoveryObservations(
     }
   }
   const lastEnd = ended?.outcome ?? null;
+  // The turn the app stopped to continue in a fresh one (`ui.rotateStopFallback`) shows stopped:
+  // calls may run again, and the continue goes as an ordinary message.
+  const fencedTurn = rotationFenceTurn(conversationId);
+  if (lastEnd === 'stopped' && sessionId && fencedTurn && ended?.turnId === fencedTurn) {
+    clearRotationFence(conversationId);
+    void fileRotationContinueAfterStop(sessionId, fencedTurn).then(row => {
+      logInfo(row ? `turn rotation: ${conversationId} — turn ${fencedTurn} stopped; continuing in a fresh turn`
+        : `turn rotation: ${conversationId} — turn ${fencedTurn} stopped; a message was already waiting, so it goes instead of the continue`);
+      changed();
+    }).catch(error => logWarn(`turn rotation: ${String(error)}`));
+  }
   let terminalGrant = activeUntil.get(conversationId);
   if (thinkingFailed && ended.turnId && sessionId && activity.terminal) {
     // Keep the exact work owner through an error observation, including a reload
@@ -9648,8 +9697,15 @@ async function awaitRotationDelivery(conversationId: string, id: string): Promis
     }
     const waited = Date.now() - started;
     if (state === 'pending' && waited >= rotationHoldMs) {
-      if (await withdrawUnsentRotation(id)) {
-        logInfo(`turn rotation: ${conversationId} — the page did not send the continue within ${Math.round(rotationHoldMs / 1000)} s; the call answers and a later one tries again`);
+      const where = await withdrawUnsentRotation(id);
+      if (where) {
+        const seconds = Math.round(rotationHoldMs / 1000);
+        // Two different faults (2026-10-21): a page that never picked the continue up, often a
+        // browser worker that had stopped answering, and one that picked it up but never reached Send.
+        const why = where === 'queued'
+          ? `the page did not pick up the continue within ${seconds} s (the browser is ${browserWakeConnected() ? 'connected' : 'not connected'})`
+          : `the page picked up the continue but did not reach Send within ${seconds} s`;
+        logInfo(`turn rotation: ${conversationId} — ${why}; the call answers and a later one tries again`);
         changed();
       }
       return;
@@ -9769,6 +9825,20 @@ function noteCallAttribution(
     if (!pro && sourceTurnId && filedSession?.activeTurnId === sourceTurnId &&
         filedSession.origin?.kind !== 'worker' && filedSession.origin?.kind !== 'helper' &&
         !isWorkerConversation(conversationId) && !(tool && GOAL_HOLD_TOOLS.has(tool)) && callHoldOpen(conversationId)) {
+      if (stopFallbackDue(conversationId, sourceTurnId, getConfig().ui.rotateStopFallback === true, Date.now()) && !rotationFenced(conversationId)) {
+        // ChatGPT offered no Send for this turn's continue twice: stop the turn once this result has
+        // gone out, refusing (not running) any call that comes meanwhile, and continue after the stop.
+        noteStopFallback(conversationId, sourceTurnId, Date.now());
+        armRotationFence(conversationId, sourceTurnId);
+        logInfo(`turn rotation: ${conversationId} — ChatGPT offered no Send for the continue; stopping turn ${sourceTurnId} after this result to continue in a fresh one`);
+        const timer = setTimeout(() => {
+          void stopSessionTurn(sessionId, sourceTurnId, { rotation: true }).catch(error => {
+            clearRotationFence(conversationId);
+            logWarn(`turn rotation: ${conversationId} — could not stop turn ${sourceTurnId}: ${String(error)}`);
+          });
+        }, ROTATION_STOP_DELAY_MS);
+        timer.unref?.();
+      } else {
       let filedId: string | null = null;
       const deps: RotationDeps = { ...turnRotationDeps, file: async (session, turn) => {
         const row = await fileRotationInput(session, turn);
@@ -9778,6 +9848,7 @@ function noteCallAttribution(
       holdCalls(conversationId, considerTurnRotation(conversationId, sessionId, sourceTurnId, deps)
         .then(filed => filed && filedId ? awaitRotationDelivery(conversationId, filedId) : undefined)
         .catch(error => logWarn(`turn rotation: ${String(error)}`)));
+      }
     }
     // Exact calls are visible work even without a page. They cannot turn that
     // display into a worker wake, browser repair or continuation after departure.
@@ -10295,6 +10366,11 @@ async function failRepairAttempt(
     if (repairsInFlight.get(conversationId) !== repair) return;
     if (repair.reason === 'assistant-error' && turnRepairSpent.get(conversationId)?.token === token)
       turnRepairSpent.delete(conversationId);
+    if (why === 'changed' && changeDetail === 'navigating' &&
+        (repair.reason === 'assistant-error' || repair.reason === 'no-tab' || repair.reason === 'compaction')) {
+      // Navigation is transient; keep the same repair episode and retry after the short navigation cooldown.
+      repair.notBefore = Math.max(repair.notBefore, Date.now() + NAVIGATION_RECOVERY_COOLDOWN_MS);
+    }
     if (repair.reason === 'unattributed') repair.state = 'done';
     else {
       repair.state = 'queued';

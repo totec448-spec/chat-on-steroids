@@ -20,7 +20,7 @@ import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { Worker } from 'node:worker_threads';
 import { ensureUsablePath, normalizeEnvironment } from '../env.js';
-import { findWindowsPowerShell, terminateProcessTree } from '../exec.js';
+import { findWindowsPowerShell, terminateProcess, terminateProcessTree } from '../exec.js';
 import { logInfo, logWarn } from '../logger.js';
 import type { MacOSDesktopAccessStatus, MacOSPermissionState } from '../../shared/types.js';
 import { noteMacOSGrants } from './macos-grants.js';
@@ -326,7 +326,12 @@ function retireHelper(runtime: HelperRuntime): Promise<void> {
   const task = (async () => {
     if (runtime.child.exitCode === null && runtime.child.pid !== undefined) {
       const closed = new Promise<void>((resolve) => runtime.child.once('close', () => resolve()));
-      await terminateProcessTree(runtime.child.pid);
+      // On Windows every app launch_app started is this helper's child, and taskkill /T would
+      // close those apps (and their unsaved work) with it. The helper starts nothing of its own.
+      if (process.platform === 'win32') {
+        logInfo(`desktop helper ${runtime.child.pid} retired alone: apps it launched keep running`);
+        await terminateProcess(runtime.child.pid);
+      } else await terminateProcessTree(runtime.child.pid);
       await Promise.race([closed, new Promise<void>((resolve) => setTimeout(resolve, 2_000))]);
     }
     await cleanupHelperScript(runtime);
@@ -443,6 +448,12 @@ async function startHelper(): Promise<HelperRuntime> {
               continue;
             }
             const reply = parsed as Record<string, any>;
+            // The Windows helper says when a window came forward only on its second attempt.
+            if (Array.isArray(reply['focusNotes'])) {
+              for (const note of reply['focusNotes'].slice(0, 4)) {
+                if (typeof note === 'string') logInfo(`desktop focus: ${note.slice(0, 200)}`);
+              }
+            }
             runtime.ready = true;
             clearTimeout(pending.timer);
             runtime.pending = null;

@@ -66,6 +66,9 @@ export function mainTexts(): Record<MainText, string> {
     'Keep checkout': t('Keep checkout'),
     'Remove checkout; preserve Git branch': t('Remove checkout; preserve Git branch'),
     'ChatGPT finished.': t('ChatGPT finished.'),
+    'Goal result needs review': t('Goal result needs review'),
+    'The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.':
+      t('The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.'),
   };
 }
 

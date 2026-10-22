@@ -3,13 +3,15 @@ import { promises as fs } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 const project = vi.hoisted(() => vi.fn());
 vi.mock('../src/main/projects.js', () => ({ getSessionProject: project }));
-const swarm = vi.hoisted(() => ({ running: false, managed: false, orphanedWorker: false }));
+const swarm = vi.hoisted(() => ({ running: false, managed: false, orphanedWorker: false, members: null as Set<string> | null }));
 const leaseLookup = vi.hoisted(() => vi.fn());
 const leaseValidate = vi.hoisted(() => vi.fn());
 vi.mock('../src/main/worktrees/index.js', () => ({ lookupWorkerWorkspace: leaseLookup, validateWorkerWorkspaceLease: leaseValidate }));
 vi.mock('../src/main/agents.js', async (original) => ({
   ...(await original<typeof import('../src/main/agents.js')>()),
   swarmRunning: () => swarm.running,
+  // The run a chat belongs to: every chat while `members` is unset, else only those listed.
+  currentRunId: (conversationId?: string) => swarm.running && (!swarm.members || (conversationId && swarm.members.has(conversationId))) ? 'run-1' : null,
   managedWorkerWorktreeRequired: () => swarm.managed,
   managedWorkerIsolationRequired: () => swarm.managed || swarm.orphanedWorker,
   managedWorkerAllocationIdentity: () => swarm.managed ? { runId: 'owner-allocation', agentId: 'worker-1' } : null
@@ -25,7 +27,7 @@ afterAll(async () => { await removeTempDir(base); });
 beforeEach(() => {
   resetWorkspaces(); project.mockReset(); leaseLookup.mockReset(); leaseValidate.mockReset();
   leaseValidate.mockImplementation(async lease => lease);
-  swarm.running = false; swarm.managed = false; swarm.orphanedWorker = false;
+  swarm.running = false; swarm.managed = false; swarm.orphanedWorker = false; swarm.members = null;
 });
 function run<T>(id: string, fn: () => T): T {
   const context: CallContext = { startedAt: Date.now(), transportKey: null, agent: 'prime', caller: { transportKey: null, requestId: null, conversationId: `chat-${id}`, sessionId: id }, outcome: null, evidence: emptyEvidence() };
@@ -158,4 +160,14 @@ it('blocks a worker relative write and command after its checked-out directory i
     .rejects.toThrow(/WORKTREE_PATH_CHANGED/);
   expect(await fs.readFile(notes, 'utf8')).toBe('USER-OWNED NOTES - KEEP');
   expect(leaseValidate).toHaveBeenCalledTimes(2);
+});
+
+// 2026-10-21 (VM): while one chat had a sub-agent run, every other chat outside a project had its
+// first command refused with WORKSPACE_REQUIRED, because the check asked whether any run existed.
+it('asks only a chat that belongs to a run for an explicit folder', async () => {
+  project.mockResolvedValue(null);
+  swarm.running = true; swarm.members = new Set(['chat-prime']);
+  const ctx = { roots: roots(), caps: defaultConfig().capabilities, readOnly: false };
+  expect(await run('other', () => resolveCwd(ctx, undefined))).toMatchObject({ virtual: '/work', defaulted: true });
+  await expect(run('prime', () => resolveCwd(ctx, undefined))).rejects.toThrow('has no proven workspace');
 });

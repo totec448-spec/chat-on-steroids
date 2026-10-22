@@ -46,6 +46,7 @@
 .ph.ph-arrow-square-out::before { content: '\e5de'; }
 .ph.ph-arrow-up::before { content: '\e08e'; }
 .ph.ph-arrows-clockwise::before { content: '\e094'; }
+.ph.ph-bookmark-simple::before { content: '\e0ea'; }
 .ph.ph-caret-down::before { content: '\e136'; }
 .ph.ph-caret-left::before { content: '\e138'; }
 .ph.ph-caret-right::before { content: '\e13a'; }
@@ -67,6 +68,7 @@
 .ph.ph-file::before { content: '\e230'; }
 .ph.ph-file-text::before { content: '\e23a'; }
 .ph.ph-folder::before { content: '\e24a'; }
+.ph.ph-folder-simple::before { content: '\e25a'; }
 .ph.ph-gear-six::before { content: '\e272'; }
 .ph.ph-git-branch::before { content: '\e278'; }
 .ph.ph-git-diff::before { content: '\e27c'; }
@@ -108,6 +110,7 @@
 .ph.ph-warning::before { content: '\e4e0'; }
 .ph.ph-x::before { content: '\e4f6'; }
 
+.ph-fill.ph-bookmark-simple::before { content: '\e0ea'; }
 .ph-fill.ph-square-half::before { content: '\e462'; }
 .ph-fill.ph-square-half-bottom::before { content: '\eb16'; }
 .ph-fill.ph-push-pin-simple::before { content: '\e65c'; }
