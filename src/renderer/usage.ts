@@ -1,5 +1,5 @@
 import { currentLanguage, ui, t, tn } from './i18n.js';
-import { $, el, run } from './dom.js';
+import { $, el, run, toast } from './dom.js';
 import { DEFAULT_USAGE_FORMULA, usageDateKey as dateKey, usageEstimate, usageMessageTotals, usageModelGroups, usageRate, usageWeekStart, type UsageFormula, type UsageOverview } from '../shared/usage.js';
 import type { ProviderUsage } from '../shared/provider-usage.js';
 let snapshot: UsageOverview | null = null;
@@ -371,4 +371,20 @@ export function initUsage(): void {
     input.addEventListener('input', () => { if (input.value !== '' && input.validity.valid && Number.isFinite(input.valueAsNumber)) { formula[key] = input.valueAsNumber; saveFormula(); paintCost(); } });
   }
   $('refreshUsage').addEventListener('click', () => void refreshUsage(true));
+  const exportButton = $<HTMLButtonElement>('exportUsage');
+  exportButton.addEventListener('click', async () => {
+    if (exportButton.disabled) return;
+    const restoreFocus = document.activeElement === exportButton;
+    exportButton.disabled = true;
+    // Not run(): main's error names the chosen file's full path, which the page never shows.
+    try {
+      const reply = await window.api.exportUsage(formula.divisor);
+      if (!reply.ok) toast(t('Usage could not be exported.'));
+      else if (reply.data.saved) toast(t('Saved {0}', [reply.data.name]));
+    } catch { toast(t('Usage could not be exported.')); } finally {
+      exportButton.disabled = false;
+      // Disabling the button dropped keyboard focus to the page; give it back unless the person moved it.
+      if (restoreFocus && (document.activeElement === exportButton || document.activeElement === document.body || !document.activeElement)) exportButton.focus();
+    }
+  });
 }
