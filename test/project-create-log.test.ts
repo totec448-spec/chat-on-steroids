@@ -5,7 +5,7 @@ import os from 'node:os';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { initSessionStore, resetSessionStoreForTests } from '../src/main/session/store.js';
-import { addProject, armProjectCreate, claimProjectCreate, completeProjectCreate, getProject, PROJECT_CREATE_ARMED_MS, retryProjectCreate } from '../src/main/projects.js';
+import { addProject, armProjectCreate, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, PROJECT_CREATE_ARMED_MS, retryProjectCreate } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 
 const logged = vi.hoisted(() => [] as string[]);
@@ -56,4 +56,17 @@ it('logs nothing for a step that changed nothing', async () => {
   expect(await armProjectCreate(request, 'page')).toBe(false);
   expect(await completeProjectCreate(request, 'page', `g-p-${'a'.repeat(32)}`)).toBe(false);
   expect(logged).toEqual([]);
+});
+
+it('keeps a reported failure to one short line in the log', async () => {
+  const project = await addProject(path.join(approved, 'Kunden'));
+  const request = (project.chatgpt as { requestId: string }).requestId;
+  expect(await claimProjectCreate(request, 'page')).toBe(true);
+  logged.length = 0;
+  // Whatever a page reports, the log line stays one line and never runs on.
+  expect(await failProjectCreate(request, 'page', `ChatGPT did not open\n\r its dialog\u0000\u2028 ${'x'.repeat(400)}`)).toBe(true);
+  expect(logged).toHaveLength(1);
+  expect(logged[0]).not.toMatch(/[\u0000-\u001f\u007f\u2028\u2029]/);
+  expect(logged[0]).toContain("went from claimed to failed: ChatGPT did not open its dialog x");
+  expect(logged[0]!.length).toBeLessThan(330);
 });

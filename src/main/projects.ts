@@ -256,7 +256,9 @@ function updateChatgptLink(match: (link: ChatgptProjectLink, project: LocalProje
     const updated: LocalProject = { ...project, chatgpt: changed };
     await writeDurableNow('projects', projects.map(row => row.id === project.id ? updated : row));
     // Every step, so a Project that never appeared shows where it stopped (#1759); ids only, no names.
-    const why = 'error' in changed ? `: ${changed.error.slice(0, 200)}` : '';
+    // A page reports the error text: one line, no control characters, so it can never split or forge a line.
+    // eslint-disable-next-line no-control-regex
+    const why = 'error' in changed ? `: ${changed.error.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200)}` : '';
     logInfo(`projects: project ${project.id}'s ChatGPT Project went from ${project.chatgpt.state} to ${changed.state}${why}`);
     for (const listener of linkListeners) { try { listener(); } catch { /* presentation only */ } }
     return updated;
