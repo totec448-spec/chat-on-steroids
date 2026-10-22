@@ -1301,6 +1301,8 @@ export function createFilePanel(options: FilePanelOptions) {
     if (!value) {
       replacePreview(head, el('p', 'file-preview-empty', () => t('Loading diff…')));
       preview.hidden = false;
+      // Nothing is shown for this revision yet: a binary, too large or conflicted result must still render.
+      renderedGitDiffRevision = null;
       return;
     }
     const language = el('span', 'file-editor-language', () => t('Detecting language…'));
