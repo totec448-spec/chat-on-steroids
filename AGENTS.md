@@ -1326,7 +1326,8 @@ selection the shell gets the key. Native terminal escape handling stays in xterm
 Appearance application refreshes all existing xterm palettes, including hidden tabs, from the
 current page/ink tokens without recreating shells; cursor colors follow the same palette.
 `scripts/verify-workspace-terminal.cjs` tests real Electron/PTY input, cwd/environment persistence,
-hide/reopen, tabs, Ctrl+C, exit codes, resize and closing against isolated state.
+hide/reopen, tabs, Ctrl+C, exit codes, resize and closing against isolated state;
+`test/renderer-terminal-selection.test.ts` tests the Send to chat block, caps, key and draft insert.
 
 ### Images
 
