@@ -43,7 +43,7 @@ describe('the desktop helper leaves the app\'s own windows out', () => {
       return child;
     });
     vi.doMock('node:child_process', () => ({ spawn }));
-    vi.doMock('../src/main/exec.js', () => ({ findWindowsPowerShell: () => 'powershell.exe', terminateProcessTree: vi.fn() }));
+    vi.doMock('../src/main/exec.js', () => ({ findWindowsPowerShell: () => 'powershell.exe', terminateProcessTree: vi.fn(), terminateProcess: vi.fn() }));
     vi.doMock('../src/main/logger.js', () => ({ logInfo: vi.fn(), logWarn: vi.fn() }));
     Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
     vi.resetModules();

@@ -30,7 +30,7 @@ import type {
   ToolOutcome,
   TurnOutcome
 } from '../../shared/session.js';
-import { estimateTokens, originTitle, UNATTRIBUTED_SESSION_TITLE } from '../../shared/session.js';
+import { estimateTokens, isUnattributedSession, originTitle, UNATTRIBUTED_SESSION_TITLE } from '../../shared/session.js';
 import { chatErrorMessageKey } from '../../shared/chat-error.js';
 import { continuedRequestTurn, overlappingRequestTurns, recordedRequestTurn, responseTurnId, turnOpenAt } from '../../shared/chronology.js';
 import { getConfig } from '../config.js';
@@ -79,6 +79,7 @@ import {
 import { RESUME_CLAIM_WINDOW_MS, dispatchedResumeFromSession, dispatchedResumeMarkerIn, resumeOpeningChat } from './resume-gate.js';
 import { summarizeToolCall } from './summarize.js';
 import { editReplacement, replacedQuestion } from './edits.js';
+import { takeAutomaticReply } from './automatic-replies.js';
 
 interface LiveConversation {
   conversationId: string;
@@ -910,7 +911,7 @@ export async function repairDeterministicAttribution(affected?: ReadonlySet<stri
   const changed = new Set<string>();
 
   for (const summary of await indexedSessions()) {
-    if (summary.conversationId !== null || summary.title !== UNATTRIBUTED_SESSION_TITLE) continue;
+    if (!isUnattributedSession(summary)) continue;
     const cached = repairBuckets.get(summary.id);
     if (affected && cached?.toolCalls === summary.toolCalls && cached.updatedAt === summary.updatedAt &&
         ![...affected].some((id) => cached.requestIds.has(id))) continue;
@@ -1514,7 +1515,8 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
         // The one thing an unattributed call still carries: the server turn it belongs to.
         input.requestId ?? null,
         reopenedTurnId,
-        filed
+        filed,
+        input.tool
       );
     } catch (err) {
       logWarn(`call attribution listener failed: ${(err as Error).message}`);
@@ -1662,7 +1664,8 @@ let attributionListener:
       completedFinalAt: number | null,
       requestId: string | null,
       reopenedTurnId: string | null,
-      filedSession: SessionSummary | null
+      filedSession: SessionSummary | null,
+      tool: string
     ) => void)
   | null = null;
 
@@ -1678,7 +1681,8 @@ export function setCallAttributionListener(
         requestId: string | null,
         /** The turn this call reopened, when it proved the page's completed end false. */
         reopenedTurnId: string | null,
-        filedSession: SessionSummary | null
+        filedSession: SessionSummary | null,
+        tool: string
       ) => void)
     | null
 ): void {
@@ -2232,6 +2236,7 @@ async function recordChatObservationsNow(
           ...(item.parentId ? { parentId: item.parentId } : {}),
           ...(editReplacement(item.messageId) ? { replaces: editReplacement(item.messageId) }
             : item.parentId && item.parentExact === true ? await replacedQuestion(sessionId, item.messageId, item.parentId) : {}),
+          ...(takeAutomaticReply(conversationId, item.text ?? '') ? { automatic: true as const } : {}),
           messageId: item.messageId
         }, { preferTime: item.authoredTime === true, work: item.authoredNow === true });
         if (!written.changed) continue;
@@ -2588,7 +2593,8 @@ export async function recordProgress(
   text: string,
   anchor?: { seq: number; time: number },
   turnId?: string | null,
-  finishControl?: { state: 'released' | 'notified' | 'decision'; conversationId: string; revision?: string; inputRevision?: string; workSeq?: number }
+  finishControl?: { state: 'released' | 'notified' | 'decision'; conversationId: string; revision?: string; inputRevision?: string; workSeq?: number },
+  reason?: 'helper_stop_unverified'
 ): Promise<{ seq: number; time: number } | null> {
   if (!recordingEnabled() || !progressId) return null;
   const time = anchor?.time ?? Date.now();
@@ -2602,6 +2608,7 @@ export async function recordProgress(
     kind: 'progress',
     progressId,
     ...(finishControl ? { finishControl } : {}),
+    ...(reason ? { reason } : {}),
     ...(anchor ? { origin: anchor.seq } : {}),
     ...(turnId ? { turnId } : {}),
     message: await storeText(sessionId, text, 4000)
