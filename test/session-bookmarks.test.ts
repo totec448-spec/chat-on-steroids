@@ -56,7 +56,8 @@ it('refuses a bookmark past the limit and a message id that is not ChatGPT\'s', 
     const messageId = `${n.toString(16).padStart(8, '0')}-1111-4222-8333-444444444444`;
     await setBookmark(id, { messageId, excerpt: `mark ${n}`, messageTime: n }, true);
   }
-  await expect(setBookmark(id, { messageId: C, excerpt: 'one too many', messageTime: 9_999 }, true)).rejects.toThrow(/bookmarks/i);
+  // A literal message, so the window finds its translation; it must name the real limit.
+  await expect(setBookmark(id, { messageId: C, excerpt: 'one too many', messageTime: 9_999 }, true)).rejects.toThrow(`A chat keeps at most ${MAX_BOOKMARKS} bookmarks`);
   expect(await listBookmarks(id)).toHaveLength(MAX_BOOKMARKS);
 });
 

@@ -1349,6 +1349,10 @@ or clicking New Chat again preserves text, staged attachments, prepared workflow
 first-message Goal/Loop objective, mode and delivery choice. Each project and unfiled New Chat
 has its own draft key. Manual deletion remains deleted; accepted openings retire the original
 draft as the outbox/session takes ownership. Navigation still fences stale async imports.
+Draft text is also written to the renderer's local storage (`composer-drafts.ts`, the newest 100
+drafts in at most 1,000,000 stored characters), so an unsent draft survives a restart; staged files and a new
+chat's Goal/Loop choices stay window-local. A chat other than the open one that holds a draft shows
+a pencil mark on its sidebar row, and removing a chat removes its saved draft.
 
 The chat composer and queued-message editor have no HTML character cap. Send and queue edits
 share the existing 96,000-character message admission ceiling; prepared delivery additionally
@@ -2197,6 +2201,13 @@ with an event-loop yield between reads, and quitting cancels the warmup before c
 The loading message explains a potentially slow post-update rebuild and that the app remains usable.
 These charts are not a provider invoice, exact
 token consumption or proof of current prices/entitlements.
+**By project** (`UsageOverview.projects`) groups the same cached per-chat model totals by each
+chat's current `projectId`, largest first; `projectId: null` is the chats outside every project.
+The cache holds no project, so moving a chat moves its whole history without a reread or a cache
+version change. The renderer names rows from `listProjects()` (a sidebar-removed project keeps its
+record and name), and the usage paints without waiting for that list. An id missing from it
+shows Unknown project; a list that cannot be read keeps the names already shown. The table is
+left out when no chat has a project.
 
 The bottom **Messages and limits** section counts native user-message IDs with recorded
 model selection proof for GPT-5.6 and GPT-6. It uses provider `authoredAt`, otherwise the
@@ -4638,7 +4649,12 @@ checkout or push authority. Review projects `M/A/D/R/U`, plus `C` for every unme
 (`DD/AU/UD/UA/DU/AA/UU`) so an unfinished merge is never shown as an ordinary edit; a conflicted
 file missing from the worktree diffs as empty. It also projects ancestor-folder markers and
 bounded unified diffs; Files may open it from its toolbar. Files and Review are alternate right
-tabs; Review does not add a second file watcher or expose file-write actions.
+tabs; Review does not add a second file watcher or expose file-write actions, with one
+exception that is a Files write, not a Git one: an untracked (`U`) working-tree row's context
+menu offers Add to .gitignore for that file or its folder. After a confirmation it appends one
+anchored, escaped line (`/dist/`) to the project folder's `.gitignore` through the existing
+`projectFiles:create`/`projectFiles:preview`/`projectFiles:save` IPC. The file is read before the
+dialog and saved against that revision, so an edit made elsewhere meanwhile is refused.
 Review also identifies the checked-out branch and offers a searchable, read-only comparison
 against locally known branch refs. Selecting a ref never switches branches or fetches remote
 data. The comparison shows committed changes from the selected ref's merge base to current
