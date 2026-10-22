@@ -8099,6 +8099,20 @@ describe('charts, diagrams and illustrated Markdown from recorded DIL', () => {
   });
 
   it.each([
+    { name: 'four spaces', indent: '    ' },
+    { name: 'a tab', indent: '\t' }
+  ])('keeps a chart directive literal inside code indented by $name', async ({ indent }) => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Example:\n\n${indent}${widget}\n\n${widget}\n\nAfter.`)]);
+    const root = message(w);
+    expect(root.querySelector('pre code')?.textContent).toContain(widget);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(root.lastElementChild?.textContent).toBe('After.');
+  });
+
+  it.each([
     { name: 'blockquote fence', example: (widget: string) => `> \`\`\`json\n> ${widget}\n> \`\`\``, code: 'blockquote pre code' },
     { name: 'list-item fence', example: (widget: string) => `- \`\`\`json\n  ${widget}\n  \`\`\``, code: 'li pre code' },
     { name: 'inline backticks', example: (widget: string) => `Example: \`${widget}\``, code: 'p code' },

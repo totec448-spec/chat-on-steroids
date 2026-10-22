@@ -4139,6 +4139,32 @@ function fencedMarkdownRanges(text: string): Array<{ start: number; end: number 
 function markdownCodeRanges(text: string): Array<{ start: number; end: number }> {
   const fences = fencedMarkdownRanges(text);
   const ranges = [...fences];
+  // Four-space and tab-indented blocks are code too. A blank line can continue
+  // one, but an unindented nonblank line ends it before its own content.
+  let indentedStart: number | null = null;
+  let afterBlank = true;
+  let fenceIndex = 0;
+  for (let at = 0; at < text.length;) {
+    const newline = text.indexOf('\n', at);
+    const end = newline < 0 ? text.length : newline + 1;
+    const line = text.slice(at, newline < 0 ? end : newline).replace(/\r$/, '');
+    while (fences[fenceIndex] && at >= fences[fenceIndex]!.end) fenceIndex++;
+    if (fences[fenceIndex] && at >= fences[fenceIndex]!.start) {
+      if (indentedStart !== null) ranges.push({ start: indentedStart, end: at });
+      indentedStart = null;
+      afterBlank = false;
+    } else {
+      if (indentedStart === null) {
+        if (afterBlank && CODE_LINE.test(line)) indentedStart = at;
+      } else if (line.trim() && !CODE_LINE.test(line)) {
+        ranges.push({ start: indentedStart, end: at });
+        indentedStart = null;
+      }
+      afterBlank = !line.trim();
+    }
+    at = end;
+  }
+  if (indentedStart !== null) ranges.push({ start: indentedStart, end: text.length });
   let start = 0;
   for (const fence of [...fences, { start: text.length, end: text.length }]) {
     const outside = text.slice(start, fence.start);
