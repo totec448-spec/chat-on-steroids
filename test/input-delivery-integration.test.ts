@@ -551,6 +551,26 @@ it('holds a message for an existing chat until a new tunnel-client has taken ove
   } finally { clock.mockRestore(); resetRouteSettleForTests(); }
 });
 
+it('learns a longer hold when the first message for an existing chat after a restart still took the old route (#1788)', async () => {
+  const { noteTunnelClientConnected, resetRouteSettleForTests, routeHoldMs, noteRouteRequestSighted, noteRouteRequestArrived } =
+    await import('../src/main/tunnel/route-settle.js');
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'First message after a tunnel restart', conversationId });
+    const existing = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto' });
+    noteTunnelClientConnected();
+    now += routeHoldMs();
+    expect((await post('/input/claim', { id: existing.id, owner: 'chat-page', conversationId, requiresAuthorization: true })).body.input)
+      .toMatchObject({ id: existing.id });
+    now += 2_000;
+    noteRouteRequestSighted('request-after-restart', conversationId);
+    now += 124_000;
+    noteRouteRequestArrived('request-after-restart');
+    expect(routeHoldMs(), 'the claim of an existing chat started the measurement').toBeGreaterThan(35_000);
+  } finally { clock.mockRestore(); resetRouteSettleForTests(); }
+});
+
 // A running GPT-5.6 turn takes an immediate message directly (above); these cover the boundary.
 it.each([
   { mode: 'after-turn', earlyEnd: false }, { mode: 'finish', earlyEnd: false },

@@ -80,6 +80,7 @@ import { RESUME_CLAIM_WINDOW_MS, dispatchedResumeFromSession, dispatchedResumeMa
 import { summarizeToolCall } from './summarize.js';
 import { editReplacement, replacedQuestion } from './edits.js';
 import { takeAutomaticReply } from './automatic-replies.js';
+import { noteRouteRequestSighted } from '../tunnel/route-settle.js';
 
 interface LiveConversation {
   conversationId: string;
@@ -865,6 +866,7 @@ function noteCallEvidence(
     } else if (result === 'stored') {
       stored = true;
       logInfo(`request attribution: ${call.requestId} -> conversation ${conversationId}`);
+      noteRouteRequestSighted(call.requestId, conversationId, observedAt);
       scheduleAttributionRepair(call.requestId);
     }
   }
