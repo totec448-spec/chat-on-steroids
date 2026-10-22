@@ -2968,5 +2968,13 @@
   "Secure OS credential storage is unavailable, so the key was not saved": "系統的安全憑證儲存空間無法使用，因此未儲存金鑰",
   "Secure OS credential storage is unavailable, so nothing was changed": "系統的安全憑證儲存空間無法使用，因此未做任何變更",
   "A handoff cannot be empty": "交接內容不能為空",
-  "That session no longer exists": "該工作階段已不存在"
+  "That session no longer exists": "該工作階段已不存在",
+  "Chat groups, bookmarks, drafts that wait for you, and a better Review.": "聊天分組、書籤、等你回來的草稿，以及更好的檢閱。",
+  "Chat groups": "聊天分組",
+  "Sort a project's chats into groups from its ⋯ menu.": "從專案的 ⋯ 選單把它的聊天分到各個群組。",
+  "Bookmark an answer and jump back to it from the chat's header.": "為回答加上書籤，並從聊天標題列跳回去。",
+  "Drafts that wait": "等你回來的草稿",
+  "A pencil marks chats with an unsent message, and drafts come back after a restart.": "鉛筆標出有未傳送訊息的聊天，重新啟動後草稿也會回來。",
+  "A better Review": "更好的檢閱",
+  "See a merge conflict's three sides, and add an untracked file to .gitignore.": "查看合併衝突的三方內容，並把未追蹤的檔案加入 .gitignore。"
 }

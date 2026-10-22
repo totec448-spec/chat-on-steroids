@@ -2968,5 +2968,13 @@
   "Secure OS credential storage is unavailable, so the key was not saved": "Bộ lưu trữ thông tin đăng nhập an toàn của hệ thống không khả dụng nên khóa chưa được lưu",
   "Secure OS credential storage is unavailable, so nothing was changed": "Bộ lưu trữ thông tin đăng nhập an toàn của hệ thống không khả dụng nên chưa có gì thay đổi",
   "A handoff cannot be empty": "Bàn giao không được để trống",
-  "That session no longer exists": "Phiên đó không còn nữa"
+  "That session no longer exists": "Phiên đó không còn nữa",
+  "Chat groups, bookmarks, drafts that wait for you, and a better Review.": "Nhóm trò chuyện, dấu trang, bản nháp chờ bạn và phần Xem lại tốt hơn.",
+  "Chat groups": "Nhóm trò chuyện",
+  "Sort a project's chats into groups from its ⋯ menu.": "Sắp xếp các cuộc trò chuyện của một dự án vào nhóm từ menu ⋯ của nó.",
+  "Bookmark an answer and jump back to it from the chat's header.": "Đánh dấu một câu trả lời và quay lại nó từ phần đầu cuộc trò chuyện.",
+  "Drafts that wait": "Bản nháp chờ bạn",
+  "A pencil marks chats with an unsent message, and drafts come back after a restart.": "Một cây bút đánh dấu các cuộc trò chuyện có tin nhắn chưa gửi, và bản nháp quay lại sau khi khởi động lại.",
+  "A better Review": "Phần Xem lại tốt hơn",
+  "See a merge conflict's three sides, and add an untracked file to .gitignore.": "Xem ba phía của một xung đột hợp nhất, và thêm tệp chưa được theo dõi vào .gitignore."
 }

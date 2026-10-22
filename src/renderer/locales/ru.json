@@ -3112,5 +3112,13 @@
   "Secure OS credential storage is unavailable, so the key was not saved": "Защищённое хранилище учётных данных системы недоступно, поэтому ключ не сохранён",
   "Secure OS credential storage is unavailable, so nothing was changed": "Защищённое хранилище учётных данных системы недоступно, поэтому ничего не изменено",
   "A handoff cannot be empty": "Передача не может быть пустой",
-  "That session no longer exists": "Этого сеанса больше нет"
+  "That session no longer exists": "Этого сеанса больше нет",
+  "Chat groups, bookmarks, drafts that wait for you, and a better Review.": "Группы чатов, закладки, черновики, которые вас ждут, и улучшенная «Проверка».",
+  "Chat groups": "Группы чатов",
+  "Sort a project's chats into groups from its ⋯ menu.": "Раскладывайте чаты проекта по группам через его меню ⋯.",
+  "Bookmark an answer and jump back to it from the chat's header.": "Добавьте ответ в закладки и возвращайтесь к нему из заголовка чата.",
+  "Drafts that wait": "Черновики, которые ждут",
+  "A pencil marks chats with an unsent message, and drafts come back after a restart.": "Карандаш отмечает чаты с неотправленным сообщением, а черновики возвращаются после перезапуска.",
+  "A better Review": "Улучшенная «Проверка»",
+  "See a merge conflict's three sides, and add an untracked file to .gitignore.": "Смотрите три версии конфликта слияния и добавляйте неотслеживаемый файл в .gitignore."
 }

@@ -3064,5 +3064,13 @@
   "Secure OS credential storage is unavailable, so the key was not saved": "O armazenamento seguro de credenciais do sistema não está disponível, por isso a chave não foi guardada",
   "Secure OS credential storage is unavailable, so nothing was changed": "O armazenamento seguro de credenciais do sistema não está disponível, por isso nada foi alterado",
   "A handoff cannot be empty": "Uma passagem não pode estar vazia",
-  "That session no longer exists": "Essa sessão já não existe"
+  "That session no longer exists": "Essa sessão já não existe",
+  "Chat groups, bookmarks, drafts that wait for you, and a better Review.": "Grupos de chats, marcadores, rascunhos que esperam por si e uma Revisão melhor.",
+  "Chat groups": "Grupos de chats",
+  "Sort a project's chats into groups from its ⋯ menu.": "Organize os chats de um projeto em grupos no menu ⋯.",
+  "Bookmark an answer and jump back to it from the chat's header.": "Marque uma resposta e volte a ela a partir do cabeçalho do chat.",
+  "Drafts that wait": "Rascunhos que esperam",
+  "A pencil marks chats with an unsent message, and drafts come back after a restart.": "Um lápis assinala os chats com uma mensagem por enviar, e os rascunhos voltam depois de reiniciar.",
+  "A better Review": "Uma Revisão melhor",
+  "See a merge conflict's three sides, and add an untracked file to .gitignore.": "Veja os três lados de um conflito de merge e adicione um ficheiro não monitorizado ao .gitignore."
 }
