@@ -401,11 +401,11 @@ describe('the session-row chat actions', () => {
    */
   it('blocks the Unattributed row through the one switch that can answer for it', () => {
     expect(chatSource).toMatch(
-      /if \(summary\.conversationId === null\)[\s\S]{0,2200}toggleUnattributedBlock\(!blocked\)/
+      /if \(isUnattributedSession\(summary\)\)[\s\S]{0,2200}toggleUnattributedBlock\(!blocked\)/
     );
     // In strict mode the row offers no Allow the kernel would ignore: only Remove.
     expect(chatSource).toMatch(
-      /strictChatAllowlist !== true\) \{[\s\S]{0,1200}toggleUnattributedBlock\(!blocked\)[\s\S]{0,120}\n  \} else \{/
+      /strictChatAllowlist !== true\) \{[\s\S]{0,1200}toggleUnattributedBlock\(!blocked\)[\s\S]{0,120}\n  \} else if \(summary\.conversationId === null\) \{/
     );
     expect(chatSource).toMatch(
       /toggleUnattributedBlock[\s\S]{0,400}\$<HTMLInputElement>\('allowUnattributedCalls'\)\.checked = !blocked/
