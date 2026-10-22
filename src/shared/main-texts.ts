@@ -41,6 +41,7 @@ export const MAIN_TEXTS = [
   'Import SKILL.md',
   'Markdown files',
   'Text files',
+  'Save code',
   'Approve a folder for ChatGPT',
   'Import Skill folder',
   'Markdown skills',
