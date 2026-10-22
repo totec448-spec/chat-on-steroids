@@ -3024,5 +3024,5 @@
   "Drafts that wait": "Bekleyen taslaklar",
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "Bir kalem, gönderilmemiş mesajı olan sohbetleri işaretler ve taslaklar yeniden başlatmadan sonra geri gelir.",
   "A better Review": "Daha iyi bir İnceleme",
-  "See a merge conflict's three sides, and add an untracked file to .gitignore.": "Bir birleştirme çakışmasının üç tarafını görün ve izlenmeyen bir dosyayı .gitignore'a ekleyin."
+  "Right-click an untracked file to add it, or its folder, to .gitignore.": "İzlenmeyen bir dosyaya sağ tıklayarak onu ya da klasörünü .gitignore dosyasına ekleyin."
 }

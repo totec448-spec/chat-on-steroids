@@ -2976,5 +2976,5 @@
   "Drafts that wait": "Bản nháp chờ bạn",
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "Một cây bút đánh dấu các cuộc trò chuyện có tin nhắn chưa gửi, và bản nháp quay lại sau khi khởi động lại.",
   "A better Review": "Phần Xem lại tốt hơn",
-  "See a merge conflict's three sides, and add an untracked file to .gitignore.": "Xem ba phía của một xung đột hợp nhất, và thêm tệp chưa được theo dõi vào .gitignore."
+  "Right-click an untracked file to add it, or its folder, to .gitignore.": "Nhấp chuột phải vào một tệp chưa được theo dõi để thêm tệp đó hoặc thư mục của nó vào .gitignore."
 }

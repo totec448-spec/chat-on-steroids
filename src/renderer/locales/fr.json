@@ -3072,5 +3072,5 @@
   "Drafts that wait": "Des brouillons qui attendent",
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "Un crayon signale les chats avec un message non envoyé, et les brouillons reviennent après un redémarrage.",
   "A better Review": "Une Révision améliorée",
-  "See a merge conflict's three sides, and add an untracked file to .gitignore.": "Voyez les trois versions d'un conflit de fusion et ajoutez un fichier non suivi à .gitignore."
+  "Right-click an untracked file to add it, or its folder, to .gitignore.": "Faites un clic droit sur un fichier non suivi pour ajouter le fichier ou son dossier à .gitignore."
 }

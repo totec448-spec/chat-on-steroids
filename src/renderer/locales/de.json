@@ -3024,5 +3024,5 @@
   "Drafts that wait": "Entwürfe, die warten",
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "Ein Stift markiert Chats mit einer ungesendeten Nachricht, und Entwürfe kommen nach einem Neustart zurück.",
   "A better Review": "Ein besseres Review",
-  "See a merge conflict's three sides, and add an untracked file to .gitignore.": "Sieh die drei Seiten eines Merge-Konflikts und füge eine nicht verfolgte Datei zu .gitignore hinzu."
+  "Right-click an untracked file to add it, or its folder, to .gitignore.": "Klicke mit der rechten Maustaste auf eine nicht versionierte Datei, um sie oder ihren Ordner zu .gitignore hinzuzufügen."
 }
