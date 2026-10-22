@@ -42,6 +42,8 @@
   "Continue until this objective is satisfied.": "继续执行，直到达成此目标。",
   "Keep working within the brief until paused.": "在任务范围内继续工作，直到暂停。",
   "By model": "按模型",
+  "By project": "按项目",
+  "Unknown project": "未知项目",
   "By day": "按日期",
   "Code": "代码",
   "est.": "估算",

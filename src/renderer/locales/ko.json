@@ -42,6 +42,8 @@
   "Continue until this objective is satisfied.": "이 목표가 충족될 때까지 계속합니다.",
   "Keep working within the brief until paused.": "일시 중지될 때까지 이 지시 범위 내에서 계속 작업합니다.",
   "By model": "모델별",
+  "By project": "프로젝트별",
+  "Unknown project": "알 수 없는 프로젝트",
   "By day": "일별",
   "Auto": "자동",
   "Browser bridge port": "브라우저 브리지 포트",
