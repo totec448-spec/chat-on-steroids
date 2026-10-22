@@ -32,6 +32,15 @@ describe('a new tunnel-client takes over existing chats (#1220)', () => {
     expect(wake).toHaveBeenCalledTimes(1);
   });
 
+  // #1788, measured on the Mac on 2026-10-22: sent 12 s after the new client connected, about half
+  // the calls from an existing chat still waited ~128 s; at 22 s, 2 of 3; at 32 s and 47 s, 0 of 6.
+  it('holds existing chats for longer than the 32 s the Mac measurably needs', async () => {
+    noteTunnelClientConnected();
+    await vi.advanceTimersByTimeAsync(32_000);
+    expect(tunnelRouteSettling()).toBe(true);
+    expect(wake).not.toHaveBeenCalled();
+  });
+
   it('runs to the later of two clients, since core and desktop each start one', async () => {
     noteTunnelClientConnected();
     await vi.advanceTimersByTimeAsync(5_000);
