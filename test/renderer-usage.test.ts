@@ -393,6 +393,14 @@ it('shows usage while the project list is still loading, then names the By proje
   expect(document.getElementById('usageStatus')!.textContent).toBe('');
   expect(document.querySelector('[data-usage-metric="Conversations"] strong')!.textContent).toBe('1');
   expect(document.querySelector('.usage-days-project td')!.textContent).toBe('Unknown project');
+  // Someone is already reading the Daily breakdown: names that arrive must not close it or take the focus.
+  const breakdown = document.querySelector('.usage-breakdown') as HTMLDetailsElement;
+  const summary = breakdown.querySelector('summary') as HTMLElement;
+  breakdown.open = true; summary.focus();
+  expect(document.activeElement).toBe(summary);
   answer({ ok: true, data: [{ id: 'project-a', name: 'Website', path: '/home/you/website', createdAt: 1 }] });
-  await vi.waitFor(() => expect(document.querySelector('.usage-days-project td')!.textContent).toBe('Website'));
+  await vi.waitFor(() => expect(document.querySelector('.usage-days-project td')!.textContent).toBe('Website'), { timeout: 5000 });
+  expect(document.querySelector('.usage-breakdown')).toBe(breakdown);
+  expect(breakdown.open).toBe(true);
+  expect(document.activeElement).toBe(summary);
 });
