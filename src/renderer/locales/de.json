@@ -2924,6 +2924,7 @@
   "Bookmarks": "Lesezeichen",
   "Answer": "Antwort",
   "This answer is no longer in the chat.": "Diese Antwort ist nicht mehr im Chat.",
+  "This answer is no longer in the chat, so its bookmark was removed.": "Diese Antwort ist nicht mehr im Chat, daher wurde ihr Lesezeichen entfernt.",
   "{0} bookmarks in this chat": "{0} Lesezeichen in diesem Chat",
   "{0} bookmarks in this chat|one": "{0} Lesezeichen in diesem Chat"
 }

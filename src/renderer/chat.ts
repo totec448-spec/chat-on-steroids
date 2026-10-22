@@ -2648,6 +2648,8 @@ function paintBookmarks(): void {
   const id = !newChatSelected ? selectedId : null;
   const marks = id && bookmarks?.sessionId === id ? bookmarks.marks : [];
   const button = $<HTMLButtonElement>('chatBookmarks');
+  // A button about to hide hands its focus to the message box, never to nothing.
+  if (!marks.length && !button.hidden && document.activeElement === button) $<HTMLTextAreaElement>('chatInput').focus();
   button.hidden = marks.length === 0;
   button.querySelector('.chat-bookmarks-count')!.textContent = String(marks.length);
   const label = () => tn('{0} bookmark in this chat', '{0} bookmarks in this chat', marks.length);
@@ -2667,17 +2669,27 @@ function bookmarkMenuItems(): RowMenuItem[] {
     title: () => mark.excerpt,
     hint: () => clockTime(mark.messageTime),
     data: { bookmark: mark.messageId },
-    run: () => void openBookmark(id, mark.messageId)
+    run: () => void openBookmark(id, mark)
   }));
 }
 
-/** Scrolls the open chat to a bookmarked answer, loading the history around it when needed. */
-async function openBookmark(sessionId: string, messageId: string): Promise<void> {
+/**
+ * Scrolls the open chat to a bookmarked answer, loading the history around it when needed. An
+ * answer the recorded chat no longer holds takes its bookmark with it: its own button is gone, so
+ * nothing else could remove it. A history that could not be read keeps the bookmark.
+ */
+async function openBookmark(sessionId: string, mark: SessionBookmark): Promise<void> {
   const selection = selectionGeneration;
-  const location = await run(api.locateMessage(sessionId, messageId));
+  const reply = await Promise.resolve(api.locateMessage(sessionId, mark.messageId)).catch((error: unknown) => ({ ok: false as const, error: String(error) }));
   if (selection !== selectionGeneration || selectedId !== sessionId) return;
-  if (!location) { toast(t('This answer is no longer in the chat.')); return; }
-  await revealChatLocation(sessionId, location);
+  if (!reply.ok) { toast(t(reply.error)); return; }
+  if (reply.data) { await revealChatLocation(sessionId, reply.data); return; }
+  const removed = await Promise.resolve(api.setBookmark(sessionId, mark.messageId, mark.excerpt, mark.messageTime, false))
+    .catch((error: unknown) => ({ ok: false as const, error: String(error) }));
+  // Another chat opened meanwhile: its view stays as it is, and it gets no message about this one.
+  if (selection !== selectionGeneration || selectedId !== sessionId) return;
+  if (removed.ok && bookmarks?.sessionId === sessionId) { bookmarks = { sessionId, marks: removed.data }; paintBookmarks(); }
+  toast(t(removed.ok ? 'This answer is no longer in the chat, so its bookmark was removed.' : 'This answer is no longer in the chat.'));
 }
 
 /** The Edit action under one of your questions. */
