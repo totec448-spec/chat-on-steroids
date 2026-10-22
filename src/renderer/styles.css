@@ -509,10 +509,13 @@ code {
 .sidebar-resize:hover, .sidebar-resize:focus-visible, .app.is-resizing-sidebar .sidebar-resize { background: linear-gradient(to bottom, transparent 18px, var(--accent-edge) 36px, transparent 88%) center / 1px 100% no-repeat; outline: none; }
 .app.is-resizing-sidebar, .app.is-resizing-sidebar * { cursor: col-resize !important; user-select: none !important; }
 .sidebar-brand { display: flex; align-items: center; gap: 11px; padding: 0 8px 24px; }
-/* Chat search opens from here (and ⌘K / Ctrl+K), as in ChatGPT: one quiet icon, no field in the list. */
-.sidebar-brand .sidebar-brand-search { display: grid; place-items: center; flex: none; width: 28px; height: 28px; margin-left: auto; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--faint); }
-.sidebar-brand .sidebar-brand-search:hover, .sidebar-brand .sidebar-brand-search:focus-visible { color: var(--ink); background: var(--hover); }
-.sidebar-brand-search .ico { --ico: 16px; }
+/* Chat search opens from here (and ⌘K / Ctrl+K), as in ChatGPT: one quiet icon, no field in the list.
+   Mark all as seen sits before it only while a chat shows New response. */
+.sidebar-brand :is(.sidebar-brand-search, .sidebar-brand-seen) { display: grid; place-items: center; flex: none; width: 28px; height: 28px; margin-left: auto; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--faint); }
+.sidebar-brand :is(.sidebar-brand-search, .sidebar-brand-seen):is(:hover, :focus-visible) { color: var(--ink); background: var(--hover); }
+.sidebar-brand .sidebar-brand-seen[hidden] { display: none; }
+.sidebar-brand .sidebar-brand-seen:not([hidden]) + .sidebar-brand-search { margin-left: -7px; }
+:is(.sidebar-brand-search, .sidebar-brand-seen) .ico { --ico: 16px; }
 .sidebar-brand strong { font-size: calc(15px * var(--text-scale, 1)); font-weight: 600; letter-spacing: -.025em; }
 .sidebar-brand strong span { display: block; color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); font-weight: 400; letter-spacing: .01em; }
 .sidebar-brand .mark { display: none; }

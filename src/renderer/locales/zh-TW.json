@@ -2834,6 +2834,8 @@
   "A tool call from an untrusted chat was refused. To allow it, open this chat's ⋯ menu in the sidebar (or right-click its row) and choose Trust chat.": "來自未受信任聊天的工具呼叫已被拒絕。若要允許，請在側邊欄開啟此聊天的 ⋯ 選單（或在其列上按右鍵），然後選擇「信任聊天」。",
   "A tool call from a worker whose main chat is not currently allowed was refused. Open that main chat's ⋯ menu in the sidebar and choose Trust chat if it is untrusted, or Release chat if it is blocked.": "一個工作者的工具呼叫已被拒絕，因為它的主聊天目前未被允許。請在側邊欄開啟該主聊天的 ⋯ 選單，若未受信任則選擇「信任聊天」，若已被封鎖則選擇「解除阻止」。",
   "A tool call from an app-created worker was refused because the main chat that started it is not proven yet. Return to that main chat in the sidebar; once its row is there, open its ⋯ menu and choose Trust chat, or Release chat if it is blocked, then retry after the worker is attached or recovered there.": "一個由應用程式建立的工作者的工具呼叫已被拒絕，因為啟動它的主聊天尚未獲得確認。請回到側邊欄中的該主聊天；其列出現後，開啟 ⋯ 選單並選擇「信任聊天」（若已封鎖則選擇「解除阻止」），待工作者在那裡連線或復原後再重試。",
+  "Mark all as seen": "全部標為已讀",
+  "Clear New response from this project's finished chats": "清除此專案已完成聊天的「新回覆」",
   "Add to .gitignore": "新增至 .gitignore",
   "Add “{0}” to .gitignore": "將「{0}」新增至 .gitignore",
   ".gitignore is too large or not plain text, so it cannot be changed here.": ".gitignore 太大或不是純文字，無法在此變更。",
