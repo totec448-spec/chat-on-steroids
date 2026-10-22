@@ -2667,17 +2667,24 @@ function bookmarkMenuItems(): RowMenuItem[] {
     title: () => mark.excerpt,
     hint: () => clockTime(mark.messageTime),
     data: { bookmark: mark.messageId },
-    run: () => void openBookmark(id, mark.messageId)
+    run: () => void openBookmark(id, mark)
   }));
 }
 
-/** Scrolls the open chat to a bookmarked answer, loading the history around it when needed. */
-async function openBookmark(sessionId: string, messageId: string): Promise<void> {
+/**
+ * Scrolls the open chat to a bookmarked answer, loading the history around it when needed. An
+ * answer the recorded chat no longer holds takes its bookmark with it: its own button is gone, so
+ * nothing else could remove it. A history that could not be read keeps the bookmark.
+ */
+async function openBookmark(sessionId: string, mark: SessionBookmark): Promise<void> {
   const selection = selectionGeneration;
-  const location = await run(api.locateMessage(sessionId, messageId));
+  const reply = await Promise.resolve(api.locateMessage(sessionId, mark.messageId)).catch((error: unknown) => ({ ok: false as const, error: String(error) }));
   if (selection !== selectionGeneration || selectedId !== sessionId) return;
-  if (!location) { toast(t('This answer is no longer in the chat.')); return; }
-  await revealChatLocation(sessionId, location);
+  if (!reply.ok) { toast(t(reply.error)); return; }
+  if (reply.data) { await revealChatLocation(sessionId, reply.data); return; }
+  const marks = await run(api.setBookmark(sessionId, mark.messageId, mark.excerpt, mark.messageTime, false));
+  if (marks && bookmarks?.sessionId === sessionId) { bookmarks = { sessionId, marks }; paintBookmarks(); }
+  toast(t(marks ? 'This answer is no longer in the chat, so its bookmark was removed.' : 'This answer is no longer in the chat.'));
 }
 
 /** The Edit action under one of your questions. */

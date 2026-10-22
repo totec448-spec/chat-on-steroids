@@ -2924,6 +2924,7 @@
   "Bookmarks": "Yer imleri",
   "Answer": "Yanıt",
   "This answer is no longer in the chat.": "Bu yanıt artık sohbette değil.",
+  "This answer is no longer in the chat, so its bookmark was removed.": "Bu yanıt artık sohbette değil, bu yüzden yer imi kaldırıldı.",
   "{0} bookmarks in this chat": "Bu sohbette {0} yer imi",
   "{0} bookmarks in this chat|one": "Bu sohbette {0} yer imi"
 }
