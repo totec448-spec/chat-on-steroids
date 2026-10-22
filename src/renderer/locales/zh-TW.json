@@ -202,6 +202,7 @@
   "Create this project in ChatGPT again": "在 ChatGPT 中重新建立此專案",
   "Creating this project in ChatGPT…": "正在 ChatGPT 中建立此專案…",
   "This project's ChatGPT Project isn't available. Retry it from the project's menu.": "此專案的 ChatGPT 專案無法使用。請從專案選單重試。",
+  "This chat's project was removed from the sidebar. Add its folder again to send this message, or cancel it.": "此聊天的專案已從側邊欄移除。請重新加入它的資料夾以傳送這則訊息，或取消這則訊息。",
   "Sending in a moment…": "稍後傳送…",
   "Image cleanup failed. No further cleanup was requested.": "圖片清理失敗。未要求進一步清理。",
   "Collapse a folder before expanding more folders.": "請先收合一個資料夾，再展開其他資料夾。",
