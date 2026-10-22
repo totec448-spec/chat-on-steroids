@@ -2696,6 +2696,8 @@
   "The server did not answer in time.": "Máy chủ không trả lời kịp thời.",
   "The server does not offer SFTP, which SSH projects need for files.": "Máy chủ không cung cấp SFTP, thứ mà dự án SSH cần cho tệp.",
   "SSH could not connect.": "SSH không thể kết nối.",
+  "Folder not found on the server: {0}": "Không tìm thấy thư mục trên máy chủ: {0}",
+  "{0} on the server is not a folder": "{0} trên máy chủ không phải là thư mục",
   "Only regular files and folders can be deleted": "Chỉ có thể xóa tệp và thư mục thông thường",
   "The project file changed location": "Tệp dự án đã đổi vị trí",
   "Secure OS credential storage is unavailable, so the key cannot be stored safely.": "Kho thông tin xác thực an toàn của hệ thống không khả dụng nên không thể lưu khóa một cách an toàn.",

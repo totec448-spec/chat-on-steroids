@@ -2696,6 +2696,8 @@
   "The server did not answer in time.": "서버가 제시간에 응답하지 않았습니다.",
   "The server does not offer SFTP, which SSH projects need for files.": "서버가 SFTP를 제공하지 않습니다. SSH 프로젝트의 파일에는 SFTP가 필요합니다.",
   "SSH could not connect.": "SSH로 연결할 수 없었습니다.",
+  "Folder not found on the server: {0}": "서버에서 폴더를 찾을 수 없습니다: {0}",
+  "{0} on the server is not a folder": "서버의 {0}은(는) 폴더가 아닙니다",
   "Only regular files and folders can be deleted": "일반 파일과 폴더만 삭제할 수 있습니다",
   "The project file changed location": "프로젝트 파일의 위치가 바뀌었습니다",
   "Secure OS credential storage is unavailable, so the key cannot be stored safely.": "시스템의 보안 자격 증명 저장소를 사용할 수 없어 키를 안전하게 저장할 수 없습니다.",

@@ -2696,6 +2696,8 @@
   "The server did not answer in time.": "伺服器沒有及時回應。",
   "The server does not offer SFTP, which SSH projects need for files.": "伺服器不提供 SFTP，而 SSH 專案需要用它處理檔案。",
   "SSH could not connect.": "SSH 無法連線。",
+  "Folder not found on the server: {0}": "在伺服器上找不到資料夾：{0}",
+  "{0} on the server is not a folder": "伺服器上的 {0} 不是資料夾",
   "Only regular files and folders can be deleted": "只能刪除一般檔案和資料夾",
   "The project file changed location": "專案檔案的位置已變更",
   "Secure OS credential storage is unavailable, so the key cannot be stored safely.": "系統的安全認證儲存區無法使用，因此無法安全儲存金鑰。",

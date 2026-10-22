@@ -2807,6 +2807,8 @@
   "The server did not answer in time.": "Сервер не ответил вовремя.",
   "The server does not offer SFTP, which SSH projects need for files.": "Сервер не предоставляет SFTP, а он нужен проектам SSH для файлов.",
   "SSH could not connect.": "Не удалось подключиться по SSH.",
+  "Folder not found on the server: {0}": "Папка не найдена на сервере: {0}",
+  "{0} on the server is not a folder": "{0} на сервере не является папкой",
   "Only regular files and folders can be deleted": "Удалять можно только обычные файлы и папки",
   "The project file changed location": "Файл проекта сменил расположение",
   "Secure OS credential storage is unavailable, so the key cannot be stored safely.": "Защищённое хранилище учётных данных системы недоступно, поэтому ключ нельзя сохранить безопасно.",

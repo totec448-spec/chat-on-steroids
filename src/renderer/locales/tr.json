@@ -2733,6 +2733,8 @@
   "The server did not answer in time.": "Sunucu zamanında yanıt vermedi.",
   "The server does not offer SFTP, which SSH projects need for files.": "Sunucu, SSH projelerinin dosyalar için ihtiyaç duyduğu SFTP'yi sunmuyor.",
   "SSH could not connect.": "SSH bağlanamadı.",
+  "Folder not found on the server: {0}": "Sunucuda klasör bulunamadı: {0}",
+  "{0} on the server is not a folder": "Sunucudaki {0} bir klasör değil",
   "Only regular files and folders can be deleted": "Yalnızca normal dosya ve klasörler silinebilir",
   "The project file changed location": "Proje dosyasının konumu değişti",
   "Secure OS credential storage is unavailable, so the key cannot be stored safely.": "Sistemin güvenli kimlik bilgisi deposu kullanılamıyor, bu yüzden anahtar güvenle saklanamıyor.",

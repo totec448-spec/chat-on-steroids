@@ -2696,6 +2696,8 @@
   "The server did not answer in time.": "服务器没有及时响应。",
   "The server does not offer SFTP, which SSH projects need for files.": "服务器不提供 SFTP，而 SSH 项目需要用它处理文件。",
   "SSH could not connect.": "SSH 无法连接。",
+  "Folder not found on the server: {0}": "在服务器上找不到文件夹：{0}",
+  "{0} on the server is not a folder": "服务器上的 {0} 不是文件夹",
   "Only regular files and folders can be deleted": "只能删除普通文件和文件夹",
   "The project file changed location": "项目文件的位置已更改",
   "Secure OS credential storage is unavailable, so the key cannot be stored safely.": "系统的安全凭据存储不可用，因此无法安全保存密钥。",

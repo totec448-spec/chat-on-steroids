@@ -2696,6 +2696,8 @@
   "The server did not answer in time.": "サーバーが時間内に応答しませんでした。",
   "The server does not offer SFTP, which SSH projects need for files.": "サーバーが SFTP を提供していません。SSH プロジェクトのファイルには SFTP が必要です。",
   "SSH could not connect.": "SSH で接続できませんでした。",
+  "Folder not found on the server: {0}": "サーバー上にフォルダが見つかりません: {0}",
+  "{0} on the server is not a folder": "サーバー上の {0} はフォルダではありません",
   "Only regular files and folders can be deleted": "削除できるのは通常のファイルとフォルダーだけです",
   "The project file changed location": "プロジェクトファイルの場所が変わりました",
   "Secure OS credential storage is unavailable, so the key cannot be stored safely.": "システムの安全な資格情報ストレージを利用できないため、キーを安全に保存できません。",
