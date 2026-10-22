@@ -1325,3 +1325,15 @@ it('offers no .gitignore action on a server project or while comparing branches'
   openRowContextMenu('dist/app.js');
   expect(document.querySelector('.row-menu')).toBeNull();
 });
+
+it('offers no .gitignore action for an untracked name with a line break', async () => {
+  vi.mocked(window.api.getProjectGitSnapshot).mockImplementation(() => ok({
+    ...untrackedGit(), changes: [{ status: 'U', path: 'notes/a\nb.md', additions: 1, deletions: 0, binary: false }]
+  }));
+  const review = createFilePanel({ host, mount: host, toggle, reviewOnly: true });
+  review.update(projectA); await review.show(); await tick();
+  const row = host.querySelector<HTMLElement>('.file-change-row')!;
+  expect(row.dataset.path).toBe('notes/a\nb.md');
+  row.dispatchEvent(new dom.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 60 }));
+  expect(document.querySelector('.row-menu')).toBeNull();
+});
