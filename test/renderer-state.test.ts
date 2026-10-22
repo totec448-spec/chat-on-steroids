@@ -601,6 +601,8 @@ it('applies line spacing and the legible font from Appearance at once, and saves
   // The drag repaints before anything is saved.
   expect(root.style.getPropertyValue('--line-spacing')).toBe('1.4');
   expect(doc.getElementById('appearanceLineSpacingValue')!.textContent).toBe('1.4×');
+  // A screen reader gets the shown value, not the stored 140.
+  expect(spacing.getAttribute('aria-valuetext')).toBe('1.4×');
   spacing.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
   await waitFor(() => expect(mounted.calls.at(-1)?.ui.appearance).toMatchObject({ lineSpacing: 140 }));
   const font = doc.getElementById('appearanceFont') as HTMLSelectElement;
@@ -619,6 +621,31 @@ it('applies line spacing and the legible font from Appearance at once, and saves
   await waitFor(() => expect(mounted.calls.at(-1)?.ui.appearance).toMatchObject({ lineSpacing: 100, font: 'system' }));
   expect(mounted.calls.at(-1)?.ui.announceTurns).toBe(true);
   expect(root.style.getPropertyValue('--line-spacing')).toBe('1');
+});
+
+it('gives the line-spacing slider the shown value as its spoken value, from the saved setting and after a change', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const spacing = doc.getElementById('appearanceLineSpacing') as HTMLInputElement;
+  const shown = () => doc.getElementById('appearanceLineSpacingValue')!.textContent;
+  expect(spacing.getAttribute('aria-valuetext')).toBe(shown());
+  // A saved setting arrives with a state push (start-up, another window).
+  const { defaultAppearance } = await import('../src/shared/appearance.js');
+  mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, appearance: { ...defaultAppearance(), lineSpacing: 160 } } };
+  mounted.push(structuredClone(mounted.state));
+  expect(spacing.value).toBe('160');
+  expect(spacing.getAttribute('aria-valuetext')).toBe('1.6×');
+  expect(spacing.getAttribute('aria-valuetext')).toBe(shown());
+  spacing.value = '200';
+  spacing.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
+  expect(spacing.getAttribute('aria-valuetext')).toBe('2.0×');
+  expect(spacing.getAttribute('aria-valuetext')).toBe(shown());
+  // The decimal mark follows the app language, in the label and in the spoken value alike.
+  doc.documentElement.lang = 'de';
+  spacing.value = '130';
+  spacing.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
+  expect(spacing.getAttribute('aria-valuetext')).toBe('1,3×');
+  expect(spacing.getAttribute('aria-valuetext')).toBe(shown());
 });
 
 it('draws the sidebar layout saved in Appearance, Projects by default, and repaints when it changes', async () => {

@@ -51,7 +51,10 @@ export function initAppearance(save: (patch: { theme?: AppearanceTheme; appearan
     $<HTMLInputElement>('appearanceSize').value = String(current.fontSize);
     $('appearanceSizeValue').textContent = `${current.fontSize} px`;
     $<HTMLInputElement>('appearanceLineSpacing').value = String(current.lineSpacing);
-    $('appearanceLineSpacingValue').textContent = `${(current.lineSpacing / 100).toLocaleString(document.documentElement.lang || undefined, { minimumFractionDigits: 1 })}×`;
+    // The slider's value is 140; assistive technology reads the shown "1.4×" instead.
+    const spacing = `${(current.lineSpacing / 100).toLocaleString(document.documentElement.lang || undefined, { minimumFractionDigits: 1 })}×`;
+    $('appearanceLineSpacingValue').textContent = spacing;
+    $('appearanceLineSpacing').setAttribute('aria-valuetext', spacing);
     $<HTMLInputElement>('appearanceContrast').value = String(current[theme].contrast);
     $('appearanceContrastValue').textContent = String(current[theme].contrast);
     $<HTMLInputElement>('appearanceTranslucent').checked = current.translucentSidebar;
