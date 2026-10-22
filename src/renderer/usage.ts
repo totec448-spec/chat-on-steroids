@@ -4,6 +4,9 @@ import { DEFAULT_USAGE_FORMULA, usageDateKey as dateKey, usageEstimate, usageMes
 import type { ProviderUsage } from '../shared/provider-usage.js';
 let snapshot: UsageOverview | null = null;
 let projectNames = new Map<string, string>();
+// The By project name cells, so names that arrive late are written in place: repainting the section
+// would close an open Daily breakdown and drop the focus inside it.
+let projectNameCells: Array<[HTMLElement, () => string]> = [];
 let otherAppsGeneration = 0;
 let loadGeneration = 0;
 const FORMULA_KEY = 'usage-formula-v1';
@@ -109,7 +112,8 @@ export async function refreshUsage(fresh = false): Promise<void> {
     // The rows wait for names, never the page. They keep the last names until a list answers.
     void names.then(found => {
       if (!found || generation !== loadGeneration || (found.size === projectNames.size && [...found].every(([id, name]) => projectNames.get(id) === name))) return;
-      projectNames = found; paintCost();
+      projectNames = found;
+      for (const [cell, name] of projectNameCells) ui(cell, 'textContent', name);
     });
   } catch {
     if (generation === loadGeneration) ui(status, 'textContent', () => t("Usage could not be loaded. Try Refresh."));
@@ -139,6 +143,7 @@ function dayLabel(key: string): string {
 }
 function paintCost(): void {
   if (!snapshot) return;
+  projectNameCells = [];
   const total = usageEstimate(snapshot.models, formula);
   // Tokens without a rate make the priced sum a lower bound: "≥ $0.29", which fits the card on one
   // line and reads in every language; the hint and the sentence below name the unpriced tokens.
@@ -249,7 +254,8 @@ function paintCost(): void {
     for (const entry of snapshot.projects) {
       const estimate = usageEstimate(entry.models, formula); const row = el('tr');
       const name = () => entry.projectId === null ? t("No project") : projectNames.get(entry.projectId) ?? t("Unknown project");
-      row.append(el('td', '', name), el('td', '', () => Math.round(estimate.tokens).toLocaleString(currentLanguage())), el('td', '', () => estimate.unpricedTokens > 0 && estimate.unpricedTokens === estimate.tokens ? t("Rate unknown") : costText(estimate)));
+      const nameCell = el('td', '', name); projectNameCells.push([nameCell, name]);
+      row.append(nameCell, el('td', '', () => Math.round(estimate.tokens).toLocaleString(currentLanguage())), el('td', '', () => estimate.unpricedTokens > 0 && estimate.unpricedTokens === estimate.tokens ? t("Rate unknown") : costText(estimate)));
       projectTable.append(row);
     }
     const projectSection = el('section', 'usage-days-model usage-days-project');
