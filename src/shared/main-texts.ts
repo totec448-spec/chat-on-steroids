@@ -43,6 +43,7 @@ export const MAIN_TEXTS = [
   'Markdown files',
   'Text files',
   'CSV files',
+  'Save code',
   'Approve a folder for ChatGPT',
   'Import Skill folder',
   'Markdown skills',
