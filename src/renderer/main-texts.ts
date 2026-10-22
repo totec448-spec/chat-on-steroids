@@ -46,6 +46,7 @@ export function mainTexts(): Record<MainText, string> {
     'Markdown files': t('Markdown files'),
     'Text files': t('Text files'),
     'CSV files': t('CSV files'),
+    'Save code': t('Save code'),
     'Approve a folder for ChatGPT': t('Approve a folder for ChatGPT'),
     'Import Skill folder': t('Import Skill folder'),
     'Markdown skills': t('Markdown skills'),
