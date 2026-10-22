@@ -2782,6 +2782,7 @@ input[readonly] {
    the turn's work and what it says. */
 .turn-worked { margin: 12px 0 8px; padding-bottom: 9px; border-bottom: 1px solid var(--line); color: var(--faint); font-size: calc(12.5px * var(--text-scale, 1)); font-weight: 500; letter-spacing: .01em; line-height: 18px; font-variant-numeric: tabular-nums; }
 .turn-worked[hidden] { display: none; }
+.turn-stopped { color: var(--red); }
 /* While the turn works, a light sheen passes through the words (not the rule under them). */
 .turn-status.is-working .turn-worked-label {
   color: transparent;
