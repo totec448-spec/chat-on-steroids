@@ -6,6 +6,7 @@ import { initChatSearch, type ChatSearch } from './chat-search.js';
 import { initChatFind } from './chat-find.js';
 import { initChatCycle } from './chat-cycle.js';
 import { createWorkspaceTerminal } from './workspace-terminal.js';
+import { sendTerminalSelection } from './terminal-selection.js';
 import { createWorkspaceDocks } from './workspace-docks.js';
 import { currentLanguage, ui, t, tn } from './i18n.js';
 import { APP_COMMANDS, initSkills } from './skills.js';
@@ -30,6 +31,7 @@ import { shownSessionTitle } from './session-title.js';
 import { preserveTimelineViewport, ROUNDING_PX } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
 import { createSidebarPins, pinnedSortScope } from './sidebar-pins.js';
+import { createComposerDrafts } from './composer-drafts.js';
 import { createSidebarCompletionState } from './sidebar-completion.js';
 import { toolResultText } from './tool-result.js';
 import { renderEditCards } from './tool-artifacts.js';
@@ -84,6 +86,7 @@ import {
   committedResumeAncestorsFromSummary,
   continuationMarkerOf,
   DEFAULT_RECORDING_STORAGE_GIB,
+  isUnattributedSession,
   RECORDING_STORAGE_LIMITS_GIB,
   TURN_OUTCOME_LABELS,
   foldProgress,
@@ -239,7 +242,8 @@ async function deleteChatGroup(group: ChatGroup): Promise<void> {
 /** The chat menu's group items, for a main chat of a project. */
 function chatGroupMenuItems(summary: SessionSummary): RowMenuItem[] {
   const projectId = projectGroup(summary.projectId);
-  if (!projectId || summary.origin?.kind === 'worker' || !summary.conversationId) return [];
+  // Kept by session id: a new chat still waiting for its conversation can be grouped too (#1759).
+  if (!projectId || summary.origin?.kind === 'worker' || isUnattributedSession(summary)) return [];
   const current = chatGroupOf(chatGroups, summary);
   const groups = projectChatGroups(projectId);
   return [{
@@ -291,6 +295,11 @@ function projectMenuItems(id: string): RowMenuItem[] {
         ? t('ChatGPT may already have created it; retrying can leave a second Project')
         : t('Create this project in ChatGPT again'),
       run: () => void retryChatgptProject(id)
+    } satisfies RowMenuItem] : []),
+    // Only while one of its chats shows New response, so the menu does not offer what does nothing.
+    ...(sessions.some(entry => newResponse(entry) && projectGroup(entry.projectId) === id) ? [{
+      action: 'mark-seen', icon: 'i-checks', label: () => t('Mark all as seen'),
+      title: () => t("Clear New response from this project's finished chats"), run: () => markAllSeen(id)
     } satisfies RowMenuItem] : []),
     {
       action: 'color', icon: 'i-palette', label: () => t('Color'), title: () => t('Change project color'),
@@ -438,7 +447,13 @@ let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
 let filePanel: ReturnType<typeof createFilePanel> | null = null;
 let reviewPanel: ReturnType<typeof createFilePanel> | null = null;
 const expandedWorkers = new Set<string>();
-const inputDrafts = new Map<string, string>();
+const inputDrafts = createComposerDrafts({
+  // A chat's row shows whether it holds a draft, so a draft that comes or goes in a chat other
+  // than the open one repaints the list. The open chat's row shows no mark.
+  onDraftedChange: key => { if (key !== draftKey() && sessions.some(row => row.id === key)) paintSessions(); },
+  // A restart ends an edit the way leaving its chat does: the draft from before it comes back.
+  savedText: (key, text) => editingQuestion?.sessionId === key ? editingQuestion.previousDraft : text
+});
 const newChatTasks = new Map<string, { objective: string; automation: string; loopDelivery: string }>();
 const imageDrafts = new Map<string, Array<InputImage | InputAttachment>>();
 const startingInputs = new Map<string, InputEntry>();
@@ -947,11 +962,13 @@ function sessionBadges(summary: SessionSummary): Badge[] {
   const origin = summary.origin;
   // The one session that is not a chat. Saying so on the row is what stops it reading
   // as a chat that mysteriously lost its name.
-  if (summary.conversationId === null) {
+  if (isUnattributedSession(summary)) {
     return unattributedBlocked()
       ? [{ text: 'blocked', tone: 'is-failed' }, { text: 'not a chat', tone: '' }]
       : [{ text: 'not a chat', tone: '' }];
   }
+  // A new chat whose first message has not gone out yet (#1759): nothing to say about it until it has a conversation.
+  if (summary.conversationId === null) return badges;
   // First, and in the failure tone: the states that need the person, most pressing first. A chat
   // waiting on an approval card or a recovery that gave up cannot go on without them, and a blocked
   // chat is the app actively refusing its work; the user came to the list to find them at a glance.
@@ -989,8 +1006,22 @@ function sessionBadges(summary: SessionSummary): Badge[] {
   else if (!agent && workerReportedFinish(summary)) badges.push(AGENT_BADGE.sleeping);
   else if (sessionWorking(summary)) badges.push(AGENT_BADGE.active);
   else if (agent && agent.role !== 'prime') badges.push(AGENT_BADGE[agent.state]);
-  if (!sessionWorking(summary) && sidebarCompletion?.isUnseen(summary)) badges.push({ text: 'New response', tone: 'is-unseen' });
+  if (newResponse(summary)) badges.push({ text: 'New response', tone: 'is-unseen' });
   return badges;
+}
+
+/** The row's New response badge: a finished reply not yet seen on this device. A chat working again shows its spinner instead. */
+function newResponse(summary: SessionSummary): boolean {
+  return !sessionWorking(summary) && sidebarCompletion?.isUnseen(summary) === true;
+}
+
+/**
+ * Mark all as seen: clears New response from every chat that shows it, or from one project's chats,
+ * as opening each would. A working chat keeps its spinner and its next reply still arrives as new.
+ */
+function markAllSeen(projectId?: string): void {
+  const shown = sessions.filter(entry => newResponse(entry) && (projectId === undefined || projectGroup(entry.projectId) === projectId));
+  if (sidebarCompletion?.markAllSeen(shown)) paintSessions();
 }
 
 /** The chat whose tooltip a click put away, until the pointer leaves its row. */
@@ -1003,9 +1034,13 @@ function placeSessionTooltip(tip: HTMLElement, row: HTMLElement): void {
   tip.style.top = `${Math.min(bounds.top, window.innerHeight - 110)}px`;
 }
 
+/** Unsent text waits in this chat's composer. The open chat shows its draft itself, so it never counts. */
+function draftedChat(summary: SessionSummary): boolean { return summary.id !== selectedId && inputDrafts.has(summary.id); }
+
 /** A row's tooltip: its name, then `state` when a card says more than its badges, then the badges and its age. */
 function sessionRowTitle(summary: SessionSummary, pinned: boolean, badges: Badge[], state: string[] = []): string {
-  return [shownSessionTitle(summary), ...state, ...(pinned ? [t("Pinned")] : []), ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · ');
+  return [shownSessionTitle(summary), ...state, ...(pinned ? [t("Pinned")] : []), ...(draftedChat(summary) ? [t('Draft')] : []),
+    ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · ');
 }
 
 function sessionRow(summary: SessionSummary): HTMLElement {
@@ -1032,6 +1067,13 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   if (pinned) {
     row.classList.add('is-pinned');
     const mark = icon('i-pinned', 'ico sess-pin-mark');
+    top.append(mark);
+  }
+  if (draftedChat(summary)) {
+    // The row's tooltip says "Draft" to a pointer; the mark says it to a screen reader on the focused chat.
+    const mark = icon('i-pencil', 'ico sess-draft-mark');
+    mark.removeAttribute('aria-hidden'); mark.setAttribute('role', 'img');
+    ui(mark, 'aria-label', () => t('Draft'));
     top.append(mark);
   }
   ui(row, 'title', () => sessionRowTitle(summary, pinned, badges));
@@ -1082,7 +1124,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     title: () => t("Remove this chat and its saved history from the app. The chat stays in ChatGPT."),
     run: () => void deleteSession(summary.id)
   };
-  if (summary.conversationId === null) {
+  if (isUnattributedSession(summary)) {
     // Strict mode cannot trust an unattributed stream by definition. Do not offer an "Allow"
     // that the kernel will intentionally ignore; the Settings checkbox explains that
     // unattributed calls stay blocked until strict mode is turned off.
@@ -1099,6 +1141,10 @@ function sessionRow(summary: SessionSummary): HTMLElement {
         run: () => void toggleUnattributedBlock(!blocked)
       });
     }
+  } else if (summary.conversationId === null) {
+    // A new chat whose first message has not gone out yet (#1759): no ChatGPT link to open, copy or block.
+    items.push({ action: 'rename', icon: 'i-pencil', label: () => t('Rename'), title: () => t("Rename this chat in the app. Its title in ChatGPT stays the same."), run: () => startRename(summary) });
+    items.push(...chatGroupMenuItems(summary));
   } else {
     const policyLineage = [
       summary.conversationId,
@@ -1397,6 +1443,8 @@ async function deleteSession(id: string): Promise<void> {
   const done = await run(api.deleteSession(id));
   if (done === null) return;
   sessions = sessions.filter((entry) => entry.id !== id);
+  // Its saved draft goes with the chat; text still on screen stays in the composer.
+  inputDrafts.delete(id);
   pressure.delete(id);
   sessionTotal = Math.max(0, sessionTotal - 1);
   if (selectedId === id) {
@@ -1509,8 +1557,7 @@ async function loadMoreSessions(): Promise<void> {
 
 /** A chat the project's section can show: workers alone leave it looking empty. */
 function projectShowsChat(id: string): boolean {
-  return sessions.some(entry => projectGroup(entry.projectId) === id && entry.origin?.kind !== 'worker' &&
-    (!!entry.conversationId || entry.origin?.kind === 'desktop'));
+  return sessions.some(entry => projectGroup(entry.projectId) === id && entry.origin?.kind !== 'worker' && !isUnattributedSession(entry));
 }
 
 /**
@@ -1815,7 +1862,8 @@ function paintInbox(): void {
   const children = workerChildren();
   const busy = new Map([...children].map(([key, workers]) => [key, busyWorkers(workers)]));
   const inProject = (entry: SessionSummary) => !inboxProject || projectGroup(entry.projectId) === inboxProject;
-  const attributed = (entry: SessionSummary) => !!entry.conversationId || entry.origin?.kind === 'desktop';
+  // Everything but the unattributed bucket is a chat, a new one still waiting for its conversation too (#1759).
+  const attributed = (entry: SessionSummary) => !isUnattributedSession(entry);
   const shown = sessions.filter(entry => entry.origin?.kind !== 'worker' && attributed(entry) && inProject(entry));
   // What the tree puts under "Unattributed activity", under the same disclosure here.
   const diagnostics = sessions.filter(entry => entry.origin?.kind !== 'worker' && !attributed(entry) && inProject(entry));
@@ -1971,7 +2019,7 @@ function inboxEmpty(id: string | null): HTMLElement {
 function projectSortEntries(groupOf: typeof projectGroup = projectGroup): Array<{ id: string; scope: string }> {
   const ids = new Set(projects.filter(project => !project.ungrouped).map(project => project.id));
   for (const entry of sessions) {
-    if (entry.origin?.kind === 'worker' || (!entry.conversationId && entry.origin?.kind !== 'desktop')) continue;
+    if (entry.origin?.kind === 'worker' || isUnattributedSession(entry)) continue;
     const id = groupOf(entry.projectId);
     if (id) ids.add(id);
   }
@@ -2161,10 +2209,19 @@ function paintSessions(): void {
   if (renaming && (document.activeElement as HTMLElement | null)?.classList.contains('sess-rename')) return;
   const layout = sidebarLayout();
   paintedLayout = layout;
+  // The header's Mark all as seen shows only while a chat shows New response.
+  const markAllSeenButton = $('markAllSeen'), markAllSeenFocused = document.activeElement === markAllSeenButton;
+  markAllSeenButton.hidden = !sessions.some(newResponse);
+  // It also hides when another path acknowledges the last one (an open chat's detail read), not only on its own click.
+  const keepFocus = () => {
+    // The keyboard goes on to search, beside it in either layout; the inbox draws its search control with the list.
+    if (markAllSeenFocused && markAllSeenButton.hidden) (layout === 'inbox' ? $('chatList').querySelector<HTMLElement>('[data-inbox-control="search"]') : $('searchChatsButton'))?.focus({ preventScroll: true });
+  };
   $('sessionList').classList.toggle('is-inbox', layout === 'inbox');
   if (layout !== 'inbox') inboxPicker.close();
   if (layout === 'inbox') {
     paintInbox();
+    keepFocus();
     syncSelectedWorkspace();
     scheduleToolActivityExpiry();
     return;
@@ -2207,7 +2264,7 @@ function paintSessions(): void {
   });
   for (const entry of orderedSessions) {
     if (entry.origin?.kind === 'worker') continue;
-    if (!entry.conversationId && entry.origin?.kind !== 'desktop') { diagnostics.push(entry); continue; }
+    if (isUnattributedSession(entry)) { diagnostics.push(entry); continue; }
     const projectId = groupOf(entry.projectId);
     const workers = children.get(entry.id);
     if (projectId) {
@@ -2335,6 +2392,7 @@ function paintSessions(): void {
   }
   restoreFocus();
   restoreGroupFocus();
+  keepFocus();
   syncSelectedWorkspace();
   $('projectsEmpty').hidden = projectSections.length > 0;
   $('sessionsEmpty').hidden = rows.length > 0;
@@ -2660,6 +2718,8 @@ function paintBookmarks(): void {
   const id = !newChatSelected ? selectedId : null;
   const marks = id && bookmarks?.sessionId === id ? bookmarks.marks : [];
   const button = $<HTMLButtonElement>('chatBookmarks');
+  // A button about to hide hands its focus to the message box, never to nothing.
+  if (!marks.length && !button.hidden && document.activeElement === button) $<HTMLTextAreaElement>('chatInput').focus();
   button.hidden = marks.length === 0;
   button.querySelector('.chat-bookmarks-count')!.textContent = String(marks.length);
   const label = () => tn('{0} bookmark in this chat', '{0} bookmarks in this chat', marks.length);
@@ -2679,17 +2739,27 @@ function bookmarkMenuItems(): RowMenuItem[] {
     title: () => mark.excerpt,
     hint: () => clockTime(mark.messageTime),
     data: { bookmark: mark.messageId },
-    run: () => void openBookmark(id, mark.messageId)
+    run: () => void openBookmark(id, mark)
   }));
 }
 
-/** Scrolls the open chat to a bookmarked answer, loading the history around it when needed. */
-async function openBookmark(sessionId: string, messageId: string): Promise<void> {
+/**
+ * Scrolls the open chat to a bookmarked answer, loading the history around it when needed. An
+ * answer the recorded chat no longer holds takes its bookmark with it: its own button is gone, so
+ * nothing else could remove it. A history that could not be read keeps the bookmark.
+ */
+async function openBookmark(sessionId: string, mark: SessionBookmark): Promise<void> {
   const selection = selectionGeneration;
-  const location = await run(api.locateMessage(sessionId, messageId));
+  const reply = await Promise.resolve(api.locateMessage(sessionId, mark.messageId)).catch((error: unknown) => ({ ok: false as const, error: String(error) }));
   if (selection !== selectionGeneration || selectedId !== sessionId) return;
-  if (!location) { toast(t('This answer is no longer in the chat.')); return; }
-  await revealChatLocation(sessionId, location);
+  if (!reply.ok) { toast(t(reply.error)); return; }
+  if (reply.data) { await revealChatLocation(sessionId, reply.data); return; }
+  const removed = await Promise.resolve(api.setBookmark(sessionId, mark.messageId, mark.excerpt, mark.messageTime, false))
+    .catch((error: unknown) => ({ ok: false as const, error: String(error) }));
+  // Another chat opened meanwhile: its view stays as it is, and it gets no message about this one.
+  if (selection !== selectionGeneration || selectedId !== sessionId) return;
+  if (removed.ok && bookmarks?.sessionId === sessionId) { bookmarks = { sessionId, marks: removed.data }; paintBookmarks(); }
+  toast(t(removed.ok ? 'This answer is no longer in the chat, so its bookmark was removed.' : 'This answer is no longer in the chat.'));
 }
 
 /** The Edit action under one of your questions. */
@@ -4074,6 +4144,18 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
   return box;
 }
 
+/** A fence's language (`language-ts`, written by marked and by ChatGPT's page alike), read before the sanitizer drops classes. */
+const CODE_LANGUAGE = /(?:^|\s)language-([\w+#.-]{1,32})(?=\s|$)/;
+/** The extension a block's Save offers; any other language saves as text. */
+// A Map, so a fence named `constructor` or `__proto__` finds nothing instead of Object's own members.
+const CODE_EXTENSIONS: ReadonlyMap<string, string> = new Map(Object.entries({
+  ts: 'ts', typescript: 'ts', tsx: 'tsx', js: 'js', javascript: 'js', jsx: 'jsx', mjs: 'mjs', json: 'json',
+  py: 'py', python: 'py', sh: 'sh', bash: 'sh', shell: 'sh', zsh: 'sh', ps1: 'ps1', powershell: 'ps1',
+  html: 'html', css: 'css', scss: 'scss', sql: 'sql', yaml: 'yml', yml: 'yml', toml: 'toml', xml: 'xml',
+  md: 'md', markdown: 'md', rs: 'rs', rust: 'rs', go: 'go', java: 'java', kt: 'kt', kotlin: 'kt',
+  swift: 'swift', c: 'c', cpp: 'cpp', 'c++': 'cpp', cs: 'cs', csharp: 'cs', rb: 'rb', ruby: 'rb', php: 'php', diff: 'diff'
+}));
+
 export function renderedMessage(html: StoredText | null | undefined, fallback: string): HTMLElement {
   const box = el('div', 'msg');
   // Same reason as textBlock, for the markdown path — and it is the fallback rather than the
@@ -4097,6 +4179,12 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
   // elements. These replacement nodes contain text only and undergo that same sanitizer.
   const prompts = nativePromptCards(template.content);
   for (const prompt of prompts) prompt.group.replaceWith(prompt.card);
+  // The sanitizer keeps each allowed `pre` as the same node, so its language can wait beside it.
+  const languages = new WeakMap<Element, string>();
+  for (const pre of template.content.querySelectorAll('pre')) {
+    const language = pre.querySelector('code')?.getAttribute('class')?.match(CODE_LANGUAGE)?.[1];
+    if (language) languages.set(pre, language);
+  }
   sanitizeHtmlTree(template.content, {
     allowedTags: RENDERED_TAGS,
     dropTags: DROP_RENDERED_TAGS,
@@ -4138,16 +4226,31 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
     // sanitizing and after the empty-capture fallback has been decided.
     for (const pre of box.querySelectorAll('pre')) {
       const value = pre.textContent ?? '';
+      const language = languages.get(pre);
       const panel = el('div', 'markdown-code');
       const header = el('div', 'tool-output-header');
-      header.append(icon('i-terminal', 'ico'), el('strong', '', () => t('Code')));
+      header.append(icon('i-terminal', 'ico'), el('strong', '', language ?? (() => t('Code'))));
       const copy = el('button', 'tool-copy', () => t('Copy')) as HTMLButtonElement;
       copy.type = 'button';
       copy.addEventListener('click', () => void (async () => {
         if (await run(api.writeClipboard(value))) ui(copy, 'textContent', () => t('Copied'));
         else toast(t('Could not copy text.'));
       })());
-      header.append(copy);
+      // Long lines scroll by default, as ChatGPT draws them; Wrap folds this block's lines to the column.
+      const wrap = el('button', 'tool-copy code-wrap', () => t('Wrap')) as HTMLButtonElement;
+      wrap.type = 'button';
+      wrap.setAttribute('aria-pressed', 'false');
+      wrap.addEventListener('click', () => {
+        wrap.setAttribute('aria-pressed', String(panel.classList.toggle('is-wrapped')));
+      });
+      const save = el('button', 'tool-copy code-save', () => t('Save')) as HTMLButtonElement;
+      save.type = 'button';
+      save.addEventListener('click', () => void (async () => {
+        const name = `snippet.${CODE_EXTENSIONS.get(language?.toLowerCase() ?? '') ?? 'txt'}`;
+        const result = await run(api.saveCode({ text: value, name }));
+        if (result?.done === 'saved') toast(t('Saved {0}', [result.name]));
+      })());
+      header.append(copy, wrap, save);
       pre.replaceWith(panel);
       panel.append(header, pre);
     }
@@ -6306,7 +6409,7 @@ async function stopBackgroundProcess(row: RunningExecProcess, restoreFocus: bool
   backgroundProcessStopping = null;
   paintBackgroundProcessStops();
   if (!reply.ok || !reply.data) {
-    toast(reply.ok ? t('Background process is no longer running') : reply.error);
+    toast(reply.ok ? t('Background process is no longer running') : t(reply.error));
     refreshBackgroundProcesses();
     return;
   }
@@ -6831,7 +6934,7 @@ function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?:
   // from another browser or from another machine can only be recorded as what it is:
   // real, complete, and not placeable in any chat this app can observe.
   const selected = sessions.find((entry) => entry.id === selectedId) ?? null;
-  if (selected && selected.conversationId === null) {
+  if (selected && isUnattributedSession(selected)) {
     return {
       text: t("Work this app could not place in a chat — driven from another device, or with no ChatGPT tab open"),
       tone: ''
@@ -8359,7 +8462,7 @@ export function initChat(next: Deps): void {
   sidebarOrder = createSidebarOrder($('sessionList'), () => [
     ...projectSortEntries(),
     ...chatGroups.groups.map(group => ({ id: group.id, scope: chatGroupsScope(group.projectId) })),
-    ...sessions.filter(entry => (entry.conversationId || entry.origin?.kind === 'desktop') && entry.origin?.kind !== 'worker')
+    ...sessions.filter(entry => !isUnattributedSession(entry) && entry.origin?.kind !== 'worker')
       .map(entry => ({ id: entry.id, scope: pinnedSortScope(chatSortList(entry), pinnedChat(entry)) }))
   ], paintSessions);
   void run(api.chatGroups()).then(state => { if (state) { chatGroups = state; paintSessions(); } });
@@ -8592,11 +8695,12 @@ export function initChat(next: Deps): void {
     onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); }
   });
   reviewPanel.update(selectedLocalProject());
+  const onSendSelection = (text: string): boolean => sendTerminalSelection($<HTMLTextAreaElement>('chatInput'), text);
   workspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.bottomBody,
-    { onEmpty: () => docks.setBottomOpen(false), onClosePanel: () => docks.setBottomOpen(false) });
+    { onEmpty: () => docks.setBottomOpen(false), onClosePanel: () => docks.setBottomOpen(false), onSendSelection });
   workspaceTerminal.update(selectedLocalProject());
   rightWorkspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.body,
-    { id: 'workspaceTerminalRight', dockedTabs: true, onTabsChanged: () => docks.sync() });
+    { id: 'workspaceTerminalRight', dockedTabs: true, onTabsChanged: () => docks.sync(), onSendSelection });
   rightWorkspaceTerminal.update(selectedLocalProject());
   docks.register('review', 'Review', 'i-git-diff', mount => {
     reviewPanel?.mountAt(mount); void reviewPanel?.show();
@@ -8606,7 +8710,8 @@ export function initChat(next: Deps): void {
     hide: () => rightWorkspaceTerminal?.hide(), canCreate: () => true,
     newTab: () => rightWorkspaceTerminal?.newTab() ?? null,
     tabs: () => rightWorkspaceTerminal?.tabs() ?? [],
-    selectTab: id => rightWorkspaceTerminal?.selectTab(id), closeTab: id => rightWorkspaceTerminal?.closeTab(id)
+    selectTab: id => rightWorkspaceTerminal?.selectTab(id), closeTab: id => rightWorkspaceTerminal?.closeTab(id),
+    moveTab: (id, index) => rightWorkspaceTerminal?.moveTab(id, index)
   }, {
     show: (mount, createIfEmpty) => workspaceTerminal?.show(mount, createIfEmpty),
     hide: () => workspaceTerminal?.hide()
@@ -8906,7 +9011,7 @@ export function initChat(next: Deps): void {
     selectedId: () => selectedId,
     // The chats the sidebar lists, newest first: sub-agents, helpers and diagnostics rows stay out.
     recent: () => sessions
-      .filter(entry => entry.origin?.kind !== 'worker' && entry.origin?.kind !== 'helper' && (!!entry.conversationId || entry.origin?.kind === 'desktop'))
+      .filter(entry => entry.origin?.kind !== 'worker' && entry.origin?.kind !== 'helper' && !isUnattributedSession(entry))
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .map(entry => ({ id: entry.id, title: entry.title }))
   });
@@ -9015,6 +9120,7 @@ export function initChat(next: Deps): void {
   });
 
   $('chatRefresh').addEventListener('click', event => { event.preventDefault(); void refreshAll(); });
+  $('markAllSeen').addEventListener('click', () => markAllSeen());
 
   $('copyHandoff').addEventListener('click', async () => {
     if (!handoff) return;

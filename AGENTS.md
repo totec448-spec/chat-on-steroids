@@ -1335,11 +1335,21 @@ a tab, renderer reload/destruction or app shutdown retires them. UUIDs and pendi
 prevent a late spawn after close. IPC accepts only the current main-frame sender and bounded
 named requests. Output pauses at 256 KiB until xterm parser acknowledgements drain it; scrollback
 is limited to 5,000 lines and queued input to 256 KiB. Ctrl+C interrupts unless copying a selection;
-Ctrl+Shift+C copies. Native terminal escape handling stays in xterm, not HTML rendering.
+Ctrl+Shift+C copies. While the shown shell has a selection, Send to chat (or Cmd/Ctrl+Shift+Enter)
+adds it to the composer (`terminal-selection.ts`) as a fenced block after the typed draft, keeping
+the last 400 lines and 20,000 characters with a note above when it cut; it never sends. Without a
+selection the shell gets the key. Native terminal escape handling stays in xterm, not HTML rendering.
+`renderer/terminal-memory.ts` keeps each dock's started and not-yet-restarted tabs (project id,
+title and folder; at most eight per dock) as a localStorage list, so the next launch or reload
+shows them as inert "previous session" tabs, right-dock ones as dock tabs. No shell starts by
+itself: Start shell here sends the saved project id, never the folder, so main still resolves the
+cwd and the Command permission still applies. Closed, exited and failed tabs are forgotten; no
+output or scrollback is stored.
 Appearance application refreshes all existing xterm palettes, including hidden tabs, from the
 current page/ink tokens without recreating shells; cursor colors follow the same palette.
 `scripts/verify-workspace-terminal.cjs` tests real Electron/PTY input, cwd/environment persistence,
-hide/reopen, tabs, Ctrl+C, exit codes, resize and closing against isolated state.
+hide/reopen, tabs, Ctrl+C, exit codes, resize and closing against isolated state;
+`test/renderer-terminal-selection.test.ts` tests the Send to chat block, caps, key and draft insert. `test/renderer-terminal-chat-wiring.test.ts` runs `initChat` and checks both the bottom and the right-dock terminal fill the real composer.
 
 ### Images
 
@@ -1365,6 +1375,10 @@ or clicking New Chat again preserves text, staged attachments, prepared workflow
 first-message Goal/Loop objective, mode and delivery choice. Each project and unfiled New Chat
 has its own draft key. Manual deletion remains deleted; accepted openings retire the original
 draft as the outbox/session takes ownership. Navigation still fences stale async imports.
+Draft text is also written to the renderer's local storage (`composer-drafts.ts`, the newest 100
+drafts in at most 1,000,000 stored characters), so an unsent draft survives a restart; staged files and a new
+chat's Goal/Loop choices stay window-local. A chat other than the open one that holds a draft shows
+a pencil mark on its sidebar row, and removing a chat removes its saved draft.
 
 The chat composer and queued-message editor have no HTML character cap. Send and queue edits
 share the existing 96,000-character message admission ceiling; prepared delivery additionally
@@ -2213,6 +2227,13 @@ with an event-loop yield between reads, and quitting cancels the warmup before c
 The loading message explains a potentially slow post-update rebuild and that the app remains usable.
 These charts are not a provider invoice, exact
 token consumption or proof of current prices/entitlements.
+**By project** (`UsageOverview.projects`) groups the same cached per-chat model totals by each
+chat's current `projectId`, largest first; `projectId: null` is the chats outside every project.
+The cache holds no project, so moving a chat moves its whole history without a reread or a cache
+version change. The renderer names rows from `listProjects()` (a sidebar-removed project keeps its
+record and name), and the usage paints without waiting for that list. An id missing from it
+shows Unknown project; a list that cannot be read keeps the names already shown. The table is
+left out when no chat has a project.
 
 The bottom **Messages and limits** section counts native user-message IDs with recorded
 model selection proof for GPT-5.6 and GPT-6. It uses provider `authoredAt`, otherwise the
@@ -2234,6 +2255,15 @@ leaving a gap; token-attribution/cache implementation notes are not persistent p
 `session-usage`, `usage-week` and `renderer-usage` tests cover evidence, boundaries and
 preference restoration. `scripts/verify-usage-week.cjs` exercises Chromium keyboard input
 and narrow/zoomed layouts with isolated data.
+
+**Export CSV**, beside Refresh, saves the page as a spreadsheet. IPC `usage:export` / preload
+`exportUsage(divisor)` takes only the page's token divisor; main reads `usageOverview()` after
+the save dialog closes and writes `shared/usage.ts::usageCsv()`: one row per recorded day with
+estimated tokens and, for the seven counted days only, verified GPT-5.6/GPT-6 sends (blank
+before them, which is not zero), then the latest limit reading. The file opens with a note that
+these are local estimates, uses English column names, local times and a UTF-8 byte-order mark,
+guards text cells against spreadsheet formulas, and holds no path, chat, account or
+conversation id. Tests: `usage-export`, `renderer-usage`.
 
 ### Other apps on this computer (#482)
 
@@ -3965,7 +3995,13 @@ traffic cannot evict middle corrections before selection. Preserve original task
 committed handoff provenance under the message budget; user references have a larger per-message
 allowance and explicit clipping. Exact same-session outbox `finishOwner` identities label known
 automatic messages; unknown native user-role rows do not prove human authorship. Both API and
-browser receive reference data rather than the helper's own prior assistant turns. Temporary
+browser receive reference data rather than the helper's own prior assistant turns. Only when
+that effective transcript lacks the first human user message, helpers receive a supplemental
+original-request reference capped at 20,000 characters, with a visible middle clip preserving
+both ends of larger text and a warning when the recorder already truncated it. API providers
+may reject requests whose combined messages exceed their context limits. ChatGPT drops this
+supplemental block first if it exceeds the active prompt budget, before shortening transcript
+history; a large or truncated original alone does not reject the decision. Temporary
 planners retain their staged-workflow role. Browser budgeting includes prompts and JSON escaping
 inside the complete 96,000-character envelope, or the smaller size learned for this account
 (`goal-helper-size.ts`, durable `goal-helper-size`, #1471): a helper prompt ChatGPT took (exact
@@ -4058,6 +4094,16 @@ PowerShell event loop checks the owning app's PID each second so a crashed/kille
 app cannot leave an orphan recording. `scripts/fixtures/smoke-dictation-parent-windows.cjs`
 parses the whole script with PowerShell and runs its loop without a microphone. No audio enters IPC or storage;
 macOS/Linux hide this Windows-only control.
+
+A code block in a rendered answer (`renderedMessage`) gets a header naming the fence's language, read
+from its `code` element's `language-*` class before the sanitizer drops classes ("Code" without one),
+and Copy, Wrap and Save. Wrap folds only that block's long lines and is not remembered. Save calls
+`saveCode({ text, name })` → `code:save`: `name` is a bare `snippet.<ext>` (the extension from the
+language, else `txt`; `ipc.ts` refuses anything else) that `main/code-file.ts` only suggests in
+Downloads; the native save dialog picks the path, the text is written beside it and renamed over it
+(a replaced file keeps its permissions from the first byte written and stays whole if the write
+fails; a file whose permissions cannot be read is not touched), and the reply is
+`{ done: 'saved', name }` or `{ done: 'cancelled' }`.
 
 Interface icons use one system: the bundled Phosphor font (`renderer/icons.css`, built from
 `@phosphor-icons/web`). Code names an icon by meaning (`icon('i-retry')`) and `dom.ts` `ICONS`
@@ -4201,7 +4247,10 @@ a completed background chat gets a static accent marker until selected, and a se
 completion is acknowledged locally without writing session metadata. The receipt advances only after
 the current selection/load generation has successfully rendered that conversation at the live tail;
 failed or stale selection loads leave it unseen. A first-run baseline prevents historical completions
-from appearing unread after an update, and the stored receipts stay bounded.
+from appearing unread after an update, and the stored receipts stay bounded. Mark all as seen
+(`markAllSeen`, one write) acknowledges every row that shows New response: the sidebar header's
+check button, shown only while one does, covers all chats, and a project's menu, holding the item only
+while one of its chats does, covers that project. A working chat has no completion to acknowledge and keeps its spinner.
 `sessions:list` (`readSessionList`, `SessionList`) carries per-chat states only the main process
 holds, as ChatGPT conversation ids, each keyed like `blocked`: `approval` (`approvalWaitingChats()`,
 the recovery hold's own 75 s freshness rule) and `recoveryStopped` (`recoveryStoppedChats()` in
@@ -4639,7 +4688,12 @@ checkout or push authority. Review projects `M/A/D/R/U`, plus `C` for every unme
 (`DD/AU/UD/UA/DU/AA/UU`) so an unfinished merge is never shown as an ordinary edit; a conflicted
 file missing from the worktree diffs as empty. It also projects ancestor-folder markers and
 bounded unified diffs; Files may open it from its toolbar. Files and Review are alternate right
-tabs; Review does not add a second file watcher or expose file-write actions.
+tabs; Review does not add a second file watcher or expose file-write actions, with one
+exception that is a Files write, not a Git one: an untracked (`U`) working-tree row's context
+menu offers Add to .gitignore for that file or its folder. After a confirmation it appends one
+anchored, escaped line (`/dist/`) to the project folder's `.gitignore` through the existing
+`projectFiles:create`/`projectFiles:preview`/`projectFiles:save` IPC. The file is read before the
+dialog and saved against that revision, so an edit made elsewhere meanwhile is refused.
 Review also identifies the checked-out branch and offers a searchable, read-only comparison
 against locally known branch refs. Selecting a ref never switches branches or fetches remote
 data. The comparison shows committed changes from the selected ref's merge base to current

@@ -26,9 +26,13 @@ export interface UsageOverview {
   limits: ModelUsage[];
   days: Array<{ date: string; tokens: number; models: UsageModelTokens[] }>;
   models: UsageModelTokens[];
+  /** The same totals grouped by each chat's current project, largest first. */
+  projects: UsageProjectTokens[];
   tokens: number;
   sessions: number;
 }
+/** `projectId: null` holds the chats outside every project. */
+export interface UsageProjectTokens { projectId: string | null; tokens: number; models: UsageModelTokens[] }
 
 export interface UsageMessageDay { date: string; gpt56: number; gpt6: number }
 export type UsageMessageFamily = 'gpt-5.6' | 'gpt-6';
@@ -119,4 +123,45 @@ export function usageEstimate(rows: readonly UsageModelTokens[], formula: UsageF
     else unpricedTokens += amount;
   }
   return { tokens, cost, unpricedTokens };
+}
+
+/** A local time as `YYYY-MM-DD HH:MM`, which spreadsheets read as a date and time. */
+function usageCsvTime(time: number): string {
+  const date = new Date(time);
+  return `${usageDateKey(date)} ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+/** RFC 4180 quoting; a text cell that a spreadsheet would run as a formula starts with `'`. */
+function usageCsvCell(value: string | number | null): string {
+  if (value === null) return '';
+  const text = typeof value === 'number' ? String(value) : /^[=+\-@\t\r\n]/.test(value) ? `'${value}` : value;
+  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+/**
+ * The Usage page as a CSV file: estimated tokens per day with the verified sends of the last
+ * seven days beside them, then the latest limit reading. English column names keep the file
+ * readable by scripts; it holds no path, chat, account or conversation id. `divisor` is the page's
+ * own, so the tokens match what the page shows.
+ */
+export function usageCsv(overview: UsageOverview, divisor: number, exportedAt: number): string {
+  const sentFrom = usageDateKey(new Date(usageWeekStart((new Date(overview.messages.through).getDay() + 1) % 7, overview.messages.through)));
+  const sent = new Map(overview.messages.days.map(day => [day.date, day]));
+  const tokens = new Map(overview.days.map(day => [day.date, day.tokens * 2 / divisor]));
+  const dates = [...new Set([...tokens.keys(), ...sent.keys()])].sort();
+  const rows: Array<Array<string | number | null>> = [
+    ['Chat On Steroids usage export', usageCsvTime(exportedAt)],
+    ['Note', `Estimated tokens are this app's local estimate (final frontend context per unique tool call, divided by ${divisor}), not a provider invoice or exact token use. Messages sent count recorded native sends with verified model proof for the last 7 days only; they are not a quota. Limits are the latest reading only. Times are local.`],
+    [],
+    ['Date', 'Estimated tokens', 'GPT-5.6 messages sent', 'GPT-6 messages sent'],
+    ...dates.map(date => {
+      const day = sent.get(date);
+      const counted = date >= sentFrom;
+      return [date, Math.round(tokens.get(date) ?? 0), counted ? day?.gpt56 ?? 0 : null, counted ? day?.gpt6 ?? 0 : null];
+    }),
+    [],
+    ['Limit', 'Kind', 'Remaining', 'Remaining percent', 'Window hours', 'Resets at', 'Read at'],
+    ...overview.limits.map(limit => [limit.model, limit.scope, limit.remaining, limit.remainingPercent === null ? null : Math.round(limit.remainingPercent * 10) / 10,
+      limit.windowSeconds === null ? null : Math.round(limit.windowSeconds / 360) / 10, limit.resetAt === null ? null : usageCsvTime(limit.resetAt), usageCsvTime(limit.observedAt)])
+  ];
+  // A byte-order mark makes Excel read the file as UTF-8.
+  return `﻿${rows.map(row => row.map(usageCsvCell).join(',')).join('\r\n')}\r\n`;
 }

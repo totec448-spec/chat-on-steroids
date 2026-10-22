@@ -256,6 +256,13 @@ describe('the session card header', () => {
     expect(document.querySelector('#chatTitle')!.closest('header')!.firstElementChild!.id).toBe('chatTitle');
   });
 
+  it('lets the language name of a code block shrink and never its Copy, Wrap and Save buttons', () => {
+    // The panel clips what overflows its header, so a long name beside three buttons would cut Save off.
+    const name = rule('.msg.rich .markdown-code .tool-output-header strong');
+    for (const declaration of ['min-width: 0', 'overflow: hidden', 'text-overflow: ellipsis', 'white-space: nowrap']) expect(name).toContain(declaration);
+    expect(rule('.msg.rich .markdown-code .tool-output-header .ico, .msg.rich .markdown-code .tool-copy')).toContain('flex: none');
+  });
+
   it('has a place to say what is happening without opening the Activity log', () => {
     const note = document.getElementById('chatState')!;
     expect(note.closest('.subhead')).not.toBeNull();
@@ -401,11 +408,11 @@ describe('the session-row chat actions', () => {
    */
   it('blocks the Unattributed row through the one switch that can answer for it', () => {
     expect(chatSource).toMatch(
-      /if \(summary\.conversationId === null\)[\s\S]{0,2200}toggleUnattributedBlock\(!blocked\)/
+      /if \(isUnattributedSession\(summary\)\)[\s\S]{0,2200}toggleUnattributedBlock\(!blocked\)/
     );
     // In strict mode the row offers no Allow the kernel would ignore: only Remove.
     expect(chatSource).toMatch(
-      /strictChatAllowlist !== true\) \{[\s\S]{0,1200}toggleUnattributedBlock\(!blocked\)[\s\S]{0,120}\n  \} else \{/
+      /strictChatAllowlist !== true\) \{[\s\S]{0,1200}toggleUnattributedBlock\(!blocked\)[\s\S]{0,120}\n  \} else if \(summary\.conversationId === null\) \{/
     );
     expect(chatSource).toMatch(
       /toggleUnattributedBlock[\s\S]{0,400}\$<HTMLInputElement>\('allowUnattributedCalls'\)\.checked = !blocked/
