@@ -2969,5 +2969,13 @@
   "Secure OS credential storage is unavailable, so the key was not saved": "系统的安全凭据存储不可用，因此未保存密钥",
   "Secure OS credential storage is unavailable, so nothing was changed": "系统的安全凭据存储不可用，因此未做任何更改",
   "A handoff cannot be empty": "交接内容不能为空",
-  "That session no longer exists": "该会话已不存在"
+  "That session no longer exists": "该会话已不存在",
+  "Chat groups, bookmarks, drafts that wait for you, and a better Review.": "聊天分组、书签、等你回来的草稿，以及更好的审阅。",
+  "Chat groups": "聊天分组",
+  "Sort a project's chats into groups from its ⋯ menu.": "从项目的 ⋯ 菜单把它的聊天分到各个组里。",
+  "Bookmark an answer and jump back to it from the chat's header.": "为回答加书签，并从聊天标题栏跳回去。",
+  "Drafts that wait": "等你回来的草稿",
+  "A pencil marks chats with an unsent message, and drafts come back after a restart.": "铅笔标出有未发送消息的聊天，重启后草稿也会回来。",
+  "A better Review": "更好的审阅",
+  "Right-click an untracked file to add it, or its folder, to .gitignore.": "右键点击未跟踪的文件，即可将它或其所在文件夹添加到 .gitignore。"
 }

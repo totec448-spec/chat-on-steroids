@@ -2969,5 +2969,13 @@
   "Secure OS credential storage is unavailable, so the key was not saved": "OS의 보안 자격 증명 저장소를 사용할 수 없어 키를 저장하지 않았습니다",
   "Secure OS credential storage is unavailable, so nothing was changed": "OS의 보안 자격 증명 저장소를 사용할 수 없어 아무것도 바꾸지 않았습니다",
   "A handoff cannot be empty": "인계 내용은 비워 둘 수 없습니다",
-  "That session no longer exists": "그 세션은 더 이상 없습니다"
+  "That session no longer exists": "그 세션은 더 이상 없습니다",
+  "Chat groups, bookmarks, drafts that wait for you, and a better Review.": "채팅 그룹, 북마크, 기다려 주는 초안, 더 나아진 리뷰.",
+  "Chat groups": "채팅 그룹",
+  "Sort a project's chats into groups from its ⋯ menu.": "프로젝트의 ⋯ 메뉴에서 채팅을 그룹으로 정리하세요.",
+  "Bookmark an answer and jump back to it from the chat's header.": "답변에 북마크를 달고 채팅 헤더에서 다시 돌아가세요.",
+  "Drafts that wait": "기다려 주는 초안",
+  "A pencil marks chats with an unsent message, and drafts come back after a restart.": "보내지 않은 메시지가 있는 채팅에 연필 표시가 붙고, 초안은 다시 시작한 뒤에도 돌아옵니다.",
+  "A better Review": "더 나아진 리뷰",
+  "Right-click an untracked file to add it, or its folder, to .gitignore.": "추적되지 않는 파일을 마우스 오른쪽 버튼으로 클릭해 그 파일이나 폴더를 .gitignore에 추가하세요."
 }
