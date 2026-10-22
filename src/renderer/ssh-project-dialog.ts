@@ -5,7 +5,8 @@ import { t } from './i18n.js';
 /**
  * Adding a folder on a server as a project (#1469). The main process connects with the person's
  * own ssh and checks the folder before anything is saved; its sentence for a failure (a host key
- * not trusted yet, a key the server refused, a folder that is a file) is shown as it is.
+ * not trusted yet, a key the server refused, a folder that is a file) is shown in the chosen
+ * language; a line ssh printed itself has no translation and is shown as it is.
  */
 export function initSshProjectDialog(
   api: Pick<AppApi, 'addRemoteProject'>,
@@ -37,7 +38,8 @@ export function initSshProjectDialog(
     setBusy(true);
     try {
       const reply = await api.addRemoteProject(address.value.trim(), folder.value.trim());
-      if (!reply.ok) { showError(reply.error); return; }
+      // The app's own sentences are translated; a line ssh printed itself has no entry and stays as it is.
+      if (!reply.ok) { showError(t(reply.error)); return; }
       close();
       onAdded(reply.data);
     } catch (failure) {
