@@ -3016,6 +3016,7 @@
   "Bookmarks": "Закладки",
   "Answer": "Ответ",
   "This answer is no longer in the chat.": "Этого ответа больше нет в чате.",
+  "This answer is no longer in the chat, so its bookmark was removed.": "Этого ответа больше нет в чате, поэтому его закладка убрана.",
   "{0} bookmarks in this chat": "{0} закладки в этом чате",
   "{0} bookmarks in this chat|one": "{0} закладка в этом чате",
   "{0} bookmarks in this chat|few": "{0} закладки в этом чате",

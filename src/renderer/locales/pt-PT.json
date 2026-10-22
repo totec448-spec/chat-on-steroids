@@ -2970,6 +2970,7 @@
   "Bookmarks": "Marcadores",
   "Answer": "Resposta",
   "This answer is no longer in the chat.": "Esta resposta já não está no chat.",
+  "This answer is no longer in the chat, so its bookmark was removed.": "Esta resposta já não está no chat, por isso o marcador foi removido.",
   "{0} bookmarks in this chat": "{0} marcadores neste chat",
   "{0} bookmarks in this chat|one": "{0} marcador neste chat",
   "{0} bookmarks in this chat|many": "{0} de marcadores neste chat"

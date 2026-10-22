@@ -2878,5 +2878,6 @@
   "Bookmarks": "书签",
   "Answer": "回答",
   "This answer is no longer in the chat.": "这个回答已不在聊天中。",
+  "This answer is no longer in the chat, so its bookmark was removed.": "这个回答已不在聊天中，因此已移除它的书签。",
   "{0} bookmarks in this chat": "此聊天中有 {0} 个书签"
 }

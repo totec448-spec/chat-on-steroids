@@ -7384,6 +7384,57 @@ describe('bookmarked answers', () => {
     expect(excerpt.endsWith('…')).toBe(true);
   });
 
+  it('removes a bookmark whose answer is no longer in the chat when it is opened, never on a failed read', async () => {
+    // The answer's own button is gone with it, so the list is the only place left to remove it from.
+    const gone = { messageId: '7c1e0f9a-1d2b-4c3d-8e4f-5a6b7c8d9e0f', excerpt: 'An answer that is gone', messageTime: T0 + 500, at: T0 + 6_000 };
+    const { w } = await boot([ask, reply, end], true, [], [], { summary: { conversationId: chat } });
+    const api = (w as any).api;
+    api.listBookmarks = vi.fn(async () => ({ ok: true, data: [gone] }));
+    api.setBookmark = vi.fn(async () => ({ ok: true, data: [] }));
+    api.locateMessage = vi.fn(async () => ({ ok: false, error: 'The chat history could not be read' }));
+    w.document.getElementById('newChat')!.click(); await settle();
+    w.document.querySelector<HTMLElement>(`.sess[data-id="${summary([]).id}"]`)!.click(); await settle();
+    const header = w.document.getElementById('chatBookmarks') as HTMLButtonElement;
+    const open = async () => { header.click(); await settle(); w.document.querySelector<HTMLButtonElement>('[data-row-action="bookmark"]')!.click(); await settle(); };
+    // A history that could not be read says so and keeps the bookmark.
+    await open();
+    expect(api.setBookmark).not.toHaveBeenCalled();
+    expect(header.hidden).toBe(false);
+    // The answer is not in the recorded chat: its bookmark goes, and the person is told why.
+    api.locateMessage = vi.fn(async () => ({ ok: true, data: null }));
+    await open();
+    expect(api.setBookmark).toHaveBeenCalledWith(summary([]).id, gone.messageId, gone.excerpt, gone.messageTime, false);
+    expect(header.hidden).toBe(true);
+    expect(w.document.querySelector('.toast')!.textContent).toBe('This answer is no longer in the chat, so its bookmark was removed.');
+    // The hidden header button gives its focus to the message box rather than to nothing.
+    expect(w.document.activeElement).toBe(w.document.getElementById('chatInput'));
+  });
+
+  it('keeps a stale bookmark when removing it fails, and says nothing in another chat opened meanwhile', async () => {
+    const gone = { messageId: '7c1e0f9a-1d2b-4c3d-8e4f-5a6b7c8d9e0f', excerpt: 'An answer that is gone', messageTime: T0 + 500, at: T0 + 6_000 };
+    const { w } = await boot([ask, reply, end], true, [], [], { summary: { conversationId: chat } });
+    const api = (w as any).api;
+    api.listBookmarks = vi.fn(async () => ({ ok: true, data: [gone] }));
+    api.locateMessage = vi.fn(async () => ({ ok: true, data: null }));
+    w.document.getElementById('newChat')!.click(); await settle();
+    w.document.querySelector<HTMLElement>(`.sess[data-id="${summary([]).id}"]`)!.click(); await settle();
+    const header = w.document.getElementById('chatBookmarks') as HTMLButtonElement;
+    const open = async () => { header.click(); await settle(); w.document.querySelector<HTMLButtonElement>('[data-row-action="bookmark"]')!.click(); await settle(); };
+    // A removal that throws still ends with a message, and the bookmark stays listed.
+    api.setBookmark = vi.fn(async () => { throw new Error('disk gone'); });
+    await open();
+    expect(header.hidden).toBe(false);
+    expect(w.document.querySelector('.toast')!.textContent).toBe('This answer is no longer in the chat.');
+    w.document.querySelector('.toast')!.remove();
+    // The person opens a new chat while the removal is still on its way: no message there.
+    let finish!: (value: unknown) => void;
+    api.setBookmark = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+    await open();
+    w.document.getElementById('newChat')!.click(); await settle();
+    finish({ ok: true, data: [] }); await settle();
+    expect(w.document.querySelector('.toast')).toBeNull();
+  });
+
   it('shows a chat\'s saved bookmarks when it is opened', async () => {
     const { w } = await boot([ask, reply, end], true, [], [], { summary: { conversationId: chat } });
     const api = (w as any).api;
