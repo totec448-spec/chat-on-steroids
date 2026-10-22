@@ -3681,6 +3681,38 @@ describe('exec sessions belong to the chat that opened them', () => {
     expect(textOf(stale)).toContain('no local tool was run');
   });
 
+  it('tells a replaced chat where its work continues, also after a second Compact & Resume', async () => {
+    const chatA = 'f0f00011-1111-4111-8111-111111111111';
+    const chatB = 'f0f00012-1111-4111-8111-111111111111';
+    const chatC = 'f0f00013-1111-4111-8111-111111111111';
+    const summary = await createSession({ title: 'Portfolio site', conversationId: chatA });
+    expect(prove('wfr_where_a', chatA, summary.id)).toBe('stored');
+    expect(await rebindSession(summary.id, chatA, chatB)).toBe(true);
+
+    const once = await asChat('wfr_where_a', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(failed(once)).toBe(true);
+    expect(textOf(once)).toContain('CONVERSATION_SUPERSEDED');
+    expect(textOf(once)).toContain(`https://chatgpt.com/c/${chatB}`);
+    expect(textOf(once)).toContain('"Portfolio site"');
+    expect(textOf(once)).toContain('no local tool was run');
+
+    // A second move sends the oldest chat straight to the newest one, never to the middle one.
+    expect(await rebindSession(summary.id, chatB, chatC)).toBe(true);
+    const twice = await asChat('wfr_where_a', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(textOf(twice)).toContain(`https://chatgpt.com/c/${chatC}`);
+    expect(textOf(twice)).not.toContain(chatB);
+
+    // A chat not yet named (the store's placeholder title) is named by its link alone.
+    const chatD = 'f0f00014-1111-4111-8111-111111111111';
+    const chatE = 'f0f00015-1111-4111-8111-111111111111';
+    const untitled = await createSession({ title: '  ', conversationId: chatD });
+    expect(prove('wfr_where_d', chatD, untitled.id)).toBe('stored');
+    expect(await rebindSession(untitled.id, chatD, chatE)).toBe(true);
+    const bare = await asChat('wfr_where_d', 'read', { paths: ['/workspace/src/app.ts'] });
+    expect(textOf(bare)).toContain(`https://chatgpt.com/c/${chatE}. Tell the user to continue there`);
+    expect(textOf(bare)).not.toContain('shown in Chat On Steroids as');
+  });
+
   it('refuses every tool from a chat whose handoff brief has been asked for, until the move is over', async () => {
     resetContinuationsForTests();
     const chatA = 'f0f00007-1111-4111-8111-111111111111';
@@ -4284,6 +4316,22 @@ describe('blocked chats', () => {
     getConfig().multiAgent.strictChatAllowlist = false;
   });
 
+  // `ui.rotateStopFallback`: while the app stops a turn to continue it in a fresh one, a call of that
+  // chat is refused, not run, so a Stop landing mid-call cannot make the model run it twice.
+  it('refuses, without running it, a call of a chat whose turn is being continued in a fresh one', async () => {
+    const { armRotationFence, clearRotationFence } = await import('../src/main/rotation-fence.js');
+    armRotationFence(ROGUE, 'turn-being-stopped');
+    try {
+      const reply = await readAs(owned(ROGUE));
+      expect(failed(reply)).toBe(true);
+      expect(textOf(reply)).toContain('TURN_CONTINUING');
+      expect(textOf(reply)).toMatch(/was not run/i);
+      expect(textOf(reply)).not.toContain('/workspace/notes.txt');
+    } finally { clearRotationFence(ROGUE); }
+    // Lifted: the same call runs again.
+    expect(failed(await readAs(owned(ROGUE)))).toBe(false);
+  });
+
   it('refuses a blocked chat’s call and tells the model to stop instead of retrying', async () => {
     setChatBlocked(ROGUE, true);
     const reply = await readAs(owned(ROGUE));
@@ -4371,9 +4419,10 @@ describe('blocked chats', () => {
     const untrusted = await readAs(owned(BYSTANDER));
     expect(failed(untrusted)).toBe(true);
     expect(textOf(untrusted)).toContain('CHAT_NOT_TRUSTED');
-    expect(textOf(untrusted)).toMatch(/chat list/i);
-    expect(textOf(untrusted)).toMatch(/sidebar/i);
-    expect(textOf(untrusted)).toContain('Trust');
+    expect(textOf(untrusted)).toMatch(/⋯ menu in the app's sidebar/);
+    expect(textOf(untrusted)).toContain('Trust chat');
+    // VM, 2026-10-20: refused here, the model ran the same command through the other computer's app.
+    expect(textOf(untrusted)).toContain('Do not send it to another app or connector instead');
     expect(textOf(untrusted)).not.toContain('Sessions');
     expect(textOf(untrusted)).not.toContain('/workspace/notes.txt');
 
@@ -4426,7 +4475,7 @@ describe('blocked chats', () => {
     expect(textOf(parentBlocked)).toContain('CHAT_NOT_TRUSTED');
   });
 
-  it('tells a refused worker to use the owning prime row in the sidebar', async () => {
+  it('tells a refused worker to use its main chat\'s menu in the sidebar', async () => {
     const prime = 'strict-worker-notice-prime';
     const worker = 'strict-worker-notice-child';
     const primeSession = await createSession({ title: 'strict worker notice prime', conversationId: prime });
@@ -4441,13 +4490,12 @@ describe('blocked chats', () => {
     const refused = await readAs(ownedSession(worker, workerSession.id));
     expect(failed(refused)).toBe(true);
     const notices = (await readRecentEvents(workerSession.id, 20))
-      .filter(event => event.kind === 'progress' && /owning prime/i.test(event.message.text));
+      .filter(event => event.kind === 'progress' && /worker whose main chat/i.test(event.message.text));
     expect(notices).toHaveLength(1);
     const copy = notices[0]?.kind === 'progress' ? notices[0].message.text : '';
-    expect(copy).toMatch(/owning prime row/i);
-    expect(copy).toMatch(/sidebar/i);
-    expect(copy).toContain('Trust');
-    expect(copy).toContain('Release');
+    expect(copy).toMatch(/main chat's ⋯ menu in the sidebar/);
+    expect(copy).toContain('Trust chat');
+    expect(copy).toContain('Release chat');
     expect(copy).not.toContain('Sessions');
   });
 
@@ -4469,7 +4517,7 @@ describe('blocked chats', () => {
     const notices = (await readRecentEvents(session.id, 20))
       .filter(event => event.kind === 'progress' && /app-created worker/.test(event.message.text));
     expect(notices).toHaveLength(1);
-    expect(notices[0]?.kind === 'progress' && notices[0].message.text).toContain('no unique owning prime');
+    expect(notices[0]?.kind === 'progress' && notices[0].message.text).toContain('the main chat that started it is not proven yet');
   });
 
   it('keeps a trusted chat authorized only after its Compact & Resume successor commits', async () => {
@@ -4533,9 +4581,10 @@ describe('blocked chats', () => {
       .filter(event => event.kind === 'progress' && /untrusted chat was refused/.test(event.message.text));
     expect(notes).toHaveLength(1);
     const copy = notes[0]?.kind === 'progress' ? notes[0].message.text : '';
-    expect(copy).toMatch(/chat list/i);
-    expect(copy).toMatch(/hover.*sidebar/i);
-    expect(copy).toContain('Trust (✓)');
+    // The sidebar has one ⋯ menu per row since 7a023be7; there is no ✓ to hover for.
+    expect(copy).toMatch(/⋯ menu in the sidebar/);
+    expect(copy).toContain('Trust chat');
+    expect(copy).not.toContain('Trust (✓)');
     expect(copy).not.toContain('Sessions');
 
     await setChatTrusted(conversationId, true);
