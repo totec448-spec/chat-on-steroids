@@ -2766,7 +2766,8 @@ function announceFinishedTurns(delta: readonly SessionEvent[]): void {
   }
   // A Goal or Loop continue can start the next turn in the same read: the end still counts.
   if (!finished || deps.state()?.config.ui.announceTurns !== true) return;
-  if (before !== text) { region.textContent = text; return; }
+  // A write now also drops a delayed repeat still waiting from an earlier read.
+  if (before !== text) { turnAnnounceWrite++; region.textContent = text; return; }
   // The region held these words when the read began; a screen reader hears no change unless it
   // is emptied first and filled in a later task. A later read or chat switch in between wins.
   region.textContent = '';

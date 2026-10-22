@@ -7382,6 +7382,25 @@ describe('the finished-reply announcement', () => {
     expect(region(w).textContent).toBe('');
   });
 
+  it('drops a delayed repeat once a later reply has been read out at once', async () => {
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns: true });
+    await append([end(3, 't1')]);
+    const held: Array<() => void> = [], setTimer = w.setTimeout.bind(w);
+    vi.spyOn(w, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) =>
+      ms === 100 ? (held.push(fn), 0) : setTimer(fn, ms, ...rest)) as typeof w.setTimeout);
+    // A Loop continue: the region still says the words, so this read waits for its repeat.
+    await append([start(4, 't2'), end(5, 't2'), start(6, 't3')]);
+    expect(held).toHaveLength(1);
+    // The next reply finishes before that repeat, and the empty region takes the words at once.
+    await append([end(7, 't3')]);
+    expect(region(w).textContent).toBe('Reply finished');
+    const said: string[] = [];
+    new w.MutationObserver(() => said.push(region(w).textContent ?? '')).observe(region(w), { childList: true, characterData: true, subtree: true });
+    for (const fn of held.splice(0)) fn();
+    await settle();
+    expect(said).toEqual([]);
+  });
+
   it.each([
     ['when it is off', false, end(3, 't1')],
     ['for a stopped reply', true, end(3, 't1', 'stopped')]
