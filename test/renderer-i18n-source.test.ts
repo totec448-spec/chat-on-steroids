@@ -99,6 +99,7 @@ it('translates every delivery error a queued message can show', () => {
   // markers never reach the timeline as written.
   const internal = new Set([
     'Native Send did not take the message.',
+    'Native Send was withdrawn before its click.',
     'Native Send receipt was not confirmed.',
     'Fresh-turn continue declined: no Send while ChatGPT works.',
     'User authorized a new helper',

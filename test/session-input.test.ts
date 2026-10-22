@@ -268,6 +268,30 @@ describe('durable user input ownership', () => {
     expect((await listInputs()).find(row => row.id === direct.id)).toMatchObject({ state: 'failed', error: 'Not sent: ChatGPT did not accept the message.' });
     expect(await pendingBrowserInputs()).toEqual([]);
   });
+  // 2.1.45 release round: a fresh tab drew its editor again while the app authorized the Send, and
+  // the page never clicked. Held as "may already have been sent", the message was never sent.
+  it('sends a message once more when the page withdrew its authorized Send before clicking', async () => {
+    const direct = await enqueueInput(input());
+    expect(await claimBrowserInput(direct.id, 'native-page', binding.conversationId, true)).not.toBeNull();
+    expect(await authorizeBrowserInput(direct.id, 'native-page', binding.conversationId)).toBe(true);
+    expect(await failBrowserInput(direct.id, 'native-page', 'Native Send was withdrawn before its click.')).toBe(true);
+    expect((await listInputs()).find(row => row.id === direct.id)).toMatchObject({ state: 'queued', owner: null, notTakenRetries: 1 });
+    expect((await listInputs()).find(row => row.id === direct.id)?.sendAuthorizedAt).toBeUndefined();
+    expect(await pendingBrowserInputs()).toEqual([expect.objectContaining({ id: direct.id })]);
+    // A second withdrawal is reported, never retried forever.
+    expect(await claimBrowserInput(direct.id, 'native-page', binding.conversationId, true)).not.toBeNull();
+    expect(await authorizeBrowserInput(direct.id, 'native-page', binding.conversationId)).toBe(true);
+    expect(await failBrowserInput(direct.id, 'native-page', 'Native Send was withdrawn before its click.')).toBe(true);
+    expect((await listInputs()).find(row => row.id === direct.id)).toMatchObject({ state: 'failed', error: 'Not sent: ChatGPT did not accept the message.' });
+    expect(await pendingBrowserInputs()).toEqual([]);
+  });
+  it('keeps an unauthorized claim as it is when the page reports a withdrawn Send', async () => {
+    const direct = await enqueueInput(input());
+    expect(await claimBrowserInput(direct.id, 'native-page', binding.conversationId, true)).not.toBeNull();
+    const before = (await listInputs()).find(row => row.id === direct.id);
+    expect(await failBrowserInput(direct.id, 'native-page', 'Native Send was withdrawn before its click.')).toBe(false);
+    expect((await listInputs()).find(row => row.id === direct.id)).toEqual(before);
+  });
   // #1402: turns past ~35 minutes break; a native send into the running turn ends it as interrupted
   // and continues in a fresh one, a command in flight keeping its result (measured 2026-10-09).
   it('files one rotation into the running turn as an automatic message, only when nothing else waits', async () => {

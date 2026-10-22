@@ -175,6 +175,12 @@ const declinedRotations = new Set<string>();
 /** The page clicked Send, yet its exact text stayed in the composer and no new user row appeared. */
 const SEND_NOT_TAKEN = 'Native Send did not take the message.';
 const NOT_TAKEN_FAILED = 'Not sent: ChatGPT did not accept the message.';
+/**
+ * The page asked for authorization but never clicked: ChatGPT drew its editor again while the app
+ * answered, and the page took its exact text back out of the composer. The same code in
+ * extension/content.js.
+ */
+const SEND_WITHDRAWN = 'Native Send was withdrawn before its click.';
 export const TOOL_INPUT_HEADER = '\n--- New instructions from the user ---\n';
 export interface ToolInputBatch {
   messages: Array<{ text: string; images: InputImage[] }>;
@@ -2131,10 +2137,14 @@ export function failBrowserInput(id: string, owner: string, error: string, detai
     // exact text in its composer and showed no new user message, and the page has cleared that
     // draft. Seen when a message for the running turn was clicked in the second the turn ended.
     // One requeue sends it again; a second refusal is reported instead of retried forever.
-    if (entry.sendAuthorizedAt !== undefined && error === SEND_NOT_TAKEN) {
+    // Withdrawn before the click is the same proof, made before any click: one requeue as well. A
+    // claim this app never authorized was never sendable, so the report changes nothing.
+    if (error === SEND_WITHDRAWN && entry.sendAuthorizedAt === undefined) return false;
+    if (entry.sendAuthorizedAt !== undefined && (error === SEND_NOT_TAKEN || error === SEND_WITHDRAWN)) {
       const retry = (entry.notTakenRetries ?? 0) === 0 && manualInput(entry) && !entry.recovery && !entry.opening &&
         entry.purpose !== 'decision' && !entry.lifetime;
-      logWarn(`input ${entry.id}: ChatGPT did not take the clicked Send; ${retry ? 'queued once more' : 'reported as not sent'}`);
+      logWarn(`input ${entry.id}: ${error === SEND_WITHDRAWN ? 'the page withdrew the authorized Send before clicking it'
+        : 'ChatGPT did not take the clicked Send'}; ${retry ? 'queued once more' : 'reported as not sent'}`);
       await commit(current.map(row => sameDelivery(entry, row) ? retry
         ? { ...row, state: 'queued', owner: null, offeredAt: undefined, sendAuthorizedAt: undefined, requiresAuthorization: undefined,
           deliveryText: undefined, error: undefined, notTakenRetries: (row.notTakenRetries ?? 0) + 1 }
