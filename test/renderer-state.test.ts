@@ -970,6 +970,32 @@ it('ranks the inbox by what each chat needs: approval, stopped recovery, blocked
   expect(inboxCardState(doc, 'approval').card.title).toMatch(/^approval · Needs approval · /);
 });
 
+it('keeps Draft in the title of an inbox card and a settled row that say Failed', async () => {
+  const old = Date.now() - 3 * DAY;
+  const sessions = [
+    inboxChat('rest', { updatedAt: Date.now() }),
+    inboxChat('failed', { updatedAt: Date.now() - 3000, lastTurnOutcome: 'failed' }),
+    inboxChat('settled', { startedAt: old, updatedAt: old, lastTurnOutcome: 'failed' })
+  ];
+  const mounted = await mountInbox({ listSessions: async () => listed(sessions) });
+  const doc = mounted.window.document;
+  const row = (id: string) => doc.querySelector<HTMLElement>(`#sessionList .sess[data-id="${id}"]`)!;
+  await vi.waitFor(() => expect(row('settled')).not.toBeNull(), { timeout: 5000 });
+  expect(row('settled').classList.contains('sess-settled')).toBe(true);
+  expect(row('failed').classList.contains('sess-card')).toBe(true);
+  const input = doc.getElementById('chatInput') as HTMLTextAreaElement;
+  for (const id of ['failed', 'settled']) {
+    row(id).querySelector<HTMLElement>('[data-session-select]')!.click(); await settle();
+    input.value = `Unsent ${id}`; input.dispatchEvent(new mounted.window.Event('input'));
+  }
+  row('rest').querySelector<HTMLElement>('[data-session-select]')!.click(); await settle();
+  for (const id of ['failed', 'settled']) {
+    expect(row(id).querySelector('.sess-draft-mark'), id).not.toBeNull();
+    expect(row(id).title, id).toContain('Failed');
+    expect(row(id).title, id).toContain('Draft');
+  }
+});
+
 it('calls an unread reply a New response on its card, the word its row badge already uses', async () => {
   const now = Date.now();
   const mounted = await mountInbox({
