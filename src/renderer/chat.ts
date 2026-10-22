@@ -4152,7 +4152,9 @@ function markdownCodeRanges(text: string): Array<{ start: number; end: number }>
     if (fences[fenceIndex] && at >= fences[fenceIndex]!.start) {
       if (indentedStart !== null) ranges.push({ start: indentedStart, end: at });
       indentedStart = null;
-      afterBlank = false;
+      // A completed fenced block is a block boundary, even without an empty
+      // line: Marked accepts an indented code block immediately after it.
+      afterBlank = end === fences[fenceIndex]!.end;
     } else {
       if (indentedStart === null) {
         if (afterBlank && CODE_LINE.test(line)) indentedStart = at;

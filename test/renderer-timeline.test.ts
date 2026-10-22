@@ -8112,6 +8112,17 @@ describe('charts, diagrams and illustrated Markdown from recorded DIL', () => {
     expect(root.lastElementChild?.textContent).toBe('After.');
   });
 
+  it.each(['    ', '\t'])('keeps %s indented chart code immediately after a closed fence', async indent => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation('```txt\nExisting example\n```\n' + indent + widget + '\n\n' + widget + '\n\nAfter.')]);
+    const root = message(w);
+    expect([...root.querySelectorAll('pre code')].map(node => node.textContent).join('\n')).toContain(widget);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(root.lastElementChild?.textContent).toBe('After.');
+  });
+
   it.each([
     { name: 'blockquote fence', example: (widget: string) => `> \`\`\`json\n> ${widget}\n> \`\`\``, code: 'blockquote pre code' },
     { name: 'list-item fence', example: (widget: string) => `- \`\`\`json\n  ${widget}\n  \`\`\``, code: 'li pre code' },
