@@ -1153,8 +1153,8 @@ describe("a new chat's first message held for its project's ChatGPT Project", ()
     chat.chatApply({ ...state, bridge: { ...state.bridge, present: true } });
     live.inputs.push({ id: 'first-message', sessionId: summary(live.events).id, state: 'queued', owner: 'page', text: 'Hi',
       mode: 'auto', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: null, projectId: project.id });
-    await append([]); await append([]);
-    expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').toContain(expected);
+    await append([]);
+    await vi.waitFor(() => expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').toContain(expected), { timeout: 5000 });
   });
 });
 
