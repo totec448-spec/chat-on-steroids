@@ -2139,7 +2139,10 @@ export function failBrowserInput(id: string, owner: string, error: string, detai
     // One requeue sends it again; a second refusal is reported instead of retried forever.
     // Withdrawn before the click is the same proof, made before any click: one requeue as well. A
     // claim this app never authorized was never sendable, so the report changes nothing.
-    if (error === SEND_WITHDRAWN && entry.sendAuthorizedAt === undefined) return false;
+    if (error === SEND_WITHDRAWN && entry.sendAuthorizedAt === undefined) {
+      logInfo(`input ${entry.id}: ignored the page's withdrawn-Send report: this app never authorized that Send`);
+      return false;
+    }
     if (entry.sendAuthorizedAt !== undefined && (error === SEND_NOT_TAKEN || error === SEND_WITHDRAWN)) {
       const retry = (entry.notTakenRetries ?? 0) === 0 && manualInput(entry) && !entry.recovery && !entry.opening &&
         entry.purpose !== 'decision' && !entry.lifetime;
