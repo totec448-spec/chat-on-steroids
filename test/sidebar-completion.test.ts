@@ -55,6 +55,19 @@ it('marks every finished completion seen in one write and leaves an open turn an
   expect(saved.seen).toEqual([['a', 1_100], ['b', 1_200]]);
 });
 
+it('adds Mark all as seen receipts to a list saved before it, and starts from a fresh baseline after a damaged one', () => {
+  const before = fixture(JSON.stringify({ baselineAt: 1_000, seen: [['kept', 1_100]] }), 5_000);
+  expect(before.state.markAllSeen([completed('kept', 1_100), completed('new', 1_200)])).toBe(1);
+  expect(JSON.parse(before.w.localStorage.getItem('chat-on-steroids.sidebar-completion-seen')!))
+    .toEqual({ baselineAt: 1_000, seen: [['kept', 1_100], ['new', 1_200]] });
+  before.w.close(); dom = null;
+
+  const damaged = fixture('{broken', 2_000);
+  expect(damaged.state.markAllSeen([completed('fresh', 2_100), completed('historical', 1_999)])).toBe(1);
+  expect(JSON.parse(damaged.w.localStorage.getItem('chat-on-steroids.sidebar-completion-seen')!))
+    .toEqual({ baselineAt: 2_000, seen: [['fresh', 2_100]] });
+});
+
 it.each(['failed', 'stopped', 'interrupted', 'stalled', 'unknown'])(
   'does not turn a %s terminal outcome into a generic unread completion',
   outcome => {
