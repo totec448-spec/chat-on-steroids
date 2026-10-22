@@ -440,11 +440,16 @@ async function readConflictStages(context: RepositoryContext, relative: string):
   // Which stages the index holds, apart from reading them: only an unlisted stage is a side without the file.
   const listed = await runGit(context.projectReal, ['ls-files', '-u', '-z', '--full-name', '--', `:(top,literal)${object}`]);
   if (listed.code !== 0) return skip('the index could not be read');
-  const present = new Set(decode(listed.stdout).split('\0').map(entry => /^\d+ [0-9a-f]+ ([123])\t(.*)$/s.exec(entry))
-    .filter(match => match?.[2] === object).map(match => Number(match![1])));
-  if (!present.size) return skip('it is no longer unmerged');
+  const stages = new Map(decode(listed.stdout).split('\0').map(entry => /^\d+ ([0-9a-f]+) ([123])\t(.*)$/s.exec(entry))
+    .filter(match => match?.[3] === object).map(match => [Number(match![2]), match![1]!] as const));
+  if (!stages.size) return skip('it is no longer unmerged');
   const names = ['base', 'ours', 'theirs'];
-  const sides = await Promise.all([1, 2, 3].map(stage => present.has(stage) ? readBlob(context, `:${stage}:${object}`) : undefined));
+  // Read by the listed object ids, so an index changed in between cannot mix two states. A read
+  // that fails part way counts as unreadable: the diff itself must still load.
+  const sides = await Promise.all([1, 2, 3].map(stage => {
+    const oid = stages.get(stage);
+    return oid ? readBlob(context, oid).catch(() => null) : undefined;
+  }));
   for (const [index, side] of sides.entries()) {
     if (side === null) return skip(`${names[index]} could not be read`);
     if (side?.tooLarge) return skip(`${names[index]} is too large`);

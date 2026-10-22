@@ -424,6 +424,31 @@ it('shows a conflicted file as ours, base and theirs, and asks chat to resolve i
   expect(asked[0]).toContain('git show :1:./src/both.ts, :2:./src/both.ts and :3:./src/both.ts');
 });
 
+it('shows a binary note, or conflict panes over a too large file, instead of staying on Loading diff', async () => {
+  // The loading view recorded the revision, so a binary or too large result returned before rendering.
+  (window.api.getProjectGitSnapshot as any).mockImplementation(() => ok({
+    ...cleanGit(), revision: 'dirty', changes: [
+      { status: 'M', path: 'a.bin', additions: null, deletions: null, binary: true },
+      { status: 'C', path: 'big.txt', additions: null, deletions: null, binary: false }
+    ]
+  }));
+  (window.api.getProjectGitDiff as any).mockImplementation((_id: string, file: string) => ok(file === 'a.bin' ? {
+    projectId: projectA.id, status: 'M', path: 'a.bin', additions: null, deletions: null,
+    binary: true, tooLarge: false, baseText: null, currentText: null, note: 'Binary diff · preview unavailable'
+  } : {
+    projectId: projectA.id, status: 'C', path: 'big.txt', additions: null, deletions: null, binary: false, tooLarge: true,
+    baseText: null, currentText: null, note: 'This diff is too large to display.', conflict: { base: 'base', ours: 'ours', theirs: 'theirs' }
+  } satisfies ProjectGitDiff));
+  const panel = createFilePanel({ host, reviewOnly: true });
+  panel.update(projectA); await panel.show(); await tick();
+  host.querySelector<HTMLButtonElement>('.file-change-row[data-path="a.bin"]')!.click(); await tick(); await tick();
+  expect(host.querySelector('.file-preview')?.textContent).toContain('Binary diff · preview unavailable');
+  host.querySelector<HTMLButtonElement>('.file-preview-actions button[title="Close preview"]')!.click(); await tick();
+  host.querySelector<HTMLButtonElement>('.file-change-row[data-path="big.txt"]')!.click(); await tick(); await tick();
+  expect(host.querySelectorAll('.file-conflict-pane')).toHaveLength(3);
+  expect(host.querySelector('.file-preview')?.textContent).not.toContain('Loading diff');
+});
+
 it('offers neither conflict action on an ordinary diff', async () => {
   (window.api.getProjectGitSnapshot as any).mockImplementation(() => ok({
     ...cleanGit(), revision: 'dirty', changes: [{ status: 'M', path: 'README.md', additions: 1, deletions: 1, binary: false }]
