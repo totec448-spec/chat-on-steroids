@@ -2834,6 +2834,8 @@ let controlledTurnId: string | null = null;
 let controlledSelection = -1;
 let controlledStopPending = false;
 let controlledFinishWaiting = false;
+/** No page picked up this chat's repairs, so recovery gave up on it (#1787). */
+let controlledPageless = false;
 let controlledQueueAtFinish = false;
 let controlledCanInject = false;
 let controlledCanSendDirectly = false;
@@ -3276,8 +3278,17 @@ function paintAutomationSwitch(): void {
   ui($<HTMLTextAreaElement>('sessionObjective'), 'placeholder', () => loop ? t("What should each continuation focus on?") : t("Optional. Leave empty to work toward what you asked in this chat."));
   paintTaskActions();
 }
+/**
+ * When the selected chat's controls were last asked for (#1787). A running turn's clock is the app's
+ * word that work goes on, and that word can lapse with nothing new written to the chat: a page that
+ * stopped reporting, an activity window that ran out. Read once, the caption counted on for six
+ * hours. While it counts, it asks again now and then; any other refresh resets the interval.
+ */
+let controlsAskedAt = 0;
+const RUNNING_CONTROLS_RECHECK_MS = 20_000;
 async function refreshSessionControls(): Promise<void> {
   const id = selectedId, generation = ++controlsGeneration;
+  controlsAskedAt = Date.now();
   const planHost = $('agentPlan');
   if (planHost.dataset.sessionId !== (id ?? '')) renderAgentPlan(planHost, id, null);
   const menu = $('sessionControls');
@@ -3288,7 +3299,7 @@ async function refreshSessionControls(): Promise<void> {
     for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
   }
   paintAutomationSwitch();
-  if (!id) { controlledSessionId = null; controlledTurnId = null; paintDeliveryControls(); menu.hidden = false;
+  if (!id) { controlledSessionId = null; controlledTurnId = null; controlledPageless = false; paintDeliveryControls(); menu.hidden = false;
     $<HTMLTextAreaElement>('sessionObjective').disabled = false;
     paintTaskActions();
     for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
@@ -3297,7 +3308,7 @@ async function refreshSessionControls(): Promise<void> {
   if (!sessions.find(row => row.id === id)?.conversationId) {
     controlledSessionId = id; controlledSelection = selectionGeneration; controlledTurnId = null;
     controlledCanInject = false; controlledCanSendDirectly = false; controlledQueueAtFinish = false;
-    controlledStopPending = false; controlledFinishWaiting = false;
+    controlledStopPending = false; controlledFinishWaiting = false; controlledPageless = false;
     menu.hidden = false;
     goalDraftView = null; goalWaitView = null; finishGoalDraftView = null; controlledRecovery = [];
     $<HTMLSelectElement>('chatAutomation').value = opening?.automation ?? 'off';
@@ -3321,6 +3332,7 @@ async function refreshSessionControls(): Promise<void> {
   finishGoalDraftView = controls?.finishGoalDraft ?? null;
   controlledStopPending = controls?.stopPending === true;
   controlledFinishWaiting = controls?.finishWaiting === true;
+  controlledPageless = controls?.pageless === true;
   controlledQueueAtFinish = controls?.queueAtFinish === true;
   controlledCanInject = controls?.canInject ?? controlledTurnId !== null;
   controlledCanSendDirectly = controls?.canSendDirectly === true;
@@ -6810,6 +6822,7 @@ function paintStateLine(): void {
   const goalWaiting = controlledSessionId === selectedId && controlledSelection === selectionGeneration && !!goalWaitView;
   if (goalWaiting) paintGoalProgress();
   if (visible && (ticking || recovering || goalWaiting)) durationTimer = window.setTimeout(paintStateLine, 1000);
+  if (visible && ticking && Date.now() - controlsAskedAt >= RUNNING_CONTROLS_RECHECK_MS) void refreshSessionControls();
   repaintBadges();
 }
 
@@ -6901,14 +6914,18 @@ function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?:
       ? { text: t("Working…"), tone: '' as const, working: true }
       : null;
     const turnId = active ?? lastBoundary?.turnId;
+    // An unfinished turn the app gave up recovering: say so, instead of an empty caption or a clock.
+    const stopped = controlledPageless && controlledSessionId === selectedId && controlledSelection === selectionGeneration &&
+      lastBoundary?.kind === 'turn_start'
+      ? { text: t("Stopped · open this chat's tab again to continue"), tone: 'is-bad' as const } : null;
     if (!turnId) return blind ?? { text: '', tone: '' };
     const startedAt = summary.finishTurn?.turnId === turnId ? summary.finishTurn.startedAt
       : events.find(event => event.kind === 'turn_start' && event.turnId === turnId)?.time;
     const endedAt = events.find(event => event.kind === 'turn_end' && event.turnId === turnId)?.time;
     if (startedAt === undefined) return active
       ? { text: deps.state()?.config.ui.playfulStatus === true ? `${turnWorkWord(turnId, 0)}…` : t("Working…"), tone: '', working: true }
-      : blind ?? { text: '', tone: '' };
-    if (!active && endedAt === undefined) return blind ?? { text: '', tone: '' };
+      : blind ?? stopped ?? { text: '', tone: '' };
+    if (!active && endedAt === undefined) return blind ?? stopped ?? { text: '', tone: '' };
     if (blind) return blind;
     const seconds = Math.max(0, Math.floor(((active ? Date.now() : endedAt!) - startedAt) / 1000));
     return { text: t("{0} for {1}{2}s", [active ? workingLabel(turnId, seconds) : t("Worked"), seconds >= 60 ? `${t('{0}m', [Math.floor(seconds / 60)])} ` : '', seconds % 60]), tone: '', working: !!active, ticking: !!active };

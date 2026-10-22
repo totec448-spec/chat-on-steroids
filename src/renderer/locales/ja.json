@@ -2977,5 +2977,6 @@
   "Drafts that wait": "待っていてくれる下書き",
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "未送信のメッセージがあるチャットに鉛筆が付き、下書きは再起動後も戻ります。",
   "A better Review": "より良いレビュー",
-  "Right-click an untracked file to add it, or its folder, to .gitignore.": "未追跡のファイルを右クリックすると、そのファイルまたはフォルダーを .gitignore に追加できます。"
+  "Right-click an untracked file to add it, or its folder, to .gitignore.": "未追跡のファイルを右クリックすると、そのファイルまたはフォルダーを .gitignore に追加できます。",
+  "Stopped · open this chat's tab again to continue": "停止しました · 続けるには、このチャットのタブをもう一度開いてください"
 }
