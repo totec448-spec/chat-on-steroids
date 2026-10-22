@@ -2282,6 +2282,139 @@ it('saves a diagnostics report through the renderer channel without personal det
   expect(shell.showItemInFolder).toHaveBeenCalledWith(target);
 });
 
+it('saves a code block where the save dialog says, offering only its bare name in Downloads', async () => {
+  const save = (payload: unknown) => handlers.get('code:save')!(null, payload);
+  const getPath = app.getPath;
+  const target = path.join(dir, 'chosen.ts');
+  (app as { getPath: (name: string) => string }).getPath = (name: string) => path.join(dir, name);
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: target } as never);
+  try {
+    expect(await save({ text: 'const answer = 42;\n', name: 'snippet.ts' })).toEqual({ ok: true, data: { done: 'saved', name: 'chosen.ts' } });
+  } finally {
+    (app as { getPath: typeof getPath }).getPath = getPath;
+  }
+  expect(vi.mocked(dialog.showSaveDialog).mock.lastCall!.at(-1)).toMatchObject({
+    defaultPath: path.join(dir, 'downloads', 'snippet.ts'),
+    filters: [{ name: 'Text files', extensions: ['ts'] }]
+  });
+  expect(await fs.readFile(target, 'utf8')).toBe('const answer = 42;\n');
+  // The renderer suggests a name, never a place: anything but a bare `name.ext` is refused before any dialog.
+  vi.mocked(dialog.showSaveDialog).mockClear();
+  for (const name of ['../snippet.ts', 'C:\\Users\\you\\snippet.ts', '/home/you/snippet.ts', 'snippet']) {
+    expect(await save({ text: 'x', name })).toMatchObject({ ok: false });
+  }
+  expect(dialog.showSaveDialog).not.toHaveBeenCalled();
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: true } as never);
+  expect(await save({ text: 'x', name: 'snippet.txt' })).toEqual({ ok: true, data: { done: 'cancelled' } });
+});
+
+it('leaves a code file the person chose to replace whole when writing the new one fails', async () => {
+  const folder = path.join(dir, 'code-replace');
+  const target = path.join(folder, 'kept.ts');
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(target, 'const kept = true;\n', 'utf8');
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: target } as never);
+  const writeFile = fs.writeFile.bind(fs);
+  // The disk fills up partway: whatever file is being written ends up cut short.
+  const write = vi.spyOn(fs, 'writeFile').mockImplementationOnce(async (file) => {
+    await writeFile(file, 'const half', 'utf8');
+    throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' });
+  });
+  try {
+    expect(await handlers.get('code:save')!(null, { text: 'const replaced = true;\n', name: 'snippet.ts' })).toMatchObject({ ok: false });
+  } finally {
+    write.mockRestore();
+  }
+  expect(await fs.readFile(target, 'utf8')).toBe('const kept = true;\n');
+  expect(await fs.readdir(folder)).toEqual(['kept.ts']);
+  const { getLog } = await import('../src/main/logger.js');
+  expect(getLog().at(-1)).toMatchObject({ level: 'warn', message: 'code save: refused, the file could not be written or replaced (ENOSPC)' });
+});
+
+it.runIf(process.platform !== 'win32')('keeps a replaced script runnable when a code block is saved over it', async () => {
+  const target = path.join(dir, 'run.sh');
+  await fs.writeFile(target, 'echo old\n', 'utf8');
+  await fs.chmod(target, 0o750);
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: target } as never);
+  expect(await handlers.get('code:save')!(null, { text: 'echo new\n', name: 'snippet.sh' })).toEqual({ ok: true, data: { done: 'saved', name: 'run.sh' } });
+  expect(await fs.readFile(target, 'utf8')).toBe('echo new\n');
+  expect((await fs.stat(target)).mode & 0o777).toBe(0o750);
+});
+
+it.runIf(process.platform !== 'win32')('never leaves the new text of a private file readable to others while a code block is saved over it', async () => {
+  const target = path.join(dir, 'private.env');
+  await fs.writeFile(target, 'TOKEN=old\n', 'utf8');
+  await fs.chmod(target, 0o600);
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: target } as never);
+  const writeFile = fs.writeFile.bind(fs);
+  let modeWhileWriting: number | undefined;
+  const write = vi.spyOn(fs, 'writeFile').mockImplementationOnce(async (file, data, options) => {
+    await writeFile(file, data, options);
+    modeWhileWriting = (await fs.stat(String(file))).mode & 0o777;
+  });
+  try {
+    expect(await handlers.get('code:save')!(null, { text: 'TOKEN=new\n', name: 'snippet.env' })).toMatchObject({ ok: true });
+  } finally {
+    write.mockRestore();
+  }
+  expect(modeWhileWriting).toBe(0o600);
+  expect((await fs.stat(target)).mode & 0o777).toBe(0o600);
+});
+
+it.runIf(process.platform !== 'win32')('leaves a code file alone when its permissions cannot be read', async () => {
+  const folder = path.join(dir, 'code-unreadable-mode');
+  const target = path.join(folder, 'run.sh');
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(target, 'echo old\n', 'utf8');
+  await fs.chmod(target, 0o750);
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: target } as never);
+  const stat = vi.spyOn(fs, 'stat').mockRejectedValueOnce(Object.assign(new Error('i/o error'), { code: 'EIO' }));
+  try {
+    expect(await handlers.get('code:save')!(null, { text: 'echo new\n', name: 'snippet.sh' })).toMatchObject({ ok: false });
+  } finally {
+    stat.mockRestore();
+  }
+  expect(await fs.readFile(target, 'utf8')).toBe('echo old\n');
+  expect((await fs.stat(target)).mode & 0o777).toBe(0o750);
+  expect(await fs.readdir(folder)).toEqual(['run.sh']);
+  const { getLog } = await import('../src/main/logger.js');
+  expect(getLog().at(-1)).toMatchObject({ level: 'warn', message: "code save: refused, the chosen file's permissions could not be read (EIO)" });
+});
+
+it.runIf(process.platform !== 'win32')('writes through a symlink chosen in the save dialog instead of replacing the link', async () => {
+  const folder = path.join(dir, 'code-symlink');
+  const real = path.join(folder, 'real.ts');
+  const link = path.join(folder, 'link.ts');
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(real, 'const old = true;\n', 'utf8');
+  await fs.symlink('real.ts', link);
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: link } as never);
+  expect(await handlers.get('code:save')!(null, { text: 'const fresh = true;\n', name: 'snippet.ts' })).toEqual({ ok: true, data: { done: 'saved', name: 'link.ts' } });
+  expect((await fs.lstat(link)).isSymbolicLink()).toBe(true);
+  expect(await fs.readFile(real, 'utf8')).toBe('const fresh = true;\n');
+  expect((await fs.readdir(folder)).sort()).toEqual(['link.ts', 'real.ts']);
+  // A link to nothing has no file to keep whole: the save stops and says why.
+  const dangling = path.join(folder, 'dangling.ts');
+  await fs.symlink('missing.ts', dangling);
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: dangling } as never);
+  expect(await handlers.get('code:save')!(null, { text: 'x', name: 'snippet.ts' })).toMatchObject({ ok: false });
+  expect((await fs.lstat(dangling)).isSymbolicLink()).toBe(true);
+  expect((await fs.readdir(folder)).sort()).toEqual(['dangling.ts', 'link.ts', 'real.ts']);
+  const { getLog } = await import('../src/main/logger.js');
+  expect(getLog().at(-1)).toMatchObject({ level: 'warn', message: 'code save: refused, the chosen file could not be resolved (ENOENT)' });
+});
+
+it('refuses a usage export without a positive, finite divisor, and logs why', async () => {
+  const { getLog } = await import('../src/main/logger.js');
+  const dialogs = vi.mocked(dialog.showSaveDialog).mock.calls.length;
+  for (const payload of [null, {}, { divisor: 0 }, { divisor: -2 }, { divisor: Number.POSITIVE_INFINITY }, { divisor: '2' }]) {
+    const before = getLog().length;
+    expect(await handlers.get('usage:export')!(null, payload)).toMatchObject({ ok: false });
+    expect(getLog().slice(before)).toEqual([expect.objectContaining({ level: 'warn', message: 'usage export: refused, the page sent no positive, finite token divisor' })]);
+  }
+  expect(vi.mocked(dialog.showSaveDialog).mock.calls.length).toBe(dialogs);
+});
+
 describe('native worker checkout cleanup confirmation', () => {
   const offer = {
     runId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',

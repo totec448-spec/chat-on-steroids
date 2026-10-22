@@ -99,6 +99,7 @@ it('translates every delivery error a queued message can show', () => {
   // markers never reach the timeline as written.
   const internal = new Set([
     'Native Send did not take the message.',
+    'Native Send was withdrawn before its click.',
     'Native Send receipt was not confirmed.',
     'Fresh-turn continue declined: no Send while ChatGPT works.',
     'User authorized a new helper',
@@ -121,17 +122,47 @@ it('translates every error the Files panel, projects, pets, skills and settings 
   // These reach the window as the toast of a failed action, which looks each text up in the
   // catalog; none were there, so a German Files panel said "A file or folder with that name
   // already exists" in English (2.1.41 pass).
-  const literal = /throw new Error\('([^'\\$]{8,})'\)/g;
+  const literal = /throw new Error\((?:'([^'\\$]{8,})'|"([^"\\$]{8,})")\)/g;
+  // Also the chat actions added since: Markdown export and /copy, bookmarks, chat groups, search
+  // and linking a ChatGPT Project.
   const sources = ['src/main/project-files.ts', 'src/main/projects.ts', 'src/main/pet-library.ts', 'src/main/skills.ts',
-    'src/main/skill-github.ts', 'src/main/skill-metadata.ts', 'src/main/skill-package.ts', 'src/shared/skills.ts', 'src/main/ipc.ts'];
+    'src/main/skill-github.ts', 'src/main/skill-metadata.ts', 'src/main/skill-package.ts', 'src/shared/skills.ts', 'src/main/ipc.ts',
+    'src/main/session/markdown-export.ts', 'src/main/session/bookmarks.ts', 'src/main/chat-groups.ts', 'src/main/session/search.ts',
+    'src/main/remote/ssh.ts',
+    // Setup profiles, the terminal, attachments and images, project instructions, Git Review,
+    // secure storage and handoffs: each shows its error to the person (2.1.45 pass).
+    'src/main/setup-profiles.ts', 'src/main/workspace-terminal.ts', 'src/main/session/input-attachments.ts', 'src/main/session/input-images.ts',
+    'src/main/session/prompt.ts', 'src/main/project-git.ts', 'src/main/secrets.ts', 'src/main/session/handoff.ts'];
   // A snake_case code ("task_settings_changed") is translated where it is mapped, not as text.
-  const messages = new Set(sources.flatMap(file => [...readFileSync(file, 'utf8').matchAll(literal)].map(match => match[1]!))
+  const messages = new Set(sources.flatMap(file => [...readFileSync(file, 'utf8').matchAll(literal)].map(match => (match[1] ?? match[2])!))
     .filter(message => !/^[a-z0-9_]+$/.test(message)));
+  // What ssh's failures mean, in the SSH project dialog: returned by sshFailure(), not thrown.
+  const ssh = readFileSync('src/main/remote/ssh.ts', 'utf8');
+  const failure = ssh.slice(ssh.indexOf('export function sshFailure'), ssh.indexOf('let programOverride'));
+  for (const match of failure.matchAll(/return '([^']+)'|\|\| '([^']+)'/g)) messages.add((match[1] ?? match[2])!);
+  // Adding a server folder names the folder in two sentences, built from a template: the dialog
+  // translates them with the path as {0}.
+  const projects = readFileSync('src/main/projects.ts', 'utf8');
+  for (const template of ['Folder not found on the server: {0}', '{0} on the server is not a folder']) {
+    expect(projects.includes(template.replace('{0}', '${asked.path}')), template).toBe(true);
+    messages.add(template);
+  }
   expect(messages.size).toBeGreaterThan(150);
   for (const locale of LOCALES) {
     const catalog = JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>;
     expect([...messages].filter(message => !Object.hasOwn(catalog, message)), locale).toEqual([]);
   }
+});
+
+it("shows the app's own errors through the catalog, not as they came", () => {
+  // These three showed a failed action's English text in every language (2.1.45 pass).
+  const terminal = readFileSync('src/renderer/workspace-terminal.ts', 'utf8');
+  expect(terminal).not.toMatch(/term\.writeln\(`\\r\\n\$\{result\.error\}`\)/);
+  expect(terminal).toContain('t(result.error)');
+  const chat = readFileSync('src/renderer/chat.ts', 'utf8');
+  expect(chat).not.toContain("t('Background process is no longer running') : reply.error");
+  const skills = readFileSync('src/renderer/skills.ts', 'utf8');
+  expect(skills).not.toMatch(/if \(error\) return error;/);
 });
 
 it('translates every note the file and diff previews can show', () => {
