@@ -10,7 +10,7 @@ import { waitingForSubAgents } from '../agents.js';
 import { draftFastFollowup, conversationMessages, automaticFinishEnabled, goalDrivingMode, goalObjectiveFor, goalProgressFor, onGoalChange } from '../goal.js';
 import { hasEligibleToolInput, finishNeedsBrowserInput, onInputChange, listInputs, enqueueInput } from './input.js';
 
-import { logWarn } from '../logger.js';
+import { logInfo, logWarn } from '../logger.js';
 import { retryTaskRequest } from '../task-request.js';
 
 let notify: ((title: string, body: string, sessionId: string, turnId: string) => boolean | void) | null = null;
@@ -93,6 +93,7 @@ async function prepareNotice(sessionId: string, summary: string, userRequested =
       await recordProgress(sessionId, noticeId, `Astra is wrapping up: ${description}\n${notification}`, anchor, turnId);
     }
     let result = `${notification} ${REMAINING}`;
+    let unverifiedStop = false;
     if (!userRequested && !automatic) return result;
     // The chat's own workers report back into it. Drafting now would take the decision from a
     // context that is about to change and then type the instruction into a chat that is still
@@ -175,6 +176,18 @@ async function prepareNotice(sessionId: string, summary: string, userRequested =
             { turnId, periodic: false, mode, ...(userRequested ? { userRequested: true } : {}) });
           result = `${notification} An automatic Goal instruction is queued once. ${REMAINING}`;
         }
+      } else if (mode === 'goal' && settings.finishHoldOnStop === true) {
+        unverifiedStop = true;
+        logInfo(`finish: ${draft.model} says the goal is met in ${session.conversationId}; unverified, finish hold kept`);
+        notification = 'Desktop notification is unavailable.';
+        if (notify) {
+          try {
+            notification = notify('Goal result needs review', 'The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.', sessionId, turnId) === false
+              ? 'The app is open; no desktop notification was shown.'
+              : 'The user has been notified.';
+          } catch { notification = 'The desktop notification could not be shown.'; }
+        }
+        result = `Goal helper says the goal is met, which is unverified. The finish hold was kept. ${notification} ${REMAINING}`;
       } else if (mode === 'goal') {
         await releaseSessionFinish(sessionId, turnId);
         result = 'Goal found no remaining requested work. The finish hold was released; ChatGPT may complete its answer.';
@@ -182,7 +195,8 @@ async function prepareNotice(sessionId: string, summary: string, userRequested =
     } catch (error) {
       result = `${notification} Goal follow-up was not available: ${(error as Error).message}. ${REMAINING}`;
     } finally { stopInput(); stopSession(); stopGoal(); }
-    await recordProgress(sessionId, progressId, result, anchor, turnId);
+    const recorded = await recordProgress(sessionId, progressId, result, anchor, turnId, undefined, unverifiedStop ? 'helper_stop_unverified' : undefined);
+    if (unverifiedStop && !recorded) logWarn(`finish: unverified stop could not be recorded in ${session.conversationId}`);
     return result;
   })();
   // Notification-only holds are not pending automatic continuations.

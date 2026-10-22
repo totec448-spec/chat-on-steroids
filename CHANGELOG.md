@@ -9,6 +9,106 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.44] — Pictures with /image, keyboard shortcuts, and a quicker message after Stop
+
+Type /image to ask ChatGPT for a picture, move around with new keyboard shortcuts, and copy, export or search a chat from the message box. A message you send right after pressing Stop now goes out at once, and finished sub-agent chats can tidy themselves away.
+
+### 👉 After updating
+
+- Nothing to do. The browser extension updates itself once no chat is busy.
+
+### ✨ New
+
+- **Ask for a picture with /image.** Start a message with /image (or pick it from the / menu) and ChatGPT draws it with its own image tool, without Chat On Steroids in the way.
+- **Keyboard shortcuts.** Ctrl+N (⌘N on macOS) starts a new chat, Ctrl+, (⌘,) opens Settings, Ctrl+Tab and Ctrl+Shift+Tab open the next and previous chat, and Esc pressed twice in an empty message box stops the running answer.
+- **/copy, /export and /find.** Copy the newest answer, save the chat as Markdown, or search it, straight from the message box.
+- **Copy a formula.** Right-click a formula in an answer to copy it as LaTeX or MathML.
+- **Hold to dictate on Windows.** Hold Ctrl+Shift+Space in the message box to dictate, and let go to stop.
+- **Your own words for Continue.** Settings → Agents & automation lets you set the text of the automatic Continue that picks up an unfinished answer.
+- **Sidebar layout pictures in your language.** The Projects and Inbox pictures in Settings → Appearance now show your language, in light and dark.
+- **Worker slots at a glance.** The Sub-agents panel shows how many of a chat's worker slots are busy, as in "Active · 2 / 3".
+- **Experimental: stop and continue when ChatGPT offers no Send.** For long Goal and Loop work in chats where ChatGPT shows only Stop, the app can stop the turn right after a result and continue in a fresh one. Off by default; Settings → Agents & automation, under "Start a fresh turn after".
+
+### 💪 Better
+
+- **A message right after Stop goes out at once.** Before, it could wait up to three minutes (ten with Pro models) after ChatGPT had already stopped.
+- **Finished sub-agent chats tidy themselves away.** With "Archive worker chats in ChatGPT when their task is done" on (Settings → Agents & automation), a worker's chat is archived two minutes after it reports its task done, and brought back if the main chat needs it again.
+- **Your own tunnel keeps working across restarts.** "Keep plugin URLs across restarts" now keeps the local port too. If another program has taken that port, the setting tells you which port to point your tunnel at instead.
+- **A sub-agent that needs you shows on its chat** in the sidebar, even while its sub-agents are folded away.
+- **Slow-starting sub-agents keep going.** On a busy computer, a new sub-agent whose first commands arrive early is told to try again in a moment instead of giving up.
+- **Gentler recovery while a page loads.** When a chat's page is still loading, recovery waits 20 seconds before trying again instead of reloading it over and over.
+
+### 🛠 Fixed
+
+- **Chats outside a sub-agent run aren't asked for a folder.** A chat's first command was refused with "choose a folder" whenever a sub-agent run was going on in another chat.
+- **A refused chat stays refused.** ChatGPT no longer runs the command through another computer's Chat On Steroids instead.
+- **"Trust only selected chats"** now tells you where to trust a chat (its ⋯ menu in the sidebar), in your language.
+- **Emptying a number field** in Agents & automation keeps the old value instead of jumping to the minimum, such as a 10,000-token Compact & Resume threshold.
+- **/goal or /rename** typed at the start of a message now also runs when you send it with Cmd/Ctrl+Shift+Enter during an answer.
+- **Pressing Stop when the browser can't be opened** no longer shows an error. The Stop still reaches ChatGPT once the browser connects.
+
+## [2.1.43] — See what sub-agents do, long work that keeps going, and clearer Settings
+
+Opening a sub-agent now shows what it did: each action with its result and the files it changed. Compact & Resume steps in during long answers again, and Goal and Loop chats continue long turns in a fresh one. Settings use plainer words throughout, and you pick the sidebar layout from a picture.
+
+### 👉 After updating
+
+- Nothing to do. The browser extension updates itself once no chat is busy. In Firefox the add-on of this release is numbered 2.1.43.1; it is the same build.
+
+### ✨ New
+
+- **See what a sub-agent does.** Open a sub-agent in the Sub-agents panel and its **Activity** comes first: its task, every action with its result, and the files it changed. Its conversation is one tab away, unchanged.
+- **Pick the sidebar layout from a picture.** Settings → Appearance → Sidebar layout shows the real Projects and Inbox sidebars side by side. Click one, or use the arrow keys.
+- **Meet Whip.** A cheeky new pet that cracks its whip so the work goes faster. It doesn't, but it tries.
+
+### 💪 Better
+
+- **Compact & Resume during long answers.** An automatic Compact & Resume steps in again while ChatGPT is still working, also in a chat's first answer, and tries again as soon as the page is readable after a moment it wasn't.
+- **Goal and Loop keep long turns going.** Like other chats, a Goal or Loop chat that has worked a long time continues in a fresh turn right after a tool result, without a second Goal or Loop message.
+- **Clearer Settings.** Plain words throughout. Agents & automation is regrouped: Goal and Loop settings together, a new **Chat access** section, and the worker list names the main chat and each worker.
+- **Chat names read properly.** A chat named after a long first message ends at a word with "…" instead of stopping mid-word.
+- **Tidier pages.** Plugin and pet cards line up with their neighbors, an empty Activity list says why it's empty, and Usage no longer shows empty boxes while it loads.
+- **Lighter waits before Compact & Resume.** While Chat On Steroids waits for ChatGPT to confirm the latest tool results, it checks every 2 seconds after the first 10 instead of four times a second, which matters most on slower computers.
+
+### 🛠 Fixed
+
+- **A queued message no longer waits forever** when the answer it waited for had already finished before you queued it.
+- **Prompt recall** (Up in an empty message box) no longer brings back a Goal opening that ChatGPT typed for you.
+- **The app log keeps writing** when Windows briefly blocks the log file, for example while another program has it open. No lines are lost.
+- **A stopped answer** shows a stop sign instead of a success check.
+- **Uninstalling a plugin** now asks with a Cancel button, like removing a skill.
+- **A chat that Compact & Resume replaced** now tells you which chat the work continues in, with a link, if you keep using it. Before, ChatGPT could only say that it could no longer use your computer.
+- **A tool approval card that ChatGPT redraws** no longer shows in the app as answered and then asked again.
+- **A tool approval request shows once.** After the app restarts while ChatGPT waits for your approval, the chat no longer shows the same request again, each with its own buttons.
+- **Asking for sprites, concept art or pixel art** gets you a picture. Before, ChatGPT could answer that its image tool was not available in this chat.
+- **Detailed generated pictures show in the app** instead of "image exceeds the recording limit", and Free storage is offered only where it helps.
+- **Screenshot only the active window** is offered on macOS only. On Windows every screenshot already shows one window, so the switch did nothing there.
+
+## [2.1.42] — Bring back earlier messages, smoother answers, and long work that keeps going
+
+Press Up in an empty message box to bring back what you asked before. Answers appear paragraph by paragraph instead of jumping while they're written. Long work moves on to a fresh turn without losing a result or running a command twice, and sub-agents start reliably even with a second browser around.
+
+### 👉 After updating
+
+- Nothing to do. The browser extension updates itself once no chat is busy.
+
+### ✨ New
+
+- **Bring back your earlier messages.** In an empty message box, press **Up** to bring back the last message you sent in this chat, and again for the one before. **Down** goes forward again, and past the newest one the box is empty. Only messages you typed come back, never the app's own Goal, Loop or fresh-turn messages. Nothing is sent until you send it.
+
+### 💪 Better
+
+- **Answers read calmly.** While ChatGPT writes, the answer shows whole paragraphs and fades each new one in, instead of jumping and reflowing with every word.
+- **Long work keeps going.** When a turn has run long, Chat On Steroids continues it in a fresh turn right after a tool result. That result is no longer lost and no command runs twice, in a new chat as well as later in a conversation. A message you send while ChatGPT is still answering no longer leaves the chat stuck afterwards.
+- **Sub-agents on slower computers.** The browser extension does far less work while sub-agents run, so their chats no longer wait on it.
+- **Compact & Resume says why it waits.** When an automatic Compact & Resume can't ask ChatGPT for the summary yet, the chat says so instead of "asking ChatGPT", and the app log records the reason.
+
+### 🛠 Fixed
+
+- **Sub-agents with two browsers.** With the extension in a second browser that isn't updated yet, sub-agents no longer fail to start because that browser opened their chats.
+- **Updating from an older Firefox add-on.** The update notice now tells you how to update it in Firefox, instead of asking for a reload from the app's folder.
+- **Goal follow-ups** no longer put a typo into a command or into a word ChatGPT is asked to reply with.
+
 ## [2.1.41] — Edit your earlier messages, branch a chat, and sub-agents that start every time
 
 Change something you asked earlier and continue from there, or take a chat in a new direction from any answer without losing the original. Sort your chats in an optional Inbox. Sub-agents now start reliably even on a busy computer, and every count reads right in your language.
