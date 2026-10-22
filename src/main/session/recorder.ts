@@ -30,7 +30,7 @@ import type {
   ToolOutcome,
   TurnOutcome
 } from '../../shared/session.js';
-import { estimateTokens, originTitle, UNATTRIBUTED_SESSION_TITLE } from '../../shared/session.js';
+import { estimateTokens, isUnattributedSession, originTitle, UNATTRIBUTED_SESSION_TITLE } from '../../shared/session.js';
 import { chatErrorMessageKey } from '../../shared/chat-error.js';
 import { continuedRequestTurn, overlappingRequestTurns, recordedRequestTurn, responseTurnId, turnOpenAt } from '../../shared/chronology.js';
 import { getConfig } from '../config.js';
@@ -911,7 +911,7 @@ export async function repairDeterministicAttribution(affected?: ReadonlySet<stri
   const changed = new Set<string>();
 
   for (const summary of await indexedSessions()) {
-    if (summary.conversationId !== null || summary.title !== UNATTRIBUTED_SESSION_TITLE) continue;
+    if (!isUnattributedSession(summary)) continue;
     const cached = repairBuckets.get(summary.id);
     if (affected && cached?.toolCalls === summary.toolCalls && cached.updatedAt === summary.updatedAt &&
         ![...affected].some((id) => cached.requestIds.has(id))) continue;

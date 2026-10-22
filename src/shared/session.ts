@@ -1333,3 +1333,13 @@ export interface SessionSearchReply {
  * window shows it in the interface language.
  */
 export const UNATTRIBUTED_SESSION_TITLE = 'Unattributed activity';
+
+/**
+ * The chat that collects unplaceable tool calls. No conversation alone does not make one: a new
+ * chat whose first message has not gone out yet has none either (#1759). The bucket is created
+ * without an origin, while such a chat starts with one, so even a chat renamed to the bucket's
+ * title stays a chat.
+ */
+export function isUnattributedSession(summary: { conversationId: string | null; title: string; origin?: SessionOrigin | null }): boolean {
+  return summary.conversationId === null && !summary.origin && summary.title === UNATTRIBUTED_SESSION_TITLE;
+}

@@ -970,6 +970,32 @@ it('ranks the inbox by what each chat needs: approval, stopped recovery, blocked
   expect(inboxCardState(doc, 'approval').card.title).toMatch(/^approval · Needs approval · /);
 });
 
+it('keeps Draft in the title of an inbox card and a settled row that say Failed', async () => {
+  const old = Date.now() - 3 * DAY;
+  const sessions = [
+    inboxChat('rest', { updatedAt: Date.now() }),
+    inboxChat('failed', { updatedAt: Date.now() - 3000, lastTurnOutcome: 'failed' }),
+    inboxChat('settled', { startedAt: old, updatedAt: old, lastTurnOutcome: 'failed' })
+  ];
+  const mounted = await mountInbox({ listSessions: async () => listed(sessions) });
+  const doc = mounted.window.document;
+  const row = (id: string) => doc.querySelector<HTMLElement>(`#sessionList .sess[data-id="${id}"]`)!;
+  await vi.waitFor(() => expect(row('settled')).not.toBeNull(), { timeout: 5000 });
+  expect(row('settled').classList.contains('sess-settled')).toBe(true);
+  expect(row('failed').classList.contains('sess-card')).toBe(true);
+  const input = doc.getElementById('chatInput') as HTMLTextAreaElement;
+  for (const id of ['failed', 'settled']) {
+    row(id).querySelector<HTMLElement>('[data-session-select]')!.click(); await settle();
+    input.value = `Unsent ${id}`; input.dispatchEvent(new mounted.window.Event('input'));
+  }
+  row('rest').querySelector<HTMLElement>('[data-session-select]')!.click(); await settle();
+  for (const id of ['failed', 'settled']) {
+    expect(row(id).querySelector('.sess-draft-mark'), id).not.toBeNull();
+    expect(row(id).title, id).toContain('Failed');
+    expect(row(id).title, id).toContain('Draft');
+  }
+});
+
 it('calls an unread reply a New response on its card, the word its row badge already uses', async () => {
   const now = Date.now();
   const mounted = await mountInbox({
@@ -1419,12 +1445,19 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
     lastToolCallAt: null, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
     estimatedTokens: 0, contextTokens: 0, lastTurnOutcome: null, activeTurnId: null, agents: [], origin: null };
   const chat = { ...base, id: 'menu-chat-0001', title: 'A chat', conversationId: 'menu-conversation-0001', chatIds: ['menu-conversation-0001'] };
-  const loose = { ...base, id: 'menu-loose-0001', title: '', conversationId: null, chatIds: [] };
+  const loose = { ...base, id: 'menu-loose-0001', title: 'Unattributed activity', conversationId: null, chatIds: [] };
+  // #1759: a new chat whose first message is still held (its ChatGPT Project is being created, or
+  // could not be) has no conversation yet either, but it is a chat, not the unattributed bucket.
+  const projectId = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000001';
+  const pending = { ...base, id: 'menu-pending-0001', title: 'Buenas!', conversationId: null, chatIds: [], projectId };
+  // Renamed to the bucket's own title, a waiting chat is still a chat: only the bucket has no origin.
+  const renamed = { ...base, id: 'menu-pending-0002', title: 'Unattributed activity', conversationId: null, chatIds: [], projectId,
+    origin: { kind: 'desktop' as const, fromSessionId: null, agentId: null, task: '' } };
   const deleteSession = vi.fn(async () => ({ ok: true, data: true }));
   const openSessionChat = vi.fn(async () => ({ ok: true, data: true }));
   const mounted = await mountChat({}, [], {
-    listProjects: async () => ({ ok: true, data: [] }),
-    listSessions: async () => ({ ok: true, data: { sessions: [chat, loose], activeId: null, pressure: [], blocked: [], trusted: [] } }),
+    listProjects: async () => ({ ok: true, data: [{ id: projectId, name: 'Website', path: '/work/website', createdAt: 1 }] }),
+    listSessions: async () => ({ ok: true, data: { sessions: [chat, loose, pending, renamed], activeId: null, pressure: [], blocked: [], trusted: [] } }),
     deleteSession, openSessionChat
   });
   const doc = mounted.window.document;
@@ -1441,6 +1474,25 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
   await waitFor(() => expect(row(loose.id)).not.toBeNull());
   rowMenuItem(row(loose.id), 'block');
   expect(actions()).toEqual(['block', 'remove']);
+  closeRowMenus(doc);
+  const shown = (id: string) => `${row(id).textContent} ${[...row(id).querySelectorAll<HTMLElement>('[title]'), row(id)].map(node => node.getAttribute('title') ?? '').join(' ')}`;
+  expect(shown(loose.id)).toContain('not a chat');
+  // A chat still waiting for its ChatGPT conversation: no "not a chat", no unattributed switch,
+  // and nothing that needs a ChatGPT link yet (open, copy link, block).
+  await waitFor(() => expect(row(pending.id)).not.toBeNull());
+  expect(shown(pending.id)).not.toContain('not a chat');
+  expect(shown(pending.id)).not.toContain('blocked');
+  // It is listed with the chats, not under "Unattributed activity" (which still holds the bucket).
+  expect(row(pending.id).closest('.session-diagnostics')).toBeNull();
+  expect(row(loose.id).closest('.session-diagnostics')).not.toBeNull();
+  // Groups are kept by the chat's own id, so it can be sorted into one of its project's groups already.
+  rowMenuItem(row(pending.id), 'rename');
+  expect(actions()).toEqual(['rename', 'move-to-group', 'remove']);
+  closeRowMenus(doc);
+  expect(row(renamed.id).closest('.session-diagnostics')).toBeNull();
+  expect(shown(renamed.id)).not.toContain('not a chat');
+  rowMenuItem(row(renamed.id), 'rename');
+  expect(actions()).toEqual(['rename', 'move-to-group', 'remove']);
   closeRowMenus(doc);
   // A right click opens the same menu; its items run their action.
   row(chat.id).dispatchEvent(new mounted.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 40 }));

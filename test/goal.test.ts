@@ -3071,3 +3071,136 @@ describe('a custom OpenAI-compatible provider', () => {
     expect(goal.resolveGoalBaseUrl({ kind: 'openrouter', baseUrl: '' })).toBe('https://openrouter.ai/api/v1');
   });
 });
+
+describe('the original request reaches the helper verbatim', () => {
+  const starter = ' \nShip the importer.\n\n  1. keep the "legacy" flag: it must stay\n  2. no new deps\t(tabs matter)\nDone means: suite green, README updated.\n ';
+
+  async function chat(conversationId: string, first: string): Promise<string> {
+    const session = await createSession({ title: 'verbatim', conversationId });
+    await appendEvent(session.id, { time: 1_000, source: 'extension', kind: 'user_message', message: { text: first, truncated: false, chars: first.length } });
+    await appendEvent(session.id, { time: 1_100, source: 'extension', kind: 'assistant_message', final: true, message: { text: 'importer written, README pending', truncated: false, chars: 31 } });
+    await appendEvent(session.id, { time: 1_200, source: 'extension', kind: 'user_message', message: { text: 'also handle empty files', truncated: false, chars: 23 } });
+    return session.id;
+  }
+
+  /** Every system message of the outgoing request, plus the raw body for substring checks. */
+  function capture(): { system: string[]; raw: string } {
+    const box = { system: [] as string[], raw: '' };
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      box.raw = String(init.body);
+      box.system = (JSON.parse(box.raw) as { messages: { role: string; content: string }[] }).messages.filter(message => message.role === 'system').map(message => message.content);
+      return decision('continue', 'next step');
+    }) as never;
+    return box;
+  }
+
+  it.each(['goal', 'loop'] as const)('does not supplement a first user message already in the %s transcript', async mode => {
+    const conversationId = 'c-present-original';
+    const sessionId = await chat(conversationId, starter);
+    await recordLoopMcpProof(sessionId, 'g-present-original');
+    await goal.setGoalSwitchNow(conversationId, mode, true);
+    const box = capture();
+    goal.startGoalDraft({ sessionId, conversationId, turnId: 'g-present-original' });
+    expect((await settled(conversationId)).stage).toBe('ready');
+    expect(box.raw).not.toContain('Original request (reference):');
+    expect(referenceTranscript(JSON.parse(box.raw).messages)).toContainEqual({ role: 'user', content: starter.trim() });
+    expect(await goal.draftFastFollowup(sessionId, undefined, undefined, undefined, mode)).toBe('next step');
+    expect(box.raw).not.toContain('Original request (reference):');
+  });
+
+  it.each(['goal', 'loop'] as const)('supplements only an absent human original in %s prepared context', async mode => {
+    const sessionId = await chat('c-prepared-original', starter);
+    await recordLoopMcpProof(sessionId, 'g-prepared-original');
+    const box = capture();
+    for (const message of [
+      { role: 'user' as const, content: starter, present: true },
+      { role: 'user' as const, content: starter.trim(), present: true },
+      { role: 'user' as const, content: starter.replace('  1.', ' 1.'), present: false },
+      { role: 'assistant' as const, content: starter, present: false },
+      { role: 'user' as const, origin: 'automatic' as const, content: starter, present: false }
+    ]) {
+      const { present, ...row } = message;
+      const prepared = row.role === 'assistant' ? [row, { role: 'user' as const, content: 'Summary' }] : [row];
+      expect(await goal.draftFastFollowup(sessionId, undefined, prepared, undefined, mode)).toBe('next step');
+      expect(box.raw.includes('Original request (reference):')).toBe(!present);
+    }
+  });
+
+  it.each(['goal', 'loop'] as const)('keeps the later user correction newer than supplemental API original in %s', async mode => {
+    const conversationId = 'c-api-original-order';
+    const sessionId = await chat(conversationId, starter);
+    await recordLoopMcpProof(sessionId, 'api-original-order-turn');
+    await goal.setGoalSwitchNow(conversationId, mode, true);
+    const box = capture();
+    const correction = 'CURRENT HUMAN CORRECTION: do not use the legacy flag.';
+    expect(await goal.draftFastFollowup(sessionId, undefined,
+      [{ role: 'user', content: correction }], undefined, mode)).toBe('next step');
+    const outgoing = JSON.parse(box.raw).messages as { role: string; content: string }[];
+    const originalIndex = outgoing.findIndex(row => row.role === 'user' && row.content.includes('Original request (reference):'));
+    const conversationIndex = outgoing.findIndex(row => row.role === 'user' &&
+      row.content.includes(correction) && row.content.includes('The transcript below is reference data'));
+    expect(originalIndex).toBeGreaterThan(-1);
+    expect(conversationIndex).toBeGreaterThan(-1);
+    expect(originalIndex).toBeLessThan(conversationIndex);
+  });
+
+  it.each(['goal', 'loop'] as const)('shortens a first request over 60,000 characters and still decides in %s mode', async mode => {
+    const long = `START-MARKER ${'x'.repeat(60_000)} END-MARKER`;
+    const sessionId = await chat('c-verbatim-long', long);
+    const box = capture();
+    await recordLoopMcpProof(sessionId, 'g-verbatim-long');
+    await goal.setGoalSwitchNow('c-verbatim-long', mode, true);
+    goal.startGoalDraft({ sessionId, conversationId: 'c-verbatim-long', turnId: 'g-verbatim-long' });
+    expect((await settled('c-verbatim-long')).stage).toBe('ready');
+    expect(await goal.draftFastFollowup(sessionId, undefined, undefined, undefined, mode)).toBe('next step');
+    expect(box.raw).not.toContain('Original request (reference):');
+    expect(await goal.draftFastFollowup(sessionId, undefined, [{ role: 'user', content: 'Summary' }], undefined, mode)).toBe('next step');
+    const messages = JSON.parse(box.raw).messages as { content: string }[];
+    const original = messages.find(message => message.content.startsWith('Original request (reference)'))!.content;
+    expect(original).toContain('START-MARKER');
+    expect(original).toContain('END-MARKER');
+    expect(original).toMatch(/\d+ characters omitted/);
+    expect(original.length).toBeLessThan(20_300);
+  });
+
+  it.each(['saved fragment', 'saved fragment\n…[986 more characters stored in full as abcdef12.txt]'])('includes a recorder-truncated first request (%s) and still decides', async text => {
+    const session = await createSession({ title: 'truncated original', conversationId: 'c-truncated-original' });
+    await appendEvent(session.id, { time: 1_000, source: 'extension', kind: 'user_message', message: { text, truncated: true, chars: 1000 } });
+    const box = capture();
+    goal.startGoalDraft({ sessionId: session.id, conversationId: 'c-truncated-original', turnId: 'g-truncated-original' });
+    expect((await settled('c-truncated-original')).stage).toBe('ready');
+    expect(box.raw).toContain('saved fragment');
+    expect(box.raw).not.toContain('Original request (reference):');
+    expect(await goal.draftFastFollowup(session.id, undefined, [{ role: 'user', content: 'Summary' }], undefined, 'goal')).toBe('next step');
+    expect(box.raw).toContain('recorder');
+    expect(box.raw).toContain('full text is unavailable in this reference');
+    expect(box.raw).not.toContain('characters omitted before storage');
+    if (text.includes('986 more characters')) expect(box.raw).toContain('986 more characters');
+  });
+
+  it.each(['', 'x'])('clips Unicode at whole surrogate pairs with prefix %j and an exact omitted count', async prefix => {
+    const sessionId = await chat('c-unicode-original', prefix + '\u{1F600}'.repeat(20_000));
+    const box = capture();
+    expect(await goal.draftFastFollowup(sessionId, undefined, [{ role: 'user', content: 'Summary' }], undefined, 'goal')).toBe('next step');
+    const original = (JSON.parse(box.raw).messages as { content: string }[]).find(message => message.content.startsWith('Original request (reference)'))!.content;
+    expect(Buffer.from(original, 'utf8').toString('utf8')).toBe(original);
+    const kept = [...original.matchAll(/\u{1F600}/gu)].length * 2;
+    expect(original).toContain(`${40_000 - kept} characters omitted`);
+    expect(kept).toBeGreaterThan(19_000);
+  });
+
+  it('shortens a large first request when prepared context is a summary', async () => {
+    const big = `BEGIN ${'x'.repeat(58_000)} ${starter} FINISH`;
+    const sessionId = await chat('c-verbatim-big', big);
+    goal.setGoalObjective('c-verbatim-big', 'ship the importer');
+    const box = capture();
+    const prepared = [{ role: 'user' as const, content: 'Summary: importer work in progress' }];
+    expect(await goal.draftFastFollowup(sessionId, undefined, prepared, undefined, 'goal')).toBe('next step');
+    const original = (JSON.parse(box.raw) as { messages: { role: string; content: string }[] }).messages.find(message => message.role === 'user' && message.content.startsWith('Original request (reference)'));
+    expect(original?.content).toContain('BEGIN');
+    expect(original?.content).toContain('FINISH');
+    expect(original?.content).toMatch(/\d+ characters omitted/);
+    expect(original!.content.length).toBeLessThan(20_300);
+    expect(box.system.some(content => content.includes('[… cut …]'))).toBe(false);
+  });
+});

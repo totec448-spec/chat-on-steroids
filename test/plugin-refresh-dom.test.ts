@@ -54,6 +54,25 @@ it.each([118, 257])('accepts %s declarations for the Plugins connector including
   const view = await api.pluginRefreshView('Chat On Steroids Plugins');
   expect(view?.tools).toHaveLength(count);
 });
+it('reads the Windows Desktop connector with all of its tools (#1763)', async () => {
+  // Windows Desktop with every permission declared 24 tools in 2.1.44; the card was refused at 16,
+  // so its automatic refresh could never be confirmed.
+  const { api, props } = page();
+  props.connector.name = 'Chat On Steroids Desktop';
+  props.actions = Array.from({ length: 24 }, (_, i) => ({ name: `desktop_tool_${i}`, description: `Desktop tool ${i}`, description_model: null,
+    params: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } }));
+  expect((await api.pluginRefreshView('Chat On Steroids Desktop'))?.tools).toHaveLength(24);
+});
+it("keeps the own connectors' limit above every tool they declare, in both readers", async () => {
+  const { SURFACES } = await import('../src/main/mcp/surfaces.js');
+  const { OWN_CONNECTOR_MAX_TOOLS } = await import('../src/main/plugin-refresh.js');
+  const limits = [...`${source}\n${fiber}`.matchAll(/externalPlugins \? 257 : (\d+)/g)].map(match => Number(match[1]));
+  expect(limits).toHaveLength(3);
+  // The page readers and the app agree on the bound.
+  expect(new Set([...limits, OWN_CONNECTOR_MAX_TOOLS]).size).toBe(1);
+  // The code-mode tool comes on top of a surface's declared tools.
+  expect(Math.max(SURFACES.core.tools.length, SURFACES.desktop.tools.length) + 1).toBeLessThanOrEqual(limits[0]!);
+});
 it('reads a Plugins catalog that fits the publication budget even with long schemas', async () => {
   // Measured 2026-10-01: Unity's 82 tools are ~116 KB of JSON, well within the 250,000-byte
   // publication budget, but the page reader's worst-case accounting (3 per character) came to
@@ -67,7 +86,7 @@ it('reads a Plugins catalog that fits the publication budget even with long sche
   const view = await api.pluginRefreshView('Chat On Steroids Plugins');
   expect(view?.tools).toHaveLength(82);
 });
-it.each([['Chat On Steroids Plugins', 258], ['Chat On Steroids Core', 17]] as const)('retains the %s observation count guard', async (connector, count) => {
+it.each([['Chat On Steroids Plugins', 258], ['Chat On Steroids Core', 65]] as const)('retains the %s observation count guard', async (connector, count) => {
   const { api, props } = page();
   props.connector.name = connector;
   props.actions = Array.from({ length: count }, (_, i) => ({ name: `tool_${i}`, description: `Tool ${i}`, description_model: null,
@@ -195,8 +214,8 @@ it('reports the page connector tunnel and a settled empty Plugins list', async (
 });
 it.each([
   ['Chat On Steroids Plugins (Windows)', 257, true],
-  ['Chat On Steroids Core (Windows)', 17, false],
-  ['Chat On Steroids Plugins Backup', 17, false]
+  ['Chat On Steroids Core (Windows)', 65, false],
+  ['Chat On Steroids Plugins Backup', 65, false]
 ] as const)('applies the Plugins connector\'s limits to %s by its kind, whatever the computer', async (connector, count, accepted) => {
   // One ChatGPT account on two computers: this computer's Plugins connector carries its suffix
   // and still holds every enabled external plugin's tools.
