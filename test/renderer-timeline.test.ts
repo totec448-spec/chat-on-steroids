@@ -1130,6 +1130,34 @@ it.each([false, true])('keeps retained image previews at the canonical row acros
   expect(w.document.querySelector('#inputQueue')!.textContent).not.toContain(row.text);
 });
 
+describe("a new chat's first message held for its project's ChatGPT Project", () => {
+  const project: LocalProject = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-000000000777', name: 'Website', path: '/work/website', createdAt: T0,
+    chatgpt: { state: 'requested', requestId: 'cccccccc-bbbb-4ccc-8ddd-000000000777', updatedAt: T0 } };
+  const failed = { ...project, chatgpt: { state: 'failed', requestId: 'cccccccc-bbbb-4ccc-8ddd-000000000777', error: 'x', updatedAt: T0 } } as LocalProject;
+  // Removed from the sidebar before its ChatGPT Project existed: nothing creates it any more and
+  // there is no menu to retry from, so the message says how it can still go out. Adding the folder
+  // again restores the project and its pending ChatGPT Project.
+  const removed = "This chat's project was removed from the sidebar. Add its folder again to send this message, or cancel it.";
+  it.each([
+    ['being created', project, 'Creating this project in ChatGPT…'],
+    ['that could not be created', failed, "This project's ChatGPT Project isn't available. Retry it from the project's menu."],
+    ['removed while it was being created', { ...project, ungrouped: true }, removed],
+    ['removed after it could not be created', { ...failed, ungrouped: true }, removed]
+  ] as const)('says why it waits for a project %s', async (_case, row, expected) => {
+    const { w, live, append } = await boot([], false, [], [row as LocalProject], { summary: { conversationId: null, projectId: project.id } });
+    // The chat sits in its project while the project is in the sidebar, under Chats once it is removed.
+    w.document.querySelector<HTMLElement>('.project-group .project-heading')?.click(); await settle();
+    w.document.querySelector<HTMLElement>('.sess[data-id]')!.click(); await settle();
+    const chat = await import('../src/renderer/chat.js');
+    const state = (await (w as any).api.getState()).data;
+    chat.chatApply({ ...state, bridge: { ...state.bridge, present: true } });
+    live.inputs.push({ id: 'first-message', sessionId: summary(live.events).id, state: 'queued', owner: 'page', text: 'Hi',
+      mode: 'auto', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: null, projectId: project.id });
+    await append([]); await append([]);
+    expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').toContain(expected);
+  });
+});
+
 it('says why a queued message waits: no extension, or a running tool call', async () => {
   const asked = Date.now() - 12_000;
   const { w, live, append } = await boot([

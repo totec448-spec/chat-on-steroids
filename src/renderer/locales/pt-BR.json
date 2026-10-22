@@ -1350,6 +1350,7 @@
   "Create this project in ChatGPT again": "Criar este projeto no ChatGPT de novo",
   "Creating this project in ChatGPT…": "Criando este projeto no ChatGPT…",
   "This project's ChatGPT Project isn't available. Retry it from the project's menu.": "O projeto do ChatGPT deste projeto não está disponível. Tente de novo pelo menu do projeto.",
+  "This chat's project was removed from the sidebar. Add its folder again to send this message, or cancel it.": "O projeto deste chat foi removido da barra lateral. Adicione a pasta de novo para enviar esta mensagem, ou cancele-a.",
   "Sending in a moment…": "Enviando em instantes…",
   "Image cleanup failed. No further cleanup was requested.": "Não foi possível limpar as imagens. Nenhuma outra limpeza foi solicitada.",
   "Collapse a folder before expanding more folders.": "Feche uma pasta antes de expandir outras.",

@@ -1349,6 +1349,7 @@
   "Create this project in ChatGPT again": "Bu projeyi ChatGPT'de yeniden oluştur",
   "Creating this project in ChatGPT…": "Bu proje ChatGPT'de oluşturuluyor…",
   "This project's ChatGPT Project isn't available. Retry it from the project's menu.": "Bu projenin ChatGPT projesi kullanılamıyor. Proje menüsünden yeniden deneyin.",
+  "This chat's project was removed from the sidebar. Add its folder again to send this message, or cancel it.": "Bu sohbetin projesi kenar çubuğundan kaldırıldı. Bu mesajı göndermek için klasörünü yeniden ekleyin veya mesajı iptal edin.",
   "Sending in a moment…": "Birazdan gönderilecek…",
   "Image cleanup failed. No further cleanup was requested.": "Görsel temizleme başarısız oldu. Başka temizleme istenmedi.",
   "Collapse a folder before expanding more folders.": "Daha fazla klasör açmadan önce açık klasörlerden birini daraltın.",

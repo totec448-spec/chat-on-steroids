@@ -1300,6 +1300,7 @@
   "Create this project in ChatGPT again": "이 프로젝트를 ChatGPT에 다시 만들기",
   "Creating this project in ChatGPT…": "ChatGPT에 이 프로젝트를 만드는 중…",
   "This project's ChatGPT Project isn't available. Retry it from the project's menu.": "이 프로젝트의 ChatGPT 프로젝트를 사용할 수 없습니다. 프로젝트 메뉴에서 다시 시도하세요.",
+  "This chat's project was removed from the sidebar. Add its folder again to send this message, or cancel it.": "이 채팅의 프로젝트가 사이드바에서 제거되었습니다. 이 메시지를 보내려면 폴더를 다시 추가하거나 메시지를 취소하세요.",
   "Sending in a moment…": "잠시 후 전송합니다…",
   "Image cleanup failed. No further cleanup was requested.": "이미지 정리에 실패했습니다. 추가 정리는 요청되지 않았습니다.",
   "Collapse a folder before expanding more folders.": "폴더를 더 펼치려면 먼저 열려 있는 폴더 하나를 접으세요.",
