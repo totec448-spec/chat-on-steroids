@@ -4110,14 +4110,15 @@ export function finishedBlocks(text: string): string {
 /** Locate Markdown fences, including ones nested under blockquotes and list items. */
 function fencedMarkdownRanges(text: string): Array<{ start: number; end: number }> {
   const ranges: Array<{ start: number; end: number }> = [];
-  let fence: { start: number; marker: string; width: number } | null = null;
+  let fence: { start: number; marker: string; width: number; nested: boolean } | null = null;
   for (let start = 0; start < text.length;) {
     const newline = text.indexOf('\n', start);
     const end = newline < 0 ? text.length : newline + 1;
     const line = text.slice(start, newline < 0 ? end : newline).replace(/\r$/, '');
     const body = line.replace(/^(?:[ \t]*(?:>|[-*+]|\d{1,9}[.)])(?=[ \t]|$)[ \t]?)*/, '');
     if (fence) {
-      const close = /^[ \t]*(`{3,}|~{3,})[ \t]*$/.exec(body)?.[1];
+      // A top-level fence cannot be closed by a list/blockquote-prefixed line.
+      const close = /^[ \t]*(`{3,}|~{3,})[ \t]*$/.exec(fence.nested ? body : line)?.[1];
       if (close && close[0] === fence.marker && close.length >= fence.width) {
         ranges.push({ start: fence.start, end });
         fence = null;
@@ -4125,7 +4126,7 @@ function fencedMarkdownRanges(text: string): Array<{ start: number; end: number 
     } else {
       const open = /^[ \t]*(`{3,}|~{3,})(.*)$/.exec(body);
       if (open && (open[1]![0] === '~' || !open[2]!.includes('`'))) {
-        fence = { start, marker: open[1]![0]!, width: open[1]!.length };
+        fence = { start, marker: open[1]![0]!, width: open[1]!.length, nested: body.length !== line.length };
       }
     }
     start = end;
@@ -4141,7 +4142,9 @@ function markdownCodeRanges(text: string): Array<{ start: number; end: number }>
   let start = 0;
   for (const fence of [...fences, { start: text.length, end: text.length }]) {
     const outside = text.slice(start, fence.start);
-    for (const span of outside.matchAll(/(?<![`\\])(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g)) {
+    // Inline code cannot span paragraph breaks: unmatched ticks in separate paragraphs
+    // must not suppress a valid chart between them.
+    for (const span of outside.matchAll(/(?<![`\\])(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g)) {
       const at = start + span.index;
       ranges.push({ start: at, end: at + span[0].length });
     }
