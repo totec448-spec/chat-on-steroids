@@ -1029,7 +1029,13 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     const mark = icon('i-pinned', 'ico sess-pin-mark');
     top.append(mark);
   }
-  if (draftedChat(summary)) top.append(icon('i-pencil', 'ico sess-draft-mark'));
+  if (draftedChat(summary)) {
+    // The row's tooltip says "Draft" to a pointer; the mark says it to a screen reader on the focused chat.
+    const mark = icon('i-pencil', 'ico sess-draft-mark');
+    mark.removeAttribute('aria-hidden'); mark.setAttribute('role', 'img');
+    ui(mark, 'aria-label', () => t('Draft'));
+    top.append(mark);
+  }
   ui(row, 'title', () => sessionRowTitle(summary, pinned, badges));
   const showTip = () => {
     if (sessionTooltipDismissed === summary.id) return;
