@@ -1323,6 +1323,12 @@ Ctrl+Shift+C copies. While the shown shell has a selection, Send to chat (or Cmd
 adds it to the composer (`terminal-selection.ts`) as a fenced block after the typed draft, keeping
 the last 400 lines and 20,000 characters with a note above when it cut; it never sends. Without a
 selection the shell gets the key. Native terminal escape handling stays in xterm, not HTML rendering.
+`renderer/terminal-memory.ts` keeps each dock's started and not-yet-restarted tabs (project id,
+title and folder; at most eight per dock) as a localStorage list, so the next launch or reload
+shows them as inert "previous session" tabs, right-dock ones as dock tabs. No shell starts by
+itself: Start shell here sends the saved project id, never the folder, so main still resolves the
+cwd and the Command permission still applies. Closed, exited and failed tabs are forgotten; no
+output or scrollback is stored.
 Appearance application refreshes all existing xterm palettes, including hidden tabs, from the
 current page/ink tokens without recreating shells; cursor colors follow the same palette.
 `scripts/verify-workspace-terminal.cjs` tests real Electron/PTY input, cwd/environment persistence,
@@ -2233,6 +2239,15 @@ leaving a gap; token-attribution/cache implementation notes are not persistent p
 `session-usage`, `usage-week` and `renderer-usage` tests cover evidence, boundaries and
 preference restoration. `scripts/verify-usage-week.cjs` exercises Chromium keyboard input
 and narrow/zoomed layouts with isolated data.
+
+**Export CSV**, beside Refresh, saves the page as a spreadsheet. IPC `usage:export` / preload
+`exportUsage(divisor)` takes only the page's token divisor; main reads `usageOverview()` after
+the save dialog closes and writes `shared/usage.ts::usageCsv()`: one row per recorded day with
+estimated tokens and, for the seven counted days only, verified GPT-5.6/GPT-6 sends (blank
+before them, which is not zero), then the latest limit reading. The file opens with a note that
+these are local estimates, uses English column names, local times and a UTF-8 byte-order mark,
+guards text cells against spreadsheet formulas, and holds no path, chat, account or
+conversation id. Tests: `usage-export`, `renderer-usage`.
 
 ### Other apps on this computer (#482)
 
@@ -4216,7 +4231,10 @@ a completed background chat gets a static accent marker until selected, and a se
 completion is acknowledged locally without writing session metadata. The receipt advances only after
 the current selection/load generation has successfully rendered that conversation at the live tail;
 failed or stale selection loads leave it unseen. A first-run baseline prevents historical completions
-from appearing unread after an update, and the stored receipts stay bounded.
+from appearing unread after an update, and the stored receipts stay bounded. Mark all as seen
+(`markAllSeen`, one write) acknowledges every row that shows New response: the sidebar header's
+check button, shown only while one does, covers all chats, and a project's menu, holding the item only
+while one of its chats does, covers that project. A working chat has no completion to acknowledge and keeps its spinner.
 `sessions:list` (`readSessionList`, `SessionList`) carries per-chat states only the main process
 holds, as ChatGPT conversation ids, each keyed like `blocked`: `approval` (`approvalWaitingChats()`,
 the recovery hold's own 75 s freshness rule) and `recoveryStopped` (`recoveryStoppedChats()` in
@@ -4935,12 +4953,14 @@ For a few seconds after a new OpenAI tunnel-client process connects (app start, 
 client the supervisor replaced), OpenAI still routes an existing chat's tool calls to the previous
 process, and a call sent then waits about 128 s for that lease (#1220; a new chat is not affected,
 and a reconnect of the same process after an outage changes nothing). `tunnel/route-settle.ts`
-holds such messages for `ROUTE_SETTLE_MS` (12 s) after each new process's first connected report:
+holds such messages for `ROUTE_SETTLE_MS` (35 s; 12 s until #1788) after each new process's first connected report:
 `/status` does not offer, and `/input/claim` refuses, an input whose page is an existing
 conversation; `wakeBrowserWork()` runs when the hold ends. `ConnectionStatus.routeSettlingUntil`
 lets the chat say the message is about to go. Measured on Windows: sent at once, 15 of 18 calls
 waited; held 12 s, 12 of 14 arrived in under 20 s (one still waited, one failed fast without reaching
-the app, back to back, so the takeover can occasionally outlast the hold). `test/tunnel-route-settle.test.ts`, the
+the app, back to back, so the takeover can occasionally outlast the hold). On the Mac on 2026-10-22 the
+takeover took longer (#1788): held 12 s, about half still waited; sent 22 s after connect, 2 of 3; at 32 s
+and 47 s, none of 6. `test/tunnel-route-settle.test.ts`, the
 `tunnel-lifecycle` and `input-delivery-integration` cases cover it.
 
 The local control API (`control-api.ts`, Settings → General → For developers, off by default) serves

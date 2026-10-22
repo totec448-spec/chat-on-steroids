@@ -509,10 +509,13 @@ code {
 .sidebar-resize:hover, .sidebar-resize:focus-visible, .app.is-resizing-sidebar .sidebar-resize { background: linear-gradient(to bottom, transparent 18px, var(--accent-edge) 36px, transparent 88%) center / 1px 100% no-repeat; outline: none; }
 .app.is-resizing-sidebar, .app.is-resizing-sidebar * { cursor: col-resize !important; user-select: none !important; }
 .sidebar-brand { display: flex; align-items: center; gap: 11px; padding: 0 8px 24px; }
-/* Chat search opens from here (and ⌘K / Ctrl+K), as in ChatGPT: one quiet icon, no field in the list. */
-.sidebar-brand .sidebar-brand-search { display: grid; place-items: center; flex: none; width: 28px; height: 28px; margin-left: auto; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--faint); }
-.sidebar-brand .sidebar-brand-search:hover, .sidebar-brand .sidebar-brand-search:focus-visible { color: var(--ink); background: var(--hover); }
-.sidebar-brand-search .ico { --ico: 16px; }
+/* Chat search opens from here (and ⌘K / Ctrl+K), as in ChatGPT: one quiet icon, no field in the list.
+   Mark all as seen sits before it only while a chat shows New response. */
+.sidebar-brand :is(.sidebar-brand-search, .sidebar-brand-seen) { display: grid; place-items: center; flex: none; width: 28px; height: 28px; margin-left: auto; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--faint); }
+.sidebar-brand :is(.sidebar-brand-search, .sidebar-brand-seen):is(:hover, :focus-visible) { color: var(--ink); background: var(--hover); }
+.sidebar-brand .sidebar-brand-seen[hidden] { display: none; }
+.sidebar-brand .sidebar-brand-seen:not([hidden]) + .sidebar-brand-search { margin-left: -7px; }
+:is(.sidebar-brand-search, .sidebar-brand-seen) .ico { --ico: 16px; }
 .sidebar-brand strong { font-size: calc(15px * var(--text-scale, 1)); font-weight: 600; letter-spacing: -.025em; }
 .sidebar-brand strong span { display: block; color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); font-weight: 400; letter-spacing: .01em; }
 .sidebar-brand .mark { display: none; }
@@ -4656,6 +4659,12 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .terminal-screen .xterm { height: 100%; }
 .terminal-empty { margin: 20px; }
 .terminal-empty[hidden] { display: none; }
+/* A tab remembered from the last launch: no shell yet, only where it was and how to start one. */
+.terminal-previous { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 20px; background: var(--page); font-size: calc(13px * var(--text-scale, 1)); }
+.terminal-previous strong { font-weight: 600; }
+.terminal-previous-cwd { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--soft); font-family: 'Cascadia Code', Consolas, monospace; font-size: calc(12px * var(--text-scale, 1)); }
+.terminal-previous .btn { margin-top: 6px; background: var(--hover); color: var(--ink); }
+.terminal-previous .btn:hover { background: color-mix(in srgb, var(--ink) 12%, transparent); }
 /* Send to chat: over the shell's top right corner while it has a selection, above xterm's own layers (up to 11). */
 .terminal-send { position: absolute; top: 8px; right: 18px; z-index: 12; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--edge); border-radius: 8px; background: var(--card); color: var(--ink); font-size: calc(12.5px * var(--text-scale, 1)); box-shadow: 0 6px 20px #0003; }
 .terminal-send:hover { background: var(--hover); }

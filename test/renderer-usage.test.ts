@@ -336,6 +336,71 @@ it('shows other apps’ reported limits apart from tokens counted here, and says
   expect(host.textContent).not.toContain('Codex ·');
 });
 
+it('exports the page as CSV beside Refresh, with the page divisor, and says where it saved', async () => {
+  dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
+  let finish!: (reply: unknown) => void;
+  const exportUsage = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+  Object.assign(dom.window, { api: { exportUsage } });
+  const { initUsage } = await import('../src/renderer/usage.js');
+  initUsage();
+  const element = (id: string) => dom.window.document.getElementById(id)!;
+  const button = element('exportUsage') as HTMLButtonElement;
+  expect(button.closest('.settings-section-head')).toBe(element('refreshUsage').closest('.settings-section-head'));
+  expect(button.textContent).toBe('Export CSV');
+  const divisor = element('usageDivisor') as HTMLInputElement;
+  divisor.value = '4'; divisor.dispatchEvent(new dom.window.Event('input'));
+  button.click();
+  // A second click while the dialog is open asks for nothing more.
+  button.click();
+  expect(exportUsage).toHaveBeenCalledTimes(1);
+  expect(exportUsage).toHaveBeenCalledWith(4);
+  expect(button.disabled).toBe(true);
+  finish({ ok: true, data: { saved: true, name: 'chat-on-steroids-usage-2026-10-20.csv' } });
+  await vi.waitFor(() => expect(button.disabled).toBe(false), { timeout: 5000 });
+  expect(dom.window.document.querySelector('.toast')!.textContent).toBe('Saved chat-on-steroids-usage-2026-10-20.csv');
+});
+
+// The IPC reply carries main's error, which names the chosen file's full path (2.1.42 review).
+it('says a failed export could not be saved, without the error that names the file path', async () => {
+  dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
+  const exportUsage = vi.fn(async () => ({ ok: false, error: "EBUSY: resource busy or locked, open 'C:\\Users\\you\\Downloads\\usage.csv'" }));
+  Object.assign(dom.window, { api: { exportUsage } });
+  const { initUsage } = await import('../src/renderer/usage.js');
+  initUsage();
+  const button = dom.window.document.getElementById('exportUsage') as HTMLButtonElement;
+  button.click();
+  await vi.waitFor(() => expect(button.disabled).toBe(false), { timeout: 5000 });
+  expect(dom.window.document.querySelector('.toast')!.textContent).toBe('Usage could not be exported.');
+});
+
+it('gives keyboard focus back to Export CSV after the dialog, unless the person moved it', async () => {
+  dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
+  let finish!: (reply: unknown) => void;
+  const exportUsage = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+  Object.assign(dom.window, { api: { exportUsage } });
+  const { initUsage } = await import('../src/renderer/usage.js');
+  initUsage();
+  const document = dom.window.document;
+  const button = document.getElementById('exportUsage') as HTMLButtonElement;
+  button.focus();
+  button.click();
+  // Chromium drops focus to the page when the focused button turns disabled; jsdom keeps it there.
+  button.disabled = false; button.blur(); button.disabled = true;
+  expect(document.activeElement).toBe(document.body);
+  finish({ ok: true, data: { saved: false } });
+  await vi.waitFor(() => expect(document.activeElement).toBe(button), { timeout: 5000 });
+
+  button.click();
+  const divisor = document.getElementById('usageDivisor') as HTMLInputElement;
+  divisor.focus();
+  finish({ ok: true, data: { saved: false } });
+  await vi.waitFor(() => expect(button.disabled).toBe(false), { timeout: 5000 });
+  expect(document.activeElement).toBe(divisor);
+});
+
 it('breaks the estimate down by project, naming each from the project list, and follows formula edits', async () => {
   dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
   vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
