@@ -26,14 +26,24 @@ const { announceSessionFinish: announceTransport, sessionFinishDeadline, settleS
 const { setGoalSwitchNow, automaticFinishEnabled, snapshotGoalSwitches, restoreGoalSwitches, registerGoalDecisionChat } = await import('../src/main/goal.js');
 const { resetAgentsForTests, spawn, bindConversation, finishAgent, waitingForSubAgents } = await import('../src/main/agents.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
-async function announceSessionFinish(sessionId: string, summary: string): Promise<string> {
-  const result = await announceTransport(sessionId, summary);
+async function announceSessionFinish(sessionId: string, summary: string, deadline?: number): Promise<string> {
+  const result = await announceTransport(sessionId, summary, deadline);
   await settleSessionFinishForTests();
   return result;
 }
 let directory: string;
 let sessionId: string;
 const notify = vi.fn();
+const configureUnverifiedHelperStop = async (setting: boolean | undefined) => {
+  await saveConfig({
+    ...defaultConfig(),
+    ui: { ...defaultConfig().ui, finishTool: true, finishAction: 'goal', ...(setting === undefined ? {} : { finishHoldOnStop: setting }) },
+    goal: { ...defaultConfig().goal, enabled: true, includeToolCalls: true }
+  });
+  hooks.hasInput = false;
+  hooks.followup.mockResolvedValueOnce(null);
+  await setGoalSwitchNow(hooks.caller.conversationId, 'goal', true);
+};
 beforeAll(async () => {
   directory = await makeTempDir('clf-session-finish-');
   initConfigPath(directory); initSessionStore(directory);
@@ -206,6 +216,56 @@ describe('session finish turn identity', () => {
     expect(await readRecentEvents(sessionId, 10, { kinds: ['turn_end'] })).toEqual([]);
     await announceSessionFinish(sessionId, 'Repeated finish');
     expect(hooks.followup).toHaveBeenCalledOnce();
+  });
+  it('keeps the finish hold and notifies when the Goal helper stops without checking the work', async () => {
+    await configureUnverifiedHelperStop(true);
+    expect(await announceSessionFinish(sessionId, 'Requested work is complete', Date.now() + 1500)).toContain('HELD:');
+    expect(hooks.followup).toHaveBeenCalledOnce();
+    expect(hooks.enqueue).not.toHaveBeenCalled();
+    expect((await getSession(sessionId))?.finishTurn?.released).toBe(false);
+    expect((await getSession(sessionId))?.activeTurnId).toBe('turn-one');
+    expect(notify).toHaveBeenCalledOnce();
+    expect(notify).toHaveBeenCalledWith(
+      'Goal result needs review',
+      'The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.',
+      sessionId,
+      'turn-one'
+    );
+    const events = await readRecentEvents(sessionId, 10);
+    expect(events).toEqual(expect.arrayContaining([expect.objectContaining({ reason: 'helper_stop_unverified' })]));
+  });
+  it.each([undefined, false])('still releases the finish hold on helper stop when finishHoldOnStop is %s (default unchanged)', async setting => {
+    await configureUnverifiedHelperStop(setting);
+    expect(await announceSessionFinish(sessionId, 'Requested work is complete', Date.now() + 1500)).toContain('RELEASED:');
+    expect(hooks.followup).toHaveBeenCalledOnce();
+    expect(hooks.enqueue).not.toHaveBeenCalled();
+    expect((await getSession(sessionId))?.finishTurn?.released).toBe(true);
+    expect(notify).not.toHaveBeenCalled();
+    const events = await readRecentEvents(sessionId, 10);
+    expect(events.some(event => 'reason' in event && event.reason === 'helper_stop_unverified')).toBe(false);
+  });
+  it('does not repeat the unverified notification when the held turn checks in again without new work', async () => {
+    await configureUnverifiedHelperStop(true);
+    hooks.followup.mockResolvedValue(null);
+    expect(await announceSessionFinish(sessionId, 'Requested work is complete', Date.now() + 1500)).toContain('HELD:');
+    expect(await announceSessionFinish(sessionId, 'Still complete', Date.now() + 1500)).toContain('HELD:');
+    expect(hooks.followup).toHaveBeenCalledOnce();
+    expect(notify).toHaveBeenCalledOnce();
+    expect((await getSession(sessionId))?.finishTurn?.released).toBe(false);
+  });
+  it('reports an unrecorded unverified finish result while retaining the hold', async () => {
+    await configureUnverifiedHelperStop(true);
+    const recorder = await import('../src/main/session/recorder.js');
+    const logger = await import('../src/main/logger.js');
+    const record = recorder.recordProgress;
+    const progress = vi.spyOn(recorder, 'recordProgress').mockImplementation((...args) =>
+      args[6] === 'helper_stop_unverified' ? Promise.resolve(null) : record(...args));
+    const warning = vi.spyOn(logger, 'logWarn');
+    try {
+      expect(await announceSessionFinish(sessionId, 'Requested work is complete', Date.now() + 1500)).toContain('HELD:');
+      expect((await getSession(sessionId))?.finishTurn?.released).toBe(false);
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining('unverified stop could not be recorded'));
+    } finally { progress.mockRestore(); warning.mockRestore(); }
   });
   it.each(['goal', 'loop'] as const)('revokes an in-flight %s decision across a mode switch and switch back', async mode => {
     await setGoalSwitchNow(hooks.caller.conversationId, mode, true);
