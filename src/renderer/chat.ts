@@ -6313,6 +6313,12 @@ function paintRecoveryVerdict(host: HTMLElement, sessionId: string | null): bool
  * (an empty chat, a folded Compact & Resume) keeps the caption in the header.
  */
 const turnStatusLine = turnLine('turn-worked turn-status');
+/** The latest question's line when the app gave up on its unfinished turn (#1787): red, no clock. */
+const turnStoppedLine = turnLine('turn-worked turn-stopped');
+/** Whether the rows were last drawn with the stopped line, so a change of that state redraws them. */
+let turnStoppedShown = false;
+/** The stopped state a redraw was last asked for; null once the rows match. */
+let turnStoppedAsked: boolean | null = null;
 
 /*
  * What the turn is doing right now, as the last row of its work, where the next thing will appear,
@@ -6321,6 +6327,15 @@ const turnStatusLine = turnLine('turn-worked turn-status');
  * "Thinking". Streaming prose needs no row; it is the feedback. A call only reaches the list once it
  * has finished, so without this a long command read as an idle chat.
  */
+/**
+ * The hours and minutes in front of a running clock's seconds ("6h 12m ", "4m ", or nothing). A
+ * six-hour turn read "Working for 372m 3s" until 2.1.46.
+ */
+function clockPrefix(seconds: number): string {
+  const hours = Math.floor(seconds / 3600), minutes = Math.floor((seconds % 3600) / 60);
+  if (hours > 0) return `${t('{0}h', [hours])} ${t('{0}m', [minutes])} `;
+  return seconds >= 60 ? `${t('{0}m', [minutes])} ` : '';
+}
 /** Whether the latest turn was working at the last paint; the status line's class is never cleared. */
 let turnWorking = false;
 /** A redraw is scheduled to retire the running turn's lines after it ended. */
@@ -6641,7 +6656,7 @@ function paintTurnNow(): void {
   const seconds = now?.since === undefined ? 0 : Math.max(0, Math.floor((Date.now() - now.since) / 1000));
   // Short steps keep no clock; the one worth watching is the one that lasts.
   turnNowTime.textContent = seconds >= 3
-    ? `${seconds >= 60 ? `${t('{0}m', [Math.floor(seconds / 60)])} ` : ''}${seconds % 60}s` : '';
+    ? `${clockPrefix(seconds)}${seconds % 60}s` : '';
   turnNow.hidden = !text;
 }
 
@@ -6706,7 +6721,7 @@ function exchangeDurations(list: readonly SessionEvent[]): Map<number, number> {
 
 function workedLine(asked: number, seconds: number): HTMLElement {
   const line = workedLines.get(String(asked)) ?? turnLine('turn-worked');
-  ui(line.firstElementChild as HTMLElement, 'textContent', () => t("{0} for {1}{2}s", [t("Worked"), seconds >= 60 ? `${t('{0}m', [Math.floor(seconds / 60)])} ` : '', seconds % 60]));
+  ui(line.firstElementChild as HTMLElement, 'textContent', () => t("{0} for {1}{2}s", [t("Worked"), clockPrefix(seconds), seconds % 60]));
   workedLines.set(String(asked), line);
   return line;
 }
@@ -6720,6 +6735,8 @@ function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, 
   const status = deps.state()?.config.ui.developerMode ? null : stateLine();
   const working = status?.working === true;
   turnWorking = working;
+  const stopped = !working && status?.tone === 'is-bad' ? status : null;
+  turnStoppedShown = false;
   const asks = rows.map((row, index) => ({ row, index, asked: Number(row.dataset.askedAt) }))
     .filter(entry => entry.row.matches('.ev-user_message') && Number.isFinite(entry.asked));
   const pending = messageOnItsWay();
@@ -6740,6 +6757,10 @@ function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, 
     const at = rows[index + 1]?.matches('.earlier-version') ? index + 2 : index + 1;
     if (latest && live && (!pending || runningBefore)) { rows.splice(at, 0, turnStatusLine); rows.push(turnNow); continue; }
     const seconds = workedSeconds.get(asked);
+    if (latest && stopped && seconds === undefined && timelineReachesEnd()) {
+      ui(turnStoppedLine.firstElementChild as HTMLElement, 'textContent', () => stateLine().text);
+      rows.splice(at, 0, turnStoppedLine); turnStoppedShown = true; continue;
+    }
     if (seconds === undefined || (latest && live)) continue;
     rows.splice(at, 0, workedLine(asked, seconds)); used.add(String(asked));
   }
@@ -6811,6 +6832,14 @@ function paintStateLine(): void {
   // (2026-10-12). Only a redraw of the rows retires them; one, after this repaint. The guard holds
   // until the stale state itself ends: a redraw that cannot retire the lines (no rows to redraw)
   // would otherwise schedule the next one from its own repaint, forever.
+  // The stopped line belongs to the rows: drawing or removing it is a redraw, once per change. A
+  // stopped turn whose question is not loaded draws no line, and must not redraw on every repaint.
+  const wantStopped = !developer && tone === 'is-bad' && working !== true;
+  if (wantStopped === turnStoppedShown) turnStoppedAsked = null;
+  else if (turnStoppedAsked !== wantStopped) {
+    turnStoppedAsked = wantStopped;
+    queueMicrotask(() => { if (turnStoppedAsked === wantStopped) paintDetail(); });
+  }
   if (developer || working === true || !turnWorking) staleTurnRedraw = false;
   else if (!staleTurnRedraw) {
     staleTurnRedraw = true;
@@ -6928,7 +6957,7 @@ function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?:
     if (!active && endedAt === undefined) return blind ?? stopped ?? { text: '', tone: '' };
     if (blind) return blind;
     const seconds = Math.max(0, Math.floor(((active ? Date.now() : endedAt!) - startedAt) / 1000));
-    return { text: t("{0} for {1}{2}s", [active ? workingLabel(turnId, seconds) : t("Worked"), seconds >= 60 ? `${t('{0}m', [Math.floor(seconds / 60)])} ` : '', seconds % 60]), tone: '', working: !!active, ticking: !!active };
+    return { text: t("{0} for {1}{2}s", [active ? workingLabel(turnId, seconds) : t("Worked"), clockPrefix(seconds), seconds % 60]), tone: '', working: !!active, ticking: !!active };
   }
   // Recording follows the conversation the browser can see. A tool call arrives over the
   // connector carrying nothing that identifies its caller, so work driven from the phone,

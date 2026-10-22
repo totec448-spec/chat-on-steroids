@@ -3720,6 +3720,14 @@ it('says a chat stopped when recovery gave up on its unfinished turn, and drops 
   expect(caption().textContent).toBe('');
 });
 
+// The 2.1.45 caption counted a six-hour turn as "Working for 372m 3s" (#1787 screenshots).
+it('counts a turn longer than an hour in hours and minutes', async () => {
+  const { w, append } = await boot([{ seq: 1, time: T0, source: 'extension', kind: 'turn_start', turnId: 'held-turn' }]);
+  (w as any).api.getSessionControls = (id: string) => Promise.resolve({ ok: true, data: { sessionId: id, automation: 'off', activeTurnId: null, finishHeld: false, blocked: '', job: null } });
+  await append([{ seq: 2, time: T0 + (6 * 3600 + 12 * 60 + 3) * 1000, source: 'extension', kind: 'turn_end', turnId: 'held-turn', outcome: 'completed' }]);
+  expect(w.document.getElementById('chatState')!.textContent).toBe('Worked for 6h 12m 3s');
+});
+
 it('shows elapsed work for the exact recorded turn without exposing lifecycle rows', async () => {
   const { w, append } = await boot([{ seq: 1, time: T0, source: 'extension', kind: 'turn_start', turnId: 'held-turn' }]);
   expect(w.document.getElementById('chatState')!.textContent).toMatch(/^Working for /);
