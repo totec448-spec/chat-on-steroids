@@ -1124,6 +1124,9 @@
   "content_goal_error_nothing_to_open_with": {
     "message": "辅助工具未生成开场消息。请让任务更具体后再试。"
   },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "辅助工具称目标已达成，但尚未检查。没有发送后续回复。请检查聊天；如果还有工作未完成，请继续。"
+  },
   "content_goal_error_loop_stop_refused": {
     "message": "辅助工具一直选择停止，而不是编写循环继续内容。请检查循环指令，或选择其他辅助模型。"
   },

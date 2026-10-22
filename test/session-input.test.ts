@@ -202,6 +202,8 @@ describe('durable user input ownership', () => {
     };
     expect(await claim({ text: 'Create an image of a fox in a misty forest' })).toMatchObject({ coreMention: false });
     expect(await claim({ text: 'Fix the failing test in src/app.ts' })).not.toHaveProperty('coreMention');
+    // /image (#1701): the person asked for a picture outright, whatever the words ("you have the concept, design it").
+    expect(await claim({ text: 'You have the concept now, go ahead and design it', imageRequest: true })).toMatchObject({ coreMention: false });
     // Generated openings and workers keep the mention.
     expect(await claim({ text: 'Create an image of a fox', authoredSource: 'objective' })).not.toHaveProperty('coreMention');
     binding.origin = 'worker';
