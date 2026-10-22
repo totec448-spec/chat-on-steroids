@@ -1,8 +1,9 @@
 import http from 'node:http';
 import { once } from 'node:events';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { attachBrowserWake, wakeBrowserWork } from '../src/main/browser-wake.js';
+import * as logger from '../src/main/logger.js';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0)) await close(); });
@@ -12,8 +13,8 @@ async function setup(auth: (token: string) => Promise<boolean> = async token => 
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const port = (server.address() as import('node:net').AddressInfo).port;
   cleanup.push(async () => { bridge.dispose(); await new Promise<void>(resolve => server.close(() => resolve())); });
-  function client(origin = 'chrome-extension://test') {
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/wake`, { origin });
+  function client(origin = 'chrome-extension://test', host?: string) {
+    const socket = new WebSocket(`ws://127.0.0.1:${port}/wake${host ? `?host=${host}` : ''}`, { origin });
     socket.on('error', () => {});
     return socket;
   }
@@ -41,6 +42,43 @@ describe('authenticated wake-only browser transport', () => {
     const closed = once(client, 'close'); client.close(); await closed;
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(seen).toEqual([true, false]);
+  });
+  // 2026-10-21: a fresh-turn continue went untaken while one extension worker had stopped
+  // answering; the log said only "disconnected", for either copy of the extension and any cause.
+  it('logs which copy of the extension came or went, and why it went', async () => {
+    const logged = vi.spyOn(logger, 'logInfo').mockImplementation(() => undefined);
+    try {
+      const h = await setup();
+      const cos = h.client(undefined, 'cos'); await once(cos, 'open');
+      const ready = once(cos, 'message'); cos.send('paired'); await ready;
+      const closed = once(cos, 'close'); cos.close(); await closed;
+      await new Promise(resolve => setTimeout(resolve, 20));
+      const older = h.client(); await once(older, 'open');
+      const olderReady = once(older, 'message'); older.send('paired'); await olderReady;
+      const olderClosed = once(older, 'close'); older.close(); await olderClosed;
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(logged.mock.calls.map(([line]) => line)).toEqual([
+        'bridge: browser wake channel (cos) authenticated',
+        'bridge: browser wake channel (cos) disconnected: closed by the browser',
+        'bridge: browser wake channel (host not named) authenticated',
+        'bridge: browser wake channel (host not named) disconnected: closed by the browser'
+      ]);
+    } finally { logged.mockRestore(); }
+  });
+  it('says when it dropped a browser that stopped answering its heartbeat', async () => {
+    const logged = vi.spyOn(logger, 'logInfo').mockImplementation(() => undefined);
+    vi.useFakeTimers({ toFake: ['setInterval', 'Date'] });
+    try {
+      const h = await setup();
+      const silent = h.client(undefined, 'browser'); await once(silent, 'open');
+      const ready = once(silent, 'message'); silent.send('paired'); await ready;
+      const closed = once(silent, 'close');
+      vi.advanceTimersByTime(60_000);
+      await closed;
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(logged.mock.calls.map(([line]) => line)).toContain('bridge: browser wake channel (browser) disconnected: no answer for 60 s');
+      expect(h.bridge.connected()).toBe(false);
+    } finally { vi.useRealTimers(); logged.mockRestore(); }
   });
   it('rejects ordinary web origins before authentication', async () => {
     const h = await setup(); const client = h.client('https://chatgpt.com');

@@ -4223,6 +4223,9 @@
     return { data: btoa(binary) };
   }
 
+  /** Preview sizes and WebP qualities tried in turn, until one fits the preview's 384 KB. */
+  const NATIVE_PREVIEW_TRIES = [[1600, 0.8], [1600, 0.6], [1200, 0.7], [1200, 0.5], [900, 0.6], [700, 0.5]];
+
   /** Captures one already-rendered native image without fetching or retaining its signed URL. */
   async function captureNativeImage(task) {
     const { key, image, observation, heldEpoch, heldConversation } = task;
@@ -4246,26 +4249,36 @@
           prior.fingerprint.complete === fingerprint.complete && prior.fingerprint.sourceUrl === sourceUrl)) return;
     const pendingCapture = { status: 'pending', fingerprint, task };
     nativeImageCaptures.set(key, pendingCapture);
-    const scale = Math.min(1, 1600 / Math.max(sourceWidth, sourceHeight));
-    const width = Math.max(1, Math.round(sourceWidth * scale));
-    const height = Math.max(1, Math.round(sourceHeight * scale));
-    if (width * height > 2_560_000) {
+    const sized = side => {
+      const scale = Math.min(1, side / Math.max(sourceWidth, sourceHeight));
+      return { width: Math.max(1, Math.round(sourceWidth * scale)), height: Math.max(1, Math.round(sourceHeight * scale)) };
+    };
+    if (sized(1600).width * sized(1600).height > 2_560_000) {
       return nativeImageUnavailable(key, image, observation, 'oversized', fingerprint, heldEpoch, heldConversation);
     }
     try {
-      const canvas = document.createElement('canvas');
-      canvas.width = width; canvas.height = height;
-      const context = canvas.getContext('2d');
-      if (!context) throw new Error('tainted');
-      context.drawImage(node, 0, 0, width, height);
-      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', 0.8));
-      if (!nativeImageCaptureOwnerCurrent(key, image, observation, heldEpoch, heldConversation) || nativeImageNode(image) !== node ||
-          !node.complete || node.naturalWidth !== sourceWidth || node.naturalHeight !== sourceHeight || (node.currentSrc || node.src) !== sourceUrl) {
-        if (nativeImageCaptures.get(key) === pendingCapture) nativeImageCaptures.delete(key);
-        return;
+      // A detailed picture can come out above the preview's 384 KB at the first size (VM, 2026-10-20:
+      // concept art, 1448x1086). Smaller and lighter tries follow, so only a picture that fits
+      // none of them is called oversized.
+      let blob = null, width = 0, height = 0;
+      for (const [side, quality] of NATIVE_PREVIEW_TRIES) {
+        ({ width, height } = sized(side));
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('tainted');
+        context.drawImage(node, 0, 0, width, height);
+        blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', quality));
+        if (!nativeImageCaptureOwnerCurrent(key, image, observation, heldEpoch, heldConversation) || nativeImageNode(image) !== node ||
+            !node.complete || node.naturalWidth !== sourceWidth || node.naturalHeight !== sourceHeight || (node.currentSrc || node.src) !== sourceUrl) {
+          if (nativeImageCaptures.get(key) === pendingCapture) nativeImageCaptures.delete(key);
+          return;
+        }
+        if (!blob) throw new Error('tainted');
+        if (blob.type !== 'image/webp' || blob.size <= 0) throw new Error('oversized');
+        if (blob.size <= 384_000) break;
       }
-      if (!blob) throw new Error('tainted');
-      if (blob.type !== 'image/webp' || blob.size <= 0 || blob.size > 384_000) throw new Error('oversized');
+      if (blob.size > 384_000) throw new Error('oversized');
       const bytes = new Uint8Array(await blob.arrayBuffer());
       if (!nativeImageCaptureOwnerCurrent(key, image, observation, heldEpoch, heldConversation) || nativeImageNode(image) !== node ||
           !node.complete || node.naturalWidth !== sourceWidth || node.naturalHeight !== sourceHeight || (node.currentSrc || node.src) !== sourceUrl) {
@@ -8055,7 +8068,7 @@
       'data-clf-tip',
       t(
         'content_chat_blocked_tip',
-        'This chat is blocked in the Chat On Steroids app: its tool calls are refused and Goal, Loop and auto-compaction are off. To release it, open the app’s Chat tab, hover this chat in the sessions list and press its block symbol.'
+        'This chat is blocked in the Chat On Steroids app: its tool calls are refused and Goal, Loop and auto-compaction are off. To release it, open this chat’s ⋯ menu in the app’s sidebar and choose “Release chat”.'
       )
     );
     blocked.hidden = true;
@@ -10093,7 +10106,7 @@
         // tool) keeps the count short, and a request still without its row keeps waiting.
         return !!fresh && seen.calls > 0 && !seen.answered && awaitingRequests.size === 0 &&
           sent?.settled === true && Number.isInteger(sent.count) && sent.count >= seen.calls;
-      }, AUTO_RECEIPT_SETTLE_MS);
+      }, AUTO_RECEIPT_SETTLE_MS, AUTO_RECEIPT_QUICK_MS);
       if (!current()) return t(
         'content_compact_chat_changed_waiting_results',
         'This chat changed while compaction was waiting for tool results.'
@@ -11293,6 +11306,8 @@
    * turn is stopped inside that gap. Still bounded: a call that runs longer is refused as before.
    */
   const AUTO_RECEIPT_SETTLE_MS = 6 * 60_000;
+  /** The first stretch of that wait, checked quickly; most receipts land within seconds. */
+  const AUTO_RECEIPT_QUICK_MS = 10_000;
   /** How many silent answers about pending calls to sit through before refusing. */
   const SETTLE_UNKNOWN_TRIES = 3;
 
@@ -11322,8 +11337,13 @@
   }
 
   /** Polls a condition. Resolves true when it holds, false when the budget runs out. */
-  async function waitUntil(test, budgetMs) {
-    const until = Date.now() + budgetMs;
+  /**
+   * Checks every 250 ms. A long wait passes `slowAfterMs`: after that it checks every 2 s, since
+   * each check reads the page and minutes of quarter-second checks weigh most on slow machines.
+   */
+  async function waitUntil(test, budgetMs, slowAfterMs = Infinity) {
+    const started = Date.now();
+    const until = started + budgetMs;
     for (;;) {
       let held = false;
       try {
@@ -11333,7 +11353,7 @@
       }
       if (held) return true;
       if (Date.now() >= until) return false;
-      await sleep(250);
+      await sleep(Date.now() - started >= slowAfterMs ? 2000 : 250);
     }
   }
 
@@ -13502,6 +13522,10 @@
       if (intoTurn && input.purpose === 'rotation' && CLF_DOM.generating() &&
           !await waitPageView(() => !!CLF_DOM.sendButton(), onTarget, 3000)) {
         noteWithdraw('no-send');
+        // Say so at once: the app holds the due call's answer for this continue, and a later tool
+        // result, usually one without Stop, tries again (measured on Loop chats, 2026-10-20).
+        await ask({ type: 'desktop_input', id: input.id, owner: input.owner, fail: true,
+          error: 'Fresh-turn continue declined: no Send while ChatGPT works.', detail: 'no-send' }).catch(() => undefined);
         return false;
       }
       const nativeSend = () => sendSubmittedText(sendingTarget, false, async sendCurrent => {
@@ -13712,11 +13736,12 @@
    */
   let projectCreateBusy = false;
   /**
-   * Archives one retired worker chat with ChatGPT's own reversible archive (#1460): the chat
-   * leaves the chat list and can be restored from ChatGPT's settings. One request for one exact
-   * chat of the signed-in account; nothing is deleted and nothing else is touched.
+   * Archives one worker chat with ChatGPT's own reversible archive (#1460): the chat leaves the
+   * chat list and can be restored from ChatGPT's settings. With `archive` false it restores one
+   * the app archived, before that worker is woken (#1701). One request for one exact chat of the
+   * signed-in account; nothing is deleted and nothing else is touched.
    */
-  async function archiveWorkerChat(conversationId) {
+  async function archiveWorkerChat(conversationId, archive = true) {
     const id = String(conversationId || '').toLowerCase();
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) return 'failed';
     const signedIn = await fetch(`${location.origin}/api/auth/session`, { credentials: 'include' });
@@ -13727,9 +13752,10 @@
     // A workspace chat belongs to that workspace's account, which ChatGPT names in this header.
     if (typeof session.account?.id === 'string' && session.account.id) headers['ChatGPT-Account-Id'] = session.account.id;
     const archived = await fetch(`${location.origin}/backend-api/conversation/${id}`, {
-      method: 'PATCH', credentials: 'include', headers, body: JSON.stringify({ is_archived: true })
+      method: 'PATCH', credentials: 'include', headers, body: JSON.stringify({ is_archived: archive })
     });
-    return archived.ok ? 'archived' : 'failed';
+    if (!archived.ok) return 'failed';
+    return archive ? 'archived' : 'unarchived';
   }
 
   async function createChatgptProject(request) {
@@ -14041,7 +14067,7 @@
       // dead context Chrome leaves behind when an unpacked extension is reloaded while the
       // ChatGPT document stays open. No page/session data crosses in this health check.
       if (message.type === 'clf-archive-chat') {
-        void archiveWorkerChat(message.conversationId).then(outcome => sendResponse({ outcome })).catch(() => sendResponse({ outcome: 'failed' }));
+        void archiveWorkerChat(message.conversationId, message.archive !== false).then(outcome => sendResponse({ outcome })).catch(() => sendResponse({ outcome: 'failed' }));
         return true;
       }
       if (message.type === 'clf-stop-turn') {

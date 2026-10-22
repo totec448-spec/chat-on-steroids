@@ -3,7 +3,8 @@ import path from 'node:path';
 import { app, clipboard, dialog, type BrowserWindow } from 'electron';
 import type { StoredText } from '../../shared/session.js';
 import {
-  answerMarkdown, completedTurnIds, markdownFileName, messageAnswerEntries, sessionMarkdown, transcriptEntries, turnAnswerEntries
+  answerMarkdown, completedTurnIds, latestAnswer, markdownFileName, messageAnswerEntries, sessionMarkdown, transcriptEntries,
+  turnAnswerEntries
 } from '../../shared/markdown-export.js';
 import { getSession, readEvents, readOverflowText } from './store.js';
 import { providerEntitiesAsMarkdown } from '../../shared/content-reference.js';
@@ -12,7 +13,8 @@ import { completedDilText } from '../../shared/dil-tables.js';
 
 export type MarkdownExportRequest = {
   id: string;
-  scope: 'answer' | 'session';
+  /** `latest` (/copy) is the chat's newest answer that offers copy, found here. */
+  scope: 'answer' | 'latest' | 'session';
   /** The completed turn whose answer is wanted; `answer` names this or `messageId`. */
   turnId?: string;
   /** An answer recorded outside any turn (copied branch history, an adopted chat's history). */
@@ -37,11 +39,14 @@ export async function exportSessionMarkdown(request: MarkdownExportRequest, owne
   const events = await readEvents(request.id);
   let markdown: string;
   let name: string;
-  if (request.scope === 'answer') {
+  if (request.scope !== 'session') {
+    const named = request.scope === 'latest' ? latestAnswer(events) : request;
+    if (!named) throw new Error('This chat has no finished answer yet');
+    const { turnId, messageId } = named;
     // Only a turn the page reported as completed has an answer to hand out; an answer recorded
     // outside any turn is final already, and is named by its message instead.
-    if (!request.messageId && (!request.turnId || !completedTurnIds(events).has(request.turnId))) throw new Error('This turn has not completed');
-    const entries = request.messageId ? messageAnswerEntries(events, request.messageId) : turnAnswerEntries(events, request.turnId!);
+    if (!messageId && (!turnId || !completedTurnIds(events).has(turnId))) throw new Error('This turn has not completed');
+    const entries = messageId ? messageAnswerEntries(events, messageId) : turnAnswerEntries(events, turnId!);
     if (!entries.length) throw new Error('This turn has no answer to export');
     markdown = answerMarkdown(await Promise.all(entries.map(entry => fullText(request.id, entry.stored, entry.html))));
     name = markdownFileName(summary.title, ' - answer');
