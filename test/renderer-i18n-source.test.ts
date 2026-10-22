@@ -135,6 +135,13 @@ it('translates every error the Files panel, projects, pets, skills and settings 
   const ssh = readFileSync('src/main/remote/ssh.ts', 'utf8');
   const failure = ssh.slice(ssh.indexOf('export function sshFailure'), ssh.indexOf('let programOverride'));
   for (const match of failure.matchAll(/return '([^']+)'|\|\| '([^']+)'/g)) messages.add((match[1] ?? match[2])!);
+  // Adding a server folder names the folder in two sentences, built from a template: the dialog
+  // translates them with the path as {0}.
+  const projects = readFileSync('src/main/projects.ts', 'utf8');
+  for (const template of ['Folder not found on the server: {0}', '{0} on the server is not a folder']) {
+    expect(projects.includes(template.replace('{0}', '${asked.path}')), template).toBe(true);
+    messages.add(template);
+  }
   expect(messages.size).toBeGreaterThan(150);
   for (const locale of LOCALES) {
     const catalog = JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>;

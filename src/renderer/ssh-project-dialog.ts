@@ -8,6 +8,18 @@ import { t } from './i18n.js';
  * not trusted yet, a key the server refused, a folder that is a file) is shown in the chosen
  * language; a line ssh printed itself has no translation and is shown as it is.
  */
+/**
+ * The app's own sentences, translated; the two that name the folder keep it as {0}. A line ssh
+ * printed itself has no entry and stays as it is.
+ */
+function dialogError(message: string): string {
+  const missing = /^Folder not found on the server: ([\s\S]+)$/.exec(message);
+  if (missing) return t('Folder not found on the server: {0}', [missing[1]]);
+  const notFolder = /^([\s\S]+) on the server is not a folder$/.exec(message);
+  if (notFolder) return t('{0} on the server is not a folder', [notFolder[1]]);
+  return t(message);
+}
+
 export function initSshProjectDialog(
   api: Pick<AppApi, 'addRemoteProject'>,
   onAdded: (project: LocalProject) => void
@@ -38,8 +50,7 @@ export function initSshProjectDialog(
     setBusy(true);
     try {
       const reply = await api.addRemoteProject(address.value.trim(), folder.value.trim());
-      // The app's own sentences are translated; a line ssh printed itself has no entry and stays as it is.
-      if (!reply.ok) { showError(t(reply.error)); return; }
+      if (!reply.ok) { showError(dialogError(reply.error)); return; }
       close();
       onAdded(reply.data);
     } catch (failure) {

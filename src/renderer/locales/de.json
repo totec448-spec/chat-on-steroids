@@ -2733,6 +2733,8 @@
   "The server did not answer in time.": "Der Server hat nicht rechtzeitig geantwortet.",
   "The server does not offer SFTP, which SSH projects need for files.": "Der Server bietet kein SFTP an, das SSH-Projekte für Dateien brauchen.",
   "SSH could not connect.": "SSH konnte keine Verbindung herstellen.",
+  "Folder not found on the server: {0}": "Ordner auf dem Server nicht gefunden: {0}",
+  "{0} on the server is not a folder": "{0} ist auf dem Server kein Ordner",
   "Only regular files and folders can be deleted": "Nur normale Dateien und Ordner können gelöscht werden",
   "The project file changed location": "Die Projektdatei hat ihren Ort geändert",
   "Secure OS credential storage is unavailable, so the key cannot be stored safely.": "Der sichere Anmeldedatenspeicher des Systems ist nicht verfügbar, daher kann der Schlüssel nicht sicher gespeichert werden.",

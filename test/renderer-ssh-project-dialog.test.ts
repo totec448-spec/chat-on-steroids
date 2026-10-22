@@ -64,6 +64,13 @@ it("shows the main process's explanation in the chosen language, and ssh's own w
     initSshProjectDialog({ addRemoteProject } as any, vi.fn()).open();
     await submit('not an address', '/srv/app');
     expect($('sshProjectError').textContent).toBe('Gib eine SSH-Adresse ein, etwa dev, me@server oder me@server:2222.');
+    // The two sentences that name the folder keep it as it is, inside the translation.
+    reason = 'Folder not found on the server: /srv/my app';
+    await submit('me@devbox', '/srv/my app');
+    expect($('sshProjectError').textContent).toBe('Ordner auf dem Server nicht gefunden: /srv/my app');
+    reason = '~/notes.txt on the server is not a folder';
+    await submit('me@devbox', '~/notes.txt');
+    expect($('sshProjectError').textContent).toBe('~/notes.txt ist auf dem Server kein Ordner');
     // A line ssh printed itself has no translation and is shown unchanged.
     reason = 'kex_exchange_identification: read: Connection reset by peer';
     await submit('me@devbox', '/srv/app');
