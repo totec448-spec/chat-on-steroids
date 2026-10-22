@@ -3,6 +3,7 @@ import type { LocalProject } from '../shared/projects.js';
 import type { ToolEditReview } from '../shared/session.js';
 import type { ProjectDirectoryListing, ProjectFileEntry, ProjectFileKind, ProjectFilePreview, ProjectFilesChanged } from '../shared/project-files.js';
 import type { ProjectGitChange, ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot, ProjectGitStatus } from '../shared/project-git.js';
+import { requestName } from './name-dialog.js';
 import { safeExternalLink } from '../shared/external-link.js';
 import { marked } from 'marked';
 import { currentLanguage, onLanguageChange, t, tn, ui } from './i18n.js';
@@ -113,58 +114,9 @@ function actionButton(label: () => string, glyph: string, action: () => void | P
 }
 
 function requestEntryName(options: { title: string; initial?: string; confirm: string }): Promise<string | null> {
-  document.querySelector('.file-entry-dialog')?.remove();
-  return new Promise(resolve => {
-    const box = document.createElement('dialog');
-    box.className = 'file-entry-dialog';
-    const form = document.createElement('form');
-    form.className = 'file-entry-dialog-form';
-    form.noValidate = true;
-    const heading = el('h2', '', options.title);
-    const label = el('label', 'file-entry-dialog-field');
-    const input = document.createElement('input');
-    input.className = 'file-entry-dialog-input';
-    input.type = 'text';
-    input.maxLength = 255;
-    input.autocomplete = 'off';
-    input.spellcheck = false;
-    input.value = options.initial ?? '';
-    label.append(el('span', '', () => t('Name')), input);
-    const actions = el('div', 'file-entry-dialog-actions');
-    const cancel = el('button', 'btn', () => t('Cancel')) as HTMLButtonElement;
-    cancel.type = 'button';
-    const confirm = el('button', 'btn btn-solid', options.confirm) as HTMLButtonElement;
-    confirm.type = 'submit';
-    actions.append(cancel, confirm);
-    form.append(heading, label, actions);
-    box.append(form);
-    document.body.append(box);
-
-    let settled = false;
-    const finish = (value: string | null): void => {
-      if (settled) return;
-      settled = true;
-      box.remove();
-      resolve(value);
-    };
-    cancel.addEventListener('click', () => finish(null));
-    box.addEventListener('cancel', event => { event.preventDefault(); finish(null); });
-    input.addEventListener('input', () => input.setCustomValidity(''));
-    form.addEventListener('submit', event => {
-      event.preventDefault();
-      const value = input.value.trim();
-      if (!value || value === '.' || value === '..' || /[\\/\0]/.test(value)) {
-        input.setCustomValidity(t('Use one file or folder name.'));
-        input.reportValidity();
-        return;
-      }
-      finish(value);
-    });
-
-    if (typeof box.showModal === 'function') box.showModal();
-    else box.setAttribute('open', '');
-    input.focus();
-    input.select();
+  return requestName({
+    ...options, maxLength: 255,
+    validate: value => !value || value === '.' || value === '..' || /[\\/\0]/.test(value) ? t('Use one file or folder name.') : null
   });
 }
 

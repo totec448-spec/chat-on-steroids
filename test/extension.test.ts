@@ -3881,6 +3881,39 @@ describe('extension revival delivery', () => {
 });
 
 describe('extension observation journal', () => {
+  // #1744: a chat started inside a ChatGPT Project joins the CoS project linked to it; the app
+  // learns the Project from the tab that recorded the chat, never from the page's own report.
+  it.each([
+    ['inside a ChatGPT Project', `https://chatgpt.com/g/g-p-${'d'.repeat(32)}-kunden/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee`, `g-p-${'d'.repeat(32)}`],
+    ['on a Project home before the chat has an id', `https://chatgpt.com/g/g-p-${'d'.repeat(32)}/project`, `g-p-${'d'.repeat(32)}`, true],
+    // A late batch for a named chat must not take the Project a tab shows by then.
+    ['on a Project home for a chat that already has an id', `https://chatgpt.com/g/g-p-${'d'.repeat(32)}/project`, undefined],
+    ['outside any Project', 'https://chatgpt.com/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', undefined],
+    ['showing another chat of that Project', `https://chatgpt.com/g/g-p-${'d'.repeat(32)}/c/11111111-2222-4333-8444-555555555555`, undefined]
+  ] as Array<[string, string, string | undefined, boolean?]>)('sends the ChatGPT Project its tab showed with a chat\'s events: %s', async (_case, url, expected, fresh) => {
+    const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const posted: Array<Record<string, unknown>> = [];
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }),
+      session: new FakeStorageArea(),
+      fetch: async (input, init = {}) => {
+        const pathname = new URL(input).pathname;
+        if (pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (pathname !== '/events') return response(404, {});
+        const batch = JSON.parse(String(init.body));
+        posted.push(batch);
+        return response(200, { stored: batch.events.length });
+      },
+      tabsGet: async (id) => ({ id, url })
+    });
+    await worker.registerTab(61);
+    // A fresh chat's first observation has no id yet; it is journalled under the tab and bound once ChatGPT names it.
+    await worker.send({ type: 'events', ...(fresh ? {} : { conversationId: chat }), entries: [{ ...(fresh ? {} : { conversationId: chat }), event: { kind: 'progress', time: Date.now(), text: 'x' } }] }, 61);
+    if (fresh) await worker.send({ type: 'events', conversationId: chat, entries: [] }, 61);
+    await vi.waitFor(() => expect(posted).toHaveLength(1), { timeout: 10_000 });
+    expect(posted[0]!.chatgptProject).toBe(expected);
+  });
+
   it.each([false, true])('retains a slow durable event batch beyond ten seconds, including a split retry: %s', async split => {
     vi.useFakeTimers();
     const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
