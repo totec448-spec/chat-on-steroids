@@ -1403,6 +1403,7 @@
   "Create this project in ChatGPT again": "Создать этот проект в ChatGPT заново",
   "Creating this project in ChatGPT…": "Создаём этот проект в ChatGPT…",
   "This project's ChatGPT Project isn't available. Retry it from the project's menu.": "Проект ChatGPT для этого проекта недоступен. Повторите попытку из меню проекта.",
+  "This chat's project was removed from the sidebar. Add its folder again to send this message, or cancel it.": "Проект этого чата убран с боковой панели. Добавьте его папку снова, чтобы отправить это сообщение, или отмените его.",
   "Sending in a moment…": "Сейчас отправим…",
   "Image cleanup failed. No further cleanup was requested.": "Не удалось очистить изображения. Дополнительная очистка не запрашивалась.",
   "Collapse a folder before expanding more folders.": "Сверните одну папку, прежде чем раскрывать другие.",
