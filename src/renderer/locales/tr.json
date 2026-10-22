@@ -3017,5 +3017,13 @@
   "Secure OS credential storage is unavailable, so the key was not saved": "Sistemin güvenli kimlik bilgisi deposu kullanılamıyor, bu yüzden anahtar kaydedilmedi",
   "Secure OS credential storage is unavailable, so nothing was changed": "Sistemin güvenli kimlik bilgisi deposu kullanılamıyor, bu yüzden hiçbir şey değiştirilmedi",
   "A handoff cannot be empty": "Devir boş olamaz",
-  "That session no longer exists": "Bu oturum artık yok"
+  "That session no longer exists": "Bu oturum artık yok",
+  "Chat groups, bookmarks, drafts that wait for you, and a better Review.": "Sohbet grupları, yer imleri, sizi bekleyen taslaklar ve daha iyi bir İnceleme.",
+  "Chat groups": "Sohbet grupları",
+  "Sort a project's chats into groups from its ⋯ menu.": "Bir projenin sohbetlerini ⋯ menüsünden gruplara ayırın.",
+  "Bookmark an answer and jump back to it from the chat's header.": "Bir yanıtı yer imine ekleyin ve sohbetin başlığından ona geri dönün.",
+  "Drafts that wait": "Bekleyen taslaklar",
+  "A pencil marks chats with an unsent message, and drafts come back after a restart.": "Bir kalem, gönderilmemiş mesajı olan sohbetleri işaretler ve taslaklar yeniden başlatmadan sonra geri gelir.",
+  "A better Review": "Daha iyi bir İnceleme",
+  "Right-click an untracked file to add it, or its folder, to .gitignore.": "İzlenmeyen bir dosyaya sağ tıklayarak onu ya da klasörünü .gitignore dosyasına ekleyin."
 }
