@@ -93,7 +93,7 @@
     "message": "Chat bloqué"
   },
   "content_chat_blocked_tip": {
-    "message": "Ce chat est bloqué dans l’application Chat On Steroids : ses appels d’outils sont refusés et Goal, Loop ainsi que le compactage automatique sont désactivés. Pour le débloquer, ouvrez l’onglet Chat de l’application, survolez ce chat dans la liste des sessions et cliquez sur son symbole de blocage."
+    "message": "Ce chat est bloqué dans l’application Chat On Steroids : ses appels d’outils sont refusés et Goal, Loop ainsi que le compactage automatique sont désactivés. Pour le débloquer, ouvrez le menu ⋯ de ce chat dans la barre latérale de l’application et choisissez « Débloquer le chat »."
   },
   "content_chat_still_opening": {
     "message": "ce chat est encore en cours d’ouverture — réessayez"
@@ -1189,6 +1189,9 @@
   },
   "content_goal_error_nothing_to_open_with": {
     "message": "L’assistant n’a pas produit de message d’ouverture. Rendez la tâche plus précise et réessayez."
+  },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "L’assistant indique que l’objectif est atteint, mais cela n’a pas été vérifié. Aucun message de suivi n’a été envoyé. Vérifiez la conversation et poursuivez s’il reste du travail."
   },
   "content_goal_error_loop_stop_refused": {
     "message": "L’assistant a continué à choisir l’arrêt au lieu de rédiger une continuation Loop. Vérifiez les instructions Loop ou choisissez un autre modèle d’assistant."

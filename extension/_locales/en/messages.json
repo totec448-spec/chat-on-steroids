@@ -93,7 +93,7 @@
     "message": "Chat blocked"
   },
   "content_chat_blocked_tip": {
-    "message": "This chat is blocked in the Chat On Steroids app: its tool calls are refused and Goal, Loop and auto-compaction are off. To release it, open the app’s Chat tab, hover this chat in the sessions list and press its block symbol."
+    "message": "This chat is blocked in the Chat On Steroids app: its tool calls are refused and Goal, Loop and auto-compaction are off. To release it, open this chat’s ⋯ menu in the app’s sidebar and choose “Release chat”."
   },
   "content_chat_still_opening": {
     "message": "this chat is still opening — try again"
@@ -1156,6 +1156,9 @@
   },
   "content_goal_error_nothing_to_open_with": {
     "message": "The helper did not produce an opening message. Make the task more specific and try again."
+  },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "The helper says the goal is met, but this has not been checked. No follow-up was sent. Review the chat and continue if work remains."
   },
   "content_goal_error_loop_stop_refused": {
     "message": "The helper kept choosing to stop instead of writing a Loop continuation. Review the Loop instructions or choose another helper model."
