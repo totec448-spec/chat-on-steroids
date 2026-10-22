@@ -7401,6 +7401,66 @@ describe('the finished-reply announcement', () => {
     expect(said).toEqual([]);
   });
 
+  // The announcement's own timers (the 100 ms refill and the gap between replies) are held and
+  // run by hand, in order, so nothing here waits on the clock.
+  const holdTimers = (w: JSDOM['window']) => {
+    const held: Array<() => void> = [], setTimer = w.setTimeout.bind(w);
+    vi.spyOn(w, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) =>
+      ms === 100 || ms === 1000 ? (held.push(fn), 0) : setTimer(fn, ms, ...rest)) as typeof w.setTimeout);
+    return held;
+  };
+  const watch = (w: JSDOM['window']) => {
+    const said: string[] = [];
+    new w.MutationObserver(() => said.push(region(w).textContent ?? '')).observe(region(w), { childList: true, characterData: true, subtree: true });
+    return said;
+  };
+
+  it('reads out every reply that finished in one read, one after another', async () => {
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns: true });
+    const held = holdTimers(w), said = watch(w);
+    await append([end(3, 't1'), start(4, 't2'), end(5, 't2'), start(6, 't3'), end(7, 't3')]);
+    // The first is read at once; the others wait their turn.
+    expect(region(w).textContent).toBe('Reply finished');
+    expect(held).toHaveLength(1);
+    held.shift()!(); // the gap, then the region is emptied for the second
+    await settle();
+    expect(region(w).textContent).toBe('');
+    held.shift()!(); // refilled in a later task
+    await settle();
+    expect(region(w).textContent).toBe('Reply finished');
+    held.shift()!();
+    await settle();
+    held.shift()!();
+    await settle();
+    expect(held).toHaveLength(0);
+    expect(said).toEqual(['Reply finished', '', 'Reply finished', '', 'Reply finished']);
+  });
+
+  it('empties and refills for each reply when the region already held the words', async () => {
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns: true });
+    await append([end(3, 't1')]);
+    const held = holdTimers(w), said = watch(w);
+    await append([start(4, 't2'), end(5, 't2'), start(6, 't3'), end(7, 't3')]);
+    while (held.length > 0) { held.shift()!(); await settle(); }
+    expect(said).toEqual(['', 'Reply finished', '', 'Reply finished']);
+  });
+
+  it('drops the replies still waiting when the open chat changes', async () => {
+    const first = summary([]), second = { ...summary([]), id: '2026-09-02-test0002', title: 'Other session' };
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns: true, sessions: [first, second] });
+    const held = holdTimers(w);
+    await append([end(3, 't1'), start(4, 't2'), end(5, 't2'), start(6, 't3'), end(7, 't3')]);
+    expect(region(w).textContent).toBe('Reply finished');
+    expect(held).toHaveLength(1);
+    (w.document.querySelector(`#sessionList [data-id="${second.id}"]`) as HTMLElement).click();
+    await settle();
+    expect(region(w).textContent).toBe('');
+    const said = watch(w);
+    while (held.length > 0) { held.shift()!(); await settle(); }
+    expect(region(w).textContent).toBe('');
+    expect(said).toEqual([]);
+  });
+
   it.each([
     ['when it is off', false, end(3, 't1')],
     ['for a stopped reply', true, end(3, 't1', 'stopped')]

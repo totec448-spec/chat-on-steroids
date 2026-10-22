@@ -2752,29 +2752,36 @@ function canonicalMessageKey(event: SessionEvent): string | null {
 
 /** Bumped by every clear and delayed write of #turnAnnounce, so a stale delayed write is dropped. */
 let turnAnnounceWrite = 0;
+/** Long enough for a screen reader to finish "Reply finished" before the next one is queued. */
+const TURN_ANNOUNCE_GAP_MS = 1000;
 /**
  * Opt-in (Appearance → Accessibility): a reply that completes in the open chat is read out once.
  * Only live deltas arrive here, so a chat opened after its reply finished stays quiet. The next turn
- * empties the region, so the same words are read again when that one ends.
+ * empties the region, so the same words are read again when that one ends. Several completions in
+ * one read are each read out, one after another.
  */
 function announceFinishedTurns(delta: readonly SessionEvent[]): void {
   const region = $('turnAnnounce'), before = region.textContent, text = t("Reply finished");
-  let finished = false;
+  let finished = 0;
   for (const event of delta) {
     if (event.kind === 'user_message' || event.kind === 'turn_start') { region.textContent = ''; turnAnnounceWrite++; }
-    else if (event.kind === 'turn_end' && event.outcome === 'completed') finished = true;
+    else if (event.kind === 'turn_end' && event.outcome === 'completed') finished++;
   }
   // A Goal or Loop continue can start the next turn in the same read: the end still counts.
-  if (!finished || deps.state()?.config.ui.announceTurns !== true) return;
-  // A write now also drops a delayed repeat still waiting from an earlier read.
-  if (before !== text) { turnAnnounceWrite++; region.textContent = text; return; }
-  // The region held these words when the read began; a screen reader hears no change unless it
-  // is emptied first and filled in a later task. A later read or chat switch in between wins.
-  region.textContent = '';
+  if (finished === 0 || deps.state()?.config.ui.announceTurns !== true) return;
+  // A later read or a chat switch in between wins: it bumps the write, and what is still waiting drops.
   const selection = selectionGeneration, write = ++turnAnnounceWrite;
-  window.setTimeout(() => {
-    if (selection === selectionGeneration && write === turnAnnounceWrite && deps.state()?.config.ui.announceTurns === true) region.textContent = text;
-  }, 100);
+  const current = (): boolean => selection === selectionGeneration && write === turnAnnounceWrite && deps.state()?.config.ui.announceTurns === true;
+  // The region is emptied and filled in a later task, so a screen reader hears each as a change.
+  const say = (remaining: number): void => {
+    region.textContent = '';
+    window.setTimeout(() => { if (current()) { region.textContent = text; next(remaining - 1); } }, 100);
+  };
+  const next = (remaining: number): void => {
+    if (remaining > 0) window.setTimeout(() => { if (current()) say(remaining); }, TURN_ANNOUNCE_GAP_MS);
+  };
+  // The region held these words when the read began, so it is emptied first.
+  if (before !== text) { region.textContent = text; next(finished - 1); } else say(finished);
 }
 
 /** Merge one sequence-cursor delta without letting canonical message revisions duplicate rows. */
