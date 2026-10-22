@@ -2169,11 +2169,18 @@ function paintSessions(): void {
   const layout = sidebarLayout();
   paintedLayout = layout;
   // The header's Mark all as seen shows only while a chat shows New response.
-  $('markAllSeen').hidden = !sessions.some(newResponse);
+  const markAllSeenButton = $('markAllSeen'), markAllSeenFocused = document.activeElement === markAllSeenButton;
+  markAllSeenButton.hidden = !sessions.some(newResponse);
+  // It also hides when another path acknowledges the last one (an open chat's detail read), not only on its own click.
+  const keepFocus = () => {
+    // The keyboard goes on to search, beside it in either layout; the inbox draws its search control with the list.
+    if (markAllSeenFocused && markAllSeenButton.hidden) (layout === 'inbox' ? $('chatList').querySelector<HTMLElement>('[data-inbox-control="search"]') : $('searchChatsButton'))?.focus({ preventScroll: true });
+  };
   $('sessionList').classList.toggle('is-inbox', layout === 'inbox');
   if (layout !== 'inbox') inboxPicker.close();
   if (layout === 'inbox') {
     paintInbox();
+    keepFocus();
     syncSelectedWorkspace();
     scheduleToolActivityExpiry();
     return;
@@ -2344,6 +2351,7 @@ function paintSessions(): void {
   }
   restoreFocus();
   restoreGroupFocus();
+  keepFocus();
   syncSelectedWorkspace();
   $('projectsEmpty').hidden = projectSections.length > 0;
   $('sessionsEmpty').hidden = rows.length > 0;
@@ -9027,12 +9035,7 @@ export function initChat(next: Deps): void {
   });
 
   $('chatRefresh').addEventListener('click', event => { event.preventDefault(); void refreshAll(); });
-  $('markAllSeen').addEventListener('click', () => {
-    const button = $('markAllSeen'), focused = document.activeElement === button;
-    markAllSeen();
-    // The button hides with the last New response; the keyboard goes on to search, beside it in either layout.
-    if (focused && button.hidden) (paintedLayout === 'inbox' ? $('chatList').querySelector<HTMLElement>('[data-inbox-control="search"]') : $('searchChatsButton'))?.focus({ preventScroll: true });
-  });
+  $('markAllSeen').addEventListener('click', () => markAllSeen());
 
   $('copyHandoff').addEventListener('click', async () => {
     if (!handoff) return;
