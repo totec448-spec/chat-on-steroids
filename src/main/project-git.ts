@@ -9,6 +9,7 @@ import { getConfig } from './config.js';
 import { rawPromises as fs } from './rawfs.js';
 import { projectFileTarget } from './project-files.js';
 import { isContained } from './sandbox.js';
+import { logInfo } from './logger.js';
 
 const MAX_GIT_OUTPUT_BYTES = 4 * 1024 * 1024;
 const MAX_CHANGES = 2_000;
@@ -432,11 +433,25 @@ async function readHeadFile(context: RepositoryContext, relative: string, oid = 
   return await readBlob(context, `${oid}:${repositoryPath(context, relative)}`) ?? { text: '', tooLarge: false };
 }
 
-/** Index stages 1-3 of an unmerged path; none when a present side is binary or too large. */
+/** Index stages 1-3 of an unmerged path; none when a present side is binary, too large or unreadable. */
 async function readConflictStages(context: RepositoryContext, relative: string): Promise<ProjectGitDiff['conflict']> {
-  const [base, ours, theirs] = await Promise.all([1, 2, 3].map(stage => readBlob(context, `:${stage}:${repositoryPath(context, relative)}`)));
-  if ([base, ours, theirs].some(side => side && (side.tooLarge || side.text === null))) return undefined;
-  return { base: base?.text ?? null, ours: ours?.text ?? null, theirs: theirs?.text ?? null };
+  const object = repositoryPath(context, relative);
+  const skip = (reason: string): undefined => { logInfo(`review: no three-way view for ${relative}: ${reason}`); };
+  // Which stages the index holds, apart from reading them: only an unlisted stage is a side without the file.
+  const listed = await runGit(context.projectReal, ['ls-files', '-u', '-z', '--full-name', '--', `:(top,literal)${object}`]);
+  if (listed.code !== 0) return skip('the index could not be read');
+  const present = new Set(decode(listed.stdout).split('\0').map(entry => /^\d+ [0-9a-f]+ ([123])\t(.*)$/s.exec(entry))
+    .filter(match => match?.[2] === object).map(match => Number(match![1])));
+  if (!present.size) return skip('it is no longer unmerged');
+  const names = ['base', 'ours', 'theirs'];
+  const sides = await Promise.all([1, 2, 3].map(stage => present.has(stage) ? readBlob(context, `:${stage}:${object}`) : undefined));
+  for (const [index, side] of sides.entries()) {
+    if (side === null) return skip(`${names[index]} could not be read`);
+    if (side?.tooLarge) return skip(`${names[index]} is too large`);
+    if (side && side.text === null) return skip(`${names[index]} is binary`);
+  }
+  const [base, ours, theirs] = sides.map(side => side?.text ?? null);
+  return { base: base ?? null, ours: ours ?? null, theirs: theirs ?? null };
 }
 
 async function readWorkingFile(projectId: string, relative: string): Promise<{ text: string | null; tooLarge: boolean }> {

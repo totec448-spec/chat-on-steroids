@@ -1193,7 +1193,11 @@ export function createFilePanel(options: FilePanelOptions) {
     }
     const conflicted = !historical && value && 'status' in value && value.status === 'C' ? value : null;
     if (conflicted?.conflict) {
-      const threeWay = actionButton(() => t('Three-way view'), 'i-git-branch', () => { conflictThreeWay = !conflictThreeWay; render(); });
+      const threeWay = actionButton(() => t('Three-way view'), 'i-git-branch', () => {
+        conflictThreeWay = !conflictThreeWay; render();
+        // The header is rebuilt: focus stays on the toggle.
+        preview.querySelector<HTMLButtonElement>('.file-conflict-toggle')?.focus();
+      });
       threeWay.classList.add('file-conflict-toggle');
       threeWay.setAttribute('aria-pressed', String(conflictThreeWay));
       actions.append(threeWay);
