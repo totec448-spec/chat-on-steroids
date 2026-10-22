@@ -231,7 +231,7 @@ export function initSkills(options: Options) {
     .filter(file => file.entry.kind !== 'other' && file.normalizedName.includes(query))
     .map(file => file.entry);
   const stateMessage = (range: Completion, query: string): string => {
-    if (error) return error;
+    if (error) return t(error);
     if (loading && (range.kind === 'file' ? !files : !library))
       return t(range.kind === 'file' ? 'Loading files…' : 'Loading skills…');
     if (choices.length) return '';
