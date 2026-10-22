@@ -226,3 +226,13 @@ it('locates a reply by its native message id, where it first appeared (#482)', a
   expect(await locateMessage(id, first.messageId)).toEqual({ seq: first.seq, kind: 'assistant_message', messageId: first.messageId, position: positionOf(first) });
   expect(await locateMessage(id, 'not-in-this-chat')).toBeNull();
 });
+
+it('locates a bookmarked reply whose recorded id is upper case (bookmarks are kept lower case)', async () => {
+  const session = await createSession({ conversationId: `search-chat-${++counter}`, title: 'Upper-case id' });
+  const recorded = 'ABCDEF01-2345-4678-9ABC-DEF012345678';
+  await upsertMessageEvent(session.id, { kind: 'assistant_message', source: 'extension', time: Date.now(), messageId: recorded,
+    message: { text: 'Marked answer.', chars: 14, truncated: false }, state: 'final', final: true });
+  await flushSessions();
+  const location = await locateMessage(session.id, recorded.toLowerCase());
+  expect(location).toMatchObject({ kind: 'assistant_message', messageId: recorded });
+});
