@@ -2565,8 +2565,8 @@ input[readonly] {
 @media (prefers-reduced-motion: reduce) { .sess-actions { transition: none; } }
 /* While a chat is being named, its field takes the actions' place (#1107). */
 .sess:has(.sess-rename) .sess-actions { display: none; }
-/* Pinned chats (#1133): a quiet mark that stays visible; it hides with the status while actions show. */
-.sess-pin-mark { flex: none; margin-left: 4px; font-size: 12px; color: var(--faint); }
+/* Pinned chats (#1133) and chats holding an unsent draft: a quiet mark that stays visible; it hides with the status while actions show. */
+.sess-pin-mark, .sess-draft-mark { flex: none; margin-left: 4px; font-size: 12px; color: var(--faint); }
 .session-diagnostics { margin-top: 20px; color: var(--faint); }
 .session-diagnostics > summary { padding: 8px 10px; cursor: pointer; font-size: calc(12px * var(--text-scale, 1)); }
 .session-diagnostics .sess-top b { font-size: calc(13px * var(--text-scale, 1)); }
