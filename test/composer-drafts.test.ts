@@ -1,5 +1,5 @@
 import { JSDOM } from 'jsdom';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, expect, it, onTestFinished, vi } from 'vitest';
 import { createComposerDrafts, type ComposerDraftOptions } from '../src/renderer/composer-drafts.js';
 
 const KEY = 'chat-on-steroids.composer-drafts';
@@ -44,7 +44,10 @@ it('writes a typed draft after a short pause without waiting for a quit', () => 
 });
 
 it('ignores broken storage and keeps only the newest drafts that fit', () => {
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+  onTestFinished(() => logged.mockRestore());
   expect(fixture('{not json').has('chat-a')).toBe(false);
+  expect(fixture('{"chat-a":"an older shape"}').has('chat-a')).toBe(false);
   const mixed = fixture(JSON.stringify([['ok', 'text'], ['', 'no key'], ['bad', 7], 'loose', ['x'.repeat(201), 'long key']]));
   expect(mixed.has('ok')).toBe(true);
   expect(mixed.has('bad')).toBe(false);
@@ -61,6 +64,13 @@ it('ignores broken storage and keeps only the newest drafts that fit', () => {
   huge.set('older', 'short');
   huge.set('pasted', 'x'.repeat(1_000_001));
   expect(stored()).toEqual([['older', 'short']]);
+  stored();
+  // Why a draft did not come back is in the app log, once, with no draft text.
+  expect(logged.mock.calls).toEqual([
+    ['Composer drafts: the saved drafts could not be read, so none came back.'],
+    ['Composer drafts: the saved drafts were not a list, so none came back.'],
+    ['Composer drafts: a draft too long for the 1000000 stored characters stays in this window only.']
+  ]);
 
   // Under the bound as typed, six times over it as stored: it must not cost the older drafts their restart.
   const escaped = fixture();
