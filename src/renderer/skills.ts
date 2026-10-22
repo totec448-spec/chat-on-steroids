@@ -96,6 +96,7 @@ export const APP_COMMANDS = [
   { command: 'goal', name: 'Goal', description: 'Pursue a saved objective and stop when it is complete.', glyph: 'i-target' },
   { command: 'loop', name: 'Loop', description: 'Keep continuing toward the saved objective.', glyph: 'i-loop' },
   { command: 'compact', name: 'Compact', description: 'Compact this chat and resume it in a fresh conversation.', glyph: 'i-copy' },
+  { command: 'image', name: 'Image', description: 'Ask ChatGPT for a picture: this message goes without the app, so ChatGPT can draw.', glyph: 'i-image' },
   // Codex's slash commands, each opening what the app already has.
   { command: 'model', name: 'Model', description: 'Choose the model for this chat.', glyph: 'i-sparkle' },
   { command: 'reasoning', name: 'Reasoning', description: 'Choose how long the model thinks.', glyph: 'i-bolt' },
@@ -108,7 +109,11 @@ export const APP_COMMANDS = [
   { command: 'usage', name: 'Usage', description: 'Open usage and token statistics.', glyph: 'i-chart' },
   { command: 'plugins', name: 'Plugins', description: 'Open the plugins and their status.', glyph: 'i-plug' },
   { command: 'pet', name: 'Pet', description: 'Open the pets.', glyph: 'i-paw' },
-  { command: 'feedback', name: 'Feedback', description: 'Open the diagnostics report to attach to a bug report.', glyph: 'i-warning' }
+  { command: 'feedback', name: 'Feedback', description: 'Open the diagnostics report to attach to a bug report.', glyph: 'i-warning' },
+  // The open chat's answer copy, Markdown export and Find in chat.
+  { command: 'copy', name: 'Copy', description: 'Copy the newest answer in this chat.', glyph: 'i-copy' },
+  { command: 'export', name: 'Export', description: 'Save this chat as a Markdown file.', glyph: 'i-export' },
+  { command: 'find', name: 'Find', description: 'Find text in this chat.', glyph: 'i-search' }
   // The command or the name the menu shows: a German menu says "Umbenennen" for /rename.
 ] as const;
 

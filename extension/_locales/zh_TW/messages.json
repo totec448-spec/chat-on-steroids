@@ -93,7 +93,7 @@
     "message": "聊天已封鎖"
   },
   "content_chat_blocked_tip": {
-    "message": "此聊天已在 Chat On Steroids 應用程式中封鎖：其工具呼叫會遭拒，目標、循環與自動壓縮均已停用。若要解除封鎖，請開啟應用程式的「聊天」分頁，在工作階段清單中將滑鼠移到此聊天上，然後按下封鎖圖示。"
+    "message": "此聊天已在 Chat On Steroids 應用程式中封鎖：其工具呼叫會遭拒，目標、循環與自動壓縮均已停用。若要解除封鎖，請在應用程式側邊欄開啟此聊天的 ⋯ 選單，然後選擇「解除阻止」。"
   },
   "content_chat_still_opening": {
     "message": "此聊天仍在開啟中——請再試一次"
@@ -1123,6 +1123,9 @@
   },
   "content_goal_error_nothing_to_open_with": {
     "message": "輔助工具未產生開場訊息。請讓任務更具體後再試一次。"
+  },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "輔助工具表示目標已達成，但尚未檢查。沒有傳送後續回覆。請檢查對話；若仍有工作，請繼續。"
   },
   "content_goal_error_loop_stop_refused": {
     "message": "輔助工具持續選擇停止，而不是產生循環續接內容。請檢查循環指示，或選擇其他輔助模型。"
