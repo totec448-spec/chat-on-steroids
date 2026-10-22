@@ -84,6 +84,7 @@ import {
   committedResumeAncestorsFromSummary,
   continuationMarkerOf,
   DEFAULT_RECORDING_STORAGE_GIB,
+  isUnattributedSession,
   RECORDING_STORAGE_LIMITS_GIB,
   TURN_OUTCOME_LABELS,
   foldProgress,
@@ -238,7 +239,8 @@ async function deleteChatGroup(group: ChatGroup): Promise<void> {
 /** The chat menu's group items, for a main chat of a project. */
 function chatGroupMenuItems(summary: SessionSummary): RowMenuItem[] {
   const projectId = projectGroup(summary.projectId);
-  if (!projectId || summary.origin?.kind === 'worker' || !summary.conversationId) return [];
+  // Kept by session id: a new chat still waiting for its conversation can be grouped too (#1759).
+  if (!projectId || summary.origin?.kind === 'worker' || isUnattributedSession(summary)) return [];
   const current = chatGroupOf(chatGroups, summary);
   const groups = projectChatGroups(projectId);
   return [{
@@ -927,11 +929,13 @@ function sessionBadges(summary: SessionSummary): Badge[] {
   const origin = summary.origin;
   // The one session that is not a chat. Saying so on the row is what stops it reading
   // as a chat that mysteriously lost its name.
-  if (summary.conversationId === null) {
+  if (isUnattributedSession(summary)) {
     return unattributedBlocked()
       ? [{ text: 'blocked', tone: 'is-failed' }, { text: 'not a chat', tone: '' }]
       : [{ text: 'not a chat', tone: '' }];
   }
+  // A new chat whose first message has not gone out yet (#1759): nothing to say about it until it has a conversation.
+  if (summary.conversationId === null) return badges;
   // First, and in the failure tone: the states that need the person, most pressing first. A chat
   // waiting on an approval card or a recovery that gave up cannot go on without them, and a blocked
   // chat is the app actively refusing its work; the user came to the list to find them at a glance.
@@ -1062,7 +1066,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     title: () => t("Remove this chat and its saved history from the app. The chat stays in ChatGPT."),
     run: () => void deleteSession(summary.id)
   };
-  if (summary.conversationId === null) {
+  if (isUnattributedSession(summary)) {
     // Strict mode cannot trust an unattributed stream by definition. Do not offer an "Allow"
     // that the kernel will intentionally ignore; the Settings checkbox explains that
     // unattributed calls stay blocked until strict mode is turned off.
@@ -1079,6 +1083,10 @@ function sessionRow(summary: SessionSummary): HTMLElement {
         run: () => void toggleUnattributedBlock(!blocked)
       });
     }
+  } else if (summary.conversationId === null) {
+    // A new chat whose first message has not gone out yet (#1759): no ChatGPT link to open, copy or block.
+    items.push({ action: 'rename', icon: 'i-pencil', label: () => t('Rename'), title: () => t("Rename this chat in the app. Its title in ChatGPT stays the same."), run: () => startRename(summary) });
+    items.push(...chatGroupMenuItems(summary));
   } else {
     const policyLineage = [
       summary.conversationId,
@@ -1489,8 +1497,7 @@ async function loadMoreSessions(): Promise<void> {
 
 /** A chat the project's section can show: workers alone leave it looking empty. */
 function projectShowsChat(id: string): boolean {
-  return sessions.some(entry => projectGroup(entry.projectId) === id && entry.origin?.kind !== 'worker' &&
-    (!!entry.conversationId || entry.origin?.kind === 'desktop'));
+  return sessions.some(entry => projectGroup(entry.projectId) === id && entry.origin?.kind !== 'worker' && !isUnattributedSession(entry));
 }
 
 /**
@@ -1795,7 +1802,8 @@ function paintInbox(): void {
   const children = workerChildren();
   const busy = new Map([...children].map(([key, workers]) => [key, busyWorkers(workers)]));
   const inProject = (entry: SessionSummary) => !inboxProject || projectGroup(entry.projectId) === inboxProject;
-  const attributed = (entry: SessionSummary) => !!entry.conversationId || entry.origin?.kind === 'desktop';
+  // Everything but the unattributed bucket is a chat, a new one still waiting for its conversation too (#1759).
+  const attributed = (entry: SessionSummary) => !isUnattributedSession(entry);
   const shown = sessions.filter(entry => entry.origin?.kind !== 'worker' && attributed(entry) && inProject(entry));
   // What the tree puts under "Unattributed activity", under the same disclosure here.
   const diagnostics = sessions.filter(entry => entry.origin?.kind !== 'worker' && !attributed(entry) && inProject(entry));
@@ -1951,7 +1959,7 @@ function inboxEmpty(id: string | null): HTMLElement {
 function projectSortEntries(groupOf: typeof projectGroup = projectGroup): Array<{ id: string; scope: string }> {
   const ids = new Set(projects.filter(project => !project.ungrouped).map(project => project.id));
   for (const entry of sessions) {
-    if (entry.origin?.kind === 'worker' || (!entry.conversationId && entry.origin?.kind !== 'desktop')) continue;
+    if (entry.origin?.kind === 'worker' || isUnattributedSession(entry)) continue;
     const id = groupOf(entry.projectId);
     if (id) ids.add(id);
   }
@@ -2187,7 +2195,7 @@ function paintSessions(): void {
   });
   for (const entry of orderedSessions) {
     if (entry.origin?.kind === 'worker') continue;
-    if (!entry.conversationId && entry.origin?.kind !== 'desktop') { diagnostics.push(entry); continue; }
+    if (isUnattributedSession(entry)) { diagnostics.push(entry); continue; }
     const projectId = groupOf(entry.projectId);
     const workers = children.get(entry.id);
     if (projectId) {
@@ -6811,7 +6819,7 @@ function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?:
   // from another browser or from another machine can only be recorded as what it is:
   // real, complete, and not placeable in any chat this app can observe.
   const selected = sessions.find((entry) => entry.id === selectedId) ?? null;
-  if (selected && selected.conversationId === null) {
+  if (selected && isUnattributedSession(selected)) {
     return {
       text: t("Work this app could not place in a chat — driven from another device, or with no ChatGPT tab open"),
       tone: ''
@@ -8339,7 +8347,7 @@ export function initChat(next: Deps): void {
   sidebarOrder = createSidebarOrder($('sessionList'), () => [
     ...projectSortEntries(),
     ...chatGroups.groups.map(group => ({ id: group.id, scope: chatGroupsScope(group.projectId) })),
-    ...sessions.filter(entry => (entry.conversationId || entry.origin?.kind === 'desktop') && entry.origin?.kind !== 'worker')
+    ...sessions.filter(entry => !isUnattributedSession(entry) && entry.origin?.kind !== 'worker')
       .map(entry => ({ id: entry.id, scope: pinnedSortScope(chatSortList(entry), pinnedChat(entry)) }))
   ], paintSessions);
   void run(api.chatGroups()).then(state => { if (state) { chatGroups = state; paintSessions(); } });
@@ -8877,7 +8885,7 @@ export function initChat(next: Deps): void {
     selectedId: () => selectedId,
     // The chats the sidebar lists, newest first: sub-agents, helpers and diagnostics rows stay out.
     recent: () => sessions
-      .filter(entry => entry.origin?.kind !== 'worker' && entry.origin?.kind !== 'helper' && (!!entry.conversationId || entry.origin?.kind === 'desktop'))
+      .filter(entry => entry.origin?.kind !== 'worker' && entry.origin?.kind !== 'helper' && !isUnattributedSession(entry))
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .map(entry => ({ id: entry.id, title: entry.title }))
   });
