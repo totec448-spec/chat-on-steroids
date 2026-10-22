@@ -14,7 +14,7 @@ type TerminalView = { show: (mount: HTMLElement, createIfEmpty: boolean) => void
   tabs: () => { id: string; title: string; exited: boolean; previous?: boolean }[];
   selectTab: (id: string) => void; closeTab: (id: string) => void;
   /** Index among the terminals only; the saved order follows it. */
-  moveTab?: (id: string, index: number) => void };
+  moveTab: (id: string, index: number) => void };
 type BottomTerminalView = Pick<TerminalView, 'show' | 'hide'>;
 
 /** The right dock owns tool selection; the bottom dock owns its own terminal view. */
@@ -298,7 +298,7 @@ export function createWorkspaceDocks(host: HTMLElement) {
     opened.splice(from, 1); opened.splice(Math.max(0, Math.min(opened.length, index)), 0, key); paint();
     // The terminal saves its tabs in its own order, so a restart brings them back as they are shown here.
     const id = terminalId(key);
-    if (id) rightTerminal?.moveTab?.(id, opened.slice(0, opened.indexOf(key)).filter(entry => terminalId(entry) !== null).length);
+    if (id) rightTerminal?.moveTab(id, opened.slice(0, opened.indexOf(key)).filter(entry => terminalId(entry) !== null).length);
   };
   enableTabReorder(tabs, { item: '.work-dock-tab', key: node => node.dataset.key, move: (key, index) => moveTab(key as DockTab, index) });
   tabs.addEventListener('keydown', event => {
