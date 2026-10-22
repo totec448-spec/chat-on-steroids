@@ -8077,6 +8077,22 @@ describe('charts, diagrams and illustrated Markdown from recorded DIL', () => {
     expect(root.querySelector('.markdown-dil-chart')).toBeNull();
   });
 
+  it.each([
+    { name: 'blockquote fence', example: (widget: string) => `> \`\`\`json\n> ${widget}\n> \`\`\``, code: 'blockquote pre code' },
+    { name: 'list-item fence', example: (widget: string) => `- \`\`\`json\n  ${widget}\n  \`\`\``, code: 'li pre code' },
+    { name: 'inline backticks', example: (widget: string) => `Example: \`${widget}\``, code: 'p code' },
+    { name: 'double inline backticks', example: (widget: string) => `Example: \`\`${widget}\`\``, code: 'p code' }
+  ])('keeps a chart example literal in $name and renders the following chart', async ({ example, code }) => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Example code:\n\n${example(widget)}\n\n${widget}\n\nAfter.`)]);
+    const root = message(w);
+    expect(root.querySelector(code)?.textContent).toContain(widget);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(root.lastElementChild?.textContent).toBe('After.');
+  });
+
   it('formats chart values, axis guides, tooltips and accessibility text in the chosen app language', async () => {
     const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
       chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value', label: 'Vergleich' }],
