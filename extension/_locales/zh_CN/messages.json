@@ -93,7 +93,7 @@
     "message": "聊天已阻止"
   },
   "content_chat_blocked_tip": {
-    "message": "此聊天已在 Chat On Steroids 应用中被阻止：其工具调用会被拒绝，目标、循环 和自动压缩均已关闭。要解除阻止，请打开应用的“聊天”标签页，在会话列表中将鼠标悬停在此聊天上，然后点击其阻止图标。"
+    "message": "此聊天已在 Chat On Steroids 应用中被阻止：其工具调用会被拒绝，目标、循环 和自动压缩均已关闭。要解除阻止，请在应用侧边栏中打开此聊天的 ⋯ 菜单，然后选择“解除阻止”。"
   },
   "content_chat_still_opening": {
     "message": "此聊天仍在打开中，请重试"
@@ -1123,6 +1123,9 @@
   },
   "content_goal_error_nothing_to_open_with": {
     "message": "辅助工具未生成开场消息。请让任务更具体后再试。"
+  },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "辅助工具称目标已达成，但尚未检查。没有发送后续回复。请检查聊天；如果还有工作未完成，请继续。"
   },
   "content_goal_error_loop_stop_refused": {
     "message": "辅助工具一直选择停止，而不是编写循环继续内容。请检查循环指令，或选择其他辅助模型。"
