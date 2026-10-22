@@ -11,7 +11,7 @@ import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme,
 import { createKeepAwake, installKeepAwake } from './keep-awake.js';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { initConnectorProofPath, loadConnectorProof, notePluginInstalled } from './connector-proof.js';
-import { initWorkerArchivePath, loadWorkerArchive, queueWorkerArchives } from './worker-archive.js';
+import { initWorkerArchivePath, loadWorkerArchive, queueWorkerArchives, WORKER_ARCHIVE_AFTER_FINISH_MS } from './worker-archive.js';
 import { initBrowserProofPath, loadBrowserProof } from './browser-proof.js';
 import { enrolledPluginSurfaces } from './plugin-refresh.js';
 import {
@@ -61,6 +61,7 @@ import {
   onRetiredWorkersPersist,
   onRetiredWorkersPersistNow,
   onWorkerChatsRetired,
+  onWorkerFinished,
   onSwarmPersist,
   onSwarmPersistNow,
   pauseSwarmForDisable,
@@ -122,6 +123,7 @@ import {
 } from './window-lifecycle.js';
 import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
 import { browserWindowIconPath } from './window-icon.js';
+import { approvedChatGptImageRequest, RENDERER_CONTENT_SECURITY_POLICY } from './renderer-csp.js';
 import { editContextMenuTemplate } from './edit-context-menu.js';
 import { showConnectionLossNotice } from './connection-loss-notice.js';
 
@@ -455,7 +457,9 @@ void app.whenReady().then(async () => {
   setRecordingStorageLimit(getConfig().sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB);
   await loadConnectorProof();
   await loadWorkerArchive();
-  // Worker chats the broker retired for good are archived in ChatGPT when the setting is on (#1460).
+  // Worker chats are archived in ChatGPT when the setting is on: a little after their worker reports
+  // its task done (#1701), and once the broker retired them for good (#1460).
+  onWorkerFinished((conversationId) => queueWorkerArchives([conversationId], Date.now(), WORKER_ARCHIVE_AFTER_FINISH_MS));
   onWorkerChatsRetired((conversationIds) => queueWorkerArchives(conversationIds));
   await loadBrowserProof();
   // Plugins ChatGPT already showed the refresh feature are created: Setup need not wait for a call.
@@ -621,13 +625,26 @@ void app.whenReady().then(async () => {
   // state and does not run until its first coarse interval after this point.
   startAgentRuntimeGc();
 
-  // Strict CSP for our own page. There is no remote content and no inline script.
+  // Do not let the new img-src origin permit arbitrary paths, tracking parameters,
+  // or requests of another type to that host. Redirects are checked again by CSP:
+  // an image cannot follow a Location header to a different remote origin.
+  // Electron supports only one onBeforeRequest listener per session: registering
+  // another one anywhere on defaultSession would replace this URL safety gate.
+  // Keep future request checks inside this listener rather than adding a second.
+  session.defaultSession.webRequest.onBeforeRequest({ urls: ['https://images.openai.com/*'] }, (details, callback) => {
+    const allowed = approvedChatGptImageRequest(details.url, details.resourceType, details.method);
+    if (!allowed) logWarn('static ChatGPT image request refused: unapproved URL or resource type');
+    callback({ cancel: !allowed });
+  });
+
+  // Strict CSP for our own page. Only the verified first-party static image host is
+  // remote; scripts, connections and all other capabilities remain app-local.
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'none'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'"
+          RENDERER_CONTENT_SECURITY_POLICY
         ]
       }
     });

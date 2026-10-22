@@ -14,6 +14,24 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.44': {
+    lead: () => t("Pictures with /image, keyboard shortcuts, and a quicker message after Stop."),
+    highlights: [
+      { icon: 'i-image', title: () => t("Ask for a picture"), text: () => t("Start a message with /image, and ChatGPT draws it with its own image tool.") },
+      { icon: 'i-bolt', title: () => t("Keyboard shortcuts"), text: () => t("{0} starts a new chat, Ctrl+Tab moves between chats, and Esc twice stops an answer.", [primaryShortcut('N')]) },
+      { icon: 'i-stop', title: () => t("Quicker after Stop"), text: () => t("A message you send right after Stop goes out at once.") },
+      { icon: 'i-agents', title: () => t("Sub-agent chats tidy up"), text: () => t("With archiving on, a worker's chat is archived two minutes after its task is done.") }
+    ]
+  },
+  '2.1.43': {
+    lead: () => t("See what sub-agents do, long work that keeps going, and clearer Settings."),
+    highlights: [
+      { icon: 'i-agents', title: () => t("See what a sub-agent does"), text: () => t("Opening a sub-agent shows each action with its result and the files it changed.") },
+      { icon: 'i-retry', title: () => t("Long work keeps going"), text: () => t("Compact & Resume steps in during long answers, and Goal and Loop continue in a fresh turn.") },
+      { icon: 'i-gear', title: () => t("Clearer Settings"), text: () => t("Plain words throughout, and the sidebar layout picked from a picture.") },
+      { icon: 'i-paw', title: () => t("Meet Whip"), text: () => t("A cheeky new pet that cracks its whip so the work goes faster.") }
+    ]
+  },
   '2.1.42': {
     lead: () => t('Bring back earlier messages, calmer answers, and long work that keeps going.'),
     highlights: [
