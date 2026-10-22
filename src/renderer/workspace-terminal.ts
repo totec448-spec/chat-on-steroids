@@ -6,6 +6,7 @@ import { t, ui } from './i18n.js';
 import { onAppearanceChanged } from './appearance.js';
 import { enableTabReorder, reorderKey } from './tab-reorder.js';
 import { rememberedTerminals, rememberTerminals, type RememberedTerminal } from './terminal-memory.js';
+import { isMac, primaryShiftShortcut } from './shortcuts.js';
 import type { LocalProject } from '../shared/projects.js';
 
 type Tab = { id: string; projectId: string | null; cwd: string; title: string; node: HTMLElement; term: Terminal; fit: FitAddon;
@@ -15,7 +16,9 @@ export type WorkspaceTerminalTab = { id: string; title: string; exited: boolean;
 /** A hidden panel retains its shells; each dock owns only the tabs it created, and remembers them for the next launch. */
 export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount: HTMLElement,
   options: { id?: string; onEmpty?: () => void; onClosePanel?: () => void;
-    dockedTabs?: boolean; onTabsChanged?: () => void } = {}) {
+    dockedTabs?: boolean; onTabsChanged?: () => void;
+    /** Adds selected terminal text to the composer; false when nothing was added. */
+    onSendSelection?: (text: string) => boolean } = {}) {
   const app = document.querySelector<HTMLElement>('.app')!;
   const panel = el('section', 'workspace-terminal'); panel.id = options.id ?? 'workspaceTerminal'; panel.hidden = true;
   ui(panel, 'aria-label', () => t('Terminal'));
@@ -44,6 +47,20 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
   if (!options.dockedTabs) panel.append(bar);
   panel.append(body); initialMount.append(panel);
   const tabs = new Map<string, Tab>();
+  // Over the selected shell while it has a selection: adds that text to the composer, never sends.
+  const send = el('button', 'btn terminal-send') as HTMLButtonElement; send.type = 'button'; send.hidden = true;
+  send.append(icon('i-chat'), el('span', '', () => t('Send to chat')));
+  ui(send, 'title', () => `${t('Send to chat')} (${primaryShiftShortcut('Enter')})`);
+  send.setAttribute('aria-keyshortcuts', isMac() ? 'Meta+Shift+Enter' : 'Control+Shift+Enter');
+  if (options.onSendSelection) body.append(send);
+  const paintSend = (): void => {
+    const tab = selected ? tabs.get(selected) : null;
+    send.hidden = !options.onSendSelection || !tab || !tab.term.hasSelection();
+  };
+  const sendSelection = (tab: Tab): void => {
+    if (options.onSendSelection?.(tab.term.getSelection())) { tab.term.clearSelection(); paintSend(); }
+  };
+  send.addEventListener('click', () => { const tab = selected ? tabs.get(selected) : null; if (tab) sendSelection(tab); });
   const terminalTheme = () => {
     const colors = getComputedStyle(app);
     const background = colors.getPropertyValue('--page').trim(), foreground = colors.getPropertyValue('--ink').trim();
@@ -104,7 +121,7 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
       close.addEventListener('click', () => closeTab(tab.id));
       wrapper.append(pick, close); tabsHost.append(wrapper);
     }
-    empty.hidden = options.dockedTabs || tabs.size > 0; add.disabled = tabs.size >= 8;
+    empty.hidden = options.dockedTabs || tabs.size > 0; add.disabled = tabs.size >= 8; paintSend();
     ui(empty, 'textContent', () => project ? t('Open a terminal in this project') : t('New terminal'));
   };
   /** A remembered tab opens inert: its shell starts only from "Start shell here", in its own project. */
@@ -120,6 +137,7 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
     tabs.set(id, tab); selected = id;
     if (!options.dockedTabs && !restored) setOpen(true);
     paint(); fit();
+    term.onSelectionChange(() => { if (selected === id) paintSend(); });
     term.onData(data => {
       if (tab.exited || !tab.ready) return;
       if (tab.queued + data.length > 262_144) { toast(t('Terminal input is busy. Try a smaller paste.')); return; }
@@ -139,12 +157,18 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
       if (event.type === 'keydown' && event.ctrlKey && event.code === 'KeyC' && (event.shiftKey || term.hasSelection())) {
         void window.api.writeClipboard(term.getSelection()); return false;
       }
+      // Cmd/Ctrl+Shift+Enter does what Send to chat does; without a selection the shell gets the key.
+      if (event.type === 'keydown' && event.key === 'Enter' && event.shiftKey && (event.ctrlKey || event.metaKey)
+        && !event.isComposing && options.onSendSelection && term.hasSelection()) {
+        // The composer takes focus within this keydown: its Enter must not land there as a new line.
+        event.preventDefault(); sendSelection(tab); return false;
+      }
       return true;
     });
     const start = async (): Promise<void> => {
       const result = await window.api.terminalCreate(id, tab.projectId, Math.min(500, term.cols), Math.min(200, term.rows));
       if (!tabs.has(id)) { void window.api.terminalClose(id); return; }
-      if (!result.ok) { tab.exited = true; term.writeln(`\r\n${result.error}`); }
+      if (!result.ok) { tab.exited = true; term.writeln(`\r\n${t(result.error)}`); }
       else {
         tab.ready = true; tab.cwd = result.data.cwd; node.title = result.data.cwd;
         if (!restored) tab.title = scope ? `${scope.name} · ${result.data.shell}` : result.data.shell;

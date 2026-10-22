@@ -254,6 +254,19 @@ it('records a proven completed legacy migration as manual when the provider has 
     expect(await pendingPluginRefreshes()).toEqual([]);
   } finally { get.mockRestore(); }
 });
+it('claims and confirms a Desktop refresh with all of its Windows tools (#1763)', async () => {
+  // Windows Desktop with every permission declared 24 tools in 2.1.44; anything over 16 was taken
+  // for a page that was not ours, so its refresh never finished.
+  const desktop: PluginToolSchema[] = Array.from({ length: 24 }, (_, i) => ({ name: `desktop_tool_${i}`, description: `Desktop tool ${i}`,
+    inputSchema: { type: 'object', properties: { window: { type: 'string' } }, required: ['window'] } }));
+  publishPluginSurface('desktop', 'Chat On Steroids Desktop', '1', '', desktop); vi.advanceTimersByTime(20_000);
+  const request = (await pendingPluginRefreshes())[0]!;
+  expect(request.surface).toBe('desktop');
+  const older = desktop.map(tool => ({ ...tool, description: `${tool.description} (older)` }));
+  expect(await claimPluginRefresh({ ...request, appId, connectorName: 'Chat On Steroids Desktop', tools: older })).toBe(true);
+  expect(await completePluginRefresh({ ...request, appId, tools: desktop })).toBe(true);
+  expect((await pluginRefreshStatuses()).desktop?.state).toBe('current');
+});
 it('retries a transient ledger read on the next state push without Reset, replacement or browser work', async () => {
   publish(); const request = (await pendingPluginRefreshes())[0]!;
   expect(await claim(request)).toBe(true);

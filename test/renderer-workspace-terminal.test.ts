@@ -6,6 +6,7 @@ vi.mock('@xterm/xterm', () => ({ Terminal: class {
   loadAddon(): void {}
   open(node: HTMLElement): void { const screen = node.ownerDocument.createElement('div'); screen.className = 'xterm'; node.append(screen); }
   onData(): void {}
+  onSelectionChange(): void {}
   attachCustomKeyEventHandler(): void {}
   write(): void {}
   writeln(): void {}
