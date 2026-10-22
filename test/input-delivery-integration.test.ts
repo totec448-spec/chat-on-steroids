@@ -269,6 +269,18 @@ async function silentTurnContinue(title: string, advance: (ms: number) => number
   return { conversationId, turnId, session, row };
 }
 
+it("files an automatic Continue in the person's own words when they set a Continue prompt", async () => {
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      ui: { ...defaultConfig().ui, customContinue: 'Bitte weitermachen: finish the open steps.' } });
+    const { row } = await silentTurnContinue('Own Continue words', ms => now += ms);
+    expect(row.text.startsWith('Bitte weitermachen: finish the open steps. ')).toBe(true);
+    // The notice to check existing work stays after the person's words.
+    expect(row.text.slice('Bitte weitermachen: finish the open steps. '.length)).toMatch(/check|inspect|verify|look for/i);
+  } finally { clock.mockRestore(); }
+});
+
 it('ends a Continue the page refuses before claiming because its answer is finished', async () => {
   // Measured 2026-10-02: a Continue filed for a turn whose final the app had missed was refused by
   // every page before claiming, because ChatGPT showed that final. Nothing was reported, so the
