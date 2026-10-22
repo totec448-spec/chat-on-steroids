@@ -3083,11 +3083,18 @@ input[readonly] {
   border: 1px solid var(--line); border-radius: var(--r-md); margin: 12px 0;
   padding: 14px; background: var(--card); min-width: 0;
 }
-.msg.rich .markdown-dil-chart-heading { font-weight: 650; font-size: calc(13px * var(--text-scale, 1)); }
+.msg.rich .markdown-dil-chart-heading {
+  font-weight: 650; font-size: calc(13px * var(--text-scale, 1));
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .msg.rich .markdown-dil-chart-plot { display: flex; gap: 12px; height: 230px; margin-top: 14px; }
 .msg.rich .markdown-dil-chart-guide {
-  flex: 0 0 36px; display: flex; flex-direction: column; justify-content: space-between;
+  flex: 0 1 auto; min-width: 36px; max-width: 30%; overflow: hidden;
+  display: flex; flex-direction: column; justify-content: space-between;
   text-align: end; padding-bottom: 26px; color: var(--soft); font-size: calc(11px * var(--text-scale, 1));
+}
+.msg.rich .markdown-dil-chart-guide > span {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .msg.rich .markdown-dil-chart-bars {
   display: flex; flex: 1; gap: 10px; align-items: stretch; min-width: 0;
@@ -3106,6 +3113,7 @@ input[readonly] {
 .msg.rich .markdown-dil-chart-x {
   position: absolute; top: 100%; left: 0; width: 100%; height: 26px;
   font-size: calc(11px * var(--text-scale, 1)); text-align: center; padding-top: 5px;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
 .msg.rich .markdown-dil-chart-note { color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); margin: 8px 0 0; }
 @container (max-width: 330px) {

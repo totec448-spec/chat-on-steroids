@@ -4262,14 +4262,20 @@ function staticBarChart(raw: string): HTMLElement | null {
   if (title) figure.append(el('figcaption', 'markdown-dil-chart-heading', title));
   const plot = el('div', 'markdown-dil-chart-plot');
   const guide = el('div', 'markdown-dil-chart-guide');
-  guide.append(el('span', '', valueText(maximum)), el('span', '', valueText(maximum / 2)), el('span', '', valueText(0)));
+  for (const value of [maximum, maximum / 2, 0]) {
+    const label = el('span', '', valueText(value));
+    label.title = label.textContent ?? '';
+    guide.append(label);
+  }
   const columns = el('div', 'markdown-dil-chart-bars');
   for (const item of items) {
     const column = el('div', 'markdown-dil-chart-column');
     const bar = el('div', 'markdown-dil-chart-bar');
     bar.style.height = `${item.value / maximum * 100}%`;
     bar.title = `${item.label}: ${valueText(item.value)}`;
-    column.append(bar, el('span', 'markdown-dil-chart-x', item.label));
+    const axisLabel = el('span', 'markdown-dil-chart-x', item.label);
+    axisLabel.title = item.label;
+    column.append(bar, axisLabel);
     columns.append(column);
   }
   plot.append(guide, columns);
@@ -4289,7 +4295,10 @@ function visibleWords(node: Node): string[] {
   const words: string[] = [];
   const walk = (current: Node): void => {
     if (current.nodeType === 3) {
-      words.push(...(current.textContent ?? '').normalize('NFKC').toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
+      // A changed sign, decimal separator, percent or currency must invalidate
+      // recorded metrics, even when their digits and surrounding words match.
+      words.push(...(current.textContent ?? '').normalize('NFKC').toLocaleLowerCase()
+        .match(/[+\-−]?\p{N}+(?:[.,]\p{N}+)*[%‰]?|\p{Sc}|[\p{L}\p{N}]+/gu) ?? []);
       return;
     }
     if (current.nodeType === 1 && (current as Element).matches('svg, script, style, template, [hidden], [aria-hidden="true"]')) return;
@@ -4311,7 +4320,9 @@ function safeRecordedSvg(source: string): string | null {
   const parsed = new view.DOMParser().parseFromString(decoded, 'image/svg+xml');
   const root = parsed.documentElement;
   if (root.localName !== 'svg' || root.namespaceURI !== 'http://www.w3.org/2000/svg') return null;
-  const tags = new Set(['svg', 'g', 'path', 'line', 'rect', 'circle', 'ellipse', 'polyline', 'polygon', 'text', 'tspan']);
+  // Text in a data-URL drawing cannot be checked against the canonical reply.
+  // Refuse labelled SVGs rather than risk showing stale values from a capture.
+  const tags = new Set(['svg', 'g', 'path', 'line', 'rect', 'circle', 'ellipse', 'polyline', 'polygon']);
   const attributes = new Set(['viewBox', 'width', 'height', 'x', 'y', 'x1', 'x2', 'y1', 'y2', 'cx', 'cy', 'r', 'rx', 'ry', 'd',
     'points', 'fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-opacity', 'fill-opacity', 'text-anchor',
     'font-size', 'font-weight', 'opacity', 'transform', 'fill-rule', 'stroke-linecap', 'stroke-linejoin']);
