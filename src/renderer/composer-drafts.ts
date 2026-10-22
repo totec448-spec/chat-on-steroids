@@ -25,17 +25,24 @@ export function createComposerDrafts({ onDraftedChange = () => {}, savedText = (
   const drafts = new Map<string, string>();
   // A late save writes to the window that made it, never to one created after it closed.
   const host = window;
+  // The app log takes only renderer errors. A draft a restart will not give back counts as one:
+  // logged once per window and reason, with no draft text.
+  const noted = new Set<string>();
+  const note = (why: string): void => {
+    if (!noted.has(why)) { noted.add(why); console.error(`Composer drafts: ${why}`); }
+  };
   try {
     const raw = host.localStorage.getItem(STORAGE_KEY);
-    const saved: unknown = raw && raw.length <= MAX_STORED_CHARS + 2 ? JSON.parse(raw) : [];
-    if (Array.isArray(saved)) {
+    const saved: unknown = !raw ? [] : raw.length <= MAX_STORED_CHARS + 2 ? JSON.parse(raw) : null;
+    if (!Array.isArray(saved)) note('the saved drafts were not a list, so none came back.');
+    else {
       for (const entry of saved.slice(-MAX_SAVED)) {
         if (!Array.isArray(entry) || entry.length !== 2) continue;
         const [key, text] = entry as unknown[];
         if (typeof key === 'string' && key.length > 0 && key.length <= MAX_KEY && typeof text === 'string' && drafted(text)) drafts.set(key, text);
       }
     }
-  } catch { /* Unavailable or corrupt storage must not prevent writing a message. */ }
+  } catch { note('the saved drafts could not be read, so none came back.'); /* Writing a message still works. */ }
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   function save(): void {
@@ -49,11 +56,11 @@ export function createComposerDrafts({ onDraftedChange = () => {}, savedText = (
       if (!drafted(text) || key.length > MAX_KEY) continue;
       // `["key","text"],` as stored. One draft too long to fit leaves room for the shorter, older ones.
       const stored = JSON.stringify(key).length + JSON.stringify(text).length + 4;
-      if (chars + stored > MAX_STORED_CHARS) continue;
+      if (chars + stored > MAX_STORED_CHARS) { note(`a draft too long for the ${MAX_STORED_CHARS} stored characters stays in this window only.`); continue; }
       kept.push([key, text]); chars += stored;
     }
     try { host.localStorage.setItem(STORAGE_KEY, JSON.stringify(kept.reverse())); }
-    catch { /* The draft stays in this window when storage is full or unavailable. */ }
+    catch { note('storage is full or unavailable, so drafts stay in this window only.'); }
   }
   function schedule(): void { if (timer === undefined) timer = setTimeout(save, SAVE_DELAY_MS); }
   // A quit or reload writes the newest keystrokes the delay would otherwise lose.
