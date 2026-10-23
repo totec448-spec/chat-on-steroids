@@ -105,10 +105,13 @@ export function freeFormBug(issue) {
   return labeled || /^\s*\[?bug\b/i.test(String(issue.title ?? ''));
 }
 
-/** The app's version where the text names it ("CoS application: 2.1.40", "Chat On Steroids 2.1.40", "[Bug] 2.1.40:"). */
+/**
+ * The app's version where the text names it ("CoS application: 2.1.40", "Chat On Steroids 2.1.40", "[Bug] 2.1.40:").
+ * Never three parts of a longer number: "Edge 141.0.3537.71" holds no app version, not 0.3537.71.
+ */
 export function freeFormVersion(issue) {
   const text = `${issue.title ?? ''}\n${issue.body ?? ''}`;
-  const named = /\b(?:chat on steroids|cos|app(?:lication)?|version)\b[^\n]{0,40}?\bv?(\d+\.\d+\.\d+)(?![.\d])/i.exec(text);
+  const named = /\b(?:chat on steroids|cos|app(?:lication)?|version)\b[^\n]{0,40}?(?<![.\d])\bv?(\d+\.\d+\.\d+)(?![.\d])/i.exec(text);
   const titled = /^\s*\[?bug\]?[:\s-]*v?(\d+\.\d+\.\d+)(?![.\d])/i.exec(String(issue.title ?? ''));
   return named?.[1] ?? titled?.[1] ?? null;
 }

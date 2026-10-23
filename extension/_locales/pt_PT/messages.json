@@ -1190,6 +1190,9 @@
   "content_goal_error_nothing_to_open_with": {
     "message": "O auxiliar não produziu uma mensagem inicial. Especifique melhor a tarefa e tente novamente."
   },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "O auxiliar diz que o objetivo foi atingido, mas isso não foi verificado. Não foi enviada nenhuma mensagem de seguimento. Verifique a conversa e continue se ainda houver trabalho."
+  },
   "content_goal_error_loop_stop_refused": {
     "message": "O auxiliar continuou a escolher parar em vez de escrever uma continuação do Ciclo. Reveja as instruções do Ciclo ou escolha outro modelo auxiliar."
   },
@@ -1288,5 +1291,17 @@
   },
   "content_edit_unavailable": {
     "message": "O ChatGPT não ofereceu Editar para essa mensagem. Abra o chat no ChatGPT e tente novamente."
+  },
+  "content_auto_compaction_waiting_app": {
+    "message": "Compactação automática: a aguardar a app"
+  },
+  "content_goal_loop_waiting_app": {
+    "message": "Goal e Loop: a aguardar a app"
+  },
+  "content_settings_waiting_app": {
+    "message": "a aguardar a app"
+  },
+  "content_task_waiting_app": {
+    "message": "A aguardar a resposta do Chat On Steroids."
   }
 }

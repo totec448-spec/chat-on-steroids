@@ -1223,6 +1223,9 @@
   "content_goal_error_nothing_to_open_with": {
     "message": "Помощник не создал первое сообщение. Уточните задачу и повторите попытку."
   },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "Помощник сообщает, что цель достигнута, но это не проверено. Ответ с дальнейшими инструкциями не отправлен. Проверьте чат и продолжите, если осталась работа."
+  },
   "content_goal_error_loop_stop_refused": {
     "message": "Помощник снова выбирает остановку вместо продолжения «Цикла». Проверьте инструкции «Цикла» или выберите другую модель помощника."
   },
@@ -1339,5 +1342,17 @@
   },
   "content_edit_unavailable": {
     "message": "ChatGPT не предложил изменить это сообщение. Откройте чат в ChatGPT и попробуйте снова."
+  },
+  "content_auto_compaction_waiting_app": {
+    "message": "Автосжатие: ожидание ответа приложения"
+  },
+  "content_goal_loop_waiting_app": {
+    "message": "Цель и Цикл: ожидание ответа приложения"
+  },
+  "content_settings_waiting_app": {
+    "message": "ожидание ответа приложения"
+  },
+  "content_task_waiting_app": {
+    "message": "Ожидание ответа Chat On Steroids."
   }
 }

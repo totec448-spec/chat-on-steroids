@@ -19,6 +19,10 @@ export function attachBrowserWake(server: http.Server, allowed: (request: http.I
   const authorized = new Map<WebSocket, number>();
   /** Which copy of the extension holds each socket, as its URL says; older builds say nothing. */
   const hosts = new Map<WebSocket, WakeHost>();
+  /** Why the app itself dropped a socket, for its one log line; a socket missing here was closed by the browser. */
+  const dropped = new Map<WebSocket, string>();
+  const drop = (client: WebSocket, why: string) => { dropped.set(client, why); client.terminate(); };
+  const named = (client: WebSocket) => hosts.get(client) ?? 'host not named';
   let epoch = 0;
   const upgrade = (request: http.IncomingMessage, socket: import('node:stream').Duplex, head: Buffer) => {
     const url = new URL(request.url ?? '', 'http://127.0.0.1');
@@ -33,8 +37,12 @@ export function attachBrowserWake(server: http.Server, allowed: (request: http.I
       client.on('error', () => client.terminate());
       client.on('close', () => {
         clearTimeout(deadline);
+        if (authorized.delete(client)) {
+          logInfo(`bridge: browser wake channel (${named(client)}) disconnected: ${dropped.get(client) ?? 'closed by the browser'}`);
+          changed();
+        }
         hosts.delete(client);
-        if (authorized.delete(client)) { logInfo('bridge: browser wake channel disconnected'); changed(); }
+        dropped.delete(client);
       });
       client.on('message', (bytes, binary) => {
         if (binary) { client.terminate(); return; }
@@ -51,7 +59,7 @@ export function attachBrowserWake(server: http.Server, allowed: (request: http.I
           if (client.readyState !== WebSocket.OPEN) return;
           clearTimeout(deadline);
           authorized.set(client, Date.now());
-          logInfo('bridge: browser wake channel authenticated');
+          logInfo(`bridge: browser wake channel (${named(client)}) authenticated`);
           changed();
           // Reconnection always reads current work; no lost notification is durable state.
           client.send('wake');
@@ -63,7 +71,7 @@ export function attachBrowserWake(server: http.Server, allowed: (request: http.I
   const wake = (topic: 'wake' | 'browser-control') => {
     for (const client of authorized.keys()) {
       if (client.readyState === WebSocket.OPEN && client.bufferedAmount < 1024) client.send(topic);
-      else client.terminate();
+      else drop(client, client.readyState === WebSocket.OPEN ? 'its wake messages backed up' : 'its socket was no longer open');
     }
   };
   subscribers.add(wake);
@@ -71,7 +79,8 @@ export function attachBrowserWake(server: http.Server, allowed: (request: http.I
   // This is a transport heartbeat, not a poll of chats or the outbox.
   const heartbeat = setInterval(() => {
     for (const [client, seen] of authorized) {
-      if (Date.now() - seen > 45000 || client.bufferedAmount >= 1024) client.terminate();
+      if (Date.now() - seen > 45000) drop(client, `no answer for ${Math.round((Date.now() - seen) / 1000)} s`);
+      else if (client.bufferedAmount >= 1024) drop(client, 'its wake messages backed up');
       else if (client.readyState === WebSocket.OPEN) client.send('ping');
     }
   }, 20000);

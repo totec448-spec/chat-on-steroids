@@ -11,8 +11,10 @@ type View = { label: string; glyph: string; available: () => boolean;
   show: (mount: HTMLElement) => void; hide: () => void };
 type TerminalView = { show: (mount: HTMLElement, createIfEmpty: boolean) => void;
   hide: () => void; canCreate: () => boolean; newTab: () => string | null;
-  tabs: () => { id: string; title: string; exited: boolean }[];
-  selectTab: (id: string) => void; closeTab: (id: string) => void };
+  tabs: () => { id: string; title: string; exited: boolean; previous?: boolean }[];
+  selectTab: (id: string) => void; closeTab: (id: string) => void;
+  /** Index among the terminals only; the saved order follows it. */
+  moveTab: (id: string, index: number) => void };
 type BottomTerminalView = Pick<TerminalView, 'show' | 'hide'>;
 
 /** The right dock owns tool selection; the bottom dock owns its own terminal view. */
@@ -148,7 +150,7 @@ export function createWorkspaceDocks(host: HTMLElement) {
     const terminalTabs = rightTerminal?.tabs() ?? [];
     // Selection alone updates the pills in place; rebuilding them on every click reset hover and
     // focus and repainted the whole strip. Only a change of tabs, order or titles rebuilds.
-    const signature = `${opened.join(',')}|${terminalTabs.map(tab => `${tab.id}:${tab.title}:${tab.exited}`).join(',')}`;
+    const signature = `${opened.join(',')}|${terminalTabs.map(tab => `${tab.id}:${tab.title}:${tab.exited}:${!!tab.previous}`).join(',')}`;
     if (signature === tabSignature) {
       for (const tab of tabs.children as HTMLCollectionOf<HTMLElement>) {
         const selected = tab.dataset.key === active, pick = tab.querySelector<HTMLButtonElement>('[role=tab]')!;
@@ -170,7 +172,7 @@ export function createWorkspaceDocks(host: HTMLElement) {
         const pick = el('button', 'btn') as HTMLButtonElement;
         // The label is its own element so a long title truncates instead of running under the close.
         pick.append(icon(id ? 'i-terminal' : view!.glyph), el('span', 'tab-label', () => terminal
-          ? `${terminal.title}${terminal.exited ? ` · ${t('exited')}` : ''}` : t(view!.label)));
+          ? `${terminal.title}${terminal.exited ? ` · ${t('exited')}` : terminal.previous ? ` · ${t('previous session')}` : ''}` : t(view!.label)));
         pick.type = 'button'; pick.setAttribute('role', 'tab');
         if (terminal) pick.title = terminal.title;
         pick.setAttribute('aria-selected', String(active === key)); pick.tabIndex = active === key ? 0 : -1;
@@ -269,6 +271,8 @@ export function createWorkspaceDocks(host: HTMLElement) {
   };
   const registerTerminal = (right: TerminalView, bottom: BottomTerminalView): void => {
     rightTerminal = right; bottomTerminal = bottom;
+    // Tabs remembered from the previous launch are already there; they come back as dock tabs.
+    for (const tab of right.tabs()) if (!opened.includes(terminalKey(tab.id))) opened.push(terminalKey(tab.id));
     addAction('terminal', 'Terminal', 'i-terminal'); paint();
   };
 
@@ -292,6 +296,9 @@ export function createWorkspaceDocks(host: HTMLElement) {
   const moveTab = (key: DockTab, index: number): void => {
     const from = opened.indexOf(key); if (from < 0) return;
     opened.splice(from, 1); opened.splice(Math.max(0, Math.min(opened.length, index)), 0, key); paint();
+    // The terminal saves its tabs in its own order, so a restart brings them back as they are shown here.
+    const id = terminalId(key);
+    if (id) rightTerminal?.moveTab(id, opened.slice(0, opened.indexOf(key)).filter(entry => terminalId(entry) !== null).length);
   };
   enableTabReorder(tabs, { item: '.work-dock-tab', key: node => node.dataset.key, move: (key, index) => moveTab(key as DockTab, index) });
   tabs.addEventListener('keydown', event => {

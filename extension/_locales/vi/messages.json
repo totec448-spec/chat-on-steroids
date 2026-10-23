@@ -1124,6 +1124,9 @@
   "content_goal_error_nothing_to_open_with": {
     "message": "Trợ lý không tạo tin nhắn mở đầu. Hãy làm tác vụ cụ thể hơn rồi thử lại."
   },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "Trợ lý cho biết mục tiêu đã hoàn thành nhưng điều đó chưa được kiểm tra. Chưa gửi phản hồi tiếp theo. Hãy kiểm tra cuộc trò chuyện và tiếp tục nếu còn việc."
+  },
   "content_goal_error_loop_stop_refused": {
     "message": "Trợ lý liên tục chọn dừng thay vì viết nội dung tiếp tục cho Loop. Hãy xem lại chỉ dẫn Loop hoặc chọn mô hình trợ lý khác."
   },
@@ -1186,5 +1189,17 @@
   },
   "content_edit_unavailable": {
     "message": "ChatGPT không cung cấp Chỉnh sửa cho tin nhắn đó. Hãy mở cuộc trò chuyện trong ChatGPT rồi thử lại."
+  },
+  "content_auto_compaction_waiting_app": {
+    "message": "Tự động thu gọn: đang chờ ứng dụng"
+  },
+  "content_goal_loop_waiting_app": {
+    "message": "Goal và Loop: đang chờ ứng dụng"
+  },
+  "content_settings_waiting_app": {
+    "message": "đang chờ ứng dụng"
+  },
+  "content_task_waiting_app": {
+    "message": "Đang chờ Chat On Steroids phản hồi."
   }
 }

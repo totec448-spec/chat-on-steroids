@@ -40,10 +40,13 @@ export function mainTexts(): Record<MainText, string> {
     'Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.':
       t('Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.'),
     'Export as Markdown': t('Export as Markdown'),
+    'Export usage as CSV': t('Export usage as CSV'),
     'Import CoS Pet folder': t('Import CoS Pet folder'),
     'Import SKILL.md': t('Import SKILL.md'),
     'Markdown files': t('Markdown files'),
     'Text files': t('Text files'),
+    'CSV files': t('CSV files'),
+    'Save code': t('Save code'),
     'Approve a folder for ChatGPT': t('Approve a folder for ChatGPT'),
     'Import Skill folder': t('Import Skill folder'),
     'Markdown skills': t('Markdown skills'),
@@ -66,6 +69,9 @@ export function mainTexts(): Record<MainText, string> {
     'Keep checkout': t('Keep checkout'),
     'Remove checkout; preserve Git branch': t('Remove checkout; preserve Git branch'),
     'ChatGPT finished.': t('ChatGPT finished.'),
+    'Goal result needs review': t('Goal result needs review'),
+    'The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.':
+      t('The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.'),
   };
 }
 
