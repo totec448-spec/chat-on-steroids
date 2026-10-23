@@ -12856,6 +12856,8 @@
    * a row the page reads back differently (#821: `&#x20;` for a space) kept this document's
    * input slot for good, and every later message waited for a reload.
    */
+  /** How long a linked Project's page may load before a missing composer counts (#1759). */
+  const PROJECT_PAGE_LOAD_MS = 30_000;
   const DESKTOP_RECEIPT_MS = 120_000;
   // The durable claim, never a project path/title guess, fences first tool evidence.
   let desktopProjectInput = null;
@@ -13317,6 +13319,14 @@
       (project ? CLF_DOM.projectHomeId() === project : location.pathname === '/') &&
       (project ? freshMarker() : new URL(location.href).searchParams.get('cos-input') === message.id) && !CLF_DOM.turns().length));
     if (!target && !ownsFreshPage()) return false;
+    // A linked Project ChatGPT no longer has (#1759). ChatGPT used to send its page home, which the
+    // extension reports; since October 2026 the page stays on "loading", with no composer, for good.
+    // Gone only when the page has had its time and the open Projects list does not name it.
+    if (!target && project && CLF_DOM.projectHomeId() === project && !CLF_DOM.composerVisible() &&
+        performance.now() >= PROJECT_PAGE_LOAD_MS && CLF_DOM.sidebarListsProject(project) === false) {
+      await ask({ type: 'project_unavailable', id: message.id, project });
+      return false;
+    }
     desktopInputBusy = true;
     let decision = null;
     let sent = false;

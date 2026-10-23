@@ -1141,6 +1141,33 @@ describe('accepted helper tab cleanup', () => {
   }
 });
 
+describe('a linked Project ChatGPT no longer has (#1759)', () => {
+  const inputId = 'ffffffff-1111-4222-8333-444444444444';
+  const project = 'g-p-11111111222233334444555555555555';
+  it.each([
+    ['the opened tab on that Project', 1, `https://chatgpt.com/g/${project}-work/project?cos-input=${inputId}`, project, true],
+    ['another tab', 2, `https://chatgpt.com/g/${project}/project`, project, false],
+    ['a tab that moved away', 1, 'https://chatgpt.com/', project, false],
+    ['another Project', 1, `https://chatgpt.com/g/${project}/project`, 'g-p-99999999888877776666555555555555', false]
+  ] as const)('is reported only by %s', async (_name, tabId, url, reportedProject, posted) => {
+    const calls: any[] = [];
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token', inputOpenings: { [inputId]: { tab: 1, stage: 'ready', project } } }),
+      session: new FakeStorageArea(),
+      tabsGet: async () => ({ id: tabId, url }),
+      fetch: async (input, init: any = {}) => {
+        const route = new URL(input).pathname;
+        if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (route === '/project-create') calls.push(JSON.parse(init.body));
+        return response(200, { ok: true });
+      }
+    });
+    await worker.registerTab(tabId);
+    await worker.send({ type: 'project_unavailable', id: inputId, project: reportedProject }, tabId);
+    expect(calls).toEqual(posted ? [{ action: 'gone', inputId, chatgptId: project }] : []);
+  });
+});
+
 describe('browser identity', () => {
   it('sends one stable random browser id with every app request', async () => {
     const seen: string[] = [];

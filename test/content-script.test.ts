@@ -1077,6 +1077,31 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.filter(message => message.ack)).toEqual([expect.objectContaining({ messageId: questionId, conversationId: chatB })]);
   });
 
+  // #1759: since October 2026 ChatGPT keeps a deleted Project's page on "loading" instead of sending
+  // it home, so the message for a new chat there waited for good with nothing said.
+  it.each([
+    ['gone', { listed: false, loaded: true, composer: false }, true],
+    ['still listed', { listed: true, loaded: true, composer: false }, false],
+    ['still loading', { listed: false, loaded: false, composer: false }, false],
+    ['a composer after all', { listed: false, loaded: true, composer: true }, false]
+  ] as const)('reports a linked Project ChatGPT no longer has only when it is gone (%s)', async (_name, page, reported) => {
+    const project = 'g-p-11111111222233334444555555555555';
+    live = await harness(`https://chatgpt.com/g/${project}/project?cos-input=${inputId}`, {
+      project_unavailable: () => ({ ok: true, data: { ok: true } }),
+      desktop_input: () => ({ ok: true, data: { input: null } })
+    });
+    if (!page.composer) live.document.querySelector('#prompt-textarea')?.closest('form')?.remove();
+    const nav = live.document.createElement('nav');
+    nav.innerHTML = `<div data-app-action-sidebar-section="" data-app-action-sidebar-section-collapsed="false">
+      <button data-app-action-sidebar-project-create="">New project</button>
+      <div data-app-action-sidebar-project-id="${page.listed ? project : 'g-p-99999999888877776666555555555555'}" data-app-action-sidebar-project-label="Other"></div></div>`;
+    live.document.body.prepend(nav);
+    vi.spyOn(live.window.performance, 'now').mockReturnValue(page.loaded ? 31_000 : 5_000);
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null, project })).toEqual({ ok: false });
+    expect(live.sent.filter(message => message.type === 'project_unavailable'))
+      .toEqual(reported ? [expect.objectContaining({ id: inputId, project })] : []);
+  });
+
   it('confirms a hidden new chat\'s first Send when the extension reports its new address', async () => {
     // The page's own check can be held back for long in a hidden tab; the extension's
     // background sees the address change and tells this page directly.
