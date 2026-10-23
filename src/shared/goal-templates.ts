@@ -1,5 +1,13 @@
-/** Offline Goal protocol. Only an exact last line is actionable; missing markers pause. */
+/** Offline Goal protocol: exact last-line markers, with one bounded status-only recovery check. */
 export const GOAL_MARKER_INSTRUCTION = '\n\nFor this Goal session only: at the end of each final reply, write exactly one separate last line: [[COS_GOAL:COMPLETE]] if the entire requested task is finished, or [[COS_GOAL:CONTINUE]] if requested work remains. Do not claim completion for partial work. If user input is required, explain it and omit both markers.';
+/** Distinguishes a single status-only checkpoint from an ordinary Goal continuation. */
+export const GOAL_MARKER_RECOVERY_TAG = '[[COS_GOAL:MARKER_CHECK]]';
+const GOAL_MARKER_RECOVERY_PROMPT = `${GOAL_MARKER_RECOVERY_TAG}\nThe previous answer did not end with an offline Goal completion marker. This is a STATUS CHECK ONLY, not a request to repeat or continue the work yet. Do not call tools, run commands, change files, or repeat completed actions. Review only the conversation and the results already recorded. Briefly state what is verified complete and what remains. If the entire original task is finished, end with [[COS_GOAL:COMPLETE]]; if work remains, end with [[COS_GOAL:CONTINUE]]. If you cannot determine the status safely, explain the blocker and omit both markers. Do not perform the unfinished work in this reply.`;
+export const GOAL_MARKER_RECOVERY_RESUME = 'Resume only the steps identified as unfinished in the preceding status check. Do not repeat verified completed actions. ';
+function markerCheckWasSent(lastUserMessage: string): boolean {
+  // The browser may record Markdown-escaped brackets for a sent user message.
+  return lastUserMessage.replace(/\\([\[\]])/g, '$1').includes(GOAL_MARKER_RECOVERY_TAG);
+}
 export const GOAL_CONTINUATIONS: readonly string[] = [
   "Keep going until the requested work is finished. Stay within what I asked for.",
   "Keep going until the requested work is finished. Use the context already in this conversation.",
@@ -202,12 +210,18 @@ export const GOAL_CONTINUATIONS: readonly string[] = [
   "Finish the remaining work instead of just promising it. Keep the update brief and get back to the work.",
   "Finish the remaining work instead of just promising it. Stop when the requested goal is fully complete."
 ];
-export function templateGoalDecision(final: string, slot: number, secondSlot = slot + 1): { action: 'stop' } | { action: 'continue'; reply: string } | { action: 'invalid'; error: string } {
+export function templateGoalDecision(final: string, slot: number, secondSlot = slot + 1, lastUserMessage = ''): { action: 'stop' } | { action: 'continue'; reply: string } | { action: 'invalid'; error: string } {
   const last = final.trim().split(/\r?\n/).at(-1)?.trim();
   if (last === '[[COS_GOAL:COMPLETE]]') return { action: 'stop' };
-  if (last !== '[[COS_GOAL:CONTINUE]]') return { action: 'invalid', error: 'goal_marker_missing' };
+  if (last !== '[[COS_GOAL:CONTINUE]]') {
+    // Do not infer completion from prose, retry work, or send indefinite repair turns.
+    // The latest user message is recorded durably, so the one-check limit survives a restart.
+    if (!final.trim() || markerCheckWasSent(lastUserMessage)) return { action: 'invalid', error: 'goal_marker_missing' };
+    return { action: 'continue', reply: GOAL_MARKER_RECOVERY_PROMPT + GOAL_MARKER_INSTRUCTION };
+  }
   const first = Math.abs(Math.trunc(slot)) % GOAL_CONTINUATIONS.length;
   let second = Math.abs(Math.trunc(secondSlot)) % GOAL_CONTINUATIONS.length;
   if (second === first) second = (first + 1) % GOAL_CONTINUATIONS.length;
-  return { action: 'continue', reply: `${GOAL_CONTINUATIONS[first]} ${GOAL_CONTINUATIONS[second]}` + GOAL_MARKER_INSTRUCTION };
+  const recoveryResume = markerCheckWasSent(lastUserMessage) ? GOAL_MARKER_RECOVERY_RESUME : '';
+  return { action: 'continue', reply: `${recoveryResume}${GOAL_CONTINUATIONS[first]} ${GOAL_CONTINUATIONS[second]}` + GOAL_MARKER_INSTRUCTION };
 }

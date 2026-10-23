@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { recordLoopMcpProof } from './goal-mcp-proof.js';
-import { GOAL_CONTINUATIONS, GOAL_MARKER_INSTRUCTION, templateGoalDecision } from '../src/shared/goal-templates.js';
+import { GOAL_CONTINUATIONS, GOAL_MARKER_INSTRUCTION, GOAL_MARKER_RECOVERY_RESUME, GOAL_MARKER_RECOVERY_TAG, templateGoalDecision } from '../src/shared/goal-templates.js';
 import { promises as fs } from 'node:fs';
 const browser = vi.hoisted(() => ({ request: vi.fn(), authorize: vi.fn(), inputs: [] as Array<{ id: string; sessionId: string; finishOwner?: { turnId: string; periodic: boolean } }> }));
 vi.mock('../src/main/session/input.js', () => ({ requestBrowserDecision: browser.request, authorizeBrowserHelperRetry: browser.authorize, listInputs: async () => browser.inputs }));
@@ -519,16 +519,52 @@ describe('Goal decision backends', () => {
     expect(fetch).not.toHaveBeenCalled();
     expect(browser.request).not.toHaveBeenCalled();
   });
-  it('stops on exact completion and pauses for missing markers without guessing', async () => {
-    for (const [id, text, stage] of [
-      ['goal-template-stop', 'Finished\n[[COS_GOAL:COMPLETE]]', 'no-reply'],
-      ['goal-template-missing', 'I probably finished', 'failed']
-    ]) {
-      const sessionId = await recording(id!, text!);
-      goal.startGoalDraft({ conversationId: id!, sessionId, turnId: 'turn' });
-      expect((await settled(id!)).stage).toBe(stage);
+  it('stops on exact completion; a missing marker schedules a status-only check without rerunning work', async () => {
+    const completeId = 'goal-template-stop';
+    const completedSession = await recording(completeId, 'Finished\n[[COS_GOAL:COMPLETE]]');
+    goal.startGoalDraft({ conversationId: completeId, sessionId: completedSession, turnId: 'turn' });
+    expect((await settled(completeId)).stage).toBe('no-reply');
+
+    const id = 'goal-template-missing';
+    const sessionId = await recording(id, 'I probably finished');
+    goal.startGoalDraft({ conversationId: id, sessionId, turnId: 'turn' });
+    const draft = await settled(id);
+    expect(draft.stage).toBe('ready');
+    expect(draft.reply.startsWith(GOAL_MARKER_RECOVERY_TAG)).toBe(true);
+    expect(draft.reply).toContain('Do not call tools');
+    expect(draft.reply).toContain('Do not perform the unfinished work');
+    expect(draft.reply.endsWith(GOAL_MARKER_INSTRUCTION)).toBe(true);
+    expect(browser.request).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(await goal.draftFastFollowup(sessionId, undefined, undefined, undefined, 'goal')).toContain(GOAL_MARKER_RECOVERY_TAG);
+  });
+  it('halts after one missing-marker check, even across draft recreation, without retrying the task', async () => {
+    const id = 'goal-template-recovery-exhausted';
+    const sessionId = await recording(id, 'Result without a marker');
+    const checkpoint = templateGoalDecision('Result without a marker', 0);
+    expect(checkpoint).toMatchObject({ action: 'continue', reply: expect.stringContaining(GOAL_MARKER_RECOVERY_TAG) });
+    if (checkpoint.action !== 'continue') throw new Error('expected a checkpoint');
+    for (const [kind, content] of [
+      ['user_message', checkpoint.reply],
+      ['assistant_message', 'Still no final marker']
+    ] as const) {
+      const message = { text: content, chars: content.length, truncated: false };
+      if (kind === 'assistant_message') await appendEvent(sessionId, { source: 'extension', time: Date.now(), kind, final: true, message });
+      else await appendEvent(sessionId, { source: 'extension', time: Date.now(), kind, message });
     }
-    expect(goal.goalViewFor('goal-template-missing')).toMatchObject({ error: 'goal_marker_missing', retryable: false });
+    goal.startGoalDraft({ conversationId: id, sessionId, turnId: 'checkpoint-turn' });
+    expect(await settled(id)).toMatchObject({ stage: 'failed', error: 'goal_marker_missing', retryable: false });
+    await expect(goal.draftFastFollowup(sessionId, undefined, undefined, undefined, 'goal')).rejects.toThrow('goal_marker_missing');
+  });
+  it('lets a checkpoint report completion or continue once a valid marker is present', () => {
+    const checkpointMessage = GOAL_MARKER_RECOVERY_TAG + GOAL_MARKER_INSTRUCTION;
+    expect(templateGoalDecision('Finished\n[[COS_GOAL:COMPLETE]]', 0, 1, checkpointMessage)).toEqual({ action: 'stop' });
+    expect(templateGoalDecision('Still remaining\n[[COS_GOAL:CONTINUE]]', 0, 1, checkpointMessage)).toEqual({
+      action: 'continue', reply: GOAL_MARKER_RECOVERY_RESUME + GOAL_CONTINUATIONS[0] + ' ' + GOAL_CONTINUATIONS[1] + GOAL_MARKER_INSTRUCTION
+    });
+    expect(templateGoalDecision('Unknown status', 0, 1, checkpointMessage)).toEqual({ action: 'invalid', error: 'goal_marker_missing' });
+    expect(templateGoalDecision('Unknown status', 0, 1, '\\[\\[COS_GOAL:MARKER_CHECK\\]\\]')).toEqual({ action: 'invalid', error: 'goal_marker_missing' });
+    expect(templateGoalDecision('', 0)).toEqual({ action: 'invalid', error: 'goal_marker_missing' });
   });
   it('keeps all 200 template variants unique with identical marker contracts', () => {
     expect(GOAL_CONTINUATIONS).toHaveLength(200);
@@ -537,7 +573,7 @@ describe('Goal decision backends', () => {
       expect(templateGoalDecision('[[COS_GOAL:CONTINUE]]', index)).toEqual({ action: 'continue', reply: GOAL_CONTINUATIONS[index] + ' ' + GOAL_CONTINUATIONS[(index + 1) % 200] + GOAL_MARKER_INSTRUCTION });
     }
     for (const text of ['prefix [[COS_GOAL:COMPLETE]]', '[[COS_GOAL:COMPLETE]]\nMore work', '[[COS_GOAL:complete]]']) {
-      expect(templateGoalDecision(text, 0).action).toBe('invalid');
+      expect(templateGoalDecision(text, 0, 1, GOAL_MARKER_RECOVERY_TAG)).toEqual({ action: 'invalid', error: 'goal_marker_missing' });
     }
   });
   it('uses browser JSON decisions without an API key and refuses prose', async () => {
