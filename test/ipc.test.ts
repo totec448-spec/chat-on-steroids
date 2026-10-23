@@ -105,7 +105,7 @@ it('keeps the reported interface language and the extension preferences through 
   expect(getConfig().ui.browserPreferences).toEqual({ overwrite: false, durations: true });
 });
 
-it.each(['playfulStatus', 'playfulContinue', 'followOutput'] as const)('saves the %s display switch from Settings', async key => {
+it.each(['playfulStatus', 'playfulContinue', 'followOutput', 'announceTurns'] as const)('saves the %s display switch from Settings', async key => {
   // Both are plain ui booleans saved by the general Settings save. The save schema dropped keys
   // it did not list, so a switch that was not listed reverted on the next state push.
   const base = getConfig();
@@ -543,7 +543,7 @@ it('adds picker-selected projects, reuses containing approval, and leaves cancel
   const uncolored = await handlers.get('projects:color')!(null, { id: first.data.id, color: null }) as any;
   expect(uncolored).toMatchObject({ ok: true, data: { id: first.data.id } });
   expect(uncolored.data.color).toBeUndefined();
-  // #1796: the secrets shield's per-project switch.
+  // #1797: the secrets shield's per-project switch.
   const shieldOff = await handlers.get('projects:secrets-shield')!(null, { id: first.data.id, off: true }) as any;
   expect(shieldOff).toMatchObject({ ok: true, data: { id: first.data.id, secretsShieldOff: true } });
   expect(await handlers.get('projects:secrets-shield')!(null, { id: first.data.id, off: 'yes' })).toMatchObject({ ok: false });
@@ -1101,7 +1101,7 @@ describe('settings writes from more than one UI', () => {
     expect(getConfig().ui.tabsToKeepOpen).toBe(6);
     expect(getConfig().goal).toMatchObject({ helperModel: 'account-helper', helperReasoning: 'medium', model: base.goal.model });
   });
-  it('saves the secrets shield switch, and keeps it when a form without it saves (#1796)', async () => {
+  it('saves the secrets shield switch, and keeps it when a form without it saves (#1797)', async () => {
     const base = defaultConfig();
     await saveConfig(base);
     expect(getConfig().ui.secretsShield).toBe(true);

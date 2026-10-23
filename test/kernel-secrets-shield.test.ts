@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-// #1796: what a tool returns reaches ChatGPT with credentials masked, unless the shield is off.
+// #1797: what a tool returns reaches ChatGPT with credentials masked, unless the shield is off.
 const state = vi.hoisted(() => ({ shield: true as boolean | undefined, projectOff: vi.fn(async (_sessionId: string) => false), log: vi.fn(), background: null as string | null }));
 vi.mock('../src/main/config.js', async (original) => {
   const actual = await original<typeof import('../src/main/config.js')>();

@@ -344,6 +344,7 @@ const configSchema = z.object({
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
     playfulContinue: z.boolean().optional(),
+    announceTurns: z.boolean().optional(),
     // Empty, too long or damaged falls back to the built-in Continue phrases.
     customContinue: z.string().trim().min(1).max(CUSTOM_CONTINUE_MAX_CHARS).optional().catch(undefined),
     /** Keep the chat at its end while it grows, in the app and on ChatGPT, until the reader scrolls up. */
@@ -382,7 +383,7 @@ const configSchema = z.object({
     keepAwake: z.boolean().optional().default(true),
     keepScreenAwake: z.boolean().optional().default(false),
     privacyScreenshots: z.boolean().optional().default(false),
-    // Masking credentials in tool output before ChatGPT sees them (#1796). On unless turned off.
+    // Masking credentials in tool output before ChatGPT sees them (#1797). On unless turned off.
     secretsShield: z.boolean().optional().default(true),
     // Dark is the design the app is drawn for, and a config written before the theme
     // existed has no stored answer to override — so it is the default rather than the
