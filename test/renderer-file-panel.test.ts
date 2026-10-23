@@ -384,6 +384,12 @@ it('compares against a code checkpoint and asks main to restore one file or all 
   expect(window.api.getProjectGitSnapshot).toHaveBeenLastCalledWith(projectA.id, ref);
   expect(host.querySelector('.file-branch-trigger')?.textContent).toMatch(/Before turn · /);
   expect(host.querySelector<HTMLElement>('.file-branch-stats')?.title).toBe('Changes since this checkpoint, local work included');
+  // A language change rewrites the label and its date format with the rest of the panel.
+  try {
+    setLanguage('de');
+    expect(host.querySelector('.file-branch-trigger')?.textContent).toMatch(/^Vor dem Durchlauf · 13\.10\.26, /);
+  } finally { setLanguage('en'); }
+  expect(host.querySelector('.file-branch-trigger')?.textContent).toMatch(/^Before turn · 10\/13\/26, /);
 
   host.querySelector<HTMLButtonElement>('.file-change-row[data-path="README.md"]')!.click(); await tick(); await tick();
   expect(window.api.getProjectGitDiff).toHaveBeenLastCalledWith(projectA.id, 'README.md', ref, 'checkpoint-2');
