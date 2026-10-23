@@ -497,7 +497,8 @@ void app.whenReady().then(async () => {
   // state, where three minutes without input, or a locked screen, count as away.
   installPhonePush({
     settings: () => ({ ...DEFAULT_PHONE_PUSH, ...getConfig().ui.phonePush }),
-    token: () => getSecret('ntfyToken').catch(() => null),
+    // A failed read is reported, not treated as no token (phone-push.ts refuses to send).
+    token: () => getSecret('ntfyToken'),
     now: () => Date.now(),
     idleState: () => powerMonitor.getSystemIdleState(180),
     post: async (url, body, headers) => {

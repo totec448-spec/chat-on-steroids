@@ -385,10 +385,15 @@ const configSchema = z.object({
     keepScreenAwake: z.boolean().optional().default(false),
     privacyScreenshots: z.boolean().optional().default(false),
     // Phone notifications through ntfy. Each field repairs on its own, so a damaged one never
-    // turns the rest off or sends to a server nobody chose.
-    phonePush: z.object({
+    // turns the rest off. A damaged server is the exception: it switches them off with no server,
+    // because falling back to ntfy.sh would send to a server nobody chose (a missing one is the default).
+    phonePush: z.preprocess(raw => {
+      if (!raw || typeof raw !== 'object' || !('server' in raw)) return raw;
+      const server = (raw as { server: unknown }).server;
+      return typeof server === 'string' && server.length <= 2048 ? raw : { ...raw, enabled: false, server: '' };
+    }, z.object({
       enabled: z.boolean().catch(false),
-      server: z.string().max(2048).catch(DEFAULT_PHONE_PUSH.server),
+      server: z.string().max(2048).optional().default(DEFAULT_PHONE_PUSH.server).catch(''),
       topic: z.string().max(64).catch(''),
       needsYou: z.boolean().catch(true),
       failures: z.boolean().catch(true),
@@ -396,7 +401,7 @@ const configSchema = z.object({
       onlyWhenAway: z.boolean().catch(true),
       quietHours: z.object({ from: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), to: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/) }).nullable().catch(null),
       includeDetails: z.boolean().catch(false)
-    }).optional().catch(undefined),
+    })).optional().catch(undefined),
     // Dark is the design the app is drawn for, and a config written before the theme
     // existed has no stored answer to override — so it is the default rather than the
     // fallback. An explicit `light` is somebody's own choice and is never touched.

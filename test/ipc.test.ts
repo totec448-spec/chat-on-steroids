@@ -2630,6 +2630,20 @@ describe('phone notifications over IPC', () => {
     expect(getConfig().ui.phonePush).toMatchObject({ enabled: false, topic: '' });
   });
 
+  it('never lets a damaged saved phone setting block other saves, or the save that repairs it', async () => {
+    // A hand-edited or older config: on, with no topic and a server with a path.
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, phonePush: phone({ topic: '', server: 'https://ntfy.sh/mytopic' }) } });
+    const stored = getConfig();
+    // An unrelated change carries the stored phone settings unchanged: it saves.
+    expect((await save({ ...stored, ui: { ...stored.ui, theme: 'light' } }, stored)).ok).toBe(true);
+    // Editing the phone settings is checked: still bad is refused, repaired or switched off saves.
+    const now = getConfig();
+    expect(await save({ ...now, ui: { ...now.ui, phonePush: phone({ topic: '' }) } }, now)).toMatchObject({ ok: false });
+    expect((await save({ ...now, ui: { ...now.ui, phonePush: phone() } }, now)).ok).toBe(true);
+    const fixed = getConfig();
+    expect((await save({ ...fixed, ui: { ...fixed.ui, phonePush: phone({ enabled: false, topic: '' }) } }, fixed)).ok).toBe(true);
+  });
+
   it('merges field by field, so a form from before a change does not undo it', async () => {
     const base = getConfig();
     await save({ ...base, ui: { ...base.ui, phonePush: phone() } }, base);

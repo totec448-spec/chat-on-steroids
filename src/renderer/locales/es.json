@@ -3134,5 +3134,11 @@
   "A chat finished.": "Un chat terminó.",
   "Finished after {0} min.": "Terminado tras {0} min.",
   "This is a test from Chat On Steroids. Phone notifications work.": "Esto es una prueba de Chat On Steroids. Las notificaciones en el móvil funcionan.",
-  "Use ntfy.sh": "Usar ntfy.sh"
+  "Use ntfy.sh": "Usar ntfy.sh",
+  "An access token is sent only over https, or to this computer. Use https:// for this server.": "Un token de acceso solo se envía por https o a este ordenador. Usa https:// para este servidor.",
+  "The saved access token could not be read from secure storage.": "No se pudo leer el token de acceso guardado en el almacenamiento seguro.",
+  "The settings could not be saved, so no test was sent.": "No se pudieron guardar los ajustes, así que no se envió ninguna prueba.",
+  "After {0} minutes of work": "Tras {0} minutos de trabajo",
+  "After {0} minutes of work|one": "Tras {0} minuto de trabajo",
+  "After {0} minutes of work|many": "Tras {0} de minutos de trabajo"
 }

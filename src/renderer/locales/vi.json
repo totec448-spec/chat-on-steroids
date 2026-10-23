@@ -3038,5 +3038,9 @@
   "A chat finished.": "Một cuộc trò chuyện đã xong.",
   "Finished after {0} min.": "Xong sau {0} phút.",
   "This is a test from Chat On Steroids. Phone notifications work.": "Đây là tin thử từ Chat On Steroids. Thông báo trên điện thoại hoạt động.",
-  "Use ntfy.sh": "Dùng ntfy.sh"
+  "Use ntfy.sh": "Dùng ntfy.sh",
+  "An access token is sent only over https, or to this computer. Use https:// for this server.": "Mã truy cập chỉ được gửi qua https hoặc tới máy tính này. Hãy dùng https:// cho máy chủ này.",
+  "The saved access token could not be read from secure storage.": "Không đọc được mã truy cập đã lưu từ kho lưu trữ an toàn.",
+  "The settings could not be saved, so no test was sent.": "Không lưu được cài đặt nên chưa gửi thử.",
+  "After {0} minutes of work": "Sau {0} phút làm việc"
 }

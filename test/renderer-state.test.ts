@@ -4614,11 +4614,20 @@ describe('phone notifications in Settings', () => {
     const mounted = await withPhone(phone({ finishedAfterMinutes: 7, quietHours: { from: '01:30', to: '05:15' } }));
     const doc = mounted.window.document;
     expect((doc.getElementById('phonePushQuiet') as HTMLSelectElement).value).toBe('custom');
-    // 7 minutes is not offered: the nearest longer choice shows.
-    expect((doc.getElementById('phonePushFinished') as HTMLSelectElement).value).toBe('15');
+    // 7 minutes is not offered: it is shown as its own choice and kept, like the quiet hours.
+    const finished = doc.getElementById('phonePushFinished') as HTMLSelectElement;
+    expect(finished.value).toBe('7');
+    expect(finished.selectedOptions[0]!.textContent).toBe('After 7 minutes of work');
     change(doc, 'phonePushAway', false);
     await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.onlyWhenAway).toBe(false));
     expect(mounted.calls.at(-1).ui.phonePush.quietHours).toEqual({ from: '01:30', to: '05:15' });
+    expect(mounted.calls.at(-1).ui.phonePush.finishedAfterMinutes).toBe(7);
+    // Choosing an offered value drops the extra choice again.
+    change(doc, 'phonePushFinished', '30');
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.finishedAfterMinutes).toBe(30));
+    mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush: phone({ finishedAfterMinutes: 30 }) } };
+    mounted.push(mounted.state);
+    expect([...finished.options].map(option => option.value)).toEqual(['never', '0', '5', '15', '30', '60']);
   });
 
   it('sends a test after saving what was typed, and says when it did not arrive', async () => {
@@ -4635,6 +4644,31 @@ describe('phone notifications in Settings', () => {
     (doc.getElementById('phonePushTest') as HTMLButtonElement).click();
     await waitFor(() => expect(doc.getElementById('phonePushTestStatus')!.classList.contains('is-warn')).toBe(true));
     expect(doc.getElementById('phonePushTestStatus')!.textContent).toContain('refused the message');
+  });
+
+  it('sends no test when the settings could not be saved', async () => {
+    const testPhonePush = vi.fn(async () => ({ ok: true, data: undefined }));
+    const mounted = await withPhone(phone(), { testPhonePush, saveSettings: async () => ({ ok: false, error: 'Fixture save refused' }) });
+    const doc = mounted.window.document;
+    (doc.getElementById('phonePushTest') as HTMLButtonElement).click();
+    await waitFor(() => expect(doc.getElementById('phonePushTestStatus')!.textContent).toBe('The settings could not be saved, so no test was sent.'));
+    expect(doc.getElementById('phonePushTestStatus')!.classList.contains('is-warn')).toBe(true);
+    expect(testPhonePush).not.toHaveBeenCalled();
+  });
+
+  it('keeps a token typed while the previous one was being saved', async () => {
+    let release: () => void = () => {};
+    const setPhonePushToken = vi.fn((token: string) => new Promise(resolve => { release = () => resolve({ ok: true, data: { ...mounted.state, hasPhonePushToken: token !== '' } }); }));
+    const mounted = await mountChat({}, [], { setPhonePushToken });
+    const doc = mounted.window.document;
+    const field = doc.getElementById('phonePushToken') as HTMLInputElement;
+    field.value = 'tk_first';
+    (doc.getElementById('phonePushTokenSave') as HTMLButtonElement).click();
+    await waitFor(() => expect(setPhonePushToken).toHaveBeenCalledWith('tk_first'));
+    field.value = 'tk_second_draft';
+    release();
+    await waitFor(() => expect(doc.getElementById('phonePushTokenStatus')!.textContent).toBe('A token is saved. Save an empty field to remove it.'));
+    expect(field.value).toBe('tk_second_draft');
   });
 
   it('saves and removes the access token without ever showing it again', async () => {

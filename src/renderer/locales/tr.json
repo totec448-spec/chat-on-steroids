@@ -3086,5 +3086,10 @@
   "A chat finished.": "Bir sohbet bitti.",
   "Finished after {0} min.": "{0} dakikada bitti.",
   "This is a test from Chat On Steroids. Phone notifications work.": "Bu, Chat On Steroids'ten bir test. Telefon bildirimleri çalışıyor.",
-  "Use ntfy.sh": "ntfy.sh kullan"
+  "Use ntfy.sh": "ntfy.sh kullan",
+  "An access token is sent only over https, or to this computer. Use https:// for this server.": "Erişim belirteci yalnızca https üzerinden veya bu bilgisayara gönderilir. Bu sunucu için https:// kullanın.",
+  "The saved access token could not be read from secure storage.": "Kayıtlı erişim belirteci güvenli depodan okunamadı.",
+  "The settings could not be saved, so no test was sent.": "Ayarlar kaydedilemedi, bu yüzden test gönderilmedi.",
+  "After {0} minutes of work": "{0} dakikalık çalışmadan sonra",
+  "After {0} minutes of work|one": "{0} dakikalık çalışmadan sonra"
 }

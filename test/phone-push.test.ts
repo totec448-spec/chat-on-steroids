@@ -134,6 +134,38 @@ describe('when nothing is sent', () => {
   });
 });
 
+describe('the access token', () => {
+  it('goes only over https or to this computer, and never silently stays behind', async () => {
+    for (const [server, sent] of [['https://ntfy.example.org', true], ['http://localhost:8080', true], ['http://127.0.0.1', true], ['http://[::1]:80', true], ['http://192.168.1.5:8080', false], ['http://ntfy.example.org', false]] as const) {
+      const { push, sent: posted, setToken, log } = setUp({ server });
+      setToken('tk_secret');
+      expect(await push.notify({ kind: 'failed', detail: 'x' }), server).toBe(sent ? 'sent' : 'error');
+      expect(posted.length, server).toBe(sent ? 1 : 0);
+      if (!sent) {
+        expect(log).toHaveBeenLastCalledWith('phone push: not sent "failure": An access token is sent only over https, or to this computer. Use https:// for this server.');
+        await expect(push.test()).rejects.toThrow('An access token is sent only over https, or to this computer. Use https:// for this server.');
+      }
+    }
+    // Without a token, a plain-http server in the house is fine.
+    const lan = setUp({ server: 'http://192.168.1.5:8080' });
+    expect(await lan.push.notify({ kind: 'failed', detail: 'x' })).toBe('sent');
+  });
+
+  it('refuses to send when the saved token cannot be read, instead of sending without it', async () => {
+    const log = vi.fn(), post = vi.fn(async () => ({ ok: true, status: 200 }));
+    const push = createPhonePush({ settings: () => settings(), token: async () => { throw new Error('keychain locked'); }, now: () => at(14), idleState: () => 'idle', log, post });
+    expect(await push.notify({ kind: 'needs-you', sessionId: 's1' })).toBe('error');
+    expect(post).not.toHaveBeenCalled();
+    expect(log).toHaveBeenLastCalledWith('phone push: not sent "needs you": The saved access token could not be read from secure storage. (keychain locked)');
+    await expect(push.test()).rejects.toThrow('The saved access token could not be read from secure storage.');
+  });
+
+  it('says a bad server address is not valid, rather than that it could not be reached', async () => {
+    const { push } = setUp({ server: '' });
+    await expect(push.test()).rejects.toThrow('The ntfy server address is not valid.');
+  });
+});
+
 describe('a test message', () => {
   it('is sent even while at the computer and in quiet hours, and reports a failure', async () => {
     const { push, sent, setNow } = setUp({ quietHours: { from: '00:00', to: '23:59' } }, 'active');

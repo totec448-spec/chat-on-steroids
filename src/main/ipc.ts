@@ -39,6 +39,7 @@ import { draftOpeningMessage, onGoalChange, nativeGoalFailure } from './goal.js'
 import { cancelTaskRequest, runTaskRequest } from './task-request.js';
 import { randomUUID } from 'node:crypto';
 import { isValidTopic, normalizeServer, testPhonePush } from './phone-push.js';
+
 import { DEFAULT_PHONE_PUSH, type PhonePushSettings } from '../shared/phone-push.js';
 import { retryGoalBrowserHelper } from './goal.js';
 import { requestBrowserPreferences } from './browser-preferences.js';
@@ -175,6 +176,14 @@ import {
   refreshMacOSDesktopAccess
 } from './computer/index.js';
 
+/** Why phone settings cannot be saved as they are, or null. Only an enabled form is checked. */
+function phonePushProblem(push: { enabled: boolean; topic: string; server: string }): string | null {
+  if (!push.enabled) return null;
+  if (!isValidTopic(push.topic)) return 'Choose a topic of letters, digits, - and _ (up to 64).';
+  if (!normalizeServer(push.server)) return 'Enter the address of an ntfy server, such as https://ntfy.sh.';
+  return null;
+}
+
 /** Fixed native Settings destinations; authored chat links use the shared web/mail policy. */
 const ALLOWED_LINKS = new Set([
   'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
@@ -268,12 +277,7 @@ const settingsPatch = z.object({
       finishedAfterMinutes: z.number().int().min(0).max(240).nullable(), onlyWhenAway: z.boolean(),
       quietHours: z.object({ from: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), to: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/) }).strict().nullable(),
       includeDetails: z.boolean()
-    }).strict().superRefine((push, ctx) => {
-      // Checked only when on, so a half-filled form can still be switched off and saved.
-      if (!push.enabled) return;
-      if (!isValidTopic(push.topic)) ctx.addIssue({ code: 'custom', path: ['topic'], message: 'Choose a topic of letters, digits, - and _ (up to 64).' });
-      if (!normalizeServer(push.server)) ctx.addIssue({ code: 'custom', path: ['server'], message: 'Enter the address of an ntfy server, such as https://ntfy.sh.' });
-    }).optional(),
+    }).strict().optional(),
     theme: z.enum(['light', 'dark'])
   }),
   sessions: z.object({
@@ -754,6 +758,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('settings:save', async (payload) => {
     const request = settingsSave.parse(payload);
+    // The phone settings are checked only when this save changes them, and only while on: a damaged
+    // stored value (hand-edited, or from an older version) must not block every other save, nor the
+    // save that repairs it or switches it off.
+    const push = request.patch.ui.phonePush;
+    if (push && JSON.stringify(push) !== JSON.stringify(request.base.ui.phonePush)) {
+      const problem = phonePushProblem(push);
+      if (problem) throw new Error(problem);
+    }
     const before = getConfig();
     const next = await updateConfig(async config => {
       if (request.patch.ui.browserBridgePort !== undefined &&

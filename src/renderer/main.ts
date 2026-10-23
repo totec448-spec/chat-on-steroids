@@ -699,14 +699,15 @@ function toolsOn(next: AppState): number {
 let settingsSaveQueue: Promise<void> = Promise.resolve();
 let requestedSettings: SettingsPatch | null = null;
 
-function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?: AppearanceSettings } = {}): Promise<void> {
-  if (applying || !state) return Promise.resolve();
+/** Resolves true once main saved the form, false when nothing was saved (an invalid field, a refusal). */
+function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?: AppearanceSettings } = {}): Promise<boolean> {
+  if (applying || !state) return Promise.resolve(false);
 
   const previous: AppState['config'] = requestedSettings
     ? { ...state.config, ...requestedSettings }
     : state.config;
   const commandAllowlist = readCommandAllowlist();
-  if (!commandAllowlist) return Promise.resolve();
+  if (!commandAllowlist) return Promise.resolve(false);
   const capabilities = { ...previous.capabilities };
   for (const input of document.querySelectorAll<HTMLInputElement>('[data-cap]')) {
     const capability = input.dataset.cap as Capability;
@@ -793,7 +794,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
   return work;
 }
 
-async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']): Promise<void> {
+async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']): Promise<boolean> {
   const toolSurfaceChanged =
     previous.multiAgent.enabled !== patch.multiAgent.enabled ||
     (Object.keys(patch.capabilities) as Capability[]).some((cap) => {
@@ -827,6 +828,7 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     } else if (toolSurfaceChanged) {
       toast(t("Tools changed. Start a new ChatGPT conversation to guarantee the new tool list is loaded."));
     }
+    return true;
   } else {
     await refresh();
     // A rejected select remains focused. Restore it even though ordinary pushes protect dirty
@@ -843,6 +845,7 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     if (state && (!requestedSettings || requestedSettings.controlApi?.enabled === patch.controlApi?.enabled)) {
       $<HTMLInputElement>('controlApiEnabled').checked = state.config.controlApi?.enabled === true;
     }
+    return false;
   }
 }
 
@@ -2889,7 +2892,7 @@ initPlugins(apply);
 initPets(api, pet);
 openSkillsLibrary = initSkillsLibrary(api);
 initBrowserPreferences();
-initChat({ save: () => save(), state: () => state });
+initChat({ save: async () => { await save(); }, state: () => state });
 
 void (async () => {
   await refresh();
