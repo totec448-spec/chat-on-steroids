@@ -10817,6 +10817,42 @@ describe('a content script reloaded into a turn already in flight', () => {
     expect(await check(before)).toMatchObject({ safe: false, why: 'changed', changed: 'progress', progressBy: 'page-call' });
   });
 
+  it('does not take a known tool call drawn again with other details for new progress (#1787)', async () => {
+    // 2.1.45, live: with ChatGPT's stream gone ("connection interrupted"), every repair for four
+    // minutes was refused with "the page showed a new tool call" although no call was added.
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    live = await harness(`https://chatgpt.com/c/${conversationId}`, { activity: () => activity({ activeTurnId: 'g-old-run-0-4' }) }, midTurn);
+    live.hook.observe(); await settle();
+    const check = (expected?: unknown) => live!.runtimeMessage({ type: 'clf-repair-check', conversationId, expected });
+    const section = live.document.querySelector<HTMLElement>('[data-turn-id="turn-live"]')!;
+    const call = (messageId: string, over: Record<string, unknown> = {}) =>
+      ({ messageId, requestId: `request-${messageId}`, tool: 'exec_command', order: 0, answered: true, ...over });
+    await bindFiberTurns([{ section, turn: { turnId: 'turn-live', conversationId, calls: [call('known-1'), call('known-2', { answered: false })] } }]);
+    live.hook.observe(); await settle();
+    const before = await check();
+    // The same calls again, one now without its request id: nothing new happened.
+    await bindFiberTurns([{ section, turn: { turnId: 'turn-live', conversationId, calls: [call('known-1', { requestId: undefined }), call('known-2', { answered: false })] } }]);
+    live.hook.observe(); await settle();
+    expect(await check(before)).not.toMatchObject({ changed: 'progress' });
+    // A call that got its result is progress.
+    await bindFiberTurns([{ section, turn: { turnId: 'turn-live', conversationId, calls: [call('known-1'), call('known-2')] } }]);
+    expect(await check(before)).toMatchObject({ safe: false, why: 'changed', changed: 'progress', progressBy: 'page-call' });
+  });
+
+  it('counts a known call that got its result as progress even when its request id holds a NUL (#1787)', async () => {
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    live = await harness(`https://chatgpt.com/c/${conversationId}`, { activity: () => activity({ activeTurnId: 'g-old-run-0-4' }) }, midTurn);
+    live.hook.observe(); await settle();
+    const check = (expected?: unknown) => live!.runtimeMessage({ type: 'clf-repair-check', conversationId, expected });
+    const section = live.document.querySelector<HTMLElement>('[data-turn-id="turn-live"]')!;
+    const call = (answered: boolean) => ({ messageId: 'odd-id', requestId: 'request\u00001\u00000', tool: 'exec_command', order: 0, answered });
+    await bindFiberTurns([{ section, turn: { turnId: 'turn-live', conversationId, calls: [call(false)] } }]);
+    live.hook.observe(); await settle();
+    const before = await check();
+    await bindFiberTurns([{ section, turn: { turnId: 'turn-live', conversationId, calls: [call(true)] } }]);
+    expect(await check(before)).toMatchObject({ safe: false, why: 'changed', changed: 'progress', progressBy: 'page-call' });
+  });
+
   it.each([true, false])('binds a separate final section only within the exact adopted question (same question: %s)', async sameQuestion => {
     const source = 'g-split-final-source';
     live = await harness(undefined, {
@@ -14328,8 +14364,9 @@ describe('the Compact & resume control', () => {
     //
     // The button is a gear now, so the hover answers the question a gear raises — what are
     // the settings — rather than naming one action it no longer performs on its own.
+    // The app has not answered this page yet, so the hover says that rather than "off" (#1787).
     expect(control.querySelector('.clf-compact-btn')!.getAttribute('data-clf-tip')).toBe(
-      'Auto-compaction off\nGoal and Loop off'
+      'Auto-compaction: waiting for the app\nGoal and Loop: waiting for the app'
     );
   });
 
@@ -14359,7 +14396,9 @@ describe('the Compact & resume control', () => {
       'Goal',
       'Loop'
     ]);
-    expect(track.dataset.clfValue).toBe('off');
+    // The app has not answered yet, so no stop is the value (#1787).
+    expect(track.dataset.clfValue).toBe('');
+    expect(track.querySelectorAll('[aria-checked="true"]')).toHaveLength(0);
     expect(menu.querySelector('.clf-menu-action')!.textContent).toBe('Compact & resume now');
 
     live.hook.closeMenu();
@@ -14520,7 +14559,8 @@ describe('the Compact & resume control', () => {
    */
   it('writes a switch to the app and paints what the app answered', async () => {
     live = await harness();
-    live.reply.set('settings_set', () => ({
+    let auto = false;
+    live.reply.set('settings_set', () => (auto = true, {
       ok: true,
       data: {
         context: { auto: true, threshold: 300_000, warn: 300_000, limit: 400_000 },
@@ -14529,6 +14569,15 @@ describe('the Compact & resume control', () => {
     }));
     live.hook.injectControl();
     live.hook.toggleMenu();
+    // Before the app's first answer the switch cannot be moved: nobody knows what it is at.
+    const waiting = live.document.querySelector('[data-clf-row="autoCompact"]') as HTMLButtonElement;
+    waiting.click();
+    await settle();
+    expect(live.sent.filter((message) => message.type === 'settings_set')).toEqual([]);
+    live.reply.set('activity', () => ({ ok: true, data: { sessionId: null, entries: [], stream: [], userAnchors: [], nextSince: 0,
+      context: { auto, threshold: 300_000, warn: 300_000, limit: 400_000 },
+      goal: { enabled: false, hasKey: false, model: 'deepseek/deepseek-v4-flash' } } }));
+    await live.hook.pullActivity();
 
     const row = live.document.querySelector('[data-clf-row="autoCompact"]') as HTMLButtonElement;
     expect(row.getAttribute('aria-checked')).toBe('false');
@@ -22952,6 +23001,27 @@ describe('the goal loop', () => {
     async function open(): Promise<void> {
       live = await harness(`https://chatgpt.com/c/${CHAT}`, goalReplies());
     }
+
+    it('says it is waiting for the app, not that a key is missing, before the app has answered (#1787)', async () => {
+      await open();
+      // 2.1.45, live: a reloaded stuck chat showed Off and "OpenRouter key required" with no key in
+      // use at all; the page simply had no answer from the app yet.
+      const view = live!.hook.settingsView({ context: null, goal: null, compact: { action: 'start', hint: '' }, scope: 'chat' });
+      // No stop is drawn as chosen: Off would be a guess too.
+      expect(view.mode).toMatchObject({ value: '', note: 'waiting for the app', warn: false, disabled: true });
+      expect(view.rows[0]).toMatchObject({ key: 'autoCompact', note: 'waiting for the app', disabled: true });
+      expect(view.tip).toBe('Auto-compaction: waiting for the app\nGoal and Loop: waiting for the app');
+      expect(view.objective).toMatchObject({ available: false, unavailable: 'Waiting for Chat On Steroids to answer.' });
+      expect(JSON.stringify(view)).not.toMatch(/OpenRouter|API key/);
+    });
+
+    it('keeps the auto-compaction switch still above a New Chat until the app answers (#1787)', async () => {
+      await open();
+      // A click there would write the app-wide preference from a value nobody has seen.
+      const view = live!.hook.settingsView({ context: null, goal: null, compact: { action: 'start', hint: '' }, scope: 'new' });
+      expect(view.rows[0]).toMatchObject({ key: 'autoCompact', note: 'waiting for the app', disabled: true });
+      expect(view.tip.split('\n')[0]).toBe('Auto-compaction: waiting for the app');
+    });
 
     it('offers one task under the slider, and shows the one a chat already has', async () => {
       await open();
