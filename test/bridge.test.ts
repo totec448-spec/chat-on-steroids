@@ -13532,11 +13532,10 @@ describe('unattributed activity recovery', () => {
       const refused = await request('POST', '/goal/draft', { body: { conversationId: chat, turnId: 'loop-without-mcp' } });
       expect(refused.status).toBe(409);
       expect(refused.body).toMatchObject({ error: 'loop_mcp_call_missing', retryable: false });
-      expect(refused.body.message).toContain('No MCP tool call was recorded in the last response');
-      expect(refused.body.message).toContain('ChatGPT may be asking you something');
-      expect(refused.body.message).toContain('the tool connection may have been lost');
-      expect(refused.body.message).toContain('Answer it');
-      expect(refused.body.message).toContain('Loop remains enabled');
+      expect(refused.body.message).toContain('no local tool call was recorded for it');
+      expect(refused.body.message).toContain('Answer any question');
+      expect(refused.body.message).toContain('Loop stays on');
+      expect(refused.body.message).not.toContain('Loop paused');
       expect(goal.goalViewFor(chat)).toBeNull();
       await request('POST', '/settings', { body: { conversationId: chat, loop: false } });
       await request('POST', '/settings', { body: { conversationId: chat, loop: true } });
@@ -13544,6 +13543,97 @@ describe('unattributed activity recovery', () => {
       expect(goal.snapshotGoalReplies().replies.find(row => row.conversationId === chat)).toMatchObject({ explicitActivation: true });
       const allowed = await request('POST', '/goal/draft', { body: { conversationId: chat, turnId: 'loop-without-mcp', terminalRequired: true } });
       expect(`${allowed.status} ${JSON.stringify(allowed.body)}`).toMatch(/^200 /);
+    } finally { resetGoalStateForTests(); await setSecret('openRouterApiKey', ''); await saveConfig(previous); }
+  });
+
+  it.each([
+    { model: 'GPT-5.6 Sol', finishTool: false, afterTurn: false, diagnosticFailure: 'null' },
+    { model: 'GPT-5.6 Sol', finishTool: false, afterTurn: false, splitEnd: true, diagnosticFailure: 'throw' },
+    { model: 'GPT-5.6 Sol', finishTool: false, afterTurn: false, splitEnd: false },
+    { model: 'GPT-5.6 Sol', finishTool: true, afterTurn: false },
+    { model: 'GPT-6 Astra', finishTool: true, afterTurn: false, finishOnly: true },
+    { model: 'GPT-6 Pro', finishTool: false, afterTurn: false },
+    { model: 'GPT-6 Pro', finishTool: true, afterTurn: true },
+    { model: 'GPT-6 Pro', finishTool: true, afterTurn: false, finishOnly: true },
+    { model: 'GPT-5.6 Sol', finishTool: false, afterTurn: false, splitEnd: true },
+    { model: 'GPT-6 Pro', finishTool: true, afterTurn: true, splitEnd: true },
+    { model: 'GPT-5.6 Sol', finishTool: false, afterTurn: false, outcome: 'stopped' },
+    // An upstream turn rotation interrupts the source turn before the fresh answer starts.
+    { model: 'GPT-5.6 Sol', finishTool: false, afterTurn: false, outcome: 'interrupted' },
+    { model: 'GPT-6 Pro', finishTool: false, afterTurn: false, outcome: 'failed' }
+  ])('records one no-tool Loop diagnostic only after completion ($model, finish=$finishTool, split=$splitEnd, outcome=$outcome)', async ({ model, finishTool, afterTurn, finishOnly = false, splitEnd = false, outcome = 'completed', diagnosticFailure }) => {
+    const chat = randomUUID();
+    const goal = await import('../src/main/goal.js');
+    const { findSessionByConversation, readRecentEvents, flushSessions, resetSessionStoreForTests, initSessionStore } = await import('../src/main/session/store.js');
+    const previous = getConfig();
+    const realFetch = globalThis.fetch;
+    const helper = vi.fn();
+    globalThis.fetch = helper;
+    await saveConfig({ ...previous, ui: { ...previous.ui, finishTool }, goal: { ...previous.goal, enabled: true, mode: 'loop' } });
+    await setSecret('openRouterApiKey', 'sk-or-loop-test');
+    const recorder = await import('../src/main/session/recorder.js');
+    const recording = diagnosticFailure ? vi.spyOn(recorder, 'recordProgress') : null;
+    if (diagnosticFailure === 'null') recording!.mockResolvedValue(null);
+    if (diagnosticFailure === 'throw') recording!.mockRejectedValue(new Error('diagnostic write failed'));
+    try {
+      await pair();
+      await goal.setGoalSwitchNow(chat, 'loop', true, afterTurn);
+      const answer = { kind: 'assistant_message', turnId: 'no-tool-turn', messageId: 'stable-answer', providerMessageId: outcome === 'completed' ? 'native-answer' : undefined,
+        time: Date.now(), text: 'La comprobación ha terminado.', final: true, state: 'final', activeNow: true, goalEligible: true };
+      await events(chat, [{ kind: 'model_selection', model, reasoningEffort: 'high', time: Date.now() },
+        { kind: 'user_message', time: Date.now(), text: 'Comprueba el resultado.', messageId: 'question' },
+        openTurn('older-completed-turn'), endTurn('older-completed-turn', 'completed'), openTurn('no-tool-turn'), answer]);
+      const session = (await findSessionByConversation(chat))!;
+      const diagnostics = async () => (await readRecentEvents(session.id, 80, { kinds: ['progress'] }))
+        .filter(event => event.kind === 'progress' && event.progressId === 'loop-stalled:no-tool-turn');
+      // An apparent final with the same stable id can still belong to the running turn.
+      expect(await diagnostics()).toHaveLength(0);
+      const completed = await events(chat, [...(splitEnd ? [] : [answer]), endTurn('no-tool-turn', outcome)]);
+      expect(completed.status).toBe(200);
+      if (diagnosticFailure) expect(goal.snapshotGoalReplies().replies).toContainEqual(
+        expect.objectContaining({ conversationId: chat, replyId: 'stable-answer', state: 'handled' }));
+      const rows = await diagnostics();
+      expect(rows).toHaveLength(outcome === 'completed' && !finishOnly && !diagnosticFailure ? 1 : 0);
+      if (outcome === 'completed' && !finishOnly && !diagnosticFailure) expect(rows[0]).toMatchObject({ source: 'app', turnId: 'no-tool-turn',
+        message: { text: expect.stringContaining('no local tool call was recorded for it') } });
+      expect(goalPendingReplyFor(chat)).toBeNull();
+      expect(goal.goalViewFor(chat)).toBeNull();
+      expect(goal.goalSwitchFor(chat)).toMatchObject({ enabled: true, mode: 'loop' });
+      // Re-observation, a provisional page id, and restart retain the same single diagnostic.
+      await events(chat, [answer]);
+      await goal.acceptGoalReplyNow({ conversationId: chat, sessionId: session.id, replyId: 'turn:no-tool-turn',
+        turnId: 'no-tool-turn', eventSeq: 0, blocked: false });
+      await flushSessions();
+      const saved = goal.snapshotGoalReplies();
+      resetSessionStoreForTests(); initSessionStore(dir); goal.restoreGoalReplies(saved);
+      await events(chat, [answer]);
+      expect(await diagnostics()).toEqual(rows);
+      expect(helper).not.toHaveBeenCalled();
+      expect(await maintenance()).toBeNull();
+    } finally { recording?.mockRestore(); globalThis.fetch = realFetch; resetGoalStateForTests(); await setSecret('openRouterApiKey', ''); await saveConfig(previous); }
+  });
+
+  it('does not diagnose a deliberately rearmed no-tool Loop reply as paused', async () => {
+    const chat = randomUUID();
+    const goal = await import('../src/main/goal.js');
+    const { findSessionByConversation, readRecentEvents } = await import('../src/main/session/store.js');
+    const previous = getConfig();
+    await saveConfig({ ...previous, goal: { ...previous.goal, enabled: false } });
+    await setSecret('openRouterApiKey', 'sk-or-loop-test');
+    try {
+      await pair();
+      const answer = { kind: 'assistant_message', turnId: 'rearmed-turn', messageId: 'rearmed-answer',
+        time: Date.now(), text: 'Resultado comprobado.', final: true, state: 'final', activeNow: true, goalEligible: true };
+      await events(chat, [{ kind: 'model_selection', model: 'GPT-5.6 Sol', reasoningEffort: 'high', time: Date.now() },
+        { kind: 'user_message', time: Date.now(), text: 'Comprueba el resultado.', messageId: 'question' },
+        openTurn('rearmed-turn'), answer, endTurn('rearmed-turn', 'completed')]);
+      await request('POST', '/settings', { body: { conversationId: chat, loop: true } });
+      expect(goal.snapshotGoalReplies().replies.find(row => row.conversationId === chat)).toMatchObject({ state: 'pending', explicitActivation: true });
+      await events(chat, [answer]);
+      const session = (await findSessionByConversation(chat))!;
+      expect((await readRecentEvents(session.id, 80, { kinds: ['progress'] })).filter(event =>
+        event.kind === 'progress' && event.progressId === 'loop-stalled:rearmed-turn')).toHaveLength(0);
+      expect(await goal.loopReplyHasAuthority(session.id, chat, 'rearmed-turn')).toBe(true);
     } finally { resetGoalStateForTests(); await setSecret('openRouterApiKey', ''); await saveConfig(previous); }
   });
 

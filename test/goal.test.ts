@@ -103,6 +103,144 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
+it('accepts another chat while one acceptance is reading, and serializes the same chat', async () => {
+  const store = await import('../src/main/session/store.js');
+  const read = store.getSession;
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const a = await createSession({ conversationId: 'accept-a' });
+  const b = await createSession({ conversationId: 'accept-b' });
+  const spy = vi.spyOn(store, 'getSession').mockImplementation(async id => {
+    if (id === a.id) await gate;
+    return read(id);
+  });
+  const input = { conversationId: 'accept-a', sessionId: a.id, replyId: 'first', turnId: 'turn-a', eventSeq: 1, blocked: false };
+  const first = goal.acceptGoalReplyNow(input);
+  const second = goal.acceptGoalReplyNow({ ...input, replyId: 'second', eventSeq: 2 });
+  let otherAccepted = false;
+  const other = goal.acceptGoalReplyNow({ ...input, conversationId: 'accept-b', sessionId: b.id }).then(() => { otherAccepted = true; });
+  try {
+    await vi.waitFor(() => expect(otherAccepted).toBe(true));
+    expect(spy.mock.calls.filter(([id]) => id === a.id)).toHaveLength(1);
+  } finally {
+    release();
+    await Promise.all([first, second, other]);
+    spy.mockRestore();
+  }
+  expect(goal.snapshotGoalReplies().replies.find(row => row.conversationId === 'accept-a')?.replyId).toBe('second');
+});
+
+it('keeps another chat advance when acceptance persistence fails and accepts the same chat again', async () => {
+  const b = await createSession({ conversationId: 'rollback-other-chat' });
+  await goal.acceptGoalReplyNow({ conversationId: 'rollback-other-chat', sessionId: b.id, replyId: 'b-first', turnId: 'b-turn', eventSeq: 1, blocked: false });
+  const a = await createSession({ conversationId: 'rollback-first-chat' });
+  const durable = await import('../src/main/durable.js');
+  const write = durable.writeDurableNow;
+  let entered!: () => void, fail!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { fail = resolve; });
+  const spy = vi.spyOn(durable, 'writeDurableNow').mockImplementationOnce(async () => {
+    entered(); await gate; throw new Error('acceptance write failed');
+  }).mockImplementation(write);
+  const input = { conversationId: 'rollback-first-chat', sessionId: a.id, replyId: 'a-first', turnId: 'a-turn', eventSeq: 1, blocked: false };
+  const accepting = goal.acceptGoalReplyNow(input);
+  const rejected = expect(accepting).rejects.toThrow('acceptance write failed');
+  try {
+    await started;
+    await goal.setGoalReplyActiveNow('rollback-other-chat', false);
+    const changed = goal.snapshotGoalReplies().replies.find(row => row.conversationId === 'rollback-other-chat');
+    fail(); await rejected;
+    expect(goal.snapshotGoalReplies().replies.find(row => row.conversationId === 'rollback-other-chat')).toEqual(changed);
+    await durable.flushDurable();
+    const saved = await durable.readDurable<ReturnType<typeof goal.snapshotGoalReplies>>(goal.GOAL_REPLIES_STATE);
+    expect(saved?.replies.find(row => row.conversationId === 'rollback-other-chat')).toEqual(changed);
+    await expect(goal.acceptGoalReplyNow(input)).resolves.toBeUndefined();
+    expect(goal.snapshotGoalReplies().replies).toContainEqual(expect.objectContaining({ conversationId: input.conversationId, replyId: 'a-first' }));
+  } finally { fail(); await rejected; spy.mockRestore(); }
+});
+
+it.each(['null', 'throw', 'warn-throws'] as const)('accepts a completed Loop reply when diagnostic recording returns %s', async failure => {
+  const conversationId = 'loop-diagnostic-failure';
+  const session = await createSession({ conversationId });
+  await goal.setGoalSwitchNow(conversationId, 'loop', true);
+  await appendEvent(session.id, { source: 'extension', time: 1000, kind: 'turn_start', turnId: 'completed-turn' });
+  await appendEvent(session.id, { source: 'extension', time: 1200, kind: 'assistant_message', turnId: 'completed-turn',
+    messageId: 'stable-answer', final: true, message: { text: 'Checked.', chars: 8, truncated: false } });
+  await appendEvent(session.id, { source: 'extension', time: 1300, kind: 'turn_end', turnId: 'completed-turn', outcome: 'completed' });
+  const recorder = await import('../src/main/session/recorder.js');
+  const logger = await import('../src/main/logger.js');
+  const record = vi.spyOn(recorder, 'recordProgress');
+  if (failure === 'null') record.mockResolvedValue(null);
+  else record.mockRejectedValue(new Error('record failed'));
+  const warn = vi.spyOn(logger, 'logWarn');
+  if (failure === 'warn-throws') warn.mockImplementation(() => { throw new Error('debug output failed'); });
+  try {
+    await expect(goal.acceptGoalReplyNow({ conversationId, sessionId: session.id,
+      replyId: 'stable-answer', turnId: 'completed-turn', eventSeq: 3, blocked: false })).resolves.toBeUndefined();
+    expect(goal.snapshotGoalReplies().replies).toContainEqual(expect.objectContaining({ conversationId, state: 'handled' }));
+    expect(warn).toHaveBeenCalled();
+  } finally { record.mockRestore(); warn.mockRestore(); }
+});
+
+it.each(['goal', 'off'] as const)('preserves a %s policy change while the Loop diagnostic is pending', async mode => {
+  const conversationId = `loop-diagnostic-policy-${mode}`;
+  const session = await createSession({ conversationId });
+  await goal.setGoalSwitchNow(conversationId, 'loop', true);
+  await appendEvent(session.id, { source: 'extension', time: 1000, kind: 'turn_start', turnId: 'completed-turn' });
+  await appendEvent(session.id, { source: 'extension', time: 1200, kind: 'assistant_message', turnId: 'completed-turn',
+    messageId: 'stable-answer', final: true, message: { text: 'Checked.', chars: 8, truncated: false } });
+  await appendEvent(session.id, { source: 'extension', time: 1300, kind: 'turn_end', turnId: 'completed-turn', outcome: 'completed' });
+  const recorder = await import('../src/main/session/recorder.js');
+  const recordProgress = recorder.recordProgress;
+  let entered!: () => void, release!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const record = vi.spyOn(recorder, 'recordProgress').mockImplementation(async (...args) => {
+    entered();
+    await gate;
+    return recordProgress(...args);
+  });
+  const input = { conversationId, sessionId: session.id, replyId: 'stable-answer',
+    turnId: 'completed-turn', eventSeq: 3, blocked: false };
+  const acceptance = goal.acceptGoalReplyNow(input);
+  try {
+    await started;
+    await goal.setGoalSwitchNow(conversationId, mode === 'goal' ? 'goal' : 'loop', mode === 'goal');
+    await goal.setGoalReplyActiveNow(conversationId, mode === 'goal');
+    release();
+    await acceptance;
+    await goal.acceptGoalReplyNow(input);
+    expect(goal.snapshotGoalReplies().replies).toContainEqual(expect.objectContaining({
+      conversationId, replyId: 'stable-answer', state: mode === 'goal' ? 'pending' : 'handled'
+    }));
+    expect(goal.goalPendingReplyFor(conversationId)?.replyId ?? null).toBe(mode === 'goal' ? 'stable-answer' : null);
+  } finally {
+    release();
+    await acceptance;
+    record.mockRestore();
+  }
+});
+
+it('records one Loop diagnostic for concurrent observations of the same completed reply', async () => {
+  const conversationId = 'loop-concurrent-observation';
+  const session = await createSession({ conversationId });
+  await goal.setGoalSwitchNow(conversationId, 'loop', true);
+  await appendEvent(session.id, { source: 'extension', time: 1000, kind: 'user_message',
+    messageId: 'question', message: { text: 'Check the result.', chars: 17, truncated: false } });
+  await appendEvent(session.id, { source: 'extension', time: 1100, kind: 'turn_start', turnId: 'completed-turn' });
+  await appendEvent(session.id, { source: 'extension', time: 1200, kind: 'assistant_message', turnId: 'completed-turn',
+    messageId: 'stable-answer', final: true, message: { text: 'Result checked.', chars: 15, truncated: false } });
+  await appendEvent(session.id, { source: 'extension', time: 1300, kind: 'turn_end', turnId: 'completed-turn', outcome: 'completed' });
+  const [end] = await readRecentEvents(session.id, 1);
+  const helper = vi.fn(); globalThis.fetch = helper;
+  await Promise.all(Array.from({ length: 8 }, () => goal.acceptGoalReplyNow({ conversationId, sessionId: session.id,
+    replyId: 'stable-answer', turnId: 'completed-turn', eventSeq: end!.seq, blocked: false })));
+  expect((await readRecentEvents(session.id, 80, { kinds: ['progress'] })).filter(event =>
+    event.kind === 'progress' && event.progressId === 'loop-stalled:completed-turn')).toHaveLength(1);
+  expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
+  expect(helper).not.toHaveBeenCalled();
+});
+
 it('preserves the Astra delivery preference across Goal/Loop, restart and finish-setting changes', async () => {
   const config = (await import('../src/main/config.js')).getConfig();
   await saveConfig({ ...config, ui: { ...config.ui, finishTool: true } });

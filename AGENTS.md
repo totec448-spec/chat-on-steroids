@@ -3904,6 +3904,13 @@ Explicit user activation may proceed without that proof after the existing idle 
 activation setter records that exemption in the existing reply ledger; browser parameters or
 reply-ID prefixes cannot grant it. Recheck restored automatic debt, provider start and delivery.
 This condition does not change ordinary Goal mode or user-message delivery.
+An enabled Loop records one `loop-stalled:<turnId>` progress explanation when an exact completed
+final lacks that tool-call proof. Active turns and explicit reactivation do not produce it;
+the note grants no decision, transport or retry authority and does not change finish-only timing.
+`acceptGoalReplyNow` serializes acceptance per conversation. For this no-tool diagnostic, the
+recorder re-offers an eligible final only after its exact source turn completes; acceptance defers
+the handled tombstone while that turn is still running. Diagnostic write failure logs a warning
+and leaves reply acceptance intact.
 Automatic tickets retain exact source ownership. Native busy uses the shared one/five-minute
 wait and one Stop claim; uncollected tickets use the shared bounded three-reload 2/5/10 pickup schedule (§14).
 A chat that started its own workers defers that pickup and the automatic decision
@@ -4017,8 +4024,9 @@ bounded receipt journal distinguishes pre-send busy cancellation from successful
 lost deferral response cannot resurrect the old text. App/web name this wait explicitly.
 
 Goal/Loop/planner failures retain machine codes for retry/ownership but publish a separate readable
-explanation in app and browser. Missing MCP evidence explains that the previous response made no
-local tool call, so lost tool connectivity cannot be established; Loop remains enabled. Do not
+explanation in app and browser. Missing MCP evidence reports that no local tool call was recorded
+for this reply: Loop did not continue. Answer any question, or check the tool connection; Loop
+stays on. Missing evidence cannot establish lost tool connectivity. Do not
 claim login is missing or the tunnel is off without evidence. Distinguish input size, helper output
 size, provider failures and uncertain delivery. Browser error text wraps instead of truncating.
 

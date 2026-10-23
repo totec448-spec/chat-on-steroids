@@ -1101,7 +1101,7 @@
     "message": "sim"
   },
   "content_goal_error_loop_mcp_call_missing": {
-    "message": "Não foi registada nenhuma chamada a ferramentas MCP na última resposta. O ChatGPT pode estar a fazer uma pergunta ou a ligação às ferramentas pode ter sido perdida. Responda à pergunta ou verifique o túnel se as ferramentas deixaram de funcionar. A continuação automática está em pausa; o Loop permanece ativo."
+    "message": "O Loop não continuou após esta resposta: não foi registada nenhuma chamada a uma ferramenta local. Responda a qualquer pergunta ou verifique a ligação às ferramentas; o Loop continua ativo."
   },
   "content_goal_error_goal_reply_not_pending": {
     "message": "Não há nenhuma continuação pendente para esta resposta. Pode já ter sido tratada ou substituída por trabalho mais recente. Consulte a atividade mais recente do chat antes de tentar novamente."

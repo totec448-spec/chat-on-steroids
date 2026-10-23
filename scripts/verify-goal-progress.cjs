@@ -31,11 +31,14 @@ app.whenReady().then(async () => {
     const ok = data => Promise.resolve({ok:true,data});
     const session = {id:'goal-fixture',title:'Loop progress',conversationId:'fixture',chatIds:['fixture'],
       startedAt:1,updatedAt:1,endedAt:null,events:0,userMessages:0,toolCalls:0,errors:0,estimatedTokens:0,contextTokens:0,agents:[],origin:null};
+    const notice = 'Loop did not continue after this reply: no local tool call was recorded for it. Answer any question, or check the tool connection; Loop stays on.';
+    const events = [{seq:1,time:1,source:'app',kind:'progress',progressId:'loop-stalled:fixture-turn',turnId:'fixture-turn',
+      message:{text:notice,chars:notice.length,truncated:false}}];
     window.controls = {sessionId:session.id,conversationId:'fixture',automation:'loop',objective:'Continue the requested work',blocked:'',job:null,
       goalWait:{reason:'quiet',until:Date.now()+125000},goalDraft:null};
     window.api = new Proxy({listSessions:()=>ok({sessions:[session],activeId:null,blocked:[],pressure:[]}),
       listProjects:()=>ok([]),listInputs:()=>ok([]),runningTools:()=>ok([]),listPausedHelpers:()=>ok([]),
-      getSession:()=>ok({summary:session,total:0,events:[],nextFrom:0}),getSessionControls:()=>ok(controls)
+      getSession:()=>ok({summary:session,total:1,events,nextFrom:1}),getSessionControls:()=>ok(controls)
     }, {get:(target,key)=>target[key]??(()=>ok(null))});
     window.frame=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
   })()`);
@@ -45,6 +48,9 @@ app.whenReady().then(async () => {
     document.querySelector('#sessionList [data-id="goal-fixture"]').click();
     for(let i=0;i<120&&!document.getElementById('goalLifecycle')?.textContent.includes('Waiting for tool inactivity');i++) await frame();
   })()`);
+  const note = await win.webContents.executeJavaScript(`document.querySelector('.ev-progress .meta')?.textContent`);
+  assert.ok(note?.includes('no local tool call was recorded for it'), note);
+  fs.writeFileSync(path.join(output, 'stalled-reply.png'), (await win.webContents.capturePage()).toPNG());
   const results = [];
   for (const width of [1100, 720]) for (const zoom of [1, 1.5]) {
     win.setContentSize(width, 760); win.webContents.setZoomFactor(zoom);

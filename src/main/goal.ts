@@ -43,7 +43,7 @@
  */
 
 import { requestBrowserDecision, authorizeBrowserHelperRetry } from './session/input.js';
-import { goalErrorKey, goalErrorMessage } from '../shared/goal-errors.js';
+import { goalErrorKey, goalErrorMessage, LOOP_MCP_CALL_MISSING_NOTICE } from '../shared/goal-errors.js';
 import { userPromptText } from '../shared/user-prompt.js';
 import { planProgressText, type TaskProgressUpdate } from '../shared/task-progress.js';
 import { TaskRequestError } from './task-request.js';
@@ -58,7 +58,7 @@ import { goalHelperPromptLimit, noteGoalHelperUnanswered, resetGoalHelperSizeFor
 export { GOAL_HELPER_SIZE_STATE, restoreGoalHelperSize } from './goal-helper-size.js';
 import { logInfo, logWarn } from './logger.js';
 import { getSecret, secretsRevision } from './secrets.js';
-import { findSessionByConversation, getSession, readEvents, readHandoff, readRecentEvents, turnHasMcpCall } from './session/store.js';
+import { findSessionByConversation, getSession, readCompletedFinal, readEvents, readHandoff, readRecentEvents, turnHasMcpCall } from './session/store.js';
 import { foldProgress } from '../shared/session.js';
 import { modelFacingText } from '../shared/content-reference.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
@@ -656,8 +656,18 @@ export async function syncGoalPickupRecoveryNow(conversationId: string, replyId:
   return true;
 }
 
-/** Freezes Goal eligibility at the durable recorder boundary. */
-export async function acceptGoalReplyNow(input: {
+const goalReplyAccepts = new Map<string, Promise<void>>();
+/** Freeze eligibility and its diagnostic together for one conversation. */
+export function acceptGoalReplyNow(input: Parameters<typeof acceptGoalReply>[0]): Promise<void> {
+  const write = (goalReplyAccepts.get(input.conversationId) ?? Promise.resolve()).then(() => acceptGoalReply(input));
+  const tail = write.catch(() => {}).finally(() => {
+    if (goalReplyAccepts.get(input.conversationId) === tail) goalReplyAccepts.delete(input.conversationId);
+  });
+  goalReplyAccepts.set(input.conversationId, tail);
+  return write;
+}
+
+async function acceptGoalReply(input: {
   silenceSourceTurnId?: string;
   silencePro?: boolean;
   listenUntil?: number;
@@ -671,11 +681,35 @@ export async function acceptGoalReplyNow(input: {
   handledOnly?: true;
   current?: () => boolean;
 }): Promise<void> {
-  if (!input.handledOnly && await astraFinishOnly(input.sessionId, input.conversationId)) return;
+  const finishOnly = !input.handledOnly && await astraFinishOnly(input.sessionId, input.conversationId);
   if (input.silenceSourceTurnId &&
       !await turnHasMcpCall(input.sessionId, input.conversationId, input.silenceSourceTurnId)) return;
   const current = goalReplies.get(input.conversationId);
-  if (current?.replyId === input.replyId || (current && current.eventSeq > input.eventSeq)) return;
+  const armed =
+    !input.handledOnly && !input.blocked &&
+    getConfig().sessions.record &&
+    goalArmedFor(input.conversationId) &&
+    await goalKeyPresent(goalSwitchFor(input.conversationId).mode);
+  const explicitlyActive = current?.sessionId === input.sessionId && current.turnId === input.turnId &&
+    current.state === 'pending' && current.explicitActivation;
+  const missingMcp = armed && !explicitlyActive && goalSwitchFor(input.conversationId).mode === 'loop' &&
+    !await automaticLoopHasMcpWork(input.sessionId, input.conversationId, input.silenceSourceTurnId ?? input.turnId);
+  let stalledTurn: string | undefined;
+  if (missingMcp) {
+    const source = await goalReplySourceTurn(input.sessionId, input.turnId);
+    const [boundary] = await readRecentEvents(input.sessionId, 1, { kinds: ['turn_start', 'turn_end'] });
+    // An apparent final can keep the same assistant id while the turn is still running.
+    // Do not freeze its handled tombstone before its exact completion arrives.
+    if (boundary?.kind === 'turn_start' && boundary.turnId === source) return;
+    if (source && boundary?.kind === 'turn_end' && boundary.turnId === source && boundary.outcome === 'completed') {
+      const final = await readCompletedFinal(input.sessionId, input.conversationId, input.turnId);
+      if (final && (final.messageId === input.replyId || input.replyId === 'turn:' + input.turnId)) stalledTurn = source;
+    }
+  }
+  if (input.current && !input.current()) return;
+  if (goalReplies.get(input.conversationId) !== current || (current && current.eventSeq > input.eventSeq)) return;
+  if (finishOnly) return;
+  if (current?.replyId === input.replyId) return;
   const provisionalUpgrade = Boolean(
     current &&
       current.eventSeq === 0 &&
@@ -683,16 +717,8 @@ export async function acceptGoalReplyNow(input: {
       current.replyId === `turn:${input.turnId}`.slice(0, 200)
   );
   const before = current ? { ...current } : null;
-  const bounded = snapshotGoalReplies().replies;
-  const active =
-    !input.handledOnly && !input.blocked &&
-    getConfig().sessions.record &&
-    goalArmedFor(input.conversationId) &&
-    await goalKeyPresent(goalSwitchFor(input.conversationId).mode) &&
-    (goalSwitchFor(input.conversationId).mode !== 'loop' ||
-      await automaticLoopHasMcpWork(input.sessionId, input.conversationId, input.silenceSourceTurnId ?? input.turnId));
-  if (input.current && !input.current()) return;
-  goalReplies.set(input.conversationId, {
+  const active = armed && !missingMcp;
+  const accepted: GoalReplyObligation = {
     conversationId: input.conversationId,
     sessionId: input.sessionId,
     replyId: input.replyId.slice(0, 200),
@@ -709,19 +735,36 @@ export async function acceptGoalReplyNow(input: {
     // policy or reopen a decision the page already acknowledged in the meantime.
     acceptedAt: provisionalUpgrade ? current!.acceptedAt : Date.now(),
     state: provisionalUpgrade ? current!.state : active ? 'pending' : 'handled'
-  });
+  };
+  goalReplies.set(input.conversationId, accepted);
   try {
     await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies());
   } catch (error) {
-    // The rejected write is one whole revision, so the rollback is too: the row this accept
-    // added and the expired rows it pruned go back together, leaving the ledger exactly as the
-    // decision found it.
-    goalReplies.clear();
-    for (const reply of bounded) goalReplies.set(reply.conversationId, reply);
-    if (before) goalReplies.set(input.conversationId, before);
-    else goalReplies.delete(input.conversationId);
+    // Other chats can advance while this write is pending. Roll back only this acceptance,
+    // and never replace a newer row installed by another control of the same conversation.
+    if (goalReplies.get(input.conversationId) === accepted) {
+      if (before) goalReplies.set(input.conversationId, before);
+      else goalReplies.delete(input.conversationId);
+    }
     persistGoalRepliesSoon();
     throw error;
+  }
+  // Publish the reply before optional diagnostics so a concurrent switch can re-arm it.
+  if (stalledTurn) {
+    const progressId = 'loop-stalled:' + stalledTurn;
+    try {
+      const [recorded] = await readRecentEvents(input.sessionId, 1, { kinds: ['progress'],
+        acceptEvent: event => event.kind === 'progress' && event.progressId === progressId });
+      if (!recorded) {
+        const { recordProgress } = await import('./session/recorder.js');
+        if (!await recordProgress(input.sessionId, progressId,
+          LOOP_MCP_CALL_MISSING_NOTICE, undefined, stalledTurn)) {
+          logWarn('goal: Loop diagnostic could not be recorded');
+        }
+      }
+    } catch {
+      try { logWarn('goal: Loop diagnostic could not be recorded'); } catch {}
+    }
   }
 }
 

@@ -11,6 +11,8 @@ import tr from '../src/renderer/locales/tr.json';
 import fr from '../src/renderer/locales/fr.json';
 import ptBR from '../src/renderer/locales/pt-BR.json';
 import ptPT from '../src/renderer/locales/pt-PT.json';
+import ru from '../src/renderer/locales/ru.json';
+import vi from '../src/renderer/locales/vi.json';
 
 function extensionCatalogs(locales: readonly string[]) {
   return Object.fromEntries(locales.map(locale => [
@@ -20,13 +22,18 @@ function extensionCatalogs(locales: readonly string[]) {
 }
 
 describe('Goal failure explanations', () => {
-  it('explains that missing tool evidence may be a question or lost connection without disabling Loop', () => {
+  it('provides the no-tool Loop timeline notice in all twelve interface languages', () => {
+    const source = 'Loop did not continue after this reply: no local tool call was recorded for it. Answer any question, or check the tool connection; Loop stays on.';
+    const catalogs: Record<string, Record<string, string>> = { de, es, 'zh-CN': zhCN, 'zh-TW': zhTW, ja, ko, tr, vi, fr, 'pt-BR': ptBR, 'pt-PT': ptPT, ru };
+    for (const [locale, catalog] of Object.entries(catalogs)) {
+      expect(catalog[source], locale).toBeTruthy();
+      expect(catalog[source], locale).not.toBe(source);
+    }
+  });
+
+  it('explains the no-tool reply without implying that Loop was disabled', () => {
     const message = goalErrorMessage('loop_mcp_call_missing');
-    expect(message).toContain('ChatGPT may be asking you something');
-    expect(message).toContain('the tool connection may have been lost');
-    expect(message).toContain('Answer it');
-    expect(message).toContain('Loop remains enabled');
-    expect(message).not.toMatch(/logged out|sign in|tunnel is off/i);
+    expect(message).toBe('Loop did not continue after this reply: no local tool call was recorded for it. Answer any question, or check the tool connection; Loop stays on.');
     expect(goalErrorMessage('goal_reply_not_pending')).not.toContain('No MCP tool call');
   });
 
@@ -66,7 +73,7 @@ describe('Goal failure explanations', () => {
   });
 
   it('keeps every fixed Goal explanation localizable in every renderer catalog', () => {
-    const catalogs: Record<string, Record<string, string>> = { de, es, 'zh-CN': zhCN, 'zh-TW': zhTW, ja, ko, tr, fr, 'pt-BR': ptBR, 'pt-PT': ptPT };
+    const catalogs: Record<string, Record<string, string>> = { de, es, 'zh-CN': zhCN, 'zh-TW': zhTW, ja, ko, tr, vi, fr, 'pt-BR': ptBR, 'pt-PT': ptPT, ru };
     const codes = [
       'loop_mcp_call_missing', 'goal_reply_not_pending', 'goal_context_too_large', 'reply_too_long',
       'stream_record_too_long', 'response_body_too_large', 'no_api_key', 'auth_rejected', 'out_of_credit',
@@ -88,7 +95,9 @@ describe('Goal failure explanations', () => {
       for (const source of [...fixed, ...parameterized]) {
         expect(Object.hasOwn(catalog, source), `${locale}: ${source}`).toBe(true);
       }
-      expect(catalog[goalErrorMessage('loop_mcp_call_missing')], locale).toContain('ChatGPT');
+      const noToolNotice = goalErrorMessage('loop_mcp_call_missing');
+      expect(catalog[noToolNotice], locale).toBeTruthy();
+      expect(catalog[noToolNotice], locale).not.toBe(noToolNotice);
     }
   });
 
@@ -97,7 +106,7 @@ describe('Goal failure explanations', () => {
       'out_of_credit', 'auth_rejected', 'no_api_key', 'rate_limited', 'loop_mcp_call_missing',
       'goal_context_too_large', 'request_failed', 'request_failed: fetch failed', 'request_failed: no_api_key'
     ];
-    const locales = ['de', 'en', 'es', 'fr', 'ja', 'tr', 'zh_CN', 'zh_TW'];
+    const locales = ['de', 'en', 'es', 'fr', 'ja', 'ko', 'pt_BR', 'pt_PT', 'ru', 'tr', 'vi', 'zh_CN', 'zh_TW'];
     const catalogs = extensionCatalogs(locales);
     for (const code of codes) {
       const key = goalErrorKey(code);
@@ -106,7 +115,6 @@ describe('Goal failure explanations', () => {
       for (const locale of locales) {
         const message = catalogs[locale]?.[`content_goal_error_${key}`]?.message;
         expect(message, `${locale}: ${code}`).toBeTruthy();
-        if (code === 'loop_mcp_call_missing') expect(message, `${locale}: ${code}`).toContain('ChatGPT');
       }
     }
     expect(catalogs.de?.content_goal_error_out_of_credit?.message).not.toBe(catalogs.en?.content_goal_error_out_of_credit?.message);

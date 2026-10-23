@@ -1035,7 +1035,7 @@
     "message": "có"
   },
   "content_goal_error_loop_mcp_call_missing": {
-    "message": "Không ghi nhận lệnh gọi công cụ MCP nào trong phản hồi gần nhất. ChatGPT có thể đang hỏi bạn điều gì đó hoặc kết nối công cụ có thể đã bị mất. Hãy trả lời, hoặc kiểm tra tunnel nếu công cụ ngừng hoạt động. Tiếp tục tự động đã tạm dừng; Loop vẫn bật."
+    "message": "Loop đã không tiếp tục sau câu trả lời này: không ghi nhận lệnh gọi công cụ cục bộ nào. Hãy trả lời câu hỏi nếu có hoặc kiểm tra kết nối công cụ; Loop vẫn bật."
   },
   "content_goal_error_goal_reply_not_pending": {
     "message": "Không có nội dung tiếp tục nào đang chờ cho câu trả lời này. Có thể nó đã được xử lý hoặc bị công việc mới hơn thay thế. Hãy kiểm tra hoạt động cuộc trò chuyện mới nhất trước khi thử lại."

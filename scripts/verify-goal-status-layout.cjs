@@ -10,7 +10,9 @@ app.whenReady().then(async () => {
     webPreferences: { sandbox: true, backgroundThrottling: false } });
   const css = fs.readFileSync(path.join(__dirname, '../extension/overlay.css'), 'utf8');
   const errors = fs.readFileSync(path.join(__dirname, '../src/shared/goal-errors.ts'), 'utf8');
-  const reason = errors.match(/loop_mcp_call_missing: '([^']+)'/)[1];
+  const reason = errors.match(/LOOP_MCP_CALL_MISSING_NOTICE\s*=\s*'([^']+)'/)?.[1];
+  assert.equal(typeof reason, 'string');
+  assert.match(errors, /loop_mcp_call_missing:\s*LOOP_MCP_CALL_MISSING_NOTICE/);
   await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(`<style>${css}
     body { background: #171717; color: #eee; font-family: sans-serif; }</style>
     <div class="clf-stage" data-kind="goal-error"><div class="clf-stage-head">
@@ -35,6 +37,9 @@ app.whenReady().then(async () => {
     assert.equal(result.documentOverflow, false);
     assert.ok(result.lines > 1);
     results.push(result);
+    const output = path.join(__dirname, '../outputs/goal-status-layout');
+    fs.mkdirSync(output, { recursive: true });
+    fs.writeFileSync(path.join(output, `stage-${width}.png`), (await win.webContents.capturePage()).toPNG());
   }
   console.log(JSON.stringify(results, null, 2));
   win.destroy(); app.quit();
