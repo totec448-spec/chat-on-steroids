@@ -513,6 +513,8 @@ code {
 }
 /* Sidebar surfaces share the chosen tint, including the detached connection popover. */
 .sidebar, .app-topbar, .connection-popover { background: var(--sidebar-color, var(--sunk)); color: var(--ink); }
+/* High contrast draws the sidebar on the page color, so a 3:1 line keeps the two apart. */
+:root[data-high-contrast='true'] .sidebar { border-right-color: var(--line); }
 :root[data-translucent-sidebar='true'] :is(.sidebar, .app-topbar, .appearance-preview-sidebar, .connection-popover) {
   background: linear-gradient(155deg, color-mix(in srgb, var(--sidebar-color) 72%, transparent), color-mix(in srgb, var(--sidebar-color) 94%, transparent));
   backdrop-filter: blur(22px) saturate(125%);

@@ -2986,5 +2986,11 @@
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "Một cây bút đánh dấu các cuộc trò chuyện có tin nhắn chưa gửi, và bản nháp quay lại sau khi khởi động lại.",
   "A better Review": "Phần Xem lại tốt hơn",
   "Right-click an untracked file to add it, or its folder, to .gitignore.": "Nhấp chuột phải vào một tệp chưa được theo dõi để thêm tệp đó hoặc thư mục của nó vào .gitignore.",
-  "Stopped · open this chat's tab again to continue": "Đã dừng · hãy mở lại tab của cuộc trò chuyện này để tiếp tục"
+  "Stopped · open this chat's tab again to continue": "Đã dừng · hãy mở lại tab của cuộc trò chuyện này để tiếp tục",
+  "High contrast": "Độ tương phản cao",
+  "Black or white background with stronger text and lines. Your colors stay saved for when you turn it off.": "Nền đen hoặc trắng, chữ và đường kẻ rõ hơn. Màu bạn chọn vẫn được lưu để dùng khi tắt chế độ này.",
+  "Accent presets": "Màu nhấn có sẵn",
+  "Each is easy to read in light and dark.": "Màu nào cũng dễ đọc ở cả giao diện sáng và tối.",
+  "Orange": "Cam",
+  "Red": "Đỏ"
 }

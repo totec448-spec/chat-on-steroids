@@ -623,6 +623,63 @@ it('applies line spacing and the legible font from Appearance at once, and saves
   expect(root.style.getPropertyValue('--line-spacing')).toBe('1');
 });
 
+it('offers eight accent presets and a High contrast switch that keeps the chosen colors underneath', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document, root = doc.documentElement;
+  const { ACCENT_PRESETS, defaultAppearance } = await import('../src/shared/appearance.js');
+  const swatches = [...doc.querySelectorAll<HTMLButtonElement>('#appearanceAccentPresets .appearance-swatch')];
+  const theme = root.dataset.theme as 'light' | 'dark';
+  expect(swatches.map(swatch => swatch.getAttribute('aria-label'))).toEqual(['Blue', 'Teal', 'Green', 'Amber', 'Orange', 'Red', 'Rose', 'Purple']);
+  expect(swatches.map(swatch => swatch.getAttribute('role'))).toEqual(Array(8).fill('radio'));
+  // The default accent is the first preset; exactly one is checked.
+  expect(swatches.map(swatch => swatch.getAttribute('aria-checked'))).toEqual(['true', ...Array(7).fill('false')]);
+  // A preset sets its own shade for both themes, so switching theme keeps the family.
+  swatches[1]!.click();
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.appearance).toMatchObject({
+    light: { accent: ACCENT_PRESETS[1].light }, dark: { accent: ACCENT_PRESETS[1].dark } }));
+  expect(swatches.map(swatch => swatch.getAttribute('aria-checked'))).toEqual(['false', 'true', ...Array(6).fill('false')]);
+  expect((doc.getElementById('appearance-accent-hex') as HTMLInputElement).value).toBe(ACCENT_PRESETS[1][theme].toUpperCase());
+  // Arrows move between the presets and choose the one they land on.
+  swatches[1]!.focus();
+  swatches[1]!.dispatchEvent(new mounted.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  expect(doc.activeElement).toBe(swatches[2]);
+  expect(swatches[2]!.getAttribute('aria-checked')).toBe('true');
+  expect(swatches.filter(swatch => swatch.tabIndex === 0)).toEqual([swatches[2]]);
+  swatches[0]!.focus();
+  swatches[0]!.dispatchEvent(new mounted.window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+  expect(doc.activeElement).toBe(swatches[7]);
+  // A hand-picked color checks no preset.
+  const hex = doc.getElementById('appearance-accent-hex') as HTMLInputElement;
+  hex.value = '#123456';
+  hex.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  expect(swatches.every(swatch => swatch.getAttribute('aria-checked') === 'false')).toBe(true);
+
+  const high = doc.getElementById('appearanceHighContrast') as HTMLInputElement;
+  expect(high.checked).toBe(false);
+  high.checked = true;
+  high.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.appearance).toMatchObject({ highContrast: true }));
+  expect(root.dataset.highContrast).toBe('true');
+  expect(root.style.getPropertyValue('--page')).toBe(theme === 'dark' ? '#000000' : '#ffffff');
+  // Background, sidebar, contrast and translucency do nothing now, so they say so; the accent still works.
+  for (const id of ['appearance-background', 'appearance-background-hex', 'appearance-sidebar', 'appearance-sidebar-hex', 'appearanceContrast', 'appearanceTranslucent'])
+    expect((doc.getElementById(id) as HTMLInputElement).disabled, id).toBe(true);
+  expect((doc.getElementById('appearance-accent-hex') as HTMLInputElement).disabled).toBe(false);
+  // The colors chosen before wait underneath.
+  expect(mounted.calls.at(-1)?.ui.appearance[theme].background).toBe(defaultAppearance()[theme].background);
+  high.checked = false;
+  high.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.appearance).toMatchObject({ highContrast: false }));
+  expect(root.style.getPropertyValue('--page')).toBe(defaultAppearance()[theme].background);
+  expect((doc.getElementById('appearanceContrast') as HTMLInputElement).disabled).toBe(false);
+  // Reset turns high contrast off too.
+  high.checked = true;
+  high.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  doc.getElementById('appearanceReset')!.click();
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.appearance).toMatchObject({ highContrast: false }));
+  expect(high.checked).toBe(false);
+});
+
 it('gives the line-spacing slider the shown value as its spoken value, from the saved setting and after a change', async () => {
   const mounted = await mountChat();
   const doc = mounted.window.document;

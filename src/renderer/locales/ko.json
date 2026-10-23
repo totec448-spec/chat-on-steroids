@@ -2986,5 +2986,11 @@
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "보내지 않은 메시지가 있는 채팅에 연필 표시가 붙고, 초안은 다시 시작한 뒤에도 돌아옵니다.",
   "A better Review": "더 나아진 리뷰",
   "Right-click an untracked file to add it, or its folder, to .gitignore.": "추적되지 않는 파일을 마우스 오른쪽 버튼으로 클릭해 그 파일이나 폴더를 .gitignore에 추가하세요.",
-  "Stopped · open this chat's tab again to continue": "중지됨 · 계속하려면 이 채팅의 탭을 다시 여세요"
+  "Stopped · open this chat's tab again to continue": "중지됨 · 계속하려면 이 채팅의 탭을 다시 여세요",
+  "High contrast": "고대비",
+  "Black or white background with stronger text and lines. Your colors stay saved for when you turn it off.": "검은색 또는 흰색 배경에 텍스트와 선을 더 뚜렷하게 표시합니다. 선택한 색은 끌 때를 위해 저장됩니다.",
+  "Accent presets": "강조 색 프리셋",
+  "Each is easy to read in light and dark.": "모두 라이트와 다크에서 읽기 쉽습니다.",
+  "Orange": "주황",
+  "Red": "빨강"
 }

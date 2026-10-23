@@ -3082,5 +3082,11 @@
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "Un crayon signale les chats avec un message non envoyé, et les brouillons reviennent après un redémarrage.",
   "A better Review": "Une Révision améliorée",
   "Right-click an untracked file to add it, or its folder, to .gitignore.": "Faites un clic droit sur un fichier non suivi pour ajouter le fichier ou son dossier à .gitignore.",
-  "Stopped · open this chat's tab again to continue": "Arrêté · rouvrez l'onglet de cette discussion pour continuer"
+  "Stopped · open this chat's tab again to continue": "Arrêté · rouvrez l'onglet de cette discussion pour continuer",
+  "High contrast": "Contraste élevé",
+  "Black or white background with stronger text and lines. Your colors stay saved for when you turn it off.": "Fond noir ou blanc, texte et lignes plus marqués. Vos couleurs restent enregistrées pour quand vous le désactivez.",
+  "Accent presets": "Accents prédéfinis",
+  "Each is easy to read in light and dark.": "Chacun reste lisible en clair et en sombre.",
+  "Orange": "Orange",
+  "Red": "Rouge"
 }
