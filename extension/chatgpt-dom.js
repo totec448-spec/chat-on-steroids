@@ -2824,6 +2824,13 @@ var CLF_DOM = (() => {
   const connectorNames = () => [...(ownConnectors || PLAIN_CONNECTORS)];
   /** The Plugins connector of any computer: it only selects that connector's larger action limits. */
   const pluginsConnectorName = (name) => name === PLAIN_CONNECTORS[2] || SUFFIXED_CONNECTOR.exec(typeof name === 'string' ? name : '')?.[1] === 'Plugins';
+  /** Multi-app Core enrollment: undefined means one/no proven ID; null means ambiguous. */
+  function firstEnrollmentAppId(proven, connectorName) {
+    if (proven.length <= 1) return undefined;
+    const named = proven.filter(app => app.name === connectorName);
+    if (named.length !== 1 || ownApps.filter(app => app.appId === named[0].appId).length !== 1) return null;
+    return named[0].appId;
+  }
 
   /** Observed ChatGPT Plugins settings surface. Missing/ambiguous structure is not proof. */
   async function pluginRefreshView(connectorName, expectedTools = [], expectedAppId = null) {
@@ -2860,7 +2867,12 @@ var CLF_DOM = (() => {
    */
   function ownSnapshot(snapshot, connectorName) {
     const proven = provenAppsFor(connectorName);
-    return proven !== null && (proven.length ? proven.some(app => app.appId === snapshot.appId) : snapshot.connectorName === connectorName);
+    if (proven === null) return false;
+    // The detail page must retain the same unique first-enrollment target elected in the
+    // installed list. Otherwise an unbound request could accept a different proven Core ID.
+    const target = firstEnrollmentAppId(proven, connectorName);
+    return target !== null && (target ? snapshot.appId === target : proven.length
+      ? proven.some(app => app.appId === snapshot.appId) : snapshot.connectorName === connectorName);
   }
   function pluginInstalledButtons(connectorName, expectedAppId = null, expectedSurface = null) {
     // Native links name their exact App Id, even when a fresh provider rename has not reached
@@ -2881,6 +2893,12 @@ var CLF_DOM = (() => {
           (!proven.length && connectorNames()[surfaceAt] !== connectorName))) return null;
     }
     if (proven === null) return null;
+    // A surface can retain several real, still-installed App IDs (for example an older Core,
+    // this Mac's Core and a separately named OCX). All are valid sightings, but they are not
+    // interchangeable refresh targets. The caller's current connector name must identify one
+    // proven App ID; only a previously enrolled exact ID can bypass this first-enrollment rule.
+    const namedTargetId = expectedAppId === null ? firstEnrollmentAppId(proven, connectorName) : undefined;
+    if (namedTargetId === null) return null;
     const names = [connectorName, ...proven.map(app => app.name).filter(Boolean)];
     const named = node => names.includes(text(node));
     return safe(() => {
@@ -2897,15 +2915,16 @@ var CLF_DOM = (() => {
             const route = /^\/settings\/plugins-settings\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(url.pathname);
             if (url.origin !== location.origin || !route || url.hash) return false;
             if (expectedAppId !== null && route[1] !== expectedAppId) return false;
+            if (namedTargetId !== undefined) return route[1] === namedTargetId;
             if (proven.length) return proven.some(app => app.appId === route[1]);
             if (expectedAppId !== null) return true;
           }
-          if (expectedAppId !== null) return false; // An enrolled observation needs the link's exact ID, never a name-only button.
+          if (expectedAppId !== null || namedTargetId !== undefined) return false; // Once an exact ID is known, name-only buttons cannot prove its identity.
           return [...button.querySelectorAll('*')].some(node => !node.children.length && named(node));
         });
         return rows.length ? rows : null;
       }
-      if (expectedAppId !== null) return null; // Legacy rows cannot prove a native installed App Id.
+      if (expectedAppId !== null || namedTargetId !== undefined) return null; // Legacy rows cannot prove an exact installed App Id.
       const panels = [...document.querySelectorAll('[role="tabpanel"]')].filter(panel => panel.getClientRects().length > 0 &&
         (panel.querySelector('[data-testid="plugin-icon-wrapper"]') || panel.querySelector('a[href="/plugins"]')));
       if (panels.length !== 1) return null;
