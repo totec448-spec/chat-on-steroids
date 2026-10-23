@@ -16200,6 +16200,41 @@ describe('folding away the chat’s opening instruction', () => {
 });
 
 describe('the fresh chat the app opened', () => {
+  // #1792: a URL in the handoff became a rich-link preview with its own <style> inside the editor,
+  // and the untouched handoff read as "ChatGPT replaced the composer while inserting the bootstrap".
+  it('sends a handoff whose link ChatGPT turned into a preview while it was being inserted', async () => {
+    let clicks = 0, injected = false;
+    live = await harness(
+      'https://chatgpt.com/?clf=cmd-link-resume',
+      {
+        redeem: () => ({ ok: true, command: { id: 'cmd-link-resume', type: 'resume',
+          text: '[[CLF-RESUME:0123456789abcdef0123456789abcdef]]\n\nNotes are in https://drive.example.com/folders/abc123 for the next step', agent: null } }),
+        ack: () => ({ ok: true })
+      },
+      (document, dom) => {
+        const editor = document.querySelector('#prompt-textarea')!;
+        new dom.window.MutationObserver(() => {
+          // The handoff's own words, not a host name: only the inserted handoff gets the preview.
+          if (!editor.textContent!.includes('for the next step') || editor.querySelector('style')) return;
+          const card = document.createElement('span');
+          const style = document.createElement('style');
+          style.textContent = '@supports (display:grid){.link-card{display:grid}}@media (min-width:600px){.link-card{gap:8px}}';
+          card.append(style); editor.append(card); injected = true;
+        }).observe(editor, { childList: true, subtree: true, characterData: true });
+        document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+          clicks += 1;
+          dom.reconfigure({ url: 'https://chatgpt.com/c/12121212-3434-5656-7878-909090909090' });
+        });
+      }
+    );
+    await settle(200);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await settle();
+    expect(injected, 'the preview was injected').toBe(true);
+    expect(JSON.stringify(live.sent)).not.toContain('replaced the composer');
+    expect(clicks).toBe(1);
+  });
+
   it('delivers the bootstrap before unrelated status restoration can stall startup', async () => {
     let releaseStatus: () => void = () => undefined;
     const statusHeld = new Promise((resolve) => {
