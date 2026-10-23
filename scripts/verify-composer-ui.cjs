@@ -54,7 +54,8 @@ app.whenReady().then(async () => {
   // Exercise both motion preferences explicitly; hosted macOS defaults to reduce.
   win.webContents.debugger.attach('1.3');
   await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});
-  await check('Renderer selected the fixture session', `document.getElementById('contextMeterCompact').textContent==='38%'`);
+  // 152K of the fixture's 300K compaction point (#1806: the meter no longer fills toward the derived 400K).
+  await check('Renderer selected the fixture session', `document.getElementById('contextMeterCompact').textContent==='51%'`);
   await capture('composer');
   await click('#modelMenu > summary');
   await check('Effort popover initially hides the model list', `document.getElementById('composerModelChoices').hidden&&document.getElementById('composerModelToggle').getAttribute('aria-expanded')==='false'`);
@@ -150,7 +151,7 @@ app.whenReady().then(async () => {
   await click('#composerSettings > summary'); await click('[data-mode="off"]');
   await click('#contextMeterButton'); await capture('context');
   await click('#contextDisplay');
-  await check('Context values toggle in the original meter', `document.getElementById('contextMeterCompact').textContent==='152K / 400K'`);
+  await check('Context values toggle in the original meter', `document.getElementById('contextMeterCompact').textContent==='152K / 300K'`);
   await js(`document.getElementById('contextDisplay').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`); await pause(180);
   await check('Escape closes context and restores focus', `getComputedStyle(document.getElementById('contextMeterInfo')).display==='none'&&document.activeElement.id==='contextMeterButton'`);
   await click('#contextMeterButton'); await click('#compactSession'); await pause(350);

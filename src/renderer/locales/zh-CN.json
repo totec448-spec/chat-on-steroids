@@ -1173,7 +1173,6 @@
   "{0} problems": "{0} 个问题",
   "{0} total · {1} folder": "共 {0} 个 · {1} 个文件夹",
   "{0} total · {1} folders": "共 {0} 个 · {1} 个文件夹",
-  "{0} / {1} tokens · {2}% of configured limit": "{0}／{1} Token · 占设定上限的 {2}%",
   "The recording does not include this source URL": "记录中未包含此来源的 URL",
   "[source link unavailable]": "[来源链接不可用]",
   " at {0}": "，时间 {0}",
@@ -1768,7 +1767,6 @@
   "This reply points to content from another message that was not recorded.": "此回复指向另一条消息中未被记录的内容。",
   "Use effort: {0}": "使用此强度：{0}",
   "This chat (estimate)": "此对话（估算）",
-  "Context limit": "上下文上限",
   "Filled": "已用",
   "Compacts automatically at": "自动压缩起点",
   "A chat stopped": "一个聊天已停止",
@@ -2991,5 +2989,8 @@
   "What ChatGPT gets to see on this computer.": "ChatGPT 在这台电脑上能看到的内容。",
   "Off for every project in Settings": "已在设置中对所有项目关闭",
   "This project's tools send keys and tokens to ChatGPT as they are": "此项目的工具会将密钥和令牌原样发送给 ChatGPT",
-  "Keys and tokens in this project's tool results are hidden from ChatGPT": "此项目工具结果中的密钥和令牌对 ChatGPT 隐藏"
+  "Keys and tokens in this project's tool results are hidden from ChatGPT": "此项目工具结果中的密钥和令牌对 ChatGPT 隐藏",
+  "{0} / {1} tokens · {2}% of the compaction point": "{0}／{1} Token · 占压缩起点的 {2}%",
+  "{0} / {1} tokens · {2}% of the large-chat warning": "{0}／{1} Token · 占大聊天警告值的 {2}%",
+  "Large-chat warning at": "大聊天警告起点"
 }

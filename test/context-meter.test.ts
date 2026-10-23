@@ -7,13 +7,13 @@ import type { SessionSummary } from '../src/shared/session.js';
 
 let dom: JSDOM | undefined;
 afterEach(() => { dom?.window.close(); vi.unstubAllGlobals(); });
-function setup(model: string, reasoningEffort: 'high' | 'pro' = 'high') {
+function setup(model: string, reasoningEffort: 'high' | 'pro' = 'high', auto = true) {
   dom = new JSDOM(readFileSync('src/renderer/index.html', 'utf8'));
   vi.stubGlobal('document', dom.window.document);
   vi.stubGlobal('Node', dom.window.Node);
   const session = { conversationId: 'chat', contextTokens: 100000,
     selectedModel: { conversationId: 'chat', model, reasoningEffort } } as SessionSummary;
-  const config = { sessions: { limitTokens: 200000 }, compaction: { auto: true, autoTokens: 150000 } } as Config;
+  const config = { sessions: { limitTokens: 200000 }, compaction: { auto, autoTokens: 150000 } } as Config;
   paintContextMeter(session, config);
   return dom.window.document;
 }
@@ -23,21 +23,32 @@ it('keeps Pro static and identifies token estimates and compaction exclusion', (
   expect(doc.getElementById('contextMeterInfo')?.textContent).toContain('Auto-compaction off for Pro');
   expect(doc.getElementById('contextMeterButton')?.getAttribute('aria-label')).toContain('estimated');
   expect(doc.getElementById('contextTokens')?.textContent).toBe('100K');
-  // Pro has no configured limit or share: the rows say so instead of showing a number.
-  expect(doc.getElementById('contextLimit')?.textContent).toBe('—');
+  // Pro has no share to fill against: the row says so, and no warning size is offered.
   expect(doc.getElementById('contextPercent')?.textContent).toBe('—');
-  expect([...doc.querySelectorAll('.context-data dt')].map(row => row.textContent)).toEqual(['This chat (estimate)', 'Context limit', 'Filled', 'Compacts automatically at']);
+  expect(shownRows(doc)).toEqual(['This chat (estimate)', 'Filled', 'Compacts automatically at']);
 });
-it('uses configured limits for ordinary models and supports click and Escape', () => {
+const shownRows = (doc: Document) => [...doc.querySelectorAll<HTMLElement>('.context-data dt')].filter(row => !row.hidden).map(row => row.textContent);
+it('fills toward the compaction point while auto-compaction is on, never toward a derived limit (#1806)', () => {
   const doc = setup('gpt-5.6-sol-high');
-  expect(doc.getElementById('contextMeterButton')?.getAttribute('aria-label')).toContain('50% of configured limit');
-  expect(doc.getElementById('contextMeterCompact')?.textContent).toBe('50%');
+  // 100K of a 150K compaction point; the 200K warning size is not a context limit.
+  expect(doc.getElementById('contextMeterButton')?.getAttribute('aria-label')).toContain('67% of the compaction point');
+  expect(doc.getElementById('contextMeterCompact')?.textContent).toBe('67%');
+  expect(doc.getElementById('contextPercent')?.textContent).toBe('67%');
+  expect(shownRows(doc)).toEqual(['This chat (estimate)', 'Filled', 'Compacts automatically at']);
+  expect(doc.getElementById('contextMeterInfo')?.textContent).not.toContain('Context limit');
   doc.getElementById('contextDisplay')!.click();
-  expect(doc.getElementById('contextMeterCompact')?.textContent).toBe('100K / 200K');
-  expect(doc.getElementById('contextTokens')?.textContent).toBe('100K');
+  expect(doc.getElementById('contextMeterCompact')?.textContent).toBe('100K / 150K');
+});
+it('fills toward the large-chat warning, and names it so, while auto-compaction is off (#1806)', () => {
+  const doc = setup('gpt-5.6-sol-high', 'high', false);
+  expect(doc.getElementById('contextMeterButton')?.getAttribute('aria-label')).toContain('50% of the large-chat warning');
+  expect(doc.getElementById('contextPercent')?.textContent).toBe('50%');
+  expect(shownRows(doc)).toEqual(['This chat (estimate)', 'Large-chat warning at', 'Filled', 'Compacts automatically at']);
   expect(doc.getElementById('contextLimit')?.textContent).toBe('200K');
-  doc.getElementById('contextDisplay')!.click();
-  expect(doc.getElementById('contextMeterCompact')?.textContent).toBe('50%');
+});
+it('supports click and Escape', () => {
+  const doc = setup('gpt-5.6-sol-high');
+  expect(doc.getElementById('contextTokens')?.textContent).toBe('100K');
   initContextMeter();
   const button = doc.getElementById('contextMeterButton')!;
   button.click();
