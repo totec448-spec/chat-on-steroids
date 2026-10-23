@@ -10,6 +10,7 @@ import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { emptyEvidence, runInCallContext, type CallContext } from '../src/main/mcp/call-context.js';
 import { createRegistrar, type ToolContext, type ToolResult } from '../src/main/mcp/kernel.js';
 import { registerCoreTools } from '../src/main/mcp/tools-core.js';
+import * as logger from '../src/main/logger.js';
 import * as projectGit from '../src/main/project-git.js';
 import { readProjectGitDiff, readProjectGitSnapshot } from '../src/main/project-git.js';
 import { addProject } from '../src/main/projects.js';
@@ -246,9 +247,13 @@ it('never fails or blocks the patch when the capture fails', async () => {
 
 it('takes no later checkpoint in a turn whose first capture failed, since its patch already ran', async () => {
   vi.spyOn(projectGit, 'withTemporaryIndex').mockRejectedValueOnce(new Error('disk full'));
+  const info = vi.spyOn(logger, 'logInfo');
   await applyPatch(editApp('export const value = 1;', 'export const value = 2;'));
   await applyPatch(editApp('export const value = 2;', 'export const value = 3;'));
+  await applyPatch(editApp('export const value = 3;', 'export const value = 3;'));
   expect(await listCheckpoints(projectId)).toEqual([]);
+  // The skip says why, once per turn.
+  expect(info.mock.calls.filter(([line]) => /no checkpoint for this turn: its first capture failed/.test(String(line)))).toHaveLength(1);
 
   session = { ...session, activeTurnId: 'turn-2' };
   await applyPatch(editApp('export const value = 3;', 'export const value = 4;'));
@@ -316,14 +321,30 @@ it('skips a file-to-folder checkpoint swap before confirmation and leaves the fi
   const { revision } = await compare(`${CHECKPOINT_REF_PREFIX}${id}`);
   const confirm = vi.fn(async () => true);
 
+  const info = vi.spyOn(logger, 'logInfo');
   const result = await restoreCheckpoint(projectId, id, null, revision, confirm);
   expect(confirm).not.toHaveBeenCalled();
   expect(result).toMatchObject({ confirmed: false, restored: [], undoRef: null });
+  expect(info).toHaveBeenCalledWith('checkpoint restore: nothing restored; 2 path(s) swap a file and a folder');
   expect(result.skipped.sort((a, b) => a.path.localeCompare(b.path))).toEqual([
     { path: 'a', reason: 'conflict' },
     { path: 'a/child.ts', reason: 'conflict' }
   ]);
   expect(await fs.readFile(path.join(root, 'a'), 'utf8')).toBe('current file\n');
+});
+
+it('restores nothing when a file changes while the undo checkpoint is taken', async () => {
+  const id = await checkpointNow();
+  await fs.writeFile(path.join(root, 'app.ts'), 'export const value = 2;\n');
+  const { revision } = await compare(`${CHECKPOINT_REF_PREFIX}${id}`);
+  const real = projectGit.withTemporaryIndex;
+  // The person saves the file in their editor while the "Before restore" snapshot is read.
+  vi.spyOn(projectGit, 'withTemporaryIndex').mockImplementation(async (work) => {
+    await fs.writeFile(path.join(root, 'app.ts'), 'export const value = 9; // typed during the restore\n');
+    return real(work);
+  });
+  await expect(restoreCheckpoint(projectId, id, ['app.ts'], revision, async () => true)).rejects.toThrow('The comparison changed. Refresh Review and try again.');
+  expect(await fs.readFile(path.join(root, 'app.ts'), 'utf8')).toBe('export const value = 9; // typed during the restore\n');
 });
 
 it('confirms only non-conflicting files and keeps a non-empty folder in a folder-to-file swap', async () => {
