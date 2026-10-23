@@ -124,6 +124,24 @@ describe('secrets shield (masking only unmistakable credentials)', () => {
     expect(masked).toEqual(['private key']);
   });
 
+  it.each(['DB_PASSWORD=hunter2', 'PASS=abc', 'API_TOKEN="k9"', "SECRET: 'x'", 'export DB_PASS=1234'])
+  ('masks a short secret value too: %s', line => {
+    const { text, masked } = maskSecrets(line);
+    expect(masked).toEqual(['secret setting']);
+    expect(text).toContain('[value hidden by Chat On Steroids]');
+    expect(text).not.toMatch(/hunter2|abc|k9|'x'|1234/);
+  });
+
+  it.each(['DB_PASSWORD=', "DB_PASSWORD=''", 'API_TOKEN=null', 'PASS=true', 'SECRET=...', 'API_KEY=***'])
+  ('leaves an empty or stand-in value alone: %s', line => {
+    expect(maskSecrets(line)).toEqual({ text: line, masked: [] });
+  });
+
+  it.each(['PASS: test_math.py', 'PASS: tests/parser 3', 'PASS:   ok'])
+  ('leaves a test runner\'s PASS line alone: %s', line => {
+    expect(maskSecrets(line)).toEqual({ text: line, masked: [] });
+  });
+
   it.each(['DB_PASSWORD=$uper-secret99', 'API_TOKEN=%x8!kQ2zLm0p', 'SESSION_SECRET=<x8kQ2zLm0p', 'CLIENT_SECRET={x8kQ2zLm0p'])
   ('masks a real value that only starts like a reference: %s', line => {
     expect(maskSecrets(line).masked).toEqual(['secret setting']);
