@@ -1425,7 +1425,10 @@ Quote a selection (`quote-selection.ts`): words selected inside one message's te
 It appends them to the draft as a Markdown quote after what is typed, with an empty line below and
 the caret there. The text is read from the DOM by `selectedText`, not the selection's own string:
 lines per block and `<br>`, code and plain messages verbatim, a KaTeX formula as its TeX, and the panels'
-`.tool-output-header` controls and hidden nodes left out. It only fills the composer; nothing is sent.
+`.tool-output-header` controls and hidden nodes left out. A selection over the terminal block's caps
+(400 lines, 20,000 characters) keeps its last lines under the same "Only the end of the selection is
+here" line, cut by `limitedSelection`, and goes into the draft with `draftWithTerminalBlock`. It only
+fills the composer; nothing is sent.
 Esc to stop (`escapeStopsTurn` in `chat.ts`): while the open chat's turn runs and Send shows Stop
 (composer empty, no files, no prepared plan), a first plain Esc in the composer only arms Stop and
 says "Press Esc again to stop the turn" in `#composerStatus`; a second plain Esc within 1.5 s stops
