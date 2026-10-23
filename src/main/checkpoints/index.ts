@@ -8,7 +8,7 @@ import path from 'node:path';
 import { responseTurnId } from '../../shared/chronology.js';
 import { CHECKPOINT_REF_PREFIX, type CheckpointRestoreResult, type ProjectGitSnapshot } from '../../shared/project-git.js';
 import { getConfig } from '../config.js';
-import { logWarn } from '../logger.js';
+import { logInfo, logWarn } from '../logger.js';
 import { currentCall } from '../mcp/call-context.js';
 import { projectRestoreTarget, revalidateProjectFileTarget } from '../project-files.js';
 import { decode, readProjectGitSnapshot, repositoryContext, runGit, withTemporaryIndex, type RepositoryContext } from '../project-git.js';
@@ -30,6 +30,8 @@ const failedTurns = new Set<string>();
 /** Successful turn keys stay fenced after their visible ledger entry is evicted. */
 const capturedTurns = new Set<string>();
 const restores = new Map<string, Promise<unknown>>();
+/** Turns whose skipped capture was already logged, so a long turn says it once. */
+const skipsLogged = new Set<string>();
 
 function rememberFailedTurn(flight: string): void {
   failedTurns.add(flight);
@@ -156,7 +158,15 @@ export async function checkpointBeforePatch(realPaths: readonly string[]): Promi
       : caller.requestId ? `request:${caller.requestId}` : null;
     if (!key) return;
     const flight = `${session.projectId}\0${sessionId}\0${key}`;
-    if (capturedTurns.has(flight) || failedTurns.has(flight)) return;
+    if (capturedTurns.has(flight)) return;
+    if (failedTurns.has(flight)) {
+      if (!skipsLogged.has(flight)) {
+        skipsLogged.add(flight);
+        if (skipsLogged.size > MAX_FAILED_TURNS) skipsLogged.delete(skipsLogged.values().next().value!);
+        logInfo('code checkpoint: no checkpoint for this turn: its first capture failed, and a later one would already hold its edits');
+      }
+      return;
+    }
     let context: RepositoryContext | null;
     try { context = await repositoryContext(session.projectId); }
     catch (error) { rememberFailedTurn(flight); throw error; }
@@ -299,11 +309,20 @@ export function restoreCheckpoint(projectId: string, checkpointId: string, paths
     const skipped = [...conflictPaths].map(file => ({ path: file, reason: 'conflict' as const }));
     // Preflight may take time. Do not confirm a list based on a comparison that changed meanwhile.
     await current();
-    if (!restorable.length) return { confirmed: false, restored: [], skipped, undoRef: null };
-    if (!(await confirm(restorable))) return { confirmed: false, restored: [], skipped: [], undoRef: null };
+    if (!restorable.length) {
+      logInfo(`checkpoint restore: nothing restored; ${skipped.length} path(s) swap a file and a folder`);
+      return { confirmed: false, restored: [], skipped, undoRef: null };
+    }
+    if (!(await confirm(restorable))) {
+      logInfo(`checkpoint restore: kept the current files (${restorable.length} offered)`);
+      return { confirmed: false, restored: [], skipped: [], undoRef: null };
+    }
     // The dialog can stay open for a long time; what is restored must still be what was confirmed.
     await current();
     const undo = (await createCheckpoint(context, source!.sessionId, `restore:${randomBytes(8).toString('hex')}`, 'restore'))!;
+    // A file saved while the undo snapshot was read would be in it, and the per-file guard below
+    // compares with that snapshot: check the comparison once more before writing anything.
+    await current();
     const result: CheckpointRestoreResult = { confirmed: true, restored: [], skipped, undoRef: `${CHECKPOINT_REF_PREFIX}${undo.id}` };
     for (const relative of restorable) {
       let outcome: Awaited<ReturnType<typeof restoreFile>>;
