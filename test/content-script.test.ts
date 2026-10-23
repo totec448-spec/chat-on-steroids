@@ -14334,7 +14334,9 @@ describe('the Compact & resume control', () => {
       'Goal',
       'Loop'
     ]);
-    expect(track.dataset.clfValue).toBe('off');
+    // The app has not answered yet, so no stop is the value (#1787).
+    expect(track.dataset.clfValue).toBe('');
+    expect(track.querySelectorAll('[aria-checked="true"]')).toHaveLength(0);
     expect(menu.querySelector('.clf-menu-action')!.textContent).toBe('Compact & resume now');
 
     live.hook.closeMenu();
@@ -22943,7 +22945,8 @@ describe('the goal loop', () => {
       // 2.1.45, live: a reloaded stuck chat showed Off and "OpenRouter key required" with no key in
       // use at all; the page simply had no answer from the app yet.
       const view = live!.hook.settingsView({ context: null, goal: null, compact: { action: 'start', hint: '' }, scope: 'chat' });
-      expect(view.mode).toMatchObject({ note: 'waiting for the app', warn: false, disabled: true });
+      // No stop is drawn as chosen: Off would be a guess too.
+      expect(view.mode).toMatchObject({ value: '', note: 'waiting for the app', warn: false, disabled: true });
       expect(view.rows[0]).toMatchObject({ key: 'autoCompact', note: 'waiting for the app', disabled: true });
       expect(view.tip).toBe('Auto-compaction: waiting for the app\nGoal and Loop: waiting for the app');
       expect(view.objective).toMatchObject({ available: false, unavailable: 'Waiting for Chat On Steroids to answer.' });

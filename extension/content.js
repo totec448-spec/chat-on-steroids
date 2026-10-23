@@ -7602,7 +7602,7 @@
       mode: fresh
         ? null
         : {
-            value: position,
+            value: goalUnknown ? '' : position,
             options: [
               {
                 value: 'off',
