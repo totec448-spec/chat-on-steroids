@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const wake = vi.hoisted(() => vi.fn());
 vi.mock('../src/main/browser-wake.js', () => ({ wakeBrowserWork: wake }));
+const log = vi.hoisted(() => vi.fn());
+vi.mock('../src/main/logger.js', async (original) => ({ ...await original<typeof import('../src/main/logger.js')>(), logInfo: log }));
 const durable = vi.hoisted(() => ({ store: new Map<string, unknown>() }));
 vi.mock('../src/main/durable.js', () => ({
   readDurable: async (name: string) => durable.store.get(name) ?? null,
@@ -15,6 +17,7 @@ const { ROUTE_SETTLE_MS, noteTunnelClientConnected, resetRouteSettleForTests, tu
 beforeEach(() => {
   vi.useFakeTimers();
   wake.mockClear();
+  log.mockClear();
   durable.store.clear();
   resetRouteSettleForTests();
 });
@@ -176,6 +179,11 @@ describe('the hold learns from what happened after each new tunnel-client', () =
     noteRouteExistingChatSend('existing-chat');
     // A turn that was already running when the message went in: its request is older than the send.
     noteRouteRequestSighted('older-req', 'existing-chat', Date.now(), Date.now() - 60_000);
+    noteRouteRequestSighted('older-req-2', 'existing-chat', Date.now(), Date.now() - 50_000);
+    // Said once per measurement, however many calls that running turn makes.
+    expect(log.mock.calls.filter(([line]) => String(line).includes('started before'))).toEqual([[
+      'route hold: not measuring calls ChatGPT started before this chat\'s message went out (a turn that was already running); waiting for the message\'s own call'
+    ]]);
     await vi.advanceTimersByTimeAsync(124_000);
     noteRouteRequestArrived('older-req');
     expect(routeHoldMs(), 'an older request says nothing about this restart').toBe(35_000);
