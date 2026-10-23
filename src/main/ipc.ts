@@ -141,6 +141,7 @@ import { findInSession, locateMessage, locateSearchMatch, searchSessions } from 
 import { listBookmarks, setBookmark } from './session/bookmarks.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
 import { exportSessionMarkdown } from './session/markdown-export.js';
+import { exportSessionPage } from './session/page-export.js';
 import { saveCodeFile } from './code-file.js';
 import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
 import { setChatsTrusted, trustedChatIds } from './session/trusted-chats.js';
@@ -1347,6 +1348,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       target: z.enum(['clipboard', 'file'])
     }).parse(payload);
     return exportSessionMarkdown(request, getWindow());
+  });
+
+  // Share a chat as one web page: the dialog previews exactly what Save writes, with or without
+  // the details the person chose to hide.
+  handle('sessions:sharePage', async (payload) => {
+    const id = z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i);
+    const request = z.discriminatedUnion('target', [
+      z.object({ id, target: z.literal('preview'), hide: z.boolean(), lang: z.string().max(35).regex(/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/) }),
+      z.object({ id, target: z.literal('file'), preview: z.string().uuid() })
+    ]).parse(payload);
+    return exportSessionPage(request, getWindow());
   });
 
   // The Install button. The renderer decides nothing about what is installed - it cannot

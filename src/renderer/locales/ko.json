@@ -2991,5 +2991,21 @@
   "What ChatGPT gets to see on this computer.": "이 컴퓨터에서 ChatGPT가 볼 수 있는 것.",
   "Off for every project in Settings": "설정에서 모든 프로젝트에 대해 꺼져 있음",
   "This project's tools send keys and tokens to ChatGPT as they are": "이 프로젝트의 도구는 키와 토큰을 그대로 ChatGPT에 보냅니다",
-  "Keys and tokens in this project's tool results are hidden from ChatGPT": "이 프로젝트의 도구 결과에 있는 키와 토큰은 ChatGPT에서 숨겨집니다"
+  "Keys and tokens in this project's tool results are hidden from ChatGPT": "이 프로젝트의 도구 결과에 있는 키와 토큰은 ChatGPT에서 숨겨집니다",
+  "Share as web page": "웹 페이지로 공유",
+  "Save this chat as one web page file to send to anyone. You see the page before it is saved.": "이 채팅을 누구에게나 보낼 수 있는 웹 페이지 파일 하나로 저장합니다. 저장하기 전에 페이지를 확인할 수 있습니다.",
+  "Share": "공유",
+  "Save this chat as a web page to share.": "이 채팅을 공유할 웹 페이지로 저장합니다.",
+  "Saves this chat as one web page file that opens in any browser. Nothing is uploaded: you decide who gets the file.": "이 채팅을 어떤 브라우저에서나 열리는 웹 페이지 파일 하나로 저장합니다. 아무것도 업로드되지 않으며, 파일을 누구에게 줄지는 직접 정합니다.",
+  "Preparing the preview…": "미리보기를 준비하는 중…",
+  "Hide personal details": "개인 정보 숨기기",
+  "Keys and passwords, email addresses and user names in folder paths show as “hidden”.": "키와 비밀번호, 이메일 주소, 폴더 경로의 사용자 이름은 \"숨김\"으로 표시됩니다.",
+  "Save…": "저장…",
+  "{0} details are hidden on this page.": "이 페이지에서 {0}개의 정보가 숨겨졌습니다.",
+  "Nothing to hide was found in this chat.": "이 채팅에서 숨길 정보를 찾지 못했습니다.",
+  "Save as web page": "웹 페이지로 저장",
+  "Web pages": "웹 페이지",
+  "Shared from Chat On Steroids": "Chat On Steroids에서 공유됨",
+  "This chat has nothing to share yet": "이 채팅에는 아직 공유할 내용이 없습니다",
+  "The preview is out of date. Open Share again.": "미리보기가 최신이 아닙니다. 공유를 다시 여세요."
 }

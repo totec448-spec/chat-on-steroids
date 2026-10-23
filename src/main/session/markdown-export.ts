@@ -25,7 +25,7 @@ export type MarkdownExportRequest = {
 export type MarkdownExportResult = { done: 'copied' } | { done: 'saved'; name: string } | { done: 'cancelled' };
 
 /** The whole text: an answer cut in the log is read back from the overflow copy beside it. */
-async function fullText(sessionId: string, stored: StoredText, html?: StoredText): Promise<string> {
+export async function fullText(sessionId: string, stored: StoredText, html?: StoredText): Promise<string> {
   // ChatGPT's link cards arrive as private-use markup; exported Markdown gets real links. A table
   // it drew in full but wrote with only its header gets its recorded rows (#1477).
   const text = !stored.truncated || !stored.assetId ? stored.text : (await readOverflowText(sessionId, stored.assetId)) ?? stored.text;

@@ -2991,5 +2991,21 @@
   "What ChatGPT gets to see on this computer.": "Những gì ChatGPT được thấy trên máy tính này.",
   "Off for every project in Settings": "Đã tắt cho mọi dự án trong Cài đặt",
   "This project's tools send keys and tokens to ChatGPT as they are": "Công cụ của dự án này gửi khóa và token cho ChatGPT nguyên trạng",
-  "Keys and tokens in this project's tool results are hidden from ChatGPT": "Khóa và token trong kết quả công cụ của dự án này được ẩn khỏi ChatGPT"
+  "Keys and tokens in this project's tool results are hidden from ChatGPT": "Khóa và token trong kết quả công cụ của dự án này được ẩn khỏi ChatGPT",
+  "Share as web page": "Chia sẻ dưới dạng trang web",
+  "Save this chat as one web page file to send to anyone. You see the page before it is saved.": "Lưu cuộc trò chuyện này thành một tệp trang web để gửi cho bất kỳ ai. Bạn sẽ xem trang trước khi lưu.",
+  "Share": "Chia sẻ",
+  "Save this chat as a web page to share.": "Lưu cuộc trò chuyện này thành trang web để chia sẻ.",
+  "Saves this chat as one web page file that opens in any browser. Nothing is uploaded: you decide who gets the file.": "Lưu cuộc trò chuyện này thành một tệp trang web mở được trong mọi trình duyệt. Không có gì được tải lên: bạn quyết định ai nhận tệp.",
+  "Preparing the preview…": "Đang chuẩn bị bản xem trước…",
+  "Hide personal details": "Ẩn thông tin cá nhân",
+  "Keys and passwords, email addresses and user names in folder paths show as “hidden”.": "Khóa và mật khẩu, địa chỉ email và tên người dùng trong đường dẫn thư mục sẽ hiển thị là “đã ẩn”.",
+  "Save…": "Lưu…",
+  "{0} details are hidden on this page.": "Đã ẩn {0} thông tin trên trang này.",
+  "Nothing to hide was found in this chat.": "Không tìm thấy gì cần ẩn trong cuộc trò chuyện này.",
+  "Save as web page": "Lưu dưới dạng trang web",
+  "Web pages": "Trang web",
+  "Shared from Chat On Steroids": "Được chia sẻ từ Chat On Steroids",
+  "This chat has nothing to share yet": "Cuộc trò chuyện này chưa có gì để chia sẻ",
+  "The preview is out of date. Open Share again.": "Bản xem trước đã cũ. Hãy mở lại Chia sẻ."
 }

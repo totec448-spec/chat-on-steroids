@@ -1146,6 +1146,15 @@ the same actions as a turn's answer (`messageAnswerAnchors`); `sessions:exportMa
 by `messageId` instead of `turnId`, and refuses a turn's own answer named that way. `scope: 'latest'` names
 no answer: main picks the newest one that offers these actions (`latestAnswer`), a completed turn's or a turnless one.
 
+Share as web page (chat menu "Share as web page", `/share`): `sessions:sharePage { id, target: 'preview', hide, lang }`
+→ `{ done: 'preview', preview, html, hidden }` builds one self-contained HTML page of the transcript
+(`src/main/session/chat-page.ts`: answers as Markdown with raw markup escaped, pictures as links, only
+http(s)/mailto links, a page policy that loads and runs nothing). `hide` (off unless chosen) masks keys
+and passwords (`maskSecrets`), email addresses and the user name in home-folder paths; `hidden` counts
+them. `{ id, target: 'file', preview }` saves the page main kept for that preview id, not a rebuilt one,
+and refuses any other id. The dialog shows the preview in a `sandbox=""` srcdoc frame. Labels come from
+`MAIN_TEXTS` ('You', 'hidden', 'Shared from Chat On Steroids', 'New chat' for an untitled chat).
+
 
 Bookmarked answers (#1719): `sessions:bookmarks { id }` → `SessionBookmark[]` (oldest answer first)
 and `sessions:bookmark { id, messageId, excerpt, messageTime, on }` → the chat's new list, in

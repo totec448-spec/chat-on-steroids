@@ -2991,5 +2991,21 @@
   "What ChatGPT gets to see on this computer.": "ChatGPT 在这台电脑上能看到的内容。",
   "Off for every project in Settings": "已在设置中对所有项目关闭",
   "This project's tools send keys and tokens to ChatGPT as they are": "此项目的工具会将密钥和令牌原样发送给 ChatGPT",
-  "Keys and tokens in this project's tool results are hidden from ChatGPT": "此项目工具结果中的密钥和令牌对 ChatGPT 隐藏"
+  "Keys and tokens in this project's tool results are hidden from ChatGPT": "此项目工具结果中的密钥和令牌对 ChatGPT 隐藏",
+  "Share as web page": "以网页形式分享",
+  "Save this chat as one web page file to send to anyone. You see the page before it is saved.": "将此聊天保存为一个网页文件，可发送给任何人。保存前你会先看到页面。",
+  "Share": "分享",
+  "Save this chat as a web page to share.": "将此聊天保存为网页以便分享。",
+  "Saves this chat as one web page file that opens in any browser. Nothing is uploaded: you decide who gets the file.": "将此聊天保存为一个可在任何浏览器中打开的网页文件。不会上传任何内容：由你决定把文件给谁。",
+  "Preparing the preview…": "正在准备预览…",
+  "Hide personal details": "隐藏个人信息",
+  "Keys and passwords, email addresses and user names in folder paths show as “hidden”.": "密钥和密码、电子邮件地址以及文件夹路径中的用户名会显示为“已隐藏”。",
+  "Save…": "保存…",
+  "{0} details are hidden on this page.": "此页面已隐藏 {0} 项信息。",
+  "Nothing to hide was found in this chat.": "此聊天中没有找到需要隐藏的内容。",
+  "Save as web page": "另存为网页",
+  "Web pages": "网页",
+  "Shared from Chat On Steroids": "分享自 Chat On Steroids",
+  "This chat has nothing to share yet": "此聊天还没有可分享的内容",
+  "The preview is out of date. Open Share again.": "预览已过期。请重新打开“分享”。"
 }
