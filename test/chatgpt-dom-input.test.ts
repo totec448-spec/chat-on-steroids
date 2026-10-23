@@ -28,6 +28,7 @@ interface DomApi {
   turns(): Array<{ id: string | null; role: string; node: HTMLElement; nodes: HTMLElement[] }>;
   toolBlocks(turn: ReturnType<DomApi['turns']>[number]): HTMLElement[];
   hideActivity(turn: ReturnType<DomApi['turns']>[number], covered: HTMLElement[]): void;
+  sidebarListsProject(id: string): boolean | null;
 }
 let dom: JSDOM;
 let document: Document;
@@ -1713,5 +1714,40 @@ describe('a rich-link preview inside the editor (#1792)', () => {
     await vi.advanceTimersByTimeAsync(50);
     expect(await sent).toBe(true);
     expect(sends).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('whether ChatGPT\'s sidebar lists a Project (#1759)', () => {
+  const ours = 'g-p-11111111222233334444555555555555';
+  const other = 'g-p-99999999888877776666555555555555';
+  // The October 2026 sidebar: the Projects section holds the New project control and one row per
+  // Project, collapsed or not, each naming its id (measured 2026-10-23).
+  const sidebar = (rows: string[], { collapsed = 'false', create = true } = {}) => {
+    const nav = document.createElement('nav');
+    nav.innerHTML = `<div data-app-action-sidebar-section="" data-app-action-sidebar-section-collapsed="${collapsed}">
+      ${create ? '<button data-app-action-sidebar-project-create="">New project</button>' : ''}
+      <div role="list">${rows.map(id => `<div role="listitem"><div data-app-action-sidebar-project-id="${id}" data-app-action-sidebar-project-label="Work" data-app-action-sidebar-project-collapsed="true" role="button"></div></div>`).join('')}</div>
+    </div><div data-app-action-sidebar-section="" data-app-action-sidebar-section-collapsed="false"><a href="/c/aaaa">A chat</a></div>`;
+    document.body.prepend(nav);
+  };
+
+  it('says yes for a listed Project, collapsed rows included, and no for one it does not list', () => {
+    sidebar([other, ours.toUpperCase()]);
+    expect(api.sidebarListsProject(ours)).toBe(true);
+    expect(api.sidebarListsProject('g-p-00000000000000000000000000000000')).toBe(false);
+  });
+
+  it('says no for an account whose open Projects section lists none', () => {
+    sidebar([]);
+    expect(api.sidebarListsProject(ours)).toBe(false);
+  });
+
+  it.each([
+    ['the sidebar is closed', () => undefined],
+    ['the Projects section is collapsed', () => sidebar([other], { collapsed: 'true' })],
+    ['no section holds the New project control', () => sidebar([other], { create: false })]
+  ])('cannot tell when %s', (_name, build) => {
+    build();
+    expect(api.sidebarListsProject(ours)).toBeNull();
   });
 });

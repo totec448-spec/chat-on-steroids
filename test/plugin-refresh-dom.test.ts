@@ -248,7 +248,22 @@ it.each(['legacy', 'native'])('retains proven identity when the request itself u
   // A legitimately recreated connector becomes usable when its own ID is proven.
   api.setConnectorApps({ core: [{ appId: 'asdk_app_other', name: 'Renamed' },
     { appId: 'asdk_app_synthetic', name: 'Renamed' }], desktop: [], plugins: [] });
-  expect(await api.pluginRefreshView('Renamed', [tool])).toMatchObject({ appId: 'asdk_app_synthetic' });
+  expect(await api.pluginRefreshView('Renamed', [tool])).toBeNull(); // Two same-named IDs cannot be enrolled by name.
+  expect(await api.pluginRefreshView('Renamed', [tool], 'asdk_app_synthetic')).toMatchObject({ appId: 'asdk_app_synthetic' });
+});
+it('pins an unbound refresh to its uniquely named Core ID on the detail page, not a sibling MCP', async () => {
+  const apps = { core: [
+    { appId: 'asdk_app_synthetic', name: 'Core Host A' },
+    { appId: 'asdk_app_other', name: 'Core Host B' },
+    { appId: 'asdk_app_legacy', name: 'Chat On Steroids Core' }
+  ], desktop: [], plugins: [] };
+  const own = settingsPage(); own.connector.name = 'Core Host A'; own.api.setConnectorApps(apps);
+  expect((await own.api.pluginRefreshView('Core Host A', [tool]))?.appId).toBe('asdk_app_synthetic');
+  dom.window.close();
+  const sibling = settingsPage('/settings/plugins-settings/plugin_asdk_app_other');
+  sibling.connector.id = 'asdk_app_other'; sibling.connector.name = 'Core Host B'; sibling.api.setConnectorApps(apps);
+  expect(await sibling.api.pluginRefreshView('Core Host A', [tool])).toBeNull();
+  expect((await sibling.api.pluginRefreshView('Core Host B', [tool]))?.appId).toBe('asdk_app_other');
 });
 it('refuses a name shared by different proven surfaces rather than guessing one', async () => {
   const { api, props } = page(); props.connector.name = 'Renamed';
@@ -334,7 +349,7 @@ it.each(['external', 'catalog', 'hash', 'wrong-id', 'hidden', 'detached', 'repla
     expect(api.pluginInstalledButtons('Chat On Steroids Core')).toBeNull();
   }
 );
-it.each(['duplicate-id', 'multiple-core-ids'])('preserves ambiguity among proven native rows (%s)', mode => {
+it.each(['duplicate-id', 'multiple-core-ids'])('does not mistake multiple known Core identities for duplicate refresh targets (%s)', mode => {
   const { api, main, link } = renamedNativeList();
   const other = link.cloneNode(true) as HTMLAnchorElement;
   if (mode === 'multiple-core-ids') {
@@ -343,7 +358,53 @@ it.each(['duplicate-id', 'multiple-core-ids'])('preserves ambiguity among proven
       { appId: 'asdk_app_other', name: 'Older known name' }], desktop: [], plugins: [] });
   }
   main.append(other);
-  expect(api.pluginInstalledButtons('Chat On Steroids Core')).toEqual([link, other]); // The workflow must refuse length !== 1.
+  expect(api.pluginInstalledButtons('Chat On Steroids Core')).toEqual(mode === 'duplicate-id' ? [link, other] : [link]);
+});
+it('refresh discovery selects the named target among four proven Core identities', () => {
+  const { api, main, link } = renamedNativeList();
+  link.href = '/settings/plugins-settings/plugin_asdk_app_mac';
+  link.textContent = 'Core Host A';
+  main.insertAdjacentHTML('beforeend', [
+    '<a href="/settings/plugins-settings/plugin_asdk_app_ocx">Core Host B</a>',
+    '<a href="/settings/plugins-settings/plugin_asdk_app_legacy">Chat On Steroids Core</a>',
+    '<a href="/settings/plugins-settings/plugin_asdk_app_oldocx">OpenChatX</a>'
+  ].join(''));
+  api.setConnectorApps({ core: [
+    { appId: 'asdk_app_mac', name: 'Core Host A' },
+    { appId: 'asdk_app_ocx', name: 'Core Host B' },
+    { appId: 'asdk_app_legacy', name: 'Chat On Steroids Core' },
+    { appId: 'asdk_app_oldocx', name: 'OpenChatX' }
+  ], desktop: [], plugins: [] });
+  expect(api.pluginInstalledButtons('Core Host A')).toEqual([link]);
+  expect(api.pluginInstalledButtons('Core Host B')).toEqual([main.querySelectorAll('a')[1]]);
+  expect(api.pluginInstalledButtons('Unproven Core')).toBeNull();
+  // Enrolled exact IDs still win over aliases, but never cross another surface.
+  expect(api.pluginInstalledButtons('Core Host A', 'asdk_app_mac', 'core')).toEqual([link]);
+  expect(api.pluginInstalledButtons('Core Host A', 'asdk_app_ocx', 'plugins')).toBeNull();
+});
+it('does not guess between two proven Core apps with an identical current name', () => {
+  const { api, main } = renamedNativeList();
+  main.insertAdjacentHTML('beforeend', '<a href="/settings/plugins-settings/plugin_asdk_app_other"><span>Core Host A</span></a>');
+  api.setConnectorApps({ core: [
+    { appId: 'asdk_app_synthetic', name: 'Core Host A' },
+    { appId: 'asdk_app_other', name: 'Core Host A' }
+  ], desktop: [], plugins: [] });
+  expect(api.pluginInstalledButtons('Core Host A')).toBeNull();
+});
+it('requires the chosen App ID native link, never a name-only button in multi-Core enrollment', () => {
+  const { api, main, link } = renamedNativeList();
+  link.href = '/settings/plugins-settings/plugin_asdk_app_primary';
+  link.textContent = 'Primary Core';
+  api.setConnectorApps({ core: [
+    { appId: 'asdk_app_primary', name: 'Primary Core' },
+    { appId: 'asdk_app_sibling', name: 'Sibling Core' }
+  ], desktop: [], plugins: [] });
+  const unproven = dom.window.document.createElement('button');
+  unproven.innerHTML = '<span>Primary Core</span>';
+  main.append(unproven);
+  expect(api.pluginInstalledButtons('Primary Core')).toEqual([link]);
+  link.remove();
+  expect(api.pluginInstalledButtons('Primary Core')).toBeNull();
 });
 it.each(['Chat On Steroids Core', 'User renamed it 日本語'])('selects only the enrolled native App Id among two proven Core identities (%s)', name => {
   const { api, main, link } = renamedNativeList();
@@ -351,7 +412,7 @@ it.each(['Chat On Steroids Core', 'User renamed it 日本語'])('selects only th
   main.insertAdjacentHTML('beforeend', '<a href="/settings/plugins-settings/plugin_asdk_app_other"><span>Other proven Core</span></a>');
   api.setConnectorApps({ core: [{ appId: 'asdk_app_synthetic', name: 'Chat On Steroids Core' },
     { appId: 'asdk_app_other', name: 'Other proven Core' }], desktop: [], plugins: [] });
-  expect(api.pluginInstalledButtons('Chat On Steroids Core')).toHaveLength(2);
+  expect(api.pluginInstalledButtons('Chat On Steroids Core')).toEqual([link]);
   expect(api.pluginInstalledButtons('Chat On Steroids Core', 'asdk_app_synthetic')).toEqual([link]);
 });
 it.each(['core', 'plugins'])('uses the exact proven %s surface when renamed installed connectors share a name', surface => {
