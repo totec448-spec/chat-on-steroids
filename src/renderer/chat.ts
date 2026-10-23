@@ -6769,6 +6769,11 @@ function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, 
   // line heads them, where the question would put it. Parked after the queue it sat under the newest
   // action and jumped back up whenever the question was loaded again (2026-10-12).
   if (live && !pending && asks.length === 0 && (historyBefore !== null || totalEvents > events.length) && rows.length > 0) { rows.unshift(turnStatusLine); rows.push(turnNow); }
+  // The same for a stopped turn whose question is further up: its line heads the loaded rows.
+  if (stopped && !turnStoppedShown && asks.length === 0 && timelineReachesEnd() && rows.length > 0) {
+    ui(turnStoppedLine.firstElementChild as HTMLElement, 'textContent', () => stateLine().text);
+    rows.unshift(turnStoppedLine); turnStoppedShown = true;
+  }
   const inTimeline = rows.includes(turnStatusLine);
   if (!inTimeline) parkTurnStatus(working);
   if (working && status) paintTurnStatus(status);
@@ -6850,8 +6855,10 @@ function paintStateLine(): void {
   const recovering = paintRecoveryStatus();
   const goalWaiting = controlledSessionId === selectedId && controlledSelection === selectionGeneration && !!goalWaitView;
   if (goalWaiting) paintGoalProgress();
-  if (visible && (ticking || recovering || goalWaiting)) durationTimer = window.setTimeout(paintStateLine, 1000);
-  if (visible && ticking && Date.now() - controlsAskedAt >= RUNNING_CONTROLS_RECHECK_MS) void refreshSessionControls();
+  // A stopped line is the app's word too, and it lapses the same way when the page comes back idle.
+  const stoppedShown = tone === 'is-bad' && working !== true && !developer;
+  if (visible && (ticking || recovering || goalWaiting || stoppedShown)) durationTimer = window.setTimeout(paintStateLine, 1000);
+  if (visible && (ticking || stoppedShown) && Date.now() - controlsAskedAt >= RUNNING_CONTROLS_RECHECK_MS) void refreshSessionControls();
   repaintBadges();
 }
 
@@ -6912,7 +6919,10 @@ function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?:
     const summary = sessions.find(entry => entry.id === selectedId);
     if (!summary || detailFor !== selectedId) return { text: '', tone: '' };
     const active = controlledSessionId === selectedId && controlledSelection === selectionGeneration ? controlledTurnId : null;
-    const lastBoundary = [...events].reverse().find(event => event.kind === 'turn_start' || event.kind === 'turn_end');
+    // Latest by recording order: the rows are ordered for reading (a turn's events together), so a
+    // turn started again after its end can sit before that end in this list.
+    const latest = <T extends SessionEvent>(rows: readonly T[]): T | undefined => rows.reduce<T | undefined>((best, row) => !best || row.seq > best.seq ? row : best, undefined);
+    const lastBoundary = latest(events.filter(event => event.kind === 'turn_start' || event.kind === 'turn_end'));
     /*
      * A chat whose page never opened a turn is still working, and this app knows it.
      *
@@ -6944,13 +6954,17 @@ function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?:
       : null;
     const turnId = active ?? lastBoundary?.turnId;
     // An unfinished turn the app gave up recovering: say so, instead of an empty caption or a clock.
-    const stopped = controlledPageless && controlledSessionId === selectedId && controlledSelection === selectionGeneration &&
-      lastBoundary?.kind === 'turn_start'
+    // Unfinished: its latest loaded boundary is a start, or none is loaded (a long turn's start is
+    // further up) and the recorded session still has its turn open.
+    const unfinished = lastBoundary ? lastBoundary.kind === 'turn_start' : !!summary.activeTurnId;
+    const stopped = controlledPageless && controlledSessionId === selectedId && controlledSelection === selectionGeneration && unfinished
       ? { text: t("Stopped · open this chat's tab again to continue"), tone: 'is-bad' as const } : null;
-    if (!turnId) return blind ?? { text: '', tone: '' };
+    if (!turnId) return blind ?? stopped ?? { text: '', tone: '' };
     const startedAt = summary.finishTurn?.turnId === turnId ? summary.finishTurn.startedAt
       : events.find(event => event.kind === 'turn_start' && event.turnId === turnId)?.time;
-    const endedAt = events.find(event => event.kind === 'turn_end' && event.turnId === turnId)?.time;
+    // The latest boundary of this turn decides: a turn that started again after an end is not over.
+    const lastOfTurn = latest(events.filter(event => (event.kind === 'turn_start' || event.kind === 'turn_end') && event.turnId === turnId));
+    const endedAt = lastOfTurn?.kind === 'turn_end' ? lastOfTurn.time : undefined;
     if (startedAt === undefined) return active
       ? { text: deps.state()?.config.ui.playfulStatus === true ? `${turnWorkWord(turnId, 0)}…` : t("Working…"), tone: '', working: true }
       : blind ?? stopped ?? { text: '', tone: '' };
