@@ -223,6 +223,11 @@ it('says why a page withdrew a Continue and ends it after three minutes of withd
     expect((await post('/input/fail', { id: row.id, owner: 'a-document', conversationId, error: withdrawn, detail: 'send-not-ready' })).body.ok).toBe(true);
     expect(getLog().filter(entry => entry.message.includes('could not send this recovery message')).at(-1)?.message)
       .toContain('(send-not-ready)');
+    // The page's most telling reasons name what moved the turn; they keep their words (#1787).
+    expect(await input.claimBrowserInput(row.id, 'a-document', conversationId, true)).not.toBeNull();
+    expect((await post('/input/fail', { id: row.id, owner: 'a-document', conversationId, error: withdrawn, detail: 'turn-progressed by app-tool_call' })).body.ok).toBe(true);
+    expect(getLog().filter(entry => entry.message.includes('could not send this recovery message')).at(-1)?.message)
+      .toContain('(turn-progressed by app-tool_call)');
     const firstRelease = now;
     expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ state: 'queued',
       recovery: { withdrawnSince: firstRelease } });
