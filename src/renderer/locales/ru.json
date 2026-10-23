@@ -3142,5 +3142,6 @@
   "Ours (HEAD)": "Наша (HEAD)",
   "Common base": "Общая база",
   "Theirs (incoming)": "Их (входящая)",
-  "Not in this version": "Нет в этой версии"
+  "Not in this version": "Нет в этой версии",
+  "Start or cancel the prepared plan first, then ask again.": "Сначала запустите или отмените подготовленный план, затем повторите запрос."
 }

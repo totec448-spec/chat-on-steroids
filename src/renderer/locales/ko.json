@@ -2998,5 +2998,6 @@
   "Ours (HEAD)": "우리 쪽 (HEAD)",
   "Common base": "공통 기준",
   "Theirs (incoming)": "상대 쪽 (들어오는 쪽)",
-  "Not in this version": "이 버전에는 없음"
+  "Not in this version": "이 버전에는 없음",
+  "Start or cancel the prepared plan first, then ask again.": "먼저 준비된 계획을 시작하거나 취소한 다음 다시 요청하세요."
 }

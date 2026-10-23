@@ -2998,5 +2998,6 @@
   "Ours (HEAD)": "自分側 (HEAD)",
   "Common base": "共通の基点",
   "Theirs (incoming)": "相手側 (取り込む側)",
-  "Not in this version": "この版にはありません"
+  "Not in this version": "この版にはありません",
+  "Start or cancel the prepared plan first, then ask again.": "先に準備済みのプランを開始するか取り消してから、もう一度お試しください。"
 }

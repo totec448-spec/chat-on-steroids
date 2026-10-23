@@ -2998,5 +2998,6 @@
   "Ours (HEAD)": "我方 (HEAD)",
   "Common base": "共同基础",
   "Theirs (incoming)": "对方 (传入)",
-  "Not in this version": "此版本中不存在"
+  "Not in this version": "此版本中不存在",
+  "Start or cancel the prepared plan first, then ask again.": "请先开始或取消已准备好的计划，然后再试一次。"
 }
