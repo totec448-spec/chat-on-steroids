@@ -425,6 +425,8 @@ function replaceComposerDraft(): void {
   retireDictation(); composerDraftGeneration++; skillPicker?.close(); disarmEscapeStop();
   // A recall ends here too; the same message recalled next must change the live region to be read.
   $('recallAnnounce').textContent = '';
+  // So does a finished reply: every chat switch passes here.
+  $('turnAnnounce').textContent = ''; turnAnnounceWrite++;
 }
 let pendingNewInput: { id: string; generation: number } | null = null;
 let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
@@ -2802,6 +2804,40 @@ function canonicalMessageKey(event: SessionEvent): string | null {
   return null;
 }
 
+/** Bumped by every clear and delayed write of #turnAnnounce, so a stale delayed write is dropped. */
+let turnAnnounceWrite = 0;
+/** Long enough for a screen reader to finish "Reply finished" before the next one is queued. */
+const TURN_ANNOUNCE_GAP_MS = 1000;
+/**
+ * Opt-in (Appearance → Accessibility): a reply that completes in the open chat is read out once.
+ * Only live deltas arrive here, so a chat opened after its reply finished stays quiet. The next turn
+ * empties the region, so the same words are read again when that one ends. Several completions in
+ * one read are each read out, one after another.
+ */
+function announceFinishedTurns(delta: readonly SessionEvent[]): void {
+  const region = $('turnAnnounce'), before = region.textContent, text = t("Reply finished");
+  let finished = 0;
+  for (const event of delta) {
+    if (event.kind === 'user_message' || event.kind === 'turn_start') { region.textContent = ''; turnAnnounceWrite++; }
+    else if (event.kind === 'turn_end' && event.outcome === 'completed') finished++;
+  }
+  // A Goal or Loop continue can start the next turn in the same read: the end still counts.
+  if (finished === 0 || deps.state()?.config.ui.announceTurns !== true) return;
+  // A later read or a chat switch in between wins: it bumps the write, and what is still waiting drops.
+  const selection = selectionGeneration, write = ++turnAnnounceWrite;
+  const current = (): boolean => selection === selectionGeneration && write === turnAnnounceWrite && deps.state()?.config.ui.announceTurns === true;
+  // The region is emptied and filled in a later task, so a screen reader hears each as a change.
+  const say = (remaining: number): void => {
+    region.textContent = '';
+    window.setTimeout(() => { if (current()) { region.textContent = text; next(remaining - 1); } }, 100);
+  };
+  const next = (remaining: number): void => {
+    if (remaining > 0) window.setTimeout(() => { if (current()) say(remaining); }, TURN_ANNOUNCE_GAP_MS);
+  };
+  // The region held these words when the read began, so it is emptied first.
+  if (before !== text) { region.textContent = text; next(finished - 1); } else say(finished);
+}
+
 /** Merge one sequence-cursor delta without letting canonical message revisions duplicate rows. */
 function mergeDetailDelta(delta: SessionEvent[]): void {
   if (delta.length === 0) return;
@@ -3415,7 +3451,7 @@ async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: nu
   // their stable progressId/messageId names, then chronology places that row at its first
   // appearance. This helper existed already but was never wired into the desktop reader,
   // which is why "Inspecting…" and "Inspected…" still appeared as siblings.
-  if (incremental) mergeDetailDelta(detail.events);
+  if (incremental) { mergeDetailDelta(detail.events); announceFinishedTurns(detail.events); }
   else {
     const folded = chronological(foldProgress(detail.events));
     if (newerFrom !== undefined) {

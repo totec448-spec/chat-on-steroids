@@ -172,6 +172,8 @@ export interface UiPrefs {
   developerMode?: boolean;
   /** Rotating joke words instead of "Working" in a chat's status line. Off by default. */
   playfulStatus?: boolean;
+  /** Screen readers hear "Reply finished" when a turn completes in the open chat. Off by default. */
+  announceTurns?: boolean;
   /** A random fun-fact aside at the end of each automatic Continue, marked for the model to ignore. Off by default. */
   playfulContinue?: boolean;
   /** The person's own words in place of the built-in automatic Continue phrase (silence recovery only). Unset means the built-in phrases. */
