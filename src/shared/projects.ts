@@ -13,6 +13,8 @@ export interface LocalProject {
   createdAt: number;
   /** Removed sidebar group; existing conversations and queued work retain their folder. */
   ungrouped?: boolean;
+  /** The secrets shield is off for this project's chats (on everywhere else, unless off in Settings). */
+  secretsShieldOff?: boolean;
   /**
    * The native ChatGPT Project this CoS project's new chats open in. Only projects created after
    * this existed have one; it grants no filesystem permission.

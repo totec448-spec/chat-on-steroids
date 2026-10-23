@@ -1878,7 +1878,6 @@
   "Mention Chat On Steroids Core": "Mencionar Chat On Steroids Core",
   "Makes sure ChatGPT can use this app in every chat. Turn it off if ChatGPT starts plain questions with an unneeded tool call. Workers, Goal, Loop and Continue always keep the mention.": "Garantiza que ChatGPT pueda usar esta app en cada chat. Desactívalo si ChatGPT empieza preguntas sencillas con una llamada a herramienta innecesaria. Los workers, Objetivo, Bucle y Continue siempre conservan la mención.",
   "Privacy": "Privacidad",
-  "What ChatGPT sees of your screen.": "Lo que ChatGPT ve de tu pantalla.",
   "For developers": "Para desarrolladores",
   "Troubleshooting details and access for tools on this computer.": "Detalles para solucionar problemas y acceso para herramientas de este equipo.",
   "Show turn boundaries and recovery events in the chat.": "Mostrar los límites de los turnos y los eventos de recuperación en el chat.",
@@ -3081,6 +3080,13 @@
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "Un lápiz marca los chats con un mensaje sin enviar, y los borradores vuelven tras reiniciar.",
   "A better Review": "Una Revisión mejor",
   "Right-click an untracked file to add it, or its folder, to .gitignore.": "Haz clic derecho en un archivo sin seguimiento para añadir el archivo o su carpeta a .gitignore.",
+  "Stopped · open this chat's tab again to continue": "Detenido · vuelve a abrir la pestaña de este chat para continuar",
+  "Hide secrets from ChatGPT": "Ocultar secretos a ChatGPT",
+  "API keys, tokens, private keys and passwords in what tools return are replaced with a short note before ChatGPT sees them. Your files stay as they are. A project can turn this off in its menu.": "Las claves de API, tokens, claves privadas y contraseñas en lo que devuelven las herramientas se sustituyen por una nota breve antes de que ChatGPT las vea. Tus archivos no cambian. Un proyecto puede desactivarlo en su menú.",
+  "What ChatGPT gets to see on this computer.": "Lo que ChatGPT llega a ver en este ordenador.",
+  "Off for every project in Settings": "Desactivado para todos los proyectos en Ajustes",
+  "This project's tools send keys and tokens to ChatGPT as they are": "Las herramientas de este proyecto envían claves y tokens a ChatGPT tal cual",
+  "Keys and tokens in this project's tool results are hidden from ChatGPT": "Las claves y tokens en los resultados de las herramientas de este proyecto se ocultan a ChatGPT",
   "Choose a ChatGPT Project…": "Elegir un proyecto de ChatGPT…",
   "Use a new or an existing ChatGPT Project for this project's chats": "Usar un proyecto de ChatGPT nuevo o existente para los chats de este proyecto",
   "New ChatGPT Project “{0}”": "Nuevo proyecto de ChatGPT «{0}»",
@@ -3094,6 +3100,5 @@
   "This project already has a ChatGPT Project": "Este proyecto ya tiene un proyecto de ChatGPT",
   "Its ChatGPT Project is being created": "Su proyecto de ChatGPT se está creando",
   "That Project is not one ChatGPT lists for this account": "ChatGPT no muestra ese proyecto para esta cuenta",
-  "That ChatGPT Project is already linked to another project": "Ese proyecto de ChatGPT ya está vinculado a otro proyecto",
-  "Stopped · open this chat's tab again to continue": "Detenido · vuelve a abrir la pestaña de este chat para continuar"
+  "That ChatGPT Project is already linked to another project": "Ese proyecto de ChatGPT ya está vinculado a otro proyecto"
 }
