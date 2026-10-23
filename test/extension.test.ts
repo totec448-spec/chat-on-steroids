@@ -1173,9 +1173,12 @@ describe('a page\'s release reason', () => {
       }
     });
     await worker.registerTab(1);
-    for (const detail of ['Some sentence. With dots', 'x'.repeat(81), 'UPPER-case']) {
+    for (const [index, detail] of ['Some sentence. With dots', 'x'.repeat(81), 'UPPER-case'].entries()) {
       await worker.send({ type: 'desktop_input', id: 'ffffffff-1111-4222-8333-444444444444', owner: '1:document-1-0:0',
         fail: true, error: 'After-turn pickup was withdrawn before Send.', detail });
+      // The report itself still travels; only its reason is left out.
+      expect(posted).toHaveLength(index + 1);
+      expect(posted.at(-1)).toMatchObject({ error: 'After-turn pickup was withdrawn before Send.' });
       expect(posted.at(-1)?.detail).toBeUndefined();
     }
   });
