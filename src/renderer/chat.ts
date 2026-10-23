@@ -110,6 +110,7 @@ import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMe
 import { createSearchPopup } from './search-popup.js';
 import { primaryShortcut } from './shortcuts.js';
 import { initSshProjectDialog } from './ssh-project-dialog.js';
+import { initSharePage } from './share-page.js';
 
 const api = window.api;
 let chatSearch: ChatSearch | null = null;
@@ -1181,7 +1182,9 @@ function sessionRow(summary: SessionSummary): HTMLElement {
       { action: 'open', icon: 'i-out', label: () => t('Open in browser'), title: () => t("Open this chat in your browser"), run: () => void run(api.openSessionChat(summary.id)) },
       // ChatGPT opens /c/<id> wherever the chat lives, a project included (#1107).
       { action: 'copy-link', icon: 'i-copy', label: () => t('Copy link'), title: () => t("Copy this chat's ChatGPT link"),
-        run: async () => { if (await run(api.writeClipboard(`https://chatgpt.com/c/${summary.conversationId}`))) toast(t('Link copied')); } }
+        run: async () => { if (await run(api.writeClipboard(`https://chatgpt.com/c/${summary.conversationId}`))) toast(t('Link copied')); } },
+      { action: 'share', icon: 'i-globe', label: () => t('Share as web page'),
+        title: () => t('Save this chat as one web page file to send to anyone. You see the page before it is saved.'), run: () => openSharePage(summary.id) }
     );
     items.push(...chatGroupMenuItems(summary));
     // The stop this app can actually make. It does not touch the running ChatGPT turn — nothing
@@ -1254,7 +1257,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
 let renaming: { id: string; original: string; value: string; start: number; end: number } | null = null;
 
 /** Slash commands that act on the open chat; New Chat does not offer them. */
-const CHAT_COMMANDS = new Set(['rename', 'pin', 'status', 'compact', 'copy', 'export', 'find']);
+const CHAT_COMMANDS = new Set(['rename', 'pin', 'status', 'compact', 'copy', 'export', 'share', 'find']);
 /** The commands that switch how the next message is sent; their rest is that message. */
 const MODE_COMMANDS = new Set(['plan', 'goal', 'loop']);
 /** The draft a typed /image is being sent from (#1701): that one message asks for a picture. */
@@ -1362,7 +1365,13 @@ function runSlashCommand(name: string): void {
     .then(result => { if (result?.done === 'copied') toast(t('Answer copied')); });
   else if (name === 'export' && chat) void run(api.exportMarkdown({ id: chat.id, scope: 'session', target: 'file' }))
     .then(result => { if (result?.done === 'saved') toast(t('Saved {0}', [result.name])); });
+  else if (name === 'share' && chat) openSharePage(chat.id);
   else if (name === 'find' && chat) afterClick(() => chatFind?.open());
+}
+
+let sharePage: ReturnType<typeof initSharePage> | null = null;
+function openSharePage(sessionId: string): void {
+  (sharePage ??= initSharePage(api, name => toast(t('Saved {0}', [name])))).open(sessionId);
 }
 
 function startRename(summary: SessionSummary): void {

@@ -69,7 +69,14 @@ export const MAIN_TEXTS = [
   'ChatGPT finished.',
   // The Goal helper stopped without evidence that the requested work is complete.
   'Goal result needs review',
-  'The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.'
+  'The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.',
+  // A chat shared as a web page: its save dialog and the page's own labels.
+  'Save as web page',
+  'Web pages',
+  'New chat',
+  'You',
+  'hidden',
+  'Shared from Chat On Steroids'
 ] as const;
 
 export type MainText = typeof MAIN_TEXTS[number];

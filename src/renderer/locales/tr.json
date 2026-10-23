@@ -3039,5 +3039,22 @@
   "What ChatGPT gets to see on this computer.": "ChatGPT'nin bu bilgisayarda görebildikleri.",
   "Off for every project in Settings": "Ayarlar'da tüm projeler için kapalı",
   "This project's tools send keys and tokens to ChatGPT as they are": "Bu projenin araçları anahtarları ve tokenları ChatGPT'ye olduğu gibi gönderir",
-  "Keys and tokens in this project's tool results are hidden from ChatGPT": "Bu projenin araç sonuçlarındaki anahtarlar ve tokenlar ChatGPT'den gizlenir"
+  "Keys and tokens in this project's tool results are hidden from ChatGPT": "Bu projenin araç sonuçlarındaki anahtarlar ve tokenlar ChatGPT'den gizlenir",
+  "Share as web page": "Web sayfası olarak paylaş",
+  "Save this chat as one web page file to send to anyone. You see the page before it is saved.": "Bu sohbeti herkese gönderebileceğin tek bir web sayfası dosyası olarak kaydet. Sayfayı kaydetmeden önce görürsün.",
+  "Share": "Paylaş",
+  "Save this chat as a web page to share.": "Bu sohbeti paylaşmak için web sayfası olarak kaydet.",
+  "Saves this chat as one web page file that opens in any browser. Nothing is uploaded: you decide who gets the file.": "Bu sohbeti her tarayıcıda açılan tek bir web sayfası dosyası olarak kaydeder. Hiçbir şey yüklenmez: dosyayı kimin alacağına sen karar verirsin.",
+  "Preparing the preview…": "Önizleme hazırlanıyor…",
+  "Hide personal details": "Kişisel bilgileri gizle",
+  "Keys and passwords, email addresses and user names in folder paths show as “hidden”.": "Anahtarlar ve parolalar, e-posta adresleri ve klasör yollarındaki kullanıcı adları “gizli” olarak görünür.",
+  "Save…": "Kaydet…",
+  "{0} details are hidden on this page.": "Bu sayfada {0} bilgi gizlendi.",
+  "Nothing to hide was found in this chat.": "Bu sohbette gizlenecek bir şey bulunamadı.",
+  "Save as web page": "Web sayfası olarak kaydet",
+  "Web pages": "Web sayfaları",
+  "Shared from Chat On Steroids": "Chat On Steroids ile paylaşıldı",
+  "This chat has nothing to share yet": "Bu sohbette henüz paylaşılacak bir şey yok",
+  "The preview is out of date. Open Share again.": "Önizleme güncel değil. Paylaş'ı yeniden aç.",
+  "{0} details are hidden on this page.|one": "Bu sayfada {0} bilgi gizlendi."
 }

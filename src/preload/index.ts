@@ -267,6 +267,8 @@ const api = {
   saveCode: (request: { text: string; name: string }) => call<{ done: 'saved'; name: string } | { done: 'cancelled' }>('code:save', request),
   exportMarkdown: (request: { id: string; scope: 'answer' | 'latest' | 'session'; turnId?: string; messageId?: string; target: 'clipboard' | 'file' }) =>
     call<{ done: 'copied' } | { done: 'saved'; name: string } | { done: 'cancelled' }>('sessions:exportMarkdown', request),
+  sharePage: (request: { id: string; target: 'preview'; hide: boolean; lang: string } | { id: string; target: 'file'; preview: string }) =>
+    call<{ done: 'preview'; preview: string; html: string; hidden: number } | { done: 'saved'; name: string } | { done: 'cancelled' }>('sessions:sharePage', request),
   // `external`: the system's own browser even for a page the CoS browser would open.
   openLink: (url: string, options: { external?: boolean } = {}) => call<boolean>('link:open', { url, ...(options.external ? { external: true } : {}) }),
   showCosBrowser: () => call<boolean>('cosBrowser:show'),

@@ -2991,5 +2991,21 @@
   "What ChatGPT gets to see on this computer.": "このコンピューターで ChatGPT が見られるもの。",
   "Off for every project in Settings": "設定ですべてのプロジェクトでオフになっています",
   "This project's tools send keys and tokens to ChatGPT as they are": "このプロジェクトのツールはキーやトークンをそのまま ChatGPT に送ります",
-  "Keys and tokens in this project's tool results are hidden from ChatGPT": "このプロジェクトのツール結果に含まれるキーやトークンは ChatGPT から隠されます"
+  "Keys and tokens in this project's tool results are hidden from ChatGPT": "このプロジェクトのツール結果に含まれるキーやトークンは ChatGPT から隠されます",
+  "Share as web page": "Web ページとして共有",
+  "Save this chat as one web page file to send to anyone. You see the page before it is saved.": "このチャットを 1 つの Web ページファイルとして保存し、誰にでも送れるようにします。保存する前にページを確認できます。",
+  "Share": "共有",
+  "Save this chat as a web page to share.": "このチャットを共有用の Web ページとして保存します。",
+  "Saves this chat as one web page file that opens in any browser. Nothing is uploaded: you decide who gets the file.": "このチャットを、どのブラウザーでも開ける 1 つの Web ページファイルとして保存します。何もアップロードされません。ファイルを誰に渡すかはあなたが決めます。",
+  "Preparing the preview…": "プレビューを準備しています…",
+  "Hide personal details": "個人情報を隠す",
+  "Keys and passwords, email addresses and user names in folder paths show as “hidden”.": "キーやパスワード、メールアドレス、フォルダーパス内のユーザー名は「非表示」と表示されます。",
+  "Save…": "保存…",
+  "{0} details are hidden on this page.": "このページでは {0} 件の情報が非表示になっています。",
+  "Nothing to hide was found in this chat.": "このチャットには隠す情報が見つかりませんでした。",
+  "Save as web page": "Web ページとして保存",
+  "Web pages": "Web ページ",
+  "Shared from Chat On Steroids": "Chat On Steroids から共有",
+  "This chat has nothing to share yet": "このチャットにはまだ共有できる内容がありません",
+  "The preview is out of date. Open Share again.": "プレビューが古くなっています。もう一度「共有」を開いてください。"
 }
