@@ -151,3 +151,30 @@ it('offers nothing outside a message or while the selection is still being dragg
   await frame();
   expect(button().hidden).toBe(false);
 });
+
+it('leaves the composer alone and says to start or cancel the plan first while a prepared plan waits', async () => {
+  // Send submits the prepared plan, so a quote dropped into the composer would never be sent.
+  const { initQuoteSelection } = await import('../src/renderer/quote-selection.js');
+  const input = document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'Look at this:';
+  const typed = vi.fn();
+  input.addEventListener('input', typed);
+  let plan = true;
+  initQuoteSelection({ timeline: document.getElementById('timeline')!, input, blocked: () => plan });
+  const words = document.querySelector('.msg p')!.firstChild!;
+  select(words, 4, words, 10);
+  await frame();
+  expect(button().hidden).toBe(false);
+
+  button().dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  expect(input.value).toBe('Look at this:');
+  expect(typed).not.toHaveBeenCalled();
+  expect(document.querySelector('.toast')?.textContent).toBe('Start or cancel the prepared plan first, then quote again.');
+
+  // With the plan started or cancelled, the same button quotes.
+  plan = false;
+  document.querySelector('.toast')?.remove();
+  button().dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  expect(input.value).toBe('Look at this:\n\n> loader\n\n');
+  expect(document.querySelector('.toast')).toBeNull();
+});

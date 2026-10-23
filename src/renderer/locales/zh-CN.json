@@ -2992,5 +2992,6 @@
   "Off for every project in Settings": "已在设置中对所有项目关闭",
   "This project's tools send keys and tokens to ChatGPT as they are": "此项目的工具会将密钥和令牌原样发送给 ChatGPT",
   "Keys and tokens in this project's tool results are hidden from ChatGPT": "此项目工具结果中的密钥和令牌对 ChatGPT 隐藏",
-  "Quote": "引用"
+  "Quote": "引用",
+  "Start or cancel the prepared plan first, then quote again.": "请先开始或取消已准备好的计划，然后再引用一次。"
 }

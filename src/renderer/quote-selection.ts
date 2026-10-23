@@ -1,4 +1,4 @@
-import { el, icon } from './dom.js';
+import { el, icon, toast } from './dom.js';
 import { t } from './i18n.js';
 import { draftWithTerminalBlock, limitedSelection } from './terminal-selection.js';
 
@@ -99,9 +99,11 @@ export interface QuoteSelectionDeps {
   timeline: HTMLElement;
   /** The composer the quote goes into. */
   input: HTMLTextAreaElement;
+  /** True while Send would submit something other than the composer text, such as a prepared plan: the quote would sit there unsent. */
+  blocked?: () => boolean;
 }
 
-export function initQuoteSelection({ timeline, input }: QuoteSelectionDeps): void {
+export function initQuoteSelection({ timeline, input, blocked }: QuoteSelectionDeps): void {
   const button = el('button', 'quote-selection') as HTMLButtonElement;
   button.type = 'button';
   button.hidden = true;
@@ -160,6 +162,7 @@ export function initQuoteSelection({ timeline, input }: QuoteSelectionDeps): voi
   button.addEventListener('click', () => {
     if (stale) update();
     if (button.hidden || !quote) return;
+    if (blocked?.()) { toast(t('Start or cancel the prepared plan first, then quote again.')); return; }
     input.value = draftWithQuote(input.value, quote);
     document.getSelection()?.removeAllRanges();
     hide();
