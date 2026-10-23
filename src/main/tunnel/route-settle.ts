@@ -57,7 +57,7 @@ let epoch: { connectedAt: number; measured: boolean } | null = null;
  * window. A later one has had more time to find the new route and would make the hold look shorter
  * than it is.
  */
-let target: { conversationId: string; sentAt: number; sighted: { requestId: string; at: number } | null } | null = null;
+let target: { conversationId: string; sentAt: number; sighted: { requestId: string; at: number } | null; toldOlder?: boolean } | null = null;
 /** Said once per restart, so a busy chat does not repeat it. */
 let toldOutsideWindow = false;
 /** Calls that reached this app before the page reported them, while the target waits for its own. */
@@ -119,7 +119,13 @@ export function noteRouteExistingChatSend(conversationId: string, now = Date.now
  */
 export function noteRouteRequestSighted(requestId: string, conversationId: string, now = Date.now(), createdAt: number | null = null): void {
   if (!open() || target!.conversationId !== conversationId || target!.sighted) return;
-  if (createdAt !== null && createdAt < target!.sentAt - CLOCK_SKEW_MS) return;
+  if (createdAt !== null && createdAt < target!.sentAt - CLOCK_SKEW_MS) {
+    if (!target!.toldOlder) {
+      target!.toldOlder = true;
+      logInfo('route hold: not measuring calls ChatGPT started before this chat\'s message went out (a turn that was already running); waiting for the message\'s own call');
+    }
+    return;
+  }
   const arrivedAt = arrived.get(requestId);
   if (arrivedAt !== undefined) learn(arrivedAt - now);
   else target!.sighted = { requestId, at: now };
