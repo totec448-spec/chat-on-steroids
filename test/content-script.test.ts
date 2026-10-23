@@ -10791,6 +10791,20 @@ describe('a content script reloaded into a turn already in flight', () => {
     expect(await check(before)).toMatchObject({ safe: false, why: 'changed', changed: 'progress', progressBy: 'page-call' });
   });
 
+  it('counts a known call that got its result as progress even when its request id holds a NUL (#1787)', async () => {
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    live = await harness(`https://chatgpt.com/c/${conversationId}`, { activity: () => activity({ activeTurnId: 'g-old-run-0-4' }) }, midTurn);
+    live.hook.observe(); await settle();
+    const check = (expected?: unknown) => live!.runtimeMessage({ type: 'clf-repair-check', conversationId, expected });
+    const section = live.document.querySelector<HTMLElement>('[data-turn-id="turn-live"]')!;
+    const call = (answered: boolean) => ({ messageId: 'odd-id', requestId: 'request\u00001\u00000', tool: 'exec_command', order: 0, answered });
+    await bindFiberTurns([{ section, turn: { turnId: 'turn-live', conversationId, calls: [call(false)] } }]);
+    live.hook.observe(); await settle();
+    const before = await check();
+    await bindFiberTurns([{ section, turn: { turnId: 'turn-live', conversationId, calls: [call(true)] } }]);
+    expect(await check(before)).toMatchObject({ safe: false, why: 'changed', changed: 'progress', progressBy: 'page-call' });
+  });
+
   it.each([true, false])('binds a separate final section only within the exact adopted question (same question: %s)', async sameQuestion => {
     const source = 'g-split-final-source';
     live = await harness(undefined, {
@@ -22951,6 +22965,14 @@ describe('the goal loop', () => {
       expect(view.tip).toBe('Auto-compaction: waiting for the app\nGoal and Loop: waiting for the app');
       expect(view.objective).toMatchObject({ available: false, unavailable: 'Waiting for Chat On Steroids to answer.' });
       expect(JSON.stringify(view)).not.toMatch(/OpenRouter|API key/);
+    });
+
+    it('keeps the auto-compaction switch still above a New Chat until the app answers (#1787)', async () => {
+      await open();
+      // A click there would write the app-wide preference from a value nobody has seen.
+      const view = live!.hook.settingsView({ context: null, goal: null, compact: { action: 'start', hint: '' }, scope: 'new' });
+      expect(view.rows[0]).toMatchObject({ key: 'autoCompact', note: 'waiting for the app', disabled: true });
+      expect(view.tip.split('\n')[0]).toBe('Auto-compaction: waiting for the app');
     });
 
     it('offers one task under the slider, and shows the one a chat already has', async () => {

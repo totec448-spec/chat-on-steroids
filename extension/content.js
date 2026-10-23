@@ -4870,9 +4870,9 @@
         const owner = index === activeTurnIndex ? activeLocalTurnId || '' : '';
         const signature = `${call.tool}\u0000${call.requestId || ''}\u0000${call.answered ? '1' : '0'}\u0000${owner}`;
         const previous = callsReported.get(call.messageId);
-        if (previous === signature) return false;
-        if (previous === undefined || (call.answered && previous.split('\u0000')[2] === '0')) advanced.push(call);
-        callsReported.set(call.messageId, signature);
+        if (previous?.signature === signature) return false;
+        if (previous === undefined || (call.answered && !previous.answered)) advanced.push(call);
+        callsReported.set(call.messageId, { signature, answered: Boolean(call.answered) });
         return true;
       });
       if (fresh.length > 0) {
@@ -7499,7 +7499,7 @@
     const fenced = blocked === 'worker' || blocked === 'blocked';
     // No answer from the app yet (a reloaded page, an app that is busy or away): nothing here is
     // known, so the sheet says so instead of drawing Off and a missing key (#1787).
-    const contextUnknown = !context && !fresh;
+    const contextUnknown = !context;
     const goalUnknown = !goal;
     const auto = Boolean(context && context.auto) && !fenced;
     const threshold = context && context.threshold > 0 ? context.threshold : 0;
