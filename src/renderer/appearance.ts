@@ -1,6 +1,7 @@
 import { defaultAppearance, mixColor, paletteTokens, type AppearanceSettings, type AppearanceTheme } from '../shared/appearance.js';
 import type { UiPrefs } from '../shared/types.js';
 import { $ } from './dom.js';
+import { currentLanguage, onLanguageChange } from './i18n.js';
 
 const FONT_FAMILIES = {
   system: '', sans: 'Arial, Helvetica, sans-serif',
@@ -43,6 +44,12 @@ export function initAppearance(save: (patch: { theme?: AppearanceTheme; appearan
   let current = defaultAppearance();
   let editing = false;
   const colorKeys = ['accent', 'background', 'sidebar'] as const;
+  /** Shown and spoken alike: the slider's value is 140, a screen reader reads "1.4×". The decimal mark follows the app language, so it is a number format and not a catalog string. */
+  function paintSpacing(): void {
+    const spacing = `${new Intl.NumberFormat(currentLanguage(), { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(current.lineSpacing / 100)}×`;
+    $('appearanceLineSpacingValue').textContent = spacing;
+    $('appearanceLineSpacing').setAttribute('aria-valuetext', spacing);
+  }
   function paint(): void {
     applyAppearance(theme, current);
     $<HTMLSelectElement>('appearanceTheme').value = theme;
@@ -51,10 +58,7 @@ export function initAppearance(save: (patch: { theme?: AppearanceTheme; appearan
     $<HTMLInputElement>('appearanceSize').value = String(current.fontSize);
     $('appearanceSizeValue').textContent = `${current.fontSize} px`;
     $<HTMLInputElement>('appearanceLineSpacing').value = String(current.lineSpacing);
-    // The slider's value is 140; assistive technology reads the shown "1.4×" instead.
-    const spacing = `${(current.lineSpacing / 100).toLocaleString(document.documentElement.lang || undefined, { minimumFractionDigits: 1 })}×`;
-    $('appearanceLineSpacingValue').textContent = spacing;
-    $('appearanceLineSpacing').setAttribute('aria-valuetext', spacing);
+    paintSpacing();
     $<HTMLInputElement>('appearanceContrast').value = String(current[theme].contrast);
     $('appearanceContrastValue').textContent = String(current[theme].contrast);
     $<HTMLInputElement>('appearanceTranslucent').checked = current.translucentSidebar;
@@ -107,6 +111,7 @@ export function initAppearance(save: (patch: { theme?: AppearanceTheme; appearan
       if (control.dataset.hex) control.value = current[theme][control.dataset.hex as typeof colorKeys[number]].toUpperCase();
     }
   });
+  onLanguageChange(paintSpacing);
   $('appearanceReset').addEventListener('click', () => {
     // Colors and typography only: the sidebar keeps the layout the person chose.
     editing = false; current = { ...defaultAppearance(), sidebarLayout: current.sidebarLayout }; paint(); save({ appearance: current });

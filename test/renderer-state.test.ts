@@ -640,12 +640,22 @@ it('gives the line-spacing slider the shown value as its spoken value, from the 
   spacing.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
   expect(spacing.getAttribute('aria-valuetext')).toBe('2.0×');
   expect(spacing.getAttribute('aria-valuetext')).toBe(shown());
-  // The decimal mark follows the app language, in the label and in the spoken value alike.
-  doc.documentElement.lang = 'de';
-  spacing.value = '130';
-  spacing.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
-  expect(spacing.getAttribute('aria-valuetext')).toBe('1,3×');
-  expect(spacing.getAttribute('aria-valuetext')).toBe(shown());
+  // The decimal mark follows the app language, in the label and in the spoken value alike, also when the language changes with the slider untouched.
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  try {
+    spacing.value = '130';
+    spacing.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
+    expect(spacing.getAttribute('aria-valuetext')).toBe('1.3×');
+    setLanguage('de');
+    expect(shown()).toBe('1,3×');
+    expect(spacing.getAttribute('aria-valuetext')).toBe('1,3×');
+    spacing.value = '200';
+    spacing.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
+    expect(spacing.getAttribute('aria-valuetext')).toBe('2,0×');
+    expect(spacing.getAttribute('aria-valuetext')).toBe(shown());
+  } finally {
+    setLanguage('en');
+  }
 });
 
 it('draws the sidebar layout saved in Appearance, Projects by default, and repaints when it changes', async () => {
