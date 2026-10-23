@@ -137,7 +137,7 @@ it('has a translation of every bundled pet description in every language', async
   const fs = await import('node:fs');
   const descriptions = [...fs.readdirSync('pets').map(id => JSON.parse(fs.readFileSync(`pets/${id}/pet.json`, 'utf8')).description as string),
     /description: '([^']+)'/.exec(fs.readFileSync('src/main/pet-library.ts', 'utf8'))![1]!];
-  expect(descriptions).toHaveLength(3);
+  expect(descriptions).toHaveLength(4);
   for (const file of fs.readdirSync('src/renderer/locales')) {
     const catalog = JSON.parse(fs.readFileSync(`src/renderer/locales/${file}`, 'utf8')) as Record<string, string>;
     for (const description of descriptions) expect(catalog[description], `${file}: ${description}`).toBeTruthy();

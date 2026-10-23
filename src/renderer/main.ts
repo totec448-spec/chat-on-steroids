@@ -1,5 +1,7 @@
 import { initBrowserSetup } from './setup-browser.js';
 import { currentLanguage, ui, uiText, t, tn, initLanguage, onLanguageChange } from './i18n.js';
+import { initLayoutPreviews } from './layout-previews.js';
+import { workerName } from './agent-panel.js';
 import { primaryShiftShortcut, primaryShortcut } from './shortcuts.js';
 import { desktopAccessProblem, paintDesktopAccessNotice } from './desktop-access-notice.js';
 import { chatgptNameLine } from './connector-name.js';
@@ -13,6 +15,7 @@ import { initUpdateReadiness, paintUpdateReadiness } from './update-readiness.js
 import { updateErrorText } from './update-error.js';
 import { initUsage, refreshOtherApps, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
+import { initAppShortcuts } from './app-shortcuts.js';
 import { initViewMenu } from './view-menu.js';
 import { initPlugins, applyPluginsState } from './plugins.js';
 import { initBrowserPreferences } from './browser-preferences.js';
@@ -72,6 +75,7 @@ const api = window.api;
 // First: main announces a Keychain read before it starts and may not get through again until it ends.
 initKeychainNotice(api);
 initLanguage();
+initLayoutPreviews();
 // Composer key hints name this computer's keys only: a Windows user never reads ⌘ first.
 ui($('followUpHint'), 'textContent', () => t('What a message you send while ChatGPT works does by default. {0} sends it the other way.', [primaryShiftShortcut(t('Enter'))]));
 ui($('enterSendsHint'), 'textContent', () => t('Which key sends what you type. With {0}, Enter starts a new line.', [primaryShortcut(t('Enter'))]));
@@ -621,7 +625,7 @@ function paintGroups(): void {
   // focused/dirty-field guard. Recopying state here undid that protection and visibly
   // flipped a user's just-clicked toggle back when an unsolicited stale state push
   // arrived before save completed, so this only reads them.
-  for (const [id, onText] of [['agents', 'agents tool exposed']] as Array<[string, string]>) {
+  for (const [id, onText] of [['agents', 'on']] as Array<[string, string]>) {
     const root = document.querySelector<HTMLElement>(`[data-group="${id}"]`);
     if (!root) continue;
     const box = root.querySelector<HTMLInputElement>('.sw input')!;
@@ -735,9 +739,11 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       chatBrowser: $<HTMLSelectElement>('chatBrowser').value as ChatBrowser,
       cosBrowserMinimize: $<HTMLSelectElement>('cosBrowserMinimize').value === 'tray' ? 'tray' : 'taskbar',
       finishTool: $<HTMLInputElement>('finishTool').checked,
+      finishHoldOnStop: $<HTMLInputElement>('finishHoldOnStop').checked,
       planBackend: $<HTMLSelectElement>('planBackend').value as 'chatgpt' | 'api',
       finishLeadMinutes: Number($<HTMLSelectElement>('finishLeadMinutes').value),
       rotateTurnMinutes: Number($<HTMLSelectElement>('rotateTurnMinutes').value),
+      rotateStopFallback: $<HTMLInputElement>('rotateStopFallback').checked,
       backgroundChats: $<HTMLInputElement>('backgroundChats').checked,
       backgroundPlacement: $<HTMLSelectElement>('backgroundPlacement').value === 'group' ? 'group' : 'window',
       followUp: $<HTMLSelectElement>('followUp').value === 'queue' ? 'queue' : 'steer',
@@ -757,10 +763,13 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       developerMode: $<HTMLInputElement>('developerMode').checked,
       playfulStatus: $<HTMLInputElement>('playfulStatus').checked,
       playfulContinue: $<HTMLInputElement>('playfulContinue').checked,
+      announceTurns: $<HTMLInputElement>('announceTurns').checked,
+      customContinue: $<HTMLTextAreaElement>('customContinue').value.trim() || undefined,
       followOutput: $<HTMLInputElement>('followOutput').checked,
       mentionCore: $<HTMLInputElement>('mentionCore').checked,
       mentionPlugins: $<HTMLInputElement>('mentionPlugins').checked,
       privacyScreenshots: $<HTMLInputElement>('privacyScreenshots').checked,
+      secretsShield: $<HTMLInputElement>('secretsShield').checked,
       theme: over.theme ?? previous.ui.theme,
       appearance: over.appearance ?? previous.ui.appearance
     },
@@ -831,6 +840,10 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     }
     if (state && (!requestedSettings || requestedSettings.controlApi?.enabled === patch.controlApi?.enabled)) {
       $<HTMLInputElement>('controlApiEnabled').checked = state.config.controlApi?.enabled === true;
+    }
+    // And the secrets shield: an unticked switch left by a refused save must not turn it off later.
+    if (state && (!requestedSettings || requestedSettings.ui.secretsShield === patch.ui.secretsShield)) {
+      $<HTMLInputElement>('secretsShield').checked = state.config.ui.secretsShield !== false;
     }
   }
 }
@@ -1657,6 +1670,7 @@ function apply(next: AppState): void {
   $('cosBrowserMinimizeRow').hidden = (config.ui.chatBrowser ?? 'chrome') !== 'cos';
   $<HTMLSelectElement>('planBackend').value = config.ui.planBackend ?? 'chatgpt';
   applyChecked($<HTMLInputElement>('finishTool'), config.ui.finishTool === true, previousState?.config.ui.finishTool);
+  applyChecked($<HTMLInputElement>('finishHoldOnStop'), config.ui.finishHoldOnStop === true, previousState?.config.ui.finishHoldOnStop);
   applyValue($<HTMLSelectElement>('finishLeadMinutes'), String(config.ui.finishLeadMinutes ?? 5), String(previousState?.config.ui.finishLeadMinutes ?? 5));
   $<HTMLSelectElement>('finishLeadMinutes').disabled = config.ui.finishTool !== true;
   // A value the list does not offer (set in the config) gets its own option; without one the select
@@ -1670,6 +1684,8 @@ function apply(next: AppState): void {
     rotate.add(option);
   }
   applyValue(rotate, rotateMinutes, previousState ? String(previousState.config.ui.rotateTurnMinutes ?? 30) : undefined);
+  applyChecked($<HTMLInputElement>('rotateStopFallback'), config.ui.rotateStopFallback === true, previousState?.config.ui.rotateStopFallback);
+  $<HTMLInputElement>('rotateStopFallback').disabled = (config.ui.rotateTurnMinutes ?? 30) === 0;
   applyChecked($<HTMLInputElement>('backgroundChats'), config.ui.backgroundChats === true, previousState?.config.ui.backgroundChats);
   applyValue($<HTMLSelectElement>('backgroundPlacement'), config.ui.backgroundPlacement ?? 'window', previousState?.config.ui.backgroundPlacement ?? 'window');
   applyValue($<HTMLSelectElement>('followUp'), config.ui.followUp ?? 'steer', previousState?.config.ui.followUp ?? 'steer');
@@ -1697,6 +1713,8 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('developerMode'), config.ui.developerMode === true, previousState?.config.ui.developerMode);
   applyChecked($<HTMLInputElement>('playfulStatus'), config.ui.playfulStatus === true, previousState?.config.ui.playfulStatus);
   applyChecked($<HTMLInputElement>('playfulContinue'), config.ui.playfulContinue === true, previousState?.config.ui.playfulContinue);
+  applyChecked($<HTMLInputElement>('announceTurns'), config.ui.announceTurns === true, previousState?.config.ui.announceTurns);
+  applyValue($<HTMLTextAreaElement>('customContinue'), config.ui.customContinue ?? '', previousState ? previousState.config.ui.customContinue ?? '' : undefined);
   applyChecked($<HTMLInputElement>('followOutput'), config.ui.followOutput !== false, previousState?.config.ui.followOutput);
   applyChecked($<HTMLInputElement>('mentionCore'), config.ui.mentionCore !== false, previousState?.config.ui.mentionCore);
   applyChecked($<HTMLInputElement>('mentionPlugins'), config.ui.mentionPlugins === true, previousState?.config.ui.mentionPlugins);
@@ -1704,6 +1722,12 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('mcpPersistentUrls'), config.mcp?.persistentUrls === true, previousState?.config.mcp?.persistentUrls);
   // Stable URLs live only in the OS-backed secret store; without it they keep rotating.
   $<HTMLInputElement>('mcpPersistentUrls').disabled = next.secureStorage?.available === false && config.mcp?.persistentUrls !== true;
+  // Another program held the kept port at this start: the tunnel must follow the new one.
+  const moved = config.mcp?.persistentUrls === true ? next.status.keptPortMoved ?? null : null;
+  $('mcpPortMoved').hidden = moved === null;
+  ui($('mcpPortMoved'), 'textContent', () => moved
+    ? t('Port {0} was in use when the app started, so it now listens on port {1}. Point your tunnel at port {1}.', [moved.from, moved.to])
+    : '');
   applyChecked($<HTMLInputElement>('controlApiAllowActions'), config.controlApi?.allowActions === true, previousState?.config.controlApi?.allowActions);
   // Actions need the API itself, so the switch stays off and disabled until it is on.
   $<HTMLInputElement>('controlApiAllowActions').disabled = config.controlApi?.enabled !== true;
@@ -1717,7 +1741,15 @@ function apply(next: AppState): void {
     config.ui.privacyScreenshots,
     previousState?.config.ui.privacyScreenshots
   );
-  $('privacyScreenshotsSetting').hidden = !(next.platform?.desktopAutomation ?? true);
+  // Missing means on (#1797).
+  applyChecked(
+    $<HTMLInputElement>('secretsShield'),
+    config.ui.secretsShield !== false,
+    previousState ? previousState.config.ui.secretsShield !== false : undefined
+  );
+  // Only macOS screenshots can show the whole screen; on Windows every capture is one window
+  // already, so the switch would change nothing there.
+  $('privacyScreenshotsSetting').hidden = !(next.platform?.desktopAutomation ?? true) || next.platform?.family !== 'macos';
   if (next.platform?.family === 'macos') {
     ui($('backgroundRunningCopy'), 'textContent', () => t("Leave it running while you use its plugins in ChatGPT. It stays available from the menu bar and Dock when you close the window."));
     ui($('minimizeToTrayCopy'), 'textContent', () => t("Hide the window to the menu bar when closed"));
@@ -2358,6 +2390,18 @@ for (const id of FEEDS) {
   });
 }
 
+/** A feed with no row to show says why, instead of an empty box. */
+function paintFeedEmpty(): void {
+  for (const id of FEEDS) {
+    const view = $(id);
+    const rows = [...view.querySelectorAll<HTMLElement>('p')];
+    const onlyBad = view.classList.contains('only-bad');
+    const visible = rows.some(row => !row.hidden && (!onlyBad || row.classList.contains('bad')));
+    view.classList.toggle('is-empty', !visible);
+    ui(view, 'data-empty', () => rows.length ? t('Nothing matches this filter.') : t('Nothing has happened yet.'));
+  }
+}
+
 function addLogLine(entry: LogEntry): void {
   let evicted = false;
   for (const id of FEEDS) {
@@ -2376,6 +2420,7 @@ function addLogLine(entry: LogEntry): void {
   // A quiet run of 500 info lines retires old problems just as surely as a new one adds
   // to them, so both directions have to repaint.
   if (entry.level !== 'info' || evicted) paintProblems();
+  paintFeedEmpty();
 }
 
 $('logFilter').addEventListener('click', (event) => {
@@ -2385,6 +2430,7 @@ $('logFilter').addEventListener('click', (event) => {
     other.classList.toggle('is-sel', other === button);
   }
   $('fullFeed').classList.toggle('only-bad', button.dataset.filter === 'bad');
+  paintFeedEmpty();
   // Hiding most of the rows changes what "the bottom" is, so re-pin rather than leaving
   // the view parked at an offset that now belongs to a line the filter removed.
   stickToNewest('fullFeed');
@@ -2402,6 +2448,7 @@ function applyAgentFilter(): void {
   for (const row of $('fullFeed').querySelectorAll<HTMLElement>('p')) {
     row.hidden = agentFilter !== null && (row.dataset.agent ?? null) !== agentFilter;
   }
+  paintFeedEmpty();
 }
 
 function paintAgentFilter(swarm: SwarmState): void {
@@ -2416,8 +2463,10 @@ function paintAgentFilter(swarm: SwarmState): void {
     return;
   }
   // Prime first, then workers in creation order — the order the broker reports them.
-  const choices: Array<{ id: string | null; label: string }> = [{ id: null, label: t("All") }];
-  for (const agent of swarm.agents) choices.push({ id: agent.id, label: agent.label || agent.id });
+  const choices: Array<{ id: string | null; label: () => string }> = [{ id: null, label: () => t("All") }];
+  for (const agent of swarm.agents) {
+    choices.push({ id: agent.id, label: () => agent.role === 'prime' ? t('Main chat') : workerName(agent.id, agent.label) });
+  }
   if (agentFilter !== null && !swarm.agents.some((agent) => agent.id === agentFilter)) {
     agentFilter = null;
   }
@@ -2425,7 +2474,7 @@ function paintAgentFilter(swarm: SwarmState): void {
     ...choices.map((choice) => {
       const button = document.createElement('button');
       button.type = 'button';
-      button.textContent = choice.label;
+      ui(button, 'textContent', choice.label);
       button.classList.toggle('is-sel', choice.id === agentFilter);
       button.addEventListener('click', () => {
         agentFilter = choice.id;
@@ -2767,6 +2816,7 @@ for (const id of [
   'developerMode',
   'playfulStatus',
   'playfulContinue',
+  'announceTurns',
   'followOutput',
   'followUp',
   'enterSends',
@@ -2777,6 +2827,7 @@ for (const id of [
   'controlApiAllowActions',
   'mcpPersistentUrls',
   'privacyScreenshots',
+  'secretsShield',
   'tunnelKind',
   'tunnelId',
   'desktopTunnelId',
@@ -2820,6 +2871,11 @@ async function refresh(): Promise<void> {
 
 buildGroups();
 initSidebarResize();
+initAppShortcuts({
+  newChat: $('newChat'),
+  settings: $('workspaceSettings'),
+  settingsShown: () => document.querySelector<HTMLElement>('.app')?.dataset.screen === 'settings'
+});
 const viewMenu = initViewMenu({
   search: openChatSearch,
   cosBrowser: () => state?.config.ui.chatBrowser === 'cos',
@@ -2851,6 +2907,7 @@ void (async () => {
     const left = shown.get(key(entry)) ?? 0;
     if (left > 0) shown.set(key(entry), left - 1); else addLogLine(entry);
   }
+  paintFeedEmpty();
   const swarm = await run(api.getSwarm());
   if (swarm) paintAgentFilter(swarm);
 })();

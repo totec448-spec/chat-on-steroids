@@ -223,6 +223,11 @@ it('says why a page withdrew a Continue and ends it after three minutes of withd
     expect((await post('/input/fail', { id: row.id, owner: 'a-document', conversationId, error: withdrawn, detail: 'send-not-ready' })).body.ok).toBe(true);
     expect(getLog().filter(entry => entry.message.includes('could not send this recovery message')).at(-1)?.message)
       .toContain('(send-not-ready)');
+    // The page's most telling reasons name what moved the turn; they keep their words (#1787).
+    expect(await input.claimBrowserInput(row.id, 'a-document', conversationId, true)).not.toBeNull();
+    expect((await post('/input/fail', { id: row.id, owner: 'a-document', conversationId, error: withdrawn, detail: 'turn-progressed by app-tool_call' })).body.ok).toBe(true);
+    expect(getLog().filter(entry => entry.message.includes('could not send this recovery message')).at(-1)?.message)
+      .toContain('(turn-progressed by app-tool_call)');
     const firstRelease = now;
     expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ state: 'queued',
       recovery: { withdrawnSince: firstRelease } });
@@ -268,6 +273,18 @@ async function silentTurnContinue(title: string, advance: (ms: number) => number
   expect(row).toMatchObject({ state: 'queued' });
   return { conversationId, turnId, session, row };
 }
+
+it("files an automatic Continue in the person's own words when they set a Continue prompt", async () => {
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      ui: { ...defaultConfig().ui, customContinue: 'Bitte weitermachen: finish the open steps.' } });
+    const { row } = await silentTurnContinue('Own Continue words', ms => now += ms);
+    expect(row.text.startsWith('Bitte weitermachen: finish the open steps. ')).toBe(true);
+    // The notice to check existing work stays after the person's words.
+    expect(row.text.slice('Bitte weitermachen: finish the open steps. '.length)).toMatch(/check|inspect|verify|look for/i);
+  } finally { clock.mockRestore(); }
+});
 
 it('ends a Continue the page refuses before claiming because its answer is finished', async () => {
   // Measured 2026-10-02: a Continue filed for a turn whose final the app had missed was refused by
@@ -536,6 +553,26 @@ it('holds a message for an existing chat until a new tunnel-client has taken ove
     expect(released.body.inputs.map((row: { id: string }) => row.id)).toContain(existing.id);
     expect((await post('/input/claim', { id: existing.id, owner: 'chat-page', conversationId, requiresAuthorization: true })).body.input)
       .toMatchObject({ id: existing.id });
+  } finally { clock.mockRestore(); resetRouteSettleForTests(); }
+});
+
+it('learns a longer hold when the first message for an existing chat after a restart still took the old route (#1788)', async () => {
+  const { noteTunnelClientConnected, resetRouteSettleForTests, routeHoldMs, noteRouteRequestSighted, noteRouteRequestArrived } =
+    await import('../src/main/tunnel/route-settle.js');
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'First message after a tunnel restart', conversationId });
+    const existing = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto' });
+    noteTunnelClientConnected();
+    now += routeHoldMs();
+    expect((await post('/input/claim', { id: existing.id, owner: 'chat-page', conversationId, requiresAuthorization: true })).body.input)
+      .toMatchObject({ id: existing.id });
+    now += 2_000;
+    noteRouteRequestSighted('request-after-restart', conversationId);
+    now += 124_000;
+    noteRouteRequestArrived('request-after-restart');
+    expect(routeHoldMs(), 'the claim of an existing chat started the measurement').toBeGreaterThan(35_000);
   } finally { clock.mockRestore(); resetRouteSettleForTests(); }
 });
 
@@ -1147,6 +1184,27 @@ it('refuses restored recovery tickets without MCP proof but still delivers a rea
     { kind: 'assistant_message', turnId: 'restored-turn', messageId: 'restored-final', text: 'Finished', state: 'final', final: true, time: Date.now() },
     { kind: 'turn_end', turnId: 'restored-turn', outcome: 'completed', time: Date.now() + 1 }
   ] });
+  expect((await post('/input/claim', { id: row.id, owner: 'page', conversationId, requiresAuthorization: true })).body.input?.id).toBe(row.id);
+});
+
+it('delivers a message queued after the silent turn it waits for had already completed', async () => {
+  // Live 2026-10-19 (VM): the page could not read ChatGPT's answer for a while, so the app still
+  // took the chat for busy when a message was queued, and silence recovery tied it to that turn.
+  // The turn had completed two minutes earlier; the message waited for a newer end forever.
+  const { readRecentEvents } = await import('../src/main/session/store.js');
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Completed before queueing', conversationId });
+  const started = Date.now() - 120_000;
+  await post('/events', { conversationId, events: [
+    { kind: 'turn_start', turnId: 'silent-done', time: started },
+    { kind: 'assistant_message', turnId: 'silent-done', messageId: 'silent-final', text: 'done', state: 'final', final: true, time: started + 1 },
+    { kind: 'turn_end', turnId: 'silent-done', outcome: 'completed', time: started + 2 }
+  ] });
+  const [end] = await readRecentEvents(session.id, 1);
+  const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto' as const });
+  await writeDurableNow('session-input', [{ ...row, state: 'queued',
+    silenceBoundary: { turnId: 'silent-done', conversationId, workSeq: end!.seq, acceptedAt: Date.now() - 1_000, listenUntil: Date.now() - 500 } }]);
+  input.resetInputForTests();
   expect((await post('/input/claim', { id: row.id, owner: 'page', conversationId, requiresAuthorization: true })).body.input?.id).toBe(row.id);
 });
 
@@ -3330,3 +3388,43 @@ it('copies only the chat a branch was made from, not the chat a Compact & Resume
     expect(said).toEqual(['new-ask', reply]);
   } finally { clock.mockRestore(); }
 });
+
+it('holds a message to a worker chat the app archived until that chat is restored (#1701)', async () => {
+  const archive = await import('../src/main/worker-archive.js');
+  archive.resetWorkerArchiveForTests();
+  await saveConfig({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, archiveWorkerChats: true } });
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Archived worker', conversationId });
+  archive.queueWorkerArchives([conversationId]);
+  expect(archive.nextWorkerArchive()).toEqual({ conversationId, archive: true });
+  archive.settleWorkerArchive(conversationId, 'archived');
+  const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto' as const });
+  expect((await input.pendingBrowserInputs()).some(item => item.id === row.id)).toBe(false);
+  expect(archive.nextWorkerArchive()).toEqual({ conversationId, archive: false });
+  archive.settleWorkerArchive(conversationId, 'unarchived');
+  expect((await input.pendingBrowserInputs()).some(item => item.id === row.id)).toBe(true);
+});
+
+it.each(['GPT-5.6 Sol', 'gpt-6-pro'])('sends a message typed after Stop once ChatGPT shows the turn stopped (%s)', async model => {
+  // Measured 2026-10-20 on Windows: Stop a second after a command's result, ChatGPT confirmed the
+  // stop, and the message typed next waited 3 minutes (10 for Pro) behind the stopped turn's
+  // activity window. That window stays for the app's own automatic sends.
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Stopped then typed', conversationId });
+  const time = Date.now();
+  await post('/events', { conversationId, events: [
+    { kind: 'model_selection', model, time },
+    { kind: 'user_message', messageId: 'stop-question', text: 'Work', authoredNow: true, time },
+    { kind: 'turn_start', turnId: 'stopped-turn', time }
+  ] });
+  await attributedMcp(conversationId);
+  await post('/events', { conversationId, events: [{ kind: 'turn_end', turnId: 'stopped-turn', outcome: 'stopped', time: Date.now() }] });
+  expect(await input.sessionInputPolicy(session.id)).toMatchObject({ browserAllowed: false, stoppedIdle: true });
+  const typed = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto' as const });
+  expect((await input.pendingBrowserInputs()).some(item => item.id === typed.id)).toBe(true);
+  await input.cancelInput(typed.id);
+  // An automatic after-turn message still waits for the window.
+  const queued = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'after-turn' as const });
+  expect((await input.pendingBrowserInputs()).some(item => item.id === queued.id)).toBe(false);
+});
+

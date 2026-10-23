@@ -6,7 +6,7 @@
  * Optional tunnel failures stay on their own Settings cards and cannot fail Core.
  */
 
-import { loadSurfaceTokens, rememberSurfaceTokens } from './mcp/persistent-paths.js';
+import { loadKeptPort, loadSurfaceTokens, rememberSurfaceTokens } from './mcp/persistent-paths.js';
 import { connectorProof } from './connector-proof.js';
 import type { ConnectionState, ConnectionStatus, SurfaceStatus, TunnelSettings } from '../shared/types.js';
 import { requiresApprovedFilesystemRoot } from '../shared/capabilities.js';
@@ -407,6 +407,7 @@ async function connectImpl(current: () => boolean = () => true): Promise<void> {
     // Opt-in stable URLs for a tunnel of the user's own (#924): the stored tokens, else fresh ones.
     const keepUrls = getConfig().mcp?.persistentUrls === true;
     const kept = keepUrls ? await loadSurfaceTokens().catch(() => ({})) : {};
+    const keptPort = keepUrls ? await loadKeptPort().catch(() => null) : null;
     const startedEndpoint = await startMcpServer(() => {
       const live = getConfig();
       return {
@@ -416,7 +417,7 @@ async function connectImpl(current: () => boolean = () => true): Promise<void> {
         readOnly: live.readOnly,
         privacyScreenshots: live.ui.privacyScreenshots
       };
-    }, kept);
+    }, kept, keptPort ? { port: keptPort } : {});
     if (keepUrls && !(await rememberSurfaceTokens(startedEndpoint.urls))) {
       logWarn('connector URLs: secure storage is unavailable, so they change at the next start');
     }
@@ -434,7 +435,8 @@ async function connectImpl(current: () => boolean = () => true): Promise<void> {
       await disconnectImpl();
       return;
     }
-    setStatus({ localUrl: endpoint.url, surfaces: describeSurfaces() });
+    setStatus({ localUrl: endpoint.url, keptPortMoved: keptPort && endpoint.port !== keptPort ? { from: keptPort, to: endpoint.port } : null,
+      surfaces: describeSurfaces() });
     if (desktopAutomationSupported() && (caps.screen || caps.control)) void prewarmComputerHelper();
     updateSurface('core', { state: 'starting', detail: 'Connecting…' });
 
@@ -693,6 +695,7 @@ async function disconnectResources(endpointForceAfterMs?: number): Promise<void>
     detail: '',
     publicUrl: null,
     localUrl: null,
+    keptPortMoved: null,
     handshakeAt: null,
     health: null,
     surfaces: describeSurfaces()
