@@ -8,6 +8,12 @@ name: Publish release
 # pipeline in that tag's own tree.
 on:
   workflow_dispatch:
+    inputs:
+      firefox_build:
+        description: 'Firefox-only fourth version part (1 makes the add-on 2.1.43.1). Only when Mozilla already holds this version; it never signs one twice.'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -118,6 +124,8 @@ jobs:
 
       # Same stamp as the packaged app, so app and add-on agree on the build they run.
       - name: Stage the Firefox add-on
+        env:
+          FIREFOX_BUILD: ${{ inputs.firefox_build }}
         run: |
           set -euo pipefail
           node scripts/write-extension-stamp.mjs
@@ -128,6 +136,7 @@ jobs:
         env:
           WEB_EXT_API_KEY: ${{ secrets.AMO_JWT_ISSUER }}
           WEB_EXT_API_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+          FIREFOX_BUILD: ${{ inputs.firefox_build }}
         run: |
           set -euo pipefail
           if [ -z "$WEB_EXT_API_KEY" ] || [ -z "$WEB_EXT_API_SECRET" ]; then
@@ -141,7 +150,7 @@ jobs:
           if [ "${#signed[@]}" -ne 1 ]; then echo "Expected one signed package, found ${#signed[@]}" >&2; exit 1; fi
           mkdir -p release/firefox
           cp "${signed[0]}" release/firefox/Chat-On-Steroids-Firefox.xpi
-          node scripts/firefox-update-manifest.mjs release/firefox/Chat-On-Steroids-Firefox.xpi "${TAG#v}" release/firefox/firefox-updates.json
+          node scripts/firefox-update-manifest.mjs release/firefox/Chat-On-Steroids-Firefox.xpi "${TAG#v}${FIREFOX_BUILD:+.$FIREFOX_BUILD}" release/firefox/firefox-updates.json
           cat release/firefox/firefox-updates.json
 
       - name: Upload the signed add-on

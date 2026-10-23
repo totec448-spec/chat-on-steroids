@@ -3,12 +3,15 @@ import type { LocalProject } from '../shared/projects.js';
 import type { ToolEditReview } from '../shared/session.js';
 import type { ProjectDirectoryListing, ProjectFileEntry, ProjectFileKind, ProjectFilePreview, ProjectFilesChanged } from '../shared/project-files.js';
 import type { ProjectGitChange, ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot, ProjectGitStatus } from '../shared/project-git.js';
+import { requestName } from './name-dialog.js';
 import { safeExternalLink } from '../shared/external-link.js';
 import { marked } from 'marked';
 import { currentLanguage, onLanguageChange, t, tn, ui } from './i18n.js';
 import { disclosureChevron, el, icon, run, toast } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
 import { createSearchPopup } from './search-popup.js';
+import { openRowMenu, type RowMenuItem } from './row-menu.js';
+import { appendGitignoreEntry, gitignoreEntry } from './gitignore-entry.js';
 import { sanitizeHtmlTree } from './sanitize-html.js';
 import type { ProjectCodeEditor, ProjectDiffViewer } from './file-code-editor.js';
 import type { ProjectPdfViewer } from './file-pdf-viewer.js';
@@ -33,6 +36,7 @@ interface Selection {
 
 const PREVIEW_HEIGHT_KEY = 'chat-on-steroids.file-preview-height';
 const PREVIEW_MIN_HEIGHT = 140;
+const GITIGNORE = '.gitignore';
 const MARKDOWN_TAGS = new Set([
   'A', 'BLOCKQUOTE', 'BR', 'CODE', 'DEL', 'EM', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6',
   'HR', 'KBD', 'LI', 'OL', 'P', 'PRE', 'S', 'STRONG', 'TABLE', 'TBODY', 'TD', 'TFOOT',
@@ -111,63 +115,15 @@ function actionButton(label: () => string, glyph: string, action: () => void | P
 }
 
 function requestEntryName(options: { title: string; initial?: string; confirm: string }): Promise<string | null> {
-  document.querySelector('.file-entry-dialog')?.remove();
-  return new Promise(resolve => {
-    const box = document.createElement('dialog');
-    box.className = 'file-entry-dialog';
-    const form = document.createElement('form');
-    form.className = 'file-entry-dialog-form';
-    form.noValidate = true;
-    const heading = el('h2', '', options.title);
-    const label = el('label', 'file-entry-dialog-field');
-    const input = document.createElement('input');
-    input.className = 'file-entry-dialog-input';
-    input.type = 'text';
-    input.maxLength = 255;
-    input.autocomplete = 'off';
-    input.spellcheck = false;
-    input.value = options.initial ?? '';
-    label.append(el('span', '', () => t('Name')), input);
-    const actions = el('div', 'file-entry-dialog-actions');
-    const cancel = el('button', 'btn', () => t('Cancel')) as HTMLButtonElement;
-    cancel.type = 'button';
-    const confirm = el('button', 'btn btn-solid', options.confirm) as HTMLButtonElement;
-    confirm.type = 'submit';
-    actions.append(cancel, confirm);
-    form.append(heading, label, actions);
-    box.append(form);
-    document.body.append(box);
-
-    let settled = false;
-    const finish = (value: string | null): void => {
-      if (settled) return;
-      settled = true;
-      box.remove();
-      resolve(value);
-    };
-    cancel.addEventListener('click', () => finish(null));
-    box.addEventListener('cancel', event => { event.preventDefault(); finish(null); });
-    input.addEventListener('input', () => input.setCustomValidity(''));
-    form.addEventListener('submit', event => {
-      event.preventDefault();
-      const value = input.value.trim();
-      if (!value || value === '.' || value === '..' || /[\\/\0]/.test(value)) {
-        input.setCustomValidity(t('Use one file or folder name.'));
-        input.reportValidity();
-        return;
-      }
-      finish(value);
-    });
-
-    if (typeof box.showModal === 'function') box.showModal();
-    else box.setAttribute('open', '');
-    input.focus();
-    input.select();
+  return requestName({
+    ...options, maxLength: 255,
+    validate: value => !value || value === '.' || value === '..' || /[\\/\0]/.test(value) ? t('Use one file or folder name.') : null
   });
 }
 
-function requestFileConfirmation(options: { title: string; message: string; detail?: string; confirm: string }): Promise<boolean> {
+function requestFileConfirmation(options: { title: string; message: string; detail?: string; confirm: string; danger?: boolean }): Promise<boolean> {
   document.querySelector('.file-confirm-dialog')?.remove();
+  const opener = document.activeElement as HTMLElement | null;
   return new Promise(resolve => {
     const box = document.createElement('dialog');
     box.className = 'file-confirm-dialog';
@@ -177,7 +133,7 @@ function requestFileConfirmation(options: { title: string; message: string; deta
     const actions = el('div', 'file-entry-dialog-actions');
     const cancel = el('button', 'btn', () => t('Cancel')) as HTMLButtonElement;
     cancel.type = 'button';
-    const confirm = el('button', 'btn btn-solid file-dialog-danger', options.confirm) as HTMLButtonElement;
+    const confirm = el('button', `btn btn-solid${options.danger === false ? '' : ' file-dialog-danger'}`, options.confirm) as HTMLButtonElement;
     confirm.type = 'button';
     actions.append(cancel, confirm);
     body.append(actions);
@@ -188,7 +144,10 @@ function requestFileConfirmation(options: { title: string; message: string; deta
     const finish = (value: boolean): void => {
       if (settled) return;
       settled = true;
+      // Closing a modal dialog hands focus back to where it was; removing it leaves focus on the page body.
+      if (typeof box.close === 'function' && box.open) box.close();
       box.remove();
+      if ((!document.activeElement || document.activeElement === document.body) && opener?.isConnected) opener.focus({ preventScroll: true });
       resolve(value);
     };
     cancel.addEventListener('click', () => finish(false));
@@ -1129,11 +1088,92 @@ export function createFilePanel(options: FilePanelOptions) {
         row.title = `${gitStatusLabel(change.status)} · ${change.previousPath ? `${change.previousPath} → ` : ''}${change.path} · ${stats.textContent ?? ''}`;
         row.setAttribute('aria-label', row.title);
         row.addEventListener('click', () => void openGitDiff(change));
+        // A name no single .gitignore line can hold (a line break) gets no menu rather than one that does nothing.
+        if (status === 'U' && !gitSnapshot.comparison && !project.remote && gitignoreEntry(change.path, false)) {
+          row.addEventListener('contextmenu', event => {
+            event.preventDefault();
+            // The context-menu key reports no pointer position; the menu then opens below the row.
+            const pointer = event.clientX || event.clientY ? { at: { x: event.clientX, y: event.clientY } } : {};
+            openRowMenu({
+              owner: `git-change:${change.path}`,
+              anchor: () => [...changesList.querySelectorAll<HTMLElement>('.file-change-row')].find(item => item.dataset.path === change.path) ?? null,
+              label: () => t('Add to .gitignore'),
+              items: () => ignoreMenuItems(change.path),
+              ...pointer
+            });
+          });
+        }
         section.append(row);
       }
       changesList.append(section);
     }
     if (gitSnapshot.truncated) changesList.append(el('p', 'file-changes-limit', () => t('More changes exist than can be shown at once.')));
+  }
+
+  function ignoreMenuItems(path: string): RowMenuItem[] {
+    const items: RowMenuItem[] = [{
+      action: 'gitignore-file', icon: 'i-ban', label: () => t('Add “{0}” to .gitignore', [baseName(path)]),
+      run: () => void addToGitignore(path, false)
+    }];
+    const folder = parentPath(path);
+    if (folder) {
+      items.push({
+        action: 'gitignore-folder', icon: 'i-folder', label: () => t('Add “{0}” to .gitignore', [`${baseName(folder)}/`]),
+        title: () => `${folder}/`, run: () => void addToGitignore(folder, true)
+      });
+    }
+    return items;
+  }
+
+  /**
+   * Appends one untracked path to the project folder's .gitignore through the Files save path.
+   * The file is read before the dialog and saved against that revision, so an edit made
+   * elsewhere while the dialog is open is refused instead of overwritten.
+   */
+  async function addToGitignore(path: string, folder: boolean): Promise<void> {
+    const current = project;
+    const entry = gitignoreEntry(path, folder);
+    if (!current || current.remote || !entry) return;
+    const expected = generation;
+    const rowPosition = [...changesList.querySelectorAll<HTMLElement>('.file-change-row')].findIndex(row => row.dataset.path === path);
+    const read = await window.api.previewProjectFile(current.id, GITIGNORE);
+    if (expected !== generation || project?.id !== current.id) return;
+    let base: (ProjectFilePreview & { text: string; revision: string }) | null = null;
+    if (read.ok) {
+      if (!editablePreview(read.data)) { toast(t('.gitignore is too large or not plain text, so it cannot be changed here.')); return; }
+      base = read.data;
+    } else {
+      // A missing file is created after the dialog; any other read failure is reported as is.
+      const root = await run(window.api.listProjectFiles(current.id, ''));
+      if (!root || expected !== generation || project?.id !== current.id) return;
+      if (root.entries.some(item => item.path === GITIGNORE)) { toast(t(read.error)); return; }
+    }
+    const confirmed = await requestFileConfirmation({
+      title: t('Add to .gitignore?'),
+      message: t('Add the line “{0}” to .gitignore?', [entry]),
+      ...(base ? {} : { detail: t('This project has no .gitignore yet. One is created in the project folder.') }),
+      confirm: t('Add'),
+      danger: false
+    });
+    if (!confirmed || expected !== generation || project?.id !== current.id) return;
+    if (!base) {
+      if (!(await run(window.api.createProjectFileEntry(current.id, '', GITIGNORE, 'file')))) return;
+      const created = await run(window.api.previewProjectFile(current.id, GITIGNORE));
+      if (!created || !editablePreview(created)) return;
+      base = created;
+    }
+    const saved = await run(window.api.saveProjectFile(current.id, GITIGNORE, appendGitignoreEntry(base.text, entry),
+      base.modifiedAt, base.bytes, base.revision));
+    if (!saved) return;
+    toast(t('Added {0} to .gitignore', [entry]));
+    if (expected !== generation || project?.id !== current.id) return;
+    if (!options.reviewOnly) await reloadDirectory('');
+    await reconcileGitChanges(true);
+    // The ignored row is gone after the refresh, taking focus with it: continue at the row now in its place.
+    if (document.activeElement && document.activeElement !== document.body) return;
+    const rows = [...changesList.querySelectorAll<HTMLElement>('.file-change-row')];
+    (rows.find(row => row.dataset.path === path) ?? rows[Math.min(Math.max(rowPosition, 0), rows.length - 1)]
+      ?? (options.reviewOnly ? refresh : backToFiles)).focus({ preventScroll: true });
   }
 
   function closeGitDiff(): void {

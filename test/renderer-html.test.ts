@@ -119,6 +119,38 @@ describe('captured ChatGPT rendered HTML', () => {
     expect(plain.querySelector('.markdown-writing .tool-output-header strong')?.textContent).toBe('Text');
   });
 
+  it('names a code block by its language, wraps its long lines on request and saves it with that language\'s extension', async () => {
+    const saveCode = vi.fn(async () => ({ ok: true, data: { done: 'saved', name: 'snippet.ts' } }));
+    Object.assign((dom.window as unknown as { api: object }).api, { saveCode });
+    const rendered = renderedMarkdown('Here it is.\n\n```typescript\nconst answer = 42;\n```\n\n```\nplain words\n```');
+    const [typed, plain] = [...rendered.querySelectorAll('.markdown-code')];
+    expect(typed!.querySelector('.tool-output-header strong')?.textContent).toBe('typescript');
+    expect(plain!.querySelector('.tool-output-header strong')?.textContent).toBe('Code');
+    expect([...typed!.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Copy', 'Wrap', 'Save']);
+    const wrap = typed!.querySelector<HTMLButtonElement>('.code-wrap')!;
+    wrap.click();
+    expect(typed!.classList.contains('is-wrapped')).toBe(true);
+    expect(wrap.getAttribute('aria-pressed')).toBe('true');
+    expect(plain!.classList.contains('is-wrapped')).toBe(false);
+    wrap.click();
+    expect(typed!.classList.contains('is-wrapped')).toBe(false);
+    expect(wrap.getAttribute('aria-pressed')).toBe('false');
+    typed!.querySelector<HTMLButtonElement>('.code-save')!.click();
+    await vi.waitFor(() => expect(saveCode).toHaveBeenCalledWith({ text: 'const answer = 42;\n', name: 'snippet.ts' }));
+    plain!.querySelector<HTMLButtonElement>('.code-save')!.click();
+    await vi.waitFor(() => expect(saveCode).toHaveBeenLastCalledWith({ text: 'plain words\n', name: 'snippet.txt' }));
+    // A class that is not a plain language name names nothing, and its file is text.
+    const odd = renderedMessage(whole('<pre><code class="language-../../x">x</code></pre>'), 'x');
+    expect(odd.querySelector('.tool-output-header strong')?.textContent).toBe('Code');
+    odd.querySelector<HTMLButtonElement>('.code-save')!.click();
+    await vi.waitFor(() => expect(saveCode).toHaveBeenLastCalledWith({ text: 'x', name: 'snippet.txt' }));
+    // A language that happens to name a member every object has is still just a language.
+    const member = renderedMarkdown('```constructor\ny\n```');
+    expect(member.querySelector('.tool-output-header strong')?.textContent).toBe('constructor');
+    member.querySelector<HTMLButtonElement>('.code-save')!.click();
+    await vi.waitFor(() => expect(saveCode).toHaveBeenLastCalledWith({ text: 'y\n', name: 'snippet.txt' }));
+  });
+
   it('shows the page\'s resolved content for a content-reference reply instead of the raw pointer (#574)', () => {
     const pointer = '::chatgpt-content-reference{index="0" source_message_id="d2b82e00-509e-4a87-aa93-00bcde251680"}';
     // The page resolved the pointer: its capture is this message's faithful presentation.
@@ -413,8 +445,9 @@ describe('a capture that could not be carried whole', () => {
     // The prose either side of the block is prose, not part of the box.
     const paragraphs = [...rendered.querySelectorAll('p')].map((node) => node.textContent);
     expect(paragraphs).toEqual(['Run the suite before pushing.', 'Then open a pull request.']);
-    expect(rendered.querySelectorAll('button')).toHaveLength(1);
-    expect(rendered.querySelector('.markdown-code .tool-output-header')?.textContent).toContain('Code');
+    // Only the app's own controls: ChatGPT's Copy and Edit are gone.
+    expect([...rendered.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Copy', 'Wrap', 'Save']);
+    expect(rendered.querySelector('.markdown-code .tool-output-header strong')?.textContent).toBe('bash');
     expect(rendered.querySelector('.markdown-code .tool-copy')?.textContent).toBe('Copy');
     expect(rendered.textContent).not.toContain('Edit');
   });

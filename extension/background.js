@@ -32,6 +32,11 @@ const activeTabs = globalThis.chrome?.debugger ? createActiveTabs(chrome) : null
 const PORTS = [8765, 8766, 8767, 8768, 8769, 18765, 18766, 18767, 18768, 18769, 38765, 38766, 38767, 38768, 38769];
 const HELLO_TIMEOUT_MS = 1200;
 const REQUEST_TIMEOUT_MS = 10_000;
+/**
+ * A page's reason for releasing an input before Send: one of its own short codes, some naming what
+ * moved the turn ("turn-progressed by app-tool_call"). Free text never travels (#820, #1787).
+ */
+const RELEASE_DETAIL = /^[a-z][a-z0-9 _-]{0,79}$/;
 /** A journal receipt follows durable session writes, which can outlast an ordinary read. */
 const EVENTS_REQUEST_TIMEOUT_MS = 60_000;
 /**
@@ -729,6 +734,9 @@ function enqueue(entries) {
       provisional: typeof entry.provisional === 'string' ? entry.provisional : null,
       agent: typeof entry.agent === 'string' ? entry.agent : null,
       agentCommandId: typeof entry.agentCommandId === 'string' ? entry.agentCommandId : null,
+      // The ChatGPT Project the recording tab showed (#1744); the app puts the chat into the
+      // CoS project linked to it. Read from the tab's URL here, never from the page's report.
+      chatgptProject: typeof entry.chatgptProject === 'string' && CHATGPT_PROJECT_ID.test(entry.chatgptProject) ? entry.chatgptProject : null,
       event: entry.event
     });
   }
@@ -815,6 +823,7 @@ function nextJournalBatch(preferredConversationId = null, excluded = []) {
       : null;
   let agent;
   let agentCommandId;
+  let chatgptProject;
   const mine = [];
   for (const entry of journal) {
     if (!conversationId) {
@@ -830,13 +839,14 @@ function nextJournalBatch(preferredConversationId = null, excluded = []) {
       agent = entry.agent;
       agentCommandId = entry.agentCommandId;
     }
+    if (!chatgptProject && entry.chatgptProject) chatgptProject = entry.chatgptProject;
     if (mine.length >= BATCH) break;
   }
-  return conversationId ? { conversationId, mine, agent, agentCommandId } : null;
+  return conversationId ? { conversationId, mine, agent, agentCommandId, chatgptProject } : null;
 }
 
 async function deliverJournalBatch(batch) {
-  const { conversationId, mine, agent, agentCommandId } = batch;
+  const { conversationId, mine, agent, agentCommandId, chatgptProject } = batch;
   const result = await call('/events', {
     method: 'POST',
     timeoutMs: EVENTS_REQUEST_TIMEOUT_MS,
@@ -844,6 +854,7 @@ async function deliverJournalBatch(batch) {
       conversationId,
       agent,
       agentCommandId,
+      chatgptProject,
       events: mine.map((entry) => entry.event)
     })
   });
@@ -854,7 +865,7 @@ async function deliverJournalBatch(batch) {
     const retry = await call('/events', {
       method: 'POST',
       timeoutMs: EVENTS_REQUEST_TIMEOUT_MS,
-      body: JSON.stringify({ conversationId, agent, agentCommandId, events: half.map((entry) => entry.event) })
+      body: JSON.stringify({ conversationId, agent, agentCommandId, chatgptProject, events: half.map((entry) => entry.event) })
     });
     noteDelivery(retry, half.length, conversationId);
     if (!retry.ok) return false;
@@ -3834,6 +3845,24 @@ function projectFromUrl(value) {
   }
 }
 
+const CHATGPT_PROJECT_ID = /^g-p-[0-9a-f]{32}$/;
+
+/**
+ * The ChatGPT Project the recording tab shows this chat in (#1744), from the tab's own URL: the
+ * chat's own Project route (`/g/g-p-…/c/<id>`) or, for a fresh chat's first observations before
+ * ChatGPT names it, the Project home it was started on. Null when the tab is on another chat,
+ * on a route without a chat for a named one, outside any Project, or cannot be read.
+ */
+async function tabChatgptProject(source, conversationId) {
+  const tab = await chrome.tabs.get(source.tab).catch(() => null);
+  if (!tab || tab.pendingUrl) return null;
+  const shown = conversationFromUrl(tab.url);
+  // A named chat counts only on its own route; a route without a chat (the Project home) only
+  // for a fresh chat's first observations, so a late batch never takes the Project shown by then.
+  if (shown ? shown !== conversationId : Boolean(conversationId)) return null;
+  return projectFromUrl(tab.url);
+}
+
 function isChatGptUrl(value) {
   try {
     const url = new URL(String(value || ''));
@@ -4022,6 +4051,23 @@ const HANDLERS = {
     return call('/core-plugin', { method: 'POST', body: JSON.stringify({ appId: message.appId }) });
   },
   // A page read ChatGPT's own `conversation_deleted` answer for this chat (usage.js).
+  // A new chat's tab for a linked Project found that Project gone (#1759): ChatGPT now keeps such a
+  // page on "loading" instead of sending it home, which the outbox loop above reports. Only the tab
+  // opened for that message, still on that Project's page, may say so.
+  async project_unavailable(message, _sender, source) {
+    const id = String(message.id || '');
+    const project = String(message.project || '');
+    if (!ownsDocument(source) || !/^[a-f0-9-]{36}$/i.test(id) || !/^g-p-[0-9a-f]{32}$/.test(project)) return { ok: false };
+    const opening = inputOpenings[id];
+    if (opening?.tab !== source.tab || opening.project !== project) return { ok: false };
+    const tab = await chrome.tabs.get(source.tab).catch(() => null);
+    // The document may have been replaced while asking, or the tab may already be leaving.
+    if (!tab || !ownsDocument(source) || tab.pendingUrl) return { ok: false };
+    let home = null;
+    try { home = /^\/g\/(g-p-[0-9a-f]{32})(?:-[^/]+)?\/project\/?$/i.exec(new URL(tab.url).pathname)?.[1]?.toLowerCase() ?? null; } catch {}
+    if (home !== project) return { ok: false };
+    return call('/project-create', { method: 'POST', body: JSON.stringify({ action: 'gone', inputId: id, chatgptId: project }) });
+  },
   async conversation_deleted(message, _sender, source) {
     const conversationId = String(message.conversationId || '').toLowerCase();
     if (!ownsDocument(source) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(conversationId)) return { ok: false };
@@ -4064,7 +4110,7 @@ const HANDLERS = {
     }
     if (message.recoveryAction && message.owner !== owner) return { ok: false };
     const result = await call(typeof message.partial === 'string' ? '/input/progress' : typeof message.response === 'string' ? '/input/answer' : message.fail === true ? '/input/fail' : message.ack === true ? '/input/ack' : '/input/claim', {
-      method: 'POST', body: JSON.stringify({ id, owner, conversationId, recoveryAction: ['stop', 'stopped'].includes(message.recoveryAction) ? message.recoveryAction : undefined, silenceBusyTurnId: typeof message.silenceBusyTurnId === 'string' ? message.silenceBusyTurnId : undefined, recoveryVeto: message.recoveryVeto === 'page-final' ? 'page-final' : undefined, requiresAuthorization: message.requiresAuthorization === true, authorize: message.authorize === true, partial: typeof message.partial === 'string' ? message.partial.slice(-8000) : undefined, messageId: typeof message.messageId === 'string' ? message.messageId : undefined, error: message.error, detail: typeof message.detail === 'string' && /^[a-z-]{1,40}$/.test(message.detail) ? message.detail : undefined, response: typeof message.response === 'string' ? message.response.slice(0, 16001) : undefined, project: typeof message.project === 'string' && /^g-p-[0-9a-f]{32}$/.test(message.project) ? message.project : undefined })
+      method: 'POST', body: JSON.stringify({ id, owner, conversationId, recoveryAction: ['stop', 'stopped'].includes(message.recoveryAction) ? message.recoveryAction : undefined, silenceBusyTurnId: typeof message.silenceBusyTurnId === 'string' ? message.silenceBusyTurnId : undefined, recoveryVeto: message.recoveryVeto === 'page-final' ? 'page-final' : undefined, requiresAuthorization: message.requiresAuthorization === true, authorize: message.authorize === true, partial: typeof message.partial === 'string' ? message.partial.slice(-8000) : undefined, messageId: typeof message.messageId === 'string' ? message.messageId : undefined, error: message.error, detail: typeof message.detail === 'string' && RELEASE_DETAIL.test(message.detail) ? message.detail : undefined, response: typeof message.response === 'string' ? message.response.slice(0, 16001) : undefined, project: typeof message.project === 'string' && /^g-p-[0-9a-f]{32}$/.test(message.project) ? message.project : undefined })
     });
     if (typeof message.response === 'string' && message.lifetime === 'temporary-planner' && result.ok && result.data?.ok === true && ownsDocument(source)) {
       // Acceptance retires this exact helper immediately. Fresh page proof still
@@ -4354,9 +4400,12 @@ const HANDLERS = {
     if (!ownsDocument(source) || (binding.projectBound && !await currentConversationDocument(source, conversationId)))
       return { ok: false, error: 'stale_document' };
     const key = tabKey(source);
-    const entries = (Array.isArray(message.entries) ? message.entries : []).map((entry) =>
-      entry && !entry.conversationId ? { ...entry, provisional: key } : entry
-    );
+    const chatgptProject = await tabChatgptProject(source, conversationId);
+    const entries = (Array.isArray(message.entries) ? message.entries : []).map((entry) => {
+      if (!entry || typeof entry !== 'object') return entry;
+      const placed = chatgptProject ? { ...entry, chatgptProject } : entry;
+      return placed.conversationId ? placed : { ...placed, provisional: key };
+    });
     enqueue(entries);
     let ackBound = 0;
     if (message.conversationId) {
@@ -4955,6 +5004,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'core_plugin',
     'load_failure',
     'conversation_deleted',
+    'project_unavailable',
     'usage_observation',
     'events',
     'bind',
@@ -5676,23 +5726,27 @@ if (chrome.runtime.onStartup && typeof chrome.runtime.onStartup.addListener === 
 }
 
 /**
- * Archives one retired worker chat the app has queued (#1460), from any ChatGPT page of this
- * extension: the archive is an account-level request, so it needs no tab of that chat. At most
- * one per pass. Without such a page the app hears `deferred`, which costs no attempt.
+ * Archives one worker chat the app has queued (#1460), or restores one before its worker is woken
+ * (#1701), from any ChatGPT page of this extension: both are account-level requests, so they need
+ * no tab of that chat. At most one per pass. Without such a page the app hears `deferred`, which
+ * costs no attempt.
  */
 async function drainWorkerArchive() {
   await load();
   const next = await call('/worker-archive/next', { method: 'POST', body: '{}' });
-  const conversationId = next.ok ? cleanConversationId(next.data?.conversationId) : null;
+  const unarchive = next.ok ? cleanConversationId(next.data?.unarchive) : null;
+  const conversationId = unarchive || (next.ok ? cleanConversationId(next.data?.conversationId) : null);
   if (!conversationId) return;
+  const archive = !unarchive;
+  const done = archive ? 'archived' : 'unarchived';
   let outcome = 'deferred';
   for (const tab of await chrome.tabs.query({ url: ['https://chatgpt.com/*'] })) {
     const documentId = tab.id === undefined ? null : tabDocuments[String(tab.id)];
     if (!documentId) continue;
     let reply;
-    try { reply = await chrome.tabs.sendMessage(tab.id, { type: 'clf-archive-chat', conversationId }, { documentId }); }
+    try { reply = await chrome.tabs.sendMessage(tab.id, { type: 'clf-archive-chat', conversationId, archive }, { documentId }); }
     catch { continue; } // that document is gone; another page may still do it
-    outcome = reply?.outcome === 'archived' ? 'archived' : 'failed';
+    outcome = reply?.outcome === done ? done : 'failed';
     break;
   }
   await call('/worker-archive/result', { method: 'POST', body: JSON.stringify({ conversationId, outcome }) });

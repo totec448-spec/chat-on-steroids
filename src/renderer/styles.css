@@ -79,7 +79,7 @@
 /* Pets library (desktop pets). */
 .pet-library-grid { align-items: stretch; }
 .pet-library-card { height: 100%; }
-.pet-library-card .plugin-entry { height: 100%; min-height: 112px; padding: 15px 82px 38px 16px; cursor: default; }
+.pet-library-card .plugin-entry { height: 100%; align-items: flex-start; min-height: 112px; padding: 15px 82px 38px 16px; cursor: default; }
 .pet-library-card .plugin-entry h2 { padding-right: 0; }
 .pet-library-status { position: absolute; right: 16px; bottom: 14px; }
 .pet-import-guide { justify-content: space-between; column-gap: 48px; margin-top: 20px; }
@@ -142,7 +142,7 @@
 .plugin-menu-actions .btn { display: flex; width: 100%; padding: 9px 11px; border-radius: var(--r-xs); color: var(--ink); text-align: left; font-size: calc(12px * var(--text-scale, 1)); }
 .plugin-menu-actions .plugin-destructive { color: var(--red); border-top: 1px solid var(--line); border-radius: 0 0 var(--r-xs) var(--r-xs); margin-top: 4px; }
 .plugin-catalog { margin: 20px 0 28px; }
-.plugin-catalog-card { display: flex; align-items: center; gap: 13px; min-width: 0; min-height: 90px; padding: 15px 16px; border: 1px solid transparent; border-radius: var(--r-lg); background: transparent; color: var(--ink); text-align: left; font: inherit; cursor: pointer; transition: background .14s; }
+.plugin-catalog-card { display: flex; align-items: flex-start; gap: 13px; min-width: 0; min-height: 90px; padding: 15px 16px; border: 1px solid transparent; border-radius: var(--r-lg); background: transparent; color: var(--ink); text-align: left; font: inherit; cursor: pointer; transition: background .14s; }
 .plugin-catalog-card:hover { background: var(--hover); }
 .plugin-no-results { grid-column: 1 / -1; padding: 24px 0; font-size: calc(13px * var(--text-scale, 1)); line-height: 1.6; }
 .plugin-empty { grid-column: 1 / -1; display: grid; justify-items: center; padding: 32px 24px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--card); text-align: center; }
@@ -332,6 +332,18 @@ body {
   overflow: hidden;
 }
 
+/* Appearance → Font → Atkinson Hyperlegible: Atkinson Hyperlegible Next 5.2.6 (OFL-1.1,
+   docs/licenses/atkinson-hyperlegible-next/LICENSE), variable weight, Latin and Latin Extended.
+   Bundled because font-src is 'self'; Chromium only loads it once the font is chosen. */
+@font-face { font-family: "CoS Atkinson Hyperlegible Next"; font-style: normal; font-weight: 200 800; font-display: swap;
+  src: url('./fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2') format('woff2'); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+@font-face { font-family: "CoS Atkinson Hyperlegible Next"; font-style: normal; font-weight: 200 800; font-display: swap;
+  src: url('./fonts/atkinson-hyperlegible-next-latin-ext-wght-normal.woff2') format('woff2'); unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }
+@font-face { font-family: "CoS Atkinson Hyperlegible Next"; font-style: italic; font-weight: 200 800; font-display: swap;
+  src: url('./fonts/atkinson-hyperlegible-next-latin-wght-italic.woff2') format('woff2'); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+@font-face { font-family: "CoS Atkinson Hyperlegible Next"; font-style: italic; font-weight: 200 800; font-display: swap;
+  src: url('./fonts/atkinson-hyperlegible-next-latin-ext-wght-italic.woff2') format('woff2'); unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }
+
 body {
   background: var(--page);
   color: var(--ink);
@@ -442,10 +454,17 @@ code {
 #viewMenu .ico { --glyph: 18.5px; }
 /* A sidebar row's menu and its submenus (row-menu.ts): fixed in the window, above the sidebar. */
 :is(.row-menu, .row-menu-leaving) { --row-menu-hover: color-mix(in srgb, var(--popover, var(--card)) 86%, var(--ink));
-  position: fixed; z-index: 200; display: grid; gap: 1px; min-width: 196px; max-width: 280px; padding: 5px; color: var(--ink);
+  position: fixed; z-index: 200; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; min-width: 196px; max-width: 280px; padding: 5px; color: var(--ink);
   background: var(--popover, var(--card)); border: 1px solid var(--edge); border-radius: 10px; box-shadow: 0 8px 28px #0003;
   transform-origin: top left; animation: row-menu-in 140ms cubic-bezier(.2, .8, .2, 1); }
 .row-menu-leaving { pointer-events: none; animation: row-menu-out 100ms ease-in forwards; }
+/* A long menu (a chat's bookmarks, up to 200) scrolls inside the window instead of running past it;
+   placeBeside() narrows it further to the room beside its button. */
+.row-menu { max-height: calc(100vh - 16px); overflow-y: auto; overscroll-behavior: contain; }
+.row-menu.is-wide { max-width: min(440px, calc(100vw - 16px)); }
+/* A wide list's live value (a bookmark's time) lines up at the end of each line. */
+.row-menu.is-wide .row-menu-label:has(+ .row-menu-hint) { flex: 1 1 auto; }
+.row-menu.is-wide .row-menu-hint { margin-inline-end: 0; }
 @keyframes row-menu-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
 @keyframes row-menu-out { from { opacity: 1; } to { opacity: 0; } }
 .row-menu-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 32px; padding: 6px 10px; border: 0; border-radius: 6px;
@@ -502,10 +521,13 @@ code {
 .sidebar-resize:hover, .sidebar-resize:focus-visible, .app.is-resizing-sidebar .sidebar-resize { background: linear-gradient(to bottom, transparent 18px, var(--accent-edge) 36px, transparent 88%) center / 1px 100% no-repeat; outline: none; }
 .app.is-resizing-sidebar, .app.is-resizing-sidebar * { cursor: col-resize !important; user-select: none !important; }
 .sidebar-brand { display: flex; align-items: center; gap: 11px; padding: 0 8px 24px; }
-/* Chat search opens from here (and ⌘K / Ctrl+K), as in ChatGPT: one quiet icon, no field in the list. */
-.sidebar-brand .sidebar-brand-search { display: grid; place-items: center; flex: none; width: 28px; height: 28px; margin-left: auto; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--faint); }
-.sidebar-brand .sidebar-brand-search:hover, .sidebar-brand .sidebar-brand-search:focus-visible { color: var(--ink); background: var(--hover); }
-.sidebar-brand-search .ico { --ico: 16px; }
+/* Chat search opens from here (and ⌘K / Ctrl+K), as in ChatGPT: one quiet icon, no field in the list.
+   Mark all as seen sits before it only while a chat shows New response. */
+.sidebar-brand :is(.sidebar-brand-search, .sidebar-brand-seen) { display: grid; place-items: center; flex: none; width: 28px; height: 28px; margin-left: auto; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--faint); }
+.sidebar-brand :is(.sidebar-brand-search, .sidebar-brand-seen):is(:hover, :focus-visible) { color: var(--ink); background: var(--hover); }
+.sidebar-brand .sidebar-brand-seen[hidden] { display: none; }
+.sidebar-brand .sidebar-brand-seen:not([hidden]) + .sidebar-brand-search { margin-left: -7px; }
+:is(.sidebar-brand-search, .sidebar-brand-seen) .ico { --ico: 16px; }
 .sidebar-brand strong { font-size: calc(15px * var(--text-scale, 1)); font-weight: 600; letter-spacing: -.025em; }
 .sidebar-brand strong span { display: block; color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); font-weight: 400; letter-spacing: .01em; }
 .sidebar-brand .mark { display: none; }
@@ -1793,6 +1815,16 @@ main {
   display: none;
 }
 
+/* Said in the interface's font, not the log's. */
+.feed.is-empty::before {
+  content: attr(data-empty);
+  display: block;
+  padding: 12px 8px;
+  color: var(--faint);
+  font-family: var(--ui-font, system-ui, sans-serif);
+  font-size: calc(13px * var(--text-scale, 1));
+}
+
 [data-panel='activity'] .card {
   grid-template-rows: auto minmax(0, 1fr) auto;
 }
@@ -2258,6 +2290,9 @@ textarea {
   font-size: calc(12px * var(--text-scale, 1));
 }
 
+/* One instruction, not a whole prompt: a few lines are enough. */
+#customContinue { min-height: 88px; }
+
 input[readonly] {
   background: var(--sunk);
   color: var(--soft);
@@ -2478,6 +2513,12 @@ input[readonly] {
 .chat-branch-origin:hover:not(:disabled) { background: var(--hover); color: var(--ink); }
 .chat-branch-origin:disabled { cursor: default; }
 .chat-branch-origin:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
+/* Bookmarked answers of the open chat: the count, and the shared menu that lists them. */
+.chat-bookmarks { display: inline-flex; align-items: center; gap: 4px; flex: none; padding: 4px 8px; border: 0; border-radius: 7px; background: transparent; color: var(--soft); font: inherit; font-size: calc(12.5px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; cursor: pointer; }
+.chat-bookmarks[hidden] { display: none; }
+.chat-bookmarks .ico { --ico: 14px; --glyph: 14px; flex: none; }
+.chat-bookmarks:hover, .chat-bookmarks[aria-expanded="true"] { background: var(--hover); color: var(--ink); }
+.chat-bookmarks:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
 /* The new chat being written starts from a reply: one row of the composer dock, drawn like its
    neighbours (the dock draws the frame, the row adds none of its own). */
 .branch-draft[hidden], .edit-draft[hidden] { display: none; }
@@ -2539,8 +2580,8 @@ input[readonly] {
 @media (prefers-reduced-motion: reduce) { .sess-actions { transition: none; } }
 /* While a chat is being named, its field takes the actions' place (#1107). */
 .sess:has(.sess-rename) .sess-actions { display: none; }
-/* Pinned chats (#1133): a quiet mark that stays visible; it hides with the status while actions show. */
-.sess-pin-mark { flex: none; margin-left: 4px; font-size: 12px; color: var(--faint); }
+/* Pinned chats (#1133) and chats holding an unsent draft: a quiet mark that stays visible; it hides with the status while actions show. */
+.sess-pin-mark, .sess-draft-mark { flex: none; margin-left: 4px; font-size: 12px; color: var(--faint); }
 .session-diagnostics { margin-top: 20px; color: var(--faint); }
 .session-diagnostics > summary { padding: 8px 10px; cursor: pointer; font-size: calc(12px * var(--text-scale, 1)); }
 .session-diagnostics .sess-top b { font-size: calc(13px * var(--text-scale, 1)); }
@@ -2753,6 +2794,7 @@ input[readonly] {
    the turn's work and what it says. */
 .turn-worked { margin: 12px 0 8px; padding-bottom: 9px; border-bottom: 1px solid var(--line); color: var(--faint); font-size: calc(12.5px * var(--text-scale, 1)); font-weight: 500; letter-spacing: .01em; line-height: 18px; font-variant-numeric: tabular-nums; }
 .turn-worked[hidden] { display: none; }
+.turn-stopped { color: var(--red); }
 /* While the turn works, a light sheen passes through the words (not the rule under them). */
 .turn-status.is-working .turn-worked-label {
   color: transparent;
@@ -2806,6 +2848,7 @@ input[readonly] {
 .answer-action:hover, .answer-export[open] > .answer-action { background: var(--hover); color: var(--ink); }
 .answer-action:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
 .answer-action.is-done { color: var(--green); }
+.answer-bookmark.is-on { color: var(--accent); }
 .answer-export { anchor-scope: --answer-export; }
 .answer-export > summary { anchor-name: --answer-export; }
 .answer-export::details-content { transition: content-visibility 120ms allow-discrete; }
@@ -2839,7 +2882,7 @@ input[readonly] {
 
 .msg {
   font-size: calc(15px * var(--text-scale, 1));
-  line-height: 1.75;
+  line-height: calc(1.75 * var(--line-spacing, 1));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   max-height: none;
@@ -2848,7 +2891,7 @@ input[readonly] {
 
 .msg.rich {
   white-space: normal;
-  line-height: 1.5;
+  line-height: calc(1.5 * var(--line-spacing, 1));
 }
 
 /* Plain messages keep independent bidi paragraphs, including mixed-language pastes.
@@ -2935,6 +2978,14 @@ input[readonly] {
   border: 0;
   border-radius: 0;
 }
+
+/* Copy, Wrap and Save sit together at the header's end. */
+.msg.rich .markdown-code .tool-copy + .tool-copy { margin-left: 0; }
+/* A long language name gives way (with an ellipsis) so the buttons keep their width and Save is never clipped. */
+.msg.rich .markdown-code .tool-output-header strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg.rich .markdown-code .tool-output-header .ico, .msg.rich .markdown-code .tool-copy { flex: none; white-space: nowrap; }
+.msg.rich .markdown-code .code-wrap[aria-pressed="true"] { background: var(--hover); color: var(--ink); }
+.msg.rich .markdown-code.is-wrapped pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* ChatGPT's writing block (#1477): the code panel's frame and header; its text reads as text, not a quote. */
 .msg.rich .markdown-writing {
@@ -3667,7 +3718,7 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .pending-message { position: relative; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; margin: 4px 0 26px auto; width: fit-content; max-width: 82%; text-align: start; }
 /* Match the canonical user row's padding and footer before receipt arrives. */
 #inputQueue > .pending-message { margin-top: 11px; margin-bottom: 33px; }
-.pending-message-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(15px * var(--text-scale, 1)); line-height: 1.75; }
+.pending-message-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(15px * var(--text-scale, 1)); line-height: calc(1.75 * var(--line-spacing, 1)); }
 .pending-message-status { position: absolute; right: 30px; top: calc(100% + 1px); height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: calc(12px * var(--text-scale, 1)); line-height: 1.45; color: var(--soft); }
 .pending-message.is-delivery-error .pending-message-status, .pending-message.is-route-held .pending-message-status, .pending-message.is-waiting .pending-message-status { position: static; display: block; width: auto; max-width: 100%; height: auto; margin-top: 4px; font-size: calc(11px * var(--text-scale, 1)); font-weight: 400; white-space: normal; overflow-wrap: anywhere; }
 .pending-message.is-delivery-error .pending-message-status { color: var(--red); }
@@ -4109,13 +4160,30 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 /* Heading: 8px padding + 17px folder + 9px gap. Rows already supply 10px padding. */
 .project-group > .sess, .project-group > .worker-group { margin-inline-start: 24px; }
 .project-show-more { margin-inline-start: 34px; color: var(--faint); font-size: calc(14px * var(--text-scale, 1)); padding: 6px 0; border: 0; background: transparent; }
+/* Chat groups inside a project (#1038): one step in, a heading like the project's, its chats one more step in. */
+.project-group > .chat-group { position: relative; margin: 2px 0 2px 24px; }
+.chat-group-heading { display: flex; align-items: center; gap: 9px; padding: 6px 6px 6px 10px; border-radius: 8px; list-style: none; cursor: grab; user-select: none; }
+.chat-group-heading::-webkit-details-marker { display: none; }
+.chat-group-heading:hover, .chat-group-heading:has(.chat-group-menu[aria-expanded='true']) { background: var(--hover); }
+.chat-group-heading:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.chat-group-heading > .ico { color: var(--soft); }
+.chat-group-name { min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-group-count { flex: none; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; }
+/* The menu takes the count's place on hover or focus, in the chats' "⋯" column. */
+.chat-group-menu { display: none; }
+.chat-group-heading:is(:hover, :focus-within, :has(.chat-group-menu[aria-expanded='true'])) .chat-group-count { display: none; }
+.chat-group-heading:is(:hover, :focus-within, :has(.chat-group-menu[aria-expanded='true'])) .chat-group-menu { display: grid; }
+/* Heading: 10px padding + 17px icon + 9px gap; a row's own 10px padding then puts its title under the group's name. */
+.chat-group > .sess, .chat-group > .worker-group { margin-inline-start: 26px; }
+.chat-group-empty { margin: 2px 0 6px 36px; color: var(--faint); font-size: calc(13px * var(--text-scale, 1)); }
+.project-show-more.chat-group-show-more { margin-inline-start: 36px; }
 .sess[data-sort-scope] .sess-top { cursor: grab; user-select: none; }
 .sess-top:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; border-radius: 5px; }
 #sessionList.is-sorting, #sessionList.is-sorting * { cursor: grabbing; user-select: none; }
-:is(.sess, .project-group).is-sorting { opacity: .45; }
-:is(.sess, .project-group).sort-before::before, :is(.sess, .project-group).sort-after::after { content: ''; position: absolute; inset-inline: 0; height: 2px; border-radius: 2px; background: var(--blue); pointer-events: none; }
-:is(.sess, .project-group).sort-before::before { top: -2px; }
-:is(.sess, .project-group).sort-after::after { bottom: -2px; }
+:is(.sess, .project-group, .chat-group).is-sorting { opacity: .45; }
+:is(.sess, .project-group, .chat-group).sort-before::before, :is(.sess, .project-group, .chat-group).sort-after::after { content: ''; position: absolute; inset-inline: 0; height: 2px; border-radius: 2px; background: var(--blue); pointer-events: none; }
+:is(.sess, .project-group, .chat-group).sort-before::before { top: -2px; }
+:is(.sess, .project-group, .chat-group).sort-after::after { bottom: -2px; }
 
 /* Right-side work panes. Files and Sub-agents are mutually exclusive projections of the
    current task; the ChatGPT browser remains the independent left dock. */
@@ -4185,6 +4253,37 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
   .agent-panel-row.is-arriving { animation: none; background: var(--arrive); }
   .agent-panel-row .agent-card-avatar::before { animation: none; }
   .agent-card-activity { animation: none; color: var(--soft); background: none; }
+}
+/* A failed worker's last action: where it stopped, plainly. */
+.agent-card-last { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.4; }
+/* A worker's two views (#105): pills like the dock's tabs, on their own line under its name. */
+.agent-panel-header:has(.agent-panel-views) { flex-wrap: wrap; row-gap: 10px; padding-bottom: 10px; }
+.agent-panel-views { display: flex; gap: 4px; flex-basis: 100%; min-width: 0; }
+.agent-panel-view { height: 28px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: var(--soft);
+  font: inherit; font-size: calc(12px * var(--text-scale, 1)); font-weight: 500; cursor: pointer; transition: background-color 120ms ease, color 120ms ease; }
+.agent-panel-view:hover, .agent-panel-view.is-selected { background: var(--hover); color: var(--ink); }
+.agent-panel-view:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
+/* Activity: the task, then one quiet line per action (time, icon, what, result), then the files. */
+.agent-panel-body > .btn:first-child + .agent-activity-heading { margin-top: 18px; }
+.agent-activity-heading .agent-activity-count { color: var(--faint); font-weight: 500; }
+.agent-activity-task { margin: 0 12px 4px; color: var(--ink); font-size: calc(13px * var(--text-scale, 1)); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-activity-empty { margin: 0 12px; }
+.agent-activity-list, .agent-activity-files { margin: 0; padding: 0; list-style: none; }
+.agent-activity-row, .agent-activity-file { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 5px 12px; border-radius: 7px;
+  font-size: calc(12px * var(--text-scale, 1)); line-height: 1.4; }
+.agent-activity-row:hover, .agent-activity-file:hover { background: var(--hover); }
+.agent-activity-time { flex: none; min-width: 56px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.agent-activity-icon { --ico: 13px; flex: none; color: var(--soft); }
+.agent-activity-title, .agent-activity-file-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.agent-activity-title em, .agent-activity-file-name em { margin-left: 6px; color: var(--faint); font-style: normal; }
+.agent-activity-metric, .agent-activity-file-counts { flex: none; display: flex; gap: 6px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.agent-activity-row[data-tone='good'] .agent-activity-metric { color: var(--green); }
+.agent-activity-row[data-tone='bad'] :is(.agent-activity-metric, .agent-activity-icon) { color: var(--red); }
+.agent-activity-file-counts .is-added { color: var(--green); }
+.agent-activity-file-counts .is-removed { color: var(--red); }
+.agent-activity-earlier { padding: 4px 12px 6px; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); }
+@media (prefers-reduced-motion: reduce) {
+  .agent-panel-view { transition: none; }
 }
 .agent-panel-body .ev { display: block; margin: 24px 0; }
 .agent-panel-body :is(.ev-tool_call, .ev-page_tool, .ev-agent_message) { margin: 0; }
@@ -4564,6 +4663,17 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .terminal-screen .xterm { height: 100%; }
 .terminal-empty { margin: 20px; }
 .terminal-empty[hidden] { display: none; }
+/* A tab remembered from the last launch: no shell yet, only where it was and how to start one. */
+.terminal-previous { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 20px; background: var(--page); font-size: calc(13px * var(--text-scale, 1)); }
+.terminal-previous strong { font-weight: 600; }
+.terminal-previous-cwd { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--soft); font-family: 'Cascadia Code', Consolas, monospace; font-size: calc(12px * var(--text-scale, 1)); }
+.terminal-previous .btn { margin-top: 6px; background: var(--hover); color: var(--ink); }
+.terminal-previous .btn:hover { background: color-mix(in srgb, var(--ink) 12%, transparent); }
+/* Send to chat: over the shell's top right corner while it has a selection, above xterm's own layers (up to 11). */
+.terminal-send { position: absolute; top: 8px; right: 18px; z-index: 12; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--edge); border-radius: 8px; background: var(--card); color: var(--ink); font-size: calc(12.5px * var(--text-scale, 1)); box-shadow: 0 6px 20px #0003; }
+.terminal-send:hover { background: var(--hover); }
+.terminal-send[hidden] { display: none; }
+.terminal-send .ico { --ico: 14px; --glyph: 14px; }
 
 /* One quiet frame for right-side tools; the tool owners keep their own content state. */
 [data-panel='chat'].has-work-dock { grid-template-columns: minmax(0, 1fr) var(--work-panel-width, minmax(340px, 42%)); }

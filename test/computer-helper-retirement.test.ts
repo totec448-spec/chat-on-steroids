@@ -63,25 +63,29 @@ const fake = vi.hoisted(() => {
     return child;
   });
 
-  const terminateProcessTree = vi.fn(async (pid: number) => {
+  const terminate = async (pid: number) => {
     const child = children.find((candidate) => candidate.pid === pid);
     if (pid === 9000) await new Promise<void>((resolve) => retirementReleases.push(resolve));
     if (child) {
       child.exitCode = 0;
       child.emit('close');
     }
-  });
+  };
+  const terminateProcessTree = vi.fn(terminate);
+  const terminateProcess = vi.fn(terminate);
 
   return {
     children,
     spawn,
     terminateProcessTree,
+    terminateProcess,
     releaseFirstRetirement: () => retirementReleases.shift()?.(),
     reset: () => {
       for (const release of retirementReleases.splice(0)) release();
       children.splice(0);
       spawn.mockClear();
       terminateProcessTree.mockClear();
+      terminateProcess.mockClear();
     }
   };
 });
@@ -96,7 +100,8 @@ vi.mock('../src/main/env.js', () => ({
 }));
 vi.mock('../src/main/exec.js', () => ({
   findWindowsPowerShell: () => 'powershell.exe',
-  terminateProcessTree: fake.terminateProcessTree
+  terminateProcessTree: fake.terminateProcessTree,
+  terminateProcess: fake.terminateProcess
 }));
 vi.mock('../src/main/logger.js', () => ({ logInfo: vi.fn(), logWarn: vi.fn() }));
 
@@ -104,6 +109,9 @@ vi.mock('../src/main/logger.js', () => ({ logInfo: vi.fn(), logWarn: vi.fn() }))
 vi.stubEnv('COS_MACOS_DESKTOP_HELPER', process.execPath);
 
 import { listWindows, stopComputerHelper } from '../src/main/computer/index.js';
+
+/** Windows ends the helper alone (its children are apps launched for the person); elsewhere its tree. */
+const retirement = () => (process.platform === 'win32' ? fake.terminateProcess : fake.terminateProcessTree);
 
 afterEach(() => {
   vi.useRealTimers();
@@ -133,7 +141,7 @@ describe('desktop helper retirement ordering', () => {
       expect(options.env['CLF_HELPER']).toBeUndefined();
     }
     fake.children[0]!.emit('error', new Error('pipe broke'));
-    await vi.waitFor(() => expect(fake.terminateProcessTree).toHaveBeenCalledWith(9000));
+    await vi.waitFor(() => expect(retirement()).toHaveBeenCalledWith(9000));
 
     expect(firstSettled).toBe(false);
     const second = listWindows();
@@ -170,7 +178,7 @@ describe('desktop helper retirement ordering', () => {
     await vi.waitFor(() => expect(fake.children[0]?.writeCount).toBe(1));
     await vi.advanceTimersByTimeAsync(15_000);
     await Promise.resolve();
-    expect(fake.terminateProcessTree).toHaveBeenCalledWith(9000);
+    expect(retirement()).toHaveBeenCalledWith(9000);
 
     expect(firstSettled).toBe(false);
     const second = listWindows();
@@ -184,6 +192,23 @@ describe('desktop helper retirement ordering', () => {
 
     await expect(second).resolves.toEqual({ windows: [], screen: { x: 0, y: 0, width: 100, height: 100 } });
     expect(fake.spawn).toHaveBeenCalledTimes(2);
+  });
+
+  it('on Windows ends only the helper, so apps it launched for the person keep running', async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+    try {
+      const first = listWindows();
+      const settled = first.catch(() => undefined);
+      await vi.waitFor(() => expect(fake.children[0]?.writeCount).toBe(1), { timeout: 5_000 });
+      fake.children[0]!.emit('error', new Error('pipe broke'));
+      await vi.waitFor(() => expect(fake.terminateProcess).toHaveBeenCalledWith(9000), { timeout: 5_000 });
+      fake.releaseFirstRetirement();
+      await settled;
+      expect(fake.terminateProcessTree).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+    }
   });
 
   it.runIf(process.platform !== 'darwin')('cancels startup before spawning if shutdown begins while the script is being written', async () => {

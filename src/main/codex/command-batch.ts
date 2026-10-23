@@ -37,7 +37,9 @@ function powershellBatch(commands: readonly string[], marker: string): string {
     // `$?` after a dot-sourced block is always true; recorded inside, it is the command's own
     // last statement. So a failing cmdlet is 1, and a native failure a later success replaced is 0.
     '    $global:__cos_batch_ok = $false',
-    "    . ([ScriptBlock]::Create($__cos_batch_text + \"`n\" + '$global:__cos_batch_ok = $?'))",
+    // Piped to Out-Default so the command's own output is written before the next banner, and
+    // not dropped by the final `exit`: Windows PowerShell 5.1 holds table output back (2026-10-21).
+    "    . ([ScriptBlock]::Create($__cos_batch_text + \"`n\" + '$global:__cos_batch_ok = $?')) | Out-Default",
     '    $__cos_batch_code = if ($global:__cos_batch_ok) { 0 } elseif ($LASTEXITCODE -is [int] -and $LASTEXITCODE -ne 0) { [int]$LASTEXITCODE } else { 1 }',
     '  } catch {',
     '    [Console]::Error.WriteLine($_.ToString())',
