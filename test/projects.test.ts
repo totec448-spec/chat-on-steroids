@@ -76,7 +76,8 @@ it('turns the secrets shield off for one project\'s chats only, durably (#1797)'
   expect((await listProjects())[0]!.id).toBe(project.id);
 });
 
-it.skipIf(process.platform === 'win32')('never lets a failed shield switch land later through the store\'s retry', async () => {
+// A read-only folder stops the write; root and Windows ignore that mode, so the test does not apply there.
+it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('never lets a failed shield switch land later through the store\'s retry', async () => {
   const project = await addProject(path.join(approved, 'first'));
   const store = (await fs.readdir(directory)).includes('state') ? path.join(directory, 'state') : directory;
   await fs.chmod(store, 0o500);
