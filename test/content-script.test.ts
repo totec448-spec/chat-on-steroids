@@ -10769,6 +10769,28 @@ describe('a content script reloaded into a turn already in flight', () => {
     expect(await check(before)).toMatchObject({ safe: false, why: 'changed', changed: 'progress', progressBy: 'page-call' });
   });
 
+  it('does not take a known tool call drawn again with other details for new progress (#1787)', async () => {
+    // 2.1.45, live: with ChatGPT's stream gone ("connection interrupted"), every repair for four
+    // minutes was refused with "the page showed a new tool call" although no call was added.
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    live = await harness(`https://chatgpt.com/c/${conversationId}`, { activity: () => activity({ activeTurnId: 'g-old-run-0-4' }) }, midTurn);
+    live.hook.observe(); await settle();
+    const check = (expected?: unknown) => live!.runtimeMessage({ type: 'clf-repair-check', conversationId, expected });
+    const section = live.document.querySelector<HTMLElement>('[data-turn-id="turn-live"]')!;
+    const call = (messageId: string, over: Record<string, unknown> = {}) =>
+      ({ messageId, requestId: `request-${messageId}`, tool: 'exec_command', order: 0, answered: true, ...over });
+    await bindFiberTurns([{ section, turn: { turnId: 'turn-live', conversationId, calls: [call('known-1'), call('known-2', { answered: false })] } }]);
+    live.hook.observe(); await settle();
+    const before = await check();
+    // The same calls again, one now without its request id: nothing new happened.
+    await bindFiberTurns([{ section, turn: { turnId: 'turn-live', conversationId, calls: [call('known-1', { requestId: undefined }), call('known-2', { answered: false })] } }]);
+    live.hook.observe(); await settle();
+    expect(await check(before)).not.toMatchObject({ changed: 'progress' });
+    // A call that got its result is progress.
+    await bindFiberTurns([{ section, turn: { turnId: 'turn-live', conversationId, calls: [call('known-1'), call('known-2')] } }]);
+    expect(await check(before)).toMatchObject({ safe: false, why: 'changed', changed: 'progress', progressBy: 'page-call' });
+  });
+
   it.each([true, false])('binds a separate final section only within the exact adopted question (same question: %s)', async sameQuestion => {
     const source = 'g-split-final-source';
     live = await harness(undefined, {
