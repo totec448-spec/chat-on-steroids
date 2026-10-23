@@ -5504,6 +5504,16 @@ and short option names; keys naming tunnels, profiles, paths, roots, prompts, UR
 dropped unless the value is a number or boolean. Never add message, task or title text to a section.
 Tests: `report-scrub.test.ts`, `diagnostics-report.test.ts` and `ipc.test.ts` (no personal value survives).
 
+Send feedback (Activity's button, `/feedback`; `feedback-dialog.ts`) writes a problem report or an idea
+and opens GitHub's issue form filled in: `feedback:openIssue { kind: 'bug', what, steps?, frequency? }`
+or `{ kind: 'idea', problem, proposal }` → `{ trimmed }`. Main builds the address (`feedback.ts`) with the
+form's own field ids and dropdown texts (`.github/ISSUE_TEMPLATE`; `feedback-issue.test.ts` fails when a
+template renames one), adds the version, system, architecture and what it knows of the extension, and
+opens it with `shell.openExternal`; nothing is sent from the app. Text that does not fit in a 7800-character
+link is shortened, longest field first, and `trimmed` makes the dialog put the whole text on the clipboard.
+A problem report needs the saved diagnostics report (the form closes reports without one); a newer release
+is pointed out first. The draft stays until it reached GitHub. One `feedback:` log line, never the text.
+
 ## 20. Build, installation, updater and release
 
 Source, bundle, package, installed bytes and live behavior are separate gates (§3). The app id
