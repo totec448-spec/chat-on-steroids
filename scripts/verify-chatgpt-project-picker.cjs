@@ -17,7 +17,7 @@ app.whenReady().then(async () => {
   fs.mkdirSync(output, { recursive: true });
   const code = (await require('esbuild').build({ stdin: { contents: `
       export { createChatgptProjectPicker } from './src/renderer/chatgpt-project-picker.ts';
-      export { setLanguage } from './src/renderer/i18n.ts';`, resolveDir: root, loader: 'ts' },
+      export { setLanguage, initLanguage } from './src/renderer/i18n.ts';`, resolveDir: root, loader: 'ts' },
     bundle: true, write: false, platform: 'browser', format: 'iife', globalName: 'picker', logLevel: 'error', loader: { '.css': 'empty' } })).outputFiles[0].text;
   // The icon font too, embedded, so the pictures show the rows as the app draws them.
   const font = (name) => 'data:font/woff2;base64,' + fs.readFileSync(path.join(root, 'node_modules/@phosphor-icons/web/src', name)).toString('base64');
@@ -31,6 +31,7 @@ app.whenReady().then(async () => {
   await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
   win.webContents.on('console-message', (_e, _l, message) => { if (/error|Error/.test(message)) console.error('renderer:', message); });
   await win.webContents.executeJavaScript(code);
+  await win.webContents.executeJavaScript('picker.initLanguage(); true');
   const open = async (language) => win.webContents.executeJavaScript(`(async()=>{
     document.querySelectorAll('.file-branch-menu').forEach(n => n.remove());
     picker.setLanguage(${JSON.stringify(language)});
@@ -67,6 +68,16 @@ app.whenReady().then(async () => {
       noteCut: notes.some(p => p.scrollWidth > p.clientWidth + 1),
       menuWidth: Math.round(m.width), clipped: options.some(o => o.scrollWidth > o.clientWidth + 1 && !o.querySelector('span').matches(':first-of-type'))
     }; })()`;
+  // The sidebar with no projects yet: its one sentence says what to do, whole, in at most two lines.
+  const empty = `(()=>{
+    document.querySelectorAll('.file-branch-menu').forEach(n => n.remove());
+    document.getElementById('projectList').hidden = true;
+    const p = document.getElementById('projectsEmpty'); p.hidden = false;
+    const cs = getComputedStyle(p), line = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.4;
+    const r = p.getBoundingClientRect();
+    return { text: p.textContent, lines: Math.round((r.height - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)) / line),
+      cut: p.scrollWidth > p.clientWidth + 1, inside: r.right <= p.parentElement.getBoundingClientRect().right + 0.5,
+      box: { x: Math.max(0, Math.floor(r.left) - 24), y: Math.max(0, Math.floor(r.top) - 60), width: 380, height: Math.ceil(r.height) + 90 } }; })()`;
   const results = [];
   const languages = ['en', 'de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW'];
   for (const language of languages) {
@@ -79,6 +90,13 @@ app.whenReady().then(async () => {
       const result = await win.webContents.executeJavaScript(measure);
       results.push({ language, width, zoom, ...result });
       if (width === 1100 && zoom === 1) fs.writeFileSync(path.join(output, `picker-${language}.png`), (await win.webContents.capturePage({ x: 0, y: 80, width: 380, height: 360 })).toPNG());
+      if (width === 1100 && zoom === 1) {
+        const state = await win.webContents.executeJavaScript(empty);
+        assert.ok(state.lines <= 2 && !state.cut && state.inside, 'the empty projects line is whole, in at most two lines: ' + JSON.stringify({ language, ...state }));
+        fs.writeFileSync(path.join(output, `projects-empty-${language}.png`), (await win.webContents.capturePage(state.box)).toPNG());
+        results.push({ language, emptyState: state });
+        await win.webContents.executeJavaScript(`document.getElementById('projectList').hidden = false; document.getElementById('projectsEmpty').hidden = true; true`);
+      }
       assert.ok(result.inside, JSON.stringify({ language, width, zoom, ...result }));
       assert.equal(result.optionHeights.length, 1, 'rows have one height: ' + JSON.stringify(result.optionHeights));
       for (const left of [result.headingLeft, result.searchLeft, result.noteLeft]) {
@@ -89,6 +107,6 @@ app.whenReady().then(async () => {
     win.setContentSize(1100, 760); win.webContents.setZoomFactor(1);
   }
   fs.writeFileSync(path.join(output, 'measurements.json'), JSON.stringify(results, null, 2));
-  console.log('Passed: the ChatGPT Project picker keeps one left edge, one row height and a whole one-line note in all 13 languages (English and German also narrow and zoomed).');
+  console.log('Passed: the ChatGPT Project picker keeps one left edge, one row height and a whole one-line note in all 13 languages (English and German also narrow and zoomed), and the empty Projects line is whole.');
   win.destroy(); app.exit(0);
 }).catch(error => { console.error(error); app.exit(1); });
