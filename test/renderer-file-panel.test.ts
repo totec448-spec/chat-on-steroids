@@ -393,6 +393,12 @@ it('compares against a code checkpoint and asks main to restore one file or all 
 
   host.querySelector<HTMLButtonElement>('.file-change-row[data-path="README.md"]')!.click(); await tick(); await tick();
   expect(window.api.getProjectGitDiff).toHaveBeenLastCalledWith(projectA.id, 'README.md', ref, 'checkpoint-2');
+  // Restore goes back in time, so it does not wear the Refresh arrow it sits next to.
+  const restoreFile = [...host.querySelectorAll<HTMLButtonElement>('.file-preview-actions button')].find(button => button.textContent === 'Restore file')!;
+  const iconOf = (button: Element | null) => button?.querySelector('.ico')?.className;
+  expect(iconOf(restoreFile)).toContain('ph-arrow-counter-clockwise');
+  expect(iconOf(host.querySelector('.file-checkpoint-bar button'))).toContain('ph-arrow-counter-clockwise');
+  expect(iconOf(restoreFile)).not.toBe(iconOf(host.querySelector('[aria-label="Refresh changes"]')));
   [...host.querySelectorAll<HTMLButtonElement>('.file-preview-actions button')].find(button => button.textContent === 'Restore file')!.click();
   await tick(); await tick();
   expect(restore).toHaveBeenLastCalledWith(projectA.id, id, ['README.md'], 'checkpoint-2');
