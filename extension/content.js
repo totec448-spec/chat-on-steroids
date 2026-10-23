@@ -4854,6 +4854,10 @@
         pageConversation &&
         pageConversation !== askedConversation
       );
+      // Calls this document had not seen before, or that got their result: the only calls that
+      // are progress. A known call drawn again with another request id or owner is reported
+      // again, but counting it kept every repair refused while ChatGPT's stream was gone (#1787).
+      const advanced = [];
       const fresh = turn.calls.filter((call) => {
         // A mismatched owned turn is admissible only as a provisional-first-turn candidate.
         // Its request id must have survived the app's explicit owner read-back before the
@@ -4865,7 +4869,9 @@
         ) return false;
         const owner = index === activeTurnIndex ? activeLocalTurnId || '' : '';
         const signature = `${call.tool}\u0000${call.requestId || ''}\u0000${call.answered ? '1' : '0'}\u0000${owner}`;
-        if (callsReported.get(call.messageId) === signature) return false;
+        const previous = callsReported.get(call.messageId);
+        if (previous === signature) return false;
+        if (previous === undefined || (call.answered && previous.split('\u0000')[2] === '0')) advanced.push(call);
         callsReported.set(call.messageId, signature);
         return true;
       });
@@ -4878,7 +4884,7 @@
           ((previous.turnId && previous.turnId === turn.turnId) ||
             (previous.calls || []).some(seen => turn.calls.some(call => call.messageId === seen.messageId))));
         const witnessedSend = Boolean(newestUser?.id && openedUserMessageId === newestUser.id);
-        if (generating && index === activeTurnIndex && (knownTurn || witnessedSend)) noteTurnProgress(turnId, 'page-call');
+        if (advanced.length && generating && index === activeTurnIndex && (knownTurn || witnessedSend)) noteTurnProgress(turnId, 'page-call');
         emit({
           kind: 'tool_evidence',
           ...(index === activeTurnIndex ? { turnId: activeLocalTurnId } : {}),
