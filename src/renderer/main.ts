@@ -60,7 +60,7 @@ import {
 } from '../shared/types.js';
 import type { SwarmState } from '../shared/session.js';
 import { $, ago, disclosureChevron, el, icon, run, shortAgo, toast } from './dom.js';
-import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatSearch, openChatView } from './chat.js';
+import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatSearch, openChatView, openFeedback } from './chat.js';
 import { publishStopNoticeTexts } from './stop-notices.js';
 import { publishMainTexts } from './main-texts.js';
 import { paintSharedTunnel } from './tunnel-warning.js';
@@ -2750,6 +2750,7 @@ async function saveDiagnosticsReport(): Promise<void> {
   }
 }
 for (const button of diagnosticsButtons) button.addEventListener('click', () => void saveDiagnosticsReport());
+$('sendFeedback').addEventListener('click', () => openFeedback());
 
 $('copyLogJson').addEventListener('click', async () => {
   const text = await run(api.getLogJson());
