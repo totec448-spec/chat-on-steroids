@@ -666,6 +666,24 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.filter(row => row.fail)).toContainEqual(expect.objectContaining({
       error: 'After-turn pickup was withdrawn before Send.', detail: 'turn-progressed by app-assistant_message' }));
   });
+  it('says a silence pickup ended in an error, rather than giving no reason (#1787)', async () => {
+    let silenceTurnId: string;
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: async message => {
+        if (message.authorize || message.ack || message.fail) return { ok: true, data: { ok: true } };
+        return { ok: true, data: { input: claimed({ silenceBoundary: { turnId: silenceTurnId } }) } };
+      }
+    });
+    startGenerating(live.document); live.hook.observe(); await settle();
+    silenceTurnId = emitted(live.sent, 'turn_start').at(-1)!.event.turnId as string;
+    stopGenerating(live.document);
+    (live.window as any).CLF_DOM.selectModelSettings = async () => { throw new Error('picker vanished'); };
+    const sends = watchSend(live.document);
+    await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA, silenceTurnId }).catch(() => undefined);
+    expect(sends()).toBe(0);
+    expect(live.sent.filter(row => row.fail)).toContainEqual(expect.objectContaining({
+      error: 'After-turn pickup was withdrawn before Send.', detail: 'page-error' }));
+  });
   // ChatGPT takes a message while it works and folds it into the running turn (#1231): nothing is stopped.
   it.each(['accepted', 'refused', 'new-question', 'draft'])('direct delivery sends into the claimed running turn without stopping it (%s)', async change => {
     let directTurn: { id: string; startedAt: number };
@@ -1075,6 +1093,54 @@ describe('desktop input delivery and helper ownership', () => {
     expect(await delivered).toEqual({ ok: true });
     expect(live.sent.filter(message => message.fail)).toHaveLength(0);
     expect(live.sent.filter(message => message.ack)).toEqual([expect.objectContaining({ messageId: questionId, conversationId: chatB })]);
+  });
+
+  // #1759: since October 2026 ChatGPT keeps a deleted Project's page on "loading" instead of sending
+  // it home, so the message for a new chat there waited for good with nothing said.
+  it.each([
+    ['gone', { listed: false, loaded: true, composer: false }, true],
+    ['still listed', { listed: true, loaded: true, composer: false }, false],
+    ['still loading', { listed: false, loaded: false, composer: false }, false],
+    ['a composer after all', { listed: false, loaded: true, composer: true }, false]
+  ] as const)('reports a linked Project ChatGPT no longer has only when it is gone (%s)', async (_name, page, reported) => {
+    const project = 'g-p-11111111222233334444555555555555';
+    live = await harness(`https://chatgpt.com/g/${project}/project?cos-input=${inputId}`, {
+      project_unavailable: () => ({ ok: true, data: { ok: true } }),
+      desktop_input: () => ({ ok: true, data: { input: null } })
+    });
+    if (!page.composer) live.document.querySelector('#prompt-textarea')?.closest('form')?.remove();
+    const nav = live.document.createElement('nav');
+    nav.innerHTML = `<div data-app-action-sidebar-section="" data-app-action-sidebar-section-collapsed="false">
+      <button data-app-action-sidebar-project-create="">New project</button>
+      <div data-app-action-sidebar-project-id="${page.listed ? project : 'g-p-99999999888877776666555555555555'}" data-app-action-sidebar-project-label="Other"></div></div>`;
+    live.document.body.prepend(nav);
+    vi.spyOn(live.window.performance, 'now').mockReturnValue(page.loaded ? 31_000 : 5_000);
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null, project })).toEqual({ ok: false });
+    expect(live.sent.filter(message => message.type === 'project_unavailable'))
+      .toEqual(reported ? [expect.objectContaining({ id: inputId, project })] : []);
+  });
+
+  it('counts the 30 seconds from when the page reached the Project, not from when it loaded (#1759)', async () => {
+    const project = 'g-p-11111111222233334444555555555555';
+    const chat = 'cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa';
+    live = await harness(`https://chatgpt.com/c/${chat}`, {
+      project_unavailable: () => ({ ok: true, data: { ok: true } }),
+      desktop_input: () => ({ ok: true, data: { input: null } })
+    });
+    live.document.querySelector('#prompt-textarea')?.closest('form')?.remove();
+    const nav = live.document.createElement('nav');
+    nav.innerHTML = '<div data-app-action-sidebar-section="" data-app-action-sidebar-section-collapsed="false"><button data-app-action-sidebar-project-create="">New project</button></div>';
+    live.document.body.prepend(nav);
+    const now = vi.spyOn(live.window.performance, 'now').mockReturnValue(120_000);
+    // The document waited elsewhere for two minutes, then moved to the Project's home.
+    live.dom.reconfigure({ url: `https://chatgpt.com/g/${project}/project?cos-input=${inputId}` });
+    await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null, project });
+    now.mockReturnValue(140_000);
+    await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null, project });
+    expect(live.sent.filter(message => message.type === 'project_unavailable')).toEqual([]);
+    now.mockReturnValue(151_000);
+    await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null, project });
+    expect(live.sent.filter(message => message.type === 'project_unavailable')).toEqual([expect.objectContaining({ id: inputId, project })]);
   });
 
   it('confirms a hidden new chat\'s first Send when the extension reports its new address', async () => {
@@ -16200,6 +16266,41 @@ describe('folding away the chat’s opening instruction', () => {
 });
 
 describe('the fresh chat the app opened', () => {
+  // #1792: a URL in the handoff became a rich-link preview with its own <style> inside the editor,
+  // and the untouched handoff read as "ChatGPT replaced the composer while inserting the bootstrap".
+  it('sends a handoff whose link ChatGPT turned into a preview while it was being inserted', async () => {
+    let clicks = 0, injected = false;
+    live = await harness(
+      'https://chatgpt.com/?clf=cmd-link-resume',
+      {
+        redeem: () => ({ ok: true, command: { id: 'cmd-link-resume', type: 'resume',
+          text: '[[CLF-RESUME:0123456789abcdef0123456789abcdef]]\n\nNotes are in https://drive.example.com/folders/abc123 for the next step', agent: null } }),
+        ack: () => ({ ok: true })
+      },
+      (document, dom) => {
+        const editor = document.querySelector('#prompt-textarea')!;
+        new dom.window.MutationObserver(() => {
+          // The handoff's own words, not a host name: only the inserted handoff gets the preview.
+          if (!editor.textContent!.includes('for the next step') || editor.querySelector('style')) return;
+          const card = document.createElement('span');
+          const style = document.createElement('style');
+          style.textContent = '@supports (display:grid){.link-card{display:grid}}@media (min-width:600px){.link-card{gap:8px}}';
+          card.append(style); editor.append(card); injected = true;
+        }).observe(editor, { childList: true, subtree: true, characterData: true });
+        document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+          clicks += 1;
+          dom.reconfigure({ url: 'https://chatgpt.com/c/12121212-3434-5656-7878-909090909090' });
+        });
+      }
+    );
+    await settle(200);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await settle();
+    expect(injected, 'the preview was injected').toBe(true);
+    expect(JSON.stringify(live.sent)).not.toContain('replaced the composer');
+    expect(clicks).toBe(1);
+  });
+
   it('delivers the bootstrap before unrelated status restoration can stall startup', async () => {
     let releaseStatus: () => void = () => undefined;
     const statusHeld = new Promise((resolve) => {

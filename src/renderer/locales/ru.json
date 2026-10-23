@@ -2982,6 +2982,14 @@
   "A tool call from an untrusted chat was refused. To allow it, open this chat's ⋯ menu in the sidebar (or right-click its row) and choose Trust chat.": "Вызов инструмента из недоверенного чата отклонён. Чтобы разрешить его, откройте меню ⋯ этого чата на боковой панели (или щёлкните строку правой кнопкой) и выберите «Доверять чату».",
   "A tool call from a worker whose main chat is not currently allowed was refused. Open that main chat's ⋯ menu in the sidebar and choose Trust chat if it is untrusted, or Release chat if it is blocked.": "Вызов инструмента от воркера, чей основной чат сейчас не разрешён, отклонён. Откройте меню ⋯ этого основного чата на боковой панели и выберите «Доверять чату», если он не доверенный, или «Разблокировать чат», если он заблокирован.",
   "A tool call from an app-created worker was refused because the main chat that started it is not proven yet. Return to that main chat in the sidebar; once its row is there, open its ⋯ menu and choose Trust chat, or Release chat if it is blocked, then retry after the worker is attached or recovered there.": "Вызов инструмента от воркера, созданного приложением, отклонён: основной чат, который его запустил, ещё не подтверждён. Вернитесь к этому основному чату на боковой панели; когда появится его строка, откройте меню ⋯ и выберите «Доверять чату» или «Разблокировать чат», если он заблокирован, а затем повторите, когда воркер подключится или восстановится там.",
+  "Atkinson Hyperlegible": "Atkinson Hyperlegible",
+  "Line spacing": "Межстрочный интервал",
+  "Space between the lines of chat messages.": "Расстояние между строками сообщений в чате.",
+  "Accessibility": "Специальные возможности",
+  "Help for screen readers.": "Помощь для программ чтения с экрана.",
+  "Announce finished replies": "Сообщать о готовых ответах",
+  "Your screen reader says “Reply finished” when a reply in the open chat ends.": "Программа чтения с экрана скажет «Ответ готов», когда ответ в открытом чате завершится.",
+  "Reply finished": "Ответ готов",
   "Mark all as seen": "Отметить все как просмотренные",
   "Clear New response from this project's finished chats": "Убрать «Новый ответ» с завершённых чатов этого проекта",
   "Add to .gitignore": "Добавить в .gitignore",
@@ -3134,5 +3142,6 @@
   "This project already has a ChatGPT Project": "У этого проекта уже есть проект ChatGPT",
   "Its ChatGPT Project is being created": "Его проект ChatGPT сейчас создаётся",
   "That Project is not one ChatGPT lists for this account": "ChatGPT не показывает этот проект для этой учётной записи",
-  "That ChatGPT Project is already linked to another project": "Этот проект ChatGPT уже связан с другим проектом"
+  "That ChatGPT Project is already linked to another project": "Этот проект ChatGPT уже связан с другим проектом",
+  "Stopped · open this chat's tab again to continue": "Остановлено · откройте вкладку этого чата снова, чтобы продолжить"
 }

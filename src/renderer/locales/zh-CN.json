@@ -2841,6 +2841,14 @@
   "A tool call from an untrusted chat was refused. To allow it, open this chat's ⋯ menu in the sidebar (or right-click its row) and choose Trust chat.": "来自未受信任聊天的工具调用已被拒绝。要允许它，请在侧边栏中打开此聊天的 ⋯ 菜单（或右键点击其所在行），然后选择“信任聊天”。",
   "A tool call from a worker whose main chat is not currently allowed was refused. Open that main chat's ⋯ menu in the sidebar and choose Trust chat if it is untrusted, or Release chat if it is blocked.": "一个工作者的工具调用已被拒绝，因为它的主聊天当前未被允许。请在侧边栏中打开该主聊天的 ⋯ 菜单，若未受信任则选择“信任聊天”，若已被阻止则选择“解除阻止”。",
   "A tool call from an app-created worker was refused because the main chat that started it is not proven yet. Return to that main chat in the sidebar; once its row is there, open its ⋯ menu and choose Trust chat, or Release chat if it is blocked, then retry after the worker is attached or recovered there.": "一个由应用创建的工作者的工具调用已被拒绝，因为启动它的主聊天尚未得到确认。请回到侧边栏中的该主聊天；其所在行出现后，打开 ⋯ 菜单并选择“信任聊天”（若已被阻止则选择“解除阻止”），待工作者在那里连接或恢复后再重试。",
+  "Atkinson Hyperlegible": "Atkinson Hyperlegible",
+  "Line spacing": "行距",
+  "Space between the lines of chat messages.": "聊天消息各行之间的间距。",
+  "Accessibility": "无障碍",
+  "Help for screen readers.": "为屏幕阅读器提供的帮助。",
+  "Announce finished replies": "朗读回复完成",
+  "Your screen reader says “Reply finished” when a reply in the open chat ends.": "当前打开的聊天中回复结束时，屏幕阅读器会读出“回复已完成”。",
+  "Reply finished": "回复已完成",
   "Mark all as seen": "全部标为已读",
   "Clear New response from this project's finished chats": "清除此项目已完成聊天的“新回复”",
   "Add to .gitignore": "添加到 .gitignore",
@@ -2990,5 +2998,6 @@
   "This project already has a ChatGPT Project": "此项目已有 ChatGPT 项目",
   "Its ChatGPT Project is being created": "它的 ChatGPT 项目正在创建",
   "That Project is not one ChatGPT lists for this account": "ChatGPT 没有为此账户列出该项目",
-  "That ChatGPT Project is already linked to another project": "该 ChatGPT 项目已关联到另一个项目"
+  "That ChatGPT Project is already linked to another project": "该 ChatGPT 项目已关联到另一个项目",
+  "Stopped · open this chat's tab again to continue": "已停止 · 重新打开此聊天的标签页即可继续"
 }

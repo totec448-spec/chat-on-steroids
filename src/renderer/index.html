@@ -255,8 +255,15 @@
             <section class="appearance-section">
               <header class="settings-section-head"><div><h2>Typography</h2><p>Choose how text reads throughout the workspace.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
-              <label class="setting"><span class="setting-text"><b>Font</b></span><select id="appearanceFont"><option value="system">System default</option><option value="sans">Sans serif</option><option value="serif">Serif</option><option value="mono">Monospace</option></select></label>
+              <label class="setting"><span class="setting-text"><b>Font</b></span><select id="appearanceFont"><option value="system">System default</option><option value="sans">Sans serif</option><option value="serif">Serif</option><option value="mono">Monospace</option><option value="legible">Atkinson Hyperlegible</option></select></label>
               <label class="setting"><span class="setting-text"><b>Text size</b></span><span class="appearance-range"><input id="appearanceSize" type="range" min="12" max="18" aria-label="Text size" /><output id="appearanceSizeValue" for="appearanceSize"></output></span></label>
+              <label class="setting"><span class="setting-text"><b>Line spacing</b><em>Space between the lines of chat messages.</em></span><span class="appearance-range"><input id="appearanceLineSpacing" type="range" min="100" max="200" step="10" aria-label="Line spacing" /><output id="appearanceLineSpacingValue" for="appearanceLineSpacing"></output></span></label>
+              </div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Accessibility</h2><p>Help for screen readers.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+              <label class="setting"><span class="setting-text"><b>Announce finished replies</b><em>Your screen reader says “Reply finished” when a reply in the open chat ends.</em></span><input id="announceTurns" type="checkbox" /></label>
               </div>
             </section>
             <section class="appearance-section">
@@ -1457,6 +1464,7 @@
               <p id="composerStatus" role="status" aria-live="polite"></p>
               <p class="composer-dictation-status" id="dictationStatus" role="status" aria-live="polite" aria-atomic="true" hidden></p>
               <span class="sr-only" id="recallAnnounce" role="status" aria-live="polite" aria-atomic="true"></span>
+              <span class="sr-only" id="turnAnnounce" role="status" aria-live="polite" aria-atomic="true"></span>
             </form>
             <p class="foot" id="chatFoot" hidden></p>
           </section>
