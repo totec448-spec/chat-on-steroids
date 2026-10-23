@@ -136,6 +136,40 @@ describe('the hold learns from what happened after each new tunnel-client', () =
     expect(routeHoldMs(), 'between fast and late: no change').toBe(35_000);
   });
 
+  it('measures a send made inside the window even when its late call arrives after it', async () => {
+    noteTunnelClientConnected();
+    await vi.advanceTimersByTimeAsync(4 * 60_000 + 50_000);
+    noteRouteExistingChatSend('existing-chat');
+    noteRouteRequestSighted('edge-of-window', 'existing-chat');
+    await vi.advanceTimersByTimeAsync(124_000);
+    noteRouteRequestArrived('edge-of-window');
+    expect(routeHoldMs()).toBeGreaterThan(35_000);
+  });
+
+  it('measures only the first message after a restart, even if a later one calls first', async () => {
+    noteTunnelClientConnected();
+    await vi.advanceTimersByTimeAsync(routeHoldMs());
+    noteRouteExistingChatSend('first-chat');
+    await vi.advanceTimersByTimeAsync(20_000);
+    noteRouteExistingChatSend('later-chat');
+    // The later chat's call comes fast; it had more time and says nothing about the hold.
+    noteRouteRequestSighted('later-req', 'later-chat');
+    noteRouteRequestArrived('later-req');
+    expect(routeHoldMs()).toBe(35_000);
+    noteRouteRequestSighted('first-req', 'first-chat');
+    await vi.advanceTimersByTimeAsync(124_000);
+    noteRouteRequestArrived('first-req');
+    expect(routeHoldMs(), 'the first message decides').toBeGreaterThan(35_000);
+  });
+
+  it('starts the fast streak over after a gap between fast and late', async () => {
+    await restart(3_000); await restart(3_000);
+    await restart(45_000);
+    await restart(3_000); await restart(3_000);
+    expect(routeHoldMs(), 'only consecutive fast restarts count').toBe(35_000);
+    expect(durable.store.get('route-hold')).toMatchObject({ fastStreak: 2 });
+  });
+
   it('measures once per new tunnel-client', async () => {
     noteTunnelClientConnected();
     await vi.advanceTimersByTimeAsync(routeHoldMs());
