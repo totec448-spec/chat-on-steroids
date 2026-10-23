@@ -5,9 +5,9 @@ import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { bindBrowserInputProject, claimBrowserInput, enqueueInput, listInputs, pendingBrowserInputs, resetInputForTests } from '../src/main/session/input.js';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
-import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
+import { flushDurable, initDurableStore, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import { createSession, getSession, initSessionStore, rebindSession, resetSessionStoreForTests, setSessionOrigin } from '../src/main/session/store.js';
-import { addProject, armProjectCreate, assignSessionProject, bindChatToLinkedProject, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, getSessionProject, inheritSessionProject, listProjects, markProjectGone, pendingProjectCreates, PROJECT_CREATE_ARMED_MS, PROJECT_CREATE_CLAIM_MS, projectWorkspace, removeProject, retryProjectCreate, setProjectColor } from '../src/main/projects.js';
+import { addProject, armProjectCreate, assignSessionProject, bindChatToLinkedProject, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, getSessionProject, inheritSessionProject, listProjects, markProjectGone, pendingProjectCreates, PROJECT_CREATE_ARMED_MS, PROJECT_CREATE_CLAIM_MS, projectWorkspace, removeProject, retryProjectCreate, sessionSecretsShieldOff, setProjectColor, setProjectSecretsShieldOff } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 import { resetWorkspaces, setWorkspaceFor } from '../src/main/workspace.js';
 
@@ -47,6 +47,46 @@ it('persists only predefined presentation colors without changing project worksp
   expect(await listProjects()).toEqual([colored]);
   await expect(setProjectColor(project.id, 'chartreuse' as any)).rejects.toThrow();
   expect(await setProjectColor(project.id, null)).toEqual(project);
+});
+
+it('turns the secrets shield off for one project\'s chats only, durably (#1797)', async () => {
+  const project = await addProject(path.join(approved, 'first'));
+  const other = await addProject(path.join(approved, 'second'));
+  const inside = await createSession({ title: 'Inside', conversationId: 'inside-conversation' });
+  const elsewhere = await createSession({ title: 'Elsewhere', conversationId: 'elsewhere-conversation' });
+  const loose = await createSession({ title: 'No project', conversationId: 'loose-conversation' });
+  await assignSessionProject(inside.id, project.id);
+  await assignSessionProject(elsewhere.id, other.id);
+  expect(await sessionSecretsShieldOff(inside.id)).toBe(false);
+  const off = await setProjectSecretsShieldOff(project.id, true);
+  expect(off).toEqual({ ...project, secretsShieldOff: true });
+  expect(await sessionSecretsShieldOff(inside.id)).toBe(true);
+  expect(await sessionSecretsShieldOff(elsewhere.id)).toBe(false);
+  expect(await sessionSecretsShieldOff(loose.id)).toBe(false);
+  expect(await sessionSecretsShieldOff(randomUUID())).toBe(false);
+  resetDurableForTests(); initDurableStore(directory);
+  expect((await listProjects()).find(row => row.id === project.id)).toEqual(off);
+  // On again leaves no flag behind, so the saved project looks as it did before.
+  expect(await setProjectSecretsShieldOff(project.id, false)).toEqual(project);
+  expect(await setProjectSecretsShieldOff(project.id, false)).toEqual(project);
+  await expect(setProjectSecretsShieldOff(randomUUID(), true)).rejects.toThrow(/not found/);
+  // A hand-edited `false` is simply on; it never makes the project list unreadable.
+  await writeDurableNow('projects', [{ ...project, secretsShieldOff: false }]);
+  expect(await sessionSecretsShieldOff(inside.id)).toBe(false);
+  expect((await listProjects())[0]!.id).toBe(project.id);
+});
+
+// A read-only folder stops the write; root and Windows ignore that mode, so the test does not apply there.
+it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('never lets a failed shield switch land later through the store\'s retry', async () => {
+  const project = await addProject(path.join(approved, 'first'));
+  const store = (await fs.readdir(directory)).includes('state') ? path.join(directory, 'state') : directory;
+  await fs.chmod(store, 0o500);
+  try {
+    await expect(setProjectSecretsShieldOff(project.id, true)).rejects.toThrow();
+  } finally { await fs.chmod(store, 0o700); }
+  await flushDurable();
+  resetDurableForTests(); initDurableStore(directory);
+  expect((await listProjects())[0]).toEqual(project);
 });
 
 it('resolves a native picker alias to the approved identity without granting outside aliases', async () => {

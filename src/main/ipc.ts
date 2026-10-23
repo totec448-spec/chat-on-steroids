@@ -93,7 +93,7 @@ import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { inFlightToolCalls } from './mcp/call-context.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, addRemoteProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor } from './projects.js';
+import { addProject, addRemoteProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff } from './projects.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile, serverFileSnapshot } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
@@ -228,6 +228,7 @@ const settingsPatch = z.object({
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
     playfulContinue: z.boolean().optional(),
+    announceTurns: z.boolean().optional(),
     customContinue: z.string().trim().max(CUSTOM_CONTINUE_MAX_CHARS).optional(),
     followOutput: z.boolean().optional(),
     mentionCore: z.boolean().optional(),
@@ -260,6 +261,7 @@ const settingsPatch = z.object({
     keepAwake: z.boolean().optional(),
     keepScreenAwake: z.boolean().optional(),
     privacyScreenshots: z.boolean(),
+    secretsShield: z.boolean().optional(),
     theme: z.enum(['light', 'dark'])
   }),
   sessions: z.object({
@@ -415,6 +417,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       developerMode: pick(current.ui.developerMode, base.ui.developerMode, wanted.ui.developerMode),
       playfulStatus: pick(current.ui.playfulStatus, base.ui.playfulStatus, wanted.ui.playfulStatus),
       playfulContinue: pick(current.ui.playfulContinue, base.ui.playfulContinue, wanted.ui.playfulContinue),
+      announceTurns: pick(current.ui.announceTurns, base.ui.announceTurns, wanted.ui.announceTurns),
       // An emptied field means the built-in phrases again.
       customContinue: pick(current.ui.customContinue, base.ui.customContinue, wanted.ui.customContinue || undefined),
       followOutput: pick(current.ui.followOutput, base.ui.followOutput, wanted.ui.followOutput),
@@ -455,6 +458,8 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         base.ui.privacyScreenshots,
         wanted.ui.privacyScreenshots
       ),
+      // Missing means on, here as in the saved settings.
+      secretsShield: pick(current.ui.secretsShield !== false, base.ui.secretsShield !== false, wanted.ui.secretsShield ?? current.ui.secretsShield !== false),
       theme: pick(current.ui.theme, base.ui.theme, wanted.ui.theme)
     },
     sessions: {
@@ -1040,6 +1045,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
     const project = await retryProjectCreate(id);
     if (project) wakeBrowserWork();
+    push('session:changed');
+    return project;
+  });
+  handle('projects:secrets-shield', async payload => {
+    const { id, off } = z.object({ id: z.string().uuid(), off: z.boolean() }).strict().parse(payload);
+    const project = await setProjectSecretsShieldOff(id, off);
+    logInfo(`secrets shield: turned ${off ? 'off' : 'back on'} for a project's chats`);
     push('session:changed');
     return project;
   });

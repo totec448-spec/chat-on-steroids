@@ -27,7 +27,7 @@ import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, coll
 import { callHoldOpen, holdCalls } from './rotation-hold.js';
 import { authorizedPluginRefreshPublications, hasRequestedPluginRefresh, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
 import { attachBrowserWake, wakeBrowserWork } from './browser-wake.js';
-import { tunnelRouteSettling } from './tunnel/route-settle.js';
+import { noteRouteExistingChatSend, tunnelRouteSettling } from './tunnel/route-settle.js';
 import { armProjectCreate, bindChatToLinkedProject, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, markProjectGone, pendingProjectCreates } from './projects.js';
 import { wakeBrowserUrl } from './browser-startup.js';
 let browserWake: ReturnType<typeof attachBrowserWake> | null = null;
@@ -2034,6 +2034,11 @@ export type SessionControlsView = {
   finishGoalDraft?: Pick<import('./goal.js').GoalDraftView, 'stage' | 'model' | 'text' | 'error'> | null;
   blocked: 'worker' | 'blocked' | '';
   job: ResumeJobView | null;
+  /**
+   * No page picked up this chat's repairs, so recovery gave up (#1787); in memory, lifted when the page
+   * polls again. Not the session list's durable `recoveryStopped`.
+   */
+  pageless?: boolean;
 };
 
 /** Renderer authority is a durable session, never a caller-supplied browser identity. */
@@ -2081,7 +2086,7 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
     proLoopDelivery: control.enabled && getConfig().ui.finishTool === true && session.selectedModel?.conversationId === id &&
       supportsFinishAutomation(control.mode, session.selectedModel.model, session.selectedModel.reasoningEffort),
     automation: goalArmedFor(id) && !blocked ? control.enabled ? control.mode : 'goal' : 'off',
-    blocked, job: resumeJobFor(sessionId) };
+    blocked, job: resumeJobFor(sessionId), pageless: pagelessChats.has(id) };
 }
 /** One absolute budget includes opening an absent tab and native hydration. */
 export const STOP_COMMAND_TIMEOUT_MS = 120_000;
@@ -2877,7 +2882,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     if (route === '/input/fail') {
       const ok = await failBrowserInput(body.id, body.owner, typeof body.error === 'string' ? body.error : 'Unable to prepare ChatGPT',
-        typeof body.detail === 'string' && /^[a-z-]{1,40}$/.test(body.detail) ? body.detail : undefined);
+        // The page's own short reason code, as the extension forwards it (see RELEASE_DETAIL there).
+        typeof body.detail === 'string' && /^[a-z][a-z0-9 _-]{0,79}$/.test(body.detail) ? body.detail : undefined);
       // A rejected picker choice invalidates cached availability. Reobserve existing
       // browser documents through the catalog owner; failure grants no new-tab authority.
       if (ok && body.error === 'Requested model or reasoning could not be confirmed') requestChatModels(false);
@@ -2957,6 +2963,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       if (link && (link.state !== 'linked' || body.project !== link.id)) return json(res, 200, { input: null }, origin);
     }
     const input = await claimBrowserInput(body.id, body.owner, target, body.requiresAuthorization === true);
+    // The first message for an existing chat after a new tunnel-client is what the hold learns from.
+    if (input && target) noteRouteExistingChatSend(target);
     return json(res, 200, { input }, origin);
   }
 

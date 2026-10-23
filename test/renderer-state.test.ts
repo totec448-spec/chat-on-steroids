@@ -588,6 +588,76 @@ it('starts project groups collapsed and deliberately expands the project selecte
   expect(group().open).toBe(true);
 });
 
+it('applies line spacing and the legible font from Appearance at once, and saves them with the announcement switch', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document, root = doc.documentElement;
+  const panel = doc.querySelector('[data-panel="appearance"]')!;
+  const spacing = doc.getElementById('appearanceLineSpacing') as HTMLInputElement;
+  expect(panel.contains(spacing)).toBe(true);
+  expect([spacing.min, spacing.max, spacing.step, spacing.value]).toEqual(['100', '200', '10', '100']);
+  expect(doc.getElementById('appearanceLineSpacingValue')!.textContent).toBe('1.0×');
+  spacing.value = '140';
+  spacing.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
+  // The drag repaints before anything is saved.
+  expect(root.style.getPropertyValue('--line-spacing')).toBe('1.4');
+  expect(doc.getElementById('appearanceLineSpacingValue')!.textContent).toBe('1.4×');
+  // A screen reader gets the shown value, not the stored 140.
+  expect(spacing.getAttribute('aria-valuetext')).toBe('1.4×');
+  spacing.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.appearance).toMatchObject({ lineSpacing: 140 }));
+  const font = doc.getElementById('appearanceFont') as HTMLSelectElement;
+  font.value = 'legible';
+  font.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  expect(root.style.getPropertyValue('--ui-font')).toMatch(/^"CoS Atkinson Hyperlegible Next", /);
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.appearance).toMatchObject({ lineSpacing: 140, font: 'legible' }));
+  // Off unless chosen; a plain ui switch, so Reset appearance leaves it alone.
+  const announce = doc.getElementById('announceTurns') as HTMLInputElement;
+  expect(panel.contains(announce)).toBe(true);
+  expect(announce.checked).toBe(false);
+  announce.checked = true;
+  announce.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.announceTurns).toBe(true));
+  doc.getElementById('appearanceReset')!.click();
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.appearance).toMatchObject({ lineSpacing: 100, font: 'system' }));
+  expect(mounted.calls.at(-1)?.ui.announceTurns).toBe(true);
+  expect(root.style.getPropertyValue('--line-spacing')).toBe('1');
+});
+
+it('gives the line-spacing slider the shown value as its spoken value, from the saved setting and after a change', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const spacing = doc.getElementById('appearanceLineSpacing') as HTMLInputElement;
+  const shown = () => doc.getElementById('appearanceLineSpacingValue')!.textContent;
+  expect(spacing.getAttribute('aria-valuetext')).toBe(shown());
+  // A saved setting arrives with a state push (start-up, another window).
+  const { defaultAppearance } = await import('../src/shared/appearance.js');
+  mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, appearance: { ...defaultAppearance(), lineSpacing: 160 } } };
+  mounted.push(structuredClone(mounted.state));
+  expect(spacing.value).toBe('160');
+  expect(spacing.getAttribute('aria-valuetext')).toBe('1.6×');
+  expect(spacing.getAttribute('aria-valuetext')).toBe(shown());
+  spacing.value = '200';
+  spacing.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
+  expect(spacing.getAttribute('aria-valuetext')).toBe('2.0×');
+  expect(spacing.getAttribute('aria-valuetext')).toBe(shown());
+  // The decimal mark follows the app language, in the label and in the spoken value alike, also when the language changes with the slider untouched.
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  try {
+    spacing.value = '130';
+    spacing.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
+    expect(spacing.getAttribute('aria-valuetext')).toBe('1.3×');
+    setLanguage('de');
+    expect(shown()).toBe('1,3×');
+    expect(spacing.getAttribute('aria-valuetext')).toBe('1,3×');
+    spacing.value = '200';
+    spacing.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
+    expect(spacing.getAttribute('aria-valuetext')).toBe('2,0×');
+    expect(spacing.getAttribute('aria-valuetext')).toBe(shown());
+  } finally {
+    setLanguage('en');
+  }
+});
+
 it('draws the sidebar layout saved in Appearance, Projects by default, and repaints when it changes', async () => {
   const { project, session } = projectSidebarFixture();
   const mounted = await mountChat({}, [], {
@@ -2310,6 +2380,48 @@ it('offers whole-screen privacy only where a screenshot can show the whole scree
   expect(row.hidden).toBe(false);
   mounted.push({ ...mounted.state, platform: { family: 'linux', name: 'Linux', desktopAutomation: false } });
   expect(row.hidden).toBe(true);
+});
+
+it('shows Privacy on every platform with the secrets shield on by default, and saves turning it off (#1797)', async () => {
+  const mounted = await mountChat({ platform: { family: 'windows', name: 'Windows', desktopAutomation: true } });
+  const doc = mounted.window.document;
+  const section = doc.getElementById('privacySettings')!;
+  const shield = doc.getElementById('secretsShield') as HTMLInputElement;
+  expect(section.hidden).toBe(false);
+  expect(doc.querySelector('[data-panel="general"]')!.contains(section)).toBe(true);
+  // A config from before the shield has no field: it shows on.
+  expect(mounted.state.config.ui.secretsShield).toBeUndefined();
+  expect(shield.checked).toBe(true);
+  expect(doc.getElementById('privacyScreenshotsSetting')!.hidden).toBe(true);
+  shield.checked = false;
+  shield.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.secretsShield).toBe(false));
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, secretsShield: false } } });
+  expect(shield.checked).toBe(false);
+});
+
+it('puts the secrets shield switch back after a save that was refused, so a later save cannot turn it off', async () => {
+  let refuse = true;
+  const saves: any[] = [];
+  const mounted = await mountChat({}, [], { saveSettings: (patch: any) => {
+    saves.push(structuredClone(patch));
+    if (refuse) return Promise.resolve({ ok: false, error: 'Settings could not be saved.' });
+    return Promise.resolve({ ok: true, data: mounted.state });
+  } });
+  const doc = mounted.window.document;
+  const shield = doc.getElementById('secretsShield') as HTMLInputElement;
+  shield.focus();
+  shield.checked = false;
+  shield.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(saves.at(-1)?.ui.secretsShield).toBe(false));
+  // The refusal leaves the switch on, as saved, even though it still has focus.
+  await waitFor(() => expect(shield.checked).toBe(true));
+  refuse = false;
+  const follow = doc.getElementById('followOutput') as HTMLInputElement;
+  follow.checked = !follow.checked;
+  follow.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(saves.length).toBeGreaterThan(1));
+  expect(saves.at(-1).ui.secretsShield).toBe(true);
 });
 
 it('says why an Activity list is empty, in the app language, and drops the note once a line arrives', async () => {

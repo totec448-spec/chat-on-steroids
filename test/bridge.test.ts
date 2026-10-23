@@ -2620,6 +2620,9 @@ describe('automatic compaction', () => {
 
     expect(seen, 'the repair was still being offered after forty reads').toBeLessThan(40);
     expect(await offered(), 'it came back after being retired').toBe(false);
+    // #1787: the chat's own caption says so too, rather than counting on as if work went on.
+    const stoppedSession = (await findSessionByConversation(conversationId))!;
+    expect((await sessionControlsFor(stoppedSession.id)).pageless, 'the chat window was not told recovery stopped').toBe(true);
 
     // The ceiling above bounds one repair, not the supply of them: the chat goes quiet, the sweep
     // reads silence, and a fresh repair used to arrive with its own budget. Measured on 2026-09-21
@@ -2641,6 +2644,7 @@ describe('automatic compaction', () => {
     ] } });
     await settled();
     expect(await offered(), 'a page that came back was still refused recovery').toBe(true);
+    expect((await sessionControlsFor(stoppedSession.id)).pageless, 'a page that came back still read as stopped').toBe(false);
 
     const session = (await findSessionByConversation(conversationId))!;
     const notes = (await readEvents(session.id, { kinds: ['note'] }))
