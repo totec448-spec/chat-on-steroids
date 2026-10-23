@@ -23,7 +23,10 @@ app.whenReady().then(async () => {
   const icons = fs.readFileSync(path.join(root, 'src/renderer/icons.css'), 'utf8')
     .replace("url('@phosphor-icons/web/regular/Phosphor.woff2')", `url('${font('regular/Phosphor.woff2')}')`)
     .replace("url('@phosphor-icons/web/fill/Phosphor-Fill.woff2')", `url('${font('fill/Phosphor-Fill.woff2')}')`);
-  const css = icons + fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8');
+  // Every stylesheet the page links, in its order (settings.css owns the settings layouts).
+  const linked = [...fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8').matchAll(/<link rel="stylesheet" href="\.\/([\w-]+\.css)"/g)].map(match => match[1]);
+  if (!linked.includes('settings.css')) throw new Error('index.html no longer links settings.css; update this check');
+  const css = linked.map(name => name === 'icons.css' ? icons : fs.readFileSync(path.join(root, 'src/renderer', name), 'utf8')).join('\n');
   const html = withoutScripts(fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')).replace(/<link\b[^>]*>/g, '')
     .replace('</head>', `<style>${css}</style></head>`);
   const win = new BrowserWindow({ show: false, width: 1100, height: 900, webPreferences: { sandbox: true, offscreen: true, backgroundThrottling: false } });
@@ -74,6 +77,9 @@ app.whenReady().then(async () => {
       assert.equal(result.controlRights.length, 1, 'switches and choices share one right edge ' + tag + JSON.stringify(result.controlRights));
       assert.equal(result.controlRights[0], result.fieldRights[0], 'fields end where switches end ' + tag);
       if (zoom === 1 && (width === 1100 ? ['en', 'de', 'ja'].includes(language) : language === 'en')) {
+        // An offscreen window hands back its last painted frame: let the scroll above paint first,
+        // or the picture shows the top of the page instead of this section.
+        await win.webContents.executeJavaScript('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 50))))');
         fs.writeFileSync(path.join(output, `phone-${tag}.png`), (await win.webContents.capturePage(result.box)).toPNG());
       }
     }

@@ -1,7 +1,7 @@
 import type { AppApi } from '../preload/index.js';
 import { DEFAULT_PHONE_PUSH, type PhonePushSettings } from '../shared/phone-push.js';
 import type { AppState } from '../shared/types.js';
-import { currentLanguage, onLanguageChange, t, ui } from './i18n.js';
+import { currentLanguage, onLanguageChange, t, tn, ui } from './i18n.js';
 
 /**
  * Settings → General → Phone notifications (ntfy). The form reads into `ui.phonePush` with the rest
@@ -51,9 +51,20 @@ export function applyPhonePush(state: AppState): void {
   set('phonePushFinished', () => {
     const select = $<HTMLSelectElement>('phonePushFinished');
     const value = push.finishedAfterMinutes === null ? 'never' : String(push.finishedAfterMinutes);
-    // A value Settings does not offer (from a hand-edited file) shows as the nearest longer choice.
-    select.value = [...select.options].some(option => option.value === value) ? value
-      : [...select.options].find(option => option.value !== 'never' && Number(option.value) >= (push.finishedAfterMinutes ?? 0))?.value ?? '60';
+    // A value Settings does not offer (a hand-edited file) is shown as its own choice and kept, as
+    // the quiet hours are; showing a neighbour would save that neighbour with the next change.
+    select.querySelector('option[data-custom]')?.remove();
+    if (![...select.options].some(option => option.value === value)) {
+      const custom = document.createElement('option');
+      custom.value = value;
+      custom.dataset.custom = '';
+      const minutes = push.finishedAfterMinutes ?? 0;
+      custom.textContent = tn('After {0} minute of work', 'After {0} minutes of work', minutes, [minutes]);
+      // In order among the minute choices, so the menu still reads from short to long.
+      const after = [...select.options].find(option => option.value !== 'never' && Number(option.value) > minutes);
+      select.insertBefore(custom, after ?? null);
+    }
+    select.value = value;
   });
   set('phonePushQuiet', () => {
     const select = $<HTMLSelectElement>('phonePushQuiet');
@@ -100,7 +111,7 @@ function quietLabel(from: string, to: string): string {
 }
 
 export function initPhonePushSettings(api: Pick<AppApi, 'testPhonePush' | 'setPhonePushToken'>, hooks: {
-  save(): Promise<void>; applied(state: AppState): void; toast(message: string): void;
+  save(): Promise<boolean>; applied(state: AppState): void; toast(message: string): void;
 }): void {
   for (const option of $<HTMLSelectElement>('phonePushQuiet').options) {
     const [from, to] = option.value.split('-');
@@ -132,11 +143,13 @@ export function initPhonePushSettings(api: Pick<AppApi, 'testPhonePush' | 'setPh
     if (savingToken) return;
     savingToken = true;
     const field = $<HTMLInputElement>('phonePushToken');
+    // The answer is about this value; a newer one typed meanwhile is a draft and stays.
+    const submitted = field.value;
     try {
-      const reply = await api.setPhonePushToken(field.value);
+      const reply = await api.setPhonePushToken(submitted);
       if (!reply.ok) { hooks.toast(t(reply.error)); return; }
-      hooks.toast(field.value.trim() ? t('Access token saved.') : t('Access token removed.'));
-      field.value = '';
+      hooks.toast(submitted.trim() ? t('Access token saved.') : t('Access token removed.'));
+      if (field.value === submitted) field.value = '';
       hooks.applied(reply.data);
     } finally { savingToken = false; }
   });
@@ -150,8 +163,13 @@ export function initPhonePushSettings(api: Pick<AppApi, 'testPhonePush' | 'setPh
     status.classList.remove('is-warn');
     status.textContent = t('Sending…');
     try {
-      // What was just typed is saved first, so the test uses it.
-      await hooks.save();
+      // What was just typed is saved first, so the test uses it. A save that did not happen would
+      // test the previous settings and report on them, so nothing is sent.
+      if (!await hooks.save().catch(() => false)) {
+        status.textContent = t('The settings could not be saved, so no test was sent.');
+        status.classList.add('is-warn');
+        return;
+      }
       const reply = await api.testPhonePush();
       status.textContent = reply.ok ? t('Sent. Check your phone.') : t(reply.error);
       status.classList.toggle('is-warn', !reply.ok);

@@ -52,6 +52,13 @@ const TAGS: Record<PhonePushKind, string> = { 'needs-you': 'raising_hand', faile
 export const isValidTopic = (topic: string): boolean => TOPIC.test(topic);
 
 /** The server's base URL without a trailing slash, or null when it is not a plain http(s) address. */
+/** A refusal before anything went out, in words the person can act on. */
+class SendRefused extends Error {
+  constructor(message: string, readonly reason?: string) { super(message); }
+}
+/** Hosts on this computer, where plain http never leaves the machine. */
+const LOOPBACK = /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\])$/i;
+
 export function normalizeServer(input: string): string | null {
   let url: URL;
   try { url = new URL(input.trim()); } catch { return null; }
@@ -103,8 +110,17 @@ export function createPhonePush(deps: PhonePushDeps) {
 
   const send = async (settings: PhonePushSettings, body: Record<string, unknown>): Promise<{ ok: boolean; status: number }> => {
     const server = normalizeServer(settings.server);
-    if (!server) throw new Error('The ntfy server address is not valid.');
-    const token = await deps.token();
+    if (!server) throw new SendRefused('The ntfy server address is not valid.');
+    // A token that cannot be read is not "no token": a protected server would refuse the message,
+    // and the log would blame the server.
+    let token: string | null;
+    try { token = await deps.token(); } catch (error) {
+      throw new SendRefused('The saved access token could not be read from secure storage.', error instanceof Error ? error.message : String(error));
+    }
+    // A Bearer token over plain http is readable on the way; only this computer is exempt.
+    if (token && !server.startsWith('https:') && !LOOPBACK.test(new URL(server).hostname)) {
+      throw new SendRefused('An access token is sent only over https, or to this computer. Use https:// for this server.');
+    }
     const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
     return deps.post(server, JSON.stringify({ topic: settings.topic, ...body }), headers);
   };
@@ -141,7 +157,8 @@ export function createPhonePush(deps: PhonePushDeps) {
         if (!reply.ok) { forget(); deps.log(`phone push: the server refused "${name}" (HTTP ${reply.status})`); return 'error'; }
       } catch (error) {
         forget();
-        deps.log(`phone push: could not reach the server for "${name}": ${error instanceof Error ? error.message : String(error)}`);
+        if (error instanceof SendRefused) deps.log(`phone push: not sent "${name}": ${error.message}${error.reason ? ` (${error.reason})` : ''}`);
+        else deps.log(`phone push: could not reach the server for "${name}": ${error instanceof Error ? error.message : String(error)}`);
         return 'error';
       }
       deps.log(`phone push: sent "${name}" to the phone`);
@@ -155,6 +172,10 @@ export function createPhonePush(deps: PhonePushDeps) {
       try {
         reply = await send(settings, { title: 'Chat On Steroids', message: mainText('This is a test from Chat On Steroids. Phone notifications work.'), priority: 3, tags: ['bell'] });
       } catch (error) {
+        if (error instanceof SendRefused) {
+          deps.log(`phone push: test not sent: ${error.message}${error.reason ? ` (${error.reason})` : ''}`);
+          throw new Error(error.message);
+        }
         deps.log(`phone push: test could not reach the server: ${error instanceof Error ? error.message : String(error)}`);
         throw new Error('The ntfy server could not be reached. Check the address and the connection.');
       }

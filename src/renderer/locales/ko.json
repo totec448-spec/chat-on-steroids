@@ -3038,5 +3038,9 @@
   "A chat finished.": "채팅이 끝났습니다.",
   "Finished after {0} min.": "{0}분 만에 끝났습니다.",
   "This is a test from Chat On Steroids. Phone notifications work.": "Chat On Steroids의 테스트입니다. 휴대폰 알림이 작동합니다.",
-  "Use ntfy.sh": "ntfy.sh 사용"
+  "Use ntfy.sh": "ntfy.sh 사용",
+  "An access token is sent only over https, or to this computer. Use https:// for this server.": "액세스 토큰은 https 또는 이 컴퓨터로만 전송됩니다. 이 서버에는 https://를 사용하세요.",
+  "The saved access token could not be read from secure storage.": "저장된 액세스 토큰을 보안 저장소에서 읽을 수 없습니다.",
+  "The settings could not be saved, so no test was sent.": "설정을 저장하지 못해 테스트를 보내지 않았습니다.",
+  "After {0} minutes of work": "{0}분 이상 작업한 뒤"
 }
