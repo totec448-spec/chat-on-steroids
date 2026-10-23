@@ -46,8 +46,6 @@ const PRIVATE_KEY = /(-----BEGIN ((?:[A-Z0-9]+ )*)PRIVATE KEY( BLOCK)?-----)[\s\
  */
 const SETTING_HEAD = /^([ \t]*(?:export[ \t]+)?)(["']?)([A-Z][A-Z0-9_]*)\2[ \t]*[:=][ \t]*/;
 const SECRET_NAME = /(?:^|_)(?:API_?KEY|SECRET(?:_KEY)?|TOKEN|PASSWORD|PASSWD|PASS|PRIVATE_KEY|ACCESS_KEY(?:_ID)?|SIGNING_KEY|ENCRYPTION_KEY|MASTER_KEY|CLIENT_SECRET|CREDENTIALS?|AUTH_TOKEN)$/;
-/** No real setting line is this long; a longer one is data (a bundle, a log dump), not a setting. */
-const MAX_SETTING_LINE = 4096;
 /**
  * Examples and references are not secrets: an empty value, `${VAR}`, `$VAR`, `<your key>`,
  * `{{ secrets.X }}`, `%VAR%`, `changeme`, `xxxx`. A real value that merely starts with `$` or `<`
@@ -64,14 +62,18 @@ function settingHits(text: string): Hit[] {
     const lineEnd = newline < 0 ? text.length : newline;
     let line = text.slice(lineStart, lineEnd);
     if (line.endsWith('\r')) line = line.slice(0, -1);
-    const head = line.length <= MAX_SETTING_LINE ? SETTING_HEAD.exec(line) : null;
+    // The head pattern is anchored and short, so even a very long line costs one pass.
+    const head = SETTING_HEAD.exec(line);
     if (head && SECRET_NAME.test(head[3]!)) {
       // The rest of the line, without trailing spaces and one trailing comma (JSON).
       let rest = line.slice(head[0].length).replace(/[ \t]+$/, '');
       if (rest.endsWith(',')) rest = rest.slice(0, -1).replace(/[ \t]+$/, '');
       const quote = rest[0] === '"' || rest[0] === "'" ? rest[0] : '';
       const value = quote ? (rest.length >= 2 && rest.endsWith(quote) ? rest.slice(1, -1) : null) : rest;
-      if (value !== null && value.length >= 8 && !/["']/.test(value) && !PLACEHOLDER.test(value)) {
+      // A quoted value may hold the other quote ("hunter2'plus"); an unquoted one that holds a quote
+      // is code reading the setting (getenv("TOKEN")), not its value.
+      const plain = value !== null && (quote ? !value.includes(quote) : !/["']/.test(value));
+      if (value !== null && plain && value.length >= 8 && !PLACEHOLDER.test(value)) {
         const start = lineStart + head[0].length + quote.length;
         hits.push({ start, end: start + value.length, kind: 'secret setting', replacement: VALUE_MARKER });
       }

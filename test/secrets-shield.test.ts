@@ -102,6 +102,21 @@ describe('secrets shield (masking only unmistakable credentials)', () => {
     expect(performance.now() - started).toBeLessThan(250);
   });
 
+  it('masks a secret setting on a very long line', () => {
+    const value = 'Zq9' + 'x'.repeat(5000);
+    const { text, masked } = maskSecrets(`API_TOKEN=${value}`);
+    expect(masked).toEqual(['secret setting']);
+    expect(text).toBe('API_TOKEN=[value hidden by Chat On Steroids]');
+  });
+
+  it('masks a quoted password that holds the other quote, and leaves code that reads one alone', () => {
+    expect(maskSecrets(`DB_PASSWORD="hunter2'plus"`).text).toBe('DB_PASSWORD="[value hidden by Chat On Steroids]"');
+    expect(maskSecrets(`DB_PASSWORD='hunter2"plus'`).text).toBe("DB_PASSWORD='[value hidden by Chat On Steroids]'");
+    for (const line of ['API_TOKEN = getenv("API_TOKEN")', "SECRET_KEY: os.environ['SECRET_KEY']"]) {
+      expect(maskSecrets(line)).toEqual({ text: line, masked: [] });
+    }
+  });
+
   it('masks a PGP private key block', () => {
     const pgp = '-----BEGIN PGP PRIVATE KEY BLOCK-----\n\nlQOYBGVhZXQBCAC3\n=ab12\n-----END PGP PRIVATE KEY BLOCK-----';
     const { text, masked } = maskSecrets(`gpg --export-secret-keys\n${pgp}`);
