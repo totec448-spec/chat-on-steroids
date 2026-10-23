@@ -3094,5 +3094,14 @@
   "Earlier messages, in an empty message box": "Mensajes anteriores, en un cuadro de mensaje vacío",
   "Sidebar": "Barra lateral",
   "Move the focused chat or project": "Mover el chat o proyecto enfocado",
-  "Workspace panels": "Paneles del espacio de trabajo"
+  "Workspace panels": "Paneles del espacio de trabajo",
+  "Next chat": "Chat siguiente",
+  "Previous chat": "Chat anterior",
+  "Full screen": "Pantalla completa",
+  "Stop the turn, twice in an empty message box": "Detener el turno, dos veces en un cuadro de mensaje vacío",
+  "Hold to dictate": "Mantener para dictar",
+  "Move a queued task": "Mover una tarea en cola",
+  "Move the focused tab": "Mover la pestaña enfocada",
+  "Save the file being edited": "Guardar el archivo que se edita",
+  "Copy the selection": "Copiar la selección"
 }

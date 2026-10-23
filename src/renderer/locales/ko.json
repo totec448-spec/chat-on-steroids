@@ -2998,5 +2998,14 @@
   "Earlier messages, in an empty message box": "이전 메시지 (메시지 상자가 비어 있을 때)",
   "Sidebar": "사이드바",
   "Move the focused chat or project": "포커스된 채팅이나 프로젝트 이동",
-  "Workspace panels": "워크스페이스 패널"
+  "Workspace panels": "워크스페이스 패널",
+  "Next chat": "다음 채팅",
+  "Previous chat": "이전 채팅",
+  "Full screen": "전체 화면",
+  "Stop the turn, twice in an empty message box": "턴 중지, 빈 메시지 상자에서 두 번 누르기",
+  "Hold to dictate": "누르고 있는 동안 받아쓰기",
+  "Move a queued task": "대기 중인 작업 이동",
+  "Move the focused tab": "포커스된 탭 이동",
+  "Save the file being edited": "편집 중인 파일 저장",
+  "Copy the selection": "선택 항목 복사"
 }

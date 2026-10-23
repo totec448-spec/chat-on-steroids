@@ -573,7 +573,7 @@ code {
 }
 /* Keyboard shortcuts (Ctrl/⌘+/): the search window's card, as tall as its rows, scrolling inside on a short window.
    Where two columns fit, each group sits in its own (`column` in shortcuts-dialog.ts). */
-.shortcuts-dialog { width: min(760px, calc(100vw - 40px)); height: fit-content; max-height: min(640px, calc(100dvh - 80px)); margin: 8vh auto auto; }
+.shortcuts-dialog { width: min(760px, calc(100vw - 40px)); height: fit-content; max-height: min(700px, calc(100dvh - 80px)); margin: 8vh auto auto; }
 .shortcuts-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: none; min-height: 0; padding: 12px 10px 10px 20px; border-bottom: 1px solid var(--line); }
 .shortcuts-head h2 { margin: 0; font-size: calc(14px * var(--text-scale, 1)); font-weight: 600; line-height: calc(20px * var(--text-scale, 1)); }
 .shortcuts-close { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 8px; color: var(--faint); }
