@@ -4046,6 +4046,21 @@ const HANDLERS = {
     return call('/core-plugin', { method: 'POST', body: JSON.stringify({ appId: message.appId }) });
   },
   // A page read ChatGPT's own `conversation_deleted` answer for this chat (usage.js).
+  // A new chat's tab for a linked Project found that Project gone (#1759): ChatGPT now keeps such a
+  // page on "loading" instead of sending it home, which the outbox loop above reports. Only the tab
+  // opened for that message, still on that Project's page, may say so.
+  async project_unavailable(message, _sender, source) {
+    const id = String(message.id || '');
+    const project = String(message.project || '');
+    if (!ownsDocument(source) || !/^[a-f0-9-]{36}$/i.test(id) || !/^g-p-[0-9a-f]{32}$/.test(project)) return { ok: false };
+    const opening = inputOpenings[id];
+    if (opening?.tab !== source.tab || opening.project !== project) return { ok: false };
+    const tab = await chrome.tabs.get(source.tab);
+    let home = null;
+    try { home = /^\/g\/(g-p-[0-9a-f]{32})(?:-[^/]+)?\/project\/?$/i.exec(new URL(tab.url).pathname)?.[1]?.toLowerCase() ?? null; } catch {}
+    if (home !== project) return { ok: false };
+    return call('/project-create', { method: 'POST', body: JSON.stringify({ action: 'gone', inputId: id, chatgptId: project }) });
+  },
   async conversation_deleted(message, _sender, source) {
     const conversationId = String(message.conversationId || '').toLowerCase();
     if (!ownsDocument(source) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(conversationId)) return { ok: false };
@@ -4982,6 +4997,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'core_plugin',
     'load_failure',
     'conversation_deleted',
+    'project_unavailable',
     'usage_observation',
     'events',
     'bind',
