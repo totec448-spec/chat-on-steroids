@@ -2834,6 +2834,8 @@ let controlledTurnId: string | null = null;
 let controlledSelection = -1;
 let controlledStopPending = false;
 let controlledFinishWaiting = false;
+/** No page picked up this chat's repairs, so recovery gave up on it (#1787). */
+let controlledPageless = false;
 let controlledQueueAtFinish = false;
 let controlledCanInject = false;
 let controlledCanSendDirectly = false;
@@ -3276,8 +3278,17 @@ function paintAutomationSwitch(): void {
   ui($<HTMLTextAreaElement>('sessionObjective'), 'placeholder', () => loop ? t("What should each continuation focus on?") : t("Optional. Leave empty to work toward what you asked in this chat."));
   paintTaskActions();
 }
+/**
+ * When the selected chat's controls were last asked for (#1787). A running turn's clock is the app's
+ * word that work goes on, and that word can lapse with nothing new written to the chat: a page that
+ * stopped reporting, an activity window that ran out. Read once, the caption counted on for six
+ * hours. While it counts, it asks again now and then; any other refresh resets the interval.
+ */
+let controlsAskedAt = 0;
+const RUNNING_CONTROLS_RECHECK_MS = 20_000;
 async function refreshSessionControls(): Promise<void> {
   const id = selectedId, generation = ++controlsGeneration;
+  controlsAskedAt = Date.now();
   const planHost = $('agentPlan');
   if (planHost.dataset.sessionId !== (id ?? '')) renderAgentPlan(planHost, id, null);
   const menu = $('sessionControls');
@@ -3288,7 +3299,7 @@ async function refreshSessionControls(): Promise<void> {
     for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
   }
   paintAutomationSwitch();
-  if (!id) { controlledSessionId = null; controlledTurnId = null; paintDeliveryControls(); menu.hidden = false;
+  if (!id) { controlledSessionId = null; controlledTurnId = null; controlledPageless = false; paintDeliveryControls(); menu.hidden = false;
     $<HTMLTextAreaElement>('sessionObjective').disabled = false;
     paintTaskActions();
     for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
@@ -3297,7 +3308,7 @@ async function refreshSessionControls(): Promise<void> {
   if (!sessions.find(row => row.id === id)?.conversationId) {
     controlledSessionId = id; controlledSelection = selectionGeneration; controlledTurnId = null;
     controlledCanInject = false; controlledCanSendDirectly = false; controlledQueueAtFinish = false;
-    controlledStopPending = false; controlledFinishWaiting = false;
+    controlledStopPending = false; controlledFinishWaiting = false; controlledPageless = false;
     menu.hidden = false;
     goalDraftView = null; goalWaitView = null; finishGoalDraftView = null; controlledRecovery = [];
     $<HTMLSelectElement>('chatAutomation').value = opening?.automation ?? 'off';
@@ -3321,6 +3332,7 @@ async function refreshSessionControls(): Promise<void> {
   finishGoalDraftView = controls?.finishGoalDraft ?? null;
   controlledStopPending = controls?.stopPending === true;
   controlledFinishWaiting = controls?.finishWaiting === true;
+  controlledPageless = controls?.pageless === true;
   controlledQueueAtFinish = controls?.queueAtFinish === true;
   controlledCanInject = controls?.canInject ?? controlledTurnId !== null;
   controlledCanSendDirectly = controls?.canSendDirectly === true;
@@ -6301,6 +6313,12 @@ function paintRecoveryVerdict(host: HTMLElement, sessionId: string | null): bool
  * (an empty chat, a folded Compact & Resume) keeps the caption in the header.
  */
 const turnStatusLine = turnLine('turn-worked turn-status');
+/** The latest question's line when the app gave up on its unfinished turn (#1787): red, no clock. */
+const turnStoppedLine = turnLine('turn-worked turn-stopped');
+/** Whether the rows were last drawn with the stopped line, so a change of that state redraws them. */
+let turnStoppedShown = false;
+/** The stopped state a redraw was last asked for; null once the rows match. */
+let turnStoppedAsked: boolean | null = null;
 
 /*
  * What the turn is doing right now, as the last row of its work, where the next thing will appear,
@@ -6309,6 +6327,15 @@ const turnStatusLine = turnLine('turn-worked turn-status');
  * "Thinking". Streaming prose needs no row; it is the feedback. A call only reaches the list once it
  * has finished, so without this a long command read as an idle chat.
  */
+/**
+ * The hours and minutes in front of a running clock's seconds ("6h 12m ", "4m ", or nothing). A
+ * six-hour turn read "Working for 372m 3s" until 2.1.46.
+ */
+function clockPrefix(seconds: number): string {
+  const hours = Math.floor(seconds / 3600), minutes = Math.floor((seconds % 3600) / 60);
+  if (hours > 0) return `${t('{0}h', [hours])} ${t('{0}m', [minutes])} `;
+  return seconds >= 60 ? `${t('{0}m', [minutes])} ` : '';
+}
 /** Whether the latest turn was working at the last paint; the status line's class is never cleared. */
 let turnWorking = false;
 /** A redraw is scheduled to retire the running turn's lines after it ended. */
@@ -6629,7 +6656,7 @@ function paintTurnNow(): void {
   const seconds = now?.since === undefined ? 0 : Math.max(0, Math.floor((Date.now() - now.since) / 1000));
   // Short steps keep no clock; the one worth watching is the one that lasts.
   turnNowTime.textContent = seconds >= 3
-    ? `${seconds >= 60 ? `${t('{0}m', [Math.floor(seconds / 60)])} ` : ''}${seconds % 60}s` : '';
+    ? `${clockPrefix(seconds)}${seconds % 60}s` : '';
   turnNow.hidden = !text;
 }
 
@@ -6694,7 +6721,7 @@ function exchangeDurations(list: readonly SessionEvent[]): Map<number, number> {
 
 function workedLine(asked: number, seconds: number): HTMLElement {
   const line = workedLines.get(String(asked)) ?? turnLine('turn-worked');
-  ui(line.firstElementChild as HTMLElement, 'textContent', () => t("{0} for {1}{2}s", [t("Worked"), seconds >= 60 ? `${t('{0}m', [Math.floor(seconds / 60)])} ` : '', seconds % 60]));
+  ui(line.firstElementChild as HTMLElement, 'textContent', () => t("{0} for {1}{2}s", [t("Worked"), clockPrefix(seconds), seconds % 60]));
   workedLines.set(String(asked), line);
   return line;
 }
@@ -6708,6 +6735,8 @@ function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, 
   const status = deps.state()?.config.ui.developerMode ? null : stateLine();
   const working = status?.working === true;
   turnWorking = working;
+  const stopped = !working && status?.tone === 'is-bad' ? status : null;
+  turnStoppedShown = false;
   const asks = rows.map((row, index) => ({ row, index, asked: Number(row.dataset.askedAt) }))
     .filter(entry => entry.row.matches('.ev-user_message') && Number.isFinite(entry.asked));
   const pending = messageOnItsWay();
@@ -6728,6 +6757,10 @@ function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, 
     const at = rows[index + 1]?.matches('.earlier-version') ? index + 2 : index + 1;
     if (latest && live && (!pending || runningBefore)) { rows.splice(at, 0, turnStatusLine); rows.push(turnNow); continue; }
     const seconds = workedSeconds.get(asked);
+    if (latest && stopped && seconds === undefined && timelineReachesEnd()) {
+      ui(turnStoppedLine.firstElementChild as HTMLElement, 'textContent', () => stateLine().text);
+      rows.splice(at, 0, turnStoppedLine); turnStoppedShown = true; continue;
+    }
     if (seconds === undefined || (latest && live)) continue;
     rows.splice(at, 0, workedLine(asked, seconds)); used.add(String(asked));
   }
@@ -6736,6 +6769,11 @@ function placeTurnLines(rows: HTMLElement[], workedSeconds: ReadonlyMap<number, 
   // line heads them, where the question would put it. Parked after the queue it sat under the newest
   // action and jumped back up whenever the question was loaded again (2026-10-12).
   if (live && !pending && asks.length === 0 && (historyBefore !== null || totalEvents > events.length) && rows.length > 0) { rows.unshift(turnStatusLine); rows.push(turnNow); }
+  // The same for a stopped turn whose question is further up: its line heads the loaded rows.
+  if (stopped && !turnStoppedShown && asks.length === 0 && timelineReachesEnd() && rows.length > 0) {
+    ui(turnStoppedLine.firstElementChild as HTMLElement, 'textContent', () => stateLine().text);
+    rows.unshift(turnStoppedLine); turnStoppedShown = true;
+  }
   const inTimeline = rows.includes(turnStatusLine);
   if (!inTimeline) parkTurnStatus(working);
   if (working && status) paintTurnStatus(status);
@@ -6799,6 +6837,14 @@ function paintStateLine(): void {
   // (2026-10-12). Only a redraw of the rows retires them; one, after this repaint. The guard holds
   // until the stale state itself ends: a redraw that cannot retire the lines (no rows to redraw)
   // would otherwise schedule the next one from its own repaint, forever.
+  // The stopped line belongs to the rows: drawing or removing it is a redraw, once per change. A
+  // stopped turn whose question is not loaded draws no line, and must not redraw on every repaint.
+  const wantStopped = !developer && tone === 'is-bad' && working !== true;
+  if (wantStopped === turnStoppedShown) turnStoppedAsked = null;
+  else if (turnStoppedAsked !== wantStopped) {
+    turnStoppedAsked = wantStopped;
+    queueMicrotask(() => { if (turnStoppedAsked === wantStopped) paintDetail(); });
+  }
   if (developer || working === true || !turnWorking) staleTurnRedraw = false;
   else if (!staleTurnRedraw) {
     staleTurnRedraw = true;
@@ -6809,7 +6855,10 @@ function paintStateLine(): void {
   const recovering = paintRecoveryStatus();
   const goalWaiting = controlledSessionId === selectedId && controlledSelection === selectionGeneration && !!goalWaitView;
   if (goalWaiting) paintGoalProgress();
-  if (visible && (ticking || recovering || goalWaiting)) durationTimer = window.setTimeout(paintStateLine, 1000);
+  // A stopped line is the app's word too, and it lapses the same way when the page comes back idle.
+  const stoppedShown = tone === 'is-bad' && working !== true && !developer;
+  if (visible && (ticking || recovering || goalWaiting || stoppedShown)) durationTimer = window.setTimeout(paintStateLine, 1000);
+  if (visible && (ticking || stoppedShown) && Date.now() - controlsAskedAt >= RUNNING_CONTROLS_RECHECK_MS) void refreshSessionControls();
   repaintBadges();
 }
 
@@ -6870,7 +6919,10 @@ function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?:
     const summary = sessions.find(entry => entry.id === selectedId);
     if (!summary || detailFor !== selectedId) return { text: '', tone: '' };
     const active = controlledSessionId === selectedId && controlledSelection === selectionGeneration ? controlledTurnId : null;
-    const lastBoundary = [...events].reverse().find(event => event.kind === 'turn_start' || event.kind === 'turn_end');
+    // Latest by recording order: the rows are ordered for reading (a turn's events together), so a
+    // turn started again after its end can sit before that end in this list.
+    const latest = <T extends SessionEvent>(rows: readonly T[]): T | undefined => rows.reduce<T | undefined>((best, row) => !best || row.seq > best.seq ? row : best, undefined);
+    const lastBoundary = latest(events.filter(event => event.kind === 'turn_start' || event.kind === 'turn_end'));
     /*
      * A chat whose page never opened a turn is still working, and this app knows it.
      *
@@ -6901,17 +6953,25 @@ function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?:
       ? { text: t("Working…"), tone: '' as const, working: true }
       : null;
     const turnId = active ?? lastBoundary?.turnId;
-    if (!turnId) return blind ?? { text: '', tone: '' };
+    // An unfinished turn the app gave up recovering: say so, instead of an empty caption or a clock.
+    // Unfinished: its latest loaded boundary is a start, or none is loaded (a long turn's start is
+    // further up) and the recorded session still has its turn open.
+    const unfinished = lastBoundary ? lastBoundary.kind === 'turn_start' : !!summary.activeTurnId;
+    const stopped = controlledPageless && controlledSessionId === selectedId && controlledSelection === selectionGeneration && unfinished
+      ? { text: t("Stopped · open this chat's tab again to continue"), tone: 'is-bad' as const } : null;
+    if (!turnId) return blind ?? stopped ?? { text: '', tone: '' };
     const startedAt = summary.finishTurn?.turnId === turnId ? summary.finishTurn.startedAt
       : events.find(event => event.kind === 'turn_start' && event.turnId === turnId)?.time;
-    const endedAt = events.find(event => event.kind === 'turn_end' && event.turnId === turnId)?.time;
+    // The latest boundary of this turn decides: a turn that started again after an end is not over.
+    const lastOfTurn = latest(events.filter(event => (event.kind === 'turn_start' || event.kind === 'turn_end') && event.turnId === turnId));
+    const endedAt = lastOfTurn?.kind === 'turn_end' ? lastOfTurn.time : undefined;
     if (startedAt === undefined) return active
       ? { text: deps.state()?.config.ui.playfulStatus === true ? `${turnWorkWord(turnId, 0)}…` : t("Working…"), tone: '', working: true }
-      : blind ?? { text: '', tone: '' };
-    if (!active && endedAt === undefined) return blind ?? { text: '', tone: '' };
+      : blind ?? stopped ?? { text: '', tone: '' };
+    if (!active && endedAt === undefined) return blind ?? stopped ?? { text: '', tone: '' };
     if (blind) return blind;
     const seconds = Math.max(0, Math.floor(((active ? Date.now() : endedAt!) - startedAt) / 1000));
-    return { text: t("{0} for {1}{2}s", [active ? workingLabel(turnId, seconds) : t("Worked"), seconds >= 60 ? `${t('{0}m', [Math.floor(seconds / 60)])} ` : '', seconds % 60]), tone: '', working: !!active, ticking: !!active };
+    return { text: t("{0} for {1}{2}s", [active ? workingLabel(turnId, seconds) : t("Worked"), clockPrefix(seconds), seconds % 60]), tone: '', working: !!active, ticking: !!active };
   }
   // Recording follows the conversation the browser can see. A tool call arrives over the
   // connector carrying nothing that identifies its caller, so work driven from the phone,

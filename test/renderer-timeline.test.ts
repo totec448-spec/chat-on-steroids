@@ -3689,6 +3689,95 @@ it("retires the running turn's lines when the turn ends after its rows were draw
   expect(w.document.querySelector('#timeline .turn-now')).toBeNull();
 });
 
+// #1787: a chat's page stopped reporting, the app gave up recovering it and its activity window ran
+// out, but nothing new was written to the chat. The caption had read the controls once and went on
+// saying "Working for …" for six hours.
+it('stops counting a turn the app no longer sees running, even when nothing new arrives in the chat', async () => {
+  const { w } = await boot([{ seq: 1, time: Date.now() - 60_000, source: 'extension', kind: 'turn_start', turnId: 'held-turn' }]);
+  expect(w.document.getElementById('chatState')!.textContent).toMatch(/^Working for /);
+  const api = (w as any).api;
+  const original = api.getSessionControls;
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data, activeTurnId: null } });
+  try {
+    vi.setSystemTime(Date.now() + 5 * 60_000);
+    await vi.waitFor(() => expect(w.document.getElementById('chatState')!.textContent).not.toMatch(/^Working for /), { timeout: 5_000 });
+  } finally { vi.useRealTimers(); }
+});
+
+it('says a chat stopped when recovery gave up on its unfinished turn, and drops that once the page is back', async () => {
+  const { w, append } = await boot([{ seq: 1, time: Date.now() - 60_000, source: 'extension', kind: 'turn_start', turnId: 'held-turn' }]);
+  const api = (w as any).api;
+  const original = api.getSessionControls;
+  let stopped = true;
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data, activeTurnId: null, pageless: stopped } });
+  await append([]);
+  const caption = () => w.document.getElementById('chatState')!;
+  expect(caption().textContent).toBe("Stopped · open this chat's tab again to continue");
+  expect(caption().classList.contains('is-bad')).toBe(true);
+  expect(caption().classList.contains('is-working')).toBe(false);
+  stopped = false;
+  await append([]);
+  expect(caption().textContent).toBe('');
+});
+
+it('takes the stopped line away when the page is back, even when nothing new arrives in the chat', async () => {
+  const { w, append } = await boot([{ seq: 1, time: Date.now() - 60_000, source: 'extension', kind: 'turn_start', turnId: 'held-turn' }]);
+  const api = (w as any).api;
+  const original = api.getSessionControls;
+  let stopped = true;
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data, activeTurnId: null, pageless: stopped } });
+  await append([]);
+  expect(w.document.getElementById('chatState')!.textContent).toBe("Stopped · open this chat's tab again to continue");
+  stopped = false;
+  try {
+    vi.setSystemTime(Date.now() + 60_000);
+    await vi.waitFor(() => expect(w.document.getElementById('chatState')!.textContent).toBe(''), { timeout: 5_000 });
+  } finally { vi.useRealTimers(); }
+});
+
+it('says a reopened turn stopped rather than how long it worked', async () => {
+  const at = Date.now() - 120_000;
+  const { w, append } = await boot([
+    { seq: 1, time: at, source: 'extension', kind: 'turn_start', turnId: 'reopened-turn' },
+    { seq: 2, time: at + 10_000, source: 'extension', kind: 'turn_end', turnId: 'reopened-turn', outcome: 'completed' },
+    { seq: 3, time: at + 20_000, source: 'extension', kind: 'turn_start', turnId: 'reopened-turn' }
+  ]);
+  const api = (w as any).api;
+  const original = api.getSessionControls;
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data, activeTurnId: null, pageless: true } });
+  await append([]);
+  expect(w.document.getElementById('chatState')!.textContent).toBe("Stopped · open this chat's tab again to continue");
+});
+
+it('shows the stopped line at the top of the loaded rows when its question is further up', async () => {
+  const asked = Date.now() - 45 * 60_000;
+  const calls = Array.from({ length: 220 }, (_, i): SessionEvent => ({ ...toolCall(i + 3, `long-${i}`), time: asked + (i + 1) * 1000, turnId: 'long-turn' }));
+  const app = await boot([
+    { seq: 1, time: asked - 100, source: 'extension', kind: 'turn_start', turnId: 'long-turn' },
+    { kind: 'user_message', seq: 2, origin: 2, time: asked, source: 'extension', turnId: 'long-turn', messageId: 'q-long', message: text('Build all thirty quests') },
+    ...calls
+  ], true, [], [], { summary: { activeTurnId: 'long-turn' } });
+  const { w } = app;
+  const api = (w as any).api;
+  const original = api.getSessionControls;
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data, activeTurnId: null, pageless: true } });
+  await app.append([]); await app.append([]);
+  const timeline = w.document.getElementById('timeline')!;
+  expect(timeline.querySelector('.ev-user_message')).toBeNull();
+  const rows = [...timeline.querySelectorAll('[data-timeline-key], .turn-stopped, .turn-status')];
+  expect(rows[0]?.matches('.turn-stopped')).toBe(true);
+  expect(rows[0]?.textContent).toBe("Stopped · open this chat's tab again to continue");
+  expect(timeline.querySelector('.turn-status.is-working')).toBeNull();
+});
+
+// The 2.1.45 caption counted a six-hour turn as "Working for 372m 3s" (#1787 screenshots).
+it('counts a turn longer than an hour in hours and minutes', async () => {
+  const { w, append } = await boot([{ seq: 1, time: T0, source: 'extension', kind: 'turn_start', turnId: 'held-turn' }]);
+  (w as any).api.getSessionControls = (id: string) => Promise.resolve({ ok: true, data: { sessionId: id, automation: 'off', activeTurnId: null, finishHeld: false, blocked: '', job: null } });
+  await append([{ seq: 2, time: T0 + (6 * 3600 + 12 * 60 + 3) * 1000, source: 'extension', kind: 'turn_end', turnId: 'held-turn', outcome: 'completed' }]);
+  expect(w.document.getElementById('chatState')!.textContent).toBe('Worked for 6h 12m 3s');
+});
+
 it('shows elapsed work for the exact recorded turn without exposing lifecycle rows', async () => {
   const { w, append } = await boot([{ seq: 1, time: T0, source: 'extension', kind: 'turn_start', turnId: 'held-turn' }]);
   expect(w.document.getElementById('chatState')!.textContent).toMatch(/^Working for /);

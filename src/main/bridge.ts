@@ -2034,6 +2034,11 @@ export type SessionControlsView = {
   finishGoalDraft?: Pick<import('./goal.js').GoalDraftView, 'stage' | 'model' | 'text' | 'error'> | null;
   blocked: 'worker' | 'blocked' | '';
   job: ResumeJobView | null;
+  /**
+   * No page picked up this chat's repairs, so recovery gave up (#1787); in memory, lifted when the page
+   * polls again. Not the session list's durable `recoveryStopped`.
+   */
+  pageless?: boolean;
 };
 
 /** Renderer authority is a durable session, never a caller-supplied browser identity. */
@@ -2081,7 +2086,7 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
     proLoopDelivery: control.enabled && getConfig().ui.finishTool === true && session.selectedModel?.conversationId === id &&
       supportsFinishAutomation(control.mode, session.selectedModel.model, session.selectedModel.reasoningEffort),
     automation: goalArmedFor(id) && !blocked ? control.enabled ? control.mode : 'goal' : 'off',
-    blocked, job: resumeJobFor(sessionId) };
+    blocked, job: resumeJobFor(sessionId), pageless: pagelessChats.has(id) };
 }
 /** One absolute budget includes opening an absent tab and native hydration. */
 export const STOP_COMMAND_TIMEOUT_MS = 120_000;
