@@ -109,6 +109,23 @@ describe('settings migration', () => {
       expect((await loadConfig()).ui.appearance).toEqual({ ...appearance, sidebarLayout: 'projects' });
     }
   });
+  it('loads line spacing and the announcement switch saved before they existed, or damaged, as normal spacing and off', async () => {
+    const { defaultAppearance } = await import('../src/shared/appearance.js');
+    const config = defaultConfig();
+    const appearance = { ...defaultAppearance(), lineSpacing: 140, font: 'legible' as const }; appearance.dark.sidebar = '#e53aa0';
+    await saveConfig({ ...config, ui: { ...config.ui, appearance, announceTurns: true } });
+    expect((await loadConfig()).ui).toMatchObject({ appearance: { lineSpacing: 140, font: 'legible' }, announceTurns: true });
+    const { lineSpacing: _, ...old } = appearance;
+    for (const [saved, announceTurns] of [[old, undefined], [{ ...old, lineSpacing: 145 }, 'yes']] as const) {
+      await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...config, readOnly: true,
+        ui: { ...config.ui, appearance: saved, announceTurns } }), 'utf8');
+      const loaded = await loadConfig();
+      // Each falls back on its own; the colors, the font and the rest of Settings are kept.
+      expect(loaded.ui.appearance).toEqual({ ...appearance, lineSpacing: 100 });
+      expect(loaded.ui.announceTurns).toBeUndefined();
+      expect(loaded.readOnly).toBe(true);
+    }
+  });
   it('drops removed file-saving settings without changing other saved choices', async () => {
     const config = defaultConfig();
     config.readOnly = true;
@@ -173,6 +190,16 @@ describe('settings migration', () => {
     expect((await loadConfig()).ui).toMatchObject({ rotateTurnMinutes: 30, startAtLogin: true });
     await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, rotateTurnMinutes: 0 } });
     expect((await loadConfig()).ui.rotateTurnMinutes).toBe(0);
+  });
+  it('keeps the stop fallback for fresh turns off unless chosen, also for legacy and malformed settings', async () => {
+    expect(defaultConfig().ui.rotateStopFallback).toBe(false);
+    const legacy = defaultConfig(); delete legacy.ui.rotateStopFallback;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
+    expect((await loadConfig()).ui.rotateStopFallback).toBe(false);
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...legacy, ui: { ...legacy.ui, rotateStopFallback: 'yes', startAtLogin: true } }), 'utf8');
+    expect((await loadConfig()).ui).toMatchObject({ rotateStopFallback: false, startAtLogin: true });
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, rotateStopFallback: true } });
+    expect((await loadConfig()).ui.rotateStopFallback).toBe(true);
   });
   it('reads other apps’ usage for fresh and legacy settings and keeps it off once switched off', async () => {
     expect(defaultConfig().ui.localAppUsage).toBe(true);
@@ -303,6 +330,8 @@ describe('settings migration', () => {
     expect(loaded.goal.provider).toEqual({ kind: 'openrouter', baseUrl: '' });
     expect(loaded.ui.autoConnect).toBe(true);
     expect(loaded.ui.privacyScreenshots).toBe(false);
+    // #1797: a config from before the secrets shield has it on.
+    expect(loaded.ui.secretsShield).toBe(true);
     // The one tunnel id a pre-split config had is Core's, because Core is the connector
     // the app cannot work without. Desktop is a second, optional tunnel that starts empty
     // rather than inheriting Core's id — publishing Core twice would be worse than not
@@ -1102,6 +1131,15 @@ it('persists optional ordinary new-chat model defaults without inventing them fo
   const loaded = await loadConfig();
   expect(loaded.ui.defaultChatModel).toBe('gpt-5.6-sol');
   expect(loaded.ui.defaultChatReasoning).toBe('xhigh');
+});
+
+it('keeps a Continue prompt, and reads an empty or overlong one as the built-in phrases', async () => {
+  const config = defaultConfig();
+  expect(config.ui.customContinue).toBeUndefined();
+  for (const [stored, read] of [['Keep going.', 'Keep going.'], ['   ', undefined], ['x'.repeat(501), undefined], [42, undefined]] as const) {
+    await saveConfig({ ...config, ui: { ...config.ui, customContinue: stored as string } });
+    expect((await loadConfig()).ui.customContinue, String(stored).slice(0, 20)).toBe(read);
+  }
 });
 
 describe('a settings file the app cannot read as is', () => {

@@ -44,6 +44,8 @@ export const inputArgs = z.object({
   objective: z.string().trim().max(16000).optional(),
   /** Which existing field holds the human request, before generated workflow wrapping. */
   authoredSource: z.enum(['text', 'objective', 'none']).optional(),
+  /** Sent with /image (#1701): the person asked for a picture, so it goes without the Core mention. */
+  imageRequest: z.literal(true).optional(),
   stages: z.array(z.string().trim().min(1).max(16000)).max(11).optional(),
   images: z.array(z.object({ name: z.string().min(1).max(110), dataUrl: z.string().max(512100).regex(/^data:image\/webp;base64,[A-Za-z0-9+/]+={0,2}$/) })).max(MAX_INPUT_IMAGES).optional(),
   attachments: z.array(attachmentSchema).max(20).optional(),
@@ -75,6 +77,8 @@ export const inputArgs = z.object({
 });
 export type InputArgs = z.infer<typeof inputArgs>;
 const entrySchema = inputArgs.extend({
+  /** A fresh-turn continue sent as an ordinary message after the app stopped the turn (`ui.rotateStopFallback`). */
+  afterStop: z.literal(true).optional(),
   /** An edit of the chat's first question: its new version carries the chat's setup again. */
   editFramed: z.literal(true).optional(),
   /** This exact outbox row owns the first native send of its reserved local session. */
@@ -171,6 +175,12 @@ const declinedRotations = new Set<string>();
 /** The page clicked Send, yet its exact text stayed in the composer and no new user row appeared. */
 const SEND_NOT_TAKEN = 'Native Send did not take the message.';
 const NOT_TAKEN_FAILED = 'Not sent: ChatGPT did not accept the message.';
+/**
+ * The page asked for authorization but never clicked: ChatGPT drew its editor again while the app
+ * answered, and the page took its exact text back out of the composer. The same code in
+ * extension/content.js.
+ */
+const SEND_WITHDRAWN = 'Native Send was withdrawn before its click.';
 export const TOOL_INPUT_HEADER = '\n--- New instructions from the user ---\n';
 export interface ToolInputBatch {
   messages: Array<{ text: string; images: InputImage[] }>;
@@ -285,7 +295,8 @@ async function browserInputAllowed(entry: InputEntry): Promise<boolean> {
 }
 /** A message you typed, for a chat ChatGPT shows stopped with nothing running: it need not wait. */
 function typedAfterStop(entry: InputEntry, policy: { stoppedIdle?: boolean; stoppedWait?: string }): boolean {
-  const typed = manualInput(entry) && !entry.recovery;
+  // The app's own continue after it stopped the turn to start a fresh one goes the same way.
+  const typed = (manualInput(entry) && !entry.recovery) || (entry.purpose === 'rotation' && entry.afterStop === true);
   if (typed && policy.stoppedWait && stoppedWaitTold.get(entry.id) !== policy.stoppedWait) {
     stoppedWaitTold.set(entry.id, policy.stoppedWait);
     if (stoppedWaitTold.size > 200) stoppedWaitTold.delete(stoppedWaitTold.keys().next().value!);
@@ -857,6 +868,26 @@ export function fileRotationInput(sessionId: string, turnId: string): Promise<In
 }
 
 /**
+ * The fresh-turn continue for a turn the app stopped (`ui.rotateStopFallback`): an ordinary message,
+ * sent once ChatGPT shows the stop and nothing runs. Nothing else of the person's may be waiting.
+ */
+export function fileRotationContinueAfterStop(sessionId: string, turnId: string): Promise<InputEntry | null> {
+  return serial(async () => {
+    const current = await load();
+    if (current.some(row => row.sessionId === sessionId && !terminal(row))) return null;
+    const session = await getSession(sessionId);
+    if (!session?.conversationId || session.activeTurnId || isChatBlocked(session.conversationId)) return null;
+    const now = Date.now();
+    const entry: InputEntry = { id: randomUUID(), sessionId, text: rotationMessage(), mode: 'auto', dueAt: now, model: null, reasoningEffort: null,
+      authoredSource: 'none', purpose: 'rotation', afterStop: true, transportIntent: 'browser',
+      queuedTurn: { conversationId: session.conversationId, turnId }, state: 'queued', owner: null, createdAt: now,
+      conversationId: session.conversationId };
+    await commit(append(current, entry));
+    return { ...entry };
+  });
+}
+
+/**
  * Where a fresh-turn continue (#1402) stands, for the tool call held for it (#1662): not yet sent,
  * being sent (Send is authorized), or settled either way.
  */
@@ -872,15 +903,17 @@ export async function rotationDelivery(id: string): Promise<'pending' | 'sending
  * Withdraws a fresh-turn continue that has not been sent, once the call it was held for has to
  * answer. Sent after that answer it would land in the gap where ChatGPT queues it behind the
  * reply. Nobody's message, so it leaves no notice; the turn is tried again at a later call.
+ * Says where it was: still `queued` (no page picked it up) or claimed by a `browser` page that
+ * had not reached Send; null when there was nothing left to withdraw.
  */
-export function withdrawUnsentRotation(id: string): Promise<boolean> {
+export function withdrawUnsentRotation(id: string): Promise<'queued' | 'browser' | null> {
   return serial(async () => {
     const current = await load();
     const row = current.find(entry => entry.id === id && entry.purpose === 'rotation' &&
       (entry.state === 'queued' || (entry.state === 'browser' && entry.sendAuthorizedAt === undefined)));
-    if (!row) return false;
+    if (!row) return null;
     await commit(current.map(entry => entry === row ? { ...entry, state: 'cancelled' as const } : entry));
-    return true;
+    return row.state === 'queued' ? 'queued' : 'browser';
   });
 }
 
@@ -1537,7 +1570,7 @@ export function fileRecoveryInput(sessionId: string, conversationId: string, tur
     const now = Date.now();
     const row: InputEntry = { id: randomUUID(), sessionId, conversationId, owner: null, state: 'queued',
       mode: 'after-turn', dueAt: now, createdAt: now, model: null, reasoningEffort: null,
-      text: recoveryMessage({ playful: getConfig().ui.playfulContinue === true }),
+      text: recoveryMessage({ playful: getConfig().ui.playfulContinue === true, custom: getConfig().ui.customContinue }),
       recovery: { questionId: question.messageId, episode, pro, busyUntil, phase: 'ready' },
       silenceBoundary: { turnId, conversationId, workSeq: workSequence(work), acceptedAt: now } };
     if (!await recoveryCurrent(row)) {
@@ -1792,6 +1825,8 @@ async function imageRequestWithoutMention(entry: InputEntry, session: SessionSum
   // A combined message also carries the next queued instruction, which may need the app.
   if (companion || entry.purpose === 'decision' || entry.recovery || entry.finishOwner || (entry.authoredSource ?? 'text') !== 'text') return false;
   if (session?.origin?.kind === 'worker' || session?.origin?.kind === 'helper') return false;
+  // /image: asked for outright, in whatever words ("you have the concept, design it").
+  if (entry.imageRequest === true) return true;
   const attachedImage = (entry.images?.length ?? 0) > 0 || (entry.attachments ?? []).some(file => file.mimeType.startsWith('image/'));
   // Shortly after ChatGPT made a picture, "make it brighter" changes that picture: the picture
   // answered one of the last two questions, so one failed edit in between still counts.
@@ -2102,10 +2137,17 @@ export function failBrowserInput(id: string, owner: string, error: string, detai
     // exact text in its composer and showed no new user message, and the page has cleared that
     // draft. Seen when a message for the running turn was clicked in the second the turn ended.
     // One requeue sends it again; a second refusal is reported instead of retried forever.
-    if (entry.sendAuthorizedAt !== undefined && error === SEND_NOT_TAKEN) {
+    // Withdrawn before the click is the same proof, made before any click: one requeue as well. A
+    // claim this app never authorized was never sendable, so the report changes nothing.
+    if (error === SEND_WITHDRAWN && entry.sendAuthorizedAt === undefined) {
+      logInfo(`input ${entry.id}: ignored the page's withdrawn-Send report: this app never authorized that Send`);
+      return false;
+    }
+    if (entry.sendAuthorizedAt !== undefined && (error === SEND_NOT_TAKEN || error === SEND_WITHDRAWN)) {
       const retry = (entry.notTakenRetries ?? 0) === 0 && manualInput(entry) && !entry.recovery && !entry.opening &&
         entry.purpose !== 'decision' && !entry.lifetime;
-      logWarn(`input ${entry.id}: ChatGPT did not take the clicked Send; ${retry ? 'queued once more' : 'reported as not sent'}`);
+      logWarn(`input ${entry.id}: ${error === SEND_WITHDRAWN ? 'the page withdrew the authorized Send before clicking it'
+        : 'ChatGPT did not take the clicked Send'}; ${retry ? 'queued once more' : 'reported as not sent'}`);
       await commit(current.map(row => sameDelivery(entry, row) ? retry
         ? { ...row, state: 'queued', owner: null, offeredAt: undefined, sendAuthorizedAt: undefined, requiresAuthorization: undefined,
           deliveryText: undefined, error: undefined, notTakenRetries: (row.notTakenRetries ?? 0) + 1 }

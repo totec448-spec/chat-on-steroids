@@ -2961,7 +2961,10 @@
     }
     if (!connector || !Array.isArray(connector.actions) || typeof connector.name !== 'string') return null;
     const externalPlugins = pluginsConnectorApp(connector.name, connector.id);
-    if ((!connector.actions.length && !externalPlugins) || connector.actions.length > (externalPlugins ? 257 : 16)) return null;
+    // A sanity bound, not a catalog: the app's own Core and Desktop declare a few dozen tools at most
+    // (Windows Desktop 24 in 2.1.44, which the old bound of 16 refused, #1763); Plugins holds every
+    // enabled external plugin's tools. A test keeps 64 above what Core and Desktop declare.
+    if ((!connector.actions.length && !externalPlugins) || connector.actions.length > (externalPlugins ? 257 : 64)) return null;
     const budget = { bytes: PLUGIN_SCHEMA_READ_BYTES, nodes: 20000 };
     // Measured 2026-09-27: this page sends `description_model: ""` rather than null, so `??`
     // read every declaration as empty and no refresh could ever match the published schema.
@@ -3007,7 +3010,7 @@
         if (observedActions) return null;
         observedActions = props.actions;
         const externalPlugins = pluginsConnectorApp(props.connector.name, props.connector.id);
-        if ((!props.actions.length && !externalPlugins) || props.actions.length > (externalPlugins ? 257 : 16) || typeof props.connector.name !== 'string') return null;
+        if ((!props.actions.length && !externalPlugins) || props.actions.length > (externalPlugins ? 257 : 64) || typeof props.connector.name !== 'string') return null;
         const budget = { bytes: PLUGIN_SCHEMA_READ_BYTES, nodes: 20000 };
         const tools = props.actions.map(action => ({ name: action.name, description: copySchema(action.description_model ?? action.description, budget), inputSchema: copySchema(action.params, budget) }));
         if (tools.some(tool => !NAME.test(tool.name) || typeof tool.description !== 'string' || !tool.inputSchema || tool.inputSchema.type !== 'object') ||

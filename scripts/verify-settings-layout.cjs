@@ -30,7 +30,7 @@ app.whenReady().then(async () => {
     await js(code);
     await js(`(() => {
       const models = [{ model: 'gpt-6-astra', reasoningEffort: 'high', assumed: false, tokens: 1200000 }];
-      const data = { contextTokenCap: 533333, tokens: 1200000, sessions: 24, models,
+      const data = { contextTokenCap: 533333, tokens: 1200000, sessions: 24, models, projects: [],
         days: [{ date: new Date().toISOString().slice(0, 10), tokens: 1200000, models }],
         messages: { through: Date.now(), days: [] }, limits: [{ model: 'gpt-6-astra', scope: 'model',
           remaining: 12345, remainingPercent: 75, resetAt: Date.now() + 86400000,
@@ -198,6 +198,22 @@ app.whenReady().then(async () => {
       }
     }
     assert.deepEqual(failures, []);
+    win.setSize(1440, 950); win.webContents.setZoomFactor(1);
+    const review = await js(`(async () => {
+      document.querySelectorAll('.panel').forEach(p => p.classList.toggle('is-active', p.dataset.panel === 'chat'));
+      for (const view of document.querySelectorAll('[data-view]')) view.hidden = view.dataset.view !== 'settings';
+      document.documentElement.dataset.theme = 'dark';
+      const input = document.getElementById('finishHoldOnStop'), label = input.closest('label');
+      label.scrollIntoView({block: 'center'});
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      return { section: input.closest('.settings-surface').previousElementSibling.querySelector('h2').textContent,
+        description: label.querySelector('em').textContent, checked: input.checked, visible: input.checkVisibility() };
+    })()`);
+    assert.equal(review.section, 'Unfinished answers, Goal and Loop');
+    assert.ok(review.description.startsWith('When Goal reports completion'));
+    assert.equal(review.checked, false);
+    assert.equal(review.visible, true);
+    fs.writeFileSync(path.join(output, 'goal-completion-review.png'), (await win.webContents.capturePage()).toPNG());
     // Agents & automation shares the chat host. Exercise real dock layout classes,
     // including expanded/narrow/closing states, without starting a terminal process.
     for (const width of [760, 1440]) {

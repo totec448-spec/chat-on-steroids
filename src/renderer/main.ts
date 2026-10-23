@@ -15,6 +15,7 @@ import { initUpdateReadiness, paintUpdateReadiness } from './update-readiness.js
 import { updateErrorText } from './update-error.js';
 import { initUsage, refreshOtherApps, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
+import { initAppShortcuts } from './app-shortcuts.js';
 import { initViewMenu } from './view-menu.js';
 import { initShortcutsDialog } from './shortcuts-dialog.js';
 import { initPlugins, applyPluginsState } from './plugins.js';
@@ -739,9 +740,11 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       chatBrowser: $<HTMLSelectElement>('chatBrowser').value as ChatBrowser,
       cosBrowserMinimize: $<HTMLSelectElement>('cosBrowserMinimize').value === 'tray' ? 'tray' : 'taskbar',
       finishTool: $<HTMLInputElement>('finishTool').checked,
+      finishHoldOnStop: $<HTMLInputElement>('finishHoldOnStop').checked,
       planBackend: $<HTMLSelectElement>('planBackend').value as 'chatgpt' | 'api',
       finishLeadMinutes: Number($<HTMLSelectElement>('finishLeadMinutes').value),
       rotateTurnMinutes: Number($<HTMLSelectElement>('rotateTurnMinutes').value),
+      rotateStopFallback: $<HTMLInputElement>('rotateStopFallback').checked,
       backgroundChats: $<HTMLInputElement>('backgroundChats').checked,
       backgroundPlacement: $<HTMLSelectElement>('backgroundPlacement').value === 'group' ? 'group' : 'window',
       followUp: $<HTMLSelectElement>('followUp').value === 'queue' ? 'queue' : 'steer',
@@ -761,10 +764,13 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       developerMode: $<HTMLInputElement>('developerMode').checked,
       playfulStatus: $<HTMLInputElement>('playfulStatus').checked,
       playfulContinue: $<HTMLInputElement>('playfulContinue').checked,
+      announceTurns: $<HTMLInputElement>('announceTurns').checked,
+      customContinue: $<HTMLTextAreaElement>('customContinue').value.trim() || undefined,
       followOutput: $<HTMLInputElement>('followOutput').checked,
       mentionCore: $<HTMLInputElement>('mentionCore').checked,
       mentionPlugins: $<HTMLInputElement>('mentionPlugins').checked,
       privacyScreenshots: $<HTMLInputElement>('privacyScreenshots').checked,
+      secretsShield: $<HTMLInputElement>('secretsShield').checked,
       theme: over.theme ?? previous.ui.theme,
       appearance: over.appearance ?? previous.ui.appearance
     },
@@ -835,6 +841,10 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     }
     if (state && (!requestedSettings || requestedSettings.controlApi?.enabled === patch.controlApi?.enabled)) {
       $<HTMLInputElement>('controlApiEnabled').checked = state.config.controlApi?.enabled === true;
+    }
+    // And the secrets shield: an unticked switch left by a refused save must not turn it off later.
+    if (state && (!requestedSettings || requestedSettings.ui.secretsShield === patch.ui.secretsShield)) {
+      $<HTMLInputElement>('secretsShield').checked = state.config.ui.secretsShield !== false;
     }
   }
 }
@@ -1661,6 +1671,7 @@ function apply(next: AppState): void {
   $('cosBrowserMinimizeRow').hidden = (config.ui.chatBrowser ?? 'chrome') !== 'cos';
   $<HTMLSelectElement>('planBackend').value = config.ui.planBackend ?? 'chatgpt';
   applyChecked($<HTMLInputElement>('finishTool'), config.ui.finishTool === true, previousState?.config.ui.finishTool);
+  applyChecked($<HTMLInputElement>('finishHoldOnStop'), config.ui.finishHoldOnStop === true, previousState?.config.ui.finishHoldOnStop);
   applyValue($<HTMLSelectElement>('finishLeadMinutes'), String(config.ui.finishLeadMinutes ?? 5), String(previousState?.config.ui.finishLeadMinutes ?? 5));
   $<HTMLSelectElement>('finishLeadMinutes').disabled = config.ui.finishTool !== true;
   // A value the list does not offer (set in the config) gets its own option; without one the select
@@ -1674,6 +1685,8 @@ function apply(next: AppState): void {
     rotate.add(option);
   }
   applyValue(rotate, rotateMinutes, previousState ? String(previousState.config.ui.rotateTurnMinutes ?? 30) : undefined);
+  applyChecked($<HTMLInputElement>('rotateStopFallback'), config.ui.rotateStopFallback === true, previousState?.config.ui.rotateStopFallback);
+  $<HTMLInputElement>('rotateStopFallback').disabled = (config.ui.rotateTurnMinutes ?? 30) === 0;
   applyChecked($<HTMLInputElement>('backgroundChats'), config.ui.backgroundChats === true, previousState?.config.ui.backgroundChats);
   applyValue($<HTMLSelectElement>('backgroundPlacement'), config.ui.backgroundPlacement ?? 'window', previousState?.config.ui.backgroundPlacement ?? 'window');
   applyValue($<HTMLSelectElement>('followUp'), config.ui.followUp ?? 'steer', previousState?.config.ui.followUp ?? 'steer');
@@ -1701,6 +1714,8 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('developerMode'), config.ui.developerMode === true, previousState?.config.ui.developerMode);
   applyChecked($<HTMLInputElement>('playfulStatus'), config.ui.playfulStatus === true, previousState?.config.ui.playfulStatus);
   applyChecked($<HTMLInputElement>('playfulContinue'), config.ui.playfulContinue === true, previousState?.config.ui.playfulContinue);
+  applyChecked($<HTMLInputElement>('announceTurns'), config.ui.announceTurns === true, previousState?.config.ui.announceTurns);
+  applyValue($<HTMLTextAreaElement>('customContinue'), config.ui.customContinue ?? '', previousState ? previousState.config.ui.customContinue ?? '' : undefined);
   applyChecked($<HTMLInputElement>('followOutput'), config.ui.followOutput !== false, previousState?.config.ui.followOutput);
   applyChecked($<HTMLInputElement>('mentionCore'), config.ui.mentionCore !== false, previousState?.config.ui.mentionCore);
   applyChecked($<HTMLInputElement>('mentionPlugins'), config.ui.mentionPlugins === true, previousState?.config.ui.mentionPlugins);
@@ -1708,6 +1723,12 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('mcpPersistentUrls'), config.mcp?.persistentUrls === true, previousState?.config.mcp?.persistentUrls);
   // Stable URLs live only in the OS-backed secret store; without it they keep rotating.
   $<HTMLInputElement>('mcpPersistentUrls').disabled = next.secureStorage?.available === false && config.mcp?.persistentUrls !== true;
+  // Another program held the kept port at this start: the tunnel must follow the new one.
+  const moved = config.mcp?.persistentUrls === true ? next.status.keptPortMoved ?? null : null;
+  $('mcpPortMoved').hidden = moved === null;
+  ui($('mcpPortMoved'), 'textContent', () => moved
+    ? t('Port {0} was in use when the app started, so it now listens on port {1}. Point your tunnel at port {1}.', [moved.from, moved.to])
+    : '');
   applyChecked($<HTMLInputElement>('controlApiAllowActions'), config.controlApi?.allowActions === true, previousState?.config.controlApi?.allowActions);
   // Actions need the API itself, so the switch stays off and disabled until it is on.
   $<HTMLInputElement>('controlApiAllowActions').disabled = config.controlApi?.enabled !== true;
@@ -1720,6 +1741,12 @@ function apply(next: AppState): void {
     $<HTMLInputElement>('privacyScreenshots'),
     config.ui.privacyScreenshots,
     previousState?.config.ui.privacyScreenshots
+  );
+  // Missing means on (#1797).
+  applyChecked(
+    $<HTMLInputElement>('secretsShield'),
+    config.ui.secretsShield !== false,
+    previousState ? previousState.config.ui.secretsShield !== false : undefined
   );
   // Only macOS screenshots can show the whole screen; on Windows every capture is one window
   // already, so the switch would change nothing there.
@@ -2790,6 +2817,7 @@ for (const id of [
   'developerMode',
   'playfulStatus',
   'playfulContinue',
+  'announceTurns',
   'followOutput',
   'followUp',
   'enterSends',
@@ -2800,6 +2828,7 @@ for (const id of [
   'controlApiAllowActions',
   'mcpPersistentUrls',
   'privacyScreenshots',
+  'secretsShield',
   'tunnelKind',
   'tunnelId',
   'desktopTunnelId',
@@ -2844,6 +2873,11 @@ async function refresh(): Promise<void> {
 buildGroups();
 initSidebarResize();
 const shortcutsDialog = initShortcutsDialog({ enterSends: () => state?.config.ui.enterSends !== false });
+initAppShortcuts({
+  newChat: $('newChat'),
+  settings: $('workspaceSettings'),
+  settingsShown: () => document.querySelector<HTMLElement>('.app')?.dataset.screen === 'settings'
+});
 const viewMenu = initViewMenu({
   search: openChatSearch,
   shortcuts: shortcutsDialog.open,

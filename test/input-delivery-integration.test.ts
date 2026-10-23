@@ -223,6 +223,11 @@ it('says why a page withdrew a Continue and ends it after three minutes of withd
     expect((await post('/input/fail', { id: row.id, owner: 'a-document', conversationId, error: withdrawn, detail: 'send-not-ready' })).body.ok).toBe(true);
     expect(getLog().filter(entry => entry.message.includes('could not send this recovery message')).at(-1)?.message)
       .toContain('(send-not-ready)');
+    // The page's most telling reasons name what moved the turn; they keep their words (#1787).
+    expect(await input.claimBrowserInput(row.id, 'a-document', conversationId, true)).not.toBeNull();
+    expect((await post('/input/fail', { id: row.id, owner: 'a-document', conversationId, error: withdrawn, detail: 'turn-progressed by app-tool_call' })).body.ok).toBe(true);
+    expect(getLog().filter(entry => entry.message.includes('could not send this recovery message')).at(-1)?.message)
+      .toContain('(turn-progressed by app-tool_call)');
     const firstRelease = now;
     expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ state: 'queued',
       recovery: { withdrawnSince: firstRelease } });
@@ -268,6 +273,18 @@ async function silentTurnContinue(title: string, advance: (ms: number) => number
   expect(row).toMatchObject({ state: 'queued' });
   return { conversationId, turnId, session, row };
 }
+
+it("files an automatic Continue in the person's own words when they set a Continue prompt", async () => {
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      ui: { ...defaultConfig().ui, customContinue: 'Bitte weitermachen: finish the open steps.' } });
+    const { row } = await silentTurnContinue('Own Continue words', ms => now += ms);
+    expect(row.text.startsWith('Bitte weitermachen: finish the open steps. ')).toBe(true);
+    // The notice to check existing work stays after the person's words.
+    expect(row.text.slice('Bitte weitermachen: finish the open steps. '.length)).toMatch(/check|inspect|verify|look for/i);
+  } finally { clock.mockRestore(); }
+});
 
 it('ends a Continue the page refuses before claiming because its answer is finished', async () => {
   // Measured 2026-10-02: a Continue filed for a turn whose final the app had missed was refused by
@@ -536,6 +553,26 @@ it('holds a message for an existing chat until a new tunnel-client has taken ove
     expect(released.body.inputs.map((row: { id: string }) => row.id)).toContain(existing.id);
     expect((await post('/input/claim', { id: existing.id, owner: 'chat-page', conversationId, requiresAuthorization: true })).body.input)
       .toMatchObject({ id: existing.id });
+  } finally { clock.mockRestore(); resetRouteSettleForTests(); }
+});
+
+it('learns a longer hold when the first message for an existing chat after a restart still took the old route (#1788)', async () => {
+  const { noteTunnelClientConnected, resetRouteSettleForTests, routeHoldMs, noteRouteRequestSighted, noteRouteRequestArrived } =
+    await import('../src/main/tunnel/route-settle.js');
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'First message after a tunnel restart', conversationId });
+    const existing = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto' });
+    noteTunnelClientConnected();
+    now += routeHoldMs();
+    expect((await post('/input/claim', { id: existing.id, owner: 'chat-page', conversationId, requiresAuthorization: true })).body.input)
+      .toMatchObject({ id: existing.id });
+    now += 2_000;
+    noteRouteRequestSighted('request-after-restart', conversationId);
+    now += 124_000;
+    noteRouteRequestArrived('request-after-restart');
+    expect(routeHoldMs(), 'the claim of an existing chat started the measurement').toBeGreaterThan(35_000);
   } finally { clock.mockRestore(); resetRouteSettleForTests(); }
 });
 

@@ -33,7 +33,9 @@ const REFUSED_RETRY_MS = 60_000;
 const UNTAKEN_RETRY_MS = 5 * 60_000;
 const MAX_FILED_PER_TURN = 2;
 const MAX_DECLINED_PER_TURN = 6;
-const attempts = new Map<string, { turnId: string; at: number; filed: boolean; filings: number; declines?: number; gaveUp?: boolean }>();
+const attempts = new Map<string, { turnId: string; at: number; filed: boolean; filings: number; declines?: number; gaveUp?: boolean; stopped?: boolean }>();
+/** With `ui.rotateStopFallback`, after this many continues ChatGPT offered no Send for, the turn is stopped instead. */
+export const STOP_FALLBACK_AFTER_DECLINES = 2;
 const inFlight = new Set<string>();
 
 export async function considerTurnRotation(conversationId: string, sessionId: string, turnId: string, deps: RotationDeps): Promise<boolean> {
@@ -66,6 +68,24 @@ export async function considerTurnRotation(conversationId: string, sessionId: st
   } finally {
     inFlight.delete(conversationId);
   }
+}
+
+/**
+ * Whether this turn should now be stopped after its result rather than given another continue: the
+ * opt-in fallback, once ChatGPT offered no Send twice in this turn, once per turn, and not before a
+ * minute after the last decline (the same pace as a retried continue).
+ */
+export function stopFallbackDue(conversationId: string, turnId: string, enabled: boolean, now: number): boolean {
+  const last = attempts.get(conversationId);
+  return enabled && last?.turnId === turnId && !last.stopped && (last.declines ?? 0) >= STOP_FALLBACK_AFTER_DECLINES &&
+    now - last.at >= REFUSED_RETRY_MS;
+}
+
+/** The fallback was used for this turn: no more continues into it. */
+export function noteStopFallback(conversationId: string, turnId: string, now: number): void {
+  const last = attempts.get(conversationId);
+  attempts.set(conversationId, { turnId, at: now, filed: false, filings: last?.turnId === turnId ? last.filings : 0,
+    declines: last?.turnId === turnId ? last.declines ?? 0 : 0, gaveUp: true, stopped: true });
 }
 
 /**

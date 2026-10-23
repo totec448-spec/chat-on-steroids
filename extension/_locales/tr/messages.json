@@ -1157,6 +1157,9 @@
   "content_goal_error_nothing_to_open_with": {
     "message": "Yardımcı bir açılış mesajı üretmedi. Görevi daha belirgin hale getirip yeniden deneyin."
   },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "Yardımcı hedefe ulaşıldığını söylüyor, ancak bu kontrol edilmedi. Takip yanıtı gönderilmedi. Sohbeti kontrol edin ve iş kaldıysa devam edin."
+  },
   "content_goal_error_loop_stop_refused": {
     "message": "Yardımcı, Döngü devamı yazmak yerine durmayı seçmeye devam etti. Döngü talimatlarını gözden geçirin veya başka bir yardımcı model seçin."
   },
@@ -1237,5 +1240,17 @@
   },
   "content_edit_unavailable": {
     "message": "ChatGPT bu mesaj için Düzenle seçeneği sunmadı. Sohbeti ChatGPT'de açıp yeniden deneyin."
+  },
+  "content_auto_compaction_waiting_app": {
+    "message": "Otomatik sıkıştırma: uygulama bekleniyor"
+  },
+  "content_goal_loop_waiting_app": {
+    "message": "Hedef ve Döngü: uygulama bekleniyor"
+  },
+  "content_settings_waiting_app": {
+    "message": "uygulama bekleniyor"
+  },
+  "content_task_waiting_app": {
+    "message": "Chat On Steroids yanıtı bekleniyor."
   }
 }

@@ -145,6 +145,13 @@ it('reads a bug report written without the form from its text, and asks for what
   expect(intakeDecision(freeIssue(freeForm(), { author_association: 'OWNER' }), current).decision).toBe('none');
 });
 
+it('does not read the end of a browser version as the app version', () => {
+  // "Browser version: Edge 141.0.3537.71" was read as app version 0.3537.71, an old release.
+  const body = `## Environment\n\n- Browser version: Edge 141.0.3537.71\n\n${attached}\n`;
+  expect(intakeDecision(freeIssue(body), current).missing).toEqual([]);
+  expect(intakeDecision(freeIssue(body, { title: '[Bug] it broke' }), current).missing).toEqual(['version', 'latest']);
+});
+
 it('does not close an open free-form report on a later edit only because a newer release came out', () => {
   expect(intakeDecision(freeIssue(freeForm(attached)), { latest: 'v2.1.41', opened: false }).decision).toBe('none');
 });

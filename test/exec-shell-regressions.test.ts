@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { bindBundledRipgrep, execRecoveryHints, nonZeroExitIsBenign, repairPowerShellQuoting } from '../src/main/exec-hints.js';
-import { deriveExecArgs, getShellByModelProvidedPath, withPosixPathPrefix, withPowershellExitStatus } from '../src/main/codex/shell.js';
+import { deriveExecArgs, getShellByModelProvidedPath, prefixPowershellScriptWithUtf8, UTF8_OUTPUT_PREFIX, withPosixPathPrefix, withPowershellExitStatus } from '../src/main/codex/shell.js';
 import { composeCommandBatch, parseCommandBatchSections } from '../src/main/codex/command-batch.js';
 import { locateRipgrep } from '../src/main/ripgrep.js';
 
@@ -138,8 +138,13 @@ const EXIT_CASES: Array<[string, number]> = [
 describe('PowerShell exit status', () => {
   it('ends every PowerShell script with the exit status of its last statement', () => {
     const script = withPowershellExitStatus(['powershell.exe', '-NoProfile', '-Command', 'cmd /c exit 5']).at(-1)!;
-    expect(script.startsWith('cmd /c exit 5\n')).toBe(true);
+    // The script runs dot-sourced and piped to Out-Default, so its output is out before the exit.
+    expect(script).toContain('. {\ncmd /c exit 5\n$global:__cos_ok = $?\n} | Out-Default\n');
     expect(script).toContain('$LASTEXITCODE');
+    // The UTF-8 output line stays first, outside the block.
+    const utf8 = withPowershellExitStatus(prefixPowershellScriptWithUtf8(['powershell.exe', '-NoProfile', '-Command', 'Get-Location'])).at(-1)!;
+    expect(utf8.startsWith(UTF8_OUTPUT_PREFIX)).toBe(true);
+    expect(utf8).toContain('. {\nGet-Location\n');
     // Applying it twice changes nothing, and a command that is not PowerShell is left alone.
     expect(withPowershellExitStatus(['powershell.exe', '-NoProfile', '-Command', script]).at(-1)).toBe(script);
     expect(withPowershellExitStatus(['/bin/bash', '-c', 'exit 5'])).toEqual(['/bin/bash', '-c', 'exit 5']);
@@ -160,6 +165,30 @@ describe('PowerShell exit status', () => {
       const output = spawnSync(args[0]!, args.slice(1), { encoding: 'utf8', windowsHide: true }).stdout;
       expect(parseCommandBatchSections(output, batch.marker).map(section => section.exitCode))
         .toEqual(EXIT_CASES.filter(([command]) => !/^exit /.test(command)).map(([, code]) => code));
+    });
+
+    // 2026-10-21: the exit status ends the script with `exit`, and Windows PowerShell 5.1 then drops
+    // table output its formatter still holds: Get-Location and Select-Object came back empty, and a
+    // batch lost every section after its first table (live on the Windows VM).
+    it.skipIf(!shell)(`${name}: keeps table output when the script ends with its exit status`, () => {
+      const cases: Array<[string, RegExp, number]> = [
+        ['Get-Location', /Path\s+-+\s+\S/, 0],
+        ['Get-Item . | Select-Object Name', /Name\s+-+\s+\S/, 0],
+        ['Get-Location; cmd /c exit 5', /Path\s+-+\s+\S/, 5],
+        ["Get-Location; Write-Error 'boom'", /Path\s+-+\s+\S/, 1]
+      ];
+      // PowerShell 7 colors table headers; the text between the colors is what matters.
+      const plain = (text: string) => text.replace(/\u001b\[[0-9;]*m/g, '');
+      for (const [command, table, code] of cases) {
+        const args = withPowershellExitStatus(deriveExecArgs(shell!, command, false));
+        const result = spawnSync(args[0]!, args.slice(1), { encoding: 'utf8', windowsHide: true });
+        expect(plain(result.stdout), command).toMatch(table);
+        expect(result.status, command).toBe(code);
+      }
+      const batch = composeCommandBatch(['Get-Location', 'Write-Output second', 'Get-Item . | Select-Object Name'], shell!.shellType);
+      const args = withPowershellExitStatus(deriveExecArgs(shell!, batch.command, false));
+      const sections = parseCommandBatchSections(spawnSync(args[0]!, args.slice(1), { encoding: 'utf8', windowsHide: true }).stdout, batch.marker);
+      expect(sections.map(section => plain(section.text).trim().split(/\s+/)[0])).toEqual(['Path', 'second', 'Name']);
     });
   }
 });

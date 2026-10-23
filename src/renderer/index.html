@@ -33,7 +33,7 @@
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-resize" id="sidebarResize" role="separator" tabindex="0" aria-label="Chat list width" aria-orientation="vertical" aria-controls="sidebar" title="Drag to resize · Double-click to reset"></div>
         <button class="btn" id="backToChat" type="button" hidden><i class="ico ph ph-arrow-left" aria-hidden="true"></i><span>Back to chat</span></button>
-        <div class="sidebar-brand"><span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span><strong>Chat On Steroids</strong><button class="btn sidebar-brand-search" id="searchChatsButton" type="button" aria-haspopup="dialog" aria-controls="searchDialog" title="Search chats" aria-label="Search chats"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i></button></div>
+        <div class="sidebar-brand"><span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span><strong>Chat On Steroids</strong><button class="btn sidebar-brand-seen" id="markAllSeen" type="button" title="Mark all as seen" aria-label="Mark all as seen" hidden><i class="ico ph ph-checks" aria-hidden="true"></i></button><button class="btn sidebar-brand-search" id="searchChatsButton" type="button" aria-haspopup="dialog" aria-controls="searchDialog" title="Search chats" aria-label="Search chats"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i></button></div>
         <div class="sidebar-primary" id="sidebarPrimary">
           <button class="btn new-chat" id="newChat" type="button"><i class="ico ph ph-pencil-simple" aria-hidden="true"></i>New chat</button>
           <button class="btn sidebar-primary-link" id="sidebarPlugins" data-sidebar-page="plugins" type="button"><i class="ico ph ph-puzzle-piece" aria-hidden="true"></i>Plugins</button>
@@ -205,17 +205,18 @@
                 <label class="setting"><span class="setting-text"><b>Mention Plugins instead of Core</b><em>Ordinary messages the app sends mention Chat On Steroids Plugins. Goal, Loop, workers and recovery always mention Core. Messages you send in ChatGPT itself are unchanged.</em></span><input id="mentionPlugins" type="checkbox" /></label>
               </div>
             </section>
-            <section class="appearance-section" id="privacyScreenshotsSetting">
-              <header class="settings-section-head"><div><h2>Privacy</h2><p>What ChatGPT sees of your screen.</p></div></header>
+            <section class="appearance-section" id="privacySettings">
+              <header class="settings-section-head"><div><h2>Privacy</h2><p>What ChatGPT gets to see on this computer.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
-                <label class="setting"><span class="setting-text"><b>Screenshot only the active window</b><em>For privacy, ChatGPT's screenshots show the window in front instead of the whole screen.</em></span><input id="privacyScreenshots" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Hide secrets from ChatGPT</b><em>API keys, tokens, private keys and passwords in what tools return are replaced with a short note before ChatGPT sees them. Your files stay as they are. A project can turn this off in its menu.</em></span><input id="secretsShield" type="checkbox" /></label>
+                <label class="setting" id="privacyScreenshotsSetting"><span class="setting-text"><b>Screenshot only the active window</b><em>For privacy, ChatGPT's screenshots show the window in front instead of the whole screen.</em></span><input id="privacyScreenshots" type="checkbox" /></label>
               </div>
             </section>
             <section class="appearance-section">
               <header class="settings-section-head"><div><h2>For developers</h2><p>Troubleshooting details and access for tools on this computer.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
                 <label class="setting"><span class="setting-text"><b>Developer mode</b><em>Show turn boundaries and recovery events in the chat.</em></span><input id="developerMode" type="checkbox" /></label>
-                <label class="setting"><span class="setting-text"><b>Keep plugin URLs across restarts</b><em>For your own tunnel, such as a named Cloudflare tunnel, whose URL ChatGPT stores. Anyone with that URL can use your Chat On Steroids plugins until you turn this off. Needs secure storage.</em></span><input id="mcpPersistentUrls" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Keep plugin URLs across restarts</b><em>For your own tunnel, such as a named Cloudflare tunnel, whose URL ChatGPT stores. The local port stays the same too, so the tunnel can point at it. Anyone with that URL can use your Chat On Steroids plugins until you turn this off. Needs secure storage.</em><em id="mcpPortMoved" class="is-warn" role="status" hidden></em></span><input id="mcpPersistentUrls" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Local control API</b><em>Let agents on this computer read app status and chats.</em></span><input id="controlApiEnabled" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Allow actions</b><em>Let those agents also send messages, start new chats and cancel messages. Needs the local control API.</em></span><input id="controlApiAllowActions" type="checkbox" disabled /></label>
               </div>
@@ -255,8 +256,15 @@
             <section class="appearance-section">
               <header class="settings-section-head"><div><h2>Typography</h2><p>Choose how text reads throughout the workspace.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
-              <label class="setting"><span class="setting-text"><b>Font</b></span><select id="appearanceFont"><option value="system">System default</option><option value="sans">Sans serif</option><option value="serif">Serif</option><option value="mono">Monospace</option></select></label>
+              <label class="setting"><span class="setting-text"><b>Font</b></span><select id="appearanceFont"><option value="system">System default</option><option value="sans">Sans serif</option><option value="serif">Serif</option><option value="mono">Monospace</option><option value="legible">Atkinson Hyperlegible</option></select></label>
               <label class="setting"><span class="setting-text"><b>Text size</b></span><span class="appearance-range"><input id="appearanceSize" type="range" min="12" max="18" aria-label="Text size" /><output id="appearanceSizeValue" for="appearanceSize"></output></span></label>
+              <label class="setting"><span class="setting-text"><b>Line spacing</b><em>Space between the lines of chat messages.</em></span><span class="appearance-range"><input id="appearanceLineSpacing" type="range" min="100" max="200" step="10" aria-label="Line spacing" /><output id="appearanceLineSpacingValue" for="appearanceLineSpacing"></output></span></label>
+              </div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Accessibility</h2><p>Help for screen readers.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+              <label class="setting"><span class="setting-text"><b>Announce finished replies</b><em>Your screen reader says “Reply finished” when a reply in the open chat ends.</em></span><input id="announceTurns" type="checkbox" /></label>
               </div>
             </section>
             <section class="appearance-section">
@@ -366,7 +374,7 @@
               <section class="settings-section usage-section usage-messages" aria-labelledby="usageMessagesTitle">
                 <header class="settings-section-head">
                   <div><h2 id="usageMessagesTitle">Messages and limits</h2><p>Messages the app saw you send, per model, and the limits ChatGPT and Codex report.</p></div>
-                  <button class="btn" id="refreshUsage" type="button"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i>Refresh</button>
+                  <span class="workspace-section-actions"><button class="btn" id="exportUsage" type="button"><i class="ico ph ph-download-simple" aria-hidden="true"></i>Export CSV</button><button class="btn" id="refreshUsage" type="button"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i>Refresh</button></span>
                 </header>
                 <div class="settings-surface usage-message-surface">
                   <p class="muted usage-status" id="usageStatus" role="status">Updating usage in the background. After an update, this can take a few minutes. You can keep using the app.</p>
@@ -942,6 +950,10 @@
                 <span id="chatProjectName"></span>
               </span>
               <button id="chatBranchOrigin" class="chat-branch-origin" type="button" hidden></button>
+              <button id="chatBookmarks" class="chat-bookmarks" type="button" aria-haspopup="menu" aria-expanded="false" hidden>
+                <i class="ico ph ph-bookmark-simple" aria-hidden="true"></i>
+                <span class="chat-bookmarks-count">0</span>
+              </button>
               <span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span>
               <span class="title">
                 Chat On Steroids
@@ -1021,7 +1033,24 @@
                     <input id="autoContinue" type="checkbox" />
                   </label>
                   <details class="setting-timing"><summary><svg class="disclosure-chevron sum-chev" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Recovery timing details</summary><p>Recover unfinished answers, including in Goal and Loop. Reload after 2 minutes without progress (Pro: 10). If still generating, wait 1 more minute (Pro: 5), then stop and send. A final answer selects Goal or Loop instead of Continue. Undelivered steps get at most three page reloads (after 2, 5, and 10 minutes); recovery then stops visibly while the original pending work remains saved.</p></details>
+                  <div class="setting">
+                    <span class="setting-text">
+                      <b>Continue prompt</b>
+                      <em>Your own words for the automatic Continue that recovers an unfinished answer. The app still adds a note to check work already done. Fresh turns keep their own message.</em>
+                    </span>
+                    <button class="btn" id="customContinueEdit" type="button">Edit prompt</button>
+                  </div>
+                  <div class="field goal-prompt" id="customContinuePanel" hidden>
+                    <label for="customContinue">Continue prompt</label>
+                    <textarea dir="auto" id="customContinue" rows="3" spellcheck="false"></textarea>
+                    <p class="hint">Saved when you leave the editor. Leave it empty to use the built-in phrases.</p>
+                    <div class="step-actions">
+                      <button class="btn" id="customContinueReset" type="button">Restore default</button>
+                    </div>
+                  </div>
                   <div class="setting"><span class="setting-text"><b id="rotateTurnMinutesTitle">Start a fresh turn after</b><em>Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.</em></span><select id="rotateTurnMinutes" aria-labelledby="rotateTurnMinutesTitle"><option value="0">Off</option><option value="20">20 minutes</option><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option></select></div>
+                  <label class="setting"><span class="setting-text"><b>Review Goal completion</b><em>When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you. Off by default.</em></span><input id="finishHoldOnStop" type="checkbox" /></label>
+                  <label class="setting"><span class="setting-text"><b>Stop and continue when ChatGPT offers no Send</b><em>Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run. Experimental.</em></span><input id="rotateStopFallback" type="checkbox" /></label>
                   <div class="setting"><span class="setting-text"><b id="goalBackendTitle">Goal response source</b><em>Where Goal's next message comes from: a separate ChatGPT chat in your account, your API key (most reliable), or Offline (prepared messages, no API cost).</em></span><select id="goalBackend" aria-labelledby="goalBackendTitle"><option value="chatgpt">Separate ChatGPT chat</option><option value="api">API key · Most reliable</option><option value="templates">Offline · No API cost</option></select></div>
                   <div class="setting"><span class="setting-text"><b id="loopBackendTitle">Loop response source</b><em>Where Loop's next message comes from: your API key (most reliable) or a separate ChatGPT chat in your account. Loop keeps going until you turn it off.</em></span><select id="loopBackend" aria-labelledby="loopBackendTitle"><option value="api">API key · Most reliable</option><option value="chatgpt">Separate ChatGPT chat</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan model</b><em>Model for ChatGPT-generated messages and plans.</em></span><select id="helperModel" aria-label="Goal, Loop and Plan model"></select></div>
@@ -1436,6 +1465,7 @@
               <p id="composerStatus" role="status" aria-live="polite"></p>
               <p class="composer-dictation-status" id="dictationStatus" role="status" aria-live="polite" aria-atomic="true" hidden></p>
               <span class="sr-only" id="recallAnnounce" role="status" aria-live="polite" aria-atomic="true"></span>
+              <span class="sr-only" id="turnAnnounce" role="status" aria-live="polite" aria-atomic="true"></span>
             </form>
             <p class="foot" id="chatFoot" hidden></p>
           </section>

@@ -81,6 +81,7 @@ import { initControlApiPath, shutdownControlApi, startControlApi } from './contr
 import { restoreRequestCorrelations } from './session/correlation.js';
 import { restoreBlockedChats } from './session/blocked-chats.js';
 import { restoreTrustedChats } from './session/trusted-chats.js';
+import { restoreRouteHold } from './tunnel/route-settle.js';
 import { stopComputerHelper } from './computer/index.js';
 import {
   GOAL_OBJECTIVES_STATE,
@@ -123,6 +124,7 @@ import {
 } from './window-lifecycle.js';
 import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
 import { browserWindowIconPath } from './window-icon.js';
+import { approvedChatGptImageRequest, RENDERER_CONTENT_SECURITY_POLICY } from './renderer-csp.js';
 import { editContextMenuTemplate } from './edit-context-menu.js';
 import { showConnectionLossNotice } from './connection-loss-notice.js';
 
@@ -539,6 +541,8 @@ void app.whenReady().then(async () => {
   // endpoints can accept work, just as blocked-chat policy is restored above.
   await restoreTrustedChats();
   if (windowActivation.isDisabled()) return;
+  // This computer's learned hold after a new tunnel-client (#1788), before any tunnel starts.
+  await restoreRouteHold();
   setAgentConversationLookup(agentConversation);
   // The prime's chat is the user's own, so no extension report can name it. It is bound
   // when the recorder manages to place the prime's first call. See recordToolCall.
@@ -624,13 +628,26 @@ void app.whenReady().then(async () => {
   // state and does not run until its first coarse interval after this point.
   startAgentRuntimeGc();
 
-  // Strict CSP for our own page. There is no remote content and no inline script.
+  // Do not let the new img-src origin permit arbitrary paths, tracking parameters,
+  // or requests of another type to that host. Redirects are checked again by CSP:
+  // an image cannot follow a Location header to a different remote origin.
+  // Electron supports only one onBeforeRequest listener per session: registering
+  // another one anywhere on defaultSession would replace this URL safety gate.
+  // Keep future request checks inside this listener rather than adding a second.
+  session.defaultSession.webRequest.onBeforeRequest({ urls: ['https://images.openai.com/*'] }, (details, callback) => {
+    const allowed = approvedChatGptImageRequest(details.url, details.resourceType, details.method);
+    if (!allowed) logWarn('static ChatGPT image request refused: unapproved URL or resource type');
+    callback({ cancel: !allowed });
+  });
+
+  // Strict CSP for our own page. Only the verified first-party static image host is
+  // remote; scripts, connections and all other capabilities remain app-local.
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'none'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'"
+          RENDERER_CONTENT_SECURITY_POLICY
         ]
       }
     });
