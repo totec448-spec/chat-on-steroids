@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 // #1797: what a tool returns reaches ChatGPT with credentials masked, unless the shield is off.
-const state = vi.hoisted(() => ({ shield: true as boolean | undefined, projectOff: vi.fn(async (_sessionId: string) => false), log: vi.fn(), background: null as string | null }));
+const state = vi.hoisted(() => ({ shield: true as boolean | undefined, projectOff: vi.fn(async (_sessionId: string) => false), log: vi.fn(), warn: vi.fn(), background: null as string | null }));
 vi.mock('../src/main/config.js', async (original) => {
   const actual = await original<typeof import('../src/main/config.js')>();
   const base = actual.defaultConfig();
@@ -11,7 +11,7 @@ vi.mock('../src/main/projects.js', async (original) => ({
   ...await original<typeof import('../src/main/projects.js')>(), sessionSecretsShieldOff: state.projectOff
 }));
 vi.mock('../src/main/logger.js', async (original) => ({
-  ...await original<typeof import('../src/main/logger.js')>(), logInfo: state.log
+  ...await original<typeof import('../src/main/logger.js')>(), logInfo: state.log, logWarn: state.warn
 }));
 vi.mock('../src/main/session/recorder.js', async (original) => ({
   ...await original<typeof import('../src/main/session/recorder.js')>(),
@@ -85,6 +85,7 @@ it('sends the output unchanged in a project whose shield is off, and says so in 
 it('keeps masking when the project cannot be read', async () => {
   state.projectOff.mockRejectedValue(new Error('The session project is unavailable'));
   expect(text(await tool(output)('req-chat-a'))).not.toContain(KEY);
+  expect(state.warn).toHaveBeenCalledWith("secrets shield: could not read this chat's project (The session project is unavailable); masking anyway");
 });
 
 it('masks a call no chat could be proven for (no project to ask)', async () => {

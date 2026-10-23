@@ -5,7 +5,7 @@ import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { bindBrowserInputProject, claimBrowserInput, enqueueInput, listInputs, pendingBrowserInputs, resetInputForTests } from '../src/main/session/input.js';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
-import { initDurableStore, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
+import { flushDurable, initDurableStore, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import { createSession, getSession, initSessionStore, rebindSession, resetSessionStoreForTests, setSessionOrigin } from '../src/main/session/store.js';
 import { addProject, armProjectCreate, assignSessionProject, bindChatToLinkedProject, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, getSessionProject, inheritSessionProject, listProjects, markProjectGone, pendingProjectCreates, PROJECT_CREATE_ARMED_MS, PROJECT_CREATE_CLAIM_MS, projectWorkspace, removeProject, retryProjectCreate, sessionSecretsShieldOff, setProjectColor, setProjectSecretsShieldOff } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
@@ -74,6 +74,18 @@ it('turns the secrets shield off for one project\'s chats only, durably (#1797)'
   await writeDurableNow('projects', [{ ...project, secretsShieldOff: false }]);
   expect(await sessionSecretsShieldOff(inside.id)).toBe(false);
   expect((await listProjects())[0]!.id).toBe(project.id);
+});
+
+it.skipIf(process.platform === 'win32')('never lets a failed shield switch land later through the store\'s retry', async () => {
+  const project = await addProject(path.join(approved, 'first'));
+  const store = (await fs.readdir(directory)).includes('state') ? path.join(directory, 'state') : directory;
+  await fs.chmod(store, 0o500);
+  try {
+    await expect(setProjectSecretsShieldOff(project.id, true)).rejects.toThrow();
+  } finally { await fs.chmod(store, 0o700); }
+  await flushDurable();
+  resetDurableForTests(); initDurableStore(directory);
+  expect((await listProjects())[0]).toEqual(project);
 });
 
 it('resolves a native picker alias to the approved identity without granting outside aliases', async () => {
