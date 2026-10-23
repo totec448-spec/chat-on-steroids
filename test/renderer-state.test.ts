@@ -7,7 +7,7 @@ vi.mock('../src/renderer/pet.js', () => ({ initPet: () => Object.assign(() => {}
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_GOAL_MODEL, DEFAULT_GOAL_SYSTEM_PROMPT } from '../src/shared/goal.js';
 import { DEFAULT_HANDOFF_PROMPT } from '../src/shared/handoff.js';
 import { BROWSER_READ_TOOLS, BROWSER_WRITE_TOOLS } from '../src/shared/browser-control.js';
@@ -4564,4 +4564,91 @@ it('offers archiving retired worker chats, off by default, and saves it', async 
   archive.dispatchEvent(new w.Event('change', { bubbles: true }));
   await settle();
   expect(mounted.calls.at(-1)?.multiAgent.archiveWorkerChats).toBe(true);
+});
+
+describe('phone notifications in Settings', () => {
+  const change = (doc: Document, id: string, value?: string | boolean) => {
+    const node = doc.getElementById(id) as HTMLInputElement | HTMLSelectElement;
+    if (typeof value === 'boolean') (node as HTMLInputElement).checked = value; else if (value !== undefined) node.value = value;
+    node.dispatchEvent(new doc.defaultView!.Event('change', { bubbles: true }));
+  };
+
+  const withPhone = async (phonePush: Record<string, unknown>, api: Record<string, (...args: any[]) => any> = {}) => {
+    const mounted = await mountChat({}, [], api);
+    mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush } };
+    mounted.push(mounted.state);
+    return mounted;
+  };
+  const phone = (over: Record<string, unknown> = {}) => ({ enabled: true, server: 'https://ntfy.sh', topic: 'cos-fixturetopic234567', needsYou: true, failures: true,
+    finishedAfterMinutes: 5, onlyWhenAway: true, quietHours: null, includeDetails: false, ...over });
+
+  it('starts off; turning it on picks a long random topic and saves the defaults', async () => {
+    const mounted = await mountChat();
+    const doc = mounted.window.document;
+    expect((doc.getElementById('phonePushEnabled') as HTMLInputElement).checked).toBe(false);
+    expect(doc.getElementById('phonePushOptions')!.hidden).toBe(true);
+    change(doc, 'phonePushEnabled', true);
+    expect(doc.getElementById('phonePushOptions')!.hidden).toBe(false);
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.enabled).toBe(true));
+    const saved = mounted.calls.at(-1).ui.phonePush;
+    expect(saved.topic).toMatch(/^cos-[a-km-np-z2-9]{20}$/);
+    expect(saved).toEqual({ enabled: true, server: 'https://ntfy.sh', topic: saved.topic, needsYou: true, failures: true,
+      finishedAfterMinutes: 5, onlyWhenAway: true, quietHours: null, includeDetails: false });
+  });
+
+  it('saves when a chat counts as finished, quiet hours shown in local time, and the details switch', async () => {
+    const mounted = await withPhone(phone());
+    const doc = mounted.window.document;
+    const quiet = doc.getElementById('phonePushQuiet') as HTMLSelectElement;
+    expect([...quiet.options].map(option => option.textContent)).toContain('10:00 PM – 7:00 AM');
+    change(doc, 'phonePushFinished', 'never');
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.finishedAfterMinutes).toBeNull());
+    change(doc, 'phonePushQuiet', '22:00-07:00');
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.quietHours).toEqual({ from: '22:00', to: '07:00' }));
+    change(doc, 'phonePushDetails', true);
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.includeDetails).toBe(true));
+    expect(mounted.calls.at(-1).ui.phonePush.topic).toBe('cos-fixturetopic234567');
+  });
+
+  it('keeps quiet hours that are not one of the choices when something else is saved', async () => {
+    const mounted = await withPhone(phone({ finishedAfterMinutes: 7, quietHours: { from: '01:30', to: '05:15' } }));
+    const doc = mounted.window.document;
+    expect((doc.getElementById('phonePushQuiet') as HTMLSelectElement).value).toBe('custom');
+    // 7 minutes is not offered: the nearest longer choice shows.
+    expect((doc.getElementById('phonePushFinished') as HTMLSelectElement).value).toBe('15');
+    change(doc, 'phonePushAway', false);
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.onlyWhenAway).toBe(false));
+    expect(mounted.calls.at(-1).ui.phonePush.quietHours).toEqual({ from: '01:30', to: '05:15' });
+  });
+
+  it('sends a test after saving what was typed, and says when it did not arrive', async () => {
+    const testPhonePush = vi.fn().mockResolvedValueOnce({ ok: true, data: undefined })
+      .mockResolvedValueOnce({ ok: false, error: 'The ntfy server refused the message. Check the server, the topic and the access token.' });
+    const mounted = await withPhone(phone(), { testPhonePush });
+    const doc = mounted.window.document;
+    (doc.getElementById('phonePushTopic') as HTMLInputElement).value = 'cos-typedbutnotblurred';
+    const before = mounted.calls.length;
+    (doc.getElementById('phonePushTest') as HTMLButtonElement).click();
+    await waitFor(() => expect(doc.getElementById('phonePushTestStatus')!.textContent).toBe('Sent. Check your phone.'));
+    expect(mounted.calls.length).toBeGreaterThan(before);
+    expect(mounted.calls.at(-1).ui.phonePush.topic).toBe('cos-typedbutnotblurred');
+    (doc.getElementById('phonePushTest') as HTMLButtonElement).click();
+    await waitFor(() => expect(doc.getElementById('phonePushTestStatus')!.classList.contains('is-warn')).toBe(true));
+    expect(doc.getElementById('phonePushTestStatus')!.textContent).toContain('refused the message');
+  });
+
+  it('saves and removes the access token without ever showing it again', async () => {
+    const setPhonePushToken = vi.fn(async (token: string) => ({ ok: true, data: { ...mounted.state, hasPhonePushToken: token !== '' } }));
+    const mounted = await mountChat({}, [], { setPhonePushToken });
+    const doc = mounted.window.document;
+    const field = doc.getElementById('phonePushToken') as HTMLInputElement;
+    field.value = 'tk_fixture_token';
+    (doc.getElementById('phonePushTokenSave') as HTMLButtonElement).click();
+    await waitFor(() => expect(setPhonePushToken).toHaveBeenCalledWith('tk_fixture_token'));
+    await waitFor(() => expect(field.value).toBe(''));
+    expect(doc.getElementById('phonePushTokenStatus')!.textContent).toBe('A token is saved. Save an empty field to remove it.');
+    (doc.getElementById('phonePushTokenSave') as HTMLButtonElement).click();
+    await waitFor(() => expect(setPhonePushToken).toHaveBeenLastCalledWith(''));
+    await waitFor(() => expect(doc.getElementById('phonePushTokenStatus')!.textContent).toMatch(/^Only for a server or topic/));
+  });
 });

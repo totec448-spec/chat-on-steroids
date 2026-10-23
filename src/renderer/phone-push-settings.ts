@@ -1,0 +1,160 @@
+import type { AppApi } from '../preload/index.js';
+import { DEFAULT_PHONE_PUSH, type PhonePushSettings } from '../shared/phone-push.js';
+import type { AppState } from '../shared/types.js';
+import { currentLanguage, onLanguageChange, t, ui } from './i18n.js';
+
+/**
+ * Settings → General → Phone notifications (ntfy). The form reads into `ui.phonePush` with the rest
+ * of the settings; the access token goes straight to secure storage and never comes back.
+ */
+const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
+const checkbox = (id: string) => $<HTMLInputElement>(id);
+
+/** A long random topic: guessing it is the only way to read its messages on a public server. */
+export function newTopic(random: (count: number) => number[] = count => [...crypto.getRandomValues(new Uint8Array(count))]): string {
+  const alphabet = 'abcdefghijkmnpqrstuvwxyz23456789';
+  // 32 letters, so each byte maps evenly: 20 of them are 100 bits.
+  return 'cos-' + random(20).map(byte => alphabet[byte % alphabet.length]).join('');
+}
+
+/** The form's phone settings; quiet hours that are not one of the choices are kept as they are. */
+export function readPhonePush(previous: PhonePushSettings | undefined): PhonePushSettings {
+  const finished = $<HTMLSelectElement>('phonePushFinished').value;
+  const quiet = $<HTMLSelectElement>('phonePushQuiet').value;
+  const [from, to] = quiet.split('-');
+  return {
+    enabled: checkbox('phonePushEnabled').checked,
+    server: $<HTMLInputElement>('phonePushServer').value.trim() || DEFAULT_PHONE_PUSH.server,
+    topic: $<HTMLInputElement>('phonePushTopic').value.trim(),
+    needsYou: checkbox('phonePushNeedsYou').checked,
+    failures: checkbox('phonePushFailures').checked,
+    finishedAfterMinutes: finished === 'never' ? null : Number(finished),
+    onlyWhenAway: checkbox('phonePushAway').checked,
+    quietHours: quiet === 'custom' ? previous?.quietHours ?? null : from && to ? { from, to } : null,
+    includeDetails: checkbox('phonePushDetails').checked
+  };
+}
+
+/** Paints the saved settings, leaving alone a field the person is typing in. */
+export function applyPhonePush(state: AppState): void {
+  const push = { ...DEFAULT_PHONE_PUSH, ...state.config.ui.phonePush };
+  const set = (id: string, apply: () => void) => { if (document.activeElement !== $(id)) apply(); };
+  set('phonePushEnabled', () => { checkbox('phonePushEnabled').checked = push.enabled; });
+  $('phonePushOptions').hidden = !push.enabled;
+  set('phonePushTopic', () => { $<HTMLInputElement>('phonePushTopic').value = push.topic; });
+  set('phonePushServer', () => { $<HTMLInputElement>('phonePushServer').value = push.server; });
+  syncServerDefault();
+  set('phonePushNeedsYou', () => { checkbox('phonePushNeedsYou').checked = push.needsYou; });
+  set('phonePushFailures', () => { checkbox('phonePushFailures').checked = push.failures; });
+  set('phonePushAway', () => { checkbox('phonePushAway').checked = push.onlyWhenAway; });
+  set('phonePushDetails', () => { checkbox('phonePushDetails').checked = push.includeDetails; });
+  set('phonePushFinished', () => {
+    const select = $<HTMLSelectElement>('phonePushFinished');
+    const value = push.finishedAfterMinutes === null ? 'never' : String(push.finishedAfterMinutes);
+    // A value Settings does not offer (from a hand-edited file) shows as the nearest longer choice.
+    select.value = [...select.options].some(option => option.value === value) ? value
+      : [...select.options].find(option => option.value !== 'never' && Number(option.value) >= (push.finishedAfterMinutes ?? 0))?.value ?? '60';
+  });
+  set('phonePushQuiet', () => {
+    const select = $<HTMLSelectElement>('phonePushQuiet');
+    const value = push.quietHours ? `${push.quietHours.from}-${push.quietHours.to}` : '';
+    select.querySelector('option[value="custom"]')?.remove();
+    if (value && ![...select.options].some(option => option.value === value)) {
+      const custom = document.createElement('option');
+      custom.value = 'custom';
+      custom.textContent = quietLabel(push.quietHours!.from, push.quietHours!.to);
+      select.append(custom);
+      select.value = 'custom';
+    } else select.value = value;
+  });
+  alignFieldButtons();
+  $('phonePushTokenStatus').textContent = state.hasPhonePushToken
+    ? t('A token is saved. Save an empty field to remove it.')
+    : t("Only for a server or topic that needs one. Kept in this computer's secure storage.");
+}
+
+/**
+ * The field rows' buttons take the widest one's width, so the three text fields end on one edge in
+ * every language and at every zoom. Measured while shown; hidden rows have no width.
+ */
+/** "Default" does nothing while the server already is ntfy.sh, so it says so. */
+function syncServerDefault(): void {
+  $<HTMLButtonElement>('phonePushServerDefault').disabled = $<HTMLInputElement>('phonePushServer').value.trim() === DEFAULT_PHONE_PUSH.server;
+}
+
+function alignFieldButtons(): void {
+  const buttons = [...document.querySelectorAll<HTMLElement>('.phone-push-control .btn')];
+  for (const button of buttons) button.style.minWidth = '';
+  if ($('phonePushOptions').hidden) return;
+  const widest = Math.max(...buttons.map(button => button.getBoundingClientRect().width));
+  if (widest > 0) for (const button of buttons) button.style.minWidth = `${Math.ceil(widest)}px`;
+}
+
+/** "22:00 – 07:00", or "10:00 PM – 7:00 AM", as the app language writes times. */
+function quietLabel(from: string, to: string): string {
+  const clock = (value: string) => {
+    const [hours, minutes] = value.split(':').map(Number);
+    try { return new Intl.DateTimeFormat(currentLanguage(), { hour: 'numeric', minute: '2-digit' }).format(new Date(2026, 0, 1, hours, minutes)); } catch { return value; }
+  };
+  return `${clock(from)} – ${clock(to)}`;
+}
+
+export function initPhonePushSettings(api: Pick<AppApi, 'testPhonePush' | 'setPhonePushToken'>, hooks: {
+  save(): Promise<void>; applied(state: AppState): void; toast(message: string): void;
+}): void {
+  for (const option of $<HTMLSelectElement>('phonePushQuiet').options) {
+    const [from, to] = option.value.split('-');
+    if (from && to) ui(option, 'textContent', () => quietLabel(from, to));
+  }
+  // Turning it on for the first time comes with a fresh topic, so the next step is the phone.
+  checkbox('phonePushEnabled').addEventListener('change', () => {
+    const topic = $<HTMLInputElement>('phonePushTopic');
+    if (checkbox('phonePushEnabled').checked && !topic.value.trim()) topic.value = newTopic();
+    $('phonePushOptions').hidden = !checkbox('phonePushEnabled').checked;
+    alignFieldButtons();
+  });
+  onLanguageChange(alignFieldButtons);
+  $('phonePushServerDefault').addEventListener('click', () => {
+    const server = $<HTMLInputElement>('phonePushServer');
+    if (server.value.trim() === DEFAULT_PHONE_PUSH.server) return;
+    server.value = DEFAULT_PHONE_PUSH.server;
+    syncServerDefault();
+    void hooks.save();
+  });
+  $('phonePushServer').addEventListener('input', syncServerDefault);
+  $('phonePushNewTopic').addEventListener('click', () => {
+    $<HTMLInputElement>('phonePushTopic').value = newTopic();
+    void hooks.save();
+    hooks.toast(t('New topic. Subscribe to it in the ntfy app on your phone.'));
+  });
+  let savingToken = false;
+  $('phonePushTokenSave').addEventListener('click', async () => {
+    if (savingToken) return;
+    savingToken = true;
+    const field = $<HTMLInputElement>('phonePushToken');
+    try {
+      const reply = await api.setPhonePushToken(field.value);
+      if (!reply.ok) { hooks.toast(t(reply.error)); return; }
+      hooks.toast(field.value.trim() ? t('Access token saved.') : t('Access token removed.'));
+      field.value = '';
+      hooks.applied(reply.data);
+    } finally { savingToken = false; }
+  });
+  let testing = false;
+  $('phonePushTest').addEventListener('click', async () => {
+    if (testing) return;
+    testing = true;
+    const status = $('phonePushTestStatus');
+    const button = $<HTMLButtonElement>('phonePushTest');
+    button.disabled = true;
+    status.classList.remove('is-warn');
+    status.textContent = t('Sending…');
+    try {
+      // What was just typed is saved first, so the test uses it.
+      await hooks.save();
+      const reply = await api.testPhonePush();
+      status.textContent = reply.ok ? t('Sent. Check your phone.') : t(reply.error);
+      status.classList.toggle('is-warn', !reply.ok);
+    } finally { testing = false; button.disabled = false; }
+  });
+}
