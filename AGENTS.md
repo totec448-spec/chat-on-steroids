@@ -4960,8 +4960,10 @@ tunnel starts): after each new process, the first message for an existing chat (
 `noteRouteRequestSighted`) to the call reaching the MCP server (`x-request-id`, `noteRouteRequestArrived`).
 The page sees the id within seconds even when the call arrives ~124 s later, so the gap measures the
 route, not thinking time. A gap ≥ 60 s grows the hold (×1.5, at least +15 s, at most 90 s); three
-restarts in a row ≤ 30 s shrink it by 5 s (never below 12 s); anything between, a new chat, or a send
-more than 5 min after the restart changes nothing. Every measurement writes one `route hold:` log line.
+restarts in a row ≤ 30 s shrink it by 5 s (never below 12 s); a gap between the two leaves the hold
+as it is and starts the fast count over. Only the first message for an existing chat after the restart is
+measured, and only when it is sent within 5 min of it (its late call may arrive after that); new chats
+and later messages are not. Every measurement writes one `route hold:` log line.
 `test/tunnel-route-settle.test.ts`, the
 `tunnel-lifecycle` and `input-delivery-integration` cases cover it.
 

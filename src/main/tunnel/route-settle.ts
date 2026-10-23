@@ -50,10 +50,13 @@ let timer: NodeJS.Timeout | null = null;
 
 /** The newest client's takeover, while its one measurement is still open. */
 let epoch: { connectedAt: number; measured: boolean } | null = null;
-/** Existing chats sent to after the newest client connected, not yet seen calling. */
-const watched = new Set<string>();
-/** Request ids ChatGPT showed for a watched chat, and when; or calls that arrived first. */
-const sighted = new Map<string, number>();
+/**
+ * The one message measured for that takeover: the first one for an existing chat, sent inside the
+ * window. A later one has had more time to find the new route and would make the hold look shorter
+ * than it is.
+ */
+let target: { conversationId: string; sighted: { requestId: string; at: number } | null } | null = null;
+/** Calls that reached this app before the page reported them, while the target waits for its own. */
 const arrived = new Map<string, number>();
 
 /** The current hold, for tests and the log. */
@@ -64,8 +67,7 @@ export function routeHoldMs(): number {
 /** A new tunnel-client process connected for the first time. */
 export function noteTunnelClientConnected(now = Date.now()): void {
   epoch = { connectedAt: now, measured: false };
-  watched.clear();
-  sighted.clear();
+  target = null;
   arrived.clear();
   const until = now + holdMs;
   if (until <= settledAt) return;
@@ -85,39 +87,40 @@ export function tunnelRouteSettlingUntil(now = Date.now()): number | null {
   return now < settledAt ? settledAt : null;
 }
 
-function measuring(now: number): boolean {
-  return !!epoch && !epoch.measured && now - epoch.connectedAt <= MEASURE_WINDOW_MS;
-}
+const open = (): boolean => !!epoch && !epoch.measured && !!target;
 
-/** The browser took a message for an existing chat (one with a ChatGPT conversation). */
+/**
+ * The browser took a message for an existing chat (one with a ChatGPT conversation). Only the first
+ * one inside the window is measured; the window is checked here, at the send, so a late call that
+ * arrives after it still counts.
+ */
 export function noteRouteExistingChatSend(conversationId: string, now = Date.now()): void {
-  if (measuring(now)) watched.add(conversationId);
+  if (!epoch || epoch.measured || target || now - epoch.connectedAt > MEASURE_WINDOW_MS) return;
+  target = { conversationId, sighted: null };
 }
 
 /** The page proved which chat a ChatGPT request belongs to: its call has been issued. */
 export function noteRouteRequestSighted(requestId: string, conversationId: string, now = Date.now()): void {
-  if (!measuring(now) || !watched.has(conversationId) || sighted.has(requestId)) return;
-  watched.delete(conversationId);
+  if (!open() || target!.conversationId !== conversationId || target!.sighted) return;
   const arrivedAt = arrived.get(requestId);
   if (arrivedAt !== undefined) learn(arrivedAt - now);
-  else sighted.set(requestId, now);
+  else target!.sighted = { requestId, at: now };
 }
 
 /** A call reached this app over the tunnel, carrying ChatGPT's request id. */
 export function noteRouteRequestArrived(requestId: string, now = Date.now()): void {
-  if (!measuring(now)) return;
-  const at = sighted.get(requestId);
-  if (at !== undefined) { learn(now - at); return; }
-  // A fast route can deliver the call before the page reports it. Only while a send is watched,
-  // so ordinary traffic costs nothing.
-  if (watched.size && arrived.size < 64) arrived.set(requestId, now);
+  if (!open()) return;
+  const sighted = target!.sighted;
+  if (sighted) { if (sighted.requestId === requestId) learn(now - sighted.at); return; }
+  // A fast route can deliver the call before the page reports it. Only while the measured message
+  // waits for its sighting, so ordinary traffic costs nothing.
+  if (arrived.size < 64) arrived.set(requestId, now);
 }
 
 function learn(gapMs: number): void {
   if (!epoch || epoch.measured) return;
   epoch.measured = true;
-  watched.clear();
-  sighted.clear();
+  target = null;
   arrived.clear();
   const seconds = Math.round(Math.max(0, gapMs) / 1000);
   const before = holdMs;
@@ -136,9 +139,10 @@ function learn(gapMs: number): void {
       (holdMs !== before ? `${FAST_STREAK} fast restarts in a row, hold ${before / 1000} s → ${holdMs / 1000} s` :
         `hold stays ${holdMs / 1000} s (${fastStreak} of ${FAST_STREAK} fast restarts)`));
   } else {
+    // Not fast either: only fast restarts in a row may shorten the hold.
+    fastStreak = 0;
     logInfo(`route hold: an existing chat's call reached this app ${seconds} s after ChatGPT showed it; ` +
-      `neither clearly fast nor late, hold stays ${holdMs / 1000} s`);
-    return;
+      `neither clearly fast nor late, hold stays ${holdMs / 1000} s and the fast count starts over`);
   }
   writeDurableSoon(STATE, { version: STATE_VERSION, holdMs, fastStreak });
 }
@@ -161,7 +165,6 @@ export function resetRouteSettleForTests(): void {
   holdMs = ROUTE_SETTLE_MS;
   fastStreak = 0;
   epoch = null;
-  watched.clear();
-  sighted.clear();
+  target = null;
   arrived.clear();
 }
