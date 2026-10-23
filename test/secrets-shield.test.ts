@@ -137,8 +137,16 @@ describe('secrets shield (masking only unmistakable credentials)', () => {
     expect(maskSecrets(line)).toEqual({ text: line, masked: [] });
   });
 
-  it.each(['PASS: test_math.py', 'PASS: tests/parser 3', 'PASS:   ok'])
-  ('leaves a test runner\'s PASS line alone: %s', line => {
+  it.each(['PASS: hunter2', 'PASS: "hunter2"', "PASS: 's3cretvalue'", 'PASS: test_math.py'])
+  ('masks a lone PASS setting: %s', line => {
+    expect(maskSecrets(line).masked).toEqual(['secret setting']);
+  });
+
+  it.each([
+    'PASS: test_math.py\nFAIL: test_io.py',
+    'PASS: tests/parser 3\nPASS: tests/lexer 1\nSKIP: tests/net',
+    'make check\nPASS: t1\n# TOTAL: 1\n# PASS:  1'
+  ])('leaves a test runner\'s PASS lines alone: %j', line => {
     expect(maskSecrets(line)).toEqual({ text: line, masked: [] });
   });
 
