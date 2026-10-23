@@ -4710,7 +4710,7 @@ file missing from the worktree diffs as empty. A working-tree conflict's diff al
 null only for a stage `ls-files -u` does not list, and absent (with a log line) when a side is
 binary, too large or listed but unreadable. Review shows them
 as three read-only panes with a toggle back to the diff; Ask chat to resolve only prefills the
-composer with a request naming the file, and nothing writes, stages or marks it resolved.
+composer with a request naming the file (or, while a prepared Plan waits to be sent, only says to start or cancel it first), and nothing writes, stages or marks it resolved.
 It also projects ancestor-folder markers and
 bounded unified diffs; Files may open it from its toolbar. Files and Review are alternate right
 tabs; Review does not add a second file watcher or expose file-write actions, with one

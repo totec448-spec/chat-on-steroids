@@ -3094,5 +3094,6 @@
   "Ours (HEAD)": "La nôtre (HEAD)",
   "Common base": "Base commune",
   "Theirs (incoming)": "La leur (entrante)",
-  "Not in this version": "Absent de cette version"
+  "Not in this version": "Absent de cette version",
+  "Start or cancel the prepared plan first, then ask again.": "Lancez ou annulez d'abord le plan préparé, puis redemandez."
 }

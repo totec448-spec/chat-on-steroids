@@ -3094,5 +3094,6 @@
   "Ours (HEAD)": "Nossa (HEAD)",
   "Common base": "Base comum",
   "Theirs (incoming)": "Deles (recebida)",
-  "Not in this version": "Não existe nesta versão"
+  "Not in this version": "Não existe nesta versão",
+  "Start or cancel the prepared plan first, then ask again.": "Inicie ou cancele primeiro o plano preparado e peça novamente."
 }
