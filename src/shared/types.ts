@@ -166,10 +166,14 @@ export interface UiPrefs {
   finishTool?: boolean;
   planBackend?: 'chatgpt' | 'api';
   finishAction?: 'notify' | 'goal';
+  /** Leave unverified Goal completion pending; Session finish may notify. Off by default. */
+  finishHoldOnStop?: boolean;
   finishLeadMinutes?: number;
   developerMode?: boolean;
   /** Rotating joke words instead of "Working" in a chat's status line. Off by default. */
   playfulStatus?: boolean;
+  /** Screen readers hear "Reply finished" when a turn completes in the open chat. Off by default. */
+  announceTurns?: boolean;
   /** A random fun-fact aside at the end of each automatic Continue, marked for the model to ignore. Off by default. */
   playfulContinue?: boolean;
   /** The person's own words in place of the built-in automatic Continue phrase (silence recovery only). Unset means the built-in phrases. */
@@ -201,6 +205,12 @@ export interface UiPrefs {
    * automatic continue (0 = off). Missing means 30.
    */
   rotateTurnMinutes?: number;
+  /**
+   * Opt-in: where ChatGPT offers no Send for a fresh-turn continue at a tool result (it shows only
+   * Stop there), stop the turn right after a result instead and send the continue as an ordinary
+   * message once the stop shows. Missing means off.
+   */
+  rotateStopFallback?: boolean;
   /** Usage › Other apps: read Codex's and Claude Code's local logs (numbers only). Missing means on. */
   localAppUsage?: boolean;
   /** Codex's "Follow-up behavior": a message typed during a turn joins it (`steer`, the default) or waits for its end (`queue`). */

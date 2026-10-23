@@ -33,7 +33,7 @@
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-resize" id="sidebarResize" role="separator" tabindex="0" aria-label="Chat list width" aria-orientation="vertical" aria-controls="sidebar" title="Drag to resize · Double-click to reset"></div>
         <button class="btn" id="backToChat" type="button" hidden><i class="ico ph ph-arrow-left" aria-hidden="true"></i><span>Back to chat</span></button>
-        <div class="sidebar-brand"><span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span><strong>Chat On Steroids</strong><button class="btn sidebar-brand-search" id="searchChatsButton" type="button" aria-haspopup="dialog" aria-controls="searchDialog" title="Search chats" aria-label="Search chats"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i></button></div>
+        <div class="sidebar-brand"><span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span><strong>Chat On Steroids</strong><button class="btn sidebar-brand-seen" id="markAllSeen" type="button" title="Mark all as seen" aria-label="Mark all as seen" hidden><i class="ico ph ph-checks" aria-hidden="true"></i></button><button class="btn sidebar-brand-search" id="searchChatsButton" type="button" aria-haspopup="dialog" aria-controls="searchDialog" title="Search chats" aria-label="Search chats"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i></button></div>
         <div class="sidebar-primary" id="sidebarPrimary">
           <button class="btn new-chat" id="newChat" type="button"><i class="ico ph ph-pencil-simple" aria-hidden="true"></i>New chat</button>
           <button class="btn sidebar-primary-link" id="sidebarPlugins" data-sidebar-page="plugins" type="button"><i class="ico ph ph-puzzle-piece" aria-hidden="true"></i>Plugins</button>
@@ -255,8 +255,15 @@
             <section class="appearance-section">
               <header class="settings-section-head"><div><h2>Typography</h2><p>Choose how text reads throughout the workspace.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
-              <label class="setting"><span class="setting-text"><b>Font</b></span><select id="appearanceFont"><option value="system">System default</option><option value="sans">Sans serif</option><option value="serif">Serif</option><option value="mono">Monospace</option></select></label>
+              <label class="setting"><span class="setting-text"><b>Font</b></span><select id="appearanceFont"><option value="system">System default</option><option value="sans">Sans serif</option><option value="serif">Serif</option><option value="mono">Monospace</option><option value="legible">Atkinson Hyperlegible</option></select></label>
               <label class="setting"><span class="setting-text"><b>Text size</b></span><span class="appearance-range"><input id="appearanceSize" type="range" min="12" max="18" aria-label="Text size" /><output id="appearanceSizeValue" for="appearanceSize"></output></span></label>
+              <label class="setting"><span class="setting-text"><b>Line spacing</b><em>Space between the lines of chat messages.</em></span><span class="appearance-range"><input id="appearanceLineSpacing" type="range" min="100" max="200" step="10" aria-label="Line spacing" /><output id="appearanceLineSpacingValue" for="appearanceLineSpacing"></output></span></label>
+              </div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Accessibility</h2><p>Help for screen readers.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+              <label class="setting"><span class="setting-text"><b>Announce finished replies</b><em>Your screen reader says “Reply finished” when a reply in the open chat ends.</em></span><input id="announceTurns" type="checkbox" /></label>
               </div>
             </section>
             <section class="appearance-section">
@@ -366,7 +373,7 @@
               <section class="settings-section usage-section usage-messages" aria-labelledby="usageMessagesTitle">
                 <header class="settings-section-head">
                   <div><h2 id="usageMessagesTitle">Messages and limits</h2><p>Messages the app saw you send, per model, and the limits ChatGPT and Codex report.</p></div>
-                  <button class="btn" id="refreshUsage" type="button"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i>Refresh</button>
+                  <span class="workspace-section-actions"><button class="btn" id="exportUsage" type="button"><i class="ico ph ph-download-simple" aria-hidden="true"></i>Export CSV</button><button class="btn" id="refreshUsage" type="button"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i>Refresh</button></span>
                 </header>
                 <div class="settings-surface usage-message-surface">
                   <p class="muted usage-status" id="usageStatus" role="status">Updating usage in the background. After an update, this can take a few minutes. You can keep using the app.</p>
@@ -943,6 +950,10 @@
                 <span id="chatProjectName"></span>
               </span>
               <button id="chatBranchOrigin" class="chat-branch-origin" type="button" hidden></button>
+              <button id="chatBookmarks" class="chat-bookmarks" type="button" aria-haspopup="menu" aria-expanded="false" hidden>
+                <i class="ico ph ph-bookmark-simple" aria-hidden="true"></i>
+                <span class="chat-bookmarks-count">0</span>
+              </button>
               <span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span>
               <span class="title">
                 Chat On Steroids
@@ -1038,6 +1049,8 @@
                     </div>
                   </div>
                   <div class="setting"><span class="setting-text"><b id="rotateTurnMinutesTitle">Start a fresh turn after</b><em>Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.</em></span><select id="rotateTurnMinutes" aria-labelledby="rotateTurnMinutesTitle"><option value="0">Off</option><option value="20">20 minutes</option><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option></select></div>
+                  <label class="setting"><span class="setting-text"><b>Review Goal completion</b><em>When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you. Off by default.</em></span><input id="finishHoldOnStop" type="checkbox" /></label>
+                  <label class="setting"><span class="setting-text"><b>Stop and continue when ChatGPT offers no Send</b><em>Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run. Experimental.</em></span><input id="rotateStopFallback" type="checkbox" /></label>
                   <div class="setting"><span class="setting-text"><b id="goalBackendTitle">Goal response source</b><em>Where Goal's next message comes from: a separate ChatGPT chat in your account, your API key (most reliable), or Offline (prepared messages, no API cost).</em></span><select id="goalBackend" aria-labelledby="goalBackendTitle"><option value="chatgpt">Separate ChatGPT chat</option><option value="api">API key · Most reliable</option><option value="templates">Offline · No API cost</option></select></div>
                   <div class="setting"><span class="setting-text"><b id="loopBackendTitle">Loop response source</b><em>Where Loop's next message comes from: your API key (most reliable) or a separate ChatGPT chat in your account. Loop keeps going until you turn it off.</em></span><select id="loopBackend" aria-labelledby="loopBackendTitle"><option value="api">API key · Most reliable</option><option value="chatgpt">Separate ChatGPT chat</option></select></div>
                   <div class="setting"><span class="setting-text"><b>Goal, Loop and Plan model</b><em>Model for ChatGPT-generated messages and plans.</em></span><select id="helperModel" aria-label="Goal, Loop and Plan model"></select></div>
@@ -1452,6 +1465,7 @@
               <p id="composerStatus" role="status" aria-live="polite"></p>
               <p class="composer-dictation-status" id="dictationStatus" role="status" aria-live="polite" aria-atomic="true" hidden></p>
               <span class="sr-only" id="recallAnnounce" role="status" aria-live="polite" aria-atomic="true"></span>
+              <span class="sr-only" id="turnAnnounce" role="status" aria-live="polite" aria-atomic="true"></span>
             </form>
             <p class="foot" id="chatFoot" hidden></p>
           </section>

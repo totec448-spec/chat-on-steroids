@@ -42,10 +42,13 @@ export const MAIN_TEXTS = [
   'Restore files',
   // Native file dialogs and the worker checkout removal confirmation.
   'Export as Markdown',
+  'Export usage as CSV',
   'Import CoS Pet folder',
   'Import SKILL.md',
   'Markdown files',
   'Text files',
+  'CSV files',
+  'Save code',
   'Approve a folder for ChatGPT',
   'Import Skill folder',
   'Markdown skills',
@@ -68,7 +71,10 @@ export const MAIN_TEXTS = [
   'Keep checkout',
   'Remove checkout; preserve Git branch',
   // The turn-completion notice when an answer has no text to show.
-  'ChatGPT finished.'
+  'ChatGPT finished.',
+  // The Goal helper stopped without evidence that the requested work is complete.
+  'Goal result needs review',
+  'The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.'
 ] as const;
 
 export type MainText = typeof MAIN_TEXTS[number];

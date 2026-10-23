@@ -109,6 +109,23 @@ describe('settings migration', () => {
       expect((await loadConfig()).ui.appearance).toEqual({ ...appearance, sidebarLayout: 'projects' });
     }
   });
+  it('loads line spacing and the announcement switch saved before they existed, or damaged, as normal spacing and off', async () => {
+    const { defaultAppearance } = await import('../src/shared/appearance.js');
+    const config = defaultConfig();
+    const appearance = { ...defaultAppearance(), lineSpacing: 140, font: 'legible' as const }; appearance.dark.sidebar = '#e53aa0';
+    await saveConfig({ ...config, ui: { ...config.ui, appearance, announceTurns: true } });
+    expect((await loadConfig()).ui).toMatchObject({ appearance: { lineSpacing: 140, font: 'legible' }, announceTurns: true });
+    const { lineSpacing: _, ...old } = appearance;
+    for (const [saved, announceTurns] of [[old, undefined], [{ ...old, lineSpacing: 145 }, 'yes']] as const) {
+      await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...config, readOnly: true,
+        ui: { ...config.ui, appearance: saved, announceTurns } }), 'utf8');
+      const loaded = await loadConfig();
+      // Each falls back on its own; the colors, the font and the rest of Settings are kept.
+      expect(loaded.ui.appearance).toEqual({ ...appearance, lineSpacing: 100 });
+      expect(loaded.ui.announceTurns).toBeUndefined();
+      expect(loaded.readOnly).toBe(true);
+    }
+  });
   it('drops removed file-saving settings without changing other saved choices', async () => {
     const config = defaultConfig();
     config.readOnly = true;
@@ -173,6 +190,16 @@ describe('settings migration', () => {
     expect((await loadConfig()).ui).toMatchObject({ rotateTurnMinutes: 30, startAtLogin: true });
     await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, rotateTurnMinutes: 0 } });
     expect((await loadConfig()).ui.rotateTurnMinutes).toBe(0);
+  });
+  it('keeps the stop fallback for fresh turns off unless chosen, also for legacy and malformed settings', async () => {
+    expect(defaultConfig().ui.rotateStopFallback).toBe(false);
+    const legacy = defaultConfig(); delete legacy.ui.rotateStopFallback;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
+    expect((await loadConfig()).ui.rotateStopFallback).toBe(false);
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...legacy, ui: { ...legacy.ui, rotateStopFallback: 'yes', startAtLogin: true } }), 'utf8');
+    expect((await loadConfig()).ui).toMatchObject({ rotateStopFallback: false, startAtLogin: true });
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, rotateStopFallback: true } });
+    expect((await loadConfig()).ui.rotateStopFallback).toBe(true);
   });
   it('reads other apps’ usage for fresh and legacy settings and keeps it off once switched off', async () => {
     expect(defaultConfig().ui.localAppUsage).toBe(true);

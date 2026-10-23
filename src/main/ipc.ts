@@ -33,6 +33,7 @@ import { stageInputAttachment, stageInputAttachments, type AttachmentSource } fr
 import { recordDeliveredInput, recordedInputImage } from './session/input-history.js';
 import { UI_BASE_ZOOM, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
 import { usageOverview } from './session/usage.js';
+import { exportUsageCsv } from './session/usage-export.js';
 import { readProviderUsage } from './provider-usage.js';
 import { inputArgs, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs } from './session/input.js';
 import { draftOpeningMessage, onGoalChange, nativeGoalFailure } from './goal.js';
@@ -44,6 +45,7 @@ import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser } from '.
 import { wakeBrowserUrl } from './browser-startup.js';
 import { registerPluginIpc } from './plugins-ipc.js';
 import { deletePet, importPet, loadPetAsset, petLibraryState, setPetEnabled, setPetFavorite } from './pet-library.js';
+import { assignChatGroup, chatGroupsState, createChatGroup, deleteChatGroup, forgetChatGroupMember, renameChatGroup } from './chat-groups.js';
 import { petOverlayControlState, refreshPetOverlayActivities, refreshPetOverlayAppearance, setPetOverlayVisible } from './pet-overlay.js';
 import { confirmedPluginSchemas, pluginRefreshPublications, pluginRefreshStatuses, onPluginRefreshChange, pluginRefreshUnreadable, resetPluginRefreshLedger } from './plugin-refresh.js';
 /**
@@ -137,8 +139,10 @@ import {
 } from './session/store.js';
 import { forgetSession, notifyChanged, onSessionChange } from './session/recorder.js';
 import { findInSession, locateMessage, locateSearchMatch, searchSessions } from './session/search.js';
+import { listBookmarks, setBookmark } from './session/bookmarks.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
 import { exportSessionMarkdown } from './session/markdown-export.js';
+import { saveCodeFile } from './code-file.js';
 import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
 import { setChatsTrusted, trustedChatIds } from './session/trusted-chats.js';
 import {
@@ -225,6 +229,7 @@ const settingsPatch = z.object({
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
     playfulContinue: z.boolean().optional(),
+    announceTurns: z.boolean().optional(),
     customContinue: z.string().trim().max(CUSTOM_CONTINUE_MAX_CHARS).optional(),
     followOutput: z.boolean().optional(),
     mentionCore: z.boolean().optional(),
@@ -235,6 +240,7 @@ const settingsPatch = z.object({
     finishTool: z.boolean().optional(),
     planBackend: z.enum(['chatgpt', 'api']).optional(),
     finishAction: z.enum(['notify', 'goal']).optional(),
+    finishHoldOnStop: z.boolean().optional(),
     finishLeadMinutes: z.number().int().min(3).max(5).optional(),
     backgroundChats: z.boolean().optional(),
     backgroundPlacement: z.enum(['window', 'group']).optional(),
@@ -251,6 +257,7 @@ const settingsPatch = z.object({
     startAtLogin: z.boolean().optional(),
     turnNotifications: z.boolean().optional(),
     rotateTurnMinutes: z.number().int().min(0).max(120).optional(),
+    rotateStopFallback: z.boolean().optional(),
     localAppUsage: z.boolean().optional(),
     keepAwake: z.boolean().optional(),
     keepScreenAwake: z.boolean().optional(),
@@ -416,6 +423,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       developerMode: pick(current.ui.developerMode, base.ui.developerMode, wanted.ui.developerMode),
       playfulStatus: pick(current.ui.playfulStatus, base.ui.playfulStatus, wanted.ui.playfulStatus),
       playfulContinue: pick(current.ui.playfulContinue, base.ui.playfulContinue, wanted.ui.playfulContinue),
+      announceTurns: pick(current.ui.announceTurns, base.ui.announceTurns, wanted.ui.announceTurns),
       // An emptied field means the built-in phrases again.
       customContinue: pick(current.ui.customContinue, base.ui.customContinue, wanted.ui.customContinue || undefined),
       followOutput: pick(current.ui.followOutput, base.ui.followOutput, wanted.ui.followOutput),
@@ -428,6 +436,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       finishTool: pick(current.ui.finishTool, base.ui.finishTool, wanted.ui.finishTool),
       planBackend: pick(current.ui.planBackend, base.ui.planBackend, wanted.ui.planBackend),
       finishAction: pick(current.ui.finishAction, base.ui.finishAction, wanted.ui.finishAction),
+      finishHoldOnStop: pick(current.ui.finishHoldOnStop, base.ui.finishHoldOnStop, wanted.ui.finishHoldOnStop),
       finishLeadMinutes: pick(current.ui.finishLeadMinutes, base.ui.finishLeadMinutes, wanted.ui.finishLeadMinutes),
       backgroundChats: pick(current.ui.backgroundChats, base.ui.backgroundChats, wanted.ui.backgroundChats),
       backgroundPlacement: pick(current.ui.backgroundPlacement, base.ui.backgroundPlacement, wanted.ui.backgroundPlacement),
@@ -446,6 +455,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       startAtLogin: pick(current.ui.startAtLogin, base.ui.startAtLogin, wanted.ui.startAtLogin),
       turnNotifications: pick(current.ui.turnNotifications, base.ui.turnNotifications, wanted.ui.turnNotifications),
       rotateTurnMinutes: pick(current.ui.rotateTurnMinutes, base.ui.rotateTurnMinutes, wanted.ui.rotateTurnMinutes),
+      rotateStopFallback: pick(current.ui.rotateStopFallback === true, base.ui.rotateStopFallback === true, wanted.ui.rotateStopFallback ?? current.ui.rotateStopFallback === true),
       localAppUsage: pick(current.ui.localAppUsage, base.ui.localAppUsage, wanted.ui.localAppUsage),
       keepAwake: pick(current.ui.keepAwake, base.ui.keepAwake, wanted.ui.keepAwake),
       keepScreenAwake: pick(current.ui.keepScreenAwake, base.ui.keepScreenAwake, wanted.ui.keepScreenAwake),
@@ -685,6 +695,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('usage:get', () => usageOverview());
   handle('usage:providers', (payload) => readProviderUsage({ fresh: z.object({ fresh: z.boolean() }).parse(payload).fresh }));
+  // The page sends only its divisor, so the file's tokens match the page; main reads the numbers.
+  handle('usage:export', (payload) => {
+    const request = z.object({ divisor: z.number().finite().positive() }).safeParse(payload);
+    if (!request.success) {
+      logWarn('usage export: refused, the page sent no positive, finite token divisor');
+      throw request.error;
+    }
+    return exportUsageCsv(request.data.divisor, getWindow());
+  });
   handle('plugin-refresh:reset', async () => {
     await resetPluginRefreshLedger();
     return buildState();
@@ -889,6 +908,27 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // The bound follows the list: a fixed 32 refused the whole set once it grew past that.
     setMainTextTranslations(z.record(z.string().max(200), z.string().max(200))
       .refine(value => Object.keys(value).length <= MAIN_TEXTS.length).parse(payload));
+  });
+  // Chat groups (#1038): organisation inside a project only; see chat-groups.ts.
+  const groupId = z.string().min(1).max(64);
+  handle('chatGroups:get', async () => chatGroupsState());
+  handle('chatGroups:create', async payload => {
+    const { projectId, name } = z.object({ projectId: z.string().min(1).max(160), name: z.string().max(400) }).strict().parse(payload);
+    const projects = await listProjects();
+    return createChatGroup(projectId, name, id => projects.some(project => project.id === id && !project.ungrouped));
+  });
+  handle('chatGroups:rename', async payload => {
+    const { id, name } = z.object({ id: groupId, name: z.string().max(400) }).strict().parse(payload);
+    return renameChatGroup(id, name);
+  });
+  handle('chatGroups:delete', async payload => {
+    const { id } = z.object({ id: groupId }).strict().parse(payload);
+    return deleteChatGroup(id);
+  });
+  handle('chatGroups:assign', async payload => {
+    const { sessionId, groupId: target } = z.object({ sessionId: sessionIdArg.shape.id, groupId: groupId.nullable() }).strict().parse(payload);
+    const session = await getSession(sessionId);
+    return assignChatGroup(session ? { id: session.id, projectId: session.projectId ?? null, origin: session.origin ?? null } : null, target);
   });
   handle('pets:list', async () => petLibraryState());
   handle('pets:overlayState', async () => petOverlayControlState());
@@ -1310,6 +1350,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     await clipboard.writeText(text);
     return true;
   });
+  // A code block's Save: a bare `name.ext` suggestion only, so no renderer value can point outside the dialog's choice.
+  handle('code:save', async (payload) => {
+    const { text, name } = z.object({
+      text: z.string().max(1_000_000),
+      name: z.string().regex(/^[a-z0-9-]{1,40}\.[a-z0-9]{1,8}$/i)
+    }).parse(payload);
+    return saveCodeFile(text, name, getWindow());
+  });
 
   // Copy or save a completed turn's answer, or the session transcript, as Markdown. Main reads
   // the full text of answers that were cut in the log, so neither comes out truncated.
@@ -1722,6 +1770,22 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { id, messageId } = sessionIdArg.extend({ messageId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i) }).parse(payload);
     return locateMessage(id, messageId);
   });
+  // Bookmarked answers: marked under an answer, listed in the chat's header to jump back to them.
+  handle('sessions:bookmarks', async (payload) => {
+    const { id } = sessionIdArg.parse(payload);
+    if (!await getSession(id)) return [];
+    return listBookmarks(id);
+  });
+  handle('sessions:bookmark', async (payload) => {
+    const { id, messageId, excerpt, messageTime, on } = sessionIdArg.extend({
+      messageId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i),
+      excerpt: z.string().max(4000),
+      messageTime: z.number().finite().nonnegative(),
+      on: z.boolean()
+    }).parse(payload);
+    if (!await getSession(id)) throw new Error('Session not found');
+    return setBookmark(id, { messageId, excerpt, messageTime }, on);
+  });
   handle('sessions:rename', async (payload) => {
     const { id, title } = sessionNameArg.parse(payload);
     if (!await getSession(id)) throw new Error('Session not found');
@@ -1761,6 +1825,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         ], false);
       }
       await deleteSession(id);
+      // A deleted chat leaves its group too; the group itself stays.
+      await forgetChatGroupMember(id);
       logInfo(
         detached.length > 0
           ? `session ${id} deleted; ${detached.length} live conversation(s) will start a new session`

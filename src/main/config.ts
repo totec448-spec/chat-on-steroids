@@ -346,6 +346,7 @@ const configSchema = z.object({
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
     playfulContinue: z.boolean().optional(),
+    announceTurns: z.boolean().optional(),
     // Empty, too long or damaged falls back to the built-in Continue phrases.
     customContinue: z.string().trim().min(1).max(CUSTOM_CONTINUE_MAX_CHARS).optional().catch(undefined),
     /** Keep the chat at its end while it grows, in the app and on ChatGPT, until the reader scrolls up. */
@@ -360,6 +361,7 @@ const configSchema = z.object({
     finishTool: z.boolean().optional(),
     planBackend: z.enum(['chatgpt', 'api']).optional(),
     finishAction: z.enum(['notify', 'goal']).optional(),
+    finishHoldOnStop: z.boolean().optional(),
     finishLeadMinutes: z.number().int().min(3).max(5).optional(),
     backgroundChats: z.boolean().optional().default(true),
     backgroundPlacement: z.enum(['window', 'group']).optional().default('window').catch('window'),
@@ -377,6 +379,7 @@ const configSchema = z.object({
     turnNotifications: z.boolean().optional().default(true),
     // #1402: a fresh turn after this many minutes of one (0 = off). A malformed value keeps the default.
     rotateTurnMinutes: z.number().int().min(0).max(120).optional().default(30).catch(30),
+    rotateStopFallback: z.boolean().optional().default(false).catch(false),
     // Reading Codex's and Claude Code's own logs for the Usage page (#482). Missing means on.
     localAppUsage: z.boolean().optional().default(true),
     keepAwake: z.boolean().optional().default(true),
@@ -605,7 +608,7 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform, rele
     // Fresh installs refresh changed connector tools on their own: a permission chosen in Setup
     // changes the tool list, and nothing else tells a new user to refresh the plugin in ChatGPT.
     // Older configs keep the schema default (off).
-    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, keepAwake: true, keepScreenAwake: false, cosBrowserMinimize: 'taskbar', turnNotifications: true, rotateTurnMinutes: 30, localAppUsage: true, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: true, autoSelectSkills: false, backgroundChats: true, backgroundPlacement: 'window', followUp: 'steer', enterSends: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true, mentionPlugins: false,
+    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, keepAwake: true, keepScreenAwake: false, cosBrowserMinimize: 'taskbar', turnNotifications: true, rotateTurnMinutes: 30, rotateStopFallback: false, localAppUsage: true, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: true, autoSelectSkills: false, backgroundChats: true, backgroundPlacement: 'window', followUp: 'steer', enterSends: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true, mentionPlugins: false,
       // The built-in browser is opt-in: Chrome with the companion stays the default for new and
       // existing installs alike, and the built-in one runs only once someone chooses it.
       chatBrowser: 'chrome' },

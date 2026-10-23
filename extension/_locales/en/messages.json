@@ -1157,6 +1157,9 @@
   "content_goal_error_nothing_to_open_with": {
     "message": "The helper did not produce an opening message. Make the task more specific and try again."
   },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "The helper says the goal is met, but this has not been checked. No follow-up was sent. Review the chat and continue if work remains."
+  },
   "content_goal_error_loop_stop_refused": {
     "message": "The helper kept choosing to stop instead of writing a Loop continuation. Review the Loop instructions or choose another helper model."
   },

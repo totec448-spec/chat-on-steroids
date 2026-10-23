@@ -115,6 +115,7 @@ import {
 import { requestCorrelation } from '../session/correlation.js';
 import { summarizeRunningCall } from '../session/summarize.js';
 import { anyChatBlocked, BLOCKED_CHAT_REFUSAL, isChatBlocked } from '../session/blocked-chats.js';
+import { ROTATION_FENCE_REFUSAL, rotationFenced } from '../rotation-fence.js';
 import { STRICT_CHAT_REFUSAL, conversationAccessRefusal, strictChatAllowlistEnabled } from '../session/conversation-access.js';
 import { anyContinuationOpen, compactingConversation } from '../session/continuation.js';
 import {
@@ -826,7 +827,9 @@ async function dispatchTracked(
   const conversationPolicyRefusal = (strictChatAllowlistEnabled()
     ? await conversationAccessRefusal(context.caller.conversationId)
     : isChatBlocked(context.caller.conversationId) ? BLOCKED_CHAT_REFUSAL : null) ??
-    workerConnectionProfileRefusal(context.caller);
+    workerConnectionProfileRefusal(context.caller) ??
+    // A turn being stopped to continue in a fresh one: nothing runs until the stop shows.
+    (rotationFenced(context.caller.conversationId) ? ROTATION_FENCE_REFUSAL : null);
   let silentFinishAuthorized = false;
   // Two things about liveness, both before the agent is resolved so that the answer this
   // call gets is the state this call itself established.

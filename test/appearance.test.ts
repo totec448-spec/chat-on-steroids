@@ -54,6 +54,19 @@ describe('custom appearance', () => {
     expect(mergeAppearance(base, base, live)!.sidebarLayout).toBe('inbox');
   });
 
+  it('bounds line spacing, opens older saves at normal spacing, and offers the bundled legible font', () => {
+    const old: Record<string, unknown> = { ...defaultAppearance() };
+    delete old.lineSpacing;
+    expect(appearanceSchema.parse(old).lineSpacing).toBe(100);
+    expect(appearanceSchema.parse({ ...old, lineSpacing: 140, font: 'legible' })).toMatchObject({ lineSpacing: 140, font: 'legible' });
+    // Out of range or off the 10-percent steps: normal spacing, the rest of the appearance is kept.
+    for (const bad of [99, 201, 142.5, 145, '140', null]) expect(appearanceSchema.parse({ ...old, lineSpacing: bad, font: 'serif' })).toMatchObject({ lineSpacing: 100, font: 'serif' });
+    const base = defaultAppearance(), live = { ...defaultAppearance(), lineSpacing: 150 };
+    // A stale window saving its text size keeps the spacing another window chose.
+    expect(mergeAppearance(live, base, { ...base, fontSize: 16 })).toMatchObject({ lineSpacing: 150, fontSize: 16 });
+    expect(mergeAppearance(base, base, live)!.lineSpacing).toBe(150);
+  });
+
   it('uses the custom sidebar for native caption contrast and the custom page for reload backing', () => {
     const appearance = defaultAppearance();
     appearance.dark.sidebar = '#ffffff'; appearance.dark.background = '#391c56'; appearance.translucentSidebar = false;
