@@ -1812,7 +1812,6 @@
   "Mention Chat On Steroids Core": "Chat On Steroids Core をメンション",
   "Makes sure ChatGPT can use this app in every chat. Turn it off if ChatGPT starts plain questions with an unneeded tool call. Workers, Goal, Loop and Continue always keep the mention.": "どのチャットでも ChatGPT がこのアプリを使えるようにします。簡単な質問で ChatGPT が不要なツール呼び出しから始める場合はオフにしてください。ワーカー、ゴール、ループ、Continue は常にメンションします。",
   "Privacy": "プライバシー",
-  "What ChatGPT sees of your screen.": "ChatGPT に見える画面の範囲。",
   "For developers": "開発者向け",
   "Troubleshooting details and access for tools on this computer.": "トラブルシューティングの詳細と、このコンピューター上のツールへのアクセス。",
   "Show turn boundaries and recovery events in the chat.": "ターンの境界と復旧イベントをチャットに表示します。",
@@ -2985,6 +2984,13 @@
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "未送信のメッセージがあるチャットに鉛筆が付き、下書きは再起動後も戻ります。",
   "A better Review": "より良いレビュー",
   "Right-click an untracked file to add it, or its folder, to .gitignore.": "未追跡のファイルを右クリックすると、そのファイルまたはフォルダーを .gitignore に追加できます。",
+  "Stopped · open this chat's tab again to continue": "停止しました · 続けるには、このチャットのタブをもう一度開いてください",
+  "Hide secrets from ChatGPT": "シークレットを ChatGPT から隠す",
+  "API keys, tokens, private keys and passwords in what tools return are replaced with a short note before ChatGPT sees them. Your files stay as they are. A project can turn this off in its menu.": "ツールが返す内容に含まれる API キー、トークン、秘密鍵、パスワードは、ChatGPT が見る前に短い注記に置き換えられます。ファイル自体は変わりません。プロジェクトごとにメニューからオフにできます。",
+  "What ChatGPT gets to see on this computer.": "このコンピューターで ChatGPT が見られるもの。",
+  "Off for every project in Settings": "設定ですべてのプロジェクトでオフになっています",
+  "This project's tools send keys and tokens to ChatGPT as they are": "このプロジェクトのツールはキーやトークンをそのまま ChatGPT に送ります",
+  "Keys and tokens in this project's tool results are hidden from ChatGPT": "このプロジェクトのツール結果に含まれるキーやトークンは ChatGPT から隠されます",
   "Choose a ChatGPT Project…": "ChatGPT プロジェクトを選択…",
   "Use a new or an existing ChatGPT Project for this project's chats": "このプロジェクトのチャットに新規または既存の ChatGPT プロジェクトを使う",
   "New ChatGPT Project “{0}”": "新しい ChatGPT プロジェクト「{0}」",
@@ -2998,6 +3004,5 @@
   "This project already has a ChatGPT Project": "このプロジェクトにはすでに ChatGPT プロジェクトがあります",
   "Its ChatGPT Project is being created": "この ChatGPT プロジェクトは作成中です",
   "That Project is not one ChatGPT lists for this account": "そのプロジェクトはこのアカウントの ChatGPT に表示されていません",
-  "That ChatGPT Project is already linked to another project": "その ChatGPT プロジェクトはすでに別のプロジェクトにリンクされています",
-  "Stopped · open this chat's tab again to continue": "停止しました · 続けるには、このチャットのタブをもう一度開いてください"
+  "That ChatGPT Project is already linked to another project": "その ChatGPT プロジェクトはすでに別のプロジェクトにリンクされています"
 }
