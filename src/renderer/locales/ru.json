@@ -3068,6 +3068,7 @@
   "This answer is no longer in the chat.": "Этого ответа больше нет в чате.",
   "This turn has not completed": "Этот ход ещё не завершён",
   "This turn has no answer to export": "В этом ходе нет ответа для экспорта",
+  "HTML export saves a whole session to a file": "Экспорт в HTML сохраняет весь сеанс в один файл",
   "Only a ChatGPT answer can be bookmarked": "В закладки можно добавить только ответ ChatGPT",
   "A chat keeps at most 200 bookmarks": "В чате может быть не больше 200 закладок",
   "This answer is no longer in the chat, so its bookmark was removed.": "Этого ответа больше нет в чате, поэтому его закладка убрана.",

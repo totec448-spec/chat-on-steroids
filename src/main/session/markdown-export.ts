@@ -1,6 +1,5 @@
-import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { app, clipboard, dialog, type BrowserWindow } from 'electron';
+import { app, clipboard, dialog, type BrowserWindow, type SaveDialogOptions } from 'electron';
 import type { StoredText } from '../../shared/session.js';
 import {
   answerMarkdown, completedTurnIds, latestAnswer, markdownFileName, messageAnswerEntries, sessionMarkdown, transcriptEntries,
@@ -12,6 +11,7 @@ import { dialogLabel, mainText } from '../main-texts.js';
 import { completedDilText } from '../../shared/dil-tables.js';
 import { transcriptHtml } from '../../shared/html-export.js';
 import { redactSecretText } from '../redaction.js';
+import { replaceFile } from '../replace-file.js';
 
 export type MarkdownExportRequest = {
   id: string;
@@ -62,7 +62,8 @@ export async function exportSessionMarkdown(request: MarkdownExportRequest, owne
     // A page is made to be passed on, so the credential shapes chat text can hold are masked in it.
     const title = html ? redactSecretText(summary.title) : summary.title;
     markdown = html
-      ? transcriptHtml(title, entries.map(entry => ({ role: entry.role, text: redactSecretText(entry.text) })))
+      ? transcriptHtml(title, entries.map(entry => ({ role: entry.role, text: redactSecretText(entry.text) })),
+        { user: mainText('You'), assistant: 'ChatGPT' })
       : sessionMarkdown(title, entries);
     name = markdownFileName(title, '', html ? 'html' : 'md');
   }
@@ -70,13 +71,15 @@ export async function exportSessionMarkdown(request: MarkdownExportRequest, owne
     await clipboard.writeText(markdown);
     return { done: 'copied' };
   }
-  const options = {
+  // Linux asks nothing about replacing a file unless told to.
+  const options: SaveDialogOptions = {
     ...dialogLabel(html ? 'Export as HTML' : 'Export as Markdown'),
     defaultPath: path.join(app.getPath('downloads'), name),
-    filters: [html ? { name: mainText('HTML files'), extensions: ['html'] } : { name: mainText('Markdown files'), extensions: ['md'] }]
+    filters: [html ? { name: mainText('HTML files'), extensions: ['html'] } : { name: mainText('Markdown files'), extensions: ['md'] }],
+    properties: ['showOverwriteConfirmation']
   };
   const result = owner ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options);
   if (result.canceled || !result.filePath) return { done: 'cancelled' };
-  await fs.writeFile(result.filePath, markdown, 'utf8');
+  await replaceFile(result.filePath, markdown, html ? 'HTML export' : 'Markdown export');
   return { done: 'saved', name: path.basename(result.filePath) };
 }

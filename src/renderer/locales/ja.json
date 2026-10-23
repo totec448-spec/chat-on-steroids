@@ -2924,6 +2924,7 @@
   "This answer is no longer in the chat.": "この回答はもうチャットにありません。",
   "This turn has not completed": "このターンはまだ完了していません",
   "This turn has no answer to export": "このターンにはエクスポートする回答がありません",
+  "HTML export saves a whole session to a file": "HTML エクスポートはセッション全体を 1 つのファイルに保存します",
   "Only a ChatGPT answer can be bookmarked": "ブックマークできるのは ChatGPT の回答だけです",
   "A chat keeps at most 200 bookmarks": "1 つのチャットに保存できるブックマークは最大 200 件です",
   "This answer is no longer in the chat, so its bookmark was removed.": "この回答はもうチャットにないため、ブックマークを解除しました。",

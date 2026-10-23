@@ -40,6 +40,7 @@ export function mainTexts(): Record<MainText, string> {
     'Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.':
       t('Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.'),
     'Export as Markdown': t('Export as Markdown'),
+    'You': t('You'),
     'Export as HTML': t('Export as HTML'),
     'Export usage as CSV': t('Export usage as CSV'),
     'Import CoS Pet folder': t('Import CoS Pet folder'),

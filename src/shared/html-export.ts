@@ -74,7 +74,7 @@ export function transcriptHtml(title: string, entries: readonly { role: 'user' |
       ? `<section class="user"><h2>${escapeHtml(labels.user)}</h2><p class="said" dir="auto">${escapeHtml(entry.text)}</p></section>`
       : `<section class="assistant"><h2>${escapeHtml(labels.assistant)}</h2><div class="answer" dir="auto">\n${answerHtml(entry.text)}</div></section>`);
   return `<!doctype html>
-<html lang="en">
+<html>
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${POLICY}">

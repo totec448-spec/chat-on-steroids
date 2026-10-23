@@ -3018,6 +3018,7 @@
   "This answer is no longer in the chat.": "Esta respuesta ya no está en el chat.",
   "This turn has not completed": "Este turno aún no ha terminado",
   "This turn has no answer to export": "Este turno no tiene ninguna respuesta para exportar",
+  "HTML export saves a whole session to a file": "La exportación a HTML guarda una sesión completa en un archivo",
   "Only a ChatGPT answer can be bookmarked": "Solo se puede marcar una respuesta de ChatGPT",
   "A chat keeps at most 200 bookmarks": "Un chat guarda como máximo 200 marcadores",
   "This answer is no longer in the chat, so its bookmark was removed.": "Esta respuesta ya no está en el chat, así que se quitó su marcador.",

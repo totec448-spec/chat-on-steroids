@@ -5177,6 +5177,8 @@ function answerActions(turnId: string | null, messageId?: string, answer?: { tex
     choice.type = 'button';
     choice.addEventListener('click', async () => {
       menu.open = false;
+      // The clicked choice leaves the screen with the menu; focus goes back to the menu's own button.
+      trigger.focus();
       const result = await exportTo(scope, 'file', format);
       if (result?.done === 'saved') toast(t('Saved {0}', [result.name]));
     });

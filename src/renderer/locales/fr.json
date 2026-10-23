@@ -3018,6 +3018,7 @@
   "This answer is no longer in the chat.": "Cette réponse n'est plus dans le chat.",
   "This turn has not completed": "Ce tour n'est pas encore terminé",
   "This turn has no answer to export": "Ce tour n'a aucune réponse à exporter",
+  "HTML export saves a whole session to a file": "L'export HTML enregistre une session entière dans un fichier",
   "Only a ChatGPT answer can be bookmarked": "Seule une réponse de ChatGPT peut recevoir un signet",
   "A chat keeps at most 200 bookmarks": "Un chat conserve au plus 200 signets",
   "This answer is no longer in the chat, so its bookmark was removed.": "Cette réponse n'est plus dans le chat, son signet a donc été retiré.",
