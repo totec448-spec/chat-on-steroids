@@ -56,6 +56,9 @@ const PLACEHOLDER = /^(?:\$\{[^{}]*\}|\$[A-Za-z_][A-Za-z0-9_]*|<[^<>]*>|\{\{[^{}
 /** Secret-named settings, as hits on their values. One pass over the lines. */
 function settingHits(text: string): Hit[] {
   const hits: Hit[] = [];
+  // "PASS: name" is a test runner's result line (make check, TAP-like logs) only in a test log:
+  // two or more result lines, or a "# TOTAL:" summary. A lone "PASS: value" is a setting.
+  const testLog = /^# TOTAL: \d/m.test(text) || (text.match(/^(?:PASS|FAIL|XFAIL|XPASS|SKIP|ERROR): \S/gm)?.length ?? 0) >= 2;
   let lineStart = 0;
   while (lineStart <= text.length) {
     const newline = text.indexOf('\n', lineStart);
@@ -64,8 +67,7 @@ function settingHits(text: string): Hit[] {
     if (line.endsWith('\r')) line = line.slice(0, -1);
     // The head pattern is anchored and short, so even a very long line costs one pass.
     const head = SETTING_HEAD.exec(line);
-    // "PASS: name" is a test runner's result line (make check, TAP-like logs), not a setting.
-    if (head && SECRET_NAME.test(head[3]!) && !(head[3] === 'PASS' && head[0].trimEnd().endsWith(':'))) {
+    if (head && SECRET_NAME.test(head[3]!) && !(testLog && head[3] === 'PASS' && head[0].trimEnd().endsWith(':'))) {
       // The rest of the line, without trailing spaces and one trailing comma (JSON).
       let rest = line.slice(head[0].length).replace(/[ \t]+$/, '');
       if (rest.endsWith(',')) rest = rest.slice(0, -1).replace(/[ \t]+$/, '');
