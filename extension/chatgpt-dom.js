@@ -3474,6 +3474,23 @@ var CLF_DOM = (() => {
     return selected && closed && stillCurrent();
   }
 
+  /**
+   * Whether ChatGPT's sidebar lists this Project (#1759): true or false only when its Projects
+   * section is open, the section that holds the New project control. Every Project has a row there,
+   * collapsed or not, naming its id (measured 2026-10-23). A closed sidebar or a collapsed section
+   * lists nothing and proves nothing, so the answer is then null.
+   */
+  function sidebarListsProject(id) {
+    return safe(() => {
+      const wanted = String(id || '').toLowerCase();
+      const sections = [...document.querySelectorAll('[data-app-action-sidebar-section]')]
+        .filter(section => section.querySelector('[data-app-action-sidebar-project-create]'));
+      if (sections.length !== 1 || sections[0].getAttribute('data-app-action-sidebar-section-collapsed') !== 'false') return null;
+      return [...sections[0].querySelectorAll('[data-app-action-sidebar-project-id]')]
+        .some(row => row.getAttribute('data-app-action-sidebar-project-id').toLowerCase() === wanted);
+    }, null);
+  }
+
   function projectHomeId(pathname = location.pathname) {
     return /^\/g\/(g-p-[0-9a-f]{32})(?:-[^/]+)?\/project\/?$/i.exec(pathname)?.[1]?.toLowerCase() || null;
   }
@@ -3716,6 +3733,7 @@ var CLF_DOM = (() => {
     projectIdsShown,
     fillProjectName,
     projectHomeId,
+    sidebarListsProject,
     enterProject,
     visibleModelSelection,
     inspectModelSettings,
