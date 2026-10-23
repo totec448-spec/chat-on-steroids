@@ -174,10 +174,15 @@ app.whenReady().then(async () => {
     await screenshot('review-checkpoint-menu');
     await js(`[...document.querySelectorAll('.file-branch-option')].at(-1).click()`);
     await until(`document.querySelector('.review-panel .file-branch-trigger')?.textContent.startsWith(window.fixture.t('Before turn')) && document.querySelectorAll('.review-panel .file-change-row').length===2 && !!document.querySelector('.review-panel .file-checkpoint-bar button')`);
-    // A checkpoint's date and time are read whole while the header has room for them.
+    // A checkpoint's date and time are read whole while the header has room for them; a label may
+    // shorten only when the header's other parts leave it no space (a narrow window or runner).
     const cut = await js(`(() => { const label = document.querySelector('.review-panel .file-branch-trigger-label');
-      return { cut: label.scrollWidth > label.clientWidth + 1, text: label.textContent }; })()`);
-    if (cut.cut) throw new Error('The checkpoint label is cut in a wide Review header: ' + cut.text);
+      const header = label.closest('.file-changes-header-content');
+      const used = [...header.children].filter(child => !child.hidden).reduce((sum, child) => sum + child.getBoundingClientRect().width, 0);
+      const gaps = parseFloat(getComputedStyle(header).columnGap || '0') * Math.max(0, [...header.children].filter(child => !child.hidden).length - 1);
+      const room = header.clientWidth - used - gaps;
+      return { cut: label.scrollWidth > label.clientWidth + 1, room, text: label.textContent }; })()`);
+    if (cut.cut && cut.room > 2) throw new Error('The checkpoint label is cut although the Review header has room: ' + JSON.stringify(cut));
     await screenshot('review-checkpoint-compare');
     await js(`document.querySelector('.review-panel .file-branch-trigger').click();document.querySelector('.file-branch-option').click()`);
     await until(`document.querySelectorAll('.review-panel .file-change-row').length===2 && !document.querySelector('.review-panel .file-checkpoint-bar')`);
