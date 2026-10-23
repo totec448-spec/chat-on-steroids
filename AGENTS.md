@@ -4241,7 +4241,11 @@ the recovery hold's own 75 s freshness rule) and `recoveryStopped` (`recoverySto
 bridge.ts: exactly the chats whose `sessionRecoveryCountdowns` reads `pickup-stopped`, asked only of
 sessions with a durable stop mark, so a list with none costs nothing). The pageless verdict
 (`pagelessChats`) is deliberately not in `recoveryStopped`: it is in memory, keeps no obligation and
-lifts when the page polls. "Last turn failed and nothing followed" needs no field:
+lifts when the page polls. The selected chat's own controls (`sessions:controls`, `SessionControlsView`)
+carry it as `pageless`, and its unfinished turn's caption then reads "Stopped · open this chat's tab
+again to continue" instead of nothing (#1787). While a turn's caption counts, the window asks for the
+controls again every 20 s (`RUNNING_CONTROLS_RECHECK_MS`): an activity window can run out with nothing
+new written to the chat, and the caption had counted on for hours. "Last turn failed and nothing followed" needs no field:
 `!activeTurnId && lastTurnOutcome` is `failed` or `stalled` (`interrupted` is usually followed by a
 fresh turn: rotation, automatic Continue, a replacing message).
 The chat keeps the current input queue/plan visible alongside a

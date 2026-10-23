@@ -3121,5 +3121,6 @@
   "Drafts that wait": "Черновики, которые ждут",
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "Карандаш отмечает чаты с неотправленным сообщением, а черновики возвращаются после перезапуска.",
   "A better Review": "Улучшенная «Проверка»",
-  "Right-click an untracked file to add it, or its folder, to .gitignore.": "Щёлкните правой кнопкой по неотслеживаемому файлу, чтобы добавить его или его папку в .gitignore."
+  "Right-click an untracked file to add it, or its folder, to .gitignore.": "Щёлкните правой кнопкой по неотслеживаемому файлу, чтобы добавить его или его папку в .gitignore.",
+  "Stopped · open this chat's tab again to continue": "Остановлено · откройте вкладку этого чата снова, чтобы продолжить"
 }
