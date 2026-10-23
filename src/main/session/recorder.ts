@@ -866,7 +866,8 @@ function noteCallEvidence(
     } else if (result === 'stored') {
       stored = true;
       logInfo(`request attribution: ${call.requestId} -> conversation ${conversationId}`);
-      noteRouteRequestSighted(call.requestId, conversationId, observedAt);
+      noteRouteRequestSighted(call.requestId, conversationId, observedAt,
+        typeof call.createTime === 'number' && Number.isFinite(call.createTime) ? call.createTime * 1000 : null);
       scheduleAttributionRepair(call.requestId);
     }
   }

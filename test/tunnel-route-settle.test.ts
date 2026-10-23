@@ -170,6 +170,22 @@ describe('the hold learns from what happened after each new tunnel-client', () =
     expect(durable.store.get('route-hold')).toMatchObject({ fastStreak: 2 });
   });
 
+  it('ignores a call of a request ChatGPT created before the measured message was sent', async () => {
+    noteTunnelClientConnected();
+    await vi.advanceTimersByTimeAsync(routeHoldMs());
+    noteRouteExistingChatSend('existing-chat');
+    // A turn that was already running when the message went in: its request is older than the send.
+    noteRouteRequestSighted('older-req', 'existing-chat', Date.now(), Date.now() - 60_000);
+    await vi.advanceTimersByTimeAsync(124_000);
+    noteRouteRequestArrived('older-req');
+    expect(routeHoldMs(), 'an older request says nothing about this restart').toBe(35_000);
+    // The message's own request, created after it was sent (within ChatGPT's clock skew), still counts.
+    noteRouteRequestSighted('own-req', 'existing-chat', Date.now(), Date.now() - 5_000);
+    await vi.advanceTimersByTimeAsync(124_000);
+    noteRouteRequestArrived('own-req');
+    expect(routeHoldMs()).toBeGreaterThan(35_000);
+  });
+
   it('measures once per new tunnel-client', async () => {
     noteTunnelClientConnected();
     await vi.advanceTimersByTimeAsync(routeHoldMs());
