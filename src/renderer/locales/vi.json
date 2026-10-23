@@ -1813,7 +1813,6 @@
   "Mention Chat On Steroids Core": "Nhắc đến Chat On Steroids Core",
   "Makes sure ChatGPT can use this app in every chat. Turn it off if ChatGPT starts plain questions with an unneeded tool call. Workers, Goal, Loop and Continue always keep the mention.": "Đảm bảo ChatGPT có thể dùng ứng dụng này trong mọi cuộc trò chuyện. Tắt nếu ChatGPT bắt đầu câu hỏi đơn giản bằng một lệnh gọi công cụ không cần thiết. Worker, Goal, Loop và Continue luôn giữ lời nhắc.",
   "Privacy": "Quyền riêng tư",
-  "What ChatGPT sees of your screen.": "Những gì ChatGPT thấy trên màn hình của bạn.",
   "For developers": "Dành cho nhà phát triển",
   "Troubleshooting details and access for tools on this computer.": "Chi tiết khắc phục sự cố và quyền truy cập cho công cụ trên máy này.",
   "Show turn boundaries and recovery events in the chat.": "Hiển thị ranh giới lượt và sự kiện khôi phục trong cuộc trò chuyện.",
@@ -2986,5 +2985,11 @@
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "Một cây bút đánh dấu các cuộc trò chuyện có tin nhắn chưa gửi, và bản nháp quay lại sau khi khởi động lại.",
   "A better Review": "Phần Xem lại tốt hơn",
   "Right-click an untracked file to add it, or its folder, to .gitignore.": "Nhấp chuột phải vào một tệp chưa được theo dõi để thêm tệp đó hoặc thư mục của nó vào .gitignore.",
-  "Stopped · open this chat's tab again to continue": "Đã dừng · hãy mở lại tab của cuộc trò chuyện này để tiếp tục"
+  "Stopped · open this chat's tab again to continue": "Đã dừng · hãy mở lại tab của cuộc trò chuyện này để tiếp tục",
+  "Hide secrets from ChatGPT": "Ẩn bí mật khỏi ChatGPT",
+  "API keys, tokens, private keys and passwords in what tools return are replaced with a short note before ChatGPT sees them. Your files stay as they are. A project can turn this off in its menu.": "Khóa API, token, khóa riêng tư và mật khẩu trong kết quả công cụ trả về được thay bằng một ghi chú ngắn trước khi ChatGPT nhìn thấy. Tệp của bạn vẫn giữ nguyên. Mỗi dự án có thể tắt tính năng này trong menu của nó.",
+  "What ChatGPT gets to see on this computer.": "Những gì ChatGPT được thấy trên máy tính này.",
+  "Off for every project in Settings": "Đã tắt cho mọi dự án trong Cài đặt",
+  "This project's tools send keys and tokens to ChatGPT as they are": "Công cụ của dự án này gửi khóa và token cho ChatGPT nguyên trạng",
+  "Keys and tokens in this project's tool results are hidden from ChatGPT": "Khóa và token trong kết quả công cụ của dự án này được ẩn khỏi ChatGPT"
 }

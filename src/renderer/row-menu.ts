@@ -21,8 +21,10 @@ export interface RowMenuItem {
   /** A longer explanation, as the item's tooltip. */
   title?: () => string;
   danger?: boolean;
-  /** A choice among several (menuitemradio): whether it is the current one. */
+  /** A choice among several (menuitemradio): whether it is the current one. With `toggle`, an on/off switch's state. */
   checked?: boolean;
+  /** An on/off switch (menuitemcheckbox) rather than a choice among several. */
+  toggle?: boolean;
   /** A color dot before the label (`data-color`); an empty string draws the empty dot. */
   swatch?: string;
   disabled?: boolean;
@@ -189,7 +191,7 @@ function itemButton(item: RowMenuItem, menu: HTMLElement, depth: number): HTMLBu
   for (const [key, value] of Object.entries(item.data ?? {})) button.dataset[key] = value;
   button.tabIndex = -1;
   button.disabled = item.disabled === true;
-  button.setAttribute('role', item.checked === undefined ? 'menuitem' : 'menuitemradio');
+  button.setAttribute('role', item.checked === undefined ? 'menuitem' : item.toggle ? 'menuitemcheckbox' : 'menuitemradio');
   if (item.checked !== undefined) button.setAttribute('aria-checked', String(item.checked));
   if (item.swatch !== undefined) {
     const dot = el('span', 'row-menu-swatch');

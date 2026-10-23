@@ -68,6 +68,7 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-pulse': 'activity',
   'i-retry': 'arrow-clockwise',
   'i-search': 'magnifying-glass',
+  'i-shield': 'shield-check',
   'i-skill': 'cube',
   'i-sparkle': 'sparkle',
   'i-star': 'star',
