@@ -2747,7 +2747,15 @@
   }
 
   let observedRoute = null;
+  // When this document reached its current path: load for the first one, else the first look at
+  // a new one. Every DOM change looks, so a page that left and came back starts again (#1759).
+  let routeArrival = { path: location.pathname, at: 0 };
+  function routeAge() {
+    if (routeArrival.path !== location.pathname) routeArrival = { path: location.pathname, at: performance.now() };
+    return performance.now() - routeArrival.at;
+  }
   function observe() {
+    routeAge();
     // This duplicate source document is only the native Project entry point. Its transcript
     // belongs to A's original recorder; do not adopt it while preparing the fresh composer.
     if (commandAttempt?.projectEntry && CLF_DOM.conversationId() === OPENED_CONVERSATION) return;
@@ -12856,6 +12864,8 @@
    * a row the page reads back differently (#821: `&#x20;` for a space) kept this document's
    * input slot for good, and every later message waited for a reload.
    */
+  /** How long a linked Project's page may load, from reaching it, before a missing composer counts (#1759). */
+  const PROJECT_PAGE_LOAD_MS = 30_000;
   const DESKTOP_RECEIPT_MS = 120_000;
   // The durable claim, never a project path/title guess, fences first tool evidence.
   let desktopProjectInput = null;
@@ -13317,6 +13327,14 @@
       (project ? CLF_DOM.projectHomeId() === project : location.pathname === '/') &&
       (project ? freshMarker() : new URL(location.href).searchParams.get('cos-input') === message.id) && !CLF_DOM.turns().length));
     if (!target && !ownsFreshPage()) return false;
+    // A linked Project ChatGPT no longer has (#1759). ChatGPT used to send its page home, which the
+    // extension reports; since October 2026 the page stays on "loading", with no composer, for good.
+    // Gone only when the page has had its time and the open Projects list does not name it.
+    if (!target && project && CLF_DOM.projectHomeId() === project && !CLF_DOM.composerVisible() &&
+        routeAge() >= PROJECT_PAGE_LOAD_MS && CLF_DOM.sidebarListsProject(project) === false) {
+      await ask({ type: 'project_unavailable', id: message.id, project });
+      return false;
+    }
     desktopInputBusy = true;
     let decision = null;
     let sent = false;
@@ -13673,6 +13691,10 @@
         try { await draft.clear(); } catch { /* Unprovable native cleanup preserves the draft. */ }
       }
       return accepted;
+    } catch (error) {
+      // An exception is the one exit with no reason of its own; the release still says it was one.
+      noteWithdraw('page-error');
+      throw error;
     } finally {
       if (claimedSilence && !sendAttempted) {
         await ask({ type: 'desktop_input', id: claimedSilence.id, owner: claimedSilence.owner, fail: true,
