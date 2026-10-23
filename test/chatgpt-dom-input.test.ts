@@ -8,6 +8,7 @@ interface DomApi {
   enterProject(entry: { id: string; sourceConversationId: string }, current?: () => boolean,
     failure?: (reason: string) => void): Promise<boolean>;
   composer(): HTMLElement | null;
+  composerText(box?: Element | null): string;
   composerActions(): { host: HTMLElement; before: HTMLElement | null } | null;
   generating(): boolean;
   sendButton(): HTMLButtonElement | null;
@@ -27,6 +28,7 @@ interface DomApi {
   turns(): Array<{ id: string | null; role: string; node: HTMLElement; nodes: HTMLElement[] }>;
   toolBlocks(turn: ReturnType<DomApi['turns']>[number]): HTMLElement[];
   hideActivity(turn: ReturnType<DomApi['turns']>[number], covered: HTMLElement[]): void;
+  sidebarListsProject(id: string): boolean | null;
 }
 let dom: JSDOM;
 let document: Document;
@@ -1652,5 +1654,100 @@ describe('page checks for the diagnostics report', () => {
     document.querySelector('form')!.remove();
     document.documentElement.lang = 'en <script>';
     expect(checks()).toEqual({ composer: false, sendArea: false, modelMenu: false, plusMenu: false, language: null });
+  });
+});
+
+/**
+ * #1792: ChatGPT turns a pasted URL into a rich-link preview and puts the preview's own <style> inside
+ * the editor. Its CSS is part of `textContent` but not of the prompt, so an untouched prompt read as
+ * changed: Compact & Resume never sent its handoff ("ChatGPT replaced the composer while inserting the
+ * bootstrap"), and a lease on any prompt with a link was lost.
+ */
+describe('a rich-link preview inside the editor (#1792)', () => {
+  const css = '@supports (display:grid){.link-card{display:grid}}@media (min-width:600px){.link-card{gap:8px}}';
+  const enrich = () => {
+    const card = document.createElement('span');
+    card.className = 'link-card';
+    const style = document.createElement('style');
+    style.textContent = css;
+    card.append(style);
+    box.append(card);
+  };
+
+  it('reads the prompt without the preview stylesheet', () => {
+    enrich();
+    expect(box.textContent).toContain('@supports');
+    expect(api.composerText()).toBe('Exact app prompt');
+    expect(api.composerText(box)).toBe('Exact app prompt');
+  });
+
+  it('reads nothing from a stylesheet that is itself a direct child of the editor', () => {
+    const style = document.createElement('style');
+    style.textContent = css;
+    box.append(style);
+    expect(api.composerText(style)).toBe('');
+    expect(api.composerText()).toBe('Exact app prompt');
+  });
+
+  it('keeps the lease on an untouched prompt when ChatGPT adds a preview', () => {
+    const draft = api.captureComposerDraft('Exact app prompt');
+    enrich();
+    expect(draft.current()).toBe(true);
+  });
+
+  it('still notices a real edit next to a preview', () => {
+    const draft = api.captureComposerDraft('Exact app prompt');
+    enrich();
+    box.append(document.createTextNode(' and more'));
+    expect(draft.current()).toBe(false);
+  });
+
+  it('keeps literal style text that the prompt itself contains', () => {
+    box.textContent = 'Explain <style> tags';
+    expect(api.composerText()).toBe('Explain <style> tags');
+  });
+
+  it('sends a prompt whose link became a preview while Send waited', async () => {
+    const sends = vi.fn(() => { box.textContent = ''; });
+    button.addEventListener('click', sends);
+    const sent = api.send({ acceptanceTimeoutMs: 1000, beforeSend: async () => { enrich(); return true; } });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(await sent).toBe(true);
+    expect(sends).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('whether ChatGPT\'s sidebar lists a Project (#1759)', () => {
+  const ours = 'g-p-11111111222233334444555555555555';
+  const other = 'g-p-99999999888877776666555555555555';
+  // The October 2026 sidebar: the Projects section holds the New project control and one row per
+  // Project, collapsed or not, each naming its id (measured 2026-10-23).
+  const sidebar = (rows: string[], { collapsed = 'false', create = true } = {}) => {
+    const nav = document.createElement('nav');
+    nav.innerHTML = `<div data-app-action-sidebar-section="" data-app-action-sidebar-section-collapsed="${collapsed}">
+      ${create ? '<button data-app-action-sidebar-project-create="">New project</button>' : ''}
+      <div role="list">${rows.map(id => `<div role="listitem"><div data-app-action-sidebar-project-id="${id}" data-app-action-sidebar-project-label="Work" data-app-action-sidebar-project-collapsed="true" role="button"></div></div>`).join('')}</div>
+    </div><div data-app-action-sidebar-section="" data-app-action-sidebar-section-collapsed="false"><a href="/c/aaaa">A chat</a></div>`;
+    document.body.prepend(nav);
+  };
+
+  it('says yes for a listed Project, collapsed rows included, and no for one it does not list', () => {
+    sidebar([other, ours.toUpperCase()]);
+    expect(api.sidebarListsProject(ours)).toBe(true);
+    expect(api.sidebarListsProject('g-p-00000000000000000000000000000000')).toBe(false);
+  });
+
+  it('says no for an account whose open Projects section lists none', () => {
+    sidebar([]);
+    expect(api.sidebarListsProject(ours)).toBe(false);
+  });
+
+  it.each([
+    ['the sidebar is closed', () => undefined],
+    ['the Projects section is collapsed', () => sidebar([other], { collapsed: 'true' })],
+    ['no section holds the New project control', () => sidebar([other], { create: false })]
+  ])('cannot tell when %s', (_name, build) => {
+    build();
+    expect(api.sidebarListsProject(ours)).toBeNull();
   });
 });

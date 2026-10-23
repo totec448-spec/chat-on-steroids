@@ -28,6 +28,7 @@ import { getConfig } from '../config.js';
 import { logError, logInfo, logWarn } from '../logger.js';
 import { buildServer, resetToolClock, type ToolContext } from './tools.js';
 import { SURFACE_IDS, configuredConnectorName, type SurfaceId } from './surfaces.js';
+import { noteRouteRequestArrived } from '../tunnel/route-settle.js';
 
 const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
@@ -432,6 +433,7 @@ export async function startMcpServer(
     // The tool dispatch reads this back to join the call to the page request that issued
     // it; see inbound.ts for why it cannot be taken from the MCP call context.
     const requestId = requestIdFromHeader(req.headers['x-request-id']);
+    if (requestId) noteRouteRequestArrived(requestId);
     const dispatch = (body?: unknown): void => {
       if (stopping || res.destroyed) {
         if (!res.destroyed) {

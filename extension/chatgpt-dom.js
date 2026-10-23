@@ -69,6 +69,21 @@ var CLF_DOM = (() => {
   // A ChatGPT app mention renders as an inline chip (#861). It is how a message attached the app,
   // not what its author wrote, so readers comparing authored text never count it.
   const APP_MENTION_CHIP = '[data-prompt-link-href^="app://"], [app-mention-path]';
+  /**
+   * Nodes ChatGPT puts inside the editor that are not prompt text (#1792). A URL turned into a
+   * rich-link preview carries its own <style>; its CSS is part of `textContent`, so an untouched
+   * prompt read as changed and Compact & Resume never sent its handoff. Literal "<style>" typed into
+   * a prompt is text, not an element, and stays.
+   */
+  const NOT_PROMPT = 'style, script, noscript, template';
+  /** The editor's text as written: everything but those nodes. The common case reads it directly. */
+  const editorText = (node) => {
+    if (!node || node.matches?.(NOT_PROMPT)) return '';
+    if (!node.querySelector?.(NOT_PROMPT) || typeof node.cloneNode !== 'function') return node.textContent ?? '';
+    const clone = node.cloneNode(true);
+    for (const injected of clone.querySelectorAll(NOT_PROMPT)) injected.remove();
+    return clone.textContent ?? '';
+  };
   const authoredText = (node) => {
     if (!node?.querySelector?.(APP_MENTION_CHIP) || typeof node.cloneNode !== 'function') return text(node);
     const clone = node.cloneNode(true);
@@ -82,10 +97,10 @@ var CLF_DOM = (() => {
    */
   const composerAuthoredText = () => {
     const box = composer();
-    if (!box?.querySelector?.(APP_MENTION_CHIP) || typeof box.cloneNode !== 'function') return box?.textContent ?? '';
+    if (!box?.querySelector?.(APP_MENTION_CHIP) || typeof box.cloneNode !== 'function') return editorText(box);
     const clone = box.cloneNode(true);
     for (const chip of clone.querySelectorAll(APP_MENTION_CHIP)) chip.remove();
-    return clone.textContent ?? '';
+    return editorText(clone);
   };
 
   function searchUnitRole(node) {
@@ -806,13 +821,13 @@ var CLF_DOM = (() => {
     // Keep the same text comparison used by send receipts; editor identity and
     // trusted edits still revoke the lease even when a user only changes spacing.
     const compact = text => String(text || '').replace(/\s+/g, '');
-    const insertedText = compact(box?.textContent);
+    const insertedText = compact(editorText(box));
     let touched = false;
     let files = [];
     const events = ['input', 'change', 'keydown', 'pointerdown', 'paste', 'drop'];
     const changed = event => { if (event.isTrusted) touched = true; };
     for (const name of events) host?.addEventListener(name, changed, true);
-    const same = () => !touched && stillCurrent() && composer() === box && box?.isConnected && compact(box.textContent) === insertedText;
+    const same = () => !touched && stillCurrent() && composer() === box && box?.isConnected && compact(editorText(box)) === insertedText;
     const ownsAttachments = () => {
       if (!same() || !host) return false;
       const current = [...host.querySelectorAll('button[aria-label]')].filter(node => composerFileName(node));
@@ -850,7 +865,7 @@ var CLF_DOM = (() => {
       rebind() {
         if (rebound || touched || files.length || !stillCurrent() || same()) return false;
         const next = composer(), nextHost = composerBox() || composerActions()?.host;
-        if (!next?.isConnected || next === box || compact(next.textContent) !== insertedText || hasComposerAttachments()) return false;
+        if (!next?.isConnected || next === box || compact(editorText(next)) !== insertedText || hasComposerAttachments()) return false;
         for (const name of events) host?.removeEventListener(name, changed, true);
         box = next; host = nextHost; rebound = true;
         for (const name of events) host?.addEventListener(name, changed, true);
@@ -865,7 +880,7 @@ var CLF_DOM = (() => {
       withdraw() {
         if (touched || files.length || hasComposerAttachments()) return false;
         let current = composer();
-        if (!current?.isConnected || compact(current.textContent) !== insertedText) return false;
+        if (!current?.isConnected || compact(editorText(current)) !== insertedText) return false;
         if (current !== box) {
           if (withdrawRebound) return false;
           const nextHost = composerBox() || composerActions()?.host;
@@ -874,7 +889,7 @@ var CLF_DOM = (() => {
           for (const name of events) host?.addEventListener(name, changed, true);
         }
         current = composer();
-        if (touched || current !== box || !box?.isConnected || compact(box.textContent) !== insertedText || hasComposerAttachments()) return false;
+        if (touched || current !== box || !box?.isConnected || compact(editorText(box)) !== insertedText || hasComposerAttachments()) return false;
         return clearPromptExact(value);
       },
       dispose() { for (const name of events) host?.removeEventListener(name, changed, true); }
@@ -1074,7 +1089,7 @@ var CLF_DOM = (() => {
     if (!form) return [];
     // Read the editor here rather than reusing the submitter's own `draftText`, which is a local
     // closure over its captured box. Only "the composer holds something" is needed, not equality.
-    const drafted = (typeof box.innerText === 'string' ? box.innerText : box.textContent || '').trim();
+    const drafted = (typeof box.innerText === 'string' ? box.innerText : editorText(box)).trim();
     if (drafted === '' || generating()) return [];
     return [...form.querySelectorAll('button[class*="size-token-button-composer"][class*="bg-composer-primary"]')]
       .filter(button => {
@@ -1899,7 +1914,7 @@ var CLF_DOM = (() => {
       const box = composer();
       if (!composerWritable()) return false;
       if (generating() || stopButton()) return false;
-      if ((box.textContent || '').trim() !== '') return false;
+      if (editorText(box).trim() !== '') return false;
       return true;
     }, false);
   }
@@ -1927,14 +1942,14 @@ var CLF_DOM = (() => {
     return safe(() => {
       const box = composer();
       if (!composerWritable() || generating() || stopButton() || hasComposerAttachments()) return false;
-      const text = String(box.textContent || '').replace(/\\(?=[!-/:-@[-`{-~])/g, '').replace(/\s+/g, '');
+      const text = String(editorText(box)).replace(/\\(?=[!-/:-@[-`{-~])/g, '').replace(/\s+/g, '');
       if (!text || !REVIVAL_RESIDUE.test(text)) return false;
       box.focus();
       const selection = document.getSelection();
       if (!selection || document.activeElement !== box) return false;
       selection.selectAllChildren(box);
       document.execCommand('delete', false);
-      return (box.textContent || '').trim() === '';
+      return editorText(box).trim() === '';
     }, false);
   }
 
@@ -2384,7 +2399,7 @@ var CLF_DOM = (() => {
     };
     try {
       if (!box) return reject('composer_missing');
-      const existing = (box.textContent || '').trim();
+      const existing = editorText(box).trim();
       if (value === '' && mode !== true) return false;
       // Text this same value already put there is not a draft to protect: inserting it again would
       // produce exactly what is on screen. The residue of an attempt whose Send never landed used to
@@ -2429,7 +2444,7 @@ var CLF_DOM = (() => {
       const compact = text => String(text || '').replace(/\s+/g, '');
       const expected = mode === 'append' ? existing + value : value;
       if (!box.isConnected || !stillOwned(box)) return reject('editor_replaced');
-      if (compact(box.textContent) !== compact(expected)) return reject('text_mismatch');
+      if (compact(editorText(box)) !== compact(expected)) return reject('text_mismatch');
       return true;
     } catch {
       return reject('insertion_exception');
@@ -2441,12 +2456,12 @@ var CLF_DOM = (() => {
     return safe(() => {
       const box = composer();
       const compact = (text) => String(text || '').replace(/\s+/g, '');
-      if (!box || compact(box.textContent) !== compact(value)) return false;
+      if (!box || compact(editorText(box)) !== compact(value)) return false;
       box.focus();
       document.execCommand('selectAll', false);
       document.execCommand('delete', false);
       box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null }));
-      return (box.textContent || '').trim() === '';
+      return editorText(box).trim() === '';
     }, false);
   }
 
@@ -2531,7 +2546,7 @@ var CLF_DOM = (() => {
       // Rich editors use adjacent paragraphs for newlines; textContent concatenates
       // their words. Preserve those boundaries when matching the rendered user message.
       const draftText = () => (typeof box.innerText === 'string' ? box.innerText : [...box.childNodes]
-        .map((node) => (node.textContent || '') + (/^(P|DIV|BR)$/.test(node.nodeName) ? '\n' : '')).join('')).trim();
+        .map((node) => editorText(node) + (/^(P|DIV|BR)$/.test(node.nodeName) ? '\n' : '')).join('')).trim();
       const submitted = draftText();
       if (!submitted) return refused('draft-empty');
       const compact = (value) => String(value || '').replace(/\s+/g, ' ').trim();
@@ -2577,7 +2592,7 @@ var CLF_DOM = (() => {
         // or Stop alone cannot hand off a receipt, and a later DOM read can lose it.
         if (acceptUserReceipt || currentConversation !== beforeConversation) return false;
         const current = composer();
-        if (current === box && box.isConnected && (current.textContent || '').trim() === '') return true;
+        if (current === box && box.isConnected && editorText(current).trim() === '') return true;
         if (!beforeGenerating && generating()) return true;
         if (!beforeStop && stopButton()) return true;
         return false;
@@ -3459,6 +3474,23 @@ var CLF_DOM = (() => {
     return selected && closed && stillCurrent();
   }
 
+  /**
+   * Whether ChatGPT's sidebar lists this Project (#1759): true or false only when its Projects
+   * section is open, the section that holds the New project control. Every Project has a row there,
+   * collapsed or not, naming its id (measured 2026-10-23). A closed sidebar or a collapsed section
+   * lists nothing and proves nothing, so the answer is then null.
+   */
+  function sidebarListsProject(id) {
+    return safe(() => {
+      const wanted = String(id || '').toLowerCase();
+      const sections = [...document.querySelectorAll('[data-app-action-sidebar-section]')]
+        .filter(section => section.querySelector('[data-app-action-sidebar-project-create]'));
+      if (sections.length !== 1 || sections[0].getAttribute('data-app-action-sidebar-section-collapsed') !== 'false') return null;
+      return [...sections[0].querySelectorAll('[data-app-action-sidebar-project-id]')]
+        .some(row => row.getAttribute('data-app-action-sidebar-project-id').toLowerCase() === wanted);
+    }, null);
+  }
+
   function projectHomeId(pathname = location.pathname) {
     return /^\/g\/(g-p-[0-9a-f]{32})(?:-[^/]+)?\/project\/?$/i.exec(pathname)?.[1]?.toLowerCase() || null;
   }
@@ -3706,6 +3738,8 @@ var CLF_DOM = (() => {
     turnIdOf,
     messageIdOf,
     composerAuthoredText,
+    /** The composer's prompt text, without nodes ChatGPT injects for presentation (#1792). */
+    composerText: (box = composer()) => editorText(box),
     pageChecks,
     userPromptText,
     userMessageReaction,
@@ -3724,6 +3758,7 @@ var CLF_DOM = (() => {
     projectsShown,
     fillProjectName,
     projectHomeId,
+    sidebarListsProject,
     enterProject,
     visibleModelSelection,
     inspectModelSettings,

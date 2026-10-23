@@ -259,7 +259,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Models/usage | `src/main/chat-models.ts`, `session/usage.ts`, `provider-usage.ts`, `usage-tool.ts`; `src/shared/{chat-models,usage,provider-usage}.ts`; `src/renderer/{chat-models,context-meter,usage}.ts`: account observations vs local estimates. |
 | External plugins | `src/main/plugins/{catalog,installer,manager,exposure,oauth}.ts`, `plugins-ipc.ts`, `plugin-refresh.ts`, `src/shared/{plugins,plugin-refresh}.ts`, `src/renderer/plugins.ts`. |
 | Renderer boundary | `src/main/ipc.ts`, `edit-context-menu.ts`, `src/preload/index.ts`; `src/renderer/{main,chat,dom,tool-result,timeline-scroll,sidebar-resize,browser-preferences,i18n}.ts`, `locales/{es,zh-CN,zh-TW,ja,tr,fr,pt-PT}.json`, `index.html`, `styles.css`. |
-| Appearance | `src/shared/appearance.ts`, `src/main/appearance-schema.ts`, `src/renderer/appearance.ts`: bounded saved colors/typography, field-wise Settings merge, immediate semantic CSS projection. `window-layout.ts` shares native caption/backing colors. |
+| Appearance | `src/shared/appearance.ts`, `src/main/appearance-schema.ts`, `src/renderer/appearance.ts`: bounded saved colors/typography (including line spacing and the bundled Atkinson Hyperlegible Next in `src/renderer/fonts/`), field-wise Settings merge, immediate semantic CSS projection. `window-layout.ts` shares native caption/backing colors. |
 | Native Desktop | `src/main/computer/{index,helper,browser-chords,windows-api,windows-capture,windows-apps,windows-keys}.ts`, `src/shared/windows-computer.ts`, `mcp/tools-desktop-{windows,macos}.ts`, `native/macos-desktop-helper/*`, `native/macos-desktop-addon/*`. |
 | Direct browser control | `src/main/browser-control.ts`, `mcp/tools-browser.ts`, `src/shared/browser-control.ts`, `extension/browser-control{,-page}.js`: short-lived RPCs, session-owned debugger tabs, bounded DOM/diagnostics and background input. |
 | Delivery/build | `src/main/{update,extension-path,version,logger,durable}.ts`, `electron.vite.config.ts`, `electron-builder.yml`, `scripts/*`, `.github/workflows/*`, `vitest.config.ts`. |
@@ -1083,6 +1083,12 @@ anything else. While the Project is being created, or could not be, the message 
 row says so ("Creating this project in ChatGPT…", or the unavailable line pointing at Retry). A
 deleted Project's page redirects to ChatGPT's home and drops the marker: the worker reports
 `gone` for the tab it opened for that Project, the link becomes `failed`, and nothing is sent.
+Since October 2026 ChatGPT may instead keep that page on "loading" with no composer (#1759): the
+page reports `project_unavailable` { id, project } once it is at least 30 s old, shows no composer,
+and the sidebar's open Projects section (the one holding `data-app-action-sidebar-project-create`)
+has no row `data-app-action-sidebar-project-id` for it (`CLF_DOM.sidebarListsProject`: null when
+the sidebar is closed or the section collapsed, which proves nothing). The worker passes it on as
+the same `gone` only for the tab it opened for that message, still on that Project's home.
 An opening remembers its Project, so a retry's new Project gets its own tab.
 Linking to a Project the account already has (#1756): ChatGPT pages report the Projects their
 sidebar lists (`CLF_DOM.projectsShown`: rows' `data-app-action-sidebar-project-id`/`-label`, then
@@ -4257,7 +4263,11 @@ the recovery hold's own 75 s freshness rule) and `recoveryStopped` (`recoverySto
 bridge.ts: exactly the chats whose `sessionRecoveryCountdowns` reads `pickup-stopped`, asked only of
 sessions with a durable stop mark, so a list with none costs nothing). The pageless verdict
 (`pagelessChats`) is deliberately not in `recoveryStopped`: it is in memory, keeps no obligation and
-lifts when the page polls. "Last turn failed and nothing followed" needs no field:
+lifts when the page polls. The selected chat's own controls (`sessions:controls`, `SessionControlsView`)
+carry it as `pageless`, and its unfinished turn's caption then reads "Stopped · open this chat's tab
+again to continue" instead of nothing (#1787). While a turn's caption counts, the window asks for the
+controls again every 20 s (`RUNNING_CONTROLS_RECHECK_MS`): an activity window can run out with nothing
+new written to the chat, and the caption had counted on for hours. "Last turn failed and nothing followed" needs no field:
 `!activeTurnId && lastTurnOutcome` is `failed` or `stalled` (`interrupted` is usually followed by a
 fresh turn: rotation, automatic Continue, a replacing message).
 The chat keeps the current input queue/plan visible alongside a
@@ -4527,6 +4537,16 @@ layout: `'projects'`, the default project tree, or `'inbox'`) is read by `chat.t
 never browser storage; a save without it or with another value loads as `'projects'` while the
 rest of the appearance is kept, and the state push after a save repaints the sidebar. Text size
 scales the existing typography hierarchy, including code, independently of window zoom. System font retains the locale-specific fallback stack.
+Line spacing (`ui.appearance.lineSpacing`, 100–200 percent in steps of 10, default 100) multiplies
+the chat's own line heights through `--line-spacing`: messages, outbox rows and the sample chat.
+A save without it, out of range or off those steps loads as 100. The Atkinson Hyperlegible font (`font: 'legible'`)
+is Atkinson Hyperlegible Next, bundled as WOFF2 because `font-src` is `'self'`; its OFL licence is
+in `docs/licenses/atkinson-hyperlegible-next/` and the third-party notices. Reset appearance
+restores both. Appearance → Accessibility → Announce finished replies (`ui.announceTurns`, off
+unless true, not part of Reset) puts "Reply finished" in the polite `#turnAnnounce` region when a
+live delta of the open chat carries a completed `turn_end`, also when the same delta starts the
+next turn; a `user_message` or `turn_start`, and every chat switch, empty it first, and words still
+in the region are emptied and written again in a later task, unless a later clear or chat switch came first. Several completed turns in one delta are each written in turn, one second apart, and a chat switch drops the ones still waiting. A chat opened after its reply finished, or a stopped turn, says nothing.
 The Appearance sample chat reflects the same semantic color and typography tokens immediately;
 it contains no session data. The composer context dialog and accessible label identify local
 estimates; its toolbar toggles percentage/token values. Compact and Cancel remain the original
@@ -4963,14 +4983,24 @@ For a few seconds after a new OpenAI tunnel-client process connects (app start, 
 client the supervisor replaced), OpenAI still routes an existing chat's tool calls to the previous
 process, and a call sent then waits about 128 s for that lease (#1220; a new chat is not affected,
 and a reconnect of the same process after an outage changes nothing). `tunnel/route-settle.ts`
-holds such messages for `ROUTE_SETTLE_MS` (35 s; 12 s until #1788) after each new process's first connected report:
+holds such messages for the current hold (`routeHoldMs()`, starting at `ROUTE_SETTLE_MS` = 35 s; 12 s until #1788) after each new process's first connected report:
 `/status` does not offer, and `/input/claim` refuses, an input whose page is an existing
 conversation; `wakeBrowserWork()` runs when the hold ends. `ConnectionStatus.routeSettlingUntil`
 lets the chat say the message is about to go. Measured on Windows: sent at once, 15 of 18 calls
 waited; held 12 s, 12 of 14 arrived in under 20 s (one still waited, one failed fast without reaching
 the app, back to back, so the takeover can occasionally outlast the hold). On the Mac on 2026-10-22 the
 takeover took longer (#1788): held 12 s, about half still waited; sent 22 s after connect, 2 of 3; at 32 s
-and 47 s, none of 6. `test/tunnel-route-settle.test.ts`, the
+and 47 s, none of 6. The hold learns per computer (durable `route-hold` state, restored before any
+tunnel starts): after each new process, the first message for an existing chat (`/input/claim` →
+`noteRouteExistingChatSend`) is timed from the page's first sighting of its request id (recorder,
+`noteRouteRequestSighted`) to the call reaching the MCP server (`x-request-id`, `noteRouteRequestArrived`).
+The page sees the id within seconds even when the call arrives ~124 s later, so the gap measures the
+route, not thinking time. A gap ≥ 60 s grows the hold (×1.5, at least +15 s, at most 90 s); three
+restarts in a row ≤ 30 s shrink it by 5 s (never below 12 s); a gap between the two leaves the hold
+as it is and starts the fast count over. Only the first message for an existing chat after the restart is
+measured, and only when it is sent within 5 min of it (its late call may arrive after that); new chats
+and later messages are not. Every measurement writes one `route hold:` log line.
+`test/tunnel-route-settle.test.ts`, the
 `tunnel-lifecycle` and `input-delivery-integration` cases cover it.
 
 The local control API (`control-api.ts`, Settings → General → For developers, off by default) serves

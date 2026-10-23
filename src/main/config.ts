@@ -344,6 +344,7 @@ const configSchema = z.object({
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
     playfulContinue: z.boolean().optional(),
+    announceTurns: z.boolean().optional(),
     // Empty, too long or damaged falls back to the built-in Continue phrases.
     customContinue: z.string().trim().min(1).max(CUSTOM_CONTINUE_MAX_CHARS).optional().catch(undefined),
     /** Keep the chat at its end while it grows, in the app and on ChatGPT, until the reader scrolls up. */
