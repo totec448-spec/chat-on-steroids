@@ -106,10 +106,11 @@ export function initAppearance(save: (patch: { theme?: AppearanceTheme; appearan
     for (const swatch of presets.querySelectorAll<HTMLButtonElement>('.appearance-swatch')) {
       const preset = ACCENT_PRESETS.find(entry => entry.id === swatch.dataset.preset)!;
       swatch.style.setProperty('--swatch', preset[theme]);
-      // One preset is checked only while the accent is exactly its shade for this theme.
-      const checked = current[theme].accent === preset[theme];
+      // A preset is its pair: checked only while both themes' accents are exactly its two shades.
+      const matches = (entry: typeof preset) => current.light.accent === entry.light && current.dark.accent === entry.dark;
+      const checked = matches(preset);
       swatch.setAttribute('aria-checked', String(checked));
-      swatch.tabIndex = checked || (!ACCENT_PRESETS.some(entry => current[theme].accent === entry[theme]) && preset === ACCENT_PRESETS[0]) ? 0 : -1;
+      swatch.tabIndex = checked || (!ACCENT_PRESETS.some(matches) && preset === ACCENT_PRESETS[0]) ? 0 : -1;
     }
     for (const key of colorKeys) {
       const color = current[theme][key];
