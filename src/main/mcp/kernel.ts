@@ -45,7 +45,8 @@ import {
 } from '../sandbox.js';
 import { currentWorkspace, forgetMissingWorkspace, learnWorkspace, setCurrentWorkspace } from '../workspace.js';
 import { lookupWorkerWorkspace, validateWorkerWorkspaceLease } from '../worktrees/index.js';
-import { getSessionProject } from '../projects.js';
+import { getSessionProject, sessionSecretsShieldOff } from '../projects.js';
+import { shieldToolResult } from '../secrets-shield.js';
 import { firstTaskRoot, resolveLinkedSkillAlias } from '../skill-access.js';
 import { isUserSkillVirtualPath, resolveUserSkillPath } from '../user-skills.js';
 import { ExecError } from '../exec.js';
@@ -499,9 +500,33 @@ function noteTransportIdentity(transportKey: string | null): void {
 }
 
 /** Deliver bounded completed output after all other appendices have spent their text budget. */
+/**
+ * #1796: a tool's own output as ChatGPT should receive it, with credentials masked.
+ *
+ * Off only when Settings turns it off for everyone or this chat's project turns it off. The
+ * project is looked up only once something was found, so ordinary output costs one quick test.
+ * A project that cannot be read keeps the shield on. The log names what was hidden, never the value.
+ */
+async function shieldOutput(context: CallContext, name: string, result: ToolResult): Promise<ToolResult> {
+  if (getConfig().ui.secretsShield === false) return result;
+  const shielded = shieldToolResult(result);
+  if (!shielded.masked.length) return result;
+  const counts = new Map<string, number>();
+  for (const kind of shielded.masked) counts.set(kind, (counts.get(kind) ?? 0) + 1);
+  const what = [...counts].map(([kind, count]) => `${count} ${kind}${count > 1 ? 's' : ''}`).join(', ');
+  const sessionId = context.caller.sessionId;
+  if (sessionId && await sessionSecretsShieldOff(sessionId).catch(() => false)) {
+    logInfo(`secrets shield: off for this chat's project; the ${name} result went out with ${what} unmasked`);
+    return result;
+  }
+  logInfo(`secrets shield: hid ${what} in the ${name} result`);
+  return shielded.result;
+}
+
 async function withBackgroundExecRecovery(
   context: CallContext,
-  result: ToolResult
+  result: ToolResult,
+  name: string
 ): Promise<ToolResult> {
   const { publication, caller } = context;
   if (!publication || !caller.requestId) return result;
@@ -514,13 +539,9 @@ async function withBackgroundExecRecovery(
   // The page is the priority. Running-terminal reminders can wait for a later response.
   const text = output ?? backgroundExecRecoveryNotices(principal, publication).join('\n');
   if (!text) return result;
-  return {
-    ...result,
-    content: [
-      ...result.content,
-      { type: 'text', text: `\n--- Background command results ---\n${text}` }
-    ]
-  };
+  // A background command's output is tool output too.
+  const recovered = await shieldOutput(context, `${name} background command`, ok(`\n--- Background command results ---\n${text}`));
+  return { ...result, content: [...result.content, ...recovered.content] };
 }
 
 /**
@@ -1121,7 +1142,10 @@ async function dispatchTracked(
   // subtly earlier internal value that omits the worker report most likely to matter later.
   // The Plugins handler owns validation/redaction of external results. A dispatcher refusal
   // never visited that owner and therefore needs its own single redaction pass.
-  const baseResult = surface === 'plugins' && !handlerRan ? pluginManager.redactResult(result) as ToolResult : result;
+  // #1796: the tool's own output is masked once, on the outer call, before anything the app adds
+  // (inbox, notices, the user's own new messages) — those are not tool output.
+  const ownResult = surface === 'plugins' && !handlerRan ? pluginManager.redactResult(result) as ToolResult : result;
+  const baseResult = nested ? ownResult : await shieldOutput(context, name, ownResult);
   // A tool that reads nothing belonging to a chat (usage) answers before the page's evidence
   // for its request arrives; the attribution notice would only add noise to every such answer.
   const identityFree = IDENTITY_FREE_TOOLS.has(name);
@@ -1153,7 +1177,7 @@ async function dispatchTracked(
     delivered = { ...delivered, content: [...delivered.content, ...attachments] };
   }
   if (!nested && handlerRan && !deliveryFenced) {
-    delivered = await withBackgroundExecRecovery(context, delivered);
+    delivered = await withBackgroundExecRecovery(context, delivered, name);
   }
   if (!nested) delivered = await withIdentityRecoveredNotice(context, delivered);
   if (surface === 'plugins' && delivered.content.length > baseResult.content.length) {

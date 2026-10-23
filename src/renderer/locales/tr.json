@@ -1846,7 +1846,6 @@
   "Mention Chat On Steroids Core": "Chat On Steroids Core'dan bahset",
   "Makes sure ChatGPT can use this app in every chat. Turn it off if ChatGPT starts plain questions with an unneeded tool call. Workers, Goal, Loop and Continue always keep the mention.": "ChatGPT'nin bu uygulamayı her sohbette kullanabilmesini sağlar. ChatGPT basit sorulara gereksiz bir araç çağrısıyla başlıyorsa kapatın. Worker'lar, Hedef, Döngü ve Continue bahsetmeyi her zaman korur.",
   "Privacy": "Gizlilik",
-  "What ChatGPT sees of your screen.": "ChatGPT'nin ekranınızdan gördükleri.",
   "For developers": "Geliştiriciler için",
   "Troubleshooting details and access for tools on this computer.": "Sorun giderme ayrıntıları ve bu bilgisayardaki araçlar için erişim.",
   "Show turn boundaries and recovery events in the chat.": "Tur sınırlarını ve kurtarma olaylarını sohbette göster.",
@@ -3025,5 +3024,11 @@
   "Drafts that wait": "Bekleyen taslaklar",
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "Bir kalem, gönderilmemiş mesajı olan sohbetleri işaretler ve taslaklar yeniden başlatmadan sonra geri gelir.",
   "A better Review": "Daha iyi bir İnceleme",
-  "Right-click an untracked file to add it, or its folder, to .gitignore.": "İzlenmeyen bir dosyaya sağ tıklayarak onu ya da klasörünü .gitignore dosyasına ekleyin."
+  "Right-click an untracked file to add it, or its folder, to .gitignore.": "İzlenmeyen bir dosyaya sağ tıklayarak onu ya da klasörünü .gitignore dosyasına ekleyin.",
+  "Hide secrets from ChatGPT": "Gizli bilgileri ChatGPT'den gizle",
+  "API keys, tokens, private keys and passwords in what tools return are replaced with a short note before ChatGPT sees them. Your files stay as they are. A project can turn this off in its menu.": "Araçların döndürdüğü içerikteki API anahtarları, tokenlar, özel anahtarlar ve parolalar ChatGPT görmeden önce kısa bir notla değiştirilir. Dosyalarınız olduğu gibi kalır. Bir proje bunu kendi menüsünden kapatabilir.",
+  "What ChatGPT gets to see on this computer.": "ChatGPT'nin bu bilgisayarda görebildikleri.",
+  "Off for every project in Settings": "Ayarlar'da tüm projeler için kapalı",
+  "This project's tools send keys and tokens to ChatGPT as they are": "Bu projenin araçları anahtarları ve tokenları ChatGPT'ye olduğu gibi gönderir",
+  "Keys and tokens in this project's tool results are hidden from ChatGPT": "Bu projenin araç sonuçlarındaki anahtarlar ve tokenlar ChatGPT'den gizlenir"
 }

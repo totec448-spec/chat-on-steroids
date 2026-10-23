@@ -1879,7 +1879,6 @@
   "Mention Chat On Steroids Core": "Mentionner Chat On Steroids Core",
   "Makes sure ChatGPT can use this app in every chat. Turn it off if ChatGPT starts plain questions with an unneeded tool call. Workers, Goal, Loop and Continue always keep the mention.": "Garantit que ChatGPT peut utiliser cette app dans chaque discussion. Désactivez-le si ChatGPT commence des questions simples par un appel d'outil inutile. Les workers, Goal, Loop et Continue gardent toujours la mention.",
   "Privacy": "Confidentialité",
-  "What ChatGPT sees of your screen.": "Ce que ChatGPT voit de votre écran.",
   "For developers": "Pour les développeurs",
   "Troubleshooting details and access for tools on this computer.": "Détails de dépannage et accès pour les outils de cet ordinateur.",
   "Show turn boundaries and recovery events in the chat.": "Afficher les limites de tour et les événements de récupération dans la discussion.",
@@ -3073,5 +3072,11 @@
   "Drafts that wait": "Des brouillons qui attendent",
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "Un crayon signale les chats avec un message non envoyé, et les brouillons reviennent après un redémarrage.",
   "A better Review": "Une Révision améliorée",
-  "Right-click an untracked file to add it, or its folder, to .gitignore.": "Faites un clic droit sur un fichier non suivi pour ajouter le fichier ou son dossier à .gitignore."
+  "Right-click an untracked file to add it, or its folder, to .gitignore.": "Faites un clic droit sur un fichier non suivi pour ajouter le fichier ou son dossier à .gitignore.",
+  "Hide secrets from ChatGPT": "Masquer les secrets à ChatGPT",
+  "API keys, tokens, private keys and passwords in what tools return are replaced with a short note before ChatGPT sees them. Your files stay as they are. A project can turn this off in its menu.": "Les clés d’API, jetons, clés privées et mots de passe dans ce que renvoient les outils sont remplacés par une courte note avant que ChatGPT ne les voie. Vos fichiers restent tels quels. Un projet peut désactiver cela dans son menu.",
+  "What ChatGPT gets to see on this computer.": "Ce que ChatGPT peut voir sur cet ordinateur.",
+  "Off for every project in Settings": "Désactivé pour tous les projets dans les Réglages",
+  "This project's tools send keys and tokens to ChatGPT as they are": "Les outils de ce projet envoient les clés et jetons à ChatGPT tels quels",
+  "Keys and tokens in this project's tool results are hidden from ChatGPT": "Les clés et jetons dans les résultats des outils de ce projet sont masqués à ChatGPT"
 }

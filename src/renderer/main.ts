@@ -768,6 +768,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       mentionCore: $<HTMLInputElement>('mentionCore').checked,
       mentionPlugins: $<HTMLInputElement>('mentionPlugins').checked,
       privacyScreenshots: $<HTMLInputElement>('privacyScreenshots').checked,
+      secretsShield: $<HTMLInputElement>('secretsShield').checked,
       theme: over.theme ?? previous.ui.theme,
       appearance: over.appearance ?? previous.ui.appearance
     },
@@ -1733,6 +1734,12 @@ function apply(next: AppState): void {
     $<HTMLInputElement>('privacyScreenshots'),
     config.ui.privacyScreenshots,
     previousState?.config.ui.privacyScreenshots
+  );
+  // Missing means on (#1796).
+  applyChecked(
+    $<HTMLInputElement>('secretsShield'),
+    config.ui.secretsShield !== false,
+    previousState ? previousState.config.ui.secretsShield !== false : undefined
   );
   // Only macOS screenshots can show the whole screen; on Windows every capture is one window
   // already, so the switch would change nothing there.
@@ -2813,6 +2820,7 @@ for (const id of [
   'controlApiAllowActions',
   'mcpPersistentUrls',
   'privacyScreenshots',
+  'secretsShield',
   'tunnelKind',
   'tunnelId',
   'desktopTunnelId',
