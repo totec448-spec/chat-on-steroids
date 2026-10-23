@@ -21,8 +21,10 @@ export interface RowMenuItem {
   /** A longer explanation, as the item's tooltip. */
   title?: () => string;
   danger?: boolean;
-  /** A choice among several (menuitemradio): whether it is the current one. */
+  /** A choice among several (menuitemradio): whether it is the current one. With `toggle`, an on/off switch's state. */
   checked?: boolean;
+  /** An on/off switch (menuitemcheckbox) rather than a choice among several. */
+  toggle?: boolean;
   /** A color dot before the label (`data-color`); an empty string draws the empty dot. */
   swatch?: string;
   disabled?: boolean;
@@ -51,6 +53,8 @@ export interface RowMenuOptions {
   items: () => RowMenuItem[];
   /** A right click opens the menu at the pointer instead of beside the button. */
   at?: { x: number; y: number };
+  /** Items that are lines of text (a chat's bookmarks), not commands: the menu may be wider. */
+  wide?: boolean;
 }
 
 const EDGE = 8;
@@ -106,6 +110,7 @@ export function openRowMenu(options: RowMenuOptions): void {
   // opened from the keyboard must measure the button where it is, not where it is hidden.
   options.anchor()?.setAttribute('aria-expanded', 'true');
   const menu = level(options.items(), options.label, 0);
+  menu.classList.toggle('is-wide', options.wide === true);
   document.body.append(menu);
   current.levels.push(menu);
   place(menu, options);
@@ -186,7 +191,7 @@ function itemButton(item: RowMenuItem, menu: HTMLElement, depth: number): HTMLBu
   for (const [key, value] of Object.entries(item.data ?? {})) button.dataset[key] = value;
   button.tabIndex = -1;
   button.disabled = item.disabled === true;
-  button.setAttribute('role', item.checked === undefined ? 'menuitem' : 'menuitemradio');
+  button.setAttribute('role', item.checked === undefined ? 'menuitem' : item.toggle ? 'menuitemcheckbox' : 'menuitemradio');
   if (item.checked !== undefined) button.setAttribute('aria-checked', String(item.checked));
   if (item.swatch !== undefined) {
     const dot = el('span', 'row-menu-swatch');
@@ -271,14 +276,17 @@ function checkedIndex(menu: HTMLElement): number {
 
 function focusItem(menu: HTMLElement, index: number): void {
   const items = enabledItems(menu);
-  items[Math.min(Math.max(0, index), items.length - 1)]?.focus({ preventScroll: true });
+  const item = items[Math.min(Math.max(0, index), items.length - 1)];
+  item?.focus({ preventScroll: true });
+  // A long menu scrolls: keep the focused item in view inside it (the page itself never scrolls).
+  if (item && menu.scrollHeight > menu.clientHeight) item.scrollIntoView({ block: 'nearest' });
 }
 
 function keyboard(event: KeyboardEvent, menu: HTMLElement, depth: number): void {
   if (!current) return;
   const items = enabledItems(menu);
   const at = items.indexOf(document.activeElement as HTMLButtonElement);
-  const move = (index: number): void => { event.preventDefault(); items[(index + items.length) % items.length]?.focus({ preventScroll: true }); };
+  const move = (index: number): void => { event.preventDefault(); focusItem(menu, (index + items.length) % items.length); };
   switch (event.key) {
     case 'ArrowDown': return move(at + 1);
     case 'ArrowUp': return move(at < 0 ? items.length - 1 : at - 1);
@@ -315,12 +323,19 @@ function placeAt(menu: HTMLElement, x: number, y: number): void {
 /** Below a button (opening upwards without room), or beside a submenu's item, inside the window. */
 function placeBeside(menu: HTMLElement, box: DOMRect, side: 'below' | 'right'): void {
   // Its layout size: the opening animation must not make it look smaller than it is.
-  const width = menu.offsetWidth, height = menu.offsetHeight;
+  const width = menu.offsetWidth;
+  let height = menu.offsetHeight;
   let left: number, top: number;
   if (side === 'below') {
     left = box.left;
     top = box.bottom + 4;
-    if (top + height > window.innerHeight - EDGE) top = box.top - height - 4;
+    const below = window.innerHeight - EDGE - top, above = box.top - 4 - EDGE;
+    if (height > below && height > above) {
+      // Too long for either side: it scrolls in the larger one, still next to its button.
+      height = Math.max(below, above);
+      menu.style.maxHeight = `${height}px`;
+      if (above > below) top = box.top - 4 - height;
+    } else if (height > below) top = box.top - height - 4;
   } else {
     left = box.right + 2;
     if (left + width > window.innerWidth - EDGE) left = box.left - width - 2;

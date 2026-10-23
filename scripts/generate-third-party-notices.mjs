@@ -31,6 +31,10 @@ notices.push('='.repeat(80), 'Phosphor Icons — interface icons (Regular and Fi
   'Source: https://www.npmjs.com/package/@phosphor-icons/core/v/2.1.1',
   'CoS embeds the SVG paths of the icons it uses in its renderer sprite, scaled to a 24-unit grid.', '');
 notices.push('--- Phosphor LICENSE ---', await fs.readFile(path.join(root, 'docs/licenses/phosphor/LICENSE'), 'utf8'), '');
+notices.push('='.repeat(80), 'Atkinson Hyperlegible Next — the Appearance font "Atkinson Hyperlegible"',
+  'Source: https://www.npmjs.com/package/@fontsource-variable/atkinson-hyperlegible-next/v/5.2.6',
+  'CoS bundles its unmodified Latin and Latin Extended variable-weight WOFF2 files, upright and italic.', '');
+notices.push('--- Atkinson Hyperlegible Next LICENSE ---', await fs.readFile(path.join(root, 'docs/licenses/atkinson-hyperlegible-next/LICENSE'), 'utf8'), '');
 let count = 0;
 for (const [relative, entry] of Object.entries(lock.packages).sort(([a], [b]) => a.localeCompare(b))) {
   if (!relative || entry.dev === true) continue;

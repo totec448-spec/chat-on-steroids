@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { goalErrorKey, goalErrorMessage } from '../src/shared/goal-errors.js';
 import de from '../src/renderer/locales/de.json';
 import es from '../src/renderer/locales/es.json';
@@ -11,6 +11,13 @@ import tr from '../src/renderer/locales/tr.json';
 import fr from '../src/renderer/locales/fr.json';
 import ptBR from '../src/renderer/locales/pt-BR.json';
 import ptPT from '../src/renderer/locales/pt-PT.json';
+
+function extensionCatalogs(locales: readonly string[]) {
+  return Object.fromEntries(locales.map(locale => [
+    locale,
+    JSON.parse(readFileSync(new URL(`../extension/_locales/${locale}/messages.json`, import.meta.url), 'utf8')) as Record<string, { message: string }>
+  ]));
+}
 
 describe('Goal failure explanations', () => {
   it('explains that missing tool evidence may be a question or lost connection without disabling Loop', () => {
@@ -67,7 +74,7 @@ describe('Goal failure explanations', () => {
       'goal_browser_busy', 'goal_browser_cancelled', 'goal_browser_send_failed', 'goal_browser_send_unconfirmed',
       'goal_owned_elsewhere', 'goal_final_not_confirmed', 'astra_finish_only', 'goal_disabled', 'goal_worker_chat',
       'conversation_superseded', 'chat_blocked', 'session_not_recorded', 'no_conversation', 'no_objective',
-      'nothing_to_open_with', 'loop_stop_refused', 'goal_marker_missing', 'goal_reply_not_durable',
+      'nothing_to_open_with', 'goal_helper_stop_unverified', 'loop_stop_refused', 'goal_marker_missing', 'goal_reply_not_durable',
       'goal_ack_not_durable', 'goal_switch_not_durable', 'goal_objective_not_durable',
       'invalid_goal_decision_json', 'provider_completion_error'
     ];
@@ -85,16 +92,13 @@ describe('Goal failure explanations', () => {
     }
   });
 
-  it('gives the page a catalog key for every fixed explanation, in every extension language', () => {
+  it('gives the page a catalog key for selected explanations in the existing eight extension languages', () => {
     const codes = [
       'out_of_credit', 'auth_rejected', 'no_api_key', 'rate_limited', 'loop_mcp_call_missing',
       'goal_context_too_large', 'request_failed', 'request_failed: fetch failed', 'request_failed: no_api_key'
     ];
     const locales = ['de', 'en', 'es', 'fr', 'ja', 'tr', 'zh_CN', 'zh_TW'];
-    const catalogs = Object.fromEntries(locales.map((locale) => [
-      locale,
-      JSON.parse(readFileSync(new URL(`../extension/_locales/${locale}/messages.json`, import.meta.url), 'utf8')) as Record<string, { message: string }>
-    ]));
+    const catalogs = extensionCatalogs(locales);
     for (const code of codes) {
       const key = goalErrorKey(code);
       expect(key, code).toMatch(/^[a-z_]+$/);
@@ -106,6 +110,18 @@ describe('Goal failure explanations', () => {
       }
     }
     expect(catalogs.de?.content_goal_error_out_of_credit?.message).not.toBe(catalogs.en?.content_goal_error_out_of_credit?.message);
+  });
+
+  it('localizes the unchecked Goal stop in every extension language', () => {
+    const locales = readdirSync(new URL('../extension/_locales/', import.meta.url), { withFileTypes: true })
+      .filter(entry => entry.isDirectory()).map(entry => entry.name);
+    const catalogs = extensionCatalogs(locales);
+    const code = 'goal_helper_stop_unverified';
+    const key = goalErrorKey(code);
+    expect(catalogs.en?.[`content_goal_error_${key}`]?.message).toBe(goalErrorMessage(code));
+    for (const locale of locales) {
+      expect(catalogs[locale]?.[`content_goal_error_${key}`]?.message, locale).toBeTruthy();
+    }
   });
 
   it('leaves explanations with dynamic detail untranslated rather than dropping the detail', () => {

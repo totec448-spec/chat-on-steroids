@@ -80,9 +80,10 @@ vi.mock('../src/main/mcp/server.js', () => ({
 }));
 
 vi.mock('../src/main/mcp/tools.js', () => ({ lastToolCallAt: () => null }));
-const paths = vi.hoisted(() => ({ kept: {} as Record<string, string>, remembered: [] as unknown[] }));
+const paths = vi.hoisted(() => ({ kept: {} as Record<string, string>, port: null as number | null, remembered: [] as unknown[] }));
 vi.mock('../src/main/mcp/persistent-paths.js', () => ({
   loadSurfaceTokens: vi.fn(async () => paths.kept),
+  loadKeptPort: vi.fn(async () => paths.port),
   rememberSurfaceTokens: vi.fn(async (urls: unknown) => { paths.remembered.push(urls); return true; }),
   forgetSurfaceTokens: vi.fn(async () => undefined)
 }));
@@ -1027,17 +1028,39 @@ describe('persistent connector URLs', () => {
     const connection = await import('../src/main/connection.js');
     const { startMcpServer } = await import('../src/main/mcp/server.js');
     const start = vi.mocked(startMcpServer);
-    paths.kept = { core: 'k'.repeat(43) }; paths.remembered.length = 0;
+    paths.kept = { core: 'k'.repeat(43) }; paths.port = 50123; paths.remembered.length = 0;
     mocks.config.mcp.persistentUrls = true;
     await connection.connect();
     expect(start.mock.calls.at(-1)![1]).toEqual({ core: 'k'.repeat(43) });
+    // The kept local port too (#1550): a tunnel of the user's own points at it.
+    expect(start.mock.calls.at(-1)![2]).toEqual({ port: 50123 });
     expect(paths.remembered.at(-1)).toMatchObject({ core: 'http://127.0.0.1:45678/mcp/core/core-token' });
     await connection.disconnect();
     mocks.config.mcp.persistentUrls = false; paths.remembered.length = 0;
     await connection.connect();
     expect(start.mock.calls.at(-1)![1]).toEqual({});
+    expect(start.mock.calls.at(-1)![2]).toEqual({});
     expect(paths.remembered).toEqual([]);
     await connection.disconnect();
+  });
+
+  // #1733 edge: the kept port can be taken by another program; the endpoint then listens on
+  // another one, and a tunnel of the user's own still points at the old one until they change it.
+  it('says when the kept port was taken and the endpoint moved, and clears that on disconnect', async () => {
+    vi.resetModules();
+    const connection = await import('../src/main/connection.js');
+    paths.kept = { core: 'k'.repeat(43) }; paths.port = 50123;
+    mocks.config.mcp.persistentUrls = true;
+    try {
+      await connection.connect();
+      expect(connection.getStatus().keptPortMoved).toEqual({ from: 50123, to: 45678 });
+      await connection.disconnect();
+      expect(connection.getStatus().keptPortMoved).toBeNull();
+      paths.port = 45678;
+      await connection.connect();
+      expect(connection.getStatus().keptPortMoved).toBeNull();
+      await connection.disconnect();
+    } finally { mocks.config.mcp.persistentUrls = false; }
   });
 });
 

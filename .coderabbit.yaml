@@ -1,0 +1,137 @@
+# CodeRabbit: a second automatic reviewer next to Codex (#1625). It comments; it never pushes,
+# approves or merges. Kept quiet on purpose: line findings that matter, no summaries, no labels.
+# The PR checklist bot (scripts/pr-check.mjs) stays the gate for titles, descriptions and the rules.
+# Schema: https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+tone_instructions: >-
+  Plain, short English. Report only real problems: bugs, rare and edge cases, races, data loss,
+  security. One finding per comment with a concrete fix. No praise, no style nits the linters catch.
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: false
+  review_status: false
+  review_details: false
+  collapse_walkthrough: true
+  changed_files_summary: false
+  sequence_diagrams: false
+  estimate_code_review_effort: false
+  # PRs here need no linked issue (CONTRIBUTING.md); background lives in the description.
+  assess_linked_issues: false
+  related_issues: false
+  related_prs: false
+  suggested_labels: false
+  auto_apply_labels: false
+  suggested_reviewers: false
+  in_progress_fortune: false
+  poem: false
+  abort_on_close: true
+  auto_review:
+    enabled: true
+    drafts: false
+    # Every push of a PR, however many: the default pauses after five reviewed commits.
+    auto_pause_after_reviewed_commits: 0
+    # PRs into any branch, not only main.
+    base_branches:
+      - ".*"
+    ignore_usernames:
+      - dependabot[bot]
+  path_filters:
+    # Translations are checked by test/renderer-i18n*.test.ts (every key in every language,
+    # placeholders intact); twelve catalogs per PR would bury the real findings.
+    - "!src/renderer/locales/**"
+    - "!extension/_locales/**"
+    - "!package-lock.json"
+    - "!CHANGELOG.md"
+    - "!docs/release-notes/**"
+    - "!**/*.png"
+    - "!**/*.webp"
+    - "!**/*.jpg"
+    - "!**/*.svg"
+  path_instructions:
+    - path: "src/main/**"
+      instructions: >-
+        Electron main process. Check what happens on restart mid-operation, with two browsers
+        connected, on a slow or loaded computer, and with missing, old or damaged saved data.
+        Every decision the app makes (it waits, refuses, skips or retries) should write one log
+        line that says which and why.
+    - path: "extension/**"
+      instructions: >-
+        Browser extension for Chrome and Firefox (MV3; a service worker in Chrome, an event page in
+        Firefox). Listeners must be registered synchronously at top level. Firefox drops alarms on
+        restart. chatgpt.com changes its page often: no matching on English UI text, and no
+        assumption that an element exists.
+    - path: "src/renderer/**"
+      instructions: >-
+        Every text a person sees goes through t() (or tn() for counts) and must exist in all 12
+        catalogs. Check keyboard access, focus after the action, and long translations (German)
+        in narrow places.
+    - path: "test/**"
+      instructions: >-
+        Flag fixed waits over a second and vi.waitFor calls that rely on its one-second default:
+        the release runners (Intel macOS, Linux arm64) are slow. Prefer waiting for a condition.
+        A test for a bug fix should fail on the code before the fix.
+  pre_merge_checks:
+    docstrings:
+      mode: "off"
+    title:
+      mode: "off"
+    description:
+      mode: "off"
+    issue_assessment:
+      mode: "off"
+    custom_checks:
+      - name: "Edge cases handled"
+        mode: "warning"
+        instructions: >-
+          Read the PR description's "## Edge cases" section (or its "No edge cases: <reason>"
+          line). Pass if each listed case is handled in the diff and, where code changed, a test
+          exercises it. Warn, naming the case, when a listed case has no handling or no test, or
+          when the diff plainly misses a common one: restart or crash mid-operation, empty or
+          very large input, two browsers or two computers at once, a slow machine, old saved data.
+  # Review only: none of its commands may commit to a PR branch (Autofix, Fix CI, merge conflicts,
+  # generated tests or docstrings). Contributors push their own changes.
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+    simplify:
+      enabled: false
+    autofix:
+      enabled: false
+    fix_ci:
+      enabled: false
+    resolve_merge_conflict:
+      enabled: false
+  tools:
+    # The repository's own ESLint and TypeScript run in CI; these would add overlapping noise.
+    biome:
+      enabled: false
+    oxc:
+      enabled: false
+    languagetool:
+      enabled: false
+    markdownlint:
+      enabled: false
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "AGENTS.md"
+      - "CONTRIBUTING.md"
+  learnings:
+    scope: local
+
+issue_enrichment:
+  auto_enrich:
+    enabled: false
+  planning:
+    enabled: false
+    auto_planning:
+      enabled: false

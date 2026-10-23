@@ -1141,6 +1141,98 @@ describe('accepted helper tab cleanup', () => {
   }
 });
 
+describe('a linked Project ChatGPT no longer has (#1759)', () => {
+  const inputId = 'ffffffff-1111-4222-8333-444444444444';
+  const project = 'g-p-11111111222233334444555555555555';
+  it.each([
+    ['the opened tab on that Project', 1, `https://chatgpt.com/g/${project}-work/project?cos-input=${inputId}`, project, true],
+    ['another tab', 2, `https://chatgpt.com/g/${project}/project`, project, false],
+    ['a tab that moved away', 1, 'https://chatgpt.com/', project, false],
+    ['another Project', 1, `https://chatgpt.com/g/${project}/project`, 'g-p-99999999888877776666555555555555', false],
+    ['a tab already leaving the Project', 1, `https://chatgpt.com/g/${project}/project`, project, false, 'https://chatgpt.com/']
+  ] as const)('is reported only by %s', async (_name, tabId, url, reportedProject, posted, pendingUrl?: string) => {
+    const calls: any[] = [];
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token', inputOpenings: { [inputId]: { tab: 1, stage: 'ready', project } } }),
+      session: new FakeStorageArea(),
+      tabsGet: async () => ({ id: tabId, url, ...(pendingUrl ? { pendingUrl } : {}) }),
+      fetch: async (input, init: any = {}) => {
+        const route = new URL(input).pathname;
+        if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (route === '/project-create') calls.push(JSON.parse(init.body));
+        return response(200, { ok: true });
+      }
+    });
+    await worker.registerTab(tabId);
+    await worker.send({ type: 'project_unavailable', id: inputId, project: reportedProject }, tabId);
+    expect(calls).toEqual(posted ? [{ action: 'gone', inputId, chatgptId: project }] : []);
+  });
+
+  it('is not reported by a tab that closed while asking', async () => {
+    const calls: any[] = [];
+    let closed = false;
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token', inputOpenings: { [inputId]: { tab: 1, stage: 'ready', project } } }),
+      session: new FakeStorageArea(),
+      tabsGet: async () => { if (closed) throw new Error('No tab with id: 1.'); return { id: 1, url: `https://chatgpt.com/g/${project}/project` }; },
+      fetch: async (input, init: any = {}) => {
+        const route = new URL(input).pathname;
+        if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (route === '/project-create') calls.push(JSON.parse(init.body));
+        return response(200, { ok: true });
+      }
+    });
+    await worker.registerTab(1);
+    closed = true;
+    const reply = await worker.send({ type: 'project_unavailable', id: inputId, project }, 1);
+    expect(reply).toEqual({ ok: false });
+    expect(calls).toEqual([]);
+  });
+});
+
+describe('a page\'s release reason', () => {
+  it.each(['send-not-ready', 'turn-progressed by app-tool_call', 'turn-progressed by page-text'])('reaches the app whole: %s', async (detail) => {
+    const posted: any[] = [];
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }), session: new FakeStorageArea(),
+      tabsGet: async () => ({ id: 1, url: 'https://chatgpt.com/c/6adb3318-5500-83eb-afe8-d70d1bd49d1f' }),
+      fetch: async (input, init: any = {}) => {
+        const route = new URL(input).pathname;
+        if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (route === '/input/fail') posted.push(JSON.parse(init.body));
+        return response(200, { ok: true });
+      }
+    });
+    await worker.registerTab(1);
+    await worker.send({ type: 'desktop_input', id: 'ffffffff-1111-4222-8333-444444444444', owner: '1:document-1-0:0',
+      fail: true, error: 'After-turn pickup was withdrawn before Send.', detail });
+    expect(posted.at(-1)?.detail).toBe(detail);
+  });
+
+  it('drops a reason that is not one of the page\'s own short codes', async () => {
+    const posted: any[] = [];
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }), session: new FakeStorageArea(),
+      tabsGet: async () => ({ id: 1, url: 'https://chatgpt.com/c/6adb3318-5500-83eb-afe8-d70d1bd49d1f' }),
+      fetch: async (input, init: any = {}) => {
+        const route = new URL(input).pathname;
+        if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (route === '/input/fail') posted.push(JSON.parse(init.body));
+        return response(200, { ok: true });
+      }
+    });
+    await worker.registerTab(1);
+    for (const [index, detail] of ['Some sentence. With dots', 'x'.repeat(81), 'UPPER-case'].entries()) {
+      await worker.send({ type: 'desktop_input', id: 'ffffffff-1111-4222-8333-444444444444', owner: '1:document-1-0:0',
+        fail: true, error: 'After-turn pickup was withdrawn before Send.', detail });
+      // The report itself still travels; only its reason is left out.
+      expect(posted).toHaveLength(index + 1);
+      expect(posted.at(-1)).toMatchObject({ error: 'After-turn pickup was withdrawn before Send.' });
+      expect(posted.at(-1)?.detail).toBeUndefined();
+    }
+  });
+});
+
 describe('browser identity', () => {
   it('sends one stable random browser id with every app request', async () => {
     const seen: string[] = [];
@@ -3881,6 +3973,39 @@ describe('extension revival delivery', () => {
 });
 
 describe('extension observation journal', () => {
+  // #1744: a chat started inside a ChatGPT Project joins the CoS project linked to it; the app
+  // learns the Project from the tab that recorded the chat, never from the page's own report.
+  it.each([
+    ['inside a ChatGPT Project', `https://chatgpt.com/g/g-p-${'d'.repeat(32)}-kunden/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee`, `g-p-${'d'.repeat(32)}`],
+    ['on a Project home before the chat has an id', `https://chatgpt.com/g/g-p-${'d'.repeat(32)}/project`, `g-p-${'d'.repeat(32)}`, true],
+    // A late batch for a named chat must not take the Project a tab shows by then.
+    ['on a Project home for a chat that already has an id', `https://chatgpt.com/g/g-p-${'d'.repeat(32)}/project`, undefined],
+    ['outside any Project', 'https://chatgpt.com/c/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', undefined],
+    ['showing another chat of that Project', `https://chatgpt.com/g/g-p-${'d'.repeat(32)}/c/11111111-2222-4333-8444-555555555555`, undefined]
+  ] as Array<[string, string, string | undefined, boolean?]>)('sends the ChatGPT Project its tab showed with a chat\'s events: %s', async (_case, url, expected, fresh) => {
+    const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const posted: Array<Record<string, unknown>> = [];
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }),
+      session: new FakeStorageArea(),
+      fetch: async (input, init = {}) => {
+        const pathname = new URL(input).pathname;
+        if (pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (pathname !== '/events') return response(404, {});
+        const batch = JSON.parse(String(init.body));
+        posted.push(batch);
+        return response(200, { stored: batch.events.length });
+      },
+      tabsGet: async (id) => ({ id, url })
+    });
+    await worker.registerTab(61);
+    // A fresh chat's first observation has no id yet; it is journalled under the tab and bound once ChatGPT names it.
+    await worker.send({ type: 'events', ...(fresh ? {} : { conversationId: chat }), entries: [{ ...(fresh ? {} : { conversationId: chat }), event: { kind: 'progress', time: Date.now(), text: 'x' } }] }, 61);
+    if (fresh) await worker.send({ type: 'events', conversationId: chat, entries: [] }, 61);
+    await vi.waitFor(() => expect(posted).toHaveLength(1), { timeout: 10_000 });
+    expect(posted[0]!.chatgptProject).toBe(expected);
+  });
+
   it.each([false, true])('retains a slow durable event batch beyond ten seconds, including a split retry: %s', async split => {
     vi.useFakeTimers();
     const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
@@ -6041,15 +6166,15 @@ describe('this install\'s connector names', () => {
 
 describe('archiving retired worker chats (#1460)', () => {
   const chat = 'aaaaaaaa-1111-4222-8333-444444444444';
-  function archiveWorker(outcome: unknown) {
+  function archiveWorker(outcome: unknown, job: Record<string, unknown> = { conversationId: chat }) {
     const results: unknown[] = [];
-    let next: string | null = chat;
+    let next: Record<string, unknown> | null = job;
     const worker = loadWorker({
       local: new FakeStorageArea({ port: 8765, token: 'paired-token' }), session: new FakeStorageArea(),
       fetch: async (input, init = {}) => {
         const route = new URL(input).pathname;
         if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
-        if (route === '/worker-archive/next') { const id = next; next = null; return response(200, { conversationId: id }); }
+        if (route === '/worker-archive/next') { const body = next ?? { conversationId: null }; next = null; return response(200, body); }
         if (route === '/worker-archive/result') { results.push(JSON.parse(String(init.body))); return response(200, { ok: true }); }
         return response(200, {});
       },
@@ -6063,7 +6188,7 @@ describe('archiving retired worker chats (#1460)', () => {
     await worker.createTab({ id: 1, url: 'https://chatgpt.com/' });
     await worker.registerTab(1);
     await worker.fireAlarm();
-    expect(worker.tabsSendMessage).toHaveBeenCalledWith(1, { type: 'clf-archive-chat', conversationId: chat }, expect.objectContaining({ documentId: expect.any(String) }));
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(1, { type: 'clf-archive-chat', conversationId: chat, archive: true }, expect.objectContaining({ documentId: expect.any(String) }));
     expect(results).toEqual([{ conversationId: chat, outcome: 'archived' }]);
   });
 
@@ -6072,6 +6197,28 @@ describe('archiving retired worker chats (#1460)', () => {
     await worker.fireAlarm();
     expect(worker.tabsSendMessage).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ type: 'clf-archive-chat' }), expect.anything());
     expect(results).toEqual([{ conversationId: chat, outcome: 'deferred' }]);
+  });
+
+  it('restores a chat the app archived before its worker is woken (#1701)', async () => {
+    const { worker, results } = archiveWorker({ outcome: 'unarchived' }, { conversationId: null, unarchive: chat });
+    await worker.createTab({ id: 1, url: 'https://chatgpt.com/' });
+    await worker.registerTab(1);
+    await worker.fireAlarm();
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(1, { type: 'clf-archive-chat', conversationId: chat, archive: false }, expect.objectContaining({ documentId: expect.any(String) }));
+    expect(results).toEqual([{ conversationId: chat, outcome: 'unarchived' }]);
+  });
+
+  it('never reports a restore as an archive, or the other way round', async () => {
+    const restoring = archiveWorker({ outcome: 'archived' }, { conversationId: null, unarchive: chat });
+    await restoring.worker.createTab({ id: 1, url: 'https://chatgpt.com/' });
+    await restoring.worker.registerTab(1);
+    await restoring.worker.fireAlarm();
+    expect(restoring.results).toEqual([{ conversationId: chat, outcome: 'failed' }]);
+    const archiving = archiveWorker({ outcome: 'unarchived' });
+    await archiving.worker.createTab({ id: 1, url: 'https://chatgpt.com/' });
+    await archiving.worker.registerTab(1);
+    await archiving.worker.fireAlarm();
+    expect(archiving.results).toEqual([{ conversationId: chat, outcome: 'failed' }]);
   });
 
   it('reports a failure the page could not explain as failed', async () => {

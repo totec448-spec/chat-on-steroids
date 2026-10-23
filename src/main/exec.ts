@@ -206,6 +206,18 @@ export async function terminateProcessTree(
   force = true,
   helperTimeoutMs = force ? 1_000 : 500
 ): Promise<void> {
+  return endProcess(pid, force, helperTimeoutMs, true);
+}
+
+/**
+ * Ends one process and nothing it started. For a process whose children are not its own work:
+ * the desktop helper starts apps for the person, and those must outlive the helper.
+ */
+export async function terminateProcess(pid: number, force = true): Promise<void> {
+  return endProcess(pid, force, force ? 1_000 : 500, false);
+}
+
+async function endProcess(pid: number, force: boolean, helperTimeoutMs: number, tree: boolean): Promise<void> {
   // child.kill() leaves grandchildren running on Windows; taskkill /T handles the tree.
   // taskkill itself can block while waiting on an uncooperative console process, so
   // bound the helper too. The caller owns the larger graceful/forced deadline.
@@ -225,7 +237,7 @@ export async function terminateProcessTree(
         resolve(ok);
       };
       try {
-        const args = ['/pid', String(pid), '/T'];
+        const args = tree ? ['/pid', String(pid), '/T'] : ['/pid', String(pid)];
         if (force) args.push('/F');
         const killer = spawn(taskkill, args, {
           windowsHide: true,
@@ -265,11 +277,13 @@ export async function terminateProcessTree(
   // Fall back to the leader itself for a process that predates that launch contract or
   // has already changed session/group state.
   const signal = force ? 'SIGKILL' : 'SIGTERM';
-  try {
-    process.kill(-pid, signal);
-    return;
-  } catch {
-    /* group is gone or was not created */
+  if (tree) {
+    try {
+      process.kill(-pid, signal);
+      return;
+    } catch {
+      /* group is gone or was not created */
+    }
   }
   try {
     process.kill(pid, signal);

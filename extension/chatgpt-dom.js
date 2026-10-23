@@ -69,6 +69,21 @@ var CLF_DOM = (() => {
   // A ChatGPT app mention renders as an inline chip (#861). It is how a message attached the app,
   // not what its author wrote, so readers comparing authored text never count it.
   const APP_MENTION_CHIP = '[data-prompt-link-href^="app://"], [app-mention-path]';
+  /**
+   * Nodes ChatGPT puts inside the editor that are not prompt text (#1792). A URL turned into a
+   * rich-link preview carries its own <style>; its CSS is part of `textContent`, so an untouched
+   * prompt read as changed and Compact & Resume never sent its handoff. Literal "<style>" typed into
+   * a prompt is text, not an element, and stays.
+   */
+  const NOT_PROMPT = 'style, script, noscript, template';
+  /** The editor's text as written: everything but those nodes. The common case reads it directly. */
+  const editorText = (node) => {
+    if (!node || node.matches?.(NOT_PROMPT)) return '';
+    if (!node.querySelector?.(NOT_PROMPT) || typeof node.cloneNode !== 'function') return node.textContent ?? '';
+    const clone = node.cloneNode(true);
+    for (const injected of clone.querySelectorAll(NOT_PROMPT)) injected.remove();
+    return clone.textContent ?? '';
+  };
   const authoredText = (node) => {
     if (!node?.querySelector?.(APP_MENTION_CHIP) || typeof node.cloneNode !== 'function') return text(node);
     const clone = node.cloneNode(true);
@@ -82,10 +97,10 @@ var CLF_DOM = (() => {
    */
   const composerAuthoredText = () => {
     const box = composer();
-    if (!box?.querySelector?.(APP_MENTION_CHIP) || typeof box.cloneNode !== 'function') return box?.textContent ?? '';
+    if (!box?.querySelector?.(APP_MENTION_CHIP) || typeof box.cloneNode !== 'function') return editorText(box);
     const clone = box.cloneNode(true);
     for (const chip of clone.querySelectorAll(APP_MENTION_CHIP)) chip.remove();
-    return clone.textContent ?? '';
+    return editorText(clone);
   };
 
   function searchUnitRole(node) {
@@ -615,6 +630,21 @@ var CLF_DOM = (() => {
     if (!turn || !stamp?.startsWith(`${turn}:`)) return null;
     try { return decodeURIComponent(stamp.slice(turn.length + 1)) || null; } catch { return null; }
   }
+  /**
+   * Whether the page shows exactly one exchange, the chat's first, running without its question
+   * (fiber.js `data-clf-fiber-first`), and no user message anywhere. The stamp counts only under
+   * the exchange's current turn stamp, like every other MAIN stamp; a stale one is no evidence.
+   */
+  function firstQuestionPending() {
+    return safe(() => {
+      const all = turns();
+      if (all.length !== 1 || all[0].role !== 'assistant' || messages().some(message => message.role === 'user')) return false;
+      const section = all[0].node;
+      if (!section?.matches?.(SHELL_TURN)) return false;
+      const turn = section.getAttribute('data-clf-fiber-turn'), stamp = section.getAttribute('data-clf-fiber-first');
+      return !!turn && stamp === turn;
+    }, false);
+  }
   function turns() {
     return safe(() => {
       const out = [];
@@ -791,13 +821,13 @@ var CLF_DOM = (() => {
     // Keep the same text comparison used by send receipts; editor identity and
     // trusted edits still revoke the lease even when a user only changes spacing.
     const compact = text => String(text || '').replace(/\s+/g, '');
-    const insertedText = compact(box?.textContent);
+    const insertedText = compact(editorText(box));
     let touched = false;
     let files = [];
     const events = ['input', 'change', 'keydown', 'pointerdown', 'paste', 'drop'];
     const changed = event => { if (event.isTrusted) touched = true; };
     for (const name of events) host?.addEventListener(name, changed, true);
-    const same = () => !touched && stillCurrent() && composer() === box && box?.isConnected && compact(box.textContent) === insertedText;
+    const same = () => !touched && stillCurrent() && composer() === box && box?.isConnected && compact(editorText(box)) === insertedText;
     const ownsAttachments = () => {
       if (!same() || !host) return false;
       const current = [...host.querySelectorAll('button[aria-label]')].filter(node => composerFileName(node));
@@ -835,7 +865,7 @@ var CLF_DOM = (() => {
       rebind() {
         if (rebound || touched || files.length || !stillCurrent() || same()) return false;
         const next = composer(), nextHost = composerBox() || composerActions()?.host;
-        if (!next?.isConnected || next === box || compact(next.textContent) !== insertedText || hasComposerAttachments()) return false;
+        if (!next?.isConnected || next === box || compact(editorText(next)) !== insertedText || hasComposerAttachments()) return false;
         for (const name of events) host?.removeEventListener(name, changed, true);
         box = next; host = nextHost; rebound = true;
         for (const name of events) host?.addEventListener(name, changed, true);
@@ -850,7 +880,7 @@ var CLF_DOM = (() => {
       withdraw() {
         if (touched || files.length || hasComposerAttachments()) return false;
         let current = composer();
-        if (!current?.isConnected || compact(current.textContent) !== insertedText) return false;
+        if (!current?.isConnected || compact(editorText(current)) !== insertedText) return false;
         if (current !== box) {
           if (withdrawRebound) return false;
           const nextHost = composerBox() || composerActions()?.host;
@@ -859,7 +889,7 @@ var CLF_DOM = (() => {
           for (const name of events) host?.addEventListener(name, changed, true);
         }
         current = composer();
-        if (touched || current !== box || !box?.isConnected || compact(box.textContent) !== insertedText || hasComposerAttachments()) return false;
+        if (touched || current !== box || !box?.isConnected || compact(editorText(box)) !== insertedText || hasComposerAttachments()) return false;
         return clearPromptExact(value);
       },
       dispose() { for (const name of events) host?.removeEventListener(name, changed, true); }
@@ -1059,7 +1089,7 @@ var CLF_DOM = (() => {
     if (!form) return [];
     // Read the editor here rather than reusing the submitter's own `draftText`, which is a local
     // closure over its captured box. Only "the composer holds something" is needed, not equality.
-    const drafted = (typeof box.innerText === 'string' ? box.innerText : box.textContent || '').trim();
+    const drafted = (typeof box.innerText === 'string' ? box.innerText : editorText(box)).trim();
     if (drafted === '' || generating()) return [];
     return [...form.querySelectorAll('button[class*="size-token-button-composer"][class*="bg-composer-primary"]')]
       .filter(button => {
@@ -1884,7 +1914,7 @@ var CLF_DOM = (() => {
       const box = composer();
       if (!composerWritable()) return false;
       if (generating() || stopButton()) return false;
-      if ((box.textContent || '').trim() !== '') return false;
+      if (editorText(box).trim() !== '') return false;
       return true;
     }, false);
   }
@@ -1912,14 +1942,14 @@ var CLF_DOM = (() => {
     return safe(() => {
       const box = composer();
       if (!composerWritable() || generating() || stopButton() || hasComposerAttachments()) return false;
-      const text = String(box.textContent || '').replace(/\\(?=[!-/:-@[-`{-~])/g, '').replace(/\s+/g, '');
+      const text = String(editorText(box)).replace(/\\(?=[!-/:-@[-`{-~])/g, '').replace(/\s+/g, '');
       if (!text || !REVIVAL_RESIDUE.test(text)) return false;
       box.focus();
       const selection = document.getSelection();
       if (!selection || document.activeElement !== box) return false;
       selection.selectAllChildren(box);
       document.execCommand('delete', false);
-      return (box.textContent || '').trim() === '';
+      return editorText(box).trim() === '';
     }, false);
   }
 
@@ -2369,7 +2399,7 @@ var CLF_DOM = (() => {
     };
     try {
       if (!box) return reject('composer_missing');
-      const existing = (box.textContent || '').trim();
+      const existing = editorText(box).trim();
       if (value === '' && mode !== true) return false;
       // Text this same value already put there is not a draft to protect: inserting it again would
       // produce exactly what is on screen. The residue of an attempt whose Send never landed used to
@@ -2414,7 +2444,7 @@ var CLF_DOM = (() => {
       const compact = text => String(text || '').replace(/\s+/g, '');
       const expected = mode === 'append' ? existing + value : value;
       if (!box.isConnected || !stillOwned(box)) return reject('editor_replaced');
-      if (compact(box.textContent) !== compact(expected)) return reject('text_mismatch');
+      if (compact(editorText(box)) !== compact(expected)) return reject('text_mismatch');
       return true;
     } catch {
       return reject('insertion_exception');
@@ -2426,12 +2456,12 @@ var CLF_DOM = (() => {
     return safe(() => {
       const box = composer();
       const compact = (text) => String(text || '').replace(/\s+/g, '');
-      if (!box || compact(box.textContent) !== compact(value)) return false;
+      if (!box || compact(editorText(box)) !== compact(value)) return false;
       box.focus();
       document.execCommand('selectAll', false);
       document.execCommand('delete', false);
       box.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward', data: null }));
-      return (box.textContent || '').trim() === '';
+      return editorText(box).trim() === '';
     }, false);
   }
 
@@ -2516,7 +2546,7 @@ var CLF_DOM = (() => {
       // Rich editors use adjacent paragraphs for newlines; textContent concatenates
       // their words. Preserve those boundaries when matching the rendered user message.
       const draftText = () => (typeof box.innerText === 'string' ? box.innerText : [...box.childNodes]
-        .map((node) => (node.textContent || '') + (/^(P|DIV|BR)$/.test(node.nodeName) ? '\n' : '')).join('')).trim();
+        .map((node) => editorText(node) + (/^(P|DIV|BR)$/.test(node.nodeName) ? '\n' : '')).join('')).trim();
       const submitted = draftText();
       if (!submitted) return refused('draft-empty');
       const compact = (value) => String(value || '').replace(/\s+/g, ' ').trim();
@@ -2562,7 +2592,7 @@ var CLF_DOM = (() => {
         // or Stop alone cannot hand off a receipt, and a later DOM read can lose it.
         if (acceptUserReceipt || currentConversation !== beforeConversation) return false;
         const current = composer();
-        if (current === box && box.isConnected && (current.textContent || '').trim() === '') return true;
+        if (current === box && box.isConnected && editorText(current).trim() === '') return true;
         if (!beforeGenerating && generating()) return true;
         if (!beforeStop && stopButton()) return true;
         return false;
@@ -2809,6 +2839,13 @@ var CLF_DOM = (() => {
   const connectorNames = () => [...(ownConnectors || PLAIN_CONNECTORS)];
   /** The Plugins connector of any computer: it only selects that connector's larger action limits. */
   const pluginsConnectorName = (name) => name === PLAIN_CONNECTORS[2] || SUFFIXED_CONNECTOR.exec(typeof name === 'string' ? name : '')?.[1] === 'Plugins';
+  /** Multi-app Core enrollment: undefined means one/no proven ID; null means ambiguous. */
+  function firstEnrollmentAppId(proven, connectorName) {
+    if (proven.length <= 1) return undefined;
+    const named = proven.filter(app => app.name === connectorName);
+    if (named.length !== 1 || ownApps.filter(app => app.appId === named[0].appId).length !== 1) return null;
+    return named[0].appId;
+  }
 
   /** Observed ChatGPT Plugins settings surface. Missing/ambiguous structure is not proof. */
   async function pluginRefreshView(connectorName, expectedTools = [], expectedAppId = null) {
@@ -2831,7 +2868,7 @@ var CLF_DOM = (() => {
     const route = /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.hash) ||
       (!location.hash ? /^\/(?:settings\/plugins-settings|plugins)\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.pathname) : null);
     if (!snapshot || snapshot.appId !== route?.[1] || (expectedAppId ? snapshot.appId !== expectedAppId : !ownSnapshot(snapshot, connectorName)) ||
-        !Array.isArray(snapshot.tools) || (snapshot.tools.length < 1 && !externalPlugins) || snapshot.tools.length > (externalPlugins ? 257 : 16) || JSON.stringify(snapshot.tools).length > 300000 ||
+        !Array.isArray(snapshot.tools) || (snapshot.tools.length < 1 && !externalPlugins) || snapshot.tools.length > (externalPlugins ? 257 : 64) || JSON.stringify(snapshot.tools).length > 300000 ||
         snapshot.tools.some(tool => !tool || typeof tool.name !== 'string' || !/^[a-z][a-z0-9_]{0,79}$/.test(tool.name) || typeof tool.description !== 'string' || tool.inputSchema?.type !== 'object') ||
         new Set(snapshot.tools.map(tool => tool.name)).size !== snapshot.tools.length) return null;
     const buttons = [...document.querySelectorAll('button[data-clf-plugin-refresh]')].filter(button => button.getAttribute('data-clf-plugin-refresh') === snapshot.appId && button.getClientRects().length > 0);
@@ -2845,7 +2882,12 @@ var CLF_DOM = (() => {
    */
   function ownSnapshot(snapshot, connectorName) {
     const proven = provenAppsFor(connectorName);
-    return proven !== null && (proven.length ? proven.some(app => app.appId === snapshot.appId) : snapshot.connectorName === connectorName);
+    if (proven === null) return false;
+    // The detail page must retain the same unique first-enrollment target elected in the
+    // installed list. Otherwise an unbound request could accept a different proven Core ID.
+    const target = firstEnrollmentAppId(proven, connectorName);
+    return target !== null && (target ? snapshot.appId === target : proven.length
+      ? proven.some(app => app.appId === snapshot.appId) : snapshot.connectorName === connectorName);
   }
   function pluginInstalledButtons(connectorName, expectedAppId = null, expectedSurface = null) {
     // Native links name their exact App Id, even when a fresh provider rename has not reached
@@ -2866,6 +2908,12 @@ var CLF_DOM = (() => {
           (!proven.length && connectorNames()[surfaceAt] !== connectorName))) return null;
     }
     if (proven === null) return null;
+    // A surface can retain several real, still-installed App IDs (for example an older Core,
+    // this Mac's Core and a separately named OCX). All are valid sightings, but they are not
+    // interchangeable refresh targets. The caller's current connector name must identify one
+    // proven App ID; only a previously enrolled exact ID can bypass this first-enrollment rule.
+    const namedTargetId = expectedAppId === null ? firstEnrollmentAppId(proven, connectorName) : undefined;
+    if (namedTargetId === null) return null;
     const names = [connectorName, ...proven.map(app => app.name).filter(Boolean)];
     const named = node => names.includes(text(node));
     return safe(() => {
@@ -2882,15 +2930,16 @@ var CLF_DOM = (() => {
             const route = /^\/settings\/plugins-settings\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(url.pathname);
             if (url.origin !== location.origin || !route || url.hash) return false;
             if (expectedAppId !== null && route[1] !== expectedAppId) return false;
+            if (namedTargetId !== undefined) return route[1] === namedTargetId;
             if (proven.length) return proven.some(app => app.appId === route[1]);
             if (expectedAppId !== null) return true;
           }
-          if (expectedAppId !== null) return false; // An enrolled observation needs the link's exact ID, never a name-only button.
+          if (expectedAppId !== null || namedTargetId !== undefined) return false; // Once an exact ID is known, name-only buttons cannot prove its identity.
           return [...button.querySelectorAll('*')].some(node => !node.children.length && named(node));
         });
         return rows.length ? rows : null;
       }
-      if (expectedAppId !== null) return null; // Legacy rows cannot prove a native installed App Id.
+      if (expectedAppId !== null || namedTargetId !== undefined) return null; // Legacy rows cannot prove an exact installed App Id.
       const panels = [...document.querySelectorAll('[role="tabpanel"]')].filter(panel => panel.getClientRects().length > 0 &&
         (panel.querySelector('[data-testid="plugin-icon-wrapper"]') || panel.querySelector('a[href="/plugins"]')));
       if (panels.length !== 1) return null;
@@ -3444,6 +3493,23 @@ var CLF_DOM = (() => {
     return selected && closed && stillCurrent();
   }
 
+  /**
+   * Whether ChatGPT's sidebar lists this Project (#1759): true or false only when its Projects
+   * section is open, the section that holds the New project control. Every Project has a row there,
+   * collapsed or not, naming its id (measured 2026-10-23). A closed sidebar or a collapsed section
+   * lists nothing and proves nothing, so the answer is then null.
+   */
+  function sidebarListsProject(id) {
+    return safe(() => {
+      const wanted = String(id || '').toLowerCase();
+      const sections = [...document.querySelectorAll('[data-app-action-sidebar-section]')]
+        .filter(section => section.querySelector('[data-app-action-sidebar-project-create]'));
+      if (sections.length !== 1 || sections[0].getAttribute('data-app-action-sidebar-section-collapsed') !== 'false') return null;
+      return [...sections[0].querySelectorAll('[data-app-action-sidebar-project-id]')]
+        .some(row => row.getAttribute('data-app-action-sidebar-project-id').toLowerCase() === wanted);
+    }, null);
+  }
+
   function projectHomeId(pathname = location.pathname) {
     return /^\/g\/(g-p-[0-9a-f]{32})(?:-[^/]+)?\/project\/?$/i.exec(pathname)?.[1]?.toLowerCase() || null;
   }
@@ -3667,6 +3733,8 @@ var CLF_DOM = (() => {
     turnIdOf,
     messageIdOf,
     composerAuthoredText,
+    /** The composer's prompt text, without nodes ChatGPT injects for presentation (#1792). */
+    composerText: (box = composer()) => editorText(box),
     pageChecks,
     userPromptText,
     userMessageReaction,
@@ -3684,6 +3752,7 @@ var CLF_DOM = (() => {
     projectIdsShown,
     fillProjectName,
     projectHomeId,
+    sidebarListsProject,
     enterProject,
     visibleModelSelection,
     inspectModelSettings,
@@ -3742,6 +3811,7 @@ var CLF_DOM = (() => {
     turns,
     presentationTurns,
     messages,
+    firstQuestionPending,
     messagesIn,
     sectionSignature,
     generating,

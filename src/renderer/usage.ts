@@ -1,8 +1,12 @@
 import { currentLanguage, ui, t, tn } from './i18n.js';
-import { $, el, run } from './dom.js';
+import { $, el, run, toast } from './dom.js';
 import { DEFAULT_USAGE_FORMULA, usageDateKey as dateKey, usageEstimate, usageMessageTotals, usageModelGroups, usageRate, usageWeekStart, type UsageFormula, type UsageOverview } from '../shared/usage.js';
 import type { ProviderUsage } from '../shared/provider-usage.js';
 let snapshot: UsageOverview | null = null;
+let projectNames = new Map<string, string>();
+// The By project name cells, so names that arrive late are written in place: repainting the section
+// would close an open Daily breakdown and drop the focus inside it.
+let projectNameCells: Array<[HTMLElement, () => string]> = [];
 let otherAppsGeneration = 0;
 let loadGeneration = 0;
 const FORMULA_KEY = 'usage-formula-v1';
@@ -20,6 +24,13 @@ function saveFormula(): void {
 const count = { format: (value: number) => new Intl.NumberFormat(currentLanguage(), { notation: 'compact', maximumFractionDigits: 1 }).format(Math.round(value)) };
 const money = { format: (value: number) => new Intl.NumberFormat(currentLanguage(), { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value) };
 const featureLabels: Record<string, string> = { deep_research: "Deep research", file_upload: "File uploads", paste_text_to_file: "Pasted text files", image_gen: "Image generation" };
+// Names only label the By project rows: an unreadable list must not keep the page from loading.
+async function readProjectNames(): Promise<Map<string, string> | null> {
+  try {
+    const reply = await window.api.listProjects();
+    return reply.ok ? new Map(reply.data.map(project => [project.id, project.name])) : null;
+  } catch { return null; }
+}
 function usageHint(node: HTMLElement, text: string | (() => string)): void {
   ui(node, 'data-usage-hint', typeof text === 'function' ? text : () => text);
   node.setAttribute('tabindex', '0');
@@ -65,6 +76,7 @@ export async function refreshUsage(fresh = false): Promise<void> {
   ui(status, 'textContent', () => t("Updating usage in the background. After an update, this can take a few minutes. You can keep using the app."));
   status.setAttribute('role', 'status');
   try {
+    const names = readProjectNames();
     const value = await run(window.api.getUsage());
     if (generation !== loadGeneration) return;
     if (!value) { ui(status, 'textContent', () => t("Usage could not be loaded. Try Refresh.")); return; }
@@ -97,6 +109,12 @@ export async function refreshUsage(fresh = false): Promise<void> {
     paintRates();
     paintCost();
     ui(status, 'textContent', () => '');
+    // The rows wait for names, never the page. They keep the last names until a list answers.
+    void names.then(found => {
+      if (!found || generation !== loadGeneration || (found.size === projectNames.size && [...found].every(([id, name]) => projectNames.get(id) === name))) return;
+      projectNames = found;
+      for (const [cell, name] of projectNameCells) ui(cell, 'textContent', name);
+    });
   } catch {
     if (generation === loadGeneration) ui(status, 'textContent', () => t("Usage could not be loaded. Try Refresh."));
   } finally { if (generation === loadGeneration) $('refreshUsage').removeAttribute('disabled'); }
@@ -125,6 +143,7 @@ function dayLabel(key: string): string {
 }
 function paintCost(): void {
   if (!snapshot) return;
+  projectNameCells = [];
   const total = usageEstimate(snapshot.models, formula);
   // Tokens without a rate make the priced sum a lower bound: "≥ $0.29", which fits the card on one
   // line and reads in every language; the hint and the sentence below name the unpriced tokens.
@@ -226,11 +245,28 @@ function paintCost(): void {
   breakdown.append(table);
   const modelSection = el('section', 'usage-days-model');
   modelSection.append(el('h3', 'usage-cost-subhead', () => t('By model')), modelTable);
+  const sections = [modelSection];
+  // Someone who never uses projects would get one "No project" row; that is not a breakdown.
+  if (snapshot.projects.some(entry => entry.projectId !== null)) {
+    const projectTable = el('table', 'usage-table'); const projectHead = el('tr');
+    for (const title of ['Project', 'Estimated tokens', 'Estimated equivalent']) projectHead.append(el('th', '', () => t(title)));
+    projectTable.append(projectHead);
+    for (const entry of snapshot.projects) {
+      const estimate = usageEstimate(entry.models, formula); const row = el('tr');
+      const name = () => entry.projectId === null ? t("No project") : projectNames.get(entry.projectId) ?? t("Unknown project");
+      const nameCell = el('td', '', name); projectNameCells.push([nameCell, name]);
+      row.append(nameCell, el('td', '', () => Math.round(estimate.tokens).toLocaleString(currentLanguage())), el('td', '', () => estimate.unpricedTokens > 0 && estimate.unpricedTokens === estimate.tokens ? t("Rate unknown") : costText(estimate)));
+      projectTable.append(row);
+    }
+    const projectSection = el('section', 'usage-days-model usage-days-project');
+    projectSection.append(el('h3', 'usage-cost-subhead', () => t('By project')), projectTable);
+    sections.push(projectSection);
+  }
   const daySection = el('section', 'usage-days-daily');
   daySection.append(el('h3', 'usage-cost-subhead', () => t('By day')));
   if (recent.length) daySection.append(scale, chart, axis);
   daySection.append(breakdown);
-  $('usageDays').replaceChildren(modelSection, daySection);
+  $('usageDays').replaceChildren(...sections, daySection);
 }
 /** A limit row in the page's own shape: a name with a note, then the value, its reset and a bar. */
 function limitRow(name: () => string, note: (() => string) | null, value: () => string, small: () => string, remainingPercent: number | null): HTMLElement {
@@ -335,4 +371,20 @@ export function initUsage(): void {
     input.addEventListener('input', () => { if (input.value !== '' && input.validity.valid && Number.isFinite(input.valueAsNumber)) { formula[key] = input.valueAsNumber; saveFormula(); paintCost(); } });
   }
   $('refreshUsage').addEventListener('click', () => void refreshUsage(true));
+  const exportButton = $<HTMLButtonElement>('exportUsage');
+  exportButton.addEventListener('click', async () => {
+    if (exportButton.disabled) return;
+    const restoreFocus = document.activeElement === exportButton;
+    exportButton.disabled = true;
+    // Not run(): main's error names the chosen file's full path, which the page never shows.
+    try {
+      const reply = await window.api.exportUsage(formula.divisor);
+      if (!reply.ok) toast(t('Usage could not be exported.'));
+      else if (reply.data.saved) toast(t('Saved {0}', [reply.data.name]));
+    } catch { toast(t('Usage could not be exported.')); } finally {
+      exportButton.disabled = false;
+      // Disabling the button dropped keyboard focus to the page; give it back unless the person moved it.
+      if (restoreFocus && (document.activeElement === exportButton || document.activeElement === document.body || !document.activeElement)) exportButton.focus();
+    }
+  });
 }

@@ -93,7 +93,7 @@
     "message": "Chat blockiert"
   },
   "content_chat_blocked_tip": {
-    "message": "Dieser Chat ist in der App Chat On Steroids blockiert: Seine Tool-Aufrufe werden abgelehnt, und Goal, Loop und automatisches Komprimieren sind aus. Zum Freigeben öffnest du in der App den Tab „Chat“, zeigst in der Sitzungsliste auf diesen Chat und klickst auf sein Blockiersymbol."
+    "message": "Dieser Chat ist in der App Chat On Steroids blockiert: Seine Tool-Aufrufe werden abgelehnt, und Goal, Loop und automatisches Komprimieren sind aus. Zum Freigeben öffnest du in der Seitenleiste der App das ⋯-Menü dieses Chats und wählst „Chat freigeben“."
   },
   "content_chat_still_opening": {
     "message": "dieser Chat wird noch geöffnet – versuch es gleich noch einmal"
@@ -1157,6 +1157,9 @@
   "content_goal_error_nothing_to_open_with": {
     "message": "Der Helfer hat keine erste Nachricht erzeugt. Formuliere die Aufgabe genauer und versuche es erneut."
   },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "Der Helfer sagt, das Ziel sei erreicht, aber das wurde nicht überprüft. Es wurde keine Folgeantwort gesendet. Prüfe den Chat und fahre fort, falls noch Arbeit offen ist."
+  },
   "content_goal_error_loop_stop_refused": {
     "message": "Der Helfer hat immer wieder angehalten, statt eine Loop-Fortsetzung zu schreiben. Prüfe die Loop-Anweisungen oder wähle ein anderes Helfer-Modell."
   },
@@ -1237,5 +1240,17 @@
   },
   "content_edit_unavailable": {
     "message": "ChatGPT hat für diese Nachricht kein Bearbeiten angeboten. Öffne den Chat in ChatGPT und versuche es dann erneut."
+  },
+  "content_auto_compaction_waiting_app": {
+    "message": "Automatisches Komprimieren: wartet auf die App"
+  },
+  "content_goal_loop_waiting_app": {
+    "message": "Goal und Loop: wartet auf die App"
+  },
+  "content_settings_waiting_app": {
+    "message": "wartet auf die App"
+  },
+  "content_task_waiting_app": {
+    "message": "Wartet auf eine Antwort von Chat On Steroids."
   }
 }
