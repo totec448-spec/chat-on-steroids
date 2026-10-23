@@ -2607,3 +2607,119 @@ it('records the one-time answer to the automatic plugin refresh offer', async ()
   expect(accepted).toMatchObject({ ok: true, data: { config: { ui: { autoRefreshPlugins: true, autoRefreshPluginsAsked: true } } } });
   expect(await handlers.get('pluginRefresh:offer')!(null, { turnOn: 'yes' })).toMatchObject({ ok: false });
 });
+
+describe('settings backup over IPC', () => {
+  const tunnelA = 'tunnel_' + 'a'.repeat(32), tunnelB = 'tunnel_' + 'b'.repeat(32);
+  // Made up for this test; not a real credential.
+  const key = 'sk-fixture-' + 'k'.repeat(40);
+  const exportTo = async (file: string, payload: object) => {
+    vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: file } as never);
+    return handlers.get('settings:export')!(null, payload) as Promise<any>;
+  };
+  const pick = async (file: string) => {
+    vi.mocked(dialog.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: [file] });
+    return handlers.get('settings:importPick')!(null, undefined) as Promise<any>;
+  };
+  const apply = (payload: object) => handlers.get('settings:importApply')!(null, payload) as Promise<any>;
+  beforeAll(() => {
+    // An earlier test registers the handlers against a destroyed window; these use the live one.
+    registerIpc(() => currentWindow as any, () => { quitToInstallCalls += 1; });
+  });
+  beforeEach(async () => {
+    const { deleteAllSecrets } = await import('../src/main/secrets.js');
+    await deleteAllSecrets();
+    // A refused export never reaches its dialog; its queued answer must not leak into the next test.
+    vi.mocked(dialog.showSaveDialog).mockReset().mockResolvedValue({ canceled: true } as never);
+    vi.mocked(dialog.showOpenDialog).mockReset().mockResolvedValue({ canceled: true, filePaths: [] });
+  });
+  const setUp = async (theme: 'light' | 'dark', tunnelId: string, readOnly: boolean) => {
+    const base = getConfig();
+    await saveConfig({ ...base, readOnly, tunnel: { ...base.tunnel, tunnelId }, ui: { ...base.ui, theme }, connectorSuffix: theme === 'dark' ? 'Mac' : 'PC' });
+  };
+
+  it('carries settings to another computer and keeps that computer\'s folders, tunnel and connector name', async () => {
+    const { setSecret } = await import('../src/main/secrets.js');
+    await setUp('dark', tunnelA, true);
+    await setSecret('openaiApiKey', key);
+    const file = path.join(dir, 'backup.json');
+    expect(await exportTo(file, { includeKeys: false })).toEqual({ ok: true, data: { file: 'backup.json', keyCount: 0 } });
+    const text = await fs.readFile(file, 'utf8');
+    expect(text).not.toContain(key);
+    expect(text).not.toContain(tunnelA);
+    expect(text).not.toContain(dir);
+    expect(JSON.parse(text)).toMatchObject({ format: 'chat-on-steroids-settings', version: 1, appVersion: '0.0.0', settings: { readOnly: true, ui: { theme: 'dark' } } });
+    // The other computer: its own tunnel, name and look.
+    await setUp('light', tunnelB, false);
+    const roots = getConfig().roots;
+    const picked = await pick(file);
+    expect(picked).toMatchObject({ ok: true, data: { file: 'backup.json', appVersion: '0.0.0', keyCount: 0 } });
+    expect(picked.data.changed).toEqual(['readOnly', 'ui.theme']);
+    const applied = await apply({ token: picked.data.token, includeKeys: false });
+    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, data: { changedCount: 2, keyCount: 0 } });
+    expect(getConfig()).toMatchObject({ readOnly: true, ui: { theme: 'dark' }, tunnel: { tunnelId: tunnelB }, connectorSuffix: 'PC', roots });
+    // A token is used once.
+    expect(await apply({ token: picked.data.token, includeKeys: false })).toEqual({ ok: false, error: 'Choose the backup file again.' });
+  });
+
+  it('carries saved keys only with the passphrase; a wrong one changes nothing', async () => {
+    const { getSecret, setSecret, clearSecret } = await import('../src/main/secrets.js');
+    await setUp('dark', tunnelA, false);
+    await setSecret('openaiApiKey', key);
+    await setSecret('bridgeToken', 'local-bridge-token');
+    const file = path.join(dir, 'with-keys.json');
+    expect(await exportTo(file, { includeKeys: true })).toEqual({ ok: false, error: 'Use a passphrase of at least 8 characters.' });
+    expect(await exportTo(file, { includeKeys: true, passphrase: 'short' })).toEqual({ ok: false, error: 'Use a passphrase of at least 8 characters.' });
+    expect(await exportTo(file, { includeKeys: true, passphrase: 'correct horse battery' })).toEqual({ ok: true, data: { file: 'with-keys.json', keyCount: 1 } });
+    const text = await fs.readFile(file, 'utf8');
+    expect(text).not.toContain(key);
+    expect(text).not.toContain('local-bridge-token');
+    if (process.platform !== 'win32') expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
+    await clearSecret('openaiApiKey');
+    await setUp('light', tunnelB, false);
+    const picked = await pick(file);
+    expect(picked.data.keyCount).toBe(1);
+    expect(await apply({ token: picked.data.token, includeKeys: true, passphrase: 'wrong horse battery' }))
+      .toEqual({ ok: false, error: 'That passphrase does not open the saved keys in this backup.' });
+    expect(getConfig().ui.theme).toBe('light');
+    expect(await getSecret('openaiApiKey')).toBeNull();
+    // The same choice can be tried again with the right passphrase.
+    expect(await apply({ token: picked.data.token, includeKeys: true, passphrase: 'correct horse battery' }))
+      .toMatchObject({ ok: true, data: { changedCount: 1, keyCount: 1 } });
+    expect(getConfig().ui.theme).toBe('dark');
+    expect(await getSecret('openaiApiKey')).toBe(key);
+    expect(await getSecret('bridgeToken')).toBe('local-bridge-token');
+  });
+
+  it('imports only the settings when keys are left out, even from a backup that has them', async () => {
+    const { getSecret, setSecret, clearSecret } = await import('../src/main/secrets.js');
+    await setUp('dark', tunnelA, false);
+    await setSecret('openaiApiKey', key);
+    const file = path.join(dir, 'keys-left-out.json');
+    await exportTo(file, { includeKeys: true, passphrase: 'correct horse battery' });
+    await clearSecret('openaiApiKey');
+    await setUp('light', tunnelB, false);
+    const picked = await pick(file);
+    expect(await apply({ token: picked.data.token, includeKeys: false })).toMatchObject({ ok: true, data: { changedCount: 1, keyCount: 0 } });
+    expect(await getSecret('openaiApiKey')).toBeNull();
+  });
+
+  it('refuses a file that is not a backup, and does nothing when a dialog is cancelled', async () => {
+    const other = path.join(dir, 'package.json');
+    await fs.writeFile(other, JSON.stringify({ name: 'something' }));
+    expect(await pick(other)).toEqual({ ok: false, error: 'This file is not a Chat On Steroids settings backup.' });
+    vi.mocked(dialog.showOpenDialog).mockResolvedValueOnce({ canceled: true, filePaths: [] });
+    expect(await handlers.get('settings:importPick')!(null, undefined)).toEqual({ ok: true, data: null });
+    vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: true } as never);
+    expect(await handlers.get('settings:export')!(null, { includeKeys: false })).toEqual({ ok: true, data: null });
+    expect((await fs.readdir(dir)).filter(name => name.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('applies a backup that changes nothing without saving, and says so', async () => {
+    await setUp('dark', tunnelA, false);
+    const file = path.join(dir, 'same.json');
+    await exportTo(file, { includeKeys: false });
+    const picked = await pick(file);
+    expect(picked.data.changed).toEqual([]);
+    expect(await apply({ token: picked.data.token, includeKeys: false })).toMatchObject({ ok: true, data: { changedCount: 0, keyCount: 0 } });
+  });
+});

@@ -38,6 +38,8 @@ import { inputArgs, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueu
 import { draftOpeningMessage, onGoalChange, nativeGoalFailure } from './goal.js';
 import { cancelTaskRequest, runTaskRequest } from './task-request.js';
 import { randomUUID } from 'node:crypto';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { retryGoalBrowserHelper } from './goal.js';
 import { requestBrowserPreferences } from './browser-preferences.js';
 import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser } from './session/start-input.js';
@@ -68,7 +70,8 @@ import {
   GOAL_PROVIDERS,
   GOAL_REASONING_LEVELS,
   type AppState,
-  type Config
+  type Config,
+  type SettingsBackupChoice
 } from '../shared/types.js';
 import { MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
 import { DEFAULT_HANDOFF_LENGTH, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
@@ -97,7 +100,8 @@ import { addProject, addRemoteProject, expireArmedProjectCreates, getSessionProj
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile, serverFileSnapshot } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
-import { hasSecret, isEncryptionAvailable, secureStorageStatus, setAsideUnreadableSecrets, setSecret, storedSecretsUnreadable } from './secrets.js';
+import { hasSecret, isEncryptionAvailable, readSecretsFor, secureStorageStatus, setAsideUnreadableSecrets, setSecret, setSecrets, storedSecretsUnreadable, type SecretKey } from './secrets.js';
+import { BackupError, buildBackup, changedSettings, exportableSecret, openSecrets, overlaySettings, pickByShape, readBackup, type ParsedBackup } from './settings-backup.js';
 import { setupApiKeySlot } from '../shared/setup-profile.js';
 import { addSetupProfile, removeSetupProfile, switchSetupProfile } from './setup-profiles.js';
 import { bundledVersion, locateBinary } from './tunnel/locate.js';
@@ -715,8 +719,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return state;
   });
 
-  handle('settings:save', async (payload) => {
-    const request = settingsSave.parse(payload);
+  /** One settings save: the Settings form's, and a settings backup's import. */
+  const saveSettings = async (request: z.infer<typeof settingsSave>): Promise<AppState> => {
     const before = getConfig();
     const next = await updateConfig(async config => {
       if (request.patch.ui.browserBridgePort !== undefined &&
@@ -845,6 +849,92 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (loginStartupError) throw loginStartupError;
     if (controlApiError) throw controlApiError;
     return buildState();
+  };
+  handle('settings:save', async payload => saveSettings(settingsSave.parse(payload)));
+
+  // Settings backup. The file is read and checked in the main process; the renderer sees only a
+  // summary and a token, and saved keys never cross to it. Errors are sentences it translates.
+  let pendingImport: { token: string; backup: ParsedBackup } | null = null;
+  handle('settings:export', async payload => {
+    const { includeKeys, passphrase } = z.object({ includeKeys: z.boolean(), passphrase: z.string().max(1024).optional() }).strict().parse(payload);
+    if (includeKeys && !passphrase) throw new Error('Use a passphrase of at least 8 characters.');
+    const keys = includeKeys ? await readSecretsFor(exportableSecret).catch(error => {
+      logWarn(`settings backup: saved keys could not be read: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error('The saved keys could not be read, so no backup was made. Try again, or export without them.');
+    }) : null;
+    // Its errors are sentences the renderer translates (a short passphrase).
+    const text = await buildBackup({ settings: pickByShape(settingsPatch, getConfig()), appVersion: app.getVersion(), now: new Date(),
+      ...(keys ? { secrets: { values: keys, passphrase: passphrase! } } : {}) });
+    const options: Electron.SaveDialogOptions = { ...dialogLabel('Export settings'),
+      defaultPath: path.join(app.getPath('documents'), `chat-on-steroids-settings-${new Date().toISOString().slice(0, 10)}.json`),
+      filters: [{ name: mainText('Settings backups'), extensions: ['json'] }] };
+    const owner = getWindow();
+    const chosen = owner && !owner.isDestroyed() ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options);
+    if (chosen.canceled || !chosen.filePath) return null;
+    // Written beside the target and renamed, so a failed write never leaves half a backup; readable
+    // by this user only, since it may hold keys.
+    const temporary = `${chosen.filePath}.${randomUUID()}.tmp`;
+    try {
+      await fs.writeFile(temporary, text, { encoding: 'utf8', mode: 0o600 });
+      await fs.rename(temporary, chosen.filePath);
+    } catch (error) {
+      await fs.rm(temporary, { force: true }).catch(() => undefined);
+      throw error;
+    }
+    const keyCount = keys ? Object.keys(keys).length : 0;
+    logInfo(`settings backup: exported ${keyCount ? `with ${keyCount} saved key${keyCount === 1 ? '' : 's'}` : 'without saved keys'}`);
+    return { file: path.basename(chosen.filePath), keyCount };
+  });
+  handle('settings:importPick', async (): Promise<SettingsBackupChoice | null> => {
+    const options: Electron.OpenDialogOptions = { ...dialogLabel('Import settings'), properties: ['openFile'],
+      filters: [{ name: mainText('Settings backups'), extensions: ['json'] }] };
+    const owner = getWindow();
+    const selected = owner && !owner.isDestroyed() ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
+    if (selected.canceled || !selected.filePaths[0]) return null;
+    const file = selected.filePaths[0];
+    // Size first: a large file is refused without reading it.
+    if ((await fs.stat(file)).size > 4_000_000) throw new BackupError('too-large', 'This file is too large to be a settings backup.');
+    let backup: ParsedBackup;
+    try { backup = readBackup(await fs.readFile(file, 'utf8')); } catch (error) {
+      if (error instanceof BackupError) logInfo(`settings backup: refused the chosen file (${error.code})`);
+      throw error;
+    }
+    const current = pickByShape(settingsPatch, getConfig());
+    pendingImport = { token: randomUUID(), backup };
+    return {
+      token: pendingImport.token, file: path.basename(file), appVersion: backup.appVersion, exportedAt: backup.exportedAt,
+      changed: changedSettings(current, overlaySettings(settingsPatch, current, backup.settings)), keyCount: backup.secretCount
+    };
+  });
+  handle('settings:importApply', async payload => {
+    const { token, includeKeys, passphrase } = z.object({ token: z.string().uuid(), includeKeys: z.boolean(), passphrase: z.string().max(1024).optional() }).strict().parse(payload);
+    if (!pendingImport || pendingImport.token !== token) throw new Error('Choose the backup file again.');
+    const { backup } = pendingImport;
+    // Keys open first: a wrong passphrase changes nothing, and the dialog can ask again.
+    let keys: Record<string, string> = {};
+    if (includeKeys && backup.secrets) {
+      try { keys = await openSecrets(backup.secrets, passphrase ?? ''); } catch (error) {
+        logInfo('settings backup: import refused, the passphrase did not open the saved keys; nothing changed');
+        throw error;
+      }
+    }
+    // Against the settings as they are now, which may have changed since the file was chosen.
+    const base = pickByShape(settingsPatch, getConfig());
+    const merged = overlaySettings(settingsPatch, base, backup.settings);
+    const changed = changedSettings(base, merged);
+    // Checked before anything changes, so a computer without secure storage gets a clear refusal
+    // rather than its settings changed and its keys missing.
+    if (Object.keys(keys).length && !(await isEncryptionAvailable())) {
+      logInfo('settings backup: import refused, secure storage is not available for the saved keys; nothing changed');
+      throw new Error('Secure storage is not available on this computer, so the saved keys cannot be imported. Import without them.');
+    }
+    if (changed.length) await saveSettings(settingsSave.parse({ base, patch: merged }));
+    if (Object.keys(keys).length) await setSecrets(keys as Partial<Record<SecretKey, string>>);
+    pendingImport = null;
+    const keyCount = Object.keys(keys).length;
+    logInfo(`settings backup: imported ${changed.length} changed setting${changed.length === 1 ? '' : 's'}` +
+      `${keyCount ? ` and ${keyCount} saved key${keyCount === 1 ? '' : 's'}` : ''}${backup.appVersion ? ` from a ${backup.appVersion} backup` : ''}`);
+    return { state: await buildState(), changedCount: changed.length, keyCount };
   });
 
   /** Approves one folder by path. The picker dialog and the drop zone both end here. */

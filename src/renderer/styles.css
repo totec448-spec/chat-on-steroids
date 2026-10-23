@@ -102,6 +102,12 @@
 .pet-delete-warning { margin: 20px 0 0; padding-top: 18px; border-top: 1px solid var(--line); color: var(--soft); }
 .pet-delete-actions { display: flex; justify-content: flex-end; gap: 10px; margin: 22px -24px -24px; padding: 16px 24px; border-top: 1px solid var(--line); }
 .pet-delete-actions .btn { min-height: 38px; padding: 8px 14px; }
+/* Settings backup: the switch row's text starts on the dialog's text edge, its passphrase fields sit
+   close under it, and the file line reads as a caption above the summary. */
+.backup-dialog .setting { padding-inline: 0; }
+.backup-dialog .setting + .plugin-field, .backup-dialog .setting + div > .plugin-field:first-child { margin-top: 4px; }
+.backup-dialog #importSettingsSource { margin-bottom: 4px; color: var(--soft); }
+.backup-dialog #importSettingsSummary { margin-top: 0; }
 .pet-delete-confirm { border: 1px solid #b4262c; background: #b4262c; color: #fff; font-weight: 600; }
 .pet-delete-confirm:hover:not(:disabled) { border-color: #971f25; background: #971f25; color: #fff; }
 .pet-library-preview { display: grid; place-items: center; width: 58px; height: 64px; flex: 0 0 58px; overflow: hidden; border-radius: 12px; background: var(--sunk); }
