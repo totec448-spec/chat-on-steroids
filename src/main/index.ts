@@ -81,6 +81,7 @@ import { initControlApiPath, shutdownControlApi, startControlApi } from './contr
 import { restoreRequestCorrelations } from './session/correlation.js';
 import { restoreBlockedChats } from './session/blocked-chats.js';
 import { restoreTrustedChats } from './session/trusted-chats.js';
+import { restoreRouteHold } from './tunnel/route-settle.js';
 import { stopComputerHelper } from './computer/index.js';
 import {
   GOAL_OBJECTIVES_STATE,
@@ -540,6 +541,8 @@ void app.whenReady().then(async () => {
   // endpoints can accept work, just as blocked-chat policy is restored above.
   await restoreTrustedChats();
   if (windowActivation.isDisabled()) return;
+  // This computer's learned hold after a new tunnel-client (#1788), before any tunnel starts.
+  await restoreRouteHold();
   setAgentConversationLookup(agentConversation);
   // The prime's chat is the user's own, so no extension report can name it. It is bound
   // when the recorder manages to place the prime's first call. See recordToolCall.

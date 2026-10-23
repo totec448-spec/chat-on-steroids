@@ -17,7 +17,7 @@ it.each([
     startupCommandId: null, RUN_ID: 'document', OPENED_CONVERSATION: null, conversationId: null, commandsHandled: new Set(),
     alive: true, epoch: 1, desktopDecision: null, fiberTerminalMessageId: null, generating: false, pendingTools,
     desktopInputBusy: false, modelCatalogBusy: false, pluginRefreshBusy, commandAttempt: null, commandJournalGate: false,
-    queue: [], flushWork: null, CLF_DOM: { conversationId: () => null, generating: () => false, composer: () => ({ textContent: '' }), hasComposerAttachments: () => false }
+    queue: [], flushWork: null, CLF_DOM: { composerText(box?: { textContent?: string | null } | null) { return (box === undefined ? (this as any).composer?.() : box)?.textContent ?? ''; }, conversationId: () => null, generating: () => false, composer: () => ({ textContent: '' }), hasComposerAttachments: () => false }
   });
   vm.runInContext(`(function () { ${section} })()`, context);
   expect(await response).toMatchObject({ safe: !pluginRefreshBusy && pendingTools === 0 });
@@ -39,7 +39,7 @@ it.each([false, true])('holds cold discovery until composer hydration without a 
     MutationObserver: dom.window.MutationObserver, alive: true, epoch: 1, conversationId: null,
     generating: false, desktopInputBusy: false, modelCatalogBusy: false,
     location: { pathname: '/', href: `https://chatgpt.com/?cos-model-catalog=${nonce}` }, ask,
-    CLF_DOM: { prepareChatModelSurface: async () => true, composerVisible: () => !!dom.window.document.querySelector('textarea'), composer: () => dom.window.document.querySelector('textarea'), generating: () => false,
+    CLF_DOM: { composerText(box?: { textContent?: string | null } | null) { return (box === undefined ? (this as any).composer?.() : box)?.textContent ?? ''; }, prepareChatModelSurface: async () => true, composerVisible: () => !!dom.window.document.querySelector('textarea'), composer: () => dom.window.document.querySelector('textarea'), generating: () => false,
       turns: () => [], hasComposerAttachments: () => false, clearPromptExact: clear, inspectModelSettings: async () => [{ id: 'observed', label: 'Observed', efforts: ['high'] }] }
   });
   const wait = source.slice(source.indexOf('  function waitPageView('), source.indexOf('  async function refreshManagedPlugin('));
@@ -63,7 +63,7 @@ function fixture(text = '', changed = false, conversationId: string | null = nul
   const inspect = vi.fn(async (current: () => boolean) => { if (changed) composer.textContent = 'new user text'; return current() ? [{ id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', efforts: ['high'] }] : null; });
   const context = vm.createContext({ URL, Date, alive: true, epoch: 1, conversationId, generating: false, desktopInputBusy: false, modelCatalogBusy: false,
     location: { pathname: '/', href: `https://chatgpt.com/?cos-model-catalog=${nonce}` }, ask,
-    CLF_DOM: { prepareChatModelSurface: async () => true, composerVisible: () => true, composer: () => composer, generating: () => false, turns: () => [], hasComposerAttachments: () => false, clearPromptExact: clear, inspectModelSettings: inspect } });
+    CLF_DOM: { composerText(box?: { textContent?: string | null } | null) { return (box === undefined ? (this as any).composer?.() : box)?.textContent ?? ''; }, prepareChatModelSurface: async () => true, composerVisible: () => true, composer: () => composer, generating: () => false, turns: () => [], hasComposerAttachments: () => false, clearPromptExact: clear, inspectModelSettings: inspect } });
   vm.runInContext(`${section}\nglobalThis.run = inspectAppModelCatalog;`, context);
   return { composer, ask, clear, inspect, run: (allowPrepare = false) => (context.run as Function)({ nonce, expiresAt: Date.now() + 10000, allowPrepare }) };
 }
@@ -93,7 +93,7 @@ it.each(['generating', 'draft', 'attachment'])('defers catalog discovery on a %s
   const ask = vi.fn(async () => ({ ok: true })), prepare = vi.fn(), inspect = vi.fn(), clear = vi.fn();
   const context = vm.createContext({ URL, Date, alive: true, epoch: 1, conversationId: 'existing-chat', generating: busy === 'generating',
     desktopInputBusy: false, modelCatalogBusy: false, location: { pathname: '/c/existing-chat', href: 'https://chatgpt.com/c/existing-chat' }, ask,
-    CLF_DOM: { composerVisible: () => true, composer: () => composer, generating: () => busy === 'generating', hasComposerAttachments: () => busy === 'attachment',
+    CLF_DOM: { composerText(box?: { textContent?: string | null } | null) { return (box === undefined ? (this as any).composer?.() : box)?.textContent ?? ''; }, composerVisible: () => true, composer: () => composer, generating: () => busy === 'generating', hasComposerAttachments: () => busy === 'attachment',
       prepareChatModelSurface: prepare, inspectModelSettings: inspect, clearPromptExact: clear }
   });
   vm.runInContext(`${section}\nglobalThis.run = inspectAppModelCatalog;`, context);
@@ -112,7 +112,7 @@ it('binds discovery to the Chat composer after Work replaces its composer', asyn
   });
   const context = vm.createContext({ URL, Date, alive: true, epoch: 1, conversationId: null, generating: false, desktopInputBusy: false, modelCatalogBusy: false,
     location: { pathname: '/', href: 'https://chatgpt.com/' }, ask,
-    CLF_DOM: { prepareChatModelSurface: prepare, composerVisible: () => true, composer: () => composer, generating: () => false, turns: () => [], hasComposerAttachments: () => false,
+    CLF_DOM: { composerText(box?: { textContent?: string | null } | null) { return (box === undefined ? (this as any).composer?.() : box)?.textContent ?? ''; }, prepareChatModelSurface: prepare, composerVisible: () => true, composer: () => composer, generating: () => false, turns: () => [], hasComposerAttachments: () => false,
       inspectModelSettings: async (current: () => boolean) => { expect(composer).not.toBe(old); expect(current()).toBe(true); return [{ id: 'observed', label: 'Observed', efforts: ['high'] }]; } }
   });
   vm.runInContext(`${section}\nglobalThis.run = inspectAppModelCatalog;`, context);
