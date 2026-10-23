@@ -1454,11 +1454,13 @@ export function createFilePanel(options: FilePanelOptions) {
     branchArrow.hidden = !options.reviewOnly || showingDiff || !project ||
       (gitSnapshot?.state !== 'ready' && !selectedBaseRef);
     branchTrigger.hidden = branchArrow.hidden;
-    branchTrigger.querySelector('.file-branch-trigger-label')!.textContent = selectedBaseRef?.startsWith(CHECKPOINT_REF_PREFIX)
-      ? checkpointLabel(selectedBaseRef)
-      : selectedBaseRef
-        ? gitSnapshot?.comparison?.label ?? selectedBaseRef.replace(/^refs\/(heads|remotes)\//, '')
-        : t('Working tree');
+    // Bound, so a language change rewrites the checkpoint's words and date format too.
+    const baseRef = selectedBaseRef, comparisonLabel = gitSnapshot?.comparison?.label;
+    ui(branchTrigger.querySelector('.file-branch-trigger-label')!, 'textContent', () => baseRef?.startsWith(CHECKPOINT_REF_PREFIX)
+      ? checkpointLabel(baseRef)
+      : baseRef
+        ? comparisonLabel ?? baseRef.replace(/^refs\/(heads|remotes)\//, '')
+        : t('Working tree'));
     branchStats.hidden = branchTrigger.hidden || !gitSnapshot?.comparison || gitSnapshot.truncated;
     branchStats.replaceChildren();
     if (!branchStats.hidden && gitSnapshot?.state === 'ready') {
