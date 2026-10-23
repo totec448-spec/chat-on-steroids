@@ -82,13 +82,13 @@ app.whenReady().then(async () => {
     const view=await js(`(()=>{const d=${dialog},box=d.getBoundingClientRect(),body=document.getElementById('sharePageForm').getBoundingClientRect();
       const inside=n=>{const r=n.getBoundingClientRect();return r.left>=box.left-0.5&&r.right<=box.right+0.5;};
       const cut=[...d.querySelectorAll('h2,.setting-text b,.setting-text em,.pet-delete-actions .btn,p')].filter(n=>n.offsetParent&&(n.scrollWidth>n.clientWidth+1||n.scrollHeight>n.clientHeight+1)).map(n=>n.textContent);
-      const preview=document.getElementById('sharePagePreview').getBoundingClientRect(),setting=d.querySelector('.share-page-hide').getBoundingClientRect();
+      const preview=document.getElementById('sharePagePreview').getBoundingClientRect(),setting=d.querySelector('.share-page-hide .setting-text').getBoundingClientRect(),toggle=d.querySelector('#sharePageHide').getBoundingClientRect();
       const pad=parseFloat(getComputedStyle(document.getElementById('sharePageForm')).paddingLeft);
       const buttons=[...d.querySelectorAll('.pet-delete-actions .btn')].map(b=>b.getBoundingClientRect());
       const scrolls=[d,document.getElementById('sharePageForm')].filter(n=>n.scrollHeight>n.clientHeight+1).map(n=>n.id||n.className);
       return {fits:box.left>=0&&box.right<=innerWidth&&box.top>=0&&box.bottom<=innerHeight,cut,scrolls,
         outside:[...d.querySelectorAll('*')].filter(n=>n.offsetParent&&!inside(n)).map(n=>n.id||n.className),
-        previewLeft:preview.left-body.left,previewRight:body.right-preview.right,settingLeft:setting.left-body.left,pad,previewHeight:preview.height,
+        previewLeft:preview.left-body.left,previewRight:body.right-preview.right,settingLeft:setting.left-body.left,toggleRight:body.right-toggle.right,pad,previewHeight:preview.height,
         buttonsOneLine:buttons.every(b=>Math.abs(b.top-buttons[0].top)<1),buttonsRight:Math.round(box.right-buttons[buttons.length-1].right),
         frame:document.getElementById('sharePageFrame').getBoundingClientRect().height};})()`);
     assert.equal(view.fits,true,`${label}: the dialog fits the window`);
@@ -97,7 +97,7 @@ app.whenReady().then(async () => {
     assert.deepEqual(view.outside,[],`${label}: nothing sticks out of the dialog`);
     // The preview and the switch row share the body's left edge; the preview spans the body.
     assert.ok(Math.abs(view.previewLeft-view.pad)<1&&Math.abs(view.previewRight-view.pad)<1,`${label}: preview spans the body ${JSON.stringify(view)}`);
-    assert.ok(Math.abs(view.settingLeft-view.pad)<=2.5,`${label}: switch row on the body's edge ${JSON.stringify(view)}`);
+    assert.ok(Math.abs(view.settingLeft-view.pad)<1&&Math.abs(view.toggleRight-view.pad)<1,`${label}: switch row text and switch on the preview's edges ${JSON.stringify(view)}`);
     assert.ok(view.previewHeight>=160&&Math.abs(view.frame-(view.previewHeight-2))<1,`${label}: the frame fills the preview ${JSON.stringify(view)}`);
     assert.equal(view.buttonsOneLine,true,`${label}: Cancel and Save on one line`);
     assert.equal(view.buttonsRight,25,`${label}: buttons keep the dialog's right padding`);
