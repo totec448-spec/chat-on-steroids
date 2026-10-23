@@ -1141,6 +1141,46 @@ describe('accepted helper tab cleanup', () => {
   }
 });
 
+describe('a page\'s release reason', () => {
+  it.each(['send-not-ready', 'turn-progressed by app-tool_call', 'turn-progressed by page-text'])('reaches the app whole: %s', async (detail) => {
+    const posted: any[] = [];
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }), session: new FakeStorageArea(),
+      tabsGet: async () => ({ id: 1, url: 'https://chatgpt.com/c/6adb3318-5500-83eb-afe8-d70d1bd49d1f' }),
+      fetch: async (input, init: any = {}) => {
+        const route = new URL(input).pathname;
+        if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (route === '/input/fail') posted.push(JSON.parse(init.body));
+        return response(200, { ok: true });
+      }
+    });
+    await worker.registerTab(1);
+    await worker.send({ type: 'desktop_input', id: 'ffffffff-1111-4222-8333-444444444444', owner: '1:document-1-0:0',
+      fail: true, error: 'After-turn pickup was withdrawn before Send.', detail });
+    expect(posted.at(-1)?.detail).toBe(detail);
+  });
+
+  it('drops a reason that is not one of the page\'s own short codes', async () => {
+    const posted: any[] = [];
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }), session: new FakeStorageArea(),
+      tabsGet: async () => ({ id: 1, url: 'https://chatgpt.com/c/6adb3318-5500-83eb-afe8-d70d1bd49d1f' }),
+      fetch: async (input, init: any = {}) => {
+        const route = new URL(input).pathname;
+        if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (route === '/input/fail') posted.push(JSON.parse(init.body));
+        return response(200, { ok: true });
+      }
+    });
+    await worker.registerTab(1);
+    for (const detail of ['Some sentence. With dots', 'x'.repeat(81), 'UPPER-case']) {
+      await worker.send({ type: 'desktop_input', id: 'ffffffff-1111-4222-8333-444444444444', owner: '1:document-1-0:0',
+        fail: true, error: 'After-turn pickup was withdrawn before Send.', detail });
+      expect(posted.at(-1)?.detail).toBeUndefined();
+    }
+  });
+});
+
 describe('browser identity', () => {
   it('sends one stable random browser id with every app request', async () => {
     const seen: string[] = [];
