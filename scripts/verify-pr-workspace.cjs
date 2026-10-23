@@ -174,6 +174,10 @@ app.whenReady().then(async () => {
     await screenshot('review-checkpoint-menu');
     await js(`[...document.querySelectorAll('.file-branch-option')].at(-1).click()`);
     await until(`document.querySelector('.review-panel .file-branch-trigger')?.textContent.startsWith(window.fixture.t('Before turn')) && document.querySelectorAll('.review-panel .file-change-row').length===2 && !!document.querySelector('.review-panel .file-checkpoint-bar button')`);
+    // A checkpoint's date and time are read whole while the header has room for them.
+    const cut = await js(`(() => { const label = document.querySelector('.review-panel .file-branch-trigger-label');
+      return { cut: label.scrollWidth > label.clientWidth + 1, text: label.textContent }; })()`);
+    if (cut.cut) throw new Error('The checkpoint label is cut in a wide Review header: ' + cut.text);
     await screenshot('review-checkpoint-compare');
     await js(`document.querySelector('.review-panel .file-branch-trigger').click();document.querySelector('.file-branch-option').click()`);
     await until(`document.querySelectorAll('.review-panel .file-change-row').length===2 && !document.querySelector('.review-panel .file-checkpoint-bar')`);

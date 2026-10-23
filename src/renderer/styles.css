@@ -4373,12 +4373,13 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .file-changes-header-title { color: var(--ink); font-size: calc(11px * var(--text-scale, 1)); font-weight: 650; }
 .file-branch-arrow { display: inline-flex; align-items: center; color: var(--faint); }
 .file-branch-arrow .ico, .ico.file-change-arrow { --ico: 12px; --glyph: 12px; }
-.file-branch-trigger { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; max-width: 190px; padding: 4px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--soft); font: inherit; font-size: calc(11px * var(--text-scale, 1)); cursor: pointer; }
+/* Room for a checkpoint's date and time; it shrinks only when the panel is narrower than the label. */
+.file-branch-trigger { display: inline-flex; flex: 0 1 auto; align-items: center; gap: 4px; min-width: 0; min-height: 28px; max-width: 320px; padding: 4px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--soft); font: inherit; font-size: calc(11px * var(--text-scale, 1)); cursor: pointer; }
 .file-branch-trigger:hover, .file-branch-trigger[aria-expanded="true"] { background: var(--hover); color: var(--ink); }
 .file-branch-trigger:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
 .file-branch-trigger-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-branch-trigger .ico { flex: 0 0 auto; --ico: 13px; --glyph: 13px; transform: rotate(90deg); }
-.file-branch-stats { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: calc(10px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; }
+.file-branch-stats { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: calc(10px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; }
 .file-branch-stats .is-added { color: var(--green); }
 .file-branch-stats .is-deleted { color: var(--red); }
 .file-branch-arrow[hidden], .file-branch-trigger[hidden], .file-branch-stats[hidden] { display: none; }
