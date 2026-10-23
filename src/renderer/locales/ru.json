@@ -3136,5 +3136,6 @@
   "Off for every project in Settings": "Отключено для всех проектов в настройках",
   "This project's tools send keys and tokens to ChatGPT as they are": "Инструменты этого проекта отправляют ключи и токены в ChatGPT как есть",
   "Keys and tokens in this project's tool results are hidden from ChatGPT": "Ключи и токены в результатах инструментов этого проекта скрыты от ChatGPT",
-  "Quote": "Цитировать"
+  "Quote": "Цитировать",
+  "Start or cancel the prepared plan first, then quote again.": "Сначала запустите или отмените подготовленный план, затем процитируйте снова."
 }

@@ -2992,5 +2992,6 @@
   "Off for every project in Settings": "설정에서 모든 프로젝트에 대해 꺼져 있음",
   "This project's tools send keys and tokens to ChatGPT as they are": "이 프로젝트의 도구는 키와 토큰을 그대로 ChatGPT에 보냅니다",
   "Keys and tokens in this project's tool results are hidden from ChatGPT": "이 프로젝트의 도구 결과에 있는 키와 토큰은 ChatGPT에서 숨겨집니다",
-  "Quote": "인용"
+  "Quote": "인용",
+  "Start or cancel the prepared plan first, then quote again.": "먼저 준비된 계획을 시작하거나 취소한 다음 다시 인용하세요."
 }

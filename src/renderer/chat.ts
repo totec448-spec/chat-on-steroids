@@ -9099,7 +9099,7 @@ export function initChat(next: Deps): void {
     reveal: revealChatLocation,
     row: rowForLocation
   });
-  initQuoteSelection({ timeline: $('timeline'), input: $<HTMLTextAreaElement>('chatInput') });
+  initQuoteSelection({ timeline: $('timeline'), input: $<HTMLTextAreaElement>('chatInput'), blocked: () => !!currentPreparedPlan() });
   chatSearch = initChatSearch({
     select: (id, match) => {
       if (id !== selectedId) { pendingNewInput = null; selectSession(id); }

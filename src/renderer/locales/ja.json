@@ -2992,5 +2992,6 @@
   "Off for every project in Settings": "設定ですべてのプロジェクトでオフになっています",
   "This project's tools send keys and tokens to ChatGPT as they are": "このプロジェクトのツールはキーやトークンをそのまま ChatGPT に送ります",
   "Keys and tokens in this project's tool results are hidden from ChatGPT": "このプロジェクトのツール結果に含まれるキーやトークンは ChatGPT から隠されます",
-  "Quote": "引用"
+  "Quote": "引用",
+  "Start or cancel the prepared plan first, then quote again.": "先に準備済みのプランを開始するか取り消してから、もう一度引用してください。"
 }

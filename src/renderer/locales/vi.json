@@ -2992,5 +2992,6 @@
   "Off for every project in Settings": "Đã tắt cho mọi dự án trong Cài đặt",
   "This project's tools send keys and tokens to ChatGPT as they are": "Công cụ của dự án này gửi khóa và token cho ChatGPT nguyên trạng",
   "Keys and tokens in this project's tool results are hidden from ChatGPT": "Khóa và token trong kết quả công cụ của dự án này được ẩn khỏi ChatGPT",
-  "Quote": "Trích dẫn"
+  "Quote": "Trích dẫn",
+  "Start or cancel the prepared plan first, then quote again.": "Hãy bắt đầu hoặc hủy kế hoạch đã chuẩn bị trước, rồi trích dẫn lại."
 }

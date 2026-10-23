@@ -3088,5 +3088,6 @@
   "Off for every project in Settings": "Desactivado para todos los proyectos en Ajustes",
   "This project's tools send keys and tokens to ChatGPT as they are": "Las herramientas de este proyecto envían claves y tokens a ChatGPT tal cual",
   "Keys and tokens in this project's tool results are hidden from ChatGPT": "Las claves y tokens en los resultados de las herramientas de este proyecto se ocultan a ChatGPT",
-  "Quote": "Citar"
+  "Quote": "Citar",
+  "Start or cancel the prepared plan first, then quote again.": "Inicia o cancela primero el plan preparado y vuelve a citar."
 }
