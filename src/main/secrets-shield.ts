@@ -64,7 +64,8 @@ function settingHits(text: string): Hit[] {
     if (line.endsWith('\r')) line = line.slice(0, -1);
     // The head pattern is anchored and short, so even a very long line costs one pass.
     const head = SETTING_HEAD.exec(line);
-    if (head && SECRET_NAME.test(head[3]!)) {
+    // "PASS: name" is a test runner's result line (make check, TAP-like logs), not a setting.
+    if (head && SECRET_NAME.test(head[3]!) && !(head[3] === 'PASS' && head[0].trimEnd().endsWith(':'))) {
       // The rest of the line, without trailing spaces and one trailing comma (JSON).
       let rest = line.slice(head[0].length).replace(/[ \t]+$/, '');
       if (rest.endsWith(',')) rest = rest.slice(0, -1).replace(/[ \t]+$/, '');
@@ -73,7 +74,7 @@ function settingHits(text: string): Hit[] {
       // A quoted value may hold the other quote ("hunter2'plus"); an unquoted one that holds a quote
       // is code reading the setting (getenv("TOKEN")), not its value.
       const plain = value !== null && (quote ? !value.includes(quote) : !/["']/.test(value));
-      if (value !== null && plain && value.length >= 8 && !PLACEHOLDER.test(value)) {
+      if (value && plain && !PLACEHOLDER.test(value)) {
         const start = lineStart + head[0].length + quote.length;
         hits.push({ start, end: start + value.length, kind: 'secret setting', replacement: VALUE_MARKER });
       }
