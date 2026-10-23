@@ -193,6 +193,8 @@
 .share-page-preview[aria-busy='true'] iframe { opacity: .4; }
 .share-page-loading { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); pointer-events: none; }
 .share-page-dialog .plugin-error { margin: 4px 0 0; }
+/* The switch row starts on the body's edge like the preview (a settings row is inset by 2px). */
+.share-page-dialog .share-page-hide { padding-left: 0; padding-right: 0; }
 .plugin-card-error { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--red); font-size: calc(11px * var(--text-scale, 1)); }
 .plugin-setup-status { margin: 0 0 20px; color: var(--soft); }
 .plugin-setup-copy { display: flex; gap: 8px; align-items: center; }
