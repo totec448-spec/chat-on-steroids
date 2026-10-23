@@ -1189,5 +1189,17 @@
   },
   "content_edit_unavailable": {
     "message": "ChatGPT không cung cấp Chỉnh sửa cho tin nhắn đó. Hãy mở cuộc trò chuyện trong ChatGPT rồi thử lại."
+  },
+  "content_auto_compaction_waiting_app": {
+    "message": "Tự động thu gọn: đang chờ ứng dụng"
+  },
+  "content_goal_loop_waiting_app": {
+    "message": "Goal và Loop: đang chờ ứng dụng"
+  },
+  "content_settings_waiting_app": {
+    "message": "đang chờ ứng dụng"
+  },
+  "content_task_waiting_app": {
+    "message": "Đang chờ Chat On Steroids phản hồi."
   }
 }

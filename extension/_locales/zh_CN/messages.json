@@ -1189,5 +1189,17 @@
   },
   "content_edit_unavailable": {
     "message": "ChatGPT 没有为该消息提供编辑。请在 ChatGPT 中打开聊天，然后重试。"
+  },
+  "content_auto_compaction_waiting_app": {
+    "message": "自动压缩：正在等待应用"
+  },
+  "content_goal_loop_waiting_app": {
+    "message": "目标和循环：正在等待应用"
+  },
+  "content_settings_waiting_app": {
+    "message": "正在等待应用"
+  },
+  "content_task_waiting_app": {
+    "message": "正在等待 Chat On Steroids 响应。"
   }
 }

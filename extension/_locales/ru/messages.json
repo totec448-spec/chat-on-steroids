@@ -1342,5 +1342,17 @@
   },
   "content_edit_unavailable": {
     "message": "ChatGPT не предложил изменить это сообщение. Откройте чат в ChatGPT и попробуйте снова."
+  },
+  "content_auto_compaction_waiting_app": {
+    "message": "Автосжатие: ожидание ответа приложения"
+  },
+  "content_goal_loop_waiting_app": {
+    "message": "Цель и Цикл: ожидание ответа приложения"
+  },
+  "content_settings_waiting_app": {
+    "message": "ожидание ответа приложения"
+  },
+  "content_task_waiting_app": {
+    "message": "Ожидание ответа Chat On Steroids."
   }
 }

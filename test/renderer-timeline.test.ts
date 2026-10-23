@@ -1906,14 +1906,17 @@ it('offers a new chat beside a project\'s menu, and its color as a submenu and r
   expect(button.getAttribute('aria-expanded')).toBe('true');
   const menu = w.document.querySelector<HTMLElement>('.row-menu')!;
   expect(menu.getAttribute('role')).toBe('menu');
-  expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['group-new', 'color', 'remove']);
+  expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['group-new', 'color', 'secrets-shield', 'remove']);
   expect(menuItem(w, 'remove').classList.contains('is-danger')).toBe(true);
   expect(w.document.activeElement).toBe(menuItem(w, 'group-new'));
   // Keyboard: Down and Up move, Right opens the color submenu on the current choice, Left comes back.
   menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
   expect(w.document.activeElement).toBe(menuItem(w, 'color'));
   menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  expect(w.document.activeElement).toBe(menuItem(w, 'secrets-shield'));
+  menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
   expect(w.document.activeElement).toBe(menuItem(w, 'remove'));
+  menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
   menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
   expect(w.document.activeElement).toBe(menuItem(w, 'color'));
   menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
@@ -1959,6 +1962,37 @@ it('picks and clears project color without changing project membership', async (
   // Choosing the color it already has saves nothing.
   colorChoice(w, project.id, 'none').click(); await settle();
   expect(api.setProjectColor).toHaveBeenCalledTimes(2);
+});
+
+it('turns the secrets shield off and on for one project from its menu (#1797)', async () => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: '/workspace', createdAt: 1 };
+  const { w } = await boot([], false, [], [project]);
+  const api = (w as any).api;
+  api.setProjectSecretsShieldOff = vi.fn(async (_id: string, off: boolean) => ({ ok: true, data: { ...project, ...(off ? { secretsShieldOff: true } : {}) } }));
+  projectMenu(w, project.id);
+  let item = menuItem(w, 'secrets-shield');
+  // An on/off switch, on by default.
+  expect(item.getAttribute('role')).toBe('menuitemcheckbox');
+  expect(item.getAttribute('aria-checked')).toBe('true');
+  expect(item.title).toBe("Keys and tokens in this project's tool results are hidden from ChatGPT");
+  item.click(); await settle();
+  expect(api.setProjectSecretsShieldOff).toHaveBeenNthCalledWith(1, project.id, true);
+  projectMenu(w, project.id);
+  item = menuItem(w, 'secrets-shield');
+  expect(item.getAttribute('aria-checked')).toBe('false');
+  expect(item.title).toBe("This project's tools send keys and tokens to ChatGPT as they are");
+  item.click(); await settle();
+  expect(api.setProjectSecretsShieldOff).toHaveBeenNthCalledWith(2, project.id, false);
+  projectMenu(w, project.id);
+  expect(menuItem(w, 'secrets-shield').getAttribute('aria-checked')).toBe('true');
+  w.document.body.dispatchEvent(new w.Event('pointerdown', { bubbles: true }));
+  // Off in Settings for every project: the switch shows off and waits there.
+  (await api.getState()).data.config.ui.secretsShield = false;
+  projectMenu(w, project.id);
+  item = menuItem(w, 'secrets-shield');
+  expect(item.getAttribute('aria-checked')).toBe('false');
+  expect(item.disabled).toBe(true);
+  expect(item.title).toBe('Off for every project in Settings');
 });
 
 it.each([[false, true], [true, true], [true, false]])('preserves the keyboard color-save focus owner (focus moved: %s, focusin: %s)', async (moved, propagates) => {
@@ -2283,7 +2317,7 @@ it("marks every New response seen from the header, or one project's from its men
   const refresh = async () => { (w.document.getElementById('chatRefresh') as HTMLButtonElement).click(); await settle(); };
   expect(header().hidden).toBe(true);
   projectMenu(w, project.id);
-  expect(actions()).toEqual(['group-new', 'color', 'remove']);
+  expect(actions()).toEqual(['group-new', 'color', 'secrets-shield', 'remove']);
   w.document.querySelector<HTMLElement>('.row-menu')!.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 
   // p1, p2 and u1 finish in the background; p3 is still running.
@@ -2297,13 +2331,13 @@ it("marks every New response seen from the header, or one project's from its men
   expect(header().hidden).toBe(false);
 
   projectMenu(w, project.id);
-  expect(actions()).toEqual(['group-new', 'mark-seen', 'color', 'remove']);
+  expect(actions()).toEqual(['group-new', 'mark-seen', 'color', 'secrets-shield', 'remove']);
   menuItem(w, 'mark-seen').click();
   await settle();
   expect(unseen()).toEqual(['u1']);
   expect(row('p3').querySelector('.session-status.is-active')).not.toBeNull();
   projectMenu(w, project.id);
-  expect(actions()).toEqual(['group-new', 'color', 'remove']);
+  expect(actions()).toEqual(['group-new', 'color', 'secrets-shield', 'remove']);
   w.document.querySelector<HTMLElement>('.row-menu')!.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 
   header().focus();
