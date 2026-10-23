@@ -7497,6 +7497,10 @@
     // refused, so nothing this app types may drive it on). 'continued' is neither — that chat
     // is finished, and its controls are moot rather than fenced.
     const fenced = blocked === 'worker' || blocked === 'blocked';
+    // No answer from the app yet (a reloaded page, an app that is busy or away): nothing here is
+    // known, so the sheet says so instead of drawing Off and a missing key (#1787).
+    const contextUnknown = !context && !fresh;
+    const goalUnknown = !goal;
     const auto = Boolean(context && context.auto) && !fenced;
     const threshold = context && context.threshold > 0 ? context.threshold : 0;
     // One setting, one control. The app sends the mode beside `enabled`, so there is a single
@@ -7532,13 +7536,17 @@
       // Two short lines rather than a sentence: this is read while reaching for something
       // else, and the only questions it answers are "is it on" and "at what point".
       tip: [
-        auto
+        contextUnknown
+          ? t('content_auto_compaction_waiting_app', 'Auto-compaction: waiting for the app')
+          : auto
           ? t('content_auto_compaction_on', 'Auto-compaction on$1', from ? `, ${from}` : '')
           : t('content_auto_compaction_off', 'Auto-compaction off'),
         blocked === 'worker'
           ? t('content_goal_off_prime_writes', 'Goal off — the prime writes this chat')
           : blocked === 'blocked'
             ? t('content_goal_off_blocked', 'Goal off — this chat is blocked in the app')
+            : goalUnknown
+            ? t('content_goal_loop_waiting_app', 'Goal and Loop: waiting for the app')
             : fresh
             ? !hasKey
               ? t('content_goal_no_api_key_unavailable', 'No API key — Goal and Loop unavailable')
@@ -7566,12 +7574,14 @@
               ? t('content_auto_compaction_worker_off', 'off here: worker chats never auto-compact')
               : blocked === 'blocked'
                 ? t('content_auto_compaction_blocked_off', 'off here: this chat is blocked in the app')
+                : contextUnknown
+                ? t('content_settings_waiting_app', 'waiting for the app')
                 : auto
                   ? from || t('content_auto_compaction_threshold_app', 'threshold set in the app')
                   : t('content_auto_compaction_manual', 'compact this chat by hand'),
           on: auto,
           warn: false,
-          disabled: fenced
+          disabled: fenced || contextUnknown
         }
       ],
       /**
@@ -7626,6 +7636,8 @@
                 ? t('content_mode_note_prime_writes', 'the prime writes here')
                 : blocked === 'blocked'
                   ? t('content_mode_note_blocked', 'blocked in the app')
+                  : goalUnknown
+                  ? t('content_settings_waiting_app', 'waiting for the app')
                   : !hasKey
                   ? t('content_mode_note_key_required', 'OpenRouter key required')
                   : position === 'loop'
@@ -7633,8 +7645,8 @@
                     : position === 'goal'
                       ? t('content_mode_note_goal', 'replies until goal reached')
                       : t('content_mode_note_off', 'no replies written here'),
-            warn: !hasKey || fenced,
-            disabled: fenced
+            warn: (!hasKey && !goalUnknown) || fenced,
+            disabled: fenced || goalUnknown
           },
       /**
        * The one task, and — above a New Chat only — the mode it is written in.
@@ -7724,6 +7736,8 @@
             ? t('content_task_worker_unavailable', 'A worker chat is already driven by its prime.')
             : blocked === 'blocked'
               ? t('content_task_blocked_unavailable', 'This chat is blocked in the app. Release it there to drive it again.')
+              : goalUnknown
+              ? t('content_task_waiting_app', 'Waiting for Chat On Steroids to answer.')
               : !hasKey
               ? t('content_task_api_key_unavailable', 'Add an OpenRouter API key in the app first.')
               : ''
