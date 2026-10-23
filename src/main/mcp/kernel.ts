@@ -515,7 +515,11 @@ async function shieldOutput(context: CallContext, name: string, result: ToolResu
   for (const kind of shielded.masked) counts.set(kind, (counts.get(kind) ?? 0) + 1);
   const what = [...counts].map(([kind, count]) => `${count} ${kind}${count > 1 ? 's' : ''}`).join(', ');
   const sessionId = context.caller.sessionId;
-  if (sessionId && await sessionSecretsShieldOff(sessionId).catch(() => false)) {
+  const projectOff = sessionId ? await sessionSecretsShieldOff(sessionId).catch(error => {
+    logWarn(`secrets shield: could not read this chat's project (${error instanceof Error ? error.message : String(error)}); masking anyway`);
+    return false;
+  }) : false;
+  if (projectOff) {
     logInfo(`secrets shield: off for this chat's project; the ${name} result went out with ${what} unmasked`);
     return result;
   }

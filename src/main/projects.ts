@@ -206,7 +206,14 @@ export function setProjectSecretsShieldOff(projectId: string, off: boolean): Pro
     if ((project.secretsShieldOff === true) === off) return project;
     const { secretsShieldOff: _, ...without } = project;
     const updated: LocalProject = off ? { ...without, secretsShieldOff: true } : without;
-    await writeDurableNow('projects', projects.map(row => row.id === projectId ? updated : row));
+    try {
+      await writeDurableNow('projects', projects.map(row => row.id === projectId ? updated : row));
+    } catch (error) {
+      // The store retries a failed write later. A switch reported as failed must not land then,
+      // so the unchanged list takes its place as the write to retry.
+      await writeDurableNow('projects', projects).catch(() => undefined);
+      throw error;
+    }
     return updated;
   });
   mutations = operation.catch(() => undefined);

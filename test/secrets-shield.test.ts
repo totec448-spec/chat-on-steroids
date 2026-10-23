@@ -95,6 +95,30 @@ describe('secrets shield (masking only unmistakable credentials)', () => {
     expect(maskSecrets(plain).text).toBe(plain);
   });
 
+  it('stays fast on one very long line that looks like a setting (a minified bundle)', () => {
+    const line = 'A=x' + ' '.repeat(200_000) + 'y\nAPI_TOKEN=' + 'q9'.repeat(10);
+    const started = performance.now();
+    expect(maskSecrets(line).masked).toEqual(['secret setting']);
+    expect(performance.now() - started).toBeLessThan(250);
+  });
+
+  it('masks a PGP private key block', () => {
+    const pgp = '-----BEGIN PGP PRIVATE KEY BLOCK-----\n\nlQOYBGVhZXQBCAC3\n=ab12\n-----END PGP PRIVATE KEY BLOCK-----';
+    const { text, masked } = maskSecrets(`gpg --export-secret-keys\n${pgp}`);
+    expect(text).toBe('gpg --export-secret-keys\n-----BEGIN PGP PRIVATE KEY BLOCK-----\n[private key hidden by Chat On Steroids]\n-----END PGP PRIVATE KEY BLOCK-----');
+    expect(masked).toEqual(['private key']);
+  });
+
+  it.each(['DB_PASSWORD=$uper-secret99', 'API_TOKEN=%x8!kQ2zLm0p', 'SESSION_SECRET=<x8kQ2zLm0p', 'CLIENT_SECRET={x8kQ2zLm0p'])
+  ('masks a real value that only starts like a reference: %s', line => {
+    expect(maskSecrets(line).masked).toEqual(['secret setting']);
+  });
+
+  it.each(['API_KEY=${OPENAI_API_KEY}', 'API_KEY=$OPENAI_API_KEY', 'API_KEY=<your key here>', 'API_KEY={{ secrets.API_KEY }}', 'API_KEY=%OPENAI_API_KEY%'])
+  ('leaves a reference alone: %s', line => {
+    expect(maskSecrets(line)).toEqual({ text: line, masked: [] });
+  });
+
   it('stays fast on a large output', () => {
     const big = ('npm test output line with nothing secret in it\n').repeat(40_000) + `TOKEN=${'a1'.repeat(20)}\n`;
     const started = performance.now();

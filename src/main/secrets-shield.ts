@@ -34,17 +34,53 @@ const TOKEN_PATTERNS: ReadonlyArray<readonly [RegExp, Kind]> = [
   [/\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, 'JSON Web Token']
 ];
 
-const PRIVATE_KEY = /(-----BEGIN ((?:[A-Z0-9]+ )*)PRIVATE KEY-----)[\s\S]*?(-----END \2PRIVATE KEY-----)/g;
+/** PEM (`-----BEGIN OPENSSH PRIVATE KEY-----`) and PGP (`-----BEGIN PGP PRIVATE KEY BLOCK-----`) blocks. */
+const PRIVATE_KEY = /(-----BEGIN ((?:[A-Z0-9]+ )*)PRIVATE KEY( BLOCK)?-----)[\s\S]*?(-----END \2PRIVATE KEY\3-----)/g;
 
 /**
- * `NAME=value`, `export NAME="value"`, `NAME: value` or JSON's `"NAME": "value",` on a line of its own, where NAME ends in a word
- * that means a secret. `MAX_TOKENS`, `TOKEN_COUNT` or `PASSWORD_MIN_LENGTH` do not end in one, and a
- * generic `…_KEY` (a sort key, a cache key) is deliberately not on the list.
+ * The start of `NAME=value`, `export NAME="value"`, `NAME: value` or JSON's `"NAME": "value",` on a
+ * line of its own, where NAME ends in a word that means a secret. `MAX_TOKENS`, `TOKEN_COUNT` or
+ * `PASSWORD_MIN_LENGTH` do not end in one, and a generic `…_KEY` (a sort key, a cache key) is
+ * deliberately not on the list. Only the head is a regular expression; the value is cut by hand, so
+ * a very long line costs one pass (a lazy value before trailing spaces was quadratic).
  */
-const SETTING = /^([ \t]*(?:export[ \t]+)?)(["']?)([A-Z][A-Z0-9_]*)\2([ \t]*[:=][ \t]*)(["']?)([^\r\n"']*?)\5[ \t]*,?[ \t]*$/gm;
+const SETTING_HEAD = /^([ \t]*(?:export[ \t]+)?)(["']?)([A-Z][A-Z0-9_]*)\2[ \t]*[:=][ \t]*/;
 const SECRET_NAME = /(?:^|_)(?:API_?KEY|SECRET(?:_KEY)?|TOKEN|PASSWORD|PASSWD|PASS|PRIVATE_KEY|ACCESS_KEY(?:_ID)?|SIGNING_KEY|ENCRYPTION_KEY|MASTER_KEY|CLIENT_SECRET|CREDENTIALS?|AUTH_TOKEN)$/;
-/** Examples and references are not secrets: an empty value, `${VAR}`, `<your key>`, `changeme`, `xxxx`. */
-const PLACEHOLDER = /^(?:[$<{%]|x{4,}$|\*{3,}$|changeme$|change[-_ ]?me$|your[-_ a-z]*$|example[-_a-z]*$|placeholder$|todo$|none$|null$|true$|false$|redacted$|\.\.\.)/i;
+/** No real setting line is this long; a longer one is data (a bundle, a log dump), not a setting. */
+const MAX_SETTING_LINE = 4096;
+/**
+ * Examples and references are not secrets: an empty value, `${VAR}`, `$VAR`, `<your key>`,
+ * `{{ secrets.X }}`, `%VAR%`, `changeme`, `xxxx`. A real value that merely starts with `$` or `<`
+ * is still a secret.
+ */
+const PLACEHOLDER = /^(?:\$\{[^{}]*\}|\$[A-Za-z_][A-Za-z0-9_]*|<[^<>]*>|\{\{[^{}]*\}\}|%[A-Za-z_][A-Za-z0-9_]*%|x{4,}|\*{3,}|change[-_ ]?me|your[-_ a-z]*|example[-_a-z]*|placeholder|todo|none|null|true|false|redacted|\.\.\.)$/i;
+
+/** Secret-named settings, as hits on their values. One pass over the lines. */
+function settingHits(text: string): Hit[] {
+  const hits: Hit[] = [];
+  let lineStart = 0;
+  while (lineStart <= text.length) {
+    const newline = text.indexOf('\n', lineStart);
+    const lineEnd = newline < 0 ? text.length : newline;
+    let line = text.slice(lineStart, lineEnd);
+    if (line.endsWith('\r')) line = line.slice(0, -1);
+    const head = line.length <= MAX_SETTING_LINE ? SETTING_HEAD.exec(line) : null;
+    if (head && SECRET_NAME.test(head[3]!)) {
+      // The rest of the line, without trailing spaces and one trailing comma (JSON).
+      let rest = line.slice(head[0].length).replace(/[ \t]+$/, '');
+      if (rest.endsWith(',')) rest = rest.slice(0, -1).replace(/[ \t]+$/, '');
+      const quote = rest[0] === '"' || rest[0] === "'" ? rest[0] : '';
+      const value = quote ? (rest.length >= 2 && rest.endsWith(quote) ? rest.slice(1, -1) : null) : rest;
+      if (value !== null && value.length >= 8 && !/["']/.test(value) && !PLACEHOLDER.test(value)) {
+        const start = lineStart + head[0].length + quote.length;
+        hits.push({ start, end: start + value.length, kind: 'secret setting', replacement: VALUE_MARKER });
+      }
+    }
+    if (newline < 0) break;
+    lineStart = newline + 1;
+  }
+  return hits;
+}
 
 interface Hit { start: number; end: number; kind: Kind; replacement: string }
 
@@ -54,20 +90,15 @@ export function maskSecrets(text: string): { text: string; masked: Kind[] } {
   const hits: Hit[] = [];
   for (const match of text.matchAll(PRIVATE_KEY)) {
     hits.push({ start: match.index!, end: match.index! + match[0].length, kind: 'private key',
-      replacement: `${match[1]}\n${marker('private key')}\n${match[3]}` });
+      replacement: `${match[1]}\n${marker('private key')}\n${match[4]}` });
   }
   for (const [pattern, kind] of TOKEN_PATTERNS) {
     for (const match of text.matchAll(pattern)) {
       hits.push({ start: match.index!, end: match.index! + match[0].length, kind, replacement: marker(kind) });
     }
   }
-  for (const match of text.matchAll(SETTING)) {
-    const [, lead, nameQuote, name, separator, quote, value] = match;
-    if (!SECRET_NAME.test(name!) || value!.length < 8 || PLACEHOLDER.test(value!)) continue;
-    // Only the value is replaced; the name and its quotes stay so the line still reads as a setting.
-    const start = match.index! + lead!.length + 2 * nameQuote!.length + name!.length + separator!.length + quote!.length;
-    hits.push({ start, end: start + value!.length, kind: 'secret setting', replacement: VALUE_MARKER });
-  }
+  // Only a setting's value is replaced; its name and quotes stay so the line still reads as a setting.
+  hits.push(...settingHits(text));
   if (!hits.length) return { text, masked: [] };
   hits.sort((a, b) => a.start - b.start || b.end - a.end);
   let out = '', at = 0;
