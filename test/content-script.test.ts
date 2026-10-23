@@ -16214,7 +16214,8 @@ describe('the fresh chat the app opened', () => {
       (document, dom) => {
         const editor = document.querySelector('#prompt-textarea')!;
         new dom.window.MutationObserver(() => {
-          if (!editor.textContent!.includes('drive.example.com') || editor.querySelector('style')) return;
+          // The handoff's own words, not a host name: only the inserted handoff gets the preview.
+          if (!editor.textContent!.includes('for the next step') || editor.querySelector('style')) return;
           const card = document.createElement('span');
           const style = document.createElement('style');
           style.textContent = '@supports (display:grid){.link-card{display:grid}}@media (min-width:600px){.link-card{gap:8px}}';
