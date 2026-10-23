@@ -332,6 +332,18 @@ body {
   overflow: hidden;
 }
 
+/* Appearance → Font → Atkinson Hyperlegible: Atkinson Hyperlegible Next 5.2.6 (OFL-1.1,
+   docs/licenses/atkinson-hyperlegible-next/LICENSE), variable weight, Latin and Latin Extended.
+   Bundled because font-src is 'self'; Chromium only loads it once the font is chosen. */
+@font-face { font-family: "CoS Atkinson Hyperlegible Next"; font-style: normal; font-weight: 200 800; font-display: swap;
+  src: url('./fonts/atkinson-hyperlegible-next-latin-wght-normal.woff2') format('woff2'); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+@font-face { font-family: "CoS Atkinson Hyperlegible Next"; font-style: normal; font-weight: 200 800; font-display: swap;
+  src: url('./fonts/atkinson-hyperlegible-next-latin-ext-wght-normal.woff2') format('woff2'); unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }
+@font-face { font-family: "CoS Atkinson Hyperlegible Next"; font-style: italic; font-weight: 200 800; font-display: swap;
+  src: url('./fonts/atkinson-hyperlegible-next-latin-wght-italic.woff2') format('woff2'); unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD; }
+@font-face { font-family: "CoS Atkinson Hyperlegible Next"; font-style: italic; font-weight: 200 800; font-display: swap;
+  src: url('./fonts/atkinson-hyperlegible-next-latin-ext-wght-italic.woff2') format('woff2'); unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF; }
+
 body {
   background: var(--page);
   color: var(--ink);
@@ -2870,7 +2882,7 @@ input[readonly] {
 
 .msg {
   font-size: calc(15px * var(--text-scale, 1));
-  line-height: 1.75;
+  line-height: calc(1.75 * var(--line-spacing, 1));
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   max-height: none;
@@ -2879,7 +2891,7 @@ input[readonly] {
 
 .msg.rich {
   white-space: normal;
-  line-height: 1.5;
+  line-height: calc(1.5 * var(--line-spacing, 1));
 }
 
 /* Plain messages keep independent bidi paragraphs, including mixed-language pastes.
@@ -3706,7 +3718,7 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .pending-message { position: relative; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; margin: 4px 0 26px auto; width: fit-content; max-width: 82%; text-align: start; }
 /* Match the canonical user row's padding and footer before receipt arrives. */
 #inputQueue > .pending-message { margin-top: 11px; margin-bottom: 33px; }
-.pending-message-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(15px * var(--text-scale, 1)); line-height: 1.75; }
+.pending-message-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(15px * var(--text-scale, 1)); line-height: calc(1.75 * var(--line-spacing, 1)); }
 .pending-message-status { position: absolute; right: 30px; top: calc(100% + 1px); height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: calc(12px * var(--text-scale, 1)); line-height: 1.45; color: var(--soft); }
 .pending-message.is-delivery-error .pending-message-status, .pending-message.is-route-held .pending-message-status, .pending-message.is-waiting .pending-message-status { position: static; display: block; width: auto; max-width: 100%; height: auto; margin-top: 4px; font-size: calc(11px * var(--text-scale, 1)); font-weight: 400; white-space: normal; overflow-wrap: anywhere; }
 .pending-message.is-delivery-error .pending-message-status { color: var(--red); }

@@ -763,6 +763,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       developerMode: $<HTMLInputElement>('developerMode').checked,
       playfulStatus: $<HTMLInputElement>('playfulStatus').checked,
       playfulContinue: $<HTMLInputElement>('playfulContinue').checked,
+      announceTurns: $<HTMLInputElement>('announceTurns').checked,
       customContinue: $<HTMLTextAreaElement>('customContinue').value.trim() || undefined,
       followOutput: $<HTMLInputElement>('followOutput').checked,
       mentionCore: $<HTMLInputElement>('mentionCore').checked,
@@ -1707,6 +1708,7 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('developerMode'), config.ui.developerMode === true, previousState?.config.ui.developerMode);
   applyChecked($<HTMLInputElement>('playfulStatus'), config.ui.playfulStatus === true, previousState?.config.ui.playfulStatus);
   applyChecked($<HTMLInputElement>('playfulContinue'), config.ui.playfulContinue === true, previousState?.config.ui.playfulContinue);
+  applyChecked($<HTMLInputElement>('announceTurns'), config.ui.announceTurns === true, previousState?.config.ui.announceTurns);
   applyValue($<HTMLTextAreaElement>('customContinue'), config.ui.customContinue ?? '', previousState ? previousState.config.ui.customContinue ?? '' : undefined);
   applyChecked($<HTMLInputElement>('followOutput'), config.ui.followOutput !== false, previousState?.config.ui.followOutput);
   applyChecked($<HTMLInputElement>('mentionCore'), config.ui.mentionCore !== false, previousState?.config.ui.mentionCore);
@@ -2803,6 +2805,7 @@ for (const id of [
   'developerMode',
   'playfulStatus',
   'playfulContinue',
+  'announceTurns',
   'followOutput',
   'followUp',
   'enterSends',

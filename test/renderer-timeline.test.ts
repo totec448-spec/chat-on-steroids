@@ -168,7 +168,7 @@ async function settleHistoryFrame(w: Pick<Window, 'requestAnimationFrame'>): Pro
   await settle();
 }
 
-async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; followUp?: 'steer' | 'queue'; enterSends?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean; approvalCard?: () => unknown; answerApproval?: (id: string, cardId: string, choice: string) => unknown; summary?: Partial<SessionSummary>; holdInputs?: Promise<void>; storage?: Record<string, string>; inbox?: boolean } = {}) {
+async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; announceTurns?: boolean; followOutput?: boolean; followUp?: 'steer' | 'queue'; enterSends?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean; approvalCard?: () => unknown; answerApproval?: (id: string, cardId: string, choice: string) => unknown; summary?: Partial<SessionSummary>; holdInputs?: Promise<void>; storage?: Record<string, string>; inbox?: boolean } = {}) {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
@@ -201,7 +201,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
     },
     commandAllowlist: { enabled: false, mode: 'allow' as const, rules: [] as string[] },
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false, playfulStatus: options.playfulStatus ?? false, ...(options.followOutput === undefined ? {} : { followOutput: options.followOutput }), ...(options.followUp === undefined ? {} : { followUp: options.followUp }), ...(options.enterSends === undefined ? {} : { enterSends: options.enterSends }),
+    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false, playfulStatus: options.playfulStatus ?? false, ...(options.announceTurns === undefined ? {} : { announceTurns: options.announceTurns }), ...(options.followOutput === undefined ? {} : { followOutput: options.followOutput }), ...(options.followUp === undefined ? {} : { followUp: options.followUp }), ...(options.enterSends === undefined ? {} : { enterSends: options.enterSends }),
       ...(options.defaultChatModel ? { defaultChatModel: options.defaultChatModel, defaultChatReasoning: 'high' } : {}),
       ...(options.inbox ? { appearance: { ...defaultAppearance(), sidebarLayout: 'inbox' as const } } : {}) },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
@@ -7554,6 +7554,153 @@ describe('prompt recall in the composer', () => {
     live.inputs = [sentInput('q-5')]; await append([]);
     expect(press(w, 'ArrowUp')).toBe(true);
     expect(composer(w).value).toBe('Second question');
+  });
+});
+
+describe('the finished-reply announcement', () => {
+  const ask = (seq: number, turnId: string): SessionEvent =>
+    ({ kind: 'user_message', seq, time: T0 + seq * 1000, source: 'extension', turnId, messageId: `q-${seq}`, message: text('Check the build') }) as SessionEvent;
+  const start = (seq: number, turnId: string): SessionEvent => ({ seq, time: T0 + seq * 1000, source: 'extension', kind: 'turn_start', turnId });
+  const end = (seq: number, turnId: string, outcome: 'completed' | 'stopped' = 'completed'): SessionEvent =>
+    ({ seq, time: T0 + seq * 1000, source: 'extension', kind: 'turn_end', turnId, outcome }) as SessionEvent;
+  const region = (w: JSDOM['window']) => w.document.getElementById('turnAnnounce')!;
+
+  it('reads out once that a reply finished in the open chat, when it is turned on', async () => {
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns: true });
+    expect(region(w).getAttribute('role')).toBe('status');
+    expect(region(w).getAttribute('aria-live')).toBe('polite');
+    expect(region(w).classList.contains('sr-only')).toBe(true);
+    expect(region(w).textContent).toBe('');
+    await append([end(3, 't1')]);
+    expect(region(w).textContent).toBe('Reply finished');
+    // The next turn empties it first, so the same words are read again when that one ends.
+    await append([ask(4, 't2'), start(5, 't2')]);
+    expect(region(w).textContent).toBe('');
+    await append([end(6, 't2')]);
+    expect(region(w).textContent).toBe('Reply finished');
+  });
+
+  it('reads out a reply that finished in the same read as the next turn started, even right after the last one', async () => {
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns: true });
+    const said: string[] = [];
+    new w.MutationObserver(() => said.push(region(w).textContent ?? '')).observe(region(w), { childList: true, characterData: true, subtree: true });
+    // A Goal or Loop continue can start the next turn within one coalesced read.
+    await append([end(3, 't1'), start(4, 't2')]);
+    expect(region(w).textContent).toBe('Reply finished');
+    // The region still holds those words: it is emptied first, so the second reply is read too.
+    said.length = 0;
+    await append([end(5, 't2'), start(6, 't3')]);
+    await settle(200);
+    expect(region(w).textContent).toBe('Reply finished');
+    expect(said).toEqual(['', 'Reply finished']);
+  });
+
+  it('drops a delayed repeat once the next question has emptied the region', async () => {
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns: true });
+    await append([end(3, 't1')]);
+    expect(region(w).textContent).toBe('Reply finished');
+    // Hold the 100 ms repeat so the next read lands before it.
+    const held: Array<() => void> = [], setTimer = w.setTimeout.bind(w);
+    vi.spyOn(w, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) =>
+      ms === 100 ? (held.push(fn), 0) : setTimer(fn, ms, ...rest)) as typeof w.setTimeout);
+    await append([ask(4, 't2'), start(5, 't2'), end(6, 't2')]);
+    expect(region(w).textContent).toBe('');
+    await append([ask(7, 't3'), start(8, 't3')]);
+    for (const fn of held.splice(0)) fn();
+    expect(region(w).textContent).toBe('');
+  });
+
+  it('drops a delayed repeat once a later reply has been read out at once', async () => {
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns: true });
+    await append([end(3, 't1')]);
+    const held: Array<() => void> = [], setTimer = w.setTimeout.bind(w);
+    vi.spyOn(w, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) =>
+      ms === 100 ? (held.push(fn), 0) : setTimer(fn, ms, ...rest)) as typeof w.setTimeout);
+    // A Loop continue: the region still says the words, so this read waits for its repeat.
+    await append([start(4, 't2'), end(5, 't2'), start(6, 't3')]);
+    expect(held).toHaveLength(1);
+    // The next reply finishes before that repeat, and the empty region takes the words at once.
+    await append([end(7, 't3')]);
+    expect(region(w).textContent).toBe('Reply finished');
+    const said: string[] = [];
+    new w.MutationObserver(() => said.push(region(w).textContent ?? '')).observe(region(w), { childList: true, characterData: true, subtree: true });
+    for (const fn of held.splice(0)) fn();
+    await settle();
+    expect(said).toEqual([]);
+  });
+
+  // The announcement's own timers (the 100 ms refill and the gap between replies) are held and
+  // run by hand, in order, so nothing here waits on the clock.
+  const holdTimers = (w: JSDOM['window']) => {
+    const held: Array<() => void> = [], setTimer = w.setTimeout.bind(w);
+    vi.spyOn(w, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) =>
+      ms === 100 || ms === 1000 ? (held.push(fn), 0) : setTimer(fn, ms, ...rest)) as typeof w.setTimeout);
+    return held;
+  };
+  const watch = (w: JSDOM['window']) => {
+    const said: string[] = [];
+    new w.MutationObserver(() => said.push(region(w).textContent ?? '')).observe(region(w), { childList: true, characterData: true, subtree: true });
+    return said;
+  };
+
+  it('reads out every reply that finished in one read, one after another', async () => {
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns: true });
+    const held = holdTimers(w), said = watch(w);
+    await append([end(3, 't1'), start(4, 't2'), end(5, 't2'), start(6, 't3'), end(7, 't3')]);
+    // The first is read at once; the others wait their turn.
+    expect(region(w).textContent).toBe('Reply finished');
+    expect(held).toHaveLength(1);
+    held.shift()!(); // the gap, then the region is emptied for the second
+    await settle();
+    expect(region(w).textContent).toBe('');
+    held.shift()!(); // refilled in a later task
+    await settle();
+    expect(region(w).textContent).toBe('Reply finished');
+    held.shift()!();
+    await settle();
+    held.shift()!();
+    await settle();
+    expect(held).toHaveLength(0);
+    expect(said).toEqual(['Reply finished', '', 'Reply finished', '', 'Reply finished']);
+  });
+
+  it('empties and refills for each reply when the region already held the words', async () => {
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns: true });
+    await append([end(3, 't1')]);
+    const held = holdTimers(w), said = watch(w);
+    await append([start(4, 't2'), end(5, 't2'), start(6, 't3'), end(7, 't3')]);
+    while (held.length > 0) { held.shift()!(); await settle(); }
+    expect(said).toEqual(['', 'Reply finished', '', 'Reply finished']);
+  });
+
+  it('drops the replies still waiting when the open chat changes', async () => {
+    const first = summary([]), second = { ...summary([]), id: '2026-09-02-test0002', title: 'Other session' };
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns: true, sessions: [first, second] });
+    const held = holdTimers(w);
+    await append([end(3, 't1'), start(4, 't2'), end(5, 't2'), start(6, 't3'), end(7, 't3')]);
+    expect(region(w).textContent).toBe('Reply finished');
+    expect(held).toHaveLength(1);
+    (w.document.querySelector(`#sessionList [data-id="${second.id}"]`) as HTMLElement).click();
+    await settle();
+    expect(region(w).textContent).toBe('');
+    const said = watch(w);
+    while (held.length > 0) { held.shift()!(); await settle(); }
+    expect(region(w).textContent).toBe('');
+    expect(said).toEqual([]);
+  });
+
+  it.each([
+    ['when it is off', false, end(3, 't1')],
+    ['for a stopped reply', true, end(3, 't1', 'stopped')]
+  ] as const)('stays quiet %s', async (_, announceTurns, last) => {
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns });
+    await append([last]);
+    expect(region(w).textContent).toBe('');
+  });
+
+  it('stays quiet for a chat whose reply had finished before it was opened', async () => {
+    const { w } = await boot([ask(1, 't1'), start(2, 't1'), end(3, 't1')], true, [], [], { announceTurns: true });
+    expect(region(w).textContent).toBe('');
   });
 });
 
