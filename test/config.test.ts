@@ -313,6 +313,8 @@ describe('settings migration', () => {
     expect(loaded.goal.provider).toEqual({ kind: 'openrouter', baseUrl: '' });
     expect(loaded.ui.autoConnect).toBe(true);
     expect(loaded.ui.privacyScreenshots).toBe(false);
+    // #1796: a config from before the secrets shield has it on.
+    expect(loaded.ui.secretsShield).toBe(true);
     // The one tunnel id a pre-split config had is Core's, because Core is the connector
     // the app cannot work without. Desktop is a second, optional tunnel that starts empty
     // rather than inheriting Core's id — publishing Core twice would be worse than not

@@ -26,7 +26,7 @@ const chatgptSchema = z.discriminatedUnion('state', [
 const projectSchema = z.object({
   id: z.string().uuid(), name: z.string().min(1).max(160), path: z.string().min(1).max(32768),
   color: z.enum(PROJECT_COLORS).optional(),
-  createdAt: z.number().finite().nonnegative(), ungrouped: z.boolean().optional(),
+  createdAt: z.number().finite().nonnegative(), ungrouped: z.boolean().optional(), secretsShieldOff: z.boolean().optional(),
   chatgpt: chatgptSchema.optional(),
   remote: z.object({ host: z.string().min(1).max(255), port: z.number().int().min(1).max(65535).optional(), path: z.string().min(1).max(4096) }).optional()
 });
@@ -195,6 +195,31 @@ export function localProjectPath(folder: { virtual: string; real: string } | nul
 }
 
 /** Null means no project. A broken explicit binding is an error, never permission to guess cwd. */
+/** #1796: turns the secrets shield off (or back on) for one project's chats. On leaves no flag behind. */
+export function setProjectSecretsShieldOff(projectId: string, off: boolean): Promise<LocalProject> {
+  const operation = mutations.then(async () => {
+    z.string().uuid().parse(projectId);
+    z.boolean().parse(off);
+    const projects = await listProjects();
+    const project = projects.find(row => row.id === projectId);
+    if (!project) throw new Error('Project not found');
+    if ((project.secretsShieldOff === true) === off) return project;
+    const { secretsShieldOff: _, ...without } = project;
+    const updated: LocalProject = off ? { ...without, secretsShieldOff: true } : without;
+    await writeDurableNow('projects', projects.map(row => row.id === projectId ? updated : row));
+    return updated;
+  });
+  mutations = operation.catch(() => undefined);
+  return operation;
+}
+
+/** #1796: whether this chat's project turned the secrets shield off. A chat without a project never has. */
+export async function sessionSecretsShieldOff(sessionId: string): Promise<boolean> {
+  const session = await getSession(sessionId);
+  if (!session?.projectId) return false;
+  return (await getProject(session.projectId))?.secretsShieldOff === true;
+}
+
 export async function getSessionProject(sessionId: string): Promise<{ virtual: string; real: string } | null> {
   const session = await getSession(sessionId);
   if (!session?.projectId) return null;

@@ -276,6 +276,8 @@ const removingProject = new Set<string>();
 function projectMenuItems(id: string): RowMenuItem[] {
   const color = projects.find(row => row.id === id)?.color ?? null;
   const link = projects.find(row => row.id === id)?.chatgpt;
+  const shieldOff = projects.find(row => row.id === id)?.secretsShieldOff === true;
+  const shieldEverywhere = deps.state()?.config.ui.secretsShield !== false;
   return [
     { action: 'group-new', icon: 'i-group', label: () => t('New group'), title: () => t('Add a group to sort this project\'s chats'),
       run: () => void newChatGroup(id) },
@@ -299,6 +301,15 @@ function projectMenuItems(id: string): RowMenuItem[] {
         action: `color-${choice ?? 'none'}`, swatch: choice ?? '', checked: color === choice, disabled: savingProjectColor.has(id),
         label: () => choice ? projectColorName(choice) : t('None'), run: () => void saveProjectColor(id, choice)
       }))
+    },
+    // #1796: on unless this project or Settings turned it off; Settings wins, so the switch waits there.
+    {
+      action: 'secrets-shield', icon: 'i-shield', toggle: true, checked: shieldEverywhere && !shieldOff,
+      disabled: !shieldEverywhere || savingProjectShield.has(id), label: () => t('Hide secrets from ChatGPT'),
+      title: () => !shieldEverywhere ? t('Off for every project in Settings') : shieldOff
+        ? t("This project's tools send keys and tokens to ChatGPT as they are")
+        : t("Keys and tokens in this project's tool results are hidden from ChatGPT"),
+      run: () => void saveProjectShield(id, !shieldOff)
     },
     {
       action: 'remove', icon: 'i-trash', danger: true, separated: true, disabled: removingProject.has(id),
@@ -350,6 +361,19 @@ async function saveProjectColor(id: string, choice: ProjectColor | null): Promis
     projects = projects.map(row => row.id === id ? updated : row);
     paintSessions();
   } finally { savingProjectColor.delete(id); }
+}
+
+const savingProjectShield = new Set<string>();
+async function saveProjectShield(id: string, off: boolean): Promise<void> {
+  if (savingProjectShield.has(id)) return;
+  savingProjectShield.add(id);
+  try {
+    const updated = await run(api.setProjectSecretsShieldOff(id, off));
+    if (!updated) return;
+    ++sessionsLoadGeneration;
+    projects = projects.map(row => row.id === id ? updated : row);
+    paintSessions();
+  } finally { savingProjectShield.delete(id); }
 }
 
 async function removeProjectFromSidebar(id: string): Promise<void> {
