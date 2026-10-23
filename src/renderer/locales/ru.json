@@ -1912,7 +1912,6 @@
   "Mention Chat On Steroids Core": "Упоминать Chat On Steroids Core",
   "Makes sure ChatGPT can use this app in every chat. Turn it off if ChatGPT starts plain questions with an unneeded tool call. Workers, Goal, Loop and Continue always keep the mention.": "ChatGPT сможет использовать это приложение в любом чате. Отключите, если ChatGPT начинает простые вопросы с ненужного вызова инструмента. Воркеры, Цель, Цикл и Continue всегда сохраняют упоминание.",
   "Privacy": "Конфиденциальность",
-  "What ChatGPT sees of your screen.": "Что ChatGPT видит на вашем экране.",
   "For developers": "Для разработчиков",
   "Troubleshooting details and access for tools on this computer.": "Сведения для диагностики и доступ для инструментов на этом компьютере.",
   "Show turn boundaries and recovery events in the chat.": "Показывать в чате границы ходов и события восстановления.",
@@ -3130,5 +3129,11 @@
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "Карандаш отмечает чаты с неотправленным сообщением, а черновики возвращаются после перезапуска.",
   "A better Review": "Улучшенная «Проверка»",
   "Right-click an untracked file to add it, or its folder, to .gitignore.": "Щёлкните правой кнопкой по неотслеживаемому файлу, чтобы добавить его или его папку в .gitignore.",
-  "Stopped · open this chat's tab again to continue": "Остановлено · откройте вкладку этого чата снова, чтобы продолжить"
+  "Stopped · open this chat's tab again to continue": "Остановлено · откройте вкладку этого чата снова, чтобы продолжить",
+  "Hide secrets from ChatGPT": "Скрывать секреты от ChatGPT",
+  "API keys, tokens, private keys and passwords in what tools return are replaced with a short note before ChatGPT sees them. Your files stay as they are. A project can turn this off in its menu.": "API-ключи, токены, закрытые ключи и пароли в том, что возвращают инструменты, заменяются короткой пометкой, прежде чем ChatGPT их увидит. Ваши файлы остаются как есть. Проект может отключить это в своём меню.",
+  "What ChatGPT gets to see on this computer.": "Что ChatGPT может видеть на этом компьютере.",
+  "Off for every project in Settings": "Отключено для всех проектов в настройках",
+  "This project's tools send keys and tokens to ChatGPT as they are": "Инструменты этого проекта отправляют ключи и токены в ChatGPT как есть",
+  "Keys and tokens in this project's tool results are hidden from ChatGPT": "Ключи и токены в результатах инструментов этого проекта скрыты от ChatGPT"
 }

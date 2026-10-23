@@ -205,10 +205,11 @@
                 <label class="setting"><span class="setting-text"><b>Mention Plugins instead of Core</b><em>Ordinary messages the app sends mention Chat On Steroids Plugins. Goal, Loop, workers and recovery always mention Core. Messages you send in ChatGPT itself are unchanged.</em></span><input id="mentionPlugins" type="checkbox" /></label>
               </div>
             </section>
-            <section class="appearance-section" id="privacyScreenshotsSetting">
-              <header class="settings-section-head"><div><h2>Privacy</h2><p>What ChatGPT sees of your screen.</p></div></header>
+            <section class="appearance-section" id="privacySettings">
+              <header class="settings-section-head"><div><h2>Privacy</h2><p>What ChatGPT gets to see on this computer.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
-                <label class="setting"><span class="setting-text"><b>Screenshot only the active window</b><em>For privacy, ChatGPT's screenshots show the window in front instead of the whole screen.</em></span><input id="privacyScreenshots" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Hide secrets from ChatGPT</b><em>API keys, tokens, private keys and passwords in what tools return are replaced with a short note before ChatGPT sees them. Your files stay as they are. A project can turn this off in its menu.</em></span><input id="secretsShield" type="checkbox" /></label>
+                <label class="setting" id="privacyScreenshotsSetting"><span class="setting-text"><b>Screenshot only the active window</b><em>For privacy, ChatGPT's screenshots show the window in front instead of the whole screen.</em></span><input id="privacyScreenshots" type="checkbox" /></label>
               </div>
             </section>
             <section class="appearance-section">

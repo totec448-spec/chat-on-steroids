@@ -2382,6 +2382,48 @@ it('offers whole-screen privacy only where a screenshot can show the whole scree
   expect(row.hidden).toBe(true);
 });
 
+it('shows Privacy on every platform with the secrets shield on by default, and saves turning it off (#1797)', async () => {
+  const mounted = await mountChat({ platform: { family: 'windows', name: 'Windows', desktopAutomation: true } });
+  const doc = mounted.window.document;
+  const section = doc.getElementById('privacySettings')!;
+  const shield = doc.getElementById('secretsShield') as HTMLInputElement;
+  expect(section.hidden).toBe(false);
+  expect(doc.querySelector('[data-panel="general"]')!.contains(section)).toBe(true);
+  // A config from before the shield has no field: it shows on.
+  expect(mounted.state.config.ui.secretsShield).toBeUndefined();
+  expect(shield.checked).toBe(true);
+  expect(doc.getElementById('privacyScreenshotsSetting')!.hidden).toBe(true);
+  shield.checked = false;
+  shield.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.secretsShield).toBe(false));
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, secretsShield: false } } });
+  expect(shield.checked).toBe(false);
+});
+
+it('puts the secrets shield switch back after a save that was refused, so a later save cannot turn it off', async () => {
+  let refuse = true;
+  const saves: any[] = [];
+  const mounted = await mountChat({}, [], { saveSettings: (patch: any) => {
+    saves.push(structuredClone(patch));
+    if (refuse) return Promise.resolve({ ok: false, error: 'Settings could not be saved.' });
+    return Promise.resolve({ ok: true, data: mounted.state });
+  } });
+  const doc = mounted.window.document;
+  const shield = doc.getElementById('secretsShield') as HTMLInputElement;
+  shield.focus();
+  shield.checked = false;
+  shield.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(saves.at(-1)?.ui.secretsShield).toBe(false));
+  // The refusal leaves the switch on, as saved, even though it still has focus.
+  await waitFor(() => expect(shield.checked).toBe(true));
+  refuse = false;
+  const follow = doc.getElementById('followOutput') as HTMLInputElement;
+  follow.checked = !follow.checked;
+  follow.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(saves.length).toBeGreaterThan(1));
+  expect(saves.at(-1).ui.secretsShield).toBe(true);
+});
+
 it('says why an Activity list is empty, in the app language, and drops the note once a line arrives', async () => {
   let addLine: ((entry: unknown) => void) | undefined;
   const mounted = await mountChat({}, [], { onLogEntry: (fn: (entry: unknown) => void) => { addLine = fn; return () => undefined; } });
