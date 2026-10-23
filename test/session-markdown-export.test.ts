@@ -7,10 +7,10 @@ const electron = vi.hoisted(() => ({
   app: { getPath: vi.fn(() => '/downloads') }
 }));
 const store = vi.hoisted(() => ({ getSession: vi.fn(), readEvents: vi.fn(), readOverflowText: vi.fn() }));
-const files = vi.hoisted(() => ({ writeFile: vi.fn(async () => undefined) }));
+const files = vi.hoisted(() => ({ replaceFile: vi.fn(async () => undefined) }));
 vi.mock('electron', () => electron);
 vi.mock('../src/main/session/store.js', () => store);
-vi.mock('node:fs', () => ({ promises: files }));
+vi.mock('../src/main/replace-file.js', () => files);
 
 const { exportSessionMarkdown } = await import('../src/main/session/markdown-export.js');
 
@@ -38,14 +38,16 @@ it('saves the session transcript where the person chooses, named after the chat'
   electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/Explain it.md' });
   await expect(exportSessionMarkdown({ id: 'session-1', scope: 'session', target: 'file' }, null)).resolves.toEqual({ done: 'saved', name: 'Explain it.md' });
   expect(electron.dialog.showSaveDialog.mock.calls[0]![0]).toMatchObject({ defaultPath: expect.stringContaining('Explain it.md') });
-  expect(files.writeFile).toHaveBeenCalledWith('/downloads/Explain it.md',
-    '# Explain: it?\n\n## You\n\nExplain it\n\n## ChatGPT\n\nThe first part, and the rest of the answer.\n', 'utf8');
+  // Linux replaces a file without asking unless the dialog is told to confirm.
+  expect(electron.dialog.showSaveDialog.mock.calls[0]![0].properties).toContain('showOverwriteConfirmation');
+  expect(files.replaceFile).toHaveBeenCalledWith('/downloads/Explain it.md',
+    '# Explain: it?\n\n## You\n\nExplain it\n\n## ChatGPT\n\nThe first part, and the rest of the answer.\n', 'Markdown export');
 });
 
 it('writes nothing when the save dialog is cancelled, and refuses unfinished turns', async () => {
   electron.dialog.showSaveDialog.mockResolvedValue({ canceled: true });
   await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't1', target: 'file' }, null)).resolves.toEqual({ done: 'cancelled' });
-  expect(files.writeFile).not.toHaveBeenCalled();
+  expect(files.replaceFile).not.toHaveBeenCalled();
   await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 'open-turn', target: 'clipboard' }, null)).rejects.toThrow('has not completed');
 });
 
@@ -98,12 +100,25 @@ it('saves the session as a self-contained HTML page with credential shapes maske
   expect(electron.dialog.showSaveDialog.mock.calls[0]![0]).toMatchObject({
     defaultPath: expect.stringContaining('Explain it.html'), filters: [{ name: 'HTML files', extensions: ['html'] }]
   });
-  const [file, page, encoding] = files.writeFile.mock.calls[0] as unknown as [string, string, string];
-  expect([file, encoding]).toEqual(['/downloads/Explain it.html', 'utf8']);
+  expect(electron.dialog.showSaveDialog.mock.calls[0]![0].properties).toContain('showOverwriteConfirmation');
+  const [file, page, label] = files.replaceFile.mock.calls[0] as unknown as [string, string, string];
+  expect([file, label]).toEqual(['/downloads/Explain it.html', 'HTML export']);
   expect(page).toContain('<title>Explain: it?</title>');
   expect(page).toContain('<p class="said" dir="auto">Explain it</p>');
   expect(page).toContain('Use the key [redacted] and &lt;b&gt;bold&lt;/b&gt;.');
   expect(page).not.toContain('sk-proj-');
+});
+
+it('names who wrote a message on the page in the interface language', async () => {
+  const { setMainTextTranslations } = await import('../src/main/main-texts.js');
+  setMainTextTranslations({ You: 'Du' });
+  try {
+    electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/Explain it.html' });
+    await exportSessionMarkdown({ id: 'session-1', scope: 'session', target: 'file', format: 'html' }, null);
+    expect((files.replaceFile.mock.calls[0] as unknown as string[])[1]).toContain('<h2>Du</h2>');
+  } finally {
+    setMainTextTranslations({});
+  }
 });
 
 it('refuses an HTML export of one answer or to the clipboard', async () => {

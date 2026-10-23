@@ -2924,6 +2924,7 @@
   "This answer is no longer in the chat.": "Câu trả lời này không còn trong chat.",
   "This turn has not completed": "Lượt này chưa hoàn tất",
   "This turn has no answer to export": "Lượt này không có câu trả lời để xuất",
+  "HTML export saves a whole session to a file": "Xuất HTML lưu toàn bộ phiên vào một tệp",
   "Only a ChatGPT answer can be bookmarked": "Chỉ có thể đánh dấu câu trả lời của ChatGPT",
   "A chat keeps at most 200 bookmarks": "Mỗi cuộc trò chuyện giữ tối đa 200 đánh dấu",
   "This answer is no longer in the chat, so its bookmark was removed.": "Câu trả lời này không còn trong chat nên đánh dấu của nó đã được bỏ.",

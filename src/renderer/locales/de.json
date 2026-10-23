@@ -2971,6 +2971,7 @@
   "This answer is no longer in the chat.": "Diese Antwort ist nicht mehr im Chat.",
   "This turn has not completed": "Dieser Durchlauf ist noch nicht abgeschlossen",
   "This turn has no answer to export": "Dieser Durchlauf hat keine Antwort zum Exportieren",
+  "HTML export saves a whole session to a file": "Der HTML-Export speichert eine ganze Sitzung in einer Datei",
   "Only a ChatGPT answer can be bookmarked": "Nur eine ChatGPT-Antwort kann als Lesezeichen gespeichert werden",
   "A chat keeps at most 200 bookmarks": "Ein Chat behält höchstens 200 Lesezeichen",
   "This answer is no longer in the chat, so its bookmark was removed.": "Diese Antwort ist nicht mehr im Chat, daher wurde ihr Lesezeichen entfernt.",
