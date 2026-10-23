@@ -49,7 +49,7 @@ it('persists only predefined presentation colors without changing project worksp
   expect(await setProjectColor(project.id, null)).toEqual(project);
 });
 
-it('turns the secrets shield off for one project\'s chats only, durably (#1796)', async () => {
+it('turns the secrets shield off for one project\'s chats only, durably (#1797)', async () => {
   const project = await addProject(path.join(approved, 'first'));
   const other = await addProject(path.join(approved, 'second'));
   const inside = await createSession({ title: 'Inside', conversationId: 'inside-conversation' });

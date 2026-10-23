@@ -195,7 +195,7 @@ export function localProjectPath(folder: { virtual: string; real: string } | nul
 }
 
 /** Null means no project. A broken explicit binding is an error, never permission to guess cwd. */
-/** #1796: turns the secrets shield off (or back on) for one project's chats. On leaves no flag behind. */
+/** #1797: turns the secrets shield off (or back on) for one project's chats. On leaves no flag behind. */
 export function setProjectSecretsShieldOff(projectId: string, off: boolean): Promise<LocalProject> {
   const operation = mutations.then(async () => {
     z.string().uuid().parse(projectId);
@@ -213,7 +213,7 @@ export function setProjectSecretsShieldOff(projectId: string, off: boolean): Pro
   return operation;
 }
 
-/** #1796: whether this chat's project turned the secrets shield off. A chat without a project never has. */
+/** #1797: whether this chat's project turned the secrets shield off. A chat without a project never has. */
 export async function sessionSecretsShieldOff(sessionId: string): Promise<boolean> {
   const session = await getSession(sessionId);
   if (!session?.projectId) return false;

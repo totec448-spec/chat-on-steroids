@@ -501,7 +501,7 @@ function noteTransportIdentity(transportKey: string | null): void {
 
 /** Deliver bounded completed output after all other appendices have spent their text budget. */
 /**
- * #1796: a tool's own output as ChatGPT should receive it, with credentials masked.
+ * #1797: a tool's own output as ChatGPT should receive it, with credentials masked.
  *
  * Off only when Settings turns it off for everyone or this chat's project turns it off. The
  * project is looked up only once something was found, so ordinary output costs one quick test.
@@ -1142,7 +1142,7 @@ async function dispatchTracked(
   // subtly earlier internal value that omits the worker report most likely to matter later.
   // The Plugins handler owns validation/redaction of external results. A dispatcher refusal
   // never visited that owner and therefore needs its own single redaction pass.
-  // #1796: the tool's own output is masked once, on the outer call, before anything the app adds
+  // #1797: the tool's own output is masked once, on the outer call, before anything the app adds
   // (inbox, notices, the user's own new messages) — those are not tool output.
   const ownResult = surface === 'plugins' && !handlerRan ? pluginManager.redactResult(result) as ToolResult : result;
   const baseResult = nested ? ownResult : await shieldOutput(context, name, ownResult);

@@ -168,7 +168,7 @@ async function settleHistoryFrame(w: Pick<Window, 'requestAnimationFrame'>): Pro
   await settle();
 }
 
-async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; followOutput?: boolean; followUp?: 'steer' | 'queue'; enterSends?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean; approvalCard?: () => unknown; answerApproval?: (id: string, cardId: string, choice: string) => unknown; summary?: Partial<SessionSummary>; holdInputs?: Promise<void>; storage?: Record<string, string>; inbox?: boolean } = {}) {
+async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers: Array<{ id: string; sourceSessionId: string }> = [], projects: LocalProject[] = [], options: { origin?: SessionSummary["origin"]; developerMode?: boolean; playfulStatus?: boolean; announceTurns?: boolean; followOutput?: boolean; followUp?: 'steer' | 'queue'; enterSends?: boolean; sessions?: SessionSummary[]; pro?: boolean; astra?: boolean; reserveOpenings?: boolean; handoff?: Handoff | null; deferProcessStop?: boolean; defaultChatModel?: string; noModels?: boolean; approvalCard?: () => unknown; answerApproval?: (id: string, cardId: string, choice: string) => unknown; summary?: Partial<SessionSummary>; holdInputs?: Promise<void>; storage?: Record<string, string>; inbox?: boolean } = {}) {
   const html = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'index.html'), 'utf8');
   dom = new JSDOM(html, { url: 'https://local.test/', pretendToBeVisual: true });
   const w = dom.window;
@@ -201,7 +201,7 @@ async function boot(events: SessionEvent[], selectExisting = true, pausedHelpers
     },
     commandAllowlist: { enabled: false, mode: 'allow' as const, rules: [] as string[] },
     tunnel: { kind: 'openai', tunnelId: 'tunnel_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', desktopTunnelId: '', binaryPath: '' },
-    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false, playfulStatus: options.playfulStatus ?? false, ...(options.followOutput === undefined ? {} : { followOutput: options.followOutput }), ...(options.followUp === undefined ? {} : { followUp: options.followUp }), ...(options.enterSends === undefined ? {} : { enterSends: options.enterSends }),
+    ui: { minimizeToTray: true, autoConnect: false, privacyScreenshots: false, theme: 'light', developerMode: options.developerMode ?? false, playfulStatus: options.playfulStatus ?? false, ...(options.announceTurns === undefined ? {} : { announceTurns: options.announceTurns }), ...(options.followOutput === undefined ? {} : { followOutput: options.followOutput }), ...(options.followUp === undefined ? {} : { followUp: options.followUp }), ...(options.enterSends === undefined ? {} : { enterSends: options.enterSends }),
       ...(options.defaultChatModel ? { defaultChatModel: options.defaultChatModel, defaultChatReasoning: 'high' } : {}),
       ...(options.inbox ? { appearance: { ...defaultAppearance(), sidebarLayout: 'inbox' as const } } : {}) },
     sessions: { record: true, retainDays: 30, advisoryTokens: 300000, limitTokens: 400000 },
@@ -1964,7 +1964,7 @@ it('picks and clears project color without changing project membership', async (
   expect(api.setProjectColor).toHaveBeenCalledTimes(2);
 });
 
-it('turns the secrets shield off and on for one project from its menu (#1796)', async () => {
+it('turns the secrets shield off and on for one project from its menu (#1797)', async () => {
   const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: '/workspace', createdAt: 1 };
   const { w } = await boot([], false, [], [project]);
   const api = (w as any).api;
@@ -3721,6 +3721,95 @@ it("retires the running turn's lines when the turn ends after its rows were draw
   expect(w.document.getElementById('chatState')!.textContent).toMatch(/^Worked for /);
   expect(w.document.querySelector('#timeline .turn-status.is-working')).toBeNull();
   expect(w.document.querySelector('#timeline .turn-now')).toBeNull();
+});
+
+// #1787: a chat's page stopped reporting, the app gave up recovering it and its activity window ran
+// out, but nothing new was written to the chat. The caption had read the controls once and went on
+// saying "Working for …" for six hours.
+it('stops counting a turn the app no longer sees running, even when nothing new arrives in the chat', async () => {
+  const { w } = await boot([{ seq: 1, time: Date.now() - 60_000, source: 'extension', kind: 'turn_start', turnId: 'held-turn' }]);
+  expect(w.document.getElementById('chatState')!.textContent).toMatch(/^Working for /);
+  const api = (w as any).api;
+  const original = api.getSessionControls;
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data, activeTurnId: null } });
+  try {
+    vi.setSystemTime(Date.now() + 5 * 60_000);
+    await vi.waitFor(() => expect(w.document.getElementById('chatState')!.textContent).not.toMatch(/^Working for /), { timeout: 5_000 });
+  } finally { vi.useRealTimers(); }
+});
+
+it('says a chat stopped when recovery gave up on its unfinished turn, and drops that once the page is back', async () => {
+  const { w, append } = await boot([{ seq: 1, time: Date.now() - 60_000, source: 'extension', kind: 'turn_start', turnId: 'held-turn' }]);
+  const api = (w as any).api;
+  const original = api.getSessionControls;
+  let stopped = true;
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data, activeTurnId: null, pageless: stopped } });
+  await append([]);
+  const caption = () => w.document.getElementById('chatState')!;
+  expect(caption().textContent).toBe("Stopped · open this chat's tab again to continue");
+  expect(caption().classList.contains('is-bad')).toBe(true);
+  expect(caption().classList.contains('is-working')).toBe(false);
+  stopped = false;
+  await append([]);
+  expect(caption().textContent).toBe('');
+});
+
+it('takes the stopped line away when the page is back, even when nothing new arrives in the chat', async () => {
+  const { w, append } = await boot([{ seq: 1, time: Date.now() - 60_000, source: 'extension', kind: 'turn_start', turnId: 'held-turn' }]);
+  const api = (w as any).api;
+  const original = api.getSessionControls;
+  let stopped = true;
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data, activeTurnId: null, pageless: stopped } });
+  await append([]);
+  expect(w.document.getElementById('chatState')!.textContent).toBe("Stopped · open this chat's tab again to continue");
+  stopped = false;
+  try {
+    vi.setSystemTime(Date.now() + 60_000);
+    await vi.waitFor(() => expect(w.document.getElementById('chatState')!.textContent).toBe(''), { timeout: 5_000 });
+  } finally { vi.useRealTimers(); }
+});
+
+it('says a reopened turn stopped rather than how long it worked', async () => {
+  const at = Date.now() - 120_000;
+  const { w, append } = await boot([
+    { seq: 1, time: at, source: 'extension', kind: 'turn_start', turnId: 'reopened-turn' },
+    { seq: 2, time: at + 10_000, source: 'extension', kind: 'turn_end', turnId: 'reopened-turn', outcome: 'completed' },
+    { seq: 3, time: at + 20_000, source: 'extension', kind: 'turn_start', turnId: 'reopened-turn' }
+  ]);
+  const api = (w as any).api;
+  const original = api.getSessionControls;
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data, activeTurnId: null, pageless: true } });
+  await append([]);
+  expect(w.document.getElementById('chatState')!.textContent).toBe("Stopped · open this chat's tab again to continue");
+});
+
+it('shows the stopped line at the top of the loaded rows when its question is further up', async () => {
+  const asked = Date.now() - 45 * 60_000;
+  const calls = Array.from({ length: 220 }, (_, i): SessionEvent => ({ ...toolCall(i + 3, `long-${i}`), time: asked + (i + 1) * 1000, turnId: 'long-turn' }));
+  const app = await boot([
+    { seq: 1, time: asked - 100, source: 'extension', kind: 'turn_start', turnId: 'long-turn' },
+    { kind: 'user_message', seq: 2, origin: 2, time: asked, source: 'extension', turnId: 'long-turn', messageId: 'q-long', message: text('Build all thirty quests') },
+    ...calls
+  ], true, [], [], { summary: { activeTurnId: 'long-turn' } });
+  const { w } = app;
+  const api = (w as any).api;
+  const original = api.getSessionControls;
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data, activeTurnId: null, pageless: true } });
+  await app.append([]); await app.append([]);
+  const timeline = w.document.getElementById('timeline')!;
+  expect(timeline.querySelector('.ev-user_message')).toBeNull();
+  const rows = [...timeline.querySelectorAll('[data-timeline-key], .turn-stopped, .turn-status')];
+  expect(rows[0]?.matches('.turn-stopped')).toBe(true);
+  expect(rows[0]?.textContent).toBe("Stopped · open this chat's tab again to continue");
+  expect(timeline.querySelector('.turn-status.is-working')).toBeNull();
+});
+
+// The 2.1.45 caption counted a six-hour turn as "Working for 372m 3s" (#1787 screenshots).
+it('counts a turn longer than an hour in hours and minutes', async () => {
+  const { w, append } = await boot([{ seq: 1, time: T0, source: 'extension', kind: 'turn_start', turnId: 'held-turn' }]);
+  (w as any).api.getSessionControls = (id: string) => Promise.resolve({ ok: true, data: { sessionId: id, automation: 'off', activeTurnId: null, finishHeld: false, blocked: '', job: null } });
+  await append([{ seq: 2, time: T0 + (6 * 3600 + 12 * 60 + 3) * 1000, source: 'extension', kind: 'turn_end', turnId: 'held-turn', outcome: 'completed' }]);
+  expect(w.document.getElementById('chatState')!.textContent).toBe('Worked for 6h 12m 3s');
 });
 
 it('shows elapsed work for the exact recorded turn without exposing lifecycle rows', async () => {
@@ -7499,6 +7588,153 @@ describe('prompt recall in the composer', () => {
     live.inputs = [sentInput('q-5')]; await append([]);
     expect(press(w, 'ArrowUp')).toBe(true);
     expect(composer(w).value).toBe('Second question');
+  });
+});
+
+describe('the finished-reply announcement', () => {
+  const ask = (seq: number, turnId: string): SessionEvent =>
+    ({ kind: 'user_message', seq, time: T0 + seq * 1000, source: 'extension', turnId, messageId: `q-${seq}`, message: text('Check the build') }) as SessionEvent;
+  const start = (seq: number, turnId: string): SessionEvent => ({ seq, time: T0 + seq * 1000, source: 'extension', kind: 'turn_start', turnId });
+  const end = (seq: number, turnId: string, outcome: 'completed' | 'stopped' = 'completed'): SessionEvent =>
+    ({ seq, time: T0 + seq * 1000, source: 'extension', kind: 'turn_end', turnId, outcome }) as SessionEvent;
+  const region = (w: JSDOM['window']) => w.document.getElementById('turnAnnounce')!;
+
+  it('reads out once that a reply finished in the open chat, when it is turned on', async () => {
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns: true });
+    expect(region(w).getAttribute('role')).toBe('status');
+    expect(region(w).getAttribute('aria-live')).toBe('polite');
+    expect(region(w).classList.contains('sr-only')).toBe(true);
+    expect(region(w).textContent).toBe('');
+    await append([end(3, 't1')]);
+    expect(region(w).textContent).toBe('Reply finished');
+    // The next turn empties it first, so the same words are read again when that one ends.
+    await append([ask(4, 't2'), start(5, 't2')]);
+    expect(region(w).textContent).toBe('');
+    await append([end(6, 't2')]);
+    expect(region(w).textContent).toBe('Reply finished');
+  });
+
+  it('reads out a reply that finished in the same read as the next turn started, even right after the last one', async () => {
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns: true });
+    const said: string[] = [];
+    new w.MutationObserver(() => said.push(region(w).textContent ?? '')).observe(region(w), { childList: true, characterData: true, subtree: true });
+    // A Goal or Loop continue can start the next turn within one coalesced read.
+    await append([end(3, 't1'), start(4, 't2')]);
+    expect(region(w).textContent).toBe('Reply finished');
+    // The region still holds those words: it is emptied first, so the second reply is read too.
+    said.length = 0;
+    await append([end(5, 't2'), start(6, 't3')]);
+    await settle(200);
+    expect(region(w).textContent).toBe('Reply finished');
+    expect(said).toEqual(['', 'Reply finished']);
+  });
+
+  it('drops a delayed repeat once the next question has emptied the region', async () => {
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns: true });
+    await append([end(3, 't1')]);
+    expect(region(w).textContent).toBe('Reply finished');
+    // Hold the 100 ms repeat so the next read lands before it.
+    const held: Array<() => void> = [], setTimer = w.setTimeout.bind(w);
+    vi.spyOn(w, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) =>
+      ms === 100 ? (held.push(fn), 0) : setTimer(fn, ms, ...rest)) as typeof w.setTimeout);
+    await append([ask(4, 't2'), start(5, 't2'), end(6, 't2')]);
+    expect(region(w).textContent).toBe('');
+    await append([ask(7, 't3'), start(8, 't3')]);
+    for (const fn of held.splice(0)) fn();
+    expect(region(w).textContent).toBe('');
+  });
+
+  it('drops a delayed repeat once a later reply has been read out at once', async () => {
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns: true });
+    await append([end(3, 't1')]);
+    const held: Array<() => void> = [], setTimer = w.setTimeout.bind(w);
+    vi.spyOn(w, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) =>
+      ms === 100 ? (held.push(fn), 0) : setTimer(fn, ms, ...rest)) as typeof w.setTimeout);
+    // A Loop continue: the region still says the words, so this read waits for its repeat.
+    await append([start(4, 't2'), end(5, 't2'), start(6, 't3')]);
+    expect(held).toHaveLength(1);
+    // The next reply finishes before that repeat, and the empty region takes the words at once.
+    await append([end(7, 't3')]);
+    expect(region(w).textContent).toBe('Reply finished');
+    const said: string[] = [];
+    new w.MutationObserver(() => said.push(region(w).textContent ?? '')).observe(region(w), { childList: true, characterData: true, subtree: true });
+    for (const fn of held.splice(0)) fn();
+    await settle();
+    expect(said).toEqual([]);
+  });
+
+  // The announcement's own timers (the 100 ms refill and the gap between replies) are held and
+  // run by hand, in order, so nothing here waits on the clock.
+  const holdTimers = (w: JSDOM['window']) => {
+    const held: Array<() => void> = [], setTimer = w.setTimeout.bind(w);
+    vi.spyOn(w, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) =>
+      ms === 100 || ms === 1000 ? (held.push(fn), 0) : setTimer(fn, ms, ...rest)) as typeof w.setTimeout);
+    return held;
+  };
+  const watch = (w: JSDOM['window']) => {
+    const said: string[] = [];
+    new w.MutationObserver(() => said.push(region(w).textContent ?? '')).observe(region(w), { childList: true, characterData: true, subtree: true });
+    return said;
+  };
+
+  it('reads out every reply that finished in one read, one after another', async () => {
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns: true });
+    const held = holdTimers(w), said = watch(w);
+    await append([end(3, 't1'), start(4, 't2'), end(5, 't2'), start(6, 't3'), end(7, 't3')]);
+    // The first is read at once; the others wait their turn.
+    expect(region(w).textContent).toBe('Reply finished');
+    expect(held).toHaveLength(1);
+    held.shift()!(); // the gap, then the region is emptied for the second
+    await settle();
+    expect(region(w).textContent).toBe('');
+    held.shift()!(); // refilled in a later task
+    await settle();
+    expect(region(w).textContent).toBe('Reply finished');
+    held.shift()!();
+    await settle();
+    held.shift()!();
+    await settle();
+    expect(held).toHaveLength(0);
+    expect(said).toEqual(['Reply finished', '', 'Reply finished', '', 'Reply finished']);
+  });
+
+  it('empties and refills for each reply when the region already held the words', async () => {
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns: true });
+    await append([end(3, 't1')]);
+    const held = holdTimers(w), said = watch(w);
+    await append([start(4, 't2'), end(5, 't2'), start(6, 't3'), end(7, 't3')]);
+    while (held.length > 0) { held.shift()!(); await settle(); }
+    expect(said).toEqual(['', 'Reply finished', '', 'Reply finished']);
+  });
+
+  it('drops the replies still waiting when the open chat changes', async () => {
+    const first = summary([]), second = { ...summary([]), id: '2026-09-02-test0002', title: 'Other session' };
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns: true, sessions: [first, second] });
+    const held = holdTimers(w);
+    await append([end(3, 't1'), start(4, 't2'), end(5, 't2'), start(6, 't3'), end(7, 't3')]);
+    expect(region(w).textContent).toBe('Reply finished');
+    expect(held).toHaveLength(1);
+    (w.document.querySelector(`#sessionList [data-id="${second.id}"]`) as HTMLElement).click();
+    await settle();
+    expect(region(w).textContent).toBe('');
+    const said = watch(w);
+    while (held.length > 0) { held.shift()!(); await settle(); }
+    expect(region(w).textContent).toBe('');
+    expect(said).toEqual([]);
+  });
+
+  it.each([
+    ['when it is off', false, end(3, 't1')],
+    ['for a stopped reply', true, end(3, 't1', 'stopped')]
+  ] as const)('stays quiet %s', async (_, announceTurns, last) => {
+    const { w, append } = await boot([ask(1, 't1'), start(2, 't1')], true, [], [], { announceTurns });
+    await append([last]);
+    expect(region(w).textContent).toBe('');
+  });
+
+  it('stays quiet for a chat whose reply had finished before it was opened', async () => {
+    const { w } = await boot([ask(1, 't1'), start(2, 't1'), end(3, 't1')], true, [], [], { announceTurns: true });
+    expect(region(w).textContent).toBe('');
   });
 });
 
