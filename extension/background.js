@@ -4060,7 +4060,9 @@ const HANDLERS = {
     if (!ownsDocument(source) || !/^[a-f0-9-]{36}$/i.test(id) || !/^g-p-[0-9a-f]{32}$/.test(project)) return { ok: false };
     const opening = inputOpenings[id];
     if (opening?.tab !== source.tab || opening.project !== project) return { ok: false };
-    const tab = await chrome.tabs.get(source.tab);
+    const tab = await chrome.tabs.get(source.tab).catch(() => null);
+    // The document may have been replaced while asking, or the tab may already be leaving.
+    if (!tab || !ownsDocument(source) || tab.pendingUrl) return { ok: false };
     let home = null;
     try { home = /^\/g\/(g-p-[0-9a-f]{32})(?:-[^/]+)?\/project\/?$/i.exec(new URL(tab.url).pathname)?.[1]?.toLowerCase() ?? null; } catch {}
     if (home !== project) return { ok: false };

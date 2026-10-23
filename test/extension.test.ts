@@ -1167,6 +1167,27 @@ describe('a linked Project ChatGPT no longer has (#1759)', () => {
     await worker.send({ type: 'project_unavailable', id: inputId, project: reportedProject }, tabId);
     expect(calls).toEqual(posted ? [{ action: 'gone', inputId, chatgptId: project }] : []);
   });
+
+  it('is not reported by a tab that closed while asking', async () => {
+    const calls: any[] = [];
+    let closed = false;
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token', inputOpenings: { [inputId]: { tab: 1, stage: 'ready', project } } }),
+      session: new FakeStorageArea(),
+      tabsGet: async () => { if (closed) throw new Error('No tab with id: 1.'); return { id: 1, url: `https://chatgpt.com/g/${project}/project` }; },
+      fetch: async (input, init: any = {}) => {
+        const route = new URL(input).pathname;
+        if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (route === '/project-create') calls.push(JSON.parse(init.body));
+        return response(200, { ok: true });
+      }
+    });
+    await worker.registerTab(1);
+    closed = true;
+    const reply = await worker.send({ type: 'project_unavailable', id: inputId, project }, 1);
+    expect(reply).toEqual({ ok: false });
+    expect(calls).toEqual([]);
+  });
 });
 
 describe('a page\'s release reason', () => {

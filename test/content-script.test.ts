@@ -1120,6 +1120,29 @@ describe('desktop input delivery and helper ownership', () => {
       .toEqual(reported ? [expect.objectContaining({ id: inputId, project })] : []);
   });
 
+  it('counts the 30 seconds from when the page reached the Project, not from when it loaded (#1759)', async () => {
+    const project = 'g-p-11111111222233334444555555555555';
+    const chat = 'cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa';
+    live = await harness(`https://chatgpt.com/c/${chat}`, {
+      project_unavailable: () => ({ ok: true, data: { ok: true } }),
+      desktop_input: () => ({ ok: true, data: { input: null } })
+    });
+    live.document.querySelector('#prompt-textarea')?.closest('form')?.remove();
+    const nav = live.document.createElement('nav');
+    nav.innerHTML = '<div data-app-action-sidebar-section="" data-app-action-sidebar-section-collapsed="false"><button data-app-action-sidebar-project-create="">New project</button></div>';
+    live.document.body.prepend(nav);
+    const now = vi.spyOn(live.window.performance, 'now').mockReturnValue(120_000);
+    // The document waited elsewhere for two minutes, then moved to the Project's home.
+    live.dom.reconfigure({ url: `https://chatgpt.com/g/${project}/project?cos-input=${inputId}` });
+    await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null, project });
+    now.mockReturnValue(140_000);
+    await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null, project });
+    expect(live.sent.filter(message => message.type === 'project_unavailable')).toEqual([]);
+    now.mockReturnValue(151_000);
+    await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null, project });
+    expect(live.sent.filter(message => message.type === 'project_unavailable')).toEqual([expect.objectContaining({ id: inputId, project })]);
+  });
+
   it('confirms a hidden new chat\'s first Send when the extension reports its new address', async () => {
     // The page's own check can be held back for long in a hidden tab; the extension's
     // background sees the address change and tells this page directly.
