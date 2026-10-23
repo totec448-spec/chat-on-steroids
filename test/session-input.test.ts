@@ -202,6 +202,8 @@ describe('durable user input ownership', () => {
     };
     expect(await claim({ text: 'Create an image of a fox in a misty forest' })).toMatchObject({ coreMention: false });
     expect(await claim({ text: 'Fix the failing test in src/app.ts' })).not.toHaveProperty('coreMention');
+    // /image (#1701): the person asked for a picture outright, whatever the words ("you have the concept, design it").
+    expect(await claim({ text: 'You have the concept now, go ahead and design it', imageRequest: true })).toMatchObject({ coreMention: false });
     // Generated openings and workers keep the mention.
     expect(await claim({ text: 'Create an image of a fox', authoredSource: 'objective' })).not.toHaveProperty('coreMention');
     binding.origin = 'worker';
@@ -265,6 +267,30 @@ describe('durable user input ownership', () => {
     expect(await failBrowserInput(direct.id, 'native-page', 'Native Send did not take the message.')).toBe(true);
     expect((await listInputs()).find(row => row.id === direct.id)).toMatchObject({ state: 'failed', error: 'Not sent: ChatGPT did not accept the message.' });
     expect(await pendingBrowserInputs()).toEqual([]);
+  });
+  // 2.1.45 release round: a fresh tab drew its editor again while the app authorized the Send, and
+  // the page never clicked. Held as "may already have been sent", the message was never sent.
+  it('sends a message once more when the page withdrew its authorized Send before clicking', async () => {
+    const direct = await enqueueInput(input());
+    expect(await claimBrowserInput(direct.id, 'native-page', binding.conversationId, true)).not.toBeNull();
+    expect(await authorizeBrowserInput(direct.id, 'native-page', binding.conversationId)).toBe(true);
+    expect(await failBrowserInput(direct.id, 'native-page', 'Native Send was withdrawn before its click.')).toBe(true);
+    expect((await listInputs()).find(row => row.id === direct.id)).toMatchObject({ state: 'queued', owner: null, notTakenRetries: 1 });
+    expect((await listInputs()).find(row => row.id === direct.id)?.sendAuthorizedAt).toBeUndefined();
+    expect(await pendingBrowserInputs()).toEqual([expect.objectContaining({ id: direct.id })]);
+    // A second withdrawal is reported, never retried forever.
+    expect(await claimBrowserInput(direct.id, 'native-page', binding.conversationId, true)).not.toBeNull();
+    expect(await authorizeBrowserInput(direct.id, 'native-page', binding.conversationId)).toBe(true);
+    expect(await failBrowserInput(direct.id, 'native-page', 'Native Send was withdrawn before its click.')).toBe(true);
+    expect((await listInputs()).find(row => row.id === direct.id)).toMatchObject({ state: 'failed', error: 'Not sent: ChatGPT did not accept the message.' });
+    expect(await pendingBrowserInputs()).toEqual([]);
+  });
+  it('keeps an unauthorized claim as it is when the page reports a withdrawn Send', async () => {
+    const direct = await enqueueInput(input());
+    expect(await claimBrowserInput(direct.id, 'native-page', binding.conversationId, true)).not.toBeNull();
+    const before = (await listInputs()).find(row => row.id === direct.id);
+    expect(await failBrowserInput(direct.id, 'native-page', 'Native Send was withdrawn before its click.')).toBe(false);
+    expect((await listInputs()).find(row => row.id === direct.id)).toEqual(before);
   });
   // #1402: turns past ~35 minutes break; a native send into the running turn ends it as interrupted
   // and continues in a fresh one, a command in flight keeping its result (measured 2026-10-09).

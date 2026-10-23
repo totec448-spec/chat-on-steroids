@@ -93,7 +93,7 @@
     "message": "Chat bloqueado"
   },
   "content_chat_blocked_tip": {
-    "message": "Este chat está bloqueado en la aplicación Chat On Steroids: se rechazan sus llamadas a herramientas y Objetivo, Bucle y la compactación automática están desactivados. Para desbloquearlo, abre la pestaña Chat de la aplicación, pasa el cursor sobre este chat en la lista de sesiones y pulsa su símbolo de bloqueo."
+    "message": "Este chat está bloqueado en la aplicación Chat On Steroids: se rechazan sus llamadas a herramientas y Objetivo, Bucle y la compactación automática están desactivados. Para desbloquearlo, abre el menú ⋯ de este chat en la barra lateral de la aplicación y elige «Desbloquear chat»."
   },
   "content_chat_still_opening": {
     "message": "este chat aún se está abriendo — inténtalo de nuevo"
@@ -1190,6 +1190,9 @@
   "content_goal_error_nothing_to_open_with": {
     "message": "El asistente no generó un mensaje inicial. Haz la tarea más específica e inténtalo de nuevo."
   },
+  "content_goal_error_goal_helper_stop_unverified": {
+    "message": "El asistente dice que se ha cumplido el objetivo, pero no se ha comprobado. No se envió ningún mensaje de seguimiento. Revisa el chat y continúa si queda trabajo."
+  },
   "content_goal_error_loop_stop_refused": {
     "message": "El asistente siguió eligiendo detenerse en lugar de escribir una continuación de Bucle. Revisa las instrucciones de Bucle o elige otro modelo asistente."
   },
@@ -1288,5 +1291,17 @@
   },
   "content_edit_unavailable": {
     "message": "ChatGPT no ofreció Editar para ese mensaje. Abre el chat en ChatGPT e inténtalo de nuevo."
+  },
+  "content_auto_compaction_waiting_app": {
+    "message": "Compactación automática: esperando a la aplicación"
+  },
+  "content_goal_loop_waiting_app": {
+    "message": "Objetivo y Bucle: esperando a la aplicación"
+  },
+  "content_settings_waiting_app": {
+    "message": "esperando a la aplicación"
+  },
+  "content_task_waiting_app": {
+    "message": "Esperando la respuesta de Chat On Steroids."
   }
 }

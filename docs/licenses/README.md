@@ -6,6 +6,11 @@ no LICENSE at the repository root. `flora-colossus-LICENSE` preserves the explic
 published by its author at https://github.com/MarshallOfSound/flora-colossus/blob/main/LICENSE,
 retrieved 2026-09-07. It retains the upstream copyright and complete permission/warranty text.
 
+`atkinson-hyperlegible-next/LICENSE` is the SIL Open Font License 1.1 text shipped with
+`@fontsource-variable/atkinson-hyperlegible-next` 5.2.6. The renderer bundles that package's four
+Latin and Latin Extended WOFF2 files unmodified in `src/renderer/fonts/`, so the package itself is
+not a dependency.
+
 Other dependency notices are collected directly from the installed packages. The @img native
 packages publish composite library attribution in their README files; those are also preserved.
 The platform-specific `@napi-rs/canvas-*` binary packages declare MIT but omit the repository

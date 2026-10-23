@@ -230,7 +230,16 @@ function showPlugin(plugin: PluginView): void {
 }
 function showUninstall(plugin: PluginView): void {
   const { box, body } = dialog(() => t("Uninstall {0}?", [plugin.name]));
-  body.append(el('p', '', () => t("This stops its connection and deletes the installation, its CoS-managed local data and stored credentials. Back up any plugin data you need first. External application data is not removed.")), button(() => t("Uninstall plugin"), async () => { if (await mutate(window.api.pluginsUninstall(plugin.id))) box.close(); }, true));
+  // The same shape as removing a skill or a pet: Cancel first and focused, the destructive step last.
+  box.classList.add('pet-delete-dialog');
+  const actions = el('div', 'pet-delete-actions');
+  const cancel = el('button', 'btn btn-solid pet-delete-cancel', () => t('Cancel')) as HTMLButtonElement;
+  cancel.type = 'button'; cancel.addEventListener('click', () => box.close());
+  const uninstall = button(() => t("Uninstall plugin"), async () => { if (await mutate(window.api.pluginsUninstall(plugin.id))) box.close(); });
+  uninstall.classList.add('plugin-destructive', 'pet-delete-confirm');
+  actions.append(cancel, uninstall);
+  body.append(el('p', '', () => t("This stops its connection and deletes the installation, its CoS-managed local data and stored credentials. Back up any plugin data you need first. External application data is not removed.")), actions);
+  cancel.focus();
 }
 function showConfigure(plugin: PluginView): void {
   const { box, body } = dialog(() => t("Configure {0}", [plugin.name])); const config = new Map<string, HTMLInputElement>(); const secrets = new Map<string, HTMLInputElement>();

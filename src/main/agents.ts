@@ -358,6 +358,7 @@ let spawnRequest: ((workers: WorkerSpawn[]) => void) | null = null;
 const listeners = new Set<() => void>();
 const endListeners = new Set<(reason: string, retired: RetiredChat[], runId: string) => void>();
 const retireListeners = new Set<(conversationIds: readonly string[]) => void>();
+const finishListeners = new Set<(conversationId: string) => void>();
 let persist: (() => void) | null = null;
 let persistNow: ((snapshot: SwarmSnapshot | null) => Promise<void>) | null = null;
 let criticalMutationRevision = 0;
@@ -614,6 +615,15 @@ export function onSwarmEnd(listener: (reason: string, retired: RetiredChat[], ru
 export function onWorkerChatsRetired(listener: (conversationIds: readonly string[]) => void): () => void {
   retireListeners.add(listener);
   return () => retireListeners.delete(listener);
+}
+
+/**
+ * A worker's chat whose worker just reported its task done (#1701). The worker only sleeps: its
+ * prime can still give it more work. Used to archive the chat early in ChatGPT.
+ */
+export function onWorkerFinished(listener: (conversationId: string) => void): () => void {
+  finishListeners.add(listener);
+  return () => finishListeners.delete(listener);
 }
 
 function announceRetired(conversationIds: readonly string[]): void {
@@ -3163,6 +3173,8 @@ function publishFinish(agent: Agent, info: AgentInfo, report: AgentMessage, dura
   recount(prime);
   logInfo(`multi-agent: ${agent.info.id} ${info.state === 'finished' ? 'finished for good' : 'is sleeping'}`);
   changed(durability);
+  const conversationId = agent.info.conversationId;
+  if (agent.info.role === 'worker' && conversationId) for (const listener of finishListeners) listener(conversationId);
 }
 
 /** Whether this exact run object still owns its agent map, active or parked. */
@@ -5738,4 +5750,5 @@ export function resetAgentsForTests(): void {
   listeners.clear();
   endListeners.clear();
   retireListeners.clear();
+  finishListeners.clear();
 }

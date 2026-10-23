@@ -1089,7 +1089,7 @@
     // Only the explicitly selected offline Goal backend changes the user prompt.
     const composer = CLF_DOM.composer();
     if (!edit && goalConfig?.backend === 'templates' && (goalConfig?.enabled === true || (!goalConfig?.own && !!goalConfig?.objective)) && goalConfig?.mode !== 'loop' && !desktopDecision) {
-      const raw = composer?.innerText || composer?.textContent || '';
+      const raw = composer?.innerText || CLF_DOM.composerText(composer);
       if (raw.trim() && !raw.includes(GOAL_MARKER_INSTRUCTION.trim())) CLF_DOM.insertPrompt(raw + GOAL_MARKER_INSTRUCTION, true);
     }
     // The receipt is compared with the rendered message, which readers take without an app
@@ -2747,7 +2747,15 @@
   }
 
   let observedRoute = null;
+  // When this document reached its current path: load for the first one, else the first look at
+  // a new one. Every DOM change looks, so a page that left and came back starts again (#1759).
+  let routeArrival = { path: location.pathname, at: 0 };
+  function routeAge() {
+    if (routeArrival.path !== location.pathname) routeArrival = { path: location.pathname, at: performance.now() };
+    return performance.now() - routeArrival.at;
+  }
   function observe() {
+    routeAge();
     // This duplicate source document is only the native Project entry point. Its transcript
     // belongs to A's original recorder; do not adopt it while preparing the fresh composer.
     if (commandAttempt?.projectEntry && CLF_DOM.conversationId() === OPENED_CONVERSATION) return;
@@ -3725,6 +3733,13 @@
   let fiberAsking = null;
   /** Off until the helper answers once, so a browser without it behaves exactly as before. */
   let fiberPresent = null; // Unknown until this document gets a reply or a definitive repair failure.
+  /**
+   * An automatic attempt this page stopped before asking while the page-model helper could not be
+   * read (#1643). Its receipts and the turn's messages are read through the helper, so whatever the
+   * stated reason, the attempt is tried again the moment the helper answers, instead of only at the
+   * app's next pickup, which can be ten minutes away.
+   */
+  let helperDeferral = null;
   /** Avoid turning a missing MAIN-world helper into one script injection per observer tick. */
   let fiberRepairAt = -Infinity;
   let fiberRepairing = null;
@@ -4216,6 +4231,9 @@
     return { data: btoa(binary) };
   }
 
+  /** Preview sizes and WebP qualities tried in turn, until one fits the preview's 384 KB. */
+  const NATIVE_PREVIEW_TRIES = [[1600, 0.8], [1600, 0.6], [1200, 0.7], [1200, 0.5], [900, 0.6], [700, 0.5]];
+
   /** Captures one already-rendered native image without fetching or retaining its signed URL. */
   async function captureNativeImage(task) {
     const { key, image, observation, heldEpoch, heldConversation } = task;
@@ -4239,26 +4257,36 @@
           prior.fingerprint.complete === fingerprint.complete && prior.fingerprint.sourceUrl === sourceUrl)) return;
     const pendingCapture = { status: 'pending', fingerprint, task };
     nativeImageCaptures.set(key, pendingCapture);
-    const scale = Math.min(1, 1600 / Math.max(sourceWidth, sourceHeight));
-    const width = Math.max(1, Math.round(sourceWidth * scale));
-    const height = Math.max(1, Math.round(sourceHeight * scale));
-    if (width * height > 2_560_000) {
+    const sized = side => {
+      const scale = Math.min(1, side / Math.max(sourceWidth, sourceHeight));
+      return { width: Math.max(1, Math.round(sourceWidth * scale)), height: Math.max(1, Math.round(sourceHeight * scale)) };
+    };
+    if (sized(1600).width * sized(1600).height > 2_560_000) {
       return nativeImageUnavailable(key, image, observation, 'oversized', fingerprint, heldEpoch, heldConversation);
     }
     try {
-      const canvas = document.createElement('canvas');
-      canvas.width = width; canvas.height = height;
-      const context = canvas.getContext('2d');
-      if (!context) throw new Error('tainted');
-      context.drawImage(node, 0, 0, width, height);
-      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', 0.8));
-      if (!nativeImageCaptureOwnerCurrent(key, image, observation, heldEpoch, heldConversation) || nativeImageNode(image) !== node ||
-          !node.complete || node.naturalWidth !== sourceWidth || node.naturalHeight !== sourceHeight || (node.currentSrc || node.src) !== sourceUrl) {
-        if (nativeImageCaptures.get(key) === pendingCapture) nativeImageCaptures.delete(key);
-        return;
+      // A detailed picture can come out above the preview's 384 KB at the first size (VM, 2026-10-20:
+      // concept art, 1448x1086). Smaller and lighter tries follow, so only a picture that fits
+      // none of them is called oversized.
+      let blob = null, width = 0, height = 0;
+      for (const [side, quality] of NATIVE_PREVIEW_TRIES) {
+        ({ width, height } = sized(side));
+        const canvas = document.createElement('canvas');
+        canvas.width = width; canvas.height = height;
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('tainted');
+        context.drawImage(node, 0, 0, width, height);
+        blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', quality));
+        if (!nativeImageCaptureOwnerCurrent(key, image, observation, heldEpoch, heldConversation) || nativeImageNode(image) !== node ||
+            !node.complete || node.naturalWidth !== sourceWidth || node.naturalHeight !== sourceHeight || (node.currentSrc || node.src) !== sourceUrl) {
+          if (nativeImageCaptures.get(key) === pendingCapture) nativeImageCaptures.delete(key);
+          return;
+        }
+        if (!blob) throw new Error('tainted');
+        if (blob.type !== 'image/webp' || blob.size <= 0) throw new Error('oversized');
+        if (blob.size <= 384_000) break;
       }
-      if (!blob) throw new Error('tainted');
-      if (blob.type !== 'image/webp' || blob.size <= 0 || blob.size > 384_000) throw new Error('oversized');
+      if (blob.size > 384_000) throw new Error('oversized');
       const bytes = new Uint8Array(await blob.arrayBuffer());
       if (!nativeImageCaptureOwnerCurrent(key, image, observation, heldEpoch, heldConversation) || nativeImageNode(image) !== node ||
           !node.complete || node.naturalWidth !== sourceWidth || node.naturalHeight !== sourceHeight || (node.currentSrc || node.src) !== sourceUrl) {
@@ -4700,7 +4728,9 @@
       traceStage(call.requestId, 'read');
       traceStage(call.requestId, 'tool', call.tool);
     }
+    const helperReturned = fiberPresent !== true;
     fiberPresent = true;
+    if (helperReturned) retryAfterHelperReturned();
     fiberRows = answer.rows;
     fiberScanToken = answer.scanToken;
     const previousFiberTurns = [...fiberTurns.values()];
@@ -4832,6 +4862,10 @@
         pageConversation &&
         pageConversation !== askedConversation
       );
+      // Calls this document had not seen before, or that got their result: the only calls that
+      // are progress. A known call drawn again with another request id or owner is reported
+      // again, but counting it kept every repair refused while ChatGPT's stream was gone (#1787).
+      const advanced = [];
       const fresh = turn.calls.filter((call) => {
         // A mismatched owned turn is admissible only as a provisional-first-turn candidate.
         // Its request id must have survived the app's explicit owner read-back before the
@@ -4843,8 +4877,10 @@
         ) return false;
         const owner = index === activeTurnIndex ? activeLocalTurnId || '' : '';
         const signature = `${call.tool}\u0000${call.requestId || ''}\u0000${call.answered ? '1' : '0'}\u0000${owner}`;
-        if (callsReported.get(call.messageId) === signature) return false;
-        callsReported.set(call.messageId, signature);
+        const previous = callsReported.get(call.messageId);
+        if (previous?.signature === signature) return false;
+        if (previous === undefined || (call.answered && !previous.answered)) advanced.push(call);
+        callsReported.set(call.messageId, { signature, answered: Boolean(call.answered) });
         return true;
       });
       if (fresh.length > 0) {
@@ -4856,7 +4892,7 @@
           ((previous.turnId && previous.turnId === turn.turnId) ||
             (previous.calls || []).some(seen => turn.calls.some(call => call.messageId === seen.messageId))));
         const witnessedSend = Boolean(newestUser?.id && openedUserMessageId === newestUser.id);
-        if (generating && index === activeTurnIndex && (knownTurn || witnessedSend)) noteTurnProgress(turnId, 'page-call');
+        if (advanced.length && generating && index === activeTurnIndex && (knownTurn || witnessedSend)) noteTurnProgress(turnId, 'page-call');
         emit({
           kind: 'tool_evidence',
           ...(index === activeTurnIndex ? { turnId: activeLocalTurnId } : {}),
@@ -7469,6 +7505,10 @@
     // refused, so nothing this app types may drive it on). 'continued' is neither — that chat
     // is finished, and its controls are moot rather than fenced.
     const fenced = blocked === 'worker' || blocked === 'blocked';
+    // No answer from the app yet (a reloaded page, an app that is busy or away): nothing here is
+    // known, so the sheet says so instead of drawing Off and a missing key (#1787).
+    const contextUnknown = !context;
+    const goalUnknown = !goal;
     const auto = Boolean(context && context.auto) && !fenced;
     const threshold = context && context.threshold > 0 ? context.threshold : 0;
     // One setting, one control. The app sends the mode beside `enabled`, so there is a single
@@ -7504,13 +7544,17 @@
       // Two short lines rather than a sentence: this is read while reaching for something
       // else, and the only questions it answers are "is it on" and "at what point".
       tip: [
-        auto
+        contextUnknown
+          ? t('content_auto_compaction_waiting_app', 'Auto-compaction: waiting for the app')
+          : auto
           ? t('content_auto_compaction_on', 'Auto-compaction on$1', from ? `, ${from}` : '')
           : t('content_auto_compaction_off', 'Auto-compaction off'),
         blocked === 'worker'
           ? t('content_goal_off_prime_writes', 'Goal off — the prime writes this chat')
           : blocked === 'blocked'
             ? t('content_goal_off_blocked', 'Goal off — this chat is blocked in the app')
+            : goalUnknown
+            ? t('content_goal_loop_waiting_app', 'Goal and Loop: waiting for the app')
             : fresh
             ? !hasKey
               ? t('content_goal_no_api_key_unavailable', 'No API key — Goal and Loop unavailable')
@@ -7538,12 +7582,14 @@
               ? t('content_auto_compaction_worker_off', 'off here: worker chats never auto-compact')
               : blocked === 'blocked'
                 ? t('content_auto_compaction_blocked_off', 'off here: this chat is blocked in the app')
+                : contextUnknown
+                ? t('content_settings_waiting_app', 'waiting for the app')
                 : auto
                   ? from || t('content_auto_compaction_threshold_app', 'threshold set in the app')
                   : t('content_auto_compaction_manual', 'compact this chat by hand'),
           on: auto,
           warn: false,
-          disabled: fenced
+          disabled: fenced || contextUnknown
         }
       ],
       /**
@@ -7564,7 +7610,7 @@
       mode: fresh
         ? null
         : {
-            value: position,
+            value: goalUnknown ? '' : position,
             options: [
               {
                 value: 'off',
@@ -7598,6 +7644,8 @@
                 ? t('content_mode_note_prime_writes', 'the prime writes here')
                 : blocked === 'blocked'
                   ? t('content_mode_note_blocked', 'blocked in the app')
+                  : goalUnknown
+                  ? t('content_settings_waiting_app', 'waiting for the app')
                   : !hasKey
                   ? t('content_mode_note_key_required', 'OpenRouter key required')
                   : position === 'loop'
@@ -7605,8 +7653,8 @@
                     : position === 'goal'
                       ? t('content_mode_note_goal', 'replies until goal reached')
                       : t('content_mode_note_off', 'no replies written here'),
-            warn: !hasKey || fenced,
-            disabled: fenced
+            warn: (!hasKey && !goalUnknown) || fenced,
+            disabled: fenced || goalUnknown
           },
       /**
        * The one task, and — above a New Chat only — the mode it is written in.
@@ -7696,6 +7744,8 @@
             ? t('content_task_worker_unavailable', 'A worker chat is already driven by its prime.')
             : blocked === 'blocked'
               ? t('content_task_blocked_unavailable', 'This chat is blocked in the app. Release it there to drive it again.')
+              : goalUnknown
+              ? t('content_task_waiting_app', 'Waiting for Chat On Steroids to answer.')
               : !hasKey
               ? t('content_task_api_key_unavailable', 'Add an OpenRouter API key in the app first.')
               : ''
@@ -8046,7 +8096,7 @@
       'data-clf-tip',
       t(
         'content_chat_blocked_tip',
-        'This chat is blocked in the Chat On Steroids app: its tool calls are refused and Goal, Loop and auto-compaction are off. To release it, open the app’s Chat tab, hover this chat in the sessions list and press its block symbol.'
+        'This chat is blocked in the Chat On Steroids app: its tool calls are refused and Goal, Loop and auto-compaction are off. To release it, open this chat’s ⋯ menu in the app’s sidebar and choose “Release chat”.'
       )
     );
     blocked.hidden = true;
@@ -8460,15 +8510,15 @@
       return;
     }
     setGoalPhase('sending');
-    const previousComposer = CLF_DOM.composer()?.textContent || '';
+    const previousComposer = CLF_DOM.composerText() || '';
     if (!CLF_DOM.insertPrompt(opening, true)) {
       setGoalPhase('sending', t('content_goal_new_chat_draft_refused', 'ChatGPT would not replace the New Chat draft'));
       return;
     }
-    const preparedOpening = CLF_DOM.composer()?.textContent || '';
+    const preparedOpening = CLF_DOM.composerText() || '';
     await sleep(200);
     if (!current()) {
-      if (alive && epoch === openingEpoch && CLF_DOM.composer()?.textContent === preparedOpening)
+      if (alive && epoch === openingEpoch && CLF_DOM.composerText() === preparedOpening)
         CLF_DOM.insertPrompt(previousComposer, true);
       return;
     }
@@ -9599,8 +9649,21 @@
    * why, so its log and the chat's Compact & Resume row say what it is waiting on instead of
    * "asking ChatGPT" (#1643: twenty minutes of pickups, each stopped here, none of it logged).
    */
+  function retryAfterHelperReturned() {
+    const deferral = helperDeferral;
+    helperDeferral = null;
+    if (!deferral || deferral.forId !== conversationId || deferral.forEpoch !== epoch) return;
+    // After this scan has been taken in; only the error that deferral left is cleared, never a newer one.
+    setTimeout(() => {
+      if (nativeBusy || localError !== deferral.why || conversationId !== deferral.forId || epoch !== deferral.forEpoch) return;
+      localError = '';
+      void maybeResumePendingCompaction(deferral.forId, deferral.forEpoch);
+    }, 0);
+  }
+
   function reportDeferredCompaction(forId, token, why) {
     if (!token || !why) return;
+    helperDeferral = fiberPresent === true ? null : { forId, forEpoch: epoch, why };
     void ask({ type: 'compact', conversationId: forId, token, sourceDeferred: true, sourceError: why }).catch(() => undefined);
   }
 
@@ -9729,8 +9792,14 @@
         box.getAttribute('aria-disabled') !== 'true' ? box : null;
     };
     const expectedQuestionId = stoppedQuestionId || policyData.recordedQuestionId || null;
+    // A chat's first turn can run without ChatGPT showing its question anywhere, page model
+    // included (2026-10-19), so it never matched and an automatic run waited for the turn to end.
+    // The app recorded that question as the conversation's first, and the page's only exchange is
+    // the conversation's first: that is the same question, by place rather than by its id.
+    const firstQuestionShown = () => !stoppedQuestionId && policyData.recordedQuestionFirst === true &&
+      expectedQuestionId === policyData.recordedQuestionId && CLF_DOM.firstQuestionPending();
     const sourceReady = () => editableSource() && (!expectedQuestionId ||
-      CLF_DOM.messages().filter(message => message.role === 'user').at(-1)?.id === expectedQuestionId);
+      CLF_DOM.messages().filter(message => message.role === 'user').at(-1)?.id === expectedQuestionId || firstQuestionShown());
     if (!sourceReady()) {
       const hydrationCurrent = () => current() && userSendReceipt === initialSendReceipt &&
         (!stoppedQuestionId || (CLF_DOM.messages().filter(message => message.role === 'user').at(-1)?.id ?? null) === stoppedQuestionId) &&
@@ -9987,7 +10056,11 @@
       const awaitingResults = new Map();
       const awaitingRequests = new Set();
       const sourceNodes = new Set();
+      // What the last complete scan showed: this turn's calls, and whether ChatGPT shows any of
+      // them answered. Reset by every scan; an ambiguous or failed one leaves nothing to rely on.
+      let seen = { calls: 0, answered: false };
       const received = () => {
+        seen = { calls: 0, answered: false };
         const pageTurn = generationTurn();
         const source = fiberTurnFor(pageTurn);
         if (!source) return false;
@@ -10023,6 +10096,7 @@
             if (call.requestId) awaitingRequests.delete(call.requestId);
           } else if (!pending) awaitingResults.set(call.messageId, call);
         }
+        seen = { calls: [...sources].reduce((total, turn) => total + turn.calls.length, 0), answered: calls.some(call => call.answered) };
         // A missing row or a failed scan cannot acknowledge a call seen earlier.
         return awaitingResults.size === 0 && awaitingRequests.size === 0;
       };
@@ -10030,9 +10104,12 @@
       nativePhase = 'settling';
       renderControl();
       let endedPolls = 0;
+      let sent = null;
       const ready = await waitUntil(async () => {
         if (!current()) return true;
-        const count = await peekPendingTools(forId);
+        const peek = await peekCompactionActivity(forId);
+        const count = peek ? peek.pendingTools : null;
+        sent = peek ? peek.sentResults : null;
         if (!current()) return true;
         if (count !== 0) {
           endedPolls = 0;
@@ -10048,8 +10125,16 @@
         } else endedPolls = 0;
         const fresh = await refreshFiber(null, true);
         if (!current()) return true;
-        return fresh && received();
-      }, AUTO_RECEIPT_SETTLE_MS);
+        if (fresh && received()) return true;
+        // ChatGPT's page no longer sees a running turn's tool results until the turn ends
+        // (2026-10-19: none of 25 finished calls answered), so its receipt cannot be read mid-turn.
+        // Only when it shows this turn's calls and not one of them answered, the app's delivery
+        // stands in: nothing running or unsent, every result sent at least 1.5 s ago, and
+        // at least as many sent results as calls shown. A call the app never served (another app's
+        // tool) keeps the count short, and a request still without its row keeps waiting.
+        return !!fresh && seen.calls > 0 && !seen.answered && awaitingRequests.size === 0 &&
+          sent?.settled === true && Number.isInteger(sent.count) && sent.count >= seen.calls;
+      }, AUTO_RECEIPT_SETTLE_MS, AUTO_RECEIPT_QUICK_MS);
       if (!current()) return t(
         'content_compact_chat_changed_waiting_results',
         'This chat changed while compaction was waiting for tool results.'
@@ -10242,7 +10327,7 @@
         ));
       }
       const composer = CLF_DOM.composer();
-      if (!composer || squeeze(composer.textContent) !== squeeze(prompt)) {
+      if (!composer || squeeze(CLF_DOM.composerText(composer)) !== squeeze(prompt)) {
         return void (await abandonBeforeSend(
           t(
             'content_compact_message_box_changed',
@@ -10271,7 +10356,7 @@
       // Reacquire the current editable composer and verify the exact frozen prompt: an
       // unchanged draft survives remounts, while changed or user-owned text still fails closed.
       const sendComposer = editable();
-      if (!sameSource() || !sendComposer || squeeze(sendComposer.textContent) !== squeeze(prompt)) {
+      if (!sameSource() || !sendComposer || squeeze(CLF_DOM.composerText(sendComposer)) !== squeeze(prompt)) {
         CLF_DOM.clearPromptExact(prompt);
         return void (await abandonBeforeSend(
           t(
@@ -10365,11 +10450,11 @@
   const HANDOFF_MARKED = /^\s*\[\[CLF-HANDOFF:[A-Za-z0-9_-]{16,64}\]\]/;
   /** A composer holding a handoff request this app typed (any attempt's), and no attachment. */
   function handoffMarked(box) {
-    return Boolean(box && HANDOFF_MARKED.test(box.textContent || '') && !CLF_DOM.hasComposerAttachments());
+    return Boolean(box && HANDOFF_MARKED.test(CLF_DOM.composerText(box)) && !CLF_DOM.hasComposerAttachments());
   }
   function handoffResidue(box, prompt) {
     const body = text => String(text || '').replace(HANDOFF_MARKED, '').replace(/\s+/g, '');
-    return handoffMarked(box) && !!body(box.textContent) && body(box.textContent) === body(prompt);
+    return handoffMarked(box) && !!body(CLF_DOM.composerText(box)) && body(CLF_DOM.composerText(box)) === body(prompt);
   }
   // Same grammar as src/shared/session.ts; letters and digits cannot carry Markdown escapes.
   // A prompt that mentions an app is stored as Markdown: its marker line ends in a hard break.
@@ -10808,7 +10893,7 @@
         turnProgressRevision === revision && goalConfig?.pending?.replyId === pending.replyId &&
         goalConfig?.pending?.acceptedAt === pending.acceptedAt && goalUsable() &&
         !stopRequestedAt && pendingTools === 0 && !nativeBusy && !job?.busy &&
-        CLF_DOM.composerVisible() && !(CLF_DOM.composer()?.textContent || '').trim() && !CLF_DOM.hasComposerAttachments() &&
+        CLF_DOM.composerVisible() && !(CLF_DOM.composerText() || '').trim() && !CLF_DOM.hasComposerAttachments() &&
         !CLF_DOM.errors().some(error => error.blocking === true);
       void (async () => {
         if (!safe() || !await confirmedProviderTerminal(true) || !safe()) return;
@@ -11144,7 +11229,7 @@
       return;
     }
     goalBusy = true;
-    const composerBefore = CLF_DOM.composer()?.textContent || '';
+    const composerBefore = CLF_DOM.composerText() || '';
     let preparedDraft = null, sendAttempted = false, workResumed = false;
     try {
       if (goalTypingSince === 0) goalTypingSince = Date.now();
@@ -11166,7 +11251,7 @@
       }
       // Reuse the same exact editor/draft lease as desktop delivery. Cancellation
       // must not restore text into a replacement editor or a user's intervening edit.
-      preparedDraft = CLF_DOM.captureComposerDraft(CLF_DOM.composer()?.textContent || '', onDocument);
+      preparedDraft = CLF_DOM.captureComposerDraft(CLF_DOM.composerText() || '', onDocument);
       await sleep(200);
       const current = () => onDocument() && goalUsable() &&
         (sendAttempted || (((goalConfig?.afterTurn !== true && !goalConfig?.pending?.silenceSourceTurnId) || turnProgressRevision === workRevision) &&
@@ -11249,6 +11334,8 @@
    * turn is stopped inside that gap. Still bounded: a call that runs longer is refused as before.
    */
   const AUTO_RECEIPT_SETTLE_MS = 6 * 60_000;
+  /** The first stretch of that wait, checked quickly; most receipts land within seconds. */
+  const AUTO_RECEIPT_QUICK_MS = 10_000;
   /** How many silent answers about pending calls to sit through before refusing. */
   const SETTLE_UNKNOWN_TRIES = 3;
 
@@ -11262,15 +11349,29 @@
    * the answer. Null means the app could not be asked, which is not the same as zero.
    */
   async function peekPendingTools(forId = conversationId) {
+    return (await peekCompactionActivity(forId))?.pendingTools ?? null;
+  }
+
+  /** The app's running-call count, and its delivery of this turn's results when it has one. */
+  async function peekCompactionActivity(forId = conversationId) {
     const reply = await ask({ type: 'activity', conversationId: forId, since });
     if (!reply || reply.ok !== true || !reply.data) return null;
     const count = Number(reply.data.pendingTools);
-    return Number.isFinite(count) && count >= 0 ? count : null;
+    const sent = reply.data.sentResults;
+    return {
+      pendingTools: Number.isFinite(count) && count >= 0 ? count : null,
+      sentResults: sent && typeof sent === 'object' ? { count: Number(sent.count), settled: sent.settled === true } : null
+    };
   }
 
   /** Polls a condition. Resolves true when it holds, false when the budget runs out. */
-  async function waitUntil(test, budgetMs) {
-    const until = Date.now() + budgetMs;
+  /**
+   * Checks every 250 ms. A long wait passes `slowAfterMs`: after that it checks every 2 s, since
+   * each check reads the page and minutes of quarter-second checks weigh most on slow machines.
+   */
+  async function waitUntil(test, budgetMs, slowAfterMs = Infinity) {
+    const started = Date.now();
+    const until = started + budgetMs;
     for (;;) {
       let held = false;
       try {
@@ -11280,7 +11381,7 @@
       }
       if (held) return true;
       if (Date.now() >= until) return false;
-      await sleep(250);
+      await sleep(Date.now() - started >= slowAfterMs ? 2000 : 250);
     }
   }
 
@@ -12139,7 +12240,7 @@
     // approve user text appended after focus moved into this tab.
     const squeeze = (value) => (value || '').replace(/\s+/g, '');
     const expectedText = squeeze(boot.text);
-    if (!composer || squeeze(composer.textContent) !== expectedText) {
+    if (!composer || squeeze(CLF_DOM.composerText(composer)) !== expectedText) {
       return void (await fail(t(
         'content_bootstrap_composer_replaced',
         'ChatGPT replaced the composer while inserting the bootstrap'
@@ -12149,7 +12250,7 @@
     // point-in-time empty check above is not enough: any edit after insertion must preserve
     // the user's draft and abort, never submit a bootstrap/user-text mixture as a worker task.
     composer = CLF_DOM.composer();
-    if (!composer || squeeze(composer.textContent) !== expectedText) {
+    if (!composer || squeeze(CLF_DOM.composerText(composer)) !== expectedText) {
       return void (await fail(t(
         'content_bootstrap_composer_changed_before_send',
         'the composer changed before bootstrap send; the draft was preserved'
@@ -12159,11 +12260,11 @@
     const resumeMarker = boot.type === 'resume' ? String(boot.text || '').match(CONTINUATION_MARKER) : null;
     // The last custody writes await HTTP. They cannot preserve the composer or SPA route
     // that was checked above; prove both again after each write and at the native click.
-    const exactBootstrapDraft = () => squeeze(CLF_DOM.composer()?.textContent) === expectedText;
+    const exactBootstrapDraft = () => squeeze(CLF_DOM.composerText()) === expectedText;
     const rejectChangedBootstrap = async () => {
       if (await failIfRetargeted()) return true;
       if (exactBootstrapDraft()) return false;
-      if (boot.type === 'resume' && !squeeze(CLF_DOM.composer()?.textContent)) {
+      if (boot.type === 'resume' && !squeeze(CLF_DOM.composerText())) {
         continuationJournalPending = false;
         await ask({ type: 'compact', token: resumeMarker[2], commandId: boot.id, client: RUN_ID, destinationLost: true });
         return true;
@@ -12783,6 +12884,8 @@
    * a row the page reads back differently (#821: `&#x20;` for a space) kept this document's
    * input slot for good, and every later message waited for a reload.
    */
+  /** How long a linked Project's page may load, from reaching it, before a missing composer counts (#1759). */
+  const PROJECT_PAGE_LOAD_MS = 30_000;
   const DESKTOP_RECEIPT_MS = 120_000;
   // The durable claim, never a project path/title guess, fences first tool evidence.
   let desktopProjectInput = null;
@@ -12944,7 +13047,7 @@
     // only when it is exactly the instruction, and refuses visibly when the person edited it (#134).
     // Holding here instead left the chat's handoff waiting with nothing on screen (2026-10-10).
     const draft = () => !handoffMarked(CLF_DOM.composer()) &&
-      Boolean((CLF_DOM.composer()?.textContent || '').trim() || CLF_DOM.hasComposerAttachments());
+      Boolean((CLF_DOM.composerText() || '').trim() || CLF_DOM.hasComposerAttachments());
     const verdict = (holds, extra) => {
       const why = holds.find(([held]) => held)?.[1];
       return { safe: !why, ...(why ? { why } : {}), ...extra };
@@ -13194,7 +13297,7 @@
         let input = null;
         try {
           const safe = () => onTarget() && !stopRequestedAt && pendingTools === 0 &&
-            CLF_DOM.composerVisible() && !(CLF_DOM.composer()?.textContent || '').trim() &&
+            CLF_DOM.composerVisible() && !(CLF_DOM.composerText() || '').trim() &&
             !CLF_DOM.hasComposerAttachments() && !CLF_DOM.errors().some(error => error.blocking === true);
           if (!safe()) return false;
           // Flush newly visible native progress before requesting destructive
@@ -13244,6 +13347,14 @@
       (project ? CLF_DOM.projectHomeId() === project : location.pathname === '/') &&
       (project ? freshMarker() : new URL(location.href).searchParams.get('cos-input') === message.id) && !CLF_DOM.turns().length));
     if (!target && !ownsFreshPage()) return false;
+    // A linked Project ChatGPT no longer has (#1759). ChatGPT used to send its page home, which the
+    // extension reports; since October 2026 the page stays on "loading", with no composer, for good.
+    // Gone only when the page has had its time and the open Projects list does not name it.
+    if (!target && project && CLF_DOM.projectHomeId() === project && !CLF_DOM.composerVisible() &&
+        routeAge() >= PROJECT_PAGE_LOAD_MS && CLF_DOM.sidebarListsProject(project) === false) {
+      await ask({ type: 'project_unavailable', id: message.id, project });
+      return false;
+    }
     desktopInputBusy = true;
     let decision = null;
     let sent = false;
@@ -13322,8 +13433,8 @@
         'content_delivery_signed_out',
         'ChatGPT is not signed in in this browser. Sign in to ChatGPT there, then send again.'
       ));
-      const ownResidue = sendText(composer.textContent) === sendText(input.text);
-      if ((!ownsFreshPage() && (composer.textContent || '').trim() && !ownResidue) || CLF_DOM.hasComposerAttachments()) return fail(t(
+      const ownResidue = sendText(CLF_DOM.composerText(composer)) === sendText(input.text);
+      if ((!ownsFreshPage() && CLF_DOM.composerText(composer).trim() && !ownResidue) || CLF_DOM.hasComposerAttachments()) return fail(t(
         'content_delivery_existing_draft',
         'ChatGPT already contains an unsent draft. Send or clear that draft in Chrome before trying again.'
       ));
@@ -13375,8 +13486,8 @@
       // behind is not a composer that "changed". Re-read rather than reusing `ownResidue`, because
       // model selection and the writability wait sit between the two and can replace the editor.
       if (!onTarget() || (CLF_DOM.generating() && !message.directTurn) ||
-          (!ownsFreshPage() && (CLF_DOM.composer()?.textContent || '').trim() &&
-            sendText(CLF_DOM.composer()?.textContent) !== sendText(input.text)) ||
+          (!ownsFreshPage() && (CLF_DOM.composerText() || '').trim() &&
+            sendText(CLF_DOM.composerText()) !== sendText(input.text)) ||
           CLF_DOM.hasComposerAttachments()) return fail(t(
         'content_delivery_composer_changed',
         'The ChatGPT composer changed before sending'
@@ -13393,6 +13504,8 @@
       // #744: a recovery's own text survives a composer remount before Send is authorized. The
       // lease may follow it once; after authorization a lost editor stays a failure.
       let authorizing = false;
+      // The app's answer to this page's one authorization request, once asked.
+      let authorization = null;
       const draftCurrent = () => draft.current() ||
         (withdrawableRecoveryDraft && !authorizing && !sendAttempted && draft.rebind() && draft.current());
       const files = [];
@@ -13420,13 +13533,13 @@
         'Attachment upload was not confirmed. Check the unsent draft and any file error in ChatGPT before trying again.'
       ));
       await Promise.resolve();
-      if (!onTarget() || !draftCurrent() || sendText(CLF_DOM.composer()?.textContent) !== sendText(input.text)) return fail(t(
+      if (!onTarget() || !draftCurrent() || sendText(CLF_DOM.composerText()) !== sendText(input.text)) return fail(t(
         'content_delivery_draft_preserved',
         'The composer changed; your draft was preserved'
       ));
       const previousUserId = CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id;
       rememberUserSend();
-      const submittedText = sendText(CLF_DOM.composer()?.textContent);
+      const submittedText = sendText(CLF_DOM.composerText());
       if (input.purpose === 'decision') {
         decision = { id: input.id, owner: input.owner, messageId: null, text: input.text, temporary, onTarget: sendingTarget, conversationId: null, epoch: forEpoch, response: '', publishing: false };
         desktopDecision = decision;
@@ -13449,13 +13562,18 @@
       if (intoTurn && input.purpose === 'rotation' && CLF_DOM.generating() &&
           !await waitPageView(() => !!CLF_DOM.sendButton(), onTarget, 3000)) {
         noteWithdraw('no-send');
+        // Say so at once: the app holds the due call's answer for this continue, and a later tool
+        // result, usually one without Stop, tries again (measured on Loop chats, 2026-10-20).
+        await ask({ type: 'desktop_input', id: input.id, owner: input.owner, fail: true,
+          error: 'Fresh-turn continue declined: no Send while ChatGPT works.', detail: 'no-send' }).catch(() => undefined);
         return false;
       }
       const nativeSend = () => sendSubmittedText(sendingTarget, false, async sendCurrent => {
         // Preserve the outbox's revocable claim until the actual native Send is ready.
         if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current(), withdrawWhy)) return false;
         authorizing = true;
-        const authorized = await ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, authorize: true });
+        authorization = ask({ type: 'desktop_input', id: input.id, owner: input.owner, conversationId: target, authorize: true });
+        const authorized = await authorization;
         if (authorized?.data?.ok !== true) noteWithdraw('app-refused');
         if (!sendCurrent() || authorized?.data?.ok !== true || !onTarget() || !draft.current()) { noteWithdraw(onTarget() ? 'lease-lost' : offTarget()); return false; }
         if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current(), withdrawWhy)) return false;
@@ -13498,7 +13616,7 @@
           // Proof that the click did not deliver: ChatGPT left this exact text in its composer and
           // showed no new user message. Clearing that exact draft lets the app send it once more;
           // anything less certain stays an unconfirmed send that is never replayed (#821).
-          if (onTarget() && sendText(CLF_DOM.composer()?.textContent) === submittedText &&
+          if (onTarget() && sendText(CLF_DOM.composerText()) === submittedText &&
               CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id === previousUserId) {
             let cleared = false;
             try { cleared = await draft.clear(); } catch { /* An unclearable draft is no proof. */ }
@@ -13510,10 +13628,27 @@
           // on "an unsent draft" (2.1.40 release round). Still uncertain, so never resent, but an
           // exact copy of it is taken out of the composer.
           if ((input.purpose === 'rotation' || input.recovery) && onTarget() &&
-              sendText(CLF_DOM.composer()?.textContent) === submittedText) {
+              sendText(CLF_DOM.composerText()) === submittedText) {
             try { await draft.clear(); } catch { /* An unclearable draft stays where it is. */ }
           }
           return fail('Native Send receipt was not confirmed.');
+        }
+        // Authorized, yet never clicked: ChatGPT drew the editor again while the app answered, as a
+        // fresh tab does when it moves to its project route (2.1.45 release round). Nothing went
+        // out, but the claim read as a send that may have, so the message was never sent at all.
+        // With this exact text taken back out of the composer the app sends it again. Continue and
+        // after-turn pickups keep their own withdrawal below. Send can give up before the app
+        // answers; its answer comes first, so a report never reaches the app ahead of its own
+        // record, and an explicit no needs none. A lost answer may still have been recorded as yes.
+        // No user row is compared: a fresh tab draws the chat's earlier questions after Send began.
+        // This page never clicked, and withdraw() takes back only the exact text it inserted, never
+        // touched by a person; a Send by anyone else would have taken that text or touched it.
+        const answer = authorizing ? await Promise.resolve(authorization).catch(() => null) : null;
+        if (authorizing && answer?.data?.ok !== false && !sendAttempted && !receipt && !input.recovery && !claimedSilence &&
+            onTarget()) {
+          let withdrawn = false;
+          try { withdrawn = draft.withdraw(); } catch { /* Text not proven ours stays where it is. */ }
+          if (withdrawn) return fail('Native Send was withdrawn before its click.');
         }
         return false;
       }
@@ -13576,6 +13711,10 @@
         try { await draft.clear(); } catch { /* Unprovable native cleanup preserves the draft. */ }
       }
       return accepted;
+    } catch (error) {
+      // An exception is the one exit with no reason of its own; the release still says it was one.
+      noteWithdraw('page-error');
+      throw error;
     } finally {
       if (claimedSilence && !sendAttempted) {
         await ask({ type: 'desktop_input', id: claimedSilence.id, owner: claimedSilence.owner, fail: true,
@@ -13659,11 +13798,12 @@
    */
   let projectCreateBusy = false;
   /**
-   * Archives one retired worker chat with ChatGPT's own reversible archive (#1460): the chat
-   * leaves the chat list and can be restored from ChatGPT's settings. One request for one exact
-   * chat of the signed-in account; nothing is deleted and nothing else is touched.
+   * Archives one worker chat with ChatGPT's own reversible archive (#1460): the chat leaves the
+   * chat list and can be restored from ChatGPT's settings. With `archive` false it restores one
+   * the app archived, before that worker is woken (#1701). One request for one exact chat of the
+   * signed-in account; nothing is deleted and nothing else is touched.
    */
-  async function archiveWorkerChat(conversationId) {
+  async function archiveWorkerChat(conversationId, archive = true) {
     const id = String(conversationId || '').toLowerCase();
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) return 'failed';
     const signedIn = await fetch(`${location.origin}/api/auth/session`, { credentials: 'include' });
@@ -13674,9 +13814,10 @@
     // A workspace chat belongs to that workspace's account, which ChatGPT names in this header.
     if (typeof session.account?.id === 'string' && session.account.id) headers['ChatGPT-Account-Id'] = session.account.id;
     const archived = await fetch(`${location.origin}/backend-api/conversation/${id}`, {
-      method: 'PATCH', credentials: 'include', headers, body: JSON.stringify({ is_archived: true })
+      method: 'PATCH', credentials: 'include', headers, body: JSON.stringify({ is_archived: archive })
     });
-    return archived.ok ? 'archived' : 'failed';
+    if (!archived.ok) return 'failed';
+    return archive ? 'archived' : 'unarchived';
   }
 
   async function createChatgptProject(request) {
@@ -13879,7 +14020,7 @@
     return alive && !generating && !CLF_DOM.generating() && pendingTools === 0 && !desktopInputBusy &&
       !modelCatalogBusy && !pluginRefreshBusy && !desktopDecision && !commandAttempt && !commandJournalGate &&
       queue.length === 0 && !flushWork && CLF_DOM.composerVisible() && !CLF_DOM.hasComposerAttachments() &&
-      !(CLF_DOM.composer()?.textContent || '').trim() &&
+      !(CLF_DOM.composerText() || '').trim() &&
       (home ? !rows.length && !marker.has('cos-input') && !marker.has('temporary-chat') :
         !!CLF_DOM.conversationId() && rows.at(-1)?.role === 'assistant');
   }
@@ -13893,7 +14034,7 @@
     const current = () => alive && !interrupted && epoch >= startEpoch && epoch <= startEpoch + (startConversation ? 1 : 0) &&
       (!CLF_DOM.conversationId() || CLF_DOM.conversationId() === startConversation) &&
       !generating && !CLF_DOM.generating() && pendingTools === 0 &&
-      !(CLF_DOM.composer()?.textContent || '').trim() && !CLF_DOM.hasComposerAttachments();
+      !(CLF_DOM.composerText() || '').trim() && !CLF_DOM.hasComposerAttachments();
     const failure = () => ({ ready: false, fallback: current(), preSend: true, url: location.href });
     desktopInputBusy = true;
     try {
@@ -13933,7 +14074,7 @@
     if (!CLF_DOM.composer()) return 'composer_missing';
     if (!CLF_DOM.composerVisible()) return 'composer_hidden';
     if (CLF_DOM.hasComposerAttachments()) return 'attachments';
-    if (CLF_DOM.composer().textContent?.trim()) return 'draft';
+    if (CLF_DOM.composerText().trim()) return 'draft';
     return null;
   }
   function catalogHelper() {
@@ -13957,16 +14098,16 @@
     // Work swaps the composer as well as its picker. Complete that owned transition
     // before binding the exact Chat composer used by the remaining inspection.
     const switchCurrent = () => current() && !generating && !CLF_DOM.generating() && !desktopInputBusy &&
-      !CLF_DOM.hasComposerAttachments() && !CLF_DOM.composer()?.textContent?.trim();
+      !CLF_DOM.hasComposerAttachments() && !CLF_DOM.composerText()?.trim();
     if (!await CLF_DOM.prepareChatModelSurface(switchCurrent) || !switchCurrent()) {
       if (switchCurrent()) await ask({ type: 'model_catalog', nonce: message.nonce, models: null, error: 'picker_unavailable' });
       return false;
     }
     if (!CLF_DOM.composer()) await waitPageView(catalogPageReady, switchCurrent, 5000);
-    const composer = CLF_DOM.composer(), draftText = composer?.textContent;
+    const composer = CLF_DOM.composer(), draftText = CLF_DOM.composerText(composer);
     const attachments = CLF_DOM.hasComposerAttachments();
     const onTarget = () => current() && catalogPageReady() &&
-      CLF_DOM.composer() === composer && composer.textContent === draftText && CLF_DOM.hasComposerAttachments() === attachments;
+      CLF_DOM.composer() === composer && CLF_DOM.composerText(composer) === draftText && CLF_DOM.hasComposerAttachments() === attachments;
     if (!onTarget()) return false;
       let error;
       const models = await CLF_DOM.inspectModelSettings(() => onTarget() && Date.now() < message.expiresAt, reason => { error ??= reason; }).catch(() => { error ??= 'inspection_failed'; return null; });
@@ -13988,7 +14129,7 @@
       // dead context Chrome leaves behind when an unpacked extension is reloaded while the
       // ChatGPT document stays open. No page/session data crosses in this health check.
       if (message.type === 'clf-archive-chat') {
-        void archiveWorkerChat(message.conversationId).then(outcome => sendResponse({ outcome })).catch(() => sendResponse({ outcome: 'failed' }));
+        void archiveWorkerChat(message.conversationId, message.archive !== false).then(outcome => sendResponse({ outcome })).catch(() => sendResponse({ outcome: 'failed' }));
         return true;
       }
       if (message.type === 'clf-stop-turn') {
@@ -14015,7 +14156,7 @@
         // The helper may close once it holds nothing of the person's: no chat, no draft, no work.
         const box = CLF_DOM.composer();
         sendResponse({ safe: !projectCreateBusy && !CLF_DOM.conversationId() && !CLF_DOM.generating() &&
-          !(box && (box.textContent || '').trim()) && !CLF_DOM.hasComposerAttachments() &&
+          !(box && CLF_DOM.composerText(box).trim()) && !CLF_DOM.hasComposerAttachments() &&
           (location.pathname === '/' || !!CLF_DOM.projectHomeId()) });
         return false;
       }
@@ -14155,7 +14296,7 @@
                 (terminal && expectedTerminal === fiberTerminalMessageId && fiberTurnFor(currentAssistantTurn())?.endMessageId === expectedTerminal)) && !desktopInputBusy && !modelCatalogBusy && !pluginRefreshBusy && !desktopDecision &&
               ((!commandAttempt && !commandJournalGate) || failedBootstrap) && (!message.failedCommand || failedBootstrap) &&
               queue.length === 0 && !flushWork && !!CLF_DOM.composer() &&
-              !(CLF_DOM.composer().textContent || '').trim() && !CLF_DOM.hasComposerAttachments() });
+              !CLF_DOM.composerText().trim() && !CLF_DOM.hasComposerAttachments() });
         })().catch(() => sendResponse({ safe: false }));
         return true;
       }
@@ -14173,7 +14314,7 @@
             : !!command && (url.searchParams.get('clf') === command || hash.get('clf') === command);
         } catch { marked = false; }
         sendResponse({ safe: marked && !CLF_DOM.conversationId() && !desktopInputBusy && !generating && !CLF_DOM.generating() &&
-          pendingTools === 0 && !CLF_DOM.hasComposerAttachments() && !(CLF_DOM.composer()?.textContent || '').trim() &&
+          pendingTools === 0 && !CLF_DOM.hasComposerAttachments() && !(CLF_DOM.composerText() || '').trim() &&
           CLF_DOM.messages().filter(row => row.role === 'user').length === 0 });
         return false;
       }
@@ -14187,7 +14328,7 @@
           new URL(location.href).searchParams.get('temporary-chat') === 'true';
         sendResponse({ safe: temporaryPlannerPage() && (location.href.includes(`cos-input=${message.id}`) || routedHelper) &&
           !generating && !CLF_DOM.generating() && pendingTools === 0 && !CLF_DOM.hasComposerAttachments() &&
-          !(CLF_DOM.composer()?.textContent || '').trim() &&
+          !(CLF_DOM.composerText() || '').trim() &&
           // A remembered helper whose decision is gone may still show its own one prompt. The app
           // inserted that prompt, so ChatGPT may store it Markdown-escaped, as its receipt allows.
           (users.length === 0 || (exact && users.length === 1 && (desktopDecision ? matchesSubmittedBootstrap(users[0], desktopDecision.text) : !!servedPlanner))) });
