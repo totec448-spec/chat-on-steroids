@@ -78,7 +78,7 @@ var CLF_DOM = (() => {
   const NOT_PROMPT = 'style, script, noscript, template';
   /** The editor's text as written: everything but those nodes. The common case reads it directly. */
   const editorText = (node) => {
-    if (!node) return '';
+    if (!node || node.matches?.(NOT_PROMPT)) return '';
     if (!node.querySelector?.(NOT_PROMPT) || typeof node.cloneNode !== 'function') return node.textContent ?? '';
     const clone = node.cloneNode(true);
     for (const injected of clone.querySelectorAll(NOT_PROMPT)) injected.remove();
