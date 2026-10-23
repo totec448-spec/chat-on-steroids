@@ -1189,5 +1189,17 @@
   },
   "content_edit_unavailable": {
     "message": "ChatGPT がそのメッセージの編集を提供しませんでした。ChatGPT でチャットを開いてから、もう一度お試しください。"
+  },
+  "content_auto_compaction_waiting_app": {
+    "message": "自動圧縮: アプリの応答を待っています"
+  },
+  "content_goal_loop_waiting_app": {
+    "message": "ゴールとループ: アプリの応答を待っています"
+  },
+  "content_settings_waiting_app": {
+    "message": "アプリの応答を待っています"
+  },
+  "content_task_waiting_app": {
+    "message": "Chat On Steroids の応答を待っています。"
   }
 }

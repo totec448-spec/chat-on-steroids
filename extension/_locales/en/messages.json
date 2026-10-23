@@ -1240,5 +1240,17 @@
   },
   "content_edit_unavailable": {
     "message": "ChatGPT did not offer Edit for that message. Open the chat in ChatGPT, then try again."
+  },
+  "content_auto_compaction_waiting_app": {
+    "message": "Auto-compaction: waiting for the app"
+  },
+  "content_goal_loop_waiting_app": {
+    "message": "Goal and Loop: waiting for the app"
+  },
+  "content_settings_waiting_app": {
+    "message": "waiting for the app"
+  },
+  "content_task_waiting_app": {
+    "message": "Waiting for Chat On Steroids to answer."
   }
 }
