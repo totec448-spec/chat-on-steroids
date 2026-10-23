@@ -155,6 +155,17 @@ app.whenReady().then(async () => {
     await js(`document.getElementById('backToChat').click()`);
     await js('new Promise(r=>setTimeout(r,100))');
     assert.equal(await js(`getComputedStyle(document.querySelector('.app')).backgroundImage`),'none');
+    // The composer's edge is a control edge: 3:1 against the page around it.
+    const composerEdge = await js(`(() => {
+      // Computed colors come as rgb(…) or, for color-mix(), as color(srgb r g b) with 0–1 channels.
+      const toHex = value => { const srgb = /^color\\(srgb ([\\d.]+) ([\\d.]+) ([\\d.]+)/.exec(value);
+        const channels = srgb ? srgb.slice(1, 4).map(n => Math.round(Number(n) * 255)) : value.match(/[\\d.]+/g).slice(0, 3).map(Number);
+        return '#' + channels.map(n => n.toString(16).padStart(2, '0')).join(''); };
+      const edge = getComputedStyle(document.querySelector('.composer')).borderTopColor;
+      const page = getComputedStyle(document.documentElement).getPropertyValue('--page').trim();
+      const lum = hex => { const v = [1,3,5].map(i => parseInt(hex.slice(i,i+2),16)/255).map(c => c <= .03928 ? c/12.92 : ((c+.055)/1.055)**2.4); return .2126*v[0]+.7152*v[1]+.0722*v[2]; };
+      const [x,y] = [lum(toHex(edge)),lum(page)].sort((m,n)=>n-m); return { edge, ratio: (x+.05)/(y+.05) }; })()`);
+    assert.ok(composerEdge.ratio >= 2.99, 'high-contrast composer edge: ' + JSON.stringify(composerEdge));
     await js(`document.querySelector('[data-tab="appearance"]').click()`);
     await js(`document.getElementById('appearanceHighContrast').click()`);
     await js('new Promise(r=>setTimeout(r,100))');

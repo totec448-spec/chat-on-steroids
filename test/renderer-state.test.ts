@@ -648,11 +648,19 @@ it('offers eight accent presets and a High contrast switch that keeps the chosen
   swatches[0]!.focus();
   swatches[0]!.dispatchEvent(new mounted.window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
   expect(doc.activeElement).toBe(swatches[7]);
-  // A hand-picked color checks no preset.
+  // A hand-picked color checks no preset, in this theme or the other one: a preset is its pair.
   const hex = doc.getElementById('appearance-accent-hex') as HTMLInputElement;
   hex.value = '#123456';
   hex.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
   expect(swatches.every(swatch => swatch.getAttribute('aria-checked') === 'false')).toBe(true);
+  const themeSelect = doc.getElementById('appearanceTheme') as HTMLSelectElement;
+  themeSelect.value = theme === 'dark' ? 'light' : 'dark';
+  themeSelect.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  expect(swatches.every(swatch => swatch.getAttribute('aria-checked') === 'false')).toBe(true);
+  // Still one tab stop when nothing is checked: the first swatch.
+  expect(swatches.filter(swatch => swatch.tabIndex === 0)).toEqual([swatches[0]]);
+  themeSelect.value = theme;
+  themeSelect.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
 
   const high = doc.getElementById('appearanceHighContrast') as HTMLInputElement;
   expect(high.checked).toBe(false);
