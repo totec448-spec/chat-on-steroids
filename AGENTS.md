@@ -4963,12 +4963,14 @@ For a few seconds after a new OpenAI tunnel-client process connects (app start, 
 client the supervisor replaced), OpenAI still routes an existing chat's tool calls to the previous
 process, and a call sent then waits about 128 s for that lease (#1220; a new chat is not affected,
 and a reconnect of the same process after an outage changes nothing). `tunnel/route-settle.ts`
-holds such messages for `ROUTE_SETTLE_MS` (12 s) after each new process's first connected report:
+holds such messages for `ROUTE_SETTLE_MS` (35 s; 12 s until #1788) after each new process's first connected report:
 `/status` does not offer, and `/input/claim` refuses, an input whose page is an existing
 conversation; `wakeBrowserWork()` runs when the hold ends. `ConnectionStatus.routeSettlingUntil`
 lets the chat say the message is about to go. Measured on Windows: sent at once, 15 of 18 calls
 waited; held 12 s, 12 of 14 arrived in under 20 s (one still waited, one failed fast without reaching
-the app, back to back, so the takeover can occasionally outlast the hold). `test/tunnel-route-settle.test.ts`, the
+the app, back to back, so the takeover can occasionally outlast the hold). On the Mac on 2026-10-22 the
+takeover took longer (#1788): held 12 s, about half still waited; sent 22 s after connect, 2 of 3; at 32 s
+and 47 s, none of 6. `test/tunnel-route-settle.test.ts`, the
 `tunnel-lifecycle` and `input-delivery-integration` cases cover it.
 
 The local control API (`control-api.ts`, Settings → General → For developers, off by default) serves
