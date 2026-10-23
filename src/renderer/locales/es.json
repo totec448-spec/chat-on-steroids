@@ -1141,9 +1141,6 @@
   "{0} problems|many": "{0} de problemas",
   "{0} total · {1} folder": "{0} en total · {1} carpeta",
   "{0} total · {1} folders": "{0} en total · {1} carpetas",
-  "{0} / {1} tokens · {2}% of configured limit": "{0} / {1} tokens · {2}% del límite configurado",
-  "{0} / {1} tokens · {2}% of configured limit|one": "{0} / {1} token · {2}% del límite configurado",
-  "{0} / {1} tokens · {2}% of configured limit|many": "{0} / {1} de tokens · {2}% del límite configurado",
   "The recording does not include this source URL": "El registro no incluye la URL de esta fuente",
   "[source link unavailable]": "[enlace de la fuente no disponible]",
   " at {0}": " a las {0}",
@@ -1834,7 +1831,6 @@
   "This reply points to content from another message that was not recorded.": "Esta respuesta remite a contenido de otro mensaje que no se registró.",
   "Use effort: {0}": "Usar el nivel: {0}",
   "This chat (estimate)": "Este chat (estimación)",
-  "Context limit": "Límite de contexto",
   "Filled": "Ocupado",
   "Compacts automatically at": "Compacta automáticamente a partir de",
   "A chat stopped": "Un chat se detuvo",
@@ -3087,5 +3083,12 @@
   "What ChatGPT gets to see on this computer.": "Lo que ChatGPT llega a ver en este ordenador.",
   "Off for every project in Settings": "Desactivado para todos los proyectos en Ajustes",
   "This project's tools send keys and tokens to ChatGPT as they are": "Las herramientas de este proyecto envían claves y tokens a ChatGPT tal cual",
-  "Keys and tokens in this project's tool results are hidden from ChatGPT": "Las claves y tokens en los resultados de las herramientas de este proyecto se ocultan a ChatGPT"
+  "Keys and tokens in this project's tool results are hidden from ChatGPT": "Las claves y tokens en los resultados de las herramientas de este proyecto se ocultan a ChatGPT",
+  "{0} / {1} tokens · {2}% of the compaction point": "{0} / {1} tokens · {2}% del punto de compactación",
+  "{0} / {1} tokens · {2}% of the compaction point|one": "{0} / {1} token · {2}% del punto de compactación",
+  "{0} / {1} tokens · {2}% of the compaction point|many": "{0} / {1} de tokens · {2}% del punto de compactación",
+  "{0} / {1} tokens · {2}% of the large-chat warning": "{0} / {1} tokens · {2}% del aviso de chat grande",
+  "{0} / {1} tokens · {2}% of the large-chat warning|one": "{0} / {1} token · {2}% del aviso de chat grande",
+  "{0} / {1} tokens · {2}% of the large-chat warning|many": "{0} / {1} de tokens · {2}% del aviso de chat grande",
+  "Large-chat warning at": "Aviso de chat grande a partir de"
 }
