@@ -187,3 +187,50 @@ it('gives the keyboard back to where it was when it closes', async () => {
   view.dialog.dispatchEvent(new dom.window.Event('cancel', { cancelable: true }));
   expect(view.doc.activeElement).toBe(button);
 });
+
+it('names Ctrl and Shift in the interface language, in every row that has them', async () => {
+  const view = await mount({ platform: 'Win32' });
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  view.shortcuts.open();
+  const keys = new Map(view.groups().flatMap(([, rows]) => rows as [string, string[]][]));
+  expect(keys.get('Nächster Chat')).toEqual(['Strg+Tab']);
+  expect(keys.get('Vorheriger Chat')).toEqual(['Strg+Umschalt+Tab']);
+  expect(keys.get('Auswahl kopieren')).toEqual(['Strg+Umschalt+C']);
+  expect([...keys.values()].flat().filter(key => /Ctrl|Shift/.test(key))).toEqual([]);
+  setLanguage('en');
+  view.shortcuts.open();
+  expect(new Map(view.groups().flatMap(([, rows]) => rows as [string, string[]][])).get('Next chat')).toEqual(['Ctrl+Tab']);
+});
+
+it('shows the focus ring on the close button when the keys opened the dialog, not when the View menu did', async () => {
+  const view = await mount({ platform: 'Win32' });
+  const close = view.doc.getElementById('shortcutsClose') as HTMLButtonElement;
+  const calls: unknown[] = [];
+  const focus = close.focus.bind(close);
+  close.focus = (options?: FocusOptions) => { calls.push(options); focus(options); };
+  view.press({ key: '/', ctrlKey: true });
+  view.press({ key: '/', ctrlKey: true });
+  view.shortcuts.open();
+  expect(calls).toEqual([{ focusVisible: true }, { focusVisible: false }]);
+});
+
+it('stays closed over a role="dialog" picker that is open, and opens once it is gone', async () => {
+  const view = await mount({ platform: 'Win32' });
+  // The context meter keeps a role="dialog" element in the page while it is closed.
+  expect(view.doc.querySelector('#contextMeterInfo[role="dialog"]')).not.toBeNull();
+  const trigger = view.doc.createElement('button');
+  view.doc.body.append(trigger);
+  const { createSearchPopup } = await import('../src/renderer/search-popup.js');
+  const picker = createSearchPopup({
+    trigger: () => trigger, className: 'test-picker', label: () => 'Pick', placeholder: () => 'Search',
+    choices: () => [], empty: () => 'Nothing'
+  });
+  picker.show();
+  expect(view.doc.activeElement?.closest('[role="dialog"]')).not.toBeNull();
+  expect(view.press({ key: '/', ctrlKey: true }, view.doc.activeElement!)).toBe(true);
+  expect(view.dialog.open).toBe(false);
+  picker.close(true);
+  expect(view.press({ key: '/', ctrlKey: true }, view.doc.activeElement!)).toBe(false);
+  expect(view.dialog.open).toBe(true);
+});
