@@ -151,6 +151,11 @@ app.whenReady().then(async () => {
     await screenshot('high-contrast-chat.png');
     await js(`document.querySelector('[data-tab="appearance"]').click()`);
     await change('appearanceTheme','dark');
+    // The dark chat screen is drawn on the plain black page, without the theme's wash.
+    await js(`document.getElementById('backToChat').click()`);
+    await js('new Promise(r=>setTimeout(r,100))');
+    assert.equal(await js(`getComputedStyle(document.querySelector('.app')).backgroundImage`),'none');
+    await js(`document.querySelector('[data-tab="appearance"]').click()`);
     await js(`document.getElementById('appearanceHighContrast').click()`);
     await js('new Promise(r=>setTimeout(r,100))');
     assert.equal(await js(`window.fixtureState.config.ui.appearance.highContrast`),false);
