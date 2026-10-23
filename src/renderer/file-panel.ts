@@ -1097,7 +1097,7 @@ export function createFilePanel(options: FilePanelOptions) {
     }
     if (gitSnapshot.comparison?.checkpoint && !gitSnapshot.truncated) {
       const bar = el('div', 'file-checkpoint-bar');
-      bar.append(actionButton(() => t('Restore all'), 'i-retry', () => restoreFromCheckpoint(null)));
+      bar.append(actionButton(() => t('Restore all'), 'i-restore', () => restoreFromCheckpoint(null)));
       changesList.append(bar);
     }
     const groups: Array<[ProjectGitStatus, string]> = [
@@ -1303,7 +1303,7 @@ export function createFilePanel(options: FilePanelOptions) {
       actions.append(previous, el('span', 'file-review-counter', `${reviewSource.cursor + 1}/${reviewSource.indices.length}`), next);
     }
     if (!historical && gitSnapshot?.comparison?.checkpoint) {
-      actions.append(actionButton(() => t('Restore file'), 'i-retry', () => restoreFromCheckpoint([path])));
+      actions.append(actionButton(() => t('Restore file'), 'i-restore', () => restoreFromCheckpoint([path])));
     }
     actions.append(actionButton(() => t('Close preview'), 'i-x', historical ? leaveReview : closeGitDiff));
     head.append(title, actions);
