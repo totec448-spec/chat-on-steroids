@@ -1148,13 +1148,14 @@ describe('a linked Project ChatGPT no longer has (#1759)', () => {
     ['the opened tab on that Project', 1, `https://chatgpt.com/g/${project}-work/project?cos-input=${inputId}`, project, true],
     ['another tab', 2, `https://chatgpt.com/g/${project}/project`, project, false],
     ['a tab that moved away', 1, 'https://chatgpt.com/', project, false],
-    ['another Project', 1, `https://chatgpt.com/g/${project}/project`, 'g-p-99999999888877776666555555555555', false]
-  ] as const)('is reported only by %s', async (_name, tabId, url, reportedProject, posted) => {
+    ['another Project', 1, `https://chatgpt.com/g/${project}/project`, 'g-p-99999999888877776666555555555555', false],
+    ['a tab already leaving the Project', 1, `https://chatgpt.com/g/${project}/project`, project, false, 'https://chatgpt.com/']
+  ] as const)('is reported only by %s', async (_name, tabId, url, reportedProject, posted, pendingUrl?: string) => {
     const calls: any[] = [];
     const worker = loadWorker({
       local: new FakeStorageArea({ port: 8765, token: 'paired-token', inputOpenings: { [inputId]: { tab: 1, stage: 'ready', project } } }),
       session: new FakeStorageArea(),
-      tabsGet: async () => ({ id: tabId, url }),
+      tabsGet: async () => ({ id: tabId, url, ...(pendingUrl ? { pendingUrl } : {}) }),
       fetch: async (input, init: any = {}) => {
         const route = new URL(input).pathname;
         if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
@@ -1165,6 +1166,49 @@ describe('a linked Project ChatGPT no longer has (#1759)', () => {
     await worker.registerTab(tabId);
     await worker.send({ type: 'project_unavailable', id: inputId, project: reportedProject }, tabId);
     expect(calls).toEqual(posted ? [{ action: 'gone', inputId, chatgptId: project }] : []);
+  });
+});
+
+describe('a page\'s release reason', () => {
+  it.each(['send-not-ready', 'turn-progressed by app-tool_call', 'turn-progressed by page-text'])('reaches the app whole: %s', async (detail) => {
+    const posted: any[] = [];
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }), session: new FakeStorageArea(),
+      tabsGet: async () => ({ id: 1, url: 'https://chatgpt.com/c/6adb3318-5500-83eb-afe8-d70d1bd49d1f' }),
+      fetch: async (input, init: any = {}) => {
+        const route = new URL(input).pathname;
+        if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (route === '/input/fail') posted.push(JSON.parse(init.body));
+        return response(200, { ok: true });
+      }
+    });
+    await worker.registerTab(1);
+    await worker.send({ type: 'desktop_input', id: 'ffffffff-1111-4222-8333-444444444444', owner: '1:document-1-0:0',
+      fail: true, error: 'After-turn pickup was withdrawn before Send.', detail });
+    expect(posted.at(-1)?.detail).toBe(detail);
+  });
+
+  it('drops a reason that is not one of the page\'s own short codes', async () => {
+    const posted: any[] = [];
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }), session: new FakeStorageArea(),
+      tabsGet: async () => ({ id: 1, url: 'https://chatgpt.com/c/6adb3318-5500-83eb-afe8-d70d1bd49d1f' }),
+      fetch: async (input, init: any = {}) => {
+        const route = new URL(input).pathname;
+        if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (route === '/input/fail') posted.push(JSON.parse(init.body));
+        return response(200, { ok: true });
+      }
+    });
+    await worker.registerTab(1);
+    for (const [index, detail] of ['Some sentence. With dots', 'x'.repeat(81), 'UPPER-case'].entries()) {
+      await worker.send({ type: 'desktop_input', id: 'ffffffff-1111-4222-8333-444444444444', owner: '1:document-1-0:0',
+        fail: true, error: 'After-turn pickup was withdrawn before Send.', detail });
+      // The report itself still travels; only its reason is left out.
+      expect(posted).toHaveLength(index + 1);
+      expect(posted.at(-1)).toMatchObject({ error: 'After-turn pickup was withdrawn before Send.' });
+      expect(posted.at(-1)?.detail).toBeUndefined();
+    }
   });
 });
 

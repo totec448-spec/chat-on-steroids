@@ -13683,6 +13683,10 @@
         try { await draft.clear(); } catch { /* Unprovable native cleanup preserves the draft. */ }
       }
       return accepted;
+    } catch (error) {
+      // An exception is the one exit with no reason of its own; the release still says it was one.
+      noteWithdraw('page-error');
+      throw error;
     } finally {
       if (claimedSilence && !sendAttempted) {
         await ask({ type: 'desktop_input', id: claimedSilence.id, owner: claimedSilence.owner, fail: true,
