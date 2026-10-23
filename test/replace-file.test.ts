@@ -1,4 +1,5 @@
 import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile, chmod, stat } from 'node:fs/promises';
+import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -10,6 +11,7 @@ const { replaceFile } = await import('../src/main/replace-file.js');
 
 let dir: string;
 beforeEach(async () => {
+  vi.restoreAllMocks();
   vi.clearAllMocks();
   dir = await mkdtemp(path.join(os.tmpdir(), 'cos-replace-file-'));
 });
@@ -32,6 +34,25 @@ it('keeps the old file when the replacement cannot be put in place, and logs why
   expect(await readFile(path.join(target, 'inside.txt'), 'utf8')).toBe('kept');
   expect(await readdir(dir)).toEqual(['taken']);
   expect(logger.logWarn).toHaveBeenCalledWith(expect.stringMatching(/^HTML export: refused, the file could not be written or replaced \(\w+\)$/));
+});
+
+it('reports the write error, and logs it, when removing the temporary file fails too', async () => {
+  // Windows can refuse the removal (EBUSY) while an antivirus scan holds the temporary file.
+  const target = path.join(dir, 'taken');
+  await mkdir(target);
+  const remove = fsp.rm.bind(fsp);
+  const rm = vi.spyOn(fsp, 'rm').mockImplementation(async (file, options) => {
+    if (String(file).endsWith('.tmp')) throw Object.assign(new Error('held by another program'), { code: 'EBUSY' });
+    return remove(file, options);
+  });
+  const failure = await replaceFile(target, 'new', 'HTML export').catch((error: NodeJS.ErrnoException) => error);
+  rm.mockRestore();
+  expect(failure).toBeInstanceOf(Error);
+  expect((failure as NodeJS.ErrnoException).code).not.toBe('EBUSY');
+  expect(logger.logWarn.mock.calls.map(([line]) => line)).toEqual([
+    expect.stringMatching(/^HTML export: refused, the file could not be written or replaced \((?!EBUSY)\w+\)$/),
+    'HTML export: the temporary file beside the chosen file could not be removed (EBUSY)'
+  ]);
 });
 
 it.skipIf(process.platform === 'win32')('writes through a chosen symlink instead of replacing the link', async () => {

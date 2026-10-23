@@ -39,8 +39,12 @@ export async function replaceFile(chosen: string, text: string, label: string): 
     if (mode !== undefined) await fs.chmod(temporary, mode);
     await fs.rename(temporary, destination);
   } catch (error) {
-    await fs.rm(temporary, { force: true });
     logWarn(`${label}: refused, the file could not be written or replaced (${(error as NodeJS.ErrnoException).code ?? 'unknown error'})`);
+    // Best effort: on Windows an antivirus scan or indexer can hold the temporary file, and that
+    // must not replace the error the caller needs to see.
+    await fs.rm(temporary, { force: true }).catch((cleanup: NodeJS.ErrnoException) => {
+      logWarn(`${label}: the temporary file beside the chosen file could not be removed (${cleanup.code ?? 'unknown error'})`);
+    });
     throw error;
   }
 }
