@@ -119,7 +119,9 @@ export function createSearchPopup(options: SearchPopupOptions): SearchPopup {
         items.append(option);
       }
       if (!items.childElementCount) notes.append(el('p', part('empty'), options.empty()));
-      for (const note of options.notes?.() ?? []) notes.append(el('p', part('empty'), note));
+      // A note is a short secondary line, set apart from the empty state above it; its whole text
+      // stays readable on hover when a narrow popup cuts it.
+      for (const note of options.notes?.() ?? []) { const line = el('p', part('note'), note); line.title = note; notes.append(line); }
       notes.hidden = !notes.childElementCount;
     };
     search.addEventListener('input', renderItems);

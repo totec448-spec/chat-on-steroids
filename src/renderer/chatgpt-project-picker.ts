@@ -69,7 +69,7 @@ export function createChatgptProjectPicker(deps: {
           } satisfies SearchPopupChoice;
         })],
         empty: () => t('No ChatGPT Project matches'),
-        notes: () => [t('Projects ChatGPT shows in its sidebar. Open chatgpt.com to update this list.')],
+        notes: () => [t('Missing one? Open chatgpt.com to refresh.')],
         // Right after adding, closing the choice keeps the default: a new ChatGPT Project.
         onDismiss: () => { if (mode === 'added' && !decided) decide(() => deps.api.createChatgptProject(project.id)); }
       });
