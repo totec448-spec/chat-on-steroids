@@ -307,7 +307,7 @@ app.whenReady().then(async () => {
     win.webContents.sendInputEvent({type:'keyDown',keyCode:'/',modifiers:[process.platform==='darwin'?'meta':'control']});
     await until(`document.getElementById('shortcutsDialog').open`);
     const shortcuts=await js(`(()=>{const d=document.getElementById('shortcutsDialog'),b=d.getBoundingClientRect();return {rows:d.querySelectorAll('dt').length,outside:[...d.querySelectorAll('dt, kbd')].filter(n=>{const r=n.getBoundingClientRect();return r.left<b.left-1||r.right>b.right+1}).length}})()`);
-    assert.deepEqual(shortcuts,{rows:18,outside:0}); await screenshot('shortcuts-dialog');
+    assert.deepEqual(shortcuts,{rows:process.platform==='win32'?30:29,outside:0}); await screenshot('shortcuts-dialog');
     win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});
     await until(`!document.getElementById('shortcutsDialog').open`);
     await js(`document.getElementById('viewMenu').click()`);

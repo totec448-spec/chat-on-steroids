@@ -2998,5 +2998,14 @@
   "Earlier messages, in an empty message box": "以前のメッセージ（メッセージ欄が空のとき）",
   "Sidebar": "サイドバー",
   "Move the focused chat or project": "フォーカス中のチャットやプロジェクトを移動",
-  "Workspace panels": "ワークスペースのパネル"
+  "Workspace panels": "ワークスペースのパネル",
+  "Next chat": "次のチャット",
+  "Previous chat": "前のチャット",
+  "Full screen": "全画面表示",
+  "Stop the turn, twice in an empty message box": "ターンを停止（空のメッセージ欄で2回押す）",
+  "Hold to dictate": "押し続けて音声入力",
+  "Move a queued task": "キュー内のタスクを移動",
+  "Move the focused tab": "フォーカス中のタブを移動",
+  "Save the file being edited": "編集中のファイルを保存",
+  "Copy the selection": "選択範囲をコピー"
 }

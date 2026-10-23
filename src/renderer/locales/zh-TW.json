@@ -2998,5 +2998,14 @@
   "Earlier messages, in an empty message box": "之前的訊息（訊息框為空時）",
   "Sidebar": "側邊欄",
   "Move the focused chat or project": "移動目前聚焦的聊天或專案",
-  "Workspace panels": "工作區面板"
+  "Workspace panels": "工作區面板",
+  "Next chat": "下一個聊天",
+  "Previous chat": "上一個聊天",
+  "Full screen": "全螢幕",
+  "Stop the turn, twice in an empty message box": "停止本回合（在空訊息框中按兩次）",
+  "Hold to dictate": "按住聽寫",
+  "Move a queued task": "移動排隊任務",
+  "Move the focused tab": "移動目前聚焦的分頁",
+  "Save the file being edited": "儲存正在編輯的檔案",
+  "Copy the selection": "複製所選內容"
 }

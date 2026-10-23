@@ -2,15 +2,23 @@
  * The keyboard shortcuts dialog: ⌘/ on macOS, Ctrl+/ elsewhere, or View → Keyboard shortcuts.
  *
  * It lists only keys the app already handles, labelled as this keyboard prints them (shortcuts.ts),
- * and the message box's Enter rows follow the Enter setting. Each row names the module whose
- * handler owns the key, so a new shortcut is added here in the same change as its handler.
+ * and the message box's Enter rows follow the Enter setting. Each row names the file whose handler
+ * owns the key (`source`), and test/renderer-shortcuts-dialog.test.ts fails when a renderer file
+ * handles modifier keys that no row names, so a new shortcut is added here in the same change.
  */
 import { $, el } from './dom.js';
 import { t, ui } from './i18n.js';
 import { closeRowMenu } from './row-menu.js';
-import { isMac, primaryShiftShortcut, primaryShortcut } from './shortcuts.js';
+import { holdToTalkShortcut, holdToTalkSupported, isMac, primaryShiftShortcut, primaryShortcut } from './shortcuts.js';
 
-export interface ShortcutRow { label: () => string; keys: () => string[] }
+export interface ShortcutRow {
+  label: () => string;
+  keys: () => string[];
+  /** The file under src/ whose handler owns these keys. */
+  source: string;
+  /** Rows that exist on some systems only. */
+  shown?: () => boolean;
+}
 /** `column` is where the group sits once the dialog is wide enough for two. */
 export interface ShortcutGroup { title: () => string; column: 1 | 2; rows: ShortcutRow[] }
 
@@ -23,41 +31,59 @@ export function shortcutGroups(enterSends: () => boolean): ShortcutGroup[] {
     {
       title: () => t('General'), column: 1,
       rows: [
-        { label: () => t('Search chats'), keys: () => [primaryShortcut('K')] }, // chat-search.ts
-        { label: () => t('Find in chat'), keys: () => [primaryShortcut('F')] }, // chat-find.ts
-        { label: () => t('Search settings'), keys: () => [primaryShortcut('F')] }, // settings-search.ts
-        { label: () => t('Toggle sidebar'), keys: () => [primaryShortcut('B')] }, // sidebar-resize.ts
-        { label: () => t('Zoom in'), keys: () => [primaryShortcut('+')] }, // main.ts
-        { label: () => t('Zoom out'), keys: () => [primaryShortcut('−')] },
-        { label: () => t('Actual size'), keys: () => [primaryShortcut('0')] },
-        { label: () => t('Keyboard shortcuts'), keys: () => [primaryShortcut('/')] }
+        { label: () => t('Search chats'), keys: () => [primaryShortcut('K')], source: 'renderer/chat-search.ts' },
+        { label: () => t('New chat'), keys: () => [primaryShortcut('N')], source: 'renderer/app-shortcuts.ts' },
+        { label: () => t('Settings'), keys: () => [primaryShortcut(',')], source: 'renderer/app-shortcuts.ts' },
+        // Ctrl on every system, macOS included, as in browsers.
+        { label: () => t('Next chat'), keys: () => ['Ctrl+Tab'], source: 'renderer/chat-cycle.ts' },
+        { label: () => t('Previous chat'), keys: () => ['Ctrl+Shift+Tab'], source: 'renderer/chat-cycle.ts' },
+        { label: () => t('Find in chat'), keys: () => [primaryShortcut('F')], source: 'renderer/chat-find.ts' },
+        { label: () => t('Search settings'), keys: () => [primaryShortcut('F')], source: 'renderer/settings-search.ts' },
+        { label: () => t('Toggle sidebar'), keys: () => [primaryShortcut('B')], source: 'renderer/sidebar-resize.ts' },
+        { label: () => t('Zoom in'), keys: () => [primaryShortcut('+')], source: 'renderer/main.ts' },
+        { label: () => t('Zoom out'), keys: () => [primaryShortcut('−')], source: 'renderer/main.ts' },
+        { label: () => t('Actual size'), keys: () => [primaryShortcut('0')], source: 'renderer/main.ts' },
+        { label: () => t('Full screen'), keys: () => ['F11'], source: 'main/index.ts' },
+        { label: () => t('Keyboard shortcuts'), keys: () => [primaryShortcut('/')], source: 'renderer/shortcuts-dialog.ts' }
       ]
     },
     {
       title: () => t('Sidebar'), column: 1,
       rows: [
-        { label: () => t('Move the focused chat or project'), keys: () => [alt('↑'), alt('↓')] } // sidebar-order.ts
+        { label: () => t('Move the focused chat or project'), keys: () => [alt('↑'), alt('↓')], source: 'renderer/sidebar-order.ts' }
       ]
     },
     {
-      // chat.ts: the composer's keydown and recallPrompt.
       title: () => t('Message box'), column: 2,
       rows: [
-        { label: () => t('Send'), keys: () => [enterSends() ? t('Enter') : primaryShortcut(t('Enter'))] },
-        { label: () => t('New line'), keys: () => [enterSends() ? shift(t('Enter')) : t('Enter')] },
-        { label: () => t('Send the other way while ChatGPT works'), keys: () => [primaryShiftShortcut(t('Enter'))] },
-        { label: () => t('Earlier messages, in an empty message box'), keys: () => ['↑', '↓'] }
+        { label: () => t('Send'), keys: () => [enterSends() ? t('Enter') : primaryShortcut(t('Enter'))], source: 'renderer/chat.ts' },
+        { label: () => t('New line'), keys: () => [enterSends() ? shift(t('Enter')) : t('Enter')], source: 'renderer/chat.ts' },
+        { label: () => t('Send the other way while ChatGPT works'), keys: () => [primaryShiftShortcut(t('Enter'))], source: 'renderer/chat.ts' },
+        { label: () => t('Earlier messages, in an empty message box'), keys: () => ['↑', '↓'], source: 'renderer/chat.ts' },
+        { label: () => t('Stop the turn, twice in an empty message box'), keys: () => ['Esc', 'Esc'], source: 'renderer/chat.ts' },
+        // Windows only: see holdToTalkSupported.
+        { label: () => t('Hold to dictate'), keys: () => [holdToTalkShortcut()], source: 'renderer/chat.ts', shown: holdToTalkSupported },
+        { label: () => t('Move a queued task'), keys: () => [alt('↑'), alt('↓')], source: 'renderer/chat.ts' }
       ]
     },
     {
       // workspace-docks.ts: Ctrl on every system, so the label is the docks' own.
       title: () => t('Workspace panels'), column: 2,
       rows: [
-        { label: () => t('Toggle bottom panel'), keys: () => ['Ctrl+`'] },
-        { label: () => t('Review'), keys: () => ['Ctrl+Shift+1'] },
-        { label: () => t('Terminal'), keys: () => ['Ctrl+Shift+2'] },
-        { label: () => t('Files'), keys: () => ['Ctrl+Shift+3'] },
-        { label: () => t('Sub-agents'), keys: () => ['Ctrl+Shift+4'] }
+        { label: () => t('Toggle bottom panel'), keys: () => ['Ctrl+`'], source: 'renderer/workspace-docks.ts' },
+        { label: () => t('Review'), keys: () => ['Ctrl+Shift+1'], source: 'renderer/workspace-docks.ts' },
+        { label: () => t('Terminal'), keys: () => ['Ctrl+Shift+2'], source: 'renderer/workspace-docks.ts' },
+        { label: () => t('Files'), keys: () => ['Ctrl+Shift+3'], source: 'renderer/workspace-docks.ts' },
+        { label: () => t('Sub-agents'), keys: () => ['Ctrl+Shift+4'], source: 'renderer/workspace-docks.ts' },
+        { label: () => t('Move the focused tab'), keys: () => ['Ctrl+Shift+←', 'Ctrl+Shift+→'], source: 'renderer/tab-reorder.ts' },
+        { label: () => t('Save the file being edited'), keys: () => [primaryShortcut('S')], source: 'renderer/file-panel.ts' }
+      ]
+    },
+    {
+      title: () => t('Terminal'), column: 1,
+      rows: [
+        { label: () => t('Copy the selection'), keys: () => ['Ctrl+Shift+C'], source: 'renderer/workspace-terminal.ts' },
+        { label: () => t('Send to chat'), keys: () => [primaryShiftShortcut(t('Enter'))], source: 'renderer/workspace-terminal.ts' }
       ]
     }
   ];
@@ -69,7 +95,7 @@ function paint(list: HTMLElement, groups: ShortcutGroup[]): void {
     side.append(...groups.filter(group => group.column === column).map(group => {
       const section = el('section', 'shortcuts-group');
       const rows = el('dl', 'shortcuts-rows');
-      for (const row of group.rows) {
+      for (const row of group.rows.filter(row => !row.shown || row.shown())) {
         const keys = el('dd', 'shortcuts-keys');
         keys.append(...row.keys().map(key => el('kbd', '', key)));
         rows.append(el('dt', '', row.label), keys);
@@ -89,6 +115,9 @@ export function initShortcutsDialog(options: { enterSends(): boolean }): { open(
   ui($('shortcutsClose'), 'title', () => t('Close'));
   ui($('shortcutsClose'), 'aria-label', () => t('Close'));
 
+  // Where the keyboard was when the dialog opened (the message box, the View button): focus goes
+  // back there on close, never to the page body.
+  let opener: HTMLElement | null = null;
   const close = (): void => {
     if (!dialog.open || dialog.classList.contains('is-closing')) return;
     dialog.classList.add('is-closing');
@@ -96,6 +125,8 @@ export function initShortcutsDialog(options: { enterSends(): boolean }): { open(
       if (!dialog.classList.contains('is-closing')) return;
       dialog.classList.remove('is-closing');
       dialog.close();
+      if (opener?.isConnected) opener.focus({ preventScroll: true });
+      opener = null;
     };
     const animation = window.getComputedStyle(dialog).animationName;
     if (!animation || animation === 'none') { finish(); return; }
@@ -104,6 +135,7 @@ export function initShortcutsDialog(options: { enterSends(): boolean }): { open(
   };
   const open = (): void => {
     dialog.classList.remove('is-closing');
+    if (!dialog.open) opener = document.activeElement === document.body ? null : document.activeElement as HTMLElement | null;
     closeRowMenu();
     // Painted on each open: the Enter setting or the language may have changed since the last one.
     paint(list, groups);

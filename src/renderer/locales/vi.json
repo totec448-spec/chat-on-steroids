@@ -2998,5 +2998,14 @@
   "Earlier messages, in an empty message box": "Tin nhắn trước đây, khi ô tin nhắn trống",
   "Sidebar": "Thanh bên",
   "Move the focused chat or project": "Di chuyển cuộc trò chuyện hoặc dự án đang chọn",
-  "Workspace panels": "Các bảng của không gian làm việc"
+  "Workspace panels": "Các bảng của không gian làm việc",
+  "Next chat": "Cuộc trò chuyện tiếp theo",
+  "Previous chat": "Cuộc trò chuyện trước",
+  "Full screen": "Toàn màn hình",
+  "Stop the turn, twice in an empty message box": "Dừng lượt, nhấn hai lần trong ô tin nhắn trống",
+  "Hold to dictate": "Giữ để đọc chính tả",
+  "Move a queued task": "Di chuyển một tác vụ đã xếp hàng",
+  "Move the focused tab": "Di chuyển tab đang chọn",
+  "Save the file being edited": "Lưu tệp đang chỉnh sửa",
+  "Copy the selection": "Sao chép phần đã chọn"
 }
