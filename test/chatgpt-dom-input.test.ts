@@ -1680,6 +1680,14 @@ describe('a rich-link preview inside the editor (#1792)', () => {
     expect(api.composerText(box)).toBe('Exact app prompt');
   });
 
+  it('reads nothing from a stylesheet that is itself a direct child of the editor', () => {
+    const style = document.createElement('style');
+    style.textContent = css;
+    box.append(style);
+    expect(api.composerText(style)).toBe('');
+    expect(api.composerText()).toBe('Exact app prompt');
+  });
+
   it('keeps the lease on an untouched prompt when ChatGPT adds a preview', () => {
     const draft = api.captureComposerDraft('Exact app prompt');
     enrich();
