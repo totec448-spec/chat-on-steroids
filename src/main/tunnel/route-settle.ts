@@ -40,6 +40,8 @@ const STEP_DOWN_MS = 5_000;
 const STEP_UP_MIN_MS = 15_000;
 /** Only a send this soon after a new client is about that client's takeover. */
 const MEASURE_WINDOW_MS = 5 * 60_000;
+/** ChatGPT's clock against this computer's: a request created this much "before" the send is still its own. */
+const CLOCK_SKEW_MS = 10_000;
 const STATE = 'route-hold';
 const STATE_VERSION = 1;
 
@@ -55,7 +57,9 @@ let epoch: { connectedAt: number; measured: boolean } | null = null;
  * window. A later one has had more time to find the new route and would make the hold look shorter
  * than it is.
  */
-let target: { conversationId: string; sighted: { requestId: string; at: number } | null } | null = null;
+let target: { conversationId: string; sentAt: number; sighted: { requestId: string; at: number } | null } | null = null;
+/** Said once per restart, so a busy chat does not repeat it. */
+let toldOutsideWindow = false;
 /** Calls that reached this app before the page reported them, while the target waits for its own. */
 const arrived = new Map<string, number>();
 
@@ -68,6 +72,7 @@ export function routeHoldMs(): number {
 export function noteTunnelClientConnected(now = Date.now()): void {
   epoch = { connectedAt: now, measured: false };
   target = null;
+  toldOutsideWindow = false;
   arrived.clear();
   const until = now + holdMs;
   if (until <= settledAt) return;
@@ -95,13 +100,26 @@ const open = (): boolean => !!epoch && !epoch.measured && !!target;
  * arrives after it still counts.
  */
 export function noteRouteExistingChatSend(conversationId: string, now = Date.now()): void {
-  if (!epoch || epoch.measured || target || now - epoch.connectedAt > MEASURE_WINDOW_MS) return;
-  target = { conversationId, sighted: null };
+  if (!epoch || epoch.measured || target) return;
+  if (now - epoch.connectedAt > MEASURE_WINDOW_MS) {
+    if (!toldOutsideWindow) {
+      toldOutsideWindow = true;
+      logInfo(`route hold: not measuring this restart; its first message for an existing chat went out ` +
+        `${Math.round((now - epoch.connectedAt) / 1000)} s after the new tunnel-client connected, past the ${MEASURE_WINDOW_MS / 60_000} min window`);
+    }
+    return;
+  }
+  target = { conversationId, sentAt: now, sighted: null };
 }
 
-/** The page proved which chat a ChatGPT request belongs to: its call has been issued. */
-export function noteRouteRequestSighted(requestId: string, conversationId: string, now = Date.now()): void {
+/**
+ * The page proved which chat a ChatGPT request belongs to: its call has been issued. `createdAt` is
+ * ChatGPT's own creation time of the request, when the page knows it: a request older than the send
+ * (a turn that was already running) is not the measured message's and is ignored.
+ */
+export function noteRouteRequestSighted(requestId: string, conversationId: string, now = Date.now(), createdAt: number | null = null): void {
   if (!open() || target!.conversationId !== conversationId || target!.sighted) return;
+  if (createdAt !== null && createdAt < target!.sentAt - CLOCK_SKEW_MS) return;
   const arrivedAt = arrived.get(requestId);
   if (arrivedAt !== undefined) learn(arrivedAt - now);
   else target!.sighted = { requestId, at: now };
@@ -166,5 +184,6 @@ export function resetRouteSettleForTests(): void {
   fastStreak = 0;
   epoch = null;
   target = null;
+  toldOutsideWindow = false;
   arrived.clear();
 }
