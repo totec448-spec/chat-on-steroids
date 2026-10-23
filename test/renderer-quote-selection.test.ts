@@ -39,6 +39,21 @@ it('marks every selected line as a quote and leaves a line under it to write on'
   expect(draftWithQuote('Why is that?\n\n\n', '> a')).toBe('Why is that?\n\n> a\n\n');
 });
 
+it('holds a long quote to the terminal selection caps and inserts it the way that block is inserted', async () => {
+  const { draftWithQuote, markdownQuote } = await import('../src/renderer/quote-selection.js');
+  const { draftWithTerminalBlock, MAX_TERMINAL_LINES } = await import('../src/renderer/terminal-selection.js');
+  const lines = Array.from({ length: 1_000 }, (_, index) => `line ${index + 1}`);
+  const quote = markdownQuote(lines.join('\n'));
+  const [note, body] = quote.split('\n\n');
+  expect(note).toBe(`Only the end of the selection is here: the last ${MAX_TERMINAL_LINES} of 1,000 lines.`);
+  expect(body!.split('\n')).toHaveLength(MAX_TERMINAL_LINES);
+  expect(body!.startsWith('> line 601\n')).toBe(true);
+  expect(body!.endsWith('> line 1000')).toBe(true);
+  // A short quote carries no note.
+  expect(markdownQuote('one\ntwo')).toBe('> one\n> two');
+  expect(draftWithQuote('Why?', quote)).toBe(draftWithTerminalBlock('Why?', quote));
+});
+
 it('reads the selected words as the message shows them, without the code panel controls', async () => {
   // Chromium's own selection text carried a code panel's "Code" and "Copy" into the quote, and a
   // formula twice: once drawn, once for screen readers.

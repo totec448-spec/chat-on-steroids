@@ -1,5 +1,6 @@
 import { el, icon } from './dom.js';
 import { t } from './i18n.js';
+import { draftWithTerminalBlock, limitedSelection } from './terminal-selection.js';
 
 /**
  * Quote a selection into the composer: select words in a message of the open chat and a Quote
@@ -73,24 +74,25 @@ export function selectedText(range: Range): string {
   return text;
 }
 
-/** The selected words as a Markdown quote: every line marked, blank lines at the ends dropped. */
+/**
+ * The selected words as a Markdown quote: every line marked, blank lines at the ends dropped. A
+ * selection over the terminal block's caps keeps its last lines, with the same line above it that
+ * says how much is left out.
+ */
 export function markdownQuote(selected: string): string {
   const lines: string[] = [];
   for (const line of selected.replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ').split('\n').map(line => line.trimEnd())) {
     // One blank line keeps two paragraphs apart; a run of them says nothing more.
     if (line || (lines.length && lines[lines.length - 1])) lines.push(line);
   }
-  while (lines.length && !lines[lines.length - 1]) lines.pop();
-  return lines.map(line => line ? `> ${line}` : '>').join('\n');
+  const limited = limitedSelection(lines.join('\n'));
+  if (!limited) return '';
+  const quote = limited.text.split('\n').map(line => line ? `> ${line}` : '>').join('\n');
+  return limited.note ? `${limited.note}\n\n${quote}` : quote;
 }
 
-/** The draft with the quote after what is typed, and an empty line under it to write on. */
-export function draftWithQuote(draft: string, quote: string): string {
-  // Only the empty lines at the end go; spaces the person typed on the last line stay.
-  const typed = draft.trim() ? draft.replace(/(?:\r?\n[ \t]*)+$/, '') : '';
-  // Without the blank line, the next words typed would still belong to the quote.
-  return `${typed ? `${typed}\n\n` : ''}${quote}\n\n`;
-}
+/** The draft with the quote after what is typed and an empty line under it: the terminal block's own insert. */
+export const draftWithQuote = draftWithTerminalBlock;
 
 export interface QuoteSelectionDeps {
   /** The open chat's timeline: only words in its messages are offered. */
