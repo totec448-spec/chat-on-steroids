@@ -13,8 +13,8 @@ const checkbox = (id: string) => $<HTMLInputElement>(id);
 /** A long random topic: guessing it is the only way to read its messages on a public server. */
 export function newTopic(random: (count: number) => number[] = count => [...crypto.getRandomValues(new Uint8Array(count))]): string {
   const alphabet = 'abcdefghijkmnpqrstuvwxyz23456789';
-  // 32 letters, so each byte maps evenly: 20 of them are 100 bits.
-  return 'cos-' + random(20).map(byte => alphabet[byte % alphabet.length]).join('');
+  // 32 letters: a byte's top five bits pick one evenly, so 20 of them are 100 bits.
+  return 'cos-' + random(20).map(byte => alphabet[(byte & 0xff) >> 3]).join('');
 }
 
 /** The form's phone settings; quiet hours that are not one of the choices are kept as they are. */
