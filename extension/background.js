@@ -32,6 +32,11 @@ const activeTabs = globalThis.chrome?.debugger ? createActiveTabs(chrome) : null
 const PORTS = [8765, 8766, 8767, 8768, 8769, 18765, 18766, 18767, 18768, 18769, 38765, 38766, 38767, 38768, 38769];
 const HELLO_TIMEOUT_MS = 1200;
 const REQUEST_TIMEOUT_MS = 10_000;
+/**
+ * A page's reason for releasing an input before Send: one of its own short codes, some naming what
+ * moved the turn ("turn-progressed by app-tool_call"). Free text never travels (#820, #1787).
+ */
+const RELEASE_DETAIL = /^[a-z][a-z0-9 _-]{0,79}$/;
 /** A journal receipt follows durable session writes, which can outlast an ordinary read. */
 const EVENTS_REQUEST_TIMEOUT_MS = 60_000;
 /**
@@ -4046,6 +4051,23 @@ const HANDLERS = {
     return call('/core-plugin', { method: 'POST', body: JSON.stringify({ appId: message.appId }) });
   },
   // A page read ChatGPT's own `conversation_deleted` answer for this chat (usage.js).
+  // A new chat's tab for a linked Project found that Project gone (#1759): ChatGPT now keeps such a
+  // page on "loading" instead of sending it home, which the outbox loop above reports. Only the tab
+  // opened for that message, still on that Project's page, may say so.
+  async project_unavailable(message, _sender, source) {
+    const id = String(message.id || '');
+    const project = String(message.project || '');
+    if (!ownsDocument(source) || !/^[a-f0-9-]{36}$/i.test(id) || !/^g-p-[0-9a-f]{32}$/.test(project)) return { ok: false };
+    const opening = inputOpenings[id];
+    if (opening?.tab !== source.tab || opening.project !== project) return { ok: false };
+    const tab = await chrome.tabs.get(source.tab).catch(() => null);
+    // The document may have been replaced while asking, or the tab may already be leaving.
+    if (!tab || !ownsDocument(source) || tab.pendingUrl) return { ok: false };
+    let home = null;
+    try { home = /^\/g\/(g-p-[0-9a-f]{32})(?:-[^/]+)?\/project\/?$/i.exec(new URL(tab.url).pathname)?.[1]?.toLowerCase() ?? null; } catch {}
+    if (home !== project) return { ok: false };
+    return call('/project-create', { method: 'POST', body: JSON.stringify({ action: 'gone', inputId: id, chatgptId: project }) });
+  },
   async conversation_deleted(message, _sender, source) {
     const conversationId = String(message.conversationId || '').toLowerCase();
     if (!ownsDocument(source) || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(conversationId)) return { ok: false };
@@ -4088,7 +4110,7 @@ const HANDLERS = {
     }
     if (message.recoveryAction && message.owner !== owner) return { ok: false };
     const result = await call(typeof message.partial === 'string' ? '/input/progress' : typeof message.response === 'string' ? '/input/answer' : message.fail === true ? '/input/fail' : message.ack === true ? '/input/ack' : '/input/claim', {
-      method: 'POST', body: JSON.stringify({ id, owner, conversationId, recoveryAction: ['stop', 'stopped'].includes(message.recoveryAction) ? message.recoveryAction : undefined, silenceBusyTurnId: typeof message.silenceBusyTurnId === 'string' ? message.silenceBusyTurnId : undefined, recoveryVeto: message.recoveryVeto === 'page-final' ? 'page-final' : undefined, requiresAuthorization: message.requiresAuthorization === true, authorize: message.authorize === true, partial: typeof message.partial === 'string' ? message.partial.slice(-8000) : undefined, messageId: typeof message.messageId === 'string' ? message.messageId : undefined, error: message.error, detail: typeof message.detail === 'string' && /^[a-z-]{1,40}$/.test(message.detail) ? message.detail : undefined, response: typeof message.response === 'string' ? message.response.slice(0, 16001) : undefined, project: typeof message.project === 'string' && /^g-p-[0-9a-f]{32}$/.test(message.project) ? message.project : undefined })
+      method: 'POST', body: JSON.stringify({ id, owner, conversationId, recoveryAction: ['stop', 'stopped'].includes(message.recoveryAction) ? message.recoveryAction : undefined, silenceBusyTurnId: typeof message.silenceBusyTurnId === 'string' ? message.silenceBusyTurnId : undefined, recoveryVeto: message.recoveryVeto === 'page-final' ? 'page-final' : undefined, requiresAuthorization: message.requiresAuthorization === true, authorize: message.authorize === true, partial: typeof message.partial === 'string' ? message.partial.slice(-8000) : undefined, messageId: typeof message.messageId === 'string' ? message.messageId : undefined, error: message.error, detail: typeof message.detail === 'string' && RELEASE_DETAIL.test(message.detail) ? message.detail : undefined, response: typeof message.response === 'string' ? message.response.slice(0, 16001) : undefined, project: typeof message.project === 'string' && /^g-p-[0-9a-f]{32}$/.test(message.project) ? message.project : undefined })
     });
     if (typeof message.response === 'string' && message.lifetime === 'temporary-planner' && result.ok && result.data?.ok === true && ownsDocument(source)) {
       // Acceptance retires this exact helper immediately. Fresh page proof still
@@ -4982,6 +5004,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'core_plugin',
     'load_failure',
     'conversation_deleted',
+    'project_unavailable',
     'usage_observation',
     'events',
     'bind',
