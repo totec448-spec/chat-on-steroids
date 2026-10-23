@@ -2607,3 +2607,48 @@ it('records the one-time answer to the automatic plugin refresh offer', async ()
   expect(accepted).toMatchObject({ ok: true, data: { config: { ui: { autoRefreshPlugins: true, autoRefreshPluginsAsked: true } } } });
   expect(await handlers.get('pluginRefresh:offer')!(null, { turnOn: 'yes' })).toMatchObject({ ok: false });
 });
+
+describe('phone notifications over IPC', () => {
+  const phone = (over: Record<string, unknown> = {}) => ({ enabled: true, server: 'https://ntfy.sh/', topic: 'cos-fixturetopic234567', needsYou: true, failures: true,
+    finishedAfterMinutes: 5, onlyWhenAway: true, quietHours: null, includeDetails: false, ...over });
+  beforeAll(() => {
+    // An earlier test registers the handlers against a destroyed window; these use the live one.
+    registerIpc(() => currentWindow as any, () => { quitToInstallCalls += 1; });
+  });
+
+  it('saves the settings with the server tidied, and refuses a bad topic or server only while on', async () => {
+    const base = getConfig();
+    expect((await save({ ...base, ui: { ...base.ui, phonePush: phone() } }, base)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ enabled: true, server: 'https://ntfy.sh', topic: 'cos-fixturetopic234567' });
+    const now = getConfig();
+    expect(await save({ ...now, ui: { ...now.ui, phonePush: phone({ topic: 'has space' }) } }, now))
+      .toEqual({ ok: false, error: 'Choose a topic of letters, digits, - and _ (up to 64).' });
+    expect(await save({ ...now, ui: { ...now.ui, phonePush: phone({ server: 'https://ntfy.sh/mytopic' }) } }, now))
+      .toEqual({ ok: false, error: 'Enter the address of an ntfy server, such as https://ntfy.sh.' });
+    // Switched off, a half-filled form still saves.
+    expect((await save({ ...now, ui: { ...now.ui, phonePush: phone({ enabled: false, topic: '' }) } }, now)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ enabled: false, topic: '' });
+  });
+
+  it('merges field by field, so a form from before a change does not undo it', async () => {
+    const base = getConfig();
+    await save({ ...base, ui: { ...base.ui, phonePush: phone() } }, base);
+    const before = getConfig();
+    // Another window turned on details meanwhile.
+    await save({ ...before, ui: { ...before.ui, phonePush: phone({ server: 'https://ntfy.sh', includeDetails: true }) } }, before);
+    // This form still shows details off and changes only the quiet hours.
+    expect((await save({ ...before, ui: { ...before.ui, phonePush: { ...before.ui.phonePush!, quietHours: { from: '22:00', to: '07:00' } } } }, before)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ includeDetails: true, quietHours: { from: '22:00', to: '07:00' } });
+  });
+
+  it('keeps the access token in secure storage and says only whether one is saved', async () => {
+    const { getSecret } = await import('../src/main/secrets.js');
+    const saved = await handlers.get('phonePush:token')!(null, { token: '  tk_fixture  ' }) as any;
+    expect(saved).toMatchObject({ ok: true, data: { hasPhonePushToken: true } });
+    expect(JSON.stringify(saved)).not.toContain('tk_fixture');
+    expect(await getSecret('ntfyToken')).toBe('tk_fixture');
+    expect(await handlers.get('phonePush:token')!(null, { token: 'has space' })).toEqual({ ok: false, error: 'An access token is letters, digits and symbols, without spaces.' });
+    expect(await handlers.get('phonePush:token')!(null, { token: '' })).toMatchObject({ ok: true, data: { hasPhonePushToken: false } });
+    expect(await getSecret('ntfyToken')).toBeNull();
+  });
+});

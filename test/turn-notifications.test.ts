@@ -71,3 +71,26 @@ it('says the answer is ready in the interface language', async () => {
   try { expect(noticeText(null)).toBe('ChatGPT ist fertig.'); }
   finally { texts.setMainTextTranslations({}); }
 });
+
+it('hands every finished chat to the phone with how long it worked, even while the window is in front', async () => {
+  const sessions = new Map([chat('a'), chat('w', { origin: { kind: 'worker' } as SessionSummary['origin'] }), chat('g'), chat('s')].map(row => [row.id, row]));
+  const phone: unknown[] = [];
+  const shown: string[] = [];
+  const notifier = createTurnNotifier({
+    getSession: async id => sessions.get(id) ?? null,
+    lastAnswer: async () => 'All tests pass.',
+    enabled: () => true, focused: () => true,
+    automated: conversationId => conversationId === 'conv-g',
+    recentlyNotified: () => false,
+    show: (_title, _body, sessionId) => { shown.push(sessionId); },
+    turnStartedAt: async id => id === 'a' ? 150 - 12 * 60_000 : null,
+    phone: event => { phone.push(event); }
+  });
+  notifier.seed([...sessions.values()]);
+  for (const id of ['a', 'w', 'g']) sessions.set(id, { ...sessions.get(id)!, lastTurnEndAt: 150 });
+  sessions.set('s', { ...sessions.get('s')!, lastTurnEndAt: 150, lastTurnOutcome: 'stopped' });
+  await notifier.handle(['a', 'w', 'g', 's']);
+  // The window is in front, so no desktop notice; the phone decides for itself whether someone is there.
+  expect(shown).toEqual([]);
+  expect(phone).toEqual([{ sessionId: 'a', chatTitle: 'Chat a', conversationId: 'conv-a', workedMs: 12 * 60_000, detail: 'All tests pass.' }]);
+});

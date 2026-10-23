@@ -3435,6 +3435,13 @@ input.num:disabled { opacity: .5; cursor: default; }
   white-space: normal;
 }
 
+/* Phone notifications: its options continue the card's rows, and a text field sits beside its
+   explanation, moving under it (with its button) when the row is narrow. */
+.phone-push-options > .setting:first-child { border-top: 1px solid var(--line); }
+.phone-push-field .phone-push-control { display: flex; flex: 1 1 280px; gap: 8px; min-width: 0; }
+.phone-push-control input { flex: 1 1 auto; min-width: 0; }
+.phone-push-control .btn { flex: 0 0 auto; justify-content: flex-end; text-align: end; }
+
 /* Inside a settings row the switch is one of several controls, not the thing the
    row pushes to the far end. */
 .setting .sw {

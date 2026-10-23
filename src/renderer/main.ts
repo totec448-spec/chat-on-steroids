@@ -1,3 +1,4 @@
+import { applyPhonePush, initPhonePushSettings, readPhonePush } from './phone-push-settings.js';
 import { initBrowserSetup } from './setup-browser.js';
 import { currentLanguage, ui, uiText, t, tn, initLanguage, onLanguageChange } from './i18n.js';
 import { initLayoutPreviews } from './layout-previews.js';
@@ -113,6 +114,7 @@ const publishUiLanguage = (): void => { void Promise.resolve(api.setUiLanguage?.
 publishUiLanguage();
 onLanguageChange(publishUiLanguage);
 const pet = initPet(api, () => showTab('pets'));
+initPhonePushSettings(api, { save: () => save(), applied: next => apply(next), toast });
 const settingsSearch = initSettingsSearch({
   open: tab => showTab(tab),
   shown: () => document.querySelector<HTMLElement>('.app')!.dataset.screen === 'settings'
@@ -769,6 +771,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       mentionCore: $<HTMLInputElement>('mentionCore').checked,
       mentionPlugins: $<HTMLInputElement>('mentionPlugins').checked,
       privacyScreenshots: $<HTMLInputElement>('privacyScreenshots').checked,
+      phonePush: readPhonePush(previous.ui.phonePush),
       theme: over.theme ?? previous.ui.theme,
       appearance: over.appearance ?? previous.ui.appearance
     },
@@ -1736,6 +1739,7 @@ function apply(next: AppState): void {
     config.ui.privacyScreenshots,
     previousState?.config.ui.privacyScreenshots
   );
+  applyPhonePush(next);
   // Only macOS screenshots can show the whole screen; on Windows every capture is one window
   // already, so the switch would change nothing there.
   $('privacyScreenshotsSetting').hidden = !(next.platform?.desktopAutomation ?? true) || next.platform?.family !== 'macos';
@@ -2816,6 +2820,15 @@ for (const id of [
   'controlApiAllowActions',
   'mcpPersistentUrls',
   'privacyScreenshots',
+  'phonePushEnabled',
+  'phonePushTopic',
+  'phonePushServer',
+  'phonePushNeedsYou',
+  'phonePushFailures',
+  'phonePushFinished',
+  'phonePushAway',
+  'phonePushQuiet',
+  'phonePushDetails',
   'tunnelKind',
   'tunnelId',
   'desktopTunnelId',

@@ -1,3 +1,4 @@
+import { DEFAULT_PHONE_PUSH } from '../shared/phone-push.js';
 import { DEFAULT_HELPER_CHAT_MODEL, SUPERSEDED_HELPER_CHAT_MODELS } from '../shared/chat-models.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
 import { DEFAULT_RECORDING_STORAGE_GIB, REASONING_EFFORTS, RECORDING_STORAGE_LIMITS_GIB, type RecordingStorageLimitGiB } from '../shared/session.js';
@@ -383,6 +384,19 @@ const configSchema = z.object({
     keepAwake: z.boolean().optional().default(true),
     keepScreenAwake: z.boolean().optional().default(false),
     privacyScreenshots: z.boolean().optional().default(false),
+    // Phone notifications through ntfy. Each field repairs on its own, so a damaged one never
+    // turns the rest off or sends to a server nobody chose.
+    phonePush: z.object({
+      enabled: z.boolean().catch(false),
+      server: z.string().max(2048).catch(DEFAULT_PHONE_PUSH.server),
+      topic: z.string().max(64).catch(''),
+      needsYou: z.boolean().catch(true),
+      failures: z.boolean().catch(true),
+      finishedAfterMinutes: z.number().int().min(0).max(240).nullable().catch(DEFAULT_PHONE_PUSH.finishedAfterMinutes),
+      onlyWhenAway: z.boolean().catch(true),
+      quietHours: z.object({ from: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), to: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/) }).nullable().catch(null),
+      includeDetails: z.boolean().catch(false)
+    }).optional().catch(undefined),
     // Dark is the design the app is drawn for, and a config written before the theme
     // existed has no stored answer to override — so it is the default rather than the
     // fallback. An explicit `light` is somebody's own choice and is never touched.
