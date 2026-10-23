@@ -1926,6 +1926,39 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.hook.desktopInputBusyForTest()).toBe(false);
   });
 
+  /**
+   * 2.1.45 release round: a message for a chat whose tab was closed opens a fresh tab. ChatGPT moves
+   * that tab to its project route and draws the editor again while the app answers the page's
+   * authorization request. Send then refused the redrawn editor and nothing was clicked, but the
+   * page told the app nothing: the authorized message was held as "may already have been sent"
+   * and never sent at all. The fresh tab also drew the chat's earlier questions only after the
+   * Send began, so "a new user row" alone cannot mean this Send went out (same round, rebuilt build).
+   */
+  it.each([['authorized', true, false], ['refused', false, false], ['authorized, history drawn late', true, true]] as const)(
+    'reports an authorized Send it never clicked and takes its own text back (%s)', async (_, granted, history) => {
+      live = await harness(`https://chatgpt.com/c/${chatA}`, {
+        desktop_input: async message => {
+          if (message.authorize) {
+            const editor = live!.document.querySelector('#prompt-textarea')!;
+            editor.replaceWith(editor.cloneNode(true));
+            if (history) userTurn(live!.document, 'earlier-question', 'An earlier question in this chat', { sent: false });
+            await new Promise(resolve => live!.window.setTimeout(resolve, 0));
+            return { ok: true, data: { ok: granted } };
+          }
+          if (message.ack || message.fail) return { ok: true, data: { ok: true } };
+          return { ok: true, data: { input: claimed() } };
+        }
+      });
+      const sends = watchSend(live.document);
+      expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA })).toEqual({ ok: false });
+      expect(sends()).toBe(0);
+      expect(live.sent.filter(message => message.type === 'desktop_input' && message.fail)).toEqual(granted ? [
+        expect.objectContaining({ id: inputId, owner: 'input-owner', error: 'Native Send was withdrawn before its click.' })
+      ] : []);
+      if (granted) expect(live.document.querySelector('#prompt-textarea')!.textContent).toBe('');
+      expect(live.hook.desktopInputBusyForTest()).toBe(false);
+    });
+
   it('ends a receipt wait the page cannot recognise without a second Send, and frees the input slot', async () => {
     const typed = 'Inspect the exact requested task';
     let claims = 0;
@@ -16167,6 +16200,41 @@ describe('folding away the chat’s opening instruction', () => {
 });
 
 describe('the fresh chat the app opened', () => {
+  // #1792: a URL in the handoff became a rich-link preview with its own <style> inside the editor,
+  // and the untouched handoff read as "ChatGPT replaced the composer while inserting the bootstrap".
+  it('sends a handoff whose link ChatGPT turned into a preview while it was being inserted', async () => {
+    let clicks = 0, injected = false;
+    live = await harness(
+      'https://chatgpt.com/?clf=cmd-link-resume',
+      {
+        redeem: () => ({ ok: true, command: { id: 'cmd-link-resume', type: 'resume',
+          text: '[[CLF-RESUME:0123456789abcdef0123456789abcdef]]\n\nNotes are in https://drive.example.com/folders/abc123 for the next step', agent: null } }),
+        ack: () => ({ ok: true })
+      },
+      (document, dom) => {
+        const editor = document.querySelector('#prompt-textarea')!;
+        new dom.window.MutationObserver(() => {
+          // The handoff's own words, not a host name: only the inserted handoff gets the preview.
+          if (!editor.textContent!.includes('for the next step') || editor.querySelector('style')) return;
+          const card = document.createElement('span');
+          const style = document.createElement('style');
+          style.textContent = '@supports (display:grid){.link-card{display:grid}}@media (min-width:600px){.link-card{gap:8px}}';
+          card.append(style); editor.append(card); injected = true;
+        }).observe(editor, { childList: true, subtree: true, characterData: true });
+        document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+          clicks += 1;
+          dom.reconfigure({ url: 'https://chatgpt.com/c/12121212-3434-5656-7878-909090909090' });
+        });
+      }
+    );
+    await settle(200);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await settle();
+    expect(injected, 'the preview was injected').toBe(true);
+    expect(JSON.stringify(live.sent)).not.toContain('replaced the composer');
+    expect(clicks).toBe(1);
+  });
+
   it('delivers the bootstrap before unrelated status restoration can stall startup', async () => {
     let releaseStatus: () => void = () => undefined;
     const statusHeld = new Promise((resolve) => {

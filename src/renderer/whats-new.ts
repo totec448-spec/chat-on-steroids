@@ -14,6 +14,24 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.45': {
+    lead: () => t("Chat groups, bookmarks, drafts that wait for you, and a better Review."),
+    highlights: [
+      { icon: 'i-group', title: () => t("Chat groups"), text: () => t("Sort a project's chats into groups from its ⋯ menu.") },
+      { icon: 'i-bookmark-fill', title: () => t("Bookmarks"), text: () => t("Bookmark an answer and jump back to it from the chat's header.") },
+      { icon: 'i-pencil', title: () => t("Drafts that wait"), text: () => t("A pencil marks chats with an unsent message, and drafts come back after a restart.") },
+      { icon: 'i-git-diff', title: () => t("A better Review"), text: () => t("Right-click an untracked file to add it, or its folder, to .gitignore.") }
+    ]
+  },
+  '2.1.44': {
+    lead: () => t("Pictures with /image, keyboard shortcuts, and a quicker message after Stop."),
+    highlights: [
+      { icon: 'i-image', title: () => t("Ask for a picture"), text: () => t("Start a message with /image, and ChatGPT draws it with its own image tool.") },
+      { icon: 'i-bolt', title: () => t("Keyboard shortcuts"), text: () => t("{0} starts a new chat, Ctrl+Tab moves between chats, and Esc twice stops an answer.", [primaryShortcut('N')]) },
+      { icon: 'i-stop', title: () => t("Quicker after Stop"), text: () => t("A message you send right after Stop goes out at once.") },
+      { icon: 'i-agents', title: () => t("Sub-agent chats tidy up"), text: () => t("With archiving on, a worker's chat is archived two minutes after its task is done.") }
+    ]
+  },
   '2.1.43': {
     lead: () => t("See what sub-agents do, long work that keeps going, and clearer Settings."),
     highlights: [

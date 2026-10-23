@@ -5,15 +5,20 @@ import { el, icon, toast } from './dom.js';
 import { t, ui } from './i18n.js';
 import { onAppearanceChanged } from './appearance.js';
 import { enableTabReorder, reorderKey } from './tab-reorder.js';
+import { rememberedTerminals, rememberTerminals, type RememberedTerminal } from './terminal-memory.js';
+import { isMac, primaryShiftShortcut } from './shortcuts.js';
 import type { LocalProject } from '../shared/projects.js';
 
-type Tab = { id: string; title: string; node: HTMLElement; term: Terminal; fit: FitAddon; ready: boolean; exited: boolean; queued: number; writes: Promise<void> };
-export type WorkspaceTerminalTab = { id: string; title: string; exited: boolean };
+type Tab = { id: string; projectId: string | null; cwd: string; title: string; node: HTMLElement; term: Terminal; fit: FitAddon;
+  ready: boolean; exited: boolean; previous: boolean; queued: number; writes: Promise<void> };
+export type WorkspaceTerminalTab = { id: string; title: string; exited: boolean; previous: boolean };
 
-/** A hidden panel retains its shells; each dock owns only the tabs it created. */
+/** A hidden panel retains its shells; each dock owns only the tabs it created, and remembers them for the next launch. */
 export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount: HTMLElement,
   options: { id?: string; onEmpty?: () => void; onClosePanel?: () => void;
-    dockedTabs?: boolean; onTabsChanged?: () => void } = {}) {
+    dockedTabs?: boolean; onTabsChanged?: () => void;
+    /** Adds selected terminal text to the composer; false when nothing was added. */
+    onSendSelection?: (text: string) => boolean } = {}) {
   const app = document.querySelector<HTMLElement>('.app')!;
   const panel = el('section', 'workspace-terminal'); panel.id = options.id ?? 'workspaceTerminal'; panel.hidden = true;
   ui(panel, 'aria-label', () => t('Terminal'));
@@ -42,6 +47,20 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
   if (!options.dockedTabs) panel.append(bar);
   panel.append(body); initialMount.append(panel);
   const tabs = new Map<string, Tab>();
+  // Over the selected shell while it has a selection: adds that text to the composer, never sends.
+  const send = el('button', 'btn terminal-send') as HTMLButtonElement; send.type = 'button'; send.hidden = true;
+  send.append(icon('i-chat'), el('span', '', () => t('Send to chat')));
+  ui(send, 'title', () => `${t('Send to chat')} (${primaryShiftShortcut('Enter')})`);
+  send.setAttribute('aria-keyshortcuts', isMac() ? 'Meta+Shift+Enter' : 'Control+Shift+Enter');
+  if (options.onSendSelection) body.append(send);
+  const paintSend = (): void => {
+    const tab = selected ? tabs.get(selected) : null;
+    send.hidden = !options.onSendSelection || !tab || !tab.term.hasSelection();
+  };
+  const sendSelection = (tab: Tab): void => {
+    if (options.onSendSelection?.(tab.term.getSelection())) { tab.term.clearSelection(); paintSend(); }
+  };
+  send.addEventListener('click', () => { const tab = selected ? tabs.get(selected) : null; if (tab) sendSelection(tab); });
   const terminalTheme = () => {
     const colors = getComputedStyle(app);
     const background = colors.getPropertyValue('--page').trim(), foreground = colors.getPropertyValue('--ink').trim();
@@ -58,22 +77,30 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
     tab.fit.fit();
     if (tab.ready && !tab.exited) void window.api.terminalResize(tab.id, Math.min(500, tab.term.cols), Math.min(200, tab.term.rows));
   };
+  // xterm keeps Tab as shell input, so a previous-session tab focuses its Start button instead.
+  const focusTab = (tab: Tab | undefined): void => {
+    if (tab?.previous) tab.node.querySelector<HTMLButtonElement>('.terminal-previous .btn')?.focus(); else tab?.term.focus();
+  };
   const setOpen = (value: boolean): void => {
     open = value; panel.hidden = !value;
-    if (value) requestAnimationFrame(() => { fit(); if (selected) tabs.get(selected)?.term.focus(); });
+    if (value) requestAnimationFrame(() => { fit(); if (selected) focusTab(tabs.get(selected)); });
   };
+  // Started and previous-session tabs come back after a restart; an exited or failed shell does not.
+  const remember = (): void => rememberTerminals(panel.id, [...tabs.values()]
+    .filter(tab => tab.previous || (tab.ready && !tab.exited))
+    .map(tab => ({ projectId: tab.projectId, title: tab.title, cwd: tab.cwd })));
   const closeTab = (id: string): void => {
     const tab = tabs.get(id); if (!tab) return;
     tabs.delete(id); tab.term.dispose(); tab.node.remove(); void window.api.terminalClose(id);
     if (selected === id) selected = [...tabs.keys()].at(-1) ?? null;
-    paint(); fit();
+    remember(); paint(); fit();
     if (!tabs.size) options.onEmpty?.();
   };
   let tabSignature = '';
   const paint = (): void => {
     for (const tab of tabs.values()) tab.node.hidden = tab.id !== selected;
     // Selection alone updates the pills in place; only a change of tabs, order or titles rebuilds.
-    const signature = [...tabs.values()].map(tab => `${tab.id}:${tab.title}:${tab.exited}`).join(',');
+    const signature = [...tabs.values()].map(tab => `${tab.id}:${tab.title}:${tab.exited}:${tab.previous}`).join(',');
     if (!options.dockedTabs && signature === tabSignature) {
       for (const wrapper of tabsHost.children as HTMLCollectionOf<HTMLElement>) {
         const current = wrapper.dataset.id === selected;
@@ -85,27 +112,32 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
       if (options.dockedTabs || tabsHost.childElementCount === tabs.size) continue;
       const wrapper = el('div', `terminal-tab${tab.id === selected ? ' is-selected' : ''}`); wrapper.dataset.id = tab.id;
       const pick = el('button', 'btn') as HTMLButtonElement;
-      pick.append(icon('i-terminal'), el('span', 'tab-label', () => `${tab.title}${tab.exited ? ` · ${t('exited')}` : ''}`));
+      pick.append(icon('i-terminal'), el('span', 'tab-label', () => `${tab.title}${tab.exited ? ` · ${t('exited')}`
+        : tab.previous ? ` · ${t('previous session')}` : ''}`));
       pick.type = 'button'; pick.title = tab.title;
       pick.setAttribute('aria-pressed', String(tab.id === selected));
-      pick.addEventListener('click', () => { selected = tab.id; paint(); fit(); tab.term.focus(); });
+      pick.addEventListener('click', () => { selected = tab.id; paint(); fit(); focusTab(tab); });
       const close = button('i-x', 'Close terminal');
       close.addEventListener('click', () => closeTab(tab.id));
       wrapper.append(pick, close); tabsHost.append(wrapper);
     }
-    empty.hidden = options.dockedTabs || tabs.size > 0; add.disabled = tabs.size >= 8;
+    empty.hidden = options.dockedTabs || tabs.size > 0; add.disabled = tabs.size >= 8; paintSend();
     ui(empty, 'textContent', () => project ? t('Open a terminal in this project') : t('New terminal'));
   };
-  const create = (): string | null => {
+  /** A remembered tab opens inert: its shell starts only from "Start shell here", in its own project. */
+  const create = (restored?: RememberedTerminal): string | null => {
     const scope = project; if (tabs.size >= 8) return null;
     const id = crypto.randomUUID();
     const node = el('div', 'terminal-screen'); body.append(node);
     const term = new Terminal({ theme: terminalTheme(), cursorBlink: true, fontSize: 13, fontFamily: 'Cascadia Code, Consolas, monospace', scrollback: 5000, allowProposedApi: false });
     const addon = new FitAddon(); term.loadAddon(addon); term.open(node);
-    const tab: Tab = { id, title: scope?.name ?? t('Terminal'), node, term, fit: addon, ready: false, exited: false, queued: 0, writes: Promise.resolve() };
+    const tab: Tab = { id, projectId: restored ? restored.projectId : scope?.id ?? null, cwd: restored?.cwd ?? '',
+      title: restored?.title ?? scope?.name ?? t('Terminal'), node, term, fit: addon, ready: false, exited: false,
+      previous: !!restored, queued: 0, writes: Promise.resolve() };
     tabs.set(id, tab); selected = id;
-    if (!options.dockedTabs) setOpen(true);
+    if (!options.dockedTabs && !restored) setOpen(true);
     paint(); fit();
+    term.onSelectionChange(() => { if (selected === id) paintSend(); });
     term.onData(data => {
       if (tab.exited || !tab.ready) return;
       if (tab.queued + data.length > 262_144) { toast(t('Terminal input is busy. Try a smaller paste.')); return; }
@@ -125,28 +157,47 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
       if (event.type === 'keydown' && event.ctrlKey && event.code === 'KeyC' && (event.shiftKey || term.hasSelection())) {
         void window.api.writeClipboard(term.getSelection()); return false;
       }
+      // Cmd/Ctrl+Shift+Enter does what Send to chat does; without a selection the shell gets the key.
+      if (event.type === 'keydown' && event.key === 'Enter' && event.shiftKey && (event.ctrlKey || event.metaKey)
+        && !event.isComposing && options.onSendSelection && term.hasSelection()) {
+        // The composer takes focus within this keydown: its Enter must not land there as a new line.
+        event.preventDefault(); sendSelection(tab); return false;
+      }
       return true;
     });
-    void (async () => {
-      const result = await window.api.terminalCreate(id, scope?.id ?? null, Math.min(500, term.cols), Math.min(200, term.rows));
+    const start = async (): Promise<void> => {
+      const result = await window.api.terminalCreate(id, tab.projectId, Math.min(500, term.cols), Math.min(200, term.rows));
       if (!tabs.has(id)) { void window.api.terminalClose(id); return; }
-      if (!result.ok) { tab.exited = true; term.writeln(`\r\n${result.error}`); }
-      else { tab.ready = true; tab.title = scope ? `${scope.name} · ${result.data.shell}` : result.data.shell; node.title = result.data.cwd; }
-      paint(); fit(); options.onTabsChanged?.(); if (open && selected === id) term.focus();
-    })();
+      if (!result.ok) { tab.exited = true; term.writeln(`\r\n${t(result.error)}`); }
+      else {
+        tab.ready = true; tab.cwd = result.data.cwd; node.title = result.data.cwd;
+        if (!restored) tab.title = scope ? `${scope.name} · ${result.data.shell}` : result.data.shell;
+      }
+      remember(); paint(); fit(); options.onTabsChanged?.(); if (open && selected === id) term.focus();
+    };
+    if (!restored) { void start(); return id; }
+    node.title = restored.cwd;
+    const notice = el('div', 'terminal-previous'), resume = el('button', 'btn', () => t('Start shell here')) as HTMLButtonElement;
+    resume.type = 'button';
+    notice.append(el('strong', '', () => t('Previous session')), el('span', 'terminal-previous-cwd', restored.cwd), resume);
+    node.append(notice);
+    resume.addEventListener('click', () => {
+      if (!tab.previous || !tabs.has(id)) return;
+      tab.previous = false; notice.remove(); paint(); fit(); options.onTabsChanged?.(); void start();
+    });
     return id;
   };
   const stopEvents = window.api.onTerminalEvent(event => {
     const tab = tabs.get(event.id); if (!tab) return;
     if ('data' in event) tab.term.write(event.data, () => { void window.api.terminalAck(event.id, event.data.length); });
-    else { tab.exited = true; tab.term.write(`\r\n[${t('Process exited: {0}', [event.exitCode])}]\r\n`); paint(); options.onTabsChanged?.(); }
+    else { tab.exited = true; tab.term.write(`\r\n[${t('Process exited: {0}', [event.exitCode])}]\r\n`); remember(); paint(); options.onTabsChanged?.(); }
   });
   // Tab order is the map's insertion order; moving a tab rebuilds it in the new order.
   const moveTab = (id: string, index: number): void => {
     const order = [...tabs.values()], from = order.findIndex(tab => tab.id === id); if (from < 0) return;
     const [tab] = order.splice(from, 1); order.splice(Math.max(0, Math.min(order.length, index)), 0, tab!);
     tabs.clear(); for (const entry of order) tabs.set(entry.id, entry);
-    paint(); options.onTabsChanged?.();
+    remember(); paint(); options.onTabsChanged?.();
   };
   if (!options.dockedTabs) {
     enableTabReorder(tabsHost, { item: '.terminal-tab', key: node => node.dataset.id, move: moveTab });
@@ -162,6 +213,7 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
   document.addEventListener('click', event => { if (addMenu.open && !addMenu.contains(event.target as Node)) addMenu.open = false; });
   const observer = new ResizeObserver(fit); observer.observe(body);
   window.addEventListener('beforeunload', () => { observer.disconnect(); stopEvents(); stopAppearance(); for (const tab of tabs.values()) tab.term.dispose(); }, { once: true });
+  for (const saved of rememberedTerminals(panel.id)) create(saved);
   paint();
   return {
     update(value: LocalProject | null): void { project = value; paint(); },
@@ -171,9 +223,11 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
       if (createIfEmpty && !tabs.size) void create();
     },
     newTab(): string | null { return create(); },
-    tabs(): WorkspaceTerminalTab[] { return [...tabs.values()].map(tab => ({ id: tab.id, title: tab.title, exited: tab.exited })); },
-    selectTab(id: string): void { if (!tabs.has(id)) return; selected = id; paint(); fit(); if (open) tabs.get(id)?.term.focus(); },
+    tabs(): WorkspaceTerminalTab[] { return [...tabs.values()].map(tab => ({ id: tab.id, title: tab.title, exited: tab.exited, previous: tab.previous })); },
+    selectTab(id: string): void { if (!tabs.has(id)) return; selected = id; paint(); fit(); if (open) focusTab(tabs.get(id)); },
     closeTab,
+    /** Moves a tab among this dock's terminals; the right dock calls it when a terminal tab is dragged past tools. */
+    moveTab,
     hide(): void { setOpen(false); },
     visible(): boolean { return open; },
     hasTabs(): boolean { return tabs.size > 0; }

@@ -69,18 +69,29 @@ export function createSidebarCompletionState(now = () => Date.now()) {
     return at !== null && at > (seen.get(entry.id) ?? baselineAt);
   }
 
-  function markSeen(entry: Completion | undefined): void {
-    if (!entry) return;
+  function receipt(entry: Completion): boolean {
     const at = completedAt(entry);
-    if (at === null || at <= (seen.get(entry.id) ?? baselineAt)) return;
+    if (at === null || at <= (seen.get(entry.id) ?? baselineAt)) return false;
     seen.delete(entry.id);
     seen.set(entry.id, at);
-    save();
+    return true;
+  }
+
+  function markSeen(entry: Completion | undefined): void {
+    if (entry && receipt(entry)) save();
+  }
+
+  /** Acknowledges every finished completion among `entries` with one write; an open turn has none to acknowledge. */
+  function markAllSeen(entries: Iterable<Completion>): number {
+    let marked = 0;
+    for (const entry of entries) if (receipt(entry)) marked++;
+    if (marked) save();
+    return marked;
   }
 
   // Persist the baseline even before any chat needs an explicit receipt, so a restart does not
   // reinterpret existing history as newly completed work.
   if (!loaded) save();
 
-  return { isUnseen, markSeen };
+  return { isUnseen, markSeen, markAllSeen };
 }

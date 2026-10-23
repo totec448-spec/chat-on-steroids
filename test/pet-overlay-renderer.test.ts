@@ -93,7 +93,7 @@ it('uses one spritesheet body per pet while preserving specials, multi-pet tasks
     appearance: {
       light: { background: '#f4f4f5', sidebar: '#e9edf2', accent: '#486f9d', contrast: 45 },
       dark: { background: '#181818', sidebar: '#1a2129', accent: '#b0cbed', contrast: 60 },
-      font: 'system', fontSize: 14, translucentSidebar: true, sidebarLayout: 'projects'
+      font: 'system', fontSize: 14, lineSpacing: 100, translucentSidebar: true, sidebarLayout: 'projects'
     }
   };
   snapshotListener!(runningSnapshot);
@@ -241,7 +241,7 @@ it('sleeps between authored deadlines and uses display frames only for continuou
     appearance: {
       light: { background: '#f4f4f5', sidebar: '#e9edf2', accent: '#486f9d', contrast: 45 },
       dark: { background: '#181818', sidebar: '#1a2129', accent: '#b0cbed', contrast: 60 },
-      font: 'system', fontSize: 14, translucentSidebar: true, sidebarLayout: 'projects'
+      font: 'system', fontSize: 14, lineSpacing: 100, translucentSidebar: true, sidebarLayout: 'projects'
     }
   });
 

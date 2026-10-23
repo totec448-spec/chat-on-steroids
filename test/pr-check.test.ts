@@ -278,3 +278,60 @@ No edge cases: a one-line wording change in a log message.
     expect(checkAt({ body: good, files: fix, maintainer: true, createdAt: '2026-10-20T09:00:00Z', addedTests: ['+ setTimeout(r, 5000)'] })).toEqual([]);
   });
 });
+
+// @ts-expect-error The checker is a plain Node script without type declarations.
+import { LARGE_FILE_BYTES, largeFileFindings } from '../scripts/pr-check.mjs';
+
+// The size rule is about what a PR adds: a 634 KB source file that was already that size is not
+// news, and asking for "Size:" on every edit of it (#1741, src/main/bridge.ts) only teaches people
+// to paste the line. A file that is new and large, crosses the limit, or grows by more than the
+// limit at once still needs a reason.
+describe('which files count as large', () => {
+  const kb = (n: number) => n * 1024;
+  it('asks for a new large file', () => {
+    expect(largeFileFindings([{ path: 'docs/shot.png', bytes: kb(900), baseBytes: null }])).toEqual([{ path: 'docs/shot.png', bytes: kb(900) }]);
+  });
+  it('asks for a file that crosses the limit in this PR', () => {
+    expect(largeFileFindings([{ path: 'a.webp', bytes: kb(600), baseBytes: kb(400) }])).toEqual([{ path: 'a.webp', bytes: kb(600) }]);
+  });
+  it('does not ask for an edit of a file that was already large', () => {
+    expect(largeFileFindings([{ path: 'src/main/bridge.ts', bytes: kb(634), baseBytes: kb(633) }])).toEqual([]);
+  });
+  it('asks when an already large file grows by more than the limit at once', () => {
+    expect(largeFileFindings([{ path: 'big.png', bytes: kb(600) + LARGE_FILE_BYTES + 1, baseBytes: kb(600) }]))
+      .toEqual([{ path: 'big.png', bytes: kb(600) + LARGE_FILE_BYTES + 1 }]);
+  });
+  it('leaves small files and files that shrank alone', () => {
+    expect(largeFileFindings([{ path: 'small.ts', bytes: kb(10), baseBytes: null }, { path: 'was-big.png', bytes: kb(300), baseBytes: kb(900) }])).toEqual([]);
+  });
+});
+
+// @ts-expect-error The checker is a plain Node script without type declarations.
+import { largeFilesOf } from '../scripts/pr-check.mjs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+// CodeRabbit on #1745: a file renamed and grown in the same PR has git status R, which an A/M-only
+// filter skipped, and the size before is the old name's.
+describe('the sizes the checker reads from git', () => {
+  it('counts a renamed file that grew past the limit, against its old name at the merge base', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'pr-check-'));
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' });
+    try {
+      git('init', '-q', '-b', 'main'); git('config', 'user.name', 'probe'); git('config', 'user.email', 'probe@example.invalid');
+      // A 600 KB file, renamed and grown by just over the limit: still more than half the same, so
+      // git reports a rename (R), not a new file.
+      const lines = (count: number, tag: string) => Array.from({ length: count }, (_, n) => `${tag} ${n} `.padEnd(99, 'x') + '\n').join('');
+      const old = lines(6000, 'old');
+      writeFileSync(path.join(dir, 'old.txt'), old);
+      git('add', '-A'); git('commit', '-qm', 'base'); git('branch', 'base');
+      renameSync(path.join(dir, 'old.txt'), path.join(dir, 'new.txt'));
+      writeFileSync(path.join(dir, 'new.txt'), old + lines(5300, 'new'));
+      git('add', '-A'); git('commit', '-qm', 'rename and grow');
+      expect(git('diff', '--name-status', 'base...HEAD')).toMatch(/^R\d*\told\.txt\tnew\.txt/m);
+      expect(largeFilesOf('base', dir)).toEqual([{ path: 'new.txt', bytes: expect.any(Number) }]);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
