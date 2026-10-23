@@ -40,6 +40,13 @@ describe('what reaches the phone', () => {
       priority: 3, tags: ['white_check_mark'], click: 'https://chatgpt.com/c/68f9a1b2-1c2d-8e3f-9a0b-1c2d3e4f5a6b' });
   });
 
+  it('says only that a chat finished when it worked under a minute', async () => {
+    const { push, sent } = setUp({ finishedAfterMinutes: 0 });
+    await push.notify({ kind: 'finished', sessionId: 's1', workedMs: 20_000 });
+    await push.notify({ kind: 'finished', sessionId: 's2', workedMs: 90_000 });
+    expect(sent.map(row => row.body.message)).toEqual(['A chat finished.', 'Finished after 2 min.']);
+  });
+
   it('says what failed, and sends the access token when one is saved', async () => {
     const { push, sent, setToken } = setUp({ server: 'https://ntfy.example.org/' });
     setToken('tk_secret');

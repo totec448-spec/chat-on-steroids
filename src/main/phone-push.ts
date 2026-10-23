@@ -91,7 +91,8 @@ export function createPhonePush(deps: PhonePushDeps) {
     if (event.kind === 'needs-you') text = mainText('A chat is waiting for you.');
     else if (event.kind === 'failed') text = oneLine(event.detail ?? mainText('Something failed in Chat On Steroids.'), 240);
     else {
-      const minutes = event.workedMs === undefined ? null : Math.max(1, Math.round(event.workedMs / 60_000));
+      // Under a minute says no length: "after 1 min" for 20 seconds would not be true.
+      const minutes = event.workedMs === undefined || event.workedMs < 60_000 ? null : Math.round(event.workedMs / 60_000);
       text = minutes === null ? mainText('A chat finished.') : mainText('Finished after {0} min.').replace('{0}', String(minutes));
       if (details && event.detail) text += ` ${oneLine(event.detail, 200)}`;
     }
