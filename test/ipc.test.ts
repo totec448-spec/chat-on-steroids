@@ -2652,6 +2652,21 @@ describe('phone notifications over IPC', () => {
     expect(getConfig().ui.phonePush).toMatchObject({ enabled: false, topic: '' });
   });
 
+  it('checks the settings as they will be saved, not the stale form, and logs a refusal', async () => {
+    const { getLog } = await import('../src/main/logger.js');
+    // Off, with a topic: the form the renderer still shows.
+    const base = getConfig();
+    expect((await save({ ...base, ui: { ...base.ui, phonePush: phone({ enabled: false }) } }, base)).ok).toBe(true);
+    const stale = getConfig();
+    // Meanwhile another window clears the topic.
+    expect((await save({ ...stale, ui: { ...stale.ui, phonePush: phone({ enabled: false, topic: '' }) } }, stale)).ok).toBe(true);
+    // The stale form only turns it on: alone it looks complete, merged it has no topic.
+    expect(await save({ ...stale, ui: { ...stale.ui, phonePush: phone({ enabled: true }) } }, stale))
+      .toEqual({ ok: false, error: 'Choose a topic of letters, digits, - and _ (up to 64).' });
+    expect(getConfig().ui.phonePush).toMatchObject({ enabled: false, topic: '' });
+    expect(getLog().some(entry => entry.message.includes('settings save refused: Choose a topic of letters'))).toBe(true);
+  });
+
   it('never lets a damaged saved phone setting block other saves, or the save that repairs it', async () => {
     // A hand-edited or older config: on, with no topic and a server with a path.
     await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, phonePush: phone({ topic: '', server: 'https://ntfy.sh/mytopic' }) } });
