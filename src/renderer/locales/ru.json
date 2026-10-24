@@ -3143,5 +3143,11 @@
   "{0} / {1} tokens · {2}% of the large-chat warning|one": "{0} / {1} токен · {2}% порога предупреждения о большом чате",
   "{0} / {1} tokens · {2}% of the large-chat warning|few": "{0} / {1} токена · {2}% порога предупреждения о большом чате",
   "{0} / {1} tokens · {2}% of the large-chat warning|many": "{0} / {1} токенов · {2}% порога предупреждения о большом чате",
-  "Large-chat warning at": "Предупреждение о большом чате с"
+  "Large-chat warning at": "Предупреждение о большом чате с",
+  "High contrast": "Высокая контрастность",
+  "Black or white background with stronger text and lines. Your colors stay saved for when you turn it off.": "Чёрный или белый фон, более чёткий текст и линии. Ваши цвета сохраняются, пока вы её не выключите.",
+  "Accent presets": "Готовые акцентные цвета",
+  "Each is easy to read in light and dark.": "Каждый хорошо читается в светлой и тёмной теме.",
+  "Orange": "Оранжевый",
+  "Red": "Красный"
 }

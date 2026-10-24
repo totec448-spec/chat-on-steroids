@@ -2996,5 +2996,11 @@
   "HTML export saves a whole session to a file": "HTML 匯出會將整個工作階段儲存為一個檔案",
   "Export as HTML": "匯出為 HTML",
   "Whole session as HTML": "整個工作階段（HTML）",
-  "HTML files": "HTML 檔案"
+  "HTML files": "HTML 檔案",
+  "High contrast": "高對比",
+  "Black or white background with stronger text and lines. Your colors stay saved for when you turn it off.": "黑色或白色背景，文字與線條更清楚。關閉後會恢復你選擇的顏色。",
+  "Accent presets": "強調色預設",
+  "Each is easy to read in light and dark.": "每種顏色在淺色與深色模式下都清楚易讀。",
+  "Orange": "橘色",
+  "Red": "紅色"
 }
