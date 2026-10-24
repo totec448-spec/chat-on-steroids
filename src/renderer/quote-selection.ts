@@ -106,7 +106,7 @@ export interface QuoteSelectionDeps {
 }
 
 export interface QuoteSelection {
-  /** Forget the quote and hide the button: the chat or view it was taken in is gone. */
+  /** Forget the quote, hide the button and drop a selection in the timeline: the chat or view it was taken in is gone. */
   reset(): void;
 }
 
@@ -179,5 +179,14 @@ export function initQuoteSelection({ timeline, input, blocked }: QuoteSelectionD
     input.setSelectionRange(input.value.length, input.value.length);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  return { reset: hide };
+  return {
+    reset() {
+      // A pointerup just before the switch may have scheduled an update: it must not offer the old chat's words again.
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = 0;
+      hide();
+      const selection = document.getSelection();
+      if (selection?.anchorNode && timeline.contains(selection.anchorNode)) selection.removeAllRanges();
+    }
+  };
 }

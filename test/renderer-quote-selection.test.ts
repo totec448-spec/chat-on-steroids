@@ -194,11 +194,28 @@ it('forgets the quote when the chat or view it was taken in goes away', async ()
   quote.reset();
   expect(button().hidden).toBe(true);
   await frame();
-  // A selection that is still there quotes again, from a fresh read.
+  // A new selection quotes again, from a fresh read.
   select(words, 0, words, 3);
   await frame();
   button().dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
   expect(input.value).toBe('Look at this:\n\n> The\n\n');
+});
+
+it('does not offer the old words when a pointerup just before the chat switch scheduled the update', async () => {
+  const { initQuoteSelection } = await import('../src/renderer/quote-selection.js');
+  const input = document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'New chat draft';
+  const quote = initQuoteSelection({ timeline: document.getElementById('timeline')!, input });
+  const words = document.querySelector('.msg p')!.firstChild!;
+  select(words, 4, words, 10);
+  // The sidebar click's pointerup schedules the update, then the chat switch resets before it runs.
+  document.dispatchEvent(new dom.window.Event('pointerup', { bubbles: true }));
+  quote.reset();
+  await frame();
+  await frame();
+  expect(button().hidden).toBe(true);
+  button().dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  expect(input.value).toBe('New chat draft');
 });
 
 it('leaves the composer alone and says to start or cancel the plan first while a prepared plan waits', async () => {
