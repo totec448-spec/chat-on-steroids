@@ -3093,5 +3093,9 @@
   "Accent presets": "Cores de destaque predefinidas",
   "Each is easy to read in light and dark.": "Todas são fáceis de ler no claro e no escuro.",
   "Orange": "Laranja",
-  "Red": "Vermelho"
+  "Red": "Vermelho",
+  "HTML export saves a whole session to a file": "A exportação em HTML guarda uma sessão completa num ficheiro",
+  "Export as HTML": "Exportar como HTML",
+  "Whole session as HTML": "Sessão completa em HTML",
+  "HTML files": "Ficheiros HTML"
 }

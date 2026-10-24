@@ -3045,5 +3045,9 @@
   "Accent presets": "Akzent-Vorlagen",
   "Each is easy to read in light and dark.": "Jede ist hell und dunkel gut lesbar.",
   "Orange": "Orange",
-  "Red": "Rot"
+  "Red": "Rot",
+  "HTML export saves a whole session to a file": "Der HTML-Export speichert eine ganze Sitzung in einer Datei",
+  "Export as HTML": "Als HTML exportieren",
+  "Whole session as HTML": "Ganze Sitzung als HTML",
+  "HTML files": "HTML-Dateien"
 }

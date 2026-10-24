@@ -9688,6 +9688,15 @@ function retireSpentRepairs(): void {
 let rotationHoldMs = 15_000;
 /** Test seam. */
 export function setRotationHoldForTests(ms: number): void { rotationHoldMs = ms; }
+/**
+ * Stops the 30-second maintenance timer. For tests that move a mocked Date.now by minutes on real
+ * timers: a real tick landing between two of their steps measures that jump as the computer
+ * waking from sleep and gives every chat 90 more seconds (noteRecoverySweepTick).
+ */
+export function stopRecoverySweepTimerForTests(): void {
+  if (staleSwarmTimer) clearInterval(staleSwarmTimer);
+  staleSwarmTimer = null;
+}
 
 /**
  * Waits, bounded, until the page has sent a fresh-turn continue into the call held for it (#1662).
