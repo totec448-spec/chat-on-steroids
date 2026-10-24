@@ -3157,5 +3157,7 @@
   "Common base": "Общая база",
   "Theirs (incoming)": "Их (входящая)",
   "Not in this version": "Нет в этой версии",
-  "Start or cancel the prepared plan first, then ask again.": "Сначала запустите или отмените подготовленный план, затем повторите запрос."
+  "Start or cancel the prepared plan first, then ask again.": "Сначала запустите или отмените подготовленный план, затем повторите запрос.",
+  "Reset to the default for new installs": "Сбросить к значению для новой установки",
+  "Reset {0} to the default for new installs": "Сбросить «{0}» к значению для новой установки"
 }

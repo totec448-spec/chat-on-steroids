@@ -27,6 +27,7 @@ import { initPets } from './pets.js';
 import { initSkillsLibrary } from './skills-library.js';
 import { initWhatsNew } from './whats-new.js';
 import { initSettingsSearch } from './settings-search.js';
+import { paintSettingDefaults } from './setting-defaults.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
 import { parseCommandAllowlistText } from '../shared/command-allowlist.js';
@@ -171,6 +172,8 @@ const GROUPS: Group[] = [
 ];
 
 let state: AppState | null = null;
+/** What a new install starts with, read once; rows that differ from it are marked. */
+let settingDefaults: Config | null = null;
 let updateAllError: string | null = null;
 /** Guards against saving while we are writing values into the controls. */
 let applying = false;
@@ -1949,6 +1952,7 @@ function apply(next: AppState): void {
     : t("Recent activity only. File contents and credentials are never recorded."));
 
   chatApply(next, previousState?.config);
+  if (settingDefaults) paintSettingDefaults(config, settingDefaults);
 
   applying = false;
 }
@@ -2892,6 +2896,11 @@ initChat({ save: () => save(), state: () => state });
 
 void (async () => {
   await refresh();
+  // Not awaited: the rest of startup does not wait for the marks.
+  void run(api.getSettingDefaults()).then(defaults => {
+    settingDefaults = defaults;
+    if (state && defaults) paintSettingDefaults(state.config, defaults);
+  });
   // A first run has nothing set up, so open on the wizard rather than an empty Home.
   showTab(state && missingStep(state)?.step === 'folder' ? 'setup' : 'chat');
   // What's New after a real update (#1172); a first run on the Setup wizard has nothing new to show.

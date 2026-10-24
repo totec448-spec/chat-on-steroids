@@ -3010,5 +3010,7 @@
   "Common base": "共同基礎",
   "Theirs (incoming)": "對方 (傳入)",
   "Not in this version": "此版本中不存在",
-  "Start or cancel the prepared plan first, then ask again.": "請先開始或取消已準備好的計畫，然後再試一次。"
+  "Start or cancel the prepared plan first, then ask again.": "請先開始或取消已準備好的計畫，然後再試一次。",
+  "Reset to the default for new installs": "恢復為新安裝時的預設值",
+  "Reset {0} to the default for new installs": "將「{0}」恢復為新安裝時的預設值"
 }

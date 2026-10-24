@@ -3059,5 +3059,7 @@
   "Common base": "Gemeinsame Basis",
   "Theirs (incoming)": "Ihre (eingehend)",
   "Not in this version": "Nicht in dieser Version",
-  "Start or cancel the prepared plan first, then ask again.": "Starte oder verwirf zuerst den vorbereiteten Plan und frage dann erneut."
+  "Start or cancel the prepared plan first, then ask again.": "Starte oder verwirf zuerst den vorbereiteten Plan und frage dann erneut.",
+  "Reset to the default for new installs": "Auf den Standard für neue Installationen zurücksetzen",
+  "Reset {0} to the default for new installs": "{0} auf den Standard für neue Installationen zurücksetzen"
 }
