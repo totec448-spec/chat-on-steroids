@@ -2924,6 +2924,7 @@
   "This answer is no longer in the chat.": "이 답변은 더 이상 채팅에 없습니다.",
   "This turn has not completed": "이 턴은 아직 완료되지 않았습니다",
   "This turn has no answer to export": "이 턴에는 내보낼 답변이 없습니다",
+  "HTML export saves a whole session to a file": "HTML 내보내기는 전체 세션을 파일 하나로 저장합니다",
   "Only a ChatGPT answer can be bookmarked": "ChatGPT 답변만 북마크할 수 있습니다",
   "A chat keeps at most 200 bookmarks": "채팅 하나에는 북마크를 최대 200개까지 둘 수 있습니다",
   "This answer is no longer in the chat, so its bookmark was removed.": "이 답변은 더 이상 채팅에 없으므로 북마크를 해제했습니다.",
@@ -2991,5 +2992,8 @@
   "What ChatGPT gets to see on this computer.": "이 컴퓨터에서 ChatGPT가 볼 수 있는 것.",
   "Off for every project in Settings": "설정에서 모든 프로젝트에 대해 꺼져 있음",
   "This project's tools send keys and tokens to ChatGPT as they are": "이 프로젝트의 도구는 키와 토큰을 그대로 ChatGPT에 보냅니다",
-  "Keys and tokens in this project's tool results are hidden from ChatGPT": "이 프로젝트의 도구 결과에 있는 키와 토큰은 ChatGPT에서 숨겨집니다"
+  "Keys and tokens in this project's tool results are hidden from ChatGPT": "이 프로젝트의 도구 결과에 있는 키와 토큰은 ChatGPT에서 숨겨집니다",
+  "Export as HTML": "HTML로 내보내기",
+  "Whole session as HTML": "전체 세션을 HTML로",
+  "HTML files": "HTML 파일"
 }
