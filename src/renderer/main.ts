@@ -773,6 +773,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       mentionPlugins: $<HTMLInputElement>('mentionPlugins').checked,
       privacyScreenshots: $<HTMLInputElement>('privacyScreenshots').checked,
       phonePush: readPhonePush(previous.ui.phonePush),
+      secretsShield: $<HTMLInputElement>('secretsShield').checked,
       theme: over.theme ?? previous.ui.theme,
       appearance: over.appearance ?? previous.ui.appearance
     },
@@ -844,6 +845,10 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     }
     if (state && (!requestedSettings || requestedSettings.controlApi?.enabled === patch.controlApi?.enabled)) {
       $<HTMLInputElement>('controlApiEnabled').checked = state.config.controlApi?.enabled === true;
+    }
+    // And the secrets shield: an unticked switch left by a refused save must not turn it off later.
+    if (state && (!requestedSettings || requestedSettings.ui.secretsShield === patch.ui.secretsShield)) {
+      $<HTMLInputElement>('secretsShield').checked = state.config.ui.secretsShield !== false;
     }
     return false;
   }
@@ -1743,6 +1748,12 @@ function apply(next: AppState): void {
     previousState?.config.ui.privacyScreenshots
   );
   applyPhonePush(next);
+  // Missing means on (#1797).
+  applyChecked(
+    $<HTMLInputElement>('secretsShield'),
+    config.ui.secretsShield !== false,
+    previousState ? previousState.config.ui.secretsShield !== false : undefined
+  );
   // Only macOS screenshots can show the whole screen; on Windows every capture is one window
   // already, so the switch would change nothing there.
   $('privacyScreenshotsSetting').hidden = !(next.platform?.desktopAutomation ?? true) || next.platform?.family !== 'macos';
@@ -2832,6 +2843,7 @@ for (const id of [
   'phonePushAway',
   'phonePushQuiet',
   'phonePushDetails',
+  'secretsShield',
   'tunnelKind',
   'tunnelId',
   'desktopTunnelId',

@@ -276,6 +276,8 @@ const removingProject = new Set<string>();
 function projectMenuItems(id: string): RowMenuItem[] {
   const color = projects.find(row => row.id === id)?.color ?? null;
   const link = projects.find(row => row.id === id)?.chatgpt;
+  const shieldOff = projects.find(row => row.id === id)?.secretsShieldOff === true;
+  const shieldEverywhere = deps.state()?.config.ui.secretsShield !== false;
   return [
     { action: 'group-new', icon: 'i-group', label: () => t('New group'), title: () => t('Add a group to sort this project\'s chats'),
       run: () => void newChatGroup(id) },
@@ -299,6 +301,15 @@ function projectMenuItems(id: string): RowMenuItem[] {
         action: `color-${choice ?? 'none'}`, swatch: choice ?? '', checked: color === choice, disabled: savingProjectColor.has(id),
         label: () => choice ? projectColorName(choice) : t('None'), run: () => void saveProjectColor(id, choice)
       }))
+    },
+    // #1797: on unless this project or Settings turned it off; Settings wins, so the switch waits there.
+    {
+      action: 'secrets-shield', icon: 'i-shield', toggle: true, checked: shieldEverywhere && !shieldOff,
+      disabled: !shieldEverywhere || savingProjectShield.has(id), label: () => t('Hide secrets from ChatGPT'),
+      title: () => !shieldEverywhere ? t('Off for every project in Settings') : shieldOff
+        ? t("This project's tools send keys and tokens to ChatGPT as they are")
+        : t("Keys and tokens in this project's tool results are hidden from ChatGPT"),
+      run: () => void saveProjectShield(id, !shieldOff)
     },
     {
       action: 'remove', icon: 'i-trash', danger: true, separated: true, disabled: removingProject.has(id),
@@ -350,6 +361,19 @@ async function saveProjectColor(id: string, choice: ProjectColor | null): Promis
     projects = projects.map(row => row.id === id ? updated : row);
     paintSessions();
   } finally { savingProjectColor.delete(id); }
+}
+
+const savingProjectShield = new Set<string>();
+async function saveProjectShield(id: string, off: boolean): Promise<void> {
+  if (savingProjectShield.has(id)) return;
+  savingProjectShield.add(id);
+  try {
+    const updated = await run(api.setProjectSecretsShieldOff(id, off));
+    if (!updated) return;
+    ++sessionsLoadGeneration;
+    projects = projects.map(row => row.id === id ? updated : row);
+    paintSessions();
+  } finally { savingProjectShield.delete(id); }
 }
 
 async function removeProjectFromSidebar(id: string): Promise<void> {
@@ -5114,18 +5138,19 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
 }
 
 /**
- * Copy and Markdown export under the answer of a turn the page reported as completed. Main
- * builds the text from the log, reading back answers that were cut there, so a long answer
- * copies and exports whole; the timeline only decides where the actions appear.
+ * Copy and export (Markdown, or the whole session as an HTML page) under the answer of a turn the
+ * page reported as completed. Main builds the text from the log, reading back answers that were
+ * cut there, so a long answer copies and exports whole; the timeline only decides where the
+ * actions appear.
  */
 function answerActions(turnId: string | null, messageId?: string, answer?: { text: string; time: number }): HTMLElement {
   const bar = el('div', 'answer-actions');
   const sessionId = selectedId;
   // A turn's answer is named by its turn; one recorded outside any turn by its message.
-  const exportTo = async (scope: 'answer' | 'session', target: 'clipboard' | 'file') => {
+  const exportTo = async (scope: 'answer' | 'session', target: 'clipboard' | 'file', format: 'markdown' | 'html' = 'markdown') => {
     if (!sessionId || selectedId !== sessionId) return null;
     return run(api.exportMarkdown({ id: sessionId, scope, turnId: scope === 'answer' && turnId ? turnId : undefined,
-      messageId: scope === 'answer' && !turnId ? messageId : undefined, target }));
+      messageId: scope === 'answer' && !turnId ? messageId : undefined, target, ...(format === 'html' ? { format } : {}) }));
   };
   const copy = el('button', 'answer-action') as HTMLButtonElement;
   copy.type = 'button';
@@ -5144,14 +5169,17 @@ function answerActions(turnId: string | null, messageId?: string, answer?: { tex
   menu.className = 'answer-export';
   const trigger = el('summary', 'answer-action');
   trigger.append(icon('i-export'));
-  ui(trigger, 'title', () => t('Export as Markdown')); ui(trigger, 'aria-label', () => t('Export as Markdown'));
+  ui(trigger, 'title', () => t('Export')); ui(trigger, 'aria-label', () => t('Export'));
   const choices = el('div', 'answer-export-menu');
-  for (const [scope, label] of [['answer', 'This answer'], ['session', 'Whole session']] as const) {
-    const choice = el('button', 'answer-export-choice', () => t(label)) as HTMLButtonElement;
+  for (const [scope, format, label] of [['answer', 'markdown', () => t('This answer')], ['session', 'markdown', () => t('Whole session')],
+    ['session', 'html', () => t('Whole session as HTML')]] as const) {
+    const choice = el('button', 'answer-export-choice', label) as HTMLButtonElement;
     choice.type = 'button';
     choice.addEventListener('click', async () => {
       menu.open = false;
-      const result = await exportTo(scope, 'file');
+      // The clicked choice leaves the screen with the menu; focus goes back to the menu's own button.
+      trigger.focus();
+      const result = await exportTo(scope, 'file', format);
       if (result?.done === 'saved') toast(t('Saved {0}', [result.name]));
     });
     choices.append(choice);

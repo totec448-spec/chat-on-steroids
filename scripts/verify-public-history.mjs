@@ -129,30 +129,33 @@ function checkHistory() {
   // contains it. A fresh CI checkout has no such refs, which is why this passes there and
   // fails locally on a full clone.
   const head = runGit(['rev-parse', '--verify', 'HEAD'], { allowFailure: true });
-  const commits =
+  // One `git log` for the whole line instead of a `git show` per commit. With -z every field and
+  // record ends in NUL, and git cuts %B at a NUL, so a commit message cannot fake a record.
+  const format = ['%H', '%an', '%ae', '%cn', '%ce', '%B'];
+  const fields =
     head.status === 0
-      ? String(runGit(['rev-list', 'HEAD']).stdout)
-          .split(/\r?\n/)
-          .filter(Boolean)
+      ? String(
+          runGit(['log', '-z', '--no-show-signature', '--encoding=UTF-8', `--format=${format.join('%x00')}`, 'HEAD'])
+            .stdout,
+        ).split('\0')
       : [];
+  if (fields.length > 0 && fields.length % format.length !== 1) throw new Error('Could not parse the Git history.');
+  const commitCount = Math.floor(fields.length / format.length);
   // pull_request jobs default to a GitHub-generated merge object that can never enter
   // public history. Its identity belongs to GitHub's test ref, not to the proposed tree.
   const syntheticPullRequestCommit =
     process.env.GITHUB_EVENT_NAME === 'pull_request' ? process.env.GITHUB_SHA?.trim() : '';
 
-  for (const commit of commits) {
+  for (let index = 0; index < commitCount; index += 1) {
+    const [commit = '', authorName = '', authorEmail = '', committerName = '', committerEmail = '', body = ''] =
+      fields.slice(index * format.length, (index + 1) * format.length);
     if (syntheticPullRequestCommit && commit === syntheticPullRequestCommit) continue;
     if (published.has(commit)) continue;
-    const record = String(
-      runGit(['show', '-s', '--format=%an%x00%ae%x00%cn%x00%ce%x00%B', commit]).stdout,
-    );
-    const [authorName = '', authorEmail = '', committerName = '', committerEmail = '', ...body] =
-      record.split('\0');
     const location = `commit ${commit}`;
     failures.push(
       ...checkMaintainerIdentity(authorName, authorEmail, `${location} author`),
       ...checkMaintainerIdentity(committerName, committerEmail, `${location} committer`),
-      ...findBlockedText(body.join('\0'), `${location} message`),
+      ...findBlockedText(body, `${location} message`),
     );
   }
 
@@ -182,7 +185,7 @@ function checkHistory() {
   }
 
   if (head.status === 0) failures.push(...checkIndexedOrCommittedFiles('HEAD'));
-  return { failures, commits: commits.length, tags: tags.length };
+  return { failures, commits: commitCount, tags: tags.length };
 }
 
 function fail(failures) {

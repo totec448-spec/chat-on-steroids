@@ -1240,5 +1240,17 @@
   },
   "content_edit_unavailable": {
     "message": "ChatGPT bu mesaj için Düzenle seçeneği sunmadı. Sohbeti ChatGPT'de açıp yeniden deneyin."
+  },
+  "content_auto_compaction_waiting_app": {
+    "message": "Otomatik sıkıştırma: uygulama bekleniyor"
+  },
+  "content_goal_loop_waiting_app": {
+    "message": "Hedef ve Döngü: uygulama bekleniyor"
+  },
+  "content_settings_waiting_app": {
+    "message": "uygulama bekleniyor"
+  },
+  "content_task_waiting_app": {
+    "message": "Chat On Steroids yanıtı bekleniyor."
   }
 }

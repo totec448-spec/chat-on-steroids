@@ -443,6 +443,11 @@ code {
     color-mix(in srgb, #1a1b1c 20%, var(--page)) 32%, var(--page) 78%);
 }
 :root[data-theme='dark'] .app[data-screen='chat'] .card.is-session { background: transparent; }
+/* The composer's soft edge would be 1.2:1 on a high-contrast page; it takes the 3:1 control edge. */
+:root[data-high-contrast='true'] .card.is-session,
+:root[data-high-contrast='true'] .card.is-session:has(> .composer:focus-within, > .composer-dock:focus-within) { --composer-edge: var(--edge); }
+/* High contrast keeps the page one plain color: no wash behind the chat. */
+:root[data-high-contrast='true'] .app[data-screen='chat'] { background: var(--page); }
 .app-topbar { position: relative; z-index: 130; grid-column: 1 / -1; grid-row: 1; display: flex; align-items: center; gap: 6px; height: env(titlebar-area-height, 28px); padding: 0 10px; padding-left: max(10px, calc(env(titlebar-area-x, 0px) + 4px)); padding-right: max(10px, calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw))); background: var(--page); -webkit-app-region: drag; }
 
 .app-topbar > .btn { -webkit-app-region: no-drag; height: 100%; padding: 0 5px; }
@@ -513,6 +518,8 @@ code {
 }
 /* Sidebar surfaces share the chosen tint, including the detached connection popover. */
 .sidebar, .app-topbar, .connection-popover { background: var(--sidebar-color, var(--sunk)); color: var(--ink); }
+/* High contrast draws the sidebar on the page color, so a 3:1 line keeps the two apart. */
+:root[data-high-contrast='true'] .sidebar { border-right-color: var(--line); }
 :root[data-translucent-sidebar='true'] :is(.sidebar, .app-topbar, .appearance-preview-sidebar, .connection-popover) {
   background: linear-gradient(155deg, color-mix(in srgb, var(--sidebar-color) 72%, transparent), color-mix(in srgb, var(--sidebar-color) 94%, transparent));
   backdrop-filter: blur(22px) saturate(125%);
