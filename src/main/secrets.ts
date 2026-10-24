@@ -361,6 +361,34 @@ export function setSecret(key: SecretKey, value: string): Promise<void> {
   });
 }
 
+/**
+ * The saved values whose keys `wanted` accepts, for a settings backup. Unlike `getSecret` it never
+ * answers with an empty view: storage that is unavailable or unreadable is an error, so a backup
+ * that asked for keys cannot quietly come out without them.
+ */
+export async function readSecretsFor(wanted: (key: string) => boolean): Promise<Record<string, string>> {
+  const all = await readAll();
+  await rotateIfNeeded();
+  if (cache === null) throw new Error(unreadable ? 'The saved keys could not be read' : 'Secure OS credential storage is unavailable');
+  return Object.fromEntries(Object.entries(all).filter(([key, value]) => wanted(key) && value.length > 0)
+    .map(([key, value]) => [key, isApiKey(key as SecretKey) ? cleanApiKey(value) : value]));
+}
+
+/** Several keys in one write, as a settings backup brings them; all are saved or none is. */
+export function setSecrets(values: Partial<Record<SecretKey, string>>): Promise<void> {
+  return enqueue(async () => {
+    if (!(await isEncryptionAvailable())) throw new Error(UNAVAILABLE);
+    const current = await readAll();
+    if (cache === null) throw new Error(unreadable ? UNREADABLE : UNAVAILABLE);
+    const all = { ...current };
+    for (const [key, value] of Object.entries(values) as Array<[SecretKey, string]>) {
+      const trimmed = isApiKey(key) ? cleanApiKey(value) : value.trim();
+      if (trimmed) all[key] = trimmed;
+    }
+    await writeAll(all);
+  });
+}
+
 export function clearSecret(key: SecretKey): Promise<void> {
   return setSecret(key, '');
 }

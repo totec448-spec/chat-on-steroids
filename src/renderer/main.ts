@@ -1,5 +1,6 @@
 import { initBrowserSetup } from './setup-browser.js';
-import { currentLanguage, ui, uiText, t, tn, initLanguage, onLanguageChange } from './i18n.js';
+import { currentLanguage, ui, uiText, t, tn, initLanguage, onLanguageChange, setLanguage, type Language } from './i18n.js';
+import { initSettingsBackup } from './settings-backup-dialog.js';
 import { initLayoutPreviews } from './layout-previews.js';
 import { workerName } from './agent-panel.js';
 import { primaryShiftShortcut, primaryShortcut } from './shortcuts.js';
@@ -113,6 +114,15 @@ const publishUiLanguage = (): void => { void Promise.resolve(api.setUiLanguage?.
 publishUiLanguage();
 onLanguageChange(publishUiLanguage);
 const pet = initPet(api, () => showTab('pets'));
+initSettingsBackup(api, {
+  imported: next => {
+    apply(next);
+    // The language lives in this page; a backup in another one switches it here too.
+    const language = next.config.ui.language;
+    if (language && language !== currentLanguage()) setLanguage(language as Language);
+  },
+  toast
+});
 const settingsSearch = initSettingsSearch({
   open: tab => showTab(tab),
   shown: () => document.querySelector<HTMLElement>('.app')!.dataset.screen === 'settings'
