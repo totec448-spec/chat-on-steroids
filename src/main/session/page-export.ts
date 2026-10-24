@@ -8,6 +8,7 @@ import { dialogLabel, mainText } from '../main-texts.js';
 import { fullText } from './markdown-export.js';
 import { redactPersonalText, redactSecretText } from '../redaction.js';
 import { replaceFile } from '../replace-file.js';
+import { logWarn } from '../logger.js';
 
 export type PageExportRequest =
   /**
@@ -28,6 +29,8 @@ export type PageExportResult =
  * a chat that is still working would otherwise save more than the person looked at.
  */
 let shown: { preview: string; id: string; html: string; fileName: string } | null = null;
+/** The newest preview request; an older one that finishes later must not replace what the dialog shows. */
+let latestPreview = 0;
 
 function longDate(lang: string, now: Date): string {
   try { return new Intl.DateTimeFormat(lang, { dateStyle: 'long' }).format(now); }
@@ -38,7 +41,10 @@ function longDate(lang: string, now: Date): string {
 export async function exportSessionPage(request: PageExportRequest, owner: BrowserWindow | null): Promise<PageExportResult> {
   if (request.target === 'file') {
     const page = shown;
-    if (!page || page.preview !== request.preview || page.id !== request.id) throw new Error('The preview is out of date. Open Share again.');
+    if (!page || page.preview !== request.preview || page.id !== request.id) {
+      logWarn('page export: save refused, the preview is out of date');
+      throw new Error('The preview is out of date. Open Share again.');
+    }
     // Linux asks nothing about replacing a file unless told to.
     const options: SaveDialogOptions = {
       ...dialogLabel('Export as HTML'),
@@ -51,6 +57,7 @@ export async function exportSessionPage(request: PageExportRequest, owner: Brows
     await replaceFile(result.filePath, page.html, 'HTML export');
     return { done: 'saved', name: path.basename(result.filePath) };
   }
+  const mine = ++latestPreview;
   const summary = await getSession(request.id);
   if (!summary) throw new Error('Session not found');
   const entries = transcriptEntries(await readEvents(request.id));
@@ -66,6 +73,8 @@ export async function exportSessionPage(request: PageExportRequest, owner: Brows
   });
   // A hidden detail in the title stays hidden in the suggested file name too.
   const fileName = markdownFileName(title.replace(/\[redacted(?: private key)?\]/g, word), '', 'html');
-  shown = { preview: randomUUID(), id: request.id, html, fileName };
-  return { done: 'preview', preview: shown.preview, html, hidden: hiddenCount(html) };
+  const preview = randomUUID();
+  // The dialog shows only its newest answer; that one stays the page Save writes.
+  if (mine === latestPreview) shown = { preview, id: request.id, html, fileName };
+  return { done: 'preview', preview, html, hidden: hiddenCount(html) };
 }

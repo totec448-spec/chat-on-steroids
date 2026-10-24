@@ -87,6 +87,8 @@ export function initSharePage(api: Pick<AppApi, 'sharePage'>, saved: (name: stri
     } finally {
       saving = false;
       paintControls();
+      // Save was disabled while it ran, which took the focus off it; a keyboard user carries on from Save.
+      if (dialog.open && !save.disabled && (document.activeElement === document.body || !dialog.contains(document.activeElement))) save.focus();
     }
   });
   for (const id of ['sharePageCancel', 'sharePageClose']) document.getElementById(id)!.addEventListener('click', () => close());
