@@ -11,7 +11,8 @@ import { primaryShortcut } from './shortcuts.js';
 
 export interface ViewMenuActions {
   search(): void;
-  shortcuts(): void;
+  /** `viaKeyboard`: the item was chosen with Enter or Space, so the dialog shows its focus ring. */
+  shortcuts(viaKeyboard: boolean): void;
   /** Whether the built-in CoS browser is the selected ChatGPT browser. */
   cosBrowser(): boolean;
   showCosBrowser(): void;
@@ -53,7 +54,7 @@ export function initViewMenu(actions: ViewMenuActions): { refresh(): void } {
     },
     {
       action: 'shortcuts', icon: 'i-keyboard', separated: true,
-      shortcut: () => primaryShortcut('/'), label: () => t('Keyboard shortcuts'), run: actions.shortcuts
+      shortcut: () => primaryShortcut('/'), label: () => t('Keyboard shortcuts'), runWith: actions.shortcuts
     }
   ];
   button.addEventListener('click', () => toggleRowMenu({ owner: OWNER, anchor: () => button, label: () => t('View'), items }));
