@@ -14,7 +14,8 @@ const LANGUAGES = ['en', 'de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', '
 // The window's own policy, as main sets it (a meta tag cannot carry frame-ancestors).
 const policy = /RENDERER_CONTENT_SECURITY_POLICY =\s*([\s\S]*?);\n/.exec(fs.readFileSync(path.join(root, 'src/main/renderer-csp.ts'), 'utf8'))[1]
   .split('+').map(part => part.trim().replace(/^"|"$/g, '')).join('').replace(/;\s*frame-ancestors 'none'/, '');
-const fsPath = file => '/@fs' + path.join(root, file).split(path.sep).join('/');
+// Vite's /@fs/ prefix takes an absolute path; a Windows one (C:/...) has no leading slash of its own.
+const fsPath = file => '/@fs/' + path.join(root, file).split(path.sep).join('/').replace(/^\/+/, '');
 const fixture = `(() => {
  const old=window.api,f=composerFixture,ok=data=>Promise.resolve({ok:true,data:structuredClone(data)});
  f.summary.updatedAt=Date.now()-3*3600000; f.summary.lastToolCallAt=null; f.summary.activityExpiresAt=null;
@@ -63,7 +64,7 @@ app.whenReady().then(async () => {
   const errors=[];
   win.webContents.on('console-message',e=>{if(e.level==='error'&&!BENIGN_RENDERER_ERRORS.includes(e.message))errors.push(e.message);});
   const js=code=>win.webContents.executeJavaScript(code);
-  const until=async expression=>{for(const deadline=Date.now()+15000;Date.now()<deadline;){if(await js(expression))return;await pause(40);}throw new Error('Timed out: '+expression);};
+  const until=async expression=>{for(const deadline=Date.now()+15000;Date.now()<deadline;){if(await js(expression))return;await pause(40);}throw new Error('Timed out: '+expression+' '+JSON.stringify({error:await js(`document.getElementById('sharePageError')?.textContent||''`),errors}));};
   const settle=async()=>{await js(`document.getAnimations().forEach(a=>{if(a.effect.getTiming().iterations!==Infinity)a.finish()})`);await pause(250);};
   const capture=async name=>{await settle();fs.mkdirSync(output,{recursive:true});fs.writeFileSync(path.join(output,name),(await win.webContents.capturePage()).toPNG());};
   const row=`document.querySelector('#sessionList [data-id="share-chat-1"]')`;

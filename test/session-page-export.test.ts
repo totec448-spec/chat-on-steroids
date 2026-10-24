@@ -10,6 +10,8 @@ const files = vi.hoisted(() => ({ replaceFile: vi.fn(async () => undefined) }));
 vi.mock('electron', () => electron);
 vi.mock('../src/main/session/store.js', () => store);
 vi.mock('../src/main/replace-file.js', () => files);
+const logger = vi.hoisted(() => ({ logWarn: vi.fn() }));
+vi.mock('../src/main/logger.js', async original => ({ ...await original<object>(), ...logger }));
 
 const { exportSessionPage } = await import('../src/main/session/page-export.js');
 const { setMainTextTranslations } = await import('../src/main/main-texts.js');
@@ -82,6 +84,28 @@ it('refuses to save a page that was not the last one shown', async () => {
   const last = await preview(false);
   await expect(exportSessionPage({ id: 'other-session', target: 'file', preview: last.preview }, null)).rejects.toThrow('The preview is out of date');
   expect(electron.dialog.showSaveDialog).not.toHaveBeenCalled();
+});
+
+it('logs why a save was refused', async () => {
+  await preview(false);
+  await expect(exportSessionPage({ id: 'session-1', target: 'file', preview: 'not-the-one' }, null)).rejects.toThrow('The preview is out of date');
+  expect(logger.logWarn).toHaveBeenCalledWith('page export: save refused, the preview is out of date');
+});
+
+it('keeps the newest preview when an older, slower one finishes last, so the page the dialog shows can be saved', async () => {
+  let release!: () => void;
+  const slow = new Promise<void>(done => { release = done; });
+  const events = await store.readEvents();
+  store.readEvents.mockImplementationOnce(async () => { await slow; return events; });
+  const older = exportSessionPage({ id: 'session-1', target: 'preview', hide: true, lang: 'en' }, null);
+  const newer = await preview(false);
+  release();
+  const late = await older;
+  if (late.done !== 'preview') throw new Error(late.done);
+  electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/page.html' });
+  await expect(exportSessionPage({ id: 'session-1', target: 'file', preview: newer.preview }, null)).resolves.toEqual({ done: 'saved', name: 'page.html' });
+  expect(files.replaceFile).toHaveBeenCalledWith('/downloads/page.html', newer.html, 'HTML export');
+  await expect(exportSessionPage({ id: 'session-1', target: 'file', preview: late.preview }, null)).rejects.toThrow('The preview is out of date');
 });
 
 it('says a chat with nothing said yet has nothing to share', async () => {

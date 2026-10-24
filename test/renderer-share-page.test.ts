@@ -125,6 +125,27 @@ it('keeps the choice locked while saving, and stays open when the save dialog is
   expect($<HTMLButtonElement>('sharePageSave').disabled).toBe(false);
 });
 
+it('gives the focus back to Save after a failed or cancelled save, instead of leaving it nowhere', async () => {
+  for (const answer of [{ ok: false as const, error: 'The preview is out of date. Open Share again.' }, { ok: true as const, data: { done: 'cancelled' } }]) {
+    const saving = deferred();
+    const sharePage = vi.fn((request: any) => request.target === 'preview' ? Promise.resolve(page(0)) : saving.promise);
+    await open(sharePage);
+    await settle();
+    $<HTMLButtonElement>('sharePageSave').focus();
+    $('sharePageForm').dispatchEvent(new dom.window.Event('submit', { cancelable: true }));
+    await settle();
+    // A browser moves the focus off a button that becomes disabled; jsdom does not, so it is moved here.
+    const outside = document.body.appendChild(document.createElement('button'));
+    outside.focus();
+    expect($('sharePageDialog').contains(document.activeElement)).toBe(false);
+    saving.resolve(answer);
+    await settle();
+    expect($<HTMLDialogElement>('sharePageDialog').open).toBe(true);
+    expect(document.activeElement).toBe($('sharePageSave'));
+    $('sharePageCancel').click();
+  }
+});
+
 it('shows why there is no page, in the chosen language, with nothing to save', async () => {
   const { setLanguage } = await import('../src/renderer/i18n.js');
   setLanguage('de');
