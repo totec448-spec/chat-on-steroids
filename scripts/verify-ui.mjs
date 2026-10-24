@@ -50,14 +50,14 @@ const reasonFor = outcome => {
   return [...shown, shown.length ? exitStatus(outcome.code) : `${exitStatus(outcome.code)} and no output`]
     .map(line => `      ${line.slice(0, 800)}`).join('\n');
 };
-let build;
 for (const name of scripts) {
   if (skip.has(name)) { console.log(`SKIP  ${name}  (needs a real GPU and display timing; run it locally)`); continue; }
   if (needsBuild(readFileSync(path.join(root, 'scripts', name), 'utf8'))) {
-    build ??= { problem: buildProblem(root) };
-    if (build.problem) {
+    // Looked at again before each such check: src/ can change while an earlier check runs.
+    const problem = buildProblem(root);
+    if (problem) {
       results.push({ name, ok: false, seconds: 0 });
-      console.log(`FAIL  ${name}  (0s)\n      it loads the built app, but ${build.problem}`);
+      console.log(`FAIL  ${name}  (0s)\n      it loads the built app, but ${problem}`);
       continue;
     }
   }
