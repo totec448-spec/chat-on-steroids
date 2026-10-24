@@ -27,7 +27,11 @@ export function paintContextMeter(session: SessionSummary | null, config: Config
   const observed = session?.selectedModel;
   const selection = composer ?? (observed?.conversationId === session?.conversationId ? observed : null);
   const pro = isProModel(selection?.model, selection?.reasoningEffort);
-  const limit = config.sessions.limitTokens;
+  // What the ring fills toward, as the ChatGPT page's meter does: the compaction point while
+  // automatic compaction acts on it, else the size the app warns about. Neither is the model's
+  // own context limit, which no provider reports (#1806).
+  const auto = config.compaction.auto && config.compaction.autoTokens > 0;
+  const limit = auto ? config.compaction.autoTokens : config.sessions.limitTokens;
   const percent = limit > 0 ? Math.min(100, Math.round(used / limit * 100)) : 0;
   arc.setAttribute('stroke-dasharray', `${pro ? 0 : percent * 0.377} 37.7`);
   const tokens = () => new Intl.NumberFormat(currentLanguage()).format(used);
@@ -41,14 +45,23 @@ export function paintContextMeter(session: SessionSummary | null, config: Config
   }
   const description = () => [t('Session context · estimated'), pro
     ? t('{0} tokens used', [tokens()])
-    : tn('{0} / {1} token · {2}% of configured limit', '{0} / {1} tokens · {2}% of configured limit', limit, [tokens(), new Intl.NumberFormat(currentLanguage()).format(limit), percent]),
+    : auto
+      ? tn('{0} / {1} token · {2}% of the compaction point', '{0} / {1} tokens · {2}% of the compaction point', limit, [tokens(), new Intl.NumberFormat(currentLanguage()).format(limit), percent])
+      : tn('{0} / {1} token · {2}% of the large-chat warning', '{0} / {1} tokens · {2}% of the large-chat warning', limit, [tokens(), new Intl.NumberFormat(currentLanguage()).format(limit), percent]),
     pro ? t('Auto-compaction off for Pro') : config.compaction.auto
       ? t('Auto-compaction at {0} tokens', [new Intl.NumberFormat(currentLanguage()).format(config.compaction.autoTokens)])
       : t('Auto-compaction off')].join('\n');
   // One fact per row: the estimate, the limit from Settings, the share, and when compaction starts.
   ui(document.getElementById('contextTokens')!, 'textContent', () => short(used));
+  // The warning size gets its own row only while it is what the ring measures; with automatic
+  // compaction on, the compaction point below already is that number.
   const limitRow = document.getElementById('contextLimit');
-  if (limitRow) ui(limitRow, 'textContent', () => pro ? '—' : short(limit));
+  const limitLabel = document.getElementById('contextLimitLabel');
+  if (limitRow) {
+    limitRow.hidden = pro || auto;
+    if (limitLabel) limitLabel.hidden = limitRow.hidden;
+    ui(limitRow, 'textContent', () => short(limit));
+  }
   ui(document.getElementById('contextPercent')!, 'textContent', () => pro ? '—' : `${percent}%`);
   ui(document.getElementById('contextThreshold')!, 'textContent', () => pro ? t('Auto-compaction off for Pro') : config.compaction.auto ? short(config.compaction.autoTokens) : t('Off'));
   const progress = panel.querySelector<HTMLElement>('.context-progress')!;

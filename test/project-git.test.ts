@@ -8,6 +8,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { gitExecutable, ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from '../src/main/project-git.js';
+import { getLog } from '../src/main/logger.js';
 import { addProject } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 
@@ -317,6 +318,55 @@ it('shows merge conflicts as conflicts, with a readable diff for every kind of c
   expect(await readProjectGitDiff(id, 'ours-deletes.txt', undefined, snapshot.revision)).toMatchObject({ baseText: '', currentText: 'side change\n' });
   // Changed on main, deleted on side: HEAD has it, the working tree keeps ours.
   expect(await readProjectGitDiff(id, 'theirs-deletes.txt', undefined, snapshot.revision)).toMatchObject({ baseText: 'main change\n', currentText: 'main change\n' });
+});
+
+it('reads the base, ours and theirs versions of a conflicted file, also from a project inside the repository', async () => {
+  // Review showed only HEAD against the marker-filled file; the three versions Git keeps were not readable.
+  const root = path.join(approved, 'stages');
+  const app = path.join(root, 'app');
+  await fs.mkdir(app, { recursive: true });
+  await git(root, 'init', '-b', 'main');
+  await git(root, 'config', 'user.email', 'test@example.com');
+  await git(root, 'config', 'user.name', 'CoS Test');
+  await git(root, 'config', 'core.autocrlf', 'false');
+  await fs.writeFile(path.join(app, 'both.txt'), 'base\n');
+  await fs.writeFile(path.join(app, 'ours-deletes.txt'), 'base\n');
+  await fs.writeFile(path.join(app, 'binary.bin'), Buffer.from([0, 1]));
+  await git(root, 'add', '.'); await git(root, 'commit', '-m', 'base');
+  await git(root, 'checkout', '-b', 'side');
+  await fs.writeFile(path.join(app, 'both.txt'), 'side\n');
+  await fs.writeFile(path.join(app, 'added.txt'), 'side added\n');
+  await fs.writeFile(path.join(app, 'ours-deletes.txt'), 'side change\n');
+  await fs.writeFile(path.join(app, 'binary.bin'), Buffer.from([0, 2]));
+  await git(root, 'add', '-A'); await git(root, 'commit', '-m', 'side');
+  await git(root, 'checkout', 'main');
+  await fs.writeFile(path.join(app, 'both.txt'), 'main\n');
+  await fs.writeFile(path.join(app, 'added.txt'), 'main added\n');
+  await fs.rm(path.join(app, 'ours-deletes.txt'));
+  await fs.writeFile(path.join(app, 'binary.bin'), Buffer.from([0, 3]));
+  await git(root, 'add', '-A'); await git(root, 'commit', '-m', 'main');
+  await expect(git(root, 'merge', 'side')).rejects.toThrow();
+  const { id } = await addProject(app);
+  const snapshot = await readProjectGitSnapshot(id);
+
+  expect((await readProjectGitDiff(id, 'both.txt', undefined, snapshot.revision)).conflict)
+    .toEqual({ base: 'base\n', ours: 'main\n', theirs: 'side\n' });
+  // Added on both sides: there is no common base.
+  expect((await readProjectGitDiff(id, 'added.txt', undefined, snapshot.revision)).conflict)
+    .toEqual({ base: null, ours: 'main added\n', theirs: 'side added\n' });
+  // Deleted on ours: no stage 2.
+  expect((await readProjectGitDiff(id, 'ours-deletes.txt', undefined, snapshot.revision)).conflict)
+    .toEqual({ base: 'base\n', ours: null, theirs: 'side change\n' });
+  // A binary conflict keeps only the existing note, never invented text.
+  expect((await readProjectGitDiff(id, 'binary.bin', undefined, snapshot.revision)).conflict).toBeUndefined();
+  expect(getLog().map(entry => entry.message)).toContain('review: no three-way view for binary.bin: base is binary');
+  // A side the index lists but whose object is gone is not "not in this version": the marker diff stays.
+  const { stdout: theirsOid } = await exec('git', ['rev-parse', ':3:app/both.txt'], { cwd: root });
+  await fs.rm(path.join(root, '.git', 'objects', theirsOid.trim().slice(0, 2), theirsOid.trim().slice(2)), { force: true });
+  const damaged = await readProjectGitDiff(id, 'both.txt', undefined, (await readProjectGitSnapshot(id)).revision);
+  expect(damaged.conflict).toBeUndefined();
+  expect(damaged).toMatchObject({ baseText: 'main\n', currentText: expect.stringContaining('<<<<<<<') });
+  expect(getLog().map(entry => entry.message)).toContain('review: no three-way view for both.txt: theirs could not be read');
 });
 
 it('shows a file renamed differently on both sides as conflicts, even with no working file left', async () => {

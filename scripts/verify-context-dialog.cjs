@@ -55,26 +55,32 @@ app.whenReady().then(async () => {
     const languages = [...new Set(await js(`[...document.querySelectorAll('#uiLanguage option')].map(o=>o.value)`))];
     assert.ok(languages.length >= 11, 'all interface languages: ' + languages.join(','));
     const results = [];
+    // With automatic compaction on, the ring fills toward the compaction point and three rows say so;
+    // with it off, it fills toward the large-chat warning, which gets a fourth row (#1806).
+    for (const auto of [true, false]) {
+    await js(`window.api.saveSettings({compaction:{auto:${auto},autoTokens:300000}})`); await pause(300);
     for (const language of languages) {
       await js(`(()=>{const s=document.getElementById('uiLanguage');s.value=${JSON.stringify('LANG')};s.dispatchEvent(new Event('change',{bubbles:true}));return 1})()`.replace('LANG', language));
       await pause(500);
       await js(`(()=>{const m=document.getElementById('contextMeter');if(!m.classList.contains('pinned'))document.getElementById('contextMeterButton').click();return 1})()`);
       await pause(300);
       const r = await js(`(()=>{const d=document.getElementById('contextMeterInfo'),box=d.getBoundingClientRect();
-        const rows=[...d.querySelectorAll('.context-data dt')].map(dt=>{const dd=dt.nextElementSibling,a=dt.getBoundingClientRect(),b=dd.getBoundingClientRect();
+        const rows=[...d.querySelectorAll('.context-data dt')].filter(dt=>!dt.hidden).map(dt=>{const dd=dt.nextElementSibling,a=dt.getBoundingClientRect(),b=dd.getBoundingClientRect();
           return {label:dt.textContent,value:dd.textContent,inside:a.left>=box.left-1&&b.right<=box.right+1,overlap:a.right>b.left+1&&Math.abs(a.top-b.top)<4,clipped:dt.scrollWidth>dt.clientWidth+1||dd.scrollWidth>dd.clientWidth+1}});
         return {lang:document.documentElement.lang,rows,inViewport:box.left>=0&&box.right<=innerWidth&&box.top>=0}})()`);
       results.push(r);
-      assert.equal(r.rows.length, 4, language + ': four rows');
+      assert.equal(r.rows.length, auto ? 3 : 4, language + ': ' + (auto ? 'three' : 'four') + ' rows');
+      assert.equal(r.rows.some(row => /4\d\d/.test(row.value) && auto), false, language + ': no derived limit shown while compaction is on');
       assert.ok(r.inViewport, language + ': dialog visible');
       for (const row of r.rows) {
         assert.ok(row.inside && !row.overlap && !row.clipped, language + ': row fits: ' + JSON.stringify(row));
         assert.ok(row.value.trim().length > 0 && !/undefined|NaN|\{\d\}/.test(row.value + row.label), language + ': row has a value: ' + JSON.stringify(row));
       }
-      if (['en', 'de', 'pt-BR'].includes(language)) await capture('context-' + language);
+      if (['en', 'de', 'pt-BR'].includes(language)) await capture('context-' + language + (auto ? '' : '-auto-off'));
+    }
     }
     await js(`(()=>{const s=document.getElementById('uiLanguage');s.value='en';s.dispatchEvent(new Event('change',{bubbles:true}));return 1})()`);
     assert.deepEqual(errors, [], 'no renderer errors');
-    console.log('PASS: context dialog has four labelled rows that fit in ' + results.length + ' languages. ' + output);
+    console.log('PASS: context dialog rows fit in ' + languages.length + ' languages, with automatic compaction on and off. ' + output);
   } finally { win.destroy(); await server?.close(); app.quit(); }
 }).catch(error => { console.error(error); app.exit(1); });
