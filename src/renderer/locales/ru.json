@@ -3215,5 +3215,6 @@
   "{1}: {0} settings|one": "{1}: {0} настройка",
   "{1}: {0} settings|few": "{1}: {0} настройки",
   "{1}: {0} settings|many": "{1}: {0} настроек",
-  "Your settings changed after the file was chosen. Choose it again.": "Настройки изменились после выбора файла. Выберите его снова."
+  "Your settings changed after the file was chosen. Choose it again.": "Настройки изменились после выбора файла. Выберите его снова.",
+  "This backup has a setting this version does not accept, so nothing was imported.": "В этой резервной копии есть настройка, которую эта версия не принимает, поэтому ничего не импортировано."
 }

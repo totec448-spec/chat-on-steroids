@@ -34,7 +34,7 @@ const PER_COMPUTER: ReadonlyArray<readonly string[]> = [
   ['ui', 'browserPreferences'], ['ui', 'cosBrowserTrayHint'], ['ui', 'autoRefreshPluginsAsked']
 ];
 
-export type BackupErrorCode = 'not-a-backup' | 'newer-version' | 'too-large' | 'wrong-passphrase' | 'passphrase-too-short';
+export type BackupErrorCode = 'not-a-backup' | 'newer-version' | 'too-large' | 'wrong-passphrase' | 'passphrase-too-short' | 'invalid-settings';
 
 export class BackupError extends Error {
   constructor(readonly code: BackupErrorCode, message: string) {

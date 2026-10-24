@@ -3105,5 +3105,6 @@
   "Unattributed calls allowed": "İlişkilendirilmemiş çağrılara izin verildi",
   "Hide secrets from ChatGPT off": "Gizli bilgileri ChatGPT'den gizle kapalı",
   "{1}: {0} settings|one": "{1}: {0} ayar",
-  "Your settings changed after the file was chosen. Choose it again.": "Dosya seçildikten sonra ayarların değişti. Dosyayı yeniden seç."
+  "Your settings changed after the file was chosen. Choose it again.": "Dosya seçildikten sonra ayarların değişti. Dosyayı yeniden seç.",
+  "This backup has a setting this version does not accept, so nothing was imported.": "Bu yedekte bu sürümün kabul etmediği bir ayar var, bu yüzden hiçbir şey içe aktarılmadı."
 }

@@ -919,7 +919,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       if (error instanceof BackupError) logInfo(`settings backup: refused the chosen file (${error.code})`);
       throw error;
     }
-    const { changed, wider } = importPlan(backup);
+    // A value this version's settings do not accept (an edited file, or a value a later version
+    // dropped) refuses the whole file: importing the rest would leave a half-applied backup.
+    let plan: ReturnType<typeof importPlan>;
+    try { plan = importPlan(backup); } catch (error) {
+      if (!(error instanceof z.ZodError)) throw error;
+      logInfo(`settings backup: refused the chosen file (invalid-settings at ${error.issues[0]?.path.join('.') || 'settings'}); nothing changed`);
+      throw new BackupError('invalid-settings', 'This backup has a setting this version does not accept, so nothing was imported.');
+    }
+    const { changed, wider } = plan;
     pendingImport = { token: randomUUID(), backup, changed, wider };
     return {
       token: pendingImport.token, file: path.basename(file), appVersion: backup.appVersion, exportedAt: backup.exportedAt,

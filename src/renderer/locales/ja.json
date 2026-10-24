@@ -3050,5 +3050,6 @@
   "Trust only selected chats off": "選択したチャットのみ信頼 オフ",
   "Unattributed calls allowed": "関連付けのない呼び出しを許可",
   "Hide secrets from ChatGPT off": "シークレットを ChatGPT から隠す オフ",
-  "Your settings changed after the file was chosen. Choose it again.": "ファイルを選んだ後に設定が変わりました。もう一度選んでください。"
+  "Your settings changed after the file was chosen. Choose it again.": "ファイルを選んだ後に設定が変わりました。もう一度選んでください。",
+  "This backup has a setting this version does not accept, so nothing was imported.": "このバックアップには、このバージョンで使えない設定が含まれているため、何もインポートされませんでした。"
 }

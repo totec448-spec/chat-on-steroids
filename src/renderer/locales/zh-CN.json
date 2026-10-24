@@ -3050,5 +3050,6 @@
   "Trust only selected chats off": "关闭仅信任选定的聊天",
   "Unattributed calls allowed": "允许无法关联的调用",
   "Hide secrets from ChatGPT off": "关闭对 ChatGPT 隐藏密钥",
-  "Your settings changed after the file was chosen. Choose it again.": "选择文件后你的设置已更改。请重新选择它。"
+  "Your settings changed after the file was chosen. Choose it again.": "选择文件后你的设置已更改。请重新选择它。",
+  "This backup has a setting this version does not accept, so nothing was imported.": "此备份包含此版本不接受的设置，因此未导入任何内容。"
 }

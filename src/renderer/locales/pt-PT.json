@@ -3160,5 +3160,6 @@
   "Hide secrets from ChatGPT off": "Ocultar segredos do ChatGPT desligado",
   "{1}: {0} settings|one": "{1}: {0} definição",
   "{1}: {0} settings|many": "{1}: {0} definições",
-  "Your settings changed after the file was chosen. Choose it again.": "As suas definições mudaram depois de o ficheiro ser escolhido. Escolha-o novamente."
+  "Your settings changed after the file was chosen. Choose it again.": "As suas definições mudaram depois de o ficheiro ser escolhido. Escolha-o novamente.",
+  "This backup has a setting this version does not accept, so nothing was imported.": "Esta cópia de segurança tem uma definição que esta versão não aceita, por isso nada foi importado."
 }
