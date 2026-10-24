@@ -3049,5 +3049,6 @@
   "Local control API actions on": "Bật thao tác của API điều khiển cục bộ",
   "Trust only selected chats off": "Tắt Chỉ tin cậy các cuộc trò chuyện đã chọn",
   "Unattributed calls allowed": "Cho phép lệnh gọi không gắn với cuộc trò chuyện",
-  "Hide secrets from ChatGPT off": "Tắt Ẩn bí mật khỏi ChatGPT"
+  "Hide secrets from ChatGPT off": "Tắt Ẩn bí mật khỏi ChatGPT",
+  "Your settings changed after the file was chosen. Choose it again.": "Cài đặt của bạn đã thay đổi sau khi chọn tệp. Hãy chọn lại tệp."
 }

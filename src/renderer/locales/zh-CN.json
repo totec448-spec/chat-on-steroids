@@ -3049,5 +3049,6 @@
   "Local control API actions on": "开启本地控制 API 操作",
   "Trust only selected chats off": "关闭仅信任选定的聊天",
   "Unattributed calls allowed": "允许无法关联的调用",
-  "Hide secrets from ChatGPT off": "关闭对 ChatGPT 隐藏密钥"
+  "Hide secrets from ChatGPT off": "关闭对 ChatGPT 隐藏密钥",
+  "Your settings changed after the file was chosen. Choose it again.": "选择文件后你的设置已更改。请重新选择它。"
 }

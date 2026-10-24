@@ -9,6 +9,8 @@ import { currentLanguage, t, tn } from './i18n.js';
  * when asked. The main process reads and checks the file; this page never sees a saved key.
  */
 const WRONG_PASSPHRASE = 'That passphrase does not open the saved keys in this backup.';
+/** The main process let go of the chosen file: only choosing it again can import it now. */
+const CHOOSE_AGAIN = new Set(['Choose the backup file again.', 'Your settings changed after the file was chosen. Choose it again.']);
 
 /** The Settings tab a changed setting is on, so the person can find it; the first match wins. */
 const CATEGORIES: ReadonlyArray<readonly [RegExp, string]> = [
@@ -162,6 +164,7 @@ export function initSettingsBackup(api: Api, hooks: { imported(state: AppState):
       if (!reply.ok) {
         error(importError, t(reply.error));
         if (reply.error === WRONG_PASSPHRASE) importPass.select();
+        if (CHOOSE_AGAIN.has(reply.error)) { choice = null; importBusy(false); $('importSettingsCancel').focus(); }
         return;
       }
       hide(importDialog);

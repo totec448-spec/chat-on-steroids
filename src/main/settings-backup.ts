@@ -29,7 +29,9 @@ const SEAL_AAD = Buffer.from(`${BACKUP_FORMAT}/${BACKUP_VERSION}`);
 
 /** Paths that belong to this computer; a backup never carries them, and an import never takes them. */
 const PER_COMPUTER: ReadonlyArray<readonly string[]> = [
-  ['connectorSuffix'], ['tunnel'], ['ui', 'browserBridgePort'], ['mcp', 'persistentUrls']
+  ['connectorSuffix'], ['tunnel'], ['ui', 'browserBridgePort'], ['mcp', 'persistentUrls'],
+  // Reported by this computer's window and browser extension, or this install's own answer.
+  ['ui', 'browserPreferences'], ['ui', 'cosBrowserTrayHint'], ['ui', 'autoRefreshPluginsAsked']
 ];
 
 export type BackupErrorCode = 'not-a-backup' | 'newer-version' | 'too-large' | 'wrong-passphrase' | 'passphrase-too-short';

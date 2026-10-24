@@ -3104,5 +3104,6 @@
   "Trust only selected chats off": "Yalnızca seçili sohbetlere güven kapalı",
   "Unattributed calls allowed": "İlişkilendirilmemiş çağrılara izin verildi",
   "Hide secrets from ChatGPT off": "Gizli bilgileri ChatGPT'den gizle kapalı",
-  "{1}: {0} settings|one": "{1}: {0} ayar"
+  "{1}: {0} settings|one": "{1}: {0} ayar",
+  "Your settings changed after the file was chosen. Choose it again.": "Dosya seçildikten sonra ayarların değişti. Dosyayı yeniden seç."
 }

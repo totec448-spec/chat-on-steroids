@@ -2746,4 +2746,48 @@ describe('settings backup over IPC', () => {
     expect(picked.data.changed).toEqual([]);
     expect(await apply({ token: picked.data.token, includeKeys: false })).toMatchObject({ ok: true, data: { changedCount: 0, keyCount: 0 } });
   });
+
+  it('applies the interface language it counts', async () => {
+    await setUp('dark', tunnelA, false);
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, language: 'de' } });
+    const file = path.join(dir, 'german.json');
+    await exportTo(file, { includeKeys: false });
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, language: 'en' } });
+    const picked = await pick(file);
+    expect(picked.data.changed).toEqual(['ui.language']);
+    expect(await apply({ token: picked.data.token, includeKeys: false })).toMatchObject({ ok: true, data: { changedCount: 1 } });
+    expect(getConfig().ui.language).toBe('de');
+  });
+
+  it('leaves out what only this computer reports, and never counts a change it would not make', async () => {
+    await setUp('dark', tunnelA, false);
+    const local = { browserPreferences: { overwrite: true, durations: false }, cosBrowserTrayHint: true, autoRefreshPluginsAsked: true };
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, ...local } });
+    const file = path.join(dir, 'this-computer.json');
+    await exportTo(file, { includeKeys: false });
+    const backup = JSON.parse(await fs.readFile(file, 'utf8'));
+    for (const field of Object.keys(local)) expect(backup.settings.ui).not.toHaveProperty(field);
+    // A backup that has them anyway (edited by hand) changes and counts none of them.
+    backup.settings.ui = { ...backup.settings.ui, browserPreferences: { overwrite: false, durations: true }, cosBrowserTrayHint: false, autoRefreshPluginsAsked: false };
+    await fs.writeFile(file, JSON.stringify(backup));
+    const picked = await pick(file);
+    expect(picked.data.changed).toEqual([]);
+    await apply({ token: picked.data.token, includeKeys: false });
+    expect(getConfig().ui).toMatchObject(local);
+  });
+
+  it('refuses an import whose preview no longer matches the settings, and changes nothing', async () => {
+    await setUp('dark', tunnelA, false);
+    const file = path.join(dir, 'stale.json');
+    await exportTo(file, { includeKeys: false });
+    await setUp('light', tunnelA, false);
+    const picked = await pick(file);
+    expect(picked.data).toMatchObject({ changed: ['ui.theme'], wider: [] });
+    // Read-only goes on after the preview: applying now would turn it off without the warning.
+    await setUp('light', tunnelA, true);
+    expect(await apply({ token: picked.data.token, includeKeys: false }))
+      .toEqual({ ok: false, error: 'Your settings changed after the file was chosen. Choose it again.' });
+    expect(getConfig()).toMatchObject({ readOnly: true, ui: { theme: 'light' } });
+    expect(await apply({ token: picked.data.token, includeKeys: false })).toEqual({ ok: false, error: 'Choose the backup file again.' });
+  });
 });
