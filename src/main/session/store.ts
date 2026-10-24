@@ -2376,6 +2376,17 @@ export async function readHydratedActivityCall(
 }
 
 /** Retrieves one immutable, bounded edit artifact by its durable session/call/index identity. */
+/** One recorded edit's before and after by its stored asset (#1827); null when gone, too large or damaged. */
+export async function readEditReviewAsset(sessionId: string, assetId: string): Promise<{ before: string; after: string } | null> {
+  assertSessionId(sessionId);
+  const data = await readAsset(sessionId, assetId, 512 * 1024);
+  if (!data) return null;
+  try {
+    const parsed = JSON.parse(data.toString('utf8')) as { before?: unknown; after?: unknown };
+    return typeof parsed.before === 'string' && typeof parsed.after === 'string' ? { before: parsed.before, after: parsed.after } : null;
+  } catch { return null; }
+}
+
 export async function readToolEditReview(sessionId: string, callId: string, changeIndex: number): Promise<ToolEditReview | null> {
   assertSessionId(sessionId);
   if (!/^[0-9a-f-]{36}$/i.test(callId) || !Number.isSafeInteger(changeIndex) || changeIndex < 0 || changeIndex >= 64) return null;

@@ -153,6 +153,15 @@ it('names a chat with one clean line, and clears the name for an empty one (#110
   expect(await handlers.get('sessions:rename')!(null, { id: 'missing-session-0001', title: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('Session not found') });
 });
 
+it('answers a turn\'s changed files and refuses a malformed request (#1827)', async () => {
+  const session = await createSession({ conversationId: 'ipc-turn-changes', title: 'Changes' });
+  const call = (name: string, payload: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  expect(await call('sessions:turnChanges', { sessionId: session.id, turnId: 'no-edits', from: 0 })).toEqual({ ok: true, data: { changes: [], total: 0 } });
+  expect(await call('sessions:turnFileDiff', { sessionId: session.id, turnId: 'no-edits', from: 0, path: 'a.ts' })).toEqual({ ok: true, data: null });
+  expect(await call('sessions:turnChanges', { sessionId: '../escape', turnId: 'x', from: 0 })).toMatchObject({ ok: false });
+  expect(await call('sessions:turnChanges', { sessionId: session.id, turnId: 'x', from: -1 })).toMatchObject({ ok: false });
+});
+
 it('enabling strict chat allowlisting keeps existing chats untrusted', async () => {
   const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
   resetTrustedChatsForTests();

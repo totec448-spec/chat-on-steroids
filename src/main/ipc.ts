@@ -134,8 +134,11 @@ import {
   setRecordingStorageLimit,
   readHandoff,
   readToolEditReview,
+  readEditReviewAsset,
+  readEvents,
   withSessionMutationFence
 } from './session/store.js';
+import { netTurnChanges, netTurnFileDiff, turnFileEdits, type EditAt } from './session/turn-changes.js';
 import { forgetSession, notifyChanged, onSessionChange } from './session/recorder.js';
 import { findInSession, locateMessage, locateSearchMatch, searchSessions } from './session/search.js';
 import { listBookmarks, setBookmark } from './session/bookmarks.js';
@@ -1139,6 +1142,21 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { projectId, path, baseRef, expectedRevision } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1),
       baseRef: z.string().min(1).max(256).optional(), expectedRevision: z.string().length(64).regex(/^[0-9a-f]+$/).optional() }).strict().parse(payload);
     return readProjectGitDiff(projectId, path, baseRef, expectedRevision);
+  });
+  // #1827: what one answer changed, per file, read from the turn's start on.
+  const turnChangesRequest = z.object({ sessionId: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i), turnId: z.string().min(1).max(256),
+    from: z.number().int().nonnegative() });
+  const turnEdits = async (request: z.infer<typeof turnChangesRequest>) =>
+    turnFileEdits(await readEvents(request.sessionId, { from: request.from, kinds: ['tool_call'] }), request.turnId);
+  const reviewOf = (sessionId: string) => (at: EditAt) => at.assetId ? readEditReviewAsset(sessionId, at.assetId) : Promise.resolve(null);
+  handle('sessions:turnChanges', async payload => {
+    const request = turnChangesRequest.strict().parse(payload);
+    const files = await turnEdits(request);
+    return { changes: await netTurnChanges(files, reviewOf(request.sessionId)), total: files.length };
+  });
+  handle('sessions:turnFileDiff', async payload => {
+    const request = turnChangesRequest.extend({ path: z.string().min(1).max(4096) }).strict().parse(payload);
+    return netTurnFileDiff(await turnEdits(request), request.path, reviewOf(request.sessionId));
   });
   handle('sessions:toolEditReview', async payload => {
     const { sessionId, callId, changeIndex } = z.object({
