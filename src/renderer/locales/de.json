@@ -3041,5 +3041,9 @@
   "{0} / {1} tokens · {2}% of the compaction point|one": "{0} / {1} Token · {2} % des Komprimierungspunkts",
   "{0} / {1} tokens · {2}% of the large-chat warning": "{0} / {1} Tokens · {2} % der Warnung für große Chats",
   "{0} / {1} tokens · {2}% of the large-chat warning|one": "{0} / {1} Token · {2} % der Warnung für große Chats",
-  "Large-chat warning at": "Warnung für große Chats ab"
+  "Large-chat warning at": "Warnung für große Chats ab",
+  "HTML export saves a whole session to a file": "Der HTML-Export speichert eine ganze Sitzung in einer Datei",
+  "Export as HTML": "Als HTML exportieren",
+  "Whole session as HTML": "Ganze Sitzung als HTML",
+  "HTML files": "HTML-Dateien"
 }
