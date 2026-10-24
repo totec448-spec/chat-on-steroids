@@ -3001,8 +3001,14 @@
   "Missing one? Open chatgpt.com to refresh.": "Thiếu? Mở chatgpt.com để làm mới.",
   "No projects yet. Add a folder to get started.": "Chưa có dự án nào. Thêm một thư mục để bắt đầu.",
   "That is not a ChatGPT Project": "Đó không phải là dự án ChatGPT",
-  "This project already has a ChatGPT Project": "Dự án này đã có dự án ChatGPT",
   "Its ChatGPT Project is being created": "Dự án ChatGPT của nó đang được tạo",
   "That Project is not one ChatGPT lists for this account": "ChatGPT không liệt kê dự án đó cho tài khoản này",
-  "That ChatGPT Project is already linked to another project": "Dự án ChatGPT đó đã được liên kết với dự án khác"
+  "That ChatGPT Project is already linked to another project": "Dự án ChatGPT đó đã được liên kết với dự án khác",
+  "Change ChatGPT Project…": "Đổi dự án ChatGPT…",
+  "Use another or a new ChatGPT Project for this project's new chats": "Dùng một dự án ChatGPT khác hoặc mới cho các cuộc trò chuyện mới của dự án này",
+  "Unlink ChatGPT Project": "Bỏ liên kết dự án ChatGPT",
+  "New chats start outside any ChatGPT Project. The Project and its chats stay in ChatGPT.": "Các cuộc trò chuyện mới bắt đầu bên ngoài mọi dự án ChatGPT. Dự án và các cuộc trò chuyện của nó vẫn ở trong ChatGPT.",
+  "Unlinked. The ChatGPT Project stays in ChatGPT.": "Đã bỏ liên kết. Dự án ChatGPT vẫn ở trong ChatGPT.",
+  "Choose its ChatGPT Project later from the project’s ⋯ menu.": "Chọn dự án ChatGPT của nó sau trong menu ⋯ của dự án.",
+  "Or choose later from the ⋯ menu.": "Hoặc chọn sau trong menu ⋯."
 }

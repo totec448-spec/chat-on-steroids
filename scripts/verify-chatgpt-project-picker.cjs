@@ -46,7 +46,7 @@ app.whenReady().then(async () => {
       { id: 'g-p-4', name: 'Research notes', linkedTo: null }
     ];
     const p = picker.createChatgptProjectPicker({ api: { chatgptProjectChoices: () => ok(choices), linkChatgptProject: () => ok(null), createChatgptProject: () => ok(null) },
-      anchor: () => anchor, onUpdated: () => {}, onError: () => {} });
+      anchor: () => anchor, onUpdated: () => {}, onError: () => {}, onNotice: () => {} });
     await p.hasChoices();
     await p.offer({ id: 'p1', name: 'Website', path: '/work/website', createdAt: 1 }, 'added');
     await new Promise(r => setTimeout(r, 250));

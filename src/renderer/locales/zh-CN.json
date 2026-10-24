@@ -3001,8 +3001,14 @@
   "Missing one? Open chatgpt.com to refresh.": "找不到？打开 chatgpt.com 刷新。",
   "No projects yet. Add a folder to get started.": "还没有项目。添加一个文件夹即可开始。",
   "That is not a ChatGPT Project": "这不是 ChatGPT 项目",
-  "This project already has a ChatGPT Project": "此项目已有 ChatGPT 项目",
   "Its ChatGPT Project is being created": "它的 ChatGPT 项目正在创建",
   "That Project is not one ChatGPT lists for this account": "ChatGPT 没有为此账户列出该项目",
-  "That ChatGPT Project is already linked to another project": "该 ChatGPT 项目已关联到另一个项目"
+  "That ChatGPT Project is already linked to another project": "该 ChatGPT 项目已关联到另一个项目",
+  "Change ChatGPT Project…": "更改 ChatGPT 项目…",
+  "Use another or a new ChatGPT Project for this project's new chats": "为此项目的新聊天使用另一个或新的 ChatGPT 项目",
+  "Unlink ChatGPT Project": "取消关联 ChatGPT 项目",
+  "New chats start outside any ChatGPT Project. The Project and its chats stay in ChatGPT.": "新聊天将在任何 ChatGPT 项目之外开始。该项目及其聊天仍保留在 ChatGPT 中。",
+  "Unlinked. The ChatGPT Project stays in ChatGPT.": "已取消关联。ChatGPT 项目仍保留在 ChatGPT 中。",
+  "Choose its ChatGPT Project later from the project’s ⋯ menu.": "稍后可在项目的 ⋯ 菜单中选择它的 ChatGPT 项目。",
+  "Or choose later from the ⋯ menu.": "也可以稍后在 ⋯ 菜单中选择。"
 }

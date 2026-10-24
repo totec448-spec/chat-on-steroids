@@ -289,6 +289,18 @@ function projectMenuItems(id: string): RowMenuItem[] {
       title: () => t('Use a new or an existing ChatGPT Project for this project\'s chats'),
       run: () => { const project = projects.find(row => row.id === id); if (project) void chatgptProjectPicker.offer(project, 'menu'); }
     } satisfies RowMenuItem] : []),
+    // A linked one can be changed or let go (Haz on #1757); unlinking deletes nothing in ChatGPT.
+    ...(link?.state === 'linked' ? [{
+      action: 'chatgpt-change', icon: 'i-swap',
+      label: () => t('Change ChatGPT Project…'),
+      title: () => t('Use another or a new ChatGPT Project for this project\'s new chats'),
+      run: () => { const project = projects.find(row => row.id === id); if (project) void chatgptProjectPicker.offer(project, 'menu'); }
+    } satisfies RowMenuItem, {
+      action: 'chatgpt-unlink', icon: 'i-unlink',
+      label: () => t('Unlink ChatGPT Project'),
+      title: () => t('New chats start outside any ChatGPT Project. The Project and its chats stay in ChatGPT.'),
+      run: () => void unlinkChatgptProjectOf(id)
+    } satisfies RowMenuItem] : []),
     // Only when its native ChatGPT Project could not be created; otherwise nothing about it shows.
     ...(link?.state === 'failed' || link?.state === 'uncertain' ? [{
       action: 'chatgpt-retry', icon: 'i-retry', disabled: retryingChatgptProject.has(id),
@@ -336,8 +348,18 @@ const chatgptProjectPicker = createChatgptProjectPicker({
     paintSessions();
     void refreshInputQueue();
   },
-  onError: message => toast(message)
+  onError: message => toast(t(message)),
+  onNotice: message => toast(message)
 });
+
+async function unlinkChatgptProjectOf(id: string): Promise<void> {
+  const updated = await run(api.unlinkChatgptProject(id));
+  if (!updated) return;
+  ++sessionsLoadGeneration;
+  projects = projects.map(row => row.id === updated.id ? updated : row);
+  paintSessions();
+  toast(t('Unlinked. The ChatGPT Project stays in ChatGPT.'));
+}
 
 const retryingChatgptProject = new Set<string>();
 async function retryChatgptProject(id: string): Promise<void> {
