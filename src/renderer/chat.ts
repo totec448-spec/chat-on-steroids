@@ -4,6 +4,7 @@ import { markdownVisibleText } from '../shared/markdown-text.js';
 import { providerEntitiesAsMarkdown } from '../shared/content-reference.js';
 import { initChatSearch, type ChatSearch } from './chat-search.js';
 import { initChatFind } from './chat-find.js';
+import { initQuoteSelection, type QuoteSelection } from './quote-selection.js';
 import { initChatCycle } from './chat-cycle.js';
 import { createWorkspaceTerminal } from './workspace-terminal.js';
 import { sendTerminalSelection } from './terminal-selection.js';
@@ -114,6 +115,7 @@ import { initSshProjectDialog } from './ssh-project-dialog.js';
 const api = window.api;
 let chatSearch: ChatSearch | null = null;
 let chatFind: ReturnType<typeof initChatFind> | null = null;
+let quoteSelection: QuoteSelection | null = null;
 
 
 /**
@@ -8471,6 +8473,7 @@ export function openChatView(name: string): void {
 }
 
 function showView(name: string): void {
+  quoteSelection?.reset();
   const pane = $('chatBody');
   if (name === 'settings') retireDictation();
   const leavingTimeline = timelineShown() && name !== 'timeline';
@@ -8496,6 +8499,7 @@ function showView(name: string): void {
 }
 
 function selectSession(id: string): void {
+  quoteSelection?.reset();
   newChatBranch = null;
   // An edit belongs to its chat: leaving it gives the composer back the draft it held before.
   if (editingQuestion) endEditing(true);
@@ -8544,6 +8548,7 @@ function selectSession(id: string): void {
 }
 
 function selectNewChat(projectId: string | null = null, branch: typeof newChatBranch = null): void {
+  quoteSelection?.reset();
   if (editingQuestion) endEditing(true);
   newChatBranch = branch;
   rememberDraft(); selectionGeneration++; chatFind?.selectionChanged(); replaceComposerDraft(); pendingNewInput = null;
@@ -9113,6 +9118,7 @@ export function initChat(next: Deps): void {
     reveal: revealChatLocation,
     row: rowForLocation
   });
+  quoteSelection = initQuoteSelection({ timeline: $('timeline'), input: $<HTMLTextAreaElement>('chatInput'), blocked: () => !!currentPreparedPlan() });
   chatSearch = initChatSearch({
     select: (id, match) => {
       if (id !== selectedId) { pendingNewInput = null; selectSession(id); }

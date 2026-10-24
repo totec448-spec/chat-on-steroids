@@ -3010,5 +3010,7 @@
   "Common base": "共同基础",
   "Theirs (incoming)": "对方 (传入)",
   "Not in this version": "此版本中不存在",
-  "Start or cancel the prepared plan first, then ask again.": "请先开始或取消已准备好的计划，然后再试一次。"
+  "Start or cancel the prepared plan first, then ask again.": "请先开始或取消已准备好的计划，然后再试一次。",
+  "Quote": "引用",
+  "Start or cancel the prepared plan first, then quote again.": "请先开始或取消已准备好的计划，然后再引用一次。"
 }

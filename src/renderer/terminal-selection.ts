@@ -10,10 +10,11 @@ export const MAX_TERMINAL_LINES = 400;
 export const MAX_TERMINAL_CHARACTERS = 20_000;
 
 /**
- * The selection as a fenced block, or null when it holds no text. Over the caps, the last lines
- * are kept and a line above the block says how much is left out.
+ * The selection's lines without empty lines at either end, held to the caps: over them the last
+ * lines are kept. `note` says how much is left out, and is empty when nothing is. Null when the
+ * selection holds no text.
  */
-export function terminalSelectionBlock(selection: string): string | null {
+export function limitedSelection(selection: string): { text: string; note: string } | null {
   const lines = selection.replace(/\r\n?/g, '\n').split('\n').map(line => line.trimEnd());
   while (lines.length && !lines[0]) lines.shift();
   while (lines.length && !lines[lines.length - 1]) lines.pop();
@@ -31,7 +32,17 @@ export function terminalSelectionBlock(selection: string): string | null {
     note = tn('Only the end of the selection is here: the last {0} of {1} line.', 'Only the end of the selection is here: the last {0} of {1} lines.',
       total, [kept.length.toLocaleString(currentLanguage()), total.toLocaleString(currentLanguage())]);
   }
-  const text = kept.join('\n');
+  return { text: kept.join('\n'), note };
+}
+
+/**
+ * The selection as a fenced block, or null when it holds no text. Over the caps, the last lines
+ * are kept and a line above the block says how much is left out.
+ */
+export function terminalSelectionBlock(selection: string): string | null {
+  const limited = limitedSelection(selection);
+  if (!limited) return null;
+  const { text, note } = limited;
   // A fence longer than any run of backticks in the output, so none of it can close the block.
   const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map(match => match[0].length));
   const fence = '`'.repeat(Math.max(3, longest + 1));
