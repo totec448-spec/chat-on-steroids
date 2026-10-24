@@ -3041,5 +3041,9 @@
   "{0} / {1} tokens · {2}% of the compaction point|one": "{0} / {1} token · sıkıştırma noktasının %{2} kadarı",
   "{0} / {1} tokens · {2}% of the large-chat warning": "{0} / {1} token · büyük sohbet uyarısının %{2} kadarı",
   "{0} / {1} tokens · {2}% of the large-chat warning|one": "{0} / {1} token · büyük sohbet uyarısının %{2} kadarı",
-  "Large-chat warning at": "Büyük sohbet uyarısı başlangıcı"
+  "Large-chat warning at": "Büyük sohbet uyarısı başlangıcı",
+  "HTML export saves a whole session to a file": "HTML dışa aktarımı tüm oturumu tek bir dosyaya kaydeder",
+  "Export as HTML": "HTML olarak dışa aktar",
+  "Whole session as HTML": "Tüm oturum HTML olarak",
+  "HTML files": "HTML dosyaları"
 }

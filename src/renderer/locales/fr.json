@@ -3090,5 +3090,9 @@
   "{0} / {1} tokens · {2}% of the large-chat warning": "{0} / {1} jetons · {2} % de l’alerte de grande conversation",
   "{0} / {1} tokens · {2}% of the large-chat warning|one": "{0} / {1} jeton · {2} % de l’alerte de grande conversation",
   "{0} / {1} tokens · {2}% of the large-chat warning|many": "{0} / {1} de jetons · {2} % de l’alerte de grande conversation",
-  "Large-chat warning at": "Alerte de grande conversation à partir de"
+  "Large-chat warning at": "Alerte de grande conversation à partir de",
+  "HTML export saves a whole session to a file": "L'export HTML enregistre une session entière dans un fichier",
+  "Export as HTML": "Exporter en HTML",
+  "Whole session as HTML": "Toute la session en HTML",
+  "HTML files": "Fichiers HTML"
 }

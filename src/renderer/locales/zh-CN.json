@@ -2992,5 +2992,9 @@
   "Keys and tokens in this project's tool results are hidden from ChatGPT": "此项目工具结果中的密钥和令牌对 ChatGPT 隐藏",
   "{0} / {1} tokens · {2}% of the compaction point": "{0}／{1} Token · 占压缩起点的 {2}%",
   "{0} / {1} tokens · {2}% of the large-chat warning": "{0}／{1} Token · 占大聊天警告值的 {2}%",
-  "Large-chat warning at": "大聊天警告起点"
+  "Large-chat warning at": "大聊天警告起点",
+  "HTML export saves a whole session to a file": "HTML 导出会把整个会话保存为一个文件",
+  "Export as HTML": "导出为 HTML",
+  "Whole session as HTML": "整个会话（HTML）",
+  "HTML files": "HTML 文件"
 }

@@ -2992,5 +2992,9 @@
   "Keys and tokens in this project's tool results are hidden from ChatGPT": "이 프로젝트의 도구 결과에 있는 키와 토큰은 ChatGPT에서 숨겨집니다",
   "{0} / {1} tokens · {2}% of the compaction point": "{0} / {1} 토큰 · 압축 시작점의 {2}%",
   "{0} / {1} tokens · {2}% of the large-chat warning": "{0} / {1} 토큰 · 큰 채팅 경고 기준의 {2}%",
-  "Large-chat warning at": "큰 채팅 경고 기준"
+  "Large-chat warning at": "큰 채팅 경고 기준",
+  "HTML export saves a whole session to a file": "HTML 내보내기는 전체 세션을 파일 하나로 저장합니다",
+  "Export as HTML": "HTML로 내보내기",
+  "Whole session as HTML": "전체 세션을 HTML로",
+  "HTML files": "HTML 파일"
 }
