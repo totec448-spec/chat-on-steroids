@@ -113,7 +113,6 @@
 .backup-review { margin: 0 0 12px; }
 .backup-review > summary { display: flex; align-items: center; gap: 6px; width: fit-content; cursor: pointer; color: var(--soft); list-style: none; }
 .backup-review > summary::-webkit-details-marker { display: none; }
-.backup-review > summary .sum-chev { margin-left: -5px; }
 .backup-review > summary:hover { color: var(--ink); }
 .backup-review[open] .sum-chev { transform: rotate(90deg); }
 .backup-review ul { margin: 8px 0 0; padding-left: 18px; color: var(--soft); }

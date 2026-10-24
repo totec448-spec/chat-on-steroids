@@ -4675,7 +4675,7 @@ it('offers archiving retired worker chats, off by default, and saves it', async 
 
 describe('settings backup dialogs', () => {
   const choice = (over: Record<string, unknown> = {}) => ({ token: '6f9619ff-8b86-4d01-b42d-00cf4fc964ff', file: 'backup.json', appVersion: '2.1.46',
-    exportedAt: '2026-10-23T08:00:00.000Z', changed: ['readOnly', 'ui.theme'], keyCount: 1, ...over });
+    exportedAt: '2026-10-23T08:00:00.000Z', changed: ['readOnly', 'ui.theme'], wider: [], keyCount: 1, ...over });
   const submit = (doc: Document, form: string) => doc.getElementById(form)!.dispatchEvent(new doc.defaultView!.Event('submit', { bubbles: true, cancelable: true }));
   const typeInto = (doc: Document, id: string, value: string) => {
     const input = doc.getElementById(id) as HTMLInputElement;
@@ -4744,6 +4744,12 @@ describe('settings backup dialogs', () => {
     expect(doc.getElementById('importSettingsSummary')!.textContent).toBe("2 settings will change. Folders and this computer's connection to ChatGPT stay as they are.");
     expect(doc.getElementById('importSettingsKeysRow')!.hidden).toBe(false);
     expect(doc.getElementById('importSettingsKeysLabel')!.textContent).toBe('Also import 1 saved key');
+    // Saved keys come along only when ticked.
+    const keys = doc.getElementById('importSettingsKeys') as HTMLInputElement;
+    expect(keys.checked).toBe(false);
+    expect(doc.getElementById('importSettingsPassRow')!.hidden).toBe(true);
+    keys.checked = true;
+    keys.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
     expect(doc.activeElement?.id).toBe('importSettingsPass');
     submit(doc, 'importSettingsForm');
     expect(doc.getElementById('importSettingsError')!.textContent).toBe('Enter the passphrase of this backup.');
@@ -4767,9 +4773,7 @@ describe('settings backup dialogs', () => {
     const doc = mounted.window.document;
     (doc.getElementById('importSettings') as HTMLButtonElement).click();
     await waitFor(() => expect((doc.getElementById('importSettingsDialog') as HTMLDialogElement).open).toBe(true));
-    const keys = doc.getElementById('importSettingsKeys') as HTMLInputElement;
-    keys.checked = false;
-    keys.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+    expect((doc.getElementById('importSettingsKeys') as HTMLInputElement).checked).toBe(false);
     expect(doc.getElementById('importSettingsPassRow')!.hidden).toBe(true);
     submit(doc, 'importSettingsForm');
     await waitFor(() => expect(importSettingsBackup).toHaveBeenCalledWith(choice().token, false, undefined));
@@ -4780,6 +4784,21 @@ describe('settings backup dialogs', () => {
     expect(doc.getElementById('importSettingsKeysRow')!.hidden).toBe(true);
     expect((doc.getElementById('importSettingsSubmit') as HTMLButtonElement).disabled).toBe(true);
     expect(doc.activeElement?.id).toBe('importSettingsCancel');
+  });
+
+  it('names what would give ChatGPT more access, and lists the other changes by Settings tab on request', async () => {
+    const pick = vi.fn(async () => ({ ok: true, data: choice({ keyCount: 0, changed: ['capabilities.command', 'readOnly', 'ui.appearance.dark.accent', 'ui.theme', 'goal.model', 'sessions.retainDays'],
+      wider: ['capabilities.command', 'readOnly'] }) }));
+    const mounted = await mountChat({}, [], { pickSettingsBackup: pick });
+    const doc = mounted.window.document;
+    (doc.getElementById('importSettings') as HTMLButtonElement).click();
+    await waitFor(() => expect((doc.getElementById('importSettingsDialog') as HTMLDialogElement).open).toBe(true));
+    expect(doc.getElementById('importSettingsWider')!.hidden).toBe(false);
+    expect(doc.getElementById('importSettingsWider')!.textContent).toBe('More access for ChatGPT: Run commands, Read-only mode off.');
+    const review = doc.getElementById('importSettingsReview') as HTMLDetailsElement;
+    expect([review.hidden, review.open]).toEqual([false, false]);
+    expect([...doc.querySelectorAll('#importSettingsChanges li')].map(item => item.textContent))
+      .toEqual(['Workspace: 2 settings', 'Appearance: 2 settings', 'Agents & automation: 1 setting', 'General: 1 setting']);
   });
 
   it('shows why a chosen file cannot be imported, and switches the language a backup brings', async () => {

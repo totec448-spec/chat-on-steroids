@@ -23,7 +23,10 @@ app.whenReady().then(async () => {
   const icons = fs.readFileSync(path.join(root, 'src/renderer/icons.css'), 'utf8')
     .replace("url('@phosphor-icons/web/regular/Phosphor.woff2')", `url('${font('regular/Phosphor.woff2')}')`)
     .replace("url('@phosphor-icons/web/fill/Phosphor-Fill.woff2')", `url('${font('fill/Phosphor-Fill.woff2')}')`);
-  const css = icons + fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8');
+  // Every stylesheet the window links, in its order; a missing one hides real layout (the
+  // disclosure chevron is drawn by settings.css).
+  const linked = [...fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8').matchAll(/<link rel="stylesheet" href="\.\/([^"]+)"/g)].map(match => match[1]);
+  const css = linked.map(name => name === 'icons.css' ? icons : fs.readFileSync(path.join(root, 'src/renderer', name), 'utf8')).join('\n');
   const html = withoutScripts(fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')).replace(/<link\b[^>]*>/g, '')
     .replace('</head>', `<style>${css}</style></head>`);
   const win = new BrowserWindow({ show: false, width: 1100, height: 760, webPreferences: { sandbox: true, offscreen: true, backgroundThrottling: false } });
@@ -34,7 +37,10 @@ app.whenReady().then(async () => {
     backup.initLanguage();
     const ok = data => Promise.resolve({ ok: true, data });
     window.fixtureChoice = { token: '6f9619ff-8b86-4d01-b42d-00cf4fc964ff', file: 'chat-on-steroids-settings-2026-10-23.json', appVersion: '2.1.46',
-      exportedAt: '2026-10-23T08:00:00.000Z', changed: Array.from({ length: 12 }, (_, i) => 'ui.setting' + i), keyCount: 3 };
+      exportedAt: '2026-10-23T08:00:00.000Z', keyCount: 3,
+      changed: ['capabilities.command', 'capabilities.edit', 'readOnly', 'ui.appearance.dark.accent', 'ui.theme', 'goal.model', 'multiAgent.maxWorkers',
+        'sessions.retainDays', 'compaction.autoTokens', 'ui.enterSends', 'ui.followOutput', 'ui.turnNotifications'],
+      wider: ['capabilities.command', 'capabilities.edit', 'readOnly'] };
     backup.initSettingsBackup({ exportSettings: () => ok(null), pickSettingsBackup: () => ok(window.fixtureChoice),
       importSettingsBackup: () => ok({ state: {}, changedCount: 12, keyCount: 3 }) }, { imported: () => {}, toast: () => {} });
     // The General page with the Backup section in view, as in the app.
@@ -47,11 +53,13 @@ app.whenReady().then(async () => {
     const padL = parseFloat(getComputedStyle(body).paddingLeft), padR = parseFloat(getComputedStyle(body).paddingRight);
     const shown = el => el && !el.closest('[hidden]') && el.getClientRects().length > 0;
     // The button bar is full-bleed by design (its line spans the dialog); its last button is what aligns.
-    const blocks = [...body.querySelectorAll(':scope > p, :scope > label, :scope > div > label')].filter(shown);
+    const blocks = [...body.querySelectorAll(':scope > p, :scope > label, :scope > div > label, :scope > details > summary')].filter(shown);
     const lastButton = [...body.querySelectorAll('.pet-delete-actions .btn')].filter(shown).pop();
-    const textLeft = el => { const first = el.querySelector('b, span') ?? el; const r = document.createRange(); r.selectNodeContents(first); return r.getBoundingClientRect().left; };
+    // A box (the access warning, a disclosure's summary) aligns by its own edge; text by its first letter.
+    const textLeft = el => { if (el.matches('.backup-wider, summary')) return el.getBoundingClientRect().left;
+      const first = el.querySelector('b, span') ?? el; const r = document.createRange(); r.selectNodeContents(first); return r.getBoundingClientRect().left; };
     const lefts = blocks.map(el => Math.round(textLeft(el) - b.left - padL));
-    const rights = [...blocks.filter(el => !el.matches('p')), lastButton].filter(Boolean).map(el => Math.round(b.right - padR - el.getBoundingClientRect().right));
+    const rights = [...blocks.filter(el => !el.matches('p, summary')), lastButton].filter(Boolean).map(el => Math.round(b.right - padR - el.getBoundingClientRect().right));
     const texts = [...d.querySelectorAll('b, em, span, small, button, h2, p')].filter(shown);
     const cut = texts.filter(el => el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflow !== 'visible').map(el => el.textContent.slice(0, 40));
     const buttons = [...d.querySelectorAll('.pet-delete-actions .btn')].filter(shown);
@@ -91,9 +99,11 @@ app.whenReady().then(async () => {
       assert.ok(exp.oneRow && !exp.wrapped.length, 'export: buttons on one row ' + tag);
       if (zoom === 1 && width === 1100 && (language === 'en' || language === 'de' || language === 'ja')) fs.writeFileSync(path.join(output, `export-${language}.png`), (await win.webContents.capturePage(exp.box)).toPNG());
       await win.webContents.executeJavaScript(`document.getElementById('exportSettingsDialog').close(); true`);
-      // Import, with saved keys and the passphrase field.
+      // Import in its tallest state: the access warning, Review changes open, saved keys ticked with the passphrase field.
       await win.webContents.executeJavaScript(`document.getElementById('importSettings').click(); true`);
       await new Promise(r => setTimeout(r, 120));
+      await win.webContents.executeJavaScript(`(()=>{ document.getElementById('importSettingsReview').open = true; const k = document.getElementById('importSettingsKeys'); k.checked = true; k.dispatchEvent(new Event('change')); return true; })()`);
+      await new Promise(r => setTimeout(r, 80));
       const imp = await win.webContents.executeJavaScript(measureDialog('importSettingsDialog'));
       results.push({ tag, dialog: 'import', ...imp });
       assert.ok(imp.inside, 'import dialog inside the window ' + tag);

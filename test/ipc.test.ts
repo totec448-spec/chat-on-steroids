@@ -2676,6 +2676,8 @@ describe('settings backup over IPC', () => {
     const picked = await pick(file);
     expect(picked).toMatchObject({ ok: true, data: { file: 'backup.json', appVersion: '0.0.0', keyCount: 0 } });
     expect(picked.data.changed).toEqual(['readOnly', 'ui.theme']);
+    // Read-only switched on narrows access: nothing to warn about.
+    expect(picked.data.wider).toEqual([]);
     const applied = await apply({ token: picked.data.token, includeKeys: false });
     expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, data: { changedCount: 2, keyCount: 0 } });
     expect(getConfig()).toMatchObject({ readOnly: true, ui: { theme: 'dark' }, tunnel: { tunnelId: tunnelB }, connectorSuffix: 'PC', roots });
