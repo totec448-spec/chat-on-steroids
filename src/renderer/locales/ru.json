@@ -3175,5 +3175,6 @@
   "Saved as {0}. Read it, then attach it on GitHub.": "Сохранено как {0}. Прочитайте его, затем прикрепите на GitHub.",
   "Needed for a problem report. Read it before you attach it.": "Нужен для сообщения о проблеме. Прочитайте его перед тем, как прикрепить.",
   "GitHub is open in your browser. Attach {0} in its Diagnostics report box yourself, then submit.": "GitHub открыт в браузере. Сами прикрепите {0} в поле «Diagnostics report», затем отправьте.",
-  "GitHub opens with this filled in. You submit it there; the app sends nothing.": "GitHub откроется с заполненной формой. Отправляете там вы; приложение ничего не отправляет."
+  "GitHub opens with this filled in. You submit it there; the app sends nothing.": "GitHub откроется с заполненной формой. Отправляете там вы; приложение ничего не отправляет.",
+  "GitHub opened with a shortened text. The whole text could not be copied, so it stays here.": "GitHub открылся с сокращённым текстом. Скопировать весь текст не удалось, поэтому он остаётся здесь."
 }

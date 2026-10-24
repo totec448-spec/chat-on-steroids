@@ -79,7 +79,7 @@ app.whenReady().then(async () => {
       const edges=[...d.querySelectorAll('.plugin-field,.feedback-report .setting-text,.feedback-kind,.feedback-update,.feedback-note')].filter(n=>n.offsetParent).map(n=>Math.round(n.getBoundingClientRect().left-box.left));
       return {fieldsScroll,fits:box.left>=0&&box.right<=innerWidth&&box.top>=0&&box.bottom<=innerHeight,cut,edges:[...new Set(edges)],
         primaryShown:primary.top>=box.top&&primary.bottom<=box.bottom-1&&primary.height>0,outside:shown.filter(n=>!inside(n)).map(n=>n.id||n.className),
-        fields,buttonsOneLine:buttons.every(b=>Math.abs(b.top-buttons[0].top)<1),scrollsSideways:d.scrollWidth>d.clientWidth+1};})()`);
+        fields,buttonsOneLine:buttons.every(b=>Math.abs(b.top-buttons[0].top)<1),scrollsSideways:d.scrollWidth>d.clientWidth+1,height:innerHeight};})()`);
     assert.equal(view.fits,true,`${label}: the dialog fits the window`);
     assert.deepEqual(view.cut,[],`${label}: no text is cut`);
     assert.deepEqual(view.outside,[],`${label}: nothing sticks out`);
@@ -87,7 +87,8 @@ app.whenReady().then(async () => {
     for (const edges of view.fields) assert.deepEqual(edges,[24,24],`${label}: every field spans the body ${JSON.stringify(view.fields)}`);
     assert.equal(view.buttonsOneLine,true,`${label}: the buttons share one line`);
     // In a normal window everything fits; only a short one scrolls the fields (the buttons stay put).
-    if (!label.includes('720')&&!label.includes('error')) assert.equal(view.fieldsScroll,false,`${label}: no scrolling at 1280 x 800`);
+    // Judged at the size the window really got: a CI runner's small virtual screen clamps it below 800.
+    if (!label.includes('720')&&!label.includes('error')&&view.height>=780) assert.equal(view.fieldsScroll,false,`${label}: no scrolling at 1280 x ${view.height}`);
     if (label.includes('error')) assert.equal(await js(`(()=>{const e=document.getElementById('feedbackError').getBoundingClientRect(),f=document.querySelector('.feedback-fields').getBoundingClientRect();return e.top>=f.top&&e.bottom<=f.bottom;})()`),true,`${label}: the error is in view`);
     assert.equal(view.primaryShown,true,`${label}: the main button is in view without scrolling`);
     assert.equal(view.edges.length<=1,true,`${label}: every block starts at one left edge ${JSON.stringify(view.edges)}`);
@@ -165,5 +166,6 @@ app.whenReady().then(async () => {
   }
   assert.deepEqual(errors,[]);
   console.log('PASS: send feedback from Activity and /feedback; problem needs text and report, idea needs both fields; update notice; done step; 13 languages, both themes, 720 px');
-  win.destroy();await server.close();app.exit(0);
-}).catch(async error=>{fs.mkdirSync(output,{recursive:true});if(win&&!win.isDestroyed())fs.writeFileSync(path.join(output,'failure.png'),(await win.webContents.capturePage()).toPNG());console.error(error);await server?.close();app.exit(1);});
+  // The dev server can keep a socket open after the window is gone; the check must still end.
+  win.destroy();await Promise.race([server.close(),new Promise(resolve=>setTimeout(resolve,2000))]);app.exit(0);
+}).catch(async error=>{fs.mkdirSync(output,{recursive:true});if(win&&!win.isDestroyed())fs.writeFileSync(path.join(output,'failure.png'),(await win.webContents.capturePage()).toPNG());console.error(error);await Promise.race([server?.close(),new Promise(resolve=>setTimeout(resolve,2000))]);app.exit(1);});

@@ -3031,5 +3031,6 @@
   "Saved as {0}. Read it, then attach it on GitHub.": "{0} として保存しました。内容を確認してから GitHub に添付してください。",
   "Needed for a problem report. Read it before you attach it.": "問題の報告に必要です。添付する前に内容を確認してください。",
   "GitHub is open in your browser. Attach {0} in its Diagnostics report box yourself, then submit.": "GitHub がブラウザーで開いています。{0} を「Diagnostics report」欄に自分で添付してから送信してください。",
-  "GitHub opens with this filled in. You submit it there; the app sends nothing.": "この内容が入力された GitHub が開きます。送信はそこで行います。アプリは何も送信しません。"
+  "GitHub opens with this filled in. You submit it there; the app sends nothing.": "この内容が入力された GitHub が開きます。送信はそこで行います。アプリは何も送信しません。",
+  "GitHub opened with a shortened text. The whole text could not be copied, so it stays here.": "GitHub は短くした文章で開きました。全文をコピーできなかったので、ここに残します。"
 }

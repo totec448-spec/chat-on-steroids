@@ -3031,5 +3031,6 @@
   "Saved as {0}. Read it, then attach it on GitHub.": "{0}(으)로 저장했습니다. 읽어 본 다음 GitHub에 첨부하세요.",
   "Needed for a problem report. Read it before you attach it.": "문제 신고에 필요합니다. 첨부하기 전에 읽어 보세요.",
   "GitHub is open in your browser. Attach {0} in its Diagnostics report box yourself, then submit.": "GitHub가 브라우저에서 열려 있습니다. {0}을(를) \"Diagnostics report\" 칸에 직접 첨부한 다음 제출하세요.",
-  "GitHub opens with this filled in. You submit it there; the app sends nothing.": "이 내용이 채워진 GitHub가 열립니다. 제출은 그곳에서 하며, 앱은 아무것도 보내지 않습니다."
+  "GitHub opens with this filled in. You submit it there; the app sends nothing.": "이 내용이 채워진 GitHub가 열립니다. 제출은 그곳에서 하며, 앱은 아무것도 보내지 않습니다.",
+  "GitHub opened with a shortened text. The whole text could not be copied, so it stays here.": "GitHub이 줄인 텍스트로 열렸습니다. 전체 텍스트를 복사하지 못해 여기에 그대로 둡니다."
 }

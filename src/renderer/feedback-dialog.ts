@@ -109,7 +109,12 @@ export function initFeedbackDialog(
         const whole = sending.kind === 'bug'
           ? [sending.what.trim(), sending.steps?.trim()].filter(Boolean).join('\n\n')
           : `${sending.problem.trim()}\n\n${sending.proposal.trim()}`;
-        await api.writeClipboard(whole);
+        // A failed copy keeps the draft: GitHub then holds only the shortened text, and the rest is here.
+        const copied = await api.writeClipboard(whole).catch(() => null);
+        if (!copied?.ok || !copied.data) {
+          showError(t('GitHub opened with a shortened text. The whole text could not be copied, so it stays here.'));
+          return;
+        }
       }
       sent = { kind: chosen, trimmed: reply.data.trimmed, report: savedReport };
       for (const field of [what, steps, problem, proposal]) field.value = '';
