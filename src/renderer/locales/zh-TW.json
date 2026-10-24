@@ -3001,8 +3001,14 @@
   "Missing one? Open chatgpt.com to refresh.": "找不到嗎？開啟 chatgpt.com 重新整理。",
   "No projects yet. Add a folder to get started.": "還沒有專案。新增一個資料夾即可開始。",
   "That is not a ChatGPT Project": "這不是 ChatGPT 專案",
-  "This project already has a ChatGPT Project": "此專案已有 ChatGPT 專案",
   "Its ChatGPT Project is being created": "它的 ChatGPT 專案正在建立",
   "That Project is not one ChatGPT lists for this account": "ChatGPT 未為此帳戶列出該專案",
-  "That ChatGPT Project is already linked to another project": "該 ChatGPT 專案已連結到另一個專案"
+  "That ChatGPT Project is already linked to another project": "該 ChatGPT 專案已連結到另一個專案",
+  "Change ChatGPT Project…": "變更 ChatGPT 專案…",
+  "Use another or a new ChatGPT Project for this project's new chats": "為此專案的新聊天使用另一個或新的 ChatGPT 專案",
+  "Unlink ChatGPT Project": "取消連結 ChatGPT 專案",
+  "New chats start outside any ChatGPT Project. The Project and its chats stay in ChatGPT.": "新聊天會在任何 ChatGPT 專案之外開始。該專案及其聊天仍保留在 ChatGPT 中。",
+  "Unlinked. The ChatGPT Project stays in ChatGPT.": "已取消連結。ChatGPT 專案仍保留在 ChatGPT 中。",
+  "Choose its ChatGPT Project later from the project’s ⋯ menu.": "稍後可在專案的 ⋯ 選單中選擇它的 ChatGPT 專案。",
+  "Or choose later from the ⋯ menu.": "也可以稍後在 ⋯ 選單中選擇。"
 }

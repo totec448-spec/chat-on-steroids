@@ -3001,8 +3001,14 @@
   "Missing one? Open chatgpt.com to refresh.": "없나요? chatgpt.com을 열어 새로 고치세요.",
   "No projects yet. Add a folder to get started.": "아직 프로젝트가 없습니다. 폴더를 추가해 시작하세요.",
   "That is not a ChatGPT Project": "ChatGPT 프로젝트가 아닙니다",
-  "This project already has a ChatGPT Project": "이 프로젝트에는 이미 ChatGPT 프로젝트가 있습니다",
   "Its ChatGPT Project is being created": "ChatGPT 프로젝트를 만드는 중입니다",
   "That Project is not one ChatGPT lists for this account": "ChatGPT가 이 계정에 표시하는 프로젝트가 아닙니다",
-  "That ChatGPT Project is already linked to another project": "이 ChatGPT 프로젝트는 이미 다른 프로젝트에 연결되어 있습니다"
+  "That ChatGPT Project is already linked to another project": "이 ChatGPT 프로젝트는 이미 다른 프로젝트에 연결되어 있습니다",
+  "Change ChatGPT Project…": "ChatGPT 프로젝트 변경…",
+  "Use another or a new ChatGPT Project for this project's new chats": "이 프로젝트의 새 채팅에 다른 ChatGPT 프로젝트나 새 프로젝트 사용",
+  "Unlink ChatGPT Project": "ChatGPT 프로젝트 연결 해제",
+  "New chats start outside any ChatGPT Project. The Project and its chats stay in ChatGPT.": "새 채팅은 ChatGPT 프로젝트 밖에서 시작됩니다. 프로젝트와 그 채팅은 ChatGPT에 남습니다.",
+  "Unlinked. The ChatGPT Project stays in ChatGPT.": "연결을 해제했습니다. ChatGPT 프로젝트는 ChatGPT에 남습니다.",
+  "Choose its ChatGPT Project later from the project’s ⋯ menu.": "ChatGPT 프로젝트는 나중에 프로젝트의 ⋯ 메뉴에서 고르세요.",
+  "Or choose later from the ⋯ menu.": "나중에 ⋯ 메뉴에서 골라도 됩니다."
 }

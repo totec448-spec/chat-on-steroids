@@ -6,7 +6,7 @@ import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js
 import { initDurableStore, readDurable, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import { initSessionStore, resetSessionStoreForTests } from '../src/main/session/store.js';
 import { chatgptProjectChoices, noteChatgptProjects, CHATGPT_PROJECT_CATALOG } from '../src/main/chatgpt-project-catalog.js';
-import { addProject, createChatgptProjectFor, getProject, linkChatgptProject, listProjects, removeProject } from '../src/main/projects.js';
+import { addProject, createChatgptProjectFor, getProject, linkChatgptProject, listProjects, removeProject, unlinkChatgptProject } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 
 const id = (digit: string) => `g-p-${digit.repeat(32)}`;
@@ -78,8 +78,9 @@ it('links a project without a ChatGPT Project to one the person already has, one
   await expect(linkChatgptProject(second.id, id('a'))).rejects.toThrow(/already linked to another project/);
   await expect(linkChatgptProject(second.id, id('9'))).rejects.toThrow(/not one ChatGPT lists/);
   await expect(linkChatgptProject('00000000-0000-4000-8000-000000000000', id('b'))).rejects.toThrow(/Project not found/);
-  // A linked project keeps its link; another link needs it to be failed first.
-  await expect(linkChatgptProject(first.id, id('b'))).rejects.toThrow(/already has a ChatGPT Project/);
+  // A mistaken link can be changed to another listed Project (Haz on #1757).
+  expect((await linkChatgptProject(first.id, id('b'))).chatgpt).toMatchObject({ state: 'linked', id: id('b') });
+  expect((await linkChatgptProject(first.id, id('a'))).chatgpt).toMatchObject({ state: 'linked', id: id('a') });
   // Removing the CoS project frees its ChatGPT Project for another.
   await removeProject(first.id);
   expect((await linkChatgptProject(second.id, id('a'))).chatgpt).toMatchObject({ state: 'linked', id: id('a') });
@@ -101,4 +102,23 @@ it('never links over a ChatGPT Project being created, and can create one later i
     ? { ...row, chatgpt: { state: 'failed', requestId: (requested.chatgpt as { requestId: string }).requestId, error: 'gone', updatedAt: 1 } } : row));
   expect((await linkChatgptProject(later.id, id('a'))).chatgpt).toMatchObject({ state: 'linked', id: id('a') });
   expect((await getProject(later.id))?.chatgpt).toMatchObject({ state: 'linked' });
+});
+
+it('unlinks a ChatGPT Project without touching it, and starts a new one in place of a linked one only when asked', async () => {
+  await noteChatgptProjects([{ id: id('a'), name: 'Kunden' }]);
+  const project = await addProject(path.join(approved, 'first'), { chatgpt: 'later' });
+  await linkChatgptProject(project.id, id('a'));
+  // Asking for a new Project without replace keeps the link, as before.
+  expect((await createChatgptProjectFor(project.id)).chatgpt).toMatchObject({ state: 'linked', id: id('a') });
+  // Unlinking frees it for another project; nothing in ChatGPT changes, so it is listed as before.
+  expect((await unlinkChatgptProject(project.id)).chatgpt).toBeUndefined();
+  expect((await chatgptProjectChoices()).find(choice => choice.id === id('a'))?.linkedTo).toBeNull();
+  expect((await getProject(project.id))?.chatgpt).toBeUndefined();
+  // Unlinking what is not linked is a no-op, never an error.
+  expect((await unlinkChatgptProject(project.id)).chatgpt).toBeUndefined();
+  await linkChatgptProject(project.id, id('a'));
+  expect((await createChatgptProjectFor(project.id, { replace: true })).chatgpt).toMatchObject({ state: 'requested' });
+  // While a new one is being created, neither unlinking nor relinking may race it.
+  await expect(unlinkChatgptProject(project.id)).rejects.toThrow(/being created/);
+  await expect(linkChatgptProject(project.id, id('a'))).rejects.toThrow(/being created/);
 });

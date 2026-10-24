@@ -8,15 +8,17 @@ type Reply<T> = { ok: true; data: T } | { ok: false; error: string };
 
 /**
  * Choosing a project's ChatGPT Project (#1756): a new one, or one the account already has, as
- * ChatGPT's sidebar listed them. Right after a folder is added the choice decides what happens;
- * closing it then keeps today's default, a new ChatGPT Project. From a project's menu, closing it
- * changes nothing. A ChatGPT Project another project uses is shown but cannot be picked.
+ * ChatGPT's sidebar listed them. Closing the choice changes nothing, right after a folder is added
+ * too: the project then has no ChatGPT Project until one is chosen from its menu, and nothing is
+ * created behind the person's back (Haz on #1757). From the menu a linked project can change to
+ * another one or a new one. A ChatGPT Project another project uses is shown but cannot be picked.
  */
 export function createChatgptProjectPicker(deps: {
   api: Pick<AppApi, 'chatgptProjectChoices' | 'linkChatgptProject' | 'createChatgptProject'>;
   anchor: (projectId: string) => HTMLElement | null;
   onUpdated: (project: LocalProject) => void;
   onError: (message: string) => void;
+  onNotice: (message: string) => void;
 }): { hasChoices(): Promise<boolean>; offer(project: LocalProject, mode: 'added' | 'menu'): Promise<void> } {
   let choices: ChatgptProjectChoice[] = [];
   let popup: SearchPopup | null = null;
@@ -42,12 +44,15 @@ export function createChatgptProjectPicker(deps: {
       if (mode === 'menu') await load();
       let decided = false;
       const decide = (work: () => Promise<Reply<LocalProject>>) => { decided = true; void settle(work()); };
-      const fresh: SearchPopupChoice[] = !project.chatgpt ? [{
+      const link = project.chatgpt;
+      // A new one in place of a linked or failed one only from the menu; never over a creation in flight.
+      const replaceable = !link || link.state === 'linked' || link.state === 'failed' || link.state === 'uncertain';
+      const fresh: SearchPopupChoice[] = replaceable ? [{
         label: t('New ChatGPT Project “{0}”', [project.name]),
         // Long names are cut in the list; the whole label stays readable on hover.
         title: t('New ChatGPT Project “{0}”', [project.name]),
         lead: icon('i-plus'),
-        pick: () => decide(() => deps.api.createChatgptProject(project.id))
+        pick: () => decide(() => deps.api.createChatgptProject(project.id, link ? { replace: true } : {}))
       }] : [];
       popup = createSearchPopup({
         trigger: () => deps.anchor(project.id),
@@ -69,13 +74,13 @@ export function createChatgptProjectPicker(deps: {
           } satisfies SearchPopupChoice;
         })],
         empty: () => t('No ChatGPT Project matches'),
-        notes: () => [t('Missing one? Open chatgpt.com to refresh.')],
-        // Right after adding, closing the choice keeps the default: a new ChatGPT Project.
-        onDismiss: () => { if (mode === 'added' && !decided) decide(() => deps.api.createChatgptProject(project.id)); }
+        notes: () => [t('Missing one? Open chatgpt.com to refresh.'),
+          ...(mode === 'added' ? [t('Or choose later from the ⋯ menu.')] : [])]
       });
       popup.show();
-      // No row to open it from (the sidebar hides it): after an add, keep the default at once.
-      if (!popup.open && mode === 'added' && !decided) decide(() => deps.api.createChatgptProject(project.id));
+      // No row to open the choice from (the sidebar hides it): after an add, nothing is created either;
+      // the person learns where to choose instead.
+      if (!popup.open && mode === 'added' && !decided) deps.onNotice(t('Choose its ChatGPT Project later from the project’s ⋯ menu.'));
     }
   };
 }

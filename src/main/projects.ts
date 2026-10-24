@@ -145,7 +145,7 @@ export function setProjectColor(projectId: string, color: ProjectColor | null): 
 /**
  * Links a CoS project to a ChatGPT Project the account already has (#1756), by its id. Only a
  * Project ChatGPT recently listed, never one another listed CoS project holds, and never over a
- * creation in flight: a `failed` or `uncertain` one, or none yet, may be replaced.
+ * creation in flight: none yet, a `failed` or `uncertain` one, or a mistaken link may be replaced.
  */
 export function linkChatgptProject(projectId: string, chatgptId: string): Promise<LocalProject> {
   const operation = mutations.then(async () => {
@@ -155,11 +155,8 @@ export function linkChatgptProject(projectId: string, chatgptId: string): Promis
     const project = projects.find(row => row.id === projectId && !row.ungrouped);
     if (!project) throw new Error('Project not found');
     const link = project.chatgpt;
-    if (link?.state === 'linked') {
-      if (link.id === chatgptId) return project;
-      throw new Error('This project already has a ChatGPT Project');
-    }
-    if (link && link.state !== 'failed' && link.state !== 'uncertain') throw new Error('Its ChatGPT Project is being created');
+    if (link?.state === 'linked' && link.id === chatgptId) return project;
+    if (link && link.state !== 'linked' && link.state !== 'failed' && link.state !== 'uncertain') throw new Error('Its ChatGPT Project is being created');
     if (!(await isListedChatgptProject(chatgptId))) throw new Error('That Project is not one ChatGPT lists for this account');
     const owner = projects.find(row => !row.ungrouped && row.id !== projectId && row.chatgpt?.state === 'linked' && row.chatgpt.id === chatgptId);
     if (owner) throw new Error('That ChatGPT Project is already linked to another project');
@@ -172,16 +169,46 @@ export function linkChatgptProject(projectId: string, chatgptId: string): Promis
   return operation;
 }
 
-/** Starts creating a new ChatGPT Project for a project that has none yet; one that has one keeps it. */
-export function createChatgptProjectFor(projectId: string): Promise<LocalProject> {
+/**
+ * Starts creating a new ChatGPT Project for a project that has none yet; one that has one keeps it,
+ * unless `replace` asks for a new one in place of a linked, failed or uncertain one (never over a
+ * creation in flight).
+ */
+export function createChatgptProjectFor(projectId: string, options: { replace?: boolean } = {}): Promise<LocalProject> {
   const operation = mutations.then(async () => {
     z.string().uuid().parse(projectId);
     const projects = await listProjects();
     const project = projects.find(row => row.id === projectId && !row.ungrouped);
     if (!project) throw new Error('Project not found');
-    if (project.chatgpt) return project;
+    const link = project.chatgpt;
+    if (link && !options.replace) return project;
+    if (link && link.state !== 'linked' && link.state !== 'failed' && link.state !== 'uncertain') throw new Error('Its ChatGPT Project is being created');
     const updated: LocalProject = { ...project, chatgpt: { state: 'requested', requestId: randomUUID(), updatedAt: Date.now() } };
+    if (link) logInfo(`projects: project ${projectId} asks for a new ChatGPT Project in place of its previous one`);
     await writeDurableNow('projects', projects.map(row => row.id === projectId ? updated : row));
+    return updated;
+  });
+  mutations = operation.catch(() => undefined);
+  return operation;
+}
+
+/**
+ * Takes a project's ChatGPT Project link away (Haz on #1757): its new chats start outside any
+ * ChatGPT Project until another is chosen. Nothing in ChatGPT changes; the Project and its chats
+ * stay there. Never while a new one is being created.
+ */
+export function unlinkChatgptProject(projectId: string): Promise<LocalProject> {
+  const operation = mutations.then(async () => {
+    z.string().uuid().parse(projectId);
+    const projects = await listProjects();
+    const project = projects.find(row => row.id === projectId && !row.ungrouped);
+    if (!project) throw new Error('Project not found');
+    const link = project.chatgpt;
+    if (!link) return project;
+    if (link.state !== 'linked' && link.state !== 'failed' && link.state !== 'uncertain') throw new Error('Its ChatGPT Project is being created');
+    const { chatgpt: _, ...updated } = project;
+    await writeDurableNow('projects', projects.map(row => row.id === projectId ? updated : row));
+    logInfo(`projects: project ${projectId} no longer uses a ChatGPT Project (the Project stays in ChatGPT)`);
     return updated;
   });
   mutations = operation.catch(() => undefined);

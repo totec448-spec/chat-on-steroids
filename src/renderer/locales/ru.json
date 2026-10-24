@@ -3145,8 +3145,14 @@
   "Missing one? Open chatgpt.com to refresh.": "Чего-то нет? Откройте chatgpt.com.",
   "No projects yet. Add a folder to get started.": "Проектов пока нет. Добавьте папку, чтобы начать.",
   "That is not a ChatGPT Project": "Это не проект ChatGPT",
-  "This project already has a ChatGPT Project": "У этого проекта уже есть проект ChatGPT",
   "Its ChatGPT Project is being created": "Его проект ChatGPT сейчас создаётся",
   "That Project is not one ChatGPT lists for this account": "ChatGPT не показывает этот проект для этой учётной записи",
-  "That ChatGPT Project is already linked to another project": "Этот проект ChatGPT уже связан с другим проектом"
+  "That ChatGPT Project is already linked to another project": "Этот проект ChatGPT уже связан с другим проектом",
+  "Change ChatGPT Project…": "Сменить проект ChatGPT…",
+  "Use another or a new ChatGPT Project for this project's new chats": "Использовать другой или новый проект ChatGPT для новых чатов этого проекта",
+  "Unlink ChatGPT Project": "Отвязать проект ChatGPT",
+  "New chats start outside any ChatGPT Project. The Project and its chats stay in ChatGPT.": "Новые чаты начинаются вне проектов ChatGPT. Проект и его чаты остаются в ChatGPT.",
+  "Unlinked. The ChatGPT Project stays in ChatGPT.": "Отвязано. Проект ChatGPT остаётся в ChatGPT.",
+  "Choose its ChatGPT Project later from the project’s ⋯ menu.": "Выберите его проект ChatGPT позже в меню ⋯ проекта.",
+  "Or choose later from the ⋯ menu.": "Или выберите позже в меню ⋯."
 }

@@ -3001,8 +3001,14 @@
   "Missing one? Open chatgpt.com to refresh.": "見つからない場合は chatgpt.com を開いてください。",
   "No projects yet. Add a folder to get started.": "プロジェクトはまだありません。フォルダーを追加して始めましょう。",
   "That is not a ChatGPT Project": "ChatGPT プロジェクトではありません",
-  "This project already has a ChatGPT Project": "このプロジェクトにはすでに ChatGPT プロジェクトがあります",
   "Its ChatGPT Project is being created": "この ChatGPT プロジェクトは作成中です",
   "That Project is not one ChatGPT lists for this account": "そのプロジェクトはこのアカウントの ChatGPT に表示されていません",
-  "That ChatGPT Project is already linked to another project": "その ChatGPT プロジェクトはすでに別のプロジェクトにリンクされています"
+  "That ChatGPT Project is already linked to another project": "その ChatGPT プロジェクトはすでに別のプロジェクトにリンクされています",
+  "Change ChatGPT Project…": "ChatGPT プロジェクトを変更…",
+  "Use another or a new ChatGPT Project for this project's new chats": "このプロジェクトの新しいチャットに別の、または新しい ChatGPT プロジェクトを使う",
+  "Unlink ChatGPT Project": "ChatGPT プロジェクトとのリンクを解除",
+  "New chats start outside any ChatGPT Project. The Project and its chats stay in ChatGPT.": "新しいチャットはどの ChatGPT プロジェクトにも属さずに始まります。プロジェクトとそのチャットは ChatGPT に残ります。",
+  "Unlinked. The ChatGPT Project stays in ChatGPT.": "リンクを解除しました。ChatGPT プロジェクトは ChatGPT に残ります。",
+  "Choose its ChatGPT Project later from the project’s ⋯ menu.": "ChatGPT プロジェクトは、あとでプロジェクトの ⋯ メニューから選べます。",
+  "Or choose later from the ⋯ menu.": "あとで ⋯ メニューから選ぶこともできます。"
 }

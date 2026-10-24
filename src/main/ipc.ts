@@ -94,7 +94,7 @@ import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { inFlightToolCalls } from './mcp/call-context.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, addRemoteProject, createChatgptProjectFor, linkChatgptProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff } from './projects.js';
+import { addProject, addRemoteProject, createChatgptProjectFor, linkChatgptProject, unlinkChatgptProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff } from './projects.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile, serverFileSnapshot } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
@@ -1059,9 +1059,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return project;
   });
   handle('projects:chatgpt-create', async payload => {
-    const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
-    const project = await createChatgptProjectFor(id);
+    const { id, replace } = z.object({ id: z.string().uuid(), replace: z.boolean().optional() }).strict().parse(payload);
+    const project = await createChatgptProjectFor(id, { replace: replace === true });
     if (project.chatgpt?.state === 'requested') wakeBrowserWork();
+    push('session:changed');
+    return project;
+  });
+  // Unlinking leaves the ChatGPT Project and its chats in ChatGPT; the project's new chats start outside it.
+  handle('projects:chatgpt-unlink', async payload => {
+    const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
+    const project = await unlinkChatgptProject(id);
     push('session:changed');
     return project;
   });

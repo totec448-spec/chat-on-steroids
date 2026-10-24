@@ -3097,8 +3097,14 @@
   "Missing one? Open chatgpt.com to refresh.": "Falta algum? Abra o chatgpt.com para atualizar.",
   "No projects yet. Add a folder to get started.": "Ainda não há projetos. Adicione uma pasta para começar.",
   "That is not a ChatGPT Project": "Isso não é um projeto do ChatGPT",
-  "This project already has a ChatGPT Project": "Este projeto já tem um projeto do ChatGPT",
   "Its ChatGPT Project is being created": "O projeto do ChatGPT dele está sendo criado",
   "That Project is not one ChatGPT lists for this account": "O ChatGPT não lista esse projeto para esta conta",
-  "That ChatGPT Project is already linked to another project": "Esse projeto do ChatGPT já está vinculado a outro projeto"
+  "That ChatGPT Project is already linked to another project": "Esse projeto do ChatGPT já está vinculado a outro projeto",
+  "Change ChatGPT Project…": "Trocar projeto do ChatGPT…",
+  "Use another or a new ChatGPT Project for this project's new chats": "Usar outro projeto do ChatGPT ou um novo para os novos chats deste projeto",
+  "Unlink ChatGPT Project": "Desvincular projeto do ChatGPT",
+  "New chats start outside any ChatGPT Project. The Project and its chats stay in ChatGPT.": "Os novos chats começam fora de qualquer projeto do ChatGPT. O projeto e seus chats continuam no ChatGPT.",
+  "Unlinked. The ChatGPT Project stays in ChatGPT.": "Desvinculado. O projeto do ChatGPT continua no ChatGPT.",
+  "Choose its ChatGPT Project later from the project’s ⋯ menu.": "Escolha o projeto do ChatGPT depois no menu ⋯ do projeto.",
+  "Or choose later from the ⋯ menu.": "Ou escolha depois no menu ⋯."
 }

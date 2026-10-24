@@ -1908,10 +1908,14 @@ it('offers a new chat beside a project\'s menu, and its color as a submenu and r
   expect(button.getAttribute('aria-expanded')).toBe('true');
   const menu = w.document.querySelector<HTMLElement>('.row-menu')!;
   expect(menu.getAttribute('role')).toBe('menu');
-  expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['group-new', 'color', 'secrets-shield', 'remove']);
+  expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['group-new', 'chatgpt-change', 'chatgpt-unlink', 'color', 'secrets-shield', 'remove']);
   expect(menuItem(w, 'remove').classList.contains('is-danger')).toBe(true);
   expect(w.document.activeElement).toBe(menuItem(w, 'group-new'));
   // Keyboard: Down and Up move, Right opens the color submenu on the current choice, Left comes back.
+  menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  expect(w.document.activeElement).toBe(menuItem(w, 'chatgpt-change'));
+  menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  expect(w.document.activeElement).toBe(menuItem(w, 'chatgpt-unlink'));
   menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
   expect(w.document.activeElement).toBe(menuItem(w, 'color'));
   menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
@@ -2165,11 +2169,12 @@ describe('choosing a ChatGPT Project for a project', () => {
     expect(w.document.querySelector('.chatgpt-project-picker')).toBeNull();
   });
 
-  it('keeps the default, a new ChatGPT Project, when the choice is closed', async () => {
+  it('creates nothing when the choice is closed, and says it can be made later from the menu', async () => {
     const { w, api } = await adding(listed);
+    expect(w.document.querySelector('.chatgpt-project-picker')!.textContent).toContain('Or choose later from the ⋯ menu.');
     w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await settle();
-    expect(api.createChatgptProject).toHaveBeenCalledWith(local.id);
+    expect(api.createChatgptProject).not.toHaveBeenCalled();
     expect(api.linkChatgptProject).not.toHaveBeenCalled();
   });
 
@@ -2196,6 +2201,24 @@ describe('choosing a ChatGPT Project for a project', () => {
     await settle();
     expect(w.document.querySelector('.chatgpt-project-picker')).toBeNull();
     expect(api.createChatgptProject).not.toHaveBeenCalled();
+  });
+
+  it('unlinks a linked project from its menu, and says the ChatGPT Project stays in ChatGPT', async () => {
+    const linked = { ...local, chatgpt: { state: 'linked' as const, id: existing, updatedAt: 4 } };
+    const { w } = await boot([], false, [], [linked]);
+    const api = (w as any).api;
+    api.unlinkChatgptProject = vi.fn(async () => ({ ok: true, data: local }));
+    const menuButton = w.document.querySelector<HTMLButtonElement>(`[data-row-menu="project:${local.id}"]`)!;
+    menuButton.click();
+    expect(w.document.querySelector('.row-menu [data-row-action="chatgpt-link"]')).toBeNull();
+    w.document.querySelector<HTMLButtonElement>('.row-menu [data-row-action="chatgpt-unlink"]')!.click();
+    await settle();
+    expect(api.unlinkChatgptProject).toHaveBeenCalledWith(local.id);
+    expect(w.document.body.textContent).toContain('Unlinked. The ChatGPT Project stays in ChatGPT.');
+    // Unlinked, the menu offers choosing one again instead of changing or unlinking.
+    menuButton.click();
+    expect(w.document.querySelector('.row-menu [data-row-action="chatgpt-unlink"]')).toBeNull();
+    expect(w.document.querySelector('.row-menu [data-row-action="chatgpt-link"]')).not.toBeNull();
   });
 });
 
@@ -2388,7 +2411,7 @@ it("marks every New response seen from the header, or one project's from its men
   const refresh = async () => { (w.document.getElementById('chatRefresh') as HTMLButtonElement).click(); await settle(); };
   expect(header().hidden).toBe(true);
   projectMenu(w, project.id);
-  expect(actions()).toEqual(['group-new', 'color', 'secrets-shield', 'remove']);
+  expect(actions()).toEqual(['group-new', 'chatgpt-change', 'chatgpt-unlink', 'color', 'secrets-shield', 'remove']);
   w.document.querySelector<HTMLElement>('.row-menu')!.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 
   // p1, p2 and u1 finish in the background; p3 is still running.
@@ -2402,13 +2425,13 @@ it("marks every New response seen from the header, or one project's from its men
   expect(header().hidden).toBe(false);
 
   projectMenu(w, project.id);
-  expect(actions()).toEqual(['group-new', 'mark-seen', 'color', 'secrets-shield', 'remove']);
+  expect(actions()).toEqual(['group-new', 'chatgpt-change', 'chatgpt-unlink', 'mark-seen', 'color', 'secrets-shield', 'remove']);
   menuItem(w, 'mark-seen').click();
   await settle();
   expect(unseen()).toEqual(['u1']);
   expect(row('p3').querySelector('.session-status.is-active')).not.toBeNull();
   projectMenu(w, project.id);
-  expect(actions()).toEqual(['group-new', 'color', 'secrets-shield', 'remove']);
+  expect(actions()).toEqual(['group-new', 'chatgpt-change', 'chatgpt-unlink', 'color', 'secrets-shield', 'remove']);
   w.document.querySelector<HTMLElement>('.row-menu')!.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 
   header().focus();
