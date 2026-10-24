@@ -3010,5 +3010,9 @@
   "Common base": "共同基礎",
   "Theirs (incoming)": "對方 (傳入)",
   "Not in this version": "此版本中不存在",
-  "Start or cancel the prepared plan first, then ask again.": "請先開始或取消已準備好的計畫，然後再試一次。"
+  "Start or cancel the prepared plan first, then ask again.": "請先開始或取消已準備好的計畫，然後再試一次。",
+  "Recent files": "最近的檔案",
+  "Attach {0} again": "再次附加 {0}",
+  "Recent files could not be loaded": "無法載入最近的檔案",
+  "No files attached in the last 24 hours": "過去 24 小時內沒有附加檔案"
 }

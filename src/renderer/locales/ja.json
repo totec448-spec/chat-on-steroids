@@ -3010,5 +3010,9 @@
   "Common base": "共通の基点",
   "Theirs (incoming)": "相手側 (取り込む側)",
   "Not in this version": "この版にはありません",
-  "Start or cancel the prepared plan first, then ask again.": "先に準備済みのプランを開始するか取り消してから、もう一度お試しください。"
+  "Start or cancel the prepared plan first, then ask again.": "先に準備済みのプランを開始するか取り消してから、もう一度お試しください。",
+  "Recent files": "最近のファイル",
+  "Attach {0} again": "{0} をもう一度添付",
+  "Recent files could not be loaded": "最近のファイルを読み込めませんでした",
+  "No files attached in the last 24 hours": "過去 24 時間に添付したファイルはありません"
 }

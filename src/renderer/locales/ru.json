@@ -3157,5 +3157,9 @@
   "Common base": "Общая база",
   "Theirs (incoming)": "Их (входящая)",
   "Not in this version": "Нет в этой версии",
-  "Start or cancel the prepared plan first, then ask again.": "Сначала запустите или отмените подготовленный план, затем повторите запрос."
+  "Start or cancel the prepared plan first, then ask again.": "Сначала запустите или отмените подготовленный план, затем повторите запрос.",
+  "Recent files": "Недавние файлы",
+  "Attach {0} again": "Прикрепить {0} снова",
+  "Recent files could not be loaded": "Не удалось загрузить недавние файлы",
+  "No files attached in the last 24 hours": "За последние 24 часа файлы не прикреплялись"
 }

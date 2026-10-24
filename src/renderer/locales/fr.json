@@ -3108,5 +3108,9 @@
   "Common base": "Base commune",
   "Theirs (incoming)": "La leur (entrante)",
   "Not in this version": "Absent de cette version",
-  "Start or cancel the prepared plan first, then ask again.": "Lancez ou annulez d'abord le plan préparé, puis redemandez."
+  "Start or cancel the prepared plan first, then ask again.": "Lancez ou annulez d'abord le plan préparé, puis redemandez.",
+  "Recent files": "Fichiers récents",
+  "Attach {0} again": "Joindre à nouveau {0}",
+  "Recent files could not be loaded": "Impossible de charger les fichiers récents",
+  "No files attached in the last 24 hours": "Aucun fichier joint au cours des dernières 24 heures"
 }

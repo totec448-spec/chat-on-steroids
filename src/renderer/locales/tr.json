@@ -3059,5 +3059,9 @@
   "Common base": "Ortak taban",
   "Theirs (incoming)": "Onlarınki (gelen)",
   "Not in this version": "Bu sürümde yok",
-  "Start or cancel the prepared plan first, then ask again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden isteyin."
+  "Start or cancel the prepared plan first, then ask again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden isteyin.",
+  "Recent files": "Son dosyalar",
+  "Attach {0} again": "{0} dosyasını yeniden ekle",
+  "Recent files could not be loaded": "Son dosyalar yüklenemedi",
+  "No files attached in the last 24 hours": "Son 24 saatte eklenen dosya yok"
 }
