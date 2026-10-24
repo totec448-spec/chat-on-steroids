@@ -1,16 +1,16 @@
-import { defaultAppearance, readableInk, mixColor, type AppearanceSettings } from '../shared/appearance.js';
+import { defaultAppearance, effectivePalette, readableInk, mixColor, type AppearanceSettings } from '../shared/appearance.js';
 
 /** User-facing 100% is 10% smaller than the former 1.3 base; IPC exposes relative zoom only. */
 export const UI_BASE_ZOOM = 1.17;
 
 /** Native Windows caption controls share the renderer's compact title-bar row. */
 export function titleBarOverlayForTheme(theme: 'dark' | 'light', appearance = defaultAppearance()) {
-  const palette = appearance[theme];
-  const background = appearance.translucentSidebar ? mixColor(palette.sidebar, palette.background, .13) : palette.sidebar;
+  const palette = effectivePalette(appearance, theme);
+  const background = appearance.translucentSidebar && appearance.highContrast !== true ? mixColor(palette.sidebar, palette.background, .13) : palette.sidebar;
   return { height: 36, color: '#00000000', symbolColor: readableInk(background) };
 }
 export function windowBackgroundForTheme(theme: 'dark' | 'light', appearance?: AppearanceSettings): string {
-  return (appearance ?? defaultAppearance())[theme].background;
+  return effectivePalette(appearance ?? defaultAppearance(), theme).background;
 }
 
 export interface DisplayWorkArea {
