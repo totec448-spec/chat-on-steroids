@@ -2979,7 +2979,7 @@ input[readonly] {
   border-radius: var(--r-md);
   background: var(--card);
   color: var(--ink);
-  line-height: 1.4;
+  line-height: calc(1.4 * var(--line-spacing, 1));
 }
 .msg.rich .markdown-dil-card :is(p, h1, h2, h3, h4, h5, h6) { margin: 0; }
 .msg.rich .markdown-dil-card > * + * { margin-top: 13px; }
@@ -2990,14 +2990,16 @@ input[readonly] {
 .msg.rich .markdown-dil-badge {
   flex-shrink: 0;
   padding: 3px 8px;
-  border-radius: 99px;
+  border: 1px solid var(--line);
+  border-radius: var(--pill);
   background: var(--wash);
   color: var(--soft);
   font-size: calc(11px * var(--text-scale, 1));
   font-weight: 600;
 }
 .msg.rich .markdown-dil-badge.markdown-dil-success {
-  background: color-mix(in srgb, var(--green) 12%, transparent);
+  border-color: var(--green-line);
+  background: var(--green-wash);
   color: var(--green);
 }
 .msg.rich .markdown-dil-grid {
@@ -3034,6 +3036,8 @@ input[readonly] {
 .msg.rich .markdown-dil-panel {
   border: 1px solid var(--line);
   border-radius: var(--r-md);
+  background: var(--card);
+  color: var(--ink);
   padding: 12px;
   max-width: 100%;
   min-width: 0;
@@ -3080,6 +3084,7 @@ input[readonly] {
   display: block; width: 140px; height: 140px; max-width: 100%; object-fit: cover; border-radius: var(--r-md);
 }
 .msg.rich .markdown-dil-chart {
+  --markdown-dil-label-height: calc(26px * var(--text-scale, 1));
   border: 1px solid var(--line); border-radius: var(--r-md); margin: 12px 0;
   padding: 14px; background: var(--card); min-width: 0;
 }
@@ -3091,16 +3096,16 @@ input[readonly] {
 .msg.rich .markdown-dil-chart-guide {
   flex: 0 1 auto; min-width: 36px; max-width: 30%; overflow: hidden;
   display: flex; flex-direction: column; justify-content: space-between;
-  text-align: end; padding-bottom: 26px; color: var(--soft); font-size: calc(11px * var(--text-scale, 1));
+  text-align: end; padding-bottom: var(--markdown-dil-label-height); color: var(--soft); font-size: calc(11px * var(--text-scale, 1));
 }
 .msg.rich .markdown-dil-chart-guide > span {
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .msg.rich .markdown-dil-chart-bars {
   display: flex; flex: 1; gap: 10px; align-items: stretch; min-width: 0;
-  box-sizing: border-box; padding-bottom: 26px;
+  box-sizing: border-box; padding-bottom: var(--markdown-dil-label-height);
   background: repeating-linear-gradient(to top, var(--line) 0 1px, transparent 1px 25%);
-  background-size: 100% calc(100% - 26px); background-repeat: no-repeat;
+  background-size: 100% calc(100% - var(--markdown-dil-label-height)); background-repeat: no-repeat;
 }
 .msg.rich .markdown-dil-chart-column {
   display: flex; flex: 1; flex-direction: column; justify-content: flex-end; align-items: center;
@@ -3108,10 +3113,10 @@ input[readonly] {
 }
 .msg.rich .markdown-dil-chart-bar {
   width: min(80%, 120px); min-height: 1px; border-radius: 7px 7px 0 0;
-  background: #245aa0; max-height: 100%;
+  background: var(--accent-fill, var(--accent)); max-height: 100%;
 }
 .msg.rich .markdown-dil-chart-x {
-  position: absolute; top: 100%; left: 0; width: 100%; height: 26px;
+  position: absolute; top: 100%; left: 0; width: 100%; height: var(--markdown-dil-label-height);
   font-size: calc(11px * var(--text-scale, 1)); text-align: center; padding-top: 5px;
   overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
