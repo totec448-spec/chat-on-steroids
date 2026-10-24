@@ -154,6 +154,22 @@ describe('commit', () => {
     expect(await git(root, 'log', '-1', '--format=%s', 'main')).toBe('baseline');
   });
 
+  it('refuses while a merge is in progress, where Git cannot commit a choice of files', async () => {
+    const { root, id } = await project();
+    await git(root, 'checkout', '-q', '-b', 'side');
+    await fs.writeFile(path.join(root, 'other.ts'), 'side\n');
+    await git(root, '-c', 'user.email=t@example.com', '-c', 'user.name=T', 'commit', '-qam', 'side');
+    await git(root, 'checkout', '-q', 'main');
+    await fs.writeFile(path.join(root, 'other.ts'), 'main\n');
+    await git(root, '-c', 'user.email=t@example.com', '-c', 'user.name=T', 'commit', '-qam', 'main');
+    await git(root, 'merge', 'side').catch(() => undefined);
+    await fs.writeFile(path.join(root, 'kept.ts'), 'export const kept = 9;\n');
+    const state = await readCommitState(id);
+    await expect(commitProjectChanges(id, { message: 'x', paths: ['other.ts'], expectedToken: state.token })).rejects.toThrow('Resolve the conflicts first, then commit.');
+    await expect(commitProjectChanges(id, { message: 'x', paths: ['kept.ts'], expectedToken: state.token }))
+      .rejects.toThrow('A merge is in progress. Finish it in a terminal or your Git tool, then commit here.');
+  });
+
   it('refuses on a detached HEAD, where a commit would belong to no branch', async () => {
     const { root, id } = await project();
     await git(root, 'checkout', '--detach');

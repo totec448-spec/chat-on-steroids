@@ -184,6 +184,13 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
   const chosen = snapshot.changes.filter(change => wanted.has(change.path));
   if (!chosen.length) throw new Error('Choose at least one file to commit.');
   if (chosen.length !== wanted.size) throw new Error('The changes changed. Review them again before committing.');
+  if (chosen.some(change => change.status === 'C')) throw new Error('Resolve the conflicts first, then commit.');
+  // A merge, cherry-pick or revert in progress commits everything or nothing; a choice of files cannot.
+  for (const marker of ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']) {
+    if (await fs.access(path.join(repo.gitDir, marker)).then(() => true, () => false)) {
+      throw new Error('A merge is in progress. Finish it in a terminal or your Git tool, then commit here.');
+    }
+  }
   const inRepository = (relative: string) => repo.prefix ? `${repo.prefix}/${relative}` : relative;
   // A rename is both of its paths: the old one goes, the new one comes.
   const paths = [...new Set(chosen.flatMap(change => [change.path, ...(change.previousPath ? [change.previousPath] : [])]))].map(inRepository);
