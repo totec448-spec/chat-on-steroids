@@ -2997,5 +2997,9 @@
   "Accent presets": "Màu nhấn có sẵn",
   "Each is easy to read in light and dark.": "Màu nào cũng dễ đọc ở cả giao diện sáng và tối.",
   "Orange": "Cam",
-  "Red": "Đỏ"
+  "Red": "Đỏ",
+  "HTML export saves a whole session to a file": "Xuất HTML lưu toàn bộ phiên vào một tệp",
+  "Export as HTML": "Xuất dạng HTML",
+  "Whole session as HTML": "Toàn bộ phiên dạng HTML",
+  "HTML files": "Tệp HTML"
 }

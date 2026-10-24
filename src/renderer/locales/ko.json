@@ -2997,5 +2997,9 @@
   "Accent presets": "강조 색 프리셋",
   "Each is easy to read in light and dark.": "모두 라이트와 다크에서 읽기 쉽습니다.",
   "Orange": "주황",
-  "Red": "빨강"
+  "Red": "빨강",
+  "HTML export saves a whole session to a file": "HTML 내보내기는 전체 세션을 파일 하나로 저장합니다",
+  "Export as HTML": "HTML로 내보내기",
+  "Whole session as HTML": "전체 세션을 HTML로",
+  "HTML files": "HTML 파일"
 }
