@@ -3104,5 +3104,7 @@
   "HTML export saves a whole session to a file": "HTML dışa aktarımı tüm oturumu tek bir dosyaya kaydeder",
   "Export as HTML": "HTML olarak dışa aktar",
   "Whole session as HTML": "Tüm oturum HTML olarak",
-  "HTML files": "HTML dosyaları"
+  "HTML files": "HTML dosyaları",
+  "Play sounds": "Ses çal",
+  "A short sound when a chat needs you, something fails, or a chat finishes in the background. Quiet during phone notifications' quiet hours.": "Bir sohbet sana ihtiyaç duyduğunda, bir şey başarısız olduğunda ya da bir sohbet arka planda bittiğinde kısa bir ses. Telefon bildirimlerinin sessiz saatlerinde sessiz kalır."
 }

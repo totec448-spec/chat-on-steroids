@@ -3104,5 +3104,7 @@
   "HTML export saves a whole session to a file": "Der HTML-Export speichert eine ganze Sitzung in einer Datei",
   "Export as HTML": "Als HTML exportieren",
   "Whole session as HTML": "Ganze Sitzung als HTML",
-  "HTML files": "HTML-Dateien"
+  "HTML files": "HTML-Dateien",
+  "Play sounds": "Töne abspielen",
+  "A short sound when a chat needs you, something fails, or a chat finishes in the background. Quiet during phone notifications' quiet hours.": "Ein kurzer Ton, wenn ein Chat dich braucht, etwas fehlschlägt oder ein Chat im Hintergrund fertig wird. Still während der Ruhezeiten der Handy-Benachrichtigungen."
 }

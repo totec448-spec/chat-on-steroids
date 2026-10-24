@@ -3055,5 +3055,7 @@
   "HTML export saves a whole session to a file": "HTML 匯出會將整個工作階段儲存為一個檔案",
   "Export as HTML": "匯出為 HTML",
   "Whole session as HTML": "整個工作階段（HTML）",
-  "HTML files": "HTML 檔案"
+  "HTML files": "HTML 檔案",
+  "Play sounds": "播放提示音",
+  "A short sound when a chat needs you, something fails, or a chat finishes in the background. Quiet during phone notifications' quiet hours.": "當聊天需要你、某項操作失敗，或聊天在背景完成時，播放一聲簡短的提示音。在手機通知的勿擾時段內靜音。"
 }

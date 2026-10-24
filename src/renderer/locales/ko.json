@@ -3055,5 +3055,7 @@
   "HTML export saves a whole session to a file": "HTML 내보내기는 전체 세션을 파일 하나로 저장합니다",
   "Export as HTML": "HTML로 내보내기",
   "Whole session as HTML": "전체 세션을 HTML로",
-  "HTML files": "HTML 파일"
+  "HTML files": "HTML 파일",
+  "Play sounds": "소리 재생",
+  "A short sound when a chat needs you, something fails, or a chat finishes in the background. Quiet during phone notifications' quiet hours.": "채팅이 나를 필요로 할 때, 무언가 실패했을 때, 또는 백그라운드에서 채팅이 끝났을 때 짧은 소리를 냅니다. 휴대폰 알림의 방해 금지 시간에는 울리지 않습니다."
 }
