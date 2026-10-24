@@ -3066,5 +3066,6 @@
   "Common base": "共同基礎",
   "Theirs (incoming)": "對方 (傳入)",
   "Not in this version": "此版本中不存在",
-  "Start or cancel the prepared plan first, then ask again.": "請先開始或取消已準備好的計畫，然後再試一次。"
+  "Start or cancel the prepared plan first, then ask again.": "請先開始或取消已準備好的計畫，然後再試一次。",
+  "These changes are too large to commit from here. Commit them in a terminal.": "這些變更太大，無法在這裡提交。請在終端機中提交。"
 }

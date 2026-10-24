@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import {
-  commitProjectChanges, createPullRequest, githubRepository, pushProject, readCommitState, setGhRunnerForTests, type GhRunner
+  commitProjectChanges, createPullRequest, githubRepository, pushProject, readCommitState, setChangesBudgetForTests, setGhRunnerForTests, type GhRunner
 } from '../src/main/project-commit.js';
 import { addProject } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
@@ -16,6 +16,14 @@ const logged = vi.hoisted(() => [] as string[]);
 vi.mock('../src/main/logger.js', async original => {
   const real = await original<typeof import('../src/main/logger.js')>();
   return { ...real, logInfo: (line: string) => { logged.push(line); real.logInfo(line); }, logWarn: (line: string) => { logged.push(line); real.logWarn(line); } };
+});
+
+// Lets a test make one Git command reject (a timeout, a spawn failure) instead of exiting non-zero.
+const gitFault = vi.hoisted(() => ({ reject: null as null | ((args: string[]) => boolean) }));
+vi.mock('../src/main/project-git.js', async original => {
+  const real = await original<typeof import('../src/main/project-git.js')>();
+  return { ...real, runGit: (cwd: string, args: string[], ...rest: unknown[]) =>
+    gitFault.reject?.(args) ? Promise.reject(new Error('Git took too long to respond')) : (real.runGit as (...all: unknown[]) => unknown)(cwd, args, ...rest) };
 });
 
 const exec = promisify(execFile);
@@ -37,6 +45,7 @@ beforeEach(async () => {
   initDurableStore(directory);
   await saveConfig({ ...defaultConfig(), roots: [{ name: 'work', path: approved }] });
   setGhRunnerForTests(null);
+  gitFault.reject = null;
 });
 
 afterEach(async () => {
@@ -128,6 +137,8 @@ describe('commit', () => {
     const home = path.join(directory, 'home');
     await fs.mkdir(home);
     const { root, id } = await project({ identity: false });
+    // macOS and some Linux setups guess an identity from the host name; this repository must not.
+    await git(root, 'config', 'user.useConfigOnly', 'true');
     await change(root);
     const previous = { HOME: process.env['HOME'], XDG_CONFIG_HOME: process.env['XDG_CONFIG_HOME'], USERPROFILE: process.env['USERPROFILE'] };
     Object.assign(process.env, { HOME: home, XDG_CONFIG_HOME: home, USERPROFILE: home });
@@ -224,6 +235,39 @@ describe('commit', () => {
       'git commit: refused (That branch name is not allowed.)',
       'pull request: refused (This repository is not on GitHub. Open the pull request on its own site.)'
     ]);
+  });
+
+  it.skipIf(process.platform === 'win32')('puts a detached HEAD back where it was when the commit on a new branch is refused', async () => {
+    const { root, id } = await project();
+    await git(root, 'checkout', '--detach');
+    const start = await git(root, 'rev-parse', 'HEAD');
+    await change(root);
+    await fs.writeFile(path.join(root, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    await expect(commitProjectChanges(id, { message: 'x', paths: ['kept.ts'], newBranch: 'try-it', expectedToken: await revision(id) })).rejects.toThrow('Git did not commit');
+    expect(await git(root, 'rev-parse', 'HEAD')).toBe(start);
+    await expect(git(root, 'symbolic-ref', '-q', 'HEAD')).rejects.toThrow();
+    expect(await git(root, 'branch', '--list', 'try-it')).toBe('');
+  });
+
+  it('puts everything back when a Git command fails to finish, not only when it says no', async () => {
+    const { root, id } = await project();
+    await change(root);
+    const token = await revision(id);
+    gitFault.reject = args => args[0] === 'commit';
+    await expect(commitProjectChanges(id, { message: 'x', paths: ['kept.ts'], newBranch: 'slow', expectedToken: token })).rejects.toThrow('Git took too long to respond');
+    gitFault.reject = null;
+    expect(await git(root, 'branch', '--show-current')).toBe('main');
+    expect(await git(root, 'branch', '--list', 'slow')).toBe('');
+    expect(await git(root, 'diff', '--cached', '--name-only')).toBe('');
+  });
+
+  it('refuses before reading when the changed files are too large to check', async () => {
+    const { root, id } = await project();
+    setChangesBudgetForTests(1024);
+    try {
+      await fs.writeFile(path.join(root, 'big.bin'), Buffer.alloc(2048, 7));
+      await expect(readCommitState(id)).rejects.toThrow('These changes are too large to commit from here. Commit them in a terminal.');
+    } finally { setChangesBudgetForTests(null); }
   });
 
   it('refuses on a detached HEAD, where a commit would belong to no branch', async () => {
@@ -367,6 +411,20 @@ describe('state and pull requests', () => {
     setGhRunnerForTests(async () => ({ code: 1, stdout: '', stderr: 'You are not logged into any GitHub hosts.' }));
     const page = await createPullRequest(id, { title: 'Raise kept', body: 'Because.' });
     expect(page.url).toMatch(/^https:\/\/github\.com\/octo\/app\/compare\/raise-kept\?/);
+  });
+
+  it.skipIf(process.platform === 'win32')("keeps gh's words whole when a character arrives in two pieces", async () => {
+    const { root, id } = await onGitHub();
+    await git(root, 'checkout', '-b', 'raise-kept');
+    const bin = path.join(directory, 'gh-bin');
+    await fs.mkdir(bin);
+    // "Größe" with the ö split across two writes, then a failure.
+    await fs.writeFile(path.join(bin, 'gh'), `#!/bin/sh\nif [ "$1" = auth ]; then exit 0; fi\nprintf 'Gr\\303' >&2\nsleep 0.3\nprintf '\\266\\303\\237e failed' >&2\nexit 1\n`, { mode: 0o755 });
+    const previous = process.env['PATH'];
+    process.env['PATH'] = `${bin}${path.delimiter}${previous}`;
+    try {
+      await expect(createPullRequest(id, { title: 't', body: 'b' })).rejects.toThrow('gh could not create the pull request:\nGröße failed');
+    } finally { process.env['PATH'] = previous; }
   });
 
   it('refuses a pull request from the default branch into itself', async () => {

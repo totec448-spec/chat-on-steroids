@@ -3066,5 +3066,6 @@
   "Common base": "Gốc chung",
   "Theirs (incoming)": "Của họ (đến)",
   "Not in this version": "Không có trong phiên bản này",
-  "Start or cancel the prepared plan first, then ask again.": "Hãy bắt đầu hoặc hủy kế hoạch đã chuẩn bị trước, rồi yêu cầu lại."
+  "Start or cancel the prepared plan first, then ask again.": "Hãy bắt đầu hoặc hủy kế hoạch đã chuẩn bị trước, rồi yêu cầu lại.",
+  "These changes are too large to commit from here. Commit them in a terminal.": "Các thay đổi này quá lớn để commit từ đây. Hãy commit chúng trong terminal."
 }

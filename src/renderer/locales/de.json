@@ -3116,5 +3116,6 @@
   "Common base": "Gemeinsame Basis",
   "Theirs (incoming)": "Ihre (eingehend)",
   "Not in this version": "Nicht in dieser Version",
-  "Start or cancel the prepared plan first, then ask again.": "Starte oder verwirf zuerst den vorbereiteten Plan und frage dann erneut."
+  "Start or cancel the prepared plan first, then ask again.": "Starte oder verwirf zuerst den vorbereiteten Plan und frage dann erneut.",
+  "These changes are too large to commit from here. Commit them in a terminal.": "Diese Änderungen sind zu groß, um sie hier zu committen. Committe sie im Terminal."
 }
