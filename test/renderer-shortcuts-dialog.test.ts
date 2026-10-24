@@ -97,6 +97,8 @@ it('uses ⌘ on a Mac, where Ctrl+/ is not the shortcut', async () => {
   expect(keys.get('Send to chat')).toEqual(['⌘⇧Enter']);
   // Ctrl+Tab is Ctrl on every system, as in browsers.
   expect(keys.get('Next chat')).toEqual(['Ctrl+Tab']);
+  // F11 is Show Desktop on a Mac, so full screen is the default View menu's ⌃⌘F there.
+  expect(keys.get('Full screen')).toEqual(['⌃⌘F']);
   // Hold-to-talk is Windows only: no row on a Mac.
   expect(keys.has('Hold to dictate')).toBe(false);
   expect(keys.get('New line')).toEqual(['⇧Enter']);
@@ -166,7 +168,7 @@ it('has a row for every file that handles modifier keys, so a new shortcut canno
   expect(handlers.length).toBeGreaterThan(10);
   const missing = handlers.filter(name => !sources.has(`renderer/${name}`) && !guards.has(name));
   expect(missing, 'add a row to shortcuts-dialog.ts, or name the file in guards with the reason').toEqual([]);
-  // The window's own keys (F11) are handled in the main process.
+  // The window's own keys (F11, and ⌃⌘F from the default menu on a Mac) are handled in the main process.
   const main = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
   expect(main).toMatch(/before-input-event/);
   expect(sources.has('main/index.ts')).toBe(true);

@@ -46,7 +46,8 @@ export function shortcutGroups(enterSends: () => boolean): ShortcutGroup[] {
         { label: () => t('Zoom in'), keys: () => [primaryShortcut('+')], source: 'renderer/main.ts' },
         { label: () => t('Zoom out'), keys: () => [primaryShortcut('−')], source: 'renderer/main.ts' },
         { label: () => t('Actual size'), keys: () => [primaryShortcut('0')], source: 'renderer/main.ts' },
-        { label: () => t('Full screen'), keys: () => ['F11'], source: 'main/index.ts' },
+        // F11 is Show Desktop on a Mac and never reaches the window, so there it is Electron's default View menu: ⌃⌘F.
+        { label: () => t('Full screen'), keys: () => [isMac() ? '⌃⌘F' : 'F11'], source: 'main/index.ts' },
         { label: () => t('Keyboard shortcuts'), keys: () => [primaryShortcut('/')], source: 'renderer/shortcuts-dialog.ts' }
       ]
     },
