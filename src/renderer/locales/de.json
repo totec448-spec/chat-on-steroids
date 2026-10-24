@@ -3040,6 +3040,16 @@
   "Off for every project in Settings": "Für alle Projekte in den Einstellungen ausgeschaltet",
   "This project's tools send keys and tokens to ChatGPT as they are": "Die Werkzeuge dieses Projekts senden Schlüssel und Tokens unverändert an ChatGPT",
   "Keys and tokens in this project's tool results are hidden from ChatGPT": "Schlüssel und Tokens in den Werkzeugergebnissen dieses Projekts sind vor ChatGPT verborgen",
+  "High contrast": "Hoher Kontrast",
+  "Black or white background with stronger text and lines. Your colors stay saved for when you turn it off.": "Schwarzer oder weißer Hintergrund mit kräftigerem Text und stärkeren Linien. Deine Farben bleiben gespeichert, bis du ihn wieder ausschaltest.",
+  "Accent presets": "Akzent-Vorlagen",
+  "Each is easy to read in light and dark.": "Jede ist hell und dunkel gut lesbar.",
+  "Orange": "Orange",
+  "Red": "Rot",
+  "HTML export saves a whole session to a file": "Der HTML-Export speichert eine ganze Sitzung in einer Datei",
+  "Export as HTML": "Als HTML exportieren",
+  "Whole session as HTML": "Ganze Sitzung als HTML",
+  "HTML files": "HTML-Dateien",
   "Quote": "Zitieren",
   "Start or cancel the prepared plan first, then quote again.": "Starte oder verwirf zuerst den vorbereiteten Plan und zitiere dann erneut."
 }
