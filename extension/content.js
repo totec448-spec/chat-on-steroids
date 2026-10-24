@@ -2747,7 +2747,15 @@
   }
 
   let observedRoute = null;
+  // When this document reached its current path: load for the first one, else the first look at
+  // a new one. Every DOM change looks, so a page that left and came back starts again (#1759).
+  let routeArrival = { path: location.pathname, at: 0 };
+  function routeAge() {
+    if (routeArrival.path !== location.pathname) routeArrival = { path: location.pathname, at: performance.now() };
+    return performance.now() - routeArrival.at;
+  }
   function observe() {
+    routeAge();
     // This duplicate source document is only the native Project entry point. Its transcript
     // belongs to A's original recorder; do not adopt it while preparing the fresh composer.
     if (commandAttempt?.projectEntry && CLF_DOM.conversationId() === OPENED_CONVERSATION) return;
@@ -4854,6 +4862,10 @@
         pageConversation &&
         pageConversation !== askedConversation
       );
+      // Calls this document had not seen before, or that got their result: the only calls that
+      // are progress. A known call drawn again with another request id or owner is reported
+      // again, but counting it kept every repair refused while ChatGPT's stream was gone (#1787).
+      const advanced = [];
       const fresh = turn.calls.filter((call) => {
         // A mismatched owned turn is admissible only as a provisional-first-turn candidate.
         // Its request id must have survived the app's explicit owner read-back before the
@@ -4865,8 +4877,10 @@
         ) return false;
         const owner = index === activeTurnIndex ? activeLocalTurnId || '' : '';
         const signature = `${call.tool}\u0000${call.requestId || ''}\u0000${call.answered ? '1' : '0'}\u0000${owner}`;
-        if (callsReported.get(call.messageId) === signature) return false;
-        callsReported.set(call.messageId, signature);
+        const previous = callsReported.get(call.messageId);
+        if (previous?.signature === signature) return false;
+        if (previous === undefined || (call.answered && !previous.answered)) advanced.push(call);
+        callsReported.set(call.messageId, { signature, answered: Boolean(call.answered) });
         return true;
       });
       if (fresh.length > 0) {
@@ -4878,7 +4892,7 @@
           ((previous.turnId && previous.turnId === turn.turnId) ||
             (previous.calls || []).some(seen => turn.calls.some(call => call.messageId === seen.messageId))));
         const witnessedSend = Boolean(newestUser?.id && openedUserMessageId === newestUser.id);
-        if (generating && index === activeTurnIndex && (knownTurn || witnessedSend)) noteTurnProgress(turnId, 'page-call');
+        if (advanced.length && generating && index === activeTurnIndex && (knownTurn || witnessedSend)) noteTurnProgress(turnId, 'page-call');
         emit({
           kind: 'tool_evidence',
           ...(index === activeTurnIndex ? { turnId: activeLocalTurnId } : {}),
@@ -7491,6 +7505,10 @@
     // refused, so nothing this app types may drive it on). 'continued' is neither — that chat
     // is finished, and its controls are moot rather than fenced.
     const fenced = blocked === 'worker' || blocked === 'blocked';
+    // No answer from the app yet (a reloaded page, an app that is busy or away): nothing here is
+    // known, so the sheet says so instead of drawing Off and a missing key (#1787).
+    const contextUnknown = !context;
+    const goalUnknown = !goal;
     const auto = Boolean(context && context.auto) && !fenced;
     const threshold = context && context.threshold > 0 ? context.threshold : 0;
     // One setting, one control. The app sends the mode beside `enabled`, so there is a single
@@ -7526,13 +7544,17 @@
       // Two short lines rather than a sentence: this is read while reaching for something
       // else, and the only questions it answers are "is it on" and "at what point".
       tip: [
-        auto
+        contextUnknown
+          ? t('content_auto_compaction_waiting_app', 'Auto-compaction: waiting for the app')
+          : auto
           ? t('content_auto_compaction_on', 'Auto-compaction on$1', from ? `, ${from}` : '')
           : t('content_auto_compaction_off', 'Auto-compaction off'),
         blocked === 'worker'
           ? t('content_goal_off_prime_writes', 'Goal off — the prime writes this chat')
           : blocked === 'blocked'
             ? t('content_goal_off_blocked', 'Goal off — this chat is blocked in the app')
+            : goalUnknown
+            ? t('content_goal_loop_waiting_app', 'Goal and Loop: waiting for the app')
             : fresh
             ? !hasKey
               ? t('content_goal_no_api_key_unavailable', 'No API key — Goal and Loop unavailable')
@@ -7560,12 +7582,14 @@
               ? t('content_auto_compaction_worker_off', 'off here: worker chats never auto-compact')
               : blocked === 'blocked'
                 ? t('content_auto_compaction_blocked_off', 'off here: this chat is blocked in the app')
+                : contextUnknown
+                ? t('content_settings_waiting_app', 'waiting for the app')
                 : auto
                   ? from || t('content_auto_compaction_threshold_app', 'threshold set in the app')
                   : t('content_auto_compaction_manual', 'compact this chat by hand'),
           on: auto,
           warn: false,
-          disabled: fenced
+          disabled: fenced || contextUnknown
         }
       ],
       /**
@@ -7586,7 +7610,7 @@
       mode: fresh
         ? null
         : {
-            value: position,
+            value: goalUnknown ? '' : position,
             options: [
               {
                 value: 'off',
@@ -7620,6 +7644,8 @@
                 ? t('content_mode_note_prime_writes', 'the prime writes here')
                 : blocked === 'blocked'
                   ? t('content_mode_note_blocked', 'blocked in the app')
+                  : goalUnknown
+                  ? t('content_settings_waiting_app', 'waiting for the app')
                   : !hasKey
                   ? t('content_mode_note_key_required', 'OpenRouter key required')
                   : position === 'loop'
@@ -7627,8 +7653,8 @@
                     : position === 'goal'
                       ? t('content_mode_note_goal', 'replies until goal reached')
                       : t('content_mode_note_off', 'no replies written here'),
-            warn: !hasKey || fenced,
-            disabled: fenced
+            warn: (!hasKey && !goalUnknown) || fenced,
+            disabled: fenced || goalUnknown
           },
       /**
        * The one task, and — above a New Chat only — the mode it is written in.
@@ -7718,6 +7744,8 @@
             ? t('content_task_worker_unavailable', 'A worker chat is already driven by its prime.')
             : blocked === 'blocked'
               ? t('content_task_blocked_unavailable', 'This chat is blocked in the app. Release it there to drive it again.')
+              : goalUnknown
+              ? t('content_task_waiting_app', 'Waiting for Chat On Steroids to answer.')
               : !hasKey
               ? t('content_task_api_key_unavailable', 'Add an OpenRouter API key in the app first.')
               : ''
@@ -12856,6 +12884,8 @@
    * a row the page reads back differently (#821: `&#x20;` for a space) kept this document's
    * input slot for good, and every later message waited for a reload.
    */
+  /** How long a linked Project's page may load, from reaching it, before a missing composer counts (#1759). */
+  const PROJECT_PAGE_LOAD_MS = 30_000;
   const DESKTOP_RECEIPT_MS = 120_000;
   // The durable claim, never a project path/title guess, fences first tool evidence.
   let desktopProjectInput = null;
@@ -13317,6 +13347,14 @@
       (project ? CLF_DOM.projectHomeId() === project : location.pathname === '/') &&
       (project ? freshMarker() : new URL(location.href).searchParams.get('cos-input') === message.id) && !CLF_DOM.turns().length));
     if (!target && !ownsFreshPage()) return false;
+    // A linked Project ChatGPT no longer has (#1759). ChatGPT used to send its page home, which the
+    // extension reports; since October 2026 the page stays on "loading", with no composer, for good.
+    // Gone only when the page has had its time and the open Projects list does not name it.
+    if (!target && project && CLF_DOM.projectHomeId() === project && !CLF_DOM.composerVisible() &&
+        routeAge() >= PROJECT_PAGE_LOAD_MS && CLF_DOM.sidebarListsProject(project) === false) {
+      await ask({ type: 'project_unavailable', id: message.id, project });
+      return false;
+    }
     desktopInputBusy = true;
     let decision = null;
     let sent = false;
@@ -13673,6 +13711,10 @@
         try { await draft.clear(); } catch { /* Unprovable native cleanup preserves the draft. */ }
       }
       return accepted;
+    } catch (error) {
+      // An exception is the one exit with no reason of its own; the release still says it was one.
+      noteWithdraw('page-error');
+      throw error;
     } finally {
       if (claimedSilence && !sendAttempted) {
         await ask({ type: 'desktop_input', id: claimedSilence.id, owner: claimedSilence.owner, fail: true,
