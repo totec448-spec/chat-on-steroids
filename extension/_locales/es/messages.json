@@ -1291,5 +1291,17 @@
   },
   "content_edit_unavailable": {
     "message": "ChatGPT no ofreció Editar para ese mensaje. Abre el chat en ChatGPT e inténtalo de nuevo."
+  },
+  "content_auto_compaction_waiting_app": {
+    "message": "Compactación automática: esperando a la aplicación"
+  },
+  "content_goal_loop_waiting_app": {
+    "message": "Objetivo y Bucle: esperando a la aplicación"
+  },
+  "content_settings_waiting_app": {
+    "message": "esperando a la aplicación"
+  },
+  "content_task_waiting_app": {
+    "message": "Esperando la respuesta de Chat On Steroids."
   }
 }

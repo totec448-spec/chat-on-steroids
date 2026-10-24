@@ -623,6 +623,71 @@ it('applies line spacing and the legible font from Appearance at once, and saves
   expect(root.style.getPropertyValue('--line-spacing')).toBe('1');
 });
 
+it('offers eight accent presets and a High contrast switch that keeps the chosen colors underneath', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document, root = doc.documentElement;
+  const { ACCENT_PRESETS, defaultAppearance } = await import('../src/shared/appearance.js');
+  const swatches = [...doc.querySelectorAll<HTMLButtonElement>('#appearanceAccentPresets .appearance-swatch')];
+  const theme = root.dataset.theme as 'light' | 'dark';
+  expect(swatches.map(swatch => swatch.getAttribute('aria-label'))).toEqual(['Blue', 'Teal', 'Green', 'Amber', 'Orange', 'Red', 'Rose', 'Purple']);
+  expect(swatches.map(swatch => swatch.getAttribute('role'))).toEqual(Array(8).fill('radio'));
+  // The default accent is the first preset; exactly one is checked.
+  expect(swatches.map(swatch => swatch.getAttribute('aria-checked'))).toEqual(['true', ...Array(7).fill('false')]);
+  // A preset sets its own shade for both themes, so switching theme keeps the family.
+  swatches[1]!.click();
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.appearance).toMatchObject({
+    light: { accent: ACCENT_PRESETS[1].light }, dark: { accent: ACCENT_PRESETS[1].dark } }));
+  expect(swatches.map(swatch => swatch.getAttribute('aria-checked'))).toEqual(['false', 'true', ...Array(6).fill('false')]);
+  expect((doc.getElementById('appearance-accent-hex') as HTMLInputElement).value).toBe(ACCENT_PRESETS[1][theme].toUpperCase());
+  // Arrows move between the presets and choose the one they land on.
+  swatches[1]!.focus();
+  swatches[1]!.dispatchEvent(new mounted.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  expect(doc.activeElement).toBe(swatches[2]);
+  expect(swatches[2]!.getAttribute('aria-checked')).toBe('true');
+  expect(swatches.filter(swatch => swatch.tabIndex === 0)).toEqual([swatches[2]]);
+  swatches[0]!.focus();
+  swatches[0]!.dispatchEvent(new mounted.window.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+  expect(doc.activeElement).toBe(swatches[7]);
+  // A hand-picked color checks no preset, in this theme or the other one: a preset is its pair.
+  const hex = doc.getElementById('appearance-accent-hex') as HTMLInputElement;
+  hex.value = '#123456';
+  hex.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  expect(swatches.every(swatch => swatch.getAttribute('aria-checked') === 'false')).toBe(true);
+  const themeSelect = doc.getElementById('appearanceTheme') as HTMLSelectElement;
+  themeSelect.value = theme === 'dark' ? 'light' : 'dark';
+  themeSelect.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  expect(swatches.every(swatch => swatch.getAttribute('aria-checked') === 'false')).toBe(true);
+  // Still one tab stop when nothing is checked: the first swatch.
+  expect(swatches.filter(swatch => swatch.tabIndex === 0)).toEqual([swatches[0]]);
+  themeSelect.value = theme;
+  themeSelect.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+
+  const high = doc.getElementById('appearanceHighContrast') as HTMLInputElement;
+  expect(high.checked).toBe(false);
+  high.checked = true;
+  high.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.appearance).toMatchObject({ highContrast: true }));
+  expect(root.dataset.highContrast).toBe('true');
+  expect(root.style.getPropertyValue('--page')).toBe(theme === 'dark' ? '#000000' : '#ffffff');
+  // Background, sidebar, contrast and translucency do nothing now, so they say so; the accent still works.
+  for (const id of ['appearance-background', 'appearance-background-hex', 'appearance-sidebar', 'appearance-sidebar-hex', 'appearanceContrast', 'appearanceTranslucent'])
+    expect((doc.getElementById(id) as HTMLInputElement).disabled, id).toBe(true);
+  expect((doc.getElementById('appearance-accent-hex') as HTMLInputElement).disabled).toBe(false);
+  // The colors chosen before wait underneath.
+  expect(mounted.calls.at(-1)?.ui.appearance[theme].background).toBe(defaultAppearance()[theme].background);
+  high.checked = false;
+  high.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.appearance).toMatchObject({ highContrast: false }));
+  expect(root.style.getPropertyValue('--page')).toBe(defaultAppearance()[theme].background);
+  expect((doc.getElementById('appearanceContrast') as HTMLInputElement).disabled).toBe(false);
+  // Reset turns high contrast off too.
+  high.checked = true;
+  high.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  doc.getElementById('appearanceReset')!.click();
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.appearance).toMatchObject({ highContrast: false }));
+  expect(high.checked).toBe(false);
+});
+
 it('gives the line-spacing slider the shown value as its spoken value, from the saved setting and after a change', async () => {
   const mounted = await mountChat();
   const doc = mounted.window.document;
@@ -2380,6 +2445,48 @@ it('offers whole-screen privacy only where a screenshot can show the whole scree
   expect(row.hidden).toBe(false);
   mounted.push({ ...mounted.state, platform: { family: 'linux', name: 'Linux', desktopAutomation: false } });
   expect(row.hidden).toBe(true);
+});
+
+it('shows Privacy on every platform with the secrets shield on by default, and saves turning it off (#1797)', async () => {
+  const mounted = await mountChat({ platform: { family: 'windows', name: 'Windows', desktopAutomation: true } });
+  const doc = mounted.window.document;
+  const section = doc.getElementById('privacySettings')!;
+  const shield = doc.getElementById('secretsShield') as HTMLInputElement;
+  expect(section.hidden).toBe(false);
+  expect(doc.querySelector('[data-panel="general"]')!.contains(section)).toBe(true);
+  // A config from before the shield has no field: it shows on.
+  expect(mounted.state.config.ui.secretsShield).toBeUndefined();
+  expect(shield.checked).toBe(true);
+  expect(doc.getElementById('privacyScreenshotsSetting')!.hidden).toBe(true);
+  shield.checked = false;
+  shield.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.secretsShield).toBe(false));
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, secretsShield: false } } });
+  expect(shield.checked).toBe(false);
+});
+
+it('puts the secrets shield switch back after a save that was refused, so a later save cannot turn it off', async () => {
+  let refuse = true;
+  const saves: any[] = [];
+  const mounted = await mountChat({}, [], { saveSettings: (patch: any) => {
+    saves.push(structuredClone(patch));
+    if (refuse) return Promise.resolve({ ok: false, error: 'Settings could not be saved.' });
+    return Promise.resolve({ ok: true, data: mounted.state });
+  } });
+  const doc = mounted.window.document;
+  const shield = doc.getElementById('secretsShield') as HTMLInputElement;
+  shield.focus();
+  shield.checked = false;
+  shield.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(saves.at(-1)?.ui.secretsShield).toBe(false));
+  // The refusal leaves the switch on, as saved, even though it still has focus.
+  await waitFor(() => expect(shield.checked).toBe(true));
+  refuse = false;
+  const follow = doc.getElementById('followOutput') as HTMLInputElement;
+  follow.checked = !follow.checked;
+  follow.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(saves.length).toBeGreaterThan(1));
+  expect(saves.at(-1).ui.secretsShield).toBe(true);
 });
 
 it('says why an Activity list is empty, in the app language, and drops the note once a line arrives', async () => {

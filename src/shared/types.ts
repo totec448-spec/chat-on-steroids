@@ -226,6 +226,8 @@ export interface UiPrefs {
   privacyScreenshots: boolean;
   /** Phone notifications through ntfy; missing means off. */
   phonePush?: PhonePushSettings;
+  /** Mask API keys, tokens, private keys and secret settings in what tools return to ChatGPT. Missing means on. */
+  secretsShield?: boolean;
   /** Browser for app-originated launches; connected source tabs retain placement ownership. */
   chatBrowser?: ChatBrowser;
   /** Where a minimized built-in browser window goes (default: the taskbar or Dock). */

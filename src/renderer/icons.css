@@ -98,6 +98,7 @@
 .ph.ph-prohibit::before { content: '\e3de'; }
 .ph.ph-puzzle-piece::before { content: '\e596'; }
 .ph.ph-robot::before { content: '\e762'; }
+.ph.ph-shield-check::before { content: '\e40c'; }
 .ph.ph-sidebar-simple::before { content: '\ec24'; }
 .ph.ph-sliders-horizontal::before { content: '\e434'; }
 .ph.ph-sparkle::before { content: '\e6a2'; }
