@@ -22,7 +22,9 @@ function dialogError(message: string): string {
 
 export function initSshProjectDialog(
   api: Pick<AppApi, 'addRemoteProject'>,
-  onAdded: (project: LocalProject) => void
+  onAdded: (project: LocalProject, known: ReadonlySet<string>, asked: boolean) => void,
+  // Whether the new project's ChatGPT Project is chosen next (#1756), and the projects known before.
+  prepare: () => Promise<{ asked: boolean; known: ReadonlySet<string> }> = async () => ({ asked: false, known: new Set() })
 ): { open(): void } {
   const dialog = document.getElementById('sshProjectDialog') as HTMLDialogElement;
   const form = document.getElementById('sshProjectForm') as HTMLFormElement;
@@ -49,10 +51,13 @@ export function initSshProjectDialog(
     showError(null);
     setBusy(true);
     try {
-      const reply = await api.addRemoteProject(address.value.trim(), folder.value.trim());
+      const { asked, known } = await prepare();
+      const reply = asked
+        ? await api.addRemoteProject(address.value.trim(), folder.value.trim(), { chatgpt: 'later' })
+        : await api.addRemoteProject(address.value.trim(), folder.value.trim());
       if (!reply.ok) { showError(dialogError(reply.error)); return; }
       close();
-      onAdded(reply.data);
+      onAdded(reply.data, known, asked);
     } catch (failure) {
       showError(failure instanceof Error ? failure.message : String(failure));
     } finally {

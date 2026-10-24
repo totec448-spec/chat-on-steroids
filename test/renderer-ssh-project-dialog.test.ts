@@ -34,7 +34,8 @@ it('adds the project once the server answers, and closes', async () => {
   expect($<HTMLDialogElement>('sshProjectDialog').open).toBe(true);
   await submit('  me@devbox ', ' /srv/app ');
   expect(addRemoteProject).toHaveBeenCalledWith('me@devbox', '/srv/app');
-  expect(added).toHaveBeenCalledWith(project);
+  // Without ChatGPT Projects to choose from (#1756) it is added as before.
+  expect(added).toHaveBeenCalledWith(project, new Set(), false);
   expect($<HTMLDialogElement>('sshProjectDialog').open).toBe(false);
 });
 

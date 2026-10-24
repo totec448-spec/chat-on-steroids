@@ -1435,6 +1435,28 @@
     return Boolean(keepAwakeRelease);
   }
 
+  const PROJECT_LIST_MS = 15_000;
+  let reportedProjects = '';
+  /**
+   * Tells the app which Projects ChatGPT's sidebar lists (#1756), only when that list changed: the
+   * app offers them when a project is linked. An empty list (sidebar collapsed) is not reported.
+   */
+  function reportProjectList() {
+    if (globalThis.top !== globalThis) return;
+    const projects = CLF_DOM.projectsShown();
+    if (!projects.length) return;
+    // The workspace these are listed in: ChatGPT opens a Project only in its own workspace, and
+    // names the one in use in this cookie (absent for a personal account). Read, never sent elsewhere.
+    const cookie = String(document.cookie || '').split(';').map(part => part.trim()).find(part => part.startsWith('_account='));
+    const workspace = cookie ? decodeURIComponent(cookie.slice('_account='.length)) || null : null;
+    const signature = JSON.stringify([workspace, projects]);
+    if (signature === reportedProjects) return;
+    reportedProjects = signature;
+    void ask({ type: 'project_catalog', projects, workspace }).then(reply => {
+      if (!reply || reply.ok !== true) reportedProjects = '';
+    }, () => { reportedProjects = ''; });
+  }
+
   /** Talks to the service worker. Returns null once the extension is reloaded. */
   async function ask(message, current = null) {
     // A new/reloaded document claims its browser-supplied MessageSender.documentId before
@@ -14425,6 +14447,7 @@
   watchToolRows();
   watchTranscript();
   watchChatEnd();
+  every(PROJECT_LIST_MS, reportProjectList);
 
   every(OBSERVE_MS, () => {
     recoverConversationLoad();
