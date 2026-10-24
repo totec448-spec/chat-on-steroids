@@ -385,6 +385,9 @@ const configSchema = z.object({
     privacyScreenshots: z.boolean().optional().default(false),
     // Masking credentials in tool output before ChatGPT sees them (#1797). On unless turned off.
     secretsShield: z.boolean().optional().default(true),
+    // How far Commit in Review goes (#1824 follow-up): commit only, then ask to push, or push and
+    // open a pull request. Remembered from the Commit dialog; missing or damaged means ask-push.
+    commitFlow: z.enum(['commit', 'ask-push', 'pr']).optional().catch(undefined),
     // Dark is the design the app is drawn for, and a config written before the theme
     // existed has no stored answer to override — so it is the default rather than the
     // fallback. An explicit `light` is somebody's own choice and is never touched.

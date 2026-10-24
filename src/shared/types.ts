@@ -74,6 +74,9 @@ export type Capabilities = Record<Capability, boolean>;
 /** Host family reported to the renderer. */
 export type PlatformFamily = 'windows' | 'macos' | 'linux' | 'other';
 
+/** Commit only; commit, then ask to push; or commit, push and open a pull request. */
+export type CommitFlow = 'commit' | 'ask-push' | 'pr';
+
 export interface PlatformInfo {
   family: PlatformFamily;
   /** Friendly operating-system name for setup/help copy. */
@@ -225,6 +228,8 @@ export interface UiPrefs {
   privacyScreenshots: boolean;
   /** Mask API keys, tokens, private keys and secret settings in what tools return to ChatGPT. Missing means on. */
   secretsShield?: boolean;
+  /** How far Commit in Review goes; missing means commit, then ask to push. */
+  commitFlow?: CommitFlow;
   /** Browser for app-originated launches; connected source tabs retain placement ownership. */
   chatBrowser?: ChatBrowser;
   /** Where a minimized built-in browser window goes (default: the taskbar or Dock). */
