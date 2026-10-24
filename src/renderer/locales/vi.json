@@ -3051,5 +3051,13 @@
   "Unattributed calls allowed": "Cho phép lệnh gọi không gắn với cuộc trò chuyện",
   "Hide secrets from ChatGPT off": "Tắt Ẩn bí mật khỏi ChatGPT",
   "Your settings changed after the file was chosen. Choose it again.": "Cài đặt của bạn đã thay đổi sau khi chọn tệp. Hãy chọn lại tệp.",
-  "This backup has a setting this version does not accept, so nothing was imported.": "Bản sao lưu này có một cài đặt mà phiên bản này không chấp nhận, nên không có gì được nhập."
+  "This backup has a setting this version does not accept, so nothing was imported.": "Bản sao lưu này có một cài đặt mà phiên bản này không chấp nhận, nên không có gì được nhập.",
+  "Three-way view": "Xem ba chiều",
+  "Ask chat to resolve": "Nhờ chat giải quyết",
+  "Help me resolve the merge conflict in {0}. Read the common base, ours and theirs with git show :1:./{0}, :2:./{0} and :3:./{0}, then write a version that keeps what both sides meant and tell me what you chose. Do not stage or commit it.": "Hãy giúp tôi giải quyết xung đột merge trong {0}. Đọc bản gốc chung, bản của ta và bản của họ bằng git show :1:./{0}, :2:./{0} và :3:./{0}, rồi viết một bản giữ được ý định của cả hai bên và cho tôi biết bạn đã chọn gì. Không stage hay commit.",
+  "Ours (HEAD)": "Của ta (HEAD)",
+  "Common base": "Gốc chung",
+  "Theirs (incoming)": "Của họ (đến)",
+  "Not in this version": "Không có trong phiên bản này",
+  "Start or cancel the prepared plan first, then ask again.": "Hãy bắt đầu hoặc hủy kế hoạch đã chuẩn bị trước, rồi yêu cầu lại."
 }

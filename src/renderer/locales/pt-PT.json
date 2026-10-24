@@ -3161,5 +3161,13 @@
   "{1}: {0} settings|one": "{1}: {0} definição",
   "{1}: {0} settings|many": "{1}: {0} definições",
   "Your settings changed after the file was chosen. Choose it again.": "As suas definições mudaram depois de o ficheiro ser escolhido. Escolha-o novamente.",
-  "This backup has a setting this version does not accept, so nothing was imported.": "Esta cópia de segurança tem uma definição que esta versão não aceita, por isso nada foi importado."
+  "This backup has a setting this version does not accept, so nothing was imported.": "Esta cópia de segurança tem uma definição que esta versão não aceita, por isso nada foi importado.",
+  "Three-way view": "Vista de três vias",
+  "Ask chat to resolve": "Pedir ao chat para resolver",
+  "Help me resolve the merge conflict in {0}. Read the common base, ours and theirs with git show :1:./{0}, :2:./{0} and :3:./{0}, then write a version that keeps what both sides meant and tell me what you chose. Do not stage or commit it.": "Ajuda-me a resolver o conflito de merge em {0}. Lê a base comum, a nossa versão e a deles com git show :1:./{0}, :2:./{0} e :3:./{0}, depois escreve uma versão que mantenha a intenção dos dois lados e diz-me o que escolheste. Não adiciones ao stage nem faças commit.",
+  "Ours (HEAD)": "Nossa (HEAD)",
+  "Common base": "Base comum",
+  "Theirs (incoming)": "Deles (recebida)",
+  "Not in this version": "Não existe nesta versão",
+  "Start or cancel the prepared plan first, then ask again.": "Inicie ou cancele primeiro o plano preparado e peça novamente."
 }
