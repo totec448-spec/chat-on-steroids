@@ -141,6 +141,7 @@ import { findInSession, locateMessage, locateSearchMatch, searchSessions } from 
 import { listBookmarks, setBookmark } from './session/bookmarks.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
 import { exportSessionMarkdown } from './session/markdown-export.js';
+import { commitProjectChanges, createPullRequest, pushProject, readCommitState } from './project-commit.js';
 import { saveCodeFile } from './code-file.js';
 import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
 import { setChatsTrusted, trustedChatIds } from './session/trusted-chats.js';
@@ -262,6 +263,8 @@ const settingsPatch = z.object({
     keepScreenAwake: z.boolean().optional(),
     privacyScreenshots: z.boolean(),
     secretsShield: z.boolean().optional(),
+    // Set from the Commit dialog (projectCommit:flow); a settings save carries it through.
+    commitFlow: z.enum(['commit', 'ask-push', 'pr']).optional(),
     theme: z.enum(['light', 'dark'])
   }),
   sessions: z.object({
@@ -425,6 +428,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       mentionPlugins: pick(current.ui.mentionPlugins, base.ui.mentionPlugins, wanted.ui.mentionPlugins),
       // Not part of the settings form: reported by the window and the extension, carried through.
       language: current.ui.language,
+      commitFlow: current.ui.commitFlow,
       browserPreferences: current.ui.browserPreferences,
       cosBrowserTrayHint: current.ui.cosBrowserTrayHint,
       finishTool: pick(current.ui.finishTool, base.ui.finishTool, wanted.ui.finishTool),
@@ -1134,6 +1138,32 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { projectId, baseRef } = z.object({ projectId: projectFileId,
       baseRef: z.string().min(1).max(256).optional() }).strict().parse(payload);
     return readProjectGitSnapshot(projectId, baseRef);
+  });
+  // Commit & PR from Review. Each step is its own call, so the dialog can stop after any of them.
+  handle('projectCommit:state', async payload => {
+    const { projectId } = z.object({ projectId: projectFileId }).strict().parse(payload);
+    return readCommitState(projectId);
+  });
+  handle('projectCommit:commit', async payload => {
+    const request = z.object({ projectId: projectFileId, message: z.string().max(10_000), paths: z.array(projectRelativePath.min(1)).max(2_000),
+      newBranch: z.string().min(1).max(200).optional(), expectedToken: z.string().length(64).regex(/^[0-9a-f]+$/) }).strict().parse(payload);
+    return commitProjectChanges(request.projectId, request);
+  });
+  handle('projectCommit:push', async payload => {
+    const { projectId } = z.object({ projectId: projectFileId }).strict().parse(payload);
+    return pushProject(projectId);
+  });
+  handle('projectCommit:pullRequest', async payload => {
+    const { projectId, title, body } = z.object({ projectId: projectFileId, title: z.string().max(1_000), body: z.string().max(10_000) }).strict().parse(payload);
+    const result = await createPullRequest(projectId, { title, body });
+    // Without gh, GitHub's own page opens filled in; the person creates the pull request there.
+    if (result.via === 'browser') await shell.openExternal(result.url);
+    return result;
+  });
+  handle('projectCommit:flow', async payload => {
+    const { flow } = z.object({ flow: z.enum(['commit', 'ask-push', 'pr']) }).strict().parse(payload);
+    if (getConfig().ui.commitFlow !== flow) await updateConfig(config => ({ ...config, ui: { ...config.ui, commitFlow: flow } }));
+    return true;
   });
   handle('projectGit:diff', async payload => {
     const { projectId, path, baseRef, expectedRevision } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1),
