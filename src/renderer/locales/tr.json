@@ -3059,5 +3059,9 @@
   "Common base": "Ortak taban",
   "Theirs (incoming)": "Onlarınki (gelen)",
   "Not in this version": "Bu sürümde yok",
-  "Start or cancel the prepared plan first, then ask again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden isteyin."
+  "Start or cancel the prepared plan first, then ask again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden isteyin.",
+  "At this pace, runs out {0} (estimate)": "Bu hızla {0} biter (tahmin)",
+  "At this pace, lasts until the reset (estimate)": "Bu hızla sıfırlanmaya kadar yeter (tahmin)",
+  "From this limit's readings over about the last hour. A planning estimate; ChatGPT decides the limit.": "Bu sınırın yaklaşık son bir saatlik okumalarından. Planlama için bir tahmin; sınırı ChatGPT belirler.",
+  "{0}: remaining over time": "{0}: zaman içinde kalan"
 }

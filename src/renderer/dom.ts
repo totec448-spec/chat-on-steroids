@@ -118,6 +118,26 @@ export function disclosureChevron(className = ''): SVGSVGElement {
   return node;
 }
 
+/**
+ * A small authored chart, not an icon: a line through `points` (x 0–100, y 0–30, top down) over a
+ * faint area down to the bottom edge. It stretches to its box; the stroke keeps its width.
+ */
+export function trendLine(className: string, points: ReadonlyArray<readonly [number, number]>): SVGSVGElement {
+  const node = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  node.setAttribute('class', className);
+  node.setAttribute('viewBox', '0 0 100 30');
+  node.setAttribute('preserveAspectRatio', 'none');
+  node.setAttribute('role', 'img');
+  const list = points.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  const area = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+  area.setAttribute('points', `0,30 ${list} 100,30`);
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+  line.setAttribute('points', list);
+  line.setAttribute('vector-effect', 'non-scaling-stroke');
+  node.append(area, line);
+  return node;
+}
+
 /** Redraws an existing icon, e.g. a toggle whose meaning flipped. */
 export function setIcon(node: Element, name: string, className = 'ico'): void {
   node.className = `${className} ${iconClasses(name)}`;

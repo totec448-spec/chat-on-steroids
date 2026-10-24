@@ -4,7 +4,7 @@ import { listUsageSessions, readEvents } from './store.js';
 import { readDurable, writeDurableSoon } from '../durable.js';
 import { logInfo } from '../logger.js';
 import { eventTokens } from '../../shared/session.js';
-import { usageDateKey, usageMessageFamily, usageModelKey, usageWeekStart, type ModelUsage, type UsageMessageDay, type UsageModelTokens, type UsageOverview } from '../../shared/usage.js';
+import { usageDateKey, usageLimitKey, usageLimitSegment, usageMessageFamily, usageModelKey, usageWeekStart, type ModelUsage, type UsageLimitReading, type UsageMessageDay, type UsageModelTokens, type UsageOverview } from '../../shared/usage.js';
 import { getChatModels } from '../chat-models.js';
 import { isProModel } from '../../shared/chat-models.js';
 // An extension from before 2.1.40 sends wham/usage windows as "shared": they were Codex's all along.
@@ -22,6 +22,47 @@ export function observeUsage(raw: unknown, capturedAt: unknown = Date.now()): vo
   // account/tab into the latest response; an explicit empty snapshot clears them.
   latestObservedAt = capturedAt;
   limits = parsed.map((entry) => ({ ...legacyCodex(entry), observedAt: capturedAt }) as ModelUsage);
+  const observed = limits;
+  void loadHistory().then(() => recordReadings(observed, capturedAt));
+}
+// A small local history of reported limits, only for the Usage page's pace estimate: one reading
+// per limit when its value changes or every few minutes, kept for a week (the longest window).
+const HISTORY_VERSION = 1;
+const HISTORY_MS = 8 * 86_400_000;
+const HISTORY_EVERY_MS = 5 * 60000;
+const HISTORY_MAX = 600;
+const reading = z.tuple([z.number().finite().positive(), z.number().finite().nonnegative(), z.number().finite().positive().nullable()]);
+const historySchema = z.object({ version: z.literal(HISTORY_VERSION), limits: z.array(z.tuple([z.string().max(300), z.array(reading).max(HISTORY_MAX)])).max(500) });
+const history = new Map<string, UsageLimitReading[]>();
+let historyLoad: Promise<void> | null = null;
+function loadHistory(): Promise<void> {
+  return historyLoad ??= readDurable('usage-history').then((raw) => {
+    const saved = historySchema.safeParse(raw);
+    if (!saved.success && raw !== null) logInfo('usage: the saved limit history is not in the expected format, so the pace estimate starts again');
+    if (saved.success) for (const [key, rows] of saved.data.limits) history.set(key, rows.map(([at, value, resetAt]) => ({ at, value, resetAt })));
+  });
+}
+function recordReadings(rows: readonly ModelUsage[], at: number): void {
+  let changed = false;
+  for (const row of rows) {
+    const value = row.remaining ?? row.remainingPercent;
+    if (value === null) continue;
+    const key = usageLimitKey(row);
+    const readings = history.get(key) ?? [];
+    const last = readings.at(-1);
+    if (last && (at < last.at || (last.value === value && last.resetAt === row.resetAt && at - last.at < HISTORY_EVERY_MS))) continue;
+    // A later snapshot with the same capture time replaces its reading, as it replaced the snapshot.
+    if (last?.at === at) readings.pop();
+    readings.push({ at, value, resetAt: row.resetAt });
+    history.set(key, readings.slice(-HISTORY_MAX));
+    changed = true;
+  }
+  if (!changed) return;
+  for (const [key, readings] of history) {
+    const kept = readings.filter(entry => at - entry.at <= HISTORY_MS);
+    if (kept.length) history.set(key, kept); else history.delete(key);
+  }
+  writeDurableSoon('usage-history', { version: HISTORY_VERSION, limits: [...history].map(([key, readings]) => [key, readings.map(entry => [entry.at, entry.value, entry.resetAt])]) });
 }
 /** ChatGPT's latest reported limits, as the page last showed them. */
 export function reportedUsageLimits(): ModelUsage[] {
@@ -61,6 +102,7 @@ function attribution(raw: { model?: string; reasoningEffort?: string }, previous
 async function computeOverview(signal?: AbortSignal): Promise<UsageOverview> {
   signal?.throwIfAborted();
   const started = performance.now();
+  await loadHistory();
   // One observed Pro choice raises the comparison ceiling for the whole account,
   // including ordinary models. Read existing catalog evidence without discovery.
   const contextTokenCap = getChatModels().models.some(model => isProModel(model.id) || model.efforts.includes('pro')) ? 400_000 : 256_000;
@@ -193,7 +235,8 @@ async function computeOverview(signal?: AbortSignal): Promise<UsageOverview> {
   return {
     contextTokenCap,
     messages: { through, days: [...messageDays.values()].sort((a, b) => a.date.localeCompare(b.date)) },
-    limits: limits.filter((entry) => Date.now() - entry.observedAt <= FRESH_MS && (entry.resetAt === null || entry.resetAt > Date.now())).map((entry) => ({ ...entry })),
+    limits: limits.filter((entry) => Date.now() - entry.observedAt <= FRESH_MS && (entry.resetAt === null || entry.resetAt > Date.now()))
+      .map((entry) => ({ ...entry, readings: usageLimitSegment(history.get(usageLimitKey(entry)) ?? []) })),
     days: [...days].sort(([a], [b]) => a.localeCompare(b)).map(([date, rows]) => ({ date, tokens: [...rows.values()].reduce((sum, row) => sum + row.tokens, 0), models: [...rows.values()] })),
     models: [...models.values()],
     projects: [...projects].map(([projectId, rows]) => ({ projectId, tokens: [...rows.values()].reduce((sum, row) => sum + row.tokens, 0), models: [...rows.values()] })).sort((a, b) => b.tokens - a.tokens),

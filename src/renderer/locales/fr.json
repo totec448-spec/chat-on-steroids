@@ -3108,5 +3108,9 @@
   "Common base": "Base commune",
   "Theirs (incoming)": "La leur (entrante)",
   "Not in this version": "Absent de cette version",
-  "Start or cancel the prepared plan first, then ask again.": "Lancez ou annulez d'abord le plan préparé, puis redemandez."
+  "Start or cancel the prepared plan first, then ask again.": "Lancez ou annulez d'abord le plan préparé, puis redemandez.",
+  "At this pace, runs out {0} (estimate)": "À ce rythme, épuisé {0} (estimation)",
+  "At this pace, lasts until the reset (estimate)": "À ce rythme, tient jusqu’à la réinitialisation (estimation)",
+  "From this limit's readings over about the last hour. A planning estimate; ChatGPT decides the limit.": "D’après les relevés de cette limite sur environ la dernière heure. Une estimation pour s’organiser ; c’est ChatGPT qui fixe la limite.",
+  "{0}: remaining over time": "{0} : restant au fil du temps"
 }

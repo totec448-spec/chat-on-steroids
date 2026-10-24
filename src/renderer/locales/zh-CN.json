@@ -3010,5 +3010,9 @@
   "Common base": "共同基础",
   "Theirs (incoming)": "对方 (传入)",
   "Not in this version": "此版本中不存在",
-  "Start or cancel the prepared plan first, then ask again.": "请先开始或取消已准备好的计划，然后再试一次。"
+  "Start or cancel the prepared plan first, then ask again.": "请先开始或取消已准备好的计划，然后再试一次。",
+  "At this pace, runs out {0} (estimate)": "按此速度，将在{0}用完（估算）",
+  "At this pace, lasts until the reset (estimate)": "按此速度，可用到重置（估算）",
+  "From this limit's readings over about the last hour. A planning estimate; ChatGPT decides the limit.": "根据此限额大约最近一小时的读数。仅供规划的估算；限额由 ChatGPT 决定。",
+  "{0}: remaining over time": "{0}：剩余量变化"
 }

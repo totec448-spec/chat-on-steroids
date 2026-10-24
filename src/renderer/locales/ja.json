@@ -3010,5 +3010,9 @@
   "Common base": "共通の基点",
   "Theirs (incoming)": "相手側 (取り込む側)",
   "Not in this version": "この版にはありません",
-  "Start or cancel the prepared plan first, then ask again.": "先に準備済みのプランを開始するか取り消してから、もう一度お試しください。"
+  "Start or cancel the prepared plan first, then ask again.": "先に準備済みのプランを開始するか取り消してから、もう一度お試しください。",
+  "At this pace, runs out {0} (estimate)": "このペースだと{0}に上限到達（推定）",
+  "At this pace, lasts until the reset (estimate)": "このペースならリセットまで持ちます（推定）",
+  "From this limit's readings over about the last hour. A planning estimate; ChatGPT decides the limit.": "この上限のおよそ直近1時間の記録から算出。計画用の推定で、上限はChatGPTが決めます。",
+  "{0}: remaining over time": "{0}：残りの推移"
 }

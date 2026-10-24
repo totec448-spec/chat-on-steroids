@@ -3010,5 +3010,9 @@
   "Common base": "공통 기준",
   "Theirs (incoming)": "상대 쪽 (들어오는 쪽)",
   "Not in this version": "이 버전에는 없음",
-  "Start or cancel the prepared plan first, then ask again.": "먼저 준비된 계획을 시작하거나 취소한 다음 다시 요청하세요."
+  "Start or cancel the prepared plan first, then ask again.": "먼저 준비된 계획을 시작하거나 취소한 다음 다시 요청하세요.",
+  "At this pace, runs out {0} (estimate)": "이 속도라면 {0} 소진 (추정)",
+  "At this pace, lasts until the reset (estimate)": "이 속도라면 초기화까지 충분합니다 (추정)",
+  "From this limit's readings over about the last hour. A planning estimate; ChatGPT decides the limit.": "이 한도의 최근 약 1시간 기록으로 계산합니다. 계획용 추정이며, 한도는 ChatGPT가 정합니다.",
+  "{0}: remaining over time": "{0}: 남은 양 추이"
 }

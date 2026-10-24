@@ -2216,6 +2216,19 @@ windows Codex's /status and ChatGPT's sidebar panel show), never a limit on Chat
 the Usage tab and the `usage` tool label them as Codex. An extension before 2.1.40 sends them as
 `shared`, which the app reads as `codex`.
 
+The same accepted snapshots feed a small local **limit history** (durable `usage-history`, version 1):
+one `[at, value, resetAt]` reading per limit, keyed by `shared/usage.ts::usageLimitKey()` (scope,
+model, window and measure, so a count and a percent never share a trend), written when the value or
+reset time changes or every 5 minutes, kept for 8 days and at most 600 readings per limit; a later snapshot with
+the same capture time replaces its reading. Usage overview rows carry `readings`: only those since the
+limit last went up or passed the reset its previous reading reported (`usageLimitSegment`). Snapshots
+carry no account identity, so an account switch is only separated by those two signals. The Usage tab
+draws the readings as a trend line and, from about the last hour of them (`usageLimitForecast`, at
+least 10 minutes and a real drop; a baseline more than two hours old is replaced by the oldest reading
+inside the hour), says when the limit runs out at that pace or that it lasts until the reset, always
+labeled an estimate. It is planning help, never a provider figure, and the `usage` tool does not
+report it.
+
 Daily work/cost charts use a **local estimate**: cap final frontend context, then / 2 per unique
 recorded tool call, with editable divisor, multiplier and per-model comparison rates. If the
 observed account catalog offers any Pro model or Pro reasoning option, the cap is 400,000 for

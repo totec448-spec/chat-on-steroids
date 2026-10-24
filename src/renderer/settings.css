@@ -245,6 +245,9 @@
 .usage-limit > div { display: grid; gap: 6px; }
 .usage-limit > div:last-child { text-align: right; }
 .usage-limit progress { width: 180px; height: 5px; accent-color: var(--blue); justify-self: end; }
+.usage-limit .usage-trend { width: 180px; height: 30px; justify-self: end; overflow: visible; }
+.usage-trend polygon { fill: var(--blue); fill-opacity: .14; }
+.usage-trend polyline { fill: none; stroke: var(--blue); stroke-width: 1.5; stroke-linejoin: round; }
 .usage-limits > .muted { display: block; margin: 0; padding: 18px; line-height: 1.55; }
 .usage-formula-panel { margin-bottom: 20px; padding: 12px 18px 14px; }
 .usage-formula-panel > .muted { line-height: 1.55; }
@@ -353,7 +356,7 @@
   .usage-panel .setting > input, .usage-panel .setting > select { flex: 1 1 100%; width: 100%; max-width: none; }
   .usage-limit { align-items: flex-start; flex-direction: column; }
   .usage-limit > div:last-child { width: 100%; text-align: left; }
-  .usage-limit progress { width: 100%; justify-self: stretch; }
+  .usage-limit progress, .usage-limit .usage-trend { width: 100%; justify-self: stretch; }
 }
 
 #usageTooltip { width: max-content; max-width: min(340px, calc(100vw - 24px)); white-space: pre-line; overflow-wrap: normal; }
@@ -422,7 +425,7 @@
   .usage-limits .usage-limit { align-items: flex-start; flex-direction: column; gap: 10px; }
   .usage-limits .usage-limit > div { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
   .usage-limits .usage-limit > div:last-child { width: 100%; text-align: left; }
-  .usage-limits .usage-limit progress { max-width: 100%; justify-self: start; }
+  .usage-limits .usage-limit progress, .usage-limits .usage-limit .usage-trend { max-width: 100%; justify-self: start; }
 }
 
 /* Shared disclosure geometry and navigation motion. */

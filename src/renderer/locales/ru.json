@@ -3157,5 +3157,9 @@
   "Common base": "Общая база",
   "Theirs (incoming)": "Их (входящая)",
   "Not in this version": "Нет в этой версии",
-  "Start or cancel the prepared plan first, then ask again.": "Сначала запустите или отмените подготовленный план, затем повторите запрос."
+  "Start or cancel the prepared plan first, then ask again.": "Сначала запустите или отмените подготовленный план, затем повторите запрос.",
+  "At this pace, runs out {0} (estimate)": "При таком темпе закончится {0} (оценка)",
+  "At this pace, lasts until the reset (estimate)": "При таком темпе хватит до сброса (оценка)",
+  "From this limit's readings over about the last hour. A planning estimate; ChatGPT decides the limit.": "По показаниям этого лимита примерно за последний час. Оценка для планирования; лимит определяет ChatGPT.",
+  "{0}: remaining over time": "{0}: остаток во времени"
 }

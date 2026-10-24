@@ -188,6 +188,59 @@ describe('passive usage limits and canonical token totals', () => {
     now += 60001;
     expect((await usage.usageOverview()).limits).toEqual([]);
   });
+  it('keeps a local history of each limit across a restart and shows the readings since it last went up', async () => {
+    const model = (remaining: number) => limit({ model: 'gpt-example', scope: 'model', remaining, remainingPercent: null });
+    const start = now;
+    usage.observeUsage([model(50), limit()]);
+    now += 60000;
+    usage.observeUsage([model(50), limit()]); // Unchanged within five minutes: no new reading.
+    now += 20 * 60000;
+    usage.observeUsage([model(40), limit({ remainingPercent: 30 })]);
+    const result = await usage.usageOverview();
+    expect(result.limits.find(row => row.scope === 'model')?.readings).toEqual([{ at: start, value: 50, resetAt: null }, { at: now, value: 40, resetAt: null }]);
+    expect(result.limits.find(row => row.scope === 'codex')?.readings).toEqual([{ at: start, value: 40, resetAt: null }, { at: now, value: 30, resetAt: null }]);
+    expect(usage.reportedUsageLimits()[0]).not.toHaveProperty('readings');
+    const saved = structuredClone(durable.writeDurableSoon.mock.calls.findLast(([name]) => name === 'usage-history')![1]);
+    vi.resetModules();
+    durable.readDurable.mockImplementation(async (name: string) => name === 'usage-history' ? saved : null);
+    usage = await import('../src/main/session/usage.js');
+    now += 10 * 60000;
+    usage.observeUsage([model(35)]);
+    expect((await usage.usageOverview()).limits[0]?.readings?.map(reading => reading.value)).toEqual([50, 40, 35]);
+    now += 60000;
+    usage.observeUsage([model(60)]); // A refill starts the trend again.
+    expect((await usage.usageOverview()).limits[0]?.readings).toEqual([{ at: now, value: 60, resetAt: null }]);
+    // A second snapshot with the same capture time replaces the first, in the history too.
+    usage.observeUsage([model(55)], now);
+    expect((await usage.usageOverview()).limits[0]?.readings).toEqual([{ at: now, value: 55, resetAt: null }]);
+  });
+  it('starts without a pace estimate when there is no saved history or it is damaged, and logs the damaged one', async () => {
+    const model = (remaining: number) => limit({ model: 'gpt-example', scope: 'model', remaining, remainingPercent: null });
+    // Before this change no file exists: no history, no log line.
+    logger.logInfo.mockReset();
+    usage.observeUsage([model(50)]);
+    expect((await usage.usageOverview()).limits[0]?.readings).toEqual([{ at: now, value: 50, resetAt: null }]);
+    expect(logger.logInfo.mock.calls.filter(([message]) => String(message).includes('limit history'))).toEqual([]);
+    for (const damaged of [{ version: 1, limits: 'x' }, { version: 2, limits: [] }, { version: 1, limits: [['k', [[1, -5, null]]]] }, 'text']) {
+      vi.resetModules();
+      logger.logInfo.mockReset();
+      durable.readDurable.mockImplementation(async (name: string) => name === 'usage-history' ? damaged : null);
+      usage = await import('../src/main/session/usage.js');
+      usage.observeUsage([model(50)]);
+      expect((await usage.usageOverview()).limits[0]?.readings).toEqual([{ at: now, value: 50, resetAt: null }]);
+      expect(logger.logInfo.mock.calls.filter(([message]) => String(message).includes('limit history'))).toHaveLength(1);
+    }
+  });
+  it('keeps a reset time that moved later, so the next reading does not look like a new window', async () => {
+    const model = (remaining: number, resetAt: number) => limit({ model: 'gpt-example', scope: 'model', remaining, remainingPercent: null, resetAt });
+    const start = now;
+    usage.observeUsage([model(50, start + 30 * 60000)]);
+    now += 60000;
+    usage.observeUsage([model(50, start + 90 * 60000)]); // Same value, but the window now ends later.
+    now += 39 * 60000;
+    usage.observeUsage([model(45, start + 90 * 60000)]);
+    expect((await usage.usageOverview()).limits[0]?.readings?.map(reading => reading.value)).toEqual([50, 50, 45]);
+  });
   it('removes exhausted pre-reset observations without inventing a replenished balance', async () => {
     usage.observeUsage([limit({ model: 'gpt-example', scope: 'model', remaining: 0, remainingPercent: null, resetAt: now + 1000 })]);
     now += 1001;
