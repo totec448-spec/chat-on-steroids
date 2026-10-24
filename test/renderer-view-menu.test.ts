@@ -20,7 +20,7 @@ async function mount(options: { cos: boolean }) {
   const { initViewMenu } = await import('../src/renderer/view-menu.js');
   const menu = initViewMenu({
     search: () => calls.push('search'),
-    shortcuts: () => calls.push('shortcuts'),
+    shortcuts: viaKeyboard => calls.push(viaKeyboard ? 'shortcuts:keys' : 'shortcuts'),
     cosBrowser: () => options.cos,
     showCosBrowser: () => calls.push('cos-browser'),
     pets: { toggle: () => { pets = !pets; calls.push('pets'); }, visible: () => pets },
@@ -74,6 +74,16 @@ it('opens one menu with each action, its icon and its shortcut, the CoS browser 
   expect(cos.open()).toBeNull();
 });
 
+it('tells the shortcuts item whether the keys or a pointer chose it', async () => {
+  const view = await mount({ cos: false });
+  view.button.click();
+  // A pointer click carries a detail of 1; Enter and Space click with 0.
+  view.item('shortcuts').dispatchEvent(new view.doc.defaultView!.MouseEvent('click', { bubbles: true, detail: 1 }));
+  view.button.click();
+  view.item('shortcuts').dispatchEvent(new view.doc.defaultView!.MouseEvent('click', { bubbles: true, detail: 0 }));
+  expect(view.calls).toEqual(['shortcuts', 'shortcuts:keys']);
+});
+
 it('says what the pets toggle will do, runs actions and closes; zoom steps keep it open with the value updating', async () => {
   const view = await mount({ cos: false });
   view.button.click();
@@ -84,7 +94,7 @@ it('says what the pets toggle will do, runs actions and closes; zoom steps keep 
   view.button.click();
   view.item('shortcuts').click();
   expect(view.open()).toBeNull();
-  expect(view.calls).toEqual(['search', 'pets', 'shortcuts']);
+  expect(view.calls).toEqual(['search', 'pets', 'shortcuts:keys']);
   view.button.click();
   expect(view.item('pets').querySelector('.row-menu-label')!.textContent).toBe('Hide pets');
 

@@ -214,7 +214,8 @@ it('shows the focus ring on the close button when the keys opened the dialog, no
   view.press({ key: '/', ctrlKey: true });
   view.press({ key: '/', ctrlKey: true });
   view.shortcuts.open();
-  expect(calls).toEqual([{ focusVisible: true }, { focusVisible: false }]);
+  view.shortcuts.open(true);
+  expect(calls).toEqual([{ focusVisible: true }, { focusVisible: false }, { focusVisible: true }]);
 });
 
 it('stays closed over a role="dialog" picker that is open, and opens once it is gone', async () => {

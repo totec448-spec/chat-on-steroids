@@ -111,7 +111,7 @@ function paint(list: HTMLElement, groups: ShortcutGroup[]): void {
   }));
 }
 
-export function initShortcutsDialog(options: { enterSends(): boolean }): { open(): void } {
+export function initShortcutsDialog(options: { enterSends(): boolean }): { open(viaKeyboard?: boolean): void } {
   const dialog = $<HTMLDialogElement>('shortcutsDialog');
   const list = $('shortcutsList');
   const groups = shortcutGroups(options.enterSends);
@@ -167,5 +167,5 @@ export function initShortcutsDialog(options: { enterSends(): boolean }): { open(
     event.preventDefault();
     open(true);
   });
-  return { open: () => open(false) };
+  return { open: (viaKeyboard = false) => open(viaKeyboard) };
 }
