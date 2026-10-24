@@ -1319,13 +1319,34 @@ describe('Commit & PR', () => {
     expect(getConfig().ui.commitFlow).toBe('pr');
   });
 
+  // A well-formed request for a project that does not exist reaches the commit and is refused there;
+  // each malformed one must be refused before, for its own field.
+  const wellFormed = { projectId: '6f9619ff-8b86-4d01-b42d-00cf4fc964ff', message: 'x', paths: ['a.ts'], expectedToken: 'a'.repeat(64) };
   it.each([
-    { projectId: 'p1', message: 'x', paths: ['a.ts'], expectedToken: 'short' },
-    { projectId: 'p1', message: 'x', paths: ['../outside.ts'], expectedToken: 'a'.repeat(64) },
-    { projectId: 'p1', message: 'x'.repeat(10_001), paths: ['a.ts'], expectedToken: 'a'.repeat(64) },
-    { projectId: 'p1', message: 'x', paths: ['a.ts'], expectedToken: 'a'.repeat(64), amend: true }
-  ])('refuses a commit request before Git runs: %o', async request => {
-    expect(((await handlers.get('projectCommit:commit')!(null, request)) as { ok: boolean }).ok).toBe(false);
+    { expectedToken: 'short' },
+    { paths: ['../outside.ts'] },
+    { paths: ['src/../../outside.ts'] },
+    { paths: ['C:\\Windows\\win.ini'] },
+    { message: 'x'.repeat(10_001) },
+    { amend: true }
+  ])('refuses a commit request before Git runs: %o', async change => {
+    const reached = (await handlers.get('projectCommit:commit')!(null, wellFormed)) as { ok: boolean; error: string };
+    expect(reached.ok).toBe(false);
+    const refused = (await handlers.get('projectCommit:commit')!(null, { ...wellFormed, ...change })) as { ok: boolean; error: string };
+    expect(refused.ok).toBe(false);
+    expect(refused.error).not.toBe(reached.error);
+    if (change.paths) expect(refused.error).toBe('A path must stay inside the project.');
+  });
+
+  it('tells the window the remembered choice at once, so the next Commit opens with it', async () => {
+    currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
+    try {
+      await handlers.get('projectCommit:flow')!(null, { flow: getConfig().ui.commitFlow === 'commit' ? 'pr' : 'commit' });
+      const sent = vi.mocked(currentWindow.webContents.send).mock.calls.find(([channel]) => channel === 'state:changed');
+      expect((sent?.[1] as { config: { ui: { commitFlow?: string } } } | undefined)?.config.ui.commitFlow).toBe(getConfig().ui.commitFlow);
+    } finally {
+      currentWindow = null;
+    }
   });
 });
 

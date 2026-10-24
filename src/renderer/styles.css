@@ -219,7 +219,8 @@
 .commit-step-link { flex: none; padding: 4px 10px; }
 .file-commit-bar { flex: none; padding: 10px 12px; border-top: 1px solid var(--line); }
 .file-commit-bar .btn { width: 100%; justify-content: center; }
-@media (prefers-reduced-motion: reduce) { .commit-step-spinner { animation-duration: 3s; } }
+/* Reduced motion stops every animation; a still quarter arc would look frozen, so the step shows a whole ring. */
+@media (prefers-reduced-motion: reduce) { .commit-step-spinner { border-color: var(--accent); } }
 .plugin-card-error { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--red); font-size: calc(11px * var(--text-scale, 1)); }
 .plugin-setup-status { margin: 0 0 20px; color: var(--soft); }
 .plugin-setup-copy { display: flex; gap: 8px; align-items: center; }

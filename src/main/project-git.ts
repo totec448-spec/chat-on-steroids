@@ -134,7 +134,12 @@ export async function runGit(cwd: string, args: string[], maxBytes = MAX_GIT_OUT
       cwd, env: { ...cleanGitEnvironment(), ...options.env }, windowsHide: true,
       stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe']
     });
-    if (options.input !== undefined) child.stdin!.end(options.input, 'utf8');
+    if (options.input !== undefined) {
+      // Git may exit before it reads all of it (an early refusal); the exit code says what happened,
+      // and an unhandled EPIPE here would be an uncaught exception in the main process.
+      child.stdin!.on('error', () => undefined);
+      child.stdin!.end(options.input, 'utf8');
+    }
     const stdout: Buffer[] = [], stderr: Buffer[] = [];
     let stdoutBytes = 0, stderrBytes = 0, settled = false;
     const finish = (error?: Error, code = -1): void => {

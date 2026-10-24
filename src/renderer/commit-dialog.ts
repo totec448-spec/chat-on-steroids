@@ -31,6 +31,7 @@ export function initCommitDialog(api: Api, deps: { flow: () => CommitFlow | unde
   const all = $<HTMLButtonElement>('commitFilesAll');
   const flows = [...form.querySelectorAll<HTMLInputElement>('input[name="commitFlow"]')];
   const flowNote = $('commitFlowNote');
+  const closeButton = $('commitClose') as HTMLButtonElement;
   const branchField = $('commitBranchField');
   const branch = $<HTMLInputElement>('commitBranch');
   const error = $('commitError');
@@ -59,7 +60,8 @@ export function initCommitDialog(api: Api, deps: { flow: () => CommitFlow | unde
   const canPush = () => Boolean(state?.remote);
   const canPr = () => Boolean(state?.remote && state.github);
   /** A pull request comes from its own branch; a detached HEAD needs one to commit at all. */
-  const needsBranch = () => !state?.branch || (flow() === 'pr' && state.branch === state.defaultBranch);
+  // Not knowing the default branch, the current one may be it: a pull request then gets its own branch too.
+  const needsBranch = () => !state?.branch || (flow() === 'pr' && (state.defaultBranch === null || state.branch === state.defaultBranch));
   const showError = (text: string | null) => { error.hidden = !text; error.textContent = text ?? ''; if (text) error.scrollIntoView?.({ block: 'nearest' }); };
 
   function paintFiles(changes: readonly ProjectGitChange[]): void {
@@ -92,8 +94,9 @@ export function initCommitDialog(api: Api, deps: { flow: () => CommitFlow | unde
       const fallback = flows.filter(input => !input.disabled).at(-1);
       if (fallback) fallback.checked = true;
     }
+    // A choice that is not offered says why, whichever one is chosen.
     const note = !state ? '' : !canPush() ? t('This repository has no remote to push to.')
-      : flow() === 'pr' && !state.github ? t('Pull requests need a remote on GitHub.')
+      : !state.github ? t('Pull requests need a remote on GitHub.')
       : flow() === 'pr' && state.gh === 'ready' ? t('The GitHub CLI creates the pull request.')
       : flow() === 'pr' && state.gh === 'signed-out' ? t("The GitHub CLI is not signed in, so GitHub's page opens to create the pull request.")
       : flow() === 'pr' ? t("GitHub's page opens to create the pull request. With the GitHub CLI (gh) signed in, the app creates it directly.")
@@ -104,6 +107,8 @@ export function initCommitDialog(api: Api, deps: { flow: () => CommitFlow | unde
     if (needsBranch() && !branchEdited) branch.value = branchNameFrom(message.value);
     submit.textContent = flow() === 'pr' ? t('Commit and open pull request') : t('Commit');
     submit.disabled = busy || !state || !chosen.size;
+    // While a step runs the dialog stays: its result belongs to this dialog, and a push cannot be called back.
+    closeButton.disabled = busy;
     message.disabled = busy;
     all.disabled = busy || !total;
   }
@@ -168,10 +173,12 @@ export function initCommitDialog(api: Api, deps: { flow: () => CommitFlow | unde
   }
 
   async function push(then: 'pr' | 'stop'): Promise<void> {
+    const session = generation;
     stepError.hidden = true;
     offer(null); doneClose.hidden = true;
     setStep({ key: 'push', state: 'working', text: () => t('Pushing…') });
     const reply = await api.pushProject(projectId).catch(caught => ({ ok: false as const, error: caught instanceof Error ? caught.message : String(caught) }));
+    if (session !== generation) return;
     if (!reply.ok) { stepFailed('push', () => t('Not pushed'), new Error(reply.error), () => push(then)); return; }
     setStep({ key: 'push', state: 'done', text: () => t('Pushed {0} to {1}', [reply.data.branch, reply.data.remote]) });
     if (then === 'pr') await pullRequest();
@@ -179,11 +186,13 @@ export function initCommitDialog(api: Api, deps: { flow: () => CommitFlow | unde
   }
 
   async function pullRequest(): Promise<void> {
+    const session = generation;
     stepError.hidden = true;
     offer(null); doneClose.hidden = true;
     setStep({ key: 'pr', state: 'working', text: () => t('Opening a pull request…') });
     const reply = await api.createPullRequest(projectId, committedSubject, committedBody)
       .catch(caught => ({ ok: false as const, error: caught instanceof Error ? caught.message : String(caught) }));
+    if (session !== generation) return;
     if (!reply.ok) { stepFailed('pr', () => t('No pull request yet'), new Error(reply.error), pullRequest); return; }
     const { url, via } = reply.data;
     setStep(via === 'browser'
@@ -244,9 +253,14 @@ export function initCommitDialog(api: Api, deps: { flow: () => CommitFlow | unde
     paintFiles(state?.changes ?? []);
     paint();
   });
-  stepAction.addEventListener('click', () => { const run = next; if (run) void run(); });
+  stepAction.addEventListener('click', async () => {
+    const run = next;
+    if (!run || busy) return;
+    busy = true; paint();
+    try { await run(); } finally { busy = false; paint(); }
+  });
   const close = () => { generation += 1; if (typeof dialog.close === 'function') dialog.close(); else dialog.removeAttribute('open'); };
-  for (const button of [$('commitClose'), $('commitCancel'), doneClose, notNow]) button.addEventListener('click', () => { if (!busy) close(); });
+  for (const button of [closeButton, $('commitCancel'), doneClose, notNow]) button.addEventListener('click', () => { if (!busy) close(); });
   dialog.addEventListener('cancel', event => { event.preventDefault(); if (!busy) close(); });
   onLanguageChange(() => { if (dialog.open) { paint(); paintSteps(); } });
 

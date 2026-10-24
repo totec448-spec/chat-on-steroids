@@ -11,6 +11,9 @@ function subjectOf(task: string): string {
   const chars = [...line];
   if (chars.length <= SUBJECT) return line;
   const cut = chars.slice(0, SUBJECT + 1).join('');
+  // A whole first sentence reads better than the start of the next one; a short opener ("Hi.") is no subject.
+  const sentence = [...cut.matchAll(/[.!?](?=\s)/g)].map(match => match.index!).filter(at => at >= 20).at(-1);
+  if (sentence !== undefined) return cut.slice(0, sentence + 1).replace(/[\s,.;:–-]+$/u, '');
   const space = cut.lastIndexOf(' ');
   return (space > 20 ? cut.slice(0, space) : chars.slice(0, SUBJECT).join('')).replace(/[\s,.;:–-]+$/u, '');
 }

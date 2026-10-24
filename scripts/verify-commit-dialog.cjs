@@ -221,14 +221,22 @@ app.whenReady().then(async () => {
       await js(`document.getElementById('commitCancel').click()`);
       await until(`!${dialog}.open`);
     }
+    // With reduced motion the spinner cannot turn; a still quarter arc would look like a frozen app, so it is a whole ring.
+    win.webContents.debugger.attach();
+    await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+    const still = await js(`(()=>{const s=document.body.appendChild(document.createElement('span'));s.className='commit-step-spinner';const c=getComputedStyle(s);
+      const r={animation:c.animationName,top:c.borderTopColor,right:c.borderRightColor};s.remove();return r;})()`);
+    win.webContents.debugger.detach();
+    assert.ok(still.animation === 'none' && still.top === still.right, `reduced motion: the spinner is a whole ring ${JSON.stringify(still)}`);
     assert.deepEqual(await js('window.fixtureErrors'), []);
-    console.log('PASS: Review Commit button, dialog prefilled from the chat task, all three flows, done steps; 13 languages, both themes, 760 px');
+    console.log('PASS: Review Commit button, dialog prefilled from the chat task, all three flows, done steps; 13 languages, both themes, 760 px; reduced motion');
   } catch (error) {
     if (win && !win.isDestroyed()) fs.writeFileSync(path.join(output, 'failure.png'), (await win.webContents.capturePage()).toPNG());
     console.error(error);
     process.exitCode = 1;
   } finally {
-    await server?.close();
+    // The dev server can keep a socket open; the check must still end.
+    await Promise.race([server?.close(), new Promise(resolve => setTimeout(resolve, 2000))]);
     app.exit(process.exitCode ?? 0);
   }
 });
