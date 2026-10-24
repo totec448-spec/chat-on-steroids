@@ -3055,5 +3055,7 @@
   "HTML export saves a whole session to a file": "Xuất HTML lưu toàn bộ phiên vào một tệp",
   "Export as HTML": "Xuất dạng HTML",
   "Whole session as HTML": "Toàn bộ phiên dạng HTML",
-  "HTML files": "Tệp HTML"
+  "HTML files": "Tệp HTML",
+  "Play sounds": "Phát âm thanh",
+  "A short sound when a chat needs you, something fails, or a chat finishes in the background. Quiet during phone notifications' quiet hours.": "Một âm thanh ngắn khi một cuộc trò chuyện cần bạn, có gì đó thất bại hoặc một cuộc trò chuyện xong ở chế độ nền. Im lặng trong giờ yên lặng của thông báo điện thoại."
 }

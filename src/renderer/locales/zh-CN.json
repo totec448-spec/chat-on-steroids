@@ -3055,5 +3055,7 @@
   "HTML export saves a whole session to a file": "HTML 导出会把整个会话保存为一个文件",
   "Export as HTML": "导出为 HTML",
   "Whole session as HTML": "整个会话（HTML）",
-  "HTML files": "HTML 文件"
+  "HTML files": "HTML 文件",
+  "Play sounds": "播放提示音",
+  "A short sound when a chat needs you, something fails, or a chat finishes in the background. Quiet during phone notifications' quiet hours.": "当聊天需要你、某项操作失败，或聊天在后台完成时，播放一声简短的提示音。在手机通知的免打扰时段内静音。"
 }
