@@ -3003,6 +3003,14 @@
   "Each is easy to read in light and dark.": "모두 라이트와 다크에서 읽기 쉽습니다.",
   "Orange": "주황",
   "Red": "빨강",
+  "Three-way view": "3방향 보기",
+  "Ask chat to resolve": "채팅에 해결 요청",
+  "Help me resolve the merge conflict in {0}. Read the common base, ours and theirs with git show :1:./{0}, :2:./{0} and :3:./{0}, then write a version that keeps what both sides meant and tell me what you chose. Do not stage or commit it.": "{0}의 병합 충돌 해결을 도와주세요. git show :1:./{0}, :2:./{0}, :3:./{0}로 공통 기준, 우리 쪽, 상대 쪽을 읽고 양쪽의 의도를 살린 버전을 작성한 뒤 무엇을 선택했는지 알려 주세요. 스테이징하거나 커밋하지 마세요.",
+  "Ours (HEAD)": "우리 쪽 (HEAD)",
+  "Common base": "공통 기준",
+  "Theirs (incoming)": "상대 쪽 (들어오는 쪽)",
+  "Not in this version": "이 버전에는 없음",
+  "Start or cancel the prepared plan first, then ask again.": "먼저 준비된 계획을 시작하거나 취소한 다음 다시 요청하세요.",
   "Quote": "인용",
   "Start or cancel the prepared plan first, then quote again.": "먼저 준비된 계획을 시작하거나 취소한 다음 다시 인용하세요."
 }

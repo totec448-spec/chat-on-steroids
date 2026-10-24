@@ -3003,6 +3003,14 @@
   "Each is easy to read in light and dark.": "每种颜色在浅色和深色模式下都清晰易读。",
   "Orange": "橙色",
   "Red": "红色",
+  "Three-way view": "三方视图",
+  "Ask chat to resolve": "让聊天帮忙解决",
+  "Help me resolve the merge conflict in {0}. Read the common base, ours and theirs with git show :1:./{0}, :2:./{0} and :3:./{0}, then write a version that keeps what both sides meant and tell me what you chose. Do not stage or commit it.": "请帮我解决 {0} 中的合并冲突。用 git show :1:./{0}, :2:./{0} 和 :3:./{0} 读取共同基础、我方和对方的版本，然后写出一个保留双方意图的版本，并告诉我你做了哪些选择。不要暂存或提交。",
+  "Ours (HEAD)": "我方 (HEAD)",
+  "Common base": "共同基础",
+  "Theirs (incoming)": "对方 (传入)",
+  "Not in this version": "此版本中不存在",
+  "Start or cancel the prepared plan first, then ask again.": "请先开始或取消已准备好的计划，然后再试一次。",
   "Quote": "引用",
   "Start or cancel the prepared plan first, then quote again.": "请先开始或取消已准备好的计划，然后再引用一次。"
 }
