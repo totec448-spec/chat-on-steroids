@@ -259,7 +259,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Models/usage | `src/main/chat-models.ts`, `session/usage.ts`, `provider-usage.ts`, `usage-tool.ts`; `src/shared/{chat-models,usage,provider-usage}.ts`; `src/renderer/{chat-models,context-meter,usage}.ts`: account observations vs local estimates. |
 | External plugins | `src/main/plugins/{catalog,installer,manager,exposure,oauth}.ts`, `plugins-ipc.ts`, `plugin-refresh.ts`, `src/shared/{plugins,plugin-refresh}.ts`, `src/renderer/plugins.ts`. |
 | Renderer boundary | `src/main/ipc.ts`, `edit-context-menu.ts`, `src/preload/index.ts`; `src/renderer/{main,chat,dom,tool-result,timeline-scroll,sidebar-resize,browser-preferences,i18n}.ts`, `locales/{es,zh-CN,zh-TW,ja,tr,fr,pt-PT}.json`, `index.html`, `styles.css`. |
-| Appearance | `src/shared/appearance.ts`, `src/main/appearance-schema.ts`, `src/renderer/appearance.ts`: bounded saved colors/typography (including line spacing and the bundled Atkinson Hyperlegible Next in `src/renderer/fonts/`), field-wise Settings merge, immediate semantic CSS projection. `window-layout.ts` shares native caption/backing colors. |
+| Appearance | `src/shared/appearance.ts`, `src/main/appearance-schema.ts`, `src/renderer/appearance.ts`: bounded saved colors/typography (including line spacing and the bundled Atkinson Hyperlegible Next in `src/renderer/fonts/`), field-wise Settings merge, immediate semantic CSS projection. `window-layout.ts` shares native caption/backing colors. Optional `highContrast` (missing = off): `effectivePalette()` swaps in a black or white page and `paletteTokens(…, high)` draws text at 7:1 and lines at 3:1 against the hovered surface; the chosen palette stays saved underneath. `ACCENT_PRESETS` are eight light/dark accent pairs (AA as text, 3:1 as a control); a preset writes both themes' `accent`. |
 | Native Desktop | `src/main/computer/{index,helper,browser-chords,windows-api,windows-capture,windows-apps,windows-keys}.ts`, `src/shared/windows-computer.ts`, `mcp/tools-desktop-{windows,macos}.ts`, `native/macos-desktop-helper/*`, `native/macos-desktop-addon/*`. |
 | Direct browser control | `src/main/browser-control.ts`, `mcp/tools-browser.ts`, `src/shared/browser-control.ts`, `extension/browser-control{,-page}.js`: short-lived RPCs, session-owned debugger tabs, bounded DOM/diagnostics and background input. |
 | Delivery/build | `src/main/{update,extension-path,version,logger,durable}.ts`, `electron.vite.config.ts`, `electron-builder.yml`, `scripts/*`, `.github/workflows/*`, `vitest.config.ts`. |
@@ -934,6 +934,19 @@ Projects may also store one optional color from the fixed `PROJECT_COLORS` palet
 sidebar presentation metadata only: changing or removing it never resolves paths, changes the
 project folder, grants permission, rebinds sessions, or changes prompt/workspace
 selection. Legacy rows without color remain unchanged. A project's color tints its folder icon.
+Secrets shield (#1797, `main/secrets-shield.ts`): `dispatch` masks the outer call's own tool result
+(and background command output appended to it) before the app adds its inbox, notices or the
+user's new messages, so ChatGPT and the recorded wire value never carry the credential. Only
+unmistakable shapes are masked: provider key prefixes (OpenAI, Anthropic, GitHub, AWS, Stripe,
+Slack, Google), JSON Web Tokens, private key blocks, and values of settings whose names end in a
+secret word (`…_API_KEY`, `…_TOKEN`, `…_PASSWORD`, …; placeholders such as `${VAR}`, `<your key>`
+or `changeme` stay). Each becomes `[<kind> hidden by Chat On Steroids]` (a setting keeps its name:
+`[value hidden by Chat On Steroids]`). Nested calls inside `exec` see the real value; files and the
+terminal are unchanged. `config.ui.secretsShield` (missing = on) turns it off everywhere; a
+project's `secretsShieldOff: true` (`LocalProject`, durable `projects`) turns it off for its chats.
+The project is looked up only after something matched, and a project that cannot be read keeps
+the shield on. Each masking writes one `secrets shield:` log line naming kinds and counts, never
+the value. Text without a trigger prefix or secret name returns at once, unchanged and unallocated.
 Every sidebar row (a project or a chat) has one quiet "⋯" button, shown on hover/focus or while its
 menu is open, and a right click on the row opens the same menu (`renderer/row-menu.ts`). The menu
 lives in the document body, outside the sidebar the activity repaints, so a repaint never closes
@@ -941,7 +954,9 @@ it; it finds its row's button again by owner (`data-row-menu`), stays inside the
 submenus beside their item, and is keyboard-driven (arrows, Right/Left for submenus, Escape gives
 focus back to the button). A project's menu: New chat in this project (`data-new-project`, which
 also shows the chat screen), Color (a submenu: None and the palette as radio items, each calling
-the same `projects:color` owner; choices wait while a save is pending) and Remove. A chat's
+the same `projects:color` owner; choices wait while a save is pending), Hide secrets from ChatGPT
+(an on/off `menuitemcheckbox`, `toggle: true`, calling `projects:secrets-shield` { id, off }; it
+shows off and disabled while Settings turns the shield off everywhere) and Remove. A chat's
 menu: Rename and Open in browser, Block/Release and, in strict mode, Trust/Untrust, then Remove;
 the Unattributed row offers only its app-wide Block/Allow (never in strict mode) and Remove.
 Choosing an item gives focus back to the row's button before the action runs, so a color save's
@@ -1098,6 +1113,12 @@ anything else. While the Project is being created, or could not be, the message 
 row says so ("Creating this project in ChatGPT…", or the unavailable line pointing at Retry). A
 deleted Project's page redirects to ChatGPT's home and drops the marker: the worker reports
 `gone` for the tab it opened for that Project, the link becomes `failed`, and nothing is sent.
+Since October 2026 ChatGPT may instead keep that page on "loading" with no composer (#1759): the
+page reports `project_unavailable` { id, project } once it is at least 30 s old, shows no composer,
+and the sidebar's open Projects section (the one holding `data-app-action-sidebar-project-create`)
+has no row `data-app-action-sidebar-project-id` for it (`CLF_DOM.sidebarListsProject`: null when
+the sidebar is closed or the section collapsed, which proves nothing). The worker passes it on as
+the same `gone` only for the tab it opened for that message, still on that Project's home.
 An opening remembers its Project, so a retry's new Project gets its own tab.
 A chat the person starts on chatgpt.com inside a linked Project joins that CoS project (#1744):
 the service worker's `events` handler reads the recording tab's URL (`tabChatgptProject`: the
@@ -4451,6 +4472,7 @@ Captured ChatGPT HTML passes a strict allowlist; authored plain text stays text.
 citation ranges use Unicode code points and map to UTF-16 before slicing. Exact uploaded-file
 names render as plain chips; unresolved file citations do not gain invented local links.
 Plain text leaving the timeline (Markdown export, search index and snippets, turn notifications and `modelFacingText` for Goal/Loop and completed answers) passes `providerEntitiesAsMarkdown` first: the raw text's private-use entities (U+E200 name U+E202 field … U+E201) become `[label](address)` for `url` and are dropped otherwise, so a link card never reads as "urlLabelhttps://…".
+`sessions:exportMarkdown` takes an optional `format: 'markdown' | 'html'` (Markdown when left out). `html` is accepted only with `scope: 'session'` and `target: 'file'`: main saves the same transcript as one self-contained page (`shared/html-export.ts` `transcriptHtml`). What a person wrote is escaped plain text; answers are Markdown drawn with raw HTML escaped, images reduced to their alt text and only http(s)/mailto links kept. The page has inline styles only and a `default-src 'none'` policy, so it runs no script and loads nothing. Its title and texts pass `redactSecretText` first; the Markdown export stays exact.
 An assistant message may carry `references`: the sources behind its inline
 `:chatgpt-content-reference{index="N"}` citations. `extension/fiber.js` `citedSources` reads
 them from each citation pill's own props (the list its hover card pages through, plus the reply
