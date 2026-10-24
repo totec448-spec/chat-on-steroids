@@ -1,13 +1,35 @@
 import type { AppApi } from '../preload/index.js';
-import type { AppState, SettingsBackupChoice } from '../shared/types.js';
+import { CAPABILITY_LABELS, type AppState, type Capability, type SettingsBackupChoice } from '../shared/types.js';
 import { currentLanguage, t, tn } from './i18n.js';
 
 /**
  * Settings → General → Backup. Export writes a file of the settings (and, when asked, the saved
- * keys, locked with a passphrase); import shows how many settings a backup changes before it
- * changes them. The main process reads and checks the file; this page never sees a saved key.
+ * keys, locked with a passphrase); import shows how many settings a backup changes, names any that
+ * give ChatGPT more access, lists the rest by Settings section on request, and takes saved keys only
+ * when asked. The main process reads and checks the file; this page never sees a saved key.
  */
 const WRONG_PASSPHRASE = 'That passphrase does not open the saved keys in this backup.';
+
+/** The Settings tab a changed setting is on, so the person can find it; the first match wins. */
+const CATEGORIES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^(capabilities\.|readOnly$|commandAllowlist|projects\.|mcp\.)/, 'Workspace'], [/^ui\.(appearance|theme)/, 'Appearance'],
+  [/^(multiAgent|goal)\./, 'Agents & automation']
+];
+const category = (path: string) => CATEGORIES.find(([pattern]) => pattern.test(path))?.[1] ?? 'General';
+
+/** What a change that gives ChatGPT more access is called (main's `widerAccess` paths). */
+function widerLabel(path: string): string {
+  if (path.startsWith('capabilities.')) {
+    const key = path.slice('capabilities.'.length) as Capability;
+    return Object.hasOwn(CAPABILITY_LABELS, key) ? t(CAPABILITY_LABELS[key]) : key;
+  }
+  const labels: Record<string, string> = {
+    readOnly: 'Read-only mode off', commandAllowlist: 'Command rules changed', 'controlApi.enabled': 'Local control API on',
+    'controlApi.allowActions': 'Local control API actions on', 'multiAgent.strictChatAllowlist': 'Trust only selected chats off',
+    'multiAgent.allowUnattributedCalls': 'Unattributed calls allowed', 'ui.secretsShield': 'Hide secrets from ChatGPT off'
+  };
+  return labels[path] ? t(labels[path]) : path;
+}
 const MIN_PASSPHRASE = 8;
 
 type Api = Pick<AppApi, 'exportSettings' | 'pickSettingsBackup' | 'importSettingsBackup'>;
@@ -99,9 +121,24 @@ export function initSettingsBackup(api: Api, hooks: { imported(state: AppState):
       ? tn('1 setting will change.', '{0} settings will change.', next.changed.length)
       : t('Every setting in this backup already matches yours.')) + ' ' +
       t("Folders and this computer's connection to ChatGPT stay as they are.");
+    // Wider access is named where nobody can miss it; the rest waits behind Review changes.
+    const wider = $('importSettingsWider');
+    wider.hidden = !next.wider.length;
+    wider.textContent = next.wider.length ? t('More access for ChatGPT: {0}.', [next.wider.map(widerLabel).join(', ')]) : '';
+    const review = $<HTMLDetailsElement>('importSettingsReview');
+    review.hidden = !next.changed.length;
+    review.open = false;
+    const counts = new Map<string, number>();
+    for (const path of next.changed) counts.set(category(path), (counts.get(category(path)) ?? 0) + 1);
+    $('importSettingsChanges').replaceChildren(...[...counts].map(([name, count]) => {
+      const item = document.createElement('li');
+      item.textContent = tn('{1}: 1 setting', '{1}: {0} settings', count, [count, t(name)]);
+      return item;
+    }));
     importKeysRow.hidden = next.keyCount === 0;
     $('importSettingsKeysLabel').textContent = tn('Also import 1 saved key', 'Also import {0} saved keys', next.keyCount);
-    importKeys.checked = next.keyCount > 0;
+    // Saved keys come along only when the person asks for them.
+    importKeys.checked = false;
     importPassRow.hidden = !importKeys.checked;
     importPass.value = '';
     error(importError, null);

@@ -986,6 +986,8 @@ export interface SettingsBackupChoice {
   exportedAt: string | null;
   /** Dotted paths of the settings that would change here, e.g. `ui.theme`. */
   changed: string[];
+  /** Of those, the ones that give ChatGPT more access (`widerAccess`): a permission on, read-only off… */
+  wider: string[];
   /** Saved keys the backup carries, locked with its passphrase. */
   keyCount: number;
 }

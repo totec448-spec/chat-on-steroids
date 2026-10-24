@@ -108,6 +108,16 @@
 .backup-dialog .setting + .plugin-field, .backup-dialog .setting + div > .plugin-field:first-child { margin-top: 4px; }
 .backup-dialog #importSettingsSource { margin-bottom: 4px; color: var(--soft); }
 .backup-dialog #importSettingsSummary { margin-top: 0; }
+.backup-wider { margin: 0 0 12px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--red-wash); color: var(--red); }
+.backup-wider[hidden] { display: none; }
+.backup-review { margin: 0 0 12px; }
+.backup-review > summary { display: flex; align-items: center; gap: 6px; width: fit-content; cursor: pointer; color: var(--soft); list-style: none; }
+.backup-review > summary::-webkit-details-marker { display: none; }
+.backup-review > summary .sum-chev { margin-left: -5px; }
+.backup-review > summary:hover { color: var(--ink); }
+.backup-review[open] .sum-chev { transform: rotate(90deg); }
+.backup-review ul { margin: 8px 0 0; padding-left: 18px; color: var(--soft); }
+.backup-review li + li { margin-top: 2px; }
 .pet-delete-confirm { border: 1px solid #b4262c; background: #b4262c; color: #fff; font-weight: 600; }
 .pet-delete-confirm:hover:not(:disabled) { border-color: #971f25; background: #971f25; color: #fff; }
 .pet-library-preview { display: grid; place-items: center; width: 58px; height: 64px; flex: 0 0 58px; overflow: hidden; border-radius: 12px; background: var(--sunk); }
