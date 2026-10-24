@@ -3006,7 +3006,6 @@
   "Keep current files": "現在のファイルを残す",
   "Restore files": "ファイルを復元",
   "Save a checkpoint before each turn's first edit": "各ターンの最初の編集の前にチェックポイントを保存",
-  "Off: no new checkpoints are taken. Existing checkpoints stay listed and Restore still works.": "オフ：新しいチェックポイントは作成されません。既存のチェックポイントは一覧に残り、復元も引き続き使えます。",
   "HTML export saves a whole session to a file": "HTML エクスポートはセッション全体を 1 つのファイルに保存します",
   "Hide secrets from ChatGPT": "シークレットを ChatGPT から隠す",
   "API keys, tokens, private keys and passwords in what tools return are replaced with a short note before ChatGPT sees them. Your files stay as they are. A project can turn this off in its menu.": "ツールが返す内容に含まれる API キー、トークン、秘密鍵、パスワードは、ChatGPT が見る前に短い注記に置き換えられます。ファイル自体は変わりません。プロジェクトごとにメニューからオフにできます。",
@@ -3016,5 +3015,8 @@
   "Keys and tokens in this project's tool results are hidden from ChatGPT": "このプロジェクトのツール結果に含まれるキーやトークンは ChatGPT から隠されます",
   "Export as HTML": "HTML としてエクスポート",
   "Whole session as HTML": "セッション全体を HTML で",
-  "HTML files": "HTML ファイル"
+  "HTML files": "HTML ファイル",
+  "This checkpoint is no longer available. Git has cleaned it up.": "このチェックポイントは利用できなくなりました。Git によって整理されました。",
+  "Checkpoints are temporary: Git may clean up old ones. Off: no new ones are taken.": "チェックポイントは一時的なものです。古いものは Git に整理されることがあります。オフ: 新しいチェックポイントは作成されません。",
+  "Cleaned up": "整理済み"
 }

@@ -3102,7 +3102,6 @@
   "Keep current files": "Manter os arquivos atuais",
   "Restore files": "Restaurar arquivos",
   "Save a checkpoint before each turn's first edit": "Salvar um ponto de controle antes da primeira edição de cada turno",
-  "Off: no new checkpoints are taken. Existing checkpoints stay listed and Restore still works.": "Desativado: nenhum ponto de controle novo é criado. Os existentes continuam na lista e Restaurar continua funcionando.",
   "HTML export saves a whole session to a file": "A exportação em HTML salva uma sessão inteira em um arquivo",
   "Hide secrets from ChatGPT": "Ocultar segredos do ChatGPT",
   "API keys, tokens, private keys and passwords in what tools return are replaced with a short note before ChatGPT sees them. Your files stay as they are. A project can turn this off in its menu.": "Chaves de API, tokens, chaves privadas e senhas no que as ferramentas retornam são substituídos por uma nota curta antes que o ChatGPT os veja. Seus arquivos continuam como estão. Um projeto pode desativar isso no menu dele.",
@@ -3112,5 +3111,8 @@
   "Keys and tokens in this project's tool results are hidden from ChatGPT": "Chaves e tokens nos resultados das ferramentas deste projeto ficam ocultos do ChatGPT",
   "Export as HTML": "Exportar como HTML",
   "Whole session as HTML": "Sessão inteira em HTML",
-  "HTML files": "Arquivos HTML"
+  "HTML files": "Arquivos HTML",
+  "This checkpoint is no longer available. Git has cleaned it up.": "Este ponto de controle não está mais disponível. O Git o limpou.",
+  "Checkpoints are temporary: Git may clean up old ones. Off: no new ones are taken.": "Os pontos de controle são temporários: o Git pode limpar os antigos. Desligado: nenhum novo é criado.",
+  "Cleaned up": "Limpo"
 }

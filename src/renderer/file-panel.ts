@@ -34,6 +34,8 @@ interface Selection {
   kind: ProjectFileKind | 'root';
 }
 
+/** Main's sentence for a checkpoint whose tree Git's garbage collection removed. */
+const CHECKPOINT_GONE = 'This checkpoint is no longer available. Git has cleaned it up.';
 const PREVIEW_HEIGHT_KEY = 'chat-on-steroids.file-preview-height';
 const PREVIEW_MIN_HEIGHT = 140;
 const GITIGNORE = '.gitignore';
@@ -285,11 +287,12 @@ export function createFilePanel(options: FilePanelOptions) {
     label: () => t('Compare branches'), placeholder: () => t('Search branches…'), empty: () => t('No branches found'),
     choices: () => [
       ...[{ ref: '', label: t('Working tree') }, ...(gitSnapshot?.branches ?? [])],
-      ...(gitSnapshot?.checkpoints ?? []).map(entry => ({ ref: entry.ref, label: checkpointLabel(entry.ref) }))
+      ...(gitSnapshot?.checkpoints ?? []).map(entry => ({ ref: entry.ref, label: checkpointLabel(entry.ref), gone: entry.available === false }))
     ].map(choice => ({
       label: choice.label, selected: choice.ref === (selectedBaseRef ?? ''),
       ...(choice.ref.startsWith('refs/remotes/') ? { title: t('Locally cached remote branch; no automatic fetch') } : {}),
-      ...(choice.ref.startsWith(CHECKPOINT_REF_PREFIX) ? { hint: t('Checkpoints') } : {}),
+      // Checkpoints are temporary: one Git has cleaned up says so, and opening it explains why.
+      ...(choice.ref.startsWith(CHECKPOINT_REF_PREFIX) ? { hint: 'gone' in choice && choice.gone ? t('Cleaned up') : t('Checkpoints') } : {}),
       pick: () => {
         if (selectedBaseRef === (choice.ref || null)) return;
         selectedBaseRef = choice.ref || null;
@@ -1080,6 +1083,10 @@ export function createFilePanel(options: FilePanelOptions) {
     }
     if (gitSnapshot.state === 'not-repository') {
       changesList.append(el('p', 'file-changes-empty', () => t('This folder is not a Git repository.')));
+      return;
+    }
+    if (gitSnapshot.state === 'unavailable' && gitSnapshot.message === CHECKPOINT_GONE) {
+      changesList.append(el('p', 'file-changes-empty', () => t(CHECKPOINT_GONE)));
       return;
     }
     if (gitSnapshot.state === 'unavailable') {

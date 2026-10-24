@@ -74,8 +74,9 @@ app.whenReady().then(async () => {
         watchProjectFiles:()=>ok(true),previewProjectFile:(id,name)=>ok(info(id,name)),
         getProjectGitSnapshot:(id,baseRef)=>ok({projectId:id,state:'ready',truncated:false,revision:baseRef?'fixture-compared':'fixture-dirty',
           currentBranch:'feature',branches:[{ref:'refs/remotes/origin/main',label:'origin/main'},{ref:'refs/heads/feature',label:'feature'}],
-          checkpoints:[{ref:'checkpoint:'+'d'.repeat(32),createdAt:Date.UTC(2026,9,13,9,42),reason:'restore'},
-            {ref:'checkpoint:'+'c'.repeat(32),createdAt:Date.UTC(2026,9,13,9,30),reason:'turn'}],
+          checkpoints:[{ref:'checkpoint:'+'d'.repeat(32),createdAt:Date.UTC(2026,9,13,9,42),reason:'restore',available:true},
+            {ref:'checkpoint:'+'c'.repeat(32),createdAt:Date.UTC(2026,9,13,9,30),reason:'turn',available:true},
+            {ref:'checkpoint:'+'b'.repeat(32),createdAt:Date.UTC(2026,9,1,8,0),reason:'turn',available:false}],
           ...(baseRef?{comparison:{ref:baseRef,label:baseRef.startsWith('checkpoint:')?'':'origin/main',baseOid:'a'.repeat(40),headOid:'b'.repeat(40),
             ...(baseRef.startsWith('checkpoint:')?{checkpoint:true}:{})}}:{}),changes:baseRef?.startsWith('checkpoint:')?[
           {status:'M',path:'README.md',additions:2,deletions:1,binary:false},
@@ -168,9 +169,10 @@ app.whenReady().then(async () => {
     await js(`document.querySelector('.review-panel .file-branch-trigger').click()`);
     // The shared searchable picker shows checkpoints as options with a translated
     // hint, rather than the legacy .file-branch-section heading.
-    await until(`(()=>{const hints=[...document.querySelectorAll('.file-branch-menu .file-branch-option .file-branch-hint')];return hints.length===2&&hints.every(hint=>hint.textContent===window.fixture.t('Checkpoints'))})()`);
-    assert.deepEqual(await js(`[...document.querySelectorAll('.file-branch-menu .file-branch-option')].slice(-2).map(option=>option.querySelector('span')?.textContent.split(' · ')[0])`),
-      await js(`[window.fixture.t('Before restore'),window.fixture.t('Before turn')]`));
+    // A checkpoint whose tree Git cleaned up is listed as such (#1443, checkpoints are temporary).
+    await until(`(()=>{const hints=[...document.querySelectorAll('.file-branch-menu .file-branch-option .file-branch-hint')].map(hint=>hint.textContent);return hints.length===3&&hints[0]===window.fixture.t('Checkpoints')&&hints[1]===window.fixture.t('Checkpoints')&&hints[2]===window.fixture.t('Cleaned up')})()`);
+    assert.deepEqual(await js(`[...document.querySelectorAll('.file-branch-menu .file-branch-option')].slice(-3).map(option=>option.querySelector('span')?.textContent.split(' · ')[0])`),
+      await js(`[window.fixture.t('Before restore'),window.fixture.t('Before turn'),window.fixture.t('Before turn')]`));
     await screenshot('review-checkpoint-menu');
     await js(`[...document.querySelectorAll('.file-branch-option')].at(-1).click()`);
     await until(`document.querySelector('.review-panel .file-branch-trigger')?.textContent.startsWith(window.fixture.t('Before turn')) && document.querySelectorAll('.review-panel .file-change-row').length===2 && !!document.querySelector('.review-panel .file-checkpoint-bar button')`);

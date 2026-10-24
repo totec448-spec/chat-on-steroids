@@ -24,7 +24,8 @@ const CHANGE_DEBOUNCE_MS = 180;
 export interface GitResult { code: number; stdout: Buffer; stderr: string; }
 export interface RepositoryContext { projectId: string; projectReal: string; root: string; gitDir: string; commonDir: string; prefix: string; }
 /** Checkpoint commands only: a temporary index outside the repository, and no replacement objects. */
-export interface GitOptions { indexFile?: string; noReplaceObjects?: boolean; }
+/** `input` is written to Git's standard input (a list for `--batch-check`). */
+export interface GitOptions { indexFile?: string; noReplaceObjects?: boolean; input?: string; }
 
 function sameFile(left: Stats, right: Stats): boolean {
   return left.dev === right.dev && left.ino === right.ino && left.size === right.size &&
@@ -132,8 +133,9 @@ export async function runGit(cwd: string, args: string[], maxBytes = MAX_GIT_OUT
   if (options.indexFile) env['GIT_INDEX_FILE'] = options.indexFile;
   return new Promise((resolve, reject) => {
     const child = spawn(executable, ['--no-optional-locks', ...(options.noReplaceObjects ? ['--no-replace-objects'] : []), ...args], {
-      cwd, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']
+      cwd, env, windowsHide: true, stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe']
     });
+    if (options.input !== undefined) child.stdin!.end(options.input, 'utf8');
     const stdout: Buffer[] = [], stderr: Buffer[] = [];
     let stdoutBytes = 0, stderrBytes = 0, settled = false;
     const finish = (error?: Error, code = -1): void => {
@@ -148,14 +150,14 @@ export async function runGit(cwd: string, args: string[], maxBytes = MAX_GIT_OUT
       finish(new Error('Git took too long to respond'));
     }, GIT_TIMEOUT_MS);
     child.once('error', error => finish(error));
-    child.stdout.on('data', (chunk: Buffer) => {
+    child.stdout!.on('data', (chunk: Buffer) => {
       stdoutBytes += chunk.length;
       if (stdoutBytes > maxBytes) {
         child.kill(); finish(new Error('Git returned too much data')); return;
       }
       stdout.push(chunk);
     });
-    child.stderr.on('data', (chunk: Buffer) => {
+    child.stderr!.on('data', (chunk: Buffer) => {
       stderrBytes += chunk.length;
       if (stderrBytes <= 64 * 1024) stderr.push(chunk);
     });
@@ -377,8 +379,21 @@ export async function checkpointChanges(context: RepositoryContext, treeOid: str
   return changes;
 }
 
-async function checkpointChoices(projectId: string): Promise<NonNullable<ProjectGitSnapshot['checkpoints']>> {
-  return (await listCheckpoints(projectId)).map(entry => ({ ref: `${CHECKPOINT_REF_PREFIX}${entry.id}`, createdAt: entry.createdAt, reason: entry.reason }));
+/**
+ * Git keeps no reference to a checkpoint's tree (one would show in the person's own `git log --all`),
+ * so its garbage collection may remove an old one. One batch read says which trees are still there.
+ */
+async function presentTrees(context: RepositoryContext, oids: readonly string[]): Promise<Set<string>> {
+  if (!oids.length) return new Set();
+  const listed = await runGit(context.projectReal, ['cat-file', '--batch-check=%(objectname) %(objecttype)'], undefined, { input: `${oids.join('\n')}\n` });
+  if (listed.code !== 0) return new Set();
+  return new Set(decode(listed.stdout).split('\n').map(line => line.split(' ')).filter(([, type]) => type === 'tree').map(([oid]) => oid!));
+}
+
+async function checkpointChoices(context: RepositoryContext, projectId: string): Promise<NonNullable<ProjectGitSnapshot['checkpoints']>> {
+  const entries = await listCheckpoints(projectId);
+  const present = await presentTrees(context, [...new Set(entries.map(entry => entry.treeOid))]);
+  return entries.map(entry => ({ ref: `${CHECKPOINT_REF_PREFIX}${entry.id}`, createdAt: entry.createdAt, reason: entry.reason, available: present.has(entry.treeOid) }));
 }
 
 function unavailable(projectId: string, message: string): ProjectGitSnapshot {
@@ -392,10 +407,11 @@ export async function readProjectGitSnapshot(projectId: string, baseRef?: string
   if (!context) return { projectId, state: 'not-repository', changes: [], truncated: false, revision: '' };
   try {
     const identity = await branchIdentity(context);
-    const checkpoints = await checkpointChoices(projectId);
+    const checkpoints = await checkpointChoices(context, projectId);
     if (baseRef?.startsWith(CHECKPOINT_REF_PREFIX)) {
       const entry = await findCheckpoint(projectId, baseRef.slice(CHECKPOINT_REF_PREFIX.length));
       if (!entry) throw new Error('This checkpoint is no longer available');
+      if (!checkpoints.find(choice => choice.ref === baseRef)?.available) throw new Error('This checkpoint is no longer available. Git has cleaned it up.');
       const changes = await checkpointChanges(context, entry.treeOid);
       const comparison = { ref: baseRef, label: '', baseOid: entry.treeOid, headOid: identity.headOid ?? '', checkpoint: true as const };
       // Restore is confirmed against this revision, so a same-size line edit must change it too.

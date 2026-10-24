@@ -24,7 +24,8 @@ export interface ProjectGitSnapshot {
   branches?: Array<{ ref: string; label: string }>;
   branchesTruncated?: boolean;
   /** The project's code checkpoints, newest first; `ref` is a `checkpoint:<id>` comparison choice. */
-  checkpoints?: Array<{ ref: string; createdAt: number; reason: 'turn' | 'restore' }>;
+  /** `available` is false once Git's garbage collection removed the checkpoint's tree; it can be neither compared nor restored. */
+  checkpoints?: Array<{ ref: string; createdAt: number; reason: 'turn' | 'restore'; available: boolean }>;
   /**
    * A branch comparison (merge-base → HEAD), or with `checkpoint` the working tree against a
    * checkpoint tree (`baseOid`), untracked files included.

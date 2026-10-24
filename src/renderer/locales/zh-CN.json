@@ -3006,7 +3006,6 @@
   "Keep current files": "保留当前文件",
   "Restore files": "恢复文件",
   "Save a checkpoint before each turn's first edit": "在每个轮次的首次编辑前保存检查点",
-  "Off: no new checkpoints are taken. Existing checkpoints stay listed and Restore still works.": "关闭：不再创建新的检查点。现有检查点仍会列出，恢复功能照常可用。",
   "HTML export saves a whole session to a file": "HTML 导出会把整个会话保存为一个文件",
   "Hide secrets from ChatGPT": "对 ChatGPT 隐藏密钥",
   "API keys, tokens, private keys and passwords in what tools return are replaced with a short note before ChatGPT sees them. Your files stay as they are. A project can turn this off in its menu.": "工具返回内容中的 API 密钥、令牌、私钥和密码会在 ChatGPT 看到之前替换为一条简短说明。你的文件保持不变。项目可以在其菜单中关闭此功能。",
@@ -3016,5 +3015,8 @@
   "Keys and tokens in this project's tool results are hidden from ChatGPT": "此项目工具结果中的密钥和令牌对 ChatGPT 隐藏",
   "Export as HTML": "导出为 HTML",
   "Whole session as HTML": "整个会话（HTML）",
-  "HTML files": "HTML 文件"
+  "HTML files": "HTML 文件",
+  "This checkpoint is no longer available. Git has cleaned it up.": "此检查点已不可用。Git 已将其清理。",
+  "Checkpoints are temporary: Git may clean up old ones. Off: no new ones are taken.": "检查点是临时的：Git 可能会清理旧的检查点。关闭：不再创建新的检查点。",
+  "Cleaned up": "已清理"
 }
