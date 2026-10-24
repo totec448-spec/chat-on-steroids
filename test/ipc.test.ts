@@ -2776,6 +2776,37 @@ describe('settings backup over IPC', () => {
     expect(getConfig().ui).toMatchObject(local);
   });
 
+  it('refuses a short export passphrase before any saved key is read', async () => {
+    const secrets = await import('../src/main/secrets.js');
+    const read = vi.spyOn(secrets, 'readSecretsFor');
+    try {
+      expect(await exportTo(path.join(dir, 'short.json'), { includeKeys: true, passphrase: 'seven77' }))
+        .toEqual({ ok: false, error: 'Use a passphrase of at least 8 characters.' });
+      expect(read).not.toHaveBeenCalled();
+    } finally { read.mockRestore(); }
+  });
+
+  it('finishes an import whose settings were saved even when a later step of the save fails, and says what failed', async () => {
+    const { setSecret, clearSecret, getSecret } = await import('../src/main/secrets.js');
+    const lifecycle = await import('../src/main/window-lifecycle.js');
+    await setUp('dark', tunnelA, false);
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, startAtLogin: true, language: 'de' } });
+    await setSecret('openaiApiKey', key);
+    const file = path.join(dir, 'login-fails.json');
+    await exportTo(file, { includeKeys: true, passphrase: 'correct horse battery' });
+    await clearSecret('openaiApiKey');
+    await setUp('light', tunnelA, false);
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, startAtLogin: false, language: 'en' } });
+    const login = vi.spyOn(lifecycle, 'applyLoginStartup').mockImplementation(() => { throw new Error('login registration refused'); });
+    try {
+      const picked = await pick(file);
+      const applied = await apply({ token: picked.data.token, includeKeys: true, passphrase: 'correct horse battery' });
+      expect(applied).toMatchObject({ ok: true, data: { keyCount: 1, warning: 'login registration refused' } });
+      expect(getConfig().ui).toMatchObject({ theme: 'dark', startAtLogin: true, language: 'de' });
+      expect(await getSecret('openaiApiKey')).toBe(key);
+    } finally { login.mockRestore(); }
+  });
+
   it('refuses a backup with a setting value this version does not accept, in a sentence of its own', async () => {
     await setUp('dark', tunnelA, false);
     const file = path.join(dir, 'invalid-value.json');

@@ -101,7 +101,7 @@ import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFi
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
 import { hasSecret, isEncryptionAvailable, readSecretsFor, secureStorageStatus, setAsideUnreadableSecrets, setSecret, setSecrets, storedSecretsUnreadable, type SecretKey } from './secrets.js';
-import { BackupError, buildBackup, changedSettings, widerAccess, exportableSecret, openSecrets, overlaySettings, pickByShape, readBackup, type ParsedBackup } from './settings-backup.js';
+import { BackupError, buildBackup, changedSettings, widerAccess, exportableSecret, openSecrets, overlaySettings, passphraseLongEnough, pickByShape, readBackup, type ParsedBackup } from './settings-backup.js';
 import { setupApiKeySlot } from '../shared/setup-profile.js';
 import { addSetupProfile, removeSetupProfile, switchSetupProfile } from './setup-profiles.js';
 import { bundledVersion, locateBinary } from './tunnel/locate.js';
@@ -874,7 +874,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   };
   handle('settings:export', async payload => {
     const { includeKeys, passphrase } = z.object({ includeKeys: z.boolean(), passphrase: z.string().max(1024).optional() }).strict().parse(payload);
-    if (includeKeys && !passphrase) throw new Error('Use a passphrase of at least 8 characters.');
+    // Checked before the keys are read, so a short passphrase never touches secure storage.
+    if (includeKeys && !passphraseLongEnough(passphrase ?? '')) {
+      logInfo('settings backup: export refused, the passphrase is too short; nothing was read or written');
+      throw new Error('Use a passphrase of at least 8 characters.');
+    }
     const keys = includeKeys ? await readSecretsFor(exportableSecret).catch(error => {
       logWarn(`settings backup: saved keys could not be read: ${error instanceof Error ? error.message : String(error)}`);
       throw new Error('The saved keys could not be read, so no backup was made. Try again, or export without them.');
@@ -964,14 +968,25 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       logInfo('settings backup: import refused, secure storage is not available for the saved keys; nothing changed');
       throw new Error('Secure storage is not available on this computer, so the saved keys cannot be imported. Import without them.');
     }
-    if (changed.length) await saveSettings(settingsSave.parse({ base, patch: merged }));
+    // A save can fail after it wrote the settings (login registration, the control API, worker
+    // history): it finishes its own work and then reports. The import does the same, so the
+    // language and keys are not left out of a backup whose settings already changed.
+    let warning: string | undefined;
+    if (changed.length) {
+      const savedBefore = JSON.stringify(pickByShape(settingsPatch, getConfig()));
+      try { await saveSettings(settingsSave.parse({ base, patch: merged })); } catch (error) {
+        if (JSON.stringify(pickByShape(settingsPatch, getConfig())) === savedBefore) throw error;
+        warning = error instanceof Error ? error.message : String(error);
+        logWarn(`settings backup: the settings were saved, but a later step of the save failed (${warning}); the import goes on`);
+      }
+    }
     if (language !== getConfig().ui.language) await updateConfig(config => ({ ...config, ui: { ...config.ui, language } }));
     if (Object.keys(keys).length) await setSecrets(keys as Partial<Record<SecretKey, string>>);
     pendingImport = null;
     const keyCount = Object.keys(keys).length;
     logInfo(`settings backup: imported ${changed.length} changed setting${changed.length === 1 ? '' : 's'}` +
       `${keyCount ? ` and ${keyCount} saved key${keyCount === 1 ? '' : 's'}` : ''}${backup.appVersion ? ` from a ${backup.appVersion} backup` : ''}`);
-    return { state: await buildState(), changedCount: changed.length, keyCount };
+    return { state: await buildState(), changedCount: changed.length, keyCount, ...(warning ? { warning } : {}) };
   });
 
   /** Approves one folder by path. The picker dialog and the drop zone both end here. */
