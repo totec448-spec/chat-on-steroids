@@ -3003,6 +3003,14 @@
   "Each is easy to read in light and dark.": "どれもライトとダークの両方で読みやすい色です。",
   "Orange": "オレンジ",
   "Red": "レッド",
+  "Three-way view": "3 方向ビュー",
+  "Ask chat to resolve": "チャットに解決を依頼",
+  "Help me resolve the merge conflict in {0}. Read the common base, ours and theirs with git show :1:./{0}, :2:./{0} and :3:./{0}, then write a version that keeps what both sides meant and tell me what you chose. Do not stage or commit it.": "{0} のマージ競合の解決を手伝ってください。git show :1:./{0}, :2:./{0}、:3:./{0} で共通の基点、自分側、相手側を読み、両方の意図を残した版を書いて、何を選んだか教えてください。ステージやコミットはしないでください。",
+  "Ours (HEAD)": "自分側 (HEAD)",
+  "Common base": "共通の基点",
+  "Theirs (incoming)": "相手側 (取り込む側)",
+  "Not in this version": "この版にはありません",
+  "Start or cancel the prepared plan first, then ask again.": "先に準備済みのプランを開始するか取り消してから、もう一度お試しください。",
   "Quote": "引用",
   "Start or cancel the prepared plan first, then quote again.": "先に準備済みのプランを開始するか取り消してから、もう一度引用してください。"
 }

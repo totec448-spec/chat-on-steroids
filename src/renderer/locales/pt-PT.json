@@ -3101,6 +3101,14 @@
   "Each is easy to read in light and dark.": "Todas são fáceis de ler no claro e no escuro.",
   "Orange": "Laranja",
   "Red": "Vermelho",
+  "Three-way view": "Vista de três vias",
+  "Ask chat to resolve": "Pedir ao chat para resolver",
+  "Help me resolve the merge conflict in {0}. Read the common base, ours and theirs with git show :1:./{0}, :2:./{0} and :3:./{0}, then write a version that keeps what both sides meant and tell me what you chose. Do not stage or commit it.": "Ajuda-me a resolver o conflito de merge em {0}. Lê a base comum, a nossa versão e a deles com git show :1:./{0}, :2:./{0} e :3:./{0}, depois escreve uma versão que mantenha a intenção dos dois lados e diz-me o que escolheste. Não adiciones ao stage nem faças commit.",
+  "Ours (HEAD)": "Nossa (HEAD)",
+  "Common base": "Base comum",
+  "Theirs (incoming)": "Deles (recebida)",
+  "Not in this version": "Não existe nesta versão",
+  "Start or cancel the prepared plan first, then ask again.": "Inicie ou cancele primeiro o plano preparado e peça novamente.",
   "Quote": "Citar",
   "Start or cancel the prepared plan first, then quote again.": "Inicie ou cancele primeiro o plano preparado e cite novamente."
 }
