@@ -46,7 +46,7 @@ it('sends a problem report only with what happened and a saved diagnostics repor
   expect(api.openFeedbackIssue).not.toHaveBeenCalled();
   $('feedbackSaveReport').click();
   await settle();
-  expect($('feedbackReportNote').textContent).toBe('Saved as diagnostics-2026-10-24.txt. You attach it on GitHub in the next step.');
+  expect($('feedbackReportNote').textContent).toBe('Saved as diagnostics-2026-10-24.txt. Read it, then attach it on GitHub.');
   expect($('feedbackSaveReport').textContent).toBe('Save again…');
   type('feedbackSteps', '  ');
   $<HTMLSelectElement>('feedbackFrequency').value = 'Sometimes';
@@ -54,7 +54,7 @@ it('sends a problem report only with what happened and a saved diagnostics repor
   expect(api.openFeedbackIssue).toHaveBeenCalledWith({ kind: 'bug', what: 'The Stop button stays grey.', frequency: 'Sometimes' });
   expect($('feedbackForm').hidden).toBe(true);
   expect($('feedbackDone').hidden).toBe(false);
-  expect($('feedbackDoneText').textContent).toBe('GitHub is open in your browser. Drag diagnostics-2026-10-24.txt into its Diagnostics report box, then submit the report.');
+  expect($('feedbackDoneText').textContent).toBe('GitHub is open in your browser. Attach diagnostics-2026-10-24.txt in its Diagnostics report box yourself, then submit.');
   expect($('feedbackDoneTrimmed').hidden).toBe(true);
   // What reached GitHub is cleared; the next report starts empty and saves its own diagnostics.
   $('feedbackDoneClose').click();
@@ -109,7 +109,7 @@ it('points out a newer release for a problem report, not for an idea', async () 
   const { dialog, openActivity } = await setup({}, { ...update, latest: '2.1.47' });
   dialog.open();
   expect($('feedbackUpdate').hidden).toBe(false);
-  expect($('feedbackUpdateText').textContent).toBe('Version 2.1.47 is available. Many problems are already fixed in it: update first, then check whether it still happens.');
+  expect($('feedbackUpdateText').textContent).toBe('Version 2.1.47 is out and may already fix this. Update first.');
   const idea = document.querySelector<HTMLInputElement>('input[name="feedbackKind"][value="idea"]')!;
   idea.checked = true;
   idea.dispatchEvent(new dom.window.Event('change'));

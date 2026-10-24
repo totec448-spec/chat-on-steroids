@@ -48,18 +48,18 @@ export function initFeedbackDialog(
     const latest = bug ? newer() : null;
     update.hidden = !latest;
     $('feedbackUpdateText').textContent = latest
-      ? t('Version {0} is available. Many problems are already fixed in it: update first, then check whether it still happens.', [latest]) : '';
+      ? t('Version {0} is out and may already fix this. Update first.', [latest]) : '';
     reportRow.classList.toggle('is-saved', Boolean(savedReport));
     reportNote.textContent = savedReport
-      ? t('Saved as {0}. You attach it on GitHub in the next step.', [savedReport])
-      : t('Needed for a problem report. Your user name, folders, chat titles, email addresses and keys are already removed from it.');
+      ? t('Saved as {0}. Read it, then attach it on GitHub.', [savedReport])
+      : t('Needed for a problem report. Read it before you attach it.');
     report.textContent = savedReport ? t('Save again…') : t('Save report…');
     report.disabled = busy;
     submit.disabled = busy;
     for (const input of kinds) input.disabled = busy;
     if (sent) {
       $('feedbackDoneText').textContent = sent.kind === 'bug' && sent.report
-        ? t('GitHub is open in your browser. Drag {0} into its Diagnostics report box, then submit the report.', [sent.report])
+        ? t('GitHub is open in your browser. Attach {0} in its Diagnostics report box yourself, then submit.', [sent.report])
         : t('GitHub is open in your browser. Read the form there, then submit it.');
       $('feedbackDoneTrimmed').hidden = !sent.trimmed;
     }
