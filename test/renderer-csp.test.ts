@@ -1,12 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { approvedChatGptImageRequest, RENDERER_CONTENT_SECURITY_POLICY } from '../src/main/renderer-csp.js';
 
 describe('isolated static ChatGPT illustration policy', () => {
   it('keeps a single default-session onBeforeRequest registration so the URL gate cannot be replaced', () => {
     const main = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8');
-    expect(main.match(/\.onBeforeRequest\s*\(/g)).toHaveLength(1);
     expect(main).toContain("onBeforeRequest({ urls: ['https://images.openai.com/*'] }");
+    // Electron retains only the last listener. A second registration in ANY
+    // production main-process module would silently replace this image guard.
+    const registrations: string[] = [];
+    const scan = (folder: URL): void => {
+      for (const entry of readdirSync(folder, { withFileTypes: true })) {
+        if (entry.isDirectory()) scan(new URL(`${entry.name}/`, folder));
+        else if (entry.isFile() && entry.name.endsWith('.ts')) {
+          const source = readFileSync(new URL(entry.name, folder), 'utf8');
+          registrations.push(...(source.match(/\.onBeforeRequest\s*\(/g) ?? []).map(() => entry.name));
+        }
+      }
+    };
+    scan(new URL('../src/main/', import.meta.url));
+    expect(registrations).toEqual(['index.ts']);
   });
   it('allows only the first-party image origin, not remote scripts, frames, network calls or wildcard hosts', () => {
     const directives = new Map(RENDERER_CONTENT_SECURITY_POLICY.split(';').map(part => {
