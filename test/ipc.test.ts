@@ -153,6 +153,22 @@ it('names a chat with one clean line, and clears the name for an empty one (#110
   expect(await handlers.get('sessions:rename')!(null, { id: 'missing-session-0001', title: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('Session not found') });
 });
 
+it('saves, reads, pauses and removes a chat\'s schedule, and refuses one that cannot run (#1826)', async () => {
+  const session = await createSession({ conversationId: 'ipc-schedule-chat', title: 'Scheduled' });
+  const call = (name: string, payload: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  expect(await call('schedules:get', { sessionId: session.id })).toEqual({ ok: true, data: null });
+  const saved = await call('schedules:save', { sessionId: session.id, text: '  Check the issues  ', repeat: { kind: 'weekdays', at: '09:00' }, until: null });
+  expect(saved).toMatchObject({ ok: true, data: { sessionId: session.id, text: 'Check the issues', repeat: { kind: 'weekdays', at: '09:00' }, paused: false } });
+  expect(await call('schedules:get', { sessionId: session.id })).toMatchObject({ ok: true, data: { id: saved.data.id } });
+  expect(await call('schedules:pause', { sessionId: session.id, paused: true })).toMatchObject({ ok: true, data: { paused: true } });
+  expect(await call('schedules:save', { sessionId: session.id, text: 'x', repeat: { kind: 'hours', every: 0 }, until: null })).toMatchObject({ ok: false });
+  expect(await call('schedules:save', { sessionId: session.id, text: 'x', repeat: { kind: 'daily', at: '25:00' }, until: null })).toMatchObject({ ok: false });
+  expect(await call('schedules:save', { sessionId: 'missing-session-0001', text: 'x', repeat: { kind: 'daily', at: '09:00' }, until: null }))
+    .toEqual({ ok: false, error: 'This chat no longer exists.' });
+  expect(await call('schedules:delete', { sessionId: session.id })).toEqual({ ok: true, data: true });
+  expect(await call('schedules:get', { sessionId: session.id })).toEqual({ ok: true, data: null });
+});
+
 it('enabling strict chat allowlisting keeps existing chats untrusted', async () => {
   const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
   resetTrustedChatsForTests();

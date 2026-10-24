@@ -3010,5 +3010,12 @@
   "Common base": "Gốc chung",
   "Theirs (incoming)": "Của họ (đến)",
   "Not in this version": "Không có trong phiên bản này",
-  "Start or cancel the prepared plan first, then ask again.": "Hãy bắt đầu hoặc hủy kế hoạch đã chuẩn bị trước, rồi yêu cầu lại."
+  "Start or cancel the prepared plan first, then ask again.": "Hãy bắt đầu hoặc hủy kế hoạch đã chuẩn bị trước, rồi yêu cầu lại.",
+  "Scheduled": "Đã lên lịch",
+  "Scheduled · late, was due {0}": "Đã lên lịch · trễ, đáng lẽ lúc {0}",
+  "This chat no longer exists.": "Cuộc trò chuyện này không còn nữa.",
+  "Write the message to send.": "Hãy viết tin nhắn sẽ gửi.",
+  "Choose a schedule that runs at least once an hour apart.": "Hãy chọn lịch chạy cách nhau ít nhất một giờ.",
+  "Choose an end date in the future.": "Hãy chọn ngày kết thúc trong tương lai.",
+  "There are too many scheduled chats. Remove one first.": "Có quá nhiều cuộc trò chuyện đã lên lịch. Hãy xóa bớt một cái trước."
 }

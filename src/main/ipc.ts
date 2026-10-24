@@ -86,6 +86,7 @@ import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
 import { collectReportFacts, readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts, memoryFacts } from './diagnostics-report.js';
 import { listSessions, readTurnTraces } from './session/store.js';
+import { deleteSchedule, listSchedules, saveSchedule, scheduleRepeatSchema, setSchedulePaused } from './scheduled-runs.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, logWarn, onLog } from './logger.js';
 import { managedWorktreeCleanupOffers, acknowledgeManagedWorktreeCleanupOffer } from './agents.js';
 import { listOfferedWorkerWorktrees, disposeOfferedWorkerWorktree, WorkerWorktreeError } from './worktrees/index.js';
@@ -1047,6 +1048,35 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (project) wakeBrowserWork();
     push('session:changed');
     return project;
+  });
+  // #1826: a chat's schedule. Its rules and checks live in scheduled-runs.ts; errors are sentences the renderer translates.
+  const scheduleSession = z.string().min(8).max(64);
+  handle('schedules:get', async payload => {
+    const { sessionId } = z.object({ sessionId: scheduleSession }).strict().parse(payload);
+    return (await listSchedules()).find(row => row.sessionId === sessionId) ?? null;
+  });
+  handle('schedules:save', async payload => {
+    const request = z.object({ sessionId: scheduleSession, text: z.string().max(200_000), repeat: z.unknown(), until: z.number().int().nonnegative().nullable() }).strict().parse(payload);
+    const repeat = scheduleRepeatSchema.parse(request.repeat);
+    if (!(await getSession(request.sessionId))) throw new Error('This chat no longer exists.');
+    const saved = await saveSchedule({ sessionId: request.sessionId, text: request.text, repeat, until: request.until });
+    logInfo(`scheduled run: schedule saved (${repeat.kind}) for ${request.sessionId}`);
+    push('session:changed');
+    return saved;
+  });
+  handle('schedules:pause', async payload => {
+    const { sessionId, paused } = z.object({ sessionId: scheduleSession, paused: z.boolean() }).strict().parse(payload);
+    const updated = await setSchedulePaused(sessionId, paused);
+    if (updated) logInfo(`scheduled run: ${paused ? 'paused' : 'resumed'} for ${sessionId}`);
+    push('session:changed');
+    return updated;
+  });
+  handle('schedules:delete', async payload => {
+    const { sessionId } = z.object({ sessionId: scheduleSession }).strict().parse(payload);
+    const removed = await deleteSchedule(sessionId);
+    if (removed) logInfo(`scheduled run: schedule removed for ${sessionId}`);
+    push('session:changed');
+    return removed;
   });
   handle('projects:secrets-shield', async payload => {
     const { id, off } = z.object({ id: z.string().uuid(), off: z.boolean() }).strict().parse(payload);

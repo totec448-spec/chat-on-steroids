@@ -73,7 +73,9 @@ export const inputArgs = z.object({
    * Edit & resubmit (#365): this message replaces the chat's question `messageId` through ChatGPT's
    * own edit, which keeps the old version beside it and continues the chat from the new one.
    */
-  edit: z.object({ messageId: z.string().regex(NATIVE_ID) }).strict().optional()
+  edit: z.object({ messageId: z.string().regex(NATIVE_ID) }).strict().optional(),
+  /** Scheduled runs (#1826): this message is a run of the chat's schedule, due at `dueAt`; `late` when it went out after a missed time. */
+  scheduled: z.object({ scheduleId: z.string().uuid(), dueAt: z.number().int().nonnegative(), late: z.boolean() }).strict().optional()
 });
 export type InputArgs = z.infer<typeof inputArgs>;
 const entrySchema = inputArgs.extend({

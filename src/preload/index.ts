@@ -30,6 +30,8 @@ import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '..
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { AppState, Capabilities, CompanionDiagnostics, Config, Diagnosis, LogEntry } from '../shared/types.js';
+import type { ScheduledRun } from '../main/scheduled-runs.js';
+import type { ScheduleRepeat } from '../shared/schedule.js';
 import type {
   Handoff,
   ImageStorageClearMode,
@@ -294,6 +296,11 @@ const api = {
   removeProject: (id: string) => call<LocalProject>('projects:remove', { id }),
   setProjectColor: (id: string, color: ProjectColor | null) => call<LocalProject>('projects:color', { id, color }),
   setProjectSecretsShieldOff: (id: string, off: boolean) => call<LocalProject>('projects:secrets-shield', { id, off }),
+  /** #1826: a chat's schedule (one per chat), or null. */
+  getSchedule: (sessionId: string) => call<ScheduledRun | null>('schedules:get', { sessionId }),
+  saveSchedule: (request: { sessionId: string; text: string; repeat: ScheduleRepeat; until: number | null }) => call<ScheduledRun>('schedules:save', request),
+  pauseSchedule: (sessionId: string, paused: boolean) => call<ScheduledRun | null>('schedules:pause', { sessionId, paused }),
+  deleteSchedule: (sessionId: string) => call<boolean>('schedules:delete', { sessionId }),
   listProjectFiles: (projectId: string, directory = '') => call<ProjectDirectoryListing>('projectFiles:list', { projectId, directory }),
   watchProjectFiles: (projectId: string | null, directories: string[]) => call<boolean>('projectFiles:watch', { projectId, directories }),
   onProjectFilesChanged: (listener: (event: ProjectFilesChanged) => void): (() => void) => {

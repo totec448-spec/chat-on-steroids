@@ -3010,5 +3010,12 @@
   "Common base": "共通の基点",
   "Theirs (incoming)": "相手側 (取り込む側)",
   "Not in this version": "この版にはありません",
-  "Start or cancel the prepared plan first, then ask again.": "先に準備済みのプランを開始するか取り消してから、もう一度お試しください。"
+  "Start or cancel the prepared plan first, then ask again.": "先に準備済みのプランを開始するか取り消してから、もう一度お試しください。",
+  "Scheduled": "予定",
+  "Scheduled · late, was due {0}": "予定 · 遅れて送信（予定は {0}）",
+  "This chat no longer exists.": "このチャットはもうありません。",
+  "Write the message to send.": "送るメッセージを書いてください。",
+  "Choose a schedule that runs at least once an hour apart.": "1 時間以上の間隔で実行するスケジュールを選んでください。",
+  "Choose an end date in the future.": "終了日には未来の日付を選んでください。",
+  "There are too many scheduled chats. Remove one first.": "予定されたチャットが多すぎます。先に 1 つ削除してください。"
 }
