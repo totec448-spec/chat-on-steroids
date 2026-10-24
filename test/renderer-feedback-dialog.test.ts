@@ -105,6 +105,24 @@ it('puts the whole text on the clipboard when GitHub got a shortened one, and sa
   expect($('feedbackDoneTrimmed').hidden).toBe(false);
 });
 
+it('keeps the whole draft when GitHub got a shortened text and copying the rest failed, and says so', async () => {
+  for (const failure of [async () => ({ ok: false as const, error: 'clipboard busy' }), async () => { throw new Error('gone'); }]) {
+    const { dialog } = await setup({ openFeedbackIssue: vi.fn(async () => ({ ok: true as const, data: { trimmed: true } })), writeClipboard: vi.fn(failure) });
+    dialog.open();
+    type('feedbackWhat', 'Very long');
+    $('feedbackSaveReport').click();
+    await settle();
+    await submit();
+    expect($('feedbackError').textContent).toBe('GitHub opened with a shortened text. The whole text could not be copied, so it stays here.');
+    expect($<HTMLTextAreaElement>('feedbackWhat').value).toBe('Very long');
+    expect($('feedbackForm').hidden).toBe(false);
+    dom.window.close();
+    dom = new JSDOM(readFileSync('src/renderer/index.html', 'utf8'), { url: 'https://local.test/' });
+    Object.assign(globalThis, { window: dom.window, document: dom.window.document, Event: dom.window.Event });
+    vi.resetModules();
+  }
+});
+
 it('points out a newer release for a problem report, not for an idea', async () => {
   const { dialog, openActivity } = await setup({}, { ...update, latest: '2.1.47' });
   dialog.open();

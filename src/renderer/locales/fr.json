@@ -3127,5 +3127,6 @@
   "Saved as {0}. Read it, then attach it on GitHub.": "Enregistré sous {0}. Lisez-le, puis joignez-le sur GitHub.",
   "Needed for a problem report. Read it before you attach it.": "Nécessaire pour signaler un problème. Lisez-le avant de le joindre.",
   "GitHub is open in your browser. Attach {0} in its Diagnostics report box yourself, then submit.": "GitHub est ouvert dans votre navigateur. Joignez vous-même {0} dans le champ « Diagnostics report », puis envoyez.",
-  "GitHub opens with this filled in. You submit it there; the app sends nothing.": "GitHub s’ouvre avec ces informations. Vous l’envoyez là-bas ; l’app n’envoie rien."
+  "GitHub opens with this filled in. You submit it there; the app sends nothing.": "GitHub s’ouvre avec ces informations. Vous l’envoyez là-bas ; l’app n’envoie rien.",
+  "GitHub opened with a shortened text. The whole text could not be copied, so it stays here.": "GitHub s’est ouvert avec un texte raccourci. Le texte complet n’a pas pu être copié, il reste donc ici."
 }

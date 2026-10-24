@@ -3031,5 +3031,6 @@
   "Saved as {0}. Read it, then attach it on GitHub.": "已儲存為 {0}。請閱讀後再附加到 GitHub。",
   "Needed for a problem report. Read it before you attach it.": "回報問題時需要。附加前請先閱讀。",
   "GitHub is open in your browser. Attach {0} in its Diagnostics report box yourself, then submit.": "GitHub 已在瀏覽器中開啟。請自己把 {0} 附加到「Diagnostics report」欄位中，然後送出。",
-  "GitHub opens with this filled in. You submit it there; the app sends nothing.": "GitHub 會開啟並已填好這些內容。在那裡由你送出；應用程式不會傳送任何內容。"
+  "GitHub opens with this filled in. You submit it there; the app sends nothing.": "GitHub 會開啟並已填好這些內容。在那裡由你送出；應用程式不會傳送任何內容。",
+  "GitHub opened with a shortened text. The whole text could not be copied, so it stays here.": "GitHub 已用縮短的文字開啟。完整文字無法複製，因此保留在這裡。"
 }

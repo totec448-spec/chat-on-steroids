@@ -3079,5 +3079,6 @@
   "Saved as {0}. Read it, then attach it on GitHub.": "{0} olarak kaydedildi. Oku, sonra GitHub'a ekle.",
   "Needed for a problem report. Read it before you attach it.": "Sorun bildirmek için gerekli. Eklemeden önce oku.",
   "GitHub is open in your browser. Attach {0} in its Diagnostics report box yourself, then submit.": "GitHub tarayıcında açık. {0} dosyasını “Diagnostics report” kutusuna kendin ekle, sonra gönder.",
-  "GitHub opens with this filled in. You submit it there; the app sends nothing.": "GitHub bunlar doldurulmuş olarak açılır. Orada sen gönderirsin; uygulama hiçbir şey göndermez."
+  "GitHub opens with this filled in. You submit it there; the app sends nothing.": "GitHub bunlar doldurulmuş olarak açılır. Orada sen gönderirsin; uygulama hiçbir şey göndermez.",
+  "GitHub opened with a shortened text. The whole text could not be copied, so it stays here.": "GitHub kısaltılmış bir metinle açıldı. Metnin tamamı kopyalanamadı, bu yüzden burada kalıyor."
 }
