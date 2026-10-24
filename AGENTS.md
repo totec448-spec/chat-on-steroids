@@ -1114,13 +1114,21 @@ after 30 days unseen, names are labels only. Each report carries the workspace C
 in (the `_account` cookie, null for a personal account); the catalog keeps a 16-hex SHA-256 prefix
 of it per entry, never the id, and offers or links only entries of the last reported workspace,
 because ChatGPT opens a Project only in its own workspace. Adding a folder with Projects to choose from passes
-`chatgpt: 'later'` (no link yet) and opens `chatgpt-project-picker.ts` on the new row: New (the
-default, also on Escape or when the row is not drawn) or an existing Project; one held by another
-listed project is shown disabled. `linkChatgptProject` accepts only a listed id, never one another
-listed project holds, and never over `requested`/`claimed`/`creating`; `createChatgptProjectFor`
-requests a new one for a project without any. A project without one, or a failed/uncertain one,
-offers "Choose a ChatGPT Project…" in its menu (closing it there changes nothing). Tests:
-`test/chatgpt-project-link.test.ts`, `test/chatgpt-project-list-dom.test.ts`, `scripts/verify-chatgpt-project-picker.cjs`.
+`chatgpt: 'later'` (no link yet) and opens `chatgpt-project-picker.ts` on the new row: New or an
+existing Project; one held by another listed project is shown disabled. Closing the choice creates
+nothing (Haz on #1757), and when the row is not drawn nothing is created either: a toast says to
+choose from the project's ⋯ menu. `linkChatgptProject` accepts only a listed id, never one another
+listed project holds, and never over `requested`/`claimed`/`creating`; it may replace a `linked`,
+`failed` or `uncertain` one. `createChatgptProjectFor(id, { replace })` (IPC `projects:chatgpt-create`
+with `replace: true`) requests a new one in place of such a link; without `replace` a project that
+has one keeps it. `unlinkChatgptProject` (IPC `projects:chatgpt-unlink`) drops the link only: the
+Project and its chats stay in ChatGPT, new chats start outside any Project, and it is refused while
+one is being created. A project without one, or a failed/uncertain one, offers "Choose a ChatGPT
+Project…" in its menu; a linked one offers "Change ChatGPT Project…" (the same picker, current one
+marked, New first) and "Unlink ChatGPT Project". Closing the picker from the menu changes nothing.
+Tests: `test/chatgpt-project-link.test.ts`, `test/chatgpt-project-picker.test.ts`,
+`test/chatgpt-project-list-dom.test.ts`, `scripts/verify-chatgpt-project-picker.cjs`,
+`scripts/verify-chatgpt-project-menu.cjs`.
 A chat the person starts on chatgpt.com inside a linked Project joins that CoS project (#1744):
 the service worker's `events` handler reads the recording tab's URL (`tabChatgptProject`: the
 chat's own Project route, or the Project home only for a fresh chat's first, still unnamed
