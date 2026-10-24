@@ -806,17 +806,22 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         authorityPersistError = error instanceof Error ? error : new Error(String(error));
       }
     }
+    // The settings are written. A step after this that fails is reported, but never stops the
+    // steps after it: the app does not stay half-on, and an import is not left half done.
+    let runtimeError: unknown;
+    const step = async (run: () => unknown): Promise<void> => {
+      try { await run(); } catch (error) { runtimeError ??= error; }
+    };
     // Recording, workers and direct browser tools share the same extension transport.
     // Startup and settings saves use one eligibility rule.
-    if (browserExtensionRequired(next)) await startBridge();
-    else await stopBridge();
-    if (before.ui.chatBrowser !== next.ui.chatBrowser) await syncCosBrowser();
+    await step(() => browserExtensionRequired(next) ? startBridge() : stopBridge());
+    if (before.ui.chatBrowser !== next.ui.chatBrowser) await step(syncCosBrowser);
     if (before.capabilities.screen !== next.capabilities.screen || before.capabilities.control !== next.capabilities.control || before.readOnly !== next.readOnly) wakeBrowserWork('browser-control');
     // Permissions and the second tunnel id both decide whether the optional Desktop
     // connector should be published. Without this, enabling desktop access or pasting its
     // tunnel id left the connector unpublished until the user happened to reconnect, with
     // the card still saying "not published" and nothing explaining why.
-    await applySettings();
+    await step(applySettings);
     if (before.ui.autoRefreshPlugins !== next.ui.autoRefreshPlugins) wakeBrowserWork();
     logInfo('settings updated');
     // The config and runtime side effects above still complete so the app does not stay half-on,
@@ -840,20 +845,23 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // Stable connector URLs (#924): turning it on keeps the URLs running now, so nothing has to be
     // re-entered in ChatGPT; turning it off forgets them, and the next start rotates again.
     if ((before.mcp.persistentUrls === true) !== (next.mcp.persistentUrls === true)) {
-      if (next.mcp.persistentUrls === true) {
-        if (!(await rememberRunningSurfaceTokens())) logWarn('connector URLs: secure storage is unavailable, so they still change at the next start');
-        else logInfo('connector URLs: kept across restarts from now on');
-      } else {
-        await forgetSurfaceTokens();
-        logInfo('connector URLs: forgotten; the next start gives each connector a new one');
-      }
+      await step(async () => {
+        if (next.mcp.persistentUrls === true) {
+          if (!(await rememberRunningSurfaceTokens())) logWarn('connector URLs: secure storage is unavailable, so they still change at the next start');
+          else logInfo('connector URLs: kept across restarts from now on');
+        } else {
+          await forgetSurfaceTokens();
+          logInfo('connector URLs: forgotten; the next start gives each connector a new one');
+        }
+      });
     }
     // The listener reads this switch on every request, so a flip needs no restart; it is logged.
     if (before.controlApi.allowActions !== next.controlApi.allowActions) {
       logInfo('control API: actions ' + (next.controlApi.allowActions ? 'allowed' : 'refused'));
     }
     // Each of these came after the settings were written; the caller decides how to report it.
-    const lateError = authorityPersistError ?? loginStartupError ?? controlApiError ?? null;
+    const lateError = authorityPersistError ?? runtimeError ?? loginStartupError ?? controlApiError ?? null;
+    if (runtimeError) logWarn(`settings saved, but a later step failed: ${runtimeError instanceof Error ? runtimeError.message : String(runtimeError)}`);
     return { state: await buildState(), lateError };
   };
   const saveSettings = async (request: z.infer<typeof settingsSave>): Promise<AppState> => {

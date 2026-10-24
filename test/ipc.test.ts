@@ -2807,6 +2807,41 @@ describe('settings backup over IPC', () => {
     } finally { start.mockRestore(); await saveConfig({ ...getConfig(), controlApi: { enabled: false, allowActions: false } }); }
   });
 
+  it('finishes an import when publishing the connector fails after the save, and a second import is not refused as changed', async () => {
+    const connection = await import('../src/main/connection.js');
+    await setUp('dark', tunnelA, false);
+    const file = path.join(dir, 'publish-fails.json');
+    await exportTo(file, { includeKeys: false });
+    await setUp('light', tunnelA, false);
+    const publish = vi.spyOn(connection, 'applySettings').mockRejectedValueOnce(new Error('connector could not be published'));
+    try {
+      const picked = await pick(file);
+      const applied = await apply({ token: picked.data.token, includeKeys: false });
+      expect(applied).toMatchObject({ ok: true, data: { warnings: ['connector could not be published'] } });
+      expect(getConfig().ui.theme).toBe('dark');
+      // Nothing is left half done: the same file can be imported again, and changes nothing.
+      const again = await pick(file);
+      expect(again).toMatchObject({ ok: true, data: { changed: [] } });
+    } finally { publish.mockRestore(); }
+  });
+
+  it('still reports a failed step to the Settings form, after the rest of the save ran', async () => {
+    const connection = await import('../src/main/connection.js');
+    const controlApi = await import('../src/main/control-api.js');
+    const base = getConfig();
+    await saveConfig({ ...base, controlApi: { enabled: false, allowActions: false } });
+    const publish = vi.spyOn(connection, 'applySettings').mockRejectedValueOnce(new Error('connector could not be published'));
+    const start = vi.spyOn(controlApi, 'startControlApi').mockResolvedValue(undefined as never);
+    try {
+      const before = getConfig();
+      const saved = await save({ ...before, controlApi: { enabled: true, allowActions: false } }, before);
+      expect(saved).toMatchObject({ ok: false, error: 'connector could not be published' });
+      expect(getConfig().controlApi.enabled).toBe(true);
+      // The steps after the failed one still ran.
+      expect(start).toHaveBeenCalled();
+    } finally { publish.mockRestore(); start.mockRestore(); await saveConfig({ ...getConfig(), controlApi: { enabled: false, allowActions: false } }); }
+  });
+
   it('leaves out this computer\'s login item, and refuses keys an unreadable key store could not take before changing anything', async () => {
     const secrets = await import('../src/main/secrets.js');
     await setUp('dark', tunnelA, false);
