@@ -3017,5 +3017,6 @@
   "Write the message to send.": "請寫下要傳送的訊息。",
   "Choose a schedule that runs at least once an hour apart.": "請選擇至少間隔一小時執行的排程。",
   "Choose an end date in the future.": "請選擇一個未來的結束日期。",
-  "There are too many scheduled chats. Remove one first.": "已安排的對話太多。請先刪除一個。"
+  "There are too many scheduled chats. Remove one first.": "已安排的對話太多。請先刪除一個。",
+  "These schedules were saved by a newer version of Chat On Steroids. Update the app to change them.": "這些排程由較新版本的 Chat On Steroids 儲存。請更新應用程式後再變更。"
 }

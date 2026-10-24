@@ -3017,5 +3017,6 @@
   "Write the message to send.": "送るメッセージを書いてください。",
   "Choose a schedule that runs at least once an hour apart.": "1 時間以上の間隔で実行するスケジュールを選んでください。",
   "Choose an end date in the future.": "終了日には未来の日付を選んでください。",
-  "There are too many scheduled chats. Remove one first.": "予定されたチャットが多すぎます。先に 1 つ削除してください。"
+  "There are too many scheduled chats. Remove one first.": "予定されたチャットが多すぎます。先に 1 つ削除してください。",
+  "These schedules were saved by a newer version of Chat On Steroids. Update the app to change them.": "これらのスケジュールは新しいバージョンの Chat On Steroids で保存されました。変更するにはアプリを更新してください。"
 }

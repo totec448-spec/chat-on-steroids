@@ -3066,5 +3066,6 @@
   "Write the message to send.": "Gönderilecek mesajı yaz.",
   "Choose a schedule that runs at least once an hour apart.": "En az bir saat arayla çalışan bir zamanlama seç.",
   "Choose an end date in the future.": "Gelecekte bir bitiş tarihi seç.",
-  "There are too many scheduled chats. Remove one first.": "Çok fazla zamanlanmış sohbet var. Önce birini kaldır."
+  "There are too many scheduled chats. Remove one first.": "Çok fazla zamanlanmış sohbet var. Önce birini kaldır.",
+  "These schedules were saved by a newer version of Chat On Steroids. Update the app to change them.": "Bu zamanlamalar Chat On Steroids'in daha yeni bir sürümüyle kaydedildi. Değiştirmek için uygulamayı güncelle."
 }

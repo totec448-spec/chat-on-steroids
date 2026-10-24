@@ -3017,5 +3017,6 @@
   "Write the message to send.": "Hãy viết tin nhắn sẽ gửi.",
   "Choose a schedule that runs at least once an hour apart.": "Hãy chọn lịch chạy cách nhau ít nhất một giờ.",
   "Choose an end date in the future.": "Hãy chọn ngày kết thúc trong tương lai.",
-  "There are too many scheduled chats. Remove one first.": "Có quá nhiều cuộc trò chuyện đã lên lịch. Hãy xóa bớt một cái trước."
+  "There are too many scheduled chats. Remove one first.": "Có quá nhiều cuộc trò chuyện đã lên lịch. Hãy xóa bớt một cái trước.",
+  "These schedules were saved by a newer version of Chat On Steroids. Update the app to change them.": "Các lịch này được lưu bởi một phiên bản Chat On Steroids mới hơn. Hãy cập nhật ứng dụng để thay đổi chúng."
 }

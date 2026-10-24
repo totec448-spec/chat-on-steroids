@@ -159,3 +159,26 @@ it('is accepted by the real queue, which keeps one row for the same run queued t
     expect(rows[0]).toMatchObject({ text: 'Daily check', scheduled: { dueAt: local('2026-10-24T09:00:00'), late: false } });
   } finally { input.resetInputForTests(); resetSessionStoreForTests(); }
 });
+
+it('starts empty without a saved file, keeps the good schedules of a damaged one, and never overwrites a newer version\'s', async () => {
+  const { runs, deps, queued } = await setup();
+  expect(await runs.listSchedules()).toEqual([]);
+  const durable = await import('../src/main/durable.js');
+  const good = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', sessionId: SESSION, text: 'Daily', repeat: { kind: 'daily', at: '09:00' },
+    until: null, paused: false, createdAt: local('2026-10-24T08:00:00'), lastDueAt: null };
+  await durable.writeDurableNow('scheduled-runs', { version: 1, schedules: [good, { ...good, id: 'not-a-uuid' }, { ...good, repeat: { kind: 'hours', every: 0 } }, 'garbage'] });
+  expect((await runs.listSchedules()).map(row => row.id)).toEqual([good.id]);
+  await runs.runDueSchedules(local('2026-10-24T09:00:10'), deps);
+  expect(queued).toHaveLength(1);
+  // A broken file of this version reads as none and may be replaced.
+  await durable.writeDurableNow('scheduled-runs', { version: 1, schedules: 'broken' });
+  expect(await runs.listSchedules()).toEqual([]);
+  await runs.saveSchedule({ sessionId: SESSION, text: 'Again', repeat: { kind: 'daily', at: '09:00' }, until: null }, local('2026-10-25T08:00:00'));
+  expect(await runs.listSchedules()).toHaveLength(1);
+  // A newer version's file reads as none here, and is never overwritten by this version.
+  await durable.writeDurableNow('scheduled-runs', { version: 2, schedules: 'x' });
+  expect(await runs.listSchedules()).toEqual([]);
+  await expect(runs.saveSchedule({ sessionId: SESSION, text: 'x', repeat: { kind: 'daily', at: '09:00' }, until: null }, local('2026-10-25T08:00:00')))
+    .rejects.toThrow('These schedules were saved by a newer version of Chat On Steroids. Update the app to change them.');
+  expect(await durable.readDurable('scheduled-runs')).toEqual({ version: 2, schedules: 'x' });
+});
