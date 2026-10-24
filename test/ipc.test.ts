@@ -558,6 +558,13 @@ it('adds picker-selected projects, reuses containing approval, and leaves cancel
   const uncolored = await handlers.get('projects:color')!(null, { id: first.data.id, color: null }) as any;
   expect(uncolored).toMatchObject({ ok: true, data: { id: first.data.id } });
   expect(uncolored.data.color).toBeUndefined();
+  // #1797: the secrets shield's per-project switch.
+  const shieldOff = await handlers.get('projects:secrets-shield')!(null, { id: first.data.id, off: true }) as any;
+  expect(shieldOff).toMatchObject({ ok: true, data: { id: first.data.id, secretsShieldOff: true } });
+  expect(await handlers.get('projects:secrets-shield')!(null, { id: first.data.id, off: 'yes' })).toMatchObject({ ok: false });
+  expect(await handlers.get('projects:secrets-shield')!(null, { id: first.data.id })).toMatchObject({ ok: false });
+  const shieldOn = await handlers.get('projects:secrets-shield')!(null, { id: first.data.id, off: false }) as any;
+  expect(shieldOn.data.secretsShieldOff).toBeUndefined();
   const removed = await handlers.get('projects:remove')!(null, { id: first.data.id }) as any;
   expect(removed).toMatchObject({ ok: true, data: { id: first.data.id, ungrouped: true } });
   expect(getConfig().roots).toHaveLength(1);
@@ -1108,6 +1115,21 @@ describe('settings writes from more than one UI', () => {
     expect(result.ok, result.error).toBe(true);
     expect(getConfig().ui.tabsToKeepOpen).toBe(6);
     expect(getConfig().goal).toMatchObject({ helperModel: 'account-helper', helperReasoning: 'medium', model: base.goal.model });
+  });
+  it('saves the secrets shield switch, and keeps it when a form without it saves (#1797)', async () => {
+    const base = defaultConfig();
+    await saveConfig(base);
+    expect(getConfig().ui.secretsShield).toBe(true);
+    expect((await save({ ...base, ui: { ...base.ui, secretsShield: false } }, base)).ok).toBe(true);
+    expect(getConfig().ui.secretsShield).toBe(false);
+    // An older window's form has no such field; saving it must not turn the shield back on.
+    const off = getConfig();
+    const { secretsShield: _, ...olderUi } = off.ui;
+    expect((await save({ ...off, ui: { ...olderUi, followOutput: false } }, off)).ok).toBe(true);
+    expect(getConfig().ui).toMatchObject({ secretsShield: false, followOutput: false });
+    const now = getConfig();
+    expect((await save({ ...now, ui: { ...now.ui, secretsShield: true } }, now)).ok).toBe(true);
+    expect(getConfig().ui.secretsShield).toBe(true);
   });
   it('persists and clears ordinary new-chat defaults independently through settings merge', async () => {
     const base = defaultConfig();

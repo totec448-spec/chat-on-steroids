@@ -1813,7 +1813,6 @@
   "Mention Chat On Steroids Core": "Nhắc đến Chat On Steroids Core",
   "Makes sure ChatGPT can use this app in every chat. Turn it off if ChatGPT starts plain questions with an unneeded tool call. Workers, Goal, Loop and Continue always keep the mention.": "Đảm bảo ChatGPT có thể dùng ứng dụng này trong mọi cuộc trò chuyện. Tắt nếu ChatGPT bắt đầu câu hỏi đơn giản bằng một lệnh gọi công cụ không cần thiết. Worker, Goal, Loop và Continue luôn giữ lời nhắc.",
   "Privacy": "Quyền riêng tư",
-  "What ChatGPT sees of your screen.": "Những gì ChatGPT thấy trên màn hình của bạn.",
   "For developers": "Dành cho nhà phát triển",
   "Troubleshooting details and access for tools on this computer.": "Chi tiết khắc phục sự cố và quyền truy cập cho công cụ trên máy này.",
   "Show turn boundaries and recovery events in the chat.": "Hiển thị ranh giới lượt và sự kiện khôi phục trong cuộc trò chuyện.",
@@ -3007,5 +3006,15 @@
   "Keep current files": "Giữ các tệp hiện tại",
   "Restore files": "Khôi phục tệp",
   "Save a checkpoint before each turn's first edit": "Lưu một điểm kiểm tra trước lần chỉnh sửa đầu tiên của mỗi lượt",
-  "Off: no new checkpoints are taken. Existing checkpoints stay listed and Restore still works.": "Tắt: không tạo điểm kiểm tra mới. Các điểm kiểm tra hiện có vẫn hiển thị trong danh sách và Khôi phục vẫn hoạt động."
+  "Off: no new checkpoints are taken. Existing checkpoints stay listed and Restore still works.": "Tắt: không tạo điểm kiểm tra mới. Các điểm kiểm tra hiện có vẫn hiển thị trong danh sách và Khôi phục vẫn hoạt động.",
+  "HTML export saves a whole session to a file": "Xuất HTML lưu toàn bộ phiên vào một tệp",
+  "Hide secrets from ChatGPT": "Ẩn bí mật khỏi ChatGPT",
+  "API keys, tokens, private keys and passwords in what tools return are replaced with a short note before ChatGPT sees them. Your files stay as they are. A project can turn this off in its menu.": "Khóa API, token, khóa riêng tư và mật khẩu trong kết quả công cụ trả về được thay bằng một ghi chú ngắn trước khi ChatGPT nhìn thấy. Tệp của bạn vẫn giữ nguyên. Mỗi dự án có thể tắt tính năng này trong menu của nó.",
+  "What ChatGPT gets to see on this computer.": "Những gì ChatGPT được thấy trên máy tính này.",
+  "Off for every project in Settings": "Đã tắt cho mọi dự án trong Cài đặt",
+  "This project's tools send keys and tokens to ChatGPT as they are": "Công cụ của dự án này gửi khóa và token cho ChatGPT nguyên trạng",
+  "Keys and tokens in this project's tool results are hidden from ChatGPT": "Khóa và token trong kết quả công cụ của dự án này được ẩn khỏi ChatGPT",
+  "Export as HTML": "Xuất dạng HTML",
+  "Whole session as HTML": "Toàn bộ phiên dạng HTML",
+  "HTML files": "Tệp HTML"
 }

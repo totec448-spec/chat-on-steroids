@@ -1253,6 +1253,11 @@
   background: #10a37f;
 }
 
+/* Before the app has answered no stop is the value, so no handle is drawn (#1787). */
+.clf-menu-mode-track[data-clf-value=''] .clf-menu-mode-fill {
+  display: none;
+}
+
 .clf-menu-mode-track[data-clf-value='goal'] .clf-menu-mode-fill {
   transform: translateX(100%);
 }
