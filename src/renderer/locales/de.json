@@ -3114,5 +3114,7 @@
   "Common base": "Gemeinsame Basis",
   "Theirs (incoming)": "Ihre (eingehend)",
   "Not in this version": "Nicht in dieser Version",
-  "Start or cancel the prepared plan first, then ask again.": "Starte oder verwirf zuerst den vorbereiteten Plan und frage dann erneut."
+  "Start or cancel the prepared plan first, then ask again.": "Starte oder verwirf zuerst den vorbereiteten Plan und frage dann erneut.",
+  "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "Die gespeicherten Schlüssel auf diesem Computer lassen sich nicht lesen, daher können die Schlüssel der Sicherung nicht hinzugefügt werden. Importiere ohne sie.",
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Die Einstellungen wurden importiert, aber die gespeicherten Schlüssel ließen sich nicht ablegen. Füge sie in den Einstellungen erneut hinzu."
 }

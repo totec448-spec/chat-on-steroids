@@ -3059,5 +3059,7 @@
   "Common base": "공통 기준",
   "Theirs (incoming)": "상대 쪽 (들어오는 쪽)",
   "Not in this version": "이 버전에는 없음",
-  "Start or cancel the prepared plan first, then ask again.": "먼저 준비된 계획을 시작하거나 취소한 다음 다시 요청하세요."
+  "Start or cancel the prepared plan first, then ask again.": "먼저 준비된 계획을 시작하거나 취소한 다음 다시 요청하세요.",
+  "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "이 컴퓨터에 저장된 키를 읽을 수 없어 백업의 키를 추가할 수 없습니다. 키 없이 가져오세요.",
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "설정은 가져왔지만 저장된 키를 보관하지 못했습니다. 설정에서 다시 추가하세요."
 }

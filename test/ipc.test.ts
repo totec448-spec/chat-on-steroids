@@ -2788,23 +2788,57 @@ describe('settings backup over IPC', () => {
 
   it('finishes an import whose settings were saved even when a later step of the save fails, and says what failed', async () => {
     const { setSecret, clearSecret, getSecret } = await import('../src/main/secrets.js');
-    const lifecycle = await import('../src/main/window-lifecycle.js');
+    const controlApi = await import('../src/main/control-api.js');
     await setUp('dark', tunnelA, false);
-    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, startAtLogin: true, language: 'de' } });
+    await saveConfig({ ...getConfig(), controlApi: { enabled: true, allowActions: false }, ui: { ...getConfig().ui, language: 'de' } });
     await setSecret('openaiApiKey', key);
-    const file = path.join(dir, 'login-fails.json');
+    const file = path.join(dir, 'control-api-fails.json');
     await exportTo(file, { includeKeys: true, passphrase: 'correct horse battery' });
     await clearSecret('openaiApiKey');
     await setUp('light', tunnelA, false);
-    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, startAtLogin: false, language: 'en' } });
-    const login = vi.spyOn(lifecycle, 'applyLoginStartup').mockImplementation(() => { throw new Error('login registration refused'); });
+    await saveConfig({ ...getConfig(), controlApi: { enabled: false, allowActions: false }, ui: { ...getConfig().ui, language: 'en' } });
+    const start = vi.spyOn(controlApi, 'startControlApi').mockRejectedValue(new Error('control API could not start'));
     try {
       const picked = await pick(file);
       const applied = await apply({ token: picked.data.token, includeKeys: true, passphrase: 'correct horse battery' });
-      expect(applied).toMatchObject({ ok: true, data: { keyCount: 1, warning: 'login registration refused' } });
-      expect(getConfig().ui).toMatchObject({ theme: 'dark', startAtLogin: true, language: 'de' });
+      expect(applied).toMatchObject({ ok: true, data: { keyCount: 1, warnings: ['control API could not start'] } });
+      expect(getConfig()).toMatchObject({ controlApi: { enabled: true }, ui: { theme: 'dark', language: 'de' } });
       expect(await getSecret('openaiApiKey')).toBe(key);
-    } finally { login.mockRestore(); }
+    } finally { start.mockRestore(); await saveConfig({ ...getConfig(), controlApi: { enabled: false, allowActions: false } }); }
+  });
+
+  it('leaves out this computer\'s login item, and refuses keys an unreadable key store could not take before changing anything', async () => {
+    const secrets = await import('../src/main/secrets.js');
+    await setUp('dark', tunnelA, false);
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, startAtLogin: true } });
+    await secrets.setSecret('openaiApiKey', key);
+    const file = path.join(dir, 'login-item.json');
+    await exportTo(file, { includeKeys: true, passphrase: 'correct horse battery' });
+    expect(JSON.parse(await fs.readFile(file, 'utf8')).settings.ui).not.toHaveProperty('startAtLogin');
+    await setUp('light', tunnelA, false);
+    const unreadable = vi.spyOn(secrets, 'storedSecretsUnreadable').mockReturnValue(true);
+    try {
+      const picked = await pick(file);
+      expect(await apply({ token: picked.data.token, includeKeys: true, passphrase: 'correct horse battery' }))
+        .toEqual({ ok: false, error: "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them." });
+      expect(getConfig().ui.theme).toBe('light');
+    } finally { unreadable.mockRestore(); await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, startAtLogin: false } }); }
+  });
+
+  it('reports keys that could not be stored after the settings were imported, and counts none', async () => {
+    const secrets = await import('../src/main/secrets.js');
+    await setUp('dark', tunnelA, false);
+    await secrets.setSecret('openaiApiKey', key);
+    const file = path.join(dir, 'keys-fail.json');
+    await exportTo(file, { includeKeys: true, passphrase: 'correct horse battery' });
+    await setUp('light', tunnelA, false);
+    const write = vi.spyOn(secrets, 'setSecrets').mockRejectedValue(new Error('keychain locked'));
+    try {
+      const picked = await pick(file);
+      expect(await apply({ token: picked.data.token, includeKeys: true, passphrase: 'correct horse battery' })).toMatchObject({ ok: true,
+        data: { keyCount: 0, warnings: ['The settings were imported, but the saved keys could not be stored. Add them again in Settings.'] } });
+      expect(getConfig().ui.theme).toBe('dark');
+    } finally { write.mockRestore(); }
   });
 
   it('refuses a backup with a setting value this version does not accept, in a sentence of its own', async () => {

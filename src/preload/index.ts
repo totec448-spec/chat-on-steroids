@@ -164,8 +164,8 @@ const api = {
     call<{ file: string; keyCount: number } | null>('settings:export', { includeKeys, ...(passphrase !== undefined ? { passphrase } : {}) }),
   pickSettingsBackup: () => call<SettingsBackupChoice | null>('settings:importPick', undefined),
   importSettingsBackup: (token: string, includeKeys: boolean, passphrase?: string) =>
-    // `warning`: the settings were imported, but a later step of their save failed (said in its own words).
-    call<{ state: AppState; changedCount: number; keyCount: number; warning?: string }>('settings:importApply', { token, includeKeys, ...(passphrase !== undefined ? { passphrase } : {}) }),
+    // `warnings`: what went wrong after the settings were written, each a sentence of its own.
+    call<{ state: AppState; changedCount: number; keyCount: number; warnings?: string[] }>('settings:importApply', { token, includeKeys, ...(passphrase !== undefined ? { passphrase } : {}) }),
   markWhatsNewSeen: () => call<void>('ui:whatsNewSeen'),
   /** The one-time automatic plugin refresh offer: true turns it on; either answer is kept. */
   answerPluginRefreshOffer: (turnOn: boolean) => call<AppState>('pluginRefresh:offer', { turnOn }),

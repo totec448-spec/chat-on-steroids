@@ -3059,5 +3059,7 @@
   "Common base": "Gốc chung",
   "Theirs (incoming)": "Của họ (đến)",
   "Not in this version": "Không có trong phiên bản này",
-  "Start or cancel the prepared plan first, then ask again.": "Hãy bắt đầu hoặc hủy kế hoạch đã chuẩn bị trước, rồi yêu cầu lại."
+  "Start or cancel the prepared plan first, then ask again.": "Hãy bắt đầu hoặc hủy kế hoạch đã chuẩn bị trước, rồi yêu cầu lại.",
+  "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "Không đọc được các khóa đã lưu trên máy này, nên không thể thêm các khóa của bản sao lưu. Hãy nhập mà không có chúng.",
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Đã nhập cài đặt, nhưng không thể lưu các khóa. Hãy thêm lại chúng trong Cài đặt."
 }

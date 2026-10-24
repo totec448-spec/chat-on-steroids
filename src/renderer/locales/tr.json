@@ -3114,5 +3114,7 @@
   "Common base": "Ortak taban",
   "Theirs (incoming)": "Onlarınki (gelen)",
   "Not in this version": "Bu sürümde yok",
-  "Start or cancel the prepared plan first, then ask again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden isteyin."
+  "Start or cancel the prepared plan first, then ask again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden isteyin.",
+  "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "Bu bilgisayardaki kayıtlı anahtarlar okunamıyor, bu yüzden yedeğin anahtarları eklenemiyor. Onlar olmadan içe aktar.",
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Ayarlar içe aktarıldı, ancak kayıtlı anahtarlar saklanamadı. Onları Ayarlar'da yeniden ekle."
 }

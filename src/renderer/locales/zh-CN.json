@@ -3059,5 +3059,7 @@
   "Common base": "共同基础",
   "Theirs (incoming)": "对方 (传入)",
   "Not in this version": "此版本中不存在",
-  "Start or cancel the prepared plan first, then ask again.": "请先开始或取消已准备好的计划，然后再试一次。"
+  "Start or cancel the prepared plan first, then ask again.": "请先开始或取消已准备好的计划，然后再试一次。",
+  "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "无法读取此电脑上保存的密钥，因此无法添加备份中的密钥。请不带密钥导入。",
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "设置已导入，但无法存储保存的密钥。请在设置中重新添加。"
 }

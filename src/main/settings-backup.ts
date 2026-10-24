@@ -33,7 +33,9 @@ const SEAL_AAD = Buffer.from(`${BACKUP_FORMAT}/${BACKUP_VERSION}`);
 const PER_COMPUTER: ReadonlyArray<readonly string[]> = [
   ['connectorSuffix'], ['tunnel'], ['ui', 'browserBridgePort'], ['mcp', 'persistentUrls'],
   // Reported by this computer's window and browser extension, or this install's own answer.
-  ['ui', 'browserPreferences'], ['ui', 'cosBrowserTrayHint'], ['ui', 'autoRefreshPluginsAsked']
+  ['ui', 'browserPreferences'], ['ui', 'cosBrowserTrayHint'], ['ui', 'autoRefreshPluginsAsked'],
+  // The OS login item of this computer: an import never registers or removes it elsewhere.
+  ['ui', 'startAtLogin']
 ];
 
 export type BackupErrorCode = 'not-a-backup' | 'newer-version' | 'too-large' | 'wrong-passphrase' | 'passphrase-too-short' | 'invalid-settings';
