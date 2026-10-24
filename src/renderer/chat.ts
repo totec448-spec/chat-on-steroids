@@ -20,6 +20,7 @@ import { chatGroupName, chatGroupOf } from '../shared/chat-groups.js';
 import { requestName } from './name-dialog.js';
 import { KIND_ICON } from './agent-activity.js';
 import { createFilePanel } from './file-panel.js';
+import { initCommitDialog } from './commit-dialog.js';
 import { renderAgentPlan } from './agent-plan.js';
 import { userPromptText } from '../shared/user-prompt.js';
 import { messageReaction, withoutMessageReaction } from '../shared/message-reaction.js';
@@ -456,6 +457,7 @@ let pendingNewInput: { id: string; generation: number } | null = null;
 let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
 let filePanel: ReturnType<typeof createFilePanel> | null = null;
 let reviewPanel: ReturnType<typeof createFilePanel> | null = null;
+let commitDialog: ReturnType<typeof initCommitDialog> | null = null;
 const expandedWorkers = new Set<string>();
 const inputDrafts = createComposerDrafts({
   // A chat's row shows whether it holds a draft, so a draft that comes or goes in a chat other
@@ -8799,6 +8801,11 @@ export function initChat(next: Deps): void {
   filePanel.update(selectedLocalProject());
   reviewPanel = createFilePanel({
     host: chatHost, mount: docks.body, reviewOnly: true,
+    onCommit: projectId => (commitDialog ??= initCommitDialog(api, {
+      flow: () => deps.state()?.config.ui.commitFlow,
+      // The chat Review belongs to; its task starts the message.
+      task: id => { const chat = openChatSummary(); return selectedLocalProject()?.id === id && chat?.title?.trim() ? chat.title : null; }
+    })).open(projectId),
     onShow: () => docks.adopt('review'),
     onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); }
   });

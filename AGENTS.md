@@ -4704,7 +4704,7 @@ passes only a LocalProject UUID and project-relative path through fixed IPC; mai
 approved project/root and Git metadata before reading status or a diff. Git inspection is strictly
 read-only: it strips inherited Git repository/index redirects, uses optional-lock-free bounded
 subprocesses and exposes no stage, commit, reset,
-checkout or push authority. Review projects `M/A/D/R/U`, plus `C` for every unmerged index state
+checkout or push authority. The one Git write path is Commit & PR (below), in its own module. Review projects `M/A/D/R/U`, plus `C` for every unmerged index state
 (`DD/AU/UD/UA/DU/AA/UU`) so an unfinished merge is never shown as an ordinary edit; a conflicted
 file missing from the worktree diffs as empty. It also projects ancestor-folder markers and
 bounded unified diffs; Files may open it from its toolbar. Files and Review are alternate right
@@ -4722,6 +4722,29 @@ uncommitted and untracked changes. Its list, line counts and file preview must s
 comparison identity, and a changed ref/HEAD cannot publish an old diff as current.
 A non-repository, binary file, oversized diff or truncated change set is an
 explicit state rather than a reason to invent content or mutate the worktree.
+
+Commit & PR (`src/main/project-commit.ts`, `renderer/commit-dialog.ts`) is Review's only write
+path, and only on the person's own press in the Commit dialog (Review's footer button, shown for a
+local project's working tree, not for a branch comparison or a truncated set). The model has no
+route to it. `projectCommit:state { projectId }` → `CommitState` (branch or null, the remote's
+default branch, push remote, upstream, `github { owner, repo }`, `gh: ready | signed-out | missing`,
+the changes, and a `token`). The token hashes the change list and every changed file's bytes
+(Review's own revision covers only paths and line counts), and `projectCommit:commit { projectId,
+message, paths, newBranch?, expectedToken }` refuses with "The changes changed…" unless the files
+are exactly what the dialog listed. It refuses conflicts, a merge/cherry-pick/revert in progress
+and a detached HEAD without `newBranch`. It runs `git add -A` and `git commit` on exactly the
+chosen pathspecs (literal, NUL-separated on stdin), so what the person staged for other files stays
+staged; a refused commit unstages only what it staged and removes a branch it created. Hooks run.
+`projectCommit:push` pushes the current branch (`-u <remote> HEAD:refs/heads/<branch>` when it has
+no upstream) with `GIT_TERMINAL_PROMPT=0`; it never forces. `projectCommit:pullRequest { title, body }`
+uses `gh pr create` (found on PATH or in its installers' folders, `GH_PROMPT_DISABLED=1`) when gh is
+signed in, opens an existing pull request for the branch instead of failing, targets the `upstream`
+remote's repository for a fork, and otherwise opens GitHub's compare page filled in. `projectCommit:flow`
+saves `config.ui.commitFlow` (`commit | ask-push | pr`, missing = ask-push), which a Settings save
+carries through. Errors are fixed sentences the window translates; Git's, a hook's or gh's own words
+follow after a line break, untranslated. One `git commit:` / `git push:` / `pull request:` log line
+per outcome, never the message or file names. Tests: `project-commit.test.ts` (real repositories,
+a bare remote), `commit-message.test.ts`, `renderer-commit-dialog.test.ts`, `verify-commit-dialog.cjs`.
 
 An exact successful `apply_patch` may also retain a bounded immutable before/after review asset
 beside the session record. That historical review belongs to the recorded tool call, not to HEAD or

@@ -27,6 +27,8 @@ interface FilePanelOptions {
   onAttach?: (attachment: InputAttachment) => void;
   /** Capture the current composer owner before staging starts, including its draft epoch. */
   captureAttachment?: () => (attachment: InputAttachment) => boolean;
+  /** Review's Commit button: opens the Commit dialog for this project. */
+  onCommit?: (projectId: string) => void;
 }
 
 interface Selection {
@@ -236,7 +238,13 @@ export function createFilePanel(options: FilePanelOptions) {
   const changesList = el('div', 'file-changes-list');
   changesList.setAttribute('role', 'region');
   ui(changesList, 'aria-label', () => t('Git changes'));
-  changesView.append(changesHeader, changesList);
+  // Commit sits under the working-tree changes it commits; a branch comparison has nothing to commit.
+  const commitBar = el('div', 'file-commit-bar'); commitBar.hidden = true;
+  const commitButton = el('button', 'btn btn-solid file-commit-open', () => t('Commit…')) as HTMLButtonElement;
+  commitButton.type = 'button';
+  commitButton.addEventListener('click', () => { if (project) options.onCommit?.(project.id); });
+  commitBar.append(commitButton);
+  changesView.append(changesHeader, changesList, commitBar);
   const preview = el('section', 'file-preview'); preview.hidden = true;
   const previewResize = el('div', 'file-preview-resize');
   previewResize.tabIndex = 0;
@@ -1034,6 +1042,8 @@ export function createFilePanel(options: FilePanelOptions) {
 
   function renderChangesList(): void {
     changesList.replaceChildren();
+    commitBar.hidden = !(options.reviewOnly && options.onCommit && project && !project.remote && gitSnapshot?.state === 'ready'
+      && !gitSnapshot.comparison && !gitSnapshot.truncated && gitSnapshot.changes.some(change => change.status !== 'C'));
     if (!project) {
       changesList.append(el('p', 'file-changes-empty', () => t('Changes is available only for chats in a local project.')));
       return;
