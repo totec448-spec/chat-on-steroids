@@ -9,6 +9,7 @@ import { getConfig } from './config.js';
 import { rawPromises as fs } from './rawfs.js';
 import { projectFileTarget } from './project-files.js';
 import { isContained } from './sandbox.js';
+import { logInfo } from './logger.js';
 
 const MAX_GIT_OUTPUT_BYTES = 4 * 1024 * 1024;
 const MAX_CHANGES = 2_000;
@@ -417,15 +418,52 @@ function textFromBytes(bytes: Buffer): string | null {
   try { return decode(bytes); } catch { return null; }
 }
 
-async function readHeadFile(context: RepositoryContext, relative: string, oid = 'HEAD'): Promise<{ text: string | null; tooLarge: boolean }> {
-  const object = `${oid}:${repositoryPath(context, relative)}`;
+/** One bounded blob, or null when the object does not exist. */
+async function readBlob(context: RepositoryContext, object: string): Promise<{ text: string | null; tooLarge: boolean } | null> {
   const size = await runGit(context.projectReal, ['cat-file', '-s', object], 128);
-  if (size.code !== 0) return { text: '', tooLarge: false };
+  if (size.code !== 0) return null;
   const bytes = Number(decode(size.stdout).trim());
   if (!Number.isFinite(bytes) || bytes > MAX_DIFF_SIDE_BYTES) return { text: null, tooLarge: true };
   const content = await runGit(context.projectReal, ['cat-file', 'blob', object], MAX_DIFF_SIDE_BYTES + 1);
   if (content.code !== 0) throw new Error(content.stderr || 'The Git base could not be read');
   return { text: textFromBytes(content.stdout), tooLarge: false };
+}
+
+async function readHeadFile(context: RepositoryContext, relative: string, oid = 'HEAD'): Promise<{ text: string | null; tooLarge: boolean }> {
+  return await readBlob(context, `${oid}:${repositoryPath(context, relative)}`) ?? { text: '', tooLarge: false };
+}
+
+/** Index stages 1-3 of an unmerged path; none when a present side is binary, too large or unreadable. */
+async function readConflictStages(context: RepositoryContext, relative: string): Promise<ProjectGitDiff['conflict']> {
+  const object = repositoryPath(context, relative);
+  const skip = (reason: string): undefined => { logInfo(`review: no three-way view for ${relative}: ${reason}`); };
+  // Which stages the index holds, apart from reading them: only an unlisted stage is a side without the file.
+  // A listing that fails, times out or is not UTF-8 leaves out only the three-way view, never the diff.
+  let listing: string;
+  try {
+    const listed = await runGit(context.projectReal, ['ls-files', '-u', '-z', '--full-name', '--', `:(top,literal)${object}`]);
+    if (listed.code !== 0) return skip('the index could not be read');
+    listing = decode(listed.stdout);
+  } catch (error) {
+    return skip(`the index could not be read (${error instanceof Error ? error.message : String(error)})`);
+  }
+  const stages = new Map(listing.split('\0').map(entry => /^\d+ ([0-9a-f]+) ([123])\t(.*)$/s.exec(entry))
+    .filter(match => match?.[3] === object).map(match => [Number(match![2]), match![1]!] as const));
+  if (!stages.size) return skip('it is no longer unmerged');
+  const names = ['base', 'ours', 'theirs'];
+  // Read by the listed object ids, so an index changed in between cannot mix two states. A read
+  // that fails part way counts as unreadable: the diff itself must still load.
+  const sides = await Promise.all([1, 2, 3].map(stage => {
+    const oid = stages.get(stage);
+    return oid ? readBlob(context, oid).catch(() => null) : undefined;
+  }));
+  for (const [index, side] of sides.entries()) {
+    if (side === null) return skip(`${names[index]} could not be read`);
+    if (side?.tooLarge) return skip(`${names[index]} is too large`);
+    if (side && side.text === null) return skip(`${names[index]} is binary`);
+  }
+  const [base, ours, theirs] = sides.map(side => side?.text ?? null);
+  return { base: base ?? null, ours: ours ?? null, theirs: theirs ?? null };
 }
 
 async function readWorkingFile(projectId: string, relative: string): Promise<{ text: string | null; tooLarge: boolean }> {
@@ -457,12 +495,14 @@ export async function readProjectGitDiff(projectId: string, relativePath: string
         : await readWorkingFile(projectId, change.path);
   const tooLarge = base.tooLarge || current.tooLarge;
   const binary = change.binary || (!tooLarge && (base.text === null || current.text === null));
+  const conflict = change.status === 'C' && !snapshot.comparison ? await readConflictStages(context, change.path) : undefined;
   return {
     projectId, status: change.status, path: change.path, previousPath: change.previousPath,
     additions: change.additions, deletions: change.deletions, binary, tooLarge,
     baseText: binary || tooLarge ? null : base.text,
     currentText: binary || tooLarge ? null : current.text,
-    note: tooLarge ? 'This diff is too large to display.' : binary ? 'Binary diff · preview unavailable' : undefined
+    note: tooLarge ? 'This diff is too large to display.' : binary ? 'Binary diff · preview unavailable' : undefined,
+    ...(conflict ? { conflict } : {})
   };
 }
 
