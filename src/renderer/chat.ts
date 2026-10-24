@@ -7767,8 +7767,10 @@ export function chatApply(state: AppState, previous?: Config): void {
   applyRouteSettling(state.status.routeSettlingUntil ?? 0);
   if (bridgePresent !== bridge.present) { bridgePresent = bridge.present; paintPendingInputs(); }
   if (visible && selectedId) void refreshSessionControls();
-  paintContextMeter(sessions.find(session => session.id === selectedId) ?? null, config, confirmedComposerModel());
   applyChatModels(config, previous);
+  // After the picker took this state: the meter's Pro rule reads the picker, and before it could
+  // still describe the previous model and fill a Pro chat toward a compaction point it never uses.
+  paintContextMeter(sessions.find(session => session.id === selectedId) ?? null, config, confirmedComposerModel());
 
   applyChatChecked($<HTMLInputElement>('autoCompact'), config.compaction.auto, previous?.compaction.auto);
   applyChatValue(
@@ -8807,6 +8809,15 @@ export function initChat(next: Deps): void {
       task: id => { const chat = openChatSummary(); return selectedLocalProject()?.id === id && chat?.title?.trim() ? chat.title : null; }
     })).open(projectId),
     onShow: () => docks.adopt('review'),
+    // A new message: not an edit of an earlier question, which would replace the messages after it.
+    // A narrow window shows the dock instead of the chat; it closes so the composer is in view.
+    onAskChat: request => {
+      // Send submits a prepared plan, not what the composer shows, so the request would sit there unsent.
+      if (currentPreparedPlan()) { toast(t("Start or cancel the prepared plan first, then ask again.")); return; }
+      if (editingQuestion) endEditing(true);
+      if (window.matchMedia?.('(max-width: 850px)').matches) docks.setOpen(false);
+      prefillComposer(request);
+    },
     onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); }
   });
   reviewPanel.update(selectedLocalProject());

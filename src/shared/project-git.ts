@@ -40,6 +40,12 @@ export interface ProjectGitDiff {
   baseText: string | null;
   currentText: string | null;
   note?: string;
+  /**
+   * Only for a working-tree `C` path: Git's index stages 1 (common base), 2 (ours, HEAD) and
+   * 3 (theirs). Null is a side without that file (added or deleted there). Absent when a side
+   * is binary, too large or unreadable.
+   */
+  conflict?: { base: string | null; ours: string | null; theirs: string | null };
 }
 
 /** Git metadata changed. This is only an invalidation signal; main rereads Git before publishing. */
