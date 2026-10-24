@@ -1429,7 +1429,7 @@ lines per block and `<br>`, code and plain messages verbatim, a KaTeX formula as
 (400 lines, 20,000 characters) keeps its last lines under the same "Only the end of the selection is
 here" line, cut by `limitedSelection`, and goes into the draft with `draftWithTerminalBlock`. It only
 fills the composer; nothing is sent. Switching chat, starting a new one or changing view calls the
-returned `reset()`, and a click reads the selection again, so a stale quote never reaches the composer.
+returned `reset()` (it also drops a selection in the timeline and a scheduled update), and a click reads the selection again, so a stale quote never reaches the composer.
 Esc to stop (`escapeStopsTurn` in `chat.ts`): while the open chat's turn runs and Send shows Stop
 (composer empty, no files, no prepared plan), a first plain Esc in the composer only arms Stop and
 says "Press Esc again to stop the turn" in `#composerStatus`; a second plain Esc within 1.5 s stops
