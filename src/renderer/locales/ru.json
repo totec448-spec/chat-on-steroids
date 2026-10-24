@@ -3150,7 +3150,6 @@
   "Keep current files": "Оставить текущие файлы",
   "Restore files": "Восстановить файлы",
   "Save a checkpoint before each turn's first edit": "Сохранять контрольную точку перед первой правкой в каждом ходе",
-  "Off: no new checkpoints are taken. Existing checkpoints stay listed and Restore still works.": "Выкл.: новые контрольные точки не создаются. Существующие остаются в списке, а «Восстановить» по-прежнему работает.",
   "Export as HTML": "Экспортировать в HTML",
   "Whole session as HTML": "Весь сеанс в HTML",
   "HTML files": "Файлы HTML",
@@ -3160,5 +3159,8 @@
   "What ChatGPT gets to see on this computer.": "Что ChatGPT может видеть на этом компьютере.",
   "Off for every project in Settings": "Отключено для всех проектов в настройках",
   "This project's tools send keys and tokens to ChatGPT as they are": "Инструменты этого проекта отправляют ключи и токены в ChatGPT как есть",
-  "Keys and tokens in this project's tool results are hidden from ChatGPT": "Ключи и токены в результатах инструментов этого проекта скрыты от ChatGPT"
+  "Keys and tokens in this project's tool results are hidden from ChatGPT": "Ключи и токены в результатах инструментов этого проекта скрыты от ChatGPT",
+  "This checkpoint is no longer available. Git has cleaned it up.": "Эта контрольная точка больше недоступна. Git её удалил при очистке.",
+  "Checkpoints are temporary: Git may clean up old ones. Off: no new ones are taken.": "Контрольные точки временные: Git может удалить старые. Выкл.: новые не создаются.",
+  "Cleaned up": "Удалена"
 }

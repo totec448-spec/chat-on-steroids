@@ -129,7 +129,7 @@ it('checkpoints the project once per turn, before the first patch, without touch
   const ref = `${CHECKPOINT_REF_PREFIX}${checkpoint!.id}`;
   const snapshot = await compare(ref);
   expect(snapshot.comparison).toMatchObject({ ref, checkpoint: true, baseOid: checkpoint!.treeOid });
-  expect(snapshot.checkpoints).toEqual([{ ref, createdAt: checkpoint!.createdAt, reason: 'turn' }]);
+  expect(snapshot.checkpoints).toEqual([{ ref, createdAt: checkpoint!.createdAt, reason: 'turn', available: true }]);
   // The untracked file was part of the checkpoint, so it is not a change since then.
   expect(snapshot.changes.map(change => [change.status, change.path]).sort()).toEqual([['A', 'created.ts'], ['M', 'app.ts']]);
   const diff = await readProjectGitDiff(projectId, 'app.ts', ref, snapshot.revision);
@@ -206,7 +206,7 @@ it('keeps listing existing checkpoints and restoring from them while the setting
 
   const ref = `${CHECKPOINT_REF_PREFIX}${id}`;
   const snapshot = await compare(ref);
-  expect(snapshot.checkpoints).toEqual([{ ref, createdAt: expect.any(Number), reason: 'turn' }]);
+  expect(snapshot.checkpoints).toEqual([{ ref, createdAt: expect.any(Number), reason: 'turn', available: true }]);
   expect((await readProjectGitSnapshot(projectId)).checkpoints).toHaveLength(1);
 
   const result = await restoreCheckpoint(projectId, id, ['app.ts'], snapshot.revision, async () => true);
@@ -458,7 +458,13 @@ it('keeps a bounded ledger across restarts, and an unknown or pruned tree reads 
   await addCheckpoint({
     id: 'e'.repeat(32), projectId, sessionId: SESSION, key: 'turn:pruned', reason: 'turn', treeOid: '0'.repeat(40), headOid: null, createdAt: 9_999
   });
-  expect(await readProjectGitSnapshot(projectId, `${CHECKPOINT_REF_PREFIX}${'e'.repeat(32)}`)).toMatchObject({ state: 'unavailable', changes: [] });
+  // Git keeps no reference to a checkpoint's tree, so its garbage collection may remove one. The
+  // list says so instead of offering it like the others, and comparing it explains why.
+  const listed = (await readProjectGitSnapshot(projectId)).checkpoints!;
+  expect(listed.find(choice => choice.ref === `${CHECKPOINT_REF_PREFIX}${'e'.repeat(32)}`)?.available).toBe(false);
+  expect(listed.filter(choice => choice.available)).toHaveLength(MAX_CHECKPOINTS_PER_PROJECT - 1);
+  expect(await readProjectGitSnapshot(projectId, `${CHECKPOINT_REF_PREFIX}${'e'.repeat(32)}`))
+    .toMatchObject({ state: 'unavailable', changes: [], message: 'This checkpoint is no longer available. Git has cleaned it up.' });
   expect(await readProjectGitSnapshot(projectId, `${CHECKPOINT_REF_PREFIX}${'f'.repeat(32)}`)).toMatchObject({ state: 'unavailable', changes: [] });
 });
 

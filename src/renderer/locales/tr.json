@@ -3054,7 +3054,6 @@
   "Keep current files": "Geçerli dosyaları koru",
   "Restore files": "Dosyaları geri yükle",
   "Save a checkpoint before each turn's first edit": "Her turun ilk düzenlemesinden önce bir denetim noktası kaydet",
-  "Off: no new checkpoints are taken. Existing checkpoints stay listed and Restore still works.": "Kapalı: yeni denetim noktası oluşturulmaz. Mevcut denetim noktaları listede kalır ve Geri yükle çalışmaya devam eder.",
   "HTML export saves a whole session to a file": "HTML dışa aktarımı tüm oturumu tek bir dosyaya kaydeder",
   "Hide secrets from ChatGPT": "Gizli bilgileri ChatGPT'den gizle",
   "API keys, tokens, private keys and passwords in what tools return are replaced with a short note before ChatGPT sees them. Your files stay as they are. A project can turn this off in its menu.": "Araçların döndürdüğü içerikteki API anahtarları, tokenlar, özel anahtarlar ve parolalar ChatGPT görmeden önce kısa bir notla değiştirilir. Dosyalarınız olduğu gibi kalır. Bir proje bunu kendi menüsünden kapatabilir.",
@@ -3064,5 +3063,8 @@
   "Keys and tokens in this project's tool results are hidden from ChatGPT": "Bu projenin araç sonuçlarındaki anahtarlar ve tokenlar ChatGPT'den gizlenir",
   "Export as HTML": "HTML olarak dışa aktar",
   "Whole session as HTML": "Tüm oturum HTML olarak",
-  "HTML files": "HTML dosyaları"
+  "HTML files": "HTML dosyaları",
+  "This checkpoint is no longer available. Git has cleaned it up.": "Bu denetim noktası artık kullanılamıyor. Git onu temizledi.",
+  "Checkpoints are temporary: Git may clean up old ones. Off: no new ones are taken.": "Denetim noktaları geçicidir: Git eskileri temizleyebilir. Kapalı: yenileri alınmaz.",
+  "Cleaned up": "Temizlendi"
 }

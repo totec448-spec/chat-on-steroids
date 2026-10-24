@@ -3006,7 +3006,6 @@
   "Keep current files": "Giữ các tệp hiện tại",
   "Restore files": "Khôi phục tệp",
   "Save a checkpoint before each turn's first edit": "Lưu một điểm kiểm tra trước lần chỉnh sửa đầu tiên của mỗi lượt",
-  "Off: no new checkpoints are taken. Existing checkpoints stay listed and Restore still works.": "Tắt: không tạo điểm kiểm tra mới. Các điểm kiểm tra hiện có vẫn hiển thị trong danh sách và Khôi phục vẫn hoạt động.",
   "HTML export saves a whole session to a file": "Xuất HTML lưu toàn bộ phiên vào một tệp",
   "Hide secrets from ChatGPT": "Ẩn bí mật khỏi ChatGPT",
   "API keys, tokens, private keys and passwords in what tools return are replaced with a short note before ChatGPT sees them. Your files stay as they are. A project can turn this off in its menu.": "Khóa API, token, khóa riêng tư và mật khẩu trong kết quả công cụ trả về được thay bằng một ghi chú ngắn trước khi ChatGPT nhìn thấy. Tệp của bạn vẫn giữ nguyên. Mỗi dự án có thể tắt tính năng này trong menu của nó.",
@@ -3016,5 +3015,8 @@
   "Keys and tokens in this project's tool results are hidden from ChatGPT": "Khóa và token trong kết quả công cụ của dự án này được ẩn khỏi ChatGPT",
   "Export as HTML": "Xuất dạng HTML",
   "Whole session as HTML": "Toàn bộ phiên dạng HTML",
-  "HTML files": "Tệp HTML"
+  "HTML files": "Tệp HTML",
+  "This checkpoint is no longer available. Git has cleaned it up.": "Điểm kiểm tra này không còn khả dụng. Git đã dọn dẹp nó.",
+  "Checkpoints are temporary: Git may clean up old ones. Off: no new ones are taken.": "Điểm kiểm tra chỉ là tạm thời: Git có thể dọn dẹp các điểm cũ. Tắt: không tạo điểm mới.",
+  "Cleaned up": "Đã dọn"
 }

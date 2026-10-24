@@ -354,7 +354,7 @@ it('searches a comparison branch without checking out and keeps the chosen diff 
 it('compares against a code checkpoint and asks main to restore one file or all of them with that revision', async () => {
   const id = 'c'.repeat(32), ref = `checkpoint:${id}`;
   // Local time: the label shows the day where the app runs, so a UTC fixture would move a day west of UTC−9.
-  const checkpoints = [{ ref, createdAt: new Date(2026, 9, 13, 9, 30).getTime(), reason: 'turn' as const }];
+  const checkpoints = [{ ref, createdAt: new Date(2026, 9, 13, 9, 30).getTime(), reason: 'turn' as const, available: true }];
   let changes: ProjectGitSnapshot['changes'] = [
     { status: 'M', path: 'README.md', additions: 1, deletions: 1, binary: false },
     { status: 'A', path: 'src/new.ts', additions: 3, deletions: 0, binary: false }
