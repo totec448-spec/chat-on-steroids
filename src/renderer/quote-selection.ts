@@ -105,7 +105,12 @@ export interface QuoteSelectionDeps {
   blocked?: () => boolean;
 }
 
-export function initQuoteSelection({ timeline, input, blocked }: QuoteSelectionDeps): void {
+export interface QuoteSelection {
+  /** Forget the quote and hide the button: the chat or view it was taken in is gone. */
+  reset(): void;
+}
+
+export function initQuoteSelection({ timeline, input, blocked }: QuoteSelectionDeps): QuoteSelection {
   const button = el('button', 'quote-selection') as HTMLButtonElement;
   button.type = 'button';
   button.hidden = true;
@@ -117,7 +122,7 @@ export function initQuoteSelection({ timeline, input, blocked }: QuoteSelectionD
   let pressed = false;
   let frame = 0;
 
-  const hide = (): void => { button.hidden = true; };
+  const hide = (): void => { button.hidden = true; quote = ''; stale = true; };
   /** The message text a selection end is in, never its labels, receipts or the rows between messages. */
   const messageOf = (node: Node | null): Element | null => {
     const element = node?.nodeType === 1 ? node as Element : node?.parentElement ?? null;
@@ -162,7 +167,9 @@ export function initQuoteSelection({ timeline, input, blocked }: QuoteSelectionD
   // Pressing the button must not take the selection away before the click reads it.
   button.addEventListener('mousedown', event => event.preventDefault());
   button.addEventListener('click', () => {
-    if (stale) update();
+    // Read the selection again: the chat or view it was taken in may be gone.
+    stale = true;
+    update();
     if (button.hidden || !quote) return;
     if (blocked?.()) { toast(t('Start or cancel the prepared plan first, then quote again.')); return; }
     input.value = draftWithQuote(input.value, quote);
@@ -172,4 +179,5 @@ export function initQuoteSelection({ timeline, input, blocked }: QuoteSelectionD
     input.setSelectionRange(input.value.length, input.value.length);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
+  return { reset: hide };
 }

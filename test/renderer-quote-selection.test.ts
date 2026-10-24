@@ -170,6 +170,37 @@ it('offers nothing outside a message or while the selection is still being dragg
   expect(button().hidden).toBe(false);
 });
 
+it('forgets the quote when the chat or view it was taken in goes away', async () => {
+  const { initQuoteSelection } = await import('../src/renderer/quote-selection.js');
+  const input = document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = 'Look at this:';
+  const quote = initQuoteSelection({ timeline: document.getElementById('timeline')!, input });
+  const words = document.querySelector('.msg p')!.firstChild!;
+  select(words, 4, words, 10);
+  await frame();
+  expect(button().hidden).toBe(false);
+
+  // Settings hides the composer; the button of the cached quote is still clickable.
+  document.getElementById('composer')!.hidden = true;
+  button().dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  expect(input.value).toBe('Look at this:');
+  expect(button().hidden).toBe(true);
+
+  // Switching chat or starting a new one resets it, whatever the selection still says.
+  document.getElementById('composer')!.hidden = false;
+  select(words, 4, words, 10);
+  await frame();
+  expect(button().hidden).toBe(false);
+  quote.reset();
+  expect(button().hidden).toBe(true);
+  await frame();
+  // A selection that is still there quotes again, from a fresh read.
+  select(words, 0, words, 3);
+  await frame();
+  button().dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+  expect(input.value).toBe('Look at this:\n\n> The\n\n');
+});
+
 it('leaves the composer alone and says to start or cancel the plan first while a prepared plan waits', async () => {
   // Send submits the prepared plan, so a quote dropped into the composer would never be sent.
   const { initQuoteSelection } = await import('../src/renderer/quote-selection.js');
