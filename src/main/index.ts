@@ -40,6 +40,8 @@ import { pluginManager } from './plugins/manager.js';
 import { sessionActivityExpiresAt, setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
 import { setStuckNotifier } from './stuck-notice.js';
 import { flushSessions, getSession, initSessionStore, listSessions, readRecentEvents, setRecordingStorageLimit } from './session/store.js';
+import { runDueSchedules, type RunnerDeps } from './scheduled-runs.js';
+import { enqueueInput, listInputs } from './session/input.js';
 import { createTurnNotifier } from './turn-notifications.js';
 import { DEFAULT_RECORDING_STORAGE_GIB } from '../shared/session.js';
 import { initSkillsPath } from './skills.js';
@@ -505,6 +507,18 @@ void app.whenReady().then(async () => {
   });
   turnNotifier.seed(await listSessions().catch(() => []));
   onSessionChange(change => void turnNotifier.handle(change.sessionIds ?? []));
+  // #1826: scheduled runs. Checked every 30 s and right after the computer wakes; a run missed
+  // while it slept or the app was closed goes out once, labelled late.
+  const scheduleDeps: RunnerDeps = {
+    session: async id => { const summary = await getSession(id).catch(() => null); return summary ? { id: summary.id, conversationId: summary.conversationId ?? null, activeTurnId: summary.activeTurnId ?? null } : null; },
+    enqueue: input => enqueueInput(input),
+    pending: async () => new Set((await listInputs()).filter(row => ['queued', 'browser', 'tool'].includes(row.state)).map(row => row.id)),
+    log: logInfo
+  };
+  const checkSchedules = () => void runDueSchedules(Date.now(), scheduleDeps).catch(error => logWarn(`scheduled runs: the check failed (${error instanceof Error ? error.message : String(error)})`));
+  setInterval(checkSchedules, 30_000).unref();
+  powerMonitor.on('resume', checkSchedules);
+  checkSchedules();
   // The app's own requests follow the system proxy too, not only the tunnel (#1255).
   configureAppProxy(url => session.defaultSession.resolveProxy(url), () => [
     ...(getConfig().goal.provider.kind === 'custom' ? [getConfig().goal.provider.baseUrl] : []),

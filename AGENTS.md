@@ -1915,6 +1915,25 @@ replacement invalidates the old attempt. Progress uses the existing mutable time
 notifications are scoped to that exact turn and may be suppressed when the app is open.
 No periodic generated-input daemon is part of this design; old periodic rows are retired.
 
+### Scheduled runs (#1826)
+
+A chat's own message sent into that same chat at set times; one schedule per chat, durable
+`scheduled-runs` (`main/scheduled-runs.ts`, rules in `shared/schedule.ts`). Kinds: every n hours
+(1–24, real hours from when it was saved), daily, weekdays and weekly at a local `HH:MM`. A time
+the spring clock change skips runs at the first minute after it; a repeated autumn hour runs once.
+Checked every 30 s and on `powerMonitor` resume. A due run is one `enqueueInput` row with
+`scheduled { scheduleId, dueAt, late }`, mode `after-turn` while the chat has an active turn
+(never joining it), else `auto`, so read-only mode, the "slow down" hold and a missing browser hold
+it like any automatic send. Exactly once: the row id is derived from the schedule id and `dueAt`, so
+a crash before the schedule is saved queues the same id and the queue keeps one row. Missed runs
+(app closed, asleep) send one run, `late` when more than 2 min after its time; a time whose previous
+run still waits in the queue is skipped; a refused queueing skips that time once (no 30 s retry
+loop); saving or resuming starts at the next time; an ended schedule sends nothing; a deleted chat's
+schedule is removed. IPC `schedules:get|save|pause|delete`; errors are sentences the renderer
+translates. Queue rows and pending messages say "Scheduled" (late: "Scheduled · late, was due …").
+One `scheduled run:` log line per decision, never the message. Tests: `test/schedule-rules.test.ts`,
+`test/scheduled-runs.test.ts`, the IPC and renderer timeline tests named "schedule".
+
 ## 12. Recording, history, context and usage
 
 **Intent:** preserve what the user and model actually said and what local tools actually did,

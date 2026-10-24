@@ -3010,5 +3010,12 @@
   "Common base": "共同基礎",
   "Theirs (incoming)": "對方 (傳入)",
   "Not in this version": "此版本中不存在",
-  "Start or cancel the prepared plan first, then ask again.": "請先開始或取消已準備好的計畫，然後再試一次。"
+  "Start or cancel the prepared plan first, then ask again.": "請先開始或取消已準備好的計畫，然後再試一次。",
+  "Scheduled": "已安排",
+  "Scheduled · late, was due {0}": "已安排 · 延遲傳送，原定 {0}",
+  "This chat no longer exists.": "此對話已不存在。",
+  "Write the message to send.": "請寫下要傳送的訊息。",
+  "Choose a schedule that runs at least once an hour apart.": "請選擇至少間隔一小時執行的排程。",
+  "Choose an end date in the future.": "請選擇一個未來的結束日期。",
+  "There are too many scheduled chats. Remove one first.": "已安排的對話太多。請先刪除一個。"
 }

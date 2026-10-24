@@ -3108,5 +3108,12 @@
   "Common base": "Base commune",
   "Theirs (incoming)": "La leur (entrante)",
   "Not in this version": "Absent de cette version",
-  "Start or cancel the prepared plan first, then ask again.": "Lancez ou annulez d'abord le plan préparé, puis redemandez."
+  "Start or cancel the prepared plan first, then ask again.": "Lancez ou annulez d'abord le plan préparé, puis redemandez.",
+  "Scheduled": "Programmé",
+  "Scheduled · late, was due {0}": "Programmé · en retard, prévu à {0}",
+  "This chat no longer exists.": "Ce chat n’existe plus.",
+  "Write the message to send.": "Écrivez le message à envoyer.",
+  "Choose a schedule that runs at least once an hour apart.": "Choisissez une programmation espacée d’au moins une heure.",
+  "Choose an end date in the future.": "Choisissez une date de fin dans le futur.",
+  "There are too many scheduled chats. Remove one first.": "Il y a trop de chats programmés. Supprimez-en un d’abord."
 }

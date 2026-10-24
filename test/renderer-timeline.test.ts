@@ -903,6 +903,27 @@ it('identifies automatic Continue without user-task editing or reordering and ke
   expect(w.document.querySelectorAll('#finishQueue [aria-label="Edit queued task"]')).toHaveLength(2);
 });
 
+// #1826: a run of the chat's schedule says so in its queue row, and when it went out late.
+it('labels a scheduled run in the queue, with when it was due when it is late', async () => {
+  const { w, live, append } = await boot([]);
+  const dueAt = new Date(2026, 9, 24, 9, 0).getTime();
+  const run: InputEntry = { id: 'scheduled-run', sessionId: summary([]).id, text: 'Check the open issues', mode: 'auto',
+    dueAt: 0, model: null, reasoningEffort: null, state: 'queued', owner: null, createdAt: 0, conversationId: 'chat-b',
+    scheduled: { scheduleId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', dueAt, late: false } };
+  live.inputs.push(run);
+  await append([]);
+  const label = () => w.document.querySelector('#inputQueue [data-input-id="scheduled-run"] .pending-message-origin')?.textContent;
+  expect(label()).toBe('Scheduled');
+  expect(w.document.querySelector('#inputQueue [data-input-id="scheduled-run"] .pending-message-text')?.textContent).toBe('Check the open issues');
+  live.inputs[0] = { ...run, scheduled: { ...run.scheduled!, late: true } };
+  await append([]);
+  expect(label()).toBe(`Scheduled · late, was due ${new Date(dueAt).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })}`);
+  // Waiting for a running turn, the run is a task card that carries the same label.
+  live.inputs[0] = { ...run, mode: 'after-turn' };
+  await append([]);
+  expect(w.document.querySelector('#finishQueue [data-input-id="scheduled-run"] .queue-label')?.textContent).toBe('Scheduled · Check the open issues');
+});
+
 // #1402: the app's own fresh-turn continue is no one's typed message. Waiting, it shows as the
 // message it is; dropped, it raises no delivery notice, because the app tries again by itself.
 it('shows a fresh-turn continue while it waits and raises no notice when it is dropped', async () => {

@@ -3059,5 +3059,12 @@
   "Common base": "Ortak taban",
   "Theirs (incoming)": "Onlarınki (gelen)",
   "Not in this version": "Bu sürümde yok",
-  "Start or cancel the prepared plan first, then ask again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden isteyin."
+  "Start or cancel the prepared plan first, then ask again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden isteyin.",
+  "Scheduled": "Planlandı",
+  "Scheduled · late, was due {0}": "Planlandı · gecikti, zamanı {0} idi",
+  "This chat no longer exists.": "Bu sohbet artık yok.",
+  "Write the message to send.": "Gönderilecek mesajı yaz.",
+  "Choose a schedule that runs at least once an hour apart.": "En az bir saat arayla çalışan bir zamanlama seç.",
+  "Choose an end date in the future.": "Gelecekte bir bitiş tarihi seç.",
+  "There are too many scheduled chats. Remove one first.": "Çok fazla zamanlanmış sohbet var. Önce birini kaldır."
 }

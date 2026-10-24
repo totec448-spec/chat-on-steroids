@@ -3010,5 +3010,12 @@
   "Common base": "공통 기준",
   "Theirs (incoming)": "상대 쪽 (들어오는 쪽)",
   "Not in this version": "이 버전에는 없음",
-  "Start or cancel the prepared plan first, then ask again.": "먼저 준비된 계획을 시작하거나 취소한 다음 다시 요청하세요."
+  "Start or cancel the prepared plan first, then ask again.": "먼저 준비된 계획을 시작하거나 취소한 다음 다시 요청하세요.",
+  "Scheduled": "예약됨",
+  "Scheduled · late, was due {0}": "예약됨 · 늦게 보냄, 예정 {0}",
+  "This chat no longer exists.": "이 채팅은 더 이상 없습니다.",
+  "Write the message to send.": "보낼 메시지를 작성하세요.",
+  "Choose a schedule that runs at least once an hour apart.": "최소 1시간 간격으로 실행되는 일정을 고르세요.",
+  "Choose an end date in the future.": "미래의 종료 날짜를 고르세요.",
+  "There are too many scheduled chats. Remove one first.": "예약된 채팅이 너무 많습니다. 먼저 하나를 삭제하세요."
 }
