@@ -3002,5 +3002,13 @@
   "Accent presets": "強調色預設",
   "Each is easy to read in light and dark.": "每種顏色在淺色與深色模式下都清楚易讀。",
   "Orange": "橘色",
-  "Red": "紅色"
+  "Red": "紅色",
+  "Three-way view": "三方檢視",
+  "Ask chat to resolve": "請聊天協助解決",
+  "Help me resolve the merge conflict in {0}. Read the common base, ours and theirs with git show :1:./{0}, :2:./{0} and :3:./{0}, then write a version that keeps what both sides meant and tell me what you chose. Do not stage or commit it.": "請幫我解決 {0} 中的合併衝突。用 git show :1:./{0}, :2:./{0} 和 :3:./{0} 讀取共同基礎、我方與對方的版本，然後寫出保留雙方意圖的版本，並告訴我你做了哪些選擇。不要暫存或提交。",
+  "Ours (HEAD)": "我方 (HEAD)",
+  "Common base": "共同基礎",
+  "Theirs (incoming)": "對方 (傳入)",
+  "Not in this version": "此版本中不存在",
+  "Start or cancel the prepared plan first, then ask again.": "請先開始或取消已準備好的計畫，然後再試一次。"
 }

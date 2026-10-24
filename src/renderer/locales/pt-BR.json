@@ -3100,5 +3100,13 @@
   "Accent presets": "Cores de destaque predefinidas",
   "Each is easy to read in light and dark.": "Todas são fáceis de ler no claro e no escuro.",
   "Orange": "Laranja",
-  "Red": "Vermelho"
+  "Red": "Vermelho",
+  "Three-way view": "Visão de três vias",
+  "Ask chat to resolve": "Pedir ao chat para resolver",
+  "Help me resolve the merge conflict in {0}. Read the common base, ours and theirs with git show :1:./{0}, :2:./{0} and :3:./{0}, then write a version that keeps what both sides meant and tell me what you chose. Do not stage or commit it.": "Me ajude a resolver o conflito de merge em {0}. Leia a base comum, a nossa versão e a deles com git show :1:./{0}, :2:./{0} e :3:./{0}, depois escreva uma versão que mantenha a intenção dos dois lados e me diga o que você escolheu. Não adicione ao stage nem faça commit.",
+  "Ours (HEAD)": "Nossa (HEAD)",
+  "Common base": "Base comum",
+  "Theirs (incoming)": "Deles (recebida)",
+  "Not in this version": "Não existe nesta versão",
+  "Start or cancel the prepared plan first, then ask again.": "Inicie ou cancele primeiro o plano preparado e peça de novo."
 }
