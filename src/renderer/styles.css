@@ -207,7 +207,8 @@
 .plugin-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 .plugin-field { display: flex; flex-direction: column; gap: 7px; margin: 16px 0; font-size: calc(12px * var(--text-scale, 1)); font-weight: 600; }
 .plugin-field input, .plugin-field select { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--edge); border-radius: var(--r-sm); background: var(--sunk); color: var(--ink); font: inherit; }
-.plugin-field small { font-weight: 400; line-height: 1.5; }
+/* A field's hint reads like a setting's description: quiet, not the label's ink. */
+.plugin-field small { font-weight: 400; line-height: 1.5; font-size: calc(11.5px * var(--text-scale, 1)); color: var(--faint); }
 .plugin-steps { padding-left: 22px; font-size: calc(13px * var(--text-scale, 1)); line-height: 1.65; color: var(--soft); }
 .plugin-steps li { margin: 10px 0; }
 .plugin-legal { display: block; margin: 32px 0 4px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); line-height: 1.7; }

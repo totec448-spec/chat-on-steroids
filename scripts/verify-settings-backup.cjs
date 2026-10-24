@@ -97,6 +97,10 @@ app.whenReady().then(async () => {
       assert.ok(exp.rights.length <= 1, 'export: one right edge ' + tag + JSON.stringify(exp.rights));
       assert.deepEqual(exp.cut, [], 'export: nothing cut ' + tag);
       assert.ok(exp.oneRow && !exp.wrapped.length, 'export: buttons on one row ' + tag);
+      // Every quiet line (a switch's description, a field's hint) has one colour and size.
+      const quiet = await win.webContents.executeJavaScript(`[...new Set([...document.querySelectorAll('#exportSettingsDialog small, #exportSettingsDialog .setting-text em')]
+        .filter(n => n.offsetParent).map(n => { const c = getComputedStyle(n); return c.color + ' ' + c.fontSize + ' ' + c.fontWeight; }))]`);
+      assert.equal(quiet.length, 1, 'export: hints look alike ' + tag + JSON.stringify(quiet));
       if (zoom === 1 && width === 1100 && (language === 'en' || language === 'de' || language === 'ja')) fs.writeFileSync(path.join(output, `export-${language}.png`), (await win.webContents.capturePage(exp.box)).toPNG());
       await win.webContents.executeJavaScript(`document.getElementById('exportSettingsDialog').close(); true`);
       // Import in its tallest state: the access warning, Review changes open, saved keys ticked with the passphrase field.
