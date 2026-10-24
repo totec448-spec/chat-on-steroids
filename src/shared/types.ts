@@ -1,3 +1,4 @@
+import type { PhonePushSettings } from './phone-push.js';
 import type { ReasoningEffort, RecordingStorageLimitGiB } from './session.js';
 import type { PluginRefreshStatus } from './plugin-refresh.js';
 import { WINDOWS_COMPUTER_READ_METHODS, WINDOWS_COMPUTER_INPUT_METHODS } from './windows-computer.js';
@@ -200,6 +201,8 @@ export interface UiPrefs {
   startAtLogin?: boolean;
   /** A notification when a chat finishes a turn while the window is in the background. Missing means on. */
   turnNotifications?: boolean;
+  /** #1802: a short sound when a chat needs you, something failed or a chat finished in the background. Missing means off. */
+  sounds?: boolean;
   /**
    * #1402: after this many minutes of one turn, the next tool result starts a fresh turn with an
    * automatic continue (0 = off). Missing means 30.
@@ -223,6 +226,8 @@ export interface UiPrefs {
   keepScreenAwake?: boolean;
   /** Default screenshots to the active window instead of the whole primary monitor. */
   privacyScreenshots: boolean;
+  /** Phone notifications through ntfy; missing means off. */
+  phonePush?: PhonePushSettings;
   /** Mask API keys, tokens, private keys and secret settings in what tools return to ChatGPT. Missing means on. */
   secretsShield?: boolean;
   /** Browser for app-originated launches; connected source tabs retain placement ownership. */
@@ -870,6 +875,8 @@ export interface AppState {
   hasGoalKey: boolean;
   /** True when a custom-provider key is stored. Only meaningful beside a custom endpoint, which may also run keyless. */
   hasCustomProviderKey: boolean;
+  /** An ntfy access token is saved (never the token itself). */
+  hasPhonePushToken?: boolean;
   /** Resolved path of the tunnel binary we would run, or null if we cannot find one. */
   resolvedBinary: string | null;
   /** Version of the tunnel-client copy shipped inside the app, for diagnostics. */

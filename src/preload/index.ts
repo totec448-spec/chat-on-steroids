@@ -30,6 +30,7 @@ import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '..
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { AppState, Capabilities, CompanionDiagnostics, Config, Diagnosis, LogEntry } from '../shared/types.js';
+import type { SoundCue } from '../shared/sound-cues.js';
 import type {
   Handoff,
   ImageStorageClearMode,
@@ -159,6 +160,8 @@ const api = {
   setMainTexts: (texts: Record<string, string>) => call<void>('ui:mainTexts', texts),
   /** The interface language, kept by the app for the browser extension. */
   setUiLanguage: (language: string) => call<void>('ui:language', language),
+  testPhonePush: () => call<void>('phonePush:test', undefined),
+  setPhonePushToken: (token: string) => call<AppState>('phonePush:token', { token }),
   markWhatsNewSeen: () => call<void>('ui:whatsNewSeen'),
   /** The one-time automatic plugin refresh offer: true turns it on; either answer is kept. */
   answerPluginRefreshOffer: (turnOn: boolean) => call<AppState>('pluginRefresh:offer', { turnOn }),
@@ -433,6 +436,12 @@ const api = {
     const wrapped = (_event: unknown, change?: SessionChange): void => listener(change);
     ipcRenderer.on('session:changed', wrapped);
     return () => ipcRenderer.removeListener('session:changed', wrapped);
+  },
+  /** #1802: the main process decided a sound plays now. */
+  onSoundCue: (listener: (kind: SoundCue) => void): (() => void) => {
+    const wrapped = (_event: unknown, kind: SoundCue): void => listener(kind);
+    ipcRenderer.on('sound:cue', wrapped);
+    return () => ipcRenderer.removeListener('sound:cue', wrapped);
   },
   onWriteSession: (listener: (id: string) => void): (() => void) => {
     const wrapped = (_event: unknown, id: string): void => listener(id);
