@@ -110,6 +110,7 @@ import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMe
 import { createSearchPopup } from './search-popup.js';
 import { primaryShortcut } from './shortcuts.js';
 import { initSshProjectDialog } from './ssh-project-dialog.js';
+import { initFeedbackDialog } from './feedback-dialog.js';
 
 const api = window.api;
 let chatSearch: ChatSearch | null = null;
@@ -1321,6 +1322,11 @@ function prefillComposer(text: string): void {
   input.dispatchEvent(new Event('input', { bubbles: true }));
   input.focus();
 }
+let feedbackDialog: ReturnType<typeof initFeedbackDialog> | null = null;
+/** Send feedback: from /feedback and from Activity's button. */
+export function openFeedback(): void {
+  (feedbackDialog ??= initFeedbackDialog(api, { update: () => deps.state()?.update ?? null, openActivity: () => openSettingsTab('activity') })).open();
+}
 function openSettingsTab(tab: string): void {
   $('workspaceSettings').click();
   document.querySelector<HTMLElement>(`[data-tab="${tab}"]`)?.click();
@@ -1355,7 +1361,7 @@ function runSlashCommand(name: string): void {
   else if (name === 'review') prefillComposer(t('Review the uncommitted changes in this project. Look for bugs, regressions and missing tests, and list what you find by severity with the file and line. Do not change any files.'));
   else if (name === 'init') prefillComposer(t('Create an AGENTS.md for this project. Read the project first, then describe how it is built, tested and run, how it is laid out, and the conventions a coding agent should follow. Keep it short and accurate.'));
   else if (name === 'usage') openSettingsTab('usage');
-  else if (name === 'feedback') openSettingsTab('activity');
+  else if (name === 'feedback') openFeedback();
   else if (name === 'plugins') $('sidebarPlugins').click();
   else if (name === 'pet') $('sidebarPets').click();
   else if (name === 'copy' && chat) void run(api.exportMarkdown({ id: chat.id, scope: 'latest', target: 'clipboard' }))
