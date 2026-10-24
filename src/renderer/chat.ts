@@ -4118,15 +4118,17 @@ function fencedMarkdownRanges(text: string): Array<{ start: number; end: number 
     const body = line.replace(/^(?:[ \t]*(?:>|[-*+]|\d{1,9}[.)])(?=[ \t]|$)[ \t]?)*/, '');
     if (fence) {
       // A top-level fence cannot be closed by a list/blockquote-prefixed line.
-      const close = /^[ \t]*(`{3,}|~{3,})[ \t]*$/.exec(fence.nested ? body : line)?.[1];
+      const close = (fence.nested ? /^[ \t]*(`{3,}|~{3,})[ \t]*$/ : /^ {0,3}(`{3,}|~{3,})[ \t]*$/)
+        .exec(fence.nested ? body : line)?.[1];
       if (close && close[0] === fence.marker && close.length >= fence.width) {
         ranges.push({ start: fence.start, end });
         fence = null;
       }
     } else {
-      const open = /^[ \t]*(`{3,}|~{3,})(.*)$/.exec(body);
+      const nested = body.length !== line.length;
+      const open = (nested ? /^[ \t]*(`{3,}|~{3,})(.*)$/ : /^ {0,3}(`{3,}|~{3,})(.*)$/).exec(body);
       if (open && (open[1]![0] === '~' || !open[2]!.includes('`'))) {
-        fence = { start, marker: open[1]![0]!, width: open[1]!.length, nested: body.length !== line.length };
+        fence = { start, marker: open[1]![0]!, width: open[1]!.length, nested };
       }
     }
     start = end;
@@ -4144,6 +4146,16 @@ function markdownCodeRanges(text: string): Array<{ start: number; end: number }>
   let indentedStart: number | null = null;
   let afterBlank = true;
   let fenceIndex = 0;
+  let listContentIndent: number | null = null;
+  const indentColumns = (line: string): number => {
+    let columns = 0;
+    for (const char of line) {
+      if (char === ' ') columns++;
+      else if (char === '\t') columns += 4 - (columns % 4);
+      else break;
+    }
+    return columns;
+  };
   for (let at = 0; at < text.length;) {
     const newline = text.indexOf('\n', at);
     const end = newline < 0 ? text.length : newline + 1;
@@ -4156,8 +4168,16 @@ function markdownCodeRanges(text: string): Array<{ start: number; end: number }>
       // line: Marked accepts an indented code block immediately after it.
       afterBlank = end === fences[fenceIndex]!.end;
     } else {
+      // Indented list content begins at the marker's text column. Its code
+      // blocks need *another* four columns, unlike a plain four-space continuation.
+      const marker = /^([ ]{0,3})(?:[-*+]|\d{1,9}[.)])([ \t]+)/.exec(line);
+      if (marker) listContentIndent = marker[0].length;
+      else if (line.trim() && listContentIndent !== null && indentColumns(line) < listContentIndent) {
+        listContentIndent = null;
+      }
       if (indentedStart === null) {
-        if (afterBlank && CODE_LINE.test(line)) indentedStart = at;
+        if (afterBlank && CODE_LINE.test(line) &&
+            (listContentIndent === null || indentColumns(line) >= listContentIndent + 4)) indentedStart = at;
       } else if (line.trim() && !CODE_LINE.test(line)) {
         ranges.push({ start: indentedStart, end: at });
         indentedStart = null;
