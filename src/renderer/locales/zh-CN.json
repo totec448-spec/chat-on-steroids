@@ -3002,12 +3002,12 @@
   "Save this chat as a web page to share.": "将此聊天保存为网页以便分享。",
   "Saves this chat as one web page file that opens in any browser. Nothing is uploaded: you decide who gets the file.": "将此聊天保存为一个可在任何浏览器中打开的网页文件。不会上传任何内容：由你决定把文件给谁。",
   "Preparing the preview…": "正在准备预览…",
-  "Hide personal details": "隐藏个人信息",
   "Save…": "保存…",
   "{0} details are hidden on this page.": "此页面已隐藏 {0} 项信息。",
   "Nothing to hide was found in this chat.": "此聊天中没有找到需要隐藏的内容。",
   "Shared from Chat On Steroids": "分享自 Chat On Steroids",
   "This chat has nothing to share yet": "此聊天还没有可分享的内容",
   "The preview is out of date. Open Share again.": "预览已过期。请重新打开“分享”。",
-  "Email addresses and user names in folder paths show as “hidden”. Keys and tokens always do.": "电子邮件地址和文件夹路径中的用户名会显示为“已隐藏”。密钥和令牌始终如此。"
+  "Hide email addresses and user names": "隐藏电子邮件地址和用户名",
+  "Keys and tokens are always hidden. Check the preview: other personal details may remain.": "密钥和令牌始终会隐藏。请检查预览：其他个人信息可能仍然存在。"
 }

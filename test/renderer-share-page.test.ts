@@ -32,13 +32,14 @@ async function open(sharePage: (request: unknown) => Promise<Answer>, saved = vi
   return saved;
 }
 
-it('opens with nothing hidden, shows the page in a frame that runs nothing, and saves that page', async () => {
+it('opens with addresses and user names hidden, shows the page in a frame that runs nothing, and saves that page', async () => {
   const sharePage = vi.fn(async (request: any): Promise<Answer> => request.target === 'preview' ? page(0)
     : { ok: true, data: { done: 'saved', name: 'Plan.html' } });
   const saved = await open(sharePage);
   expect($<HTMLDialogElement>('sharePageDialog').open).toBe(true);
   await settle();
-  expect(sharePage).toHaveBeenCalledWith({ id: 'session-1', target: 'preview', hide: false, lang: 'en' });
+  expect(sharePage).toHaveBeenCalledWith({ id: 'session-1', target: 'preview', hide: true, lang: 'en' });
+  expect($<HTMLInputElement>('sharePageHide').checked).toBe(true);
   const frame = $<HTMLIFrameElement>('sharePageFrame');
   expect(frame.getAttribute('sandbox')).toBe('');
   expect(frame.srcdoc).toBe('<html><head>\n<base target="_blank"></head><body>0</body></html>');
@@ -51,20 +52,20 @@ it('opens with nothing hidden, shows the page in a frame that runs nothing, and 
   expect($<HTMLDialogElement>('sharePageDialog').open).toBe(false);
 });
 
-it('says how many details the page hides: keys always, personal details only when asked', async () => {
-  let hidden = 0;
+it('says how many details the page hides, and shows addresses and names only when asked', async () => {
+  let hidden = 3;
   const sharePage = vi.fn(async (request: any): Promise<Answer> => page(request.hide ? hidden : 0));
   await open(sharePage);
   await settle();
-  expect($('sharePageCount').hidden).toBe(true);
-  const hide = $<HTMLInputElement>('sharePageHide');
-  hide.checked = true;
-  hidden = 3;
-  hide.dispatchEvent(new dom.window.Event('change'));
-  await settle();
-  expect(sharePage).toHaveBeenLastCalledWith({ id: 'session-1', target: 'preview', hide: true, lang: 'en' });
   expect($('sharePageCount').hidden).toBe(false);
   expect($('sharePageCount').textContent).toBe('3 details are hidden on this page.');
+  const hide = $<HTMLInputElement>('sharePageHide');
+  hide.checked = false;
+  hide.dispatchEvent(new dom.window.Event('change'));
+  await settle();
+  expect(sharePage).toHaveBeenLastCalledWith({ id: 'session-1', target: 'preview', hide: false, lang: 'en' });
+  expect($('sharePageCount').hidden).toBe(true);
+  hide.checked = true;
   hidden = 1;
   hide.dispatchEvent(new dom.window.Event('change'));
   await settle();
@@ -88,7 +89,7 @@ it('shows the newest choice when an older preview answers last, and saves only t
   const sharePage = vi.fn((request: any) => request.target === 'preview' ? answers.shift()!.promise : new Promise<Answer>(() => undefined));
   await open(sharePage);
   const hide = $<HTMLInputElement>('sharePageHide');
-  hide.checked = true;
+  hide.checked = false;
   hide.dispatchEvent(new dom.window.Event('change'));
   // Nothing can be saved while no page is shown.
   expect($<HTMLButtonElement>('sharePageSave').disabled).toBe(true);
@@ -149,10 +150,10 @@ it('drops a preview that answers after the dialog was closed, and starts clean w
   await settle();
   expect($<HTMLIFrameElement>('sharePageFrame').srcdoc).toBe('');
   const hide = $<HTMLInputElement>('sharePageHide');
-  hide.checked = true;
+  hide.checked = false;
   sharePage.mockImplementation(async () => page(0));
   dialog.open('session-2');
-  expect(hide.checked).toBe(false);
+  expect(hide.checked).toBe(true);
   await settle();
-  expect(sharePage).toHaveBeenLastCalledWith({ id: 'session-2', target: 'preview', hide: false, lang: 'en' });
+  expect(sharePage).toHaveBeenLastCalledWith({ id: 'session-2', target: 'preview', hide: true, lang: 'en' });
 });

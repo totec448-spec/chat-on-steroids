@@ -3098,7 +3098,6 @@
   "Save this chat as a web page to share.": "Enregistrer ce chat comme page web à partager.",
   "Saves this chat as one web page file that opens in any browser. Nothing is uploaded: you decide who gets the file.": "Enregistre ce chat dans un fichier de page web qui s’ouvre dans n’importe quel navigateur. Rien n’est envoyé en ligne : vous décidez qui reçoit le fichier.",
   "Preparing the preview…": "Préparation de l’aperçu…",
-  "Hide personal details": "Masquer les informations personnelles",
   "Save…": "Enregistrer…",
   "{0} details are hidden on this page.": "{0} informations sont masquées sur cette page.",
   "Nothing to hide was found in this chat.": "Rien à masquer n’a été trouvé dans ce chat.",
@@ -3107,5 +3106,6 @@
   "The preview is out of date. Open Share again.": "L’aperçu n’est plus à jour. Rouvrez Partager.",
   "{0} details are hidden on this page.|one": "{0} information est masquée sur cette page.",
   "{0} details are hidden on this page.|many": "{0} informations sont masquées sur cette page.",
-  "Email addresses and user names in folder paths show as “hidden”. Keys and tokens always do.": "Les adresses e-mail et les noms d’utilisateur dans les chemins de dossiers apparaissent comme « masqué ». Les clés et jetons, toujours."
+  "Hide email addresses and user names": "Masquer les adresses e-mail et les noms d’utilisateur",
+  "Keys and tokens are always hidden. Check the preview: other personal details may remain.": "Les clés et jetons sont toujours masqués. Vérifiez l’aperçu : d’autres informations personnelles peuvent rester."
 }

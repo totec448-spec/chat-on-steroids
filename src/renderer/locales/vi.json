@@ -3002,12 +3002,12 @@
   "Save this chat as a web page to share.": "Lưu cuộc trò chuyện này thành trang web để chia sẻ.",
   "Saves this chat as one web page file that opens in any browser. Nothing is uploaded: you decide who gets the file.": "Lưu cuộc trò chuyện này thành một tệp trang web mở được trong mọi trình duyệt. Không có gì được tải lên: bạn quyết định ai nhận tệp.",
   "Preparing the preview…": "Đang chuẩn bị bản xem trước…",
-  "Hide personal details": "Ẩn thông tin cá nhân",
   "Save…": "Lưu…",
   "{0} details are hidden on this page.": "Đã ẩn {0} thông tin trên trang này.",
   "Nothing to hide was found in this chat.": "Không tìm thấy gì cần ẩn trong cuộc trò chuyện này.",
   "Shared from Chat On Steroids": "Được chia sẻ từ Chat On Steroids",
   "This chat has nothing to share yet": "Cuộc trò chuyện này chưa có gì để chia sẻ",
   "The preview is out of date. Open Share again.": "Bản xem trước đã cũ. Hãy mở lại Chia sẻ.",
-  "Email addresses and user names in folder paths show as “hidden”. Keys and tokens always do.": "Địa chỉ email và tên người dùng trong đường dẫn thư mục hiển thị là “đã ẩn”. Khóa và token thì luôn luôn."
+  "Hide email addresses and user names": "Ẩn địa chỉ email và tên người dùng",
+  "Keys and tokens are always hidden. Check the preview: other personal details may remain.": "Khóa và token luôn được ẩn. Hãy kiểm tra bản xem trước: các thông tin cá nhân khác có thể vẫn còn."
 }
