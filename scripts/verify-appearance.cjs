@@ -108,6 +108,70 @@ app.whenReady().then(async () => {
     await verifyPopoverPalette();
     await js(`document.getElementById('appearanceTranslucent').click()`);
     assert.ok((await js(`getComputedStyle(document.querySelector('.sidebar')).backdropFilter`)).includes('blur'));
+    // Accent presets: one click sets the preset's shade for both themes.
+    await js(`document.querySelector('#appearanceAccentPresets [data-preset="green"]').click()`);
+    await js('new Promise(r=>setTimeout(r,100))');
+    assert.equal(await js(`window.fixtureState.config.ui.appearance.dark.accent`),'#7fcf86');
+    assert.equal(await js(`window.fixtureState.config.ui.appearance.light.accent`),'#2e7d32');
+    assert.equal(await js(`document.querySelectorAll('#appearanceAccentPresets [aria-checked="true"]').length`),1);
+    await screenshot('presets-dark.png');
+    // High contrast: measured on the rendered tokens, text at 7:1 and lines at 3:1 on every surface.
+    const ratios = () => js(`(() => {
+      const css = getComputedStyle(document.documentElement);
+      const lum = hex => { const v = [1,3,5].map(i => parseInt(hex.slice(i,i+2),16)/255).map(c => c <= .03928 ? c/12.92 : ((c+.055)/1.055)**2.4); return .2126*v[0]+.7152*v[1]+.0722*v[2]; };
+      const ratio = (a,b) => { const [x,y] = [lum(a),lum(b)].sort((m,n)=>n-m); return (x+.05)/(y+.05); };
+      const token = name => css.getPropertyValue(name).trim();
+      const out = {};
+      for (const surface of ['--page','--card']) {
+        for (const text of ['--ink','--soft','--faint','--accent']) out[text+' on '+surface] = ratio(token(text), token(surface));
+        for (const line of ['--line','--edge']) out[line+' on '+surface] = ratio(token(line), token(surface));
+      }
+      out['--on-accent on --accent-fill'] = ratio(token('--on-accent'), token('--accent-fill'));
+      return out;
+    })()`);
+    const checkRatios = async theme => {
+      for (const [pair, value] of Object.entries(await ratios())) {
+        const need = /^--(line|edge)/.test(pair) ? 3 : pair.startsWith('--on-accent') ? 4.5 : 7;
+        assert.ok(value >= need - .01, `${theme}: ${pair} is ${value.toFixed(2)}:1, needs ${need}:1`);
+      }
+    };
+    await js(`document.getElementById('appearanceHighContrast').click()`);
+    await js('new Promise(r=>setTimeout(r,100))');
+    assert.equal(await js(`window.fixtureState.config.ui.appearance.highContrast`),true);
+    assert.equal(await js(`document.documentElement.style.getPropertyValue('--page')`),'#000000');
+    assert.equal(await js(`document.getElementById('appearanceContrast').disabled`),true);
+    await checkRatios('dark');
+    await screenshot('high-contrast-dark.png');
+    await change('appearanceTheme','light');
+    assert.equal(await js(`document.documentElement.style.getPropertyValue('--page')`),'#ffffff');
+    await checkRatios('light');
+    await screenshot('high-contrast-light.png');
+    await js(`document.getElementById('backToChat').click()`);
+    await js('new Promise(r=>setTimeout(r,100))');
+    await screenshot('high-contrast-chat.png');
+    await js(`document.querySelector('[data-tab="appearance"]').click()`);
+    await change('appearanceTheme','dark');
+    // The dark chat screen is drawn on the plain black page, without the theme's wash.
+    await js(`document.getElementById('backToChat').click()`);
+    await js('new Promise(r=>setTimeout(r,100))');
+    assert.equal(await js(`getComputedStyle(document.querySelector('.app')).backgroundImage`),'none');
+    // The composer's edge is a control edge: 3:1 against the page around it.
+    const composerEdge = await js(`(() => {
+      // Computed colors come as rgb(…) or, for color-mix(), as color(srgb r g b) with 0–1 channels.
+      const toHex = value => { const srgb = /^color\\(srgb ([\\d.]+) ([\\d.]+) ([\\d.]+)/.exec(value);
+        const channels = srgb ? srgb.slice(1, 4).map(n => Math.round(Number(n) * 255)) : value.match(/[\\d.]+/g).slice(0, 3).map(Number);
+        return '#' + channels.map(n => n.toString(16).padStart(2, '0')).join(''); };
+      const edge = getComputedStyle(document.querySelector('.composer')).borderTopColor;
+      const page = getComputedStyle(document.documentElement).getPropertyValue('--page').trim();
+      const lum = hex => { const v = [1,3,5].map(i => parseInt(hex.slice(i,i+2),16)/255).map(c => c <= .03928 ? c/12.92 : ((c+.055)/1.055)**2.4); return .2126*v[0]+.7152*v[1]+.0722*v[2]; };
+      const [x,y] = [lum(toHex(edge)),lum(page)].sort((m,n)=>n-m); return { edge, ratio: (x+.05)/(y+.05) }; })()`);
+    assert.ok(composerEdge.ratio >= 2.99, 'high-contrast composer edge: ' + JSON.stringify(composerEdge));
+    await js(`document.querySelector('[data-tab="appearance"]').click()`);
+    await js(`document.getElementById('appearanceHighContrast').click()`);
+    await js('new Promise(r=>setTimeout(r,100))');
+    assert.equal(await js(`window.fixtureState.config.ui.appearance.highContrast`),false);
+    // The colors chosen before high contrast came back untouched.
+    assert.equal(await js(`window.fixtureState.config.ui.appearance.dark.background`),'#19151f');
     // Dirty HEX edits survive status pushes; invalid text cannot reach storage.
     await js(`window.countBefore=window.savedPatches.length;const hex=document.getElementById('appearance-sidebar-hex');hex.focus();hex.value='#12';hex.dispatchEvent(new Event('input',{bubbles:true}));window.pushState()`);
     assert.equal(await js(`document.getElementById('appearance-sidebar-hex').value`),'#12');
@@ -124,6 +188,7 @@ app.whenReady().then(async () => {
     await js('window.holdSave=false;window.releaseSave()');
     await js('new Promise(r=>setTimeout(r,100))');
     assert.deepEqual(await js(`window.fixtureState.config.ui.appearance.dark`),{background:'#19151f',sidebar:'#23454e',accent:'#72ea34',contrast:60});
+    assert.equal(await js(`window.fixtureState.config.ui.appearance.highContrast`),false);
     await js('window.rejectSave=true');
     await change('appearance-sidebar-hex','#ff00ff');
     assert.equal(await js("window.fixtureState.config.ui.appearance.dark.sidebar"),'#23454e');
@@ -166,7 +231,7 @@ app.whenReady().then(async () => {
     await change('uiLanguage','en');
     await js(`document.getElementById('backToChat').click();document.getElementById('chatInput').value='A workspace in your colors.'`);
     await screenshot('chat.png');
-    fs.writeFileSync(path.join(output,'results.json'),JSON.stringify({arbitraryColors:true,separateThemes:true,translucency:true,dirtyPush:true,queuedSave:true,saveFailureRollback:true,reload:true,reset:true,layout},null,2));
+    fs.writeFileSync(path.join(output,'results.json'),JSON.stringify({arbitraryColors:true,accentPresets:true,highContrast:true,separateThemes:true,translucency:true,dirtyPush:true,queuedSave:true,saveFailureRollback:true,reload:true,reset:true,layout},null,2));
     console.log('Appearance Electron checks passed. '+output);
   } finally { win?.destroy(); await server.close(); app.quit(); }
 }).catch(error=>{console.error(error);app.exit(1)});
