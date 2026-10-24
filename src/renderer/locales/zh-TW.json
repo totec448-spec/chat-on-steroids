@@ -3027,5 +3027,9 @@
   "Save the diagnostics report first. A problem report on GitHub needs it.": "請先儲存診斷報告。GitHub 上的問題回報需要它。",
   "Write what problem it would solve.": "請寫下它能解決什麼問題。",
   "Write what the app should do.": "請寫下應用程式應該做什麼。",
-  "Report a problem or suggest an idea.": "回報問題或提出想法。"
+  "Report a problem or suggest an idea.": "回報問題或提出想法。",
+  "HTML export saves a whole session to a file": "HTML 匯出會將整個工作階段儲存為一個檔案",
+  "Export as HTML": "匯出為 HTML",
+  "Whole session as HTML": "整個工作階段（HTML）",
+  "HTML files": "HTML 檔案"
 }

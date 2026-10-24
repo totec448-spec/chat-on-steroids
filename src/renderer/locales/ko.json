@@ -3027,5 +3027,9 @@
   "Save the diagnostics report first. A problem report on GitHub needs it.": "먼저 진단 보고서를 저장하세요. GitHub의 문제 신고에 필요합니다.",
   "Write what problem it would solve.": "어떤 문제를 해결하는지 적어 주세요.",
   "Write what the app should do.": "앱이 무엇을 해야 하는지 적어 주세요.",
-  "Report a problem or suggest an idea.": "문제를 신고하거나 아이디어를 제안합니다."
+  "Report a problem or suggest an idea.": "문제를 신고하거나 아이디어를 제안합니다.",
+  "HTML export saves a whole session to a file": "HTML 내보내기는 전체 세션을 파일 하나로 저장합니다",
+  "Export as HTML": "HTML로 내보내기",
+  "Whole session as HTML": "전체 세션을 HTML로",
+  "HTML files": "HTML 파일"
 }
