@@ -3047,7 +3047,6 @@ input[readonly] {
   container-type: inline-size;
 }
 .msg.rich .markdown-dil-panel .markdown-dil-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 .msg.rich .markdown-dil-panel .markdown-dil-grid-item { gap: 7px; }

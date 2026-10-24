@@ -8098,6 +8098,38 @@ describe('charts, diagrams and illustrated Markdown from recorded DIL', () => {
     expect(root.lastElementChild?.textContent).toBe('After.');
   });
 
+  it.each([
+    { name: 'content line', markdown: (widget: string) => 'Example:\n\n```json\n    ```\n' + widget + '\n```\n\n' + widget },
+    { name: 'indented opener', markdown: (widget: string) => 'Example:\n\n    ```\n\n' + widget }
+  ])('respects Marked top-level fence indentation for $name', async ({ markdown, name }) => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(markdown(widget))]);
+    const root = message(w);
+    if (name === 'content line') {
+      expect(root.querySelector('pre code')?.textContent).toContain(widget);
+      expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    } else {
+      expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+      expect(root.textContent).not.toContain('\uE030');
+    }
+  });
+
+  it.each([
+    { spaces: '    ', charts: 2 },
+    { spaces: '      ', charts: 1 }
+  ])('distinguishes list-continuation charts from nested indented code at $spaces spaces', async ({ spaces, charts }) => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation('- Revenue\n\n' + spaces + widget + '\n\n' + widget)]);
+    const root = message(w);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(charts);
+    if (charts === 1) expect(root.querySelector('li pre code')?.textContent).toContain(widget);
+    expect(root.textContent).not.toContain('\uE030');
+  });
+
   it('does not hide a valid chart between unrelated backticks in separate paragraphs', async () => {
     const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
       chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]

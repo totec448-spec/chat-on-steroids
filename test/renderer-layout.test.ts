@@ -58,6 +58,8 @@ it('keeps recorded DIL surfaces on CoS tokens across themes and high-contrast pa
   expect(badge).toContain('var(--green-wash)');
   expect(badge).toContain('var(--green-line)');
   expect(rule('.msg.rich .markdown-dil-panel')).toContain('background: var(--card)');
+  // Nested workflow tables must collapse with the same narrow-container rule as cards.
+  expect(rule('.msg.rich .markdown-dil-panel .markdown-dil-grid')).not.toContain('grid-template-columns');
   expect(rule('.msg.rich .markdown-dil-chart')).toContain('var(--text-scale, 1)');
   expect(rule('.msg.rich .markdown-dil-chart-x')).toContain('var(--markdown-dil-label-height)');
   expect(rule('.msg.rich .markdown-dil-chart-guide')).toContain('var(--markdown-dil-label-height)');
