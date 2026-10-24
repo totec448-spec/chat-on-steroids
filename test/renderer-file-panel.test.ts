@@ -8,16 +8,17 @@ import type { ProjectDirectoryListing, ProjectFilePreview, ProjectFilesChanged }
 import type { ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../src/shared/project-git.js';
 
 const createPdfViewer = vi.hoisted(() => vi.fn());
-const codeMount = vi.hoisted(() => ({ wait: null as Promise<void> | null, calls: 0 }));
+const codeMount = vi.hoisted(() => ({ wait: null as Promise<void> | null, calls: 0, jumps: [] as Array<[string, number, number | undefined]> }));
 vi.mock('../src/renderer/file-pdf-viewer.js', () => ({ createProjectPdfViewer: createPdfViewer }));
 vi.mock('../src/renderer/file-code-editor.js', () => ({
-  createProjectCodeEditor: async (options: { parent: HTMLElement; text: string; onChange?: (text: string) => void }) => {
+  createProjectCodeEditor: async (options: { parent: HTMLElement; filename: string; text: string; onChange?: (text: string) => void }) => {
     codeMount.calls++;
     if (codeMount.wait) await codeMount.wait;
     const input = document.createElement('textarea'); input.className = 'test-code-input'; input.value = options.text;
     options.parent.append(input);
     input.addEventListener('input', () => options.onChange?.(input.value));
-    return { getValue: () => input.value, focus: () => input.focus(), destroy: () => input.remove(), language: 'Plain text' };
+    return { getValue: () => input.value, focus: () => input.focus(), destroy: () => input.remove(), language: 'Plain text',
+      goTo: (line: number, column?: number) => { codeMount.jumps.push([options.filename, line, column]); } };
   },
   createProjectDiffViewer: async (options: { parent: HTMLElement; baseText: string; currentText: string }) => {
     const view = document.createElement('pre');
@@ -94,7 +95,7 @@ it('rearms a lost watch without resending watches for ordinary file changes or a
 });
 
 beforeEach(() => {
-  codeMount.wait = null; codeMount.calls = 0;
+  codeMount.wait = null; codeMount.calls = 0; codeMount.jumps = [];
   dom = new JSDOM('<body><section id="host"></section><button id="toggle"></button></body>', { url: 'https://cos.local/' });
   vi.stubGlobal('window', dom.window);
   vi.stubGlobal('document', dom.window.document);
@@ -678,6 +679,108 @@ it('previews and attaches a selected project file without exposing a native path
   expect((window.api.attachProjectFile as any)).toHaveBeenCalledWith(projectA.id, 'README.md');
   expect(attached).toEqual(['README.md']);
   expect(JSON.stringify((window.api.attachProjectFile as any).mock.calls)).not.toContain('C:\\alpha');
+});
+
+it('opens a terminal file link in Files at its line, and only for the project Files shows', async () => {
+  vi.mocked(window.api.previewProjectFile).mockImplementation((_projectId: string, path: string) =>
+    ok({ ...preview, path, name: path.split('/').at(-1)!, text: 'one\ntwo\n' }));
+  const onShow = vi.fn();
+  const panel = createFilePanel({ host, mount: host, onShow });
+  panel.update(projectA);
+  await expect(panel.openFileAt(projectB.id, 'src/main.ts', 42, 7)).resolves.toBe(false);
+  expect(window.api.previewProjectFile).not.toHaveBeenCalled();
+
+  await expect(panel.openFileAt(projectA.id, 'src/main.ts', 42, 7)).resolves.toBe(true);
+  await tick();
+  expect(onShow).toHaveBeenCalledOnce();
+  expect(window.api.previewProjectFile).toHaveBeenCalledWith(projectA.id, 'src/main.ts');
+  expect(codeMount.jumps).toEqual([['main.ts', 42, 7]]);
+
+  // The file already on screen moves to the new line without a second mount.
+  await panel.openFileAt(projectA.id, 'src/main.ts', 3, 1); await tick();
+  expect(codeMount.calls).toBe(1);
+  expect(codeMount.jumps).toEqual([['main.ts', 42, 7], ['main.ts', 3, 1]]);
+});
+
+it('drops a terminal file link when the project changed and came back while Files was opening', async () => {
+  vi.mocked(window.api.previewProjectFile).mockImplementation((_projectId: string, path: string) =>
+    ok({ ...preview, path, name: path.split('/').at(-1)!, text: 'one\ntwo\n' }));
+  let release!: () => void;
+  const slow = new Promise<void>(resolve => { release = resolve; });
+  vi.mocked(window.api.listProjectFiles).mockImplementationOnce(async () => { await slow; return { ok: true as const, data: rootListing(projectA) }; });
+  const panel = createFilePanel({ host, mount: host });
+  panel.update(projectA);
+  const opened = panel.openFileAt(projectA.id, 'src/main.ts', 42, 7);
+  await tick();
+  // A -> B -> A: the id matches again, but the click belonged to the first visit.
+  panel.update(projectB); panel.update(projectA);
+  release();
+  await expect(opened).resolves.toBe(false);
+  await tick();
+  expect(window.api.previewProjectFile).not.toHaveBeenCalled();
+  expect(codeMount.jumps).toEqual([]);
+});
+
+it('opens a Markdown file from a terminal link but reports that the line was not shown', async () => {
+  vi.mocked(window.api.previewProjectFile).mockImplementation((_projectId: string, path: string) =>
+    ok({ ...preview, path, name: path.split('/').at(-1)!, text: '# hello\n' }));
+  const panel = createFilePanel({ host, mount: host });
+  panel.update(projectA);
+  await expect(panel.openFileAt(projectA.id, 'docs/README.md', 12, 1)).resolves.toBe(false);
+  await tick();
+  expect(window.api.previewProjectFile).toHaveBeenCalledWith(projectA.id, 'docs/README.md');
+  expect(host.querySelector('.file-preview-markdown h1')?.textContent).toBe('hello');
+  expect(codeMount.jumps).toEqual([]);
+});
+
+it('moves the editor to the line of a terminal link that arrived while the editor was still mounting', async () => {
+  vi.mocked(window.api.previewProjectFile).mockImplementation((_projectId: string, path: string) =>
+    ok({ ...preview, path, name: path.split('/').at(-1)!, text: 'one\ntwo\n' }));
+  const panel = createFilePanel({ host, mount: host });
+  panel.update(projectA);
+  await panel.openFileAt(projectA.id, 'src/main.ts', 1, 1); await tick();
+  codeMount.jumps.length = 0;
+  let release!: () => void;
+  codeMount.wait = new Promise<void>(resolve => { release = resolve; });
+  [...host.querySelectorAll<HTMLButtonElement>('.file-preview-actions button')].find(button => button.title === 'Edit')!.click();
+  await tick();
+  await panel.openFileAt(projectA.id, 'src/main.ts', 2, 3);
+  expect(codeMount.jumps).toEqual([]);
+  codeMount.wait = null; release(); await tick(); await tick();
+  expect(codeMount.jumps).toEqual([['main.ts', 2, 3]]);
+});
+
+it('drops a pending terminal link line when the project changes, so it never lands on the new project draft', async () => {
+  const panel = createFilePanel({ host, toggle, onAttach: () => undefined });
+  vi.mocked(window.api.previewProjectFile).mockImplementation((_projectId: string, path: string) =>
+    ok({ ...preview, path, name: 'main.ts', text: 'one\ntwo\n' }));
+  panel.update(projectB); toggle.click(); await tick();
+  host.querySelector<HTMLButtonElement>('[data-path="src"]')!.click(); await tick();
+  host.querySelector<HTMLButtonElement>('[data-path="src/main.ts"]')!.click(); await tick();
+  host.querySelector<HTMLButtonElement>('[title="Edit"]')!.click(); await tick();
+  typeEdit(host.querySelector<HTMLTextAreaElement>('.test-code-input')!, 'unsaved in beta');
+  panel.update(projectA); await tick();
+  // A binary file shows no lines, so the link's target stays pending.
+  vi.mocked(window.api.previewProjectFile).mockImplementationOnce(() => ok({ ...preview, path: 'src/main.ts', name: 'main.ts', binary: true, text: null }));
+  await panel.openFileAt(projectA.id, 'src/main.ts', 5, 1);
+  await tick();
+  panel.update(projectB); await tick(); await tick();
+  expect(host.querySelector<HTMLTextAreaElement>('.test-code-input')?.value).toBe('unsaved in beta');
+  expect(codeMount.jumps).toEqual([]);
+});
+
+it('leaves the Changes view for Files when a terminal file link opens a file', async () => {
+  vi.mocked(window.api.previewProjectFile).mockImplementation((_projectId: string, path: string) =>
+    ok({ ...preview, path, name: path.split('/').at(-1)!, text: 'one\ntwo\n' }));
+  const panel = createFilePanel({ host, toggle });
+  panel.update(projectA); toggle.click(); await tick();
+  host.querySelector<HTMLButtonElement>('.file-panel-changes-toggle')!.click(); await tick(); await tick();
+  expect(host.querySelector<HTMLElement>('.file-changes-view')!.hidden).toBe(false);
+
+  await expect(panel.openFileAt(projectA.id, 'src/main.ts', 2, 1)).resolves.toBe(true);
+  await tick();
+  expect(host.querySelector<HTMLElement>('.file-changes-view')!.hidden).toBe(true);
+  expect(codeMount.jumps).toEqual([['main.ts', 2, 1]]);
 });
 
 it('uses the file name as the title and its relative path as metadata in file and diff previews', async () => {

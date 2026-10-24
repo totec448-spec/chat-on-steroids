@@ -3157,5 +3157,7 @@
   "Common base": "Общая база",
   "Theirs (incoming)": "Их (входящая)",
   "Not in this version": "Нет в этой версии",
-  "Start or cancel the prepared plan first, then ask again.": "Сначала запустите или отмените подготовленный план, затем повторите запрос."
+  "Start or cancel the prepared plan first, then ask again.": "Сначала запустите или отмените подготовленный план, затем повторите запрос.",
+  "Switch to {0} to open this file.": "Переключитесь на {0}, чтобы открыть этот файл.",
+  "{0}+click to open in Files": "{0}+щелчок — открыть в «Файлах»"
 }

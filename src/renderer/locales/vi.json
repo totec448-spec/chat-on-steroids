@@ -3010,5 +3010,7 @@
   "Common base": "Gốc chung",
   "Theirs (incoming)": "Của họ (đến)",
   "Not in this version": "Không có trong phiên bản này",
-  "Start or cancel the prepared plan first, then ask again.": "Hãy bắt đầu hoặc hủy kế hoạch đã chuẩn bị trước, rồi yêu cầu lại."
+  "Start or cancel the prepared plan first, then ask again.": "Hãy bắt đầu hoặc hủy kế hoạch đã chuẩn bị trước, rồi yêu cầu lại.",
+  "Switch to {0} to open this file.": "Chuyển sang {0} để mở tệp này.",
+  "{0}+click to open in Files": "{0}+nhấp để mở trong Tệp"
 }

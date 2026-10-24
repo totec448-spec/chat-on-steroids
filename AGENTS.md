@@ -1350,6 +1350,14 @@ shows them as inert "previous session" tabs, right-dock ones as dock tabs. No sh
 itself: Start shell here sends the saved project id, never the folder, so main still resolves the
 cwd and the Command permission still applies. Closed, exited and failed tabs are forgotten; no
 output or scrollback is stored.
+In a local project's tab, `renderer/terminal-file-links.ts` links `path:line[:column]` and
+`path(line,column)` locations in the output. Relative paths resolve against the tab's starting
+project cwd (a later `cd` is not tracked); an absolute path links only inside that cwd, and `..`
+may not climb out. Ctrl+click (⌘+click on macOS) opens the file in Files at that line through
+`previewProjectFile`, which still enforces project containment. Files shows the selected chat's
+project, so a link from another project's shell only says which project to switch to. Server
+projects and projectless shells have no links. A restored tab links after Start shell here, in the
+project saved with it, not the project selected at that moment.
 Appearance application refreshes all existing xterm palettes, including hidden tabs, from the
 current page/ink tokens without recreating shells; cursor colors follow the same palette.
 `scripts/verify-workspace-terminal.cjs` tests real Electron/PTY input, cwd/environment persistence,

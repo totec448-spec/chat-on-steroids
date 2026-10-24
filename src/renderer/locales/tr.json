@@ -3059,5 +3059,7 @@
   "Common base": "Ortak taban",
   "Theirs (incoming)": "Onlarınki (gelen)",
   "Not in this version": "Bu sürümde yok",
-  "Start or cancel the prepared plan first, then ask again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden isteyin."
+  "Start or cancel the prepared plan first, then ask again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden isteyin.",
+  "Switch to {0} to open this file.": "Bu dosyayı açmak için {0} projesine geçin.",
+  "{0}+click to open in Files": "Dosyalar'da açmak için {0}+tıklayın"
 }
