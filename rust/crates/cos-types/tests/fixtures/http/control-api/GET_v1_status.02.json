@@ -1,0 +1,9 @@
+{
+  "method": "GET",
+  "route": "/v1/status",
+  "status": 413,
+  "request": null,
+  "response": {
+    "error": "body_not_allowed"
+  }
+}

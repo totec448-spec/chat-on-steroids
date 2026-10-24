@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "POST",
+    "route": "/v1/inputs/<UUID:1>/cancel",
+    "note": "repeated until the first refusal, at most 40 times"
+  },
+  "response": {
+    "status": 429,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "retry-after": "60",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "error": "rate_limited"
+    }
+  }
+}

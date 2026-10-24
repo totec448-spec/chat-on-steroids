@@ -1,0 +1,11 @@
+{
+  "request": {
+    "protocolVersion": "2024-10-07"
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "negotiated": "2024-10-07",
+    "error": null
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "method": "GET",
+  "route": "/cos-browser/sign-in",
+  "status": 200,
+  "request": null,
+  "response": {
+    "offer": {
+      "id": "bf79484f-9a13-46fe-8a7c-a01c0e2a8d8f",
+      "browser": "brave",
+      "expiresAt": 1767225600000
+    }
+  }
+}

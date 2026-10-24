@@ -1,0 +1,134 @@
+{
+  "method": "GET",
+  "route": "/activity",
+  "status": 200,
+  "request": null,
+  "response": {
+    "sessionId": "2026-01-01-e00c472d",
+    "generating": false,
+    "tokens": 10016,
+    "context": {
+      "auto": true,
+      "threshold": 10000,
+      "warn": 400000,
+      "limit": 533333
+    },
+    "followOutput": true,
+    "mentionCore": true,
+    "bootstrap": null,
+    "bootstrapAgent": null,
+    "bootstrapMessageId": null,
+    "entries": [
+      {
+        "seq": 3,
+        "time": 1767225600000,
+        "tool": "read",
+        "callId": "8bf7a1dc-b19c-4481-9159-aa39fda78b4e",
+        "detailRevision": 3,
+        "turnId": null,
+        "requestId": "wfr_compact_without_page_missing",
+        "attribution": "request_id",
+        "outcome": "ok",
+        "displayOutcome": {
+          "code": "completed",
+          "label": "completed"
+        },
+        "durationMs": 0,
+        "summary": {
+          "kind": "read",
+          "tone": "neutral",
+          "title": "Read mine.ts"
+        },
+        "changes": [],
+        "agent": null
+      }
+    ],
+    "stream": [
+      {
+        "seq": 3,
+        "time": 1767225600000,
+        "turnId": null,
+        "agent": null,
+        "turnOrigin": null,
+        "kind": "tool_call",
+        "tool": "read",
+        "callId": "8bf7a1dc-b19c-4481-9159-aa39fda78b4e",
+        "detailRevision": 3,
+        "requestId": "wfr_compact_without_page_missing",
+        "attribution": "request_id",
+        "outcome": "ok",
+        "displayOutcome": {
+          "code": "completed",
+          "label": "completed"
+        },
+        "durationMs": 0,
+        "summary": {
+          "kind": "read",
+          "tone": "neutral",
+          "title": "Read mine.ts"
+        },
+        "changes": []
+      }
+    ],
+    "userAnchors": [
+      {
+        "seq": 2,
+        "time": 1767225600000,
+        "messageId": "blind-source"
+      }
+    ],
+    "resetActivity": false,
+    "truncatedFrom": null,
+    "nextSince": 4,
+    "job": {
+      "sessionId": "2026-01-01-e00c472d",
+      "token": "TTTTTTTTTTTTTTTTTTTTTT",
+      "stage": "handoff-pending",
+      "startedAt": 1767225600000,
+      "automatic": true,
+      "busy": true,
+      "handoffId": null,
+      "sourceSend": {
+        "state": "not-attempted",
+        "messageId": null
+      },
+      "destinationSend": {
+        "state": "not-attempted",
+        "conversationId": null,
+        "messageId": null
+      },
+      "error": null
+    },
+    "goal": {
+      "enabled": false,
+      "configuredEnabled": false,
+      "afterTurn": false,
+      "proLoopDelivery": false,
+      "own": false,
+      "mode": "goal",
+      "backend": "chatgpt",
+      "model": "gpt-6",
+      "provider": "openrouter",
+      "hasKey": true,
+      "queuePending": false,
+      "wait": null,
+      "objective": "",
+      "blocked": "",
+      "pending": null,
+      "draft": null
+    },
+    "pendingTools": 0,
+    "progress": {
+      "tools": null,
+      "workers": null
+    },
+    "settlingTools": 0,
+    "activeTurnId": null,
+    "recordedTurnId": null,
+    "recordedQuestionId": null,
+    "settledQuestionId": null,
+    "revival": null,
+    "revivals": [],
+    "placement": null
+  }
+}

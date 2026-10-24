@@ -1,0 +1,30 @@
+[package]
+name = "cos-goal"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+description = "Goal and Loop: the helper model that keeps a chat moving, its per-chat objectives, switches and owed replies, and the one draft per finished turn the page may type."
+
+[dependencies]
+bytes = "=1.12.1"
+cos-secrets = { version = "0.1.0", path = "../cos-secrets" }
+cos-sessions = { version = "0.1.0", path = "../cos-sessions" }
+cos-store = { version = "0.1.0", path = "../cos-store" }
+cos-types = { version = "0.1.0", path = "../cos-types" }
+getrandom = "=0.2.17"
+http = "=1.5.0"
+http-body-util = "=0.1.5"
+hyper = { version = "=1.12.0", features = ["client", "http1"] }
+hyper-rustls = { version = "=0.27.10", default-features = false, features = ["http1", "native-tokio", "ring", "tls12"] }
+hyper-util = { version = "=0.1.21", features = ["client-legacy", "http1", "tokio"] }
+icu_normalizer = "=2.3.0"
+regex = "=1.13.1"
+rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.154", features = ["preserve_order"] }
+tokio = { version = "=1.54.0", features = ["rt", "sync", "time", "macros"] }
+url = "=2.5.8"
+
+[dev-dependencies]
+tokio = { version = "=1.54.0", features = ["macros", "rt-multi-thread", "sync", "time", "net", "io-util", "test-util"] }

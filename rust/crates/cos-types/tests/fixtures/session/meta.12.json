@@ -1,0 +1,269 @@
+{
+  "id": "2026-01-01-bf54632e",
+  "title": "new task",
+  "conversationId": "c-worker-1",
+  "chatIds": [
+    "c-worker-1"
+  ],
+  "startedAt": 1767225600000,
+  "updatedAt": 1767225600000,
+  "endedAt": null,
+  "events": 60,
+  "timelineTurns": {
+    "t-dormant-exact": {
+      "origin": 2,
+      "time": 1767225600000
+    },
+    "t-dormant-late": {
+      "origin": 7,
+      "time": 1767225600000
+    },
+    "t-ceiling-same-turn": {
+      "origin": 8,
+      "time": 1767225600000
+    },
+    "t-ceiling-old-turn": {
+      "origin": 11,
+      "time": 1767225600000
+    },
+    "t-ceiling-new-turn": {
+      "origin": 13,
+      "time": 1767225600000
+    },
+    "t-ceiling-cutoff-old": {
+      "origin": 16,
+      "time": 1767225600000
+    },
+    "t-ceiling-finish-old": {
+      "origin": 21,
+      "time": 1767225600000,
+      "questionId": "new-question-without-turn-start"
+    },
+    "t-ceiling-finish-new": {
+      "origin": 23,
+      "time": 1767225600000,
+      "questionId": "new-question-without-turn-start"
+    },
+    "t-ceiling-finish-same": {
+      "origin": 25,
+      "time": 1767225600000,
+      "questionId": "new-question-without-turn-start"
+    },
+    "t-11": {
+      "origin": 31,
+      "time": 1767225600000,
+      "questionId": "new-question-without-turn-start"
+    },
+    "t-12": {
+      "origin": 32,
+      "time": 1767225600000,
+      "questionId": "new-question-without-turn-start"
+    },
+    "worker-stale": {
+      "origin": 34,
+      "time": 1767225600000,
+      "questionId": "new-question-without-turn-start"
+    },
+    "t-18": {
+      "origin": 36,
+      "time": 1767225600000,
+      "questionId": "new-question-without-turn-start"
+    },
+    "t-19": {
+      "origin": 39,
+      "time": 1767225600000,
+      "questionId": "new-question-without-turn-start"
+    },
+    "t-20": {
+      "origin": 42,
+      "time": 1767225600000,
+      "questionId": "new-question-without-turn-start"
+    },
+    "t-21": {
+      "origin": 45,
+      "time": 1767225600000,
+      "questionId": "new-question-without-turn-start"
+    },
+    "t-22": {
+      "origin": 47,
+      "time": 1767225600000,
+      "questionId": "new-question-without-turn-start"
+    },
+    "t-23": {
+      "origin": 51,
+      "time": 1767225600000,
+      "questionId": "new-question-without-turn-start"
+    },
+    "t-24": {
+      "origin": 54,
+      "time": 1767225600000,
+      "questionId": "new-question-without-turn-start"
+    },
+    "t-25": {
+      "origin": 57,
+      "time": 1767225600000,
+      "questionId": "new-question-without-turn-start"
+    },
+    "t-28": {
+      "origin": 60,
+      "time": 1767225600000,
+      "questionId": "new-question-without-turn-start"
+    }
+  },
+  "nativeQuestion": {
+    "messageId": "new-question-without-turn-start",
+    "origin": 18
+  },
+  "requestTurns": {
+    "wfr_dormant_worker_exact": {
+      "turnId": "t-dormant-exact",
+      "conversationId": "c-worker-1",
+      "origin": 4
+    },
+    "wfr_dormant_worker_late": {
+      "turnId": "t-dormant-exact",
+      "conversationId": "c-worker-1",
+      "origin": 6
+    },
+    "wfr_ceiling_same_turn": {
+      "turnId": "t-ceiling-same-turn",
+      "conversationId": "c-worker-1",
+      "origin": 9
+    },
+    "wfr_ceiling_old_turn": {
+      "turnId": "t-ceiling-old-turn",
+      "conversationId": "c-worker-1",
+      "origin": 12
+    },
+    "wfr_ceiling_new_turn": {
+      "turnId": "t-ceiling-new-turn",
+      "conversationId": "c-worker-1",
+      "origin": 14
+    },
+    "wfr_ceiling_null_marker_new": {
+      "turnId": "t-ceiling-new-turn",
+      "conversationId": "c-worker-1",
+      "origin": 15
+    },
+    "wfr_ceiling_cutoff_old": {
+      "turnId": "t-ceiling-cutoff-old",
+      "conversationId": "c-worker-1",
+      "origin": 17
+    },
+    "wfr_ceiling_cutoff_new": {
+      "turnId": "t-ceiling-cutoff-old",
+      "conversationId": "c-worker-1",
+      "origin": 19
+    },
+    "wfr_ceiling_finish_old": {
+      "turnId": "t-ceiling-finish-old",
+      "conversationId": "c-worker-1",
+      "origin": 22
+    },
+    "wfr_ceiling_finish_new": {
+      "turnId": "t-ceiling-finish-new",
+      "conversationId": "c-worker-1",
+      "origin": 24
+    },
+    "wfr_ceiling_finish_same": {
+      "turnId": "t-ceiling-finish-same",
+      "conversationId": "c-worker-1",
+      "origin": 26
+    },
+    "wfr_agents_11": {
+      "turnId": "t-ceiling-finish-same",
+      "conversationId": "c-worker-1",
+      "origin": 30
+    },
+    "wfr_agents_12": {
+      "turnId": "t-11",
+      "conversationId": "c-worker-1",
+      "origin": 33
+    },
+    "wfr_agents_18": {
+      "turnId": "worker-stale",
+      "conversationId": "c-worker-1",
+      "origin": 35
+    },
+    "wfr_agents_19": {
+      "turnId": "t-18",
+      "conversationId": "c-worker-1",
+      "origin": 38
+    },
+    "wfr_agents_20": {
+      "turnId": "t-19",
+      "conversationId": "c-worker-1",
+      "origin": 41
+    },
+    "wfr_agents_21": {
+      "turnId": "t-20",
+      "conversationId": "c-worker-1",
+      "origin": 44
+    },
+    "wfr_agents_22": {
+      "turnId": "t-21",
+      "conversationId": "c-worker-1",
+      "origin": 46
+    },
+    "wfr_agents_23": {
+      "turnId": "t-22",
+      "conversationId": "c-worker-1",
+      "origin": 50
+    },
+    "wfr_agents_24": {
+      "turnId": "t-23",
+      "conversationId": "c-worker-1",
+      "origin": 53
+    },
+    "wfr_agents_25": {
+      "turnId": "t-24",
+      "conversationId": "c-worker-1",
+      "origin": 56
+    },
+    "wfr_agents_28": {
+      "turnId": "t-25",
+      "conversationId": "c-worker-1",
+      "origin": 59
+    }
+  },
+  "userMessages": 1,
+  "toolCalls": 25,
+  "lastToolCallAt": 1767225600000,
+  "lastToolActivity": {
+    "kind": "agent",
+    "title": "Reported the finished task"
+  },
+  "lastAssistantFinalAt": null,
+  "lastTurnEndAt": null,
+  "lastFinishReportAt": 1767225600000,
+  "processExitNonzero": 0,
+  "toolRejected": 13,
+  "toolInternalErrors": 1,
+  "errors": 1,
+  "estimatedTokens": 2410,
+  "contextTokens": 2410,
+  "lastHandoffId": null,
+  "lastHandoffAt": null,
+  "lastCommittedResumeHandoffId": null,
+  "lastTurnOutcome": null,
+  "activeTurnId": "t-28",
+  "finishTurn": {
+    "turnId": "t-28",
+    "conversationId": "c-worker-1",
+    "startedAt": 1767225600000,
+    "notified": false,
+    "released": false,
+    "decisionRevision": null,
+    "workSeq": 0,
+    "decisionSeq": 0,
+    "decisionInputRevision": null
+  },
+  "agents": [
+    "worker-1"
+  ],
+  "origin": null,
+  "titleSource": "fallback",
+  "__historySeq": 60,
+  "__canonicalProjection": 1,
+  "__tokenEstimate": 1
+}

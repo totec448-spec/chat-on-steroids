@@ -1,0 +1,44 @@
+{
+  "method": "POST",
+  "route": "/v1/inputs",
+  "status": 200,
+  "request": {
+    "id": "cacbd48c-f7fb-4113-ae16-6f307ebfef24",
+    "sessionId": "2026-01-01-b8eee0a8",
+    "text": "Keep going"
+  },
+  "response": {
+    "input": {
+      "id": "cacbd48c-f7fb-4113-ae16-6f307ebfef24",
+      "sessionId": "2026-01-01-b8eee0a8",
+      "deliveredSessionId": null,
+      "conversationId": "chat-actions-1",
+      "state": "cancelled",
+      "delivery": "not_sent",
+      "mode": "auto",
+      "transportIntent": "browser",
+      "automatic": false,
+      "purpose": null,
+      "createdAt": 1767225600000,
+      "dueAt": 1767225600000,
+      "offeredAt": null,
+      "deliveredAt": null,
+      "sendAuthorizedAt": null,
+      "requiresAuthorization": false,
+      "cancelledByUser": true,
+      "queueOrder": null,
+      "model": null,
+      "reasoningEffort": null,
+      "messageId": null,
+      "error": null,
+      "text": {
+        "text": "Keep going",
+        "chars": 10,
+        "truncated": false
+      },
+      "attachments": 0,
+      "images": 0
+    },
+    "replayed": true
+  }
+}

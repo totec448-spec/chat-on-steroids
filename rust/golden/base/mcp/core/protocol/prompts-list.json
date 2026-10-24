@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "prompts/list",
+    "params": {}
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "error": {
+          "code": -32601,
+          "message": "Method not found"
+        }
+      }
+    ]
+  }
+}

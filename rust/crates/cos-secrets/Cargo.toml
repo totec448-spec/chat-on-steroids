@@ -1,0 +1,22 @@
+[package]
+name = "cos-secrets"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+description = "Reads and writes the Chat On Steroids secrets.bin exactly as Electron safeStorage does."
+
+[dependencies]
+# Listed only to turn on `zeroize`, which wipes the AES round keys when a cipher is dropped.
+aes = { version = "=0.8.4", features = ["zeroize"] }
+aes-gcm = { version = "=0.10.3", features = ["zeroize"] }
+base64 = "=0.22.1"
+cos-types = { path = "../cos-types", version = "=0.1.0" }
+indexmap = { version = "=2.14.2", features = ["serde"] }
+serde = "=1.0.229"
+serde_json = { version = "=1.0.154", features = ["preserve_order"] }
+serde_json_lenient = "=0.2.4"
+zeroize = "=1.9.1"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "=0.62.2", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }

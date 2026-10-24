@@ -1,0 +1,12 @@
+{
+  "method": "POST",
+  "route": "/goal/open",
+  "status": 200,
+  "request": {
+    "text": "rewrite the parser in rust"
+  },
+  "response": {
+    "reply": "rewirte the parser in rust",
+    "model": "deepseek/deepseek-v4-flash"
+  }
+}

@@ -1,0 +1,22 @@
+[package]
+name = "cos-connection"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+description = "Connection lifecycle: MCP endpoint generations, tunnels, health and the published connection status."
+
+[dependencies]
+cos-http = { version = "0.1.0", path = "../cos-http" }
+cos-mcp = { version = "0.1.0", path = "../cos-mcp" }
+cos-secrets = { version = "0.1.0", path = "../cos-secrets" }
+cos-store = { version = "0.1.0", path = "../cos-store" }
+cos-tools = { version = "0.1.0", path = "../cos-tools" }
+cos-types = { version = "0.1.0", path = "../cos-types" }
+regex = "=1.13.1"
+serde_json = { version = "=1.0.154", features = ["preserve_order"] }
+tokio = { version = "=1.54.0", features = ["sync", "process", "time", "macros", "rt", "net", "io-util"] }
+
+[dev-dependencies]
+cos-fs = { version = "0.1.0", path = "../cos-fs" }
+tokio = { version = "=1.54.0", features = ["rt", "test-util"] }

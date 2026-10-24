@@ -1,0 +1,16 @@
+{
+  "endpoint.json": {
+    "text": "{\n  \"protocol\": 1,\n  \"port\": <API_PORT>,\n  \"pid\": <PID>,\n  \"appVersion\": \"2.1.35\",\n  \"startedAt\": \"<ISO_TIME>\"\n}\n",
+    "parsed": {
+      "protocol": 1,
+      "port": "<API_PORT>",
+      "pid": "<PID>",
+      "appVersion": "2.1.35",
+      "startedAt": "<ISO_TIME>"
+    }
+  },
+  "token": {
+    "text": "<CONTROL_TOKEN>\n",
+    "format": "32 random bytes, base64url, 43 characters"
+  }
+}

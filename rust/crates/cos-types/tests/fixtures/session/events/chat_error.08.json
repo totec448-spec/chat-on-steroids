@@ -1,0 +1,1 @@
+{"time":130001,"source":"extension","kind":"chat_error","recoverable":false,"blocking":true,"message":{"text":"Too many requests. Please wait a few minutes.","truncated":false,"chars":45},"seq":3}

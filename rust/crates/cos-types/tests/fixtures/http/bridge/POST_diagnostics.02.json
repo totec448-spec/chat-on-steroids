@@ -1,0 +1,180 @@
+{
+  "method": "POST",
+  "route": "/diagnostics",
+  "status": 401,
+  "request": {
+    "capturedAt": 1767225600000,
+    "status": {
+      "connected": true,
+      "paired": true,
+      "appVersion": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+    },
+    "preferences": {
+      "overwrite": true,
+      "durations": false
+    },
+    "transcript": "must not be forwarded",
+    "tab": {
+      "tab": 17,
+      "page": {
+        "text": "must not be forwarded",
+        "requestId": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+        "trace": [
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          },
+          {
+            "requestId": "r",
+            "read": true,
+            "text": "must not be forwarded"
+          }
+        ]
+      }
+    }
+  },
+  "response": {
+    "error": "unauthorised"
+  }
+}

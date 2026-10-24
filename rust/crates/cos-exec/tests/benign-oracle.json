@@ -1,0 +1,847 @@
+{
+  "benign": [
+    {
+      "command": "& 'C:\\tools\\rg.exe' -n \"CallToolRequest\" src",
+      "exitCode": 1,
+      "outputText": "Wall time: 0.0056 seconds\nProcess exited with code 1\nOutput:\n",
+      "benign": true
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' -n \"Max\" $root | Select-Object -First 160",
+      "exitCode": 1,
+      "outputText": "Process exited with code 1\nOutput:\nclient.go:36: defaultMaxInFlightRequests = 20\n",
+      "benign": true
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' -n found src/missing.ts src/main.ts",
+      "exitCode": 2,
+      "outputText": "Process exited with code 2\nOutput:\nrg: src/missing.ts: The system cannot find the file specified. (os error 2)\nsrc/main.ts:9:export const found = true;",
+      "benign": false
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' -n found src/missing.ts src/main.ts",
+      "exitCode": 2,
+      "outputText": "Process exited with code 2\nOutput:\nrg: src/missing.ts: Access is denied. (os error 5)\nsrc/main.ts:9:export const found = true;",
+      "benign": false
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' found src/missing.ts",
+      "exitCode": 2,
+      "outputText": "Output:\nrg: src/missing.ts: The system cannot find the file specified. (os error 2)",
+      "benign": false
+    },
+    {
+      "command": "Write-Output found; & 'C:\\tools\\rg.exe' found src/missing.ts",
+      "exitCode": 2,
+      "outputText": "Output:\nrg: src/missing.ts: The system cannot find the file specified. (os error 2)\nsrc/main.ts:9:found",
+      "benign": false
+    },
+    {
+      "command": "rg found src/missing.ts src/main.ts",
+      "exitCode": 2,
+      "outputText": "Output:\nrg: src/missing.ts: The system cannot find the file specified. (os error 2)\nsrc/main.ts:9:found",
+      "benign": false
+    },
+    {
+      "command": "rg -n \"Transport\" C:\\Users\\x\\tunnel-client*",
+      "exitCode": 1,
+      "outputText": "Process exited with code 1\nOutput:\nrg: C:\\Users\\x\\tunnel-client*: IO error for operation on C:\\Users\\x\\tunnel-client*: The filename, directory name, or volume label syntax is incorrect. (os error 123)\n",
+      "benign": false
+    },
+    {
+      "command": "go test ./...",
+      "exitCode": 1,
+      "outputText": "Process exited with code 1\nOutput:\n--- FAIL: TestThing\nFAIL\n",
+      "benign": false
+    },
+    {
+      "command": ".\\gradlew.bat :app:test",
+      "exitCode": 1,
+      "outputText": "Process exited with code 1\nOutput:\n--- FAIL: TestThing\nFAIL\n",
+      "benign": false
+    },
+    {
+      "command": "cmd /c exit 1 `; rg foo",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "cmd /c exit 1 `| rg foo",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "cmd /c exit 1 `\nrg foo",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "cmd /c exit 1 # ; rg foo",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "rg foo",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "rg.exe foo",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": ".\\rg.exe foo",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": true
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' foo",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": true
+    },
+    {
+      "command": "'/Applications/Chat On Steroids/resources/rg/rg' foo",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": true
+    },
+    {
+      "command": "rg x src | ForEach-Object { exit 1 }",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "rg x src | Out-File -LiteralPath 'Z:\\missing\\x.txt'",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "cmd /c exit 1 && rg foo",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "go build ./... || rg foo",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "rg foo && go build ./...",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "cmd /c exit 1; & 'C:\\tools\\rg.exe' foo",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": true
+    },
+    {
+      "command": "Write-Output hi && rg foo",
+      "exitCode": 1,
+      "outputText": "At line:1 char:17\n+ Write-Output hi && rg foo\n+                 ~~\nThe token '&&' is not a valid statement separator in this version.\n    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException",
+      "benign": false
+    },
+    {
+      "command": "rg foo || Write-Output no",
+      "exitCode": 1,
+      "outputText": "At line:1 char:17\n+ Write-Output hi && rg foo\n+                 ~~\nThe token '&&' is not a valid statement separator in this version.\n    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException",
+      "benign": false
+    },
+    {
+      "command": "/bin/rg needle missing/*.ts",
+      "exitCode": 1,
+      "outputText": "zsh:1: no matches found: missing/*.ts",
+      "benign": false
+    },
+    {
+      "command": "/bin/rg needle sample.txt",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": true
+    },
+    {
+      "command": "/bin/rg needle missing/*.ts",
+      "exitCode": 1,
+      "outputText": "zsh: no matches found: missing/*.ts",
+      "benign": false
+    },
+    {
+      "command": "/bin/rg needle missing/*.ts",
+      "exitCode": 1,
+      "outputText": "/bin/bash: line 1: /bin/rg: No such file or directory",
+      "benign": false
+    },
+    {
+      "command": "/bin/rg needle missing/*.ts",
+      "exitCode": 1,
+      "outputText": "sh: 1: cannot create /missing/file: Directory nonexistent",
+      "benign": false
+    },
+    {
+      "command": "/bin/rg needle missing/*.ts",
+      "exitCode": 1,
+      "outputText": "-zsh: permission denied: /bin/rg",
+      "benign": false
+    },
+    {
+      "command": "/bin/rg needle missing/*.ts",
+      "exitCode": 1,
+      "outputText": "dash: 1: /bin/rg: not found",
+      "benign": false
+    },
+    {
+      "command": "rg -n foo src",
+      "exitCode": 1,
+      "outputText": "rg : The term 'rg' is not recognized as the name of a cmdlet, function, script file, or operable program.\n    + CategoryInfo          : ObjectNotFound: (rg:String) [], CommandNotFoundException",
+      "benign": false
+    },
+    {
+      "command": "rg -n foo src | docker-compose up",
+      "exitCode": 1,
+      "outputText": "Process exited with code 1\nOutput:\nerror: no configuration file provided",
+      "benign": false
+    },
+    {
+      "command": "rg x src | test-runner",
+      "exitCode": 1,
+      "outputText": "Process exited with code 1\nOutput:\n2 suites failed\n",
+      "benign": false
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' x src | Sort-Object | Measure-Object",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": true
+    },
+    {
+      "command": "rg -n foo src",
+      "exitCode": 2,
+      "outputText": "Process exited with code 2\nOutput:\n",
+      "benign": false
+    },
+    {
+      "command": "rg -n foo src",
+      "exitCode": 0,
+      "outputText": "Process exited with code 2\nOutput:\n",
+      "benign": false
+    },
+    {
+      "command": "rg -n foo src",
+      "exitCode": null,
+      "outputText": "Process exited with code 2\nOutput:\n",
+      "benign": false
+    },
+    {
+      "command": "rg -n foo src; git status",
+      "exitCode": 1,
+      "outputText": "Process exited with code 1\nOutput:\nfatal: not a git repository\n",
+      "benign": false
+    },
+    {
+      "command": "rg -l foo | git diff --exit-code",
+      "exitCode": 1,
+      "outputText": "Process exited with code 1\nOutput:\ndiff --git a/x b/x\n",
+      "benign": false
+    },
+    {
+      "command": ".\\rg.ps1 foo",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "rg.cmd foo",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "rg.bat foo",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "C:\\tools\\rg.cmd foo",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "C:\\tools\\rg.exe foo",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": true
+    },
+    {
+      "command": "& 'C:\\Program Files\\app\\rg.exe' -n TODO 'a.ts'",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": true
+    },
+    {
+      "command": "rg -n TODO a.ts",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "C:/tools/rg.exe needle file.txt | Select-Object -First 40",
+      "exitCode": 4294967295,
+      "outputText": "needle\n",
+      "benign": true
+    },
+    {
+      "command": "Select-String -Path docs/bug-audit-2026-08-24.md -Pattern 'DONE|SSE' -Context 2,3; git diff -- test/agents.test.ts test/goal.test.ts src/main/agents.ts src/main/goal.ts | Select-Object -First 220",
+      "exitCode": 1,
+      "outputText": "diff --git a/src/main/goal.ts b/src/main/goal.ts\n@@ -1,4 +1,4 @@\n-const a = 1;",
+      "benign": true
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' -n \"max\" src | Select-Object -First 40",
+      "exitCode": 1,
+      "outputText": "Process exited with code -1\nOutput:\nsrc/main.ts:12:  const max = 20\n",
+      "benign": true
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' -n \"max\" src | Select-Object -First 40",
+      "exitCode": -1,
+      "outputText": "Process exited with code -1\nOutput:\nsrc/main.ts:12:  const max = 20\n",
+      "benign": true
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' -n \"max\" src | Select-Object -First 40",
+      "exitCode": 4294967295,
+      "outputText": "Process exited with code -1\nOutput:\nsrc/main.ts:12:  const max = 20\n",
+      "benign": true
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' -n \"max\" src | Select-Object -First 40",
+      "exitCode": 3,
+      "outputText": "Process exited with code -1\nOutput:\nsrc/main.ts:12:  const max = 20\n",
+      "benign": false
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' -n \"max\" src src/typo.ts | Select-Object -First 40",
+      "exitCode": 1,
+      "outputText": "Process exited with code 1\nOutput:\nsrc/main.ts:12:  const max = 20\nrg: src/typo.ts: No such file or directory (os error 2)\n",
+      "benign": false
+    },
+    {
+      "command": "npm test -- --run test/goal.test.ts | Select-Object -First 120",
+      "exitCode": 1,
+      "outputText": "RUN v4.1.10\nx does not publish a handoff 15ms\nAssertionError: expected",
+      "benign": false
+    },
+    {
+      "command": "npx vitest run test/goal.test.ts | Select-Object -First 40",
+      "exitCode": 1,
+      "outputText": "RUN v4.1.10\nx does not publish a handoff 15ms\nAssertionError: expected",
+      "benign": false
+    },
+    {
+      "command": "node scripts/check.js | Select-Object -First 40",
+      "exitCode": 1,
+      "outputText": "RUN v4.1.10\nx does not publish a handoff 15ms\nAssertionError: expected",
+      "benign": false
+    },
+    {
+      "command": "git diff --exit-code -- src | Select-Object -First 220",
+      "exitCode": 1,
+      "outputText": "diff --git a/src/main/goal.ts b/src/main/goal.ts\n@@ -1,4 +1,4 @@\n-const a = 1;",
+      "benign": false
+    },
+    {
+      "command": "git diff --quiet -- src | Select-Object -First 220",
+      "exitCode": 1,
+      "outputText": "diff --git a/src/main/goal.ts b/src/main/goal.ts\n@@ -1,4 +1,4 @@\n-const a = 1;",
+      "benign": false
+    },
+    {
+      "command": "git diff --check -- src | Select-Object -First 220",
+      "exitCode": 1,
+      "outputText": "diff --git a/src/main/goal.ts b/src/main/goal.ts\n@@ -1,4 +1,4 @@\n-const a = 1;",
+      "benign": false
+    },
+    {
+      "command": "git apply --stat patch.diff | Select-Object -First 20",
+      "exitCode": 1,
+      "outputText": "diff --git a/src/main/goal.ts b/src/main/goal.ts\n@@ -1,4 +1,4 @@\n-const a = 1;",
+      "benign": false
+    },
+    {
+      "command": "git push origin main | Select-Object -First 20",
+      "exitCode": 1,
+      "outputText": "diff --git a/src/main/goal.ts b/src/main/goal.ts\n@@ -1,4 +1,4 @@\n-const a = 1;",
+      "benign": false
+    },
+    {
+      "command": "git diff -- src",
+      "exitCode": 1,
+      "outputText": "diff --git a/src/main/goal.ts b/src/main/goal.ts\n@@ -1,4 +1,4 @@\n-const a = 1;",
+      "benign": false
+    },
+    {
+      "command": "git diff -- src | Select-Object -Last 220",
+      "exitCode": 1,
+      "outputText": "diff --git a/src/main/goal.ts b/src/main/goal.ts\n@@ -1,4 +1,4 @@\n-const a = 1;",
+      "benign": false
+    },
+    {
+      "command": "git diff -- src | Sort-Object",
+      "exitCode": 1,
+      "outputText": "diff --git a/src/main/goal.ts b/src/main/goal.ts\n@@ -1,4 +1,4 @@\n-const a = 1;",
+      "benign": false
+    },
+    {
+      "command": "git diff -- src | Where-Object { $_ -match \"x\" } | Select-Object -First 5",
+      "exitCode": 1,
+      "outputText": "diff --git a/src/main/goal.ts b/src/main/goal.ts\n@@ -1,4 +1,4 @@\n-const a = 1;",
+      "benign": false
+    },
+    {
+      "command": "git diff -- src | Select-Object -First 220",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "git diff -- src | Select-Object -First 220",
+      "exitCode": 1,
+      "outputText": "fatal: not a git repository",
+      "benign": false
+    },
+    {
+      "command": "git -C sub diff -- src | Select-Object -First 220",
+      "exitCode": 1,
+      "outputText": "diff --git a/src/main/goal.ts b/src/main/goal.ts\n@@ -1,4 +1,4 @@\n-const a = 1;",
+      "benign": false
+    },
+    {
+      "command": "git diff -- src | Select-Object -First 220",
+      "exitCode": 2,
+      "outputText": "diff --git a/src/main/goal.ts b/src/main/goal.ts\n@@ -1,4 +1,4 @@\n-const a = 1;",
+      "benign": false
+    },
+    {
+      "command": "C:/tools/rg.exe needle file | Select-Object -First 1",
+      "exitCode": 1,
+      "outputText": "needle\n",
+      "benign": true
+    },
+    {
+      "command": "git grep -n -i \"edge-triggered\" -- AGENTS.md",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": true
+    },
+    {
+      "command": "git grep -n foo | Select-Object -First 40",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": true
+    },
+    {
+      "command": "rg -n foo src",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "git grep -n foo",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": true
+    },
+    {
+      "command": "git diff --check -- AGENTS.md",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "git apply patch.diff",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "git push origin main",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "git grep --quiet foo -- src",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "git grep --exit-code foo -- src",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "git grep -n foo | git diff --exit-code",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "git grep -n foo | Where-Object { $_ -match \"x\" }",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "git -C sub grep -n foo",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "cmd /c exit 1 && git grep -n foo",
+      "exitCode": 1,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "git grep -n -i \"edge-triggered\" -- AGENTS.md",
+      "exitCode": 1,
+      "outputText": "fatal: not a git repository",
+      "benign": false
+    },
+    {
+      "command": "git grep -n -i \"edge-triggered\" -- AGENTS.md",
+      "exitCode": 128,
+      "outputText": "",
+      "benign": false
+    },
+    {
+      "command": "git grep -n -i \"edge-triggered\" -- AGENTS.md",
+      "exitCode": 2,
+      "outputText": "",
+      "benign": false
+    }
+  ],
+  "note": [
+    {
+      "command": "& 'C:\\tools\\rg.exe' -n \"CallToolRequest\" src",
+      "shellType": "powershell",
+      "exitCode": 1,
+      "outputText": "Wall time: 0.0056 seconds\nProcess exited with code 1\nOutput:\n",
+      "note": "Exit code 1 from `rg` is a result, not a failure: it is what a search reports when it finds no matches, and also what it reports when a later stage such as `Select-Object -First` stops the pipeline early. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' -n \"CallToolRequest\" src",
+      "shellType": "bash",
+      "exitCode": 1,
+      "outputText": "Wall time: 0.0056 seconds\nProcess exited with code 1\nOutput:\n",
+      "note": "Exit code 1 from `rg` is a result, not a failure: this search program uses it when it finds no matches. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' -n \"Max\" $root | Select-Object -First 160",
+      "shellType": "powershell",
+      "exitCode": 1,
+      "outputText": "Process exited with code 1\nOutput:\nclient.go:36: defaultMaxInFlightRequests = 20\n",
+      "note": "Exit code 1 here is `Select-Object -First` stopping the pipeline, not a failure: it closes the pipe while `rg` is still writing, and `rg` has no other way to exit non-zero once it has printed. The output above is the first N objects and is complete for that window, so the command does not need to be run again. Add `-Wait` to the same stage to keep the exit code meaningful, at the cost of letting the command run to the end."
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' -n \"Max\" $root | Select-Object -First 160",
+      "shellType": "bash",
+      "exitCode": 1,
+      "outputText": "Process exited with code 1\nOutput:\nclient.go:36: defaultMaxInFlightRequests = 20\n",
+      "note": "Exit code 1 from `rg` is a result, not a failure: this search program uses it when it finds no matches. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": ".\\rg.exe foo",
+      "shellType": "powershell",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `rg` is a result, not a failure: it is what a search reports when it finds no matches, and also what it reports when a later stage such as `Select-Object -First` stops the pipeline early. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": ".\\rg.exe foo",
+      "shellType": "bash",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `rg` is a result, not a failure: this search program uses it when it finds no matches. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' foo",
+      "shellType": "powershell",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `rg` is a result, not a failure: it is what a search reports when it finds no matches, and also what it reports when a later stage such as `Select-Object -First` stops the pipeline early. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' foo",
+      "shellType": "bash",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `rg` is a result, not a failure: this search program uses it when it finds no matches. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "'/Applications/Chat On Steroids/resources/rg/rg' foo",
+      "shellType": "powershell",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `rg` is a result, not a failure: it is what a search reports when it finds no matches, and also what it reports when a later stage such as `Select-Object -First` stops the pipeline early. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "'/Applications/Chat On Steroids/resources/rg/rg' foo",
+      "shellType": "bash",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `rg` is a result, not a failure: this search program uses it when it finds no matches. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "cmd /c exit 1; & 'C:\\tools\\rg.exe' foo",
+      "shellType": "powershell",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `rg` is a result, not a failure: it is what a search reports when it finds no matches, and also what it reports when a later stage such as `Select-Object -First` stops the pipeline early. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "cmd /c exit 1; & 'C:\\tools\\rg.exe' foo",
+      "shellType": "bash",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `rg` is a result, not a failure: this search program uses it when it finds no matches. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "/bin/rg needle sample.txt",
+      "shellType": "powershell",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `rg` is a result, not a failure: it is what a search reports when it finds no matches, and also what it reports when a later stage such as `Select-Object -First` stops the pipeline early. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "/bin/rg needle sample.txt",
+      "shellType": "bash",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `rg` is a result, not a failure: this search program uses it when it finds no matches. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' x src | Sort-Object | Measure-Object",
+      "shellType": "powershell",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `rg` is a result, not a failure: it is what a search reports when it finds no matches, and also what it reports when a later stage such as `Select-Object -First` stops the pipeline early. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' x src | Sort-Object | Measure-Object",
+      "shellType": "bash",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `rg` is a result, not a failure: this search program uses it when it finds no matches. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "C:\\tools\\rg.exe foo",
+      "shellType": "powershell",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `rg` is a result, not a failure: it is what a search reports when it finds no matches, and also what it reports when a later stage such as `Select-Object -First` stops the pipeline early. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "C:\\tools\\rg.exe foo",
+      "shellType": "bash",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `rg` is a result, not a failure: this search program uses it when it finds no matches. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "& 'C:\\Program Files\\app\\rg.exe' -n TODO 'a.ts'",
+      "shellType": "powershell",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `rg` is a result, not a failure: it is what a search reports when it finds no matches, and also what it reports when a later stage such as `Select-Object -First` stops the pipeline early. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "& 'C:\\Program Files\\app\\rg.exe' -n TODO 'a.ts'",
+      "shellType": "bash",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `rg` is a result, not a failure: this search program uses it when it finds no matches. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "C:/tools/rg.exe needle file.txt | Select-Object -First 40",
+      "shellType": "powershell",
+      "exitCode": 4294967295,
+      "outputText": "needle\n",
+      "note": "Exit code 4294967295 here is `Select-Object -First` stopping the pipeline, not a failure: it closes the pipe while `rg` is still writing, and `rg` has no other way to exit non-zero once it has printed. The output above is the first N objects and is complete for that window, so the command does not need to be run again. Add `-Wait` to the same stage to keep the exit code meaningful, at the cost of letting the command run to the end."
+    },
+    {
+      "command": "C:/tools/rg.exe needle file.txt | Select-Object -First 40",
+      "shellType": "bash",
+      "exitCode": 4294967295,
+      "outputText": "needle\n",
+      "note": "Exit code 1 from `rg` is a result, not a failure: this search program uses it when it finds no matches. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' -n foo src | Select-Object -First 200",
+      "shellType": "powershell",
+      "exitCode": null,
+      "outputText": null,
+      "note": "Exit code 1 from `rg` is a result, not a failure: it is what a search reports when it finds no matches, and also what it reports when a later stage such as `Select-Object -First` stops the pipeline early. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "rg -n foo src",
+      "shellType": "bash",
+      "exitCode": null,
+      "outputText": null,
+      "note": "Exit code 1 from `rg` is a result, not a failure: this search program uses it when it finds no matches. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "Select-String -Path docs/bug-audit-2026-08-24.md -Pattern 'DONE|SSE' -Context 2,3; git diff -- test/agents.test.ts test/goal.test.ts src/main/agents.ts src/main/goal.ts | Select-Object -First 220",
+      "shellType": "powershell",
+      "exitCode": 1,
+      "outputText": "diff --git a/src/main/goal.ts b/src/main/goal.ts\n@@ -1,4 +1,4 @@\n-const a = 1;",
+      "note": "Exit code 1 here is `Select-Object -First` stopping the pipeline, not a failure: it closes the pipe while `git` is still writing, and `git` has no other way to exit non-zero once it has printed. The output above is the first N objects and is complete for that window, so the command does not need to be run again. Add `-Wait` to the same stage to keep the exit code meaningful, at the cost of letting the command run to the end."
+    },
+    {
+      "command": "Select-String -Path docs/bug-audit-2026-08-24.md -Pattern 'DONE|SSE' -Context 2,3; git diff -- test/agents.test.ts test/goal.test.ts src/main/agents.ts src/main/goal.ts | Select-Object -First 220",
+      "shellType": "bash",
+      "exitCode": 1,
+      "outputText": "diff --git a/src/main/goal.ts b/src/main/goal.ts\n@@ -1,4 +1,4 @@\n-const a = 1;",
+      "note": "Exit code 1 from `git diff` is a result, not a failure: this search program uses it when it finds no matches. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "Select-String -Path docs/bug-audit-2026-08-24.md -Pattern 'DONE|SSE' -Context 2,3; git diff -- test/agents.test.ts test/goal.test.ts src/main/agents.ts src/main/goal.ts | Select-Object -First 220",
+      "shellType": "powershell",
+      "exitCode": null,
+      "outputText": null,
+      "note": "Exit code 1 here is `Select-Object -First` stopping the pipeline, not a failure: it closes the pipe while `git` is still writing, and `git` has no other way to exit non-zero once it has printed. The output above is the first N objects and is complete for that window, so the command does not need to be run again. Add `-Wait` to the same stage to keep the exit code meaningful, at the cost of letting the command run to the end."
+    },
+    {
+      "command": "Select-String -Path docs/bug-audit-2026-08-24.md -Pattern 'DONE|SSE' -Context 2,3; git diff -- test/agents.test.ts test/goal.test.ts src/main/agents.ts src/main/goal.ts | Select-Object -First 220",
+      "shellType": "powershell",
+      "exitCode": -1,
+      "outputText": "diff --git a/src/main/goal.ts b/src/main/goal.ts\n@@ -1,4 +1,4 @@\n-const a = 1;",
+      "note": "Exit code -1 here is `Select-Object -First` stopping the pipeline, not a failure: it closes the pipe while `git` is still writing, and `git` has no other way to exit non-zero once it has printed. The output above is the first N objects and is complete for that window, so the command does not need to be run again. Add `-Wait` to the same stage to keep the exit code meaningful, at the cost of letting the command run to the end."
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' -n \"max\" src | Select-Object -First 40",
+      "shellType": "powershell",
+      "exitCode": 1,
+      "outputText": "Process exited with code -1\nOutput:\nsrc/main.ts:12:  const max = 20\n",
+      "note": "Exit code 1 here is `Select-Object -First` stopping the pipeline, not a failure: it closes the pipe while `rg` is still writing, and `rg` has no other way to exit non-zero once it has printed. The output above is the first N objects and is complete for that window, so the command does not need to be run again. Add `-Wait` to the same stage to keep the exit code meaningful, at the cost of letting the command run to the end."
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' -n \"max\" src | Select-Object -First 40",
+      "shellType": "bash",
+      "exitCode": 1,
+      "outputText": "Process exited with code -1\nOutput:\nsrc/main.ts:12:  const max = 20\n",
+      "note": "Exit code 1 from `rg` is a result, not a failure: this search program uses it when it finds no matches. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' -n \"max\" src | Select-Object -First 40",
+      "shellType": "powershell",
+      "exitCode": -1,
+      "outputText": "Process exited with code -1\nOutput:\nsrc/main.ts:12:  const max = 20\n",
+      "note": "Exit code -1 here is `Select-Object -First` stopping the pipeline, not a failure: it closes the pipe while `rg` is still writing, and `rg` has no other way to exit non-zero once it has printed. The output above is the first N objects and is complete for that window, so the command does not need to be run again. Add `-Wait` to the same stage to keep the exit code meaningful, at the cost of letting the command run to the end."
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' -n \"max\" src | Select-Object -First 40",
+      "shellType": "bash",
+      "exitCode": -1,
+      "outputText": "Process exited with code -1\nOutput:\nsrc/main.ts:12:  const max = 20\n",
+      "note": "Exit code 1 from `rg` is a result, not a failure: this search program uses it when it finds no matches. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' -n \"max\" src | Select-Object -First 40",
+      "shellType": "powershell",
+      "exitCode": 4294967295,
+      "outputText": "Process exited with code -1\nOutput:\nsrc/main.ts:12:  const max = 20\n",
+      "note": "Exit code 4294967295 here is `Select-Object -First` stopping the pipeline, not a failure: it closes the pipe while `rg` is still writing, and `rg` has no other way to exit non-zero once it has printed. The output above is the first N objects and is complete for that window, so the command does not need to be run again. Add `-Wait` to the same stage to keep the exit code meaningful, at the cost of letting the command run to the end."
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' -n \"max\" src | Select-Object -First 40",
+      "shellType": "bash",
+      "exitCode": 4294967295,
+      "outputText": "Process exited with code -1\nOutput:\nsrc/main.ts:12:  const max = 20\n",
+      "note": "Exit code 1 from `rg` is a result, not a failure: this search program uses it when it finds no matches. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "& 'C:\\tools\\rg.exe' -n foo src | Select-Object -First 200",
+      "shellType": "powershell",
+      "exitCode": 1,
+      "outputText": "Wall time: 0.0100 seconds\nProcess exited with code 1\nOutput:\n",
+      "note": "Exit code 1 from `rg` is a result, not a failure: it is what a search reports when it finds no matches, and also what it reports when a later stage such as `Select-Object -First` stops the pipeline early. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "C:/tools/rg.exe needle file | Select-Object -First 1",
+      "shellType": "powershell",
+      "exitCode": 1,
+      "outputText": "needle\n",
+      "note": "Exit code 1 here is `Select-Object -First` stopping the pipeline, not a failure: it closes the pipe while `rg` is still writing, and `rg` has no other way to exit non-zero once it has printed. The output above is the first N objects and is complete for that window, so the command does not need to be run again. Add `-Wait` to the same stage to keep the exit code meaningful, at the cost of letting the command run to the end."
+    },
+    {
+      "command": "C:/tools/rg.exe needle file | Select-Object -First 1",
+      "shellType": "bash",
+      "exitCode": 1,
+      "outputText": "needle\n",
+      "note": "Exit code 1 from `rg` is a result, not a failure: this search program uses it when it finds no matches. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "git grep -n -i \"edge-triggered\" -- AGENTS.md",
+      "shellType": "powershell",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `git grep` is a result, not a failure: it is what a search reports when it finds no matches, and also what it reports when a later stage such as `Select-Object -First` stops the pipeline early. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "git grep -n -i \"edge-triggered\" -- AGENTS.md",
+      "shellType": "bash",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `git grep` is a result, not a failure: this search program uses it when it finds no matches. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "git grep -n foo | Select-Object -First 40",
+      "shellType": "powershell",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `git grep` is a result, not a failure: it is what a search reports when it finds no matches, and also what it reports when a later stage such as `Select-Object -First` stops the pipeline early. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "git grep -n foo | Select-Object -First 40",
+      "shellType": "bash",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `git grep` is a result, not a failure: this search program uses it when it finds no matches. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "git grep -n foo",
+      "shellType": "powershell",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `git grep` is a result, not a failure: it is what a search reports when it finds no matches, and also what it reports when a later stage such as `Select-Object -First` stops the pipeline early. Nothing went wrong, and the command does not need to be run again."
+    },
+    {
+      "command": "git grep -n foo",
+      "shellType": "bash",
+      "exitCode": 1,
+      "outputText": "",
+      "note": "Exit code 1 from `git grep` is a result, not a failure: this search program uses it when it finds no matches. Nothing went wrong, and the command does not need to be run again."
+    }
+  ]
+}

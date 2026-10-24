@@ -1,0 +1,28 @@
+{
+  "case": "finish-bad-args",
+  "request": {
+    "tool": "session_finish",
+    "arguments": {
+      "nope": 1
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool session_finish: summary: Invalid input: expected string, received undefined"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 4
+      }
+    ]
+  }
+}

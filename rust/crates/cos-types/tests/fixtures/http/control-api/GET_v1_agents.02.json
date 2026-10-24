@@ -1,0 +1,12 @@
+{
+  "method": "GET",
+  "route": "/v1/agents",
+  "status": 200,
+  "request": null,
+  "response": {
+    "enabled": true,
+    "running": false,
+    "retainedHistory": true,
+    "agents": []
+  }
+}

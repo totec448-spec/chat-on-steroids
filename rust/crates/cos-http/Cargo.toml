@@ -1,0 +1,18 @@
+[package]
+name = "cos-http"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+description = "Loopback HTTP listener shared by the Core MCP endpoint and the local control API: bind, serve, drain."
+
+[dependencies]
+bytes = "=1.12.1"
+http = "=1.5.0"
+http-body-util = "=0.1.5"
+hyper = { version = "=1.12.0", features = ["server", "http1"] }
+hyper-util = { version = "=0.1.21", features = ["tokio", "server", "server-graceful", "http1"] }
+tokio = { version = "=1.54.0", features = ["net", "rt", "sync", "time", "macros"] }
+
+[dev-dependencies]
+tokio = { version = "=1.54.0", features = ["rt-multi-thread", "macros", "io-util"] }

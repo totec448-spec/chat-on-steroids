@@ -1,0 +1,41 @@
+{
+  "method": "POST",
+  "route": "/v1/inputs/5eb5c430-91a9-4833-b6c6-85ef65715b47/cancel",
+  "status": 409,
+  "request": null,
+  "response": {
+    "error": "not_cancellable",
+    "detail": "it is paired with another message; cancel it in the app",
+    "input": {
+      "id": "5eb5c430-91a9-4833-b6c6-85ef65715b47",
+      "sessionId": "2026-01-01-f70d5f5d",
+      "deliveredSessionId": null,
+      "conversationId": "chat-paired",
+      "state": "queued",
+      "delivery": "pending",
+      "mode": "auto",
+      "transportIntent": null,
+      "automatic": false,
+      "purpose": null,
+      "createdAt": 1767225600000,
+      "dueAt": 1,
+      "offeredAt": null,
+      "deliveredAt": null,
+      "sendAuthorizedAt": null,
+      "requiresAuthorization": false,
+      "cancelledByUser": false,
+      "queueOrder": null,
+      "model": null,
+      "reasoningEffort": null,
+      "messageId": null,
+      "error": null,
+      "text": {
+        "text": "two",
+        "chars": 3,
+        "truncated": false
+      },
+      "attachments": 0,
+      "images": 0
+    }
+  }
+}

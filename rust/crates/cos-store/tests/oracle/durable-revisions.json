@@ -1,0 +1,121 @@
+{
+  "steps": [
+    {
+      "step": "start",
+      "failed": false,
+      "changed": {
+        "a": false,
+        "b": false
+      }
+    },
+    {
+      "step": "write-now",
+      "name": "a",
+      "failed": false,
+      "changed": {
+        "a": true,
+        "b": false
+      }
+    },
+    {
+      "step": "write-now-same-value",
+      "name": "a",
+      "failed": false,
+      "changed": {
+        "a": true,
+        "b": false
+      }
+    },
+    {
+      "step": "write-soon",
+      "name": "b",
+      "failed": false,
+      "changed": {
+        "a": false,
+        "b": false
+      }
+    },
+    {
+      "step": "flush",
+      "failed": false,
+      "changed": {
+        "a": false,
+        "b": true
+      }
+    },
+    {
+      "step": "flush",
+      "failed": false,
+      "changed": {
+        "a": false,
+        "b": false
+      }
+    },
+    {
+      "step": "remove-now",
+      "name": "a",
+      "failed": false,
+      "changed": {
+        "a": true,
+        "b": false
+      }
+    },
+    {
+      "step": "remove-now-missing",
+      "name": "a",
+      "failed": false,
+      "changed": {
+        "a": true,
+        "b": false
+      }
+    },
+    {
+      "step": "recover",
+      "name": "b",
+      "failed": false,
+      "changed": {
+        "a": false,
+        "b": true
+      }
+    },
+    {
+      "step": "recover-missing",
+      "name": "a",
+      "failed": true,
+      "changed": {
+        "a": false,
+        "b": false
+      }
+    },
+    {
+      "step": "write-now-blocked-by-folder",
+      "name": "a",
+      "failed": true,
+      "changed": {
+        "a": false,
+        "b": false
+      }
+    },
+    {
+      "step": "unblock-and-flush",
+      "name": "a",
+      "failed": false,
+      "changed": {
+        "a": true,
+        "b": false
+      }
+    },
+    {
+      "step": "reopen",
+      "failed": false,
+      "changed": {
+        "a": true,
+        "b": true
+      }
+    }
+  ],
+  "files": [
+    "a.json",
+    "b.json"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "request": {
+    "method": "ping",
+    "params": {}
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {},
+        "jsonrpc": "2.0",
+        "id": 2
+      }
+    ]
+  }
+}

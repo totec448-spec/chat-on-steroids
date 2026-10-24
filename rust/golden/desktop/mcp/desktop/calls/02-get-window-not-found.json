@@ -1,0 +1,42 @@
+{
+  "case": "get-window-not-found",
+  "request": {
+    "tool": "get_window",
+    "arguments": {
+      "id": 1
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "WINDOW_NOT_FOUND: no matching visible window is available\nNext step: Call list_windows and select the current returned app/window identity. A closed window or dialog needs a new target; do not reuse its old id.\nDo not repeat completed input. Inspect the current result before deciding which action is still needed."
+            },
+            {
+              "type": "text",
+              "text": "\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat."
+            }
+          ],
+          "structuredContent": {
+            "error": {
+              "code": "WINDOW_NOT_FOUND",
+              "message": "WINDOW_NOT_FOUND: no matching visible window is available",
+              "recovery": "Call list_windows and select the current returned app/window identity. A closed window or dialog needs a new target; do not reuse its old id.",
+              "completed_count": null,
+              "failed_index": null,
+              "completed_routes": null
+            }
+          },
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 3
+      }
+    ]
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "case": "launch-app-bad-args",
+  "request": {
+    "tool": "launch_app",
+    "arguments": {
+      "app": 42
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool launch_app: app: Invalid input: expected string, received number"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 18
+      }
+    ]
+  }
+}

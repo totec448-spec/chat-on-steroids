@@ -1,0 +1,11 @@
+{
+  "method": "POST",
+  "route": "/repairs/claim",
+  "status": 200,
+  "request": {
+    "token": "TTTTTTTTTTTT"
+  },
+  "response": {
+    "allowed": true
+  }
+}

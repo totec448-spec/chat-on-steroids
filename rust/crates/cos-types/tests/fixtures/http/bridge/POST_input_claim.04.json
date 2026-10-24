@@ -1,0 +1,42 @@
+{
+  "method": "POST",
+  "route": "/input/claim",
+  "status": 200,
+  "request": {
+    "id": "a55451d9-4dd5-423e-8cb2-47505d3fbb44",
+    "owner": "page",
+    "conversationId": "771d6914-3f22-404f-8848-5d65bb30177e",
+    "requiresAuthorization": true
+  },
+  "response": {
+    "input": {
+      "automation": "off",
+      "id": "a55451d9-4dd5-423e-8cb2-47505d3fbb44",
+      "sessionId": "2026-01-01-22d14c40",
+      "text": "Complete this request",
+      "mode": "after-turn",
+      "dueAt": 1767225600000,
+      "model": null,
+      "reasoningEffort": null,
+      "silenceBoundary": {
+        "turnId": "current-turn",
+        "conversationId": "771d6914-3f22-404f-8848-5d65bb30177e",
+        "workSeq": 4,
+        "acceptedAt": 1767225600000,
+        "listenUntil": 1767225600000
+      },
+      "queuedTurn": {
+        "conversationId": "771d6914-3f22-404f-8848-5d65bb30177e",
+        "turnId": "current-turn"
+      },
+      "state": "browser",
+      "owner": "page",
+      "createdAt": 1767225600000,
+      "conversationId": "771d6914-3f22-404f-8848-5d65bb30177e",
+      "completedTurnId": "current-turn",
+      "offeredAt": 1767225600000,
+      "requiresAuthorization": true,
+      "deliveryText": "Complete this request"
+    }
+  }
+}

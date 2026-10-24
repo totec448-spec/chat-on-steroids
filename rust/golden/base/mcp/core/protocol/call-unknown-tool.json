@@ -1,0 +1,23 @@
+{
+  "request": {
+    "method": "tools/call",
+    "params": {
+      "name": "no_such_tool",
+      "arguments": {}
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "jsonrpc": "2.0",
+        "id": 6,
+        "error": {
+          "code": -32602,
+          "message": "Tool no_such_tool not found"
+        }
+      }
+    ]
+  }
+}

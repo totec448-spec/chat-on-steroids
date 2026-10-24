@@ -1,0 +1,150 @@
+{
+  "method": "GET",
+  "route": "/activity",
+  "status": 200,
+  "request": null,
+  "response": {
+    "sessionId": "2026-01-01-4e7f237c",
+    "generating": false,
+    "tokens": 18,
+    "context": {
+      "auto": true,
+      "threshold": 400000,
+      "warn": 400000,
+      "limit": 533333
+    },
+    "followOutput": true,
+    "mentionCore": true,
+    "bootstrap": null,
+    "bootstrapAgent": null,
+    "bootstrapMessageId": null,
+    "entries": [
+      {
+        "seq": 3,
+        "time": 1767225600000,
+        "tool": "read",
+        "callId": "1252c993-b360-4ff9-a284-4c9085677eea",
+        "detailRevision": 3,
+        "turnId": "mcp-native-final",
+        "requestId": "wfr_repair_128",
+        "attribution": "request_id",
+        "outcome": "ok",
+        "displayOutcome": {
+          "code": "completed",
+          "label": "completed"
+        },
+        "durationMs": 0,
+        "summary": {
+          "kind": "read",
+          "tone": "neutral",
+          "title": "Read mine.ts"
+        },
+        "changes": [],
+        "agent": null
+      }
+    ],
+    "stream": [
+      {
+        "seq": 2,
+        "time": 1767225600000,
+        "turnId": "mcp-native-final",
+        "agent": null,
+        "turnOrigin": 2,
+        "kind": "turn_start"
+      },
+      {
+        "seq": 3,
+        "time": 1767225600000,
+        "turnId": "mcp-native-final",
+        "agent": null,
+        "turnOrigin": 2,
+        "kind": "tool_call",
+        "tool": "read",
+        "callId": "1252c993-b360-4ff9-a284-4c9085677eea",
+        "detailRevision": 3,
+        "requestId": "wfr_repair_128",
+        "attribution": "request_id",
+        "outcome": "ok",
+        "displayOutcome": {
+          "code": "completed",
+          "label": "completed"
+        },
+        "durationMs": 0,
+        "summary": {
+          "kind": "read",
+          "tone": "neutral",
+          "title": "Read mine.ts"
+        },
+        "changes": []
+      },
+      {
+        "seq": 4,
+        "time": 1767225600000,
+        "turnId": "mcp-native-final",
+        "agent": null,
+        "turnOrigin": 2,
+        "kind": "assistant_message",
+        "text": "The page says complete.",
+        "renderedHtml": "",
+        "state": "final",
+        "final": true,
+        "messageId": "native-final",
+        "providerMessageId": null,
+        "origin": 4
+      },
+      {
+        "seq": 5,
+        "time": 1767225600000,
+        "turnId": "mcp-native-final",
+        "agent": null,
+        "turnOrigin": 2,
+        "kind": "turn_end",
+        "outcome": "completed",
+        "detail": ""
+      }
+    ],
+    "userAnchors": [],
+    "resetActivity": false,
+    "truncatedFrom": null,
+    "nextSince": 6,
+    "job": null,
+    "goal": {
+      "enabled": true,
+      "configuredEnabled": true,
+      "afterTurn": true,
+      "proLoopDelivery": false,
+      "own": true,
+      "mode": "loop",
+      "backend": "chatgpt",
+      "model": "gpt-6",
+      "provider": "openrouter",
+      "hasKey": true,
+      "queuePending": false,
+      "wait": {
+        "reason": "settling"
+      },
+      "objective": "",
+      "blocked": "",
+      "pending": {
+        "replyId": "native-final",
+        "turnId": "mcp-native-final",
+        "eventSeq": 4,
+        "acceptedAt": 1767225600000
+      },
+      "draft": null
+    },
+    "pendingTools": 0,
+    "progress": {
+      "tools": null,
+      "workers": null
+    },
+    "settlingTools": 0,
+    "activeTurnId": null,
+    "recordedTurnId": null,
+    "recordedQuestionId": null,
+    "settledQuestionId": null,
+    "revival": null,
+    "revivals": [],
+    "placement": null
+  }
+}

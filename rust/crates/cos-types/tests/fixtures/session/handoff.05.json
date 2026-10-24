@@ -1,0 +1,11 @@
+{
+  "id": "2026-01-01-aaaaaaaa",
+  "sessionId": "2026-01-01-21a05150",
+  "createdAt": 1000,
+  "model": "deepseek/test",
+  "reasoning": "medium",
+  "text": "TASK — finish the thing",
+  "sourceEvents": 3,
+  "sourceTokens": 120,
+  "notes": []
+}

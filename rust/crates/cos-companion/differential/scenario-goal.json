@@ -1,0 +1,28 @@
+[
+  { "config": { "goal": { "enabled": true, "backend": "api", "provider": { "kind": "custom", "baseUrl": "<STUB>" }, "model": "deepseek/deepseek-v4-flash" } } },
+  { "route": "/events", "request": { "conversationId": "a1a1a1a1-0000-4000-8000-00000000c001", "events": [
+    { "kind": "user_message", "messageId": "m-u0", "text": "fix the parser and run the tests", "time": 1767225601100, "authoredNow": true },
+    { "kind": "turn_start", "turnId": "t0", "time": 1767225601200 },
+    { "kind": "assistant_message", "messageId": "m-a0", "turnId": "t0", "text": "I fixed the parser.", "state": "final", "final": true, "time": 1767225601300 },
+    { "kind": "turn_end", "turnId": "t0", "outcome": "completed", "time": 1767225601400 } ] } },
+  { "route": "/goal/objective", "request": { "conversationId": "a1a1a1a1-0000-4000-8000-00000000c002", "text": "  ship the parser  ", "mode": "loop" } },
+  { "route": "/goal/objective", "request": { "conversationId": "a1a1a1a1-0000-4000-8000-00000000c002", "text": "", "mode": "loop" } },
+  { "route": "/goal/objective", "request": { "conversationId": "a1a1a1a1-0000-4000-8000-00000000c004", "text": "keep this one" } },
+  { "route": "/goal/objective", "request": { "conversationId": "not-a-chat!", "text": "x" } },
+  { "route": "/goal/draft", "request": { "conversationId": "a1a1a1a1-0000-4000-8000-00000000c001", "turnId": "t0", "clientId": "tab-1" } },
+  { "wait": 2000 },
+  { "route": "/goal/draft", "request": { "conversationId": "a1a1a1a1-0000-4000-8000-00000000c001", "turnId": "t0", "clientId": "tab-1" } },
+  { "route": "/goal/draft", "request": { "conversationId": "a1a1a1a1-0000-4000-8000-00000000c001", "turnId": "t1", "clientId": "tab-2" } },
+  { "route": "/goal/draft", "request": { "conversationId": "bad", "turnId": "t0" } },
+  { "route": "/goal/draft", "request": { "conversationId": "a1a1a1a1-0000-4000-8000-00000000c001" } },
+  { "route": "/goal/draft", "request": { "conversationId": "a1a1a1a1-0000-4000-8000-00000000c003", "turnId": "t9" } },
+  { "route": "/goal/ack", "request": { "conversationId": "a1a1a1a1-0000-4000-8000-00000000c001", "token": "nope", "clientId": "tab-1" } },
+  { "route": "/goal/ack", "request": { "token": "nope" } },
+  { "route": "/goal/open", "request": { "text": "rewrite the parser in rust" } },
+  { "route": "/goal/open", "request": { "text": "   " } },
+  { "route": "/goal/open", "raw": "{" },
+  { "route": "/settings", "request": { "conversationId": "a1a1a1a1-0000-4000-8000-00000000c001", "loopAfterTurn": true } },
+  { "route": "/settings", "request": { "conversationId": "a1a1a1a1-0000-4000-8000-00000000c001", "goal": false } },
+  { "route": "/goal/draft", "request": { "conversationId": "a1a1a1a1-0000-4000-8000-00000000c001", "turnId": "t0", "clientId": "tab-1" } },
+  { "route": "/settings", "request": { "conversationId": "a1a1a1a1-0000-4000-8000-00000000c003", "loopAfterTurn": false } }
+]

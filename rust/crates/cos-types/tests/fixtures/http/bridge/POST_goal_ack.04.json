@@ -1,0 +1,12 @@
+{
+  "method": "POST",
+  "route": "/goal/ack",
+  "status": 401,
+  "request": {
+    "conversationId": "cafe0003-0000-4000-8000-000000000003",
+    "token": "T"
+  },
+  "response": {
+    "error": "unauthorised"
+  }
+}

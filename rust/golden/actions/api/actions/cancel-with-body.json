@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "POST",
+    "route": "/v1/inputs/<UUID:1>/cancel",
+    "headers": {
+      "content-type": "application/json",
+      "expect": "100-continue"
+    },
+    "body": {
+      "reason": "x"
+    }
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "error": "invalid_body",
+      "detail": "unknown field"
+    }
+  }
+}

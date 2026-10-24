@@ -1,0 +1,31 @@
+{
+  "case": "read-extra-field",
+  "request": {
+    "tool": "read",
+    "arguments": {
+      "paths": [
+        "/project/README.md"
+      ],
+      "extra": true
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool read: Unrecognized key: \"extra\""
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 26
+      }
+    ]
+  }
+}

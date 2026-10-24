@@ -1,0 +1,20 @@
+{
+  "method": "POST",
+  "route": "/commands/ack",
+  "status": 200,
+  "request": {
+    "id": "2c8208fa81c47c62",
+    "client": "tab-1",
+    "conversationId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "agent": "worker-1",
+    "status": "sent"
+  },
+  "response": {
+    "ok": true,
+    "final": true,
+    "committed": true,
+    "outcome": "committed",
+    "conversationId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    "error": null
+  }
+}

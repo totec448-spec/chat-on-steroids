@@ -1,0 +1,26 @@
+{
+  "method": "POST",
+  "route": "/settings",
+  "status": 200,
+  "request": {
+    "conversationId": "a1a1a1a1-0000-4000-8000-00000000ac01",
+    "autoCompact": true
+  },
+  "response": {
+    "context": {
+      "auto": true,
+      "threshold": 10000,
+      "warn": 400000,
+      "limit": 533333
+    },
+    "goal": {
+      "enabled": false,
+      "own": false,
+      "mode": "goal",
+      "backend": "chatgpt",
+      "model": "gpt-6",
+      "provider": "openrouter",
+      "hasKey": true
+    }
+  }
+}

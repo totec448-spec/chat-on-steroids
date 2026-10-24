@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/mcp/core/<MCP_TOKEN:core>",
+    "headers": {
+      "content-type": "application/json",
+      "accept": "application/json, text/event-stream"
+    },
+    "body": "8 MiB + 1 byte with Content-Length"
+  },
+  "response": {
+    "status": 413,
+    "headers": {
+      "content-type": "application/json",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "error": "payload_too_large"
+    }
+  }
+}

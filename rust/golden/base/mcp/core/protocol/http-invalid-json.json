@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "POST",
+    "headers": {
+      "content-type": "application/json",
+      "accept": "application/json, text/event-stream"
+    },
+    "body": "{\"jsonrpc\":"
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "content-type": "application/json",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "error": "invalid_json"
+    }
+  }
+}

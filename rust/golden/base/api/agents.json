@@ -1,0 +1,22 @@
+{
+  "request": {
+    "method": "GET",
+    "route": "/v1/agents",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "enabled": false,
+      "running": false,
+      "retainedHistory": false,
+      "agents": []
+    }
+  }
+}

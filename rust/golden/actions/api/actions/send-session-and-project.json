@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "POST",
+    "route": "/v1/inputs",
+    "headers": {
+      "content-type": "application/json",
+      "expect": "100-continue"
+    },
+    "body": {
+      "id": "<UUID:1>",
+      "sessionId": "<UUID:2>",
+      "projectId": "<UUID:3>",
+      "text": "x"
+    }
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "error": "invalid_body",
+      "detail": "projectId is not valid"
+    }
+  }
+}

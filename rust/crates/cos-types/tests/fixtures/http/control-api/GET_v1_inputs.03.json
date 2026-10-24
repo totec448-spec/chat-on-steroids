@@ -1,0 +1,73 @@
+{
+  "method": "GET",
+  "route": "/v1/inputs",
+  "status": 200,
+  "request": null,
+  "response": {
+    "inputs": [
+      {
+        "id": "3eec285a-3f4f-4bef-9e69-8c888d6371d7",
+        "sessionId": "2026-01-01-cbc28d0b",
+        "deliveredSessionId": null,
+        "conversationId": "chat-inj-own",
+        "state": "sent",
+        "delivery": "sent",
+        "mode": "auto",
+        "transportIntent": null,
+        "automatic": false,
+        "purpose": null,
+        "createdAt": 1767225600000,
+        "dueAt": 1,
+        "offeredAt": 1767225600000,
+        "deliveredAt": 1767225600000,
+        "sendAuthorizedAt": null,
+        "requiresAuthorization": false,
+        "cancelledByUser": false,
+        "queueOrder": null,
+        "model": null,
+        "reasoningEffort": null,
+        "messageId": "input:3eec285a-3f4f-4bef-9e69-8c888d6371d7",
+        "error": null,
+        "text": {
+          "text": "nudge",
+          "chars": 5,
+          "truncated": false
+        },
+        "attachments": 0,
+        "images": 0
+      },
+      {
+        "id": "79a23bc8-67b8-4485-bd4c-509b11fb1651",
+        "sessionId": "2026-01-01-593c1a0f",
+        "deliveredSessionId": null,
+        "conversationId": "chat-inj-foreign",
+        "state": "tool",
+        "delivery": "unconfirmed",
+        "mode": "auto",
+        "transportIntent": null,
+        "automatic": false,
+        "purpose": null,
+        "createdAt": 1767225600000,
+        "dueAt": 1,
+        "offeredAt": 1767225600000,
+        "deliveredAt": null,
+        "sendAuthorizedAt": null,
+        "requiresAuthorization": false,
+        "cancelledByUser": false,
+        "queueOrder": null,
+        "model": null,
+        "reasoningEffort": null,
+        "messageId": null,
+        "error": null,
+        "text": {
+          "text": "nudge",
+          "chars": 5,
+          "truncated": false
+        },
+        "attachments": 0,
+        "images": 0
+      }
+    ],
+    "total": 2
+  }
+}

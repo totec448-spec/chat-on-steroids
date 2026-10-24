@@ -1,0 +1,127 @@
+[
+  {
+    "route": "/events",
+    "request": {
+      "conversationId": "c1c1c1c1-0000-4000-8000-000000000001",
+      "events": [
+        {
+          "kind": "model_selection",
+          "model": "GPT-5.6 Sol",
+          "reasoningEffort": "high",
+          "time": 1767225601000
+        },
+        {
+          "kind": "user_message",
+          "messageId": "m-u0-a",
+          "text": "Hello",
+          "time": 1767225601100,
+          "authoredNow": true
+        },
+        {
+          "kind": "turn_start",
+          "turnId": "t0",
+          "time": 1767225601200
+        },
+        {
+          "kind": "assistant_message",
+          "messageId": "m-a0-a",
+          "turnId": "t0",
+          "text": "Hi",
+          "state": "final",
+          "final": true,
+          "time": 1767225601300
+        },
+        {
+          "kind": "turn_end",
+          "turnId": "t0",
+          "outcome": "completed",
+          "time": 1767225601400
+        }
+      ]
+    }
+  },
+  {
+    "enqueue": {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "sessionId": "<SESSION:c1c1c1c1-0000-4000-8000-000000000001>",
+      "text": "  Read one file  ",
+      "mode": "auto",
+      "dueAt": 0,
+      "model": null,
+      "reasoningEffort": null
+    }
+  },
+  {
+    "enqueue": {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "sessionId": "<SESSION:c1c1c1c1-0000-4000-8000-000000000001>",
+      "text": "  Read one file  ",
+      "mode": "auto",
+      "dueAt": 0,
+      "model": null,
+      "reasoningEffort": null
+    }
+  },
+  {
+    "enqueue": {
+      "id": "22222222-2222-4222-8222-222222222222",
+      "sessionId": "<SESSION:c1c1c1c1-0000-4000-8000-000000000001>",
+      "text": "A second message",
+      "mode": "auto",
+      "dueAt": 0,
+      "model": null,
+      "reasoningEffort": null
+    }
+  },
+  {
+    "pending": true
+  },
+  {
+    "route": "/input/claim",
+    "request": {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "owner": "page-1",
+      "conversationId": "c1c1c1c1-0000-4000-8000-000000000001",
+      "requiresAuthorization": true
+    }
+  },
+  {
+    "route": "/input/claim",
+    "request": {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "owner": "page-1",
+      "conversationId": "c1c1c1c1-0000-4000-8000-000000000001",
+      "authorize": true
+    }
+  },
+  {
+    "route": "/input/claim",
+    "request": {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "owner": "page-1",
+      "conversationId": "c1c1c1c1-0000-4000-8000-000000000001",
+      "authorize": true
+    }
+  },
+  {
+    "route": "/input/ack",
+    "request": {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "owner": "page-1",
+      "conversationId": "c1c1c1c1-0000-4000-8000-000000000001",
+      "messageId": "native-1"
+    }
+  },
+  {
+    "pending": true
+  },
+  {
+    "route": "/input/ack",
+    "request": {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "owner": "page-1",
+      "conversationId": "c1c1c1c1-0000-4000-8000-000000000001",
+      "messageId": "native-1"
+    }
+  }
+]

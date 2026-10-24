@@ -1,0 +1,28 @@
+{
+  "case": "stdin-bad-type",
+  "request": {
+    "tool": "write_stdin",
+    "arguments": {
+      "session_id": "abc"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool write_stdin: session_id: Invalid input: expected number, received string"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 75
+      }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "method": "POST",
+  "route": "/cos-browser/sign-in",
+  "status": 401,
+  "request": {
+    "id": "bf79484f-9a13-46fe-8a7c-a01c0e2a8d8f",
+    "cookies": [
+      {
+        "name": "__Secure-next-auth.session-token",
+        "value": "synthetic-test-session",
+        "domain": ".chatgpt.com",
+        "path": "/",
+        "secure": true,
+        "httpOnly": true,
+        "hostOnly": false,
+        "sameSite": "lax"
+      }
+    ]
+  },
+  "response": {
+    "error": "unauthorised"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "method": "POST",
+  "route": "/input/attachment",
+  "status": 200,
+  "request": {
+    "id": "038cbfb5-a736-42c0-8088-b0daf1e76dbc",
+    "owner": "document-one",
+    "conversationId": null,
+    "attachmentId": "f4eadc1e-e222-4a41-a927-e899a3cc72e8",
+    "offset": 0
+  },
+  "response": {
+    "chunk": "QXR0YWNobWVudCBwYXlsb2Fk"
+  }
+}

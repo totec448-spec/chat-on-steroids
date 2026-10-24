@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "GET",
+    "route": "/v1/log?since=99999999999999",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "entries": [],
+      "ringSize": "<RING_SIZE>"
+    }
+  }
+}

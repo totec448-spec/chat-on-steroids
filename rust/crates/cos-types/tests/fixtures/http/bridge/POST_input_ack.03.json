@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "route": "/input/ack",
+  "status": 200,
+  "request": {
+    "id": "f786e883-f144-4b62-83d8-4dec19c99110",
+    "owner": "page",
+    "conversationId": "beb0a0a5-3094-45fe-9515-edd1c8ce2f2c",
+    "messageId": "native-late"
+  },
+  "response": {
+    "ok": true
+  }
+}

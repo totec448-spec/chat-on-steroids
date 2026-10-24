@@ -1,0 +1,11 @@
+{
+  "method": "POST",
+  "route": "/core-plugin",
+  "status": 400,
+  "request": {
+    "missing": "yes"
+  },
+  "response": {
+    "error": "invalid_core_plugin"
+  }
+}

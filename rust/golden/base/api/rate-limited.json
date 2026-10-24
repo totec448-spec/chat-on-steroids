@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "route": "/v1/health",
+    "note": "repeated until the first refusal"
+  },
+  "response": {
+    "status": 429,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "error": "rate_limited"
+    }
+  }
+}

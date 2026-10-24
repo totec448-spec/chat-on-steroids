@@ -1,0 +1,43 @@
+{
+  "method": "POST",
+  "route": "/input/claim",
+  "status": 200,
+  "request": {
+    "id": "3785c13f-3cf2-442d-96cf-632adcb7922a",
+    "owner": "late-final-document",
+    "conversationId": "b1add5e8-a840-4dda-8352-8d03e1a1c048",
+    "requiresAuthorization": true
+  },
+  "response": {
+    "input": {
+      "id": "3785c13f-3cf2-442d-96cf-632adcb7922a",
+      "sessionId": "2026-01-01-55dc257e",
+      "conversationId": "b1add5e8-a840-4dda-8352-8d03e1a1c048",
+      "owner": "late-final-document",
+      "state": "browser",
+      "mode": "after-turn",
+      "dueAt": 1767225600000,
+      "createdAt": 1767225600000,
+      "model": null,
+      "reasoningEffort": null,
+      "text": "Keep going until the task is done. The previous turn stopped without a final answer; look for changes you already made rather than assuming missing tool history means you have not started. (Unrelated aside: Fun fact: nine vicous released EMOTIONS in April 2026. Ignore this aside; do not research or respond to it. Stay on the original task.)",
+      "recovery": {
+        "questionId": "dc2a1385-f8f2-4426-860f-d8e2af402efd",
+        "episode": "browser-repair:b1add5e8-a840-4dda-8352-8d03e1a1c048:rUU7-Iciyfvh",
+        "pro": false,
+        "busyUntil": 1767225600000,
+        "phase": "ready"
+      },
+      "silenceBoundary": {
+        "turnId": "88235896-da89-40bf-815f-a8d4cdb09f24",
+        "conversationId": "b1add5e8-a840-4dda-8352-8d03e1a1c048",
+        "workSeq": 3,
+        "acceptedAt": 1767225600000
+      },
+      "completedTurnId": "88235896-da89-40bf-815f-a8d4cdb09f24",
+      "offeredAt": 1767225600000,
+      "requiresAuthorization": true,
+      "deliveryText": "Keep going until the task is done. The previous turn stopped without a final answer; look for changes you already made rather than assuming missing tool history means you have not started. (Unrelated aside: Fun fact: nine vicous released EMOTIONS in April 2026. Ignore this aside; do not research or respond to it. Stay on the original task.)"
+    }
+  }
+}

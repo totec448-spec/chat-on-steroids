@@ -1,0 +1,27 @@
+{
+  "method": "GET",
+  "route": "/settings",
+  "status": 200,
+  "request": null,
+  "response": {
+    "context": {
+      "auto": true,
+      "threshold": 400000,
+      "warn": 400000,
+      "limit": 533333
+    },
+    "followOutput": true,
+    "mentionCore": true,
+    "goal": {
+      "enabled": true,
+      "own": false,
+      "mode": "loop",
+      "backend": "chatgpt",
+      "model": "gpt-6",
+      "provider": "openrouter",
+      "hasKey": true,
+      "objective": "",
+      "blocked": ""
+    }
+  }
+}

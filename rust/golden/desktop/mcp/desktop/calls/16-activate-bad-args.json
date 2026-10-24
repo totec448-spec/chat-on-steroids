@@ -1,0 +1,28 @@
+{
+  "case": "activate-bad-args",
+  "request": {
+    "tool": "activate_window",
+    "arguments": {
+      "window": "x"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool activate_window: window: Invalid input: expected object, received string"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 17
+      }
+    ]
+  }
+}

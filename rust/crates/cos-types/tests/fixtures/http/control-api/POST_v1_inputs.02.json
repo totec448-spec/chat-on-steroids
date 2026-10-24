@@ -1,0 +1,44 @@
+{
+  "method": "POST",
+  "route": "/v1/inputs",
+  "status": 200,
+  "request": {
+    "id": "4f499156-6ade-4077-b698-da27ba29c475",
+    "sessionId": "2026-01-01-b8eee0a8",
+    "text": "was it sent?"
+  },
+  "response": {
+    "input": {
+      "id": "4f499156-6ade-4077-b698-da27ba29c475",
+      "sessionId": "2026-01-01-b8eee0a8",
+      "deliveredSessionId": null,
+      "conversationId": "chat-actions-1",
+      "state": "cancelled",
+      "delivery": "unconfirmed",
+      "mode": "auto",
+      "transportIntent": null,
+      "automatic": false,
+      "purpose": null,
+      "createdAt": 1767225600000,
+      "dueAt": 1,
+      "offeredAt": 1767225600000,
+      "deliveredAt": null,
+      "sendAuthorizedAt": 1767225600000,
+      "requiresAuthorization": true,
+      "cancelledByUser": false,
+      "queueOrder": null,
+      "model": null,
+      "reasoningEffort": null,
+      "messageId": null,
+      "error": "Stopped waiting for delivery confirmation. The message may already have been sent; it will not be resent.",
+      "text": {
+        "text": "was it sent?",
+        "chars": 12,
+        "truncated": false
+      },
+      "attachments": 0,
+      "images": 0
+    },
+    "replayed": true
+  }
+}

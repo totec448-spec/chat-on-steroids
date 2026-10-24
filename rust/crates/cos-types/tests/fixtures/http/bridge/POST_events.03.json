@@ -1,0 +1,40 @@
+{
+  "method": "POST",
+  "route": "/events",
+  "status": 200,
+  "request": {
+    "conversationId": "2645ff86-3d41-438c-8341-78eedc2a4fe2",
+    "events": [
+      {
+        "kind": "model_selection",
+        "model": "gpt-6-pro",
+        "reasoningEffort": "pro",
+        "time": 1767225600000
+      },
+      {
+        "kind": "turn_start",
+        "turnId": "previous-astra",
+        "time": 1767225600000
+      },
+      {
+        "kind": "assistant_message",
+        "turnId": "previous-astra",
+        "messageId": "previous-astra-final",
+        "text": "The previous request is complete.",
+        "state": "final",
+        "final": true,
+        "time": 1767225600000
+      },
+      {
+        "kind": "turn_end",
+        "turnId": "previous-astra",
+        "outcome": "completed",
+        "time": 1767225600000
+      }
+    ]
+  },
+  "response": {
+    "sessionId": "2026-01-01-5902925b",
+    "stored": 4
+  }
+}

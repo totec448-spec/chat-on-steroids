@@ -1,0 +1,37 @@
+{
+  "case": "set-value-identity-refused",
+  "request": {
+    "tool": "set_value",
+    "arguments": {
+      "window": {
+        "app": "c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe",
+        "id": "<HWND>"
+      },
+      "element_index": 1,
+      "value": "x"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "CALLER_IDENTITY_REQUIRED: indexed and coordinate input requires exact companion identity or Allow unattributed calls enabled in app settings; no input ran."
+            },
+            {
+              "type": "text",
+              "text": "\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat."
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 12
+      }
+    ]
+  }
+}

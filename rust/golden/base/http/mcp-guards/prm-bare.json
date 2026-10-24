@@ -1,0 +1,18 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/.well-known/oauth-protected-resource",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 404,
+    "headers": {
+      "content-type": "application/json",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "error": "not_found"
+    }
+  }
+}

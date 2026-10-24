@@ -1,0 +1,20 @@
+{
+  "method": "POST",
+  "route": "/commands/ack",
+  "status": 200,
+  "request": {
+    "id": "8a91c7b2df31f7d8",
+    "client": "stop-page",
+    "conversationId": "e1111111-aaaa-4bbb-8ccc-111111111111",
+    "turnId": "stop-turn-one",
+    "status": "sent"
+  },
+  "response": {
+    "ok": true,
+    "final": true,
+    "committed": true,
+    "outcome": "committed",
+    "conversationId": "e1111111-aaaa-4bbb-8ccc-111111111111",
+    "error": null
+  }
+}

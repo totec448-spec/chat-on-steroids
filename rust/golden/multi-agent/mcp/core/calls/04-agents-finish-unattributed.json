@@ -1,0 +1,33 @@
+{
+  "case": "agents-finish-unattributed",
+  "request": {
+    "tool": "agents",
+    "arguments": {
+      "action": "finish",
+      "result": "RESULT: none"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "WORKER_IDENTITY_LOST: Chat On Steroids could not tell which conversation this call came from, so it cannot act on the run from here. No agent operation was performed. Wait briefly and retry this operation once. If it is still refused, preserve your result in the chat and report that delivery is unconfirmed; do not claim the message or finish report reached its recipient."
+            },
+            {
+              "type": "text",
+              "text": "\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat."
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 5
+      }
+    ]
+  }
+}

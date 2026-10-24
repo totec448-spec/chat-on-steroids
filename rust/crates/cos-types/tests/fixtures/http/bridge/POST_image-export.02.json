@@ -1,0 +1,12 @@
+{
+  "method": "POST",
+  "route": "/image-export",
+  "status": 200,
+  "request": {
+    "nonce": "95cb11c4-4919-44b3-8840-9e535a4e00b6",
+    "error": "not_rendered"
+  },
+  "response": {
+    "ok": true
+  }
+}

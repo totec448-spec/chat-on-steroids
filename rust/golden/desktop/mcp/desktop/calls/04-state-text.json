@@ -1,0 +1,53 @@
+{
+  "case": "state-text",
+  "request": {
+    "tool": "get_window_state",
+    "arguments": {
+      "window": {
+        "app": "c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe",
+        "id": "<HWND>"
+      },
+      "include_screenshot": false,
+      "include_text": true
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "{\"window\":{\"app\":\"c:\\\\windows\\\\system32\\\\windowspowershell\\\\v1.0\\\\powershell.exe\",\"id\":<HWND>,\"title\":\"cos-golden-target\",\"state\":\"open\"},\"focused\":false,\"screenshots\":[],\"accessibility\":{\"truncated\":false,\"tree\":\"\\t0: Button \\\"golden-button\\\" [Invoke, Raise]\\n\\t1: Edit \\\"golden-text\\\" [Raise]\\n\\t2: TitleBar \\\"cos-golden-target\\\"\\n\\t\\t3: MenuBar \\\"System Menu Bar\\\" [Raise]\\n\\t\\t\\t4: MenuItem \\\"System\\\" [Expand, Collapse, Raise]\\n\\t\\t5: Button \\\"Minimize\\\" [Invoke]\\n\\t\\t6: Button \\\"Maximize\\\" [Invoke]\\n\\t\\t7: Button \\\"Close\\\" [Invoke]\",\"document_text\":\"golden-text\"}}"
+            },
+            {
+              "type": "text",
+              "text": "\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat."
+            }
+          ],
+          "structuredContent": {
+            "value": {
+              "window": {
+                "app": "c:\\windows\\system32\\windowspowershell\\v1.0\\powershell.exe",
+                "id": "<HWND>",
+                "title": "cos-golden-target",
+                "state": "open"
+              },
+              "focused": false,
+              "screenshots": [],
+              "accessibility": {
+                "truncated": false,
+                "tree": "\t0: Button \"golden-button\" [Invoke, Raise]\n\t1: Edit \"golden-text\" [Raise]\n\t2: TitleBar \"cos-golden-target\"\n\t\t3: MenuBar \"System Menu Bar\" [Raise]\n\t\t\t4: MenuItem \"System\" [Expand, Collapse, Raise]\n\t\t5: Button \"Minimize\" [Invoke]\n\t\t6: Button \"Maximize\" [Invoke]\n\t\t7: Button \"Close\" [Invoke]",
+                "document_text": "golden-text"
+              }
+            }
+          }
+        },
+        "jsonrpc": "2.0",
+        "id": 5
+      }
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "method": "POST",
+  "route": "/goal/objective",
+  "status": 200,
+  "request": {
+    "conversationId": "cafe0022-0000-4000-8000-000000000022",
+    "text": "",
+    "mode": "goal"
+  },
+  "response": {
+    "objective": "",
+    "enabled": false,
+    "own": true,
+    "mode": "goal"
+  }
+}

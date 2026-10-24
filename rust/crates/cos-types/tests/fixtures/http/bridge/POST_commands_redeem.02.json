@@ -1,0 +1,25 @@
+{
+  "method": "POST",
+  "route": "/commands/redeem",
+  "status": 200,
+  "request": {
+    "id": "2d6d5962bf597084",
+    "client": "reopened-page",
+    "conversationId": "e6666666-aaaa-4bbb-8ccc-111111111111"
+  },
+  "response": {
+    "command": {
+      "id": "2d6d5962bf597084",
+      "expiresAt": 1767225600000,
+      "kind": "stop-turn",
+      "type": "stop",
+      "text": "",
+      "agent": null,
+      "model": null,
+      "reasoningEffort": null,
+      "conversationId": "e6666666-aaaa-4bbb-8ccc-111111111111",
+      "turnId": "original-turn",
+      "userMessageId": "original-question"
+    }
+  }
+}

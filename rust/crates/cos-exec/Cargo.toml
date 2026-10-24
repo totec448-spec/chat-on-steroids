@@ -1,0 +1,33 @@
+[package]
+name = "cos-exec"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT AND Apache-2.0"
+description = "The exec_command and write_stdin tools and the process custody behind them."
+
+[dependencies]
+bytes = "=1.12.1"
+cos-fs = { version = "0.1.0", path = "../cos-fs" }
+cos-tools = { version = "0.1.0", path = "../cos-tools" }
+regex = "=1.13.1"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.154", features = ["preserve_order"] }
+tokio = { version = "=1.54.0", features = ["process", "sync", "io-util", "time", "rt", "net", "macros"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "=0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_IO",
+    "Win32_System_JobObjects",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+cos-store = { version = "0.1.0", path = "../cos-store" }
+cos-types = { version = "0.1.0", path = "../cos-types" }
+tokio = { version = "=1.54.0", features = ["rt-multi-thread", "macros", "test-util"] }

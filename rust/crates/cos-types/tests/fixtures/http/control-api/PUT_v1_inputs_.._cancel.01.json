@@ -1,0 +1,9 @@
+{
+  "method": "PUT",
+  "route": "/v1/inputs/\\..\\cancel",
+  "status": 400,
+  "request": null,
+  "response": {
+    "error": "invalid_target"
+  }
+}

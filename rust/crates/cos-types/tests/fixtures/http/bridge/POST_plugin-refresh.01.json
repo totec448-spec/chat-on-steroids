@@ -1,0 +1,27 @@
+{
+  "method": "POST",
+  "route": "/plugin-refresh",
+  "status": 200,
+  "request": {
+    "surface": "core",
+    "connectorName": "Chat On Steroids Core",
+    "tools": [
+      {
+        "name": "read",
+        "description": "Read old",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    ],
+    "schemaId": "57f7dd6be242cbc7fa40be51d53fa7ea5ec0b110eaa00ab121e72cb17424c329",
+    "id": "a543cbd6-26f0-464e-a44e-e34e928d3490",
+    "appId": "asdk_app_synthetic",
+    "action": "manual",
+    "error": "Recreate or republish this custom app."
+  },
+  "response": {
+    "ok": true
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "tools": [
+            {
+              "name": "update_plan",
+              "title": "Update plan",
+              "description": "Updates your task plan in the user’s app. Use for work with several meaningful steps; skip simple tasks. Send the complete plan with short step headlines, useful details and current statuses. Keep at most one step in_progress. Update after completing a step or changing approach. This only displays a plan; it does not execute steps or advance queued stages.",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "explanation": {
+                    "description": "Brief explanation of a changed plan.",
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "plan": {
+                    "maxItems": 12,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "step": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160,
+                          "description": "Short headline shown to the user."
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "in_progress",
+                            "completed"
+                          ]
+                        },
+                        "details": {
+                          "description": "Concrete approach, checks or remaining work beneath this headline. Keep useful detail when updating status.",
+                          "type": "string",
+                          "maxLength": 2000
+                        }
+                      },
+                      "required": [
+                        "step",
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "The complete updated plan. Send an empty array to clear it."
+                  }
+                },
+                "required": [
+                  "plan"
+                ],
+                "additionalProperties": false
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+              }
+            },
+            {
+              "name": "exec",
+              "title": "Run JavaScript",
+              "description": "Run JavaScript to compose this connector’s tools. Argument: {code: \"raw JavaScript\"}; the host chooses the outer namespace. Inside code, use await tools.<tool_name>(args), await Promise.all([...]), text(value), and image(dataUrlOrMcpImageContent). tools return their normal MCP result objects, including content and isError. Only explicit text/image output reaches the model; intermediate results stay in the runtime and local tool recording. ALL_TOOLS lists {name,description}; use the individual tools’ schemas for arguments. Fresh isolated JavaScript runtime, top-level await, no Node, filesystem, network, console or imports. Requires exact companion chat/session identity or Allow unattributed calls enabled. Limits: 64k source characters, 32 MiB JS memory, 2s active JS time, 60s total, 32 calls, 8 concurrent calls, 40k text bytes, 4 images, 12 MiB emitted payload. Await every call. Termination stops JavaScript/new calls, not actions already dispatched. Individual tools remain available. session_finish and agents action=finish must be direct calls. No recursive exec, pragma, wait/yield or persistent globals. See the connector instructions for examples.",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64000,
+                    "description": "Raw JavaScript source with top-level await. Emit results with text(...) or image(...)."
+                  }
+                },
+                "required": [
+                  "code"
+                ],
+                "additionalProperties": false
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": true,
+                "idempotentHint": false,
+                "openWorldHint": true
+              }
+            }
+          ]
+        },
+        "jsonrpc": "2.0",
+        "id": 2
+      }
+    ]
+  }
+}

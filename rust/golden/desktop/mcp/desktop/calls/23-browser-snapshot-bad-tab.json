@@ -1,0 +1,28 @@
+{
+  "case": "browser-snapshot-bad-tab",
+  "request": {
+    "tool": "browser_snapshot",
+    "arguments": {
+      "tabId": "x"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool browser_snapshot: tabId: Invalid string: must match pattern /^[a-f\\d-]{36}:\\d+$/i"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 24
+      }
+    ]
+  }
+}

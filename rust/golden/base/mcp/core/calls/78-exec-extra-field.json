@@ -1,0 +1,29 @@
+{
+  "case": "exec-extra-field",
+  "request": {
+    "tool": "exec_command",
+    "arguments": {
+      "cmd": "Write-Output x",
+      "nope": 1
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool exec_command: Unrecognized key: \"nope\""
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 79
+      }
+    ]
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "method": "POST",
+  "route": "/input/claim",
+  "status": 200,
+  "request": {
+    "id": "9455cb29-7875-47a8-85fb-f2187e7962e9",
+    "owner": "failed-turn-page",
+    "conversationId": "86680923-aaaf-4c85-a324-7a89687f3d00",
+    "requiresAuthorization": true
+  },
+  "response": {
+    "input": {
+      "automation": "off",
+      "id": "9455cb29-7875-47a8-85fb-f2187e7962e9",
+      "sessionId": "2026-01-01-ed20db3f",
+      "text": "Complete this request",
+      "mode": "after-turn",
+      "afterTurn": true,
+      "dueAt": 1767225600000,
+      "model": null,
+      "reasoningEffort": null,
+      "silenceBoundary": {
+        "turnId": "native-failed-turn",
+        "conversationId": "86680923-aaaf-4c85-a324-7a89687f3d00",
+        "workSeq": 4,
+        "acceptedAt": 1767225600000,
+        "listenUntil": 1767225600000,
+        "nativeBusy": true
+      },
+      "queuedTurn": {
+        "conversationId": "86680923-aaaf-4c85-a324-7a89687f3d00",
+        "turnId": "native-failed-turn"
+      },
+      "state": "browser",
+      "owner": "failed-turn-page",
+      "createdAt": 1767225600000,
+      "conversationId": "86680923-aaaf-4c85-a324-7a89687f3d00",
+      "completedTurnId": "native-failed-turn",
+      "offeredAt": 1767225600000,
+      "requiresAuthorization": true,
+      "deliveryText": "Complete this request"
+    }
+  }
+}

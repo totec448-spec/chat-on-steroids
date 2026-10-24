@@ -1,0 +1,29 @@
+{
+  "method": "POST",
+  "route": "/plugin-refresh",
+  "status": 200,
+  "request": {
+    "action": "pending"
+  },
+  "response": {
+    "requests": [
+      {
+        "surface": "core",
+        "connectorName": "Chat On Steroids Core",
+        "tools": [
+          {
+            "name": "read",
+            "description": "Read a file",
+            "inputSchema": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        ],
+        "schemaId": "b5897af024dba8afb45b0d9fe7114700240539ba53b293ec392f9ec034a35989",
+        "id": "df58654f-70e6-4c2c-b3e6-1ec2953f94ba",
+        "appId": null
+      }
+    ]
+  }
+}

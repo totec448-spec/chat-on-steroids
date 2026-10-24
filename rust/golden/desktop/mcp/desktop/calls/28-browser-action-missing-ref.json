@@ -1,0 +1,30 @@
+{
+  "case": "browser-action-missing-ref",
+  "request": {
+    "tool": "browser_action",
+    "arguments": {
+      "tabId": "<UUID:1>:1",
+      "pageId": "<UUID:2>",
+      "action": "fill"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool browser_action: ref: Editable/select ref required, text: Text required (empty fill clears the field)"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 29
+      }
+    ]
+  }
+}

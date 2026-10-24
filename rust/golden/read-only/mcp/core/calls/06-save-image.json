@@ -1,0 +1,23 @@
+{
+  "case": "save-image",
+  "request": {
+    "tool": "save_image",
+    "arguments": {
+      "path": "/project/out/generated.png"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "error": {
+          "code": -32602,
+          "message": "Tool save_image not found"
+        }
+      }
+    ]
+  }
+}

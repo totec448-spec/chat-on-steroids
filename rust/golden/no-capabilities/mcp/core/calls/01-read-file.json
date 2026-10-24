@@ -1,0 +1,25 @@
+{
+  "case": "read-file",
+  "request": {
+    "tool": "read",
+    "arguments": {
+      "paths": [
+        "/project/src/greeting.txt"
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "error": {
+          "code": -32602,
+          "message": "Tool read not found"
+        }
+      }
+    ]
+  }
+}

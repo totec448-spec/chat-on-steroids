@@ -1,0 +1,9 @@
+{
+  "method": "GET",
+  "route": "/settings",
+  "status": 401,
+  "request": null,
+  "response": {
+    "error": "unauthorised"
+  }
+}

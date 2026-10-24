@@ -1,0 +1,283 @@
+{
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "tools": [
+            {
+              "name": "exec_command",
+              "description": "Runs a command and returns output or a session ID. Use write_stdin for progress, input, or retained output. Background results also arrive on later responses.\n\nWindows shell notes:\n- Deleting or moving files works reliably inside one shell. Paths listed in PowerShell and handed to `cmd /c`, batch builtins, or another shell for deletion or moving break on quoting; use native PowerShell cmdlets such as `Remove-Item` / `Move-Item` with `-LiteralPath` rather than string-built shell commands.\n- Before a recursive delete or move, resolve the absolute target paths and check that they lie inside the intended workspace or the explicitly named target directory, in particular when a path was computed.\n- `Start-Process` for a background helper or service: add `-WindowStyle Hidden` unless the user asked for a visible window. Visible windows are for interactive tools the user needs to see or control.\n\nBrowsers: do not spawn a new browser, profile or debug port per attempt — each stays resident and heats the CPU. Keep to one or two windows you actually use and reuse the one already open.",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "cmd": {
+                    "description": "Shell command to execute. To read a file, use the read tool instead. This shell is Windows PowerShell 5.1, which has no && or ||: use the cmds array for a sequence, or A; if ($?) { B }.",
+                    "type": "string"
+                  },
+                  "cmds": {
+                    "description": "Use cmd or cmds, not both. cmds runs sequentially in one shell session; sections show exit codes. It continues after ordinary non-zero exits; first non-zero exit wins.",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "workdir": {
+                    "description": "Working directory for the command. Defaults to the turn cwd.",
+                    "type": "string"
+                  },
+                  "tty": {
+                    "description": "True allocates a PTY for the command; false or omitted uses plain pipes.",
+                    "type": "boolean"
+                  },
+                  "yield_time_ms": {
+                    "description": "Wait up to 10000 ms (250-30000 on Windows). Finished commands return immediately; otherwise return a session ID.",
+                    "type": "number"
+                  },
+                  "max_output_tokens": {
+                    "description": "Ignored; still accepted so older cached schemas keep working. Omit it.",
+                    "type": "number"
+                  },
+                  "shell": {
+                    "description": "Shell binary to launch. Defaults to the user's default shell.",
+                    "type": "string"
+                  },
+                  "login": {
+                    "description": "True loads the shell profile; false disables it. Defaults to false on Windows for deterministic commands.",
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "outputSchema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "chunk_id": {
+                    "description": "Output chunk identifier.",
+                    "type": "string"
+                  },
+                  "wall_time_seconds": {
+                    "type": "number",
+                    "description": "Seconds spent waiting for output."
+                  },
+                  "exit_code": {
+                    "description": "Process exit code when the command finished during this call.",
+                    "type": "number"
+                  },
+                  "session_id": {
+                    "description": "Session ID while running.",
+                    "type": "number"
+                  },
+                  "completed_session_id": {
+                    "description": "Use as write_stdin session_id to reread completed output.",
+                    "type": "number"
+                  },
+                  "expected_exit": {
+                    "description": "Non-zero exit is an expected result, not a failure.",
+                    "type": "boolean"
+                  },
+                  "output_replayed": {
+                    "description": "Retained output; command was not run again.",
+                    "type": "boolean"
+                  },
+                  "original_token_count": {
+                    "description": "Approximate token count before output truncation.",
+                    "type": "number"
+                  },
+                  "output": {
+                    "type": "string",
+                    "description": "Command output text, possibly truncated."
+                  },
+                  "supplemental_context": {
+                    "description": "App context, not process output.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "wall_time_seconds",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "name": "write_stdin",
+              "description": "Polls or writes to the returned session ID. Empty chars reread retained output after completion, including automatic delivery; never reruns work. Completed processes reject input. Retains the latest 64 results in this app, 256 KiB each.",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "session_id": {
+                    "type": "number",
+                    "description": "Returned running or completed session ID."
+                  },
+                  "chars": {
+                    "description": "Bytes to write to stdin. Defaults to empty, which polls without writing.",
+                    "type": "string"
+                  },
+                  "yield_time_ms": {
+                    "description": "Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait up to 5000-300000 ms by default but return early when the first output arrives.",
+                    "type": "number"
+                  },
+                  "max_output_tokens": {
+                    "description": "Ignored; still accepted so older cached schemas keep working. Omit it.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "session_id"
+                ],
+                "additionalProperties": false
+              },
+              "outputSchema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "chunk_id": {
+                    "description": "Output chunk identifier.",
+                    "type": "string"
+                  },
+                  "wall_time_seconds": {
+                    "type": "number",
+                    "description": "Seconds spent waiting for output."
+                  },
+                  "exit_code": {
+                    "description": "Process exit code when the command finished during this call.",
+                    "type": "number"
+                  },
+                  "session_id": {
+                    "description": "Session ID while running.",
+                    "type": "number"
+                  },
+                  "completed_session_id": {
+                    "description": "Use as write_stdin session_id to reread completed output.",
+                    "type": "number"
+                  },
+                  "expected_exit": {
+                    "description": "Non-zero exit is an expected result, not a failure.",
+                    "type": "boolean"
+                  },
+                  "output_replayed": {
+                    "description": "Retained output; command was not run again.",
+                    "type": "boolean"
+                  },
+                  "original_token_count": {
+                    "description": "Approximate token count before output truncation.",
+                    "type": "number"
+                  },
+                  "output": {
+                    "type": "string",
+                    "description": "Command output text, possibly truncated."
+                  },
+                  "supplemental_context": {
+                    "description": "App context, not process output.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "wall_time_seconds",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "name": "update_plan",
+              "title": "Update plan",
+              "description": "Updates your task plan in the user’s app. Use for work with several meaningful steps; skip simple tasks. Send the complete plan with short step headlines, useful details and current statuses. Keep at most one step in_progress. Update after completing a step or changing approach. This only displays a plan; it does not execute steps or advance queued stages.",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "explanation": {
+                    "description": "Brief explanation of a changed plan.",
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "plan": {
+                    "maxItems": 12,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "step": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160,
+                          "description": "Short headline shown to the user."
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "in_progress",
+                            "completed"
+                          ]
+                        },
+                        "details": {
+                          "description": "Concrete approach, checks or remaining work beneath this headline. Keep useful detail when updating status.",
+                          "type": "string",
+                          "maxLength": 2000
+                        }
+                      },
+                      "required": [
+                        "step",
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "The complete updated plan. Send an empty array to clear it."
+                  }
+                },
+                "required": [
+                  "plan"
+                ],
+                "additionalProperties": false
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+              }
+            },
+            {
+              "name": "exec",
+              "title": "Run JavaScript",
+              "description": "Run JavaScript to compose this connector’s tools. Argument: {code: \"raw JavaScript\"}; the host chooses the outer namespace. Inside code, use await tools.<tool_name>(args), await Promise.all([...]), text(value), and image(dataUrlOrMcpImageContent). tools return their normal MCP result objects, including content and isError. Only explicit text/image output reaches the model; intermediate results stay in the runtime and local tool recording. ALL_TOOLS lists {name,description}; use the individual tools’ schemas for arguments. Fresh isolated JavaScript runtime, top-level await, no Node, filesystem, network, console or imports. Requires exact companion chat/session identity or Allow unattributed calls enabled. Limits: 64k source characters, 32 MiB JS memory, 2s active JS time, 60s total, 32 calls, 8 concurrent calls, 40k text bytes, 4 images, 12 MiB emitted payload. Await every call. Termination stops JavaScript/new calls, not actions already dispatched. Individual tools remain available. session_finish and agents action=finish must be direct calls. No recursive exec, pragma, wait/yield or persistent globals. See the connector instructions for examples.",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64000,
+                    "description": "Raw JavaScript source with top-level await. Emit results with text(...) or image(...)."
+                  }
+                },
+                "required": [
+                  "code"
+                ],
+                "additionalProperties": false
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": true,
+                "idempotentHint": false,
+                "openWorldHint": true
+              }
+            }
+          ]
+        },
+        "jsonrpc": "2.0",
+        "id": 2
+      }
+    ]
+  }
+}

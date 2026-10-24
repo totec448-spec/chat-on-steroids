@@ -1,0 +1,41 @@
+{
+  "method": "POST",
+  "route": "/v1/inputs/cc97da41-fc39-44ba-8f6b-d6599a5aa9bd/cancel",
+  "status": 409,
+  "request": null,
+  "response": {
+    "error": "not_cancellable",
+    "detail": "a new chat is opening; cancel it in the app",
+    "input": {
+      "id": "cc97da41-fc39-44ba-8f6b-d6599a5aa9bd",
+      "sessionId": "cc97da41-fc39-44ba-8f6b-d6599a5aa9bd",
+      "deliveredSessionId": null,
+      "conversationId": null,
+      "state": "queued",
+      "delivery": "pending",
+      "mode": "auto",
+      "transportIntent": null,
+      "automatic": false,
+      "purpose": null,
+      "createdAt": 1767225600000,
+      "dueAt": 1,
+      "offeredAt": null,
+      "deliveredAt": null,
+      "sendAuthorizedAt": null,
+      "requiresAuthorization": false,
+      "cancelledByUser": false,
+      "queueOrder": null,
+      "model": null,
+      "reasoningEffort": null,
+      "messageId": null,
+      "error": null,
+      "text": {
+        "text": "first message of a new chat",
+        "chars": 27,
+        "truncated": false
+      },
+      "attachments": 0,
+      "images": 0
+    }
+  }
+}

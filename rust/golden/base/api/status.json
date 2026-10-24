@@ -1,0 +1,83 @@
+{
+  "request": {
+    "method": "GET",
+    "route": "/v1/status",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "appVersion": "2.1.35",
+      "connection": {
+        "state": "connected",
+        "detail": "Local server running. Expose it with your own tunnel and use the URL below.",
+        "handshakeAt": null,
+        "lastRequestAt": "<EPOCH_MS>",
+        "lastToolCallAt": "<EPOCH_MS>",
+        "tunnel": null,
+        "surfaces": [
+          {
+            "id": "core",
+            "state": "live",
+            "available": true,
+            "optional": false,
+            "detail": "Local server running. Expose it with your own tunnel and use the URL below.",
+            "tools": 6,
+            "lastRequestAt": "<EPOCH_MS>",
+            "lastToolCallAt": "<EPOCH_MS>"
+          },
+          {
+            "id": "desktop",
+            "state": "off",
+            "available": false,
+            "optional": true,
+            "detail": "Turn on \"See the screen\", \"Control mouse and keyboard\" or a clipboard permission to use this connector.",
+            "tools": 0,
+            "lastRequestAt": "<EPOCH_MS>",
+            "lastToolCallAt": null
+          },
+          {
+            "id": "plugins",
+            "state": "live",
+            "available": true,
+            "optional": true,
+            "detail": "Local server running. Expose it with your own tunnel and use the URL below.",
+            "tools": 0,
+            "lastRequestAt": "<EPOCH_MS>",
+            "lastToolCallAt": null
+          }
+        ]
+      },
+      "bridge": {
+        "running": true,
+        "port": "<PORT>",
+        "portOverridden": true,
+        "paired": false,
+        "present": false,
+        "lastSeenAt": null,
+        "extensionVersion": null,
+        "error": null
+      },
+      "plugins": [],
+      "update": {
+        "current": "2.1.35",
+        "latest": null,
+        "stage": "failed",
+        "error": "fetch failed",
+        "checkedAt": null
+      },
+      "toolCalls": {
+        "running": 0,
+        "settling": 0,
+        "inFlight": 0,
+        "inFlightMcpRequests": 0
+      }
+    }
+  }
+}

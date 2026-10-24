@@ -1,0 +1,706 @@
+{
+ "tokens": [
+  {
+   "background": "#181818",
+   "accent": "#b0cbed",
+   "contrast": 60,
+   "tokens": {
+    "--page": "#181818",
+    "--ink": "#ffffff",
+    "--card": "#262626",
+    "--sunk": "#202020",
+    "--hover": "#2e2e2e",
+    "--raise": "#2e2e2e",
+    "--popover": "#2e2e2e",
+    "--soft": "#aeaeae",
+    "--faint": "#979797",
+    "--line": "#3f3f3f",
+    "--edge": "#494949",
+    "--track": "#555555",
+    "--blue": "#b0cbed",
+    "--accent": "#b0cbed",
+    "--accent-fill": "#b0cbed",
+    "--on-accent": "#000000",
+    "--wash": "#2a2d32",
+    "--blue-line": "#464e58",
+    "--accent-wash": "#2a2d32",
+    "--accent-edge": "#4d5763",
+    "--knob-off": "#ffffff",
+    "--knob-on": "#000000",
+    "--green": "#519d75",
+    "--green-wash": "#1a251f",
+    "--green-line": "#1c3929",
+    "--red": "#dd6a6a",
+    "--red-wash": "#2f1d1d",
+    "--red-line": "#502626"
+   }
+  },
+  {
+   "background": "#f4f4f5",
+   "accent": "#486f9d",
+   "contrast": 45,
+   "tokens": {
+    "--page": "#f4f4f5",
+    "--ink": "#000000",
+    "--card": "#e7e7e8",
+    "--sunk": "#ededee",
+    "--hover": "#dfdfe0",
+    "--raise": "#dfdfe0",
+    "--popover": "#dfdfe0",
+    "--soft": "#5d5d5d",
+    "--faint": "#636364",
+    "--line": "#d0d0d1",
+    "--edge": "#c6c6c7",
+    "--track": "#b9b9b9",
+    "--blue": "#486f9d",
+    "--accent": "#486f9d",
+    "--accent-fill": "#486f9d",
+    "--on-accent": "#ffffff",
+    "--wash": "#dfe4ea",
+    "--blue-line": "#c0ccdb",
+    "--accent-wash": "#dfe4ea",
+    "--accent-edge": "#b8c5d6",
+    "--knob-off": "#000000",
+    "--knob-on": "#ffffff",
+    "--green": "#1f7146",
+    "--green-wash": "#dbe7e1",
+    "--green-line": "#b6d3c4",
+    "--red": "#b43b3b",
+    "--red-wash": "#f0dfe0",
+    "--red-line": "#eac0c0"
+   }
+  },
+  {
+   "background": "#1a2129",
+   "accent": "#b0cbed",
+   "contrast": 60,
+   "tokens": {
+    "--page": "#1a2129",
+    "--ink": "#ffffff",
+    "--card": "#282f36",
+    "--sunk": "#222830",
+    "--hover": "#30373e",
+    "--raise": "#30373e",
+    "--popover": "#30363e",
+    "--soft": "#afb1b4",
+    "--faint": "#989b9f",
+    "--line": "#40464d",
+    "--edge": "#4a5056",
+    "--track": "#565c61",
+    "--blue": "#b0cbed",
+    "--accent": "#b0cbed",
+    "--accent-fill": "#b0cbed",
+    "--on-accent": "#000000",
+    "--wash": "#2c3541",
+    "--blue-line": "#475464",
+    "--accent-wash": "#2c3541",
+    "--accent-edge": "#4f5d6e",
+    "--knob-off": "#ffffff",
+    "--knob-on": "#000000",
+    "--green": "#5ca47d",
+    "--green-wash": "#1b2d2e",
+    "--green-line": "#1d3f35",
+    "--red": "#e17d7d",
+    "--red-wash": "#30252c",
+    "--red-line": "#522c31"
+   }
+  },
+  {
+   "background": "#e9edf2",
+   "accent": "#486f9d",
+   "contrast": 45,
+   "tokens": {
+    "--page": "#e9edf2",
+    "--ink": "#000000",
+    "--card": "#dde1e5",
+    "--sunk": "#e2e6eb",
+    "--hover": "#d5d8dd",
+    "--raise": "#d5d8dd",
+    "--popover": "#d5d8dd",
+    "--soft": "#595a5c",
+    "--faint": "#5f6163",
+    "--line": "#c6cace",
+    "--edge": "#bdc1c5",
+    "--track": "#b0b3b7",
+    "--blue": "#446995",
+    "--accent": "#446995",
+    "--accent-fill": "#486f9d",
+    "--on-accent": "#ffffff",
+    "--wash": "#d6dee8",
+    "--blue-line": "#b9c7d9",
+    "--accent-wash": "#d6dee8",
+    "--accent-edge": "#b1c1d4",
+    "--knob-off": "#000000",
+    "--knob-on": "#ffffff",
+    "--green": "#1f7146",
+    "--green-wash": "#d1e1df",
+    "--green-line": "#aecec2",
+    "--red": "#aa3737",
+    "--red-wash": "#e6d9dd",
+    "--red-line": "#e3bbbe"
+   }
+  },
+  {
+   "background": "#ffffff",
+   "accent": "#ff0000",
+   "contrast": 0,
+   "tokens": {
+    "--page": "#ffffff",
+    "--ink": "#000000",
+    "--card": "#f9f9f9",
+    "--sunk": "#fafafa",
+    "--hover": "#f1f1f1",
+    "--raise": "#f1f1f1",
+    "--popover": "#f0f0f0",
+    "--soft": "#727272",
+    "--faint": "#6d6d6d",
+    "--line": "#e8e8e8",
+    "--edge": "#e0e0e0",
+    "--track": "#d1d1d1",
+    "--blue": "#e60000",
+    "--accent": "#e60000",
+    "--accent-fill": "#ff0000",
+    "--on-accent": "#000000",
+    "--wash": "#ffe0e0",
+    "--blue-line": "#ffb3b3",
+    "--accent-wash": "#ffe0e0",
+    "--accent-edge": "#ffa6a6",
+    "--knob-off": "#000000",
+    "--knob-on": "#000000",
+    "--green": "#237e4e",
+    "--green-wash": "#e5f0ea",
+    "--green-line": "#bedacb",
+    "--red": "#c94242",
+    "--red-wash": "#fae9e9",
+    "--red-line": "#f2c7c7"
+   }
+  },
+  {
+   "background": "#000000",
+   "accent": "#00ff00",
+   "contrast": 100,
+   "tokens": {
+    "--page": "#000000",
+    "--ink": "#ffffff",
+    "--card": "#161616",
+    "--sunk": "#0b0b0b",
+    "--hover": "#202020",
+    "--raise": "#202020",
+    "--popover": "#1f1f1f",
+    "--soft": "#bababa",
+    "--faint": "#a1a1a1",
+    "--line": "#383838",
+    "--edge": "#454545",
+    "--track": "#525252",
+    "--blue": "#00ff00",
+    "--accent": "#00ff00",
+    "--accent-fill": "#00ff00",
+    "--on-accent": "#000000",
+    "--wash": "#001f00",
+    "--blue-line": "#004d00",
+    "--accent-wash": "#001f00",
+    "--accent-edge": "#005900",
+    "--knob-off": "#ffffff",
+    "--knob-on": "#000000",
+    "--green": "#3b9163",
+    "--green-wash": "#04100a",
+    "--green-line": "#0b2819",
+    "--red": "#d85858",
+    "--red-wash": "#190808",
+    "--red-line": "#401515"
+   }
+  },
+  {
+   "background": "#336699",
+   "accent": "#ffcc00",
+   "contrast": 30,
+   "tokens": {
+    "--page": "#336699",
+    "--ink": "#ffffff",
+    "--card": "#3c6d9d",
+    "--sunk": "#386a9c",
+    "--hover": "#4372a1",
+    "--raise": "#4372a1",
+    "--popover": "#4372a1",
+    "--soft": "#e6ecf2",
+    "--faint": "#e5ecf2",
+    "--line": "#4d7aa6",
+    "--edge": "#557faa",
+    "--track": "#6088b0",
+    "--blue": "#ffde59",
+    "--accent": "#ffde59",
+    "--accent-fill": "#ffcc00",
+    "--on-accent": "#000000",
+    "--wash": "#4b7287",
+    "--blue-line": "#70856b",
+    "--accent-wash": "#4b7287",
+    "--accent-edge": "#7a8a63",
+    "--knob-off": "#ffffff",
+    "--knob-on": "#000000",
+    "--green": "#e9f3ee",
+    "--green-wash": "#316a90",
+    "--green-line": "#2f6f84",
+    "--red": "#fbecec",
+    "--red-wash": "#46628f",
+    "--red-line": "#635c80"
+   }
+  },
+  {
+   "background": "#7f7f7f",
+   "accent": "#7f7f7f",
+   "contrast": 50,
+   "tokens": {
+    "--page": "#7f7f7f",
+    "--ink": "#000000",
+    "--card": "#787878",
+    "--sunk": "#7b7b7b",
+    "--hover": "#747474",
+    "--raise": "#747474",
+    "--popover": "#747474",
+    "--soft": "#090909",
+    "--faint": "#090909",
+    "--line": "#6b6b6b",
+    "--edge": "#666666",
+    "--track": "#5f5f5f",
+    "--blue": "#131313",
+    "--accent": "#131313",
+    "--accent-fill": "#7f7f7f",
+    "--on-accent": "#000000",
+    "--wash": "#7f7f7f",
+    "--blue-line": "#7f7f7f",
+    "--accent-wash": "#7f7f7f",
+    "--accent-edge": "#7f7f7f",
+    "--knob-off": "#000000",
+    "--knob-on": "#000000",
+    "--green": "#020704",
+    "--green-wash": "#74807a",
+    "--green-line": "#648172",
+    "--red": "#0b0303",
+    "--red-wash": "#897878",
+    "--red-line": "#996e6e"
+   }
+  },
+  {
+   "background": "#767676",
+   "accent": "#123456",
+   "contrast": 75,
+   "tokens": {
+    "--page": "#767676",
+    "--ink": "#000000",
+    "--card": "#6e6e6e",
+    "--sunk": "#727272",
+    "--hover": "#696969",
+    "--raise": "#696969",
+    "--popover": "#6a6a6a",
+    "--soft": "#f4f4f4",
+    "--faint": "#f5f5f5",
+    "--line": "#606060",
+    "--edge": "#5b5b5b",
+    "--track": "#545454",
+    "--blue": "#010304",
+    "--accent": "#010304",
+    "--accent-fill": "#123456",
+    "--on-accent": "#ffffff",
+    "--wash": "#6a6e72",
+    "--blue-line": "#58626c",
+    "--accent-wash": "#6a6e72",
+    "--accent-edge": "#535f6b",
+    "--knob-off": "#000000",
+    "--knob-on": "#ffffff",
+    "--green": "#f4f9f6",
+    "--green-wash": "#6c7872",
+    "--green-line": "#5e7b6b",
+    "--red": "#fdf6f6",
+    "--red-wash": "#817070",
+    "--red-line": "#926767"
+   }
+  }
+ ],
+ "mixes": [
+  {
+   "a": "#1a2129",
+   "b": "#181818",
+   "amount": 0.13,
+   "mixed": "#1a2027"
+  },
+  {
+   "a": "#e9edf2",
+   "b": "#f4f4f5",
+   "amount": 0.13,
+   "mixed": "#eaeef2"
+  },
+  {
+   "a": "#000000",
+   "b": "#ffffff",
+   "amount": 0.5,
+   "mixed": "#808080"
+  },
+  {
+   "a": "#102030",
+   "b": "#f0e0d0",
+   "amount": 0.333,
+   "mixed": "#5b6065"
+  }
+ ],
+ "windows": [
+  {
+   "theme": "dark",
+   "appearance": {
+    "light": {
+     "background": "#f4f4f5",
+     "sidebar": "#e9edf2",
+     "accent": "#486f9d",
+     "contrast": 45
+    },
+    "dark": {
+     "background": "#181818",
+     "sidebar": "#1a2129",
+     "accent": "#b0cbed",
+     "contrast": 60
+    },
+    "font": "system",
+    "fontSize": 14,
+    "translucentSidebar": true
+   },
+   "captionSymbol": "#ffffff",
+   "background": "#181818"
+  },
+  {
+   "theme": "dark",
+   "appearance": {
+    "light": {
+     "background": "#ffffff",
+     "sidebar": "#202020",
+     "accent": "#ff0000",
+     "contrast": 0
+    },
+    "dark": {
+     "background": "#336699",
+     "sidebar": "#f0f0f0",
+     "accent": "#ffcc00",
+     "contrast": 100
+    },
+    "font": "mono",
+    "fontSize": 16,
+    "translucentSidebar": false
+   },
+   "captionSymbol": "#000000",
+   "background": "#336699"
+  },
+  {
+   "theme": "light",
+   "appearance": {
+    "light": {
+     "background": "#f4f4f5",
+     "sidebar": "#e9edf2",
+     "accent": "#486f9d",
+     "contrast": 45
+    },
+    "dark": {
+     "background": "#181818",
+     "sidebar": "#1a2129",
+     "accent": "#b0cbed",
+     "contrast": 60
+    },
+    "font": "system",
+    "fontSize": 14,
+    "translucentSidebar": true
+   },
+   "captionSymbol": "#000000",
+   "background": "#f4f4f5"
+  },
+  {
+   "theme": "light",
+   "appearance": {
+    "light": {
+     "background": "#ffffff",
+     "sidebar": "#202020",
+     "accent": "#ff0000",
+     "contrast": 0
+    },
+    "dark": {
+     "background": "#336699",
+     "sidebar": "#f0f0f0",
+     "accent": "#ffcc00",
+     "contrast": 100
+    },
+    "font": "mono",
+    "fontSize": 16,
+    "translucentSidebar": false
+   },
+   "captionSymbol": "#ffffff",
+   "background": "#ffffff"
+  }
+ ],
+ "displays": {
+  "primary": {
+   "x": 0,
+   "y": 0,
+   "width": 1920,
+   "height": 1040
+  },
+  "all": [
+   {
+    "x": 0,
+    "y": 0,
+    "width": 1920,
+    "height": 1040
+   },
+   {
+    "x": 1920,
+    "y": -200,
+    "width": 2560,
+    "height": 1400
+   }
+  ]
+ },
+ "placements": [
+  {
+   "saved": null,
+   "layout": {
+    "x": 0,
+    "y": 0,
+    "width": 1920,
+    "height": 1040,
+    "minWidth": 640,
+    "minHeight": 480,
+    "useContentSize": false,
+    "resizable": true,
+    "maximizable": true
+   },
+   "restored": false,
+   "maximized": false
+  },
+  {
+   "saved": "garbage",
+   "layout": {
+    "x": 0,
+    "y": 0,
+    "width": 1920,
+    "height": 1040,
+    "minWidth": 640,
+    "minHeight": 480,
+    "useContentSize": false,
+    "resizable": true,
+    "maximizable": true
+   },
+   "restored": false,
+   "maximized": false
+  },
+  {
+   "saved": {
+    "x": 100,
+    "y": 120,
+    "width": 1000,
+    "height": 700
+   },
+   "restored": true,
+   "layout": {
+    "x": 100,
+    "y": 120,
+    "width": 1000,
+    "height": 700,
+    "minWidth": 640,
+    "minHeight": 480,
+    "useContentSize": false,
+    "resizable": true,
+    "maximizable": true
+   },
+   "maximized": false
+  },
+  {
+   "saved": {
+    "bounds": {
+     "x": 100,
+     "y": 120,
+     "width": 1000,
+     "height": 700
+    },
+    "maximized": true
+   },
+   "restored": true,
+   "layout": {
+    "x": 100,
+    "y": 120,
+    "width": 1000,
+    "height": 700,
+    "minWidth": 640,
+    "minHeight": 480,
+    "useContentSize": false,
+    "resizable": true,
+    "maximizable": true
+   },
+   "maximized": true
+  },
+  {
+   "saved": {
+    "bounds": {
+     "x": 100,
+     "y": 120,
+     "width": 1000,
+     "height": 700
+    },
+    "maximized": "yes"
+   },
+   "layout": {
+    "x": 0,
+    "y": 0,
+    "width": 1920,
+    "height": 1040,
+    "minWidth": 640,
+    "minHeight": 480,
+    "useContentSize": false,
+    "resizable": true,
+    "maximizable": true
+   },
+   "restored": false,
+   "maximized": false
+  },
+  {
+   "saved": {
+    "bounds": {
+     "x": 1800,
+     "y": 900,
+     "width": 1000,
+     "height": 700
+    },
+    "maximized": false
+   },
+   "restored": true,
+   "layout": {
+    "x": 1920,
+    "y": 500,
+    "width": 1000,
+    "height": 700,
+    "minWidth": 640,
+    "minHeight": 480,
+    "useContentSize": false,
+    "resizable": true,
+    "maximizable": true
+   },
+   "maximized": false
+  },
+  {
+   "saved": {
+    "bounds": {
+     "x": 5000,
+     "y": 5000,
+     "width": 800,
+     "height": 600
+    },
+    "maximized": false
+   },
+   "layout": {
+    "x": 0,
+    "y": 0,
+    "width": 1920,
+    "height": 1040,
+    "minWidth": 640,
+    "minHeight": 480,
+    "useContentSize": false,
+    "resizable": true,
+    "maximizable": true
+   },
+   "restored": false,
+   "maximized": false
+  },
+  {
+   "saved": {
+    "bounds": {
+     "x": 2000,
+     "y": -100,
+     "width": 3000,
+     "height": 300
+    },
+    "maximized": false
+   },
+   "restored": true,
+   "layout": {
+    "x": 1920,
+    "y": -100,
+    "width": 2560,
+    "height": 480,
+    "minWidth": 640,
+    "minHeight": 480,
+    "useContentSize": false,
+    "resizable": true,
+    "maximizable": true
+   },
+   "maximized": false
+  },
+  {
+   "saved": {
+    "bounds": {
+     "x": 10.4,
+     "y": 20.6,
+     "width": 300.5,
+     "height": 200.2
+    },
+    "maximized": false
+   },
+   "restored": true,
+   "layout": {
+    "x": 10,
+    "y": 21,
+    "width": 640,
+    "height": 480,
+    "minWidth": 640,
+    "minHeight": 480,
+    "useContentSize": false,
+    "resizable": true,
+    "maximizable": true
+   },
+   "maximized": false
+  },
+  {
+   "saved": {
+    "bounds": {
+     "x": 0,
+     "y": 0,
+     "width": -5,
+     "height": 200
+    },
+    "maximized": false
+   },
+   "layout": {
+    "x": 0,
+    "y": 0,
+    "width": 1920,
+    "height": 1040,
+    "minWidth": 640,
+    "minHeight": 480,
+    "useContentSize": false,
+    "resizable": true,
+    "maximizable": true
+   },
+   "restored": false,
+   "maximized": false
+  }
+ ],
+ "trayImages": [
+  {
+   "running": false,
+   "scale": 1,
+   "size": 16,
+   "rgba": "goKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigeCgoougoKKLoKCigeCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKLoKCiqiCgor/goKK/4KCiv+Cgor/goKKqIKCii6CgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKVoKCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKKVoKCigCCgooAgoKKAIKCigCCgooAgoKKLoKCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+CgoougoKKAIKCigCCgooAgoKKAIKCiqiCgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKKqIKCigCCgooAgoKKAIKCigeCgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+CgooHgoKKAIKCigCCgoougoKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKKLoKCigCCgooAgoKKLoKCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCii6CgooAgoKKAIKCigeCgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+CgooHgoKKAIKCigCCgooAgoKKqIKCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+CgoqogoKKAIKCigCCgooAgoKKAIKCii6Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKKLoKCigCCgooAgoKKAIKCigCCgooAgoKKVoKCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKKVoKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgoougoKKqIKCiv+Cgor/goKK/4KCiv+CgoqogoKKLoKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooHgoKKLoKCii6CgooHgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAA=="
+  },
+  {
+   "running": false,
+   "scale": 2,
+   "size": 32,
+   "rgba": "goKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCiieCgopPgoKKY4KCimOCgopPgoKKJ4KCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKJ4KCioyCgorggoKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK4IKCioyCgoongoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCioyCgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+CgoqMgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCiieCgorLgoKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+CgorLgoKKJ4KCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgoongoKK4IKCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+CgorggoKKJ4KCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCisuCgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+CgorLgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgoqMgoKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+CgoqMgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKJ4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+CgoongoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgoqMgoKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCioyCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCiuCCgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK4IKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgoongoKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKKJ4KCigCCgooAgoKKAIKCigCCgooAgoKKAIKCik+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+CgopPgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKY4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCimOCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgopjgoKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKKY4KCigCCgooAgoKKAIKCigCCgooAgoKKAIKCik+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+CgopPgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKJ4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiieCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKK4IKCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+CgorggoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgoqMgoKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCioyCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCiieCgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKKJ4KCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCioyCgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCioyCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCisuCgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+CgorLgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKJ4KCiuCCgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK4IKCiieCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKJ4KCisuCgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCisuCgoongoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCioyCgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiv+CgoqMgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCiieCgoqMgoKK4IKCiv+Cgor/goKK/4KCiv+Cgor/goKK/4KCiuCCgoqMgoKKJ4KCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKJ4KCik+CgopjgoKKY4KCik+CgoongoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAIKCigCCgooAgoKKAA=="
+  },
+  {
+   "running": true,
+   "scale": 1,
+   "size": 16,
+   "rgba": "IqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgcioFouIqBaLiKgWgcioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaLiKgWqgioFr/IqBa/yKgWv8ioFr/IqBaqCKgWi4ioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaViKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBaViKgWgAioFoAIqBaACKgWgAioFoAIqBaLiKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFouIqBaACKgWgAioFoAIqBaACKgWqgioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBaqCKgWgAioFoAIqBaACKgWgcioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFoHIqBaACKgWgAioFouIqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBaLiKgWgAioFoAIqBaLiKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWi4ioFoAIqBaACKgWgcioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFoHIqBaACKgWgAioFoAIqBaqCKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFqoIqBaACKgWgAioFoAIqBaACKgWi4ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBaLiKgWgAioFoAIqBaACKgWgAioFoAIqBaViKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBaViKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFouIqBaqCKgWv8ioFr/IqBa/yKgWv8ioFqoIqBaLiKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoHIqBaLiKgWi4ioFoHIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaAA=="
+  },
+  {
+   "running": true,
+   "scale": 2,
+   "size": 32,
+   "rgba": "IqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWicioFpPIqBaYyKgWmMioFpPIqBaJyKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaJyKgWowioFrgIqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa4CKgWowioFonIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWowioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFqMIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWicioFrLIqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFrLIqBaJyKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFonIqBa4CKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFrgIqBaJyKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWssioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFrLIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFqMIqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFqMIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaJyKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFonIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFqMIqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWowioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWuAioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa4CKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFonIqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBaJyKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWk8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFpPIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaYyKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWmMioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFpjIqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBaYyKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWk8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFpPIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaJyKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWicioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBa4CKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFrgIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFqMIqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWowioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWicioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBaJyKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWowioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWowioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWssioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFrLIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaJyKgWuAioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa4CKgWicioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaJyKgWssioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWssioFonIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWowioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWv8ioFqMIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWicioFqMIqBa4CKgWv8ioFr/IqBa/yKgWv8ioFr/IqBa/yKgWuAioFqMIqBaJyKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaJyKgWk8ioFpjIqBaYyKgWk8ioFonIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaACKgWgAioFoAIqBaAA=="
+  }
+ ]
+}

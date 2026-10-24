@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "resources/list",
+    "params": {}
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "error": {
+          "code": -32601,
+          "message": "Method not found"
+        }
+      }
+    ]
+  }
+}

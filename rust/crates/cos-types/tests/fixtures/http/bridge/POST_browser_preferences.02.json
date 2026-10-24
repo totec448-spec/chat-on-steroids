@@ -1,0 +1,13 @@
+{
+  "method": "POST",
+  "route": "/browser/preferences",
+  "status": 409,
+  "request": {
+    "nonce": "c05b1598-4b07-4423-a182-0f5aa8a5bda1",
+    "values": null,
+    "error": "storage unavailable"
+  },
+  "response": {
+    "ok": false
+  }
+}

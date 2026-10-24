@@ -1,0 +1,22 @@
+[
+  { "route": "/events", "request": { "conversationId": "a1a1a1a1-0000-4000-8000-00000000b001", "events": [
+    { "kind": "model_selection", "model": "GPT-5.6 Sol", "reasoningEffort": "high", "time": 1767225601000 },
+    { "kind": "user_message", "messageId": "m-u0", "text": "Hello", "time": 1767225601100, "authoredNow": true },
+    { "kind": "turn_start", "turnId": "t0", "time": 1767225601200 },
+    { "kind": "assistant_message", "messageId": "m-a0", "turnId": "t0", "text": "Hi", "state": "final", "final": true, "time": 1767225601300 },
+    { "kind": "turn_end", "turnId": "t0", "outcome": "completed", "time": 1767225601400 }
+  ] } },
+  { "route": "/events", "request": { "conversationId": "a1a1a1a1-0000-4000-8000-00000000b002", "events": [
+    { "kind": "user_message", "messageId": "m-u1", "text": "Work on it", "time": 1767225602000, "authoredNow": true },
+    { "kind": "turn_start", "turnId": "t1", "time": 1767225602100 }
+  ] } },
+  { "send": { "id": "b0b0b0b0-0000-4000-8000-0000000000c1", "conversation": "a1a1a1a1-0000-4000-8000-00000000b001", "text": "Next step" } },
+  { "send": { "id": "b0b0b0b0-0000-4000-8000-0000000000c2", "conversation": null, "text": "Open a new chat" } },
+  { "method": "GET", "route": "/status" },
+  { "route": "/status", "headers": { "x-extension-browser": "browseraaaaaaaaaaaa1" },
+    "request": { "openConversations": ["a1a1a1a1-0000-4000-8000-00000000b001"] } },
+  { "route": "/status", "headers": { "x-extension-browser": "browserbbbbbbbbbbbb2" },
+    "request": { "openConversations": ["a1a1a1a1-0000-4000-8000-00000000b002"] } },
+  { "route": "/input/claim", "request": { "id": "b0b0b0b0-0000-4000-8000-0000000000c1", "owner": "page", "conversationId": "a1a1a1a1-0000-4000-8000-00000000b001", "requiresAuthorization": true } },
+  { "method": "GET", "route": "/status" }
+]

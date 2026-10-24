@@ -1,0 +1,11 @@
+{
+  "method": "POST",
+  "route": "/browser/presence",
+  "status": 401,
+  "request": {
+    "chatGptSignedIn": false
+  },
+  "response": {
+    "error": "unauthorised"
+  }
+}

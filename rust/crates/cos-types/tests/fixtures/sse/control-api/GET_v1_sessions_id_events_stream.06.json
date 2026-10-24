@@ -1,0 +1,6 @@
+{
+  "method": "GET",
+  "route": "/v1/sessions/2026-01-01-f6661bf3/events/stream",
+  "status": 200,
+  "stream": ": stream open\n\nevent: end\ndata: {\"reason\":\"test\"}\n\n"
+}

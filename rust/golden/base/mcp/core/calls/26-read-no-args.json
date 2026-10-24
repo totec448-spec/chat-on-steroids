@@ -1,0 +1,26 @@
+{
+  "case": "read-no-args",
+  "request": {
+    "tool": "read",
+    "arguments": {}
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool read: paths: Invalid input: expected array, received undefined"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 27
+      }
+    ]
+  }
+}

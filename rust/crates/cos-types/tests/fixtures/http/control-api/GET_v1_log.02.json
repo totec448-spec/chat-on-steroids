@@ -1,0 +1,10 @@
+{
+  "method": "GET",
+  "route": "/v1/log",
+  "status": 200,
+  "request": null,
+  "response": {
+    "entries": [],
+    "ringSize": 12
+  }
+}

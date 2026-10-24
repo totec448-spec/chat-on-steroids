@@ -1,0 +1,23 @@
+{
+  "case": "view-image",
+  "request": {
+    "tool": "view_image",
+    "arguments": {
+      "path": "/project/src/pixel.png"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "error": {
+          "code": -32602,
+          "message": "Tool view_image not found"
+        }
+      }
+    ]
+  }
+}

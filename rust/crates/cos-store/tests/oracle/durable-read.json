@@ -1,0 +1,219 @@
+{
+  "cases": {
+    "missing": {
+      "input": null,
+      "plain": null,
+      "strict": {
+        "value": null
+      },
+      "warned": false
+    },
+    "directory-in-place": {
+      "input": {
+        "directory": true
+      },
+      "plain": null,
+      "strict": {
+        "error": "Could not read probe state"
+      },
+      "warned": true
+    },
+    "valid-object": {
+      "input": {
+        "text": "{\"version\":1,\"entries\":[{\"conversationId\":\"68f1c2d4-1111-4bbb-8ccc-0123456789ab\",\"blockedAt\":5}]}"
+      },
+      "plain": {
+        "version": 1,
+        "entries": [
+          {
+            "conversationId": "68f1c2d4-1111-4bbb-8ccc-0123456789ab",
+            "blockedAt": 5
+          }
+        ]
+      },
+      "strict": {
+        "value": {
+          "version": 1,
+          "entries": [
+            {
+              "conversationId": "68f1c2d4-1111-4bbb-8ccc-0123456789ab",
+              "blockedAt": 5
+            }
+          ]
+        }
+      },
+      "warned": false
+    },
+    "valid-array": {
+      "input": {
+        "text": "[1,\"two\",{\"three\":3}]"
+      },
+      "plain": [
+        1,
+        "two",
+        {
+          "three": 3
+        }
+      ],
+      "strict": {
+        "value": [
+          1,
+          "two",
+          {
+            "three": 3
+          }
+        ]
+      },
+      "warned": false
+    },
+    "valid-pretty-with-trailing-newline": {
+      "input": {
+        "text": "{\n  \"a\": [1, 2]\n}\n"
+      },
+      "plain": {
+        "a": [
+          1,
+          2
+        ]
+      },
+      "strict": {
+        "value": {
+          "a": [
+            1,
+            2
+          ]
+        }
+      },
+      "warned": false
+    },
+    "json-null": {
+      "input": {
+        "text": "null"
+      },
+      "plain": null,
+      "strict": {
+        "error": "Could not read probe state"
+      },
+      "warned": false
+    },
+    "json-number": {
+      "input": {
+        "text": "42"
+      },
+      "plain": 42,
+      "strict": {
+        "value": 42
+      },
+      "warned": false
+    },
+    "empty-file": {
+      "input": {
+        "text": ""
+      },
+      "plain": null,
+      "strict": {
+        "error": "Could not read probe state"
+      },
+      "warned": false
+    },
+    "whitespace-only": {
+      "input": {
+        "text": " \n"
+      },
+      "plain": null,
+      "strict": {
+        "error": "Could not read probe state"
+      },
+      "warned": false
+    },
+    "truncated": {
+      "input": {
+        "text": "{\"version\":1,\"entries\":[{\"conversationId\":\"68f1c2d4-1111"
+      },
+      "plain": null,
+      "strict": {
+        "error": "Could not read probe state"
+      },
+      "warned": false
+    },
+    "corrupted-bytes": {
+      "input": {
+        "bytes": [
+          0,
+          19,
+          55,
+          255,
+          123
+        ]
+      },
+      "plain": null,
+      "strict": {
+        "error": "Could not read probe state"
+      },
+      "warned": false
+    },
+    "trailing-garbage": {
+      "input": {
+        "text": "{\"a\":1}x"
+      },
+      "plain": null,
+      "strict": {
+        "error": "Could not read probe state"
+      },
+      "warned": false
+    },
+    "bom-prefixed": {
+      "input": {
+        "text": "﻿{\"a\":1}"
+      },
+      "plain": null,
+      "strict": {
+        "error": "Could not read probe state"
+      },
+      "warned": false
+    },
+    "invalid-utf8-in-string": {
+      "input": {
+        "bytes": [
+          123,
+          34,
+          97,
+          34,
+          58,
+          34,
+          120,
+          195,
+          40,
+          121,
+          34,
+          125
+        ]
+      },
+      "plain": {
+        "a": "x�(y"
+      },
+      "strict": {
+        "value": {
+          "a": "x�(y"
+        }
+      },
+      "warned": false
+    },
+    "duplicate-keys": {
+      "input": {
+        "text": "{\"a\":1,\"b\":2,\"a\":3}"
+      },
+      "plain": {
+        "a": 3,
+        "b": 2
+      },
+      "strict": {
+        "value": {
+          "a": 3,
+          "b": 2
+        }
+      },
+      "warned": false
+    }
+  }
+}

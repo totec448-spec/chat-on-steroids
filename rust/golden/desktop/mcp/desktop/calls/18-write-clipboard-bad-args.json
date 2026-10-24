@@ -1,0 +1,28 @@
+{
+  "case": "write-clipboard-bad-args",
+  "request": {
+    "tool": "write_clipboard",
+    "arguments": {
+      "text": 42
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool write_clipboard: text: Invalid input: expected string, received number"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 19
+      }
+    ]
+  }
+}

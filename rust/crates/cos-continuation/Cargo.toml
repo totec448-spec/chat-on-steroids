@@ -1,0 +1,24 @@
+[package]
+name = "cos-continuation"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+description = "Compact & Resume (the A to B rebind transaction and its write-ahead log), the handoff brief, the held session_finish boundary and browser-recovery repair claims."
+
+[dependencies]
+base64 = "=0.22.1"
+cos-input = { version = "0.1.0", path = "../cos-input" }
+cos-sessions = { version = "0.1.0", path = "../cos-sessions" }
+cos-store = { version = "0.1.0", path = "../cos-store" }
+cos-tools = { version = "0.1.0", path = "../cos-tools" }
+cos-types = { version = "0.1.0", path = "../cos-types" }
+getrandom = "=0.2.17"
+regex = "=1.13.1"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.154", features = ["preserve_order"] }
+sha2 = "=0.10.9"
+tokio = { version = "=1.54.0", features = ["macros", "rt", "sync", "time"] }
+
+[dev-dependencies]
+tokio = { version = "=1.54.0", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }

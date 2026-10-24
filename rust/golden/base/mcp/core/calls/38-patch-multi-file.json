@@ -1,0 +1,35 @@
+{
+  "case": "patch-multi-file",
+  "request": {
+    "tool": "apply_patch",
+    "arguments": {
+      "patch": "*** Begin Patch\n*** Add File: /project/src/a.txt\n+a\n*** Add File: /project/src/b.txt\n+b\n*** End Patch\n"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Exit code: 0\nWall time: <DURATION> seconds\nOutput:\nSuccess. Updated the following files:\nA /project/src/a.txt\nA /project/src/b.txt\n"
+            },
+            {
+              "type": "text",
+              "text": "\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat."
+            }
+          ]
+        },
+        "jsonrpc": "2.0",
+        "id": 39
+      }
+    ]
+  },
+  "disk": {
+    "src/a.txt": "a\n",
+    "src/b.txt": "b\n"
+  }
+}

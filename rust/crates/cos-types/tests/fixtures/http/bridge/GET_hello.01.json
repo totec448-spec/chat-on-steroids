@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "route": "/hello",
+  "status": 200,
+  "request": null,
+  "response": {
+    "app": "chat-on-steroids",
+    "version": "2.1.35",
+    "bridge": 14,
+    "compatible": null,
+    "paired": false,
+    "disconnected": false
+  }
+}

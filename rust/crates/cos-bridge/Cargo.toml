@@ -1,0 +1,36 @@
+[package]
+name = "cos-bridge"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+description = "The loopback bridge the Chat On Steroids browser extension talks to: pairing, auth, the wake socket, the extension folder and the route families of Track 2."
+
+[dependencies]
+base64 = "=0.22.1"
+bytes = "=1.12.1"
+cos-browser-control = { version = "0.1.0", path = "../cos-browser-control" }
+cos-companion = { version = "0.1.0", path = "../cos-companion" }
+cos-continuation = { version = "0.1.0", path = "../cos-continuation" }
+cos-goal = { version = "0.1.0", path = "../cos-goal" }
+cos-http = { version = "0.1.0", path = "../cos-http" }
+cos-input = { version = "0.1.0", path = "../cos-input" }
+cos-recorder = { version = "0.1.0", path = "../cos-recorder" }
+cos-secrets = { version = "0.1.0", path = "../cos-secrets" }
+cos-store = { version = "0.1.0", path = "../cos-store" }
+cos-tools = { version = "0.1.0", path = "../cos-tools" }
+cos-types = { version = "0.1.0", path = "../cos-types" }
+getrandom = "=0.2.17"
+http = "=1.5.0"
+http-body-util = "=0.1.5"
+hyper = { version = "=1.12.0", features = ["server", "http1"] }
+hyper-util = { version = "=0.1.21", features = ["tokio"] }
+serde = "=1.0.229"
+serde_json = { version = "=1.0.154", features = ["preserve_order"] }
+sha1_smol = "=1.0.1"
+sha2 = "=0.10.9"
+subtle = "=2.6.1"
+tokio = { version = "=1.54.0", features = ["rt", "sync", "time", "macros", "net", "io-util"] }
+
+[dev-dependencies]
+tokio = { version = "=1.54.0", features = ["rt-multi-thread", "macros", "io-util", "net", "test-util"] }

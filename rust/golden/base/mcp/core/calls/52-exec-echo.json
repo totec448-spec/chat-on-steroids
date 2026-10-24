@@ -1,0 +1,41 @@
+{
+  "case": "exec-echo",
+  "request": {
+    "tool": "exec_command",
+    "arguments": {
+      "cmd": "Write-Output golden-ok",
+      "workdir": "/project"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Chunk ID: <CHUNK_ID>\nWall time: <DURATION> seconds\nProcess exited with code 0\nCompleted session ID: <EXEC_SESSION:1>\nOriginal token count: 3\nOutput:\ngolden-ok\r\n"
+            },
+            {
+              "type": "text",
+              "text": "\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat."
+            }
+          ],
+          "structuredContent": {
+            "chunk_id": "<CHUNK_ID>",
+            "wall_time_seconds": "<DURATION>",
+            "exit_code": 0,
+            "completed_session_id": "<EXEC_SESSION:1>",
+            "original_token_count": 3,
+            "output": "golden-ok\r\n",
+            "supplemental_context": "\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat."
+          }
+        },
+        "jsonrpc": "2.0",
+        "id": 53
+      }
+    ]
+  }
+}

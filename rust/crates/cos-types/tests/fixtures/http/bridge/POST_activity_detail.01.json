@@ -1,0 +1,32 @@
+{
+  "method": "POST",
+  "route": "/activity/detail",
+  "status": 200,
+  "request": {
+    "conversationId": "67676767-5656-4545-3434-232323232323",
+    "callId": "0c40b8d6-72eb-41ca-8a23-7bcecef9e7bb",
+    "detailRevision": 3
+  },
+  "response": {
+    "ok": true,
+    "conversationId": "67676767-5656-4545-3434-232323232323",
+    "callId": "0c40b8d6-72eb-41ca-8a23-7bcecef9e7bb",
+    "detailRevision": 3,
+    "tool": "read_file",
+    "outcome": {
+      "code": "completed",
+      "label": "completed"
+    },
+    "durationMs": 0,
+    "args": {
+      "text": "{\"path\":\"/project/already-recorded.ts\"}",
+      "truncated": false,
+      "chars": 39
+    },
+    "result": {
+      "text": "recorded result",
+      "truncated": false,
+      "chars": 15
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "request": {
+    "method": "POST",
+    "route": "/v1/inputs",
+    "headers": {
+      "content-type": "text/plain",
+      "expect": "100-continue"
+    },
+    "body": {}
+  },
+  "response": {
+    "status": 415,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "close"
+    },
+    "body": {
+      "error": "unsupported_media_type"
+    }
+  }
+}

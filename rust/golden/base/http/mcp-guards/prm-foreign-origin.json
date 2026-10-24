@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/.well-known/oauth-protected-resource/mcp/core/<MCP_TOKEN:core>",
+    "headers": {
+      "origin": "https://evil.example"
+    },
+    "body": null
+  },
+  "response": {
+    "status": 403,
+    "headers": {
+      "content-type": "application/json",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "error": {
+        "code": -32000,
+        "message": "Invalid Origin: evil.example"
+      },
+      "id": null
+    }
+  }
+}

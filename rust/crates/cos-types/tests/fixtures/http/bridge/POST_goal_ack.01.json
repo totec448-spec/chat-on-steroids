@@ -1,0 +1,16 @@
+{
+  "method": "POST",
+  "route": "/goal/ack",
+  "status": 200,
+  "request": {
+    "conversationId": "cafe0094-0000-4000-8000-000000000094",
+    "token": "TTTTTTTTTTTTTTTTTTTTTT",
+    "clientId": "owner",
+    "nativeBusy": true
+  },
+  "response": {
+    "acknowledged": false,
+    "deferred": true,
+    "listenUntil": 1767225600000
+  }
+}

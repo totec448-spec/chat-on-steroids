@@ -1,0 +1,31 @@
+{
+  "request": {
+    "method": "GET",
+    "route": "/v1/sessions/{unattributed}/events?from=0&limit=1",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "events": [
+        {
+          "seq": 1,
+          "position": 1,
+          "time": "<EPOCH_MS>",
+          "kind": "session_start",
+          "source": "app",
+          "conversationId": null,
+          "title": "Unattributed activity"
+        }
+      ],
+      "total": 76,
+      "nextFrom": 2
+    }
+  }
+}

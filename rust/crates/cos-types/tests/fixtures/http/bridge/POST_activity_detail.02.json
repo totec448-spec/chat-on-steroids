@@ -1,0 +1,15 @@
+{
+  "method": "POST",
+  "route": "/activity/detail",
+  "status": 400,
+  "request": {
+    "conversationId": "78787878-6767-5656-4545-343434343434",
+    "callId": [
+      "5d64b98d-cb40-40a7-8f4c-aede02db0076"
+    ],
+    "detailRevision": 3
+  },
+  "response": {
+    "error": "bad_request"
+  }
+}

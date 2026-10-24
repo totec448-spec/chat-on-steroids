@@ -1,0 +1,15 @@
+{
+  "method": "POST",
+  "route": "/input/ack",
+  "status": 200,
+  "request": {
+    "id": "4e4f2d64-1605-43d4-90f3-ca070e557222",
+    "owner": "normal-page",
+    "conversationId": "e1e51d4a-a640-4a2f-8bec-dfee89625a7b",
+    "requiresAuthorization": true,
+    "messageId": "normal-next"
+  },
+  "response": {
+    "ok": true
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "case": "read-max-bytes-over-limit",
+  "request": {
+    "tool": "read",
+    "arguments": {
+      "paths": [
+        "/project/README.md"
+      ],
+      "max_bytes": 524289
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool read: max_bytes: Too big: expected number to be <=524288"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 24
+      }
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "method": "GET",
+  "route": "/v1/log",
+  "status": 200,
+  "request": null,
+  "response": {
+    "entries": [
+      {
+        "time": 1767225600000,
+        "level": "error",
+        "message": "reads-test error f5b6a602e70f"
+      }
+    ],
+    "ringSize": 12
+  }
+}

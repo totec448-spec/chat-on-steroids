@@ -1,0 +1,40 @@
+{
+  "method": "GET",
+  "route": "/v1/sessions/49f2edd2-5213-4c31-92bb-fe245a3f528b",
+  "status": 200,
+  "request": null,
+  "response": {
+    "session": {
+      "id": "49f2edd2-5213-4c31-92bb-fe245a3f528b",
+      "title": "Start a new task: list the open pull requests.",
+      "conversationId": null,
+      "projectId": null,
+      "startedAt": 1767225600000,
+      "updatedAt": 1767225600000,
+      "endedAt": null,
+      "events": 0,
+      "userMessages": 0,
+      "toolCalls": 0,
+      "lastToolCallAt": null,
+      "lastAssistantFinalAt": null,
+      "lastTurnEndAt": null,
+      "activityExpiresAt": null,
+      "errors": 0,
+      "toolRejected": 0,
+      "toolInternalErrors": 0,
+      "processExitNonzero": 0,
+      "estimatedTokens": 0,
+      "contextTokens": 0,
+      "lastTurnOutcome": null,
+      "activeTurnId": null,
+      "model": null,
+      "agents": [],
+      "origin": {
+        "kind": "desktop",
+        "fromSessionId": null,
+        "agentId": null,
+        "task": ""
+      }
+    }
+  }
+}

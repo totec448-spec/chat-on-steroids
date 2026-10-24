@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "route": "/input/ack",
+  "status": 200,
+  "request": {
+    "id": "e700d40f-4159-4e6b-a7cc-5cdcbaba8761",
+    "owner": "decision-document",
+    "conversationId": null,
+    "messageId": "decision-question"
+  },
+  "response": {
+    "ok": true
+  }
+}

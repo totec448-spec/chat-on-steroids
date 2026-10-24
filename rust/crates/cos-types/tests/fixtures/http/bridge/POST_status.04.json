@@ -1,0 +1,1424 @@
+{
+  "method": "POST",
+  "route": "/status",
+  "status": 200,
+  "request": {
+    "openConversations": [
+      "87126663-2a4b-4a7c-832e-557f063eddc4"
+    ]
+  },
+  "response": {
+    "ok": true,
+    "conversations": [
+      {
+        "conversationId": "3a4211a2-19b2-4cd4-bc1c-1348f434b64a",
+        "sessionId": "2026-01-01-e04a80ea",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "4ee93fdb-11ab-49d7-98d0-f5b49683346d",
+        "sessionId": "2026-01-01-9be911ff",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "716dbaab-42a7-4b35-9597-45fd0b080483",
+        "sessionId": "2026-01-01-13e3841a",
+        "generating": true,
+        "activeTurnId": "9885a289-3af2-4f91-a50c-fede0402c9f6",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "2959a1d0-3812-4216-bcb7-ea2e65b26f8a",
+        "sessionId": "2026-01-01-ec1b5ee4",
+        "generating": true,
+        "activeTurnId": "924dbe7c-510f-47a7-b614-6981169695c0",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "c77e4f93-9c93-4460-9625-1321660e4bd3",
+        "sessionId": "2026-01-01-9bd00d4e",
+        "generating": true,
+        "activeTurnId": "e010fbc7-c9be-451a-83d8-b8fab57fd543",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "b7a43cd2-8fa7-4769-9ffc-b0a07e4c87a2",
+        "sessionId": "2026-01-01-c3aa0e00",
+        "generating": true,
+        "activeTurnId": "0ccf4f98-b7eb-47f7-a520-8144d382b5b9",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "3d97b2fd-3990-4316-b507-b3163b05262a",
+        "sessionId": "2026-01-01-43e7867d",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "fd76d849-2b58-48d2-86a8-8ac5b891e9fa",
+        "sessionId": "2026-01-01-4bf8c37d",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "885f6f3c-a768-436d-9ef7-86d88670657c",
+        "sessionId": "2026-01-01-67da9be0",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "f0bd980e-08b1-478d-804a-9ecbb92b20e1",
+        "sessionId": "2026-01-01-8cc28e51",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "2c25bb29-677d-407a-9d93-8711fe9804ad",
+        "sessionId": "2026-01-01-07812460",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "11e859a1-456a-48cd-8f72-e56b84b3159c",
+        "sessionId": "2026-01-01-d45b0106",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "cfa1fa2b-dc6c-455e-aa27-c7dd21b81024",
+        "sessionId": "2026-01-01-9136c770",
+        "generating": true,
+        "activeTurnId": "5af28b17-66b3-4ef4-94e0-6711bd695e2d",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "38773a68-ed75-492b-b38a-98ad95db2677",
+        "sessionId": "2026-01-01-97de2594",
+        "generating": true,
+        "activeTurnId": "369e43e3-357e-4f29-ac37-5756e96d2f9e",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "203d2168-10bb-48e0-bf51-e880524a9a10",
+        "sessionId": "2026-01-01-af3323bc",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "a21684c0-3fa7-42ca-8295-b5dd40d7fb22",
+        "sessionId": "2026-01-01-4a01da6b",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "cf584302-f06c-462b-b850-aeb1aa20fcf0",
+        "sessionId": "2026-01-01-d1cf8cee",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "2ccc204d-35e6-4c60-857b-f1443f8ae397",
+        "sessionId": "2026-01-01-4a54eb9b",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "b728a09d-c811-476c-b7f6-169fce2d8d21",
+        "sessionId": "2026-01-01-44eeb605",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "a9047f8d-9b79-404d-b341-2a3b3b076f35",
+        "sessionId": "2026-01-01-ef8e465f",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "f1109c55-2130-457e-8991-601d7dcb3fe5",
+        "sessionId": "2026-01-01-79b05c35",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "6aebe715-8495-4256-b614-06fb88329bb5",
+        "sessionId": "2026-01-01-07ab77be",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "4b9f7ee5-23b7-41cd-93aa-47f0912b06cd",
+        "sessionId": "2026-01-01-e362ce66",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "stopped"
+      },
+      {
+        "conversationId": "bf6781f3-fded-4601-b6ef-f0e71694c0ec",
+        "sessionId": "2026-01-01-fcbf30f5",
+        "generating": true,
+        "activeTurnId": "failed-view",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "61ecc156-fa76-4558-ac1b-041128446a21",
+        "sessionId": "2026-01-01-8b717f72",
+        "generating": true,
+        "activeTurnId": "failed-view",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "1bf7ee36-e37d-4bb1-bd8a-dc9fd8e08f1f",
+        "sessionId": "2026-01-01-24640924",
+        "generating": true,
+        "activeTurnId": "failed-view",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "b1ff067a-fd20-497a-a16a-8904c8090d1a",
+        "sessionId": "2026-01-01-28579803",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "d132f629-c393-4cb7-9fd9-d82b5bb80075",
+        "sessionId": "2026-01-01-cc98d98c",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "bd6a2b50-ec2f-4c94-8551-a8da5691c629",
+        "sessionId": "2026-01-01-6a3c3800",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "a98bccf2-2d76-42ab-8ae5-1a5d57bca00f",
+        "sessionId": "2026-01-01-1700dea6",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "b52a923c-386d-499e-87a3-2c7bba74ac5c",
+        "sessionId": "2026-01-01-d7bf5533",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "c92def3e-e8e0-451c-a9e3-976b5be1caff",
+        "sessionId": "2026-01-01-95d234eb",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "019e34cb-43d0-4241-aeb6-3a352090a8b3",
+        "sessionId": "2026-01-01-a070c609",
+        "generating": true,
+        "activeTurnId": "new-work",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "7cf104aa-974d-4ab5-823f-833a634243eb",
+        "sessionId": "2026-01-01-eb06c299",
+        "generating": true,
+        "activeTurnId": "new-work",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "34aa1371-8651-44de-ad0e-9288c1cf94c1",
+        "sessionId": "2026-01-01-41990208",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "b3f60ddf-5fb8-4147-981d-038d67d54e67",
+        "sessionId": "2026-01-01-488bd50b",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "c7fda686-b197-42ca-ad19-cab0f6c9517d",
+        "sessionId": "2026-01-01-a59118b1",
+        "generating": true,
+        "activeTurnId": "silent-source",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "f081cedf-683c-4f28-9b46-07b073f572e7",
+        "sessionId": "2026-01-01-4bc04eaf",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "5449fa82-0db5-4a60-800c-fa80f9edb6bc",
+        "sessionId": "2026-01-01-26a3275e",
+        "generating": true,
+        "activeTurnId": "current-turn",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "74d655ff-32f3-4a6f-9913-ecd5e61be856",
+        "sessionId": "2026-01-01-51600280",
+        "generating": true,
+        "activeTurnId": "current-turn",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 1,
+        "lastTurnOutcome": "stopped"
+      },
+      {
+        "conversationId": "e2a61383-2257-423e-b5e5-e7c5bda788d5",
+        "sessionId": "2026-01-01-28310145",
+        "generating": true,
+        "activeTurnId": "current-turn",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "a50f610d-a9d9-464b-9234-fe4b32086adc",
+        "sessionId": "2026-01-01-d3a977b9",
+        "generating": true,
+        "activeTurnId": "current-turn",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "2a629eab-3971-414e-8c62-1ee9f289b15c",
+        "sessionId": "2026-01-01-c59a8f0a",
+        "generating": true,
+        "activeTurnId": "current-turn",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "3cb1fc07-eed4-4351-bf42-a5a6cb2cd737",
+        "sessionId": "2026-01-01-4652ad83",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "016a0f84-2244-4790-90ab-b72a1da73f67",
+        "sessionId": "2026-01-01-74c6f416",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 2,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "ef948a6b-e69d-4e5e-90a5-3d1e53c101bc",
+        "sessionId": "2026-01-01-f74b2cc4",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "6610cb08-0525-4842-b37d-0b90249e0490",
+        "sessionId": "2026-01-01-0fcd6210",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "771d6914-3f22-404f-8848-5d65bb30177e",
+        "sessionId": "2026-01-01-22d14c40",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "72d9bbed-e711-4aa0-9373-ba27b4f0b241",
+        "sessionId": "2026-01-01-4bcc5985",
+        "generating": true,
+        "activeTurnId": "current-turn",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "d5af5aba-e911-409a-a035-e0e733497749",
+        "sessionId": "2026-01-01-ddf0d41f",
+        "generating": true,
+        "activeTurnId": "current-turn",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 1,
+        "lastTurnOutcome": "stopped"
+      },
+      {
+        "conversationId": "978d68ca-b970-4b9c-96ae-284d11bd4e01",
+        "sessionId": "2026-01-01-0c8cb81c",
+        "generating": true,
+        "activeTurnId": "current-turn",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "fb305804-26e6-4c62-9e1e-1a68c26aa2e0",
+        "sessionId": "2026-01-01-31a7bd18",
+        "generating": true,
+        "activeTurnId": "current-turn",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "3078e8d1-131c-4b9e-876e-78cc289072c0",
+        "sessionId": "2026-01-01-b33a3968",
+        "generating": true,
+        "activeTurnId": "current-turn",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "6d9536cc-d6ee-4068-811f-4e62cbf4b5e1",
+        "sessionId": "2026-01-01-43dd0a7b",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "4bb925e2-cd71-4837-b6f1-1269e6f858c7",
+        "sessionId": "2026-01-01-88467a83",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 2,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "24d34f69-c087-44ef-acc7-042b06060c7c",
+        "sessionId": "2026-01-01-96003b9d",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "00d711a1-4f52-4740-b96f-adc9aed845a1",
+        "sessionId": "2026-01-01-9497c01b",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "0dd8579b-0623-4751-9ccc-dc3152fd7a83",
+        "sessionId": "2026-01-01-4f6d7785",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "81296685-30ab-462d-85b6-0a2119adf6a3",
+        "sessionId": "2026-01-01-b8671e09",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "86680923-aaaf-4c85-a324-7a89687f3d00",
+        "sessionId": "2026-01-01-ed20db3f",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "359e6538-93b7-4a1d-8eb1-3703f65c903d",
+        "sessionId": "2026-01-01-f1784e26",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "e02d7628-f397-475c-bfb2-2ead6783c034",
+        "sessionId": "2026-01-01-084538d1",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "7b3b72fd-501d-4599-8ad0-995f30bcf5f6",
+        "sessionId": "2026-01-01-a2ef3a78",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "b2e08e00-dd87-481d-99be-e3d541f9e1ab",
+        "sessionId": "2026-01-01-0d0c66e5",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "aad6d37e-2606-471b-893b-994b96a6a4c0",
+        "sessionId": "2026-01-01-d9aee635",
+        "generating": true,
+        "activeTurnId": "normal-silence",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "bc68965d-0068-4fa4-aa18-4cd84ae38115",
+        "sessionId": "2026-01-01-8a46a97b",
+        "generating": true,
+        "activeTurnId": "normal-silence",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "74a19e51-875b-475e-a396-14d14a170e11",
+        "sessionId": "2026-01-01-ee87d2e1",
+        "generating": true,
+        "activeTurnId": "normal-silence",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "b7d5a94b-11f6-4e85-a3d7-b89f66713872",
+        "sessionId": "2026-01-01-2d01ee5b",
+        "generating": true,
+        "activeTurnId": "normal-silence",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "1ef5a7e9-cd70-4da0-80e8-909ad5c55de6",
+        "sessionId": "2026-01-01-d0bcc230",
+        "generating": true,
+        "activeTurnId": "normal-silence",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "e1e51d4a-a640-4a2f-8bec-dfee89625a7b",
+        "sessionId": "2026-01-01-3a5ed954",
+        "generating": true,
+        "activeTurnId": "normal-silence",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "2a010e69-d951-45d3-89d1-1f7a33c496a2",
+        "sessionId": "2026-01-01-b8db66a8",
+        "generating": true,
+        "activeTurnId": "normal-silence",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "fc46dd4f-fa85-4dd3-a1eb-5740cd8c4dff",
+        "sessionId": "2026-01-01-dda5d3e0",
+        "generating": true,
+        "activeTurnId": "silence-turn",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "eec87e87-22d0-43c0-8691-6183a137b79e",
+        "sessionId": "2026-01-01-8f8982ee",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "stalled"
+      },
+      {
+        "conversationId": "81fefc95-32e3-4384-bcc1-5c792a0f3d32",
+        "sessionId": "2026-01-01-a25d1c7f",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "4a2d9cf3-f14d-42da-98bd-79505b477a63",
+        "sessionId": "2026-01-01-af1447a1",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "351594b3-82a5-4cd9-85b2-33f385d589aa",
+        "sessionId": "2026-01-01-cdbb77cc",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "078a2d51-45b7-4929-a980-e615e92fbcb3",
+        "sessionId": "2026-01-01-762b36e8",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "66443295-116f-46af-9d67-28b3db34015e",
+        "sessionId": "2026-01-01-b07b8b3c",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "9a965dde-c7a2-43dd-bbc4-3dc91c49c878",
+        "sessionId": "2026-01-01-27b177d7",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "failed"
+      },
+      {
+        "conversationId": "0a8b79c1-3919-4f1e-8100-8ad7b9714774",
+        "sessionId": "2026-01-01-56932520",
+        "generating": true,
+        "activeTurnId": "unrelated-turn",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "f6c6cd46-84af-417c-a35e-e5c09bb30ba8",
+        "sessionId": "2026-01-01-1bb561ba",
+        "generating": true,
+        "activeTurnId": "resume-turn",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "980738ca-6e5e-4d87-a315-7fc7e6e07d87",
+        "sessionId": "2026-01-01-3635890f",
+        "generating": true,
+        "activeTurnId": "resume-turn",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "40921e6a-2b15-4f19-a8f4-c3c84d80492c",
+        "sessionId": "2026-01-01-a48c8bdf",
+        "generating": true,
+        "activeTurnId": "resume-turn",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "bbdb2fdb-befa-4787-8394-b84cad7673e3",
+        "sessionId": "2026-01-01-a56d744a",
+        "generating": true,
+        "activeTurnId": "resume-turn",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "d2bc54a7-e5a3-40f8-8c02-bdc4bd1b28eb",
+        "sessionId": "2026-01-01-d7513950",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "6feb6c03-bedd-4b1f-b6bf-3eb7bc7f1bb3",
+        "sessionId": "2026-01-01-e77b0203",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "93805587-1169-404f-8e1d-f36a2fb36bf8",
+        "sessionId": "2026-01-01-d6e7c64f",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "f3567997-2b09-4c56-b04c-1a7f09a21790",
+        "sessionId": "2026-01-01-83783996",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "03e228ae-8481-4827-afed-ae9f5de5f4e0",
+        "sessionId": "2026-01-01-316c4024",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "434d9323-6958-4e09-b97d-1615387fd439",
+        "sessionId": "2026-01-01-cb65423e",
+        "generating": true,
+        "activeTurnId": "image-race-turn",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "c4e5ce59-456f-4b81-8716-5ba0bdf6762e",
+        "sessionId": "2026-01-01-ce0714ed",
+        "generating": true,
+        "activeTurnId": "tool-free-turn",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "d54449d8-d893-411d-94b4-f573dcc321ce",
+        "sessionId": "2026-01-01-704ae587",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "5bd0b3f9-dced-4e8f-a967-0a4fc2ca4b44",
+        "sessionId": "2026-01-01-b26c184f",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "0ab29b43-1d52-4b3d-8e2e-660b8b7b2275",
+        "sessionId": "2026-01-01-be435462",
+        "generating": true,
+        "activeTurnId": "second-held-turn",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "591994e0-a1f1-4aa7-9332-1abf012023d5",
+        "sessionId": "f2cb73bb-f8ec-4978-8e98-172b20da121e",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "fb9dc9ef-e67d-4e2f-8c70-ba57b7dec522",
+        "sessionId": "04ef759f-078b-4662-bb20-7eca76fcc0bf",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "e40f9272-6ad3-47fc-a584-71d7eae28017",
+        "sessionId": "0d8ccaa2-ee12-4a49-a311-4c2adccde646",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "6ead1b44-074c-4fbe-bfc3-b71e0f105714",
+        "sessionId": "e0209769-5bbc-4c8b-bbcb-6a99616fb80c",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "e4330efa-12d9-4d87-a444-97c0a499437b",
+        "sessionId": "2026-01-01-24e1acff",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "2645ff86-3d41-438c-8341-78eedc2a4fe2",
+        "sessionId": "2026-01-01-5902925b",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "43fa176f-f43d-484d-8495-8b30daa9b676",
+        "sessionId": "2026-01-01-7d48a0cd",
+        "generating": true,
+        "activeTurnId": "e087dee0-da4b-48c4-bb55-ddd290a52aed",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "c462c586-4640-4083-8aed-b51ad9bd21c2",
+        "sessionId": "2026-01-01-8a9884da",
+        "generating": true,
+        "activeTurnId": "b6b4638e-90cc-46a1-875d-e96f2c51fb74",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "7903873e-36fe-4f4c-ba94-c050dd716986",
+        "sessionId": "2026-01-01-8a9884da",
+        "generating": false,
+        "activeTurnId": null,
+        "activeTurnStartedAt": null,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "59244ff8-7dbe-48ee-a835-632ee091ce83",
+        "sessionId": "2026-01-01-673d8186",
+        "generating": true,
+        "activeTurnId": "09be07af-5c66-43f5-900f-e6ecf4826c70",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "7bc91e59-7cb4-4fff-a4e6-bb09ae835f71",
+        "sessionId": "2026-01-01-e5a74d1c",
+        "generating": true,
+        "activeTurnId": "08a16fcb-7f53-4a7e-b5d3-d319e5da14d8",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "d1d8ae1b-6a3c-4eb0-b127-c7e9558330ea",
+        "sessionId": "2026-01-01-99e709a2",
+        "generating": true,
+        "activeTurnId": "3539f9d9-a3c4-4441-a721-4056debf8ea1",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "a7eac8f9-1bc4-44c8-b568-5056f8b37a91",
+        "sessionId": "2026-01-01-0da907e7",
+        "generating": true,
+        "activeTurnId": "ae248fa8-6d5a-42c0-bd05-594d2cd65931",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "e1a670c9-b853-4170-9b9f-82a9f87ecb4d",
+        "sessionId": "2026-01-01-d19ad469",
+        "generating": true,
+        "activeTurnId": "7e3ee69b-cf3c-49ab-9f57-b9109e7c18fc",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "47f26887-c5aa-4371-aaf4-a4f22c037e08",
+        "sessionId": "2026-01-01-2af59033",
+        "generating": true,
+        "activeTurnId": "4ab25f18-c2bb-41c2-94d5-2f6ecfbf6f44",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "bb3f1ef2-0940-4b8b-9ebc-b076d88a2f61",
+        "sessionId": "2026-01-01-2af59033",
+        "generating": true,
+        "activeTurnId": "dabbfe8b-83ee-4953-bf90-ade2e753208b",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "e968edbd-b1cb-4330-8a16-0e9967246271",
+        "sessionId": "2026-01-01-c241b5bb",
+        "generating": true,
+        "activeTurnId": "368de6b9-877f-4845-9790-63fc7742f0d6",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "9d078b29-bdbe-4f4c-aeac-22e779d89499",
+        "sessionId": "2026-01-01-c241b5bb",
+        "generating": true,
+        "activeTurnId": "a3470d64-87ac-4c0d-90cd-78f5a8c9fa1e",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "66764f0b-abce-427e-8005-007ef7f442df",
+        "sessionId": "2026-01-01-0eede526",
+        "generating": true,
+        "activeTurnId": "639d36b7-2061-40cf-8c81-428f43385851",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "76135811-3b74-4335-b854-3a88fc237db7",
+        "sessionId": "2026-01-01-3d3c5e3b",
+        "generating": true,
+        "activeTurnId": "060018e0-77f7-4a5b-8134-bf3014eee487",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "614fdb09-3371-4777-88ea-58fb86fca568",
+        "sessionId": "2026-01-01-6858ec80",
+        "generating": true,
+        "activeTurnId": "bd0eaf57-3248-4857-8130-a2cb0a03aa5b",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "1277ea2d-9cc2-4793-92e6-7cb438772fe3",
+        "sessionId": "2026-01-01-069b4914",
+        "generating": true,
+        "activeTurnId": "8bd17862-e6e3-451a-a974-52e73af23d6a",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "fd5913b2-5400-47eb-a8f6-d9d45aa80784",
+        "sessionId": "2026-01-01-e6d8b463",
+        "generating": true,
+        "activeTurnId": "2ef7c24e-a7d4-4e8e-9680-86bf067293a1",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "f8ae37f8-c1db-4ca4-8f8d-9e234a096d82",
+        "sessionId": "2026-01-01-8cc78cc5",
+        "generating": true,
+        "activeTurnId": "6ce20cd9-6bdc-45b7-a89a-684b86f6bc99",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "d11a5681-1b5d-4def-8aaa-0e22deaa58c3",
+        "sessionId": "2026-01-01-8cc78cc5",
+        "generating": true,
+        "activeTurnId": "d452fb93-1194-442c-9eba-742fad63a0d8",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "41ea0842-b4a8-4a54-8282-95a60c27044e",
+        "sessionId": "2026-01-01-479130a6",
+        "generating": true,
+        "activeTurnId": "c714ae19-3436-406c-9c46-b71ba3d76153",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "3321bd3e-8be6-412f-9320-4cdbf9e4ca7e",
+        "sessionId": "2026-01-01-479130a6",
+        "generating": true,
+        "activeTurnId": "001f2ee7-7b7c-4862-8f13-2a5849b341bb",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "c6e33e2b-6016-4a82-853a-c5c2ad04bb9e",
+        "sessionId": "2026-01-01-78cc29a8",
+        "generating": true,
+        "activeTurnId": "571aa675-06aa-4c64-badb-59319a1d368e",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "e6988487-75d0-414b-92b7-27fa402393e0",
+        "sessionId": "2026-01-01-586c19a5",
+        "generating": true,
+        "activeTurnId": "d7ca2703-7083-4b62-af01-3d204d3cc4c9",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 1,
+        "lastTurnOutcome": "completed"
+      },
+      {
+        "conversationId": "2dccaa02-3ff9-4348-ba3b-bda4f346ff9f",
+        "sessionId": "2026-01-01-7208c4a7",
+        "generating": true,
+        "activeTurnId": "b828de5f-5fde-4b64-acc8-1ef66fd28c54",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "2169d8f7-6945-4e71-970c-d355ee7ee11b",
+        "sessionId": "2026-01-01-1f8d24d5",
+        "generating": true,
+        "activeTurnId": "90b1bedd-3376-42da-9d29-01bdc93ab120",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "fa8ad4d0-0df6-4197-a98e-921048a4477e",
+        "sessionId": "2026-01-01-b0eb52ef",
+        "generating": true,
+        "activeTurnId": "f42529bd-dccc-44ac-8d15-004b7bd70c67",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "0f5d9872-00c6-489a-894e-b50c6e13e493",
+        "sessionId": "2026-01-01-e1eb964a",
+        "generating": true,
+        "activeTurnId": "874a024d-4d85-48f5-b37c-17c336e61a3f",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "13447e0c-84be-4f24-b6cc-19f3151c0b22",
+        "sessionId": "2026-01-01-86263339",
+        "generating": true,
+        "activeTurnId": "3578e702-ea8d-4b4e-b367-4c8f76e97ba1",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "cf8e46ea-627b-4905-9dbf-87cb1a4d9331",
+        "sessionId": "2026-01-01-02ec93ef",
+        "generating": true,
+        "activeTurnId": "7f216695-3bb8-4787-8f7d-4bb0b9556fdc",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      },
+      {
+        "conversationId": "87126663-2a4b-4a7c-832e-557f063eddc4",
+        "sessionId": "2026-01-01-b85cabb2",
+        "generating": true,
+        "activeTurnId": "e74be206-c305-40c9-b043-c9b63843d26f",
+        "activeTurnStartedAt": 1767225600000,
+        "endedTurns": 0,
+        "lastTurnOutcome": null
+      }
+    ],
+    "stopTurns": [],
+    "modelCatalogRequest": null,
+    "connectorNames": {
+      "core": "Chat On Steroids Core",
+      "desktop": "Chat On Steroids Desktop",
+      "plugins": "Chat On Steroids Plugins"
+    },
+    "connectorApps": {
+      "core": [],
+      "desktop": [],
+      "plugins": []
+    },
+    "pluginRefreshRequests": [],
+    "browserPreferenceRequest": null,
+    "projectCreateRequests": [
+      {
+        "id": "1862d449-f136-4de2-b9ed-3371d3d72b00",
+        "projectId": "aba09bf1-34de-4a51-b31b-f0fdb71f6882",
+        "name": "project-559b0664-bc7d-4f6d-bd74-9b4b807aea04",
+        "state": "requested"
+      }
+    ],
+    "inputOpeningIds": [
+      "4d93c9c0-b763-43de-b8d6-d87b21330f5c",
+      "763a6245-37dd-44f4-94fe-9d438c42db6d"
+    ],
+    "inputs": [
+      {
+        "id": "4d93c9c0-b763-43de-b8d6-d87b21330f5c",
+        "conversationId": "13447e0c-84be-4f24-b6cc-19f3151c0b22",
+        "recovery": {
+          "questionId": "6923a81f-777c-4fc4-98b4-26d5676abe16",
+          "stop": false
+        },
+        "silenceTurnId": "3578e702-ea8d-4b4e-b367-4c8f76e97ba1"
+      },
+      {
+        "id": "763a6245-37dd-44f4-94fe-9d438c42db6d",
+        "conversationId": "cf8e46ea-627b-4905-9dbf-87cb1a4d9331",
+        "recovery": {
+          "questionId": "1ca12626-41a4-45cc-a6ea-3aff24fbd344",
+          "stop": false
+        },
+        "silenceTurnId": "7f216695-3bb8-4787-8f7d-4bb0b9556fdc"
+      }
+    ],
+    "background": true,
+    "backgroundPlacement": "window",
+    "browserOnly": false,
+    "browserWindowBounds": {
+      "width": 800,
+      "height": 600
+    },
+    "commands": 0,
+    "commandIds": [],
+    "revival": null,
+    "revivals": [],
+    "placement": null,
+    "repairs": [
+      {
+        "conversationId": "87126663-2a4b-4a7c-832e-557f063eddc4",
+        "token": "TTTTTTTTTTTT",
+        "reason": "silence",
+        "focus": false,
+        "requiresClaim": true
+      }
+    ],
+    "idleReuseAfterMs": 120000,
+    "idleCloseAfterMs": 300000,
+    "cancelledDecisionClaims": [],
+    "retiredConversations": [],
+    "conversationActivityAt": {
+      "00d711a1-4f52-4740-b96f-adc9aed845a1": 1767225600000,
+      "016a0f84-2244-4790-90ab-b72a1da73f67": 1767225600000,
+      "019e34cb-43d0-4241-aeb6-3a352090a8b3": 1767225600000,
+      "03e228ae-8481-4827-afed-ae9f5de5f4e0": 1767225600000,
+      "078a2d51-45b7-4929-a980-e615e92fbcb3": 1767225600000,
+      "0a8b79c1-3919-4f1e-8100-8ad7b9714774": 1767225600000,
+      "0ab29b43-1d52-4b3d-8e2e-660b8b7b2275": 1767225600000,
+      "0dd8579b-0623-4751-9ccc-dc3152fd7a83": 1767225600000,
+      "0f3589b2-d0bb-4a7d-b45f-50f34b22a968": 1767225600000,
+      "0f5d9872-00c6-489a-894e-b50c6e13e493": 1767225600000,
+      "11e859a1-456a-48cd-8f72-e56b84b3159c": 1767225600000,
+      "1277ea2d-9cc2-4793-92e6-7cb438772fe3": 1767225600000,
+      "13447e0c-84be-4f24-b6cc-19f3151c0b22": 1767225600000,
+      "148ab0ce-fc9c-4652-8c6a-3428b21d8dd5": 1767225600000,
+      "1bf7ee36-e37d-4bb1-bd8a-dc9fd8e08f1f": 1767225600000,
+      "1ef5a7e9-cd70-4da0-80e8-909ad5c55de6": 1767225600000,
+      "203d2168-10bb-48e0-bf51-e880524a9a10": 1767225600000,
+      "2169d8f7-6945-4e71-970c-d355ee7ee11b": 1767225600000,
+      "24d34f69-c087-44ef-acc7-042b06060c7c": 1767225600000,
+      "2645ff86-3d41-438c-8341-78eedc2a4fe2": 1767225600000,
+      "2959a1d0-3812-4216-bcb7-ea2e65b26f8a": 1767225600000,
+      "296c93cd-1ab5-4181-9c72-b63cf29d5102": 1767225600000,
+      "2a010e69-d951-45d3-89d1-1f7a33c496a2": 1767225600000,
+      "2a629eab-3971-414e-8c62-1ee9f289b15c": 1767225600000,
+      "2c25bb29-677d-407a-9d93-8711fe9804ad": 1767225600000,
+      "2ccc204d-35e6-4c60-857b-f1443f8ae397": 1767225600000,
+      "2dccaa02-3ff9-4348-ba3b-bda4f346ff9f": 1767225600000,
+      "3078e8d1-131c-4b9e-876e-78cc289072c0": 1767225600000,
+      "3321bd3e-8be6-412f-9320-4cdbf9e4ca7e": 1767225600000,
+      "34aa1371-8651-44de-ad0e-9288c1cf94c1": 1767225600000,
+      "351594b3-82a5-4cd9-85b2-33f385d589aa": 1767225600000,
+      "359e6538-93b7-4a1d-8eb1-3703f65c903d": 1767225600000,
+      "385b609a-6900-4448-af69-023ee3fac827": 1767225600000,
+      "38773a68-ed75-492b-b38a-98ad95db2677": 1767225600000,
+      "3a4211a2-19b2-4cd4-bc1c-1348f434b64a": 1767225600000,
+      "3cb1fc07-eed4-4351-bf42-a5a6cb2cd737": 1767225600000,
+      "3d97b2fd-3990-4316-b507-b3163b05262a": 1767225600000,
+      "40921e6a-2b15-4f19-a8f4-c3c84d80492c": 1767225600000,
+      "42c89cc8-5385-41f1-b1c9-d728f6bb8145": 1767225600000,
+      "43fa176f-f43d-484d-8495-8b30daa9b676": 1767225600000,
+      "4a2d9cf3-f14d-42da-98bd-79505b477a63": 1767225600000,
+      "4b9f7ee5-23b7-41cd-93aa-47f0912b06cd": 1767225600000,
+      "4bb925e2-cd71-4837-b6f1-1269e6f858c7": 1767225600000,
+      "4cb3d810-f531-40fd-8102-cccd80205cfa": 1767225600000,
+      "4d192bdb-c58e-46c8-b178-5933f46649f6": 1767225600000,
+      "4ee93fdb-11ab-49d7-98d0-f5b49683346d": 1767225600000,
+      "511a23b6-f44b-4bc9-b964-091b5980bce5": 1767225600000,
+      "5449fa82-0db5-4a60-800c-fa80f9edb6bc": 1767225600000,
+      "57b74ee6-488f-4368-afcc-f6a58dab5296": 1767225600000,
+      "591994e0-a1f1-4aa7-9332-1abf012023d5": 1767225600000,
+      "5a188c8a-c34e-4b2b-98ef-ca7c8c807b04": 1767225600000,
+      "5bd0b3f9-dced-4e8f-a967-0a4fc2ca4b44": 1767225600000,
+      "60a54a45-fab2-43d7-a99a-fdf80eaf29f4": 1767225600000,
+      "614fdb09-3371-4777-88ea-58fb86fca568": 1767225600000,
+      "61ecc156-fa76-4558-ac1b-041128446a21": 1767225600000,
+      "64d5e553-2947-4ffa-be09-dd2edf94269f": 1767225600000,
+      "6610cb08-0525-4842-b37d-0b90249e0490": 1767225600000,
+      "66443295-116f-46af-9d67-28b3db34015e": 1767225600000,
+      "66764f0b-abce-427e-8005-007ef7f442df": 1767225600000,
+      "67ccae15-3d08-4360-a450-7a67e6743c5c": 1767225600000,
+      "6ae760c3-09ce-4a19-8465-6f6dc0561498": 1767225600000,
+      "6aebe715-8495-4256-b614-06fb88329bb5": 1767225600000,
+      "6d9536cc-d6ee-4068-811f-4e62cbf4b5e1": 1767225600000,
+      "6ead1b44-074c-4fbe-bfc3-b71e0f105714": 1767225600000,
+      "6feb6c03-bedd-4b1f-b6bf-3eb7bc7f1bb3": 1767225600000,
+      "716dbaab-42a7-4b35-9597-45fd0b080483": 1767225600000,
+      "72d9bbed-e711-4aa0-9373-ba27b4f0b241": 1767225600000,
+      "74a19e51-875b-475e-a396-14d14a170e11": 1767225600000,
+      "74d655ff-32f3-4a6f-9913-ecd5e61be856": 1767225600000,
+      "76135811-3b74-4335-b854-3a88fc237db7": 1767225600000,
+      "771d6914-3f22-404f-8848-5d65bb30177e": 1767225600000,
+      "7903873e-36fe-4f4c-ba94-c050dd716986": 1767225600000,
+      "7b3b72fd-501d-4599-8ad0-995f30bcf5f6": 1767225600000,
+      "7cf104aa-974d-4ab5-823f-833a634243eb": 1767225600000,
+      "81296685-30ab-462d-85b6-0a2119adf6a3": 1767225600000,
+      "81fefc95-32e3-4384-bcc1-5c792a0f3d32": 1767225600000,
+      "86680923-aaaf-4c85-a324-7a89687f3d00": 1767225600000,
+      "86b39e50-4df3-4680-8c12-ef9c8a0d45ec": 1767225600000,
+      "87126663-2a4b-4a7c-832e-557f063eddc4": 1767225600000,
+      "885f6f3c-a768-436d-9ef7-86d88670657c": 1767225600000,
+      "8ac297d1-3869-4dc6-bd50-6c5cbbd47eea": 1767225600000,
+      "92dda69c-00fa-4e5b-b917-5bd0cd868b11": 1767225600000,
+      "93805587-1169-404f-8e1d-f36a2fb36bf8": 1767225600000,
+      "978d68ca-b970-4b9c-96ae-284d11bd4e01": 1767225600000,
+      "980738ca-6e5e-4d87-a315-7fc7e6e07d87": 1767225600000,
+      "9a965dde-c7a2-43dd-bbc4-3dc91c49c878": 1767225600000,
+      "9d078b29-bdbe-4f4c-aeac-22e779d89499": 1767225600000,
+      "a21684c0-3fa7-42ca-8295-b5dd40d7fb22": 1767225600000,
+      "a4f29999-91ea-49f2-844d-acf9f7d63181": 1767225600000,
+      "a50f610d-a9d9-464b-9234-fe4b32086adc": 1767225600000,
+      "a9047f8d-9b79-404d-b341-2a3b3b076f35": 1767225600000,
+      "a98bccf2-2d76-42ab-8ae5-1a5d57bca00f": 1767225600000,
+      "aad6d37e-2606-471b-893b-994b96a6a4c0": 1767225600000,
+      "afa5e098-dfab-43c0-a731-0095986e46dd": 1767225600000,
+      "b1133e09-5675-4679-b2fd-9bb87df2f5d6": 1767225600000,
+      "b1ff067a-fd20-497a-a16a-8904c8090d1a": 1767225600000,
+      "b2e08e00-dd87-481d-99be-e3d541f9e1ab": 1767225600000,
+      "b3f60ddf-5fb8-4147-981d-038d67d54e67": 1767225600000,
+      "b52a923c-386d-499e-87a3-2c7bba74ac5c": 1767225600000,
+      "b54af6bd-eecb-479d-8088-0377d9646e12": 1767225600000,
+      "b728a09d-c811-476c-b7f6-169fce2d8d21": 1767225600000,
+      "b7a43cd2-8fa7-4769-9ffc-b0a07e4c87a2": 1767225600000,
+      "b7d5a94b-11f6-4e85-a3d7-b89f66713872": 1767225600000,
+      "bb3f1ef2-0940-4b8b-9ebc-b076d88a2f61": 1767225600000,
+      "bbdb2fdb-befa-4787-8394-b84cad7673e3": 1767225600000,
+      "bc2cb44f-780d-49ab-8e30-a20e35719c27": 1767225600000,
+      "bc68965d-0068-4fa4-aa18-4cd84ae38115": 1767225600000,
+      "bd6a2b50-ec2f-4c94-8551-a8da5691c629": 1767225600000,
+      "bd8120ed-ceaf-4c8a-8ca8-558c1c1e7c69": 1767225600000,
+      "beb0a0a5-3094-45fe-9515-edd1c8ce2f2c": 1767225600000,
+      "bf6781f3-fded-4601-b6ef-f0e71694c0ec": 1767225600000,
+      "c4e5ce59-456f-4b81-8716-5ba0bdf6762e": 1767225600000,
+      "c6e33e2b-6016-4a82-853a-c5c2ad04bb9e": 1767225600000,
+      "c77e4f93-9c93-4460-9625-1321660e4bd3": 1767225600000,
+      "c7fda686-b197-42ca-ad19-cab0f6c9517d": 1767225600000,
+      "c90109b2-8f36-4735-ac24-4ac222b691d1": 1767225600000,
+      "c92def3e-e8e0-451c-a9e3-976b5be1caff": 1767225600000,
+      "cf584302-f06c-462b-b850-aeb1aa20fcf0": 1767225600000,
+      "cf8e46ea-627b-4905-9dbf-87cb1a4d9331": 1767225600000,
+      "cfa1fa2b-dc6c-455e-aa27-c7dd21b81024": 1767225600000,
+      "d11a5681-1b5d-4def-8aaa-0e22deaa58c3": 1767225600000,
+      "d132f629-c393-4cb7-9fd9-d82b5bb80075": 1767225600000,
+      "d2bc54a7-e5a3-40f8-8c02-bdc4bd1b28eb": 1767225600000,
+      "d54449d8-d893-411d-94b4-f573dcc321ce": 1767225600000,
+      "d5af5aba-e911-409a-a035-e0e733497749": 1767225600000,
+      "e02d7628-f397-475c-bfb2-2ead6783c034": 1767225600000,
+      "e1e51d4a-a640-4a2f-8bec-dfee89625a7b": 1767225600000,
+      "e2a61383-2257-423e-b5e5-e7c5bda788d5": 1767225600000,
+      "e40f9272-6ad3-47fc-a584-71d7eae28017": 1767225600000,
+      "e4330efa-12d9-4d87-a444-97c0a499437b": 1767225600000,
+      "e6988487-75d0-414b-92b7-27fa402393e0": 1767225600000,
+      "e9f41c45-8557-4ecf-99fc-d83fc34e139e": 1767225600000,
+      "eec87e87-22d0-43c0-8691-6183a137b79e": 1767225600000,
+      "ef948a6b-e69d-4e5e-90a5-3d1e53c101bc": 1767225600000,
+      "f081cedf-683c-4f28-9b46-07b073f572e7": 1767225600000,
+      "f0bd980e-08b1-478d-804a-9ecbb92b20e1": 1767225600000,
+      "f1109c55-2130-457e-8991-601d7dcb3fe5": 1767225600000,
+      "f11cd7a8-8dfc-4d9c-a376-2e19a0175371": 1767225600000,
+      "f3567997-2b09-4c56-b04c-1a7f09a21790": 1767225600000,
+      "f4777845-bddd-4a29-8eb2-98a099ee624a": 1767225600000,
+      "f6c6cd46-84af-417c-a35e-e5c09bb30ba8": 1767225600000,
+      "fa8ad4d0-0df6-4197-a98e-921048a4477e": 1767225600000,
+      "fb305804-26e6-4c62-9e1e-1a68c26aa2e0": 1767225600000,
+      "fb5bd121-f55c-4cf9-ae41-90dbda577389": 1767225600000,
+      "fb9dc9ef-e67d-4e2f-8c70-ba57b7dec522": 1767225600000,
+      "fc46dd4f-fa85-4dd3-a1eb-5740cd8c4dff": 1767225600000,
+      "fd5913b2-5400-47eb-a8f6-d9d45aa80784": 1767225600000,
+      "fd76d849-2b58-48d2-86a8-8ac5b891e9fa": 1767225600000,
+      "project-followup-chat": 1767225600000
+    },
+    "managedConversations": [],
+    "reusableConversations": [],
+    "nonDiscardableConversations": [
+      "13447e0c-84be-4f24-b6cc-19f3151c0b22",
+      "2169d8f7-6945-4e71-970c-d355ee7ee11b",
+      "3321bd3e-8be6-412f-9320-4cdbf9e4ca7e",
+      "bbdb2fdb-befa-4787-8394-b84cad7673e3",
+      "cf8e46ea-627b-4905-9dbf-87cb1a4d9331",
+      "d11a5681-1b5d-4def-8aaa-0e22deaa58c3",
+      "fa8ad4d0-0df6-4197-a98e-921048a4477e"
+    ],
+    "blockedConversations": [],
+    "closableConversations": [],
+    "recoveryMonitoring": true,
+    "extensionUpdate": null,
+    "language": null,
+    "browserPreferences": null
+  }
+}

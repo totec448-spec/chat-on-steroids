@@ -1,0 +1,29 @@
+{
+  "method": "POST",
+  "route": "/correlations",
+  "status": 200,
+  "request": {
+    "conversationId": "abababab-3456-7890-abcd-ef1234567890",
+    "agent": "worker-1",
+    "agentCommandId": "9db443ce9db4cb55",
+    "calls": [
+      {
+        "requestId": "f0f00004-1111-4111-8111-111111111111",
+        "messageId": null
+      }
+    ]
+  },
+  "response": {
+    "ok": true,
+    "conversationId": "abababab-3456-7890-abcd-ef1234567890",
+    "sessionId": "2026-01-01-1885e69a",
+    "requestIds": [
+      "f0f00004-1111-4111-8111-111111111111"
+    ],
+    "confirmed": [
+      "f0f00004-1111-4111-8111-111111111111"
+    ],
+    "conflicts": [],
+    "complete": true
+  }
+}

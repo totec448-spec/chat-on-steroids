@@ -1,0 +1,16 @@
+{
+  "method": "POST",
+  "route": "/input/attachment",
+  "status": 409,
+  "request": {
+    "id": "428447f7-6bc5-47a6-836b-5d638d22f300",
+    "owner": "wrong-page",
+    "conversationId": "c7fda686-b197-42ca-ad19-cab0f6c9517d",
+    "requiresAuthorization": true,
+    "attachmentId": "12183b9f-b8bb-4ae2-963a-00e2fadcd6dd",
+    "offset": 0
+  },
+  "response": {
+    "error": "attachment_not_owned"
+  }
+}

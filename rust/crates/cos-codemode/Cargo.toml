@@ -1,0 +1,27 @@
+[package]
+name = "cos-codemode"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+description = "The exec code-mode tool: JavaScript that composes a surface's own tools."
+
+[dependencies]
+base64 = "=0.22.1"
+cos-fs = { version = "0.1.0", path = "../cos-fs" }
+cos-tools = { version = "0.1.0", path = "../cos-tools" }
+rquickjs = "=0.14.0"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.154", features = ["preserve_order"] }
+tokio = { version = "=1.54.0", features = ["rt", "sync", "time"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[target.'cfg(not(windows))'.dependencies]
+libc = "=0.2.190"
+
+[dev-dependencies]
+cos-store = { version = "0.1.0", path = "../cos-store" }
+cos-types = { version = "0.1.0", path = "../cos-types" }
+tokio = { version = "=1.54.0", features = ["rt", "rt-multi-thread", "macros"] }

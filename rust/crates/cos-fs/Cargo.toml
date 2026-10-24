@@ -1,0 +1,16 @@
+[package]
+name = "cos-fs"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+description = "Approved roots, virtual paths and the sandbox checks every file and command tool resolves through."
+
+[dependencies]
+cos-types = { version = "0.1.0", path = "../cos-types" }
+image = { version = "=0.25.10", default-features = false, features = ["png", "gif", "webp"] }
+zune-core = "=0.5.3"
+zune-jpeg = "=0.5.15"
+
+[dev-dependencies]
+serde_json = "=1.0.154"

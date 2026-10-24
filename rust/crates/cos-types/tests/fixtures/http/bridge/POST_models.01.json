@@ -1,0 +1,23 @@
+{
+  "method": "POST",
+  "route": "/models",
+  "status": 200,
+  "request": {
+    "nonce": "294e3635-431e-4b6f-a756-d0563f13b5ce",
+    "models": [
+      {
+        "id": "gpt-observed",
+        "label": "GPT Observed",
+        "efforts": [
+          "none",
+          "medium",
+          "high",
+          "xhigh"
+        ]
+      }
+    ]
+  },
+  "response": {
+    "ok": true
+  }
+}

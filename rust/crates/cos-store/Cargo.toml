@@ -1,0 +1,13 @@
+[package]
+name = "cos-store"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+description = "The Chat On Steroids user-data folder: paths, config.json, durable state, app.log and the single-instance lock."
+
+[dependencies]
+cos-types = { path = "../cos-types", version = "=0.1.0" }
+regex = "=1.13.1"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.154", features = ["preserve_order"] }

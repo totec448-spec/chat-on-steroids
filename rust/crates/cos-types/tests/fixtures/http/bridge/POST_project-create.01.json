@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "route": "/project-create",
+  "status": 200,
+  "request": {
+    "id": "ba85675d-585e-4ec9-b0e4-f5fcacb01e9c",
+    "action": "done",
+    "client": "doc",
+    "chatgptId": "g-p-cccccccccccccccccccccccccccccccc"
+  },
+  "response": {
+    "ok": true
+  }
+}

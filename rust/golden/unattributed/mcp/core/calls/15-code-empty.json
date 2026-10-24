@@ -1,0 +1,31 @@
+{
+  "case": "code-empty",
+  "request": {
+    "tool": "exec",
+    "arguments": {
+      "code": ""
+    },
+    "headers": {
+      "x-request-id": "golden-request-1"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool exec: code: Too small: expected string to have >=1 characters"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 16
+      }
+    ]
+  }
+}

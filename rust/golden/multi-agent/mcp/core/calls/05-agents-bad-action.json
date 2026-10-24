@@ -1,0 +1,28 @@
+{
+  "case": "agents-bad-action",
+  "request": {
+    "tool": "agents",
+    "arguments": {
+      "action": "explode"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool agents: action: Invalid option: expected one of \"spawn\"|\"message\"|\"status\"|\"finish\""
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 6
+      }
+    ]
+  }
+}

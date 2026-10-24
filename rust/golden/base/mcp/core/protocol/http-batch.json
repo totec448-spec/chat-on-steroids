@@ -1,0 +1,44 @@
+{
+  "request": {
+    "method": "POST",
+    "headers": {
+      "content-type": "application/json",
+      "accept": "application/json, text/event-stream"
+    },
+    "body": [
+      {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "cos-golden",
+            "version": "1"
+          }
+        }
+      },
+      {
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "ping"
+      }
+    ]
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "content-type": "application/json",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "error": {
+        "code": -32600,
+        "message": "Invalid Request: Only one initialization request is allowed"
+      },
+      "id": null
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "case": "agents-spawn-unattributed",
+  "request": {
+    "tool": "agents",
+    "arguments": {
+      "action": "spawn",
+      "workers": [
+        {
+          "label": "Golden",
+          "task": "Say hello."
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "UNIDENTIFIED_CALLER: this app could not prove which ChatGPT conversation this call came from, so it will not make this chat the prime agent of a run. No workers were created. The paired browser extension has to be connected and this conversation has to be showing its connector activity; wait a moment and call agents action=spawn again."
+            },
+            {
+              "type": "text",
+              "text": "\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat."
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 3
+      }
+    ]
+  }
+}

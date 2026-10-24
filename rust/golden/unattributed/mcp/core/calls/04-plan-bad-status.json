@@ -1,0 +1,36 @@
+{
+  "case": "plan-bad-status",
+  "request": {
+    "tool": "update_plan",
+    "arguments": {
+      "plan": [
+        {
+          "step": "A",
+          "status": "done"
+        }
+      ]
+    },
+    "headers": {
+      "x-request-id": "golden-request-1"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool update_plan: plan.0.status: Invalid option: expected one of \"pending\"|\"in_progress\"|\"completed\""
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 5
+      }
+    ]
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "method": "GET",
+  "route": "/v1/sessions",
+  "status": 200,
+  "request": null,
+  "response": {
+    "sessions": [
+      {
+        "id": "2026-01-01-376521e8",
+        "title": "Audit me [redacted]",
+        "conversationId": null,
+        "projectId": null,
+        "startedAt": 1767225600000,
+        "updatedAt": 1767225600000,
+        "endedAt": null,
+        "events": 5,
+        "userMessages": 1,
+        "toolCalls": 1,
+        "lastToolCallAt": 30,
+        "lastAssistantFinalAt": 20,
+        "lastTurnEndAt": 50,
+        "activityExpiresAt": null,
+        "errors": 0,
+        "toolRejected": 0,
+        "toolInternalErrors": 0,
+        "processExitNonzero": 0,
+        "estimatedTokens": 2290,
+        "contextTokens": 2290,
+        "lastTurnOutcome": "completed",
+        "activeTurnId": null,
+        "model": null,
+        "agents": [],
+        "origin": null,
+        "pressure": {
+          "level": "ok",
+          "advisory": 400000,
+          "limit": 533333
+        }
+      }
+    ],
+    "total": 4,
+    "nextCursor": null,
+    "activeId": null
+  }
+}

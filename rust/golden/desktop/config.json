@@ -1,0 +1,53 @@
+{
+  "config": {
+    "roots": [
+      {
+        "name": "project",
+        "path": "<PROJECT>"
+      }
+    ],
+    "capabilities": {
+      "browse": true,
+      "search": true,
+      "read": true,
+      "metadata": true,
+      "create": true,
+      "edit": true,
+      "move": true,
+      "deleteFile": true,
+      "command": true,
+      "screen": true,
+      "control": true,
+      "clipboardRead": true,
+      "clipboardWrite": true
+    },
+    "readOnly": false,
+    "multiAgent": {
+      "enabled": false,
+      "allowUnattributedCalls": false
+    },
+    "tunnel": {
+      "kind": "manual",
+      "tunnelId": "",
+      "desktopTunnelId": "",
+      "pluginsTunnelId": "",
+      "binaryPath": ""
+    },
+    "ui": {
+      "minimizeToTray": false,
+      "autoConnect": true,
+      "language": "en",
+      "lastSeenVersion": "2.1.35",
+      "turnNotifications": false,
+      "keepAwake": false,
+      "startAtLogin": false,
+      "localAppUsage": false,
+      "autoRefreshPlugins": false,
+      "autoRefreshPluginsAsked": true
+    },
+    "controlApi": {
+      "enabled": true,
+      "allowActions": false
+    }
+  }
+}

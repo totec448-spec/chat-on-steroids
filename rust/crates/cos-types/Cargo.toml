@@ -1,0 +1,12 @@
+[package]
+name = "cos-types"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+description = "Serde types for every Chat On Steroids on-disk format and wire contract."
+
+[dependencies]
+indexmap = { version = "=2.14.2", features = ["serde"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.154", features = ["preserve_order"] }

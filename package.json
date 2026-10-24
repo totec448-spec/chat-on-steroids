@@ -16,6 +16,7 @@
     "verify": "npm run verify:ci",
     "verify:ci": "npm run rg && npm run verify:privacy && npm run verify:notices && npm run typecheck && node -e \"require('electron')\" && vitest run --exclude test/mcp-shutdown.test.ts --exclude test/computer.test.ts && vitest run --maxWorkers=1 test/computer.test.ts test/mcp-shutdown.test.ts",
     "verify:notices": "node scripts/generate-third-party-notices.mjs --check && node scripts/package-native-sources.mjs --check",
+    "verify:rust-notices": "node rust/scripts/check-notices.mjs",
     "verify:privacy": "node scripts/verify-public-history.mjs",
     "verify:ui": "node scripts/verify-ui.mjs",
     "verify:tunnel-current": "node scripts/verify-current-tunnel.mjs",

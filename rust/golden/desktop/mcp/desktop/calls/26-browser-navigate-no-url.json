@@ -1,0 +1,29 @@
+{
+  "case": "browser-navigate-no-url",
+  "request": {
+    "tool": "browser_navigate",
+    "arguments": {
+      "tabId": "<UUID:1>:1",
+      "pageId": "<UUID:2>"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool browser_navigate: url: URL required"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 27
+      }
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "method": "POST",
+  "route": "/goal/draft",
+  "status": 200,
+  "request": {
+    "conversationId": "cafe0003-0000-4000-8000-000000000003",
+    "turnId": "g-1"
+  },
+  "response": {
+    "goal": {
+      "token": "TTTTTTTTTTTTTTTTTTTTTT",
+      "conversationId": "cafe0003-0000-4000-8000-000000000003",
+      "turnId": "g-1",
+      "stage": "ready",
+      "backend": "api",
+      "model": "deepseek/deepseek-v4-flash",
+      "text": "",
+      "reply": "what about the tetss",
+      "error": null,
+      "retryable": false
+    },
+    "sessionId": "2026-01-01-07f8d2ef"
+  }
+}

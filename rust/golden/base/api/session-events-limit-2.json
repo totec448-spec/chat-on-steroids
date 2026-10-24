@@ -1,0 +1,86 @@
+{
+  "request": {
+    "method": "GET",
+    "route": "/v1/sessions/{unattributed}/events?limit=2",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "events": [
+        {
+          "seq": 75,
+          "position": 75,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:1>",
+            "name": "exec",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to run exec",
+              "detail": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app ",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "other"
+            },
+            "args": {
+              "text": "{\"code\":\"text(\\\"x\\\".repeat(50000))\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app settings. No JavaScript or nested tool ran.\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 76,
+          "position": 76,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:2>",
+            "name": "exec",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to run exec",
+              "detail": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app ",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "other"
+            },
+            "args": {
+              "text": "{\"code\":\"text(typeof require + \\\" \\\" + typeof process)\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app settings. No JavaScript or nested tool ran.\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        }
+      ],
+      "total": 76,
+      "nextFrom": 77
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "method": "POST",
+  "route": "/browser-control",
+  "status": 200,
+  "request": {
+    "action": "claim",
+    "browserId": "6524272f-a02e-4eab-8a64-a4e21b97408f",
+    "id": "8cb5e255-8916-41c8-8838-a3705ea336de",
+    "epoch": "7c3751a0-7e29-4ab1-a48d-9aee31411edc"
+  },
+  "response": {
+    "command": {
+      "id": "8cb5e255-8916-41c8-8838-a3705ea336de",
+      "epoch": "7c3751a0-7e29-4ab1-a48d-9aee31411edc",
+      "owner": "session:browser-fixture",
+      "conversationId": null,
+      "tool": "browser_snapshot",
+      "args": {
+        "tabId": 12
+      },
+      "expiresAt": 1767225600000
+    }
+  }
+}

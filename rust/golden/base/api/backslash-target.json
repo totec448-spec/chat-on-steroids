@@ -1,0 +1,42 @@
+{
+  "request": {
+    "method": "GET",
+    "route": "/v1\\health",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "ok": true,
+      "protocol": 1,
+      "routes": [
+        "/v1/health",
+        "/v1/status",
+        "/v1/sessions",
+        "/v1/sessions/{id}",
+        "/v1/sessions/{id}/events",
+        "/v1/sessions/{id}/events/stream",
+        "/v1/inputs",
+        "/v1/agents",
+        "/v1/log"
+      ],
+      "actions": {
+        "enabled": false,
+        "routes": [
+          "POST /v1/inputs",
+          "POST /v1/inputs/{id}/cancel"
+        ]
+      },
+      "pid": "<PID>",
+      "appVersion": "2.1.35",
+      "startedAt": "<ISO_TIME>",
+      "uptimeSeconds": "<DURATION>"
+    }
+  }
+}

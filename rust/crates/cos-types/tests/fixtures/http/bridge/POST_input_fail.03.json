@@ -1,0 +1,13 @@
+{
+  "method": "POST",
+  "route": "/input/fail",
+  "status": 200,
+  "request": {
+    "id": "3dc8cf23-062c-4e88-87d6-63112f6a6ac6",
+    "owner": "picker-page",
+    "error": "Requested model or reasoning could not be confirmed"
+  },
+  "response": {
+    "ok": true
+  }
+}

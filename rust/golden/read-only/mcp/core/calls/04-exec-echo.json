@@ -1,0 +1,24 @@
+{
+  "case": "exec-echo",
+  "request": {
+    "tool": "exec_command",
+    "arguments": {
+      "cmd": "Write-Output golden-ok",
+      "workdir": "/project"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "error": {
+          "code": -32602,
+          "message": "Tool exec_command not found"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "case": "patch-add",
+  "request": {
+    "tool": "apply_patch",
+    "arguments": {
+      "patch": "*** Begin Patch\n*** Add File: /project/src/added.txt\n+x\n*** End Patch\n"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "error": {
+          "code": -32602,
+          "message": "Tool apply_patch not found"
+        }
+      }
+    ]
+  },
+  "disk": {
+    "src/added.txt": null
+  }
+}

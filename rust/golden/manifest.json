@@ -1,0 +1,56 @@
+{
+  "app": "electron",
+  "appVersion": "2.1.35",
+  "platform": "win32",
+  "arch": "x64",
+  "variants": [
+    {
+      "id": "base",
+      "about": "Files and commands on, Desktop off, read-write, multi-agent off, one root, control actions off."
+    },
+    {
+      "id": "no-command",
+      "about": "Command execution off: find replaces exec_command/write_stdin."
+    },
+    {
+      "id": "no-files",
+      "about": "Every file capability off, commands on."
+    },
+    {
+      "id": "no-capabilities",
+      "about": "Every capability off."
+    },
+    {
+      "id": "read-only",
+      "about": "Read-only mode on with every capability granted."
+    },
+    {
+      "id": "multi-agent",
+      "about": "Multi-agent on (agents tool), unattributed calls not allowed."
+    },
+    {
+      "id": "two-roots",
+      "about": "Two approved roots, /project and /second."
+    },
+    {
+      "id": "unattributed",
+      "about": "Allow unattributed calls on: plan and code mode with a request-scoped caller (x-request-id)."
+    },
+    {
+      "id": "finish-tool",
+      "about": "The session_finish tool switched on (ui.finishTool)."
+    },
+    {
+      "id": "desktop",
+      "about": "Screen, control and both clipboard permissions on; calls only against the recorder-owned window."
+    },
+    {
+      "id": "desktop-screen",
+      "about": "Screen only: Desktop read tools without input or clipboard."
+    },
+    {
+      "id": "actions",
+      "about": "Control API actions allowed; only refusals are recorded."
+    }
+  ]
+}

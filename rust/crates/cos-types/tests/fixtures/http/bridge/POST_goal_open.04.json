@@ -1,0 +1,11 @@
+{
+  "method": "POST",
+  "route": "/goal/open",
+  "status": 401,
+  "request": {
+    "text": "finish it"
+  },
+  "response": {
+    "error": "unauthorised"
+  }
+}

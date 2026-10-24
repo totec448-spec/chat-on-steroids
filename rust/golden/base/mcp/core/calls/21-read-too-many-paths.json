@@ -1,0 +1,50 @@
+{
+  "case": "read-too-many-paths",
+  "request": {
+    "tool": "read",
+    "arguments": {
+      "paths": [
+        "/project/README.md",
+        "/project/README.md",
+        "/project/README.md",
+        "/project/README.md",
+        "/project/README.md",
+        "/project/README.md",
+        "/project/README.md",
+        "/project/README.md",
+        "/project/README.md",
+        "/project/README.md",
+        "/project/README.md",
+        "/project/README.md",
+        "/project/README.md",
+        "/project/README.md",
+        "/project/README.md",
+        "/project/README.md",
+        "/project/README.md",
+        "/project/README.md",
+        "/project/README.md",
+        "/project/README.md",
+        "/project/README.md"
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool read: paths: Too big: expected array to have <=20 items"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 22
+      }
+    ]
+  }
+}

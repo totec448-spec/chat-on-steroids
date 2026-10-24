@@ -1,0 +1,39 @@
+{
+  "case": "code-unknown-tool",
+  "request": {
+    "tool": "exec",
+    "arguments": {
+      "code": "await tools.no_such_tool({});"
+    },
+    "headers": {
+      "x-request-id": "golden-request-1"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "CODE_MODE_SCRIPT_ERROR: execution stopped. No tool calls were dispatched. Check the JavaScript and available tool names; catch an expected error and explicitly text(...) only the details you need. Unemitted values remain private."
+            },
+            {
+              "type": "text",
+              "text": "UNKNOWN_TOOL_NAMES: this script used tools.no_such_tool, which Chat On Steroids Core does not offer; calling one fails with \"not a function\". ALL_TOOLS lists this connector's tools; call other tools through their own connector."
+            },
+            {
+              "type": "text",
+              "text": "\n--- Identity notice ---\nThis call is filed as Unattributed because its exact ChatGPT conversation is not known yet. Unattributed does not switch on Read-only mode or disable tools. Continue using every enabled tool, including apply_patch, exec_command, Desktop and Plugins; their existing permissions still apply. This request id owns its workspace, update_plan, terminals and agents/subagents. Use the process and run ids returned to this request; later exact proof attaches that state to its chat. A refusal about a particular process, worker or chat target applies only to that operation, not to file edits or other tools. Report the actual tool result; do not claim mutation or terminal tools are unavailable because of this notice, and never replay successful work. "
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 11
+      }
+    ]
+  }
+}

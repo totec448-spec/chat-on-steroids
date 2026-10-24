@@ -1,0 +1,19 @@
+{
+  "method": "POST",
+  "route": "/browser-control",
+  "status": 200,
+  "request": {
+    "action": "poll",
+    "browserId": "7a195790-ba95-406a-ab56-c40ea63f3df9",
+    "name": "Fixture",
+    "enabled": true
+  },
+  "response": {
+    "epoch": "be6b951c-b899-471f-8e7f-4cb9b5407ff1",
+    "requests": [],
+    "policy": {
+      "read": true,
+      "write": true
+    }
+  }
+}

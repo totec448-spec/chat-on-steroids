@@ -1,0 +1,11 @@
+{
+  "method": "POST",
+  "route": "/conversation-deleted",
+  "status": 400,
+  "request": {
+    "conversationId": "not a chat"
+  },
+  "response": {
+    "error": "invalid_request"
+  }
+}

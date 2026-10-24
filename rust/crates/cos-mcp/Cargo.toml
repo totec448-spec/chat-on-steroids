@@ -1,0 +1,25 @@
+[package]
+name = "cos-mcp"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+description = "The Core MCP endpoint: Streamable HTTP on loopback, per-surface secret paths, guards and JSON-RPC framing."
+
+[dependencies]
+base64 = "=0.22.1"
+bytes = "=1.12.1"
+cos-http = { version = "0.1.0", path = "../cos-http" }
+cos-store = { version = "0.1.0", path = "../cos-store" }
+cos-tools = { version = "0.1.0", path = "../cos-tools" }
+cos-types = { version = "0.1.0", path = "../cos-types" }
+getrandom = "=0.2.17"
+http = "=1.5.0"
+http-body-util = "=0.1.5"
+hyper = "=1.12.0"
+serde_json = { version = "=1.0.154", features = ["preserve_order"] }
+subtle = "=2.6.1"
+tokio = { version = "=1.54.0", features = ["sync", "net", "rt", "time", "macros"] }
+
+[dev-dependencies]
+tokio = { version = "=1.54.0", features = ["rt-multi-thread", "macros", "io-util"] }

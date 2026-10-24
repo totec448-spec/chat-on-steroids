@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "GET",
+    "route": "/v1/sessions/{unattributed}/events/stream",
+    "headers": {
+      "last-event-id": "x"
+    }
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "error": "invalid_query",
+      "detail": "Last-Event-ID is not valid"
+    }
+  }
+}

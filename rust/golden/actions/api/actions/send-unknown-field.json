@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "POST",
+    "route": "/v1/inputs",
+    "headers": {
+      "content-type": "application/json",
+      "expect": "100-continue"
+    },
+    "body": {
+      "id": "<UUID:1>",
+      "text": "x",
+      "extra": 1
+    }
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "error": "invalid_body",
+      "detail": "unknown field"
+    }
+  }
+}

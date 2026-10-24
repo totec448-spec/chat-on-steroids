@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "route": "/activity/detail",
+  "status": 200,
+  "request": {
+    "conversationId": "89898989-7878-6767-5656-454545454545",
+    "callId": "5d64b98d-cb40-40a7-8f4c-aede02db0076",
+    "detailRevision": 3
+  },
+  "response": {
+    "ok": false,
+    "error": "call_not_available"
+  }
+}

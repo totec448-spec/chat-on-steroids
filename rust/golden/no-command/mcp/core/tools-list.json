@@ -1,0 +1,282 @@
+{
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "tools": [
+            {
+              "name": "read",
+              "title": "Read files and folders",
+              "description": "Read what is at one or more paths. A folder is listed one level deep, a text file comes back as numbered lines, a PNG/JPEG/GIF/WebP comes back as an image, and anything else returns its metadata and why it was not decoded. Paths may contain * ? and ** and are expanded here. Every result starts with a header giving size, timestamps and line count. The line-number prefix is display metadata, not file content — strip it before quoting text into apply_patch. start_line/end_line apply to every file the call resolves to; a path may instead carry its own range as path:12-40 or path:12, so several ranges of one file fit in one call. A typical 1,500-line source file fits in the default read: do not pre-paginate it. Batch related paths in one call; only continue from a line when the returned header says more lines follow. Text is bounded at about 512.0 KB; images have a separate 4-image, 12.0 MB base64 budget and view_image's per-file validation.",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "paths": {
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "description": "Paths inside the live approved roots: /project, /skills. A root is an approved folder, usually a parent of the project rather than the project itself, so name every folder between the root and the file — the same path exec_command takes as workdir. Reading a root lists it one level deep. Absolute native paths copied from command output are also accepted when they resolve inside one of these roots; globs work in either spelling."
+                  },
+                  "start_line": {
+                    "description": "First line, 1-based. Applied to every file the call reads, so prefer one path when the range is file-specific.",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000000
+                  },
+                  "end_line": {
+                    "description": "Last line, inclusive. Applied to every file the call reads, so prefer one path when the range is file-specific.",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000000
+                  },
+                  "max_bytes": {
+                    "description": "Per-text-file payload cap. Default 256.0 KB; maximum 512.0 KB. Omit it for ordinary source files.",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 524288
+                  }
+                },
+                "required": [
+                  "paths"
+                ],
+                "additionalProperties": false
+              },
+              "annotations": {
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+              }
+            },
+            {
+              "name": "view_image",
+              "description": "View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk.",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "Local filesystem path to an image file."
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "name": "save_image",
+              "description": "Save the original file of an image ChatGPT generated in this chat (not a screenshot or preview) to a new file in an approved folder. Never replaces an existing file. The chat must be open in the browser with the image on its page.",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "New file path in an approved folder, for example /workspace/images/logo.png. Without an extension the image's own (.png, .jpg or .webp) is added."
+                  },
+                  "nth": {
+                    "description": "Which image, counting back from the newest generated in this chat: 1 (the default) is the latest, 2 the one before, and so on.",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "name": "find",
+              "title": "Find files or text",
+              "description": "Find files by name, or find text inside files, without running a command. Content matches come back as path:line: text; files over 2.0 MB are skipped rather than loaded into search. Build and dependency folders are skipped unless you pass your own exclude list.",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "maxLength": 1000,
+                    "description": "Text to look for"
+                  },
+                  "path": {
+                    "description": "File or folder to search. Virtual paths and absolute native paths inside approved roots are accepted. Defaults to every approved root.",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  },
+                  "mode": {
+                    "description": "Default name.",
+                    "type": "string",
+                    "enum": [
+                      "name",
+                      "content"
+                    ]
+                  },
+                  "include": {
+                    "description": "Glob filter such as **/*.ts",
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "exclude": {
+                    "description": "Folder names to skip; trailing * is a prefix match. Replaces the defaults — pass [] to search everywhere.",
+                    "maxItems": 50,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    }
+                  },
+                  "case_sensitive": {
+                    "description": "Default false.",
+                    "type": "boolean"
+                  },
+                  "regex": {
+                    "description": "Content mode only: treat query as a regex. Default false.",
+                    "type": "boolean"
+                  },
+                  "max_results": {
+                    "description": "Default 50.",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 500
+                  }
+                },
+                "required": [
+                  "query"
+                ],
+                "additionalProperties": false
+              },
+              "annotations": {
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+              }
+            },
+            {
+              "name": "apply_patch",
+              "description": "The `apply_patch` tool can be used to edit files. Pass the patch text as the `patch` string; everything else about the format below is unchanged.\n\nWithin each Update File block, put edits in file order. Quote the current file text for old/context lines; matching searches forward and does not reconstruct reformatted code. On a mismatch, use the diagnostic to correct the patch before retrying.\n\nThe patch must match this grammar:\n\nstart: begin_patch hunk+ end_patch\nbegin_patch: \"*** Begin Patch\" LF\nend_patch: \"*** End Patch\" LF?\n\nhunk: add_hunk | delete_hunk | update_hunk\nadd_hunk: \"*** Add File: \" filename LF add_line+\ndelete_hunk: \"*** Delete File: \" filename LF\nupdate_hunk: \"*** Update File: \" filename LF change_move? change?\n\nfilename: /(.+)/\nadd_line: \"+\" /(.*)/ LF -> line\n\nchange_move: \"*** Move to: \" filename LF\nchange: (change_context | change_line)+ eof_line?\nchange_context: (\"@@\" | \"@@ \" /(.+)/) LF\nchange_line: (\"+\" | \"-\" | \" \") /(.*)/ LF\neof_line: \"*** End of File\" LF\n\n%import common.LF",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "patch": {
+                    "type": "string",
+                    "description": "The patch text, from *** Begin Patch through *** End Patch, exactly as the grammar describes it."
+                  }
+                },
+                "required": [
+                  "patch"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "name": "update_plan",
+              "title": "Update plan",
+              "description": "Updates your task plan in the user’s app. Use for work with several meaningful steps; skip simple tasks. Send the complete plan with short step headlines, useful details and current statuses. Keep at most one step in_progress. Update after completing a step or changing approach. This only displays a plan; it does not execute steps or advance queued stages.",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "explanation": {
+                    "description": "Brief explanation of a changed plan.",
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "plan": {
+                    "maxItems": 12,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "step": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160,
+                          "description": "Short headline shown to the user."
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "in_progress",
+                            "completed"
+                          ]
+                        },
+                        "details": {
+                          "description": "Concrete approach, checks or remaining work beneath this headline. Keep useful detail when updating status.",
+                          "type": "string",
+                          "maxLength": 2000
+                        }
+                      },
+                      "required": [
+                        "step",
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "The complete updated plan. Send an empty array to clear it."
+                  }
+                },
+                "required": [
+                  "plan"
+                ],
+                "additionalProperties": false
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+              }
+            },
+            {
+              "name": "exec",
+              "title": "Run JavaScript",
+              "description": "Run JavaScript to compose this connector’s tools. Argument: {code: \"raw JavaScript\"}; the host chooses the outer namespace. Inside code, use await tools.<tool_name>(args), await Promise.all([...]), text(value), and image(dataUrlOrMcpImageContent). tools return their normal MCP result objects, including content and isError. Only explicit text/image output reaches the model; intermediate results stay in the runtime and local tool recording. ALL_TOOLS lists {name,description}; use the individual tools’ schemas for arguments. Fresh isolated JavaScript runtime, top-level await, no Node, filesystem, network, console or imports. Requires exact companion chat/session identity or Allow unattributed calls enabled. Limits: 64k source characters, 32 MiB JS memory, 2s active JS time, 60s total, 32 calls, 8 concurrent calls, 40k text bytes, 4 images, 12 MiB emitted payload. Await every call. Termination stops JavaScript/new calls, not actions already dispatched. Individual tools remain available. session_finish and agents action=finish must be direct calls. No recursive exec, pragma, wait/yield or persistent globals. See the connector instructions for examples.",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64000,
+                    "description": "Raw JavaScript source with top-level await. Emit results with text(...) or image(...)."
+                  }
+                },
+                "required": [
+                  "code"
+                ],
+                "additionalProperties": false
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": true,
+                "idempotentHint": false,
+                "openWorldHint": true
+              }
+            }
+          ]
+        },
+        "jsonrpc": "2.0",
+        "id": 2
+      }
+    ]
+  }
+}

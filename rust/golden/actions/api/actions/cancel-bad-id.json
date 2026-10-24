@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "POST",
+    "route": "/v1/inputs/BAD/cancel",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 404,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "error": "not_found"
+    }
+  }
+}

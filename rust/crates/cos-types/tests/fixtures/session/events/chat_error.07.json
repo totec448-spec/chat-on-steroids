@@ -1,0 +1,1 @@
+{"time":1767225600000,"source":"extension","agent":"prime","kind":"chat_error","recoverable":true,"message":{"text":"Message delivery timed out. Please try again.","truncated":false,"chars":45},"seq":3}

@@ -1,0 +1,50 @@
+{
+  "method": "POST",
+  "route": "/events",
+  "status": 200,
+  "request": {
+    "conversationId": "f0f00942-1111-4111-8111-111111111111",
+    "events": [
+      {
+        "kind": "turn_trace",
+        "time": 1767225600000,
+        "turnId": "g-942-0-1",
+        "trace": [
+          {
+            "kind": "say",
+            "text": "First command printed one.",
+            "done": true
+          },
+          {
+            "kind": "call",
+            "id": "call-1",
+            "tool": "exec_command",
+            "done": true,
+            "at": 1767225600000
+          },
+          {
+            "kind": "recap",
+            "text": "Ran the first command"
+          },
+          {
+            "kind": "say",
+            "text": "Second.",
+            "done": false
+          },
+          {
+            "kind": "mystery",
+            "text": "x"
+          },
+          {
+            "kind": "call",
+            "tool": "read"
+          }
+        ]
+      }
+    ]
+  },
+  "response": {
+    "sessionId": "2026-01-01-a048a756",
+    "stored": 0
+  }
+}

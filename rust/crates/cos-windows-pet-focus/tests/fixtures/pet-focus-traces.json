@@ -1,0 +1,14 @@
+[
+  {"name":"one use", "steps":[{"op":"press"},{"op":"release"},{"op":"release"}], "attempts":[11]},
+  {"name":"no renderer release ownership", "steps":[{"op":"foreground","handle":99},{"op":"release"}], "attempts":[]},
+  {"name":"new foreground before blur", "steps":[{"op":"press"},{"op":"foreground","handle":22},{"op":"release"},{"op":"foreground","handle":99},{"op":"release"}], "attempts":[]},
+  {"name":"blur revoke", "steps":[{"op":"press"},{"op":"blur"},{"op":"release"}], "attempts":[]},
+  {"name":"hide revoke", "steps":[{"op":"press"},{"op":"hide"},{"op":"release"}], "attempts":[]},
+  {"name":"dispose late events", "steps":[{"op":"dispose"},{"op":"press"},{"op":"release"}], "attempts":[]},
+  {"name":"closed refused", "steps":[{"op":"press"},{"op":"destroy"},{"op":"release"}], "attempts":[]},
+  {"name":"target missing", "steps":[{"op":"press"},{"op":"identity_missing","handle":11},{"op":"release"}], "attempts":[]},
+  {"name":"reused process id", "steps":[{"op":"press"},{"op":"identity_change","handle":11,"process":999,"thread":201},{"op":"release"}], "attempts":[]},
+  {"name":"reused thread id", "steps":[{"op":"press"},{"op":"identity_change","handle":11,"process":101,"thread":999},{"op":"release"}], "attempts":[]},
+  {"name":"next interaction observes new external window", "steps":[{"op":"press"},{"op":"blur"},{"op":"foreground","handle":22},{"op":"notify","handle":22},{"op":"press"},{"op":"release"}], "attempts":[22]},
+  {"name":"late foreground event wrong current window", "steps":[{"op":"foreground","handle":22},{"op":"notify","handle":99},{"op":"foreground","handle":99},{"op":"release"}], "attempts":[]}
+]

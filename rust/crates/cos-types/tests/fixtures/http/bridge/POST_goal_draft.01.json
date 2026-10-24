@@ -1,0 +1,26 @@
+{
+  "method": "POST",
+  "route": "/goal/draft",
+  "status": 200,
+  "request": {
+    "conversationId": "019e34cb-43d0-4241-aeb6-3a352090a8b3",
+    "turnId": "activation-source",
+    "clientId": "activation-page",
+    "terminalRequired": true
+  },
+  "response": {
+    "goal": {
+      "token": "TTTTTTTTTTTTTTTTTTTTTT",
+      "conversationId": "019e34cb-43d0-4241-aeb6-3a352090a8b3",
+      "turnId": "activation-source",
+      "stage": "sending",
+      "backend": "chatgpt",
+      "model": "gpt-6",
+      "text": "",
+      "reply": "",
+      "error": null,
+      "retryable": false
+    },
+    "sessionId": "2026-01-01-a070c609"
+  }
+}

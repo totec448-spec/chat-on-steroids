@@ -1,0 +1,28 @@
+{
+  "case": "exec-wrong-type",
+  "request": {
+    "tool": "exec_command",
+    "arguments": {
+      "cmd": 42
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool exec_command: cmd: Invalid input: expected string, received number"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 78
+      }
+    ]
+  }
+}

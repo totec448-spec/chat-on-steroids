@@ -1,0 +1,24 @@
+[package]
+name = "cos-recorder"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+description = "The browser recorder: ChatGPT page observations into sessions, and the request-id proof ledger that attributes tool calls to their chat."
+
+[dependencies]
+base64 = "=0.22.1"
+cos-sessions = { version = "0.1.0", path = "../cos-sessions" }
+cos-store = { version = "0.1.0", path = "../cos-store" }
+cos-tools = { version = "0.1.0", path = "../cos-tools" }
+cos-types = { version = "0.1.0", path = "../cos-types" }
+image = { version = "=0.25.10", default-features = false, features = ["webp"] }
+indexmap = "=2.14.2"
+regex = "=1.13.1"
+serde = "=1.0.229"
+serde_json = { version = "=1.0.154", features = ["preserve_order"] }
+tokio = { version = "=1.54.0", features = ["rt", "sync", "time"] }
+unicode-segmentation = "=1.13.3"
+
+[dev-dependencies]
+tokio = { version = "=1.54.0", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }

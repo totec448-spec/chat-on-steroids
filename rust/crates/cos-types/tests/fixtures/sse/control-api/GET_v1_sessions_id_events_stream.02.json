@@ -1,0 +1,6 @@
+{
+  "method": "GET",
+  "route": "/v1/sessions/2026-01-01-f6661bf3/events/stream",
+  "status": 200,
+  "stream": ": stream open\n\nid: 1\nevent: user_message\ndata: {\"seq\":1,\"position\":1,\"time\":10,\"kind\":\"user_message\",\"source\":\"extension\",\"message\":{\"text\":\"First\",\"chars\":5,\"truncated\":false},\"attachments\":0,\"images\":0}\n\nid: 5\nevent: user_message\ndata: {\"seq\":5,\"position\":5,\"time\":1767225600000,\"kind\":\"user_message\",\"source\":\"app\",\"message\":{\"text\":\"A second question\",\"chars\":17,\"truncated\":false},\"attachments\":0,\"images\":0}\n\nevent: end\ndata: {\"reason\":\"test\"}\n\n"
+}

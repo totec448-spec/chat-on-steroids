@@ -1,0 +1,26 @@
+{
+  "case": "find-no-args",
+  "request": {
+    "tool": "find",
+    "arguments": {}
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool find: query: Invalid input: expected string, received undefined"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 8
+      }
+    ]
+  }
+}

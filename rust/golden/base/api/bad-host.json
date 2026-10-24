@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "GET",
+    "route": "/v1/health",
+    "headers": {
+      "host": "evil.example"
+    },
+    "body": null
+  },
+  "response": {
+    "status": 403,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "error": "host_forbidden"
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "method": "GET",
+  "route": "/v1/sessions/not-a-session-id-at-all!",
+  "status": 404,
+  "request": null,
+  "response": {
+    "error": "not_found"
+  }
+}

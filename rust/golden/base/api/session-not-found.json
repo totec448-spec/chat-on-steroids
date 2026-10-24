@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "GET",
+    "route": "/v1/sessions/<UUID:1>",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 404,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "error": "session_not_found"
+    }
+  }
+}

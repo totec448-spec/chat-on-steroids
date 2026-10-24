@@ -1,0 +1,13 @@
+{
+  "method": "POST",
+  "route": "/goal/ack",
+  "status": 200,
+  "request": {
+    "conversationId": "cafe0074-0000-4000-8000-000000000074",
+    "token": "TTTTTTTTTTTTTTTTTTTTTT",
+    "clientId": "collector"
+  },
+  "response": {
+    "acknowledged": true
+  }
+}

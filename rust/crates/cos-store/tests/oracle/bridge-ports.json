@@ -1,0 +1,147 @@
+{
+  "cases": [
+    {
+      "raw": "",
+      "overridden": false,
+      "ports": []
+    },
+    {
+      "raw": " ",
+      "overridden": false,
+      "ports": []
+    },
+    {
+      "raw": "9333",
+      "overridden": true,
+      "ports": [
+        9333
+      ]
+    },
+    {
+      "raw": " 9333 , 9334 ",
+      "overridden": true,
+      "ports": [
+        9333,
+        9334
+      ]
+    },
+    {
+      "raw": "0",
+      "overridden": true,
+      "ports": [
+        0
+      ]
+    },
+    {
+      "raw": "-0",
+      "overridden": true,
+      "ports": [
+        0
+      ]
+    },
+    {
+      "raw": "+8765",
+      "overridden": true,
+      "ports": [
+        8765
+      ]
+    },
+    {
+      "raw": "00008765",
+      "overridden": true,
+      "ports": [
+        8765
+      ]
+    },
+    {
+      "raw": "8765abc",
+      "overridden": true,
+      "ports": [
+        8765
+      ]
+    },
+    {
+      "raw": "12.9",
+      "overridden": true,
+      "ports": [
+        12
+      ]
+    },
+    {
+      "raw": "0x10",
+      "overridden": true,
+      "ports": [
+        0
+      ]
+    },
+    {
+      "raw": "1e3",
+      "overridden": true,
+      "ports": [
+        1
+      ]
+    },
+    {
+      "raw": "-1",
+      "overridden": false,
+      "ports": []
+    },
+    {
+      "raw": "65535",
+      "overridden": true,
+      "ports": [
+        65535
+      ]
+    },
+    {
+      "raw": "65536",
+      "overridden": false,
+      "ports": []
+    },
+    {
+      "raw": "abc",
+      "overridden": false,
+      "ports": []
+    },
+    {
+      "raw": ",,",
+      "overridden": false,
+      "ports": []
+    },
+    {
+      "raw": "9333,,abc,9334",
+      "overridden": true,
+      "ports": [
+        9333,
+        9334
+      ]
+    },
+    {
+      "raw": " 9333　",
+      "overridden": true,
+      "ports": [
+        9333
+      ]
+    },
+    {
+      "raw": "９３３３",
+      "overridden": false,
+      "ports": []
+    },
+    {
+      "raw": "99999999999999999999",
+      "overridden": false,
+      "ports": []
+    },
+    {
+      "raw": "-",
+      "overridden": false,
+      "ports": []
+    },
+    {
+      "raw": "+",
+      "overridden": false,
+      "ports": []
+    }
+  ]
+}

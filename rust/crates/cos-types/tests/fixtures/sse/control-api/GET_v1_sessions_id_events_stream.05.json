@@ -1,0 +1,6 @@
+{
+  "method": "GET",
+  "route": "/v1/sessions/2026-01-01-f6661bf3/events/stream",
+  "status": 200,
+  "stream": ": stream open\n\n: keep-alive\n\nevent: end\ndata: {\"reason\":\"max_duration\"}\n\n"
+}

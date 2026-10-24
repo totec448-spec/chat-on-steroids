@@ -1,0 +1,21 @@
+[package]
+name = "cos-companion"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+description = "What the app and the browser extension exchange outside of chats: the account's model catalog and usage limits, the extension's preferences and diagnostics, the native Project creation ledger, the bridge's settings view and the maintenance-pass reply."
+
+[dependencies]
+cos-secrets = { version = "0.1.0", path = "../cos-secrets" }
+cos-store = { version = "0.1.0", path = "../cos-store" }
+cos-tools = { version = "0.1.0", path = "../cos-tools" }
+cos-types = { version = "0.1.0", path = "../cos-types" }
+getrandom = "=0.2.17"
+icu_normalizer = "=2.3.0"
+serde = "=1.0.229"
+serde_json = { version = "=1.0.154", features = ["preserve_order"] }
+tokio = { version = "=1.54.0", features = ["rt", "sync", "time"] }
+
+[dev-dependencies]
+tokio = { version = "=1.54.0", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }

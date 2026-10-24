@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "route": "/goal/objective",
+  "status": 409,
+  "request": {
+    "conversationId": "b10cced0-0000-4000-8000-00000000ac05",
+    "text": "something else"
+  },
+  "response": {
+    "error": "chat_blocked",
+    "message": "This chat is blocked in the app. Unblock it there before enabling continuation.",
+    "messageKey": "chat_blocked"
+  }
+}

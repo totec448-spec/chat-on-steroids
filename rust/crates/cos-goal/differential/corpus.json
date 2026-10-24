@@ -1,0 +1,57 @@
+{
+  "replies": [
+    "what about the tests",
+    "run the tests",
+    "rewrite the parser in rust",
+    "Begin the rewrite",
+    "next step",
+    "ok go",
+    "Keep going — the parser still fails — and fix it.",
+    "— a line that opens with a dash\nand a range 3–5 or 10 — 20",
+    "Done; — then this, — and that — .",
+    "Don't stop now, we're nearly there; it's really important that the remaining migration finishes before tomorrow's release and the documentation gets updated as well.",
+    "Fix `src/main/goal.ts` and https://example.com/a/b then check C:\\Users\\me\\file.txt and config.json for the settings.",
+    "Please continue with the implementation of the remaining features in the application, especially the parser, the renderer, the scheduler and the persistence layer. Then run the complete test suite, address every failing check, and finally write a summary of what changed and what still needs attention in the follow-up.",
+    "```\nlet value = something_long();\n```\nthen review it carefully",
+    "OK",
+    "ünïcode wörds and résumé, then commit the change",
+    "  spaced   out   reply  "
+  ],
+  "errors": [
+    "auth_rejected: the OpenRouter key was refused",
+    "rate_limited: Provider returned error",
+    "request_failed: request_failed: fetch failed",
+    "request_failed: timeout_or_cancelled",
+    "goal_browser_send_failed: composer missing",
+    "goal_browser_send_failed",
+    "invalid_goal_decision_json",
+    "provider_stream_error: upstream failed",
+    "http_503: busy",
+    "bad_request",
+    "Something Else",
+    "loop_stop_refused",
+    "no_objective",
+    "chat_blocked",
+    "request_failed: provider_completion_error"
+  ],
+  "urls": [
+    "https://api.example.com/v1/",
+    " http://localhost:11434/v1 ",
+    "http://127.0.0.1:8080",
+    "http://[::1]:9000/v1",
+    "HTTPS://API.Example.COM:443/v1//",
+    "http://example.com/v1",
+    "https://user:pw@example.com",
+    "https://example.com/v1?x=1",
+    "https://example.com/v1#frag",
+    "ftp://localhost/",
+    "not a url"
+  ],
+  "templates": [
+    ["All done.\n[[COS_GOAL:COMPLETE]]", 1, 2],
+    ["Still working.\r\n[[COS_GOAL:CONTINUE]]", 0, 0],
+    ["More to do\n  [[COS_GOAL:CONTINUE]]  ", 199, 57],
+    ["no marker here", 3, 4],
+    ["[[COS_GOAL:CONTINUE]]\nthen text", 5, 6]
+  ]
+}

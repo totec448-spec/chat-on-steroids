@@ -1,0 +1,26 @@
+{
+  "method": "POST",
+  "route": "/settings",
+  "status": 200,
+  "request": {
+    "conversationId": "7cf104aa-974d-4ab5-823f-833a634243eb",
+    "loop": true
+  },
+  "response": {
+    "context": {
+      "auto": true,
+      "threshold": 400000,
+      "warn": 400000,
+      "limit": 533333
+    },
+    "goal": {
+      "enabled": true,
+      "own": true,
+      "mode": "loop",
+      "backend": "chatgpt",
+      "model": "gpt-6",
+      "provider": "openrouter",
+      "hasKey": true
+    }
+  }
+}

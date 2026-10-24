@@ -1,0 +1,20 @@
+{
+  "method": "POST",
+  "route": "/commands/ack",
+  "status": 200,
+  "request": {
+    "id": "3f3f78d732d3f813",
+    "client": "A-page",
+    "conversationId": "cacacaca-3333-4333-8333-333333333333",
+    "status": "failed",
+    "error": "A browser refused"
+  },
+  "response": {
+    "ok": true,
+    "final": true,
+    "committed": false,
+    "outcome": "terminal-failure",
+    "conversationId": "cacacaca-3333-4333-8333-333333333333",
+    "error": "the worker's chat did not take the message — A browser refused"
+  }
+}

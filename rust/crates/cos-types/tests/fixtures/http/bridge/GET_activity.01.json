@@ -1,0 +1,152 @@
+{
+  "method": "GET",
+  "route": "/activity",
+  "status": 200,
+  "request": null,
+  "response": {
+    "sessionId": "2026-01-01-3466e754",
+    "generating": false,
+    "tokens": 10016,
+    "context": {
+      "auto": true,
+      "threshold": 10000,
+      "warn": 400000,
+      "limit": 533333
+    },
+    "followOutput": true,
+    "mentionCore": true,
+    "bootstrap": null,
+    "bootstrapAgent": null,
+    "bootstrapMessageId": null,
+    "entries": [
+      {
+        "seq": 5,
+        "time": 1767225600000,
+        "tool": "read",
+        "callId": "fff7a462-816f-4264-96ff-694fc5b6c55b",
+        "detailRevision": 5,
+        "turnId": null,
+        "requestId": "wfr_compact_without_page_failed",
+        "attribution": "request_id",
+        "outcome": "ok",
+        "displayOutcome": {
+          "code": "completed",
+          "label": "completed"
+        },
+        "durationMs": 0,
+        "summary": {
+          "kind": "read",
+          "tone": "neutral",
+          "title": "Read mine.ts"
+        },
+        "changes": [],
+        "agent": null
+      }
+    ],
+    "stream": [
+      {
+        "seq": 3,
+        "time": 1767225600000,
+        "turnId": "blind-page-turn",
+        "agent": null,
+        "turnOrigin": 3,
+        "kind": "turn_start"
+      },
+      {
+        "seq": 4,
+        "time": 1767225600000,
+        "turnId": "blind-page-turn",
+        "agent": null,
+        "turnOrigin": 3,
+        "kind": "turn_end",
+        "outcome": "failed",
+        "detail": ""
+      },
+      {
+        "seq": 5,
+        "time": 1767225600000,
+        "turnId": null,
+        "agent": null,
+        "turnOrigin": null,
+        "kind": "tool_call",
+        "tool": "read",
+        "callId": "fff7a462-816f-4264-96ff-694fc5b6c55b",
+        "detailRevision": 5,
+        "requestId": "wfr_compact_without_page_failed",
+        "attribution": "request_id",
+        "outcome": "ok",
+        "displayOutcome": {
+          "code": "completed",
+          "label": "completed"
+        },
+        "durationMs": 0,
+        "summary": {
+          "kind": "read",
+          "tone": "neutral",
+          "title": "Read mine.ts"
+        },
+        "changes": []
+      }
+    ],
+    "userAnchors": [
+      {
+        "seq": 2,
+        "time": 1767225600000,
+        "messageId": "blind-source"
+      }
+    ],
+    "resetActivity": false,
+    "truncatedFrom": null,
+    "nextSince": 6,
+    "job": {
+      "sessionId": "2026-01-01-3466e754",
+      "token": "TTTTTTTTTTTTTTTTTTTTTT",
+      "stage": "handoff-pending",
+      "startedAt": 1767225600000,
+      "automatic": true,
+      "busy": true,
+      "handoffId": null,
+      "sourceSend": {
+        "state": "not-attempted",
+        "messageId": null
+      },
+      "destinationSend": {
+        "state": "not-attempted",
+        "conversationId": null,
+        "messageId": null
+      },
+      "error": null
+    },
+    "goal": {
+      "enabled": false,
+      "configuredEnabled": false,
+      "afterTurn": false,
+      "proLoopDelivery": false,
+      "own": false,
+      "mode": "goal",
+      "backend": "chatgpt",
+      "model": "gpt-6",
+      "provider": "openrouter",
+      "hasKey": true,
+      "queuePending": false,
+      "wait": null,
+      "objective": "",
+      "blocked": "",
+      "pending": null,
+      "draft": null
+    },
+    "pendingTools": 0,
+    "progress": {
+      "tools": null,
+      "workers": null
+    },
+    "settlingTools": 0,
+    "activeTurnId": null,
+    "recordedTurnId": null,
+    "recordedQuestionId": null,
+    "settledQuestionId": "blind-source",
+    "revival": null,
+    "revivals": [],
+    "placement": null
+  }
+}

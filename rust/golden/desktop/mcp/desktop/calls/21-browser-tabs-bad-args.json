@@ -1,0 +1,28 @@
+{
+  "case": "browser-tabs-bad-args",
+  "request": {
+    "tool": "browser_tabs",
+    "arguments": {
+      "action": "attach"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool browser_tabs: tabId: Required for this action"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 22
+      }
+    ]
+  }
+}

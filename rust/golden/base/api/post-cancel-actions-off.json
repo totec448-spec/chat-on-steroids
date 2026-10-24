@@ -1,0 +1,19 @@
+{
+  "request": {
+    "method": "POST",
+    "route": "/v1/inputs/<UUID:1>/cancel",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 403,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "close"
+    },
+    "body": {
+      "error": "actions_disabled"
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "method": "POST",
+  "route": "/events",
+  "status": 200,
+  "request": {
+    "conversationId": "efefefef-1111-2222-3333-000000000093",
+    "events": [
+      {
+        "kind": "user_message",
+        "messageId": "closed-question",
+        "text": "Keep working",
+        "time": 1767225600000,
+        "authoredNow": true
+      },
+      {
+        "kind": "model_selection",
+        "model": "gpt-6-pro",
+        "reasoningEffort": "pro",
+        "time": 1767225600000
+      },
+      {
+        "kind": "turn_start",
+        "time": 1767225600000,
+        "turnId": "closed-pro"
+      },
+      {
+        "kind": "tool_evidence",
+        "time": 1767225600000,
+        "turnId": "closed-pro",
+        "calls": [
+          {
+            "messageId": "closed-call",
+            "tool": "read",
+            "order": 0,
+            "answered": false,
+            "requestId": "wfr_closed_pro_55"
+          }
+        ]
+      }
+    ]
+  },
+  "response": {
+    "sessionId": "2026-01-01-573c2604",
+    "stored": 3
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "method": "POST",
+  "route": "/settings",
+  "status": 200,
+  "request": {
+    "autoCompact": true,
+    "goal": false
+  },
+  "response": {
+    "context": {
+      "auto": true,
+      "threshold": 400000,
+      "warn": 400000,
+      "limit": 533333
+    },
+    "goal": {
+      "enabled": false,
+      "own": false,
+      "mode": "goal",
+      "backend": "api",
+      "model": "deepseek/deepseek-v4-flash",
+      "provider": "openrouter",
+      "hasKey": true
+    }
+  }
+}

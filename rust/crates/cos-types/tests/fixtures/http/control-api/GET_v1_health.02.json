@@ -1,0 +1,9 @@
+{
+  "method": "GET",
+  "route": "/v1/health",
+  "status": 401,
+  "request": null,
+  "response": {
+    "error": "unauthorized"
+  }
+}

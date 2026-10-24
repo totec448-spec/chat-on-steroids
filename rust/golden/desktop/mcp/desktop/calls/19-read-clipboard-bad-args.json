@@ -1,0 +1,28 @@
+{
+  "case": "read-clipboard-bad-args",
+  "request": {
+    "tool": "read_clipboard",
+    "arguments": {
+      "nope": 1
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool read_clipboard: Unrecognized key: \"nope\""
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 20
+      }
+    ]
+  }
+}

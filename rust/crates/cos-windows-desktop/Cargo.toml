@@ -1,0 +1,44 @@
+[package]
+name = "cos-windows-desktop"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+description = "The Windows Desktop surface tools: Window2 observation and input, and the clipboard, run in-process on one UI Automation thread."
+
+[dependencies]
+base64 = "=0.22.1"
+cos-sidecar-runtime = { path = "../cos-sidecar-runtime", version = "=0.1.0" }
+cos-tools = { version = "0.1.0", path = "../cos-tools" }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.154", features = ["preserve_order"] }
+tokio = { version = "=1.54.0", features = ["sync", "time"] }
+
+[target.'cfg(windows)'.dependencies]
+cos-windows-capture = { path = "../cos-windows-capture", version = "=0.1.0" }
+cos-windows-uia = { path = "../cos-windows-uia", version = "=0.1.0" }
+windows = { version = "=0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_HiDpi",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Threading",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_DataExchange",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Variant",
+    "Win32_System_Ole",
+    "Win32_UI_Shell",
+    "Win32_Storage_Packaging_Appx",
+    "Win32_Storage_EnhancedStorage",
+    "Win32_UI_Shell_PropertiesSystem",
+] }
+
+[dev-dependencies]
+cos-store = { version = "0.1.0", path = "../cos-store" }
+cos-types = { version = "0.1.0", path = "../cos-types" }
+image = { version = "=0.25.10", default-features = false, features = ["png"] }
+tokio = { version = "=1.54.0", features = ["rt", "macros", "rt-multi-thread", "sync", "time"] }

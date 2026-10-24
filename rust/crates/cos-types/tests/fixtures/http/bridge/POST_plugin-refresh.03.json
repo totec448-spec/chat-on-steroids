@@ -1,0 +1,25 @@
+{
+  "method": "POST",
+  "route": "/plugin-refresh",
+  "status": 409,
+  "request": {
+    "action": "claim",
+    "id": "39a70da5-262a-4eb5-b0e6-71361494f359",
+    "appId": "asdk_app_off_on_test",
+    "connectorName": "Chat On Steroids Core",
+    "tools": [
+      {
+        "name": "read",
+        "description": "Older declaration",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    ]
+  },
+  "response": {
+    "ok": false,
+    "error": "automatic_refresh_disabled"
+  }
+}

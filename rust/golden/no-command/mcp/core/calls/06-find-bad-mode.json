@@ -1,0 +1,30 @@
+{
+  "case": "find-bad-mode",
+  "request": {
+    "tool": "find",
+    "arguments": {
+      "query": "x",
+      "path": "/project",
+      "mode": "nope"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool find: mode: Invalid option: expected one of \"name\"|\"content\""
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 7
+      }
+    ]
+  }
+}

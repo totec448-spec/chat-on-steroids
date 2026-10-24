@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "route": "/input/progress",
+  "status": 200,
+  "request": {
+    "id": "8c6b5d6b-d0dc-464e-8eb8-f507c4bc553a",
+    "owner": "7:tab:1",
+    "conversationId": "68f1c2d4-4444-4bbb-8ccc-0123456789ab",
+    "partial": "Thinking about it"
+  },
+  "response": {
+    "ok": false
+  }
+}

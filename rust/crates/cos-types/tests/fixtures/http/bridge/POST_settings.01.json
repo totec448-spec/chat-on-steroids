@@ -1,0 +1,26 @@
+{
+  "method": "POST",
+  "route": "/settings",
+  "status": 200,
+  "request": {
+    "conversationId": "cafe0023-0000-4000-8000-000000000023",
+    "goal": false
+  },
+  "response": {
+    "context": {
+      "auto": true,
+      "threshold": 400000,
+      "warn": 400000,
+      "limit": 533333
+    },
+    "goal": {
+      "enabled": false,
+      "own": true,
+      "mode": "goal",
+      "backend": "api",
+      "model": "z-ai/glm-5.3",
+      "provider": "openrouter",
+      "hasKey": true
+    }
+  }
+}

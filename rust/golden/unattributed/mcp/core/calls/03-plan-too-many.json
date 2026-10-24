@@ -1,0 +1,84 @@
+{
+  "case": "plan-too-many",
+  "request": {
+    "tool": "update_plan",
+    "arguments": {
+      "plan": [
+        {
+          "step": "S0",
+          "status": "pending"
+        },
+        {
+          "step": "S1",
+          "status": "pending"
+        },
+        {
+          "step": "S2",
+          "status": "pending"
+        },
+        {
+          "step": "S3",
+          "status": "pending"
+        },
+        {
+          "step": "S4",
+          "status": "pending"
+        },
+        {
+          "step": "S5",
+          "status": "pending"
+        },
+        {
+          "step": "S6",
+          "status": "pending"
+        },
+        {
+          "step": "S7",
+          "status": "pending"
+        },
+        {
+          "step": "S8",
+          "status": "pending"
+        },
+        {
+          "step": "S9",
+          "status": "pending"
+        },
+        {
+          "step": "S10",
+          "status": "pending"
+        },
+        {
+          "step": "S11",
+          "status": "pending"
+        },
+        {
+          "step": "S12",
+          "status": "pending"
+        }
+      ]
+    },
+    "headers": {
+      "x-request-id": "golden-request-1"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool update_plan: plan: Too big: expected array to have <=12 items"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 4
+      }
+    ]
+  }
+}

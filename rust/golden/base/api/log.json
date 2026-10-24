@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "GET",
+    "route": "/v1/log?limit=5",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "bodyShape": {
+      "entries": [
+        {
+          "time": "<number>",
+          "level": "<string>",
+          "message": "<string>"
+        }
+      ],
+      "ringSize": "<number>"
+    }
+  }
+}

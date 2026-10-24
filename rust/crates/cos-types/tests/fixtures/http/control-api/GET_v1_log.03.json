@@ -1,0 +1,10 @@
+{
+  "method": "GET",
+  "route": "/v1/log",
+  "status": 400,
+  "request": null,
+  "response": {
+    "error": "invalid_query",
+    "detail": "since is not valid"
+  }
+}

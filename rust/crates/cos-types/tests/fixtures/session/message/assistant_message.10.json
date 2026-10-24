@@ -1,0 +1,1 @@
+{"kind":"assistant_message","source":"extension","time":100,"messageId":"first","providerMessageId":"same-provider","turnId":"original-turn","goalEligible":true,"message":{"text":"Old final","chars":9,"truncated":false},"final":true,"state":"final","contentSeq":1,"finalContentSeq":1,"finalObservedAt":1767225600000,"origin":1,"seq":1}

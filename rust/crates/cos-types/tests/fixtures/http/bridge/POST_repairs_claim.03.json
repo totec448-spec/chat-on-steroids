@@ -1,0 +1,9 @@
+{
+  "method": "POST",
+  "route": "/repairs/claim",
+  "status": 200,
+  "request": {},
+  "response": {
+    "allowed": false
+  }
+}

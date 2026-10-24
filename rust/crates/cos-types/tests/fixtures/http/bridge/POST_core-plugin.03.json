@@ -1,0 +1,11 @@
+{
+  "method": "POST",
+  "route": "/core-plugin",
+  "status": 200,
+  "request": {
+    "missing": true
+  },
+  "response": {
+    "ok": true
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "method": "GET",
+  "route": "/v1/inputs",
+  "status": 200,
+  "request": null,
+  "response": {
+    "inputs": [
+      {
+        "id": "4f499156-6ade-4077-b698-da27ba29c475",
+        "sessionId": "2026-01-01-b8eee0a8",
+        "deliveredSessionId": "2026-01-01-b8eee0a8",
+        "conversationId": "chat-actions-1",
+        "state": "cancelled",
+        "delivery": "sent",
+        "mode": "auto",
+        "transportIntent": null,
+        "automatic": false,
+        "purpose": null,
+        "createdAt": 1767225600000,
+        "dueAt": 1,
+        "offeredAt": 1767225600000,
+        "deliveredAt": 1767225600000,
+        "sendAuthorizedAt": 1767225600000,
+        "requiresAuthorization": true,
+        "cancelledByUser": false,
+        "queueOrder": null,
+        "model": null,
+        "reasoningEffort": null,
+        "messageId": "native-late",
+        "error": "Cancelled locally; delivery was later confirmed in ChatGPT.",
+        "text": {
+          "text": "was it sent?",
+          "chars": 12,
+          "truncated": false
+        },
+        "attachments": 0,
+        "images": 0
+      }
+    ],
+    "total": 1
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "method": "POST",
+  "route": "/input/bind",
+  "status": 200,
+  "request": {
+    "id": "0a8b9614-4dfd-41b2-b09c-277666ebd7b1",
+    "owner": "31:fresh-opening-document:0",
+    "conversationId": "24242424-4646-4848-8a8a-626262626262"
+  },
+  "response": {
+    "ok": true
+  }
+}

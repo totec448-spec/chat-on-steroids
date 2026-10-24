@@ -1,0 +1,12 @@
+{
+  "method": "POST",
+  "route": "/goal/objective",
+  "status": 401,
+  "request": {
+    "conversationId": "cafe0003-0000-4000-8000-000000000003",
+    "text": "finish it"
+  },
+  "response": {
+    "error": "unauthorised"
+  }
+}

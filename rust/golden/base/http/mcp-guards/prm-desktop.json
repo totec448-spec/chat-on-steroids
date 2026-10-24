@@ -1,0 +1,22 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/.well-known/oauth-protected-resource/mcp/desktop/<MCP_TOKEN:desktop>",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "resource": "http://127.0.0.1:<MCP_PORT>/mcp/desktop/<MCP_TOKEN:desktop>",
+      "resource_name": "Chat On Steroids Desktop",
+      "authorization_servers": [],
+      "scopes_supported": []
+    }
+  }
+}

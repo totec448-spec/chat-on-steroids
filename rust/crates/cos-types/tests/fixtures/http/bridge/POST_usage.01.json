@@ -1,0 +1,29 @@
+{
+  "method": "POST",
+  "route": "/usage",
+  "status": 200,
+  "request": {
+    "rows": [
+      {
+        "model": "gpt-6",
+        "scope": "model",
+        "remaining": 12,
+        "remainingPercent": 40,
+        "resetAt": 1767225600000,
+        "windowSeconds": 10800
+      },
+      {
+        "model": "deep-research",
+        "scope": "feature",
+        "remaining": null,
+        "remainingPercent": null,
+        "resetAt": null,
+        "windowSeconds": null
+      }
+    ],
+    "observedAt": 1767225600000
+  },
+  "response": {
+    "ok": true
+  }
+}

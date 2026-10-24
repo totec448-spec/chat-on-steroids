@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "GET",
+    "route": "/v1/sessions/{unattributed}/events?kinds=nope",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "error": "invalid_query",
+      "detail": "kinds.0 is not valid"
+    }
+  }
+}

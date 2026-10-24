@@ -1,0 +1,54 @@
+[package]
+name = "cos-app"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+publish = false
+description = "Chat On Steroids as a native GPUI app: the window, the tray and the in-process Core."
+
+[[bin]]
+name = "cos-app"
+path = "src/main.rs"
+
+[dependencies]
+cos-companion = { version = "0.1.0", path = "../cos-companion" }
+cos-core = { version = "0.1.0", path = "../cos-core" }
+cos-sessions = { version = "0.1.0", path = "../cos-sessions" }
+cos-store = { version = "0.1.0", path = "../cos-store" }
+cos-types = { version = "0.1.0", path = "../cos-types" }
+gpui = { package = "gpui-pre", version = "=0.3.9" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.9" }
+gpui-component = { version = "=0.8.0" }
+gpui-kit-assets = "=0.8.0"
+raw-window-handle = "=0.6.2"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.154", features = ["preserve_order"] }
+tokio = { version = "=1.54.0", features = ["sync"] }
+tray-icon = "=0.26.1"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "=0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[dev-dependencies]
+base64 = "=0.22.1"
+
+[[example]]
+name = "ui-driver"
+path = "tools/ui-driver.rs"
+
+[target.'cfg(windows)'.dev-dependencies]
+cos-sidecar-runtime = { version = "=0.1.0", path = "../cos-sidecar-runtime" }
+cos-windows-capture = { version = "=0.1.0", path = "../cos-windows-capture" }
+cos-windows-uia = { version = "=0.1.0", path = "../cos-windows-uia" }
+windows = { version = "=0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_System_WinRT",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+] }

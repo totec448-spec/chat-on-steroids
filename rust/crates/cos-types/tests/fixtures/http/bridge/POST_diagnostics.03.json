@@ -1,0 +1,21 @@
+{
+  "method": "POST",
+  "route": "/diagnostics",
+  "status": 200,
+  "request": {
+    "capturedAt": 1767225600000,
+    "status": {
+      "connected": true,
+      "paired": true
+    },
+    "preferences": {
+      "overwrite": false,
+      "durations": true
+    },
+    "preferencesStored": true,
+    "tab": null
+  },
+  "response": {
+    "ok": true
+  }
+}

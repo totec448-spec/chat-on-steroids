@@ -1,0 +1,225 @@
+[
+  {
+    "route": "tool_call",
+    "request": {
+      "requestId": "wfr_late_a",
+      "path": "/project/a.txt",
+      "text": "1\talpha",
+      "startedAt": 1767225601000
+    }
+  },
+  {
+    "route": "tool_call",
+    "request": {
+      "requestId": "wfr_late_b",
+      "path": "/project/b.txt",
+      "text": "1\tbeta",
+      "startedAt": 1767225601500
+    }
+  },
+  {
+    "route": "tool_call",
+    "request": {
+      "requestId": "wfr_never",
+      "path": "/project/c.txt",
+      "text": "1\tgamma",
+      "startedAt": 1767225602000
+    }
+  },
+  {
+    "route": "request_plan",
+    "request": {
+      "requestId": "wfr_late_a",
+      "startedAt": 1767225601100,
+      "update": {
+        "explanation": "late",
+        "plan": [
+          {
+            "step": "Ship the late proof",
+            "status": "in_progress"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "route": "/events",
+    "request": {
+      "conversationId": "c3c3c3c3-0000-4000-8000-000000000003",
+      "events": [
+        {
+          "kind": "user_message",
+          "messageId": "m-late-u1",
+          "text": "Read three files",
+          "time": 1767225600000,
+          "authoredNow": true,
+          "reaction": "👍🏽",
+          "attachments": [
+            {
+              "id": "file-1",
+              "name": "a.png",
+              "size": 10,
+              "mimeType": "image/png"
+            },
+            {
+              "id": "file-2",
+              "name": "b.txt",
+              "size": 3,
+              "mimeType": "text/plain"
+            }
+          ]
+        },
+        {
+          "kind": "user_message",
+          "messageId": "m-late-u0",
+          "text": "Earlier",
+          "time": 1767225599000,
+          "reaction": "not an emoji"
+        },
+        {
+          "kind": "assistant_message",
+          "messageId": "m-late-a0",
+          "text": "Earlier answer",
+          "state": "final",
+          "final": true,
+          "time": 1767225599500,
+          "references": [
+            {
+              "index": 0,
+              "sources": [
+                {
+                  "title": "  A   source ",
+                  "url": "https://example.com/a",
+                  "source": "Example",
+                  "date": 1700000000000.4
+                },
+                {
+                  "url": "javascript:x"
+                }
+              ]
+            },
+            {
+              "index": 0,
+              "sources": [
+                {
+                  "url": "https://example.com/dup"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "route": "/events",
+    "request": {
+      "conversationId": "c3c3c3c3-0000-4000-8000-000000000003",
+      "events": [
+        {
+          "kind": "native_image",
+          "messageId": "11111111-2222-4333-8444-555555555555",
+          "providerAssetId": "file_abcdefgh1234",
+          "providerRole": "assistant",
+          "time": 1767225600800,
+          "providerStatus": "in_progress",
+          "width": 1024,
+          "height": 768,
+          "previewDataUrl": "data:image/webp;base64,UklGRjgAAABXRUJQVlA4ICwAAACQAQCdASoEAAMAAUAmJaACdLoAA5gA/vD6K67xaUa/+8Z//cZ//cZ/7uAAAA==",
+          "previewWidth": 4,
+          "previewHeight": 3
+        },
+        {
+          "kind": "native_image",
+          "messageId": "11111111-2222-4333-8444-555555555555",
+          "providerAssetId": "file_abcdefgh1234",
+          "providerRole": "assistant",
+          "time": 1767225600800,
+          "providerStatus": "finished_successfully",
+          "providerChannel": "final",
+          "width": 1024,
+          "height": 768,
+          "previewDataUrl": "data:image/webp;base64,UklGRjgAAABXRUJQVlA4ICwAAACQAQCdASoEAAMAAUAmJaACdLoAA5gA/vD6K67xaUa/+8Z//cZ//cZ/7uAAAA==",
+          "previewWidth": 4,
+          "previewHeight": 3
+        },
+        {
+          "kind": "native_image",
+          "messageId": "22222222-2222-4333-8444-555555555555",
+          "providerAssetId": "file_abcdefgh1234",
+          "providerRole": "assistant",
+          "time": 1767225600800,
+          "providerStatus": "finished_successfully",
+          "previewDataUrl": "data:image/webp;base64,UklGRjgAAABXRUJQVlA4ICwAAACQAQCdASoEAAMAAUAmJaACdLoAA5gA/vD6K67xaUa/+8Z//cZ//cZ/7uAAAA==",
+          "previewWidth": 5,
+          "previewHeight": 3
+        },
+        {
+          "kind": "native_image",
+          "messageId": "33333333-2222-4333-8444-555555555555",
+          "providerAssetId": "file_abcdefgh1234",
+          "providerRole": "tool",
+          "time": 1767225600800,
+          "width": 40000
+        },
+        {
+          "kind": "native_image",
+          "messageId": "44444444-2222-4333-8444-555555555555",
+          "providerAssetId": "file_abcdefgh1234",
+          "providerRole": "tool",
+          "time": 1767225600800,
+          "previewStatus": "unavailable",
+          "previewError": "tainted"
+        }
+      ]
+    }
+  },
+  {
+    "route": "/correlations",
+    "request": {
+      "conversationId": "c3c3c3c3-0000-4000-8000-000000000003",
+      "calls": [
+        {
+          "requestId": "wfr_late_a",
+          "messageId": "m-late-a",
+          "tool": "read"
+        }
+      ]
+    }
+  },
+  {
+    "route": "/events",
+    "request": {
+      "conversationId": "c3c3c3c3-0000-4000-8000-000000000003",
+      "events": [
+        {
+          "kind": "tool_evidence",
+          "time": 1767225603000,
+          "fiberConversationId": "c3c3c3c3-0000-4000-8000-000000000003",
+          "calls": [
+            {
+              "requestId": "wfr_late_b",
+              "messageId": "m-late-b",
+              "tool": "read",
+              "order": 0,
+              "answered": true
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "route": "settle",
+    "request": {}
+  },
+  {
+    "route": "tool_call",
+    "request": {
+      "requestId": "wfr_late_a",
+      "path": "/project/d.txt",
+      "text": "1\tdelta",
+      "startedAt": 1767225604000
+    }
+  }
+]

@@ -1,0 +1,73 @@
+{
+  "method": "GET",
+  "route": "/v1/inputs",
+  "status": 200,
+  "request": null,
+  "response": {
+    "inputs": [
+      {
+        "id": "46d6b2d5-02b9-45ba-9e24-cc4e902be1ea",
+        "sessionId": "2026-01-01-b8eee0a8",
+        "deliveredSessionId": null,
+        "conversationId": null,
+        "state": "failed",
+        "delivery": "not_sent",
+        "mode": "auto",
+        "transportIntent": null,
+        "automatic": true,
+        "purpose": null,
+        "createdAt": 1767225600000,
+        "dueAt": 1,
+        "offeredAt": 5,
+        "deliveredAt": null,
+        "sendAuthorizedAt": null,
+        "requiresAuthorization": true,
+        "cancelledByUser": false,
+        "queueOrder": null,
+        "model": null,
+        "reasoningEffort": null,
+        "messageId": null,
+        "error": "After-turn pickup was withdrawn before Send.",
+        "text": {
+          "text": "Keep working until the request is complete.",
+          "chars": 43,
+          "truncated": false
+        },
+        "attachments": 0,
+        "images": 0
+      },
+      {
+        "id": "7c756b5b-d912-41a2-bb45-bb3b1356c094",
+        "sessionId": "2026-01-01-b8eee0a8",
+        "deliveredSessionId": null,
+        "conversationId": null,
+        "state": "queued",
+        "delivery": "pending",
+        "mode": "auto",
+        "transportIntent": null,
+        "automatic": false,
+        "purpose": null,
+        "createdAt": 1767225600000,
+        "dueAt": 1,
+        "offeredAt": null,
+        "deliveredAt": null,
+        "sendAuthorizedAt": null,
+        "requiresAuthorization": false,
+        "cancelledByUser": false,
+        "queueOrder": null,
+        "model": null,
+        "reasoningEffort": null,
+        "messageId": null,
+        "error": null,
+        "text": {
+          "text": "typed by a person",
+          "chars": 17,
+          "truncated": false
+        },
+        "attachments": 0,
+        "images": 0
+      }
+    ],
+    "total": 2
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "method": "POST",
+  "route": "/browser/preferences",
+  "status": 200,
+  "request": {
+    "nonce": "4cad03e2-07a1-4bf8-a76e-757bb657807f",
+    "values": {
+      "overwrite": false,
+      "durations": true
+    }
+  },
+  "response": {
+    "ok": true
+  }
+}

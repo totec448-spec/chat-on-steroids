@@ -1,0 +1,9 @@
+{
+  "method": "POST",
+  "route": "/pair",
+  "status": 200,
+  "request": {},
+  "response": {
+    "token": "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT"
+  }
+}

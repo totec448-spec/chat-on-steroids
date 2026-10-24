@@ -1,0 +1,37 @@
+{
+  "case": "plan-two-in-progress",
+  "request": {
+    "tool": "update_plan",
+    "arguments": {
+      "plan": [
+        {
+          "step": "A",
+          "status": "in_progress"
+        },
+        {
+          "step": "B",
+          "status": "in_progress"
+        }
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool update_plan: plan: At most one step may be in_progress."
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 81
+      }
+    ]
+  }
+}

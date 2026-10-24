@@ -1,0 +1,42 @@
+{
+  "case": "exec-stdin-session",
+  "request": {
+    "tool": "exec_command",
+    "arguments": {
+      "cmd": "$line = Read-Host; Write-Output \"got [$line]\"",
+      "tty": true,
+      "workdir": "/project",
+      "yield_time_ms": 3000
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Chunk ID: <CHUNK_ID>\nWall time: <DURATION> seconds\nProcess running with session ID <EXEC_SESSION:13>\nOriginal token count: 25\nOutput:\n\u001b[?25l\u001b[2J\u001b[m\u001b[H\u001b]0;<CONSOLE_TITLE>\u0007\u001b[?25h"
+            },
+            {
+              "type": "text",
+              "text": "\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat."
+            }
+          ],
+          "structuredContent": {
+            "chunk_id": "<CHUNK_ID>",
+            "wall_time_seconds": "<DURATION>",
+            "session_id": "<EXEC_SESSION:13>",
+            "original_token_count": 25,
+            "output": "\u001b[?25l\u001b[2J\u001b[m\u001b[H\u001b]0;<CONSOLE_TITLE>\u0007\u001b[?25h",
+            "supplemental_context": "\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat."
+          }
+        },
+        "jsonrpc": "2.0",
+        "id": 70
+      }
+    ]
+  }
+}

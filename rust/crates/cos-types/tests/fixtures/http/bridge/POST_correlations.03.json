@@ -1,0 +1,30 @@
+{
+  "method": "POST",
+  "route": "/correlations",
+  "status": 200,
+  "request": {
+    "conversationId": "efefefef-1111-2222-3333-000000000051",
+    "calls": [
+      {
+        "requestId": "eta-other-request",
+        "messageId": "eta-resolved",
+        "tool": "read",
+        "order": 0,
+        "answered": false
+      }
+    ]
+  },
+  "response": {
+    "ok": true,
+    "conversationId": "efefefef-1111-2222-3333-000000000051",
+    "sessionId": "2026-01-01-f45d50a9",
+    "requestIds": [
+      "eta-other-request"
+    ],
+    "confirmed": [
+      "eta-other-request"
+    ],
+    "conflicts": [],
+    "complete": true
+  }
+}

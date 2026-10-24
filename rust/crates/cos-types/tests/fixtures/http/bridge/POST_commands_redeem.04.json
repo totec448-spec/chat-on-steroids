@@ -1,0 +1,23 @@
+{
+  "method": "POST",
+  "route": "/commands/redeem",
+  "status": 200,
+  "request": {
+    "id": "2ad7151bb7afd22a",
+    "client": "tab-doomed",
+    "conversationId": "dadadada-7654-3210-fedc-ba9876543210"
+  },
+  "response": {
+    "command": {
+      "id": "2ad7151bb7afd22a",
+      "expiresAt": 1767225600000,
+      "kind": "open-chat",
+      "type": "revive",
+      "text": "one more thing\n\n(Chat On Steroids: you are still worker-1 in the same run, and this is the prime agent talking to you again in the chat you already know. Pick up from what you did here before rather than starting over. Report with agents action=message to=\"prime\" as you go and action=finish when this piece is done.)",
+      "agent": "worker-1",
+      "model": null,
+      "reasoningEffort": null,
+      "conversationId": "dadadada-7654-3210-fedc-ba9876543210"
+    }
+  }
+}

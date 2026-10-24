@@ -1,0 +1,66 @@
+{
+  "cases": {
+    "object": {
+      "value": {
+        "version": 1,
+        "entries": [
+          {
+            "conversationId": "68f1c2d4-1111-4bbb-8ccc-0123456789ab",
+            "blockedAt": 1792411200000
+          }
+        ]
+      },
+      "file": "{\"version\":1,\"entries\":[{\"conversationId\":\"68f1c2d4-1111-4bbb-8ccc-0123456789ab\",\"blockedAt\":1792411200000}]}",
+      "leftovers": []
+    },
+    "text-escapes": {
+      "value": {
+        "text": "quote \" backslash \\ newline \n tab \t nul \u0000 bell \u0007 del  ls   é 😀 </script>"
+      },
+      "file": "{\"text\":\"quote \\\" backslash \\\\ newline \\n tab \\t nul \\u0000 bell \\u0007 del  ls   é 😀 </script>\"}",
+      "leftovers": []
+    },
+    "numbers": {
+      "value": {
+        "ints": [
+          0,
+          -1,
+          9007199254740991
+        ],
+        "fractions": [
+          0.5,
+          -2.25,
+          1e-7,
+          123456.789
+        ],
+        "big": 1e+21
+      },
+      "file": "{\"ints\":[0,-1,9007199254740991],\"fractions\":[0.5,-2.25,1e-7,123456.789],\"big\":1e+21}",
+      "leftovers": []
+    },
+    "empty-containers": {
+      "value": {
+        "a": [],
+        "o": {},
+        "s": ""
+      },
+      "file": "{\"a\":[],\"o\":{},\"s\":\"\"}",
+      "leftovers": []
+    },
+    "array-root": {
+      "value": [
+        true,
+        false,
+        null,
+        "x"
+      ],
+      "file": "[true,false,null,\"x\"]",
+      "leftovers": []
+    },
+    "null-removes-file": {
+      "value": null,
+      "file": null,
+      "leftovers": []
+    }
+  }
+}

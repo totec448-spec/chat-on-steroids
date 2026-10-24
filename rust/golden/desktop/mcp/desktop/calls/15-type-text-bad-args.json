@@ -1,0 +1,28 @@
+{
+  "case": "type-text-bad-args",
+  "request": {
+    "tool": "type_text",
+    "arguments": {
+      "text": 42
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool type_text: window: Invalid input: expected object, received undefined, text: Invalid input: expected string, received number"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 16
+      }
+    ]
+  }
+}

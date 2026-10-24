@@ -1,0 +1,73 @@
+{
+  "method": "GET",
+  "route": "/v1/status",
+  "status": 200,
+  "request": null,
+  "response": {
+    "appVersion": "2.1.35",
+    "connection": {
+      "state": "disconnected",
+      "detail": "",
+      "handshakeAt": null,
+      "lastRequestAt": null,
+      "lastToolCallAt": null,
+      "tunnel": null,
+      "surfaces": [
+        {
+          "id": "core",
+          "state": "off",
+          "available": true,
+          "optional": false,
+          "detail": "",
+          "tools": 7,
+          "lastRequestAt": null,
+          "lastToolCallAt": null
+        },
+        {
+          "id": "desktop",
+          "state": "off",
+          "available": true,
+          "optional": true,
+          "detail": "",
+          "tools": 23,
+          "lastRequestAt": null,
+          "lastToolCallAt": null
+        },
+        {
+          "id": "plugins",
+          "state": "off",
+          "available": true,
+          "optional": true,
+          "detail": "",
+          "tools": 0,
+          "lastRequestAt": null,
+          "lastToolCallAt": null
+        }
+      ]
+    },
+    "bridge": {
+      "running": false,
+      "port": null,
+      "portOverridden": true,
+      "paired": false,
+      "present": false,
+      "lastSeenAt": null,
+      "extensionVersion": null,
+      "error": null
+    },
+    "plugins": [],
+    "update": {
+      "current": "2.1.35",
+      "latest": null,
+      "stage": "idle",
+      "error": null,
+      "checkedAt": null
+    },
+    "toolCalls": {
+      "running": 0,
+      "settling": 0,
+      "inFlight": 0,
+      "inFlightMcpRequests": 0
+    }
+  }
+}

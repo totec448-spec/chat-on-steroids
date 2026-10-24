@@ -1,0 +1,11 @@
+{
+  "method": "POST",
+  "route": "/pair",
+  "status": 409,
+  "request": {
+    "reuse": true
+  },
+  "response": {
+    "error": "browser_disconnected"
+  }
+}

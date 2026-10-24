@@ -1,0 +1,50 @@
+{
+  "method": "POST",
+  "route": "/input/claim",
+  "status": 200,
+  "request": {
+    "id": "428447f7-6bc5-47a6-836b-5d638d22f300",
+    "owner": "recovered-page",
+    "conversationId": "c7fda686-b197-42ca-ad19-cab0f6c9517d",
+    "requiresAuthorization": true
+  },
+  "response": {
+    "input": {
+      "id": "428447f7-6bc5-47a6-836b-5d638d22f300",
+      "sessionId": "2026-01-01-a59118b1",
+      "text": "Use no color or textures\n\nNext queued instruction:\nVerify the geometry",
+      "mode": "auto",
+      "dueAt": 1767225600000,
+      "model": null,
+      "reasoningEffort": null,
+      "silenceBoundary": {
+        "turnId": "silent-source",
+        "conversationId": "c7fda686-b197-42ca-ad19-cab0f6c9517d",
+        "workSeq": 2,
+        "acceptedAt": 1767225600000
+      },
+      "queuedTurn": {
+        "conversationId": "c7fda686-b197-42ca-ad19-cab0f6c9517d",
+        "turnId": "silent-source"
+      },
+      "transportIntent": "browser",
+      "state": "browser",
+      "owner": "recovered-page",
+      "createdAt": 1767225600000,
+      "conversationId": "c7fda686-b197-42ca-ad19-cab0f6c9517d",
+      "attachments": [
+        {
+          "id": "12183b9f-b8bb-4ae2-963a-00e2fadcd6dd",
+          "name": "Attached text.txt",
+          "size": 20,
+          "mimeType": "text/plain"
+        }
+      ],
+      "companionInputId": "24c2f71b-608d-446b-9afb-b9cdee3c4685",
+      "completedTurnId": "silent-source",
+      "offeredAt": 1767225600000,
+      "requiresAuthorization": true,
+      "deliveryText": "Use no color or textures\n\nNext queued instruction:\nVerify the geometry"
+    }
+  }
+}

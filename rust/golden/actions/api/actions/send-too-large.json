@@ -1,0 +1,22 @@
+{
+  "request": {
+    "method": "POST",
+    "route": "/v1/inputs",
+    "headers": {
+      "content-type": "application/json",
+      "expect": "100-continue"
+    },
+    "body": "512 KiB + overhead"
+  },
+  "response": {
+    "status": 413,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "close"
+    },
+    "body": {
+      "error": "body_too_large"
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "names": {
+    "swarm": true,
+    "request-plans": true,
+    "a": true,
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": true,
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": false,
+    "": false,
+    "Swarm": false,
+    "x_y": false,
+    "../x": false,
+    "state.json": false,
+    "tab\t": false
+  },
+  "recovery": {
+    "original": "{\"damaged\":",
+    "replacement": {
+      "version": 1,
+      "entries": []
+    },
+    "file": "{\"version\":1,\"entries\":[]}",
+    "copyPattern": "probe.recovery-<uuid>.json",
+    "copy": "{\"damaged\":",
+    "fileCount": 2
+  }
+}

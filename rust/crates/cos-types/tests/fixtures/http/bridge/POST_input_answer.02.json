@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "route": "/input/answer",
+  "status": 200,
+  "request": {
+    "id": "eb53feee-a58a-4b54-a1fb-de61d8bd9053",
+    "owner": "routed-page",
+    "conversationId": "5f716d6f-0917-4fa9-861b-48bf0f87528d",
+    "response": "Routed plan answer"
+  },
+  "response": {
+    "ok": true
+  }
+}

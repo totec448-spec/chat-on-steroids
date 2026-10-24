@@ -1,0 +1,24 @@
+{
+  "method": "POST",
+  "route": "/plugin-refresh",
+  "status": 200,
+  "request": {
+    "id": "df58654f-70e6-4c2c-b3e6-1ec2953f94ba",
+    "appId": "asdk_app_synthetic",
+    "action": "complete",
+    "tools": [
+      {
+        "name": "read",
+        "description": "Read a file",
+        "inputSchema": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    ],
+    "versionId": "asdk_app_v_synthetic"
+  },
+  "response": {
+    "ok": true
+  }
+}

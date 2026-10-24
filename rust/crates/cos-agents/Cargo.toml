@@ -1,0 +1,24 @@
+[package]
+name = "cos-agents"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+description = "Prime-owned worker families: the agent broker, its durable snapshot barrier, worker admission, the agents tool and marker-verified Git worktrees."
+
+[dependencies]
+cos-store = { version = "0.1.0", path = "../cos-store" }
+cos-tools = { version = "0.1.0", path = "../cos-tools" }
+cos-types = { version = "0.1.0", path = "../cos-types" }
+getrandom = "=0.2.17"
+indexmap = "=2.14.2"
+serde = "=1.0.229"
+serde_json = { version = "=1.0.154", features = ["preserve_order"] }
+sha2 = "=0.10.9"
+tokio = { version = "=1.54.0", features = ["rt", "sync", "time"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+tokio = { version = "=1.54.0", features = ["macros", "rt-multi-thread", "sync", "time", "test-util"] }

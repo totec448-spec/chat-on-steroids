@@ -1,0 +1,28 @@
+{
+  "case": "get-window-bad-args",
+  "request": {
+    "tool": "get_window",
+    "arguments": {
+      "id": "x"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool get_window: id: Invalid input: expected number, received string"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 4
+      }
+    ]
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "method": "GET",
+  "route": "/v1/agents",
+  "status": 200,
+  "request": null,
+  "response": {
+    "enabled": true,
+    "running": true,
+    "retainedHistory": false,
+    "agents": [
+      {
+        "runId": "20ee904d-6645-440c-acf6-7f77b9a06ce4",
+        "id": "prime",
+        "role": "prime",
+        "label": "Prime",
+        "task": {
+          "text": "Coordinates the workers",
+          "chars": 23,
+          "truncated": false
+        },
+        "state": "active",
+        "model": null,
+        "reasoningEffort": null,
+        "conversationId": "control-prime-a",
+        "createdAt": 1767225600000,
+        "activatedAt": 1767225600000,
+        "finishedAt": null,
+        "detachedAt": null,
+        "sleptAt": null,
+        "lastSeenAt": 1767225600000,
+        "revivable": false,
+        "pending": 0,
+        "awaitingAck": 0,
+        "delivered": 0,
+        "contextTokens": 0,
+        "result": null
+      },
+      {
+        "runId": "20ee904d-6645-440c-acf6-7f77b9a06ce4",
+        "id": "worker-1",
+        "role": "worker",
+        "label": "worker-1",
+        "task": {
+          "text": "park this worker",
+          "chars": 16,
+          "truncated": false
+        },
+        "state": "active",
+        "model": null,
+        "reasoningEffort": null,
+        "conversationId": "control-worker-a",
+        "createdAt": 1767225600000,
+        "activatedAt": 1767225600000,
+        "finishedAt": null,
+        "detachedAt": null,
+        "sleptAt": null,
+        "lastSeenAt": null,
+        "revivable": false,
+        "pending": 0,
+        "awaitingAck": 0,
+        "delivered": 0,
+        "contextTokens": 0,
+        "result": null
+      }
+    ]
+  }
+}

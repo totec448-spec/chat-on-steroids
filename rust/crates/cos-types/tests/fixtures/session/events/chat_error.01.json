@@ -1,0 +1,1 @@
+{"time":1767225600000,"source":"extension","turnId":"history-limited","kind":"chat_error","recoverable":false,"blocking":true,"retryAt":1767225600000,"message":{"text":"ChatGPT temporarily rate-limited loading this conversation history.","truncated":false,"chars":67},"seq":4}

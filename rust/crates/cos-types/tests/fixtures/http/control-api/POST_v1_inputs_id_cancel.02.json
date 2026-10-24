@@ -1,0 +1,41 @@
+{
+  "method": "POST",
+  "route": "/v1/inputs/39db5344-9e7f-4120-8e26-c517c5eacdee/cancel",
+  "status": 409,
+  "request": null,
+  "response": {
+    "error": "not_cancellable",
+    "detail": "already handed to ChatGPT",
+    "input": {
+      "id": "39db5344-9e7f-4120-8e26-c517c5eacdee",
+      "sessionId": "2026-01-01-b8eee0a8",
+      "deliveredSessionId": null,
+      "conversationId": "chat-actions-1",
+      "state": "sent",
+      "delivery": "sent",
+      "mode": "auto",
+      "transportIntent": null,
+      "automatic": false,
+      "purpose": null,
+      "createdAt": 1767225600000,
+      "dueAt": 1,
+      "offeredAt": 5,
+      "deliveredAt": 7,
+      "sendAuthorizedAt": 6,
+      "requiresAuthorization": true,
+      "cancelledByUser": false,
+      "queueOrder": null,
+      "model": null,
+      "reasoningEffort": null,
+      "messageId": "native-1",
+      "error": null,
+      "text": {
+        "text": "hello",
+        "chars": 5,
+        "truncated": false
+      },
+      "attachments": 0,
+      "images": 0
+    }
+  }
+}

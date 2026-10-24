@@ -1,0 +1,53 @@
+[
+  { "route": "/events", "request": { "conversationId": "c1c1c1c1-0000-4000-8000-000000000001", "events": [
+    { "kind": "model_selection", "model": "GPT-5.6 Sol", "reasoningEffort": "high", "time": 1767225601000 },
+    { "kind": "conversation_title", "text": "Planning the trip", "time": 1767225601000 },
+    { "kind": "user_message", "messageId": "m-u1", "text": "Plan my trip to Lisbon", "time": 1767225601000, "authoredNow": true },
+    { "kind": "turn_start", "turnId": "t1", "time": 1767225601100 },
+    { "kind": "assistant_message", "messageId": "m-a1", "turnId": "t1", "text": "Sure", "state": "streaming", "activeNow": true, "time": 1767225601200 },
+    { "kind": "page_tool", "messageId": "thought-x-0", "turnId": "t1", "text": "Searching flights", "activeNow": true, "time": 1767225601300 }
+  ] } },
+  { "route": "/events", "request": { "conversationId": "c1c1c1c1-0000-4000-8000-000000000001", "events": [
+    { "kind": "assistant_message", "messageId": "m-a1", "turnId": "t1", "text": "Sure, here", "state": "streaming", "activeNow": true, "time": 1767225602000 },
+    { "kind": "page_tool", "messageId": "thought-x-0", "turnId": "t1", "text": "Searched flights", "activeNow": true, "time": 1767225602100 },
+    { "kind": "page_tool", "messageId": "x", "turnId": "t1", "text": "Searched flights", "activeNow": true, "time": 1767225602150 },
+    { "kind": "tool_evidence", "turnId": "t1", "time": 1767225602200, "calls": [
+      { "tool": "read", "messageId": "mm1", "order": 0, "answered": true, "requestId": "wfr_c1_1" }
+    ] }
+  ] } },
+  { "route": "/correlations", "request": { "conversationId": "c1c1c1c1-0000-4000-8000-000000000001", "calls": [
+    { "requestId": "wfr_c1_1", "messageId": "mm1", "tool": "read" },
+    { "requestId": "wfr_c1_2", "messageId": null }
+  ] } },
+  { "route": "/correlations", "request": { "conversationId": "c2c2c2c2-0000-4000-8000-000000000002", "calls": [
+    { "requestId": "wfr_c1_1", "messageId": "other", "tool": "read" },
+    { "requestId": "wfr_c2_1", "messageId": "mine", "tool": "exec_command" }
+  ] } },
+  { "route": "/correlations", "request": { "conversationId": "c2c2c2c2-0000-4000-8000-000000000002", "calls": [ { "tool": "read" } ] } },
+  { "route": "/events", "request": { "conversationId": "c1c1c1c1-0000-4000-8000-000000000001", "events": [
+    { "kind": "assistant_message", "messageId": "m-a1", "turnId": "t1", "text": "Sure, here is the plan.", "renderedHtml": "<p>Sure, here is the plan.</p>", "state": "final", "final": true, "activeNow": true, "time": 1767225603000 },
+    { "kind": "turn_end", "turnId": "t1", "outcome": "completed", "time": 1767225603100 },
+    { "kind": "turn_end", "turnId": "t1", "outcome": "completed", "time": 1767225603200 },
+    { "kind": "chat_error", "text": "Something went wrong.  Retry", "turnId": "t1", "time": 1767225603300 },
+    { "kind": "chat_error", "text": "Something went wrong. Retry", "turnId": "t1", "time": 1767225603400 }
+  ] } },
+  { "route": "/events", "request": { "conversationId": "c1c1c1c1-0000-4000-8000-000000000001", "events": [
+    { "kind": "assistant_message", "messageId": "m-a1", "turnId": "t1", "text": "Sure, here", "state": "streaming", "activeNow": true, "time": 1767225603500 },
+    { "kind": "turn_start", "turnId": "t1", "time": 1767225603600 },
+    { "kind": "user_message", "messageId": "m-u1", "text": "Plan my trip to Lisbon", "time": 1767225601000 }
+  ] } },
+  { "route": "/closed", "request": { "conversationId": "c1c1c1c1-0000-4000-8000-000000000001" } },
+  { "route": "/events", "request": { "conversationId": "c1c1c1c1-0000-4000-8000-000000000001", "events": [
+    { "kind": "user_message", "messageId": "m-u2", "text": "And a hotel?", "time": 1767225604000, "authoredNow": true },
+    { "kind": "turn_start", "turnId": "t2", "time": 1767225604100 }
+  ] } },
+  { "route": "/closed", "request": { "conversationId": "c1c1c1c1-0000-4000-8000-000000000001", "manual": true } },
+  { "route": "/events", "request": { "conversationId": "not-a-chat!", "events": [] } },
+  { "route": "/events", "request": { "conversationId": "c3c3c3c3-0000-4000-8000-000000000003", "events": [
+    { "kind": "app_sightings", "time": 1767225605000, "apps": [ { "requestId": "wfr_x", "appId": "asdk_app_1" } ] }
+  ] } },
+  { "route": "/events", "request": { "conversationId": "c3c3c3c3-0000-4000-8000-000000000003", "events": [
+    { "kind": "mystery", "time": 1767225605000 },
+    { "kind": "user_message", "text": "no id", "time": 1767225605000 }
+  ] } }
+]

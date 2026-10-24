@@ -1,0 +1,36 @@
+{
+  "request": {
+    "method": "POST",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "initialize",
+      "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+          "name": "cos-golden",
+          "version": "1"
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 406,
+    "headers": {
+      "content-type": "application/json",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "error": {
+        "code": -32000,
+        "message": "Not Acceptable: Client must accept both application/json and text/event-stream"
+      },
+      "id": null
+    }
+  }
+}

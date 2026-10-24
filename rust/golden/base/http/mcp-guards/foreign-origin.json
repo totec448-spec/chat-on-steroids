@@ -1,0 +1,39 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/mcp/core/<MCP_TOKEN:core>",
+    "headers": {
+      "content-type": "application/json",
+      "accept": "application/json, text/event-stream",
+      "origin": "https://evil.example"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "initialize",
+      "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {
+          "name": "cos-golden",
+          "version": "1"
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 403,
+    "headers": {
+      "content-type": "application/json",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "error": {
+        "code": -32000,
+        "message": "Invalid Origin: evil.example"
+      },
+      "id": null
+    }
+  }
+}

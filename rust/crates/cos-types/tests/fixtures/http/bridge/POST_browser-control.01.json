@@ -1,0 +1,32 @@
+{
+  "method": "POST",
+  "route": "/browser-control",
+  "status": 200,
+  "request": {
+    "action": "claim",
+    "browserId": "361572ba-707a-48b3-a797-5a8b1090cb90",
+    "id": "db8423c0-b7cb-4717-be79-50d1db2fad73",
+    "epoch": "6ee64b52-296b-4795-acfd-66907dd73e2c",
+    "owners": [
+      "request:wfr_browser_owner_89094438-28f9-4e33-bdb7-bc0d4bd50b87",
+      "request:wfr_browser_foreign_957891c0-d0d1-407c-8e85-b286d7b37edf",
+      "request:unproved"
+    ]
+  },
+  "response": {
+    "command": {
+      "id": "db8423c0-b7cb-4717-be79-50d1db2fad73",
+      "epoch": "6ee64b52-296b-4795-acfd-66907dd73e2c",
+      "owner": "session:2026-01-01-96a18e34",
+      "conversationId": "270b436b-848f-4550-9374-47771d16dadb",
+      "tool": "browser_tabs",
+      "args": {
+        "action": "list"
+      },
+      "expiresAt": 1767225600000,
+      "ownerAliases": [
+        "request:wfr_browser_owner_89094438-28f9-4e33-bdb7-bc0d4bd50b87"
+      ]
+    }
+  }
+}

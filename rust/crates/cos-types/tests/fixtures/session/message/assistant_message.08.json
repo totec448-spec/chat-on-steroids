@@ -1,0 +1,1 @@
+{"time":1767225600000,"source":"extension","turnId":"observed-worker-turn","agent":"worker-1","kind":"assistant_message","message":{"text":"Inspecting the task.","truncated":false,"chars":20},"renderedHtml":{"text":"<p>Inspecting the task.</p>","truncated":false,"chars":27},"messageId":"worker-progress","state":"streaming","final":false,"contentSeq":3,"origin":3,"seq":4}

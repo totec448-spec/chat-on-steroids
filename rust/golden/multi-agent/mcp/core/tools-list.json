@@ -1,0 +1,539 @@
+{
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "tools": [
+            {
+              "name": "read",
+              "title": "Read files and folders",
+              "description": "Read what is at one or more paths. A folder is listed one level deep, a text file comes back as numbered lines, a PNG/JPEG/GIF/WebP comes back as an image, and anything else returns its metadata and why it was not decoded. Paths may contain * ? and ** and are expanded here. Every result starts with a header giving size, timestamps and line count. The line-number prefix is display metadata, not file content — strip it before quoting text into apply_patch. start_line/end_line apply to every file the call resolves to; a path may instead carry its own range as path:12-40 or path:12, so several ranges of one file fit in one call. A typical 1,500-line source file fits in the default read: do not pre-paginate it. Batch related paths in one call; only continue from a line when the returned header says more lines follow. Text is bounded at about 512.0 KB; images have a separate 4-image, 12.0 MB base64 budget and view_image's per-file validation.",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "paths": {
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "description": "Paths inside the live approved roots: /project, /skills. A root is an approved folder, usually a parent of the project rather than the project itself, so name every folder between the root and the file — the same path exec_command takes as workdir. Reading a root lists it one level deep. Absolute native paths copied from command output are also accepted when they resolve inside one of these roots; globs work in either spelling."
+                  },
+                  "start_line": {
+                    "description": "First line, 1-based. Applied to every file the call reads, so prefer one path when the range is file-specific.",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000000
+                  },
+                  "end_line": {
+                    "description": "Last line, inclusive. Applied to every file the call reads, so prefer one path when the range is file-specific.",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000000
+                  },
+                  "max_bytes": {
+                    "description": "Per-text-file payload cap. Default 256.0 KB; maximum 512.0 KB. Omit it for ordinary source files.",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 524288
+                  }
+                },
+                "required": [
+                  "paths"
+                ],
+                "additionalProperties": false
+              },
+              "annotations": {
+                "readOnlyHint": true,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+              }
+            },
+            {
+              "name": "view_image",
+              "description": "View a local image file from the filesystem when visual inspection is needed. Use this for images already available on disk.",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "Local filesystem path to an image file."
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "name": "save_image",
+              "description": "Save the original file of an image ChatGPT generated in this chat (not a screenshot or preview) to a new file in an approved folder. Never replaces an existing file. The chat must be open in the browser with the image on its page.",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "path": {
+                    "type": "string",
+                    "description": "New file path in an approved folder, for example /workspace/images/logo.png. Without an extension the image's own (.png, .jpg or .webp) is added."
+                  },
+                  "nth": {
+                    "description": "Which image, counting back from the newest generated in this chat: 1 (the default) is the latest, 2 the one before, and so on.",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "name": "apply_patch",
+              "description": "The `apply_patch` tool can be used to edit files. Pass the patch text as the `patch` string; everything else about the format below is unchanged.\n\nWithin each Update File block, put edits in file order. Quote the current file text for old/context lines; matching searches forward and does not reconstruct reformatted code. On a mismatch, use the diagnostic to correct the patch before retrying.\n\nThe patch must match this grammar:\n\nstart: begin_patch hunk+ end_patch\nbegin_patch: \"*** Begin Patch\" LF\nend_patch: \"*** End Patch\" LF?\n\nhunk: add_hunk | delete_hunk | update_hunk\nadd_hunk: \"*** Add File: \" filename LF add_line+\ndelete_hunk: \"*** Delete File: \" filename LF\nupdate_hunk: \"*** Update File: \" filename LF change_move? change?\n\nfilename: /(.+)/\nadd_line: \"+\" /(.*)/ LF -> line\n\nchange_move: \"*** Move to: \" filename LF\nchange: (change_context | change_line)+ eof_line?\nchange_context: (\"@@\" | \"@@ \" /(.+)/) LF\nchange_line: (\"+\" | \"-\" | \" \") /(.*)/ LF\neof_line: \"*** End of File\" LF\n\n%import common.LF",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "patch": {
+                    "type": "string",
+                    "description": "The patch text, from *** Begin Patch through *** End Patch, exactly as the grammar describes it."
+                  }
+                },
+                "required": [
+                  "patch"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "name": "exec_command",
+              "description": "Runs a command and returns output or a session ID. Use write_stdin for progress, input, or retained output. Background results also arrive on later responses.\n\nWindows shell notes:\n- Deleting or moving files works reliably inside one shell. Paths listed in PowerShell and handed to `cmd /c`, batch builtins, or another shell for deletion or moving break on quoting; use native PowerShell cmdlets such as `Remove-Item` / `Move-Item` with `-LiteralPath` rather than string-built shell commands.\n- Before a recursive delete or move, resolve the absolute target paths and check that they lie inside the intended workspace or the explicitly named target directory, in particular when a path was computed.\n- `Start-Process` for a background helper or service: add `-WindowStyle Hidden` unless the user asked for a visible window. Visible windows are for interactive tools the user needs to see or control.\n\nBrowsers: do not spawn a new browser, profile or debug port per attempt — each stays resident and heats the CPU. Keep to one or two windows you actually use and reuse the one already open.",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "cmd": {
+                    "description": "Shell command to execute. To read a file, use the read tool instead. This shell is Windows PowerShell 5.1, which has no && or ||: use the cmds array for a sequence, or A; if ($?) { B }.",
+                    "type": "string"
+                  },
+                  "cmds": {
+                    "description": "Use cmd or cmds, not both. cmds runs sequentially in one shell session; sections show exit codes. It continues after ordinary non-zero exits; first non-zero exit wins.",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "workdir": {
+                    "description": "Working directory for the command. Defaults to the turn cwd.",
+                    "type": "string"
+                  },
+                  "tty": {
+                    "description": "True allocates a PTY for the command; false or omitted uses plain pipes.",
+                    "type": "boolean"
+                  },
+                  "yield_time_ms": {
+                    "description": "Wait up to 10000 ms (250-30000 on Windows). Finished commands return immediately; otherwise return a session ID.",
+                    "type": "number"
+                  },
+                  "max_output_tokens": {
+                    "description": "Ignored; still accepted so older cached schemas keep working. Omit it.",
+                    "type": "number"
+                  },
+                  "shell": {
+                    "description": "Shell binary to launch. Defaults to the user's default shell.",
+                    "type": "string"
+                  },
+                  "login": {
+                    "description": "True loads the shell profile; false disables it. Defaults to false on Windows for deterministic commands.",
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "outputSchema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "chunk_id": {
+                    "description": "Output chunk identifier.",
+                    "type": "string"
+                  },
+                  "wall_time_seconds": {
+                    "type": "number",
+                    "description": "Seconds spent waiting for output."
+                  },
+                  "exit_code": {
+                    "description": "Process exit code when the command finished during this call.",
+                    "type": "number"
+                  },
+                  "session_id": {
+                    "description": "Session ID while running.",
+                    "type": "number"
+                  },
+                  "completed_session_id": {
+                    "description": "Use as write_stdin session_id to reread completed output.",
+                    "type": "number"
+                  },
+                  "expected_exit": {
+                    "description": "Non-zero exit is an expected result, not a failure.",
+                    "type": "boolean"
+                  },
+                  "output_replayed": {
+                    "description": "Retained output; command was not run again.",
+                    "type": "boolean"
+                  },
+                  "original_token_count": {
+                    "description": "Approximate token count before output truncation.",
+                    "type": "number"
+                  },
+                  "output": {
+                    "type": "string",
+                    "description": "Command output text, possibly truncated."
+                  },
+                  "supplemental_context": {
+                    "description": "App context, not process output.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "wall_time_seconds",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "name": "write_stdin",
+              "description": "Polls or writes to the returned session ID. Empty chars reread retained output after completion, including automatic delivery; never reruns work. Completed processes reject input. Retains the latest 64 results in this app, 256 KiB each.",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "session_id": {
+                    "type": "number",
+                    "description": "Returned running or completed session ID."
+                  },
+                  "chars": {
+                    "description": "Bytes to write to stdin. Defaults to empty, which polls without writing.",
+                    "type": "string"
+                  },
+                  "yield_time_ms": {
+                    "description": "Wait before yielding output. Non-empty writes default to 250 ms and cap at 30000 ms; empty polls wait up to 5000-300000 ms by default but return early when the first output arrives.",
+                    "type": "number"
+                  },
+                  "max_output_tokens": {
+                    "description": "Ignored; still accepted so older cached schemas keep working. Omit it.",
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "session_id"
+                ],
+                "additionalProperties": false
+              },
+              "outputSchema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "chunk_id": {
+                    "description": "Output chunk identifier.",
+                    "type": "string"
+                  },
+                  "wall_time_seconds": {
+                    "type": "number",
+                    "description": "Seconds spent waiting for output."
+                  },
+                  "exit_code": {
+                    "description": "Process exit code when the command finished during this call.",
+                    "type": "number"
+                  },
+                  "session_id": {
+                    "description": "Session ID while running.",
+                    "type": "number"
+                  },
+                  "completed_session_id": {
+                    "description": "Use as write_stdin session_id to reread completed output.",
+                    "type": "number"
+                  },
+                  "expected_exit": {
+                    "description": "Non-zero exit is an expected result, not a failure.",
+                    "type": "boolean"
+                  },
+                  "output_replayed": {
+                    "description": "Retained output; command was not run again.",
+                    "type": "boolean"
+                  },
+                  "original_token_count": {
+                    "description": "Approximate token count before output truncation.",
+                    "type": "number"
+                  },
+                  "output": {
+                    "type": "string",
+                    "description": "Command output text, possibly truncated."
+                  },
+                  "supplemental_context": {
+                    "description": "App context, not process output.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "wall_time_seconds",
+                  "output"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "name": "update_plan",
+              "title": "Update plan",
+              "description": "Updates your task plan in the user’s app. Use for work with several meaningful steps; skip simple tasks. Send the complete plan with short step headlines, useful details and current statuses. Keep at most one step in_progress. Update after completing a step or changing approach. This only displays a plan; it does not execute steps or advance queued stages.",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "explanation": {
+                    "description": "Brief explanation of a changed plan.",
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "plan": {
+                    "maxItems": 12,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "step": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 160,
+                          "description": "Short headline shown to the user."
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "in_progress",
+                            "completed"
+                          ]
+                        },
+                        "details": {
+                          "description": "Concrete approach, checks or remaining work beneath this headline. Keep useful detail when updating status.",
+                          "type": "string",
+                          "maxLength": 2000
+                        }
+                      },
+                      "required": [
+                        "step",
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "The complete updated plan. Send an empty array to clear it."
+                  }
+                },
+                "required": [
+                  "plan"
+                ],
+                "additionalProperties": false
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "idempotentHint": true,
+                "openWorldHint": false
+              }
+            },
+            {
+              "name": "agents",
+              "title": "Multi-agent run",
+              "description": "Run ChatGPT workers. Omit model and reasoning_effort unless the user explicitly requests an override; saved app defaults apply. Do not ask the user to choose them. Reuse a suitable sleeping worker with message before spawn. message: prime↔worker. Reports ride tool results, never restart primes. Use status once to collect pending reports before finalizing; otherwise state that review is pending. Never poll repeatedly. status: your active, sleeping/revivable and terminal workers, including parked families. finish: record the report, then normally sleep.",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "spawn",
+                      "message",
+                      "status",
+                      "finish"
+                    ],
+                    "description": "What to do."
+                  },
+                  "run_id": {
+                    "description": "Select your returned worker family when status lists several; never grants another caller’s workers.",
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|<UUID:1>|<UUID:2>)$"
+                  },
+                  "context": {
+                    "description": "spawn: shared instructions prepended to every task, e.g. repo, conventions, edit limits and validation.",
+                    "type": "string",
+                    "maxLength": 4000
+                  },
+                  "workers": {
+                    "description": "spawn: fresh workers to create only after checking status for a suitable sleeping worker; revive one explicitly with message.",
+                    "minItems": 1,
+                    "maxItems": 8,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "label": {
+                          "description": "Name its job in 1-3 words, e.g. \"Tests\"; shown to the user.",
+                          "type": "string",
+                          "maxLength": 60
+                        },
+                        "task": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000,
+                          "description": "This worker's job: objective, relevant files, constraints and expected handoff."
+                        },
+                        "model": {
+                          "description": "Omit unless explicitly requested by the user; app settings supply defaults. Use an exact account-observed model id or provider alias. Invalid overrides return observed ids before opening; the browser confirms availability before Send.",
+                          "type": "string",
+                          "maxLength": 80
+                        },
+                        "reasoning_effort": {
+                          "description": "Omit unless explicitly requested by the user; app settings supply defaults. Do not ask just to spawn a worker. This selects reasoning only, never a model.",
+                          "type": "string",
+                          "enum": [
+                            "pro",
+                            "none",
+                            "minimal",
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max",
+                            "ultra"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "task"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "messages": {
+                    "description": "message: atomic batch; prefer this to one call per recipient.",
+                    "minItems": 1,
+                    "maxItems": 16,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "to": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 40,
+                          "description": "Recipient."
+                        },
+                        "text": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 4000,
+                          "description": "What to say."
+                        },
+                        "label": {
+                          "description": "New job name when waking.",
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        }
+                      },
+                      "required": [
+                        "to",
+                        "text"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "to": {
+                    "description": "message: one recipient; messaging a sleeping worker wakes it.",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40
+                  },
+                  "target_run_id": {
+                    "description": "message: existing prime run id; prime-only, no worker/status access.",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 36
+                  },
+                  "text": {
+                    "description": "message: what to say.",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  },
+                  "result": {
+                    "description": "finish: factual handoff under RESULT / CHANGES / VALIDATION / BLOCKERS.",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  }
+                },
+                "required": [
+                  "action"
+                ],
+                "additionalProperties": false
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": false,
+                "idempotentHint": false,
+                "openWorldHint": true
+              }
+            },
+            {
+              "name": "exec",
+              "title": "Run JavaScript",
+              "description": "Run JavaScript to compose this connector’s tools. Argument: {code: \"raw JavaScript\"}; the host chooses the outer namespace. Inside code, use await tools.<tool_name>(args), await Promise.all([...]), text(value), and image(dataUrlOrMcpImageContent). tools return their normal MCP result objects, including content and isError. Only explicit text/image output reaches the model; intermediate results stay in the runtime and local tool recording. ALL_TOOLS lists {name,description}; use the individual tools’ schemas for arguments. Fresh isolated JavaScript runtime, top-level await, no Node, filesystem, network, console or imports. Requires exact companion chat/session identity or Allow unattributed calls enabled. Limits: 64k source characters, 32 MiB JS memory, 2s active JS time, 60s total, 32 calls, 8 concurrent calls, 40k text bytes, 4 images, 12 MiB emitted payload. Await every call. Termination stops JavaScript/new calls, not actions already dispatched. Individual tools remain available. session_finish and agents action=finish must be direct calls. No recursive exec, pragma, wait/yield or persistent globals. See the connector instructions for examples.",
+              "inputSchema": {
+                "type": "object",
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64000,
+                    "description": "Raw JavaScript source with top-level await. Emit results with text(...) or image(...)."
+                  }
+                },
+                "required": [
+                  "code"
+                ],
+                "additionalProperties": false
+              },
+              "annotations": {
+                "readOnlyHint": false,
+                "destructiveHint": true,
+                "idempotentHint": false,
+                "openWorldHint": true
+              }
+            }
+          ]
+        },
+        "jsonrpc": "2.0",
+        "id": 2
+      }
+    ]
+  }
+}

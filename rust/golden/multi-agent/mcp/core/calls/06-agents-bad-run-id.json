@@ -1,0 +1,29 @@
+{
+  "case": "agents-bad-run-id",
+  "request": {
+    "tool": "agents",
+    "arguments": {
+      "action": "status",
+      "run_id": "not-a-uuid"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool agents: run_id: Invalid UUID"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 7
+      }
+    ]
+  }
+}

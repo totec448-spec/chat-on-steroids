@@ -1,0 +1,28 @@
+{
+  "case": "read-empty-paths",
+  "request": {
+    "tool": "read",
+    "arguments": {
+      "paths": []
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool read: paths: Too small: expected array to have >=1 items"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 21
+      }
+    ]
+  }
+}

@@ -1,0 +1,1 @@
+[{"kind":"say","text":"Steering note received.","done":true},{"kind":"call","id":"call-3","tool":"exec_command","done":true}]

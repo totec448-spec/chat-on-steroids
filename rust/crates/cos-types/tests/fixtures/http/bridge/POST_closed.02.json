@@ -1,0 +1,11 @@
+{
+  "method": "POST",
+  "route": "/closed",
+  "status": 200,
+  "request": {
+    "conversationId": "cdcdcdcd-1111-2222-3333-000000000108"
+  },
+  "response": {
+    "ok": true
+  }
+}

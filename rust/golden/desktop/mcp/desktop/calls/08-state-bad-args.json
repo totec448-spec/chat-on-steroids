@@ -1,0 +1,28 @@
+{
+  "case": "state-bad-args",
+  "request": {
+    "tool": "get_window_state",
+    "arguments": {
+      "window": "x"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool get_window_state: window: Invalid input: expected object, received string"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 9
+      }
+    ]
+  }
+}

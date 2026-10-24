@@ -1,0 +1,26 @@
+{
+  "case": "patch-update",
+  "request": {
+    "tool": "apply_patch",
+    "arguments": {
+      "patch": "*** Begin Patch\n*** Update File: /project/src/greeting.txt\n@@\n-hello world\n+hello rust\n second line\n*** End Patch\n"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "jsonrpc": "2.0",
+        "id": 3,
+        "error": {
+          "code": -32602,
+          "message": "Tool apply_patch not found"
+        }
+      }
+    ]
+  },
+  "disk": {
+    "src/greeting.txt": "hello world\nsecond line\n"
+  }
+}

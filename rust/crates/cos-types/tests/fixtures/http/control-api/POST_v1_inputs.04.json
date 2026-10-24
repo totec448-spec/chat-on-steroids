@@ -1,0 +1,44 @@
+{
+  "method": "POST",
+  "route": "/v1/inputs",
+  "status": 202,
+  "request": {
+    "id": "0f8ba1a5-fcd6-4f7f-9fbc-9d38a5c742cc",
+    "projectId": "b56b7dc9-3c11-42d8-ae89-d81ed66487ea",
+    "text": "Work in this project"
+  },
+  "response": {
+    "input": {
+      "id": "0f8ba1a5-fcd6-4f7f-9fbc-9d38a5c742cc",
+      "sessionId": "0f8ba1a5-fcd6-4f7f-9fbc-9d38a5c742cc",
+      "deliveredSessionId": null,
+      "conversationId": null,
+      "state": "queued",
+      "delivery": "pending",
+      "mode": "auto",
+      "transportIntent": "browser",
+      "automatic": false,
+      "purpose": null,
+      "createdAt": 1767225600000,
+      "dueAt": 1767225600000,
+      "offeredAt": null,
+      "deliveredAt": null,
+      "sendAuthorizedAt": null,
+      "requiresAuthorization": false,
+      "cancelledByUser": false,
+      "queueOrder": null,
+      "model": null,
+      "reasoningEffort": null,
+      "messageId": null,
+      "error": null,
+      "text": {
+        "text": "Work in this project",
+        "chars": 20,
+        "truncated": false
+      },
+      "attachments": 0,
+      "images": 0
+    },
+    "replayed": false
+  }
+}

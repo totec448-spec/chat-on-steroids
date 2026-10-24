@@ -1,0 +1,12 @@
+{
+  "method": "POST",
+  "route": "/conversation-deleted",
+  "status": 200,
+  "request": {
+    "conversationId": "ca5d2c16-bb10-4f6d-a335-4bf0b354a0f1"
+  },
+  "response": {
+    "ok": true,
+    "ended": 1
+  }
+}

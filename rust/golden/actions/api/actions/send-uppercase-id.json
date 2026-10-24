@@ -1,0 +1,56 @@
+{
+  "request": {
+    "method": "POST",
+    "route": "/v1/inputs",
+    "headers": {
+      "content-type": "application/json",
+      "expect": "100-continue"
+    },
+    "body": {
+      "id": "<UUID:1>",
+      "text": "x"
+    }
+  },
+  "response": {
+    "status": 202,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "input": {
+        "id": "<UUID:1>",
+        "sessionId": "<UUID:1>",
+        "deliveredSessionId": null,
+        "conversationId": null,
+        "state": "queued",
+        "delivery": "pending",
+        "mode": "auto",
+        "transportIntent": "browser",
+        "automatic": false,
+        "purpose": null,
+        "createdAt": "<EPOCH_MS>",
+        "dueAt": "<EPOCH_MS>",
+        "offeredAt": null,
+        "deliveredAt": null,
+        "sendAuthorizedAt": null,
+        "requiresAuthorization": false,
+        "cancelledByUser": false,
+        "queueOrder": null,
+        "model": null,
+        "reasoningEffort": null,
+        "messageId": null,
+        "error": null,
+        "text": {
+          "text": "x",
+          "chars": "<CHARS>",
+          "truncated": false
+        },
+        "attachments": 0,
+        "images": 0
+      },
+      "replayed": false
+    }
+  }
+}

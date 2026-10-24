@@ -1,0 +1,28 @@
+{
+  "case": "press-key-bad-args",
+  "request": {
+    "tool": "press_key",
+    "arguments": {
+      "key": 42
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool press_key: window: Invalid input: expected object, received undefined, key: Invalid input: expected string, received number"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 15
+      }
+    ]
+  }
+}

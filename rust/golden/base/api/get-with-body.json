@@ -1,0 +1,21 @@
+{
+  "request": {
+    "method": "GET",
+    "route": "/v1/health",
+    "headers": {
+      "content-type": "application/json"
+    },
+    "body": {}
+  },
+  "response": {
+    "status": 413,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "error": "body_not_allowed"
+    }
+  }
+}

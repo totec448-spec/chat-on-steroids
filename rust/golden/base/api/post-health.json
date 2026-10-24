@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "POST",
+    "route": "/v1/health",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 405,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "allow": "GET",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "error": "method_not_allowed"
+    }
+  }
+}

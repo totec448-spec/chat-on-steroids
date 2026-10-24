@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "route": "/input/fail",
+  "status": 200,
+  "request": {
+    "id": "2877407e-a166-4830-9336-f9a1237f2fdd",
+    "owner": "refreshed-page",
+    "conversationId": "eec87e87-22d0-43c0-8691-6183a137b79e",
+    "error": "After-turn pickup was withdrawn before Send."
+  },
+  "response": {
+    "ok": true
+  }
+}

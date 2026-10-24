@@ -1,0 +1,41 @@
+{
+  "method": "POST",
+  "route": "/compact",
+  "status": 200,
+  "request": {
+    "conversationId": "f0f00003-1111-4111-8111-111111111111"
+  },
+  "response": {
+    "started": false,
+    "sessionId": "2026-01-01-db2eaab0",
+    "token": "TTTTTTTTTTTTTTTTTTTTTT",
+    "sourceSend": {
+      "state": "dispatched-unresolved",
+      "messageId": null,
+      "before": null,
+      "dispatchedAt": 1767225600000
+    },
+    "prompt": null,
+    "job": {
+      "sessionId": "2026-01-01-db2eaab0",
+      "token": "TTTTTTTTTTTTTTTTTTTTTT",
+      "stage": "handoff-pending",
+      "startedAt": 1767225600000,
+      "automatic": false,
+      "busy": true,
+      "handoffId": null,
+      "sourceSend": {
+        "state": "dispatched-unresolved",
+        "messageId": null,
+        "before": null,
+        "dispatchedAt": 1767225600000
+      },
+      "destinationSend": {
+        "state": "not-attempted",
+        "conversationId": null,
+        "messageId": null
+      },
+      "error": null
+    }
+  }
+}

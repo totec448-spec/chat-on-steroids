@@ -1,0 +1,63 @@
+{
+  "request": {
+    "method": "GET",
+    "route": "/v1/sessions/{unattributed}/events?before=3",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "events": [
+        {
+          "seq": 1,
+          "position": 1,
+          "time": "<EPOCH_MS>",
+          "kind": "session_start",
+          "source": "app",
+          "conversationId": null,
+          "title": "Unattributed activity"
+        },
+        {
+          "seq": 2,
+          "position": 2,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:1>",
+            "name": "read",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Read src/greeting.txt",
+              "detail": "lines 1–2",
+              "metric": "2 lines",
+              "tone": "neutral",
+              "kind": "read"
+            },
+            "args": {
+              "text": "{\"paths\":[\"/project/src/greeting.txt\"]}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "--- /project/src/greeting.txt — lines 1-2 of 2, 24 B, modified <ISO_TIME> ---\n1\thello world\n2\tsecond line\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        }
+      ],
+      "total": 76,
+      "nextFrom": 3
+    }
+  }
+}

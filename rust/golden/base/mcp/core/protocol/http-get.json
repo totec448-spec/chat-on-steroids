@@ -1,0 +1,24 @@
+{
+  "request": {
+    "method": "GET",
+    "headers": {
+      "accept": "text/event-stream"
+    },
+    "body": null
+  },
+  "response": {
+    "status": 405,
+    "headers": {
+      "content-type": "application/json",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "error": {
+        "code": -32000,
+        "message": "Method not allowed."
+      },
+      "id": null
+    }
+  }
+}

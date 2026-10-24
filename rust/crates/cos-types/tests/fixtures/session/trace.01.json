@@ -1,0 +1,1 @@
+[{"kind":"say","text":"First command printed one.","done":true},{"kind":"call","id":"call-1","tool":"exec_command","done":true,"at":1767225600000},{"kind":"recap","text":"Ran the first command"}]

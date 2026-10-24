@@ -1,0 +1,13 @@
+{
+  "method": "POST",
+  "route": "/goal/open",
+  "status": 400,
+  "request": {
+    "text": "   "
+  },
+  "response": {
+    "error": "no_objective",
+    "message": "No task was provided. Enter a task before starting Goal/Loop.",
+    "messageKey": "no_objective"
+  }
+}

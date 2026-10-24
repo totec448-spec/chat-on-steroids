@@ -1,0 +1,9 @@
+{
+  "method": "GET",
+  "route": "/commands",
+  "status": 404,
+  "request": null,
+  "response": {
+    "error": "not_found"
+  }
+}

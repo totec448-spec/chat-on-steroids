@@ -1,0 +1,13 @@
+{
+  "method": "POST",
+  "route": "/commands/step",
+  "status": 200,
+  "request": {
+    "id": "1d607cb3d8bebe83",
+    "client": "tab-1",
+    "step": "model"
+  },
+  "response": {
+    "ok": true
+  }
+}

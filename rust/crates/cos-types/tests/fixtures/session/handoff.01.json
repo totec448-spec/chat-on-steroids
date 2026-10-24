@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "id": "2026-01-01-73a38339",
+  "sessionId": "2026-01-01-8431769e",
+  "createdAt": 1767225600000,
+  "text": "FAILED REBIND HANDOFF: this is deliberately long enough to be a valid captured continuation brief. FAILED REBIND HANDOFF: this is deliberately long enough to be a valid captured continuation brief. FAILED REBIND HANDOFF: this is deliberately long enough to be a valid captured continuation brief.",
+  "sourceEvents": 0,
+  "sourceTokens": 1000,
+  "notes": [],
+  "provenance": {
+    "sourceConversationId": "eeeeeeee-5555-4555-8555-555555555555",
+    "sourceGeneration": 1,
+    "sourceTurnId": null,
+    "continuationId": null
+  }
+}

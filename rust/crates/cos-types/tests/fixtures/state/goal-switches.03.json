@@ -1,0 +1,1 @@
+{"version":1,"savedAt":1767225600000,"switches":[{"conversationId":"60ff8004-ae52-490e-a45c-faefe5456aa6","enabled":true,"mode":"goal","afterTurn":false,"at":1767225600000},{"conversationId":"afa5e098-dfab-43c0-a731-0095986e46dd","enabled":false,"mode":"loop","at":1767225600000,"role":"decision"}]}

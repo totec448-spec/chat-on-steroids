@@ -1,0 +1,44 @@
+{
+  "method": "POST",
+  "route": "/compact",
+  "status": 200,
+  "request": {
+    "conversationId": "c0c0c0c0-7870-4000-8000-000000000001",
+    "token": "TTTTTTTTTTTTTTTTTTTTTT",
+    "sourceMessageId": "handoff-c0c0c0c0-7870-4000-8000-000000000001"
+  },
+  "response": {
+    "stored": true,
+    "sessionId": "2026-01-01-cf3e1da4",
+    "handoffId": "2026-01-01-fe178fc0",
+    "commandId": "be5336ff293f27f9",
+    "placement": {
+      "id": "be5336ff293f27f9",
+      "model": null,
+      "reasoningEffort": null,
+      "active": true,
+      "homeConversationId": "c0c0c0c0-7870-4000-8000-000000000001",
+      "project": null
+    },
+    "job": {
+      "sessionId": "2026-01-01-cf3e1da4",
+      "token": "TTTTTTTTTTTTTTTTTTTTTT",
+      "stage": "opening",
+      "startedAt": 1767225600000,
+      "automatic": false,
+      "busy": true,
+      "handoffId": "2026-01-01-fe178fc0",
+      "sourceSend": {
+        "state": "sent",
+        "messageId": "handoff-c0c0c0c0-7870-4000-8000-000000000001"
+      },
+      "destinationSend": {
+        "state": "not-attempted",
+        "conversationId": null,
+        "messageId": null
+      },
+      "error": null
+    },
+    "bound": true
+  }
+}

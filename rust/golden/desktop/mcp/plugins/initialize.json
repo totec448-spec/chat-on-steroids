@@ -1,0 +1,34 @@
+{
+  "request": {
+    "protocolVersion": "2025-06-18"
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {
+            "tools": {
+              "listChanged": true
+            }
+          },
+          "serverInfo": {
+            "name": "chat-on-steroids-plugins",
+            "version": "2.1.35"
+          },
+          "instructions": "External MCP tools enabled by the user in Chat On Steroids. Each tool retains its upstream schema and annotations. External servers run with their own operating-system or service permissions; CoS approved folders do not sandbox them. Use only for the user's requested task. A failed or disconnected call may already have taken effect: never automatically retry a mutation after an ambiguous failure. Disabled tools require the user to re-enable them in Settings. Core and Desktop are separate connectors."
+        },
+        "jsonrpc": "2.0",
+        "id": 1
+      }
+    ],
+    "headers": {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache, no-transform",
+      "connection": "keep-alive",
+      "x-accel-buffering": "no"
+    }
+  }
+}

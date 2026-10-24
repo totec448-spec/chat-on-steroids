@@ -1,0 +1,12 @@
+{
+  "method": "POST",
+  "route": "/repairs/claim",
+  "status": 200,
+  "request": {
+    "conversationId": "7c9c10a9-3bd4-4a24-8ddd-66b9378c01f4",
+    "token": "TTTTTTTTTTTT"
+  },
+  "response": {
+    "allowed": true
+  }
+}

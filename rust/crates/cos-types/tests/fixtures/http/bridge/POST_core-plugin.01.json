@@ -1,0 +1,12 @@
+{
+  "method": "POST",
+  "route": "/core-plugin",
+  "status": 400,
+  "request": {
+    "missing": true,
+    "appId": "app://asdk_app_x"
+  },
+  "response": {
+    "error": "invalid_core_plugin"
+  }
+}

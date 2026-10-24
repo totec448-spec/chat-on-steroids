@@ -1,0 +1,9 @@
+{
+  "method": "POST",
+  "route": "/extension/update",
+  "status": 200,
+  "request": null,
+  "response": {
+    "ready": false
+  }
+}

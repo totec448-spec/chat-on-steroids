@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "route": "/input/answer",
+  "status": 409,
+  "request": {
+    "id": "2c840f82-1a6a-4e9a-b447-13dd6591f8d6",
+    "owner": "other-page",
+    "conversationId": null,
+    "response": "wrong"
+  },
+  "response": {
+    "error": "input_not_owned"
+  }
+}

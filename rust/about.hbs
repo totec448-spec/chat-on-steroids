@@ -1,0 +1,27 @@
+Chat On Steroids — Rust Third-party Notices
+===========================================
+The following Rust crates are bundled as part of the native sidecar runtime.
+The main application is MIT licensed; see the root LICENSE.
+
+{{#each licenses}}
+================================================================================
+License: {{name}}
+Crates:
+{{#each used_by}}
+  {{crate.name}}@{{crate.version}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}
+================================================================================
+NOTICE: cos-patch@0.1.0
+cos-patch contains code from OpenAI Codex (https://github.com/openai/codex), licensed under the
+Apache License 2.0 above. That project's NOTICE file reads:
+
+OpenAI Codex
+Copyright 2025 OpenAI
+
+This project includes code derived from [Ratatui](https://github.com/ratatui/ratatui), licensed under the MIT license.
+Copyright (c) 2016-2022 Florian Dehau
+Copyright (c) 2023-2025 The Ratatui Developers

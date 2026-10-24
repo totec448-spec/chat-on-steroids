@@ -1,0 +1,165 @@
+{
+  "calls": [
+    {
+      "tool": "read",
+      "args": { "paths": ["/project/src/greeting.txt"] },
+      "text": ["--- /project/src/greeting.txt — lines 1-2 of 2 ---\n1\thello world\n2\tsecond line"],
+      "outcome": "ok",
+      "startedAt": 1792000001000,
+      "durationMs": 12,
+      "detail": "lines 1–2"
+    },
+    {
+      "tool": "read",
+      "args": { "paths": ["/project/src/a.ts", "/project/src/b.ts", "/project/src/c.ts", "/project/src/d.ts"] },
+      "text": ["a", "b"],
+      "outcome": "ok",
+      "startedAt": 1792000002000,
+      "durationMs": 1250
+    },
+    {
+      "tool": "apply_patch",
+      "args": { "patch": "*** Begin Patch\n*** Add File: /project/src/added.txt\n+added line one\n+added line two\n*** End Patch" },
+      "text": ["Success. Updated the following files:\nA /project/src/added.txt"],
+      "outcome": "ok",
+      "startedAt": 1792000003000,
+      "durationMs": 31,
+      "changes": [{ "path": "/project/src/added.txt", "added": 2, "removed": 0, "approximate": false }]
+    },
+    {
+      "tool": "apply_patch",
+      "args": { "patch": "*** Begin Patch\n*** Update File: /project/src/greeting.txt\n@@\n-this line is not there\n+x\n*** End Patch" },
+      "text": ["apply_patch verification failed: Failed to find expected lines in /project/src/greeting.txt:\nthis line is not there"],
+      "outcome": "tool_rejected",
+      "startedAt": 1792000004000,
+      "durationMs": 9
+    },
+    {
+      "tool": "exec_command",
+      "args": { "cmd": "exit 3", "workdir": "/project", "env": { "TOKEN": "abc" } },
+      "text": ["Process exited with code 3"],
+      "outcome": "process_exit_nonzero",
+      "startedAt": 1792000005000,
+      "durationMs": 640,
+      "process": { "exitCode": 3, "running": false, "durationMs": 640 }
+    },
+    {
+      "tool": "exec_command",
+      "args": { "cmd": "1..1200 | ForEach-Object { \"output line $_\" }", "workdir": "/project" },
+      "repeat": { "line": "output line {n}", "count": 1200 },
+      "outcome": "ok",
+      "startedAt": 1792000006000,
+      "durationMs": 1150,
+      "process": { "exitCode": 0, "running": false, "durationMs": 1150 }
+    },
+    {
+      "tool": "update_plan",
+      "args": { "plan": [] },
+      "text": [
+        "Exact chat identity or an allowed request-scoped caller is required to update a plan. No plan was changed.",
+        "\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed."
+      ],
+      "outcome": "tool_rejected",
+      "startedAt": 1792000007000,
+      "durationMs": 2
+    },
+    {
+      "tool": "view_image",
+      "args": { "path": "/project/src/pixel.png" },
+      "text": ["/project/src/pixel.png"],
+      "image": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYPj/HwADAgH/eL9GtQAAAABJRU5ErkJggg==",
+      "outcome": "ok",
+      "startedAt": 1792000008000,
+      "durationMs": 4
+    },
+    {
+      "tool": "write_clipboard",
+      "args": { "text": "private words", "secret": "s3cret" },
+      "text": ["Clipboard replaced. key sk-proj-AAAAAAAAAAAAAAAAAAAAAAAA"],
+      "outcome": "tool_internal_error",
+      "startedAt": 1792000000500,
+      "durationMs": 3
+    },
+    {
+      "tool": "apply_patch",
+      "args": { "patch": "" },
+      "text": ["ok"],
+      "outcome": "ok",
+      "startedAt": 1792000009000,
+      "durationMs": 5,
+      "manyChanges": 3000
+    },
+    {
+      "tool": "find",
+      "args": { "query": "quartz-lantern", "mode": "content" },
+      "text": ["src/notes.md:3: quartz-lantern"],
+      "outcome": "ok",
+      "startedAt": 1792000010000,
+      "durationMs": 77,
+      "count": 1
+    },
+    {
+      "tool": "read",
+      "nested": true,
+      "args": { "paths": ["/project/src/notes.md"] },
+      "repeat": { "line": "a code-mode child read this line {n}", "count": 200 },
+      "outcome": "ok",
+      "startedAt": 1792000011000,
+      "durationMs": 6
+    },
+    {
+      "tool": "exec_command",
+      "args": { "cmd": "$line = Read-Host; Write-Output \"got [$line]\"", "workdir": "/project", "tty": true, "yield_time_ms": 3000 },
+      "text": ["Process running with session ID 41"],
+      "outcome": "ok",
+      "startedAt": 1792000012000,
+      "durationMs": 3010,
+      "process": { "exitCode": null, "running": true, "durationMs": 3005, "sessionId": "41" }
+    },
+    {
+      "tool": "write_stdin",
+      "args": { "session_id": 41, "chars": "golden\r", "yield_time_ms": 5000 },
+      "text": ["Process exited with code 0\nCompleted session ID: 41"],
+      "outcome": "ok",
+      "startedAt": 1792000013000,
+      "durationMs": 120,
+      "process": { "exitCode": 0, "running": false, "durationMs": 4200 }
+    },
+    {
+      "tool": "write_stdin",
+      "args": { "session_id": 42, "chars": "" },
+      "text": ["Process exited with code 2"],
+      "outcome": "process_exit_nonzero",
+      "startedAt": 1792000014000,
+      "durationMs": 15,
+      "process": { "exitCode": 2, "running": false }
+    },
+    {
+      "tool": "exec_command",
+      "args": { "cmds": ["git diff", "C:/tools/rg.exe needle file.txt | Select-Object -First 40"], "workdir": "/project" },
+      "text": ["Process exited with code 4294967295"],
+      "outcome": "ok",
+      "startedAt": 1792000015000,
+      "durationMs": 80,
+      "process": { "exitCode": 4294967295, "running": false, "benignExit": true, "durationMs": 75 }
+    },
+    {
+      "tool": "exec_command",
+      "args": { "cmd": "Start-Sleep 900", "workdir": "/project" },
+      "text": ["Process timed out"],
+      "outcome": "tool_execution_error",
+      "startedAt": 1792000016000,
+      "durationMs": 30000,
+      "process": { "running": false, "timedOut": true, "durationMs": 30000 }
+    },
+    {
+      "tool": "find",
+      "args": { "query": "greeting", "mode": "name" },
+      "text": ["src/greeting.txt\nsrc/greeting.md\ndocs/greeting.txt"],
+      "outcome": "ok",
+      "startedAt": 1792000017000,
+      "durationMs": 9,
+      "count": 3
+    }
+  ]
+}

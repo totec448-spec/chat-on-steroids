@@ -1,0 +1,29 @@
+{
+  "case": "save-image-bad-nth",
+  "request": {
+    "tool": "save_image",
+    "arguments": {
+      "path": "/project/out/generated.png",
+      "nth": 0
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool save_image: nth: Too small: expected number to be >=1"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 34
+      }
+    ]
+  }
+}

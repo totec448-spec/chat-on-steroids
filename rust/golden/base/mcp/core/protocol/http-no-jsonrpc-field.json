@@ -1,0 +1,28 @@
+{
+  "request": {
+    "method": "POST",
+    "headers": {
+      "content-type": "application/json",
+      "accept": "application/json, text/event-stream"
+    },
+    "body": {
+      "id": 1,
+      "method": "ping"
+    }
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "content-type": "application/json",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "jsonrpc": "2.0",
+      "error": {
+        "code": -32600,
+        "message": "Bad Request: the request body is not a valid JSON-RPC message"
+      },
+      "id": 1
+    }
+  }
+}

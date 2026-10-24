@@ -1,0 +1,20 @@
+{
+  "request": {
+    "method": "PUT",
+    "route": "/v1/inputs",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 405,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "allow": "GET, POST",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "error": "method_not_allowed"
+    }
+  }
+}

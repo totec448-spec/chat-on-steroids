@@ -1,0 +1,26 @@
+{
+  "case": "patch-no-args",
+  "request": {
+    "tool": "apply_patch",
+    "arguments": {}
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool apply_patch: patch: Invalid input: expected string, received undefined"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 51
+      }
+    ]
+  }
+}

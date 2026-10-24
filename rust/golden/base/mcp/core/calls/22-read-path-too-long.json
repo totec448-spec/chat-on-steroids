@@ -1,0 +1,28 @@
+{
+  "case": "read-path-too-long",
+  "request": {
+    "tool": "read",
+    "arguments": {
+      "note": "{\"paths\":[\"/project/\" + 4100 x \"a\"]}"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool read: paths.0: Too big: expected string to have <=4096 characters"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 23
+      }
+    ]
+  }
+}

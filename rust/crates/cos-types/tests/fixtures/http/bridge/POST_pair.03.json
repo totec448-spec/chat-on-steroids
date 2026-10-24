@@ -1,0 +1,11 @@
+{
+  "method": "POST",
+  "route": "/pair",
+  "status": 200,
+  "request": {
+    "reuse": true
+  },
+  "response": {
+    "token": "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT"
+  }
+}

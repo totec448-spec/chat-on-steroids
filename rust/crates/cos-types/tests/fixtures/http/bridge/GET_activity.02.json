@@ -1,0 +1,425 @@
+{
+  "method": "GET",
+  "route": "/activity",
+  "status": 200,
+  "request": null,
+  "response": {
+    "sessionId": "2026-01-01-796c30ae",
+    "generating": false,
+    "tokens": 75,
+    "context": {
+      "auto": true,
+      "threshold": 400000,
+      "warn": 400000,
+      "limit": 533333
+    },
+    "followOutput": true,
+    "mentionCore": true,
+    "bootstrap": null,
+    "bootstrapAgent": null,
+    "bootstrapMessageId": null,
+    "entries": [
+      {
+        "seq": 3,
+        "time": 1767225600000,
+        "tool": "read",
+        "callId": "b624b222-ec07-4f67-b654-eec861e83902",
+        "detailRevision": 3,
+        "turnId": "off-silence-source",
+        "requestId": "wfr_repair_93",
+        "attribution": "request_id",
+        "outcome": "ok",
+        "displayOutcome": {
+          "code": "completed",
+          "label": "completed"
+        },
+        "durationMs": 0,
+        "summary": {
+          "kind": "read",
+          "tone": "neutral",
+          "title": "Read mine.ts"
+        },
+        "changes": [],
+        "agent": null
+      },
+      {
+        "seq": 9,
+        "time": 1767225600000,
+        "tool": "read",
+        "callId": "cfddfdb7-b87f-4510-804c-86163f22d46e",
+        "detailRevision": 9,
+        "turnId": "native-trailing-tools",
+        "requestId": "wfr_native_trailing_pro",
+        "attribution": "request_id",
+        "outcome": "ok",
+        "displayOutcome": {
+          "code": "completed",
+          "label": "completed"
+        },
+        "durationMs": 0,
+        "summary": {
+          "kind": "read",
+          "tone": "neutral",
+          "title": "Read a.ts"
+        },
+        "changes": [],
+        "agent": null
+      },
+      {
+        "seq": 12,
+        "time": 1767225600000,
+        "tool": "read",
+        "callId": "a035e0b8-6a92-4bfe-ac01-8af1153de0a0",
+        "detailRevision": 12,
+        "turnId": "native-trailing-tools",
+        "requestId": "wfr_native_trailing_pro",
+        "attribution": "request_id",
+        "outcome": "ok",
+        "displayOutcome": {
+          "code": "completed",
+          "label": "completed"
+        },
+        "durationMs": 0,
+        "summary": {
+          "kind": "read",
+          "tone": "neutral",
+          "title": "Read a.ts"
+        },
+        "changes": [],
+        "agent": null
+      },
+      {
+        "seq": 14,
+        "time": 1767225600000,
+        "tool": "read",
+        "callId": "293be0f0-c2b1-4070-80b7-bfcd2cb71a67",
+        "detailRevision": 14,
+        "turnId": "native-trailing-tools",
+        "requestId": "wfr_native_trailing_pro",
+        "attribution": "request_id",
+        "outcome": "ok",
+        "displayOutcome": {
+          "code": "completed",
+          "label": "completed"
+        },
+        "durationMs": 0,
+        "summary": {
+          "kind": "read",
+          "tone": "neutral",
+          "title": "Read a.ts"
+        },
+        "changes": [],
+        "agent": null
+      },
+      {
+        "seq": 16,
+        "time": 1767225600000,
+        "tool": "read",
+        "callId": "a06da3a6-020e-4071-acfd-500126cc0168",
+        "detailRevision": 16,
+        "turnId": "closed-goal-turn",
+        "requestId": "wfr_repair_125",
+        "attribution": "request_id",
+        "outcome": "ok",
+        "displayOutcome": {
+          "code": "completed",
+          "label": "completed"
+        },
+        "durationMs": 0,
+        "summary": {
+          "kind": "read",
+          "tone": "neutral",
+          "title": "Read mine.ts"
+        },
+        "changes": [],
+        "agent": null
+      }
+    ],
+    "stream": [
+      {
+        "seq": 2,
+        "time": 1767225600000,
+        "turnId": "off-silence-source",
+        "agent": null,
+        "turnOrigin": 2,
+        "kind": "turn_start"
+      },
+      {
+        "seq": 3,
+        "time": 1767225600000,
+        "turnId": "off-silence-source",
+        "agent": null,
+        "turnOrigin": 2,
+        "kind": "tool_call",
+        "tool": "read",
+        "callId": "b624b222-ec07-4f67-b654-eec861e83902",
+        "detailRevision": 3,
+        "requestId": "wfr_repair_93",
+        "attribution": "request_id",
+        "outcome": "ok",
+        "displayOutcome": {
+          "code": "completed",
+          "label": "completed"
+        },
+        "durationMs": 0,
+        "summary": {
+          "kind": "read",
+          "tone": "neutral",
+          "title": "Read mine.ts"
+        },
+        "changes": []
+      },
+      {
+        "seq": 4,
+        "time": 1767225600000,
+        "turnId": "off-silence-source",
+        "agent": null,
+        "turnOrigin": 2,
+        "kind": "progress",
+        "text": "Trying to reload chat to recover an unresponsive open turn…",
+        "progressId": "browser-repair:a2222222-1111-4111-8111-000000000091:sdie9fsRBv70"
+      },
+      {
+        "seq": 4,
+        "time": 1767225600000,
+        "turnId": "off-silence-source",
+        "agent": null,
+        "turnOrigin": 2,
+        "kind": "progress",
+        "text": "Reloaded chat to recover an unresponsive open turn.",
+        "progressId": "browser-repair:a2222222-1111-4111-8111-000000000091:sdie9fsRBv70"
+      },
+      {
+        "seq": 7,
+        "time": 1767225600000,
+        "turnId": "new-work-after-silence",
+        "agent": null,
+        "turnOrigin": 7,
+        "kind": "turn_start"
+      },
+      {
+        "seq": 8,
+        "time": 1767225600000,
+        "turnId": "native-trailing-tools",
+        "agent": null,
+        "turnOrigin": 8,
+        "kind": "turn_start"
+      },
+      {
+        "seq": 9,
+        "time": 1767225600000,
+        "turnId": "native-trailing-tools",
+        "agent": null,
+        "turnOrigin": 8,
+        "kind": "tool_call",
+        "tool": "read",
+        "callId": "cfddfdb7-b87f-4510-804c-86163f22d46e",
+        "detailRevision": 9,
+        "requestId": "wfr_native_trailing_pro",
+        "attribution": "request_id",
+        "outcome": "ok",
+        "displayOutcome": {
+          "code": "completed",
+          "label": "completed"
+        },
+        "durationMs": 0,
+        "summary": {
+          "kind": "read",
+          "tone": "neutral",
+          "title": "Read a.ts"
+        },
+        "changes": []
+      },
+      {
+        "seq": 12,
+        "time": 1767225600000,
+        "turnId": "native-trailing-tools",
+        "agent": null,
+        "turnOrigin": 8,
+        "kind": "tool_call",
+        "tool": "read",
+        "callId": "a035e0b8-6a92-4bfe-ac01-8af1153de0a0",
+        "detailRevision": 12,
+        "requestId": "wfr_native_trailing_pro",
+        "attribution": "request_id",
+        "outcome": "ok",
+        "displayOutcome": {
+          "code": "completed",
+          "label": "completed"
+        },
+        "durationMs": 0,
+        "summary": {
+          "kind": "read",
+          "tone": "neutral",
+          "title": "Read a.ts"
+        },
+        "changes": []
+      },
+      {
+        "seq": 14,
+        "time": 1767225600000,
+        "turnId": "native-trailing-tools",
+        "agent": null,
+        "turnOrigin": 8,
+        "kind": "tool_call",
+        "tool": "read",
+        "callId": "293be0f0-c2b1-4070-80b7-bfcd2cb71a67",
+        "detailRevision": 14,
+        "requestId": "wfr_native_trailing_pro",
+        "attribution": "request_id",
+        "outcome": "ok",
+        "displayOutcome": {
+          "code": "completed",
+          "label": "completed"
+        },
+        "durationMs": 0,
+        "summary": {
+          "kind": "read",
+          "tone": "neutral",
+          "title": "Read a.ts"
+        },
+        "changes": []
+      },
+      {
+        "seq": 10,
+        "time": 1767225600000,
+        "turnId": "native-trailing-tools",
+        "agent": null,
+        "turnOrigin": 8,
+        "kind": "assistant_message",
+        "text": "The requested check is complete.",
+        "renderedHtml": "",
+        "state": "final",
+        "final": true,
+        "messageId": "trailing-native-answer",
+        "providerMessageId": "11111111-2222-4333-8444-555555555555",
+        "origin": 10
+      },
+      {
+        "seq": 11,
+        "time": 1767225600000,
+        "turnId": "native-trailing-tools",
+        "agent": null,
+        "turnOrigin": 8,
+        "kind": "turn_end",
+        "outcome": "completed",
+        "detail": ""
+      },
+      {
+        "seq": 13,
+        "time": 1767225600000,
+        "turnId": "next-native-turn",
+        "agent": null,
+        "turnOrigin": 13,
+        "kind": "turn_start"
+      },
+      {
+        "seq": 15,
+        "time": 1767225600000,
+        "turnId": "closed-goal-turn",
+        "agent": null,
+        "turnOrigin": 15,
+        "kind": "turn_start"
+      },
+      {
+        "seq": 16,
+        "time": 1767225600000,
+        "turnId": "closed-goal-turn",
+        "agent": null,
+        "turnOrigin": 15,
+        "kind": "tool_call",
+        "tool": "read",
+        "callId": "a06da3a6-020e-4071-acfd-500126cc0168",
+        "detailRevision": 16,
+        "requestId": "wfr_repair_125",
+        "attribution": "request_id",
+        "outcome": "ok",
+        "displayOutcome": {
+          "code": "completed",
+          "label": "completed"
+        },
+        "durationMs": 0,
+        "summary": {
+          "kind": "read",
+          "tone": "neutral",
+          "title": "Read mine.ts"
+        },
+        "changes": []
+      },
+      {
+        "seq": 17,
+        "time": 1767225600000,
+        "turnId": "closed-goal-turn",
+        "agent": null,
+        "turnOrigin": 15,
+        "kind": "assistant_message",
+        "text": "Done.",
+        "renderedHtml": "",
+        "state": "final",
+        "final": true,
+        "messageId": "closed-goal-final",
+        "providerMessageId": null,
+        "origin": 17
+      },
+      {
+        "seq": 18,
+        "time": 1767225600000,
+        "turnId": "closed-goal-turn",
+        "agent": null,
+        "turnOrigin": 15,
+        "kind": "turn_end",
+        "outcome": "completed",
+        "detail": ""
+      }
+    ],
+    "userAnchors": [
+      {
+        "seq": 6,
+        "time": 1767225600000,
+        "messageId": "new-question-after-silence"
+      }
+    ],
+    "resetActivity": false,
+    "truncatedFrom": null,
+    "nextSince": 19,
+    "job": null,
+    "goal": {
+      "enabled": true,
+      "configuredEnabled": true,
+      "afterTurn": true,
+      "proLoopDelivery": false,
+      "own": true,
+      "mode": "loop",
+      "backend": "chatgpt",
+      "model": "gpt-6",
+      "provider": "openrouter",
+      "hasKey": true,
+      "queuePending": false,
+      "wait": {
+        "reason": "settling"
+      },
+      "objective": "",
+      "blocked": "",
+      "pending": {
+        "replyId": "closed-goal-final",
+        "turnId": "closed-goal-turn",
+        "eventSeq": 17,
+        "acceptedAt": 1767225600000
+      },
+      "draft": null
+    },
+    "pendingTools": 0,
+    "progress": {
+      "tools": null,
+      "workers": null
+    },
+    "settlingTools": 0,
+    "activeTurnId": null,
+    "recordedTurnId": null,
+    "recordedQuestionId": null,
+    "settledQuestionId": "new-question-after-silence",
+    "revival": null,
+    "revivals": [],
+    "placement": null
+  }
+}

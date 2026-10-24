@@ -1,0 +1,1 @@
+{"explanation":"Validation still needs to finish.","plan":[{"step":"Implement the change","status":"completed","details":"Preserve unrelated working-tree edits."},{"step":"Run the outstanding checks","status":"in_progress","details":"Reuse the existing terminal; do not relaunch the build."}],"updatedAt":1767225600000}

@@ -1,0 +1,25 @@
+[package]
+name = "cos-files"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license = "MIT"
+description = "The read, view_image, find and save_image tools."
+
+[dependencies]
+base64 = "=0.22.1"
+cos-fs = { version = "0.1.0", path = "../cos-fs" }
+cos-tools = { version = "0.1.0", path = "../cos-tools" }
+grep-regex = "=0.1.14"
+grep-searcher = "=0.1.17"
+icu_collator = "=2.3.1"
+ignore = "=0.4.33"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = { version = "=1.0.154", features = ["preserve_order"] }
+tokio = { version = "=1.54.0", features = ["rt"] }
+
+[dev-dependencies]
+cos-store = { version = "0.1.0", path = "../cos-store" }
+cos-types = { version = "0.1.0", path = "../cos-types" }
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+tokio = { version = "=1.54.0", features = ["rt", "macros", "rt-multi-thread"] }

@@ -1,0 +1,28 @@
+{
+  "case": "exec-neither",
+  "request": {
+    "tool": "exec_command",
+    "arguments": {
+      "workdir": "/project"
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "Input validation error: Invalid arguments for tool exec_command: exec_command requires exactly one of cmd or cmds"
+            }
+          ],
+          "isError": true
+        },
+        "jsonrpc": "2.0",
+        "id": 58
+      }
+    ]
+  }
+}

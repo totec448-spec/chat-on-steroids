@@ -1,0 +1,15 @@
+{
+  "method": "POST",
+  "route": "/input/fail",
+  "status": 200,
+  "request": {
+    "id": "8aaa31df-b29c-4108-b81c-27a07d159953",
+    "owner": "a-document",
+    "conversationId": "c77e4f93-9c93-4460-9625-1321660e4bd3",
+    "error": "After-turn pickup was withdrawn before Send.",
+    "detail": "send-not-ready"
+  },
+  "response": {
+    "ok": true
+  }
+}

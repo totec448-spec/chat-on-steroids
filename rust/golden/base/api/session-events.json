@@ -1,0 +1,1638 @@
+{
+  "request": {
+    "method": "GET",
+    "route": "/v1/sessions/{unattributed}/events",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "events": [
+        {
+          "seq": 27,
+          "position": 27,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:1>",
+            "name": "apply_patch",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Created src/added.txt",
+              "metric": "+2",
+              "tone": "good",
+              "kind": "create"
+            },
+            "args": {
+              "text": "{\"patch\":\"*** Begin Patch\\n*** Add File: /project/src/added.txt\\n+added line one\\n+added line two\\n*** End Patch\\n\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Exit code: 0\nWall time: <DURATION> seconds\nOutput:\nSuccess. Updated the following files:\nA /project/src/added.txt\n\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": [
+              {
+                "path": "/project/src/added.txt",
+                "added": 2,
+                "removed": 0
+              }
+            ]
+          }
+        },
+        {
+          "seq": 28,
+          "position": 28,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:2>",
+            "name": "apply_patch",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Moved src/moved.txt",
+              "metric": "+1 −1",
+              "tone": "good",
+              "kind": "move"
+            },
+            "args": {
+              "text": "{\"patch\":\"*** Begin Patch\\n*** Update File: /project/src/added.txt\\n*** Move to: /project/src/moved.txt\\n@@\\n-added line one\\n+moved line one\\n added line two\\n*** End Patch\\n\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Exit code: 0\nWall time: <DURATION> seconds\nOutput:\nSuccess. Updated the following files:\nM /project/src/moved.txt\n\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": [
+              {
+                "path": "/project/src/moved.txt",
+                "added": 1,
+                "removed": 1
+              }
+            ]
+          }
+        },
+        {
+          "seq": 29,
+          "position": 29,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:3>",
+            "name": "apply_patch",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Deleted src/moved.txt",
+              "metric": "−2",
+              "tone": "warn",
+              "kind": "delete"
+            },
+            "args": {
+              "text": "{\"patch\":\"*** Begin Patch\\n*** Delete File: /project/src/moved.txt\\n*** End Patch\\n\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Exit code: 0\nWall time: <DURATION> seconds\nOutput:\nSuccess. Updated the following files:\nD /project/src/moved.txt\n\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": [
+              {
+                "path": "/project/src/moved.txt",
+                "added": 0,
+                "removed": 2
+              }
+            ]
+          }
+        },
+        {
+          "seq": 30,
+          "position": 30,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:4>",
+            "name": "apply_patch",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Created 2 files",
+              "metric": "+2",
+              "tone": "good",
+              "kind": "create"
+            },
+            "args": {
+              "text": "{\"patch\":\"*** Begin Patch\\n*** Add File: /project/src/a.txt\\n+a\\n*** Add File: /project/src/b.txt\\n+b\\n*** End Patch\\n\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Exit code: 0\nWall time: <DURATION> seconds\nOutput:\nSuccess. Updated the following files:\nA /project/src/a.txt\nA /project/src/b.txt\n\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": [
+              {
+                "path": "/project/src/a.txt",
+                "added": 1,
+                "removed": 0
+              },
+              {
+                "path": "/project/src/b.txt",
+                "added": 1,
+                "removed": 0
+              }
+            ]
+          }
+        },
+        {
+          "seq": 31,
+          "position": 31,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:5>",
+            "name": "apply_patch",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Patch didn’t match",
+              "detail": "apply_patch verification failed: Failed to find expected lines in /project/src/greeting.txt:",
+              "metric": "not applied",
+              "tone": "warn",
+              "kind": "edit"
+            },
+            "args": {
+              "text": "{\"patch\":\"*** Begin Patch\\n*** Update File: /project/src/greeting.txt\\n@@\\n-this line is absent\\n+x\\n*** End Patch\\n\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "apply_patch verification failed: Failed to find expected lines in /project/src/greeting.txt:\nUse the current file text as patch context; do not reconstruct or reformat the old lines.\nExpected text:\nthis line is absent\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 32,
+          "position": 32,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:6>",
+            "name": "apply_patch",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Created src/greeting.txt",
+              "metric": "+1 −2",
+              "tone": "good",
+              "kind": "create"
+            },
+            "args": {
+              "text": "{\"patch\":\"*** Begin Patch\\n*** Add File: /project/src/greeting.txt\\n+clobber\\n*** End Patch\\n\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Exit code: 0\nWall time: <DURATION> seconds\nOutput:\nSuccess. Updated the following files:\nA /project/src/greeting.txt\n\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": [
+              {
+                "path": "/project/src/greeting.txt",
+                "added": 1,
+                "removed": 2
+              }
+            ]
+          }
+        },
+        {
+          "seq": 33,
+          "position": 33,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:7>",
+            "name": "apply_patch",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to apply a patch",
+              "detail": "Not found: /project/src/none.txt",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "edit"
+            },
+            "args": {
+              "text": "{\"patch\":\"*** Begin Patch\\n*** Update File: /project/src/none.txt\\n@@\\n-a\\n+b\\n*** End Patch\\n\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Not found: /project/src/none.txt\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 34,
+          "position": 34,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:8>",
+            "name": "apply_patch",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to apply a patch",
+              "detail": "Not found: /project/src/none.txt",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "delete"
+            },
+            "args": {
+              "text": "{\"patch\":\"*** Begin Patch\\n*** Delete File: /project/src/none.txt\\n*** End Patch\\n\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Not found: /project/src/none.txt\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 35,
+          "position": 35,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:9>",
+            "name": "apply_patch",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to apply a patch",
+              "detail": "Native path \"C:/Windows/Temp/cos-golden.txt\" is not inside an approved folder. Approved roots: /project, /skills",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "create"
+            },
+            "args": {
+              "text": "{\"patch\":\"*** Begin Patch\\n*** Add File: C:/Windows/Temp/cos-golden.txt\\n+x\\n*** End Patch\\n\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Native path \"C:/Windows/Temp/cos-golden.txt\" is not inside an approved folder. Approved roots: /project, /skills\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 36,
+          "position": 36,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:10>",
+            "name": "apply_patch",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to apply a patch",
+              "detail": "Path traversal (\"..\") is not allowed",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "create"
+            },
+            "args": {
+              "text": "{\"patch\":\"*** Begin Patch\\n*** Add File: /project/../escape.txt\\n+x\\n*** End Patch\\n\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Path traversal (\"..\") is not allowed\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 37,
+          "position": 37,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:11>",
+            "name": "apply_patch",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to apply a patch",
+              "detail": "apply_patch verification failed: invalid patch: The first line of the patch must be '*** Begin Patch'",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "edit"
+            },
+            "args": {
+              "text": "{\"patch\":\"not a patch\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "apply_patch verification failed: invalid patch: The first line of the patch must be '*** Begin Patch'\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 38,
+          "position": 38,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:12>",
+            "name": "apply_patch",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to apply a patch",
+              "detail": "apply_patch verification failed: invalid patch: The last line of the patch must be '*** End Patch'",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "create"
+            },
+            "args": {
+              "text": "{\"patch\":\"*** Begin Patch\\n*** Add File: /project/src/c.txt\\n+c\\n\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "apply_patch verification failed: invalid patch: The last line of the patch must be '*** End Patch'\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 39,
+          "position": 39,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:13>",
+            "name": "apply_patch",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to apply a patch",
+              "detail": "apply_patch verification failed: invalid patch: The last line of the patch must be '*** End Patch'",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "edit"
+            },
+            "args": {
+              "text": "{\"patch\":\"\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "apply_patch verification failed: invalid patch: The last line of the patch must be '*** End Patch'\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 40,
+          "position": 40,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:14>",
+            "name": "apply_patch",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to apply a patch",
+              "detail": "apply_patch verification failed: invalid patch: The first line of the patch must be '*** Begin Patch'",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "create"
+            },
+            "args": {
+              "text": "{\"patch\":\"apply_patch <<'EOF'\\n*** Begin Patch\\n*** Add File: /project/src/heredoc.txt\\n+from heredoc\\n*** End Patch\\nEOF\\n\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "apply_patch verification failed: invalid patch: The first line of the patch must be '*** Begin Patch'\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 41,
+          "position": 41,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:15>",
+            "name": "apply_patch",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Created src/big.txt",
+              "metric": "+20000",
+              "tone": "good",
+              "kind": "create"
+            },
+            "args": {
+              "text": "{\"patch\":\"*** Begin Patch\\n*** Add File: /project/src/big.txt\\n+big 0\\n+big 1\\n+big 2\\n+big 3\\n+big 4\\n+big 5\\n+big 6\\n+big 7\\n+big 8\\n+big 9\\n+big 10\\n+big 11\\n+big 12\\n+big 13\\n+big 14\\n+big 15\\n+big 16\\n+big 17\\n+big 18\\n+big 19\\n+big 20\\n+big 21\\n+big 22\\n+big 23\\n+big 24\\n+big 25\\n+big 26\\n+big 27\\n+big 28\\n+big 29\\n+big 30\\n+big 31\\n+big 32\\n+big 33\\n+big 34\\n+big 35\\n+big 36\\n+big 37\\n+big 38\\n+big 39\\n+big 40\\n+big 41\\n+big 42\\n+big 43\\n+big 44\\n+big 45\\n+big 46\\n+big 47\\n+big 48\\n+big 49\\n+big 50\\n+big 51\\n+big 52\\n+big 53\\n+big 54\\n+big 55\\n+big 56\\n+big 57\\n+big 58\\n+big 59\\n+big 60\\n+big 61\\n+big 62\\n+big 63\\n+big 64\\n+big 65\\n+big 66\\n+big 67\\n+big 68\\n+big 69\\n+big 70\\n+big 71\\n+big 72\\n+big 73\\n+big 74\\n+big 75\\n+big 76\\n+big 77\\n+big 78\\n+big 79\\n+big 80\\n+big 81\\n+big 82\\n+big 83\\n+big 84\\n+big 85\\n+big 86\\n+big 87\\n+big 88\\n+big 89\\n+big 90\\n+big 91\\n+big 92\\n+big 93\\n+big 94\\n+big 95\\n+big 96\\n+big 97\\n+big 98\\n+big 99\\n+big 100\\n+big 101\\n+big 102\\n+big 103\\n+big 104\\n+big 105\\n+big 106\\n+big 107\\n+big 108\\n+big 109\\n+big 110\\n+big 111\\n+big 112\\n+big 113\\n+big 114\\n+big 115\\n+big 116\\n+big 117\\n+big 118\\n+big 119\\n+big 120\\n+big 121\\n+big 122\\n+big 123\\n+big 124\\n+big 125\\n+big 126\\n+big 127\\n+big 128\\n+big 129\\n+big 130\\n+big 131\\n+big 132\\n+big 133\\n+big 134\\n+big 135\\n+big 136\\n+big 137\\n+big 138\\n+big 139\\n+big 140\\n+big 141\\n+big 142\\n+big 143\\n+big 144\\n+big 145\\n+big 146\\n+big 147\\n+big 148\\n+big 149\\n+big 150\\n+big 151\\n+big 152\\n+big 153\\n+big 154\\n+big 155\\n+big 156\\n+big 157\\n+big 158\\n+big 159\\n+big 160\\n+big 161\\n+big 162\\n+big 163\\n+big 164\\n+big 165\\n+big 166\\n+big 167\\n+big 168\\n+big 169\\n+big 170\\n+big 171\\n+big 172\\n+big 173\\n+big 174\\n+big 175\\n+big 176\\n+big 177\\n+big 178\\n+big 179\\n+big 180\\n+big 181\\n+big 182\\n+big 183\\n+big 184\\n+big 185\\n+big 186\\n+big 187\\n+big 188\\n+big 189\\n+big 190\\n+big 191\\n+big 192\\n+big 193\\n+big 194\\n+big 195\\n+big 196\\n+big 197\\n+big 198\\n+big 199\\n+big 200\\n+big 201\\n+big 202\\n+big 203\\n+big 20",
+              "chars": "<CHARS>",
+              "truncated": true
+            },
+            "result": {
+              "text": "Exit code: 0\nWall time: <DURATION> seconds\nOutput:\nSuccess. Updated the following files:\nA /project/src/big.txt\n\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": [
+              {
+                "path": "/project/src/big.txt",
+                "added": 20000,
+                "removed": 0
+              }
+            ]
+          }
+        },
+        {
+          "seq": 42,
+          "position": 42,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:16>",
+            "name": "read",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Read src",
+              "tone": "neutral",
+              "kind": "read"
+            },
+            "args": {
+              "text": "{\"paths\":[\"/project/src\"]}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "--- /project/src — 8 entries, one level ---\nf a.txt  2 B\nf b.txt  2 B\nf big.txt  184.5 KB\nf data.bin  256 B\nf greeting.txt  8 B\nf large.txt  609.4 KB\nf notes.md  37 B\nf pixel.png  70 B\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 43,
+          "position": 43,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:17>",
+            "name": "exec_command",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Ran Write-Output golden-ok",
+              "metric": "✓ <DURATION>",
+              "tone": "good",
+              "kind": "run"
+            },
+            "args": {
+              "text": "{\"cmd\":\"Write-Output golden-ok\",\"workdir\":\"/project\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Chunk ID: <CHUNK_ID>\nWall time: <DURATION> seconds\nProcess exited with code 0\nCompleted session ID: <EXEC_SESSION:1>\nOriginal token count: 3\nOutput:\ngolden-ok\r\n\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 44,
+          "position": 44,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:18>",
+            "name": "exec_command",
+            "outcome": "process_exit_nonzero",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Command failed exit 3",
+              "metric": "✕ exit 3",
+              "tone": "bad",
+              "kind": "run"
+            },
+            "args": {
+              "text": "{\"cmd\":\"exit 3\",\"workdir\":\"/project\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Chunk ID: <CHUNK_ID>\nWall time: <DURATION> seconds\nProcess exited with code 3\nCompleted session ID: <EXEC_SESSION:2>\nOriginal token count: 0\nOutput:\n\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 45,
+          "position": 45,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:19>",
+            "name": "exec_command",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Ran [Console]::Error.WriteLine(\"to-stderr\"); Write-Output to-stdout",
+              "metric": "✓ <DURATION>",
+              "tone": "good",
+              "kind": "run"
+            },
+            "args": {
+              "text": "{\"cmd\":\"[Console]::Error.WriteLine(\\\"to-stderr\\\"); Write-Output to-stdout\",\"workdir\":\"/project\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Chunk ID: <CHUNK_ID>\nWall time: <DURATION> seconds\nProcess exited with code 0\nCompleted session ID: <EXEC_SESSION:3>\nOriginal token count: 6\nOutput:\nto-stderr\r\nto-stdout\r\n\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 46,
+          "position": 46,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:20>",
+            "name": "exec_command",
+            "outcome": "process_exit_nonzero",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Command failed 3 commands: Write-Output first; exit 2; Write-Output third",
+              "metric": "✕ exit 2",
+              "tone": "bad",
+              "kind": "run"
+            },
+            "args": {
+              "text": "{\"cmds\":[\"Write-Output first\",\"exit 2\",\"Write-Output third\"],\"workdir\":\"/project\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Chunk ID: <CHUNK_ID>\nWall time: <DURATION> seconds\nProcess exited with code 2\nCompleted session ID: <EXEC_SESSION:4>\nOriginal token count: 18\nOutput:\n--- command 1/3 ---\r\nfirst\r\n--- exit code 0 ---\r\n--- command 2/3 ---\r\n\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 47,
+          "position": 47,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:21>",
+            "name": "exec_command",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Ran git status --short",
+              "metric": "✓ <DURATION>",
+              "tone": "good",
+              "kind": "run"
+            },
+            "args": {
+              "text": "{\"cmd\":\"git status --short\",\"workdir\":\"/project\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Chunk ID: <CHUNK_ID>\nWall time: <DURATION> seconds\nProcess exited with code 0\nCompleted session ID: <EXEC_SESSION:5>\nOriginal token count: 6\nOutput:\n?? README.md\n?? src/\n\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 48,
+          "position": 48,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:22>",
+            "name": "exec_command",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Ran rg -n quartz-lantern .",
+              "metric": "✓ <DURATION>",
+              "tone": "good",
+              "kind": "run"
+            },
+            "args": {
+              "text": "{\"cmd\":\"rg -n quartz-lantern .\",\"workdir\":\"/project\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Chunk ID: <CHUNK_ID>\nWall time: <DURATION> seconds\nProcess exited with code 0\nCompleted session ID: <EXEC_SESSION:6>\nOriginal token count: 14\nOutput:\n.\\src\\notes.md:1:The needle phrase is quartz-lantern.\n\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 49,
+          "position": 49,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:23>",
+            "name": "exec_command",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Ran Get-ChildItem -Name",
+              "metric": "✓ <DURATION>",
+              "tone": "good",
+              "kind": "run"
+            },
+            "args": {
+              "text": "{\"cmd\":\"Get-ChildItem -Name\",\"workdir\":\"/project/src\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Chunk ID: <CHUNK_ID>\nWall time: <DURATION> seconds\nProcess exited with code 0\nCompleted session ID: <EXEC_SESSION:7>\nOriginal token count: 20\nOutput:\na.txt\r\nb.txt\r\nbig.txt\r\ndata.bin\r\ngreeting.txt\r\nlarge.txt\r\nnotes.md\r\npixel.png\r\n\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 50,
+          "position": 50,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:24>",
+            "name": "exec_command",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Ran Write-Output native-ok",
+              "metric": "✓ <DURATION>",
+              "tone": "good",
+              "kind": "run"
+            },
+            "args": {
+              "text": "{\"cmd\":\"Write-Output native-ok\",\"workdir\":\"<PROJECT>\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Chunk ID: <CHUNK_ID>\nWall time: <DURATION> seconds\nProcess exited with code 0\nCompleted session ID: <EXEC_SESSION:8>\nOriginal token count: 3\nOutput:\nnative-ok\r\n\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 51,
+          "position": 51,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:25>",
+            "name": "exec_command",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to run Write-Output x",
+              "detail": "Native path \"C:/Windows\" is not inside an approved folder. Approved roots: /project, /skills",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "run"
+            },
+            "args": {
+              "text": "{\"cmd\":\"Write-Output x\",\"workdir\":\"C:/Windows\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Native path \"C:/Windows\" is not inside an approved folder. Approved roots: /project, /skills\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 52,
+          "position": 52,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:26>",
+            "name": "exec_command",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to run Write-Output x",
+              "detail": "Path traversal (\"..\") is not allowed",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "run"
+            },
+            "args": {
+              "text": "{\"cmd\":\"Write-Output x\",\"workdir\":\"/project/..\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Path traversal (\"..\") is not allowed\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 53,
+          "position": 53,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:27>",
+            "name": "exec_command",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to run Write-Output x",
+              "detail": "Not found: /project/none",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "run"
+            },
+            "args": {
+              "text": "{\"cmd\":\"Write-Output x\",\"workdir\":\"/project/none\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Not found: /project/none\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 54,
+          "position": 54,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:28>",
+            "name": "exec_command",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Ran Write-Output no-workdir",
+              "metric": "✓ <DURATION>",
+              "tone": "good",
+              "kind": "run"
+            },
+            "args": {
+              "text": "{\"cmd\":\"Write-Output no-workdir\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Chunk ID: <CHUNK_ID>\nWall time: <DURATION> seconds\nProcess exited with code 0\nCompleted session ID: <EXEC_SESSION:9>\nOriginal token count: 3\nOutput:\nno-workdir\r\n\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 55,
+          "position": 55,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:29>",
+            "name": "exec_command",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Ran echo from-cmd",
+              "metric": "✓ <DURATION>",
+              "tone": "good",
+              "kind": "run"
+            },
+            "args": {
+              "text": "{\"cmd\":\"echo from-cmd\",\"workdir\":\"/project\",\"shell\":\"cmd.exe\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Chunk ID: <CHUNK_ID>\nWall time: <DURATION> seconds\nProcess exited with code 0\nCompleted session ID: <EXEC_SESSION:10>\nOriginal token count: 3\nOutput:\nfrom-cmd\r\n\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 56,
+          "position": 56,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:30>",
+            "name": "exec_command",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Ran Write-Output tty-ok",
+              "metric": "✓ <DURATION>",
+              "tone": "good",
+              "kind": "run"
+            },
+            "args": {
+              "text": "{\"cmd\":\"Write-Output tty-ok\",\"workdir\":\"/project\",\"tty\":true}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Chunk ID: <CHUNK_ID>\nWall time: <DURATION> seconds\nProcess exited with code 0\nCompleted session ID: <EXEC_SESSION:11>\nOriginal token count: 27\nOutput:\n\u001b[?25l\u001b[2J\u001b[m\u001b[H\u001b]0;<CONSOLE_TITLE>\u0007\u001b[?25htty-ok\r\n\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 57,
+          "position": 57,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:31>",
+            "name": "exec_command",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Ran $line = [Console]::In.ReadLine(); Write-Output \"got [$line]\"",
+              "metric": "✓ <DURATION>",
+              "tone": "good",
+              "kind": "run"
+            },
+            "args": {
+              "text": "{\"cmd\":\"$line = [Console]::In.ReadLine(); Write-Output \\\"got [$line]\\\"\",\"workdir\":\"/project\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Chunk ID: <CHUNK_ID>\nWall time: <DURATION> seconds\nProcess exited with code 0\nCompleted session ID: <EXEC_SESSION:12>\nOriginal token count: 2\nOutput:\ngot []\r\n\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 58,
+          "position": 58,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:32>",
+            "name": "exec_command",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Started $line = Read-Host; Write-Output \"got [$line]\"",
+              "metric": "started",
+              "tone": "neutral",
+              "kind": "run"
+            },
+            "args": {
+              "text": "{\"cmd\":\"$line = Read-Host; Write-Output \\\"got [$line]\\\"\",\"workdir\":\"/project\",\"tty\":true,\"yield_time_ms\":3000}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Chunk ID: <CHUNK_ID>\nWall time: <DURATION> seconds\nProcess running with session ID <EXEC_SESSION:13>\nOriginal token count: 25\nOutput:\n\u001b[?25l\u001b[2J\u001b[m\u001b[H\u001b]0;<CONSOLE_TITLE>\u0007\u001b[?25h\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 59,
+          "position": 59,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:33>",
+            "name": "write_stdin",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Wrote to session <EXEC_SESSION:13>",
+              "metric": "✓ finished",
+              "tone": "neutral",
+              "kind": "process"
+            },
+            "args": {
+              "text": "{\"session_id\":<EXEC_SESSION:13>,\"chars\":\"golden\\r\",\"yield_time_ms\":5000}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Chunk ID: <CHUNK_ID>\nWall time: <DURATION> seconds\nProcess exited with code 0\nCompleted session ID: <EXEC_SESSION:13>\nOriginal token count: 6\nOutput:\ngolden\r\ngot [golden]\r\n\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 60,
+          "position": 60,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:34>",
+            "name": "write_stdin",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Waited on session <EXEC_SESSION:13>",
+              "metric": "✓ finished",
+              "tone": "neutral",
+              "kind": "process"
+            },
+            "args": {
+              "text": "{\"session_id\":<EXEC_SESSION:13>,\"chars\":\"\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Chunk ID: <CHUNK_ID>\nWall time: <DURATION> seconds\nProcess exited with code 0\nCompleted session ID: <EXEC_SESSION:13>\nRetained output (already completed; command was not run again):\nOriginal token count: 31\nOutput:\n\u001b[?25l\u001b[2J\u001b[m\u001b[H\u001b]0;<CONSOLE_TITLE>\u0007\u001b[?25hgolden\r\ngot [golden]\r\n\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 61,
+          "position": 61,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:35>",
+            "name": "write_stdin",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to write to session <EXEC_SESSION:13>",
+              "detail": "write_stdin failed: Unified exec process failed: Process already completed; no input was sent. Use empty chars to read i",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "process"
+            },
+            "args": {
+              "text": "{\"session_id\":<EXEC_SESSION:13>,\"chars\":\"more\\n\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "write_stdin failed: Unified exec process failed: Process already completed; no input was sent. Use empty chars to read its retained output.\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 62,
+          "position": 62,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:36>",
+            "name": "write_stdin",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to wait on session <EXEC_SESSION:14>",
+              "detail": "write_stdin failed for session <EXEC_SESSION:14>: EXEC_SESSION_UNAVAILABLE: This process id is not available to this call in the ru",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "process"
+            },
+            "args": {
+              "text": "{\"session_id\":<EXEC_SESSION:14>,\"chars\":\"\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "write_stdin failed for session <EXEC_SESSION:14>: EXEC_SESSION_UNAVAILABLE: This process id is not available to this call in the running app. Check the original exec_command response and earlier results for its exit/output before deciding what remains; do not rerun the command solely because its id is unavailable. No input was sent and no output was read. This refusal concerns this process id, not Read-only mode or permission to edit files or launch other authorized work.\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 63,
+          "position": 63,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:37>",
+            "name": "exec_command",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Started Write-Output y",
+              "metric": "started",
+              "tone": "neutral",
+              "kind": "run"
+            },
+            "args": {
+              "text": "{\"cmd\":\"Write-Output y\",\"workdir\":\"/project\",\"yield_time_ms\":10}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Chunk ID: <CHUNK_ID>\nWall time: <DURATION> seconds\nProcess running with session ID <EXEC_SESSION:15>\nOriginal token count: 0\nOutput:\n\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 64,
+          "position": 64,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:38>",
+            "name": "exec_command",
+            "outcome": "ok",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Ran 1..40000 | ForEach-Object { \"output line $_\" }",
+              "metric": "✓ <DURATION>",
+              "tone": "good",
+              "kind": "run"
+            },
+            "args": {
+              "text": "{\"cmd\":\"1..40000 | ForEach-Object { \\\"output line $_\\\" }\",\"workdir\":\"/project\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Chunk ID: <CHUNK_ID>\nWall time: <DURATION> seconds\nProcess exited with code 0\nCompleted session ID: <EXEC_SESSION:16>\nOriginal token count: 187224\nOutput:\nWarning: truncated output (original token count: 187224)\nTotal output lines: 40000\n\noutput line 1\r\noutput line 2\r\noutput line 3\r\noutput line 4\r\noutput line 5\r\noutput line 6\r\noutput line 7\r\noutput line 8\r\noutput line 9\r\noutput line 10\r\noutput line 11\r\noutput line 12\r\noutput line 13\r\noutput line 14\r\noutput line 15\r\noutput line 16\r\noutput line 17\r\noutput line 18\r\noutput line 19\r\noutput line 20\r\noutput line 21\r\noutput line 22\r\noutput line 23\r\noutput line 24\r\noutput line 25\r\noutput line 26\r\noutput line 27\r\noutput line 28\r\noutput line 29\r\noutput line 30\r\noutput line 31\r\noutput line 32\r\noutput line 33\r\noutput line 34\r\noutput line 35\r\noutput line 36\r\noutput line 37\r\noutput line 38\r\noutput line 39\r\noutput line 40\r\noutput line 41\r\noutput line 42\r\noutput line 43\r\noutput line 44\r\noutput line 45\r\noutput line 46\r\noutput line 47\r\noutput line 48\r\noutput line 49\r\noutput line 50\r\noutput line 51\r\noutput line 52\r\noutput line 53\r\noutput line 54\r\noutput line 55\r\noutput line 56\r\noutput line 57\r\noutput line 58\r\noutput line 59\r\noutput line 60\r\noutput line 61\r\noutput line 62\r\noutput line 63\r\noutput line 64\r\noutput line 65\r\noutput line 66\r\noutput line 67\r\noutput line 68\r\noutput line 69\r\noutput line 70\r\noutput line 71\r\noutput line 72\r\noutput line 73\r\noutput line 74\r\noutput line 75\r\noutput line 76\r\noutput line 77\r\noutput line 78\r\noutput line 79\r\noutput line 80\r\noutput line 81\r\noutput line 82\r\noutput line 83\r\noutput line 84\r\noutput line 85\r\noutput line 86\r\noutput line 87\r\noutput line 88\r\noutput line 89\r\noutput line 90\r\noutput line 91\r\noutput line 92\r\noutput line 93\r\noutput line 94\r\noutput line 95\r\noutput line 96\r\noutput line 97\r\noutput line 98\r\noutput line 99\r\noutput line 100\r\noutput line 101\r\noutput line 102\r\noutput line 103\r\noutput line 104\r\noutput line 105\r\noutput line 106\r\noutput line 107\r\noutput line 108\r\noutput line 109\r\noutput line 110\r\noutput line 111\r\nou",
+              "chars": "<CHARS>",
+              "truncated": true
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 65,
+          "position": 65,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:39>",
+            "name": "update_plan",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused: Updated the task plan",
+              "detail": "1 / 3 completed",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "session"
+            },
+            "args": {
+              "text": "{\"explanation\":\"golden\",\"plan\":[{\"step\":\"First\",\"status\":\"completed\",\"details\":\"done\"},{\"step\":\"Second\",\"status\":\"in_progress\"},{\"step\":\"Third\",\"status\":\"pending\"}]}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Exact chat identity or an allowed request-scoped caller is required to update a plan. No plan was changed.\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 66,
+          "position": 66,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:40>",
+            "name": "update_plan",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused: Cleared the task plan",
+              "detail": "Exact chat identity or an allowed request-scoped caller is required to update a plan. No plan was changed.",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "session"
+            },
+            "args": {
+              "text": "{\"plan\":[]}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "Exact chat identity or an allowed request-scoped caller is required to update a plan. No plan was changed.\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 67,
+          "position": 67,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:41>",
+            "name": "exec",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to run exec",
+              "detail": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app ",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "other"
+            },
+            "args": {
+              "text": "{\"code\":\"text(1 + 1)\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app settings. No JavaScript or nested tool ran.\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 68,
+          "position": 68,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:42>",
+            "name": "exec",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to run exec",
+              "detail": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app ",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "other"
+            },
+            "args": {
+              "text": "{\"code\":\"const x = 1;\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app settings. No JavaScript or nested tool ran.\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 69,
+          "position": 69,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:43>",
+            "name": "exec",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to run exec",
+              "detail": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app ",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "other"
+            },
+            "args": {
+              "text": "{\"code\":\"const r = await tools.read({ paths: [\\\"/project/src/notes.md\\\"] }); text({ isError: r.isError ?? false, first: r.content[0].text.split(\\\"\\\\n\\\")[0] });\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app settings. No JavaScript or nested tool ran.\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 70,
+          "position": 70,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:44>",
+            "name": "exec",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to run exec",
+              "detail": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app ",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "other"
+            },
+            "args": {
+              "text": "{\"code\":\"const rs = await Promise.all([tools.read({ paths: [\\\"/project/README.md\\\"] }), tools.read({ paths: [\\\"/project/none\\\"] })]); text(rs.map(r => r.isError ?? false));\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app settings. No JavaScript or nested tool ran.\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 71,
+          "position": 71,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:45>",
+            "name": "exec",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to run exec",
+              "detail": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app ",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "other"
+            },
+            "args": {
+              "text": "{\"code\":\"await tools.no_such_tool({});\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app settings. No JavaScript or nested tool ran.\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 72,
+          "position": 72,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:46>",
+            "name": "exec",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to run exec",
+              "detail": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app ",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "other"
+            },
+            "args": {
+              "text": "{\"code\":\"throw new Error(\\\"golden failure\\\")\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app settings. No JavaScript or nested tool ran.\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 73,
+          "position": 73,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:47>",
+            "name": "exec",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to run exec",
+              "detail": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app ",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "other"
+            },
+            "args": {
+              "text": "{\"code\":\"let = ;\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app settings. No JavaScript or nested tool ran.\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 74,
+          "position": 74,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:48>",
+            "name": "exec",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to run exec",
+              "detail": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app ",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "other"
+            },
+            "args": {
+              "text": "{\"code\":\"const r = await tools.view_image({ path: \\\"/project/src/pixel.png\\\" }); image(r.content.find(c => c.type === \\\"image\\\"));\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app settings. No JavaScript or nested tool ran.\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 75,
+          "position": 75,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:49>",
+            "name": "exec",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to run exec",
+              "detail": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app ",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "other"
+            },
+            "args": {
+              "text": "{\"code\":\"text(\\\"x\\\".repeat(50000))\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app settings. No JavaScript or nested tool ran.\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        },
+        {
+          "seq": 76,
+          "position": 76,
+          "time": "<EPOCH_MS>",
+          "kind": "tool_call",
+          "source": "mcp",
+          "tool": {
+            "callId": "<UUID:50>",
+            "name": "exec",
+            "outcome": "tool_rejected",
+            "durationMs": "<DURATION>",
+            "attribution": "unattributed",
+            "summary": {
+              "title": "Refused to run exec",
+              "detail": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app ",
+              "metric": "refused",
+              "tone": "warn",
+              "kind": "other"
+            },
+            "args": {
+              "text": "{\"code\":\"text(typeof require + \\\" \\\" + typeof process)\"}",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "result": {
+              "text": "CALLER_IDENTITY_REQUIRED: code mode needs exact companion chat/session proof or Allow unattributed calls enabled in app settings. No JavaScript or nested tool ran.\n\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat.",
+              "chars": "<CHARS>",
+              "truncated": false
+            },
+            "changes": []
+          }
+        }
+      ],
+      "total": 76,
+      "nextFrom": 77
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "method": "POST",
+  "route": "/input/answer",
+  "status": 200,
+  "request": {
+    "id": "2c840f82-1a6a-4e9a-b447-13dd6591f8d6",
+    "owner": "temp-page",
+    "conversationId": null,
+    "response": "Transient plan answer"
+  },
+  "response": {
+    "ok": true
+  }
+}

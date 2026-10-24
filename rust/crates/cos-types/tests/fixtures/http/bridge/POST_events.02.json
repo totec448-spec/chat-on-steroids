@@ -1,0 +1,42 @@
+{
+  "method": "POST",
+  "route": "/events",
+  "status": 200,
+  "request": {
+    "conversationId": "c9494949-1111-2222-3333-444444444444",
+    "events": [
+      {
+        "kind": "model_selection",
+        "model": "GPT-5.6 Sol",
+        "reasoningEffort": "high",
+        "time": 1767225600000
+      },
+      {
+        "kind": "turn_start",
+        "time": 1767225600000,
+        "turnId": "loop-without-mcp"
+      },
+      {
+        "kind": "assistant_message",
+        "turnId": "loop-without-mcp",
+        "messageId": "loop-no-tools-final",
+        "time": 1767225600000,
+        "text": "I cannot access the MCP tools.",
+        "final": true,
+        "state": "final",
+        "activeNow": true,
+        "goalEligible": true
+      },
+      {
+        "kind": "turn_end",
+        "time": 1767225600000,
+        "turnId": "loop-without-mcp",
+        "outcome": "completed"
+      }
+    ]
+  },
+  "response": {
+    "sessionId": "2026-01-01-4912d9eb",
+    "stored": 4
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "request": {
+    "method": "POST",
+    "route": "/v1/inputs",
+    "headers": {
+      "content-type": "application/json",
+      "transfer-encoding": "chunked",
+      "expect": "100-continue"
+    },
+    "body": {
+      "id": "<UUID:1>",
+      "text": "x"
+    }
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "close"
+    },
+    "body": {
+      "error": "invalid_framing"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "method": "POST",
+  "route": "/commands/revivals/pending",
+  "status": 200,
+  "request": {
+    "entries": [
+      {
+        "id": "b1003b0f32e9b2ec",
+        "conversationId": "dededede-7654-3210-fedc-ba9876543210"
+      }
+    ]
+  },
+  "response": {
+    "pending": []
+  }
+}

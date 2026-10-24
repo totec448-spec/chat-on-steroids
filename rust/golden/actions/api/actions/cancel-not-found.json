@@ -1,0 +1,51 @@
+{
+  "request": {
+    "method": "POST",
+    "route": "/v1/inputs/<UUID:1>/cancel",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 409,
+    "headers": {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+      "connection": "keep-alive"
+    },
+    "body": {
+      "error": "not_cancellable",
+      "detail": "a new chat is opening; cancel it in the app",
+      "input": {
+        "id": "<UUID:1>",
+        "sessionId": "<UUID:1>",
+        "deliveredSessionId": null,
+        "conversationId": null,
+        "state": "queued",
+        "delivery": "pending",
+        "mode": "auto",
+        "transportIntent": "browser",
+        "automatic": false,
+        "purpose": null,
+        "createdAt": "<EPOCH_MS>",
+        "dueAt": "<EPOCH_MS>",
+        "offeredAt": null,
+        "deliveredAt": null,
+        "sendAuthorizedAt": null,
+        "requiresAuthorization": false,
+        "cancelledByUser": false,
+        "queueOrder": null,
+        "model": null,
+        "reasoningEffort": null,
+        "messageId": null,
+        "error": null,
+        "text": {
+          "text": "x",
+          "chars": "<CHARS>",
+          "truncated": false
+        },
+        "attachments": 0,
+        "images": 0
+      }
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "case": "read-binary",
+  "request": {
+    "tool": "read",
+    "arguments": {
+      "paths": [
+        "/project/src/data.bin"
+      ]
+    }
+  },
+  "response": {
+    "status": 200,
+    "framing": "sse",
+    "messages": [
+      {
+        "result": {
+          "content": [
+            {
+              "type": "text",
+              "text": "--- /project/src/data.bin ---\npath: /project/src/data.bin\ntype: file\nsize: 256 B\nmodified: <ISO_TIME>\ncreated: <ISO_TIME>\nbinary: true\nBinary file, so its bytes are not returned. Use exec_command if you need to inspect or convert it."
+            },
+            {
+              "type": "text",
+              "text": "\n--- Identity notice ---\nThis app could not tell which ChatGPT conversation made this call, so it is filed as Unattributed. This does not identify this chat as a reload target. The result above still states what ran. Attribution does not change tool permissions or mean Read-only; report a refusal only for the operation that actually failed. Do not repeat a successful mutation to repair attribution. A later exact request-id match can reattach this recorded call. Retry a refused operation once, and preserve any undelivered report in the chat."
+            }
+          ]
+        },
+        "jsonrpc": "2.0",
+        "id": 12
+      }
+    ]
+  }
+}

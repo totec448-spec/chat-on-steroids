@@ -1,0 +1,4 @@
+{
+  "clipboard": "2026-10-19T08:05:03.007Z  info   app started\n2026-10-19T08:05:03.007Z  warn   could not read swarm state: bad sk-***\n2026-10-19T08:05:03.007Z  error  multi\nline\tmessage\n2026-10-19T08:05:03.007Z  info   from a worker",
+  "json": "[\n  {\n    \"time\": \"2026-10-19T08:05:03.007Z\",\n    \"level\": \"info\",\n    \"message\": \"app started\"\n  },\n  {\n    \"time\": \"2026-10-19T08:05:03.007Z\",\n    \"level\": \"warn\",\n    \"message\": \"could not read swarm state: bad sk-***\"\n  },\n  {\n    \"time\": \"2026-10-19T08:05:03.007Z\",\n    \"level\": \"error\",\n    \"message\": \"multi\\nline\\tmessage\"\n  },\n  {\n    \"time\": \"2026-10-19T08:05:03.007Z\",\n    \"level\": \"info\",\n    \"message\": \"from a worker\"\n  }\n]"
+}

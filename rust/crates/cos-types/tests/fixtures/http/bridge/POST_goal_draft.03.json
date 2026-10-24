@@ -1,0 +1,25 @@
+{
+  "method": "POST",
+  "route": "/goal/draft",
+  "status": 200,
+  "request": {
+    "conversationId": "c9494949-1111-2222-3333-444444444444",
+    "turnId": "loop-without-mcp",
+    "terminalRequired": true
+  },
+  "response": {
+    "goal": {
+      "token": "TTTTTTTTTTTTTTTTTTTTTT",
+      "conversationId": "c9494949-1111-2222-3333-444444444444",
+      "turnId": "loop-without-mcp",
+      "stage": "sending",
+      "backend": "chatgpt",
+      "model": "gpt-6",
+      "text": "",
+      "reply": "",
+      "error": null,
+      "retryable": false
+    },
+    "sessionId": "2026-01-01-4912d9eb"
+  }
+}
