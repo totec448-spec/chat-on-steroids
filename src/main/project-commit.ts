@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { promises as fs, statSync } from 'node:fs';
+import { createReadStream, promises as fs, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { logInfo, logWarn } from './logger.js';
@@ -71,8 +71,11 @@ const runGh: GhRunner = (args, cwd) => new Promise((resolve, reject) => {
   });
   let stdout = '', stderr = '';
   const timer = setTimeout(() => { child.kill(); reject(new Error('gh took too long to respond')); }, GH_TIMEOUT_MS);
-  child.stdout.on('data', (chunk: Buffer) => { if (stdout.length < 64 * 1024) stdout += chunk.toString('utf8'); });
-  child.stderr.on('data', (chunk: Buffer) => { if (stderr.length < 64 * 1024) stderr += chunk.toString('utf8'); });
+  // A character can arrive split across two chunks; the stream decoder keeps it whole.
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk: string) => { if (stdout.length < 64 * 1024) stdout += chunk; });
+  child.stderr.on('data', (chunk: string) => { if (stderr.length < 64 * 1024) stderr += chunk; });
   child.once('error', error => { clearTimeout(timer); reject(error); });
   child.once('close', code => { clearTimeout(timer); resolve({ code: code ?? -1, stdout, stderr }); });
 });
@@ -122,8 +125,10 @@ async function remoteFacts(context: RepositoryContext): Promise<{ remote: string
   return { remote, upstream, url, defaultBranch };
 }
 
-/** A file bigger than this is named by its size and time instead of its bytes. */
-const HASHED_BYTES = 64 * 1024 * 1024;
+/** How many bytes of changed files the token may read; more is refused, never guessed from metadata. */
+const CHANGES_BUDGET_BYTES = 256 * 1024 * 1024;
+let changesBudget = CHANGES_BUDGET_BYTES;
+export function setChangesBudgetForTests(bytes: number | null): void { changesBudget = bytes ?? CHANGES_BUDGET_BYTES; }
 
 /**
  * Review's revision names the list of changes and their line counts, so an edit that keeps the
@@ -131,15 +136,22 @@ const HASHED_BYTES = 64 * 1024 * 1024;
  * token also covers every changed file's bytes.
  */
 async function changesToken(repo: RepositoryContext, changes: readonly ProjectGitChange[]): Promise<string> {
-  const hash = createHash('sha256').update(JSON.stringify(changes));
-  for (const change of changes) {
+  const files = await Promise.all(changes.map(async change => {
     const file = path.join(repo.projectReal, ...change.path.split('/'));
+    const stat = await fs.lstat(file).catch(() => null);
+    return { change, file, stat };
+  }));
+  // Sizes first: a tree with huge untracked output must not be read gigabyte by gigabyte.
+  const total = files.reduce((sum, { stat }) => sum + (stat?.isFile() ? stat.size : 0), 0);
+  if (total > changesBudget) throw refusal('git commit', 'These changes are too large to commit from here. Commit them in a terminal.');
+  const hash = createHash('sha256').update(JSON.stringify(changes));
+  for (const { change, file, stat } of files) {
     hash.update(`\0${change.path}\0`);
+    if (!stat) { hash.update('absent'); continue; }
+    if (!stat.isFile()) { hash.update(`${stat.mode}:${stat.isSymbolicLink() ? await fs.readlink(file).catch(() => '') : ''}`); continue; }
     try {
-      const stat = await fs.lstat(file);
-      if (!stat.isFile() || stat.size > HASHED_BYTES) hash.update(`${stat.mode}:${stat.size}:${stat.mtimeMs}`);
-      else hash.update(await fs.readFile(file));
-    } catch { hash.update('absent'); }
+      for await (const chunk of createReadStream(file)) hash.update(chunk as Buffer);
+    } catch { hash.update('unreadable'); }
   }
   return hash.digest('hex');
 }
@@ -208,50 +220,74 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
   if (created) {
     if ((await runGit(repo.root, ['check-ref-format', '--branch', created])).code !== 0 || created.startsWith('-')) throw refusal('git commit', 'That branch name is not allowed.');
     if ((await runGit(repo.root, ['show-ref', '--verify', '--quiet', `refs/heads/${created}`])).code === 0) throw refusal('git commit', 'A branch with that name already exists.');
-    const switched = await runGit(repo.root, ['switch', '-c', created]);
-    if (switched.code !== 0) throw new Error(`Git could not create the branch:\n${shown(switched.stderr)}`);
-    branch = created;
-  }
-  if (!branch) throw refusal('git commit', 'This folder is not on a branch. Check out a branch first.');
-  // What the person staged by hand stays as it was if the commit does not happen, a part of a file
-  // (git add -p) too: the index is kept as a tree and read back. An index Git cannot write as a
-  // tree (an unresolved conflict elsewhere) falls back to unstaging only what this commit staged.
-  const savedIndex = await runGit(repo.root, ['write-tree']);
-  const indexTree = savedIndex.code === 0 ? decode(savedIndex.stdout).trim() : null;
-  const staged = new Set(decode((await runGit(repo.root, ['diff', '--cached', '--name-only', '-z', '--no-renames'])).stdout).split('\0').filter(Boolean));
-  const putBack = async () => {
-    const restored = indexTree ? await runGit(repo.root, ['read-tree', indexTree]) : null;
-    if (!restored || restored.code !== 0) {
-      const unstage = paths.filter(file => !staged.has(file));
-      if (unstage.length) await runGit(repo.root, ['reset', '-q', '--pathspec-from-file=-', '--pathspec-file-nul'], undefined, { input: `${unstage.join('\0')}\0`, env: LITERAL });
-    }
-    // The new branch is still the commit it started from, so pointing HEAD back is the whole switch;
-    // unlike `git switch` it works while another program holds the index.
-    if (created && startedOn) {
-      const back = await runGit(repo.root, ['symbolic-ref', 'HEAD', `refs/heads/${startedOn}`]);
-      if (back.code === 0) await runGit(repo.root, ['branch', '-D', created]);
+  } else if (!branch) throw refusal('git commit', 'This folder is not on a branch. Check out a branch first.');
+  // Where HEAD was, to point it back to: its branch, or on a detached HEAD its commit.
+  const startCommit = created && !startedOn ? await text(repo, ['rev-parse', '--verify', 'HEAD']) : null;
+  let switched = false;
+  // The index as it was, once this commit starts staging: what the person staged by hand stays as it
+  // was if the commit does not happen, a part of a file (git add -p) too. An index Git cannot write
+  // as a tree (an unresolved conflict elsewhere) falls back to unstaging only what this commit staged.
+  let index: { tree: string | null; staged: Set<string> } | null = null;
+  const putBack = async (): Promise<void> => {
+    try {
+      if (index) {
+        const restored = index.tree ? await runGit(repo.root, ['read-tree', index.tree]) : null;
+        if (!restored || restored.code !== 0) {
+          const unstage = paths.filter(file => !index!.staged.has(file));
+          if (unstage.length) await runGit(repo.root, ['reset', '-q', '--pathspec-from-file=-', '--pathspec-file-nul'], undefined, { input: `${unstage.join('\0')}\0`, env: LITERAL });
+        }
+      }
+      // The new branch is still the commit it started from, so pointing HEAD back is the whole
+      // switch; unlike `git switch` it works while another program holds the index.
+      if (created && switched) {
+        const back = startedOn ? await runGit(repo.root, ['symbolic-ref', 'HEAD', `refs/heads/${startedOn}`])
+          : startCommit ? await runGit(repo.root, ['update-ref', '--no-deref', 'HEAD', startCommit]) : null;
+        if (back?.code === 0) await runGit(repo.root, ['branch', '-D', created]);
+      }
+    } catch (error) {
+      logWarn(`git commit: could not put everything back (${error instanceof Error ? error.message : String(error)})`);
     }
   };
-  const added = await runGit(repo.root, ['add', '-A', '--pathspec-from-file=-', '--pathspec-file-nul'], undefined, { input: `${toStage.join('\0')}\0`, env: LITERAL });
-  if (added.code !== 0) {
-    await putBack();
-    logWarn('git commit: not committed (Git could not stage the chosen files)');
-    throw new Error(`Git did not commit:\n${shown(added.stderr)}`);
-  }
-  const committed = await runGit(repo.root, ['commit', '--cleanup=whitespace', '-m', message, '--pathspec-from-file=-', '--pathspec-file-nul'], undefined,
-    { input: `${paths.join('\0')}\0`, env: LITERAL, timeoutMs: 120_000 });
-  if (committed.code !== 0) {
-    await putBack();
-    const output = `${committed.stderr}\n${decode(committed.stdout)}`;
-    logWarn(`git commit: not committed (${/Please tell me who you are|Author identity unknown|unable to auto-detect email/i.test(output) ? 'no Git identity' : 'Git or a hook refused'})`);
-    if (/Please tell me who you are|Author identity unknown|unable to auto-detect email/i.test(output)) {
-      throw new Error('Git does not know your name and email yet. Set them once with git config --global user.name and user.email, then commit again.');
+  try {
+    if (created) {
+      const made = await runGit(repo.root, ['switch', '-c', created]);
+      if (made.code !== 0) {
+        // A branch made but not checked out would refuse the next try as "already exists".
+        if ((await branchOf(repo)) !== created && (await runGit(repo.root, ['show-ref', '--verify', '--quiet', `refs/heads/${created}`])).code === 0) {
+          await runGit(repo.root, ['branch', '-D', created]);
+        }
+        logWarn('git commit: not committed (Git could not create the branch)');
+        throw new Error(`Git could not create the branch:\n${shown(made.stderr)}`);
+      }
+      switched = true;
+      branch = created;
     }
-    throw new Error(`Git did not commit:\n${shown(output)}`);
+    const savedIndex = await runGit(repo.root, ['write-tree']);
+    const staged = new Set(decode((await runGit(repo.root, ['diff', '--cached', '--name-only', '-z', '--no-renames'])).stdout).split('\0').filter(Boolean));
+    index = { tree: savedIndex.code === 0 ? decode(savedIndex.stdout).trim() : null, staged };
+    const added = await runGit(repo.root, ['add', '-A', '--pathspec-from-file=-', '--pathspec-file-nul'], undefined, { input: `${toStage.join('\0')}\0`, env: LITERAL });
+    if (added.code !== 0) {
+      logWarn('git commit: not committed (Git could not stage the chosen files)');
+      throw new Error(`Git did not commit:\n${shown(added.stderr)}`);
+    }
+    const committed = await runGit(repo.root, ['commit', '--cleanup=whitespace', '-m', message, '--pathspec-from-file=-', '--pathspec-file-nul'], undefined,
+      { input: `${paths.join('\0')}\0`, env: LITERAL, timeoutMs: 120_000 });
+    if (committed.code !== 0) {
+      const output = `${committed.stderr}\n${decode(committed.stdout)}`;
+      const noIdentity = /Please tell me who you are|Author identity unknown|unable to auto-detect email/i.test(output);
+      logWarn(`git commit: not committed (${noIdentity ? 'no Git identity' : 'Git or a hook refused'})`);
+      if (noIdentity) throw new Error('Git does not know your name and email yet. Set them once with git config --global user.name and user.email, then commit again.');
+      throw new Error(`Git did not commit:\n${shown(output)}`);
+    }
+  } catch (error) {
+    // One rollback for a refusal and for a Git call that never finished (a timeout, a failed spawn).
+    await putBack();
+    throw error;
   }
   const commit = (await text(repo, ['rev-parse', '--short', 'HEAD'])) ?? '';
   logInfo(`git commit: committed ${chosen.length} change(s)${created ? ' on a new branch' : ''}`);
-  return { commit, branch };
+  // Committed on the new branch, or on the branch it was on (a detached HEAD without one was refused).
+  return { commit, branch: created ?? branch ?? '' };
 }
 
 // ---------------------------------------------------------------- push

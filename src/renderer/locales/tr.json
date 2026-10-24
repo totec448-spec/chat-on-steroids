@@ -3116,5 +3116,6 @@
   "Common base": "Ortak taban",
   "Theirs (incoming)": "Onlarınki (gelen)",
   "Not in this version": "Bu sürümde yok",
-  "Start or cancel the prepared plan first, then ask again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden isteyin."
+  "Start or cancel the prepared plan first, then ask again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden isteyin.",
+  "These changes are too large to commit from here. Commit them in a terminal.": "Bu değişiklikler buradan commit etmek için çok büyük. Onları bir terminalde commit edin."
 }

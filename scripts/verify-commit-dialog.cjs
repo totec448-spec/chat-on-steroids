@@ -142,6 +142,16 @@ app.whenReady().then(async () => {
       await js(`document.querySelector('#workDockRight .work-dock-quick[data-view=review]').click()`);
       await until(`!!document.querySelector('#workDockRight .file-commit-bar:not([hidden]) .file-commit-open')`);
     };
+    // The Commit bar belongs to the list of changes: a file's diff hides it, and going back shows it again.
+    const barFollowsList = async () => {
+      await js(`document.querySelector('#workDockRight .file-change-row').click()`);
+      // Review's own panel is the one whose list holds the change rows.
+      const review = `[...document.querySelectorAll('#workDockRight .file-changes-view')].find(v => v.querySelector('.file-change-row'))`;
+      await until(`${review}?.querySelector('.file-changes-header-title')?.textContent === 'Diff'`);
+      assert.equal(await js(`${review}.querySelector('.file-commit-bar').hidden`), true, 'a diff hides the Commit bar');
+      await js(`${review}.querySelector('.file-changes-back').click()`);
+      await until(`!!document.querySelector('#workDockRight .file-commit-bar:not([hidden]) .file-commit-open')`);
+    };
     const openCommit = async () => {
       await js(`document.querySelector('#workDockRight .file-commit-bar:not([hidden]) .file-commit-open').click()`);
       await until(`${dialog}.open && document.querySelectorAll('.commit-file').length===2`);
@@ -167,6 +177,7 @@ app.whenReady().then(async () => {
     let remembered = null;
     for (const name of ['dark', 'light']) {
       await load(name);
+      if (name === 'dark') await barFollowsList();
       // A reload starts a new fixture; carry the first round's remembered choice over as the app would.
       if (remembered) await js(`window.api.setCommitFlow(${JSON.stringify(remembered)})`);
       assert.equal(await js('document.documentElement.dataset.theme'), name);

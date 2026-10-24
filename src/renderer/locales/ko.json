@@ -3066,5 +3066,6 @@
   "Common base": "공통 기준",
   "Theirs (incoming)": "상대 쪽 (들어오는 쪽)",
   "Not in this version": "이 버전에는 없음",
-  "Start or cancel the prepared plan first, then ask again.": "먼저 준비된 계획을 시작하거나 취소한 다음 다시 요청하세요."
+  "Start or cancel the prepared plan first, then ask again.": "먼저 준비된 계획을 시작하거나 취소한 다음 다시 요청하세요.",
+  "These changes are too large to commit from here. Commit them in a terminal.": "변경 사항이 너무 커서 여기서 커밋할 수 없습니다. 터미널에서 커밋하세요."
 }

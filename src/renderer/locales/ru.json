@@ -3216,5 +3216,6 @@
   "Common base": "Общая база",
   "Theirs (incoming)": "Их (входящая)",
   "Not in this version": "Нет в этой версии",
-  "Start or cancel the prepared plan first, then ask again.": "Сначала запустите или отмените подготовленный план, затем повторите запрос."
+  "Start or cancel the prepared plan first, then ask again.": "Сначала запустите или отмените подготовленный план, затем повторите запрос.",
+  "These changes are too large to commit from here. Commit them in a terminal.": "Эти изменения слишком велики, чтобы закоммитить их отсюда. Закоммитьте их в терминале."
 }
