@@ -1144,8 +1144,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { projectId } = z.object({ projectId: projectFileId }).strict().parse(payload);
     return readCommitState(projectId);
   });
+  // A changed file's path as Review listed it: relative, and never leaving the project.
+  const commitPath = projectRelativePath.min(1).refine(file => !/^(?:[\\/]|[A-Za-z]:)/.test(file) && !file.split(/[\\/]/).includes('..'),
+    'A path must stay inside the project.');
   handle('projectCommit:commit', async payload => {
-    const request = z.object({ projectId: projectFileId, message: z.string().max(10_000), paths: z.array(projectRelativePath.min(1)).max(2_000),
+    const request = z.object({ projectId: projectFileId, message: z.string().max(10_000), paths: z.array(commitPath).max(2_000),
       newBranch: z.string().min(1).max(200).optional(), expectedToken: z.string().length(64).regex(/^[0-9a-f]+$/) }).strict().parse(payload);
     return commitProjectChanges(request.projectId, request);
   });
@@ -1162,7 +1165,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('projectCommit:flow', async payload => {
     const { flow } = z.object({ flow: z.enum(['commit', 'ask-push', 'pr']) }).strict().parse(payload);
-    if (getConfig().ui.commitFlow !== flow) await updateConfig(config => ({ ...config, ui: { ...config.ui, commitFlow: flow } }));
+    if (getConfig().ui.commitFlow !== flow) {
+      await updateConfig(config => ({ ...config, ui: { ...config.ui, commitFlow: flow } }));
+      // The dialog reads the choice from the window's copy of the state; it must not open with the old one.
+      push('state:changed', await buildState());
+    }
     return true;
   });
   handle('projectGit:diff', async payload => {

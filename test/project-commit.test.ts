@@ -16,8 +16,10 @@ const exec = promisify(execFile);
 let directory: string;
 let approved: string;
 
+/** Git for the test repositories only: an inherited GIT_DIR or GIT_INDEX_FILE must not point it elsewhere. */
 async function git(cwd: string, ...args: string[]): Promise<string> {
-  return (await exec('git', args, { cwd, windowsHide: true })).stdout.trim();
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^GIT_/.test(key)));
+  return (await exec('git', args, { cwd, windowsHide: true, env })).stdout.trim();
 }
 
 beforeEach(async () => {
@@ -131,6 +133,40 @@ describe('commit', () => {
     }
   });
 
+  it('commits a rename staged with git mv, old and new path together', async () => {
+    const { root, id } = await project();
+    await git(root, 'mv', 'kept.ts', 'renamed.ts');
+    const state = await readCommitState(id);
+    expect(state.changes).toEqual([expect.objectContaining({ path: 'renamed.ts', previousPath: 'kept.ts' })]);
+    await commitProjectChanges(id, { message: 'Rename kept', paths: ['renamed.ts'], expectedToken: state.token });
+    expect(await git(root, 'ls-tree', '--name-only', 'HEAD')).toBe('gone.txt\nother.ts\nrenamed.ts');
+    expect(await git(root, 'status', '--porcelain')).toBe('');
+  });
+
+  it.skipIf(process.platform === 'win32')('gives back exactly what was staged by hand when a hook stops the commit', async () => {
+    const { root, id } = await project();
+    await fs.writeFile(path.join(root, 'kept.ts'), 'export const kept = 2;\n');
+    await git(root, 'add', 'kept.ts');
+    // Staged: one version; in the folder: a newer one. Only the staged one was the person's choice.
+    await fs.writeFile(path.join(root, 'kept.ts'), 'export const kept = 3;\n');
+    await fs.writeFile(path.join(root, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    await expect(commitProjectChanges(id, { message: 'x', paths: ['kept.ts'], expectedToken: await revision(id) })).rejects.toThrow('Git did not commit');
+    expect(await git(root, 'show', ':kept.ts')).toBe('export const kept = 2;');
+    expect(await fs.readFile(path.join(root, 'kept.ts'), 'utf8')).toBe('export const kept = 3;\n');
+  });
+
+  it('puts everything back, the branch too, when Git cannot even stage the files', async () => {
+    const { root, id } = await project();
+    await change(root);
+    const token = await revision(id);
+    // Another Git program holds the index.
+    await fs.writeFile(path.join(root, '.git', 'index.lock'), '');
+    await expect(commitProjectChanges(id, { message: 'x', paths: ['kept.ts'], newBranch: 'stuck', expectedToken: token })).rejects.toThrow('Git did not commit');
+    await fs.rm(path.join(root, '.git', 'index.lock'));
+    expect(await git(root, 'branch', '--show-current')).toBe('main');
+    expect(await git(root, 'branch', '--list', 'stuck')).toBe('');
+  });
+
   it.skipIf(process.platform === 'win32')('shows what a pre-commit hook printed when it stops the commit', async () => {
     const { root, id } = await project();
     await change(root);
@@ -201,6 +237,27 @@ describe('push', () => {
     await change(root);
     await commitProjectChanges(id, { message: 'Mine', paths: ['other.ts'], expectedToken: await revision(id) });
     await expect(pushProject(id)).rejects.toThrow('The remote has commits this branch does not have. Pull them first, then push again.');
+  });
+
+  it.skipIf(process.platform === 'win32')('never lets ssh wait for a typed answer, unless the person set their own ssh command', async () => {
+    const { root, id } = await project();
+    const bin = path.join(directory, 'bin');
+    const record = path.join(directory, 'ssh-args.txt');
+    await fs.mkdir(bin);
+    await fs.writeFile(path.join(bin, 'ssh'), `#!/bin/sh\necho "$@" >> '${record}'\nexit 255\n`, { mode: 0o755 });
+    await git(root, 'remote', 'set-url', 'origin', 'ssh://git@example.invalid/app.git');
+    const previous = process.env['PATH'];
+    process.env['PATH'] = `${bin}${path.delimiter}${previous}`;
+    try {
+      await expect(pushProject(id)).rejects.toThrow();
+      expect(await fs.readFile(record, 'utf8')).toContain('BatchMode=yes');
+      await fs.rm(record);
+      await git(root, 'config', 'core.sshCommand', `${path.join(bin, 'ssh')} -o Mine=yes`);
+      await expect(pushProject(id)).rejects.toThrow();
+      const used = await fs.readFile(record, 'utf8');
+      expect(used).toContain('Mine=yes');
+      expect(used).not.toContain('BatchMode=yes');
+    } finally { process.env['PATH'] = previous; }
   });
 
   it('says when there is nowhere to push', async () => {
@@ -275,6 +332,21 @@ describe('state and pull requests', () => {
     const url = new URL(result.url);
     expect(url.origin + url.pathname).toBe('https://github.com/octo/app/compare/main...raise-kept');
     expect(Object.fromEntries(url.searchParams)).toEqual({ expand: '1', title: 'Raise kept', body: 'Because.' });
+  });
+
+  it('leaves the base to GitHub when the default branch is not known here', async () => {
+    const { root, id } = await onGitHub();
+    await git(root, 'checkout', '-b', 'raise-kept');
+    await git(root, 'remote', 'set-head', 'origin', '-d');
+    await git(root, 'update-ref', '-d', 'refs/remotes/origin/main');
+    expect((await readCommitState(id)).defaultBranch).toBeNull();
+    const calls: string[][] = [];
+    setGhRunnerForTests(async args => { calls.push(args); return args[0] === 'auth' ? { code: 0, stdout: '', stderr: '' } : { code: 0, stdout: 'https://github.com/octo/app/pull/8\n', stderr: '' }; });
+    await createPullRequest(id, { title: 'Raise kept', body: 'Because.' });
+    expect(calls.at(-1)).toEqual(['pr', 'create', '--repo', 'octo/app', '--head', 'raise-kept', '--title', 'Raise kept', '--body', 'Because.']);
+    setGhRunnerForTests(async () => ({ code: 1, stdout: '', stderr: 'You are not logged into any GitHub hosts.' }));
+    const page = await createPullRequest(id, { title: 'Raise kept', body: 'Because.' });
+    expect(page.url).toMatch(/^https:\/\/github\.com\/octo\/app\/compare\/raise-kept\?/);
   });
 
   it('refuses a pull request from the default branch into itself', async () => {

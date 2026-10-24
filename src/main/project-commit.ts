@@ -192,8 +192,10 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
     }
   }
   const inRepository = (relative: string) => repo.prefix ? `${repo.prefix}/${relative}` : relative;
-  // A rename is both of its paths: the old one goes, the new one comes.
+  // A rename is both of its paths: the old one goes, the new one comes. Only the new one is still
+  // there to stage; staging the old one fails ("did not match any files").
   const paths = [...new Set(chosen.flatMap(change => [change.path, ...(change.previousPath ? [change.previousPath] : [])]))].map(inRepository);
+  const toStage = [...new Set(chosen.map(change => change.path))].map(inRepository);
   let branch = await branchOf(repo);
   const created = request.newBranch?.trim();
   const startedOn = branch;
@@ -205,17 +207,35 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
     branch = created;
   }
   if (!branch) throw new Error('This folder is not on a branch. Check out a branch first.');
-  const pathspec = { input: `${paths.join('\0')}\0`, env: LITERAL };
-  // What the person staged by hand among these paths stays staged if the commit does not happen.
+  // What the person staged by hand stays as it was if the commit does not happen, a part of a file
+  // (git add -p) too: the index is kept as a tree and read back. An index Git cannot write as a
+  // tree (an unresolved conflict elsewhere) falls back to unstaging only what this commit staged.
+  const savedIndex = await runGit(repo.root, ['write-tree']);
+  const indexTree = savedIndex.code === 0 ? decode(savedIndex.stdout).trim() : null;
   const staged = new Set(decode((await runGit(repo.root, ['diff', '--cached', '--name-only', '-z', '--no-renames'])).stdout).split('\0').filter(Boolean));
-  const added = await runGit(repo.root, ['add', '-A', '--pathspec-from-file=-', '--pathspec-file-nul'], undefined, pathspec);
-  if (added.code !== 0) throw new Error(`Git did not commit:\n${shown(added.stderr)}`);
+  const putBack = async () => {
+    const restored = indexTree ? await runGit(repo.root, ['read-tree', indexTree]) : null;
+    if (!restored || restored.code !== 0) {
+      const unstage = paths.filter(file => !staged.has(file));
+      if (unstage.length) await runGit(repo.root, ['reset', '-q', '--pathspec-from-file=-', '--pathspec-file-nul'], undefined, { input: `${unstage.join('\0')}\0`, env: LITERAL });
+    }
+    // The new branch is still the commit it started from, so pointing HEAD back is the whole switch;
+    // unlike `git switch` it works while another program holds the index.
+    if (created && startedOn) {
+      const back = await runGit(repo.root, ['symbolic-ref', 'HEAD', `refs/heads/${startedOn}`]);
+      if (back.code === 0) await runGit(repo.root, ['branch', '-D', created]);
+    }
+  };
+  const added = await runGit(repo.root, ['add', '-A', '--pathspec-from-file=-', '--pathspec-file-nul'], undefined, { input: `${toStage.join('\0')}\0`, env: LITERAL });
+  if (added.code !== 0) {
+    await putBack();
+    logWarn('git commit: not committed (Git could not stage the chosen files)');
+    throw new Error(`Git did not commit:\n${shown(added.stderr)}`);
+  }
   const committed = await runGit(repo.root, ['commit', '--cleanup=whitespace', '-m', message, '--pathspec-from-file=-', '--pathspec-file-nul'], undefined,
-    { ...pathspec, timeoutMs: 120_000 });
+    { input: `${paths.join('\0')}\0`, env: LITERAL, timeoutMs: 120_000 });
   if (committed.code !== 0) {
-    const unstage = paths.filter(file => !staged.has(file));
-    if (unstage.length) await runGit(repo.root, ['reset', '-q', '--pathspec-from-file=-', '--pathspec-file-nul'], undefined, { input: `${unstage.join('\0')}\0`, env: LITERAL });
-    if (created && startedOn) await runGit(repo.root, ['switch', '-q', startedOn]).then(() => runGit(repo.root, ['branch', '-D', created]));
+    await putBack();
     const output = `${committed.stderr}\n${decode(committed.stdout)}`;
     logWarn(`git commit: not committed (${/Please tell me who you are|Author identity unknown|unable to auto-detect email/i.test(output) ? 'no Git identity' : 'Git or a hook refused'})`);
     if (/Please tell me who you are|Author identity unknown|unable to auto-detect email/i.test(output)) {
@@ -253,6 +273,9 @@ export async function pushProject(projectId: string): Promise<{ branch: string; 
   // Nothing may wait for a password or a host key: without a terminal it would wait forever.
   const env: NodeJS.ProcessEnv = { GIT_TERMINAL_PROMPT: '0' };
   for (const key of ['GIT_SSH', 'GIT_SSH_COMMAND', 'GIT_ASKPASS'] as const) if (process.env[key]) env[key] = process.env[key];
+  // GIT_TERMINAL_PROMPT stops Git's own prompts, not ssh's: a host key or a key passphrase would be
+  // asked on the terminal the app was started from. The person's own ssh command is left as set.
+  if (!env['GIT_SSH'] && !env['GIT_SSH_COMMAND'] && !(await text(repo, ['config', '--get', 'core.sshCommand']))) env['GIT_SSH_COMMAND'] = 'ssh -o BatchMode=yes';
   const tracking = !facts.upstream;
   const args = tracking ? ['push', '--porcelain', '-u', facts.remote, `HEAD:refs/heads/${branch}`] : ['push', '--porcelain'];
   const pushed = await runGit(repo.root, args, undefined, { timeoutMs: PUSH_TIMEOUT_MS, env });
@@ -283,13 +306,14 @@ export async function createPullRequest(projectId: string, request: { title: str
   const upstream = upstreamUrl ? githubRepository(upstreamUrl) : null;
   const base = upstream ?? head;
   const fork = base.owner.toLowerCase() !== head.owner.toLowerCase() || base.repo.toLowerCase() !== head.repo.toLowerCase();
-  const into = facts.defaultBranch ?? 'main';
+  // Not known here (no remote HEAD, no main or master): GitHub uses the repository's default.
+  const into = facts.defaultBranch;
   if (!fork && into === branch) throw new Error('This branch is the default branch. Commit on a new branch to open a pull request.');
   const headRef = fork ? `${head.owner}:${branch}` : branch;
   const title = request.title.trim();
   if (!title) throw new Error('Write a commit message.');
   if (await ghStatus(repo.root) === 'ready') {
-    const created = await ghRunner(['pr', 'create', '--repo', `${base.owner}/${base.repo}`, '--head', headRef, '--base', into, '--title', title, '--body', request.body], repo.root);
+    const created = await ghRunner(['pr', 'create', '--repo', `${base.owner}/${base.repo}`, '--head', headRef, ...(into ? ['--base', into] : []), '--title', title, '--body', request.body], repo.root);
     const url = /https:\/\/github\.com\/\S+\/pull\/\d+/.exec(`${created.stdout}\n${created.stderr}`)?.[0];
     if (created.code === 0 && url) { logInfo('pull request: created with gh'); return { url, via: 'gh' }; }
     if (url && /already exists/i.test(created.stderr)) { logInfo('pull request: the branch already has one; opening it'); return { url, via: 'existing' }; }
@@ -298,5 +322,5 @@ export async function createPullRequest(projectId: string, request: { title: str
   }
   const query = new URLSearchParams({ expand: '1', title, body: request.body.slice(0, MAX_BROWSER_BODY) });
   logInfo('pull request: gh is missing or signed out; opening GitHub\'s page instead');
-  return { url: `https://github.com/${base.owner}/${base.repo}/compare/${into.split('/').map(encodeURIComponent).join('/')}...${encodeURIComponent(headRef).replace(/%2F/gi, '/').replace(/%3A/gi, ':')}?${query}`, via: 'browser' };
+  return { url: `https://github.com/${base.owner}/${base.repo}/compare/${into ? `${into.split('/').map(encodeURIComponent).join('/')}...` : ''}${encodeURIComponent(headRef).replace(/%2F/gi, '/').replace(/%3A/gi, ':')}?${query}`, via: 'browser' };
 }

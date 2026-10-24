@@ -137,6 +137,41 @@ it('offers only what the repository can do', async () => {
   expect($('commitWhere').textContent).toBe('On branch fix-stop');
 });
 
+it('says why a pull request cannot be chosen when the remote is not on GitHub, whatever is chosen', async () => {
+  // The live case on Windows: a remote on a local path, the person's remembered choice "ask".
+  await open({ commitState: vi.fn(() => ok(state({ github: null, gh: null }))) }, 'ask-push');
+  const disabled = [...document.querySelectorAll<HTMLInputElement>('input[name="commitFlow"]')].map(input => input.disabled);
+  expect(disabled).toEqual([false, false, true]);
+  expect(document.querySelector<HTMLInputElement>('input[name="commitFlow"]:checked')!.value).toBe('ask-push');
+  expect($('commitFlowNote').hidden).toBe(false);
+  expect($('commitFlowNote').textContent).toBe('Pull requests need a remote on GitHub.');
+});
+
+it('asks for a new branch for a pull request when the default branch is not known here', async () => {
+  // No remote HEAD and no main or master: the current branch might be the default one.
+  await open({ commitState: vi.fn(() => ok(state({ defaultBranch: null }))) }, 'pr');
+  expect($('commitBranchField').hidden).toBe(false);
+  pick('ask-push');
+  expect($('commitBranchField').hidden).toBe(true);
+});
+
+it('keeps the dialog open while a push runs, and shows how it ended', async () => {
+  let finish!: (value: unknown) => void;
+  const api = await open({ pushProject: vi.fn(() => new Promise(resolve => { finish = resolve; })) });
+  await submit();
+  $('commitStepAction').click(); await settle();
+  expect(steps().at(-1)).toBe('is-working: Pushing…');
+  expect($<HTMLButtonElement>('commitClose').disabled).toBe(true);
+  $('commitClose').click();
+  $('commitDialog').dispatchEvent(new dom.window.Event('cancel', { cancelable: true }));
+  expect($<HTMLDialogElement>('commitDialog').open).toBe(true);
+  finish({ ok: false, error: 'The remote has commits this branch does not have. Pull them first, then push again.' });
+  await settle();
+  expect(steps().at(-1)).toBe('is-failed: Not pushed');
+  expect($<HTMLButtonElement>('commitClose').disabled).toBe(false);
+  expect(api.pushProject).toHaveBeenCalledTimes(1);
+});
+
 it('reads the list again when the changes moved on, keeping the message, and commits only after the person looks again', async () => {
   let reads = 0;
   const api = await open({
