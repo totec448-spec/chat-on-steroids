@@ -1307,6 +1307,28 @@ describe('root namespace invariants', () => {
 });
 
 /** Exercise the real IPC policy for both Settings buttons and authored chat links. */
+describe('Commit & PR', () => {
+  it('remembers how far Commit goes, and keeps it through a settings save', async () => {
+    expect(await handlers.get('projectCommit:flow')!(null, { flow: 'pr' })).toEqual({ ok: true, data: true });
+    expect(getConfig().ui.commitFlow).toBe('pr');
+    expect(((await handlers.get('projectCommit:flow')!(null, { flow: 'always' })) as { ok: boolean }).ok).toBe(false);
+    expect(getConfig().ui.commitFlow).toBe('pr');
+    // The Settings form does not own it; a save that changes something else carries it through.
+    const base = getConfig();
+    expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
+    expect(getConfig().ui.commitFlow).toBe('pr');
+  });
+
+  it.each([
+    { projectId: 'p1', message: 'x', paths: ['a.ts'], expectedToken: 'short' },
+    { projectId: 'p1', message: 'x', paths: ['../outside.ts'], expectedToken: 'a'.repeat(64) },
+    { projectId: 'p1', message: 'x'.repeat(10_001), paths: ['a.ts'], expectedToken: 'a'.repeat(64) },
+    { projectId: 'p1', message: 'x', paths: ['a.ts'], expectedToken: 'a'.repeat(64), amend: true }
+  ])('refuses a commit request before Git runs: %o', async request => {
+    expect(((await handlers.get('projectCommit:commit')!(null, request)) as { ok: boolean }).ok).toBe(false);
+  });
+});
+
 describe('every link the window offers', () => {
   it('is one link:open will actually open', async () => {
     const { promises: fs } = await import('node:fs');

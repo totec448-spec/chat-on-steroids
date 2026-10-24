@@ -29,7 +29,8 @@ import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '..
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import type { AppState, Capabilities, CompanionDiagnostics, Config, Diagnosis, LogEntry } from '../shared/types.js';
+import type { AppState, Capabilities, CommitFlow, CompanionDiagnostics, Config, Diagnosis, LogEntry } from '../shared/types.js';
+import type { CommitState } from '../shared/project-git.js';
 import type {
   Handoff,
   ImageStorageClearMode,
@@ -256,6 +257,14 @@ const api = {
   connect: () => call<AppState>('connection:connect'),
   disconnect: () => call<AppState>('connection:disconnect'),
   runDiagnostics: () => call<Diagnosis>('diagnostics:run'),
+  // Commit & PR from Review (project-commit.ts).
+  commitState: (projectId: string) => call<CommitState>('projectCommit:state', { projectId }),
+  commitProject: (request: { projectId: string; message: string; paths: string[]; newBranch?: string; expectedToken: string }) =>
+    call<{ commit: string; branch: string }>('projectCommit:commit', request),
+  pushProject: (projectId: string) => call<{ branch: string; remote: string; tracking: boolean }>('projectCommit:push', { projectId }),
+  createPullRequest: (projectId: string, title: string, body: string) =>
+    call<{ url: string; via: 'gh' | 'existing' | 'browser' }>('projectCommit:pullRequest', { projectId, title, body }),
+  setCommitFlow: (flow: CommitFlow) => call<boolean>('projectCommit:flow', { flow }),
   saveDiagnosticsReport: () => call<{ saved: false } | { saved: true; name: string }>('diagnostics:saveReport'),
   requestDesktopAccessibility: () => call<AppState>('desktop:requestAccessibility'),
   repairDesktopAccess: () => call<AppState>('desktop:repairPermissions'),
