@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import {
@@ -11,6 +11,12 @@ import {
 } from '../src/main/project-commit.js';
 import { addProject } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
+
+const logged = vi.hoisted(() => [] as string[]);
+vi.mock('../src/main/logger.js', async original => {
+  const real = await original<typeof import('../src/main/logger.js')>();
+  return { ...real, logInfo: (line: string) => { logged.push(line); real.logInfo(line); }, logWarn: (line: string) => { logged.push(line); real.logWarn(line); } };
+});
 
 const exec = promisify(execFile);
 let directory: string;
@@ -204,6 +210,20 @@ describe('commit', () => {
     await expect(commitProjectChanges(id, { message: 'x', paths: ['other.ts'], expectedToken: state.token })).rejects.toThrow('Resolve the conflicts first, then commit.');
     await expect(commitProjectChanges(id, { message: 'x', paths: ['kept.ts'], expectedToken: state.token }))
       .rejects.toThrow('A merge is in progress. Finish it in a terminal or your Git tool, then commit here.');
+  });
+
+  it('writes one log line for each refusal, the sentence only, never a file name', async () => {
+    const { root, id } = await project();
+    await change(root);
+    logged.length = 0;
+    await expect(commitProjectChanges(id, { message: 'x', paths: ['kept.ts'], expectedToken: 'b'.repeat(64) })).rejects.toThrow('The changes changed');
+    await expect(commitProjectChanges(id, { message: 'x', paths: ['kept.ts'], newBranch: 'bad..name', expectedToken: await revision(id) })).rejects.toThrow('That branch name is not allowed.');
+    await expect(createPullRequest(id, { title: 't', body: 'b' })).rejects.toThrow('This repository is not on GitHub.');
+    expect(logged).toEqual([
+      'git commit: refused (The changes changed. Review them again before committing.)',
+      'git commit: refused (That branch name is not allowed.)',
+      'pull request: refused (This repository is not on GitHub. Open the pull request on its own site.)'
+    ]);
   });
 
   it('refuses on a detached HEAD, where a commit would belong to no branch', async () => {

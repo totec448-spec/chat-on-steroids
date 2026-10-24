@@ -157,6 +157,12 @@ export async function readCommitState(projectId: string): Promise<CommitState> {
     gh: github ? await ghStatus(repo.root) : null, changes: snapshot.changes, token: await changesToken(repo, snapshot.changes) };
 }
 
+/** A refusal: one log line with the sentence (never a path or Git's words), and the error the window translates. */
+function refusal(area: 'git commit' | 'git push' | 'pull request', sentence: string): Error {
+  logWarn(`${area}: refused (${sentence})`);
+  return new Error(sentence);
+}
+
 // ---------------------------------------------------------------- commit
 
 const LITERAL = { GIT_LITERAL_PATHSPECS: '1' };
@@ -174,21 +180,21 @@ export interface CommitRequest {
 /** Commits exactly the chosen changes, as their files are now, and nothing else that is staged. */
 export async function commitProjectChanges(projectId: string, request: CommitRequest): Promise<{ commit: string; branch: string }> {
   const message = request.message.replace(/\r\n/g, '\n').trim();
-  if (!message) throw new Error('Write a commit message.');
-  if (message.length > MAX_MESSAGE) throw new Error('The commit message is too long.');
+  if (!message) throw refusal('git commit', 'Write a commit message.');
+  if (message.length > MAX_MESSAGE) throw refusal('git commit', 'The commit message is too long.');
   const snapshot = await readProjectGitSnapshot(projectId);
-  if (snapshot.state !== 'ready' || snapshot.truncated) throw new Error('The changes changed. Review them again before committing.');
+  if (snapshot.state !== 'ready' || snapshot.truncated) throw refusal('git commit', 'The changes changed. Review them again before committing.');
   const repo = await context(projectId);
-  if (await changesToken(repo, snapshot.changes) !== request.expectedToken) throw new Error('The changes changed. Review them again before committing.');
+  if (await changesToken(repo, snapshot.changes) !== request.expectedToken) throw refusal('git commit', 'The changes changed. Review them again before committing.');
   const wanted = new Set(request.paths);
   const chosen = snapshot.changes.filter(change => wanted.has(change.path));
-  if (!chosen.length) throw new Error('Choose at least one file to commit.');
-  if (chosen.length !== wanted.size) throw new Error('The changes changed. Review them again before committing.');
-  if (chosen.some(change => change.status === 'C')) throw new Error('Resolve the conflicts first, then commit.');
+  if (!chosen.length) throw refusal('git commit', 'Choose at least one file to commit.');
+  if (chosen.length !== wanted.size) throw refusal('git commit', 'The changes changed. Review them again before committing.');
+  if (chosen.some(change => change.status === 'C')) throw refusal('git commit', 'Resolve the conflicts first, then commit.');
   // A merge, cherry-pick or revert in progress commits everything or nothing; a choice of files cannot.
   for (const marker of ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']) {
     if (await fs.access(path.join(repo.gitDir, marker)).then(() => true, () => false)) {
-      throw new Error('A merge is in progress. Finish it in a terminal or your Git tool, then commit here.');
+      throw refusal('git commit', 'A merge is in progress. Finish it in a terminal or your Git tool, then commit here.');
     }
   }
   const inRepository = (relative: string) => repo.prefix ? `${repo.prefix}/${relative}` : relative;
@@ -200,13 +206,13 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
   const created = request.newBranch?.trim();
   const startedOn = branch;
   if (created) {
-    if ((await runGit(repo.root, ['check-ref-format', '--branch', created])).code !== 0 || created.startsWith('-')) throw new Error('That branch name is not allowed.');
-    if ((await runGit(repo.root, ['show-ref', '--verify', '--quiet', `refs/heads/${created}`])).code === 0) throw new Error('A branch with that name already exists.');
+    if ((await runGit(repo.root, ['check-ref-format', '--branch', created])).code !== 0 || created.startsWith('-')) throw refusal('git commit', 'That branch name is not allowed.');
+    if ((await runGit(repo.root, ['show-ref', '--verify', '--quiet', `refs/heads/${created}`])).code === 0) throw refusal('git commit', 'A branch with that name already exists.');
     const switched = await runGit(repo.root, ['switch', '-c', created]);
     if (switched.code !== 0) throw new Error(`Git could not create the branch:\n${shown(switched.stderr)}`);
     branch = created;
   }
-  if (!branch) throw new Error('This folder is not on a branch. Check out a branch first.');
+  if (!branch) throw refusal('git commit', 'This folder is not on a branch. Check out a branch first.');
   // What the person staged by hand stays as it was if the commit does not happen, a part of a file
   // (git add -p) too: the index is kept as a tree and read back. An index Git cannot write as a
   // tree (an unresolved conflict elsewhere) falls back to unstaging only what this commit staged.
@@ -267,9 +273,9 @@ function pushError(stderr: string): Error {
 export async function pushProject(projectId: string): Promise<{ branch: string; remote: string; tracking: boolean }> {
   const repo = await context(projectId);
   const branch = await branchOf(repo);
-  if (!branch) throw new Error('This folder is not on a branch. Check out a branch first.');
+  if (!branch) throw refusal('git push', 'This folder is not on a branch. Check out a branch first.');
   const facts = await remoteFacts(repo);
-  if (!facts.remote) throw new Error('This repository has no remote to push to.');
+  if (!facts.remote) throw refusal('git push', 'This repository has no remote to push to.');
   // Nothing may wait for a password or a host key: without a terminal it would wait forever.
   const env: NodeJS.ProcessEnv = { GIT_TERMINAL_PROMPT: '0' };
   for (const key of ['GIT_SSH', 'GIT_SSH_COMMAND', 'GIT_ASKPASS'] as const) if (process.env[key]) env[key] = process.env[key];
@@ -298,20 +304,20 @@ const MAX_BROWSER_BODY = 4_000;
 export async function createPullRequest(projectId: string, request: { title: string; body: string }): Promise<{ url: string; via: 'gh' | 'existing' | 'browser' }> {
   const repo = await context(projectId);
   const branch = await branchOf(repo);
-  if (!branch) throw new Error('This folder is not on a branch. Check out a branch first.');
+  if (!branch) throw refusal('pull request', 'This folder is not on a branch. Check out a branch first.');
   const facts = await remoteFacts(repo);
   const head = facts.url ? githubRepository(facts.url) : null;
-  if (!head) throw new Error('This repository is not on GitHub. Open the pull request on its own site.');
+  if (!head) throw refusal('pull request', 'This repository is not on GitHub. Open the pull request on its own site.');
   const upstreamUrl = facts.remote !== 'upstream' ? await text(repo, ['remote', 'get-url', 'upstream']) : null;
   const upstream = upstreamUrl ? githubRepository(upstreamUrl) : null;
   const base = upstream ?? head;
   const fork = base.owner.toLowerCase() !== head.owner.toLowerCase() || base.repo.toLowerCase() !== head.repo.toLowerCase();
   // Not known here (no remote HEAD, no main or master): GitHub uses the repository's default.
   const into = facts.defaultBranch;
-  if (!fork && into === branch) throw new Error('This branch is the default branch. Commit on a new branch to open a pull request.');
+  if (!fork && into === branch) throw refusal('pull request', 'This branch is the default branch. Commit on a new branch to open a pull request.');
   const headRef = fork ? `${head.owner}:${branch}` : branch;
   const title = request.title.trim();
-  if (!title) throw new Error('Write a commit message.');
+  if (!title) throw refusal('pull request', 'Write a commit message.');
   if (await ghStatus(repo.root) === 'ready') {
     const created = await ghRunner(['pr', 'create', '--repo', `${base.owner}/${base.repo}`, '--head', headRef, ...(into ? ['--base', into] : []), '--title', title, '--body', request.body], repo.root);
     const url = /https:\/\/github\.com\/\S+\/pull\/\d+/.exec(`${created.stdout}\n${created.stderr}`)?.[0];
