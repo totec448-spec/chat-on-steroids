@@ -1931,6 +1931,9 @@ run still waits in the queue is skipped; a refused queueing skips that time once
 loop); saving or resuming starts at the next time; an ended schedule sends nothing; a deleted chat's
 schedule is removed. IPC `schedules:get|save|pause|delete`; errors are sentences the renderer
 translates. Queue rows and pending messages say "Scheduled" (late: "Scheduled · late, was due …").
+The delivered `user_message` records `scheduled { dueAt, late }` (copied from the input in
+`recordDeliveredInput`, kept when a later page echo lacks it), so the sent message keeps the same
+line in the chat after the outbox row is pruned.
 One `scheduled run:` log line per decision, never the message. Tests: `test/schedule-rules.test.ts`,
 `test/scheduled-runs.test.ts`, the IPC and renderer timeline tests named "schedule".
 

@@ -4941,6 +4941,8 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
         attachments.append(slot);
         return slot;
       });
+      // #1826: a scheduled run keeps saying so once sent, as its queue row did.
+      if (event.scheduled) box.append(el('span', 'said-origin', () => scheduledLabel(event)));
       if (event.attachments?.length || assets.length || retained.length) box.append(attachments);
       if (!assets.length) for (const image of retained) preview(image.dataUrl, true);
       // Native ChatGPT can prepend a blank paragraph. Ignore it only when a
@@ -7916,7 +7918,7 @@ function historicalAutomaticInput(entry: InputEntry): boolean {
 }
 
 /** #1826: a run of the chat's schedule says so, and, when it went out late, when it was due. */
-function scheduledLabel(entry: InputEntry): string {
+function scheduledLabel(entry: { scheduled?: { dueAt: number; late: boolean } }): string {
   const scheduled = entry.scheduled;
   if (!scheduled) return '';
   return scheduled.late

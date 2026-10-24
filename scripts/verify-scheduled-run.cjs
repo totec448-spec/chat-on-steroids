@@ -52,7 +52,9 @@ app.whenReady().then(async () => {
       ]};
       window.api=new Proxy({
         listSessions:()=>ok({sessions:[idle,busy],activeId:null,blocked:[],pressure:[]}), listProjects:()=>ok([]),
-        getSession:id=>ok({summary:[idle,busy].find(row=>row.id===id),total:0,events:[],nextFrom:0}),
+        getSession:id=>{const events=id===idle.id?[{kind:'user_message',seq:1,origin:1,time:nine.getTime(),source:'app',messageId:'sent-run',inputId:'sent-run',
+          message:{text:'Summarise the new issues from last night.',chars:41,truncated:false},scheduled:{dueAt:nine.getTime(),late:false}}]:[];
+          return ok({summary:[idle,busy].find(row=>row.id===id),total:events.length,events,nextFrom:events.length});},
         getSessionControls:id=>ok({sessionId:id,activeTurnId:id===busy.id?'turn-busy':null,canInject:true,automation:'off',objective:'',blocked:'',recovery:[],goalWait:null,plan:null}),
         listInputs:()=>ok(structuredClone(window.fixture.inputs)), listPausedHelpers:()=>ok([]), runningTools:()=>ok([]), runningProcesses:()=>ok([]),
         onBackgroundProcessesChanged:()=>()=>{}, onSessionChanged:()=>()=>{}, onTaskProgress:()=>()=>{},
@@ -82,6 +84,14 @@ app.whenReady().then(async () => {
           box: { x: Math.floor(Math.min(o.left, t.left)) - 16, y: Math.floor(o.top) - 12, width: Math.ceil(Math.max(o.right, t.right) - Math.min(o.left, t.left)) + 32, height: Math.ceil(t.bottom - o.top) + 40 } };
       })`);
       assert.equal(rows.length, 2);
+      // Sent, the run keeps the same line above its message in the chat.
+      const sent = await js(`(() => { const bubble = document.querySelector('.said.is-user'), origin = bubble?.querySelector('.said-origin'), text = bubble?.querySelector('.user-message-text');
+        if (!origin || !text) return null;
+        const o = origin.getBoundingClientRect(), t = text.getBoundingClientRect(), so = getComputedStyle(origin), st = getComputedStyle(text);
+        return { origin: origin.textContent, right: Math.round(t.right - o.right), above: o.bottom <= t.top + 1, cut: origin.scrollWidth > origin.clientWidth + 1,
+          smaller: parseFloat(so.fontSize) < parseFloat(st.fontSize), quieter: so.color !== st.color, sameAsQueue: so.fontSize === getComputedStyle(document.querySelector('#inputQueue .pending-message-origin')).fontSize }; })()`);
+      assert.ok(sent && sent.origin === 'Scheduled' && sent.right >= 0 && sent.right <= 6 && sent.above && !sent.cut && sent.smaller && sent.quieter && sent.sameAsQueue,
+        `${theme} sent message origin line: ${JSON.stringify(sent)}`);
       assert.equal(rows[0].origin, 'Scheduled');
       assert.match(rows[1].origin, /^Scheduled · late, was due \d{1,2}:00(?:\s?[AP]M)?$/);
       for (const row of rows) {
@@ -101,6 +111,6 @@ app.whenReady().then(async () => {
       results[theme] = { rows, card };
     }
     fs.writeFileSync(path.join(output, 'measurements.json'), JSON.stringify(results, null, 2));
-    console.log('Passed: a scheduled run says so above its message (on time and late) and on its task card, on the message edge, smaller and quieter, whole, in both themes.');
+    console.log('Passed: a scheduled run says so above its message (on time and late), on its task card and on the sent message, on the message edge, smaller and quieter, whole, in both themes.');
   } finally { win.destroy(); app.exit(0); }
 }).catch(error => { console.error(error); app.exit(1); });

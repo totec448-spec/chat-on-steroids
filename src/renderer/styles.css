@@ -3727,7 +3727,7 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 #inputQueue > .pending-message { margin-top: 11px; margin-bottom: 33px; }
 .pending-message-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(15px * var(--text-scale, 1)); line-height: calc(1.75 * var(--line-spacing, 1)); }
 /* #1826: where a scheduled run came from, one quiet line above its text, on the text's edge. */
-.pending-message-origin { margin: 0 4px -4px; font-size: calc(11.5px * var(--text-scale, 1)); line-height: 1.45; color: var(--soft); }
+.pending-message-origin, .said.is-user > .said-origin { margin: 0 4px -4px; font-size: calc(11.5px * var(--text-scale, 1)); line-height: 1.45; color: var(--soft); }
 .pending-message-status { position: absolute; right: 30px; top: calc(100% + 1px); height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: calc(12px * var(--text-scale, 1)); line-height: 1.45; color: var(--soft); }
 .pending-message.is-delivery-error .pending-message-status, .pending-message.is-route-held .pending-message-status, .pending-message.is-waiting .pending-message-status { position: static; display: block; width: auto; max-width: 100%; height: auto; margin-top: 4px; font-size: calc(11px * var(--text-scale, 1)); font-weight: 400; white-space: normal; overflow-wrap: anywhere; }
 .pending-message.is-delivery-error .pending-message-status { color: var(--red); }
