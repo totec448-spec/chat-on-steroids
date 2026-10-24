@@ -351,6 +351,66 @@ it('searches a comparison branch without checking out and keeps the chosen diff 
   expect(window.api.getProjectGitSnapshot).toHaveBeenLastCalledWith(projectB.id, undefined);
 });
 
+it('compares against a code checkpoint and asks main to restore one file or all of them with that revision', async () => {
+  const id = 'c'.repeat(32), ref = `checkpoint:${id}`;
+  // Local time: the label shows the day where the app runs, so a UTC fixture would move a day west of UTC−9.
+  const checkpoints = [{ ref, createdAt: new Date(2026, 9, 13, 9, 30).getTime(), reason: 'turn' as const, available: true }];
+  let changes: ProjectGitSnapshot['changes'] = [
+    { status: 'M', path: 'README.md', additions: 1, deletions: 1, binary: false },
+    { status: 'A', path: 'src/new.ts', additions: 3, deletions: 0, binary: false }
+  ];
+  (window.api.getProjectGitSnapshot as any).mockImplementation((_id: string, selected?: string) => ok({
+    ...cleanGit(), currentBranch: 'feature', branches: [{ ref: 'refs/heads/feature', label: 'feature' }], checkpoints,
+    ...(selected ? { comparison: { ref: selected, label: '', baseOid: 'a'.repeat(40), headOid: 'b'.repeat(40), checkpoint: true },
+      revision: `checkpoint-${changes.length}`, changes } : {})
+  }));
+  (window.api.getProjectGitDiff as any).mockImplementation(() => ok({
+    projectId: projectA.id, status: 'M', path: 'README.md', additions: 1, deletions: 1,
+    binary: false, tooLarge: false, baseText: 'before', currentText: 'after'
+  }));
+  const restore = vi.fn(async (_project: string, _id: string, paths: string[] | null) => {
+    changes = paths ? changes.filter(change => !paths.includes(change.path)) : [];
+    return { ok: true, data: { confirmed: true, restored: paths ?? ['README.md', 'src/new.ts'], skipped: [], undoRef: `checkpoint:${'d'.repeat(32)}` } };
+  });
+  Object.assign(window.api, { restoreCheckpoint: restore });
+  const panel = createFilePanel({ host, reviewOnly: true });
+  panel.update(projectA); await panel.show(); await tick();
+  expect(host.querySelector('.file-checkpoint-bar')).toBeNull();
+
+  host.querySelector<HTMLButtonElement>('.file-branch-trigger')!.click();
+  expect(document.querySelector('.file-branch-hint')?.textContent).toBe('Checkpoints');
+  const option = [...document.querySelectorAll<HTMLButtonElement>('.file-branch-option')].at(-1)!;
+  expect(option.textContent).toMatch(/^Before turn · /);
+  option.click(); await tick();
+  expect(window.api.getProjectGitSnapshot).toHaveBeenLastCalledWith(projectA.id, ref);
+  expect(host.querySelector('.file-branch-trigger')?.textContent).toMatch(/Before turn · /);
+  expect(host.querySelector<HTMLElement>('.file-branch-stats')?.title).toBe('Changes since this checkpoint, local work included');
+  // A language change rewrites the label and its date format with the rest of the panel.
+  try {
+    setLanguage('de');
+    expect(host.querySelector('.file-branch-trigger')?.textContent).toMatch(/^Vor dem Durchlauf · 13\.10\.26, /);
+  } finally { setLanguage('en'); }
+  expect(host.querySelector('.file-branch-trigger')?.textContent).toMatch(/^Before turn · 10\/13\/26, /);
+
+  host.querySelector<HTMLButtonElement>('.file-change-row[data-path="README.md"]')!.click(); await tick(); await tick();
+  expect(window.api.getProjectGitDiff).toHaveBeenLastCalledWith(projectA.id, 'README.md', ref, 'checkpoint-2');
+  // Restore goes back in time, so it does not wear the Refresh arrow it sits next to.
+  const restoreFile = [...host.querySelectorAll<HTMLButtonElement>('.file-preview-actions button')].find(button => button.textContent === 'Restore file')!;
+  const iconOf = (button: Element | null) => button?.querySelector('.ico')?.className;
+  expect(iconOf(restoreFile)).toContain('ph-arrow-counter-clockwise');
+  expect(iconOf(host.querySelector('.file-checkpoint-bar button'))).toContain('ph-arrow-counter-clockwise');
+  expect(iconOf(restoreFile)).not.toBe(iconOf(host.querySelector('[aria-label="Refresh changes"]')));
+  [...host.querySelectorAll<HTMLButtonElement>('.file-preview-actions button')].find(button => button.textContent === 'Restore file')!.click();
+  await tick(); await tick();
+  expect(restore).toHaveBeenLastCalledWith(projectA.id, id, ['README.md'], 'checkpoint-2');
+  expect(document.querySelector('.toast')?.textContent).toBe('Restored 1 of 1 files');
+  expect(host.querySelector('.file-change-row[data-path="README.md"]')).toBeNull();
+
+  host.querySelector<HTMLButtonElement>('.file-checkpoint-bar button')!.click(); await tick(); await tick();
+  expect(restore).toHaveBeenLastCalledWith(projectA.id, id, null, 'checkpoint-1');
+  expect(host.textContent).toContain('No changes since this checkpoint');
+});
+
 it('gives focus back to the branch trigger when a branch is chosen with the keyboard', async () => {
   const branches = [{ ref: 'refs/heads/main', label: 'main' }];
   (window.api.getProjectGitSnapshot as any).mockImplementation(() => ok({ ...cleanGit(), currentBranch: 'feature', branches }));

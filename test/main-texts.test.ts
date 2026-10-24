@@ -23,6 +23,17 @@ it('has every tray and notice text in every interface catalog', () => {
   }
 });
 
+it('keeps every translated tray and notice text within the bounds the main process accepts', () => {
+  // `ui:mainTexts` refuses the whole set when one text is longer, leaving every main text in English.
+  for (const file of readdirSync('src/renderer/locales').filter(name => name.endsWith('.json'))) {
+    const catalog = JSON.parse(readFileSync(`src/renderer/locales/${file}`, 'utf8')) as Record<string, string>;
+    for (const source of MAIN_TEXTS) {
+      expect(source.length, source).toBeLessThanOrEqual(200);
+      expect(catalog[source]?.length ?? 0, `${file}: ${source}`).toBeLessThanOrEqual(200);
+    }
+  }
+});
+
 it('gives every native dialog of the main process its texts in the interface language', () => {
   // Windows shows a file dialog's title, filter names and a message box's whole text; they used
   // to be English in every language (2.1.41 pass: "Export as Markdown" in a German app).

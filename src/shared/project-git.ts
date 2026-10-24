@@ -23,9 +23,25 @@ export interface ProjectGitSnapshot {
   /** Local and locally cached remote branches; selecting one never checks it out or fetches. */
   branches?: Array<{ ref: string; label: string }>;
   branchesTruncated?: boolean;
-  /** Present only for committed branch comparisons (merge-base → HEAD). */
-  comparison?: { ref: string; label: string; baseOid: string; headOid: string };
+  /** The project's code checkpoints, newest first; `ref` is a `checkpoint:<id>` comparison choice. */
+  /** `available` is false once Git's garbage collection removed the checkpoint's tree; it can be neither compared nor restored. */
+  checkpoints?: Array<{ ref: string; createdAt: number; reason: 'turn' | 'restore'; available: boolean }>;
+  /**
+   * A branch comparison (merge-base → HEAD), or with `checkpoint` the working tree against a
+   * checkpoint tree (`baseOid`), untracked files included.
+   */
+  comparison?: { ref: string; label: string; baseOid: string; headOid: string; checkpoint?: true };
   message?: string;
+}
+
+export const CHECKPOINT_REF_PREFIX = 'checkpoint:';
+
+/** Outcome of a confirmed checkpoint Restore. `undoRef` compares against the state before it. */
+export interface CheckpointRestoreResult {
+  confirmed: boolean;
+  restored: string[];
+  skipped: Array<{ path: string; reason: 'changed' | 'conflict' | 'unsupported' | 'failed' }>;
+  undoRef: string | null;
 }
 
 export interface ProjectGitDiff {
