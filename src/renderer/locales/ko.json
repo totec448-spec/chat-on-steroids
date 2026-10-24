@@ -3017,5 +3017,6 @@
   "Write the message to send.": "보낼 메시지를 작성하세요.",
   "Choose a schedule that runs at least once an hour apart.": "최소 1시간 간격으로 실행되는 일정을 고르세요.",
   "Choose an end date in the future.": "미래의 종료 날짜를 고르세요.",
-  "There are too many scheduled chats. Remove one first.": "예약된 채팅이 너무 많습니다. 먼저 하나를 삭제하세요."
+  "There are too many scheduled chats. Remove one first.": "예약된 채팅이 너무 많습니다. 먼저 하나를 삭제하세요.",
+  "These schedules were saved by a newer version of Chat On Steroids. Update the app to change them.": "이 일정은 더 새로운 버전의 Chat On Steroids에서 저장되었습니다. 바꾸려면 앱을 업데이트하세요."
 }

@@ -3164,5 +3164,6 @@
   "Write the message to send.": "Напишите сообщение для отправки.",
   "Choose a schedule that runs at least once an hour apart.": "Выберите расписание с интервалом не меньше часа.",
   "Choose an end date in the future.": "Выберите дату окончания в будущем.",
-  "There are too many scheduled chats. Remove one first.": "Слишком много чатов по расписанию. Сначала удалите один."
+  "There are too many scheduled chats. Remove one first.": "Слишком много чатов по расписанию. Сначала удалите один.",
+  "These schedules were saved by a newer version of Chat On Steroids. Update the app to change them.": "Эти расписания сохранены более новой версией Chat On Steroids. Обновите приложение, чтобы их изменить."
 }

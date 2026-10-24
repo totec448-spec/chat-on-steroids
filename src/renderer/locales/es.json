@@ -3115,5 +3115,6 @@
   "Write the message to send.": "Escribe el mensaje que se enviará.",
   "Choose a schedule that runs at least once an hour apart.": "Elige una programación con al menos una hora de separación.",
   "Choose an end date in the future.": "Elige una fecha de fin en el futuro.",
-  "There are too many scheduled chats. Remove one first.": "Hay demasiados chats programados. Elimina uno primero."
+  "There are too many scheduled chats. Remove one first.": "Hay demasiados chats programados. Elimina uno primero.",
+  "These schedules were saved by a newer version of Chat On Steroids. Update the app to change them.": "Estas programaciones las guardó una versión más reciente de Chat On Steroids. Actualiza la app para cambiarlas."
 }

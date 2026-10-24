@@ -63,12 +63,21 @@ function serial<T>(work: () => Promise<T>): Promise<T> {
   return next;
 }
 
+/** A saved file this version cannot read as its own (a newer version's): run nothing from it, and never overwrite it. */
+let foreign = false;
 async function load(): Promise<ScheduledRun[]> {
-  const raw = storeSchema.safeParse(await readDurable(STORE));
+  const stored = await readDurable(STORE);
+  const raw = storeSchema.safeParse(stored);
+  // Only a higher version is foreign; a damaged file of this version may be replaced, or a broken file would block schedules for good.
+  const version = typeof stored === 'object' && stored !== null ? (stored as { version?: unknown }).version : undefined;
+  foreign = typeof version === 'number' && version > 1;
   // A damaged entry is dropped alone; the others keep running.
   return raw.success ? raw.data.schedules.flatMap(entry => { const parsed = recordSchema.safeParse(entry); return parsed.success ? [parsed.data] : []; }) : [];
 }
-const save = (schedules: ScheduledRun[]) => writeDurableNow(STORE, { version: 1, schedules });
+const save = async (schedules: ScheduledRun[]) => {
+  if (foreign) throw new Error('These schedules were saved by a newer version of Chat On Steroids. Update the app to change them.');
+  await writeDurableNow(STORE, { version: 1, schedules });
+};
 
 const asSchedule = (run: ScheduledRun): Schedule =>
   ({ repeat: run.repeat, until: run.until, paused: run.paused, createdAt: run.createdAt, lastDueAt: run.lastDueAt });
