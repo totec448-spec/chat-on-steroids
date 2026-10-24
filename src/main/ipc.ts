@@ -76,7 +76,7 @@ import { CUSTOM_CONTINUE_MAX_CHARS } from '../shared/recovery.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange, rememberRunningSurfaceTokens } from './connection.js';
 import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema, settingsRecovered } from './config.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
-import { PROJECT_COLORS } from '../shared/projects.js';
+import { PROJECT_CHAT_DEFAULTS_SKIPS, PROJECT_COLORS } from '../shared/projects.js';
 import { bridgePortSelection } from './bridge-ports.js';
 import { clearAllGoalSwitches, draftTaskPlan, listGoalModels, MODEL_PAGE_SIZE, retireGoalDrafts, goalBackendFor, goalSwitchFor, setGoalSwitchNow, setGoalReplyActiveNow, setGoalObjectiveNow } from './goal.js';
 import { forgetExposedSurface } from './mcp/server.js';
@@ -93,7 +93,7 @@ import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { inFlightToolCalls } from './mcp/call-context.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, addRemoteProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff } from './projects.js';
+import { addProject, addRemoteProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff, setProjectChatDefaults, projectChatDefaultsSchema } from './projects.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile, serverFileSnapshot } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
@@ -1060,6 +1060,19 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const project = await setProjectColor(id, color);
     push('session:changed');
     return project;
+  });
+  handle('projects:chatDefaults', async payload => {
+    const { id, defaults } = z.object({ id: z.string().uuid(), defaults: projectChatDefaultsSchema.nullable() }).strict().parse(payload);
+    const project = await setProjectChatDefaults(id, defaults);
+    push('session:changed');
+    return project;
+  });
+  handle('projects:chatDefaultsSkipped', async payload => {
+    const { reason } = z.object({ reason: z.enum(PROJECT_CHAT_DEFAULTS_SKIPS) }).strict().parse(payload);
+    const why = reason === 'no-picker' ? 'this ChatGPT account shows no readable model picker'
+      : reason === 'model-gone' ? 'this ChatGPT account no longer offers its model' : 'this ChatGPT account no longer offers its reasoning effort for that model';
+    logInfo(`project new-chat model: skipped, ${why}; the new chat uses the Settings default`);
+    return null;
   });
 
   // A folder dropped onto the Folders card. The renderer never sees a system path itself:

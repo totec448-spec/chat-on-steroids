@@ -747,3 +747,87 @@ it('glides the effort thumb, picks the nearest effort, settles on release and st
   expect(confirmedComposerModel()).toEqual({ model: 'think', reasoningEffort: 'medium' });
   expect(slider.getAttribute('aria-valuetext')).toBe('Medium');
 });
+
+it('starts a new chat of a project on its own pair, and every other new chat on the Settings default', async () => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const models = [{ id: 'gpt-6', label: 'GPT-6', efforts: ['low', 'high'] }, { id: 'sol', label: 'GPT-5.6 Sol', efforts: ['medium', 'high'] }];
+  Object.assign(dom.window, { api: { getChatModels: async () => ({ ok: true, data: { state: 'ready', observedAt: 2, models } }), requestChatModels: vi.fn() } });
+  const { initChatModels, applyChatModels, applyComposerSessionModel, composerSendModel } = await import('../src/renderer/chat-models.js');
+  initChatModels(); applyChatModels({ ui: { defaultChatModel: 'gpt-6', defaultChatReasoning: 'low' }, multiAgent: {}, goal: {} } as Config); await Promise.resolve();
+  const project = { model: 'sol', reasoningEffort: 'medium' } as const;
+  applyComposerSessionModel(null, null, project);
+  expect(composerSendModel()).toEqual({ model: 'sol', reasoningEffort: 'medium' });
+  expect(dom.window.document.getElementById('composerModelLabel')!.textContent).toBe('GPT-5.6 Sol · Medium');
+  // Repaints of the same new chat keep a choice made in the composer.
+  const effort = dom.window.document.getElementById('composerReasoning') as HTMLSelectElement;
+  effort.value = 'high'; effort.dispatchEvent(new dom.window.Event('change'));
+  applyComposerSessionModel(null, null, { ...project });
+  expect(composerSendModel()).toEqual({ model: 'sol', reasoningEffort: 'high' });
+  // An unfiled new chat, or a project without its own pair, uses the Settings default.
+  applyComposerSessionModel(null, null, null);
+  expect(composerSendModel()).toEqual({ model: 'gpt-6', reasoningEffort: 'low' });
+  // A chat's own model still wins over both.
+  applyComposerSessionModel('chat:1', { model: 'gpt-6', reasoningEffort: 'high', observedAt: 1 }, project);
+  expect(composerSendModel()).toEqual({ model: 'gpt-6', reasoningEffort: 'high' });
+  applyComposerSessionModel(null, null, project);
+  expect(composerSendModel()).toEqual({ model: 'sol', reasoningEffort: 'medium' });
+});
+
+it('keeps a composer choice once its project pair is tracked, and starts over on another pair', async () => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const models = [{ id: 'gpt-6', label: 'GPT-6', efforts: ['low', 'high'] }, { id: 'sol', label: 'GPT-5.6 Sol', efforts: ['medium', 'high'] }];
+  Object.assign(dom.window, { api: { getChatModels: async () => ({ ok: true, data: { state: 'ready', observedAt: 2, models } }), requestChatModels: vi.fn() } });
+  const { initChatModels, applyChatModels, applyComposerSessionModel, trackComposerProjectDefaults, composerSendModel } = await import('../src/renderer/chat-models.js');
+  initChatModels(); applyChatModels({ ui: { defaultChatModel: 'gpt-6', defaultChatReasoning: 'low' }, multiAgent: {}, goal: {} } as Config); await Promise.resolve();
+  // A new chat of a project with no pair: the person picks High while a save of Medium is out.
+  applyComposerSessionModel(null, null, null);
+  const effort = dom.window.document.getElementById('composerReasoning') as HTMLSelectElement;
+  const model = dom.window.document.getElementById('composerModel') as HTMLSelectElement;
+  model.value = 'sol'; model.dispatchEvent(new dom.window.Event('change'));
+  effort.value = 'high'; effort.dispatchEvent(new dom.window.Event('change'));
+  const saved = { model: 'sol', reasoningEffort: 'medium' } as const;
+  trackComposerProjectDefaults(saved);
+  applyComposerSessionModel(null, null, { ...saved });
+  expect(composerSendModel()).toEqual({ model: 'sol', reasoningEffort: 'high' });
+  // Another project's pair still starts the composer over.
+  applyComposerSessionModel(null, null, { model: 'gpt-6', reasoningEffort: 'high' });
+  expect(composerSendModel()).toEqual({ model: 'gpt-6', reasoningEffort: 'high' });
+});
+
+const sol = { id: 'sol', label: 'GPT-5.6 Sol', efforts: ['medium', 'high'] };
+const gpt6 = { id: 'gpt-6', label: 'GPT-6', efforts: ['low', 'high'] };
+it.each([
+  ['the account shows no picker', { state: 'unavailable', observedAt: null, models: [] }, { model: 'sol', reasoningEffort: 'medium' }, 'no-picker', null],
+  ['the model is gone', { state: 'ready', observedAt: 2, models: [gpt6] }, { model: 'sol', reasoningEffort: 'medium' }, 'model-gone', { model: 'gpt-6', reasoningEffort: 'low' }],
+  ['the effort is gone', { state: 'ready', observedAt: 2, models: [gpt6, sol] }, { model: 'sol', reasoningEffort: 'low' }, 'effort-gone', { model: 'gpt-6', reasoningEffort: 'low' }]
+] as const)('skips a project\'s pair and logs why when %s', async (_name, catalog, project, reason, expected) => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const note = vi.fn(async () => ({ ok: true, data: null }));
+  Object.assign(dom.window, { api: { getChatModels: async () => ({ ok: true, data: { requestedAt: 1, ...catalog } }), requestChatModels: vi.fn(), noteProjectChatDefaultsSkipped: note } });
+  const { initChatModels, applyChatModels, applyComposerSessionModel, composerSendModel } = await import('../src/renderer/chat-models.js');
+  initChatModels();
+  applyChatModels({ ui: catalog.models.length ? { defaultChatModel: 'gpt-6', defaultChatReasoning: 'low' } : {}, multiAgent: {}, goal: {} } as Config);
+  applyComposerSessionModel(null, null, project);
+  await vi.waitFor(() => expect(note).toHaveBeenCalledTimes(1), { timeout: 5000 });
+  // The Settings default (or, with no picker and none set, Automatic) is used, never the project's pair.
+  expect(composerSendModel()).toEqual(expected ?? { model: null, reasoningEffort: null });
+  // Repaints of the same new chat say it once.
+  applyComposerSessionModel(null, null, { ...project });
+  expect(note).toHaveBeenCalledTimes(1);
+  expect(note).toHaveBeenCalledWith(reason);
+});
+it('waits for the model list before judging a project\'s pair, then uses it', async () => {
+  dom = new JSDOM(await readFile('src/renderer/index.html', 'utf8'));
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const note = vi.fn(async () => ({ ok: true, data: null }));
+  Object.assign(dom.window, { api: { getChatModels: async () => ({ ok: true, data: { state: 'ready', requestedAt: 1, observedAt: 2, models: [gpt6, sol] } }), requestChatModels: vi.fn(), noteProjectChatDefaultsSkipped: note } });
+  const { initChatModels, applyChatModels, applyComposerSessionModel, composerSendModel } = await import('../src/renderer/chat-models.js');
+  // Before the list arrives nothing says the pair is wrong, so nothing is logged or skipped.
+  applyComposerSessionModel(null, null, { model: 'sol', reasoningEffort: 'medium' });
+  initChatModels(); applyChatModels({ ui: { defaultChatModel: 'gpt-6', defaultChatReasoning: 'low' }, multiAgent: {}, goal: {} } as Config);
+  await vi.waitFor(() => expect(composerSendModel()).toEqual({ model: 'sol', reasoningEffort: 'medium' }), { timeout: 5000 });
+  expect(note).not.toHaveBeenCalled();
+});

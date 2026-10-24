@@ -543,6 +543,18 @@ it('adds picker-selected projects, reuses containing approval, and leaves cancel
   const uncolored = await handlers.get('projects:color')!(null, { id: first.data.id, color: null }) as any;
   expect(uncolored).toMatchObject({ ok: true, data: { id: first.data.id } });
   expect(uncolored.data.color).toBeUndefined();
+  const pair = { model: 'gpt-6', reasoningEffort: 'high' };
+  expect(await handlers.get('projects:chatDefaults')!(null, { id: first.data.id, defaults: pair })).toMatchObject({ ok: true, data: { id: first.data.id, chatDefaults: pair } });
+  expect(await handlers.get('projects:chatDefaults')!(null, { id: first.data.id, defaults: { ...pair, extra: 1 } })).toMatchObject({ ok: false });
+  const cleared = await handlers.get('projects:chatDefaults')!(null, { id: first.data.id, defaults: null }) as any;
+  expect(cleared).toMatchObject({ ok: true, data: { id: first.data.id } });
+  expect(cleared.data.chatDefaults).toBeUndefined();
+  // The composer reports a pair it skipped: one line saying which and why, and nothing else is accepted.
+  const { getLog } = await import('../src/main/logger.js');
+  expect(await handlers.get('projects:chatDefaultsSkipped')!(null, { reason: 'model-gone' })).toMatchObject({ ok: true });
+  expect(getLog().at(-1)).toMatchObject({ level: 'info', message: 'project new-chat model: skipped, this ChatGPT account no longer offers its model; the new chat uses the Settings default' });
+  expect(await handlers.get('projects:chatDefaultsSkipped')!(null, { reason: 'boredom' })).toMatchObject({ ok: false });
+  expect(await handlers.get('projects:chatDefaultsSkipped')!(null, { reason: 'no-picker', extra: 1 })).toMatchObject({ ok: false });
   // #1797: the secrets shield's per-project switch.
   const shieldOff = await handlers.get('projects:secrets-shield')!(null, { id: first.data.id, off: true }) as any;
   expect(shieldOff).toMatchObject({ ok: true, data: { id: first.data.id, secretsShieldOff: true } });

@@ -3010,5 +3010,11 @@
   "Common base": "共通の基点",
   "Theirs (incoming)": "相手側 (取り込む側)",
   "Not in this version": "この版にはありません",
-  "Start or cancel the prepared plan first, then ask again.": "先に準備済みのプランを開始するか取り消してから、もう一度お試しください。"
+  "Start or cancel the prepared plan first, then ask again.": "先に準備済みのプランを開始するか取り消してから、もう一度お試しください。",
+  "New-chat model": "新規チャットのモデル",
+  "The model and effort a new chat in this project starts with": "このプロジェクトの新規チャットが最初に使うモデルと思考レベル",
+  "Same as Settings": "設定と同じ",
+  "Use {0} for new chats here": "ここの新規チャットで{0}を使う",
+  "Start new chats here with the model and effort the composer shows": "入力欄に表示中のモデルと思考レベルで、ここの新規チャットを始める",
+  "Pick a model in the composer first": "先に入力欄でモデルを選んでください"
 }

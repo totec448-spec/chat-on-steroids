@@ -939,7 +939,8 @@ it; it finds its row's button again by owner (`data-row-menu`), stays inside the
 submenus beside their item, and is keyboard-driven (arrows, Right/Left for submenus, Escape gives
 focus back to the button). A project's menu: New chat in this project (`data-new-project`, which
 also shows the chat screen), Color (a submenu: None and the palette as radio items, each calling
-the same `projects:color` owner; choices wait while a save is pending), Hide secrets from ChatGPT
+the same `projects:color` owner; choices wait while a save is pending), New-chat model (a submenu,
+see the new-chat pair below), Hide secrets from ChatGPT
 (an on/off `menuitemcheckbox`, `toggle: true`, calling `projects:secrets-shield` { id, off }; it
 shows off and disabled while Settings turns the shield off everywhere) and Remove. A chat's
 menu: Rename and Open in browser, Block/Release and, in strict mode, Trust/Untrust, then Remove;
@@ -2658,6 +2659,22 @@ The ordinary-composer preference is a separate optional pair, `ui.defaultChatMod
 fresh New Chat scope with no per-conversation selection. Once a conversation or accepted opening
 input records a model/effort, that exact selection takes precedence. `multiAgent.default*` and
 `goal.helper*` continue to own worker and Goal/Loop/Plan helper defaults independently.
+
+A project may hold its own pair, `LocalProject.chatDefaults` (`{ model, reasoningEffort }`, both
+set or neither), which replaces the Settings pair for a new chat in that project and nowhere else.
+`projects:chatDefaults` (`{ id, defaults }`, null clears it) is its only writer
+(`setProjectChatDefaults`, the same catalog queue as color); a malformed stored pair is dropped
+on read, never a reason to reject the catalog. The project menu's New-chat model submenu offers
+Same as Settings, the saved pair, and the pair the composer shows now (`confirmedComposerModel`).
+`chat.ts` passes the selected new chat's project pair to `applyComposerSessionModel`; a different
+pair starts the new-chat composer over on it, so the same pair never discards a choice the person
+made in the composer.
+A pair this account cannot take is skipped, not sent: with no readable model picker, or when the
+catalog no longer offers its model or that effort, the new chat uses the Settings pair instead
+(still-loading catalogs are not judged). The composer reports each skip once per pair and reason
+through `projects:chatDefaultsSkipped` (`{ reason }`, one of `PROJECT_CHAT_DEFAULTS_SKIPS`), and
+main writes the log line. Saving a pair from the menu resets an open new chat only while the
+composer still shows what it showed when the person clicked.
 
 Model names and recovery policy checked against native picker metadata on **2026-09-17**; GPT-6 lanes observed on **2026-10-07**:
 

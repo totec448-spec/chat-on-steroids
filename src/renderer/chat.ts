@@ -11,7 +11,7 @@ import { createWorkspaceDocks } from './workspace-docks.js';
 import { currentLanguage, ui, t, tn } from './i18n.js';
 import { APP_COMMANDS, initSkills } from './skills.js';
 import { imageStorageButton } from './image-storage.js';
-import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, composerSendModel, ensureComposerModel, chatModelName } from './chat-models.js';
+import { applyChatModels, applyComposerSessionModel, trackComposerProjectDefaults, initChatModels, confirmedComposerModel, composerSendModel, ensureComposerModel, chatModelName } from './chat-models.js';
 import { marked, Marked, type TokenizerAndRendererExtension } from 'marked';
 import { safeExternalLink } from '../shared/external-link.js';
 import { AGENT_STATE_WORDS, createAgentPanel, workerName, workerSlotLimit } from './agent-panel.js';
@@ -53,7 +53,7 @@ import type { InputImage, InputAttachment, InputAutomation } from '../shared/inp
 import { authoredTextOf, injectableAttachments, queuedFollowup, MAX_INPUT_IMAGES } from '../shared/input.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
 import type { DictationEvent } from '../shared/dictation.js';
-import { PROJECT_COLORS, type LocalProject, type ProjectColor } from '../shared/projects.js';
+import { PROJECT_COLORS, type LocalProject, type ProjectChatDefaults, type ProjectColor } from '../shared/projects.js';
 import type { TaskProgress } from '../shared/task-progress.js';
 import type { RunningExecProcess } from '../shared/background-exec.js';
 /**
@@ -268,14 +268,16 @@ function rowMenuButton(owner: string): HTMLElement | null {
   return [...document.querySelectorAll<HTMLElement>('[data-row-menu]')].find(button => button.dataset.rowMenu === owner) ?? null;
 }
 
-/** Projects whose color or removal is being saved: their choices wait for the answer. */
+/** Projects whose color, new-chat model or removal is being saved: their choices wait for the answer. */
 const savingProjectColor = new Set<string>();
+const savingProjectChatDefaults = new Set<string>();
 const removingProject = new Set<string>();
 
-/** A project's menu: its color (a submenu) and taking it off the sidebar. A new chat has its own button on the row. */
+/** A project's menu: its color and new-chat model (submenus) and taking it off the sidebar. A new chat has its own button on the row. */
 function projectMenuItems(id: string): RowMenuItem[] {
   const color = projects.find(row => row.id === id)?.color ?? null;
   const link = projects.find(row => row.id === id)?.chatgpt;
+  const chatDefaults = projects.find(row => row.id === id)?.chatDefaults ?? null;
   const shieldOff = projects.find(row => row.id === id)?.secretsShieldOff === true;
   const shieldEverywhere = deps.state()?.config.ui.secretsShield !== false;
   return [
@@ -310,6 +312,26 @@ function projectMenuItems(id: string): RowMenuItem[] {
         ? t("This project's tools send keys and tokens to ChatGPT as they are")
         : t("Keys and tokens in this project's tool results are hidden from ChatGPT"),
       run: () => void saveProjectShield(id, !shieldOff)
+    },
+    {
+      action: 'chat-defaults', icon: 'i-sparkle', label: () => t('New-chat model'),
+      title: () => t('The model and effort a new chat in this project starts with'),
+      submenu: () => {
+        // What the composer shows now is the pair offered; Send would use exactly that one.
+        const composer = confirmedComposerModel();
+        const offered = composer && (composer.model !== chatDefaults?.model || composer.reasoningEffort !== chatDefaults.reasoningEffort) ? composer : null;
+        const saving = savingProjectChatDefaults.has(id);
+        return [
+          { action: 'chat-defaults-settings', checked: !chatDefaults, disabled: saving, label: () => t('Same as Settings'),
+            run: () => void saveProjectChatDefaults(id, null) },
+          ...(chatDefaults ? [{ action: 'chat-defaults-saved', checked: true, disabled: saving,
+            label: () => chatModelName(chatDefaults.model, chatDefaults.reasoningEffort) } satisfies RowMenuItem] : []),
+          offered
+            ? { action: 'chat-defaults-composer', separated: true, disabled: saving, label: () => t('Use {0} for new chats here', [chatModelName(offered.model, offered.reasoningEffort)]),
+              title: () => t('Start new chats here with the model and effort the composer shows'), run: () => void saveProjectChatDefaults(id, offered) }
+            : { action: 'chat-defaults-composer', separated: true, disabled: true, label: () => t('Pick a model in the composer first') }
+        ];
+      }
     },
     {
       action: 'remove', icon: 'i-trash', danger: true, separated: true, disabled: removingProject.has(id),
@@ -363,6 +385,34 @@ async function saveProjectColor(id: string, choice: ProjectColor | null): Promis
   } finally { savingProjectColor.delete(id); }
 }
 
+async function saveProjectChatDefaults(id: string, defaults: ProjectChatDefaults | null): Promise<void> {
+  const project = projects.find(row => row.id === id);
+  if (!project || savingProjectChatDefaults.has(id)) return;
+  if (project.chatDefaults?.model === defaults?.model && project.chatDefaults?.reasoningEffort === defaults?.reasoningEffort) return;
+  savingProjectChatDefaults.add(id);
+  const shown = confirmedComposerModel();
+  try {
+    const updated = await run(api.setProjectChatDefaults(id, defaults));
+    if (!updated) return;
+    // Reject list snapshots captured before this newer catalog commit.
+    ++sessionsLoadGeneration;
+    projects = projects.map(row => row.id === id ? updated : row);
+    paintSessions();
+    // A new chat of this project on screen starts over on its new pair, unless a model was picked while the save ran;
+    // that choice stays, and the next repaint must not mistake the saved pair for a change.
+    const now = confirmedComposerModel();
+    if (!selectedId && selectedProjectId === id) {
+      if (now?.model === shown?.model && now?.reasoningEffort === shown?.reasoningEffort) applyComposerSessionModel(null, null, newChatProjectDefaults());
+      else trackComposerProjectDefaults(newChatProjectDefaults());
+    }
+  } finally { savingProjectChatDefaults.delete(id); }
+}
+
+/** The selected new chat's project pair; null for a chat, an unfiled new chat or a project without one. */
+function newChatProjectDefaults(): ProjectChatDefaults | null {
+  return selectedId ? null : selectedLocalProject()?.chatDefaults ?? null;
+}
+
 const savingProjectShield = new Set<string>();
 async function saveProjectShield(id: string, off: boolean): Promise<void> {
   if (savingProjectShield.has(id)) return;
@@ -400,6 +450,8 @@ async function removeProjectFromSidebar(id: string): Promise<void> {
         else imageDrafts.delete(draftKey());
         imageDrafts.delete(oldKey);
         ui($<HTMLTextAreaElement>('chatInput'), 'placeholder', () => t('Ask anything…'));
+        // The draft is unfiled now, so its new chat starts on the Settings default again.
+        applyComposerSessionModel(null, null, newChatProjectDefaults());
       } else selectedProjectId = null;
     }
     paintSessions(); void refreshInputQueue();
@@ -6099,7 +6151,7 @@ function paintDetail(followBottom = historyBefore === null): void {
   paintStateLine();
   paintBackgroundProcesses();
   const summary = sessions.find((s) => s.id === selectedId) ?? null;
-  applyComposerSessionModel(selectedId ? `${selectedId}:${selectionGeneration}` : null, composerSessionSelection(summary) ?? null);
+  applyComposerSessionModel(selectedId ? `${selectedId}:${selectionGeneration}` : null, composerSessionSelection(summary) ?? null, newChatProjectDefaults());
   const config = deps.state()?.config;
   if (config) paintContextMeter(summary, config, confirmedComposerModel());
   const project = selectedLocalProject();
@@ -8553,7 +8605,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
   refreshBackgroundProcesses();
   sendAnchor = null; readingAfterSend = false; readerAtEnd = true;
   if (projectId) expandedProjects.add(projectId);
-  applyComposerSessionModel(null, null);
+  applyComposerSessionModel(null, null, newChatProjectDefaults());
   // New Chat selects its existing draft, just like a session. Navigation is not
   // permission to discard authored text, attachments or a prepared workflow.
   $('inputQueue').replaceChildren();

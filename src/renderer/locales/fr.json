@@ -3108,5 +3108,11 @@
   "Common base": "Base commune",
   "Theirs (incoming)": "La leur (entrante)",
   "Not in this version": "Absent de cette version",
-  "Start or cancel the prepared plan first, then ask again.": "Lancez ou annulez d'abord le plan préparé, puis redemandez."
+  "Start or cancel the prepared plan first, then ask again.": "Lancez ou annulez d'abord le plan préparé, puis redemandez.",
+  "New-chat model": "Modèle des nouveaux chats",
+  "The model and effort a new chat in this project starts with": "Le modèle et l’effort avec lesquels démarre un nouveau chat dans ce projet",
+  "Same as Settings": "Comme dans les Paramètres",
+  "Use {0} for new chats here": "Utiliser {0} pour les nouveaux chats ici",
+  "Start new chats here with the model and effort the composer shows": "Démarrer les nouveaux chats ici avec le modèle et l’effort affichés dans la zone de saisie",
+  "Pick a model in the composer first": "Choisissez d’abord un modèle dans la saisie"
 }

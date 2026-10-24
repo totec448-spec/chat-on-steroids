@@ -3059,5 +3059,11 @@
   "Common base": "Ortak taban",
   "Theirs (incoming)": "Onlarınki (gelen)",
   "Not in this version": "Bu sürümde yok",
-  "Start or cancel the prepared plan first, then ask again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden isteyin."
+  "Start or cancel the prepared plan first, then ask again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden isteyin.",
+  "New-chat model": "Yeni sohbet modeli",
+  "The model and effort a new chat in this project starts with": "Bu projedeki yeni bir sohbetin başladığı model ve düzey",
+  "Same as Settings": "Ayarlardaki gibi",
+  "Use {0} for new chats here": "Buradaki yeni sohbetlerde {0} kullan",
+  "Start new chats here with the model and effort the composer shows": "Buradaki yeni sohbetleri yazma alanında görünen model ve düzeyle başlat",
+  "Pick a model in the composer first": "Önce yazma alanında bir model seçin"
 }

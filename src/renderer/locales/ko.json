@@ -3010,5 +3010,11 @@
   "Common base": "공통 기준",
   "Theirs (incoming)": "상대 쪽 (들어오는 쪽)",
   "Not in this version": "이 버전에는 없음",
-  "Start or cancel the prepared plan first, then ask again.": "먼저 준비된 계획을 시작하거나 취소한 다음 다시 요청하세요."
+  "Start or cancel the prepared plan first, then ask again.": "먼저 준비된 계획을 시작하거나 취소한 다음 다시 요청하세요.",
+  "New-chat model": "새 채팅 모델",
+  "The model and effort a new chat in this project starts with": "이 프로젝트의 새 채팅이 시작할 때 쓰는 모델과 노력 수준",
+  "Same as Settings": "설정과 같음",
+  "Use {0} for new chats here": "여기의 새 채팅에 {0} 사용",
+  "Start new chats here with the model and effort the composer shows": "입력창에 표시된 모델과 노력 수준으로 여기의 새 채팅 시작",
+  "Pick a model in the composer first": "먼저 입력창에서 모델을 고르세요"
 }
