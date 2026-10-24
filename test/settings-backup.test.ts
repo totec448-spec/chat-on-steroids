@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
-  BACKUP_FORMAT, BackupError, buildBackup, changedSettings, exportableSecret, openSecrets, overlaySettings, pickByShape, readBackup
+  BACKUP_FORMAT, BackupError, buildBackup, changedSettings, exportableSecret, openSecrets, overlaySettings, pickByShape, readBackup, widerAccess
 } from '../src/main/settings-backup.js';
 
 // A small stand-in for the Settings form's schema: nested objects, optional and strict parts.
@@ -128,5 +128,35 @@ describe('applying a backup over the current settings', () => {
     const withRules = { ...current, rules: ['git status', 'npm test'] };
     expect(overlaySettings(schema, withRules, { rules: ['ls'] }).rules).toEqual(['ls']);
     expect(changedSettings(withRules, overlaySettings(schema, withRules, { rules: ['ls'] }))).toEqual(['rules']);
+  });
+});
+
+describe('what an import would open up', () => {
+  const base = {
+    capabilities: { read: true, edit: false, command: false, screen: false }, readOnly: true,
+    commandAllowlist: { enabled: true, mode: 'allow', rules: ['npm test'] },
+    controlApi: { enabled: false, allowActions: false }, multiAgent: { strictChatAllowlist: true, allowUnattributedCalls: false },
+    ui: { secretsShield: true, theme: 'dark' }
+  };
+  const after = (patch: (copy: typeof base) => void) => { const copy = structuredClone(base); patch(copy); return copy; };
+
+  it('names every change that gives ChatGPT more access, and nothing that only looks different', () => {
+    expect(widerAccess(base, after(copy => { copy.ui.theme = 'light'; copy.capabilities.read = false; }))).toEqual([]);
+    expect(widerAccess(base, after(copy => {
+      copy.capabilities.edit = true; copy.capabilities.command = true; copy.readOnly = false;
+      copy.commandAllowlist.rules = ['npm test', 'rm -rf build']; copy.controlApi.allowActions = true;
+      copy.multiAgent.strictChatAllowlist = false; copy.multiAgent.allowUnattributedCalls = true; copy.ui.secretsShield = false;
+    }))).toEqual(['capabilities.command', 'capabilities.edit', 'commandAllowlist', 'controlApi.allowActions',
+      'multiAgent.allowUnattributedCalls', 'multiAgent.strictChatAllowlist', 'readOnly', 'ui.secretsShield']);
+  });
+
+  it('counts the command rules as wider when they are switched off, even with the same rules', () => {
+    expect(widerAccess(base, after(copy => { copy.commandAllowlist.enabled = false; }))).toEqual(['commandAllowlist']);
+  });
+
+  it('treats a missing secrets shield as on, as the app does', () => {
+    const { secretsShield: _, ...ui } = base.ui;
+    expect(widerAccess(base, { ...base, ui })).toEqual([]);
+    expect(widerAccess({ ...base, ui }, after(copy => { copy.ui.secretsShield = false; }))).toEqual(['ui.secretsShield']);
   });
 });

@@ -1587,10 +1587,10 @@
     <dialog class="plugin-dialog backup-dialog" id="exportSettingsDialog" aria-labelledby="exportSettingsTitle">
       <div class="plugin-dialog-head"><h2 id="exportSettingsTitle">Export settings</h2><button class="btn" id="exportSettingsClose" type="button">Close</button></div>
       <form id="exportSettingsForm" class="plugin-dialog-body">
-        <p>Your settings go into a file you choose. Approved folders and this computer's connection to ChatGPT stay out, so another computer keeps its own.</p>
-        <label class="setting"><span class="setting-text"><b>Include saved keys</b><em>API keys and plugin keys, locked with a passphrase you choose. Without it, the file holds no keys.</em></span><input id="exportSettingsKeys" type="checkbox" /></label>
+        <p>Folders and this computer's connection to ChatGPT are left out.</p>
+        <label class="setting"><span class="setting-text"><b>Include saved keys</b><em>Locked with a passphrase you choose.</em></span><input id="exportSettingsKeys" type="checkbox" /></label>
         <div id="exportSettingsPassphrase" hidden>
-          <label class="plugin-field" for="exportSettingsPass"><span>Passphrase</span><input id="exportSettingsPass" type="password" minlength="8" maxlength="1024" autocomplete="new-password" /><small>At least 8 characters. Without it the keys cannot be opened, and it cannot be recovered.</small></label>
+          <label class="plugin-field" for="exportSettingsPass"><span>Passphrase</span><input id="exportSettingsPass" type="password" minlength="8" maxlength="1024" autocomplete="new-password" /><small>At least 8 characters. A lost passphrase cannot be recovered.</small></label>
           <label class="plugin-field" for="exportSettingsPassAgain"><span>Passphrase again</span><input id="exportSettingsPassAgain" type="password" maxlength="1024" autocomplete="new-password" /></label>
         </div>
         <p id="exportSettingsError" class="plugin-error" role="alert" hidden></p>
@@ -1602,7 +1602,9 @@
       <form id="importSettingsForm" class="plugin-dialog-body">
         <p id="importSettingsSource"></p>
         <p id="importSettingsSummary" role="status"></p>
-        <label class="setting" id="importSettingsKeysRow" hidden><span class="setting-text"><b id="importSettingsKeysLabel"></b><em>Needs the passphrase chosen when the backup was made.</em></span><input id="importSettingsKeys" type="checkbox" checked /></label>
+        <p class="backup-wider" id="importSettingsWider" hidden></p>
+        <details class="backup-review" id="importSettingsReview" hidden><summary><svg class="disclosure-chevron sum-chev" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Review changes</summary><ul id="importSettingsChanges"></ul></details>
+        <label class="setting" id="importSettingsKeysRow" hidden><span class="setting-text"><b id="importSettingsKeysLabel"></b><em>Needs the passphrase chosen when the backup was made.</em></span><input id="importSettingsKeys" type="checkbox" /></label>
         <label class="plugin-field" for="importSettingsPass" id="importSettingsPassRow" hidden><span>Passphrase</span><input id="importSettingsPass" type="password" maxlength="1024" autocomplete="off" /></label>
         <p id="importSettingsError" class="plugin-error" role="alert" hidden></p>
         <div class="pet-delete-actions"><button class="btn" id="importSettingsCancel" type="button">Cancel</button><button class="btn btn-solid" id="importSettingsSubmit" type="submit">Import</button></div>

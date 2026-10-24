@@ -101,7 +101,7 @@ import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFi
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
 import { hasSecret, isEncryptionAvailable, readSecretsFor, secureStorageStatus, setAsideUnreadableSecrets, setSecret, setSecrets, storedSecretsUnreadable, type SecretKey } from './secrets.js';
-import { BackupError, buildBackup, changedSettings, exportableSecret, openSecrets, overlaySettings, pickByShape, readBackup, type ParsedBackup } from './settings-backup.js';
+import { BackupError, buildBackup, changedSettings, widerAccess, exportableSecret, openSecrets, overlaySettings, pickByShape, readBackup, type ParsedBackup } from './settings-backup.js';
 import { setupApiKeySlot } from '../shared/setup-profile.js';
 import { addSetupProfile, removeSetupProfile, switchSetupProfile } from './setup-profiles.js';
 import { bundledVersion, locateBinary } from './tunnel/locate.js';
@@ -900,10 +900,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       throw error;
     }
     const current = pickByShape(settingsPatch, getConfig());
+    const overlaid = overlaySettings(settingsPatch, current, backup.settings);
     pendingImport = { token: randomUUID(), backup };
     return {
       token: pendingImport.token, file: path.basename(file), appVersion: backup.appVersion, exportedAt: backup.exportedAt,
-      changed: changedSettings(current, overlaySettings(settingsPatch, current, backup.settings)), keyCount: backup.secretCount
+      changed: changedSettings(current, overlaid), wider: widerAccess(current, overlaid), keyCount: backup.secretCount
     };
   });
   handle('settings:importApply', async payload => {

@@ -117,6 +117,30 @@ export function overlaySettings(schema: z.ZodType, current: Settings, incoming: 
   return shape ? merge(shape, current, withoutPerComputer(incoming)) : { ...current };
 }
 
+const at = (settings: Settings, path: string): unknown => path.split('.').reduce<unknown>((node, key) => isPlainObject(node) ? node[key] : undefined, settings);
+
+/**
+ * The changes an import would make that give ChatGPT more access to this computer, as dotted paths,
+ * sorted: a permission switched on, read-only off, the command rules switched off or changed, the
+ * control API or its actions on, the strict chat allowlist off, unattributed calls allowed, or the
+ * secrets shield off. The import dialog names these where nobody can miss them.
+ */
+export function widerAccess(before: Settings, after: Settings): string[] {
+  const wider: string[] = [];
+  const turnedOn = (path: string) => at(before, path) !== true && at(after, path) === true;
+  const turnedOff = (path: string, missing: boolean) => (at(before, path) ?? missing) !== false && (at(after, path) ?? missing) === false;
+  const capabilities = at(after, 'capabilities');
+  if (isPlainObject(capabilities)) for (const key of Object.keys(capabilities)) if (turnedOn(`capabilities.${key}`)) wider.push(`capabilities.${key}`);
+  if (at(before, 'readOnly') === true && at(after, 'readOnly') === false) wider.push('readOnly');
+  const rulesBefore = at(before, 'commandAllowlist'), rulesAfter = at(after, 'commandAllowlist');
+  if (isPlainObject(rulesBefore) && rulesBefore['enabled'] === true && JSON.stringify(rulesBefore) !== JSON.stringify(rulesAfter)) wider.push('commandAllowlist');
+  for (const path of ['controlApi.enabled', 'controlApi.allowActions', 'multiAgent.allowUnattributedCalls']) if (turnedOn(path)) wider.push(path);
+  if (turnedOff('multiAgent.strictChatAllowlist', false)) wider.push('multiAgent.strictChatAllowlist');
+  // Missing means on, as in the saved settings.
+  if (turnedOff('ui.secretsShield', true)) wider.push('ui.secretsShield');
+  return wider.sort();
+}
+
 /** Dotted paths of the settings that differ, sorted; lists and values compare whole. */
 export function changedSettings(before: Settings, after: Settings, prefix = ''): string[] {
   const changed: string[] = [];
