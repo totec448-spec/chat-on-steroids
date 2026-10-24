@@ -79,7 +79,8 @@ it('refuses new capacity without evicting a completed unread result', async () =
       request(unreadId, "setTimeout(() => { console.log('owed-output'); process.exit(7); }, 500)", 100)
     );
     expect(started.processId).toBe(unreadId);
-    await expect.poll(() => manager.backgroundState(new Set([unreadId])).exitedUnread).toEqual([
+    // A real child: a loaded full-suite run can start Node later than expect.poll's 1 s default allows.
+    await expect.poll(() => manager.backgroundState(new Set([unreadId])).exitedUnread, { timeout: 10_000 }).toEqual([
       { processId: unreadId, exitCode: 7 }
     ]);
 
