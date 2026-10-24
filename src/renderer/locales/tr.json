@@ -3075,5 +3075,9 @@
   "Save the diagnostics report first. A problem report on GitHub needs it.": "Önce tanılama raporunu kaydet. GitHub'daki bir sorun bildirimi buna ihtiyaç duyar.",
   "Write what problem it would solve.": "Hangi sorunu çözeceğini yaz.",
   "Write what the app should do.": "Uygulamanın ne yapması gerektiğini yaz.",
-  "Report a problem or suggest an idea.": "Bir sorun bildir veya fikir öner."
+  "Report a problem or suggest an idea.": "Bir sorun bildir veya fikir öner.",
+  "HTML export saves a whole session to a file": "HTML dışa aktarımı tüm oturumu tek bir dosyaya kaydeder",
+  "Export as HTML": "HTML olarak dışa aktar",
+  "Whole session as HTML": "Tüm oturum HTML olarak",
+  "HTML files": "HTML dosyaları"
 }

@@ -35,7 +35,7 @@ const { initSecretsPath } = await import('../src/main/secrets.js');
 const { initDurableStore, flushDurable, resetDurableForTests, writeDurableNow } = await import('../src/main/durable.js');
 const { createSession, getSession, rebindSession, initSessionStore, resetSessionStoreForTests } = await import('../src/main/session/store.js');
 const { registerIpc } = await import('../src/main/ipc.js');
-const { bridgePort, startBridge, stopBridge } = await import('../src/main/bridge.js');
+const { bridgePort, startBridge, stopBridge, stopRecoverySweepTimerForTests } = await import('../src/main/bridge.js');
 const input = await import('../src/main/session/input.js');
 const goal = await import('../src/main/goal.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
@@ -55,6 +55,10 @@ beforeAll(async () => {
   await saveConfig(defaultConfig());
   registerIpc(() => ({ isDestroyed: () => false, webContents: { send: pushed } }) as never, () => undefined);
   await startBridge();
+  // These tests move a mocked Date.now by minutes and call the sweep themselves. The bridge's own
+  // 30-second timer would read such a jump as the computer waking and push every deadline 90 s
+  // (a flake under load: a silence repair was missing at the step that expects it).
+  stopRecoverySweepTimerForTests();
   const paired = await post('/pair', {});
   expect(paired.status).toBe(200);
   bearer = paired.body.token;

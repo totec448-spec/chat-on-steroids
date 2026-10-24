@@ -3123,5 +3123,9 @@
   "Save the diagnostics report first. A problem report on GitHub needs it.": "Enregistrez d’abord le rapport de diagnostic. Un signalement de problème sur GitHub en a besoin.",
   "Write what problem it would solve.": "Écrivez quel problème cela résoudrait.",
   "Write what the app should do.": "Écrivez ce que l’app devrait faire.",
-  "Report a problem or suggest an idea.": "Signaler un problème ou proposer une idée."
+  "Report a problem or suggest an idea.": "Signaler un problème ou proposer une idée.",
+  "HTML export saves a whole session to a file": "L'export HTML enregistre une session entière dans un fichier",
+  "Export as HTML": "Exporter en HTML",
+  "Whole session as HTML": "Toute la session en HTML",
+  "HTML files": "Fichiers HTML"
 }
