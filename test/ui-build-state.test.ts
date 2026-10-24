@@ -25,6 +25,14 @@ it('says the build is missing', () => {
   expect(buildProblem(root)).toBe('there is no build (out/renderer/index.html); run npm run build first');
 });
 
+it('counts empty folders left by an interrupted build as no build', () => {
+  file('out/renderer/index.html', 2000); file('out/main/chunks/a.js', 2000); file('out/preload/other.js', 2000);
+  file('src/renderer/main.ts', 1000);
+  expect(buildProblem(root)).toBe('there is no build (out/main/index.js); run npm run build first');
+  file('out/main/index.js', 2000);
+  expect(buildProblem(root)).toBe('there is no build (out/preload/index.js); run npm run build first');
+});
+
 it('says which source file is newer than the build', () => {
   file('out/renderer/index.html', 2000); file('out/preload/index.js', 2000); file('out/main/index.js', 2000);
   file('src/renderer/main.ts', 1000);

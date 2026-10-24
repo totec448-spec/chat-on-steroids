@@ -3,7 +3,8 @@
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 
-const BUILT = ['out/renderer/index.html', 'out/preload', 'out/main'];
+// The entry files, not their folders: an interrupted build can leave the folders empty.
+const BUILT = ['out/renderer/index.html', 'out/main/index.js', 'out/preload/index.js'];
 
 /** True when a check's source loads the built app rather than the source files. */
 export function needsBuild(source) {
