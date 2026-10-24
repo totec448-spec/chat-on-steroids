@@ -5147,9 +5147,10 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
 }
 
 /**
- * Copy and Markdown export under the answer of a turn the page reported as completed. Main
- * builds the text from the log, reading back answers that were cut there, so a long answer
- * copies and exports whole; the timeline only decides where the actions appear.
+ * Copy and export (Markdown, or the whole session as an HTML page) under the answer of a turn the
+ * page reported as completed. Main builds the text from the log, reading back answers that were
+ * cut there, so a long answer copies and exports whole; the timeline only decides where the
+ * actions appear.
  */
 function answerActions(turnId: string | null, messageId?: string, answer?: { text: string; time: number }): HTMLElement {
   const bar = el('div', 'answer-actions');
@@ -5177,13 +5178,18 @@ function answerActions(turnId: string | null, messageId?: string, answer?: { tex
   menu.className = 'answer-export';
   const trigger = el('summary', 'answer-action');
   trigger.append(icon('i-export'));
-  ui(trigger, 'title', () => t('Export as Markdown')); ui(trigger, 'aria-label', () => t('Export as Markdown'));
+  ui(trigger, 'title', () => t('Export')); ui(trigger, 'aria-label', () => t('Export'));
   const choices = el('div', 'answer-export-menu');
-  for (const [scope, label] of [['answer', 'This answer'], ['session', 'Whole session']] as const) {
-    const choice = el('button', 'answer-export-choice', () => t(label)) as HTMLButtonElement;
+  for (const [scope, format, label] of [['answer', 'markdown', () => t('This answer')], ['session', 'markdown', () => t('Whole session')],
+    ['session', 'html', () => t('Whole session as HTML')]] as const) {
+    const choice = el('button', 'answer-export-choice', label) as HTMLButtonElement;
     choice.type = 'button';
     choice.addEventListener('click', async () => {
       menu.open = false;
+      // The clicked choice leaves the screen with the menu; focus goes back to the menu's own button.
+      trigger.focus();
+      // A web page is made to be passed on, so it is always previewed first (Share's dialog).
+      if (format === 'html') { if (sessionId && selectedId === sessionId) openSharePage(sessionId); return; }
       const result = await exportTo(scope, 'file');
       if (result?.done === 'saved') toast(t('Saved {0}', [result.name]));
     });

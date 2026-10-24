@@ -2924,6 +2924,7 @@
   "This answer is no longer in the chat.": "Câu trả lời này không còn trong chat.",
   "This turn has not completed": "Lượt này chưa hoàn tất",
   "This turn has no answer to export": "Lượt này không có câu trả lời để xuất",
+  "HTML export saves a whole session to a file": "Xuất HTML lưu toàn bộ phiên vào một tệp",
   "Only a ChatGPT answer can be bookmarked": "Chỉ có thể đánh dấu câu trả lời của ChatGPT",
   "A chat keeps at most 200 bookmarks": "Mỗi cuộc trò chuyện giữ tối đa 200 đánh dấu",
   "This answer is no longer in the chat, so its bookmark was removed.": "Câu trả lời này không còn trong chat nên đánh dấu của nó đã được bỏ.",
@@ -2992,6 +2993,9 @@
   "Off for every project in Settings": "Đã tắt cho mọi dự án trong Cài đặt",
   "This project's tools send keys and tokens to ChatGPT as they are": "Công cụ của dự án này gửi khóa và token cho ChatGPT nguyên trạng",
   "Keys and tokens in this project's tool results are hidden from ChatGPT": "Khóa và token trong kết quả công cụ của dự án này được ẩn khỏi ChatGPT",
+  "Export as HTML": "Xuất dạng HTML",
+  "Whole session as HTML": "Toàn bộ phiên dạng HTML",
+  "HTML files": "Tệp HTML",
   "Share as web page": "Chia sẻ dưới dạng trang web",
   "Save this chat as one web page file to send to anyone. You see the page before it is saved.": "Lưu cuộc trò chuyện này thành một tệp trang web để gửi cho bất kỳ ai. Bạn sẽ xem trang trước khi lưu.",
   "Share": "Chia sẻ",
@@ -2999,13 +3003,11 @@
   "Saves this chat as one web page file that opens in any browser. Nothing is uploaded: you decide who gets the file.": "Lưu cuộc trò chuyện này thành một tệp trang web mở được trong mọi trình duyệt. Không có gì được tải lên: bạn quyết định ai nhận tệp.",
   "Preparing the preview…": "Đang chuẩn bị bản xem trước…",
   "Hide personal details": "Ẩn thông tin cá nhân",
-  "Keys and passwords, email addresses and user names in folder paths show as “hidden”.": "Khóa và mật khẩu, địa chỉ email và tên người dùng trong đường dẫn thư mục sẽ hiển thị là “đã ẩn”.",
   "Save…": "Lưu…",
   "{0} details are hidden on this page.": "Đã ẩn {0} thông tin trên trang này.",
   "Nothing to hide was found in this chat.": "Không tìm thấy gì cần ẩn trong cuộc trò chuyện này.",
-  "Save as web page": "Lưu dưới dạng trang web",
-  "Web pages": "Trang web",
   "Shared from Chat On Steroids": "Được chia sẻ từ Chat On Steroids",
   "This chat has nothing to share yet": "Cuộc trò chuyện này chưa có gì để chia sẻ",
-  "The preview is out of date. Open Share again.": "Bản xem trước đã cũ. Hãy mở lại Chia sẻ."
+  "The preview is out of date. Open Share again.": "Bản xem trước đã cũ. Hãy mở lại Chia sẻ.",
+  "Email addresses and user names in folder paths show as “hidden”. Keys and tokens always do.": "Địa chỉ email và tên người dùng trong đường dẫn thư mục hiển thị là “đã ẩn”. Khóa và token thì luôn luôn."
 }
