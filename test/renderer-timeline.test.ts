@@ -5787,7 +5787,7 @@ it('offers copy and Markdown or HTML export under the answer of a completed turn
   api.sharePage = vi.fn(async () => ({ ok: true, data: { done: 'preview', preview: '00000000-0000-4000-8000-000000000000', html: '<html><head></head></html>', hidden: 0 } }));
   choices[2]!.click(); await settle();
   expect(w.document.querySelector<HTMLDialogElement>('#sharePageDialog')!.open).toBe(true);
-  expect(api.sharePage).toHaveBeenCalledWith({ id: summary([]).id, target: 'preview', hide: false, lang: 'en' });
+  expect(api.sharePage).toHaveBeenCalledWith({ id: summary([]).id, target: 'preview', hide: true, lang: 'en' });
   expect(api.exportMarkdown.mock.calls.length).toBe(calls);
 });
 

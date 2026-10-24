@@ -3002,12 +3002,12 @@
   "Save this chat as a web page to share.": "이 채팅을 공유할 웹 페이지로 저장합니다.",
   "Saves this chat as one web page file that opens in any browser. Nothing is uploaded: you decide who gets the file.": "이 채팅을 어떤 브라우저에서나 열리는 웹 페이지 파일 하나로 저장합니다. 아무것도 업로드되지 않으며, 파일을 누구에게 줄지는 직접 정합니다.",
   "Preparing the preview…": "미리보기를 준비하는 중…",
-  "Hide personal details": "개인 정보 숨기기",
   "Save…": "저장…",
   "{0} details are hidden on this page.": "이 페이지에서 {0}개의 정보가 숨겨졌습니다.",
   "Nothing to hide was found in this chat.": "이 채팅에서 숨길 정보를 찾지 못했습니다.",
   "Shared from Chat On Steroids": "Chat On Steroids에서 공유됨",
   "This chat has nothing to share yet": "이 채팅에는 아직 공유할 내용이 없습니다",
   "The preview is out of date. Open Share again.": "미리보기가 최신이 아닙니다. 공유를 다시 여세요.",
-  "Email addresses and user names in folder paths show as “hidden”. Keys and tokens always do.": "이메일 주소와 폴더 경로의 사용자 이름은 \"숨김\"으로 표시됩니다. 키와 토큰은 항상 숨겨집니다."
+  "Hide email addresses and user names": "이메일 주소와 사용자 이름 숨기기",
+  "Keys and tokens are always hidden. Check the preview: other personal details may remain.": "키와 토큰은 항상 숨겨집니다. 미리보기를 확인하세요. 다른 개인 정보가 남아 있을 수 있습니다."
 }

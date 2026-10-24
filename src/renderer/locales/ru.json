@@ -3146,7 +3146,6 @@
   "Save this chat as a web page to share.": "Сохранить этот чат как веб-страницу, чтобы поделиться.",
   "Saves this chat as one web page file that opens in any browser. Nothing is uploaded: you decide who gets the file.": "Сохраняет этот чат как один файл веб-страницы, который открывается в любом браузере. Ничего не загружается: вы сами решаете, кому отдать файл.",
   "Preparing the preview…": "Готовим предпросмотр…",
-  "Hide personal details": "Скрыть личные данные",
   "Save…": "Сохранить…",
   "{0} details are hidden on this page.": "На этой странице скрыто данных: {0}.",
   "Nothing to hide was found in this chat.": "В этом чате не найдено ничего, что нужно скрыть.",
@@ -3156,5 +3155,6 @@
   "{0} details are hidden on this page.|one": "На этой странице скрыт {0} элемент данных.",
   "{0} details are hidden on this page.|few": "На этой странице скрыто {0} элемента данных.",
   "{0} details are hidden on this page.|many": "На этой странице скрыто {0} элементов данных.",
-  "Email addresses and user names in folder paths show as “hidden”. Keys and tokens always do.": "Адреса почты и имена пользователей в путях к папкам показываются как «скрыто». Ключи и токены — всегда."
+  "Hide email addresses and user names": "Скрыть адреса почты и имена пользователей",
+  "Keys and tokens are always hidden. Check the preview: other personal details may remain.": "Ключи и токены скрываются всегда. Проверьте предпросмотр: другие личные данные могут остаться."
 }

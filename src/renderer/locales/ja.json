@@ -3002,12 +3002,12 @@
   "Save this chat as a web page to share.": "このチャットを共有用の Web ページとして保存します。",
   "Saves this chat as one web page file that opens in any browser. Nothing is uploaded: you decide who gets the file.": "このチャットを、どのブラウザーでも開ける 1 つの Web ページファイルとして保存します。何もアップロードされません。ファイルを誰に渡すかはあなたが決めます。",
   "Preparing the preview…": "プレビューを準備しています…",
-  "Hide personal details": "個人情報を隠す",
   "Save…": "保存…",
   "{0} details are hidden on this page.": "このページでは {0} 件の情報が非表示になっています。",
   "Nothing to hide was found in this chat.": "このチャットには隠す情報が見つかりませんでした。",
   "Shared from Chat On Steroids": "Chat On Steroids から共有",
   "This chat has nothing to share yet": "このチャットにはまだ共有できる内容がありません",
   "The preview is out of date. Open Share again.": "プレビューが古くなっています。もう一度「共有」を開いてください。",
-  "Email addresses and user names in folder paths show as “hidden”. Keys and tokens always do.": "メールアドレスとフォルダーパス内のユーザー名は「非表示」と表示されます。キーとトークンは常に非表示です。"
+  "Hide email addresses and user names": "メールアドレスとユーザー名を隠す",
+  "Keys and tokens are always hidden. Check the preview: other personal details may remain.": "キーとトークンは常に隠されます。プレビューを確認してください。ほかの個人情報が残っている場合があります。"
 }

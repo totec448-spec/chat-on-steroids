@@ -3050,7 +3050,6 @@
   "Save this chat as a web page to share.": "Diesen Chat als Webseite zum Teilen speichern.",
   "Saves this chat as one web page file that opens in any browser. Nothing is uploaded: you decide who gets the file.": "Speichert diesen Chat als eine Webseiten-Datei, die sich in jedem Browser öffnet. Es wird nichts hochgeladen: Du entscheidest, wer die Datei bekommt.",
   "Preparing the preview…": "Vorschau wird erstellt…",
-  "Hide personal details": "Persönliche Angaben ausblenden",
   "Save…": "Speichern…",
   "{0} details are hidden on this page.": "{0} Angaben sind auf dieser Seite ausgeblendet.",
   "Nothing to hide was found in this chat.": "In diesem Chat wurde nichts zum Ausblenden gefunden.",
@@ -3058,5 +3057,6 @@
   "This chat has nothing to share yet": "In diesem Chat gibt es noch nichts zu teilen",
   "The preview is out of date. Open Share again.": "Die Vorschau ist veraltet. Öffne Teilen erneut.",
   "{0} details are hidden on this page.|one": "{0} Angabe ist auf dieser Seite ausgeblendet.",
-  "Email addresses and user names in folder paths show as “hidden”. Keys and tokens always do.": "E-Mail-Adressen und Benutzernamen in Ordnerpfaden erscheinen als „ausgeblendet“. Schlüssel und Tokens immer."
+  "Hide email addresses and user names": "E-Mail-Adressen und Benutzernamen ausblenden",
+  "Keys and tokens are always hidden. Check the preview: other personal details may remain.": "Schlüssel und Tokens sind immer ausgeblendet. Prüf die Vorschau: Andere persönliche Angaben können bleiben."
 }

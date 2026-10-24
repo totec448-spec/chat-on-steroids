@@ -3050,7 +3050,6 @@
   "Save this chat as a web page to share.": "Bu sohbeti paylaşmak için web sayfası olarak kaydet.",
   "Saves this chat as one web page file that opens in any browser. Nothing is uploaded: you decide who gets the file.": "Bu sohbeti her tarayıcıda açılan tek bir web sayfası dosyası olarak kaydeder. Hiçbir şey yüklenmez: dosyayı kimin alacağına sen karar verirsin.",
   "Preparing the preview…": "Önizleme hazırlanıyor…",
-  "Hide personal details": "Kişisel bilgileri gizle",
   "Save…": "Kaydet…",
   "{0} details are hidden on this page.": "Bu sayfada {0} bilgi gizlendi.",
   "Nothing to hide was found in this chat.": "Bu sohbette gizlenecek bir şey bulunamadı.",
@@ -3058,5 +3057,6 @@
   "This chat has nothing to share yet": "Bu sohbette henüz paylaşılacak bir şey yok",
   "The preview is out of date. Open Share again.": "Önizleme güncel değil. Paylaş'ı yeniden aç.",
   "{0} details are hidden on this page.|one": "Bu sayfada {0} bilgi gizlendi.",
-  "Email addresses and user names in folder paths show as “hidden”. Keys and tokens always do.": "E-posta adresleri ve klasör yollarındaki kullanıcı adları “gizli” olarak görünür. Anahtarlar ve tokenlar her zaman."
+  "Hide email addresses and user names": "E-posta adreslerini ve kullanıcı adlarını gizle",
+  "Keys and tokens are always hidden. Check the preview: other personal details may remain.": "Anahtarlar ve tokenlar her zaman gizlenir. Önizlemeyi kontrol et: başka kişisel bilgiler kalabilir."
 }

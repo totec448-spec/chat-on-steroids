@@ -3002,12 +3002,12 @@
   "Save this chat as a web page to share.": "將此聊天儲存為網頁以便分享。",
   "Saves this chat as one web page file that opens in any browser. Nothing is uploaded: you decide who gets the file.": "將此聊天儲存為一個可在任何瀏覽器中開啟的網頁檔案。不會上傳任何內容：由你決定把檔案給誰。",
   "Preparing the preview…": "正在準備預覽…",
-  "Hide personal details": "隱藏個人資訊",
   "Save…": "儲存…",
   "{0} details are hidden on this page.": "此頁面已隱藏 {0} 項資訊。",
   "Nothing to hide was found in this chat.": "此聊天中沒有找到需要隱藏的內容。",
   "Shared from Chat On Steroids": "分享自 Chat On Steroids",
   "This chat has nothing to share yet": "此聊天還沒有可分享的內容",
   "The preview is out of date. Open Share again.": "預覽已過期。請重新開啟「分享」。",
-  "Email addresses and user names in folder paths show as “hidden”. Keys and tokens always do.": "電子郵件地址和資料夾路徑中的使用者名稱會顯示為「已隱藏」。金鑰和權杖一律如此。"
+  "Hide email addresses and user names": "隱藏電子郵件地址和使用者名稱",
+  "Keys and tokens are always hidden. Check the preview: other personal details may remain.": "金鑰和權杖一律會隱藏。請檢查預覽：其他個人資訊可能仍然存在。"
 }

@@ -119,18 +119,18 @@ app.whenReady().then(async () => {
     await capture(`${theme}-menu.png`);
     await js(`document.querySelector('.row-menu [data-row-action="share"]').click()`);
     await until(shown);
-    assert.deepEqual(await js('shares.at(-1)'),{id:'share-chat-1',target:'preview',hide:false,lang:'en'});
+    assert.deepEqual(await js('shares.at(-1)'),{id:'share-chat-1',target:'preview',hide:true,lang:'en'});
     assert.equal(await js(`document.getElementById('sharePageFrame').getAttribute('sandbox')`),'');
-    assert.equal(await js(`document.getElementById('sharePageHide').checked`),false,'Personal details are hidden only when chosen');
-    assert.equal(await js(`document.getElementById('sharePageCount').textContent`),'1 detail is hidden on this page.','The key is always hidden');
-    await layout(`en ${theme}`);
-    await capture(`${theme}-preview.png`);
-    await js(`(()=>{const h=document.getElementById('sharePageHide');h.click();})()`);
-    await until(`document.getElementById('sharePageCount').textContent==='3 details are hidden on this page.'`);
-    await until(shown);
-    assert.equal(await js('shares.at(-1).hide'),true);
+    assert.equal(await js(`document.getElementById('sharePageHide').checked`),true,'Addresses and user names start hidden');
+    assert.equal(await js(`document.getElementById('sharePageCount').textContent`),'3 details are hidden on this page.');
     await layout(`en ${theme} hidden`);
     await capture(`${theme}-hidden.png`);
+    await js(`(()=>{const h=document.getElementById('sharePageHide');h.click();})()`);
+    await until(`document.getElementById('sharePageCount').textContent==='1 detail is hidden on this page.'`);
+    await until(shown);
+    assert.equal(await js('shares.at(-1).hide'),false,'Shown only when chosen; the key stays hidden');
+    await layout(`en ${theme} shown`);
+    await capture(`${theme}-preview.png`);
     // Escape closes and saves nothing.
     win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'}); win.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'});
     await until(`!${dialog}.open`);
@@ -158,8 +158,6 @@ app.whenReady().then(async () => {
   for (const language of ['en','de','ru','pt-BR','vi']) {
     await load(language);
     await openShare();
-    await js(`document.getElementById('sharePageHide').click()`);
-    await until(shown);
     await layout(`${language} 720`);
     await capture(`${language}-720.png`);
   }

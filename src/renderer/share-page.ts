@@ -3,8 +3,8 @@ import { currentLanguage, onLanguageChange, t, tn } from './i18n.js';
 
 /**
  * Share a chat as a web page. The dialog always shows the page before anything is saved, in a frame
- * that runs nothing. Keys and tokens are always hidden; "Hide personal details" (off unless turned on)
- * also hides email addresses and user names, and a line says how many details the page hides. Save
+ * that runs nothing. Keys and tokens are always hidden; "Hide email addresses and user names" starts on
+ * (sharing takes the chat outside the app), and a line says how many details the page hides. Save
  * writes the page shown, not a newer one: main keeps it by its preview id.
  */
 export function initSharePage(api: Pick<AppApi, 'sharePage'>, saved: (name: string) => void): { open(sessionId: string): void } {
@@ -96,7 +96,8 @@ export function initSharePage(api: Pick<AppApi, 'sharePage'>, saved: (name: stri
   return {
     open(id: string) {
       sessionId = id;
-      hide.checked = false;
+      // Sharing takes the chat outside the app: hiding starts on, and showing them is a choice.
+      hide.checked = true;
       saving = false;
       if (typeof dialog.showModal === 'function') dialog.showModal(); else dialog.setAttribute('open', '');
       void load();

@@ -3098,7 +3098,6 @@
   "Save this chat as a web page to share.": "Guardar este chat como página web para partilhar.",
   "Saves this chat as one web page file that opens in any browser. Nothing is uploaded: you decide who gets the file.": "Guarda este chat como um ficheiro de página web que abre em qualquer navegador. Nada é carregado: decide quem recebe o ficheiro.",
   "Preparing the preview…": "A preparar a pré-visualização…",
-  "Hide personal details": "Ocultar dados pessoais",
   "Save…": "Guardar…",
   "{0} details are hidden on this page.": "{0} dados estão ocultos nesta página.",
   "Nothing to hide was found in this chat.": "Não foi encontrado nada para ocultar neste chat.",
@@ -3107,5 +3106,6 @@
   "The preview is out of date. Open Share again.": "A pré-visualização está desatualizada. Abra Partilhar novamente.",
   "{0} details are hidden on this page.|one": "{0} dado está oculto nesta página.",
   "{0} details are hidden on this page.|many": "{0} dados estão ocultos nesta página.",
-  "Email addresses and user names in folder paths show as “hidden”. Keys and tokens always do.": "Endereços de email e nomes de utilizador em caminhos de pastas aparecem como “oculto”. Chaves e tokens, sempre."
+  "Hide email addresses and user names": "Ocultar endereços de email e nomes de utilizador",
+  "Keys and tokens are always hidden. Check the preview: other personal details may remain.": "Chaves e tokens são sempre ocultados. Verifique a pré-visualização: outros dados pessoais podem permanecer."
 }
