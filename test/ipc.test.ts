@@ -2776,6 +2776,18 @@ describe('settings backup over IPC', () => {
     expect(getConfig().ui).toMatchObject(local);
   });
 
+  it('refuses a backup with a setting value this version does not accept, in a sentence of its own', async () => {
+    await setUp('dark', tunnelA, false);
+    const file = path.join(dir, 'invalid-value.json');
+    await exportTo(file, { includeKeys: false });
+    const backup = JSON.parse(await fs.readFile(file, 'utf8'));
+    backup.settings.ui.theme = 'cyan';
+    await fs.writeFile(file, JSON.stringify(backup));
+    await setUp('light', tunnelA, false);
+    expect(await pick(file)).toEqual({ ok: false, error: 'This backup has a setting this version does not accept, so nothing was imported.' });
+    expect(getConfig().ui.theme).toBe('light');
+  });
+
   it('refuses an import whose preview no longer matches the settings, and changes nothing', async () => {
     await setUp('dark', tunnelA, false);
     const file = path.join(dir, 'stale.json');
