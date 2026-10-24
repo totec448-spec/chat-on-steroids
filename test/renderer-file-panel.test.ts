@@ -715,6 +715,50 @@ it('uses the file name as the title and its relative path as metadata in file an
   expect(host.querySelector('.file-preview-meta')?.textContent).toContain('src/main.ts');
 });
 
+it('shows a changed image or PDF in Review as Before and After instead of a binary placeholder', async () => {
+  (window.api.getProjectGitSnapshot as any).mockImplementation(() => ok({
+    projectId: projectA.id, state: 'ready', truncated: false, revision: 'media',
+    changes: [
+      { status: 'M', path: 'logo.png', additions: null, deletions: null, binary: true },
+      { status: 'U', path: 'paper.pdf', additions: null, deletions: null, binary: true },
+      { status: 'M', path: 'blob.bin', additions: null, deletions: null, binary: true }
+    ]
+  } satisfies ProjectGitSnapshot));
+  const pdfBytes = Buffer.from('%PDF-1.4\n%%EOF').toString('base64');
+  (window.api.getProjectGitDiff as any).mockImplementation((_id: string, file: string) => ok(file === 'blob.bin'
+    ? { projectId: projectA.id, status: 'M', path: 'blob.bin', additions: null, deletions: null, binary: true, tooLarge: false,
+        baseText: null, currentText: null, note: 'Binary diff · preview unavailable' }
+    : file === 'logo.png'
+    ? { projectId: projectA.id, status: 'M', path: 'logo.png', additions: null, deletions: null, binary: true, tooLarge: false,
+        baseText: null, currentText: null, media: { kind: 'image', base: 'data:image/png;base64,QkFTRQ==', current: 'data:image/png;base64,Q1VSUg==' } }
+    : { projectId: projectA.id, status: 'U', path: 'paper.pdf', additions: null, deletions: null, binary: true, tooLarge: false,
+        baseText: null, currentText: null, media: { kind: 'pdf', base: null, current: pdfBytes } } satisfies ProjectGitDiff));
+
+  const panel = createFilePanel({ host, toggle });
+  panel.update(projectA); toggle.click(); await tick();
+  host.querySelector<HTMLButtonElement>('.file-panel-changes-toggle')!.click(); await tick(); await tick();
+  host.querySelector<HTMLButtonElement>('.file-change-row[data-path="logo.png"]')!.click(); await tick(); await tick();
+  const labels = () => [...host.querySelectorAll('.file-diff-media-label')].map(label => label.textContent);
+  expect(labels()).toEqual(['Before', 'After']);
+  expect([...host.querySelectorAll<HTMLImageElement>('.file-diff-media .file-preview-image')].map(image => image.src))
+    .toEqual(['data:image/png;base64,QkFTRQ==', 'data:image/png;base64,Q1VSUg==']);
+  expect(host.textContent).not.toContain('preview unavailable');
+
+  host.querySelector<HTMLButtonElement>('.file-change-row[data-path="paper.pdf"]')!.click(); await tick(); await tick();
+  expect(labels()).toEqual(['Before', 'After']);
+  expect(host.querySelector('.file-diff-media-side')?.textContent).toContain('Not in this version');
+  expect(createPdfViewer).toHaveBeenCalledTimes(1);
+  expect(createPdfViewer).toHaveBeenCalledWith(expect.objectContaining({ filename: 'paper.pdf', dataBase64: pdfBytes }));
+  const viewer = await createPdfViewer.mock.results[0]!.value as { destroy: ReturnType<typeof vi.fn> };
+  host.querySelector<HTMLButtonElement>('.file-change-row[data-path="logo.png"]')!.click(); await tick(); await tick();
+  expect(viewer.destroy).toHaveBeenCalled();
+  expect(host.querySelector('.file-pdf-viewer-host')).toBeNull();
+  // A binary file without a preview still replaces "Loading diff…" with its note.
+  host.querySelector<HTMLButtonElement>('.file-change-row[data-path="blob.bin"]')!.click(); await tick(); await tick();
+  expect(host.querySelector('.file-diff-media')).toBeNull();
+  expect(host.querySelector('.file-preview')?.textContent).toContain('Binary diff · preview unavailable');
+});
+
 it('lets the user close only the file preview without closing Files or changing the selection', async () => {
   const panel = createFilePanel({ host, toggle, onAttach: () => undefined });
   panel.update(projectA); toggle.click(); await tick();

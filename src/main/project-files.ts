@@ -100,6 +100,27 @@ const IMAGE_MIME_BY_EXTENSION = new Map<string, string>([
   ['.ico', 'image/x-icon']
 ]);
 
+/** Which Files preview a path gets: a bounded raster image, a PDF, or neither. */
+export function projectPreviewKind(relative: string): 'image' | 'pdf' | null {
+  const extension = path.extname(relative).toLowerCase();
+  return IMAGE_MIME_BY_EXTENSION.has(extension) ? 'image' : extension === '.pdf' ? 'pdf' : null;
+}
+
+/** Decodes under a pixel limit into one bounded PNG data URL. Compressed bytes alone do not bound
+ * browser memory, and a filename is not proof of image content, so invalid input returns null. */
+export async function boundedImageDataUrl(data: Buffer): Promise<string | null> {
+  try {
+    const image = await sharp(data, { failOn: 'warning', limitInputPixels: 16 * 1024 * 1024, sequentialRead: true })
+      .rotate().resize(1600, 1600, { fit: 'inside', withoutEnlargement: true }).png().toBuffer();
+    return `data:image/png;base64,${image.toString('base64')}`;
+  } catch { return null; }
+}
+
+/** PDF headers are normally at byte zero; tolerate a small prefix, and nothing else. */
+export function hasPdfHeader(data: Buffer): boolean {
+  return data.subarray(0, Math.min(1024, data.length)).includes(Buffer.from('%PDF-'));
+}
+
 export interface ProjectFileTarget {
   projectId: string;
   projectName: string;
@@ -337,13 +358,8 @@ export async function previewProjectFile(projectId: string, relativePath: string
         offset += bytesRead;
       }
       const data = offset === buffer.length ? buffer : buffer.subarray(0, offset);
-      // Decode under a pixel limit and publish one bounded raster thumbnail. Compressed bytes
-      // alone do not bound browser memory, and a filename is not proof of image content.
-      let image: Buffer;
-      try {
-        image = await sharp(data, { failOn: 'warning', limitInputPixels: 16 * 1024 * 1024, sequentialRead: true })
-          .rotate().resize(1600, 1600, { fit: 'inside', withoutEnlargement: true }).png().toBuffer();
-      } catch {
+      const imageDataUrl = await boundedImageDataUrl(data);
+      if (!imageDataUrl) {
         return { projectId, projectName: target.projectName, path: target.path, name: path.basename(target.real),
           bytes: stat.size, modifiedAt: stat.mtime.toISOString(), binary: true, text: null, truncated: false,
           note: 'Image preview unavailable. The file is invalid, unsupported or exceeds the pixel limit.' };
@@ -360,7 +376,7 @@ export async function previewProjectFile(projectId: string, relativePath: string
         binary: true,
         text: null,
         imageMimeType: 'image/png',
-        imageDataUrl: `data:image/png;base64,${image.toString('base64')}`,
+        imageDataUrl,
         truncated: false
       };
     } finally {
@@ -397,8 +413,8 @@ export async function previewProjectFile(projectId: string, relativePath: string
       await recheckTarget(target);
       if (!sameFile(stat, await handle.stat())) throw new Error('File changed while being read');
       // Fail closed on a misleading .pdf extension instead of giving arbitrary binary bytes
-      // to a document parser. PDF headers are normally at byte zero; tolerate a small prefix.
-      if (!data.subarray(0, Math.min(1024, data.length)).includes(Buffer.from('%PDF-'))) {
+      // to a document parser.
+      if (!hasPdfHeader(data)) {
         return {
           projectId,
           projectName: target.projectName,

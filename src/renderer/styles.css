@@ -4487,6 +4487,17 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .file-preview-image { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; border-radius: 4px; box-shadow: 0 0 0 1px var(--line); }
 .file-pdf-viewer-host { min-width: 0; min-height: 0; flex: 1; overflow: hidden; background: var(--sunk); }
 .file-pdf-viewer { width: 100%; height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.file-preview.has-media-diff { display: flex; flex-direction: column; overflow: hidden; }
+.file-preview.has-media-diff .file-preview-resize { flex: 0 0 3px; }
+.file-preview.has-media-diff .file-preview-head, .file-preview.has-media-diff .file-preview-meta { flex: 0 0 auto; }
+.file-diff-media { min-height: 0; flex: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); grid-auto-rows: minmax(0, 1fr); }
+.file-diff-media-side { min-width: 0; min-height: 0; display: flex; flex-direction: column; box-shadow: -1px 0 0 var(--line); }
+.file-diff-media-label { flex: 0 0 auto; margin: 0; padding: 6px 14px; border-bottom: 1px solid var(--line); color: var(--soft); font-size: calc(9.5px * var(--text-scale, 1)); font-weight: 600; }
+.file-diff-media-side .file-preview-image-wrap { flex: 1; height: auto; }
+/* Half a panel is narrower than the Files viewer: its PDF controls pack together instead of clipping. */
+.file-diff-media .file-pdf-toolbar { gap: 0; padding-inline: 2px; justify-content: center; }
+.file-diff-media .file-pdf-toolbar-spacer { display: none; }
+.file-diff-media .file-pdf-page { min-width: 34px; }
 .file-pdf-toolbar { flex: 0 0 auto; min-height: 34px; display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--line); background: var(--page); }
 .file-pdf-control { min-width: 26px; height: 26px; padding: 0 7px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--soft); font: inherit; font-size: calc(11px * var(--text-scale, 1)); cursor: pointer; }
 .file-pdf-control:hover:not(:disabled), .file-pdf-control.is-active { background: var(--hover); color: var(--ink); }

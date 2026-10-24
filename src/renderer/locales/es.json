@@ -3108,5 +3108,7 @@
   "Common base": "Base común",
   "Theirs (incoming)": "Suya (entrante)",
   "Not in this version": "No está en esta versión",
-  "Start or cancel the prepared plan first, then ask again.": "Inicia o cancela primero el plan preparado y vuelve a pedirlo."
+  "Start or cancel the prepared plan first, then ask again.": "Inicia o cancela primero el plan preparado y vuelve a pedirlo.",
+  "Before": "Antes",
+  "After": "Después"
 }
