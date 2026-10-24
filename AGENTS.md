@@ -1155,6 +1155,15 @@ missing or damaged file reads as no bookmarks; damaged entries are dropped. Noth
 ChatGPT. The header list jumps through `sessions:locate-message`; a reply no longer in the chat
 shows a notice instead of scrolling. Long row menus scroll inside the window (`row-menu.ts`). A file holding more than the limit keeps the ones bookmarked first. Tests: `test/session-bookmarks.test.ts` (storage, limit, damaged files), the "bookmarked answers" cases in `test/renderer-timeline.test.ts` (answer action, header list, jump), and `scripts/verify-bookmark-list.cjs` (200 bookmarks in a short window, real Electron).
 
+Copy as: besides `markdown` and the page `html` (see the HTML export below), the `format` of
+`sessions:exportMarkdown` can be `text`, `text-no-code` or `formatted` for a clipboard copy; a saved
+answer is always Markdown, and a file asked for as one of these three is refused. `shared/answer-copy.ts` builds the plain text with `markdownVisibleText(…, { layout:
+true, tidy: true })` (bullets, numbers, task boxes, tab-separated table cells; `tidy` collapses
+blank lines between blocks and leaves a code block as written; `codeBlocks: false` for
+`text-no-code`) and the HTML with `marked`, which escapes raw markup, draws an image as its
+parsed description (`tokensVisibleText`) and links only http(s) and mailto addresses. Both drop a writing block's `:::` fence and
+keep its words. The plain text also keeps the words of a block of raw HTML (`plainTextOfHtml`, as the timeline draws it, scripts and styles dropped); Find does not. `formatted` writes the plain text beside the HTML, for apps that paste no HTML.
+
 Edit & resubmit (#365): ChatGPT keeps an edited question as a new version beside the old one, under
 the same parent, and continues from the new one. The page reports each question's place in that tree
 (`user_message.parentId`: the legacy `metadata.parent_id`, or on the shell the previous turn's last
@@ -4457,7 +4466,7 @@ Captured ChatGPT HTML passes a strict allowlist; authored plain text stays text.
 citation ranges use Unicode code points and map to UTF-16 before slicing. Exact uploaded-file
 names render as plain chips; unresolved file citations do not gain invented local links.
 Plain text leaving the timeline (Markdown export, search index and snippets, turn notifications and `modelFacingText` for Goal/Loop and completed answers) passes `providerEntitiesAsMarkdown` first: the raw text's private-use entities (U+E200 name U+E202 field … U+E201) become `[label](address)` for `url` and are dropped otherwise, so a link card never reads as "urlLabelhttps://…".
-`sessions:exportMarkdown` takes an optional `format: 'markdown' | 'html'` (Markdown when left out). `html` is accepted only with `scope: 'session'` and `target: 'file'`: main saves the same transcript as one self-contained page (`shared/html-export.ts` `transcriptHtml`). What a person wrote is escaped plain text; answers are Markdown drawn with raw HTML escaped, images reduced to their alt text and only http(s)/mailto links kept. The page has inline styles only and a `default-src 'none'` policy, so it runs no script and loads nothing. Its title and texts pass `redactSecretText` first; the Markdown export stays exact.
+`sessions:exportMarkdown` takes an optional `format` (Markdown when left out; `html` here, `text`, `text-no-code` and `formatted` under Copy as). `html` is accepted only with `scope: 'session'` and `target: 'file'`: main saves the same transcript as one self-contained page (`shared/html-export.ts` `transcriptHtml`). What a person wrote is escaped plain text; answers are Markdown drawn with raw HTML escaped, images reduced to their alt text and only http(s)/mailto links kept. The page has inline styles only and a `default-src 'none'` policy, so it runs no script and loads nothing. Its title and texts pass `redactSecretText` first; the Markdown export stays exact.
 An assistant message may carry `references`: the sources behind its inline
 `:chatgpt-content-reference{index="N"}` citations. `extension/fiber.js` `citedSources` reads
 them from each citation pill's own props (the list its hover card pages through, plus the reply

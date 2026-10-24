@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { app, clipboard, dialog, type BrowserWindow, type SaveDialogOptions } from 'electron';
+import { app, clipboard, ClipboardItem, dialog, type BrowserWindow, type SaveDialogOptions } from 'electron';
 import type { StoredText } from '../../shared/session.js';
 import {
   answerMarkdown, completedTurnIds, latestAnswer, markdownFileName, messageAnswerEntries, sessionMarkdown, transcriptEntries,
@@ -9,6 +9,7 @@ import { getSession, readEvents, readOverflowText } from './store.js';
 import { providerEntitiesAsMarkdown } from '../../shared/content-reference.js';
 import { dialogLabel, mainText } from '../main-texts.js';
 import { completedDilText } from '../../shared/dil-tables.js';
+import { answerHtml, answerPlainText, type CopyFormat } from '../../shared/answer-copy.js';
 import { transcriptHtml } from '../../shared/html-export.js';
 import { redactSecretText } from '../redaction.js';
 import { replaceFile } from '../replace-file.js';
@@ -22,8 +23,12 @@ export type MarkdownExportRequest = {
   /** An answer recorded outside any turn (copied branch history, an adopted chat's history). */
   messageId?: string;
   target: 'clipboard' | 'file';
-  /** `html` saves a whole session as one self-contained page; Markdown when left out. */
-  format?: 'markdown' | 'html';
+  /**
+   * `html` saves a whole session as one self-contained page. The other values are for a copy:
+   * `text`, `text-no-code` and `formatted` (HTML for Word and mail) put on the clipboard something
+   * other than the Markdown. A saved answer is always Markdown; Markdown when left out.
+   */
+  format?: CopyFormat | 'html';
 };
 
 export type MarkdownExportResult = { done: 'copied' } | { done: 'saved'; name: string } | { done: 'cancelled' };
@@ -40,8 +45,10 @@ async function fullText(sessionId: string, stored: StoredText, html?: StoredText
 export async function exportSessionMarkdown(request: MarkdownExportRequest, owner: BrowserWindow | null): Promise<MarkdownExportResult> {
   const summary = await getSession(request.id);
   if (!summary) throw new Error('Session not found');
-  const html = request.format === 'html';
+  const format = request.format ?? 'markdown';
+  const html = format === 'html';
   if (html && (request.scope !== 'session' || request.target !== 'file')) throw new Error('HTML export saves a whole session to a file');
+  if (!html && format !== 'markdown' && request.target !== 'clipboard') throw new Error('Only a copy can be plain text or formatted text');
   const events = await readEvents(request.id);
   let markdown: string;
   let name: string;
@@ -68,7 +75,9 @@ export async function exportSessionMarkdown(request: MarkdownExportRequest, owne
     name = markdownFileName(title, '', html ? 'html' : 'md');
   }
   if (request.target === 'clipboard') {
-    await clipboard.writeText(markdown);
+    // Formatted text carries the plain text too, for the apps that paste no HTML.
+    if (format === 'formatted') await clipboard.write([new ClipboardItem({ 'text/plain': answerPlainText(markdown), 'text/html': answerHtml(markdown) })]);
+    else await clipboard.writeText(format === 'markdown' ? markdown : answerPlainText(markdown, { codeBlocks: format !== 'text-no-code' }));
     return { done: 'copied' };
   }
   // Linux asks nothing about replacing a file unless told to.

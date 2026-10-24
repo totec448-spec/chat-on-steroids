@@ -2,9 +2,11 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '../src/shared/session.js';
 
 const electron = vi.hoisted(() => ({
-  clipboard: { writeText: vi.fn() },
+  clipboard: { writeText: vi.fn(), write: vi.fn() },
   dialog: { showSaveDialog: vi.fn() },
-  app: { getPath: vi.fn(() => '/downloads') }
+  app: { getPath: vi.fn(() => '/downloads') },
+  // Electron's ClipboardItem keeps the MIME types it was given.
+  ClipboardItem: class { constructor(readonly items: Record<string, string>) {} }
 }));
 const store = vi.hoisted(() => ({ getSession: vi.fn(), readEvents: vi.fn(), readOverflowText: vi.fn() }));
 const files = vi.hoisted(() => ({ replaceFile: vi.fn(async () => undefined) }));
@@ -90,6 +92,31 @@ it('copies an answer recorded without a turn by its message id, and only such an
   // A turn's own answer is exported by its turn; an unknown or turn-owned id is refused.
   await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', messageId: 'a1', target: 'clipboard' }, null)).rejects.toThrow('no answer to export');
   await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', target: 'clipboard' }, null)).rejects.toThrow('has not completed');
+});
+
+// Copy as: the same answer, read whole from the log, as plain text or as formatted text.
+it('copies an answer as plain text, without its code, or as formatted text with the plain text beside it', async () => {
+  const answer = 'Run **this** first:\n\n```sh\nnpm test\n```\n\n- one\n- two\n';
+  store.readEvents.mockResolvedValue([events[0]!,
+    { seq: 2, time: 2, source: 'extension', kind: 'assistant_message', turnId: 't1', messageId: 'a1', final: true, state: 'final',
+      message: { text: answer, truncated: false, chars: answer.length } }, events[2]!] as SessionEvent[]);
+  const copy = (format: 'text' | 'text-no-code' | 'formatted') =>
+    exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't1', target: 'clipboard', format }, null);
+  await expect(copy('text')).resolves.toEqual({ done: 'copied' });
+  expect(electron.clipboard.writeText).toHaveBeenLastCalledWith('Run this first:\n\nnpm test\n\n- one\n- two');
+  await copy('text-no-code');
+  expect(electron.clipboard.writeText).toHaveBeenLastCalledWith('Run this first:\n\n- one\n- two');
+  await copy('formatted');
+  expect(electron.clipboard.write.mock.calls[0]![0].map((item: { items: unknown }) => item.items)).toEqual([{
+    'text/plain': 'Run this first:\n\nnpm test\n\n- one\n- two',
+    'text/html': '<p>Run <strong>this</strong> first:</p>\n<pre><code class="language-sh">npm test\n</code></pre>\n<ul>\n<li>one</li>\n<li>two</li>\n</ul>'
+  }]);
+});
+
+it('saves an answer as Markdown only: a file asked for as plain text or formatted text is refused', async () => {
+  for (const format of ['text', 'text-no-code', 'formatted'] as const)
+    await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't1', target: 'file', format }, null)).rejects.toThrow('Only a copy');
+  expect(electron.dialog.showSaveDialog).not.toHaveBeenCalled();
 });
 
 it('saves the session as a self-contained HTML page with credential shapes masked', async () => {

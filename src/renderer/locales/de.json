@@ -3059,5 +3059,10 @@
   "Common base": "Gemeinsame Basis",
   "Theirs (incoming)": "Ihre (eingehend)",
   "Not in this version": "Nicht in dieser Version",
-  "Start or cancel the prepared plan first, then ask again.": "Starte oder verwirf zuerst den vorbereiteten Plan und frage dann erneut."
+  "Start or cancel the prepared plan first, then ask again.": "Starte oder verwirf zuerst den vorbereiteten Plan und frage dann erneut.",
+  "Copy as": "Kopieren als",
+  "Plain text": "Nur-Text",
+  "Plain text without code blocks": "Nur-Text ohne Codeblöcke",
+  "Formatted text": "Formatierter Text",
+  "Only a copy can be plain text or formatted text": "Nur eine Kopie kann Nur-Text oder formatierter Text sein"
 }

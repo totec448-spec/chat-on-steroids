@@ -2862,8 +2862,8 @@ input[readonly] {
 .answer-export[open]::details-content { transition: none; }
 .answer-export-menu { position: fixed; z-index: 40; position-anchor: --answer-export; position-area: bottom span-right; margin-top: 6px; position-try-fallbacks: flip-block, flip-inline; display: grid; gap: 2px; min-width: 170px; padding: 5px; border: 1px solid var(--edge); border-radius: 10px; background: var(--card); box-shadow: 0 8px 28px #0003; opacity: 0; transform: translateY(4px); transition: opacity 120ms ease-in, transform 120ms ease-in; pointer-events: none; }
 .answer-export[open] > .answer-export-menu { opacity: 1; transform: none; transition: none; pointer-events: auto; animation: surface-in 140ms ease-out; }
-.answer-export-choice { display: flex; align-items: center; width: 100%; padding: 8px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font: inherit; font-size: calc(12.5px * var(--text-scale, 1)); text-align: left; cursor: pointer; }
-.answer-export-choice:hover, .answer-export-choice:focus-visible { background: var(--hover); outline: none; }
+.answer-export-choice, .answer-copy-choice { display: flex; align-items: center; width: 100%; padding: 8px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font: inherit; font-size: calc(12.5px * var(--text-scale, 1)); text-align: left; cursor: pointer; }
+.answer-export-choice:hover, .answer-export-choice:focus-visible, .answer-copy-choice:hover, .answer-copy-choice:focus-visible { background: var(--hover); outline: none; }
 @media (prefers-reduced-motion: reduce) {
   .answer-export::details-content, .answer-export-menu { transition: none; transform: none; animation: none !important; }
 }

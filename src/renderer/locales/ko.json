@@ -3010,5 +3010,10 @@
   "Common base": "공통 기준",
   "Theirs (incoming)": "상대 쪽 (들어오는 쪽)",
   "Not in this version": "이 버전에는 없음",
-  "Start or cancel the prepared plan first, then ask again.": "먼저 준비된 계획을 시작하거나 취소한 다음 다시 요청하세요."
+  "Start or cancel the prepared plan first, then ask again.": "먼저 준비된 계획을 시작하거나 취소한 다음 다시 요청하세요.",
+  "Copy as": "다른 형식으로 복사",
+  "Plain text": "일반 텍스트",
+  "Plain text without code blocks": "코드 블록 없는 일반 텍스트",
+  "Formatted text": "서식 있는 텍스트",
+  "Only a copy can be plain text or formatted text": "일반 텍스트나 서식 있는 텍스트는 복사에서만 사용할 수 있습니다"
 }

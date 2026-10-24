@@ -3157,5 +3157,10 @@
   "Common base": "Общая база",
   "Theirs (incoming)": "Их (входящая)",
   "Not in this version": "Нет в этой версии",
-  "Start or cancel the prepared plan first, then ask again.": "Сначала запустите или отмените подготовленный план, затем повторите запрос."
+  "Start or cancel the prepared plan first, then ask again.": "Сначала запустите или отмените подготовленный план, затем повторите запрос.",
+  "Copy as": "Копировать как",
+  "Plain text": "Обычный текст",
+  "Plain text without code blocks": "Обычный текст без блоков кода",
+  "Formatted text": "Форматированный текст",
+  "Only a copy can be plain text or formatted text": "Простым или форматированным текстом может быть только копия"
 }

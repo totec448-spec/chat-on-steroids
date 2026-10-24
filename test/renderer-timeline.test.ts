@@ -5776,14 +5776,34 @@ it('offers copy and Markdown or HTML export under the answer of a completed turn
   const choices = [...actions!.querySelectorAll<HTMLButtonElement>('.answer-export-choice')];
   expect(choices.map(choice => choice.textContent)).toEqual(['This answer', 'Whole session', 'Whole session as HTML']);
   // Choosing closes the menu and takes the choice off the screen; focus goes back to the Export button, not the page.
-  actions!.querySelector<HTMLDetailsElement>('details.answer-export')!.open = true;
+  const exportMenu = choices[1]!.closest('details')!;
+  exportMenu.open = true;
   choices[1]!.focus();
   choices[1]!.click(); await settle();
-  expect(actions!.querySelector<HTMLDetailsElement>('details.answer-export')!.open).toBe(false);
-  expect(w.document.activeElement).toBe(actions!.querySelector('details.answer-export > summary'));
+  expect(exportMenu.open).toBe(false);
+  expect(w.document.activeElement).toBe(exportMenu.querySelector('summary'));
   expect(api.exportMarkdown).toHaveBeenCalledWith({ id: summary([]).id, scope: 'session', turnId: undefined, target: 'file' });
   choices[2]!.click(); await settle();
   expect(api.exportMarkdown).toHaveBeenLastCalledWith({ id: summary([]).id, scope: 'session', turnId: undefined, target: 'file', format: 'html' });
+});
+
+it('copies a completed answer as plain text, without code or formatted from its Copy as menu', async () => {
+  const reply: SessionEvent = { kind: 'assistant_message', seq: 1, time: T0, source: 'extension', turnId: 'done-turn', messageId: 'reply', message: text('Created **hello.txt**.'), final: true, state: 'final' };
+  const { w } = await boot([reply, { seq: 2, time: T0 + 1_000, source: 'extension', kind: 'turn_end', turnId: 'done-turn', outcome: 'completed' }]);
+  const api = (w as any).api;
+  api.exportMarkdown = vi.fn(async () => ({ ok: true, data: { done: 'copied' } }));
+  const trigger = w.document.querySelector<HTMLElement>('.answer-actions summary[aria-label="Copy as"]');
+  expect(trigger).not.toBeNull();
+  const menu = trigger!.parentElement as HTMLDetailsElement;
+  const choices = [...menu.querySelectorAll<HTMLButtonElement>('.answer-copy-choice')];
+  expect(choices.map(choice => choice.textContent)).toEqual(['Plain text', 'Plain text without code blocks', 'Formatted text']);
+  for (const [index, format] of (['text', 'text-no-code', 'formatted'] as const).entries()) {
+    menu.open = true;
+    choices[index]!.click(); await settle();
+    expect(menu.open).toBe(false);
+    expect(w.document.activeElement).toBe(trigger);
+    expect(api.exportMarkdown).toHaveBeenLastCalledWith({ id: summary([]).id, scope: 'answer', turnId: 'done-turn', messageId: undefined, target: 'clipboard', format });
+  }
 });
 
 it('does not offer copy or export after an interrupted turn', async () => {

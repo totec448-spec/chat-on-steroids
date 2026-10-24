@@ -3108,5 +3108,10 @@
   "Common base": "Base commune",
   "Theirs (incoming)": "La leur (entrante)",
   "Not in this version": "Absent de cette version",
-  "Start or cancel the prepared plan first, then ask again.": "Lancez ou annulez d'abord le plan préparé, puis redemandez."
+  "Start or cancel the prepared plan first, then ask again.": "Lancez ou annulez d'abord le plan préparé, puis redemandez.",
+  "Copy as": "Copier en tant que",
+  "Plain text": "Texte brut",
+  "Plain text without code blocks": "Texte brut sans blocs de code",
+  "Formatted text": "Texte mis en forme",
+  "Only a copy can be plain text or formatted text": "Seule une copie peut être en texte brut ou en texte mis en forme"
 }
