@@ -385,6 +385,85 @@ it('lets Review leave a comparison whose branch disappeared', async () => {
   expect(host.textContent).toContain('Working tree is clean');
 });
 
+it('shows a conflicted file as ours, base and theirs, and asks chat to resolve it without sending', async () => {
+  // Review showed a conflict only as HEAD against the marker-filled file (2.1.41).
+  (window.api.getProjectGitSnapshot as any).mockImplementation(() => ok({
+    ...cleanGit(), revision: 'merging',
+    changes: [{ status: 'C', path: 'src/both.ts', additions: null, deletions: null, binary: false }]
+  }));
+  (window.api.getProjectGitDiff as any).mockImplementation(() => ok({
+    projectId: projectA.id, status: 'C', path: 'src/both.ts', additions: null, deletions: null,
+    binary: false, tooLarge: false, baseText: 'ours', currentText: '<<<<<<< HEAD',
+    conflict: { base: null, ours: 'export const side = "main";', theirs: 'export const side = "feature";' }
+  } satisfies ProjectGitDiff));
+  const asked: string[] = [];
+  const panel = createFilePanel({ host, reviewOnly: true, onAskChat: request => asked.push(request) });
+  panel.update(projectA); await panel.show(); await tick();
+  host.querySelector<HTMLButtonElement>('.file-change-row[data-path="src/both.ts"]')!.click(); await tick(); await tick();
+
+  const panes = [...host.querySelectorAll<HTMLElement>('.file-conflict-pane')];
+  expect(panes.map(pane => pane.querySelector('.file-conflict-pane-label')?.textContent)).toEqual(['Ours (HEAD)', 'Common base', 'Theirs (incoming)']);
+  expect(panes.map(pane => pane.querySelector<HTMLTextAreaElement>('.test-code-input')?.value ?? pane.textContent))
+    .toEqual(['export const side = "main";', 'Common baseNot in this version', 'export const side = "feature";']);
+  expect(host.querySelector('.test-diff-viewer')).toBeNull();
+
+  const toggleView = host.querySelector<HTMLButtonElement>('.file-conflict-toggle')!;
+  expect(toggleView.getAttribute('aria-pressed')).toBe('true');
+  toggleView.focus(); toggleView.click(); await tick();
+  expect(host.querySelector('.file-conflict-pane')).toBeNull();
+  expect(host.querySelector('.test-diff-viewer')?.textContent).toContain('<<<<<<< HEAD');
+  // The header is rebuilt; a keyboard user stays on the toggle.
+  expect(document.activeElement).toBe(host.querySelector('.file-conflict-toggle'));
+  expect(document.activeElement?.getAttribute('aria-pressed')).toBe('false');
+  host.querySelector<HTMLButtonElement>('.file-conflict-toggle')!.click(); await tick();
+  expect(host.querySelectorAll('.file-conflict-pane')).toHaveLength(3);
+
+  [...host.querySelectorAll<HTMLButtonElement>('.file-preview-actions button')].find(button => button.title === 'Ask chat to resolve')!.click();
+  expect(asked).toHaveLength(1);
+  expect(asked[0]).toContain('src/both.ts');
+  expect(asked[0]).toContain('git show :1:./src/both.ts, :2:./src/both.ts and :3:./src/both.ts');
+});
+
+it('shows a binary note, or conflict panes over a too large file, instead of staying on Loading diff', async () => {
+  // The loading view recorded the revision, so a binary or too large result returned before rendering.
+  (window.api.getProjectGitSnapshot as any).mockImplementation(() => ok({
+    ...cleanGit(), revision: 'dirty', changes: [
+      { status: 'M', path: 'a.bin', additions: null, deletions: null, binary: true },
+      { status: 'C', path: 'big.txt', additions: null, deletions: null, binary: false }
+    ]
+  }));
+  (window.api.getProjectGitDiff as any).mockImplementation((_id: string, file: string) => ok(file === 'a.bin' ? {
+    projectId: projectA.id, status: 'M', path: 'a.bin', additions: null, deletions: null,
+    binary: true, tooLarge: false, baseText: null, currentText: null, note: 'Binary diff · preview unavailable'
+  } : {
+    projectId: projectA.id, status: 'C', path: 'big.txt', additions: null, deletions: null, binary: false, tooLarge: true,
+    baseText: null, currentText: null, note: 'This diff is too large to display.', conflict: { base: 'base', ours: 'ours', theirs: 'theirs' }
+  } satisfies ProjectGitDiff));
+  const panel = createFilePanel({ host, reviewOnly: true });
+  panel.update(projectA); await panel.show(); await tick();
+  host.querySelector<HTMLButtonElement>('.file-change-row[data-path="a.bin"]')!.click(); await tick(); await tick();
+  expect(host.querySelector('.file-preview')?.textContent).toContain('Binary diff · preview unavailable');
+  host.querySelector<HTMLButtonElement>('.file-preview-actions button[title="Close preview"]')!.click(); await tick();
+  host.querySelector<HTMLButtonElement>('.file-change-row[data-path="big.txt"]')!.click(); await tick(); await tick();
+  expect(host.querySelectorAll('.file-conflict-pane')).toHaveLength(3);
+  expect(host.querySelector('.file-preview')?.textContent).not.toContain('Loading diff');
+});
+
+it('offers neither conflict action on an ordinary diff', async () => {
+  (window.api.getProjectGitSnapshot as any).mockImplementation(() => ok({
+    ...cleanGit(), revision: 'dirty', changes: [{ status: 'M', path: 'README.md', additions: 1, deletions: 1, binary: false }]
+  }));
+  (window.api.getProjectGitDiff as any).mockImplementation(() => ok({
+    projectId: projectA.id, status: 'M', path: 'README.md', additions: 1, deletions: 1,
+    binary: false, tooLarge: false, baseText: 'before', currentText: 'after'
+  } satisfies ProjectGitDiff));
+  const panel = createFilePanel({ host, reviewOnly: true, onAskChat: () => undefined });
+  panel.update(projectA); await panel.show(); await tick();
+  host.querySelector<HTMLButtonElement>('.file-change-row[data-path="README.md"]')!.click(); await tick(); await tick();
+  expect(host.querySelector('.test-diff-viewer')).not.toBeNull();
+  expect([...host.querySelectorAll<HTMLButtonElement>('.file-preview-actions button')].map(button => button.title)).toEqual(['Close preview']);
+});
+
 it('marks every ancestor folder, including paths of deleted and renamed files, then clears them from Git truth', async () => {
   let snapshot: ProjectGitSnapshot = {
     ...cleanGit(), revision: 'nested-dirty', changes: [

@@ -45,7 +45,9 @@ it('rereads all retained output after automatic delivery and a later receipt', a
   expect(id).not.toBeNull();
   const owned = new Set([id]);
   const published = { completedAt: null as number | null, failed: false };
-  await expect.poll(() => m.offerCompletedOutput(owned, published, 1000)).toMatchObject({ output: 'late\n' });
+  // The child needs about 0.7 s after Node has started, and a loaded full-suite run can delay that
+  // start past expect.poll's 1 s default; the test is about delivery, not speed.
+  await expect.poll(() => m.offerCompletedOutput(owned, published, 1000), { timeout: 10_000 }).toMatchObject({ output: 'late\n' });
   published.completedAt = 100;
   await m.acknowledgeCompletedOutput(owned, 101);
   const reread = await poll(m, id);
