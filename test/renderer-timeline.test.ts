@@ -924,6 +924,19 @@ it('labels a scheduled run in the queue, with when it was due when it is late', 
   expect(w.document.querySelector('#finishQueue [data-input-id="scheduled-run"] .queue-label')?.textContent).toBe('Scheduled · Check the open issues');
 });
 
+// #1826: a sent run keeps its label in the chat, on time or late, and a typed message has none.
+it('keeps the scheduled label on the sent message in the chat', async () => {
+  const dueAt = new Date(2026, 9, 24, 9, 0).getTime();
+  const sent: SessionEvent = { kind: 'user_message', seq: 1, origin: 1, time: T0, source: 'app', messageId: 'scheduled-sent', inputId: 'scheduled-run',
+    message: text('Check the open issues'), scheduled: { dueAt, late: false } };
+  const typed: SessionEvent = { kind: 'user_message', seq: 2, origin: 2, time: T0 + 1, source: 'app', messageId: 'typed', message: text('And this one?') };
+  const { w, append } = await boot([sent, typed]);
+  const labels = () => [...w.document.querySelectorAll('.said.is-user')].map(bubble => bubble.querySelector('.said-origin')?.textContent ?? null);
+  expect(labels()).toEqual(['Scheduled', null]);
+  await append([{ ...sent, seq: 3, origin: 1, scheduled: { dueAt, late: true } }]);
+  expect(labels()).toEqual([`Scheduled · late, was due ${new Date(dueAt).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })}`, null]);
+});
+
 // #1402: the app's own fresh-turn continue is no one's typed message. Waiting, it shows as the
 // message it is; dropped, it raises no delivery notice, because the app tries again by itself.
 it('shows a fresh-turn continue while it waits and raises no notice when it is dropped', async () => {
