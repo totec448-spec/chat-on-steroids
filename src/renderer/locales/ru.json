@@ -3139,5 +3139,11 @@
   "What ChatGPT gets to see on this computer.": "Что ChatGPT может видеть на этом компьютере.",
   "Off for every project in Settings": "Отключено для всех проектов в настройках",
   "This project's tools send keys and tokens to ChatGPT as they are": "Инструменты этого проекта отправляют ключи и токены в ChatGPT как есть",
-  "Keys and tokens in this project's tool results are hidden from ChatGPT": "Ключи и токены в результатах инструментов этого проекта скрыты от ChatGPT"
+  "Keys and tokens in this project's tool results are hidden from ChatGPT": "Ключи и токены в результатах инструментов этого проекта скрыты от ChatGPT",
+  "High contrast": "Высокая контрастность",
+  "Black or white background with stronger text and lines. Your colors stay saved for when you turn it off.": "Чёрный или белый фон, более чёткий текст и линии. Ваши цвета сохраняются, пока вы её не выключите.",
+  "Accent presets": "Готовые акцентные цвета",
+  "Each is easy to read in light and dark.": "Каждый хорошо читается в светлой и тёмной теме.",
+  "Orange": "Оранжевый",
+  "Red": "Красный"
 }
