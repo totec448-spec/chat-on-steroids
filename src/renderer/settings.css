@@ -22,6 +22,14 @@
 .appearance-color input[type='color']::-webkit-color-swatch { border: 1px solid var(--edge); border-radius: 50%; }
 .appearance-color input[type='text'] { width: 8ch; min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--ink); font-family: var(--mono); font-size: calc(12px * var(--text-scale, 1)); }
 .appearance-color input[aria-invalid='true'] { outline: 1px solid var(--red); }
+.appearance-swatches { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.appearance-swatch { width: 24px; height: 24px; padding: 0; border: 1px solid var(--edge); border-radius: 50%; background: var(--swatch); cursor: pointer; }
+.appearance-swatch:hover { box-shadow: 0 0 0 2px var(--hover); }
+.appearance-swatch[aria-checked='true'] { box-shadow: 0 0 0 2px var(--page), 0 0 0 4px var(--swatch); }
+.appearance-swatch:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.appearance-panel .setting :is(input, select):disabled { cursor: not-allowed; opacity: .5; }
+/* Every row high contrast sets aside reads as set aside, not only the checkbox ones. */
+.appearance-panel .setting:has(.appearance-color input:disabled, .appearance-range input:disabled) .setting-text { opacity: .6; }
 .appearance-range { display: flex; align-items: center; gap: 14px; max-width: 100%; }
 .appearance-range input { width: 130px; min-width: 60px; accent-color: var(--accent-fill); }
 .appearance-range output { min-width: 5ch; text-align: right; font-variant-numeric: tabular-nums; font-size: calc(12px * var(--text-scale, 1)); }

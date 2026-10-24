@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { appearanceSchema } from '../src/main/appearance-schema.js';
-import { defaultAppearance, mergeAppearance, paletteTokens, contrastRatio, readableInk } from '../src/shared/appearance.js';
+import { ACCENT_PRESETS, defaultAppearance, effectivePalette, mergeAppearance, paletteTokens, contrastRatio, readableInk } from '../src/shared/appearance.js';
 import { titleBarOverlayForTheme, windowBackgroundForTheme } from '../src/main/window-layout.js';
 
 describe('custom appearance', () => {
@@ -72,5 +72,63 @@ describe('custom appearance', () => {
     appearance.dark.sidebar = '#ffffff'; appearance.dark.background = '#391c56'; appearance.translucentSidebar = false;
     expect(titleBarOverlayForTheme('dark', appearance)).toEqual({ height: 36, color: '#00000000', symbolColor: readableInk('#ffffff') });
     expect(windowBackgroundForTheme('dark', appearance)).toBe('#391c56');
+  });
+});
+
+describe('high contrast and accent presets', () => {
+  it('meets WCAG AA for every preset accent on its own theme: links on the page, labels on the accent fill', () => {
+    expect(ACCENT_PRESETS).toHaveLength(8);
+    expect(new Set(ACCENT_PRESETS.map(preset => preset.id)).size).toBe(8);
+    for (const theme of ['light', 'dark'] as const) {
+      const page = defaultAppearance()[theme].background;
+      for (const preset of ACCENT_PRESETS) {
+        const tokens = paletteTokens(page, preset[theme], defaultAppearance()[theme].contrast);
+        expect(contrastRatio(tokens['--accent']!, page), `${preset.id} ${theme}`).toBeGreaterThanOrEqual(4.5);
+        expect(contrastRatio(tokens['--on-accent']!, preset[theme]), `${preset.id} ${theme} label`).toBeGreaterThanOrEqual(4.5);
+        // The swatch itself must stand out from the page as a control (WCAG 1.4.11).
+        expect(contrastRatio(preset[theme], page), `${preset.id} ${theme} swatch`).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+
+  it('turns a theme into black or white with text at 7:1 and lines at 3:1, whatever colors were chosen', () => {
+    for (const theme of ['light', 'dark'] as const) {
+      const appearance = { ...defaultAppearance(), highContrast: true };
+      appearance[theme] = { background: '#7a5c99', sidebar: '#33aa77', accent: '#ffcc00', contrast: 10 };
+      const palette = effectivePalette(appearance, theme);
+      expect(palette.background).toBe(theme === 'dark' ? '#000000' : '#ffffff');
+      expect(palette.sidebar).toBe(palette.background);
+      const tokens = paletteTokens(palette.background, palette.accent, palette.contrast, true);
+      // On every surface text and lines sit on: the page, cards, popovers and hovered rows.
+      for (const surface of ['--page', '--card', '--popover', '--hover', '--sunk']) {
+        for (const text of ['--ink', '--soft', '--faint', '--accent', '--blue', '--green', '--red']) {
+          expect(contrastRatio(tokens[text]!, tokens[surface]!), `${theme} ${text} on ${surface}`).toBeGreaterThanOrEqual(7);
+        }
+        for (const edge of ['--line', '--edge', '--track', '--accent-edge']) {
+          expect(contrastRatio(tokens[edge]!, tokens[surface]!), `${theme} ${edge} on ${surface}`).toBeGreaterThanOrEqual(3);
+        }
+      }
+      expect(contrastRatio(tokens['--on-accent']!, tokens['--accent-fill']!)).toBeGreaterThanOrEqual(7);
+    }
+  });
+
+  it('leaves the chosen colors alone while high contrast is off, and keeps them for when it is turned off', () => {
+    const appearance = defaultAppearance();
+    expect(effectivePalette(appearance, 'dark')).toEqual(appearance.dark);
+    const on = { ...appearance, highContrast: true };
+    expect(on.dark).toEqual(appearance.dark);
+  });
+
+  it('opens older saves without high contrast and merges it per field', () => {
+    const old: Record<string, unknown> = { ...defaultAppearance() };
+    delete old.highContrast;
+    // Missing stays missing, which means off.
+    expect(appearanceSchema.parse(old).highContrast).toBeUndefined();
+    expect(effectivePalette(appearanceSchema.parse(old), 'dark')).toEqual(defaultAppearance().dark);
+    for (const bad of ['yes', 1, null]) expect(appearanceSchema.parse({ ...old, highContrast: bad }).highContrast).toBe(false);
+    const base = defaultAppearance(), live = { ...defaultAppearance(), highContrast: true };
+    // A stale window saving its font keeps high contrast another window turned on.
+    expect(mergeAppearance(live, base, { ...base, font: 'serif' })).toMatchObject({ highContrast: true, font: 'serif' });
+    expect(mergeAppearance(base, base, live)!.highContrast).toBe(true);
   });
 });
