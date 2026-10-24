@@ -3106,5 +3106,13 @@
   "Hide secrets from ChatGPT off": "Gizli bilgileri ChatGPT'den gizle kapalı",
   "{1}: {0} settings|one": "{1}: {0} ayar",
   "Your settings changed after the file was chosen. Choose it again.": "Dosya seçildikten sonra ayarların değişti. Dosyayı yeniden seç.",
-  "This backup has a setting this version does not accept, so nothing was imported.": "Bu yedekte bu sürümün kabul etmediği bir ayar var, bu yüzden hiçbir şey içe aktarılmadı."
+  "This backup has a setting this version does not accept, so nothing was imported.": "Bu yedekte bu sürümün kabul etmediği bir ayar var, bu yüzden hiçbir şey içe aktarılmadı.",
+  "Three-way view": "Üç yönlü görünüm",
+  "Ask chat to resolve": "Sohbetten çözmesini iste",
+  "Help me resolve the merge conflict in {0}. Read the common base, ours and theirs with git show :1:./{0}, :2:./{0} and :3:./{0}, then write a version that keeps what both sides meant and tell me what you chose. Do not stage or commit it.": "{0} içindeki birleştirme çakışmasını çözmeme yardım et. Ortak tabanı, bizim ve onların sürümünü git show :1:./{0}, :2:./{0} ve :3:./{0} ile oku, sonra iki tarafın amacını koruyan bir sürüm yaz ve neyi seçtiğini söyle. Stage etme ve commit etme.",
+  "Ours (HEAD)": "Bizimki (HEAD)",
+  "Common base": "Ortak taban",
+  "Theirs (incoming)": "Onlarınki (gelen)",
+  "Not in this version": "Bu sürümde yok",
+  "Start or cancel the prepared plan first, then ask again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden isteyin."
 }

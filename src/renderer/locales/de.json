@@ -3106,5 +3106,13 @@
   "Hide secrets from ChatGPT off": "Geheimnisse vor ChatGPT verbergen aus",
   "{1}: {0} settings|one": "{1}: {0} Einstellung",
   "Your settings changed after the file was chosen. Choose it again.": "Deine Einstellungen haben sich geändert, nachdem die Datei gewählt wurde. Wähle sie erneut.",
-  "This backup has a setting this version does not accept, so nothing was imported.": "Diese Sicherung enthält eine Einstellung, die diese Version nicht annimmt, daher wurde nichts importiert."
+  "This backup has a setting this version does not accept, so nothing was imported.": "Diese Sicherung enthält eine Einstellung, die diese Version nicht annimmt, daher wurde nichts importiert.",
+  "Three-way view": "Dreiwege-Ansicht",
+  "Ask chat to resolve": "Chat um Lösung bitten",
+  "Help me resolve the merge conflict in {0}. Read the common base, ours and theirs with git show :1:./{0}, :2:./{0} and :3:./{0}, then write a version that keeps what both sides meant and tell me what you chose. Do not stage or commit it.": "Hilf mir, den Merge-Konflikt in {0} zu lösen. Lies die gemeinsame Basis, unsere und ihre Version mit git show :1:./{0}, :2:./{0} und :3:./{0}, schreibe dann eine Fassung, die die Absicht beider Seiten bewahrt, und sag mir, wofür du dich entschieden hast. Nicht stagen oder committen.",
+  "Ours (HEAD)": "Unsere (HEAD)",
+  "Common base": "Gemeinsame Basis",
+  "Theirs (incoming)": "Ihre (eingehend)",
+  "Not in this version": "Nicht in dieser Version",
+  "Start or cancel the prepared plan first, then ask again.": "Starte oder verwirf zuerst den vorbereiteten Plan und frage dann erneut."
 }

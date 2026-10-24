@@ -3216,5 +3216,13 @@
   "{1}: {0} settings|few": "{1}: {0} настройки",
   "{1}: {0} settings|many": "{1}: {0} настроек",
   "Your settings changed after the file was chosen. Choose it again.": "Настройки изменились после выбора файла. Выберите его снова.",
-  "This backup has a setting this version does not accept, so nothing was imported.": "В этой резервной копии есть настройка, которую эта версия не принимает, поэтому ничего не импортировано."
+  "This backup has a setting this version does not accept, so nothing was imported.": "В этой резервной копии есть настройка, которую эта версия не принимает, поэтому ничего не импортировано.",
+  "Three-way view": "Трёхстороннее сравнение",
+  "Ask chat to resolve": "Попросить чат разрешить",
+  "Help me resolve the merge conflict in {0}. Read the common base, ours and theirs with git show :1:./{0}, :2:./{0} and :3:./{0}, then write a version that keeps what both sides meant and tell me what you chose. Do not stage or commit it.": "Помоги разрешить конфликт слияния в {0}. Прочитай общую базу, нашу и их версии через git show :1:./{0}, :2:./{0} и :3:./{0}, затем напиши версию, которая сохраняет замысел обеих сторон, и расскажи, что ты выбрал. Не индексируй и не коммить её.",
+  "Ours (HEAD)": "Наша (HEAD)",
+  "Common base": "Общая база",
+  "Theirs (incoming)": "Их (входящая)",
+  "Not in this version": "Нет в этой версии",
+  "Start or cancel the prepared plan first, then ask again.": "Сначала запустите или отмените подготовленный план, затем повторите запрос."
 }
