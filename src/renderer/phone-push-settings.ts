@@ -81,7 +81,7 @@ export function applyPhonePush(state: AppState): void {
   alignFieldButtons();
   $('phonePushTokenStatus').textContent = state.hasPhonePushToken
     ? t('A token is saved. Save an empty field to remove it.')
-    : t("Only for a server or topic that needs one. Kept in this computer's secure storage.");
+    : t('Only if your server needs one. Kept in secure storage.');
 }
 
 /**
@@ -110,7 +110,7 @@ function quietLabel(from: string, to: string): string {
   return `${clock(from)} – ${clock(to)}`;
 }
 
-export function initPhonePushSettings(api: Pick<AppApi, 'testPhonePush' | 'setPhonePushToken'>, hooks: {
+export function initPhonePushSettings(api: Pick<AppApi, 'testPhonePush' | 'setPhonePushToken' | 'writeClipboard'>, hooks: {
   save(): Promise<boolean>; applied(state: AppState): void; toast(message: string): void;
 }): void {
   for (const option of $<HTMLSelectElement>('phonePushQuiet').options) {
@@ -125,6 +125,14 @@ export function initPhonePushSettings(api: Pick<AppApi, 'testPhonePush' | 'setPh
     alignFieldButtons();
   });
   onLanguageChange(alignFieldButtons);
+  // Server, token and a new topic are rarely needed with ntfy.sh; they wait behind Advanced.
+  $('phonePushAdvanced').addEventListener('toggle', alignFieldButtons);
+  $('phonePushCopyTopic').addEventListener('click', async () => {
+    const topic = $<HTMLInputElement>('phonePushTopic').value.trim();
+    if (!topic) return;
+    const reply = await api.writeClipboard(topic);
+    hooks.toast(reply.ok ? t('Topic copied') : t(reply.error));
+  });
   $('phonePushServerDefault').addEventListener('click', () => {
     const server = $<HTMLInputElement>('phonePushServer');
     if (server.value.trim() === DEFAULT_PHONE_PUSH.server) return;

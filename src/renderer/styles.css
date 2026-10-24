@@ -3441,6 +3441,14 @@ input.num:disabled { opacity: .5; cursor: default; }
 .phone-push-field .phone-push-control { display: flex; flex: 1 1 280px; gap: 8px; min-width: 0; }
 .phone-push-control input { flex: 1 1 auto; min-width: 0; }
 .phone-push-control .btn { flex: 0 0 auto; justify-content: flex-end; text-align: end; }
+.phone-push-advanced { border-top: 1px solid var(--line); }
+.phone-push-advanced > summary { display: flex; align-items: center; gap: 6px; width: fit-content; padding: 12px 2px; cursor: pointer; color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); list-style: none; }
+.phone-push-advanced > summary::-webkit-details-marker { display: none; }
+.phone-push-advanced > summary:hover { color: var(--ink); }
+.phone-push-advanced[open] .sum-chev { transform: rotate(90deg); }
+/* The chevron's glyph sits 5px inside its box; its ink starts on the rows' text edge. */
+.phone-push-advanced > summary .sum-chev { margin-left: -5px; }
+.phone-push-advanced > .setting:first-of-type { border-top: 1px solid var(--line); }
 
 /* Inside a settings row the switch is one of several controls, not the thing the
    row pushes to the far end. */

@@ -62,7 +62,10 @@ app.whenReady().then(async () => {
     for (const [width, height, zoom] of language === 'en' || language === 'de' || language === 'ru' ? [[1100, 900, 1], [720, 900, 1], [1100, 900, 1.5]] : [[1100, 900, 1]]) {
       win.setContentSize(width, height); win.webContents.setZoomFactor(zoom);
       await new Promise(r => setTimeout(r, 120));
-      const tag = `${language}-${width}${zoom === 1 ? '' : '-zoom'}`;
+      for (const advanced of [false, true]) {
+      const tag = `${language}-${width}${zoom === 1 ? '' : '-zoom'}${advanced ? '-advanced' : ''}`;
+      // Server, token and a new topic wait behind Advanced; both states are measured.
+      await win.webContents.executeJavaScript(`document.getElementById('phonePushAdvanced').open = ${advanced}; true`);
       await win.webContents.executeJavaScript(`phone.setLanguage(${JSON.stringify(language)}); true`);
       // The page reflows after a zoom or size change; the app aligns on the next state push, as here.
       await win.webContents.executeJavaScript(`phone.applyPhonePush(window.fixtureState); true`);
@@ -81,6 +84,8 @@ app.whenReady().then(async () => {
         // or the picture shows the top of the page instead of this section.
         await win.webContents.executeJavaScript('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 50))))');
         fs.writeFileSync(path.join(output, `phone-${tag}.png`), (await win.webContents.capturePage(result.box)).toPNG());
+      }
+      if (advanced) assert.equal(result.inputLefts.length === 1 && result.fieldRights.length === 1, true, 'all three fields on one grid ' + tag);
       }
     }
   }

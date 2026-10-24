@@ -4596,6 +4596,18 @@ describe('phone notifications in Settings', () => {
       finishedAfterMinutes: 5, onlyWhenAway: true, quietHours: null, includeDetails: false });
   });
 
+  it('shows the essentials first and keeps server, token and a new topic behind Advanced; Copy copies the topic', async () => {
+    const writeClipboard = vi.fn(async () => ({ ok: true, data: true }));
+    const mounted = await withPhone(phone(), { writeClipboard });
+    const doc = mounted.window.document;
+    const advanced = doc.getElementById('phonePushAdvanced') as HTMLDetailsElement;
+    expect(advanced.open).toBe(false);
+    for (const id of ['phonePushServer', 'phonePushToken', 'phonePushNewTopic']) expect(advanced.contains(doc.getElementById(id))).toBe(true);
+    for (const id of ['phonePushTopic', 'phonePushCopyTopic', 'phonePushTest', 'phonePushDetails']) expect(advanced.contains(doc.getElementById(id))).toBe(false);
+    (doc.getElementById('phonePushCopyTopic') as HTMLButtonElement).click();
+    await waitFor(() => expect(writeClipboard).toHaveBeenCalledWith('cos-fixturetopic234567'));
+  });
+
   it('saves when a chat counts as finished, quiet hours shown in local time, and the details switch', async () => {
     const mounted = await withPhone(phone());
     const doc = mounted.window.document;
@@ -4683,6 +4695,6 @@ describe('phone notifications in Settings', () => {
     expect(doc.getElementById('phonePushTokenStatus')!.textContent).toBe('A token is saved. Save an empty field to remove it.');
     (doc.getElementById('phonePushTokenSave') as HTMLButtonElement).click();
     await waitFor(() => expect(setPhonePushToken).toHaveBeenLastCalledWith(''));
-    await waitFor(() => expect(doc.getElementById('phonePushTokenStatus')!.textContent).toMatch(/^Only for a server or topic/));
+    await waitFor(() => expect(doc.getElementById('phonePushTokenStatus')!.textContent).toMatch(/^Only if your server needs one/));
   });
 });
