@@ -55,6 +55,8 @@ export function selectedText(range: Range): string {
     const { visible, verbatim } = look(math ?? parent);
     if (!visible) continue;
     const data = node.data.slice(node === range.startContainer ? range.startOffset : 0, node === range.endContainer ? range.endOffset : undefined);
+    // The range only touches this node's edge, as a triple-click ending at offset 0 of the next paragraph does: none of it is selected.
+    if (!data && node.data) continue;
     if (!verbatim && !math && !data.trim()) { if (text && !/\s$/.test(text)) text += ' '; continue; }
     const owner = parent.closest(BLOCK);
     if (block !== undefined && owner !== block) {

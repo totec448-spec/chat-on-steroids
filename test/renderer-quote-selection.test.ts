@@ -92,6 +92,24 @@ it('keeps a line break the message draws with <br>', async () => {
   expect(selectedText(range)).toBe('Roses are red,\nviolets are blue,\nsugar is sweet');
 });
 
+it('leaves out a formula the range only touches the start of, as a triple-click ends on the next paragraph', async () => {
+  const { selectedText } = await import('../src/renderer/quote-selection.js');
+  const box = document.createElement('div');
+  box.className = 'said';
+  box.innerHTML = '<div class="msg rich"><p>First paragraph.</p><p><span class="katex"><span class="katex-mathml"><math><semantics><mrow><mi>x</mi></mrow><annotation encoding="application/x-tex">x</annotation></semantics></math></span>' +
+    '<span class="katex-html" aria-hidden="true">x</span></span> comes next.</p></div>';
+  document.getElementById('timeline')!.append(box);
+  const [first, second] = box.querySelectorAll('p');
+  // Chromium ends a triple-click at offset 0 of the next paragraph's first text node.
+  const range = document.createRange();
+  range.setStart(first!.firstChild!, 0);
+  range.setEnd(second!.querySelector('mi')!.firstChild!, 0);
+  expect(selectedText(range)).toBe('First paragraph.');
+  // A selection that really reaches into the formula still quotes it.
+  range.setEnd(second!.lastChild!, 5);
+  expect(selectedText(range)).toBe('First paragraph.\n\n$x$ come');
+});
+
 it('quotes the words selected in an answer into the composer, after what is typed, without sending', async () => {
   const { initQuoteSelection } = await import('../src/renderer/quote-selection.js');
   const input = document.getElementById('chatInput') as HTMLTextAreaElement;
