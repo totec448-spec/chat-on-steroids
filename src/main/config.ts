@@ -300,6 +300,9 @@ const commandAllowlistRuleSchema = z.string().max(MAX_COMMAND_ALLOWLIST_RULE_CHA
   if (message) ctx.addIssue({ code: 'custom', message });
 });
 
+/** The damaged phone server is said once per start: the schema runs on every config read. */
+let damagedPhoneServerLogged = false;
+
 const configSchema = z.object({
   // A config written by hand — or by a build before `/skills` was reserved — must not be
   // able to claim a reserved virtual root. Renamed rather than rejected: a single bad root
@@ -392,7 +395,10 @@ const configSchema = z.object({
     phonePush: z.preprocess(raw => {
       if (!raw || typeof raw !== 'object' || !('server' in raw)) return raw;
       const server = (raw as { server: unknown }).server;
-      return typeof server === 'string' && server.length <= 2048 ? raw : { ...raw, enabled: false, server: '' };
+      if (typeof server === 'string' && server.length <= 2048) return raw;
+      // Said once per start, never with the value: it may be anything a hand edit left there.
+      if (!damagedPhoneServerLogged) { damagedPhoneServerLogged = true; logWarn('phone notifications: the saved server setting was damaged, so they are off until a server is chosen again'); }
+      return { ...raw, enabled: false, server: '' };
     }, z.object({
       enabled: z.boolean().catch(false),
       server: z.string().max(2048).optional().default(DEFAULT_PHONE_PUSH.server).catch(''),

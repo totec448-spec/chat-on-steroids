@@ -1173,7 +1173,6 @@
   "{0} problems": "{0} 个问题",
   "{0} total · {1} folder": "共 {0} 个 · {1} 个文件夹",
   "{0} total · {1} folders": "共 {0} 个 · {1} 个文件夹",
-  "{0} / {1} tokens · {2}% of configured limit": "{0}／{1} Token · 占设定上限的 {2}%",
   "The recording does not include this source URL": "记录中未包含此来源的 URL",
   "[source link unavailable]": "[来源链接不可用]",
   " at {0}": "，时间 {0}",
@@ -1768,7 +1767,6 @@
   "This reply points to content from another message that was not recorded.": "此回复指向另一条消息中未被记录的内容。",
   "Use effort: {0}": "使用此强度：{0}",
   "This chat (estimate)": "此对话（估算）",
-  "Context limit": "上下文上限",
   "Filled": "已用",
   "Compacts automatically at": "自动压缩起点",
   "A chat stopped": "一个聊天已停止",
@@ -3057,5 +3055,16 @@
   "Whole session as HTML": "整个会话（HTML）",
   "HTML files": "HTML 文件",
   "Play sounds": "播放提示音",
-  "A short sound when a chat needs you, something fails, or a chat finishes in the background. Quiet during phone notifications' quiet hours.": "当聊天需要你、某项操作失败，或聊天在后台完成时，播放一声简短的提示音。在手机通知的免打扰时段内静音。"
+  "A short sound when a chat needs you, something fails, or a chat finishes in the background. Quiet during phone notifications' quiet hours.": "当聊天需要你、某项操作失败，或聊天在后台完成时，播放一声简短的提示音。在手机通知的免打扰时段内静音。",
+  "{0} / {1} tokens · {2}% of the compaction point": "{0}／{1} Token · 占压缩起点的 {2}%",
+  "{0} / {1} tokens · {2}% of the large-chat warning": "{0}／{1} Token · 占大聊天警告值的 {2}%",
+  "Large-chat warning at": "大聊天警告起点",
+  "Three-way view": "三方视图",
+  "Ask chat to resolve": "让聊天帮忙解决",
+  "Help me resolve the merge conflict in {0}. Read the common base, ours and theirs with git show :1:./{0}, :2:./{0} and :3:./{0}, then write a version that keeps what both sides meant and tell me what you chose. Do not stage or commit it.": "请帮我解决 {0} 中的合并冲突。用 git show :1:./{0}, :2:./{0} 和 :3:./{0} 读取共同基础、我方和对方的版本，然后写出一个保留双方意图的版本，并告诉我你做了哪些选择。不要暂存或提交。",
+  "Ours (HEAD)": "我方 (HEAD)",
+  "Common base": "共同基础",
+  "Theirs (incoming)": "对方 (传入)",
+  "Not in this version": "此版本中不存在",
+  "Start or cancel the prepared plan first, then ask again.": "请先开始或取消已准备好的计划，然后再试一次。"
 }
