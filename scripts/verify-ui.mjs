@@ -3,11 +3,14 @@
 // These checks render the production renderer in isolated windows and fixtures; none touches the
 // installed app, its data or ChatGPT. They are not part of `npm test`, which is why they rotted
 // unnoticed before. Run after `npm run build`:  npm run verify:ui [-- name-filter]
+// A check that loads the build (out/) fails at once, with the reason, when there is no build or
+// it is older than src/; it used to wait out its timeout, or pass against old code.
 import { spawn } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { buildProblem, needsBuild } from './ui-build-state.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const electron = createRequire(import.meta.url)('electron');
@@ -49,6 +52,15 @@ const reasonFor = outcome => {
 };
 for (const name of scripts) {
   if (skip.has(name)) { console.log(`SKIP  ${name}  (needs a real GPU and display timing; run it locally)`); continue; }
+  if (needsBuild(readFileSync(path.join(root, 'scripts', name), 'utf8'))) {
+    // Looked at again before each such check: src/ can change while an earlier check runs.
+    const problem = buildProblem(root);
+    if (problem) {
+      results.push({ name, ok: false, seconds: 0 });
+      console.log(`FAIL  ${name}  (0s)\n      it loads the built app, but ${problem}`);
+      continue;
+    }
+  }
   // The app starts in the system language on a first start. Checks assert English text, so pin the
   // locale; otherwise they fail on any machine whose system language the app also speaks.
   const how = special[name] ?? { command: electron, args: ['--lang=en-US'] };

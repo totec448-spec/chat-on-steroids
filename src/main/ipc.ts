@@ -767,10 +767,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // stored value (hand-edited, or from an older version) must not block every other save, nor the
     // save that repairs it or switches it off.
     const push = request.patch.ui.phonePush;
-    if (push && JSON.stringify(push) !== JSON.stringify(request.base.ui.phonePush)) {
-      const problem = phonePushProblem(push);
-      if (problem) throw new Error(problem);
-    }
+    const phoneChanged = !!push && JSON.stringify(push) !== JSON.stringify(request.base.ui.phonePush);
     const before = getConfig();
     const next = await updateConfig(async config => {
       if (request.patch.ui.browserBridgePort !== undefined &&
@@ -779,6 +776,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         throw new Error('Browser bridge port is controlled by CLF_BRIDGE_PORTS.');
       }
       const proposed = { ...config, ...mergeSettings(config, request.base, request.patch) };
+      // Checked as it will be saved: the form may be stale, and the merge keeps fields another
+      // window changed meanwhile (a cleared topic stays cleared while this save turns it on).
+      if (phoneChanged && proposed.ui.phonePush) {
+        const problem = phonePushProblem(proposed.ui.phonePush);
+        if (problem) {
+          logWarn(`settings save refused: ${problem}`);
+          throw new Error(problem);
+        }
+      }
       // If an earlier Off retirement failed, On must retry it before admission.
       if (!config.ui.finishTool && proposed.ui.finishTool) await cancelFinishInputs(false);
       else if (!config.goal.impulseMinutes && (proposed.goal.impulseMinutes ?? 0) > 0) await cancelFinishInputs(true);

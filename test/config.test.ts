@@ -189,6 +189,11 @@ describe('settings migration', () => {
       // Chat details must never go to a server nobody chose: off, and no server at all.
       expect((await loadConfig()).ui.phonePush, String(server).slice(0, 8)).toMatchObject({ enabled: false, server: '', topic: phone.topic, includeDetails: true });
     }
+    // Said in the log, once, and never with the damaged value.
+    const { getLog } = await import('../src/main/logger.js');
+    const lines = getLog().filter(entry => entry.message.startsWith('phone notifications: the saved server setting was damaged'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.message).not.toContain('xxxx');
     // A missing server is the default, as before.
     const { server: _server, ...withoutServer } = phone;
     await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...defaultConfig(), ui: { ...defaultConfig().ui, phonePush: withoutServer } }), 'utf8');

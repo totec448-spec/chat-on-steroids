@@ -1069,7 +1069,6 @@
   "{0} problems": "문제 {0}개",
   "{0} total · {1} folder": "총 {0}개 · 폴더 {1}개",
   "{0} total · {1} folders": "총 {0}개 · 폴더 {1}개",
-  "{0} / {1} tokens · {2}% of configured limit": "{0} / {1} 토큰 · 설정 한도의 {2}%",
   "The recording does not include this source URL": "기록에 이 소스 URL이 포함되어 있지 않습니다",
   "[source link unavailable]": "[소스 링크를 사용할 수 없음]",
   " at {0}": " {0}에",
@@ -1768,7 +1767,6 @@
   "This reply points to content from another message that was not recorded.": "이 응답이 기록되지 않은 다른 메시지의 내용을 참조하고 있습니다.",
   "Use effort: {0}": "이 강도 사용: {0}",
   "This chat (estimate)": "이 채팅(추정)",
-  "Context limit": "컨텍스트 한도",
   "Filled": "사용률",
   "Compacts automatically at": "자동 압축 시작",
   "A chat stopped": "채팅이 멈췄습니다",
@@ -3057,5 +3055,16 @@
   "Whole session as HTML": "전체 세션을 HTML로",
   "HTML files": "HTML 파일",
   "Play sounds": "소리 재생",
-  "A short sound when a chat needs you, something fails, or a chat finishes in the background. Quiet during phone notifications' quiet hours.": "채팅이 나를 필요로 할 때, 무언가 실패했을 때, 또는 백그라운드에서 채팅이 끝났을 때 짧은 소리를 냅니다. 휴대폰 알림의 방해 금지 시간에는 울리지 않습니다."
+  "A short sound when a chat needs you, something fails, or a chat finishes in the background. Quiet during phone notifications' quiet hours.": "채팅이 나를 필요로 할 때, 무언가 실패했을 때, 또는 백그라운드에서 채팅이 끝났을 때 짧은 소리를 냅니다. 휴대폰 알림의 방해 금지 시간에는 울리지 않습니다.",
+  "{0} / {1} tokens · {2}% of the compaction point": "{0} / {1} 토큰 · 압축 시작점의 {2}%",
+  "{0} / {1} tokens · {2}% of the large-chat warning": "{0} / {1} 토큰 · 큰 채팅 경고 기준의 {2}%",
+  "Large-chat warning at": "큰 채팅 경고 기준",
+  "Three-way view": "3방향 보기",
+  "Ask chat to resolve": "채팅에 해결 요청",
+  "Help me resolve the merge conflict in {0}. Read the common base, ours and theirs with git show :1:./{0}, :2:./{0} and :3:./{0}, then write a version that keeps what both sides meant and tell me what you chose. Do not stage or commit it.": "{0}의 병합 충돌 해결을 도와주세요. git show :1:./{0}, :2:./{0}, :3:./{0}로 공통 기준, 우리 쪽, 상대 쪽을 읽고 양쪽의 의도를 살린 버전을 작성한 뒤 무엇을 선택했는지 알려 주세요. 스테이징하거나 커밋하지 마세요.",
+  "Ours (HEAD)": "우리 쪽 (HEAD)",
+  "Common base": "공통 기준",
+  "Theirs (incoming)": "상대 쪽 (들어오는 쪽)",
+  "Not in this version": "이 버전에는 없음",
+  "Start or cancel the prepared plan first, then ask again.": "먼저 준비된 계획을 시작하거나 취소한 다음 다시 요청하세요."
 }
