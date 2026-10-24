@@ -3,8 +3,9 @@ import { currentLanguage, onLanguageChange, t, tn } from './i18n.js';
 
 /**
  * Share a chat as a web page. The dialog always shows the page before anything is saved, in a frame
- * that runs nothing; "Hide personal details" is off unless the person turns it on, and then says how
- * many details it hid. Save writes the page shown, not a newer one: main keeps it by its preview id.
+ * that runs nothing. Keys and tokens are always hidden; "Hide personal details" (off unless turned on)
+ * also hides email addresses and user names, and a line says how many details the page hides. Save
+ * writes the page shown, not a newer one: main keeps it by its preview id.
  */
 export function initSharePage(api: Pick<AppApi, 'sharePage'>, saved: (name: string) => void): { open(sessionId: string): void } {
   const dialog = document.getElementById('sharePageDialog') as HTMLDialogElement;
@@ -13,7 +14,7 @@ export function initSharePage(api: Pick<AppApi, 'sharePage'>, saved: (name: stri
   const frame = document.getElementById('sharePageFrame') as HTMLIFrameElement;
   const loading = document.getElementById('sharePageLoading')!;
   const hide = document.getElementById('sharePageHide') as HTMLInputElement;
-  const note = document.getElementById('sharePageHideNote')!;
+  const count = document.getElementById('sharePageCount')!;
   const error = document.getElementById('sharePageError')!;
   const save = document.getElementById('sharePageSave') as HTMLButtonElement;
   let sessionId = '';
@@ -22,12 +23,13 @@ export function initSharePage(api: Pick<AppApi, 'sharePage'>, saved: (name: stri
   let generation = 0;
   let saving = false;
 
+  // How many details the page shown hides; with the switch on and none found, it says so.
   const paintNote = () => {
-    note.textContent = !hide.checked || !shown
-      ? t('Keys and passwords, email addresses and user names in folder paths show as “hidden”.')
-      : shown.hidden
-        ? tn('{0} detail is hidden on this page.', '{0} details are hidden on this page.', shown.hidden)
-        : t('Nothing to hide was found in this chat.');
+    const text = !shown ? '' : shown.hidden
+      ? tn('{0} detail is hidden on this page.', '{0} details are hidden on this page.', shown.hidden)
+      : hide.checked ? t('Nothing to hide was found in this chat.') : '';
+    count.hidden = !text;
+    count.textContent = text;
   };
   const showError = (message: string | null) => {
     error.hidden = !message;

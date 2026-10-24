@@ -1338,7 +1338,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
 
   // Copy or save a completed turn's answer, or the session transcript, as Markdown. Main reads
-  // the full text of answers that were cut in the log, so neither comes out truncated.
+  // the full text of answers that were cut in the log, so neither comes out truncated. A whole
+  // chat as a web page goes through sessions:sharePage, which previews it first.
   handle('sessions:exportMarkdown', async (payload) => {
     const request = z.object({
       id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),

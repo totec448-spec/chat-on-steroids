@@ -5754,7 +5754,7 @@ it('uses a playful work word when it is turned on in Settings', async () => {
   expect(w.document.getElementById('chatState')!.textContent).toMatch(PLAYFUL_WORDS);
 });
 
-it('offers copy and Markdown export under the answer of a completed turn only', async () => {
+it('offers copy and Markdown or HTML export under the answer of a completed turn only', async () => {
   const ask: SessionEvent = { kind: 'user_message', seq: 1, origin: 1, time: T0, source: 'extension', turnId: 'done-turn', messageId: 'ask', message: text('Write hello.txt') };
   const reply: SessionEvent = { kind: 'assistant_message', seq: 2, time: T0 + 1_000, source: 'extension', turnId: 'done-turn', messageId: 'reply', message: text('Created **hello.txt**.'), final: true, state: 'final' };
   const { w, append } = await boot([ask, reply]);
@@ -5774,9 +5774,21 @@ it('offers copy and Markdown export under the answer of a completed turn only', 
 
   api.exportMarkdown = vi.fn(async () => ({ ok: true, data: { done: 'saved', name: 'chat.md' } }));
   const choices = [...actions!.querySelectorAll<HTMLButtonElement>('.answer-export-choice')];
-  expect(choices.map(choice => choice.textContent)).toEqual(['This answer', 'Whole session']);
+  expect(choices.map(choice => choice.textContent)).toEqual(['This answer', 'Whole session', 'Whole session as HTML']);
+  // Choosing closes the menu and takes the choice off the screen; focus goes back to the Export button, not the page.
+  actions!.querySelector<HTMLDetailsElement>('details.answer-export')!.open = true;
+  choices[1]!.focus();
   choices[1]!.click(); await settle();
+  expect(actions!.querySelector<HTMLDetailsElement>('details.answer-export')!.open).toBe(false);
+  expect(w.document.activeElement).toBe(actions!.querySelector('details.answer-export > summary'));
   expect(api.exportMarkdown).toHaveBeenCalledWith({ id: summary([]).id, scope: 'session', turnId: undefined, target: 'file' });
+  // A web page is always previewed first: the choice opens Share's dialog and saves nothing by itself.
+  const calls = api.exportMarkdown.mock.calls.length;
+  api.sharePage = vi.fn(async () => ({ ok: true, data: { done: 'preview', preview: '00000000-0000-4000-8000-000000000000', html: '<html><head></head></html>', hidden: 0 } }));
+  choices[2]!.click(); await settle();
+  expect(w.document.querySelector<HTMLDialogElement>('#sharePageDialog')!.open).toBe(true);
+  expect(api.sharePage).toHaveBeenCalledWith({ id: summary([]).id, target: 'preview', hide: false, lang: 'en' });
+  expect(api.exportMarkdown.mock.calls.length).toBe(calls);
 });
 
 it('does not offer copy or export after an interrupted turn', async () => {

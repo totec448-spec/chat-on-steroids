@@ -6,10 +6,10 @@ const electron = vi.hoisted(() => ({
   app: { getPath: vi.fn(() => '/downloads') }
 }));
 const store = vi.hoisted(() => ({ getSession: vi.fn(), readEvents: vi.fn(), readOverflowText: vi.fn() }));
-const files = vi.hoisted(() => ({ writeFile: vi.fn(async () => undefined) }));
+const files = vi.hoisted(() => ({ replaceFile: vi.fn(async () => undefined) }));
 vi.mock('electron', () => electron);
 vi.mock('../src/main/session/store.js', () => store);
-vi.mock('node:fs', () => ({ promises: files }));
+vi.mock('../src/main/replace-file.js', () => files);
 
 const { exportSessionPage } = await import('../src/main/session/page-export.js');
 const { setMainTextTranslations } = await import('../src/main/main-texts.js');
@@ -23,56 +23,65 @@ beforeEach(() => {
   setMainTextTranslations({});
   store.getSession.mockResolvedValue({ id: 'session-1', title: 'Mail ana@example.com' });
   store.readEvents.mockResolvedValue([
-    said(1, 'user_message', 'Fix /Users/ana/app'),
+    said(1, 'user_message', 'Fix /Users/ana/app with sk-proj-abcdefghijklmnopqrstuvwx'),
     said(2, 'assistant_message', 'The first part', { message: { text: 'The first part', truncated: true, chars: 40, assetId: 'abcdef12.txt' } }),
     said(3, 'assistant_message', 'still writing', { final: false, state: 'streaming' })
   ]);
-  store.readOverflowText.mockResolvedValue('The first part, and **the rest**.');
+  store.readOverflowText.mockResolvedValue('The first part, and **the rest** <b>bold</b>.');
 });
 
-const preview = (hide: boolean) => exportSessionPage({ id: 'session-1', target: 'preview', hide, lang: 'en' }, null);
-
-it('previews the whole chat: what was cut in the log is read back, an unfinished answer is left out', async () => {
-  const result = await preview(false);
+const preview = async (hide: boolean, lang = 'en') => {
+  const result = await exportSessionPage({ id: 'session-1', target: 'preview', hide, lang }, null);
   if (result.done !== 'preview') throw new Error(result.done);
-  expect(result.html).toContain('Fix /Users/ana/app');
-  expect(result.html).toContain('The first part, and <strong>the rest</strong>.');
+  return result;
+};
+
+it('previews the whole chat, keys always hidden: what was cut in the log is read back, an unfinished answer is left out', async () => {
+  const result = await preview(false);
+  expect(result.html).toContain('Fix /Users/ana/app with <span class="hidden">hidden</span>');
+  expect(result.html).not.toContain('sk-proj-');
+  expect(result.html).toContain('The first part, and <strong>the rest</strong> &lt;b&gt;bold&lt;/b&gt;.');
   expect(result.html).not.toContain('still writing');
-  expect(result.hidden).toBe(0);
+  expect(result.hidden).toBe(1);
   expect(store.readOverflowText).toHaveBeenCalledWith('session-1', 'abcdef12.txt');
 });
 
-it('saves exactly the page that was previewed, even if the chat went on meanwhile', async () => {
+it('also hides email addresses and user names in folder paths when asked, and counts every hidden detail', async () => {
+  const result = await preview(true);
+  expect(result.html).not.toMatch(/ana@|\/Users\/ana|sk-proj-/);
+  expect(result.html).toContain('<title>Mail hidden</title>');
+  expect(result.hidden).toBe(3);
+});
+
+it('saves exactly the page that was previewed, even if the chat went on meanwhile, and asks before replacing a file', async () => {
   const shown = await preview(true);
-  if (shown.done !== 'preview') throw new Error(shown.done);
-  expect(shown.hidden).toBe(2);
   store.readEvents.mockResolvedValue([said(1, 'user_message', 'Something new')]);
   electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/page.html' });
   await expect(exportSessionPage({ id: 'session-1', target: 'file', preview: shown.preview }, null)).resolves.toEqual({ done: 'saved', name: 'page.html' });
-  expect(files.writeFile).toHaveBeenCalledWith('/downloads/page.html', shown.html, 'utf8');
+  expect(files.replaceFile).toHaveBeenCalledWith('/downloads/page.html', shown.html, 'HTML export');
+  const options = electron.dialog.showSaveDialog.mock.calls[0]![0] as { defaultPath: string; filters: unknown; properties: string[] };
   // The hidden email address is not in the suggested file name either.
-  const options = electron.dialog.showSaveDialog.mock.calls[0]![0] as { defaultPath: string; filters: unknown };
   expect(options.defaultPath).toMatch(/Mail hidden\.html$/);
-  expect(options.filters).toEqual([{ name: 'Web pages', extensions: ['html'] }]);
+  expect(options.filters).toEqual([{ name: 'HTML files', extensions: ['html'] }]);
+  expect(options.properties).toContain('showOverwriteConfirmation');
+});
+
+it('keeps a key out of the suggested file name even with personal details shown', async () => {
+  store.getSession.mockResolvedValue({ id: 'session-1', title: 'Rotate sk-proj-abcdefghijklmnopqrstuvwx' });
+  const shown = await preview(false);
+  electron.dialog.showSaveDialog.mockResolvedValue({ canceled: true });
+  await expect(exportSessionPage({ id: 'session-1', target: 'file', preview: shown.preview }, null)).resolves.toEqual({ done: 'cancelled' });
+  expect((electron.dialog.showSaveDialog.mock.calls[0]![0] as { defaultPath: string }).defaultPath).toMatch(/Rotate hidden\.html$/);
+  expect(files.replaceFile).not.toHaveBeenCalled();
 });
 
 it('refuses to save a page that was not the last one shown', async () => {
   const first = await preview(false);
   await preview(true);
-  if (first.done !== 'preview') throw new Error(first.done);
   await expect(exportSessionPage({ id: 'session-1', target: 'file', preview: first.preview }, null)).rejects.toThrow('The preview is out of date');
   const last = await preview(false);
-  if (last.done !== 'preview') throw new Error(last.done);
   await expect(exportSessionPage({ id: 'other-session', target: 'file', preview: last.preview }, null)).rejects.toThrow('The preview is out of date');
   expect(electron.dialog.showSaveDialog).not.toHaveBeenCalled();
-});
-
-it('writes nothing when the save dialog is cancelled', async () => {
-  const shown = await preview(false);
-  if (shown.done !== 'preview') throw new Error(shown.done);
-  electron.dialog.showSaveDialog.mockResolvedValue({ canceled: true });
-  await expect(exportSessionPage({ id: 'session-1', target: 'file', preview: shown.preview }, null)).resolves.toEqual({ done: 'cancelled' });
-  expect(files.writeFile).not.toHaveBeenCalled();
 });
 
 it('says a chat with nothing said yet has nothing to share', async () => {
@@ -81,12 +90,13 @@ it('says a chat with nothing said yet has nothing to share', async () => {
 });
 
 it('labels the page in the interface language and names an untitled chat like the app does', async () => {
-  setMainTextTranslations({ You: 'Du', 'New chat': 'Neuer Chat', 'Shared from Chat On Steroids': 'Geteilt aus Chat On Steroids' });
+  setMainTextTranslations({ You: 'Du', 'New chat': 'Neuer Chat', hidden: 'ausgeblendet', 'Shared from Chat On Steroids': 'Geteilt aus Chat On Steroids' });
   store.getSession.mockResolvedValue({ id: 'session-1', title: '  ' });
-  const result = await exportSessionPage({ id: 'session-1', target: 'preview', hide: false, lang: 'de' }, null);
-  if (result.done !== 'preview') throw new Error(result.done);
+  const result = await preview(false, 'de');
   expect(result.html).toContain('<html lang="de">');
   expect(result.html).toContain('<title>Neuer Chat</title>');
-  expect(result.html).toContain('<div class="who">Du</div>');
+  expect(result.html).toContain('<h2>Du</h2>');
+  expect(result.html).toContain('<span class="hidden">ausgeblendet</span>');
+  expect(result.html).toMatch(/<p class="date">\d{1,2}\. \S+ \d{4}<\/p>/);
   expect(result.html).toContain('<footer>Geteilt aus Chat On Steroids</footer>');
 });

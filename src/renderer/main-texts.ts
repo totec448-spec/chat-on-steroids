@@ -40,10 +40,13 @@ export function mainTexts(): Record<MainText, string> {
     'Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.':
       t('Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.'),
     'Export as Markdown': t('Export as Markdown'),
+    'You': t('You'),
+    'Export as HTML': t('Export as HTML'),
     'Export usage as CSV': t('Export usage as CSV'),
     'Import CoS Pet folder': t('Import CoS Pet folder'),
     'Import SKILL.md': t('Import SKILL.md'),
     'Markdown files': t('Markdown files'),
+    'HTML files': t('HTML files'),
     'Text files': t('Text files'),
     'CSV files': t('CSV files'),
     'Save code': t('Save code'),
@@ -72,10 +75,7 @@ export function mainTexts(): Record<MainText, string> {
     'Goal result needs review': t('Goal result needs review'),
     'The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.':
       t('The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.'),
-    'Save as web page': t('Save as web page'),
-    'Web pages': t('Web pages'),
     'New chat': t('New chat'),
-    'You': t('You'),
     'hidden': t('hidden'),
     'Shared from Chat On Steroids': t('Shared from Chat On Steroids'),
   };

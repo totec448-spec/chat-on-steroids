@@ -14,13 +14,13 @@ const LANGUAGES = ['en', 'de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', '
 // The window's own policy, as main sets it (a meta tag cannot carry frame-ancestors).
 const policy = /RENDERER_CONTENT_SECURITY_POLICY =\s*([\s\S]*?);\n/.exec(fs.readFileSync(path.join(root, 'src/main/renderer-csp.ts'), 'utf8'))[1]
   .split('+').map(part => part.trim().replace(/^"|"$/g, '')).join('').replace(/;\s*frame-ancestors 'none'/, '');
-const pageModule = '/@fs' + path.join(root, 'src/main/session/chat-page.ts').split(path.sep).join('/');
+const fsPath = file => '/@fs' + path.join(root, file).split(path.sep).join('/');
 const fixture = `(() => {
  const old=window.api,f=composerFixture,ok=data=>Promise.resolve({ok:true,data:structuredClone(data)});
  f.summary.updatedAt=Date.now()-3*3600000; f.summary.lastToolCallAt=null; f.summary.activityExpiresAt=null;
  const chat={...f.summary,id:'share-chat-1',title:'Why does the shop build fail?',conversationId:'share-conversation-1',chatIds:['share-conversation-1'],updatedAt:f.summary.updatedAt-60000};
  const messages=[
-  {role:'user',text:'The shop build fails on my laptop. The log is in /Users/ana/projects/shop/build.log, can you check it?'},
+  {role:'user',text:'The shop build fails on my laptop. The log is in /Users/ana/projects/shop/build.log, can you check it? The registry token is sk-proj-AbCdEfGhIjKlMnOpQrStUvWx12.'},
   {role:'assistant',text:'## What failed\\n\\nThe build stops at **step 3**, when it installs packages:\\n\\n- the lock file names \`sharp 0.34\`\\n- the cache still holds \`0.33\`\\n\\n\`\`\`sh\\nrm -rf node_modules/.cache\\nnpm ci\\n\`\`\`\\n\\nIf it still fails, send the new log to ana@example.com. The [npm docs](https://docs.npmjs.com/cli/commands/npm-ci) explain \`npm ci\`.'},
   {role:'user',text:'That worked, thanks!'},
   {role:'assistant',text:'Glad it works. The cache can go stale again after a major update, so the same two commands are the first thing to try.'}
@@ -33,12 +33,16 @@ const fixture = `(() => {
   sharePage:async request=>{
    window.shares.push(request);
    if(request.target==='file')return ok({done:'saved',name:'Why does the shop build fail.html'});
-   const {chatPageHtml}=await import(${JSON.stringify(pageModule)});
-   // Main labels the page through the window's published translations; the same catalog here.
+   // The page as main builds it (page-export.ts): the same builder and redaction, labelled through the
+   // window's own catalog, which is what main's published translations come from.
+   const {transcriptHtml,hiddenCount}=await import(${JSON.stringify(fsPath('src/shared/html-export.ts'))});
+   const {redactSecretText,redactPersonalText}=await import(${JSON.stringify(fsPath('src/main/redaction.ts'))});
    const {t}=await import('/i18n.ts');
-   const page=chatPageHtml({title:chat.title,messages,hide:request.hide,lang:request.lang,now:new Date(Date.UTC(2026,9,24,12)),
-    labels:{you:t('You'),assistant:'ChatGPT',hidden:t('hidden'),footer:t('Shared from Chat On Steroids')}});
-   return ok({done:'preview',preview:'00000000-0000-4000-8000-00000000000'+window.shares.length%10,...page});
+   const hide=text=>request.hide?redactPersonalText(redactSecretText(text)):redactSecretText(text);
+   const html=transcriptHtml(hide(chat.title),messages.map(m=>({role:m.role,text:hide(m.text)})),{user:t('You'),assistant:'ChatGPT'},
+    {lang:request.lang,date:new Intl.DateTimeFormat(request.lang,{dateStyle:'long'}).format(new Date(Date.UTC(2026,9,24,12))),
+     footer:t('Shared from Chat On Steroids'),hidden:t('hidden')});
+   return ok({done:'preview',preview:'00000000-0000-4000-8000-00000000000'+window.shares.length%10,html,hidden:hiddenCount(html)});
   }
  };
  window.api=new Proxy(methods,{get:(target,key)=>key in target?target[key]:old[key]});
@@ -117,11 +121,12 @@ app.whenReady().then(async () => {
     await until(shown);
     assert.deepEqual(await js('shares.at(-1)'),{id:'share-chat-1',target:'preview',hide:false,lang:'en'});
     assert.equal(await js(`document.getElementById('sharePageFrame').getAttribute('sandbox')`),'');
-    assert.equal(await js(`document.getElementById('sharePageHide').checked`),false,'Nothing is hidden unless chosen');
+    assert.equal(await js(`document.getElementById('sharePageHide').checked`),false,'Personal details are hidden only when chosen');
+    assert.equal(await js(`document.getElementById('sharePageCount').textContent`),'1 detail is hidden on this page.','The key is always hidden');
     await layout(`en ${theme}`);
     await capture(`${theme}-preview.png`);
     await js(`(()=>{const h=document.getElementById('sharePageHide');h.click();})()`);
-    await until(`document.getElementById('sharePageHideNote').textContent==='2 details are hidden on this page.'`);
+    await until(`document.getElementById('sharePageCount').textContent==='3 details are hidden on this page.'`);
     await until(shown);
     assert.equal(await js('shares.at(-1).hide'),true);
     await layout(`en ${theme} hidden`);

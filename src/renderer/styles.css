@@ -195,6 +195,8 @@
 .share-page-dialog .plugin-error { margin: 4px 0 0; }
 /* The switch row starts on the body's edge like the preview (a settings row is inset by 2px). */
 .share-page-dialog .share-page-hide { padding-left: 0; padding-right: 0; }
+.share-page-dialog .setting-text em.share-page-count { margin-top: 4px; color: var(--soft); }
+.share-page-dialog .setting-text em.share-page-count[hidden] { display: none; }
 .plugin-card-error { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--red); font-size: calc(11px * var(--text-scale, 1)); }
 .plugin-setup-status { margin: 0 0 20px; color: var(--soft); }
 .plugin-setup-copy { display: flex; gap: 8px; align-items: center; }

@@ -51,26 +51,34 @@ it('opens with nothing hidden, shows the page in a frame that runs nothing, and 
   expect($<HTMLDialogElement>('sharePageDialog').open).toBe(false);
 });
 
-it('hides details only when asked, says how many, and says when there was nothing to hide', async () => {
-  let hidden = 3;
+it('says how many details the page hides: keys always, personal details only when asked', async () => {
+  let hidden = 0;
   const sharePage = vi.fn(async (request: any): Promise<Answer> => page(request.hide ? hidden : 0));
   await open(sharePage);
   await settle();
-  expect($('sharePageHideNote').textContent).toContain('show as “hidden”');
+  expect($('sharePageCount').hidden).toBe(true);
   const hide = $<HTMLInputElement>('sharePageHide');
   hide.checked = true;
+  hidden = 3;
   hide.dispatchEvent(new dom.window.Event('change'));
   await settle();
   expect(sharePage).toHaveBeenLastCalledWith({ id: 'session-1', target: 'preview', hide: true, lang: 'en' });
-  expect($('sharePageHideNote').textContent).toBe('3 details are hidden on this page.');
+  expect($('sharePageCount').hidden).toBe(false);
+  expect($('sharePageCount').textContent).toBe('3 details are hidden on this page.');
   hidden = 1;
   hide.dispatchEvent(new dom.window.Event('change'));
   await settle();
-  expect($('sharePageHideNote').textContent).toBe('1 detail is hidden on this page.');
+  expect($('sharePageCount').textContent).toBe('1 detail is hidden on this page.');
   hidden = 0;
   hide.dispatchEvent(new dom.window.Event('change'));
   await settle();
-  expect($('sharePageHideNote').textContent).toBe('Nothing to hide was found in this chat.');
+  expect($('sharePageCount').textContent).toBe('Nothing to hide was found in this chat.');
+});
+
+it('counts a hidden key with personal details shown', async () => {
+  await open(vi.fn(async (): Promise<Answer> => page(1)));
+  await settle();
+  expect($('sharePageCount').textContent).toBe('1 detail is hidden on this page.');
 });
 
 it('shows the newest choice when an older preview answers last, and saves only that one', async () => {

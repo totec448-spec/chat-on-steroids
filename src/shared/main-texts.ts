@@ -37,10 +37,13 @@ export const MAIN_TEXTS = [
   'Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.',
   // Native file dialogs and the worker checkout removal confirmation.
   'Export as Markdown',
+  'You',
+  'Export as HTML',
   'Export usage as CSV',
   'Import CoS Pet folder',
   'Import SKILL.md',
   'Markdown files',
+  'HTML files',
   'Text files',
   'CSV files',
   'Save code',
@@ -70,11 +73,8 @@ export const MAIN_TEXTS = [
   // The Goal helper stopped without evidence that the requested work is complete.
   'Goal result needs review',
   'The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.',
-  // A chat shared as a web page: its save dialog and the page's own labels.
-  'Save as web page',
-  'Web pages',
+  // A chat shared as a web page: the page's own labels ('You' is above).
   'New chat',
-  'You',
   'hidden',
   'Shared from Chat On Steroids'
 ] as const;
