@@ -3059,5 +3059,21 @@
   "Common base": "Ortak taban",
   "Theirs (incoming)": "Onlarınki (gelen)",
   "Not in this version": "Bu sürümde yok",
-  "Start or cancel the prepared plan first, then ask again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden isteyin."
+  "Start or cancel the prepared plan first, then ask again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden isteyin.",
+  "Message box": "Mesaj kutusu",
+  "New line": "Yeni satır",
+  "Send the other way while ChatGPT works": "ChatGPT çalışırken diğer şekilde gönder",
+  "Earlier messages, in an empty message box": "Önceki mesajlar, mesaj kutusu boşken",
+  "Sidebar": "Kenar çubuğu",
+  "Move the focused chat or project": "Odaktaki sohbeti veya projeyi taşı",
+  "Workspace panels": "Çalışma alanı panelleri",
+  "Next chat": "Sonraki sohbet",
+  "Previous chat": "Önceki sohbet",
+  "Full screen": "Tam ekran",
+  "Stop the turn, twice in an empty message box": "Turu durdur, boş mesaj kutusunda iki kez",
+  "Hold to dictate": "Basılı tutarak sesle yaz",
+  "Move a queued task": "Sıradaki görevi taşı",
+  "Move the focused tab": "Odaktaki sekmeyi taşı",
+  "Save the file being edited": "Düzenlenen dosyayı kaydet",
+  "Copy the selection": "Seçimi kopyala"
 }

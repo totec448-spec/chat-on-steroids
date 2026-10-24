@@ -36,6 +36,8 @@ export interface RowMenuItem {
   hint?: () => string;
   /** Runs after the menu has closed, or with it still open when `keepOpen`. */
   run?: () => void;
+  /** Like `run`, and told whether the keys chose the item (Enter or Space) rather than a pointer. */
+  runWith?: (viaKeyboard: boolean) => void;
   /** The menu stays open (zoom steps: one click after another, the value updating in place). */
   keepOpen?: boolean;
   /** Starts a group: a separator line above this item. */
@@ -228,7 +230,8 @@ function itemButton(item: RowMenuItem, menu: HTMLElement, depth: number): HTMLBu
       // Focus goes back to the row's button first: an action that moves it (renaming, a new
       // chat's field) still does, and one that repaints the sidebar finds it there to keep.
       closeRowMenu(true);
-      item.run?.();
+      // A keyboard activation is a click with no pointer, so its detail is 0.
+      if (item.runWith) item.runWith(event.detail === 0); else item.run?.();
     });
     // Moving onto a plain item closes a deeper submenu, as in any menu.
     button.addEventListener('pointerenter', () => {
