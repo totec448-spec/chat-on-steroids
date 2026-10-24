@@ -4786,6 +4786,20 @@ describe('settings backup dialogs', () => {
     expect(doc.activeElement?.id).toBe('importSettingsCancel');
   });
 
+  it('turns Import off once the chosen file has to be chosen again', async () => {
+    const importSettingsBackup = vi.fn(async () => ({ ok: false, error: 'Your settings changed after the file was chosen. Choose it again.' }));
+    const mounted = await mountChat({}, [], { pickSettingsBackup: vi.fn(async () => ({ ok: true, data: choice({ keyCount: 0 }) })), importSettingsBackup });
+    const doc = mounted.window.document;
+    (doc.getElementById('importSettings') as HTMLButtonElement).click();
+    await waitFor(() => expect((doc.getElementById('importSettingsDialog') as HTMLDialogElement).open).toBe(true));
+    submit(doc, 'importSettingsForm');
+    await waitFor(() => expect(doc.getElementById('importSettingsError')!.textContent).toBe('Your settings changed after the file was chosen. Choose it again.'));
+    expect((doc.getElementById('importSettingsSubmit') as HTMLButtonElement).disabled).toBe(true);
+    expect(doc.activeElement?.id).toBe('importSettingsCancel');
+    submit(doc, 'importSettingsForm');
+    expect(importSettingsBackup).toHaveBeenCalledTimes(1);
+  });
+
   it('names what would give ChatGPT more access, and lists the other changes by Settings tab on request', async () => {
     const pick = vi.fn(async () => ({ ok: true, data: choice({ keyCount: 0, changed: ['capabilities.command', 'readOnly', 'ui.appearance.dark.accent', 'ui.theme', 'goal.model', 'sessions.retainDays'],
       wider: ['capabilities.command', 'readOnly'] }) }));

@@ -857,7 +857,21 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
 
   // Settings backup. The file is read and checked in the main process; the renderer sees only a
   // summary and a token, and saved keys never cross to it. Errors are sentences it translates.
-  let pendingImport: { token: string; backup: ParsedBackup } | null = null;
+  let pendingImport: { token: string; backup: ParsedBackup; changed: string[]; wider: string[] } | null = null;
+  // What importing would change, as a save really applies it: mergeSettings keeps the fields the
+  // settings form does not own, so only changes that happen are counted. The interface language
+  // is applied beside the save, since the form never edits it.
+  const importPlan = (backup: ParsedBackup) => {
+    const config = getConfig();
+    const base = pickByShape(settingsPatch, config);
+    const merged = overlaySettings(settingsPatch, base, backup.settings);
+    const typed = settingsSave.parse({ base, patch: merged });
+    const saved = pickByShape(settingsPatch, mergeSettings(config, typed.base, typed.patch));
+    const asked = z.enum(UI_LANGUAGES).safeParse((merged.ui as { language?: unknown } | undefined)?.language);
+    const language = asked.success ? asked.data : config.ui.language;
+    const result = { ...saved, ui: { ...(saved.ui as object), language } };
+    return { base, merged, language, changed: changedSettings(base, result), wider: widerAccess(base, result) };
+  };
   handle('settings:export', async payload => {
     const { includeKeys, passphrase } = z.object({ includeKeys: z.boolean(), passphrase: z.string().max(1024).optional() }).strict().parse(payload);
     if (includeKeys && !passphrase) throw new Error('Use a passphrase of at least 8 characters.');
@@ -896,23 +910,28 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (selected.canceled || !selected.filePaths[0]) return null;
     const file = selected.filePaths[0];
     // Size first: a large file is refused without reading it.
-    if ((await fs.stat(file)).size > 4_000_000) throw new BackupError('too-large', 'This file is too large to be a settings backup.');
+    if ((await fs.stat(file)).size > 4_000_000) {
+      logInfo('settings backup: refused the chosen file (too-large), it was not read');
+      throw new BackupError('too-large', 'This file is too large to be a settings backup.');
+    }
     let backup: ParsedBackup;
     try { backup = readBackup(await fs.readFile(file, 'utf8')); } catch (error) {
       if (error instanceof BackupError) logInfo(`settings backup: refused the chosen file (${error.code})`);
       throw error;
     }
-    const current = pickByShape(settingsPatch, getConfig());
-    const overlaid = overlaySettings(settingsPatch, current, backup.settings);
-    pendingImport = { token: randomUUID(), backup };
+    const { changed, wider } = importPlan(backup);
+    pendingImport = { token: randomUUID(), backup, changed, wider };
     return {
       token: pendingImport.token, file: path.basename(file), appVersion: backup.appVersion, exportedAt: backup.exportedAt,
-      changed: changedSettings(current, overlaid), wider: widerAccess(current, overlaid), keyCount: backup.secretCount
+      changed, wider, keyCount: backup.secretCount
     };
   });
   handle('settings:importApply', async payload => {
     const { token, includeKeys, passphrase } = z.object({ token: z.string().uuid(), includeKeys: z.boolean(), passphrase: z.string().max(1024).optional() }).strict().parse(payload);
-    if (!pendingImport || pendingImport.token !== token) throw new Error('Choose the backup file again.');
+    if (!pendingImport || pendingImport.token !== token) {
+      logInfo('settings backup: import refused, its choice is gone or was already used; nothing changed');
+      throw new Error('Choose the backup file again.');
+    }
     const { backup } = pendingImport;
     // Keys open first: a wrong passphrase changes nothing, and the dialog can ask again.
     let keys: Record<string, string> = {};
@@ -922,10 +941,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         throw error;
       }
     }
-    // Against the settings as they are now, which may have changed since the file was chosen.
-    const base = pickByShape(settingsPatch, getConfig());
-    const merged = overlaySettings(settingsPatch, base, backup.settings);
-    const changed = changedSettings(base, merged);
+    // Against the settings as they are now. If they changed since the file was chosen (a save still
+    // on its way, another window), the person confirmed a different import: it is refused, so more
+    // access is never granted without the warning the preview showed.
+    const { base, merged, language, changed, wider } = importPlan(backup);
+    if (JSON.stringify(changed) !== JSON.stringify(pendingImport.changed) || JSON.stringify(wider) !== JSON.stringify(pendingImport.wider)) {
+      pendingImport = null;
+      logInfo('settings backup: import refused, the settings changed after the file was chosen; nothing changed');
+      throw new Error('Your settings changed after the file was chosen. Choose it again.');
+    }
     // Checked before anything changes, so a computer without secure storage gets a clear refusal
     // rather than its settings changed and its keys missing.
     if (Object.keys(keys).length && !(await isEncryptionAvailable())) {
@@ -933,6 +957,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       throw new Error('Secure storage is not available on this computer, so the saved keys cannot be imported. Import without them.');
     }
     if (changed.length) await saveSettings(settingsSave.parse({ base, patch: merged }));
+    if (language !== getConfig().ui.language) await updateConfig(config => ({ ...config, ui: { ...config.ui, language } }));
     if (Object.keys(keys).length) await setSecrets(keys as Partial<Record<SecretKey, string>>);
     pendingImport = null;
     const keyCount = Object.keys(keys).length;

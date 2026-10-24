@@ -3159,5 +3159,6 @@
   "Unattributed calls allowed": "Chamadas não atribuídas permitidas",
   "Hide secrets from ChatGPT off": "Ocultar segredos do ChatGPT desligado",
   "{1}: {0} settings|one": "{1}: {0} definição",
-  "{1}: {0} settings|many": "{1}: {0} definições"
+  "{1}: {0} settings|many": "{1}: {0} definições",
+  "Your settings changed after the file was chosen. Choose it again.": "As suas definições mudaram depois de o ficheiro ser escolhido. Escolha-o novamente."
 }

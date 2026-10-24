@@ -3104,5 +3104,6 @@
   "Trust only selected chats off": "Nur ausgewählten Chats vertrauen aus",
   "Unattributed calls allowed": "Nicht zugeordnete Aufrufe erlaubt",
   "Hide secrets from ChatGPT off": "Geheimnisse vor ChatGPT verbergen aus",
-  "{1}: {0} settings|one": "{1}: {0} Einstellung"
+  "{1}: {0} settings|one": "{1}: {0} Einstellung",
+  "Your settings changed after the file was chosen. Choose it again.": "Deine Einstellungen haben sich geändert, nachdem die Datei gewählt wurde. Wähle sie erneut."
 }

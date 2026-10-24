@@ -3049,5 +3049,6 @@
   "Local control API actions on": "開啟本機控制 API 動作",
   "Trust only selected chats off": "關閉僅信任選取的聊天",
   "Unattributed calls allowed": "允許無法關聯的呼叫",
-  "Hide secrets from ChatGPT off": "關閉對 ChatGPT 隱藏密鑰"
+  "Hide secrets from ChatGPT off": "關閉對 ChatGPT 隱藏密鑰",
+  "Your settings changed after the file was chosen. Choose it again.": "選擇檔案後你的設定已變更。請重新選擇它。"
 }
