@@ -8130,6 +8130,17 @@ describe('charts, diagrams and illustrated Markdown from recorded DIL', () => {
     expect(root.textContent).not.toContain('\uE030');
   });
 
+  it('protects four-space code after a top-level fence ends a list', async () => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation('- List item\n\n```txt\nStandalone example\n```\n    ' + widget + '\n\n' + widget)]);
+    const root = message(w);
+    expect([...root.querySelectorAll('pre code')].map(node => node.textContent).join('\n')).toContain(widget);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(root.textContent).not.toContain('\uE030');
+  });
+
   it('does not hide a valid chart between unrelated backticks in separate paragraphs', async () => {
     const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
       chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]

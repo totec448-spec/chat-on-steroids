@@ -4162,6 +4162,13 @@ function markdownCodeRanges(text: string): Array<{ start: number; end: number }>
     const line = text.slice(at, newline < 0 ? end : newline).replace(/\r$/, '');
     while (fences[fenceIndex] && at >= fences[fenceIndex]!.end) fenceIndex++;
     if (fences[fenceIndex] && at >= fences[fenceIndex]!.start) {
+      // A top-level fence at a shallower column ends the preceding list.
+      // Otherwise its old offset makes following four-space code look like
+      // a list continuation; nested fences must keep their list context.
+      if (at === fences[fenceIndex]!.start && listContentIndent !== null &&
+          indentColumns(line) < listContentIndent && /^ {0,3}(`{3,}|~{3,})/.test(line)) {
+        listContentIndent = null;
+      }
       if (indentedStart !== null) ranges.push({ start: indentedStart, end: at });
       indentedStart = null;
       // A completed fenced block is a block boundary, even without an empty
