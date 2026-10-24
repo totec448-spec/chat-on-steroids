@@ -15,25 +15,29 @@ const VOLUME = 0.12;
 
 let context: AudioContext | null = null;
 
+/** Schedules one cue's notes into `audio`, starting at `at` seconds; also used to render a cue offline in the UI check. */
+export function scheduleSoundCue(audio: BaseAudioContext, kind: SoundCue, at: number): void {
+  for (const [frequency, start, length] of NOTES[kind]) {
+    const tone = audio.createOscillator(), gain = audio.createGain();
+    tone.type = 'sine';
+    tone.frequency.value = frequency;
+    // A short fade in and out, so no note clicks.
+    gain.gain.setValueAtTime(0, at + start);
+    gain.gain.linearRampToValueAtTime(VOLUME, at + start + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + start + length);
+    tone.connect(gain).connect(audio.destination);
+    tone.start(at + start);
+    tone.stop(at + start + length + 0.02);
+  }
+}
+
 export function playSoundCue(kind: SoundCue): void {
   try {
     context ??= new AudioContext();
-    // A context made before any click starts suspended in Chromium; resuming is allowed here
-    // because the app's own window plays it (Electron grants autoplay to the app).
+    // Electron's default autoplay policy needs no click first; a context that starts suspended
+    // anyway (an OS audio hiccup) is resumed.
     if (context.state === 'suspended') void context.resume().catch(() => undefined);
-    const at = context.currentTime + 0.02;
-    for (const [frequency, start, length] of NOTES[kind]) {
-      const tone = context.createOscillator(), gain = context.createGain();
-      tone.type = 'sine';
-      tone.frequency.value = frequency;
-      // A short fade in and out, so no note clicks.
-      gain.gain.setValueAtTime(0, at + start);
-      gain.gain.linearRampToValueAtTime(VOLUME, at + start + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.0001, at + start + length);
-      tone.connect(gain).connect(context.destination);
-      tone.start(at + start);
-      tone.stop(at + start + length + 0.02);
-    }
+    scheduleSoundCue(context, kind, context.currentTime + 0.02);
   } catch {
     // No audio device, or audio disabled: a cue is never worth an error.
   }
