@@ -1428,7 +1428,8 @@ lines per block and `<br>`, code and plain messages verbatim, a KaTeX formula as
 `.tool-output-header` controls and hidden nodes left out. A selection over the terminal block's caps
 (400 lines, 20,000 characters) keeps its last lines under the same "Only the end of the selection is
 here" line, cut by `limitedSelection`, and goes into the draft with `draftWithTerminalBlock`. It only
-fills the composer; nothing is sent.
+fills the composer; nothing is sent. Switching chat, starting a new one or changing view calls the
+returned `reset()`, and a click reads the selection again, so a stale quote never reaches the composer.
 Esc to stop (`escapeStopsTurn` in `chat.ts`): while the open chat's turn runs and Send shows Stop
 (composer empty, no files, no prepared plan), a first plain Esc in the composer only arms Stop and
 says "Press Esc again to stop the turn" in `#composerStatus`; a second plain Esc within 1.5 s stops
