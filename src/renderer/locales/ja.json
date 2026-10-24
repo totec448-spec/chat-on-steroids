@@ -3059,5 +3059,7 @@
   "Common base": "共通の基点",
   "Theirs (incoming)": "相手側 (取り込む側)",
   "Not in this version": "この版にはありません",
-  "Start or cancel the prepared plan first, then ask again.": "先に準備済みのプランを開始するか取り消してから、もう一度お試しください。"
+  "Start or cancel the prepared plan first, then ask again.": "先に準備済みのプランを開始するか取り消してから、もう一度お試しください。",
+  "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "このコンピューターに保存されたキーを読み取れないため、バックアップのキーを追加できません。キーなしでインポートしてください。",
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "設定はインポートされましたが、保存されたキーを格納できませんでした。設定でもう一度追加してください。"
 }

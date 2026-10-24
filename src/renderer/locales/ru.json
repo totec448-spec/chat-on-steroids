@@ -3224,5 +3224,7 @@
   "Common base": "Общая база",
   "Theirs (incoming)": "Их (входящая)",
   "Not in this version": "Нет в этой версии",
-  "Start or cancel the prepared plan first, then ask again.": "Сначала запустите или отмените подготовленный план, затем повторите запрос."
+  "Start or cancel the prepared plan first, then ask again.": "Сначала запустите или отмените подготовленный план, затем повторите запрос.",
+  "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "Сохранённые на этом компьютере ключи не читаются, поэтому ключи из резервной копии добавить нельзя. Импортируйте без них.",
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Настройки импортированы, но сохранить ключи не удалось. Добавьте их снова в настройках."
 }

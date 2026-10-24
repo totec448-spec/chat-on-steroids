@@ -347,7 +347,7 @@ Settings backup (`settings-backup.ts`, Settings → General → Backup): a JSON 
 (`format: "chat-on-steroids-settings"`, `version: 1`) holding exactly what the Settings form saves
 (`pickByShape(settingsPatch, config)`), minus per-computer parts: `connectorSuffix`, `tunnel`,
 `ui.browserBridgePort`, `mcp.persistentUrls`, `ui.browserPreferences`, `ui.cosBrowserTrayHint`,
-`ui.autoRefreshPluginsAsked` (roots, setup profiles and everything outside the form were never in it). IPC: `settings:export` { includeKeys, passphrase? } writes through a save
+`ui.autoRefreshPluginsAsked`, `ui.startAtLogin` (roots, setup profiles and everything outside the form were never in it). IPC: `settings:export` { includeKeys, passphrase? } writes through a save
 dialog (atomic, mode 0600); `settings:importPick` reads and checks a file in the main process and
 returns `SettingsBackupChoice` (a one-use token, the changed dotted paths, the key count);
 `settings:importApply` { token, includeKeys, passphrase? } opens the keys first (a wrong passphrase
@@ -358,7 +358,9 @@ preview counts only what that save really applies (`importPlan` runs `mergeSetti
 `ui.language`, which the import applies itself. A value the schema refuses refuses the whole file
 (`invalid-settings`); a preview whose `changed`/`wider` no longer match today's settings is refused
 and its token dropped. A save that fails after it wrote the settings (login item, control API,
-worker history) still gets the language and keys, and the reply carries its message as `warning`.
+worker history) still gets the language and keys, and the reply carries its message in `warnings`.
+An unreadable key store refuses an import with keys before anything changes; a key write that
+still fails after the settings were written is a warning ("…could not be stored"), `keyCount` 0.
 A short export passphrase is refused before any key is read. Keys
 travel only when ticked: `openaiApiKey`, `openRouterApiKey`, `customProviderApiKey`, `plugin:*`
 (never `bridgeToken`, `setup:*`, `mcp:path:*`), sealed with scrypt (N 2^17, r 8, p 1) and

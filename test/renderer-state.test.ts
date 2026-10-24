@@ -4788,7 +4788,7 @@ describe('settings backup dialogs', () => {
 
   it('says what failed after an import whose settings were saved anyway', async () => {
     const mounted = await mountChat({}, [], { pickSettingsBackup: vi.fn(async () => ({ ok: true, data: choice({ keyCount: 0 }) })),
-      importSettingsBackup: vi.fn(async () => ({ ok: true, data: { state: mounted.state, changedCount: 2, keyCount: 0, warning: 'login registration refused' } })) });
+      importSettingsBackup: vi.fn(async () => ({ ok: true, data: { state: mounted.state, changedCount: 2, keyCount: 0, warnings: ['login registration refused'] } })) });
     const doc = mounted.window.document;
     (doc.getElementById('importSettings') as HTMLButtonElement).click();
     await waitFor(() => expect((doc.getElementById('importSettingsDialog') as HTMLDialogElement).open).toBe(true));

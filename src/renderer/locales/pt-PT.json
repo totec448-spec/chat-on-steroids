@@ -3169,5 +3169,7 @@
   "Common base": "Base comum",
   "Theirs (incoming)": "Deles (recebida)",
   "Not in this version": "Não existe nesta versão",
-  "Start or cancel the prepared plan first, then ask again.": "Inicie ou cancele primeiro o plano preparado e peça novamente."
+  "Start or cancel the prepared plan first, then ask again.": "Inicie ou cancele primeiro o plano preparado e peça novamente.",
+  "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "As chaves guardadas neste computador não podem ser lidas, por isso as chaves da cópia de segurança não podem ser adicionadas. Importe sem elas.",
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "As definições foram importadas, mas as chaves guardadas não puderam ser armazenadas. Adicione-as novamente nas Definições."
 }
