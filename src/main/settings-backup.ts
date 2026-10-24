@@ -22,6 +22,8 @@ export const BACKUP_VERSION = 1;
 /** Far above any real backup (a few KB), far below what could hurt to read. */
 const MAX_BACKUP_CHARS = 2_000_000;
 const MIN_PASSPHRASE_CHARS = 8;
+/** Counted in characters a person types, so an emoji is one, not two. */
+export const passphraseLongEnough = (passphrase: string): boolean => [...passphrase].length >= MIN_PASSPHRASE_CHARS;
 /** scrypt cost: about half a second on a laptop, 128 MiB of memory. */
 const SCRYPT = { N: 2 ** 17, r: 8, p: 1 } as const;
 const SCRYPT_MAXMEM = 256 * 1024 * 1024;
@@ -176,7 +178,7 @@ export async function buildBackup(input: {
 }): Promise<string> {
   let sealed: SealedSecrets | null = null;
   if (input.secrets) {
-    if ([...input.secrets.passphrase].length < MIN_PASSPHRASE_CHARS) {
+    if (!passphraseLongEnough(input.secrets.passphrase)) {
       throw new BackupError('passphrase-too-short', `Use a passphrase of at least ${MIN_PASSPHRASE_CHARS} characters.`);
     }
     const values = Object.fromEntries(Object.entries(input.secrets.values).filter(([key]) => exportableSecret(key)));

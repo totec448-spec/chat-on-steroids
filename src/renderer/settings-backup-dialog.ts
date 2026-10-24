@@ -172,7 +172,8 @@ export function initSettingsBackup(api: Api, hooks: { imported(state: AppState):
       const { changedCount, keyCount } = reply.data;
       hooks.toast([
         tn('Imported: 1 setting changed.', 'Imported: {0} settings changed.', changedCount),
-        ...(keyCount ? [tn('1 saved key added.', '{0} saved keys added.', keyCount)] : [])
+        ...(keyCount ? [tn('1 saved key added.', '{0} saved keys added.', keyCount)] : []),
+        ...(reply.data.warning ? [t(reply.data.warning)] : [])
       ].join(' '));
     } catch (failure) {
       error(importError, failure instanceof Error ? failure.message : String(failure));
