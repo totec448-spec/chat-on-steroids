@@ -4941,6 +4941,8 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
         attachments.append(slot);
         return slot;
       });
+      // #1826: a scheduled run keeps saying so once sent, as its queue row did.
+      if (event.scheduled) box.append(el('span', 'said-origin', () => scheduledLabel(event)));
       if (event.attachments?.length || assets.length || retained.length) box.append(attachments);
       if (!assets.length) for (const image of retained) preview(image.dataUrl, true);
       // Native ChatGPT can prepend a blank paragraph. Ignore it only when a
@@ -7915,6 +7917,15 @@ function historicalAutomaticInput(entry: InputEntry): boolean {
     entry.state === 'cancelled' && !!entry.error;
 }
 
+/** #1826: a run of the chat's schedule says so, and, when it went out late, when it was due. */
+function scheduledLabel(entry: { scheduled?: { dueAt: number; late: boolean } }): string {
+  const scheduled = entry.scheduled;
+  if (!scheduled) return '';
+  return scheduled.late
+    ? t('Scheduled · late, was due {0}', [new Date(scheduled.dueAt).toLocaleTimeString(currentLanguage(), { hour: '2-digit', minute: '2-digit' })])
+    : t('Scheduled');
+}
+
 function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   const row = el('div', 'pending-message');
   row.classList.toggle('is-delivered', !entry.error && ['sent', 'tool'].includes(entry.state));
@@ -7935,6 +7946,7 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   if (files.childElementCount) row.append(files);
   // What the person wrote: a plan's first message shows their request, as it will once recorded.
   const authored = authoredTextOf(entry);
+  if (entry.scheduled) row.append(el('div', 'pending-message-origin', () => scheduledLabel(entry)));
   if (authored) {
     const text = el('div', 'pending-message-text', authored);
     text.setAttribute('dir', 'auto');
@@ -8052,7 +8064,7 @@ function paintPendingInputs(): void {
   const host = $('inputQueue');
   const previous = new Map([...host.querySelectorAll<HTMLElement>(':scope > .pending-message')].map(row => [row.dataset.inputId, row]));
   const next = rows.filter(entry => !historicalAutomaticInput(entry)).map(entry => {
-    const sig = JSON.stringify([entry.text, entry.state, entry.error, entry.dueAt, notice(entry), routeHeld(entry), queuedWaitReason(entry), entry.stagesApplied,
+    const sig = JSON.stringify([entry.text, entry.state, entry.error, entry.dueAt, entry.scheduled, notice(entry), routeHeld(entry), queuedWaitReason(entry), entry.stagesApplied,
       entry.stages, entry.attachments?.map(file => file.id), entry.images?.map(image => [image.name, image.dataUrl.length]),
       hasLaterModelActivity(entry.deliveredAt ?? entry.offeredAt ?? entry.createdAt)]);
     const old = previous.get(entry.id);
@@ -8108,7 +8120,8 @@ async function refreshInputQueue(): Promise<void> {
     const card = el('div', 'queued-input'); card.dataset.inputId = entry.id;
     if (projectedIds.has(entry.id)) ui(card, 'aria-label', () => t("Plan stage · waiting for the first message to be sent"));
     if (entry.recovery) ui(card, 'aria-label', () => t('Automatic Continue'));
-    const label = el('span', 'queue-label', entry.recovery ? () => `${t('Automatic Continue')} · ${entry.text}` : entry.text);
+    const label = el('span', 'queue-label', entry.recovery ? () => `${t('Automatic Continue')} · ${entry.text}`
+      : entry.scheduled ? () => `${scheduledLabel(entry)} · ${entry.text}` : entry.text);
     ui(label, 'title', () => `${entry.recovery
       ? t('Resumes without a final answer. If ChatGPT is still generating, the silent turn is stopped before Continue is sent.')
       : entry.state === 'queued' ? (entry.mode === 'after-turn' ? t("After the next completed answer") : t("At Session finish or after a completed answer")) : t("Awaiting receipt")} · ${entry.text}`);

@@ -44,6 +44,18 @@ it('commits the image handout before quota failure, retries without decoding aga
   expect(message.kind === 'user_message' && message.assets).toHaveLength(1);
 });
 
+it('records that a delivered message was a scheduled run, and a later page echo keeps it', async () => {
+  const session = await createSession({ conversationId: 'scheduled-history', title: 'Scheduled' });
+  const entry = { id: '20000000-0000-4000-8000-000000000002', sessionId: session.id, state: 'sent', messageId: 'native-1', deliveredAt: 300,
+    text: 'Check the open issues', scheduled: { scheduleId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', dueAt: 100, late: true } } as InputEntry;
+  await recordDeliveredInput(entry);
+  const recorded = () => (readEvents(session.id)).then(events => events.find(event => event.kind === 'user_message')!);
+  expect(await recorded()).toMatchObject({ inputId: entry.id, scheduled: { dueAt: 100, late: true } });
+  // The page reports the same message again, without knowing where it came from.
+  await upsertMessageEvent(session.id, { kind: 'user_message', source: 'extension', time: 300, messageId: 'native-1', message: { text: 'Check the open issues', chars: 21, truncated: false } });
+  expect(await recorded()).toMatchObject({ scheduled: { dueAt: 100, late: true } });
+});
+
 it('repairs a legacy off-tail image receipt across cold restore while retaining bytes and never reopening delivery', async () => {
   initDurableStore(directory);
   const session = await createSession({ conversationId: 'legacy-images', title: 'Legacy images' });
