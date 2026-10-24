@@ -3018,6 +3018,7 @@
   "This answer is no longer in the chat.": "Cette réponse n'est plus dans le chat.",
   "This turn has not completed": "Ce tour n'est pas encore terminé",
   "This turn has no answer to export": "Ce tour n'a aucune réponse à exporter",
+  "HTML export saves a whole session to a file": "L'export HTML enregistre une session entière dans un fichier",
   "Only a ChatGPT answer can be bookmarked": "Seule une réponse de ChatGPT peut recevoir un signet",
   "A chat keeps at most 200 bookmarks": "Un chat conserve au plus 200 signets",
   "This answer is no longer in the chat, so its bookmark was removed.": "Cette réponse n'est plus dans le chat, son signet a donc été retiré.",
@@ -3087,5 +3088,8 @@
   "What ChatGPT gets to see on this computer.": "Ce que ChatGPT peut voir sur cet ordinateur.",
   "Off for every project in Settings": "Désactivé pour tous les projets dans les Réglages",
   "This project's tools send keys and tokens to ChatGPT as they are": "Les outils de ce projet envoient les clés et jetons à ChatGPT tels quels",
-  "Keys and tokens in this project's tool results are hidden from ChatGPT": "Les clés et jetons dans les résultats des outils de ce projet sont masqués à ChatGPT"
+  "Keys and tokens in this project's tool results are hidden from ChatGPT": "Les clés et jetons dans les résultats des outils de ce projet sont masqués à ChatGPT",
+  "Export as HTML": "Exporter en HTML",
+  "Whole session as HTML": "Toute la session en HTML",
+  "HTML files": "Fichiers HTML"
 }
