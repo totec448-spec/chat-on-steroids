@@ -2996,5 +2996,11 @@
   "HTML export saves a whole session to a file": "HTML エクスポートはセッション全体を 1 つのファイルに保存します",
   "Export as HTML": "HTML としてエクスポート",
   "Whole session as HTML": "セッション全体を HTML で",
-  "HTML files": "HTML ファイル"
+  "HTML files": "HTML ファイル",
+  "High contrast": "ハイコントラスト",
+  "Black or white background with stronger text and lines. Your colors stay saved for when you turn it off.": "黒または白の背景で、文字と線をよりはっきり表示します。選んだ色は、オフにしたときのために保存されます。",
+  "Accent presets": "アクセントのプリセット",
+  "Each is easy to read in light and dark.": "どれもライトとダークの両方で読みやすい色です。",
+  "Orange": "オレンジ",
+  "Red": "レッド"
 }

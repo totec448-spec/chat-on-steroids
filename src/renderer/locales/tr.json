@@ -3045,5 +3045,11 @@
   "HTML export saves a whole session to a file": "HTML dışa aktarımı tüm oturumu tek bir dosyaya kaydeder",
   "Export as HTML": "HTML olarak dışa aktar",
   "Whole session as HTML": "Tüm oturum HTML olarak",
-  "HTML files": "HTML dosyaları"
+  "HTML files": "HTML dosyaları",
+  "High contrast": "Yüksek kontrast",
+  "Black or white background with stronger text and lines. Your colors stay saved for when you turn it off.": "Daha belirgin metin ve çizgilerle siyah veya beyaz arka plan. Renkleriniz, kapattığınızda kullanmak üzere saklanır.",
+  "Accent presets": "Hazır vurgu renkleri",
+  "Each is easy to read in light and dark.": "Hepsi açık ve koyu temada kolay okunur.",
+  "Orange": "Turuncu",
+  "Red": "Kırmızı"
 }

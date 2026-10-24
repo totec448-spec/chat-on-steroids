@@ -3094,5 +3094,11 @@
   "HTML export saves a whole session to a file": "A exportação em HTML guarda uma sessão completa num ficheiro",
   "Export as HTML": "Exportar como HTML",
   "Whole session as HTML": "Sessão completa em HTML",
-  "HTML files": "Ficheiros HTML"
+  "HTML files": "Ficheiros HTML",
+  "High contrast": "Alto contraste",
+  "Black or white background with stronger text and lines. Your colors stay saved for when you turn it off.": "Fundo preto ou branco, com texto e linhas mais fortes. As suas cores ficam guardadas para quando o desativar.",
+  "Accent presets": "Cores de destaque predefinidas",
+  "Each is easy to read in light and dark.": "Todas são fáceis de ler no claro e no escuro.",
+  "Orange": "Laranja",
+  "Red": "Vermelho"
 }
