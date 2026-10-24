@@ -1813,7 +1813,6 @@
   "Mention Chat On Steroids Core": "Chat On Steroids Core 멘션",
   "Makes sure ChatGPT can use this app in every chat. Turn it off if ChatGPT starts plain questions with an unneeded tool call. Workers, Goal, Loop and Continue always keep the mention.": "모든 채팅에서 ChatGPT가 이 앱을 사용할 수 있게 합니다. 간단한 질문에 ChatGPT가 불필요한 도구 호출부터 시작하면 끄세요. 워커, Goal, Loop, Continue는 항상 멘션을 유지합니다.",
   "Privacy": "개인정보 보호",
-  "What ChatGPT sees of your screen.": "ChatGPT가 화면에서 볼 수 있는 범위입니다.",
   "For developers": "개발자용",
   "Troubleshooting details and access for tools on this computer.": "문제 해결 정보와 이 컴퓨터의 도구를 위한 접근 권한입니다.",
   "Show turn boundaries and recovery events in the chat.": "채팅에 턴 경계와 복구 이벤트를 표시합니다.",
@@ -3007,5 +3006,15 @@
   "Keep current files": "현재 파일 유지",
   "Restore files": "파일 복원",
   "Save a checkpoint before each turn's first edit": "각 턴의 첫 편집 전에 체크포인트 저장",
-  "Off: no new checkpoints are taken. Existing checkpoints stay listed and Restore still works.": "꺼짐: 새 체크포인트를 만들지 않습니다. 기존 체크포인트는 목록에 그대로 남고 복원도 계속 작동합니다."
+  "Off: no new checkpoints are taken. Existing checkpoints stay listed and Restore still works.": "꺼짐: 새 체크포인트를 만들지 않습니다. 기존 체크포인트는 목록에 그대로 남고 복원도 계속 작동합니다.",
+  "HTML export saves a whole session to a file": "HTML 내보내기는 전체 세션을 파일 하나로 저장합니다",
+  "Hide secrets from ChatGPT": "ChatGPT에서 비밀 정보 숨기기",
+  "API keys, tokens, private keys and passwords in what tools return are replaced with a short note before ChatGPT sees them. Your files stay as they are. A project can turn this off in its menu.": "도구가 반환하는 내용의 API 키, 토큰, 개인 키, 비밀번호는 ChatGPT가 보기 전에 짧은 안내로 바뀝니다. 파일은 그대로입니다. 프로젝트 메뉴에서 이 기능을 끌 수 있습니다.",
+  "What ChatGPT gets to see on this computer.": "이 컴퓨터에서 ChatGPT가 볼 수 있는 것.",
+  "Off for every project in Settings": "설정에서 모든 프로젝트에 대해 꺼져 있음",
+  "This project's tools send keys and tokens to ChatGPT as they are": "이 프로젝트의 도구는 키와 토큰을 그대로 ChatGPT에 보냅니다",
+  "Keys and tokens in this project's tool results are hidden from ChatGPT": "이 프로젝트의 도구 결과에 있는 키와 토큰은 ChatGPT에서 숨겨집니다",
+  "Export as HTML": "HTML로 내보내기",
+  "Whole session as HTML": "전체 세션을 HTML로",
+  "HTML files": "HTML 파일"
 }

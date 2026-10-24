@@ -44,12 +44,12 @@ function tag(repository: string, name: string, message: string, email: string): 
   });
 }
 
-function verify(repository: string, args: string[] = []) {
+function verify(repository: string, args: string[] = [], env: Record<string, string> = {}) {
   return spawnSync(process.execPath, [script, ...args], {
     cwd: repository,
     encoding: 'utf8',
     windowsHide: true,
-    env: { ...process.env, GIT_AUTHOR_NAME: 'totec448-spec', GIT_AUTHOR_EMAIL: safeEmail },
+    env: { ...process.env, GIT_AUTHOR_NAME: 'totec448-spec', GIT_AUTHOR_EMAIL: safeEmail, ...env },
   });
 }
 
@@ -131,6 +131,17 @@ describe('public-history privacy gate', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('Claude session');
     expect(result.stderr).not.toContain(sessionUrl);
+  });
+
+  it('starts as many git processes for six commits as for one', () => {
+    const gitStarts = (extraCommits: number) => {
+      const repository = makeRepository();
+      for (let index = 0; index < extraCommits; index += 1) commit(repository, `Clean ${index}`, safeEmail);
+      const trace = path.join(repository, '.git', 'trace.txt');
+      expect(verify(repository, [], { GIT_TRACE: trace }).status).toBe(0);
+      return readFileSync(trace, 'utf8').split('\n').filter(line => line.includes('trace: built-in: git ')).length;
+    };
+    expect(gitStarts(5)).toBe(gitStarts(0));
   });
 
   /**

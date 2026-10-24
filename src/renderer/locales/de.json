@@ -1846,7 +1846,6 @@
   "Mention Chat On Steroids Core": "Chat On Steroids Core erwähnen",
   "Makes sure ChatGPT can use this app in every chat. Turn it off if ChatGPT starts plain questions with an unneeded tool call. Workers, Goal, Loop and Continue always keep the mention.": "Stellt sicher, dass ChatGPT diese App in jedem Chat nutzen kann. Schalte es aus, wenn ChatGPT einfache Fragen mit einem unnötigen Tool-Aufruf beginnt. Worker, Goal, Loop und Continue behalten die Erwähnung immer.",
   "Privacy": "Datenschutz",
-  "What ChatGPT sees of your screen.": "Was ChatGPT von deinem Bildschirm sieht.",
   "For developers": "Für Entwickler",
   "Troubleshooting details and access for tools on this computer.": "Details zur Fehlersuche und Zugriff für Tools auf diesem Computer.",
   "Show turn boundaries and recovery events in the chat.": "Durchlaufgrenzen und Wiederherstellungen im Chat anzeigen.",
@@ -3055,5 +3054,15 @@
   "Keep current files": "Aktuelle Dateien behalten",
   "Restore files": "Dateien wiederherstellen",
   "Save a checkpoint before each turn's first edit": "Vor der ersten Änderung jedes Durchlaufs einen Checkpoint speichern",
-  "Off: no new checkpoints are taken. Existing checkpoints stay listed and Restore still works.": "Aus: Es werden keine neuen Checkpoints erstellt. Bestehende Checkpoints bleiben gelistet und „Wiederherstellen“ funktioniert weiterhin."
+  "Off: no new checkpoints are taken. Existing checkpoints stay listed and Restore still works.": "Aus: Es werden keine neuen Checkpoints erstellt. Bestehende Checkpoints bleiben gelistet und „Wiederherstellen“ funktioniert weiterhin.",
+  "HTML export saves a whole session to a file": "Der HTML-Export speichert eine ganze Sitzung in einer Datei",
+  "Hide secrets from ChatGPT": "Geheimnisse vor ChatGPT verbergen",
+  "API keys, tokens, private keys and passwords in what tools return are replaced with a short note before ChatGPT sees them. Your files stay as they are. A project can turn this off in its menu.": "API-Schlüssel, Tokens, private Schlüssel und Passwörter in Werkzeugergebnissen werden durch einen kurzen Hinweis ersetzt, bevor ChatGPT sie sieht. Deine Dateien bleiben unverändert. Ein Projekt kann das in seinem Menü ausschalten.",
+  "What ChatGPT gets to see on this computer.": "Was ChatGPT auf diesem Computer zu sehen bekommt.",
+  "Off for every project in Settings": "Für alle Projekte in den Einstellungen ausgeschaltet",
+  "This project's tools send keys and tokens to ChatGPT as they are": "Die Werkzeuge dieses Projekts senden Schlüssel und Tokens unverändert an ChatGPT",
+  "Keys and tokens in this project's tool results are hidden from ChatGPT": "Schlüssel und Tokens in den Werkzeugergebnissen dieses Projekts sind vor ChatGPT verborgen",
+  "Export as HTML": "Als HTML exportieren",
+  "Whole session as HTML": "Ganze Sitzung als HTML",
+  "HTML files": "HTML-Dateien"
 }

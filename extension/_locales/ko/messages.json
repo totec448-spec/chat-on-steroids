@@ -1189,5 +1189,17 @@
   },
   "content_edit_unavailable": {
     "message": "ChatGPT가 해당 메시지에 편집을 제공하지 않았습니다. ChatGPT에서 채팅을 연 다음 다시 시도하세요."
+  },
+  "content_auto_compaction_waiting_app": {
+    "message": "자동 압축: 앱 응답 대기 중"
+  },
+  "content_goal_loop_waiting_app": {
+    "message": "Goal과 Loop: 앱 응답 대기 중"
+  },
+  "content_settings_waiting_app": {
+    "message": "앱 응답 대기 중"
+  },
+  "content_task_waiting_app": {
+    "message": "Chat On Steroids의 응답을 기다리는 중입니다."
   }
 }

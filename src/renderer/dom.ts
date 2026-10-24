@@ -69,6 +69,7 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-retry': 'arrow-clockwise',
   'i-restore': 'arrow-counter-clockwise',
   'i-search': 'magnifying-glass',
+  'i-shield': 'shield-check',
   'i-skill': 'cube',
   'i-sparkle': 'sparkle',
   'i-star': 'star',

@@ -1240,5 +1240,17 @@
   },
   "content_edit_unavailable": {
     "message": "ChatGPT hat für diese Nachricht kein Bearbeiten angeboten. Öffne den Chat in ChatGPT und versuche es dann erneut."
+  },
+  "content_auto_compaction_waiting_app": {
+    "message": "Automatisches Komprimieren: wartet auf die App"
+  },
+  "content_goal_loop_waiting_app": {
+    "message": "Goal und Loop: wartet auf die App"
+  },
+  "content_settings_waiting_app": {
+    "message": "wartet auf die App"
+  },
+  "content_task_waiting_app": {
+    "message": "Wartet auf eine Antwort von Chat On Steroids."
   }
 }

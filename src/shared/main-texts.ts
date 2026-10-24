@@ -42,10 +42,13 @@ export const MAIN_TEXTS = [
   'Restore files',
   // Native file dialogs and the worker checkout removal confirmation.
   'Export as Markdown',
+  'You',
+  'Export as HTML',
   'Export usage as CSV',
   'Import CoS Pet folder',
   'Import SKILL.md',
   'Markdown files',
+  'HTML files',
   'Text files',
   'CSV files',
   'Save code',
