@@ -2698,7 +2698,11 @@ describe('phone notifications over IPC', () => {
     expect(saved).toMatchObject({ ok: true, data: { hasPhonePushToken: true } });
     expect(JSON.stringify(saved)).not.toContain('tk_fixture');
     expect(await getSecret('ntfyToken')).toBe('tk_fixture');
-    expect(await handlers.get('phonePush:token')!(null, { token: 'has space' })).toEqual({ ok: false, error: 'An access token is letters, digits and symbols, without spaces.' });
+    expect(await handlers.get('phonePush:token')!(null, { token: 'tk_fixture with gap' })).toEqual({ ok: false, error: 'An access token is letters, digits and symbols, without spaces.' });
+    const { getLog } = await import('../src/main/logger.js');
+    const refused = getLog().filter(entry => entry.message.startsWith('phone push: access token'));
+    expect(refused.at(-1)?.message).toBe('phone push: access token not saved: it has spaces or other characters a token cannot have');
+    expect(refused.some(entry => entry.message.includes('tk_fixture'))).toBe(false);
     expect(await handlers.get('phonePush:token')!(null, { token: '' })).toMatchObject({ ok: true, data: { hasPhonePushToken: false } });
     expect(await getSecret('ntfyToken')).toBeNull();
   });

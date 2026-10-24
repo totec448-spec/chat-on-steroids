@@ -754,7 +754,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('phonePush:token', async payload => {
     const { token } = z.object({ token: z.string().max(512) }).strict().parse(payload);
     const trimmed = token.trim();
-    if (trimmed && !/^[\x21-\x7e]+$/.test(trimmed)) throw new Error('An access token is letters, digits and symbols, without spaces.');
+    if (trimmed && !/^[\x21-\x7e]+$/.test(trimmed)) {
+      // Never the token itself.
+      logWarn('phone push: access token not saved: it has spaces or other characters a token cannot have');
+      throw new Error('An access token is letters, digits and symbols, without spaces.');
+    }
     await setSecret('ntfyToken', trimmed);
     logInfo(`phone push: access token ${trimmed ? 'saved' : 'removed'}`);
     return buildState();
