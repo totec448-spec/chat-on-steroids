@@ -4,8 +4,9 @@
  * At its time a run becomes one message in the chat's existing queue, so everything that holds
  * any automatic send (read-only mode, ChatGPT's "slow down", a missing browser) holds it too, and
  * the queue row says why. A run waits for a running turn instead of joining it. The rules for
- * when a run is due are in shared/schedule.ts: one late run after missed ones, nothing twice for
- * the same time, nothing at once after saving or resuming.
+ * when a run is due are in shared/schedule.ts: nothing twice for the same time, nothing at once
+ * after saving or resuming. A run missed while the app was closed or asleep is skipped and shown
+ * as missed, unless the schedule catches up, which sends one late run.
  *
  * Exactly once: the queued message's id is derived from the schedule and the run's time. A crash
  * after queueing but before the schedule is saved queues the same id again, and the queue answers
@@ -40,7 +41,11 @@ const recordSchema = z.object({
   createdAt: time,
   lastDueAt: time.nullable(),
   /** The message the last run queued, so the next time can tell whether it still waits. */
-  lastInputId: z.string().uuid().optional()
+  lastInputId: z.string().uuid().optional(),
+  /** Send one late run after missed ones; off, a missed run is skipped (the default, Haz on #1826). */
+  catchUp: z.boolean().optional(),
+  /** The last run skipped as missed, shown as "Missed" until a run goes out again. */
+  missedDueAt: time.optional()
 }).strict();
 export type ScheduledRun = z.infer<typeof recordSchema>;
 const storeSchema = z.object({ version: z.literal(1), schedules: z.array(z.unknown()).max(MAX_SCHEDULES) });
@@ -91,7 +96,7 @@ function runInputId(scheduleId: string, dueAt: number): string {
 export function listSchedules(): Promise<ScheduledRun[]> { return serial(load); }
 
 /** Creates or replaces a chat's schedule. It starts at its next time, never at once. */
-export function saveSchedule(input: { sessionId: string; text: string; repeat: ScheduleRepeat; until: number | null }, now = Date.now()): Promise<ScheduledRun> {
+export function saveSchedule(input: { sessionId: string; text: string; repeat: ScheduleRepeat; until: number | null; catchUp?: boolean }, now = Date.now()): Promise<ScheduledRun> {
   return serial(async () => {
     if (!input.text.trim()) throw new Error('Write the message to send.');
     if (!validSchedule(input.repeat)) throw new Error('Choose a schedule that runs at least once an hour apart.');
@@ -100,7 +105,7 @@ export function saveSchedule(input: { sessionId: string; text: string; repeat: S
     const prior = schedules.find(row => row.sessionId === input.sessionId);
     if (!prior && schedules.length >= MAX_SCHEDULES) throw new Error('There are too many scheduled chats. Remove one first.');
     const record = recordSchema.parse({ id: prior?.id ?? randomUUID(), sessionId: input.sessionId, text: input.text.trim(),
-      repeat: input.repeat, until: input.until, paused: false, createdAt: now, lastDueAt: null,
+      repeat: input.repeat, until: input.until, paused: false, createdAt: now, lastDueAt: null, ...(input.catchUp ? { catchUp: true } : {}),
       ...(prior?.lastInputId ? { lastInputId: prior.lastInputId } : {}) });
     await save([...schedules.filter(row => row.sessionId !== input.sessionId), record]);
     return record;
@@ -153,6 +158,13 @@ export function runDueSchedules(now: number, deps: RunnerDeps): Promise<void> {
           await replace({ ...run, lastDueAt: due.dueAt });
           continue;
         }
+        // Missed while the app was closed or asleep: skipped unless catching up was chosen, since a
+        // stale run can be unexpected or expensive. It is kept as "Missed" until a run goes out again.
+        if (due.late && !run.catchUp) {
+          deps.log(`scheduled run: ${clock(due.dueAt)} missed (the app was closed or asleep); not caught up (${run.sessionId})`);
+          await replace({ ...run, lastDueAt: due.dueAt, missedDueAt: due.dueAt });
+          continue;
+        }
         const id = runInputId(run.id, due.dueAt);
         try {
           await deps.enqueue({ id, sessionId: run.sessionId, text: run.text, mode: session.activeTurnId ? 'after-turn' : 'auto',
@@ -166,7 +178,8 @@ export function runDueSchedules(now: number, deps: RunnerDeps): Promise<void> {
         }
         deps.log(`scheduled run: queued for ${run.sessionId}${due.late ? ` (late, was due ${clock(due.dueAt)})` : ''}`);
         // If this save fails, the next check queues the same message id again, and the queue keeps one row.
-        await replace({ ...run, lastDueAt: due.dueAt, lastInputId: id });
+        const { missedDueAt: _cleared, ...sent } = run;
+        await replace({ ...sent, lastDueAt: due.dueAt, lastInputId: id });
       } catch (error) {
         deps.log(`scheduled run: ${clock(due.dueAt)} not recorded yet (${error instanceof Error ? error.message : String(error)}); checked again in 30 s (${run.sessionId})`);
       }

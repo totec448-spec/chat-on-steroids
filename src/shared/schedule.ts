@@ -5,8 +5,8 @@
  * Times of day are local wall-clock times. A time the spring clock change skips runs at the first
  * minute after the change; a time the autumn change repeats runs once. "Every n hours" counts
  * real hours from when the schedule was made, so a clock change neither adds nor drops a run.
- * A run missed while the app was closed or asleep is sent once when it is back, marked late,
- * and the schedule then keeps its normal times. Past its end date it sends nothing.
+ * The latest run missed while the app was closed or asleep is reported once when it is back,
+ * marked late; the runner skips it unless the schedule catches up. Past its end date nothing.
  */
 
 export type ScheduleRepeat =

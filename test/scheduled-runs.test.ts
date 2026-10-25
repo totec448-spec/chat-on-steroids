@@ -60,9 +60,22 @@ it('waits for a running turn instead of joining it', async () => {
   expect(queued[0]).toMatchObject({ mode: 'after-turn' });
 });
 
-it('sends one late run after missed ones, labelled late', async () => {
+it('skips runs missed while the app was closed, and says which was missed (user decision, Haz on #1826)', async () => {
   const { runs, deps, queued } = await setup();
   await runs.saveSchedule({ sessionId: SESSION, text: 'Daily', repeat: { kind: 'daily', at: '09:00' }, until: null }, local('2026-10-20T10:00:00'));
+  await runs.runDueSchedules(local('2026-10-24T12:00:00'), deps);
+  expect(queued).toEqual([]);
+  expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/^scheduled run: 09:00 missed \(the app was closed or asleep\); not caught up \(/));
+  expect((await runs.listSchedules()).find(row => row.sessionId === SESSION)).toMatchObject({ lastDueAt: local('2026-10-24T09:00:00'), missedDueAt: local('2026-10-24T09:00:00') });
+  // The normal times go on, and an on-time run clears the missed mark.
+  await runs.runDueSchedules(local('2026-10-25T09:00:30'), deps);
+  expect(queued).toEqual([expect.objectContaining({ scheduled: expect.objectContaining({ dueAt: local('2026-10-25T09:00:00'), late: false }) })]);
+  expect((await runs.listSchedules()).find(row => row.sessionId === SESSION)?.missedDueAt).toBeUndefined();
+});
+
+it('sends one late run after missed ones, labelled late, when catching up was chosen', async () => {
+  const { runs, deps, queued } = await setup();
+  await runs.saveSchedule({ sessionId: SESSION, text: 'Daily', repeat: { kind: 'daily', at: '09:00' }, until: null, catchUp: true }, local('2026-10-20T10:00:00'));
   await runs.runDueSchedules(local('2026-10-24T12:00:00'), deps);
   expect(queued).toEqual([expect.objectContaining({ scheduled: expect.objectContaining({ dueAt: local('2026-10-24T09:00:00'), late: true }) })]);
   expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/^scheduled run: queued for .+ \(late, was due /));
