@@ -3909,6 +3909,19 @@ describe('page visibility in the diagnostics status', () => {
     live.document.dispatchEvent(new live.window.Event('visibilitychange'));
     expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({ visibility: 'visible', hiddenForMs: 0 });
   });
+
+  it('counts from the load for a page that opens hidden, as a background tab does', async () => {
+    live = await harness(undefined, {}, document => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    });
+    // The script's own start-up moves the harness clock a little; the count runs from the load.
+    const atLoad = await live.runtimeMessage({ type: 'clf-page-status' }) as { visibility: string; hiddenForMs: number };
+    expect(atLoad.visibility).toBe('hidden');
+    expect(atLoad.hiddenForMs).toBeGreaterThan(0);
+    expect(atLoad.hiddenForMs).toBeLessThan(10_000);
+    live.advance(45_000);
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({ visibility: 'hidden', hiddenForMs: atLoad.hiddenForMs + 45_000 });
+  });
 });
 
 describe('H2 resume transport evidence', () => {
