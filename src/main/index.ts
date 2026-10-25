@@ -34,7 +34,7 @@ import { unifiedExecManager } from './codex/manager.js';
 import { workspaceTerminalsExited } from './workspace-terminal.js';
 import { getSecret, initSecretsPath, keychainReadPending } from './secrets.js';
 import { installPhonePush, pushToPhone } from './phone-push.js';
-import { installSoundCues, soundCue } from './sound-cues.js';
+import { installSoundCues, soundCue, soundQuietHours } from './sound-cues.js';
 import { DEFAULT_PHONE_PUSH } from '../shared/phone-push.js';
 import { mainText, mainTextTranslations, onMainTextsChange, restoreMainTextTranslations } from './main-texts.js';
 import { isMainText } from '../shared/main-texts.js';
@@ -499,7 +499,7 @@ void app.whenReady().then(async () => {
   installSoundCues({
     enabled: () => getConfig().ui.sounds === true,
     focused: () => window?.isFocused() === true,
-    quietHours: () => getConfig().ui.phonePush?.enabled ? getConfig().ui.phonePush?.quietHours ?? null : null,
+    quietHours: () => soundQuietHours(getConfig().ui),
     now: () => Date.now(),
     play: kind => {
       if (!window || window.isDestroyed()) return false;

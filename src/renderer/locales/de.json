@@ -3103,7 +3103,6 @@
   "Whole session as HTML": "Ganze Sitzung als HTML",
   "HTML files": "HTML-Dateien",
   "Play sounds": "Töne abspielen",
-  "A short sound when a chat needs you, something fails, or a chat finishes in the background. Quiet during phone notifications' quiet hours.": "Ein kurzer Ton, wenn ein Chat dich braucht, etwas fehlschlägt oder ein Chat im Hintergrund fertig wird. Still während der Ruhezeiten der Handy-Benachrichtigungen.",
   "{0} / {1} tokens · {2}% of the compaction point": "{0} / {1} Tokens · {2} % des Komprimierungspunkts",
   "{0} / {1} tokens · {2}% of the compaction point|one": "{0} / {1} Token · {2} % des Komprimierungspunkts",
   "{0} / {1} tokens · {2}% of the large-chat warning": "{0} / {1} Tokens · {2} % der Warnung für große Chats",
@@ -3173,5 +3172,7 @@
   "Your settings changed after the file was chosen. Choose it again.": "Deine Einstellungen haben sich geändert, nachdem die Datei gewählt wurde. Wähle sie erneut.",
   "This backup has a setting this version does not accept, so nothing was imported.": "Diese Sicherung enthält eine Einstellung, die diese Version nicht annimmt, daher wurde nichts importiert.",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "Die gespeicherten Schlüssel auf diesem Computer lassen sich nicht lesen, daher können die Schlüssel der Sicherung nicht hinzugefügt werden. Importiere ohne sie.",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Die Einstellungen wurden importiert, aber die gespeicherten Schlüssel ließen sich nicht ablegen. Füge sie in den Einstellungen erneut hinzu."
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Die Einstellungen wurden importiert, aber die gespeicherten Schlüssel ließen sich nicht ablegen. Füge sie in den Einstellungen erneut hinzu.",
+  "For chats that need you, failures and finished chats. Follows the quiet hours below.": "Für Chats, die dich brauchen, Fehler und fertige Chats. Folgt den Ruhezeiten weiter unten.",
+  "No phone notifications and no sounds in these hours.": "Keine Benachrichtigungen aufs Handy und keine Töne in diesen Stunden."
 }

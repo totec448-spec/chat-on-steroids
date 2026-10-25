@@ -61,3 +61,12 @@ it('does not count a sound no window received, so it plays once a window can', (
   expect(cue('needs-you', 's1')).toBe('played');
   expect(deps.log.mock.calls.map(call => call[0])).toEqual(['sound: needs-you not played (no-window)', 'sound: needs-you played']);
 });
+
+it('keeps quiet hours for sounds even when phone notifications are off (Haz on #1830)', async () => {
+  const { soundQuietHours } = await import('../src/main/sound-cues.js');
+  const hours = { from: '22:00', to: '07:00' };
+  expect(soundQuietHours({ phonePush: { enabled: false, quietHours: hours } } as any)).toEqual(hours);
+  expect(soundQuietHours({ phonePush: { enabled: true, quietHours: hours } } as any)).toEqual(hours);
+  expect(soundQuietHours({ phonePush: { enabled: true, quietHours: null } } as any)).toBeNull();
+  expect(soundQuietHours({} as any)).toBeNull();
+});

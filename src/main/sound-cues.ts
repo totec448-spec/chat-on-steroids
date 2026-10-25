@@ -1,14 +1,16 @@
 /**
  * #1802: a short sound when a chat needs you, something failed, or a chat finished while the
  * window is in the background. The window plays it (renderer/sound-cues.ts); this decides
- * whether. Off by default, quiet during phone notifications' quiet hours, and one sound per chat
- * and kind in two minutes, so a burst of events never turns into a burst of sounds. Every decision
- * writes one log line, never with the chat in it.
+ * whether. Off by default, quiet during the quiet hours (the one setting under Phone
+ * notifications, even while those are off), and one sound per chat and kind in two minutes, so a
+ * burst of events never turns into a burst of sounds. Every decision writes one log line, never
+ * with the chat in it.
  */
 
 import { inQuietHours } from './phone-push.js';
 import type { QuietHours } from '../shared/phone-push.js';
 import type { SoundCue } from '../shared/sound-cues.js';
+import type { Config } from '../shared/types.js';
 
 export type SoundCueResult = 'played' | 'off' | 'at-window' | 'quiet-hours' | 'repeat' | 'no-window';
 
@@ -16,7 +18,7 @@ export interface SoundCueDeps {
   enabled(): boolean;
   /** Whether the app's window has the focus: a finished chat there is already in view. */
   focused(): boolean;
-  /** Phone notifications' quiet hours while those are on, else null. */
+  /** The quiet hours (set under Phone notifications, kept even while those are off), or null. */
   quietHours(): QuietHours | null;
   now(): number;
   /** Hands the cue to the window; false when no window could receive it. */
@@ -48,6 +50,11 @@ export function createSoundCues(deps: SoundCueDeps): (kind: SoundCue, sessionId?
     if (result !== 'off') deps.log(result === 'played' ? `sound: ${kind} played` : `sound: ${kind} not played (${result})`);
     return result;
   };
+}
+
+/** The quiet hours sounds follow: the one setting under Phone notifications, whether or not those are on. */
+export function soundQuietHours(ui: Pick<Config['ui'], 'phonePush'>): QuietHours | null {
+  return ui.phonePush?.quietHours ?? null;
 }
 
 let installed: ((kind: SoundCue, sessionId?: string) => SoundCueResult) | null = null;

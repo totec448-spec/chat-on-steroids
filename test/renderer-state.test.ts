@@ -4885,6 +4885,17 @@ describe('phone notifications in Settings', () => {
     await waitFor(() => expect(writeClipboard).toHaveBeenCalledWith('cos-fixturetopic234567'));
   });
 
+  it('keeps quiet hours visible and saved with phone notifications off, since sounds follow them too (Haz on #1830)', async () => {
+    const mounted = await withPhone(phone({ enabled: false }));
+    const doc = mounted.window.document;
+    const quiet = doc.getElementById('phonePushQuiet') as HTMLSelectElement;
+    expect(doc.getElementById('phonePushOptions')!.hidden).toBe(true);
+    expect(doc.getElementById('phonePushOptions')!.contains(quiet)).toBe(false);
+    expect(quiet.closest('[hidden]')).toBeNull();
+    change(doc, 'phonePushQuiet', '22:00-07:00');
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush).toMatchObject({ enabled: false, quietHours: { from: '22:00', to: '07:00' } }));
+  });
+
   it('saves when a chat counts as finished, quiet hours shown in local time, and the details switch', async () => {
     const mounted = await withPhone(phone());
     const doc = mounted.window.document;

@@ -3055,7 +3055,6 @@
   "Whole session as HTML": "セッション全体を HTML で",
   "HTML files": "HTML ファイル",
   "Play sounds": "サウンドを鳴らす",
-  "A short sound when a chat needs you, something fails, or a chat finishes in the background. Quiet during phone notifications' quiet hours.": "チャットがあなたを必要としたとき、何かが失敗したとき、またはバックグラウンドでチャットが終わったときに短い音を鳴らします。スマートフォン通知のおやすみ時間中は鳴りません。",
   "{0} / {1} tokens · {2}% of the compaction point": "{0} / {1}トークン · 圧縮開始点の{2}%",
   "{0} / {1} tokens · {2}% of the large-chat warning": "{0} / {1}トークン · 大きいチャットの警告値の{2}%",
   "Large-chat warning at": "大きいチャットの警告",
@@ -3117,5 +3116,7 @@
   "Your settings changed after the file was chosen. Choose it again.": "ファイルを選んだ後に設定が変わりました。もう一度選んでください。",
   "This backup has a setting this version does not accept, so nothing was imported.": "このバックアップには、このバージョンで使えない設定が含まれているため、何もインポートされませんでした。",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "このコンピューターに保存されたキーを読み取れないため、バックアップのキーを追加できません。キーなしでインポートしてください。",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "設定はインポートされましたが、保存されたキーを格納できませんでした。設定でもう一度追加してください。"
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "設定はインポートされましたが、保存されたキーを格納できませんでした。設定でもう一度追加してください。",
+  "For chats that need you, failures and finished chats. Follows the quiet hours below.": "あなたが必要なチャット、失敗、完了したチャットに。下のおやすみ時間に従います。",
+  "No phone notifications and no sounds in these hours.": "この時間帯はスマートフォンへの通知もサウンドもありません。"
 }

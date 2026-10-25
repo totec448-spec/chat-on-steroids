@@ -3151,7 +3151,6 @@
   "Whole session as HTML": "Sessão inteira em HTML",
   "HTML files": "Arquivos HTML",
   "Play sounds": "Tocar sons",
-  "A short sound when a chat needs you, something fails, or a chat finishes in the background. Quiet during phone notifications' quiet hours.": "Um som curto quando um chat precisa de você, algo falha ou um chat termina em segundo plano. Fica em silêncio durante o Horário de silêncio das notificações no celular.",
   "{0} / {1} tokens · {2}% of the compaction point": "{0} / {1} tokens · {2}% do ponto de compactação",
   "{0} / {1} tokens · {2}% of the compaction point|one": "{0} / {1} token · {2}% do ponto de compactação",
   "{0} / {1} tokens · {2}% of the compaction point|many": "{0} / {1} de tokens · {2}% do ponto de compactação",
@@ -3229,5 +3228,7 @@
   "Your settings changed after the file was chosen. Choose it again.": "Suas configurações mudaram depois que o arquivo foi escolhido. Escolha-o de novo.",
   "This backup has a setting this version does not accept, so nothing was imported.": "Este backup tem uma configuração que esta versão não aceita, então nada foi importado.",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "As chaves salvas neste computador não podem ser lidas, então as chaves do backup não podem ser adicionadas. Importe sem elas.",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "As configurações foram importadas, mas as chaves salvas não puderam ser armazenadas. Adicione-as de novo nas Configurações."
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "As configurações foram importadas, mas as chaves salvas não puderam ser armazenadas. Adicione-as de novo nas Configurações.",
+  "For chats that need you, failures and finished chats. Follows the quiet hours below.": "Para chats que precisam de você, falhas e chats concluídos. Segue o horário de silêncio abaixo.",
+  "No phone notifications and no sounds in these hours.": "Sem notificações no celular e sem sons nesse horário."
 }

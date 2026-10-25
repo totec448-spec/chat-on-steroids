@@ -3055,7 +3055,6 @@
   "Whole session as HTML": "전체 세션을 HTML로",
   "HTML files": "HTML 파일",
   "Play sounds": "소리 재생",
-  "A short sound when a chat needs you, something fails, or a chat finishes in the background. Quiet during phone notifications' quiet hours.": "채팅이 나를 필요로 할 때, 무언가 실패했을 때, 또는 백그라운드에서 채팅이 끝났을 때 짧은 소리를 냅니다. 휴대폰 알림의 방해 금지 시간에는 울리지 않습니다.",
   "{0} / {1} tokens · {2}% of the compaction point": "{0} / {1} 토큰 · 압축 시작점의 {2}%",
   "{0} / {1} tokens · {2}% of the large-chat warning": "{0} / {1} 토큰 · 큰 채팅 경고 기준의 {2}%",
   "Large-chat warning at": "큰 채팅 경고 기준",
@@ -3117,5 +3116,7 @@
   "Your settings changed after the file was chosen. Choose it again.": "파일을 고른 뒤 설정이 바뀌었습니다. 다시 고르세요.",
   "This backup has a setting this version does not accept, so nothing was imported.": "이 백업에는 이 버전에서 받을 수 없는 설정이 있어 아무것도 가져오지 않았습니다.",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "이 컴퓨터에 저장된 키를 읽을 수 없어 백업의 키를 추가할 수 없습니다. 키 없이 가져오세요.",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "설정은 가져왔지만 저장된 키를 보관하지 못했습니다. 설정에서 다시 추가하세요."
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "설정은 가져왔지만 저장된 키를 보관하지 못했습니다. 설정에서 다시 추가하세요.",
+  "For chats that need you, failures and finished chats. Follows the quiet hours below.": "나를 기다리는 채팅, 실패, 끝난 채팅에 대해. 아래 방해 금지 시간을 따릅니다.",
+  "No phone notifications and no sounds in these hours.": "이 시간에는 휴대폰 알림도 소리도 없습니다."
 }

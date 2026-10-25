@@ -3055,7 +3055,6 @@
   "Whole session as HTML": "Toàn bộ phiên dạng HTML",
   "HTML files": "Tệp HTML",
   "Play sounds": "Phát âm thanh",
-  "A short sound when a chat needs you, something fails, or a chat finishes in the background. Quiet during phone notifications' quiet hours.": "Một âm thanh ngắn khi một cuộc trò chuyện cần bạn, có gì đó thất bại hoặc một cuộc trò chuyện xong ở chế độ nền. Im lặng trong giờ yên lặng của thông báo điện thoại.",
   "{0} / {1} tokens · {2}% of the compaction point": "{0} / {1} token · {2}% điểm rút gọn",
   "{0} / {1} tokens · {2}% of the large-chat warning": "{0} / {1} token · {2}% ngưỡng cảnh báo chat lớn",
   "Large-chat warning at": "Cảnh báo chat lớn từ",
@@ -3117,5 +3116,7 @@
   "Your settings changed after the file was chosen. Choose it again.": "Cài đặt của bạn đã thay đổi sau khi chọn tệp. Hãy chọn lại tệp.",
   "This backup has a setting this version does not accept, so nothing was imported.": "Bản sao lưu này có một cài đặt mà phiên bản này không chấp nhận, nên không có gì được nhập.",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "Không đọc được các khóa đã lưu trên máy này, nên không thể thêm các khóa của bản sao lưu. Hãy nhập mà không có chúng.",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Đã nhập cài đặt, nhưng không thể lưu các khóa. Hãy thêm lại chúng trong Cài đặt."
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Đã nhập cài đặt, nhưng không thể lưu các khóa. Hãy thêm lại chúng trong Cài đặt.",
+  "For chats that need you, failures and finished chats. Follows the quiet hours below.": "Cho cuộc trò chuyện cần bạn, lỗi và cuộc trò chuyện đã xong. Tuân theo giờ yên lặng bên dưới.",
+  "No phone notifications and no sounds in these hours.": "Không có thông báo điện thoại và không có âm thanh trong những giờ này."
 }
