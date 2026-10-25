@@ -4414,13 +4414,15 @@ function visibleWords(node: Node): string[] {
   const words: string[] = [];
   const walk = (current: Node): void => {
     if (current.nodeType === 3) {
-      // A changed sign, decimal separator, percent or currency must invalidate
-      // recorded metrics, even when their digits and surrounding words match.
+      // A changed sign, decimal separator, percent, currency, status emoji or
+      // comparison symbol must invalidate a recorded layout, even when its words match.
       words.push(...(current.textContent ?? '').normalize('NFKC').toLocaleLowerCase()
-        .match(/[+\-−]?\p{N}+(?:[.,]\p{N}+)*[%‰]?|\p{Sc}|[\p{L}\p{N}]+/gu) ?? []);
+        .match(/[+\-−]?\p{N}+(?:[.,]\p{N}+)*[%‰]?|\p{Sc}|[\p{L}\p{N}]+|[\p{So}\p{Sm}]/gu) ?? []);
       return;
     }
-    if (current.nodeType === 1 && (current as Element).matches('svg, script, style, template, [hidden], [aria-hidden="true"]')) return;
+    // These inert spans replace captured SVG icons only after sanitizing. They
+    // have no equivalent text in the canonical reply, so exclude their glyphs.
+    if (current.nodeType === 1 && (current as Element).matches('svg, script, style, template, [hidden], [aria-hidden="true"], .markdown-dil-success-icon, .markdown-dil-down-icon')) return;
     for (const child of current.childNodes) walk(child);
   };
   walk(node);
