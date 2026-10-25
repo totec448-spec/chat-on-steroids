@@ -1016,6 +1016,9 @@
   "popup_pipeline_waiting_first_message": {
     "message": "Ожидание первого сообщения."
   },
+  "popup_pipeline_not_a_chat": {
+    "message": "Эта страница ChatGPT — не чат, поэтому приложению здесь нечего отслеживать. Откройте или начните чат."
+  },
   "popup_pipeline_waiting_latest_request_id": {
     "message": "Чат записан. Ожидание ID запроса из последнего хода."
   },
@@ -1084,6 +1087,9 @@
   },
   "popup_status_new_chat": {
     "message": "новый чат"
+  },
+  "popup_status_not_a_chat": {
+    "message": "не чат"
   },
   "popup_status_none_open": {
     "message": "ничего не открыто"
