@@ -2670,6 +2670,12 @@ describe('settings backup over IPC', () => {
     expect(text).not.toContain(tunnelA);
     expect(text).not.toContain(dir);
     expect(JSON.parse(text)).toMatchObject({ format: 'chat-on-steroids-settings', version: 1, appVersion: '0.0.0', settings: { readOnly: true, ui: { theme: 'dark' } } });
+    // Not even as an unset (null) entry: this computer's own settings are not in the file at all.
+    const settings = JSON.parse(text).settings;
+    expect(settings.tunnel?.tunnelId).toBeUndefined();
+    expect('connectorSuffix' in settings).toBe(false);
+    expect('browserBridgePort' in settings.ui).toBe(false);
+    expect('startAtLogin' in settings.ui).toBe(false);
     // The other computer: its own tunnel, name and look.
     await setUp('light', tunnelB, false);
     const roots = getConfig().roots;
@@ -2805,6 +2811,20 @@ describe('settings backup over IPC', () => {
       expect(getConfig()).toMatchObject({ controlApi: { enabled: true }, ui: { theme: 'dark', language: 'de' } });
       expect(await getSecret('openaiApiKey')).toBe(key);
     } finally { start.mockRestore(); await saveConfig({ ...getConfig(), controlApi: { enabled: false, allowActions: false } }); }
+  });
+
+  it('puts back a switch that was never changed when the backup was made', async () => {
+    await setUp('dark', tunnelA, false);
+    const before = getConfig();
+    const { developerMode: _, ...ui } = before.ui;
+    await saveConfig({ ...before, ui });
+    const file = path.join(dir, 'unset-switch.json');
+    await exportTo(file, { includeKeys: false });
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, developerMode: true } });
+    const picked = await pick(file);
+    expect(picked).toMatchObject({ ok: true, data: { changed: ['ui.developerMode'] } });
+    expect(await apply({ token: picked.data.token, includeKeys: false })).toMatchObject({ ok: true });
+    expect(getConfig().ui.developerMode).not.toBe(true);
   });
 
   it('finishes an import when publishing the connector fails after the save, and a second import is not refused as changed', async () => {

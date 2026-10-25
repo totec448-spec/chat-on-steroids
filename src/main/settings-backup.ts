@@ -94,6 +94,24 @@ export function pickByShape(schema: z.ZodType, value: unknown): Settings {
   return out;
 }
 
+/**
+ * The settings a backup carries: every setting the form owns, with one that was never changed
+ * written as null. A setting at its default is often not stored at all, and a backup that simply
+ * left it out would not put it back on import (a missing setting keeps today's value).
+ */
+export function settingsForBackup(schema: z.ZodType, value: unknown): Settings {
+  const shape = shapeOf(schema);
+  if (!shape) return {};
+  const source = isPlainObject(value) ? value : {};
+  const out: Settings = {};
+  for (const [key, child] of Object.entries(shape)) {
+    const item = source[key];
+    if (item === undefined) out[key] = null;
+    else out[key] = shapeOf(child) && isPlainObject(item) ? settingsForBackup(child, item) : structuredClone(item);
+  }
+  return out;
+}
+
 function withoutPerComputer(settings: Settings): Settings {
   const out = structuredClone(settings);
   for (const path of PER_COMPUTER) {
@@ -106,8 +124,9 @@ function withoutPerComputer(settings: Settings): Settings {
 
 /**
  * `current` with every setting `incoming` has, where the schema knows it. A setting the backup
- * lacks (it is older) keeps today's value; one this version does not know is ignored; a list is
- * taken whole. Per-computer settings are never taken.
+ * lacks (it is older) keeps today's value; one it has as null was never changed there and is unset
+ * here, where a setting may be unset at all (elsewhere, as in a hand-edited file, null is ignored);
+ * one this version does not know is ignored; a list is taken whole. Per-computer settings are never taken.
  */
 export function overlaySettings(schema: z.ZodType, current: Settings, incoming: Settings): Settings {
   const merge = (shape: Record<string, z.ZodType>, base: Settings, next: Settings): Settings => {
@@ -115,6 +134,10 @@ export function overlaySettings(schema: z.ZodType, current: Settings, incoming: 
     for (const [key, child] of Object.entries(shape)) {
       const item = next[key];
       if (item === undefined) continue;
+      if (item === null) {
+        if (child.safeParse(undefined).success) delete out[key];
+        continue;
+      }
       const childShape = shapeOf(child);
       if (childShape) {
         if (isPlainObject(item)) out[key] = merge(childShape, isPlainObject(base[key]) ? base[key] : {}, item);
