@@ -3003,7 +3003,6 @@
   "New branch": "新分支",
   "Commit": "提交",
   "Commit…": "提交…",
-  "Commit and open pull request": "提交并打开拉取请求",
   "Push": "推送",
   "Done": "完成",
   "Try again": "重试",
@@ -3118,5 +3117,7 @@
   "Your settings changed after the file was chosen. Choose it again.": "选择文件后你的设置已更改。请重新选择它。",
   "This backup has a setting this version does not accept, so nothing was imported.": "此备份包含此版本不接受的设置，因此未导入任何内容。",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "无法读取此电脑上保存的密钥，因此无法添加备份中的密钥。请不带密钥导入。",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "设置已导入，但无法存储保存的密钥。请在设置中重新添加。"
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "设置已导入，但无法存储保存的密钥。请在设置中重新添加。",
+  "Commit {0} files": "提交 {0} 个文件",
+  "Commit {0} files, push and open a pull request": "提交 {0} 个文件、推送并打开拉取请求"
 }

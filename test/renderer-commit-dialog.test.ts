@@ -51,7 +51,7 @@ it('starts from the chat’s task, every file chosen, and asks whether to push w
   expect($('commitFilesLabel').textContent).toBe('Files (2 of 2)');
   expect($('commitWhere').textContent).toBe('On branch fix-stop · pushes to origin');
   expect(document.querySelector<HTMLInputElement>('input[name="commitFlow"]:checked')!.value).toBe('ask-push');
-  expect($('commitSubmit').textContent).toBe('Commit');
+  expect($('commitSubmit').textContent).toBe('Commit 2 files');
   expect($('commitBranchField').hidden).toBe(true);
 });
 
@@ -59,6 +59,8 @@ it('commits only the chosen files, then asks before pushing, and pushes on reque
   const api = await open();
   (document.querySelectorAll<HTMLInputElement>('.commit-file input')[1]!).click();
   expect($('commitFilesLabel').textContent).toBe('Files (1 of 2)');
+  // The button says how many files go in, as the list does (Haz on #1825).
+  expect($('commitSubmit').textContent).toBe('Commit 1 file');
   await submit();
   expect(api.commitProject).toHaveBeenCalledWith({ projectId: 'p1', message: 'Fix the Stop button\n\n- src/chat.ts\n- notes.md', paths: ['src/chat.ts'], expectedToken: 'a'.repeat(64) });
   expect(api.setCommitFlow).toHaveBeenCalledWith('ask-push');
@@ -74,7 +76,8 @@ it('commits only the chosen files, then asks before pushing, and pushes on reque
 
 it('commits, pushes and opens the pull request in one go, with a link to it', async () => {
   const api = await open({}, 'pr');
-  expect($('commitSubmit').textContent).toBe('Commit and open pull request');
+  // A remembered pull request is spelled out on the button: it pushes too (Haz on #1825).
+  expect($('commitSubmit').textContent).toBe('Commit 2 files, push and open a pull request');
   expect($('commitFlowNote').textContent).toBe('The GitHub CLI creates the pull request.');
   await submit();
   expect(api.createPullRequest).toHaveBeenCalledWith('p1', 'Fix the Stop button', '- src/chat.ts\n- notes.md');

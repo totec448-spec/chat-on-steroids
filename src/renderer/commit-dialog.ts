@@ -105,7 +105,10 @@ export function initCommitDialog(api: Api, deps: { flow: () => CommitFlow | unde
     flowNote.textContent = note;
     branchField.hidden = !needsBranch();
     if (needsBranch() && !branchEdited) branch.value = branchNameFrom(message.value);
-    submit.textContent = flow() === 'pr' ? t('Commit and open pull request') : t('Commit');
+    // How many files go in, and for a pull request that it pushes too: a remembered choice is spelled out here (Haz on #1825).
+    submit.textContent = flow() === 'pr'
+      ? tn('Commit {0} file, push and open a pull request', 'Commit {0} files, push and open a pull request', chosen.size)
+      : tn('Commit {0} file', 'Commit {0} files', chosen.size);
     submit.disabled = busy || !state || !chosen.size;
     // While a step runs the dialog stays: its result belongs to this dialog, and a push cannot be called back.
     closeButton.disabled = busy;

@@ -3003,7 +3003,6 @@
   "New branch": "새 브랜치",
   "Commit": "커밋",
   "Commit…": "커밋…",
-  "Commit and open pull request": "커밋하고 풀 리퀘스트 열기",
   "Push": "푸시",
   "Done": "완료",
   "Try again": "다시 시도",
@@ -3118,5 +3117,7 @@
   "Your settings changed after the file was chosen. Choose it again.": "파일을 고른 뒤 설정이 바뀌었습니다. 다시 고르세요.",
   "This backup has a setting this version does not accept, so nothing was imported.": "이 백업에는 이 버전에서 받을 수 없는 설정이 있어 아무것도 가져오지 않았습니다.",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "이 컴퓨터에 저장된 키를 읽을 수 없어 백업의 키를 추가할 수 없습니다. 키 없이 가져오세요.",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "설정은 가져왔지만 저장된 키를 보관하지 못했습니다. 설정에서 다시 추가하세요."
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "설정은 가져왔지만 저장된 키를 보관하지 못했습니다. 설정에서 다시 추가하세요.",
+  "Commit {0} files": "파일 {0}개 커밋",
+  "Commit {0} files, push and open a pull request": "파일 {0}개 커밋, 푸시 후 풀 리퀘스트 열기"
 }
