@@ -4014,7 +4014,8 @@ const HANDLERS = {
     const projects = message.projects
       .filter((project) => project && typeof project.id === 'string' && /^g-p-[0-9a-f]{32}$/.test(project.id) && typeof project.name === 'string')
       .map((project) => ({ id: project.id, name: project.name.slice(0, 200) }));
-    if (!projects.length) return { ok: false };
+    // Rows that were all invalid say nothing; an empty sidebar still names the workspace in use.
+    if (message.projects.length && !projects.length) return { ok: false };
     const workspace = typeof message.workspace === 'string' && message.workspace.length <= 200 ? message.workspace : null;
     const result = await call('/chatgpt-projects', { method: 'POST', body: JSON.stringify({ projects, workspace }) });
     return { ok: result.ok === true };

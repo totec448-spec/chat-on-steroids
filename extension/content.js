@@ -1445,16 +1445,19 @@
   const PROJECT_LIST_RENEW_MS = 24 * 3_600_000;
   /**
    * Tells the app which Projects ChatGPT's sidebar lists (#1756) when that list changed, and once a day: the
-   * app offers them when a project is linked. An empty list (sidebar collapsed) is not reported.
+   * app offers them when a project is linked. An empty list still names the workspace in use, so the
+   * app stops offering another workspace's Projects; it removes none it already knows.
    */
   function reportProjectList() {
     if (globalThis.top !== globalThis) return;
     const projects = CLF_DOM.projectsShown();
-    if (!projects.length) return;
     // The workspace these are listed in: ChatGPT opens a Project only in its own workspace, and
     // names the one in use in this cookie (absent for a personal account). Read, never sent elsewhere.
     const cookie = String(document.cookie || '').split(';').map(part => part.trim()).find(part => part.startsWith('_account='));
-    const workspace = cookie ? decodeURIComponent(cookie.slice('_account='.length)) || null : null;
+    // A malformed escape must not throw on every pass and stop the reports: it counts as given.
+    const raw = cookie ? cookie.slice('_account='.length) : '';
+    let workspace = null;
+    try { workspace = decodeURIComponent(raw) || null; } catch { workspace = raw || null; }
     const signature = JSON.stringify([workspace, projects]);
     if (signature === reportedProjects && Date.now() - reportedProjectsAt < PROJECT_LIST_RENEW_MS) return;
     reportedProjects = signature;

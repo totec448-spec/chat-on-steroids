@@ -61,11 +61,13 @@ it('reports the sidebar Projects to the worker only when the list changed, and a
   context.top = context;
   vm.runInContext(`${section}\nglobalThis.report = reportProjectList;`, context);
   const report = async () => { (context.report as () => void)(); await new Promise(resolve => setTimeout(resolve, 0)); };
-  await report();
-  expect(ask).not.toHaveBeenCalled(); // a collapsed sidebar says nothing
+  await report(); await report();
+  // An empty sidebar still says which workspace is in use, once (CodeRabbit on #1757).
+  expect(ask).toHaveBeenCalledTimes(1);
+  expect(ask).toHaveBeenLastCalledWith({ type: 'project_catalog', projects: [], workspace: 'team-account-0001' });
   shown = [{ id: id('a'), name: 'Kunden' }];
   await report(); await report();
-  expect(ask).toHaveBeenCalledTimes(1);
+  expect(ask).toHaveBeenCalledTimes(2);
   // The workspace ChatGPT shows them in comes along: its Projects open only there.
   expect(ask).toHaveBeenLastCalledWith({ type: 'project_catalog', projects: shown, workspace: 'team-account-0001' });
   shown = [{ id: id('a'), name: 'Kunden' }, { id: id('b'), name: 'New' }];
@@ -73,17 +75,22 @@ it('reports the sidebar Projects to the worker only when the list changed, and a
   await report();
   reply = { ok: true };
   await report();
-  expect(ask).toHaveBeenCalledTimes(3);
+  expect(ask).toHaveBeenCalledTimes(4);
   // The same list in another workspace (no workspace cookie: a personal account) is reported again.
   document.cookie = 'oai-did=1';
   await report();
-  expect(ask).toHaveBeenCalledTimes(4);
+  expect(ask).toHaveBeenCalledTimes(5);
   expect(ask).toHaveBeenLastCalledWith({ type: 'project_catalog', projects: shown, workspace: null });
   // A frame inside the page never reports.
   context.top = {};
   shown = [{ id: id('c'), name: 'Other' }];
   await report();
-  expect(ask).toHaveBeenCalledTimes(4);
+  expect(ask).toHaveBeenCalledTimes(5);
+  // A malformed account cookie neither throws nor stops the reports; it counts as given.
+  context.top = context;
+  document.cookie = '_account=100%zz';
+  await report();
+  expect(ask).toHaveBeenLastCalledWith({ type: 'project_catalog', projects: shown, workspace: '100%zz' });
 });
 
 it('reports an unchanged sidebar list again after a day, so a tab left open keeps its Projects in the picker', async () => {
