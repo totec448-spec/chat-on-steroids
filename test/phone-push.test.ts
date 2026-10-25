@@ -40,6 +40,26 @@ describe('what reaches the phone', () => {
       priority: 3, tags: ['white_check_mark'], click: 'https://chatgpt.com/c/68f9a1b2-1c2d-8e3f-9a0b-1c2d3e4f5a6b' });
   });
 
+  it('never cuts an emoji in half when a long title or answer is shortened', async () => {
+    const { push, sent } = setUp({ includeDetails: true, finishedAfterMinutes: 0 });
+    // The cut lands exactly between the two halves of the emoji.
+    const title = 'a'.repeat(78) + '🚀 launch checklist';
+    const answer = 'b'.repeat(198) + '✅🎉 all done and shipped';
+    await push.notify({ kind: 'finished', sessionId: 's1', chatTitle: title, workedMs: 20_000, detail: answer });
+    const body = sent[0]!.body as { title: string; message: string };
+    const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+    expect(body.title).not.toMatch(lone);
+    expect(body.message).not.toMatch(lone);
+    expect(body.title.endsWith('…')).toBe(true);
+    expect([...body.title].length).toBeLessThanOrEqual(80);
+    // A family emoji is several code points joined; it stays whole or goes whole.
+    const family = '👨\u200D👩\u200D👧';
+    await push.notify({ kind: 'finished', sessionId: 's2', chatTitle: 'c'.repeat(77) + family + ' trip', workedMs: 20_000 });
+    const second = sent[1]!.body as { title: string };
+    expect(second.title.includes('\u200D') ? second.title.includes(family) : true).toBe(true);
+    expect(second.title).toMatch(/…$/);
+  });
+
   it('says only that a chat finished when it worked under a minute', async () => {
     const { push, sent } = setUp({ finishedAfterMinutes: 0 });
     await push.notify({ kind: 'finished', sessionId: 's1', workedMs: 20_000 });

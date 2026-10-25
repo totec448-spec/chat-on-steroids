@@ -1272,7 +1272,7 @@
   "Discard these edits and continue?": "Diese Änderungen verwerfen und fortfahren?",
   "Discard": "Verwerfen",
   "Detecting language…": "Sprache wird erkannt …",
-  "Saved {0}": "Gespeichert {0}",
+  "Saved {0}": "Gespeichert: {0}",
   "Unsaved editor changes were discarded because the project changed.": "Ungespeicherte Änderungen im Editor wurden verworfen, weil sich das Projekt geändert hat.",
   "Delete item?": "Eintrag löschen?",
   "Move “{0}” to the Trash?": "„{0}“ in den Papierkorb verschieben?",
