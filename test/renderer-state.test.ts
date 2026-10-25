@@ -4899,6 +4899,33 @@ describe('phone notifications in Settings', () => {
     expect(mounted.calls.at(-1).ui.phonePush.topic).toBe('cos-fixturetopic234567');
   });
 
+  // A cleared server field is sent as it is and refused, never quietly replaced by ntfy.sh: that would
+  // move the messages (and, with details on, chat names) to a public server nobody chose.
+  it('sends a cleared server as empty instead of replacing it with ntfy.sh', async () => {
+    const mounted = await withPhone(phone({ server: 'https://ntfy.example.org' }));
+    const doc = mounted.window.document;
+    change(doc, 'phonePushServer', '   ');
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.server).toBe(''));
+  });
+
+  // A switch the person has focused but not changed still follows a change made elsewhere (another
+  // window, a backup import): a stale switch would put "include chat details" back on with the next save.
+  it('updates a focused phone control that was not edited, and keeps one that was', async () => {
+    const mounted = await withPhone(phone({ includeDetails: true }));
+    const doc = mounted.window.document;
+    const details = doc.getElementById('phonePushDetails') as HTMLInputElement;
+    details.focus();
+    mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush: phone({ includeDetails: false }) } };
+    mounted.push(mounted.state);
+    expect(details.checked).toBe(false);
+    const topic = doc.getElementById('phonePushTopic') as HTMLInputElement;
+    topic.focus();
+    topic.value = 'cos-typing-in-progress';
+    mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush: phone({ includeDetails: false, topic: 'cos-elsewhere' }) } };
+    mounted.push(mounted.state);
+    expect(topic.value).toBe('cos-typing-in-progress');
+  });
+
   it('keeps quiet hours that are not one of the choices when something else is saved', async () => {
     const mounted = await withPhone(phone({ finishedAfterMinutes: 7, quietHours: { from: '01:30', to: '05:15' } }));
     const doc = mounted.window.document;
