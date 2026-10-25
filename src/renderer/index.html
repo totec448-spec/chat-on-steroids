@@ -1593,7 +1593,7 @@
         <p>Folders and this computer's connection to ChatGPT are left out.</p>
         <label class="setting"><span class="setting-text"><b>Include saved keys</b><em>Locked with a passphrase you choose.</em></span><input id="exportSettingsKeys" type="checkbox" /></label>
         <div id="exportSettingsPassphrase" hidden>
-          <label class="plugin-field" for="exportSettingsPass"><span>Passphrase</span><input id="exportSettingsPass" type="password" minlength="8" maxlength="1024" autocomplete="new-password" /><small>At least 8 characters. A lost passphrase cannot be recovered.</small></label>
+          <label class="plugin-field" for="exportSettingsPass"><span>Passphrase</span><input id="exportSettingsPass" type="password" maxlength="1024" autocomplete="new-password" /><small>At least 8 characters. A lost passphrase cannot be recovered.</small></label>
           <label class="plugin-field" for="exportSettingsPassAgain"><span>Passphrase again</span><input id="exportSettingsPassAgain" type="password" maxlength="1024" autocomplete="new-password" /></label>
         </div>
         <p id="exportSettingsError" class="plugin-error" role="alert" hidden></p>
