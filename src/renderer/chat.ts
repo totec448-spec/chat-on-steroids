@@ -8844,6 +8844,15 @@ export function initChat(next: Deps): void {
   reviewPanel = createFilePanel({
     host: chatHost, mount: docks.body, reviewOnly: true,
     onShow: () => docks.adopt('review'),
+    // A new message: not an edit of an earlier question, which would replace the messages after it.
+    // A narrow window shows the dock instead of the chat; it closes so the composer is in view.
+    onAskChat: request => {
+      // Send submits a prepared plan, not what the composer shows, so the request would sit there unsent.
+      if (currentPreparedPlan()) { toast(t("Start or cancel the prepared plan first, then ask again.")); return; }
+      if (editingQuestion) endEditing(true);
+      if (window.matchMedia?.('(max-width: 850px)').matches) docks.setOpen(false);
+      prefillComposer(request);
+    },
     onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); }
   });
   reviewPanel.update(selectedLocalProject());

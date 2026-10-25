@@ -3168,5 +3168,13 @@
   "Accent presets": "Готовые акцентные цвета",
   "Each is easy to read in light and dark.": "Каждый хорошо читается в светлой и тёмной теме.",
   "Orange": "Оранжевый",
-  "Red": "Красный"
+  "Red": "Красный",
+  "Three-way view": "Трёхстороннее сравнение",
+  "Ask chat to resolve": "Попросить чат разрешить",
+  "Help me resolve the merge conflict in {0}. Read the common base, ours and theirs with git show :1:./{0}, :2:./{0} and :3:./{0}, then write a version that keeps what both sides meant and tell me what you chose. Do not stage or commit it.": "Помоги разрешить конфликт слияния в {0}. Прочитай общую базу, нашу и их версии через git show :1:./{0}, :2:./{0} и :3:./{0}, затем напиши версию, которая сохраняет замысел обеих сторон, и расскажи, что ты выбрал. Не индексируй и не коммить её.",
+  "Ours (HEAD)": "Наша (HEAD)",
+  "Common base": "Общая база",
+  "Theirs (incoming)": "Их (входящая)",
+  "Not in this version": "Нет в этой версии",
+  "Start or cancel the prepared plan first, then ask again.": "Сначала запустите или отмените подготовленный план, затем повторите запрос."
 }
