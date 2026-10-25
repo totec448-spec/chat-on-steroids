@@ -7993,6 +7993,39 @@ describe('recorded DIL cards inside a Markdown answer', () => {
     expect(root.textContent).toContain(current);
   });
 
+  it.each([
+    { recorded: '✅ Tests', current: '❌ Tests' },
+    { recorded: '🟢 Online', current: '🔴 Online' },
+    { recorded: '⚠️ Warning', current: '✅ Warning' },
+    { recorded: '✓ Checks', current: '✗ Checks' },
+    { recorded: '↑ 12%', current: '↓ 12%' },
+    { recorded: '< 5 ms', current: '> 5 ms' },
+    { recorded: '≤ 5 ms', current: '≥ 5 ms' },
+    { recorded: '± 3', current: '~ 3' }
+  ])('refuses a stale recorded card when only the status or comparison symbol changed ($recorded to $current)', async ({ recorded, current }) => {
+    const { w } = await boot([answer(source.replace('45,678', current), captured(card.replace('45,678', recorded)))]);
+    const root = w.document.querySelector('.ev-assistant_message .msg.rich')!;
+    expect(root.querySelector('.markdown-dil-card')).toBeNull();
+    expect(root.textContent).toContain(current);
+  });
+
+  it('restores a recorded card whose status emoji still matches the current answer', async () => {
+    const updated = '✅ Tests';
+    const { w } = await boot([answer(source.replace('45,678', updated), captured(card.replace('45,678', updated)))]);
+    expect(w.document.querySelector('.ev-assistant_message .msg.rich .markdown-dil-card')).not.toBeNull();
+  });
+
+  it('keeps a recorded card with the app-replaced decorative down-arrow icon', async () => {
+    const withArrow = card.replace(
+      '<svg data-d-component="icon" style="color: var(--color-text-success)"></svg>',
+      '<svg data-d-component="icon"><path d="M12.707 18.707L1 1"/></svg>'
+    );
+    const { w } = await boot([answer(source, captured(withArrow))]);
+    const panel = w.document.querySelector('.ev-assistant_message .msg.rich .markdown-dil-card');
+    expect(panel).not.toBeNull();
+    expect(panel!.querySelectorAll('.markdown-dil-down-icon')).toHaveLength(1);
+  });
+
   it('does not restore captured cards that contain active controls or links', async () => {
     const { w } = await boot([answer(source, captured(card.replace('</div></div>', '<button>Click</button></div></div>')))]);
     const message = w.document.querySelector('.ev-assistant_message .msg.rich')!;
