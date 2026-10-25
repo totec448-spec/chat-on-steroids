@@ -196,12 +196,16 @@ let applying = false;
  * field still follows persisted state normally.
  */
 function applyValue(control: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, next: string, previous?: string): void {
-  const dirty = document.activeElement === control && previous !== undefined && control.value !== previous;
+  const dirty = (document.activeElement === control || requestedSettings !== null) && previous !== undefined && control.value !== previous;
   if (!dirty) control.value = next;
 }
 
+/**
+ * Like applyValue for a switch. A change also stays while a save is pending, focused or not: an
+ * older state push must not reset it, or the next save reads the reset value back (#1443 review).
+ */
 function applyChecked(control: HTMLInputElement, next: boolean, previous?: boolean): void {
-  const dirty = document.activeElement === control && previous !== undefined && control.checked !== previous;
+  const dirty = (document.activeElement === control || requestedSettings !== null) && previous !== undefined && control.checked !== previous;
   if (!dirty) control.checked = next;
 }
 /** The one expanded permission group, or null. One at a time keeps the layout still. */
