@@ -8,6 +8,7 @@ import { initSessionStore, resetSessionStoreForTests } from '../src/main/session
 import { chatgptProjectChoices, noteChatgptProjects, CHATGPT_PROJECT_CATALOG } from '../src/main/chatgpt-project-catalog.js';
 import { addProject, createChatgptProjectFor, getProject, linkChatgptProject, listProjects, removeProject, unlinkChatgptProject } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
+import { getLog } from '../src/main/logger.js';
 
 const id = (digit: string) => `g-p-${digit.repeat(32)}`;
 let directory: string, approved: string;
@@ -78,6 +79,12 @@ it('links a project without a ChatGPT Project to one the person already has, one
   await expect(linkChatgptProject(second.id, id('a'))).rejects.toThrow(/already linked to another project/);
   await expect(linkChatgptProject(second.id, id('9'))).rejects.toThrow(/not one ChatGPT lists/);
   await expect(linkChatgptProject('00000000-0000-4000-8000-000000000000', id('b'))).rejects.toThrow(/Project not found/);
+  // Each refusal says why in the log, once.
+  const refusals = getLog().map(entry => entry.message).filter(message => message.startsWith(`projects: project ${second.id}: link`));
+  expect(refusals).toEqual([
+    `projects: project ${second.id}: link to the ChatGPT Project ${id('a')} refused (already linked to another project)`,
+    `projects: project ${second.id}: link to the ChatGPT Project ${id('9')} refused (not listed for this account)`
+  ]);
   // A mistaken link can be changed to another listed Project (Haz on #1757).
   expect((await linkChatgptProject(first.id, id('b'))).chatgpt).toMatchObject({ state: 'linked', id: id('b') });
   expect((await linkChatgptProject(first.id, id('a'))).chatgpt).toMatchObject({ state: 'linked', id: id('a') });
@@ -91,6 +98,7 @@ it('never links over a ChatGPT Project being created, and can create one later i
   const created = await addProject(path.join(approved, 'first'));
   expect(created.chatgpt).toMatchObject({ state: 'requested' });
   await expect(linkChatgptProject(created.id, id('a'))).rejects.toThrow(/being created/);
+  expect(getLog().some(entry => entry.message === `projects: project ${created.id}: link to the ChatGPT Project ${id('a')} refused (its ChatGPT Project is being created)`)).toBe(true);
   const later = await addProject(path.join(approved, 'second'), { chatgpt: 'later' });
   const requested = await createChatgptProjectFor(later.id);
   expect(requested.chatgpt).toMatchObject({ state: 'requested' });
@@ -121,4 +129,25 @@ it('unlinks a ChatGPT Project without touching it, and starts a new one in place
   // While a new one is being created, neither unlinking nor relinking may race it.
   await expect(unlinkChatgptProject(project.id)).rejects.toThrow(/being created/);
   await expect(linkChatgptProject(project.id, id('a'))).rejects.toThrow(/being created/);
+});
+
+it('never replaces a catalog it could not read, but rebuilds one that is damaged', async () => {
+  expect(await noteChatgptProjects([{ id: id('a'), name: 'Kept' }, { id: id('b'), name: 'Also kept' }], 1_000)).toBe(true);
+  const file = path.join(directory, 'state', `${CHATGPT_PROJECT_CATALOG}.json`);
+  const saved = await fs.readFile(file, 'utf8');
+  // Unreadable for a moment (a lock, a permission hiccup): the shorter report must not replace it.
+  await fs.chmod(file, 0o000);
+  try {
+    await expect(noteChatgptProjects([{ id: id('c'), name: 'New' }], 2_000)).rejects.toThrow();
+  } finally { await fs.chmod(file, 0o600); }
+  expect(await fs.readFile(file, 'utf8')).toBe(saved);
+  // A null row or other damage in an otherwise good file is skipped, not fatal.
+  await writeDurableNow(CHATGPT_PROJECT_CATALOG, { version: 1, current: '', projects: [null, 7, { id: id('a'), name: 'Kept', seenAt: 1_000, space: '' }] });
+  expect((await chatgptProjectChoices(1_500)).map(choice => choice.name)).toEqual(['Kept']);
+  expect(await noteChatgptProjects([{ id: id('c'), name: 'New' }], 2_000)).toBe(true);
+  expect((await chatgptProjectChoices(2_000)).map(choice => choice.name)).toEqual(['New', 'Kept']);
+  // A file that is not JSON at all is a damaged cache: the next report starts it again.
+  await fs.writeFile(file, '{not json');
+  expect(await noteChatgptProjects([{ id: id('d'), name: 'Fresh' }], 3_000)).toBe(true);
+  expect((await chatgptProjectChoices(3_000)).map(choice => choice.name)).toEqual(['Fresh']);
 });

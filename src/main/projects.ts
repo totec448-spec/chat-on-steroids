@@ -156,10 +156,14 @@ export function linkChatgptProject(projectId: string, chatgptId: string): Promis
     if (!project) throw new Error('Project not found');
     const link = project.chatgpt;
     if (link?.state === 'linked' && link.id === chatgptId) return project;
-    if (link && link.state !== 'linked' && link.state !== 'failed' && link.state !== 'uncertain') throw new Error('Its ChatGPT Project is being created');
-    if (!(await isListedChatgptProject(chatgptId))) throw new Error('That Project is not one ChatGPT lists for this account');
+    const refuse = (why: string, message: string): never => {
+      logInfo(`projects: project ${projectId}: link to the ChatGPT Project ${chatgptId} refused (${why})`);
+      throw new Error(message);
+    };
+    if (link && link.state !== 'linked' && link.state !== 'failed' && link.state !== 'uncertain') refuse('its ChatGPT Project is being created', 'Its ChatGPT Project is being created');
+    if (!(await isListedChatgptProject(chatgptId))) refuse('not listed for this account', 'That Project is not one ChatGPT lists for this account');
     const owner = projects.find(row => !row.ungrouped && row.id !== projectId && row.chatgpt?.state === 'linked' && row.chatgpt.id === chatgptId);
-    if (owner) throw new Error('That ChatGPT Project is already linked to another project');
+    if (owner) refuse('already linked to another project', 'That ChatGPT Project is already linked to another project');
     const updated: LocalProject = { ...project, chatgpt: { state: 'linked', id: chatgptId, updatedAt: Date.now() } };
     await writeDurableNow('projects', projects.map(row => row.id === projectId ? updated : row));
     logInfo(`projects: project ${projectId} linked to the existing ChatGPT Project ${chatgptId}`);

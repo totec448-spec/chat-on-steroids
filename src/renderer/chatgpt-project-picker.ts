@@ -52,6 +52,8 @@ export function createChatgptProjectPicker(deps: {
         // Long names are cut in the list; the whole label stays readable on hover.
         title: t('New ChatGPT Project “{0}”', [project.name]),
         lead: icon('i-plus'),
+        // Its label holds the local project's name, so a search for a Project with that name also matches it.
+        fallback: true,
         pick: () => decide(() => deps.api.createChatgptProject(project.id, link ? { replace: true } : {}))
       }] : [];
       popup = createSearchPopup({

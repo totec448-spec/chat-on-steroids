@@ -3,8 +3,8 @@
  * choices. The file panel's base branch and the inbox sidebar's project filter both use it.
  *
  * The keyboard follows one pattern: Down from the field moves to the first choice, Enter in the
- * field picks the first one, Up/Down move between choices, Escape closes and gives focus back to
- * the trigger. A pointer press outside, or a window resize, closes it too. The trigger is read
+ * field picks the first one (a fallback choice only when nothing else matches), Up/Down move
+ * between choices, Escape closes and gives focus back to the trigger. A pointer press outside, or a window resize, closes it too. The trigger is read
  * through a function because a repaint may replace it while the popup is open.
  */
 import { el, icon } from './dom.js';
@@ -22,6 +22,8 @@ export interface SearchPopupChoice {
   hint?: string;
   /** Shown but not choosable, such as a ChatGPT Project another project already uses. */
   disabled?: boolean;
+  /** Enter in the search field picks this one only when no other choice matches. */
+  fallback?: boolean;
   pick: () => void;
 }
 
@@ -114,6 +116,7 @@ export function createSearchPopup(options: SearchPopupOptions): SearchPopup {
         if (choice.hint) option.append(el('span', part('hint'), choice.hint));
         if (choice.selected) option.append(icon('i-check'));
         option.disabled = !!choice.disabled;
+        if (choice.fallback) option.dataset.fallback = 'true';
         // The chosen option is about to leave the page, so focus goes back to the trigger first.
         option.addEventListener('click', () => { picked = true; close(true); choice.pick(); });
         items.append(option);
@@ -127,7 +130,10 @@ export function createSearchPopup(options: SearchPopupOptions): SearchPopup {
     search.addEventListener('input', renderItems);
     search.addEventListener('keydown', event => {
       if (event.key === 'ArrowDown') { event.preventDefault(); items.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus(); }
-      if (event.key === 'Enter') { event.preventDefault(); items.querySelector<HTMLButtonElement>('button:not(:disabled)')?.click(); }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        (items.querySelector<HTMLButtonElement>('button:not(:disabled):not([data-fallback])') ?? items.querySelector<HTMLButtonElement>('button:not(:disabled)'))?.click();
+      }
     });
     items.addEventListener('keydown', event => {
       const buttons = [...items.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
