@@ -126,6 +126,7 @@ function withoutPerComputer(settings: Settings): Settings {
  * `current` with every setting `incoming` has, where the schema knows it. A setting the backup
  * lacks (it is older) keeps today's value; one it has as null was never changed there and is unset
  * here, where a setting may be unset at all (elsewhere, as in a hand-edited file, null is ignored);
+ * a whole section as null (never set up there) keeps today's section;
  * one this version does not know is ignored; a list is taken whole. Per-computer settings are never taken.
  */
 export function overlaySettings(schema: z.ZodType, current: Settings, incoming: Settings): Settings {
@@ -135,7 +136,9 @@ export function overlaySettings(schema: z.ZodType, current: Settings, incoming: 
       const item = next[key];
       if (item === undefined) continue;
       if (item === null) {
-        if (child.safeParse(undefined).success) delete out[key];
+        // One setting is unset; a whole section never is. A computer that never set up phone
+        // notifications must not wipe another's (its topic is what the phone subscribed to).
+        if (!shapeOf(child) && child.safeParse(undefined).success) delete out[key];
         continue;
       }
       const childShape = shapeOf(child);

@@ -145,6 +145,14 @@ describe('applying a backup over the current settings', () => {
     expect(merged).toEqual(current);
   });
 
+  it('keeps a whole section the other computer never set up, rather than wiping it here', () => {
+    // `mcp` is an optional section: a backup from a computer without one has it as null.
+    const withSection = { ...current, mcp: { instructions: 'Be brief.' } };
+    const merged = overlaySettings(schema, withSection, { mcp: null });
+    expect(merged.mcp).toEqual({ instructions: 'Be brief.' });
+    expect(changedSettings(withSection, merged)).toEqual([]);
+  });
+
   it('replaces a list as a whole rather than mixing two lists', () => {
     const withRules = { ...current, rules: ['git status', 'npm test'] };
     expect(overlaySettings(schema, withRules, { rules: ['ls'] }).rules).toEqual(['ls']);

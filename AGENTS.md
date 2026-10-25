@@ -346,8 +346,9 @@ read again) and starts an empty store. It returns whether anything was set aside
 Settings backup (`settings-backup.ts`, Settings → General → Backup): a JSON file
 (`format: "chat-on-steroids-settings"`, `version: 1`) holding exactly what the Settings form saves
 (`settingsForBackup(settingsPatch, config)`: a setting never changed, so not stored, is written as
-`null`; on import `null` unsets it where the schema allows unset and is ignored elsewhere, while a
-setting the file lacks, from an older backup, keeps today's value), minus per-computer parts: `connectorSuffix`, `tunnel`,
+`null`; on import `null` unsets a single setting where the schema allows unset and is ignored
+elsewhere, and a whole section as `null` (never set up there, e.g. `ui.phonePush`) keeps today's
+section, while a setting the file lacks, from an older backup, keeps today's value), minus per-computer parts: `connectorSuffix`, `tunnel`,
 `ui.browserBridgePort`, `mcp.persistentUrls`, `ui.browserPreferences`, `ui.cosBrowserTrayHint`,
 `ui.autoRefreshPluginsAsked`, `ui.startAtLogin` (roots, setup profiles and everything outside the form were never in it). IPC: `settings:export` { includeKeys, passphrase? } writes through a save
 dialog (atomic, mode 0600); `settings:importPick` reads and checks a file in the main process and
