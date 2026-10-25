@@ -3118,5 +3118,13 @@
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "이 컴퓨터에 저장된 키를 읽을 수 없어 백업의 키를 추가할 수 없습니다. 키 없이 가져오세요.",
   "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "설정은 가져왔지만 저장된 키를 보관하지 못했습니다. 설정에서 다시 추가하세요.",
   "For chats that need you, failures and finished chats. Follows the quiet hours below.": "나를 기다리는 채팅, 실패, 끝난 채팅에 대해. 아래 방해 금지 시간을 따릅니다.",
-  "No phone notifications and no sounds in these hours.": "이 시간에는 휴대폰 알림도 소리도 없습니다."
+  "No phone notifications and no sounds in these hours.": "이 시간에는 휴대폰 알림도 소리도 없습니다.",
+  "Phone notifications, a settings backup, keys kept from ChatGPT, and high contrast.": "휴대폰 알림, 설정 백업, ChatGPT에게 숨기는 키, 고대비.",
+  "Get a note on your phone when a chat needs you or a long chat finishes.": "채팅에 내가 필요하거나 긴 채팅이 끝나면 휴대폰으로 알려 줍니다.",
+  "Settings backup": "설정 백업",
+  "Move your settings to another computer; saved keys only if you choose.": "설정을 다른 컴퓨터로 옮길 수 있습니다. 저장된 키는 원할 때만 포함됩니다.",
+  "Keys stay with you": "키는 내 컴퓨터에",
+  "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "도구가 돌려주는 내용 속 API 키와 토큰은 ChatGPT가 보기 전에 숨겨집니다.",
+  "Easier to read": "더 읽기 쉽게",
+  "High contrast, eight accent colors, line spacing and a more legible font.": "고대비, 강조 색상 8가지, 줄 간격, 더 읽기 쉬운 글꼴."
 }
