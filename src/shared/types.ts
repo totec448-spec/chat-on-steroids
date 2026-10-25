@@ -1,3 +1,4 @@
+import type { PhonePushSettings } from './phone-push.js';
 import type { ReasoningEffort, RecordingStorageLimitGiB } from './session.js';
 import type { PluginRefreshStatus } from './plugin-refresh.js';
 import { WINDOWS_COMPUTER_READ_METHODS, WINDOWS_COMPUTER_INPUT_METHODS } from './windows-computer.js';
@@ -226,6 +227,8 @@ export interface UiPrefs {
   keepScreenAwake?: boolean;
   /** Default screenshots to the active window instead of the whole primary monitor. */
   privacyScreenshots: boolean;
+  /** Phone notifications through ntfy; missing means off. */
+  phonePush?: PhonePushSettings;
   /** Mask API keys, tokens, private keys and secret settings in what tools return to ChatGPT. Missing means on. */
   secretsShield?: boolean;
   /** How far Commit in Review goes; missing means commit, then ask to push. */
@@ -875,6 +878,8 @@ export interface AppState {
   hasGoalKey: boolean;
   /** True when a custom-provider key is stored. Only meaningful beside a custom endpoint, which may also run keyless. */
   hasCustomProviderKey: boolean;
+  /** An ntfy access token is saved (never the token itself). */
+  hasPhonePushToken?: boolean;
   /** Resolved path of the tunnel binary we would run, or null if we cannot find one. */
   resolvedBinary: string | null;
   /** Version of the tunnel-client copy shipped inside the app, for diagnostics. */

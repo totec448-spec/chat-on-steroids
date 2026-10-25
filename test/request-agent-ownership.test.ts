@@ -81,6 +81,29 @@ it('starts workers owned by one unresolved request without inventing a conversat
   expect(broker.statusForCaller(request).state.agents.find(worker => worker.id === 'worker-1')?.result).toBe('Parser reviewed');
 });
 
+// #1841: Codex sends every tool call as a new request. Its spawn made a run owned by that one
+// request, and each later call was refused with "AGENTS_BUSY … Call agents action=spawn to create
+// workers", so it started more workers nobody could reach and never got a result.
+it('tells a later call without a chat that it cannot reach the run, and not to spawn again', () => {
+  const spawned = broker.spawn({ caller: request, workers: [{ task: 'Read the parser' }] });
+  const later = { requestId: 'wfr_codex_next_call' };
+  for (const call of [() => broker.identify(later), () => broker.sendMessage(later, 'worker-1', 'Status?'),
+    () => broker.statusForCaller({ ...later, runId: spawned.runId }),
+    () => broker.spawn({ caller: { ...later, runId: spawned.runId }, workers: [{ task: 'Again' }] })]) {
+    expect(call).toThrow(/AGENTS_NO_CHAT/);
+    expect(call).toThrow(/Do not call agents action=spawn again/);
+  }
+  // The spawn already says so, so the model does not wait for results that cannot arrive.
+  expect(broker.primeOwnerSentence(request, spawned.runId)).toMatch(/only later tool calls of this same request can reach/);
+  expect(broker.primeOwnerSentence({ conversationId: 'a-chat' }, spawned.runId)).toBe(`This conversation is now the prime agent of run ${spawned.runId}. `);
+  // Parked, the run is still out of reach, and nothing says to start one.
+  broker.resetAgentsForTests();
+  expect(() => broker.identify(later)).toThrow(/AGENTS_NO_CHAT/);
+  // A chat that owns nothing keeps the ordinary answers.
+  broker.spawn({ caller: request, workers: [{ task: 'Read the parser' }] });
+  expect(() => broker.identify({ conversationId: 'unrelated-chat' })).toThrow(/AGENTS_BUSY/);
+});
+
 it('keeps request ownership across restart, late proof and a subsequent request', async () => {
   const session = await createSession({ conversationId: 'request-prime-resolved' });
   const spawned = broker.spawn({ caller: request, workers: [{ task: 'Keep the family' }] });

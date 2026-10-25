@@ -2966,3 +2966,81 @@ describe('settings backup over IPC', () => {
     expect(await apply({ token: picked.data.token, includeKeys: false })).toEqual({ ok: false, error: 'Choose the backup file again.' });
   });
 });
+
+describe('phone notifications over IPC', () => {
+  const phone = (over: Record<string, unknown> = {}) => ({ enabled: true, server: 'https://ntfy.sh/', topic: 'cos-fixturetopic234567', needsYou: true, failures: true,
+    finishedAfterMinutes: 5, onlyWhenAway: true, quietHours: null, includeDetails: false, ...over });
+  beforeAll(() => {
+    // An earlier test registers the handlers against a destroyed window; these use the live one.
+    registerIpc(() => currentWindow as any, () => { quitToInstallCalls += 1; });
+  });
+
+  it('saves the settings with the server tidied, and refuses a bad topic or server only while on', async () => {
+    const base = getConfig();
+    expect((await save({ ...base, ui: { ...base.ui, phonePush: phone() } }, base)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ enabled: true, server: 'https://ntfy.sh', topic: 'cos-fixturetopic234567' });
+    const now = getConfig();
+    expect(await save({ ...now, ui: { ...now.ui, phonePush: phone({ topic: 'has space' }) } }, now))
+      .toEqual({ ok: false, error: 'Choose a topic of letters, digits, - and _ (up to 64).' });
+    expect(await save({ ...now, ui: { ...now.ui, phonePush: phone({ server: 'https://ntfy.sh/mytopic' }) } }, now))
+      .toEqual({ ok: false, error: 'Enter the address of an ntfy server, such as https://ntfy.sh.' });
+    // Switched off, a half-filled form still saves.
+    expect((await save({ ...now, ui: { ...now.ui, phonePush: phone({ enabled: false, topic: '' }) } }, now)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ enabled: false, topic: '' });
+  });
+
+  it('checks the settings as they will be saved, not the stale form, and logs a refusal', async () => {
+    const { getLog } = await import('../src/main/logger.js');
+    // Off, with a topic: the form the renderer still shows.
+    const base = getConfig();
+    expect((await save({ ...base, ui: { ...base.ui, phonePush: phone({ enabled: false }) } }, base)).ok).toBe(true);
+    const stale = getConfig();
+    // Meanwhile another window clears the topic.
+    expect((await save({ ...stale, ui: { ...stale.ui, phonePush: phone({ enabled: false, topic: '' }) } }, stale)).ok).toBe(true);
+    // The stale form only turns it on: alone it looks complete, merged it has no topic.
+    expect(await save({ ...stale, ui: { ...stale.ui, phonePush: phone({ enabled: true }) } }, stale))
+      .toEqual({ ok: false, error: 'Choose a topic of letters, digits, - and _ (up to 64).' });
+    expect(getConfig().ui.phonePush).toMatchObject({ enabled: false, topic: '' });
+    expect(getLog().some(entry => entry.message.includes('settings save refused: Choose a topic of letters'))).toBe(true);
+  });
+
+  it('never lets a damaged saved phone setting block other saves, or the save that repairs it', async () => {
+    // A hand-edited or older config: on, with no topic and a server with a path.
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, phonePush: phone({ topic: '', server: 'https://ntfy.sh/mytopic' }) } });
+    const stored = getConfig();
+    // An unrelated change carries the stored phone settings unchanged: it saves.
+    expect((await save({ ...stored, ui: { ...stored.ui, theme: 'light' } }, stored)).ok).toBe(true);
+    // Editing the phone settings is checked: still bad is refused, repaired or switched off saves.
+    const now = getConfig();
+    expect(await save({ ...now, ui: { ...now.ui, phonePush: phone({ topic: '' }) } }, now)).toMatchObject({ ok: false });
+    expect((await save({ ...now, ui: { ...now.ui, phonePush: phone() } }, now)).ok).toBe(true);
+    const fixed = getConfig();
+    expect((await save({ ...fixed, ui: { ...fixed.ui, phonePush: phone({ enabled: false, topic: '' }) } }, fixed)).ok).toBe(true);
+  });
+
+  it('merges field by field, so a form from before a change does not undo it', async () => {
+    const base = getConfig();
+    await save({ ...base, ui: { ...base.ui, phonePush: phone() } }, base);
+    const before = getConfig();
+    // Another window turned on details meanwhile.
+    await save({ ...before, ui: { ...before.ui, phonePush: phone({ server: 'https://ntfy.sh', includeDetails: true }) } }, before);
+    // This form still shows details off and changes only the quiet hours.
+    expect((await save({ ...before, ui: { ...before.ui, phonePush: { ...before.ui.phonePush!, quietHours: { from: '22:00', to: '07:00' } } } }, before)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ includeDetails: true, quietHours: { from: '22:00', to: '07:00' } });
+  });
+
+  it('keeps the access token in secure storage and says only whether one is saved', async () => {
+    const { getSecret } = await import('../src/main/secrets.js');
+    const saved = await handlers.get('phonePush:token')!(null, { token: '  tk_fixture  ' }) as any;
+    expect(saved).toMatchObject({ ok: true, data: { hasPhonePushToken: true } });
+    expect(JSON.stringify(saved)).not.toContain('tk_fixture');
+    expect(await getSecret('ntfyToken')).toBe('tk_fixture');
+    expect(await handlers.get('phonePush:token')!(null, { token: 'tk_fixture with gap' })).toEqual({ ok: false, error: 'An access token is letters, digits and symbols, without spaces.' });
+    const { getLog } = await import('../src/main/logger.js');
+    const refused = getLog().filter(entry => entry.message.startsWith('phone push: access token'));
+    expect(refused.at(-1)?.message).toBe('phone push: access token not saved: it has spaces or other characters a token cannot have');
+    expect(refused.some(entry => entry.message.includes('tk_fixture'))).toBe(false);
+    expect(await handlers.get('phonePush:token')!(null, { token: '' })).toMatchObject({ ok: true, data: { hasPhonePushToken: false } });
+    expect(await getSecret('ntfyToken')).toBeNull();
+  });
+});

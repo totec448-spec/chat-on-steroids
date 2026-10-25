@@ -164,3 +164,60 @@ it('keeps blocked delivery distinct from network unreachability and requires pai
   expect(result.why[1]).toContain('protocol compatibility');
   expect(result.why[1]).not.toContain('not reachable');
 });
+
+it('says a ChatGPT page that is not a chat (a Dot, the library) is not followed, instead of waiting for a first message', () => {
+  openPopup();
+  const pipeline = (url: string, events = 0) =>
+    (popup!.window as any).pipeline({ isChat: true, url, recorder: true, page: { events }, pending: 0 }, true);
+  for (const url of [
+    'https://chatgpt.com/dots/home',
+    'https://chatgpt.com/library',
+    'https://chatgpt.com/gpts',
+    'https://chatgpt.com/share/c/0123abcd-0000-4000-8000-000000000000'
+  ]) {
+    const result = pipeline(url);
+    expect(result.read[0], url).toBe('off');
+    expect(result.why[1], url).toContain('not a chat');
+  }
+  // Every route a chat lives on or starts from keeps waiting for its first message.
+  for (const url of [
+    'https://chatgpt.com/',
+    'https://chatgpt.com/?temporary-chat=true',
+    'https://chatgpt.com/c/0123abcd-0000-4000-8000-000000000000',
+    'https://chatgpt.com/g/g-p-0123456789abcdef0123456789abcdef-site/project',
+    'https://chatgpt.com/g/g-p-0123456789abcdef0123456789abcdef-site/c/0123abcd-0000-4000-8000-000000000000',
+    'https://chatgpt.com/g/g-abc123-writer',
+    'https://chat.openai.com/c/0123abcd-0000-4000-8000-000000000000'
+  ]) {
+    expect(pipeline(url).why[1], url).toContain('Waiting for the first message');
+  }
+  // Observations from the page outrank the route: whatever the page records is shown as usual.
+  expect(pipeline('https://chatgpt.com/dots/home', 3).why[1]).not.toContain('not a chat');
+  // No recorder answers on a page that is not a chat: nothing to reload, it is still not a chat.
+  const silent = (popup!.window as any).pipeline({ isChat: true, url: 'https://chatgpt.com/dots/home', recorder: false, page: null, pending: 0 }, true);
+  expect(silent.why[1]).toContain('not a chat');
+});
+
+it('marks the recording, chat, request and app rows as not applicable on a Dot page, and as a new chat at the start page', async () => {
+  const document = openPopup();
+  const show = async (url: string) => {
+    (popup!.window as any).chrome.runtime.sendMessage = async (message: { type: string }) =>
+      message.type === 'status'
+        ? { connected: true, paired: true, compatible: true, port: 8765 }
+        : { isChat: true, url, conversationId: null, recorder: true, page: { events: 0 }, pending: 0, chatTabs: 1 };
+    await (popup!.window as any).refresh();
+    const state = (name: string) => [document.getElementById(`r-${name}`)!.className, document.getElementById(`d-${name}`)!.textContent];
+    return { rec: state('rec'), chat: state('chat'), req: state('req'), app: state('app'), why: document.getElementById('why')!.textContent };
+  };
+  const dot = await show('https://chatgpt.com/dots/home');
+  expect(dot.rec).toEqual(['row off', '']);
+  expect(dot.chat).toEqual(['row off', 'not a chat']);
+  expect(dot.req).toEqual(['row off', '']);
+  expect(dot.app).toEqual(['row off', '']);
+  expect(dot.why).toContain('not a chat');
+  const start = await show('https://chatgpt.com/');
+  expect(start.rec).toEqual(['row ok', '']);
+  expect(start.chat).toEqual(['row wait', 'new chat']);
+  expect(start.req).toEqual(['row wait', 'none yet']);
+  expect(start.why).toContain('Waiting for the first message');
+});
