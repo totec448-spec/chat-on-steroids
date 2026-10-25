@@ -190,6 +190,19 @@ it('gives the keyboard back to where it was when it closes', async () => {
   expect(view.doc.activeElement).toBe(button);
 });
 
+it('gives the keyboard to the View button when the keys open it from a View menu item', async () => {
+  const view = await mount({ platform: 'Win32' });
+  const button = view.doc.getElementById('viewMenu') as HTMLButtonElement;
+  const { openRowMenu } = await import('../src/renderer/row-menu.js');
+  openRowMenu({ owner: 'view', anchor: () => button, label: () => 'View', items: () => [{ action: 'zoom', label: () => 'Zoom' }] });
+  const item = view.doc.activeElement!;
+  expect(item.closest('[role="menu"]')).not.toBeNull();
+  view.press({ key: '/', ctrlKey: true }, item);
+  expect(view.dialog.open).toBe(true);
+  view.press({ key: '/', ctrlKey: true });
+  expect(view.doc.activeElement).toBe(button);
+});
+
 it('names Ctrl and Shift in the interface language, in every row that has them', async () => {
   const view = await mount({ platform: 'Win32' });
   const { setLanguage } = await import('../src/renderer/i18n.js');
