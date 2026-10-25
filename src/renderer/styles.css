@@ -476,7 +476,7 @@ code {
 /* A sidebar row's menu and its submenus (row-menu.ts): fixed in the window, above the sidebar. */
 /* As wide as its longest label needs, so a translated one ("Geheimnisse vor ChatGPT verbergen") is not cut. */
 :is(.row-menu, .row-menu-leaving) { --row-menu-hover: color-mix(in srgb, var(--popover, var(--card)) 86%, var(--ink));
-  position: fixed; z-index: 200; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; min-width: 196px; max-width: min(400px, calc(100vw - 16px)); padding: 5px; color: var(--ink);
+  position: fixed; z-index: 200; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; min-width: min(196px, calc(100vw - 16px)); max-width: min(400px, calc(100vw - 16px)); padding: 5px; color: var(--ink);
   background: var(--popover, var(--card)); border: 1px solid var(--edge); border-radius: 10px; box-shadow: 0 8px 28px #0003;
   transform-origin: top left; animation: row-menu-in 140ms cubic-bezier(.2, .8, .2, 1); }
 .row-menu-leaving { pointer-events: none; animation: row-menu-out 100ms ease-in forwards; }
