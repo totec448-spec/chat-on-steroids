@@ -2345,7 +2345,9 @@ The bridge projects that browser apart using the explicit `x-extension-host: bro
 its browser id. While the CoS browser is chosen and its companion present, any other companion
 takes no new work (#1516): `/status` offers it no inputs, revivals, Project creations, plugin
 refreshes or model-list requests; `/input/claim` and `/repairs/claim` refuse it and
-`/commands/redeem` answers 409 `not_chosen_browser`. It still records and stops what the person
+`/commands/redeem` answers 409 `not_chosen_browser`. A page there gets no worker or replacement
+tab to open through `/activity` or its `/compact` reply either (`opensNewWork`, #1852), which also
+holds for an out-of-date companion. It still records and stops what the person
 opens there, and works on as before once the CoS browser is gone. The chosen CoS browser takes a
 new chat's opening custody over from another browser. `browser-proof.ts` keeps, across restarts, the version last seen there and
 ChatGPT's last signed-in answer, so a closed browser keeps its state and a logout stays a logout;
