@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -63,6 +63,23 @@ it('offers only the Projects of the workspace the browser is in now', async () =
   expect(JSON.stringify(await readDurable(CHATGPT_PROJECT_CATALOG))).not.toContain('team-account-0001');
   expect(await noteChatgptProjects([{ id: id('c'), name: 'Odd' }], Date.now(), 'x'.repeat(500))).toBe(true);
   expect((await chatgptProjectChoices()).map(choice => choice.name)).toEqual(['Odd', 'Personal project']);
+});
+
+it('switches to a workspace whose sidebar lists no Projects, offering none of the previous workspace', async () => {
+  // CodeRabbit on #1757: an empty report used to be dropped, so the previous workspace stayed current.
+  expect(await noteChatgptProjects([{ id: id('a'), name: 'Team project' }], 1_000, 'team-account-0001')).toBe(true);
+  expect((await chatgptProjectChoices(1_000)).map(choice => choice.name)).toEqual(['Team project']);
+  expect(await noteChatgptProjects([], 2_000, null)).toBe(true);
+  expect(await chatgptProjectChoices(2_000)).toEqual([]);
+  const project = await addProject(path.join(approved, 'first'), { chatgpt: 'later' });
+  await expect(linkChatgptProject(project.id, id('a'))).rejects.toThrow(/not one ChatGPT lists/);
+  // The same empty report again changes nothing; back in the Team workspace, its Projects are there.
+  expect(await noteChatgptProjects([], 2_500, null)).toBe(false);
+  expect(await noteChatgptProjects([], 3_000, 'team-account-0001')).toBe(true);
+  expect((await chatgptProjectChoices(3_000)).map(choice => choice.name)).toEqual(['Team project']);
+  // A report whose rows are all invalid still says nothing about the workspace.
+  expect(await noteChatgptProjects([{ id: 'g-p-bad', name: 'x' }], 4_000, null)).toBe(false);
+  expect((await chatgptProjectChoices(4_000)).map(choice => choice.name)).toEqual(['Team project']);
 });
 
 it('links a project without a ChatGPT Project to one the person already has, one to one', async () => {
@@ -136,10 +153,14 @@ it('never replaces a catalog it could not read, but rebuilds one that is damaged
   const file = path.join(directory, 'state', `${CHATGPT_PROJECT_CATALOG}.json`);
   const saved = await fs.readFile(file, 'utf8');
   // Unreadable for a moment (a lock, a permission hiccup): the shorter report must not replace it.
-  await fs.chmod(file, 0o000);
+  // Injected, not by permissions: Windows cannot take read access away with chmod.
+  const original = fs.readFile;
+  const failing = vi.spyOn(fs, 'readFile').mockImplementation(((target: unknown, ...rest: unknown[]) =>
+    String(target) === file ? Promise.reject(Object.assign(new Error('EIO: i/o error'), { code: 'EIO' }))
+      : (original as (...args: unknown[]) => Promise<unknown>)(target, ...rest)) as typeof fs.readFile);
   try {
     await expect(noteChatgptProjects([{ id: id('c'), name: 'New' }], 2_000)).rejects.toThrow();
-  } finally { await fs.chmod(file, 0o600); }
+  } finally { failing.mockRestore(); }
   expect(await fs.readFile(file, 'utf8')).toBe(saved);
   // A null row or other damage in an otherwise good file is skipped, not fatal.
   await writeDurableNow(CHATGPT_PROJECT_CATALOG, { version: 1, current: '', projects: [null, 7, { id: id('a'), name: 'Kept', seenAt: 1_000, space: '' }] });

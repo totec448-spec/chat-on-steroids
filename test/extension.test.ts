@@ -3999,6 +3999,9 @@ describe('the ChatGPT Projects a page lists (#1756)', () => {
     expect(await worker.send({ type: 'project_catalog', projects: [{ id: 'g-p-bad', name: 'x' }] }, 61)).toEqual({ ok: false });
     expect(await worker.send({ type: 'project_catalog', projects: 'nope' }, 61)).toEqual({ ok: false });
     expect(posted).toHaveLength(1);
+    // An empty sidebar still names the workspace in use (CodeRabbit on #1757).
+    expect(await worker.send({ type: 'project_catalog', projects: [], workspace: 'team-account-0002' }, 61)).toEqual({ ok: true });
+    expect(posted[1]).toEqual({ projects: [], workspace: 'team-account-0002' });
   });
 });
 

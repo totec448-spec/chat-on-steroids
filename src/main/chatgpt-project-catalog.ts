@@ -79,8 +79,15 @@ export function noteChatgptProjects(reported: ReadonlyArray<{ id: unknown; name:
       if (typeof row?.id !== 'string' || !CHATGPT_PROJECT_ID.test(row.id) || !name || seen.some(entry => entry.id === row.id)) continue;
       seen.push({ id: row.id, name, seenAt: now, space });
     }
-    if (!seen.length) return false;
+    // Rows that were all invalid say nothing; an empty sidebar still says which workspace is in use,
+    // so a workspace without Projects offers none of the previous one's.
+    if (!seen.length && reported.length) return false;
     const previous = await readCatalog(true);
+    if (!seen.length) {
+      if (previous.current === space) return false;
+      await writeDurableNow(CHATGPT_PROJECT_CATALOG, { version: 1, current: space, projects: previous.entries });
+      return true;
+    }
     const next = [...seen, ...previous.entries.filter(entry => !seen.some(other => other.id === entry.id))].slice(0, MAX_PROJECTS);
     const shape = (catalog: Catalog) => JSON.stringify([catalog.current, catalog.entries.map(entry => [entry.id, entry.name, entry.space])]);
     const changed = shape({ current: space, entries: next }) !== shape(previous);
