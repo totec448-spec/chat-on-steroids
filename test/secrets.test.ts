@@ -23,8 +23,10 @@ const {
   resetSecretsCacheForTests,
   secureStorageCiphertextIsProtected,
   secureStorageStatus,
+  readSecretsFor,
   setAsideUnreadableSecrets,
   setSecret,
+  setSecrets,
   storedSecretsUnreadable
 } = await import('../src/main/secrets.js');
 const { safeStorage } = await import('electron');
@@ -444,5 +446,30 @@ describe('secret store', () => {
     expect(latest.message).not.toContain(secret);
     expect(latest.message).toContain('***');
     expect(formatLogAsJson()).not.toContain(secret);
+  });
+});
+
+describe('reading and writing several keys at once (settings backup)', () => {
+  it('reads only the keys asked for, cleaned like single reads', async () => {
+    await setSecret('openaiApiKey', 'sk-one\u200b-key');
+    await setSecret('bridgeToken', 'local');
+    expect(await readSecretsFor(key => key === 'openaiApiKey')).toEqual({ openaiApiKey: 'sk-one-key' });
+  });
+
+  it('writes several keys in one go and keeps the others', async () => {
+    await setSecret('bridgeToken', 'local');
+    await setSecrets({ openaiApiKey: 'sk-a', 'plugin:github:token': 'ghp-b', openRouterApiKey: '  ' });
+    expect(await getSecret('openaiApiKey')).toBe('sk-a');
+    expect(await getSecret('plugin:github:token')).toBe('ghp-b');
+    expect(await getSecret('openRouterApiKey')).toBeNull();
+    expect(await getSecret('bridgeToken')).toBe('local');
+  });
+
+  it('refuses to read when secure storage cannot, instead of answering with nothing', async () => {
+    await setSecret('openaiApiKey', 'sk-a');
+    resetSecretsCacheForTests();
+    vi.mocked(safeStorage.isAsyncEncryptionAvailable).mockResolvedValue(false);
+    await expect(readSecretsFor(() => true)).rejects.toThrow(/unavailable|could not be read/);
+    await expect(setSecrets({ openaiApiKey: 'sk-b' })).rejects.toThrow(/unavailable/);
   });
 });
