@@ -685,6 +685,14 @@ function staleCompanion(req: http.IncomingMessage): boolean {
 function notChosenBrowser(req: http.IncomingMessage): boolean {
   return getConfig().ui.chatBrowser === 'cos' && req.headers['x-extension-host'] !== 'cos' && cosExtensionPresent();
 }
+/**
+ * Whether a page in this browser may open new work handed to it: a worker's or a replacement's tab.
+ * #1852: the prime chat still open in Chrome collected a worker tab through its own page while the
+ * built-in browser was chosen, and the redeem route then refused that tab's page as not chosen.
+ */
+function opensNewWork(req: http.IncomingMessage): boolean {
+  return !notChosenBrowser(req) && !staleCompanion(req);
+}
 function chosenBuiltInBrowser(req: http.IncomingMessage): boolean {
   return getConfig().ui.chatBrowser === 'cos' && req.headers['x-extension-host'] === 'cos';
 }
@@ -3772,14 +3780,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // inspect Chrome's real tab set, routes it to that tab before it considers opening one.
         // Returning the same inert id here makes a live page the fast path; /status remains the
         // service-worker/restart path. Redeem is still the exclusive ownership boundary.
-        revival: pendingBrowserRevival(),
-        revivals: pendingBrowserRevivals(),
+        revival: opensNewWork(req) ? pendingBrowserRevival() : null,
+        revivals: opensNewWork(req) ? pendingBrowserRevivals() : [],
         // Recovery only. A placement is normally collected by the `/compact` reply that
         // produced it; this is where it is still found if that reply never reached the page —
         // a navigation, a dropped socket — so a lost response becomes a correctly placed tab
         // rather than an OS open in whichever window happened to have focus. Same one-shot:
         // whoever collects it first is the one that opens it.
-        placement: pendingBrowserPlacement(id),
+        placement: opensNewWork(req) ? pendingBrowserPlacement(id) : null,
         // Browser recovery is delivered by /status, whose service-worker caller can scan every
         // actual ChatGPT tab immediately before deciding exact reload vs exact open. Keeping it
         // out of this document-local feed also lets a dead content script be recovered.
@@ -4124,7 +4132,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       const token = typeof body['token'] === 'string' ? body['token'] : '';
       const entry = continuationByToken(token);
       if (!entry || entry.sessionId !== sessionId) return json(res, 409, { error: 'no_such_continuation' }, origin);
-      const captured = await captureCompactionBrief(id, entry, body['summary'], known);
+      const captured = await captureCompactionBrief(id, entry, body['summary'], known, opensNewWork(req));
       return json(res, captured.status, captured.body, origin);
     }
 
@@ -6797,7 +6805,9 @@ async function captureCompactionBrief(
   conversationId: string,
   entry: ContinuationView,
   text: string,
-  known: SessionSummary | null
+  known: SessionSummary | null,
+  /** False for a page in a browser that may not open new work: chat B stays for the chosen one. */
+  collectPlacement = true
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const { sessionId, token } = entry;
   // The handoff owner freezes and budgets the brief with its saved plan and
@@ -6889,7 +6899,7 @@ async function captureCompactionBrief(
       commandId: command?.id ?? null,
       // Chat B, for A's own browser to open in A's own window. Null whenever delivery
       // already opened it through the OS, which is every path that has no page to tell.
-      placement: pendingBrowserPlacement(conversationId),
+      placement: collectPlacement ? pendingBrowserPlacement(conversationId) : null,
       job: resumeJobFor(sessionId)
     }
   };
