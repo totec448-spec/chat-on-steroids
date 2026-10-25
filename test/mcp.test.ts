@@ -1117,7 +1117,7 @@ describe('2025-era clients', () => {
     // The requested upstream collaboration prose replaces the old minimal tool preamble.
     expect(instructions).toContain('User authorization and preferences persist across turns.');
     expect(instructions).toContain(
-      'Current Core authority (informational; live guards decide): ' +
+      'Enabled in Core: ' +
       'browse=on search=on read=on metadata=on create=off edit=off move=off delete=off command=on; ' +
       'read-only=off; plans=off; workers=off.'
     );
