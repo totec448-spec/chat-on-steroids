@@ -161,6 +161,8 @@ it('saves, reads, pauses and removes a chat\'s schedule, and refuses one that ca
   expect(saved).toMatchObject({ ok: true, data: { sessionId: session.id, text: 'Check the issues', repeat: { kind: 'weekdays', at: '09:00' }, paused: false } });
   expect(await call('schedules:get', { sessionId: session.id })).toMatchObject({ ok: true, data: { id: saved.data.id } });
   expect(await call('schedules:pause', { sessionId: session.id, paused: true })).toMatchObject({ ok: true, data: { paused: true } });
+  // Catching up missed runs is chosen in the dialog; left out, it is off.
+  expect(await call('schedules:save', { sessionId: session.id, text: 'Daily', repeat: { kind: 'daily', at: '09:00' }, until: null, catchUp: true })).toMatchObject({ ok: true, data: { catchUp: true } });
   expect(await call('schedules:save', { sessionId: session.id, text: 'x', repeat: { kind: 'hours', every: 0 }, until: null })).toMatchObject({ ok: false });
   expect(await call('schedules:save', { sessionId: session.id, text: 'x', repeat: { kind: 'daily', at: '25:00' }, until: null })).toMatchObject({ ok: false });
   expect(await call('schedules:save', { sessionId: 'missing-session-0001', text: 'x', repeat: { kind: 'daily', at: '09:00' }, until: null }))

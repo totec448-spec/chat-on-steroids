@@ -1056,10 +1056,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return (await listSchedules()).find(row => row.sessionId === sessionId) ?? null;
   });
   handle('schedules:save', async payload => {
-    const request = z.object({ sessionId: scheduleSession, text: z.string().max(200_000), repeat: z.unknown(), until: z.number().int().nonnegative().nullable() }).strict().parse(payload);
+    const request = z.object({ sessionId: scheduleSession, text: z.string().max(200_000), repeat: z.unknown(), until: z.number().int().nonnegative().nullable(),
+      catchUp: z.boolean().optional() }).strict().parse(payload);
     const repeat = scheduleRepeatSchema.parse(request.repeat);
     if (!(await getSession(request.sessionId))) throw new Error('This chat no longer exists.');
-    const saved = await saveSchedule({ sessionId: request.sessionId, text: request.text, repeat, until: request.until });
+    const saved = await saveSchedule({ sessionId: request.sessionId, text: request.text, repeat, until: request.until, catchUp: request.catchUp === true });
     logInfo(`scheduled run: schedule saved (${repeat.kind}) for ${request.sessionId}`);
     push('session:changed');
     return saved;
