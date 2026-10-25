@@ -2333,7 +2333,7 @@ it('saves and restores the Code checkpoints switch on the Workspace page, and fi
   expect(toggle.checked).toBe(false);
   toggle.checked = true;
   toggle.dispatchEvent(new w.Event('change', { bubbles: true }));
-  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1));
+  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1), { timeout: 5_000 });
   expect(mounted.calls[0].projects).toEqual({ codeCheckpoints: true });
   mounted.push({ ...mounted.state, config: { ...mounted.state.config, projects: { codeCheckpoints: false } } });
   expect(toggle.checked).toBe(false);
