@@ -119,6 +119,7 @@ import {
   agentFamiliesForCaller,
   reconcileAgentRequestOwners,
   PRIME_ID,
+  primeOwnerSentence,
   requestWorkerBootstraps,
   requestWorkerRevivals,
   statusForCaller,
@@ -1400,7 +1401,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
               {
                 type: 'text' as const,
                 text:
-                  (becamePrime ? `This ${currentCaller().conversationId ? 'conversation' : 'request'} is now the prime agent of run ${runId}. ` : '') +
+                  (becamePrime ? primeOwnerSentence(currentCaller(), runId) : '') +
                   `${created.length} worker(s) matched: ${created.map((info) => `${info.id} (${info.label}, ${info.state}${info.model ? `, model ${info.model}` : ''}${info.reasoningEffort ? `, reasoning ${info.reasoningEffort}` : ''})`).join(', ')}. ` +
                   (invited.length > 0 ? 'New worker chats are opening with their briefs already in them. ' : '') +
                   (defaultNotes?.length ? `${defaultNotes.join(' ')} ` : '') +
