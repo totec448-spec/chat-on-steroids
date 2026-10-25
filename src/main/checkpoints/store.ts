@@ -59,13 +59,19 @@ export async function hasCheckpoint(projectId: string, sessionId: string, key: s
   return entries.some(entry => entry.projectId === projectId && entry.sessionId === sessionId && entry.key === key);
 }
 
-/** Durable before visible; the oldest of the project beyond the bound is evicted in the same write. */
-export function addCheckpoint(entry: CodeCheckpoint): Promise<void> {
+/**
+ * Durable before visible; the oldest of the project beyond the bound is evicted in the same write.
+ * `keep` (a restore's source) is never the one evicted; the oldest of the others makes room.
+ */
+export function addCheckpoint(entry: CodeCheckpoint, keep?: string): Promise<void> {
   if (!valid(entry)) return Promise.reject(new Error('Invalid code checkpoint'));
   const operation = mutations.then(async () => {
     await load();
-    const project = entries.filter(other => other.projectId === entry.projectId)
-      .sort((a, b) => b.createdAt - a.createdAt).slice(0, MAX_CHECKPOINTS_PER_PROJECT - 1);
+    const sorted = entries.filter(other => other.projectId === entry.projectId).sort((a, b) => b.createdAt - a.createdAt);
+    const kept = sorted.find(other => other.id === keep);
+    const project = kept && sorted.indexOf(kept) >= MAX_CHECKPOINTS_PER_PROJECT - 1
+      ? [...sorted.filter(other => other !== kept).slice(0, MAX_CHECKPOINTS_PER_PROJECT - 2), kept]
+      : sorted.slice(0, MAX_CHECKPOINTS_PER_PROJECT - 1);
     const next = [...entries.filter(other => other.projectId !== entry.projectId), ...project, entry];
     try {
       await writeDurableNow(STATE, { version: VERSION, entries: next });

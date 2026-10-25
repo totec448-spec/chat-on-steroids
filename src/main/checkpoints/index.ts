@@ -115,14 +115,14 @@ async function captureTree(context: RepositoryContext): Promise<{ treeOid: strin
 }
 
 async function createCheckpoint(context: RepositoryContext, sessionId: string, key: string, reason: CodeCheckpoint['reason'],
-  abandoned: () => boolean = () => false): Promise<CodeCheckpoint | null> {
+  abandoned: () => boolean = () => false, keep?: string): Promise<CodeCheckpoint | null> {
   const { treeOid, headOid } = await captureTree(context);
   // A capture that outlived its budget may have read files the patch has since written.
   if (abandoned()) return null;
   const entry: CodeCheckpoint = {
     id: randomBytes(16).toString('hex'), projectId: context.projectId, sessionId, key, reason, treeOid, headOid, createdAt: Date.now()
   };
-  await addCheckpoint(entry);
+  await addCheckpoint(entry, keep);
   return entry;
 }
 
@@ -319,7 +319,8 @@ export function restoreCheckpoint(projectId: string, checkpointId: string, paths
     }
     // The dialog can stay open for a long time; what is restored must still be what was confirmed.
     await current();
-    const undo = (await createCheckpoint(context, source!.sessionId, `restore:${randomBytes(8).toString('hex')}`, 'restore'))!;
+    // A full list must not make room by dropping the very checkpoint being restored.
+    const undo = (await createCheckpoint(context, source!.sessionId, `restore:${randomBytes(8).toString('hex')}`, 'restore', undefined, checkpointId))!;
     // A file saved while the undo snapshot was read would be in it, and the per-file guard below
     // compares with that snapshot: check the comparison once more before writing anything.
     await current();

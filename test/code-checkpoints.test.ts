@@ -165,6 +165,34 @@ it('does not take a second Before turn checkpoint after the first is evicted fro
   expect((await listCheckpoints(projectId)).some(entry => entry.sessionId === SESSION)).toBe(false);
 });
 
+// CodeRabbit on #1443: with a full list, the "Before restore" checkpoint evicted the oldest entry,
+// which was the very checkpoint being restored, and the final check then failed with nothing restored.
+it('restores the oldest checkpoint of a full list, and keeps it for another restore', async () => {
+  const id = await checkpointNow();
+  const tree = (await git(root, 'rev-parse', 'HEAD^{tree}')).trim();
+  const after = Date.now() + 1;
+  for (let index = 0; index < MAX_CHECKPOINTS_PER_PROJECT - 1; index++) {
+    await addCheckpoint({
+      id: (index + 200).toString(16).padStart(32, '0'),
+      projectId, sessionId: `newer-${index}`, key: `turn:newer-${index}`,
+      reason: 'turn', treeOid: tree, headOid: null, createdAt: after + index
+    });
+  }
+  expect(await listCheckpoints(projectId)).toHaveLength(MAX_CHECKPOINTS_PER_PROJECT);
+  await fs.writeFile(path.join(root, 'app.ts'), 'export const value = 9;\n');
+  const ref = `${CHECKPOINT_REF_PREFIX}${id}`;
+  const snapshot = await compare(ref);
+  const result = await restoreCheckpoint(projectId, id, ['app.ts'], snapshot.revision, async () => true);
+  expect(result).toMatchObject({ confirmed: true, restored: ['app.ts'], skipped: [] });
+  expect(await fs.readFile(path.join(root, 'app.ts'), 'utf8')).toBe('export const value = 1;\n');
+  const kept = await listCheckpoints(projectId);
+  expect(kept).toHaveLength(MAX_CHECKPOINTS_PER_PROJECT);
+  // The restored-from checkpoint and the undo stay; the oldest of the others made room.
+  expect(kept.some(entry => entry.id === id)).toBe(true);
+  expect(kept.some(entry => entry.reason === 'restore')).toBe(true);
+  expect(kept.some(entry => entry.sessionId === 'newer-0')).toBe(false);
+});
+
 it('is Off in a fresh config', () => {
   expect(defaultConfig().projects).toEqual({ codeCheckpoints: false });
 });
@@ -543,6 +571,9 @@ it('rehashes a file edited in the same second as the last index write, even with
   const indexTime = (await fs.stat(indexPath)).mtime;
   await fs.writeFile(path.join(root, 'app.ts'), 'export const value = 7;\n');
   await fs.utimes(path.join(root, 'app.ts'), indexTime, indexTime);
+  // A real wait: the edit must keep the exact stat the index recorded (same size, same second), and
+  // only the clock moving past that second makes Git's racy-clean check the one thing that sees it.
+  // Moving the timestamps instead changes the recorded stat and no longer tests this path.
   await new Promise(resolve => setTimeout(resolve, 1_100));
 
   await applyPatch(editApp('export const value = 7;', 'export const value = 8;'));
