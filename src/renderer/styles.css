@@ -3093,19 +3093,27 @@ input[readonly] {
 }
 .msg.rich .markdown-dil-chart-plot { display: flex; gap: 12px; height: 230px; margin-top: 14px; }
 .msg.rich .markdown-dil-chart-guide {
-  flex: 0 1 auto; min-width: 36px; max-width: 30%; overflow: hidden;
+  flex: 0 1 auto; min-width: 36px; max-width: 30%; overflow: visible;
   display: flex; flex-direction: column; justify-content: space-between;
-  text-align: end; padding-bottom: var(--markdown-dil-label-height); color: var(--soft); font-size: calc(11px * var(--text-scale, 1));
+  box-sizing: border-box; text-align: end; padding-bottom: var(--markdown-dil-label-height);
+  color: var(--soft); font-size: calc(11px * var(--text-scale, 1));
 }
 .msg.rich .markdown-dil-chart-guide > span {
   min-width: 0; overflow: visible; white-space: nowrap;
 }
+.msg.rich .markdown-dil-chart-guide > span:first-child { transform: translateY(-50%); }
+.msg.rich .markdown-dil-chart-guide > span:last-child { transform: translateY(50%); }
 .msg.rich .markdown-dil-chart-bars {
   display: flex; flex: 1; gap: 10px; align-items: stretch; min-width: 0;
-  box-sizing: border-box; padding-bottom: var(--markdown-dil-label-height);
-  background: repeating-linear-gradient(to top, var(--line) 0 1px, transparent 1px 25%);
-  background-size: 100% calc(100% - var(--markdown-dil-label-height)); background-repeat: no-repeat;
+  box-sizing: border-box; position: relative; padding-bottom: var(--markdown-dil-label-height);
 }
+.msg.rich .markdown-dil-chart-gridline {
+  position: absolute; left: 0; right: 0; height: 1px;
+  background: var(--line); pointer-events: none;
+}
+.msg.rich .markdown-dil-chart-gridline-top { top: 0; }
+.msg.rich .markdown-dil-chart-gridline-middle { top: calc((100% - var(--markdown-dil-label-height)) / 2); }
+.msg.rich .markdown-dil-chart-gridline-baseline { top: calc(100% - var(--markdown-dil-label-height)); }
 .msg.rich .markdown-dil-chart-column {
   display: flex; flex: 1; flex-direction: column; justify-content: flex-end; align-items: center;
   min-width: 0; height: 100%; position: relative;
