@@ -3151,7 +3151,6 @@
   "Whole session as HTML": "Sessão completa em HTML",
   "HTML files": "Ficheiros HTML",
   "Play sounds": "Reproduzir sons",
-  "A short sound when a chat needs you, something fails, or a chat finishes in the background. Quiet during phone notifications' quiet hours.": "Um som curto quando um chat precisa de si, algo falha ou um chat termina em segundo plano. Fica em silêncio nas horas de silêncio das notificações no telemóvel.",
   "{0} / {1} tokens · {2}% of the compaction point": "{0} / {1} tokens · {2}% do ponto de compactação",
   "{0} / {1} tokens · {2}% of the compaction point|one": "{0} / {1} token · {2}% do ponto de compactação",
   "{0} / {1} tokens · {2}% of the compaction point|many": "{0} / {1} de tokens · {2}% do ponto de compactação",
@@ -3229,5 +3228,7 @@
   "Your settings changed after the file was chosen. Choose it again.": "As suas definições mudaram depois de o ficheiro ser escolhido. Escolha-o novamente.",
   "This backup has a setting this version does not accept, so nothing was imported.": "Esta cópia de segurança tem uma definição que esta versão não aceita, por isso nada foi importado.",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "As chaves guardadas neste computador não podem ser lidas, por isso as chaves da cópia de segurança não podem ser adicionadas. Importe sem elas.",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "As definições foram importadas, mas as chaves guardadas não puderam ser armazenadas. Adicione-as novamente nas Definições."
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "As definições foram importadas, mas as chaves guardadas não puderam ser armazenadas. Adicione-as novamente nas Definições.",
+  "For chats that need you, failures and finished chats. Follows the quiet hours below.": "Para chats que precisam de si, falhas e chats concluídos. Segue as horas de silêncio abaixo.",
+  "No phone notifications and no sounds in these hours.": "Sem notificações no telemóvel e sem sons nestas horas."
 }

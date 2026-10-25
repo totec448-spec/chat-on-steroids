@@ -3103,7 +3103,6 @@
   "Whole session as HTML": "Tüm oturum HTML olarak",
   "HTML files": "HTML dosyaları",
   "Play sounds": "Ses çal",
-  "A short sound when a chat needs you, something fails, or a chat finishes in the background. Quiet during phone notifications' quiet hours.": "Bir sohbet sana ihtiyaç duyduğunda, bir şey başarısız olduğunda ya da bir sohbet arka planda bittiğinde kısa bir ses. Telefon bildirimlerinin sessiz saatlerinde sessiz kalır.",
   "{0} / {1} tokens · {2}% of the compaction point": "{0} / {1} token · sıkıştırma noktasının %{2} kadarı",
   "{0} / {1} tokens · {2}% of the compaction point|one": "{0} / {1} token · sıkıştırma noktasının %{2} kadarı",
   "{0} / {1} tokens · {2}% of the large-chat warning": "{0} / {1} token · büyük sohbet uyarısının %{2} kadarı",
@@ -3173,5 +3172,7 @@
   "Your settings changed after the file was chosen. Choose it again.": "Dosya seçildikten sonra ayarların değişti. Dosyayı yeniden seç.",
   "This backup has a setting this version does not accept, so nothing was imported.": "Bu yedekte bu sürümün kabul etmediği bir ayar var, bu yüzden hiçbir şey içe aktarılmadı.",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "Bu bilgisayardaki kayıtlı anahtarlar okunamıyor, bu yüzden yedeğin anahtarları eklenemiyor. Onlar olmadan içe aktar.",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Ayarlar içe aktarıldı, ancak kayıtlı anahtarlar saklanamadı. Onları Ayarlar'da yeniden ekle."
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Ayarlar içe aktarıldı, ancak kayıtlı anahtarlar saklanamadı. Onları Ayarlar'da yeniden ekle.",
+  "For chats that need you, failures and finished chats. Follows the quiet hours below.": "Sizi bekleyen sohbetler, hatalar ve biten sohbetler için. Aşağıdaki sessiz saatlere uyar.",
+  "No phone notifications and no sounds in these hours.": "Bu saatlerde telefon bildirimi ve ses yok."
 }
