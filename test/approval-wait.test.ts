@@ -262,6 +262,20 @@ describe('the page detector', () => {
     expect(api.approvalCard()).toBeNull();
   });
 
+  // The live card on 2026-10-25 (German UI, a key-shaped value in the request) lists the shared data
+  // as a <dl>: a label and its value in one grid row. Read as one block they ran together into
+  // "Zugangsschlüsselsk-proj-…" in the app's copy of the card.
+  it('keeps a shared-data label and its value apart', () => {
+    dom.window.document.querySelector('main')!.innerHTML = `<div data-codex-approval-surface="true"><div role="alert">
+      <div>ChatGPT erlauben, Chat On Steroids Core zu verwenden?</div><div>Zu den geteilten Daten gehören:</div>
+      <dl class="@container"><div class="grid"><dt>Zugangsschlüssel</dt><dd><span class="min-w-0"><span>sk-proj-FAKE0123</span></span></dd></div>
+      <div class="grid"><dt>Befehl</dt><dd><span>echo test</span></dd></div>
+      <div class="grid"><dd>ohne Label</dd></div><div class="grid"><dt>Nur Label</dt></div></dl></div>
+      <button>Ablehnen<kbd>Esc</kbd></button><button>Einmal zulassen<kbd>⏎</kbd></button></div>`;
+    expect(api.approvalCard()?.lines).toEqual(['ChatGPT erlauben, Chat On Steroids Core zu verwenden?', 'Zu den geteilten Daten gehören:',
+      'Zugangsschlüssel: sk-proj-FAKE0123', 'Befehl: echo test', 'ohne Label', 'Nur Label']);
+  });
+
   it('presses Deny or Allow once by their key hints, never the options menu, and only on that card', () => {
     const main = dom.window.document.querySelector('main')!;
     main.innerHTML = liveCard();

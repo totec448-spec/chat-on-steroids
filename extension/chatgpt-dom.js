@@ -943,7 +943,9 @@ var CLF_DOM = (() => {
       const clone = node.cloneNode(true);
       for (const drop of clone.querySelectorAll('button, kbd, svg, script, style, [aria-hidden="true"]')) drop.remove();
       const lines = [];
-      const block = element => element.closest('div, p, li, h1, h2, h3, h4, h5, h6');
+      // The shared data is a <dl> (2026-10-25): a label and its value share one grid row, so each
+      // term and definition is a block of its own, and a value follows its label as "label: value".
+      const block = element => element.closest('dt, dd, div, p, li, h1, h2, h3, h4, h5, h6');
       const groups = new Map();
       const walker = document.createTreeWalker(clone, NodeFilter.SHOW_TEXT);
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -951,10 +953,17 @@ var CLF_DOM = (() => {
         if (!owner) continue;
         groups.set(owner, (groups.get(owner) || '') + node.textContent);
       }
-      for (const text of groups.values()) {
+      let term = null;
+      for (const [owner, text] of groups) {
         const line = text.replace(/\s+/g, ' ').trim().slice(0, 300);
-        if (line && lines.at(-1) !== line && lines.length < 8) lines.push(line);
+        if (!line) continue;
+        if (owner.tagName === 'DT') { term = line; continue; }
+        const joined = owner.tagName === 'DD' && term ? `${term}: ${line}`.slice(0, 300) : line;
+        if (term && owner.tagName !== 'DD' && lines.at(-1) !== term && lines.length < 8) lines.push(term);
+        term = null;
+        if (lines.at(-1) !== joined && lines.length < 8) lines.push(joined);
       }
+      if (term && lines.at(-1) !== term && lines.length < 8) lines.push(term);
       return { node, lines, allow: approvalButton(node, 'allow') !== null };
     }, null);
   }
