@@ -3126,5 +3126,8 @@
   "High contrast, eight accent colors, line spacing and a more legible font.": "高對比、八種強調色、行距和更易讀的字型。",
   "Held by your send check: {0}": "已被你的傳送檢查暫緩：{0}",
   "Held by your send check": "已被你的傳送檢查暫緩",
-  "Held: your send check did not answer": "已暫緩：你的傳送檢查沒有回應"
+  "Held: your send check did not answer": "已暫緩：你的傳送檢查沒有回應",
+  "Check automatic sends": "檢查自動傳送",
+  "Before each message the app sends by itself (Goal and Loop steps, automatic Continue, the fresh turn after a long one, workers), a program on this computer is asked whether it may go. Leave empty to turn this off. Messages you send are never asked about.": "應用程式自行傳送的每則訊息(目標和循環步驟、自動繼續、長回合之後的新回合、worker)送出前,都會詢問這台電腦上的一個程式是否可以傳送。留空即關閉。你自己傳送的訊息從不詢問。",
+  "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "請使用這台電腦上含連接埠的 http 位址,例如 http://127.0.0.1:8080/check。"
 }

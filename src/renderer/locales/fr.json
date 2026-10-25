@@ -3238,5 +3238,8 @@
   "High contrast, eight accent colors, line spacing and a more legible font.": "Contraste élevé, huit couleurs d'accent, interligne et une police plus lisible.",
   "Held by your send check: {0}": "Retenu par votre vérification d’envoi : {0}",
   "Held by your send check": "Retenu par votre vérification d’envoi",
-  "Held: your send check did not answer": "Retenu : votre vérification d’envoi n’a pas répondu"
+  "Held: your send check did not answer": "Retenu : votre vérification d’envoi n’a pas répondu",
+  "Check automatic sends": "Vérifier les envois automatiques",
+  "Before each message the app sends by itself (Goal and Loop steps, automatic Continue, the fresh turn after a long one, workers), a program on this computer is asked whether it may go. Leave empty to turn this off. Messages you send are never asked about.": "Avant chaque message que l’app envoie d’elle-même (étapes Goal et Loop, Continue automatique, le nouveau tour après un tour long, workers), un programme de cet ordinateur est interrogé pour savoir s’il peut partir. Laissez vide pour désactiver. Les messages que vous envoyez ne sont jamais soumis à cette vérification.",
+  "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "Utilisez une adresse http de cet ordinateur avec un port, par exemple http://127.0.0.1:8080/check."
 }
