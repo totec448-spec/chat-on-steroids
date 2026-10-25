@@ -188,6 +188,22 @@ describe('captured ChatGPT rendered HTML', () => {
     expect(renderedMarkdown(':::canvas{title="Plan"}\nStep one\n:::').textContent).not.toContain(':::');
   });
 
+  it('keeps a canonical chart when another provider directive has a resolved recording', () => {
+    const chart = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }],
+      data: [{ group: 'Current sample', value: 7 }]
+    } } })}\uE201`;
+    const source = `Today's results.\n\n${chart}\n\n::chatgpt-entity{type="place" id="42"}`;
+    const capture = whole('<p>Previous provider-only rendering.</p>');
+    const rendered = renderedMarkdown(source, capture);
+    expect(rendered.querySelector('.markdown-dil-chart')).not.toBeNull();
+    expect(rendered.textContent).toContain('Current sample');
+    expect(rendered.textContent).toContain("Today's results.");
+    expect(rendered.textContent).not.toContain('Previous provider-only rendering.');
+    expect(rendered.textContent).not.toContain('::chatgpt-entity');
+    expect(renderedMarkdown(source).querySelector('.markdown-dil-chart')).not.toBeNull();
+  });
+
   it('renders the recorded native URL token as its authored label and opens it through validated IPC', () => {
     const openLink = vi.fn(async () => ({ ok: true, data: true }));
     (dom.window as any).api.openLink = openLink;

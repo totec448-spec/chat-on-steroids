@@ -87,7 +87,12 @@ it('keeps recorded DIL surfaces on CoS tokens across themes and high-contrast pa
     .toContain('top: calc((100% - var(--markdown-dil-label-height)) / 2)');
   expect(rule('.msg.rich .markdown-dil-chart-gridline-baseline'))
     .toContain('top: calc(100% - var(--markdown-dil-label-height))');
-  expect(css).toContain('@container (max-width: 330px)');
+  // Image/text rows respond to the real message width, not the wider session card.
+  // Keep the unnamed card/panel query for nested two-column grids.
+  expect(rule('.msg.rich:has(.markdown-dil-photo-row)')).toContain('container: message-content / inline-size');
+  expect(rule('.msg.rich')).not.toContain('container:');
+  expect(css).toContain('@container (max-width: 330px) {\n  .msg.rich .markdown-dil-grid');
+  expect(css).toContain('@container message-content (max-width: 330px) {\n  .msg.rich .markdown-dil-photo-row');
   for (const page of ['#ffffff', '#000000']) {
     const tokens = paletteTokens(page, '#ffcc00', 100, true);
     expect(contrastRatio(tokens['--accent-fill']!, tokens['--page']!)).toBeGreaterThanOrEqual(7);
