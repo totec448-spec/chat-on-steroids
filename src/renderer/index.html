@@ -212,6 +212,13 @@
                 <label class="setting" id="privacyScreenshotsSetting"><span class="setting-text"><b>Screenshot only the active window</b><em>For privacy, ChatGPT's screenshots show the window in front instead of the whole screen.</em></span><input id="privacyScreenshots" type="checkbox" /></label>
               </div>
             </section>
+            <section class="appearance-section" id="backupSettings">
+              <header class="settings-section-head"><div><h2>Backup</h2><p>Keep a copy of your settings, or move them to another computer.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <div class="setting"><span class="setting-text"><b>Export settings</b><em>Saves your settings to a file. Folders and this computer's connection to ChatGPT stay out.</em></span><button class="btn" id="exportSettings" type="button">Export…</button></div>
+                <div class="setting"><span class="setting-text"><b>Import settings</b><em>Takes the settings from a backup file. You see how many change before anything does.</em></span><button class="btn" id="importSettings" type="button">Import…</button></div>
+              </div>
+            </section>
             <section class="appearance-section">
               <header class="settings-section-head"><div><h2>For developers</h2><p>Troubleshooting details and access for tools on this computer.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
@@ -1604,6 +1611,32 @@
         <button class="whats-new-link" id="whatsNewNotes" type="button"><i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Full release notes</button>
         <button class="whats-new-done" id="whatsNewDone" type="button">Got it</button>
       </footer>
+    </dialog>
+    <dialog class="plugin-dialog backup-dialog" id="exportSettingsDialog" aria-labelledby="exportSettingsTitle">
+      <div class="plugin-dialog-head"><h2 id="exportSettingsTitle">Export settings</h2><button class="btn" id="exportSettingsClose" type="button">Close</button></div>
+      <form id="exportSettingsForm" class="plugin-dialog-body">
+        <p>Folders and this computer's connection to ChatGPT are left out.</p>
+        <label class="setting"><span class="setting-text"><b>Include saved keys</b><em>Locked with a passphrase you choose.</em></span><input id="exportSettingsKeys" type="checkbox" /></label>
+        <div id="exportSettingsPassphrase" hidden>
+          <label class="plugin-field" for="exportSettingsPass"><span>Passphrase</span><input id="exportSettingsPass" type="password" maxlength="1024" autocomplete="new-password" /><small>At least 8 characters. A lost passphrase cannot be recovered.</small></label>
+          <label class="plugin-field" for="exportSettingsPassAgain"><span>Passphrase again</span><input id="exportSettingsPassAgain" type="password" maxlength="1024" autocomplete="new-password" /></label>
+        </div>
+        <p id="exportSettingsError" class="plugin-error" role="alert" hidden></p>
+        <div class="pet-delete-actions"><button class="btn" id="exportSettingsCancel" type="button">Cancel</button><button class="btn btn-solid" id="exportSettingsSubmit" type="submit">Export</button></div>
+      </form>
+    </dialog>
+    <dialog class="plugin-dialog backup-dialog" id="importSettingsDialog" aria-labelledby="importSettingsTitle">
+      <div class="plugin-dialog-head"><h2 id="importSettingsTitle">Import settings</h2><button class="btn" id="importSettingsClose" type="button">Close</button></div>
+      <form id="importSettingsForm" class="plugin-dialog-body">
+        <p id="importSettingsSource"></p>
+        <p id="importSettingsSummary" role="status"></p>
+        <p class="backup-wider" id="importSettingsWider" hidden></p>
+        <details class="backup-review" id="importSettingsReview" hidden><summary><svg class="disclosure-chevron sum-chev" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Review changes</summary><ul id="importSettingsChanges"></ul></details>
+        <label class="setting" id="importSettingsKeysRow" hidden><span class="setting-text"><b id="importSettingsKeysLabel"></b><em>Needs the passphrase chosen when the backup was made.</em></span><input id="importSettingsKeys" type="checkbox" /></label>
+        <label class="plugin-field" for="importSettingsPass" id="importSettingsPassRow" hidden><span>Passphrase</span><input id="importSettingsPass" type="password" maxlength="1024" autocomplete="off" /></label>
+        <p id="importSettingsError" class="plugin-error" role="alert" hidden></p>
+        <div class="pet-delete-actions"><button class="btn" id="importSettingsCancel" type="button">Cancel</button><button class="btn btn-solid" id="importSettingsSubmit" type="submit">Import</button></div>
+      </form>
     </dialog>
     <dialog id="setupProfileDialog" class="setup-profile-dialog" aria-labelledby="setupProfileDialogTitle">
       <form id="setupProfileForm">
