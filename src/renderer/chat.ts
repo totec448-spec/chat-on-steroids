@@ -1,3 +1,4 @@
+import { DEFAULT_CHAT_PERSONALITY, DEFAULT_CHAT_WRITING_STYLE, MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
 import { hasProviderDirective, resolvedCapture, withoutProviderDirectives } from '../shared/content-reference.js';
 import { completedDilText } from '../shared/dil-tables.js';
 import { markdownVisibleText } from '../shared/markdown-text.js';
@@ -7558,6 +7559,24 @@ function wireGoal(save: () => Promise<void>): void {
     await save();
     toast(t('Continue prompt restored to default'));
   });
+  // #1856: Personality and Writing style of new chats; main.ts owns the ui fields they save into.
+  for (const [id, fallback, restored] of [
+    ['chatPersonality', DEFAULT_CHAT_PERSONALITY, () => t('Personality restored to default')],
+    ['chatWritingStyle', DEFAULT_CHAT_WRITING_STYLE, () => t('Writing style restored to default')]
+  ] as const) {
+    $<HTMLTextAreaElement>(id).maxLength = MAX_CHAT_STYLE_CHARS;
+    $(`${id}Edit`).addEventListener('click', () => {
+      const panel = $(`${id}Panel`);
+      panel.hidden = !panel.hidden;
+      ui($(`${id}Edit`), 'textContent', () => panel.hidden ? t('Edit prompt') : t('Close prompt'));
+      if (!panel.hidden) $<HTMLTextAreaElement>(id).focus();
+    });
+    $(`${id}Reset`).addEventListener('click', async () => {
+      $<HTMLTextAreaElement>(id).value = fallback;
+      await save();
+      toast(restored());
+    });
+  }
   $<HTMLTextAreaElement>('goalPrompt').maxLength = MAX_GOAL_SYSTEM_PROMPT_CHARS;
   $('goalPromptEdit').addEventListener('click', () => {
     const panel = $('goalPromptPanel');
@@ -7724,7 +7743,9 @@ const CHAT_INPUTS = [
   'recordingStorageLimit',
   'goalPrompt',
   'goalObjectivePrompt',
-  'goalLoopPrompt'
+  'goalLoopPrompt',
+  'chatPersonality',
+  'chatWritingStyle'
 ];
 
 /** Writes app state into this panel's controls. Called from the renderer's apply(). */

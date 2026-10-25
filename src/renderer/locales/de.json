@@ -3179,5 +3179,15 @@
   "Keys stay with you": "Schlüssel bleiben bei dir",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "API-Schlüssel und Tokens in dem, was Tools zurückgeben, werden verborgen, bevor ChatGPT sie sieht.",
   "Easier to read": "Leichter zu lesen",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Hoher Kontrast, acht Akzentfarben, Zeilenabstand und eine besser lesbare Schrift."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Hoher Kontrast, acht Akzentfarben, Zeilenabstand und eine besser lesbare Schrift.",
+  "Personality restored to default": "Persönlichkeit auf Standard zurückgesetzt",
+  "Writing style restored to default": "Schreibstil auf Standard zurückgesetzt",
+  "Chat instructions": "Chat-Anweisungen",
+  "How ChatGPT talks and writes in new chats. Its tools, permissions and workers stay fixed.": "Wie ChatGPT in neuen Chats spricht und schreibt. Seine Werkzeuge, Berechtigungen und Worker bleiben fest.",
+  "Personality": "Persönlichkeit",
+  "Its tone and manner with you.": "Sein Ton und Umgang mit dir.",
+  "Saved when you leave the editor and used from the next new chat. Leave it empty to send no personality at all.": "Wird gespeichert, wenn du den Editor verlässt, und gilt ab dem nächsten neuen Chat. Leer lassen, um gar keine Persönlichkeit zu senden.",
+  "Writing style": "Schreibstil",
+  "How it writes answers, technical explanations and pull request descriptions.": "Wie es Antworten, technische Erklärungen und Pull-Request-Beschreibungen schreibt.",
+  "Saved when you leave the editor and used from the next new chat. Leave it empty to send no writing style at all.": "Wird gespeichert, wenn du den Editor verlässt, und gilt ab dem nächsten neuen Chat. Leer lassen, um gar keinen Schreibstil zu senden."
 }

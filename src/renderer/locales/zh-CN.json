@@ -3123,5 +3123,15 @@
   "Keys stay with you": "密钥留在你这里",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "工具返回内容中的 API 密钥和令牌会在 ChatGPT 看到之前被隐藏。",
   "Easier to read": "更易阅读",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "高对比度、八种强调色、行距和更易读的字体。"
+  "High contrast, eight accent colors, line spacing and a more legible font.": "高对比度、八种强调色、行距和更易读的字体。",
+  "Personality restored to default": "已将个性恢复为默认",
+  "Writing style restored to default": "已将写作风格恢复为默认",
+  "Chat instructions": "聊天说明",
+  "How ChatGPT talks and writes in new chats. Its tools, permissions and workers stay fixed.": "ChatGPT 在新聊天中如何说话和写作。它的工具、权限和 worker 保持不变。",
+  "Personality": "个性",
+  "Its tone and manner with you.": "它对你的语气和态度。",
+  "Saved when you leave the editor and used from the next new chat. Leave it empty to send no personality at all.": "离开编辑器时保存,从下一个新聊天开始使用。留空则不发送任何个性。",
+  "Writing style": "写作风格",
+  "How it writes answers, technical explanations and pull request descriptions.": "它如何撰写回答、技术说明和拉取请求描述。",
+  "Saved when you leave the editor and used from the next new chat. Leave it empty to send no writing style at all.": "离开编辑器时保存,从下一个新聊天开始使用。留空则不发送任何写作风格。"
 }
