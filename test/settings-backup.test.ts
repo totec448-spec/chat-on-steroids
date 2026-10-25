@@ -47,6 +47,8 @@ describe('what a settings backup carries', () => {
 
   it.each([
     ['openaiApiKey', true], ['openRouterApiKey', true], ['customProviderApiKey', true], ['plugin:github:token', true],
+    // Phone notifications' access token (#1800): the topic travels in the settings, so its token must too.
+    ['ntfyToken', true],
     ['bridgeToken', false], ['setup:profile-1', false], ['mcp:path:core', false]
   ])('exports the saved key %s: %s', (key, expected) => {
     expect(exportableSecret(key)).toBe(expected);

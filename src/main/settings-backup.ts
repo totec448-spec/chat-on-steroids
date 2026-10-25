@@ -58,9 +58,12 @@ export interface ParsedBackup {
   secretCount: number;
 }
 
-/** The saved keys a person can carry to another computer: their own API and plugin keys. */
+/**
+ * The saved keys a person can carry to another computer: their own API and plugin keys, and the
+ * phone notifications' access token (#1800), whose server and topic travel in the settings.
+ */
 export function exportableSecret(key: string): boolean {
-  return key === 'openaiApiKey' || key === 'openRouterApiKey' || key === 'customProviderApiKey' || key.startsWith('plugin:');
+  return key === 'openaiApiKey' || key === 'openRouterApiKey' || key === 'customProviderApiKey' || key === 'ntfyToken' || key.startsWith('plugin:');
 }
 
 const isPlainObject = (value: unknown): value is Settings =>
