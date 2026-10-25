@@ -4901,6 +4901,35 @@ describe('through the MCP endpoint', () => {
     expect(pendingCount('worker-1')).toBe(0);
   });
 
+  it('asks the send check before a message reaches a worker, and queues nothing when it is held (#1794)', async () => {
+    const previous = getConfig();
+    await saveConfig({ ...previous, ui: { ...previous.ui, sendCheckUrl: 'http://127.0.0.1:8123/check' } });
+    const asked: Array<Record<string, unknown>> = [];
+    let allow = false;
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+      asked.push(JSON.parse(String(init.body)));
+      return Response.json(allow ? { allow: true } : { allow: false, reason: 'review first' });
+    }));
+    try {
+      spawn({ caller: prime, workers: [{ task: 'Checked worker' }] });
+      const held = await asChat(PRIME_CHAT, 'message', { to: 'worker-1', text: 'Also update the docs' });
+      expect(held).toContain("The person's send check held this message to worker-1: review first. Nothing was queued.");
+      expect(pendingCount('worker-1')).toBe(0);
+      expect(asked).toEqual([expect.objectContaining({ kind: 'worker-message', text: 'Also update the docs', attempt: 1,
+        chat: expect.objectContaining({ worker: 'worker-1' }) })]);
+      allow = true;
+      expect(await asChat(PRIME_CHAT, 'message', { to: 'worker-1', text: 'Also update the docs' })).toContain('Queued for worker-1');
+      expect(pendingCount('worker-1')).toBe(1);
+      // A worker's report to its prime is not a send the app makes to a worker.
+      const before = asked.length;
+      await asChat(PRIME_CHAT, 'status');
+      expect(asked).toHaveLength(before);
+    } finally {
+      vi.unstubAllGlobals();
+      await saveConfig(previous);
+    }
+  });
+
   it('lets existing primes exchange messages by explicit run address without exposing foreign workers', async () => {
     const primeB: Caller = { conversationId: 'mcp-peer-prime-b' };
     const a = spawn({ caller: prime, workers: [{ task: 'A worker' }] });

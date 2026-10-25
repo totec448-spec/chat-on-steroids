@@ -23,7 +23,7 @@ import { injectedUserMessage, recordedRequestTurn, responseTurnId, type Timeline
 import type { SessionSummary } from '../shared/session.js';
 import { messageReferences } from '../shared/session.js';
 import { turnTrace } from '../shared/turn-trace.js';
-import { checkAutomaticSend } from './send-check.js';
+import { checkAutomaticSend, SEND_CHECK_RETRY_MS } from './send-check.js';
 import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, fileRotationInput, fileRotationContinueAfterStop, rotationDelivery, withdrawUnsentRotation, type InputActivity } from './session/input.js';
 import { callHoldOpen, holdCalls } from './rotation-hold.js';
 import { authorizedPluginRefreshPublications, hasRequestedPluginRefresh, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
@@ -472,6 +472,8 @@ interface Command {
    */
   timer: NodeJS.Timeout | null;
   lastError: string | null;
+  /** #1794: the send check held this worker's start or wake; asked again from `nextAt`. Not persisted. */
+  sendCheck?: { attempt: number; nextAt: number; allowedText?: string };
   /**
    * The page that redeemed this command, while its lease holds.
    *
@@ -4907,6 +4909,30 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       }
     }
     if (!commands.includes(command) || command.owner !== client) return json(res, 409, { error: 'command_taken' }, origin);
+    // #1794: a worker's start or wake is an automatic send, first checked with the person's send
+    // check. Held, the page keeps redeeming (retryable) and the program is asked at most every
+    // 30 s; the command's own deadline still ends it, then with the hold as its reason.
+    if ((command.spec.type === 'worker' || command.spec.type === 'revive') && getConfig().ui.sendCheckUrl && described.text &&
+        command.sendCheck?.allowedText !== described.text) {
+      const spec = command.spec;
+      if (command.sendCheck && Date.now() < command.sendCheck.nextAt) return json(res, 503, { error: 'send_check_held', retryable: true }, origin);
+      const attempt = (command.sendCheck?.attempt ?? 0) + 1;
+      const prime = primeConversation(spec.runId);
+      const source = prime ? await findSessionByConversation(prime, { requireUnique: true }) : null;
+      const verdict = await checkAutomaticSend({ kind: spec.type === 'worker' ? 'worker-start' : 'worker-message', id: command.id, attempt,
+        text: described.text, chat: { session: source?.id ?? null, project: source?.projectId ?? null, worker: spec.agent } });
+      if (!commands.includes(command) || command.owner !== client) return json(res, 409, { error: 'command_taken' }, origin);
+      if (!verdict.allowed) {
+        command.sendCheck = { attempt, nextAt: Date.now() + SEND_CHECK_RETRY_MS };
+        command.lastError = verdict.answered
+          ? `the person's send check held it${verdict.reason ? `: ${verdict.reason}` : ''}`
+          : "the person's send check did not answer";
+        changed();
+        return json(res, 503, { error: 'send_check_held', retryable: true }, origin);
+      }
+      command.sendCheck = { attempt, nextAt: 0, allowedText: described.text };
+      if (command.lastError?.startsWith("the person's send check")) { command.lastError = null; changed(); }
+    }
     const liveResume = command.spec.type === 'resume' ? continuationByToken(command.spec.token) : null;
     if (command.spec.type === 'resume' && (!liveResume || !sendUnattempted(liveResume.destinationSend)))
       return json(res, 409, { error: 'command_already_sent', final: true }, origin);

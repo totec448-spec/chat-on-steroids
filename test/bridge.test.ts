@@ -4856,6 +4856,46 @@ describe('delivering a bootstrap', () => {
     expect(summary?.origin).toEqual({ kind: 'resume', fromSessionId: source.id, agentId: null, task: '' });
   });
 
+  it('asks the send check before a worker start is typed, holds it with the reason, and asks again 30 s later', async () => {
+    // #1794: a worker's start is an automatic send. While held the page keeps redeeming (retryable),
+    // the program is asked at most every 30 s, and a start that runs out says why.
+    const http = await import('node:http');
+    const asked: Array<Record<string, any>> = [];
+    let allow = false;
+    const server = http.createServer((req, res) => {
+      let raw = ''; req.on('data', chunk => { raw += chunk; });
+      req.on('end', () => { asked.push(JSON.parse(raw)); res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(allow ? { allow: true } : { allow: false, reason: 'one worker at a time' })); });
+    });
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      await saveConfig({ ...suiteConfig, ui: { ...suiteConfig.ui, sendCheckUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}/check` } });
+      await pair();
+      spawn({ workers: [{ task: 'Rewrite the recorder fixture' }], caller: { conversationId: PRIME_CHAT } });
+      await waitForOpened(1);
+      const id = new URL(opened[0]!).searchParams.get('clf')!;
+      const held = await request('POST', '/commands/redeem', { body: { id, client: 'tab-1' } });
+      expect(held.status).toBe(503);
+      expect(held.body).toMatchObject({ error: 'send_check_held', retryable: true });
+      expect(asked).toEqual([expect.objectContaining({ version: 1, kind: 'worker-start', id, attempt: 1,
+        chat: expect.objectContaining({ worker: 'worker-1' }) })]);
+      expect(asked[0]!.text).toContain('Rewrite the recorder fixture');
+      expect(pendingCommands()).toEqual([expect.objectContaining({ id, lastError: "the person's send check held it: one worker at a time" })]);
+      // The page retries every few seconds; the program is not asked again before 30 s.
+      expect((await request('POST', '/commands/redeem', { body: { id, client: 'tab-1' } })).status).toBe(503);
+      expect(asked).toHaveLength(1);
+      now += 30_001; allow = true;
+      const command = await redeem(id, 'tab-1');
+      expect(command.id).toBe(id);
+      expect(asked.at(-1)).toMatchObject({ kind: 'worker-start', attempt: 2 });
+      expect(pendingCommands()).toEqual([expect.objectContaining({ id, lastError: null })]);
+    } finally {
+      clock.mockRestore();
+      await new Promise(resolve => server.close(resolve));
+    }
+  });
+
   it('names a worker chat after the agent and the task it was given', async () => {
     await pair();
     spawn({ workers: [{ task: 'Rewrite the recorder fixture' }], caller: { conversationId: PRIME_CHAT } });
