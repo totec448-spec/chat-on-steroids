@@ -106,11 +106,12 @@ function pipeline(info, ready) {
   const calls = page && Array.isArray(page.trace) ? page.trace : [];
 
   if (!info || !info.isChat) return { read: ['off'], sent: ['off'], proc: ['off'], why: ['', ''] };
-  if (!info.recorder) {
-    return { read: ['failed'], sent: ['off'], proc: ['off'], why: ['bad', t('popup_pipeline_no_recorder', 'No recorder in this tab. Reload the page.')] };
-  }
+  // Before the recorder: on a page that is not a chat there is nothing to record or reload.
   if (notAChat(info)) {
     return { read: ['off'], sent: ['off'], proc: ['off'], why: ['', t('popup_pipeline_not_a_chat', 'This ChatGPT page is not a chat, so the app has nothing to follow here. Open or start a chat.')] };
+  }
+  if (!info.recorder) {
+    return { read: ['failed'], sent: ['off'], proc: ['off'], why: ['bad', t('popup_pipeline_no_recorder', 'No recorder in this tab. Reload the page.')] };
   }
   if (read === 0) {
     return { read: ['running'], sent: ['off'], proc: ['off'], why: ['', t('popup_pipeline_waiting_first_message', 'Waiting for the first message.')] };
