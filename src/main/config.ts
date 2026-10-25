@@ -1,3 +1,4 @@
+import { MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
 import { DEFAULT_PHONE_PUSH } from '../shared/phone-push.js';
 import { DEFAULT_HELPER_CHAT_MODEL, SUPERSEDED_HELPER_CHAT_MODELS } from '../shared/chat-models.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
@@ -351,6 +352,9 @@ const configSchema = z.object({
     announceTurns: z.boolean().optional(),
     // Empty, too long or damaged falls back to the built-in Continue phrases.
     customContinue: z.string().trim().min(1).max(CUSTOM_CONTINUE_MAX_CHARS).optional().catch(undefined),
+    /** #1856: the person's Personality and Writing style for new chats; absent = default, '' = left out. */
+    chatPersonality: z.string().max(MAX_CHAT_STYLE_CHARS).optional().catch(undefined),
+    chatWritingStyle: z.string().max(MAX_CHAT_STYLE_CHARS).optional().catch(undefined),
     /** Keep the chat at its end while it grows, in the app and on ChatGPT, until the reader scrolls up. */
     followOutput: z.boolean().optional().default(true),
     mentionCore: z.boolean().optional().default(true),
