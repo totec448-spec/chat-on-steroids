@@ -1326,6 +1326,7 @@ export function createFilePanel(options: FilePanelOptions) {
     }
     if (!historical && gitSnapshot?.comparison?.checkpoint) {
       actions.append(actionButton(() => t('Restore file'), 'i-restore', () => restoreFromCheckpoint([path])));
+    }
     const conflicted = !historical && value && 'status' in value && value.status === 'C' ? value : null;
     if (conflicted?.conflict) {
       const threeWay = actionButton(() => t('Three-way view'), 'i-git-branch', () => {
