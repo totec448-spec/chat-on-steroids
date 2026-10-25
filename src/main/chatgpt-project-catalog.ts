@@ -11,6 +11,7 @@
  */
 import { createHash } from 'node:crypto';
 import { readDurable, writeDurableNow } from './durable.js';
+import { logWarn } from './logger.js';
 import { listProjects } from './projects.js';
 import { CHATGPT_PROJECT_ID, type ChatgptProjectChoice } from '../shared/projects.js';
 
@@ -33,12 +34,23 @@ function spaceOf(workspace: unknown): string {
     ? createHash('sha256').update(workspace).digest('hex').slice(0, 16) : '';
 }
 
-async function readCatalog(): Promise<Catalog> {
-  const raw = await readDurable<{ projects?: unknown; current?: unknown }>(CHATGPT_PROJECT_CATALOG).catch(() => null);
+/**
+ * The saved catalog. For a write it must really have been read: a file that can't be read right
+ * now fails the write, so a shorter report never replaces what is there. A damaged one starts over.
+ */
+async function readCatalog(forWrite = false): Promise<Catalog> {
+  const raw = forWrite
+    ? await readDurable<{ projects?: unknown; current?: unknown }>(CHATGPT_PROJECT_CATALOG, { strict: true }).catch((error: { damaged?: boolean }) => {
+      if (!error?.damaged) throw error;
+      logWarn('chatgpt projects: the saved list was damaged; it starts again from this report');
+      return null;
+    })
+    : await readDurable<{ projects?: unknown; current?: unknown }>(CHATGPT_PROJECT_CATALOG).catch(() => null);
   const rows = Array.isArray(raw?.projects) ? raw.projects : [];
   const current = typeof raw?.current === 'string' && /^[0-9a-f]{16}$/.test(raw.current) ? raw.current : '';
   const entries: Entry[] = [];
   for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
     const entry = row as Partial<Entry>;
     if (typeof entry.id !== 'string' || !CHATGPT_PROJECT_ID.test(entry.id) || entries.some(other => other.id === entry.id)) continue;
     const name = cleanName(entry.name);
@@ -68,7 +80,7 @@ export function noteChatgptProjects(reported: ReadonlyArray<{ id: unknown; name:
       seen.push({ id: row.id, name, seenAt: now, space });
     }
     if (!seen.length) return false;
-    const previous = await readCatalog();
+    const previous = await readCatalog(true);
     const next = [...seen, ...previous.entries.filter(entry => !seen.some(other => other.id === entry.id))].slice(0, MAX_PROJECTS);
     const shape = (catalog: Catalog) => JSON.stringify([catalog.current, catalog.entries.map(entry => [entry.id, entry.name, entry.space])]);
     const changed = shape({ current: space, entries: next }) !== shape(previous);

@@ -68,3 +68,25 @@ it('never offers a new one while one is being created', async () => {
   await created.offer({ ...project, chatgpt: { state: 'creating', requestId: 'cccccccc-bbbb-4ccc-8ddd-eeeeeeeeeeee', updatedAt: 1 } } as any, 'menu');
   expect(options().map(option => option.textContent)).toEqual(['Existing', 'Current']);
 });
+
+it('picks the matching ChatGPT Project on Enter, and a new one only when nothing else matches', async () => {
+  // The local project shares its name with a Project the account has: Enter means that one.
+  const { api, created } = await picker(button());
+  const local = { ...project, name: 'Existing' };
+  await created.offer(local, 'menu');
+  const type = (text: string) => {
+    const search = document.querySelector<HTMLInputElement>('.chatgpt-project-picker input')!;
+    search.value = text;
+    search.dispatchEvent(new dom.window.Event('input'));
+    search.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  };
+  type('exist');
+  await settle();
+  expect(api.linkChatgptProject).toHaveBeenCalledWith(local.id, 'g-p-1');
+  expect(api.createChatgptProject).not.toHaveBeenCalled();
+  // With a query only the new one's label matches, Enter still creates it.
+  await created.offer({ ...project, name: 'Fresh name' }, 'menu');
+  type('fresh');
+  await settle();
+  expect(api.createChatgptProject).toHaveBeenCalledWith(project.id, {});
+});
