@@ -524,7 +524,8 @@ describe('cross-platform packaging targets', () => {
     expect(firstWindowRequest).toBeGreaterThan(enableActivation);
 
     const ipc = readFileSync(path.join(root, 'src', 'main', 'ipc.ts'), 'utf8');
-    const save = ipc.indexOf("handle('settings:save', async (payload) => {");
+    // Every settings save (the form's and a backup's import) goes through saveSettingsReport.
+    const save = ipc.indexOf('const saveSettingsReport = async (request');
     const liveTheme = ipc.indexOf('nativeTheme.themeSource = next.ui.theme;', save);
     const background = ipc.indexOf('getWindow()?.setBackgroundColor(windowBackgroundForTheme(next.ui.theme, next.ui.appearance));', liveTheme);
     expect(save).toBeGreaterThan(-1);

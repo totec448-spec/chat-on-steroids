@@ -102,6 +102,21 @@
 .pet-delete-warning { margin: 20px 0 0; padding-top: 18px; border-top: 1px solid var(--line); color: var(--soft); }
 .pet-delete-actions { display: flex; justify-content: flex-end; gap: 10px; margin: 22px -24px -24px; padding: 16px 24px; border-top: 1px solid var(--line); }
 .pet-delete-actions .btn { min-height: 38px; padding: 8px 14px; }
+/* Settings backup: the switch row's text starts on the dialog's text edge, its passphrase fields sit
+   close under it, and the file line reads as a caption above the summary. */
+.backup-dialog .setting { padding-inline: 0; }
+.backup-dialog .setting + .plugin-field, .backup-dialog .setting + div > .plugin-field:first-child { margin-top: 4px; }
+.backup-dialog #importSettingsSource { margin-bottom: 4px; color: var(--soft); }
+.backup-dialog #importSettingsSummary { margin-top: 0; }
+.backup-wider { margin: 0 0 12px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--red-wash); color: var(--red); }
+.backup-wider[hidden] { display: none; }
+.backup-review { margin: 0 0 12px; }
+.backup-review > summary { display: flex; align-items: center; gap: 6px; width: fit-content; cursor: pointer; color: var(--soft); list-style: none; }
+.backup-review > summary::-webkit-details-marker { display: none; }
+.backup-review > summary:hover { color: var(--ink); }
+.backup-review[open] .sum-chev { transform: rotate(90deg); }
+.backup-review ul { margin: 8px 0 0; padding-left: 18px; color: var(--soft); }
+.backup-review li + li { margin-top: 2px; }
 .pet-delete-confirm { border: 1px solid #b4262c; background: #b4262c; color: #fff; font-weight: 600; }
 .pet-delete-confirm:hover:not(:disabled) { border-color: #971f25; background: #971f25; color: #fff; }
 .pet-library-preview { display: grid; place-items: center; width: 58px; height: 64px; flex: 0 0 58px; overflow: hidden; border-radius: 12px; background: var(--sunk); }
@@ -192,7 +207,8 @@
 .plugin-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 .plugin-field { display: flex; flex-direction: column; gap: 7px; margin: 16px 0; font-size: calc(12px * var(--text-scale, 1)); font-weight: 600; }
 .plugin-field input, .plugin-field select { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--edge); border-radius: var(--r-sm); background: var(--sunk); color: var(--ink); font: inherit; }
-.plugin-field small { font-weight: 400; line-height: 1.5; }
+/* A field's hint reads like a setting's description: quiet, not the label's ink. */
+.plugin-field small { font-weight: 400; line-height: 1.5; font-size: calc(11.5px * var(--text-scale, 1)); color: var(--faint); }
 .plugin-steps { padding-left: 22px; font-size: calc(13px * var(--text-scale, 1)); line-height: 1.65; color: var(--soft); }
 .plugin-steps li { margin: 10px 0; }
 .plugin-legal { display: block; margin: 32px 0 4px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); line-height: 1.7; }
