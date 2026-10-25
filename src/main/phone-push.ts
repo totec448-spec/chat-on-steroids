@@ -83,9 +83,11 @@ export function inQuietHours(quiet: QuietHours | null, date: Date): boolean {
   return from < to ? now >= from && now < to : now >= from || now < to;
 }
 
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+/** One line of at most `max` visible characters: an emoji (a family, a flag) is never cut apart. */
 const oneLine = (text: string, max: number): string => {
-  const line = text.replace(/\s+/g, ' ').trim();
-  return line.length <= max ? line : `${line.slice(0, max - 1).trimEnd()}…`;
+  const chars = Array.from(graphemes.segment(text.replace(/\s+/g, ' ').trim()), part => part.segment);
+  return chars.length <= max ? chars.join('') : `${chars.slice(0, max - 1).join('').trimEnd()}…`;
 };
 
 export function createPhonePush(deps: PhonePushDeps) {
