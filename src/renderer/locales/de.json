@@ -3179,5 +3179,8 @@
   "Keys stay with you": "Schlüssel bleiben bei dir",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "API-Schlüssel und Tokens in dem, was Tools zurückgeben, werden verborgen, bevor ChatGPT sie sieht.",
   "Easier to read": "Leichter zu lesen",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Hoher Kontrast, acht Akzentfarben, Zeilenabstand und eine besser lesbare Schrift."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Hoher Kontrast, acht Akzentfarben, Zeilenabstand und eine besser lesbare Schrift.",
+  "Held by your send check: {0}": "Angehalten durch deine Sendeprüfung: {0}",
+  "Held by your send check": "Angehalten durch deine Sendeprüfung",
+  "Held: your send check did not answer": "Angehalten: Deine Sendeprüfung hat nicht geantwortet"
 }

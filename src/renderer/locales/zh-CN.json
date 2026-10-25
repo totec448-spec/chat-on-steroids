@@ -3123,5 +3123,8 @@
   "Keys stay with you": "密钥留在你这里",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "工具返回内容中的 API 密钥和令牌会在 ChatGPT 看到之前被隐藏。",
   "Easier to read": "更易阅读",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "高对比度、八种强调色、行距和更易读的字体。"
+  "High contrast, eight accent colors, line spacing and a more legible font.": "高对比度、八种强调色、行距和更易读的字体。",
+  "Held by your send check: {0}": "已被你的发送检查暂缓：{0}",
+  "Held by your send check": "已被你的发送检查暂缓",
+  "Held: your send check did not answer": "已暂缓：你的发送检查没有响应"
 }

@@ -3123,5 +3123,8 @@
   "Keys stay with you": "キーは手元に",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "ツールが返す内容に含まれる API キーやトークンは、ChatGPT が見る前に隠されます。",
   "Easier to read": "読みやすく",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "ハイコントラスト、8 つのアクセントカラー、行間、より読みやすいフォント。"
+  "High contrast, eight accent colors, line spacing and a more legible font.": "ハイコントラスト、8 つのアクセントカラー、行間、より読みやすいフォント。",
+  "Held by your send check: {0}": "送信チェックにより保留中: {0}",
+  "Held by your send check": "送信チェックにより保留中",
+  "Held: your send check did not answer": "保留中: 送信チェックから応答がありません"
 }
