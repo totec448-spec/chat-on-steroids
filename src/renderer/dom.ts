@@ -57,6 +57,7 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-panel-right': 'fill:square-half',
   'i-palette': 'palette',
   'i-paw': 'paw-print',
+  'i-phone': 'device-mobile',
   'i-page-next': 'caret-right',
   'i-page-previous': 'caret-left',
   'i-pencil': 'pencil-simple',

@@ -474,8 +474,9 @@ code {
 #viewMenu[aria-expanded='true'] { background: var(--hover); color: var(--ink); }
 #viewMenu .ico { --glyph: 18.5px; }
 /* A sidebar row's menu and its submenus (row-menu.ts): fixed in the window, above the sidebar. */
+/* As wide as its longest label needs, so a translated one ("Geheimnisse vor ChatGPT verbergen") is not cut. */
 :is(.row-menu, .row-menu-leaving) { --row-menu-hover: color-mix(in srgb, var(--popover, var(--card)) 86%, var(--ink));
-  position: fixed; z-index: 200; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; min-width: 196px; max-width: 280px; padding: 5px; color: var(--ink);
+  position: fixed; z-index: 200; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; min-width: min(196px, calc(100vw - 16px)); max-width: min(400px, calc(100vw - 16px)); padding: 5px; color: var(--ink);
   background: var(--popover, var(--card)); border: 1px solid var(--edge); border-radius: 10px; box-shadow: 0 8px 28px #0003;
   transform-origin: top left; animation: row-menu-in 140ms cubic-bezier(.2, .8, .2, 1); }
 .row-menu-leaving { pointer-events: none; animation: row-menu-out 100ms ease-in forwards; }
@@ -3474,6 +3475,21 @@ input.num:disabled { opacity: .5; cursor: default; }
   max-width: 100%;
   white-space: normal;
 }
+
+/* Phone notifications: its options continue the card's rows, and a text field sits beside its
+   explanation, moving under it (with its button) when the row is narrow. */
+.phone-push-options > .setting:first-child { border-top: 1px solid var(--line); }
+.phone-push-field .phone-push-control { display: flex; flex: 1 1 280px; gap: 8px; min-width: 0; }
+.phone-push-control input { flex: 1 1 auto; min-width: 0; }
+.phone-push-control .btn { flex: 0 0 auto; justify-content: flex-end; text-align: end; }
+.phone-push-advanced { border-top: 1px solid var(--line); }
+.phone-push-advanced > summary { display: flex; align-items: center; gap: 6px; width: fit-content; padding: 12px 2px; cursor: pointer; color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); list-style: none; }
+.phone-push-advanced > summary::-webkit-details-marker { display: none; }
+.phone-push-advanced > summary:hover { color: var(--ink); }
+.phone-push-advanced[open] .sum-chev { transform: rotate(90deg); }
+/* The chevron's glyph sits 5px inside its box; its ink starts on the rows' text edge. */
+.phone-push-advanced > summary .sum-chev { margin-left: -5px; }
+.phone-push-advanced > .setting:first-of-type { border-top: 1px solid var(--line); }
 
 /* Inside a settings row the switch is one of several controls, not the thing the
    row pushes to the far end. */
