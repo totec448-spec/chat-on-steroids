@@ -36,6 +36,10 @@ export interface TurnNotifierDeps {
   /** Another notice (Session finish) already told the user about this chat just now. */
   recentlyNotified(sessionId: string): boolean;
   show(title: string, body: string, sessionId: string): void;
+  /** When the turn that just ended started, if the history knows. */
+  turnStartedAt?(sessionId: string): Promise<number | null>;
+  /** The same finished chat for the phone, which keeps its own rules (away, quiet hours, length). */
+  phone?(event: { sessionId: string; chatTitle: string; conversationId: string | null; workedMs?: number; detail: string }): void;
 }
 
 export function createTurnNotifier(deps: TurnNotifierDeps) {
@@ -54,12 +58,18 @@ export function createTurnNotifier(deps: TurnNotifierDeps) {
         seen.set(id, Math.max(end, previous ?? 0));
         // A chat first seen now was created after startup; its first end is still news.
         if (end <= (previous ?? 0) || !end) continue;
-        if (!deps.enabled() || deps.focused()) continue;
         if (session.lastTurnOutcome !== 'completed' || session.activeTurnId) continue;
         if (session.origin?.kind === 'worker' || session.origin?.kind === 'helper') continue;
         if (session.conversationId && deps.automated(session.conversationId)) continue;
-        if (deps.recentlyNotified(id)) continue;
-        deps.show(session.title || 'Chat On Steroids', noticeText(await deps.lastAnswer(id).catch(() => null)), id);
+        const desktop = deps.enabled() && !deps.focused() && !deps.recentlyNotified(id);
+        if (!desktop && !deps.phone) continue;
+        const body = noticeText(await deps.lastAnswer(id).catch(() => null));
+        if (deps.phone) {
+          const started = await deps.turnStartedAt?.(id).catch(() => null) ?? null;
+          deps.phone({ sessionId: id, chatTitle: session.title || 'Chat On Steroids', conversationId: session.conversationId ?? null,
+            ...(started !== null && started <= end ? { workedMs: end - started } : {}), detail: body });
+        }
+        if (desktop) deps.show(session.title || 'Chat On Steroids', body, id);
       }
     }
   };
