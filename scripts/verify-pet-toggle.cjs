@@ -236,7 +236,7 @@ app.on('browser-window-created', (_event, win) => {
         if (ownerFocused) assert.equal(owner.isFocused(), true, 'Showing pets must not steal foreground focus');
         await drag('capy');
         await enable('hammy', true);
-        await until(async () => !!await petRect('hammy'), 'both pets', PET_RENDER_TIMEOUT_MS);
+        await until(async () => !!await petRect('hammy') && !!await petRect('capy'), 'both pets', PET_RENDER_TIMEOUT_MS);
         await sleep(150);
         const count = decodes, cpu = process.cpuUsage(), start = performance.now();
         await sleep(1100);
