@@ -47,24 +47,29 @@ const shownValue = (element: HTMLElement): string | boolean =>
  */
 export function applyPhonePush(state: AppState): void {
   const push = { ...DEFAULT_PHONE_PUSH, ...state.config.ui.phonePush };
-  const set = (id: string, apply: () => void) => {
+  // `next` is what the control will show for the saved settings: a focused value that differs from
+  // both what was painted and what was saved is an unsaved edit; one that was saved is painted now.
+  const set = (id: string, next: string | boolean, apply: () => void) => {
     const element = $(id);
-    if (document.activeElement === element && painted.has(id) && painted.get(id) !== shownValue(element)) return;
+    const shown = shownValue(element);
+    if (document.activeElement === element && painted.has(id) && painted.get(id) !== shown && shown !== next) return;
     apply();
     painted.set(id, shownValue(element));
   };
-  set('phonePushEnabled', () => { checkbox('phonePushEnabled').checked = push.enabled; });
+  const finishedValue = push.finishedAfterMinutes === null ? 'never' : String(push.finishedAfterMinutes);
+  const quietValue = push.quietHours ? `${push.quietHours.from}-${push.quietHours.to}` : '';
+  set('phonePushEnabled', push.enabled, () => { checkbox('phonePushEnabled').checked = push.enabled; });
   $('phonePushOptions').hidden = !push.enabled;
-  set('phonePushTopic', () => { $<HTMLInputElement>('phonePushTopic').value = push.topic; });
-  set('phonePushServer', () => { $<HTMLInputElement>('phonePushServer').value = push.server; });
+  set('phonePushTopic', push.topic, () => { $<HTMLInputElement>('phonePushTopic').value = push.topic; });
+  set('phonePushServer', push.server, () => { $<HTMLInputElement>('phonePushServer').value = push.server; });
   syncServerDefault();
-  set('phonePushNeedsYou', () => { checkbox('phonePushNeedsYou').checked = push.needsYou; });
-  set('phonePushFailures', () => { checkbox('phonePushFailures').checked = push.failures; });
-  set('phonePushAway', () => { checkbox('phonePushAway').checked = push.onlyWhenAway; });
-  set('phonePushDetails', () => { checkbox('phonePushDetails').checked = push.includeDetails; });
-  set('phonePushFinished', () => {
+  set('phonePushNeedsYou', push.needsYou, () => { checkbox('phonePushNeedsYou').checked = push.needsYou; });
+  set('phonePushFailures', push.failures, () => { checkbox('phonePushFailures').checked = push.failures; });
+  set('phonePushAway', push.onlyWhenAway, () => { checkbox('phonePushAway').checked = push.onlyWhenAway; });
+  set('phonePushDetails', push.includeDetails, () => { checkbox('phonePushDetails').checked = push.includeDetails; });
+  set('phonePushFinished', finishedValue, () => {
     const select = $<HTMLSelectElement>('phonePushFinished');
-    const value = push.finishedAfterMinutes === null ? 'never' : String(push.finishedAfterMinutes);
+    const value = finishedValue;
     // A value Settings does not offer (a hand-edited file) is shown as its own choice and kept, as
     // the quiet hours are; showing a neighbour would save that neighbour with the next change.
     select.querySelector('option[data-custom]')?.remove();
@@ -80,9 +85,9 @@ export function applyPhonePush(state: AppState): void {
     }
     select.value = value;
   });
-  set('phonePushQuiet', () => {
+  set('phonePushQuiet', quietValue, () => {
     const select = $<HTMLSelectElement>('phonePushQuiet');
-    const value = push.quietHours ? `${push.quietHours.from}-${push.quietHours.to}` : '';
+    const value = quietValue;
     select.querySelector('option[value="custom"]')?.remove();
     if (value && ![...select.options].some(option => option.value === value)) {
       const custom = document.createElement('option');
