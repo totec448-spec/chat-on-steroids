@@ -121,6 +121,17 @@ app.whenReady().then(async () => {
   }
   win.setContentSize(1100, 760); win.webContents.setZoomFactor(1);
   fs.writeFileSync(path.join(output, 'measurements.json'), JSON.stringify(results, null, 2));
+  // A short passphrase typed, then saved keys turned off: Export must still go. Typed for real, since
+  // only a value the person edited counts as too short for the browser's own form check.
+  await win.webContents.executeJavaScript(`backup.setLanguage('en'); document.querySelectorAll('dialog[open]').forEach(d => d.close());
+    document.getElementById('exportSettings').click(); const k = document.getElementById('exportSettingsKeys'); k.checked = true; k.dispatchEvent(new Event('change'));
+    document.getElementById('exportSettingsPass').focus(); true`);
+  await win.webContents.insertText('short');
+  const typedValid = await win.webContents.executeJavaScript(`document.getElementById('exportSettingsPass').validity.valid`);
+  await win.webContents.executeJavaScript(`(() => { const k = document.getElementById('exportSettingsKeys'); k.checked = false; k.dispatchEvent(new Event('change')); return true; })()`);
+  const formValid = await win.webContents.executeJavaScript(`document.getElementById('exportSettingsForm').checkValidity()`);
+  assert.ok(formValid, 'export goes once saved keys are off, whatever the hidden passphrase says' + JSON.stringify({ typedValid }));
+  await win.webContents.executeJavaScript(`document.getElementById('exportSettingsDialog').close(); true`);
   console.log('Passed: the Backup rows and the Export and Import dialogs fit, share one edge and cut nothing in all 13 languages (English, German and Russian also narrow and zoomed).');
   win.destroy(); app.exit(0);
 }).catch(error => { console.error(error); app.exit(1); });
