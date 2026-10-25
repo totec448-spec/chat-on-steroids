@@ -262,6 +262,19 @@ describe('the page detector', () => {
     expect(api.approvalCard()).toBeNull();
   });
 
+  // Rows the live card may also produce: a term or value wrapped in its own div, two terms in a row,
+  // a term and a value in different rows, and a value too long to share a line with its label.
+  it('pairs a label only with the value of its own row, keeps wrapped parts together and never cuts a value', () => {
+    const long = 'v'.repeat(290);
+    dom.window.document.querySelector('main')!.innerHTML = `<div data-codex-approval-surface="true"><div role="alert"><dl>
+      <div class="grid"><dt><div>Ordner</div></dt><dd><div>C:/demo</div></dd></div>
+      <div class="grid"><dt>Erster</dt><dt>Zweiter</dt><dd>Wert</dd></div>
+      <div class="grid"><dt>Allein</dt></div><div class="grid"><dd>Fremd</dd></div>
+      <div class="grid"><dt>Beschreibung lang</dt><dd>${long}</dd></div></dl></div>
+      <button>Ablehnen<kbd>Esc</kbd></button><button>Einmal zulassen<kbd>⏎</kbd></button></div>`;
+    expect(api.approvalCard()?.lines).toEqual(['Ordner: C:/demo', 'Erster', 'Zweiter: Wert', 'Allein', 'Fremd', 'Beschreibung lang', long]);
+  });
+
   // The live card on 2026-10-25 (German UI, a key-shaped value in the request) lists the shared data
   // as a <dl>: a label and its value in one grid row. Read as one block they ran together into
   // "Zugangsschlüsselsk-proj-…" in the app's copy of the card.

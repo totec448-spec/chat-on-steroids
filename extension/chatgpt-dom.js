@@ -945,7 +945,8 @@ var CLF_DOM = (() => {
       const lines = [];
       // The shared data is a <dl> (2026-10-25): a label and its value share one grid row, so each
       // term and definition is a block of its own, and a value follows its label as "label: value".
-      const block = element => element.closest('dt, dd, div, p, li, h1, h2, h3, h4, h5, h6');
+      // A term or value keeps what it wraps (a div inside a dd), so it is chosen before a plain block.
+      const block = element => element.closest('dt, dd') || element.closest('div, p, li, h1, h2, h3, h4, h5, h6');
       const groups = new Map();
       const walker = document.createTreeWalker(clone, NodeFilter.SHOW_TEXT);
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -953,17 +954,21 @@ var CLF_DOM = (() => {
         if (!owner) continue;
         groups.set(owner, (groups.get(owner) || '') + node.textContent);
       }
+      const push = line => { if (line && lines.at(-1) !== line && lines.length < 8) lines.push(line); };
+      // A label waits for the value of its own row; a second label, another row or any other block
+      // shows it alone. A pair longer than a line keeps label and value on lines of their own.
       let term = null;
       for (const [owner, text] of groups) {
         const line = text.replace(/\s+/g, ' ').trim().slice(0, 300);
         if (!line) continue;
-        if (owner.tagName === 'DT') { term = line; continue; }
-        const joined = owner.tagName === 'DD' && term ? `${term}: ${line}`.slice(0, 300) : line;
-        if (term && owner.tagName !== 'DD' && lines.at(-1) !== term && lines.length < 8) lines.push(term);
+        const pairs = owner.tagName === 'DD' && term && term.row === owner.parentElement;
+        if (term && !pairs) push(term.line);
+        if (owner.tagName === 'DT') { term = { line, row: owner.parentElement }; continue; }
+        if (pairs && term.line.length + 2 + line.length <= 300) push(`${term.line}: ${line}`);
+        else { if (pairs) push(term.line); push(line); }
         term = null;
-        if (lines.at(-1) !== joined && lines.length < 8) lines.push(joined);
       }
-      if (term && lines.at(-1) !== term && lines.length < 8) lines.push(term);
+      if (term) push(term.line);
       return { node, lines, allow: approvalButton(node, 'allow') !== null };
     }, null);
   }
