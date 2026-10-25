@@ -3144,7 +3144,6 @@
   "New branch": "Новая ветка",
   "Commit": "Закоммитить",
   "Commit…": "Закоммитить…",
-  "Commit and open pull request": "Закоммитить и открыть pull request",
   "Push": "Отправить",
   "Done": "Готово",
   "Try again": "Повторить",
@@ -3286,5 +3285,13 @@
   "Your settings changed after the file was chosen. Choose it again.": "Настройки изменились после выбора файла. Выберите его снова.",
   "This backup has a setting this version does not accept, so nothing was imported.": "В этой резервной копии есть настройка, которую эта версия не принимает, поэтому ничего не импортировано.",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "Сохранённые на этом компьютере ключи не читаются, поэтому ключи из резервной копии добавить нельзя. Импортируйте без них.",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Настройки импортированы, но сохранить ключи не удалось. Добавьте их снова в настройках."
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Настройки импортированы, но сохранить ключи не удалось. Добавьте их снова в настройках.",
+  "Commit {0} files": "Закоммитить файлов: {0}",
+  "Commit {0} files, push and open a pull request": "Закоммитить файлов: {0}, отправить и открыть pull request",
+  "Commit {0} files|one": "Закоммитить {0} файл",
+  "Commit {0} files, push and open a pull request|one": "Закоммитить {0} файл, отправить и открыть pull request",
+  "Commit {0} files|few": "Закоммитить {0} файла",
+  "Commit {0} files, push and open a pull request|few": "Закоммитить {0} файла, отправить и открыть pull request",
+  "Commit {0} files|many": "Закоммитить {0} файлов",
+  "Commit {0} files, push and open a pull request|many": "Закоммитить {0} файлов, отправить и открыть pull request"
 }

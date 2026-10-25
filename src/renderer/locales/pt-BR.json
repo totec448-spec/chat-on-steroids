@@ -3097,7 +3097,6 @@
   "New branch": "Novo branch",
   "Commit": "Fazer commit",
   "Commit…": "Fazer commit…",
-  "Commit and open pull request": "Fazer commit e abrir pull request",
   "Push": "Fazer push",
   "Done": "Concluído",
   "Try again": "Tentar de novo",
@@ -3230,5 +3229,11 @@
   "Your settings changed after the file was chosen. Choose it again.": "Suas configurações mudaram depois que o arquivo foi escolhido. Escolha-o de novo.",
   "This backup has a setting this version does not accept, so nothing was imported.": "Este backup tem uma configuração que esta versão não aceita, então nada foi importado.",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "As chaves salvas neste computador não podem ser lidas, então as chaves do backup não podem ser adicionadas. Importe sem elas.",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "As configurações foram importadas, mas as chaves salvas não puderam ser armazenadas. Adicione-as de novo nas Configurações."
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "As configurações foram importadas, mas as chaves salvas não puderam ser armazenadas. Adicione-as de novo nas Configurações.",
+  "Commit {0} files": "Fazer commit de {0} arquivos",
+  "Commit {0} files, push and open a pull request": "Fazer commit de {0} arquivos, push e abrir um pull request",
+  "Commit {0} files|one": "Fazer commit de {0} arquivo",
+  "Commit {0} files, push and open a pull request|one": "Fazer commit de {0} arquivo, push e abrir um pull request",
+  "Commit {0} files|many": "Fazer commit de {0} de arquivos",
+  "Commit {0} files, push and open a pull request|many": "Fazer commit de {0} de arquivos, push e abrir um pull request"
 }

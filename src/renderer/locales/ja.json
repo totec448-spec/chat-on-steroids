@@ -3003,7 +3003,6 @@
   "New branch": "新しいブランチ",
   "Commit": "コミット",
   "Commit…": "コミット…",
-  "Commit and open pull request": "コミットしてプルリクエストを開く",
   "Push": "プッシュ",
   "Done": "完了",
   "Try again": "再試行",
@@ -3118,5 +3117,7 @@
   "Your settings changed after the file was chosen. Choose it again.": "ファイルを選んだ後に設定が変わりました。もう一度選んでください。",
   "This backup has a setting this version does not accept, so nothing was imported.": "このバックアップには、このバージョンで使えない設定が含まれているため、何もインポートされませんでした。",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "このコンピューターに保存されたキーを読み取れないため、バックアップのキーを追加できません。キーなしでインポートしてください。",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "設定はインポートされましたが、保存されたキーを格納できませんでした。設定でもう一度追加してください。"
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "設定はインポートされましたが、保存されたキーを格納できませんでした。設定でもう一度追加してください。",
+  "Commit {0} files": "{0} 個のファイルをコミット",
+  "Commit {0} files, push and open a pull request": "{0} 個のファイルをコミットし、プッシュしてプルリクエストを作成"
 }

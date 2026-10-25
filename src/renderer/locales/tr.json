@@ -3050,7 +3050,6 @@
   "New branch": "Yeni dal",
   "Commit": "Commit et",
   "Commit…": "Commit et…",
-  "Commit and open pull request": "Commit et ve pull request aç",
   "Push": "Push yap",
   "Done": "Tamam",
   "Try again": "Tekrar dene",
@@ -3174,5 +3173,9 @@
   "Your settings changed after the file was chosen. Choose it again.": "Dosya seçildikten sonra ayarların değişti. Dosyayı yeniden seç.",
   "This backup has a setting this version does not accept, so nothing was imported.": "Bu yedekte bu sürümün kabul etmediği bir ayar var, bu yüzden hiçbir şey içe aktarılmadı.",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "Bu bilgisayardaki kayıtlı anahtarlar okunamıyor, bu yüzden yedeğin anahtarları eklenemiyor. Onlar olmadan içe aktar.",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Ayarlar içe aktarıldı, ancak kayıtlı anahtarlar saklanamadı. Onları Ayarlar'da yeniden ekle."
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Ayarlar içe aktarıldı, ancak kayıtlı anahtarlar saklanamadı. Onları Ayarlar'da yeniden ekle.",
+  "Commit {0} files": "{0} dosyayı commit et",
+  "Commit {0} files, push and open a pull request": "{0} dosyayı commit et, gönder ve pull request aç",
+  "Commit {0} files|one": "{0} dosyayı commit et",
+  "Commit {0} files, push and open a pull request|one": "{0} dosyayı commit et, gönder ve pull request aç"
 }

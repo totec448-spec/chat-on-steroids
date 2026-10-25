@@ -3050,7 +3050,6 @@
   "New branch": "Neuer Branch",
   "Commit": "Committen",
   "Commit…": "Committen…",
-  "Commit and open pull request": "Committen und Pull-Request öffnen",
   "Push": "Pushen",
   "Done": "Fertig",
   "Try again": "Erneut versuchen",
@@ -3174,5 +3173,9 @@
   "Your settings changed after the file was chosen. Choose it again.": "Deine Einstellungen haben sich geändert, nachdem die Datei gewählt wurde. Wähle sie erneut.",
   "This backup has a setting this version does not accept, so nothing was imported.": "Diese Sicherung enthält eine Einstellung, die diese Version nicht annimmt, daher wurde nichts importiert.",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "Die gespeicherten Schlüssel auf diesem Computer lassen sich nicht lesen, daher können die Schlüssel der Sicherung nicht hinzugefügt werden. Importiere ohne sie.",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Die Einstellungen wurden importiert, aber die gespeicherten Schlüssel ließen sich nicht ablegen. Füge sie in den Einstellungen erneut hinzu."
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Die Einstellungen wurden importiert, aber die gespeicherten Schlüssel ließen sich nicht ablegen. Füge sie in den Einstellungen erneut hinzu.",
+  "Commit {0} files": "{0} Dateien committen",
+  "Commit {0} files, push and open a pull request": "{0} Dateien committen, pushen und Pull-Request öffnen",
+  "Commit {0} files|one": "{0} Datei committen",
+  "Commit {0} files, push and open a pull request|one": "{0} Datei committen, pushen und Pull-Request öffnen"
 }

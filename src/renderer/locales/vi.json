@@ -3003,7 +3003,6 @@
   "New branch": "Nhánh mới",
   "Commit": "Commit",
   "Commit…": "Commit…",
-  "Commit and open pull request": "Commit và mở pull request",
   "Push": "Push",
   "Done": "Xong",
   "Try again": "Thử lại",
@@ -3118,5 +3117,7 @@
   "Your settings changed after the file was chosen. Choose it again.": "Cài đặt của bạn đã thay đổi sau khi chọn tệp. Hãy chọn lại tệp.",
   "This backup has a setting this version does not accept, so nothing was imported.": "Bản sao lưu này có một cài đặt mà phiên bản này không chấp nhận, nên không có gì được nhập.",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "Không đọc được các khóa đã lưu trên máy này, nên không thể thêm các khóa của bản sao lưu. Hãy nhập mà không có chúng.",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Đã nhập cài đặt, nhưng không thể lưu các khóa. Hãy thêm lại chúng trong Cài đặt."
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Đã nhập cài đặt, nhưng không thể lưu các khóa. Hãy thêm lại chúng trong Cài đặt.",
+  "Commit {0} files": "Commit {0} tệp",
+  "Commit {0} files, push and open a pull request": "Commit {0} tệp, push và mở pull request"
 }
