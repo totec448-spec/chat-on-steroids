@@ -1299,7 +1299,7 @@
   "Discard these edits and continue?": "Descartar estas alterações e continuar?",
   "Discard": "Descartar",
   "Detecting language…": "A detetar idioma…",
-  "Saved {0}": "Guardado {0}",
+  "Saved {0}": "Guardado: {0}",
   "Unsaved editor changes were discarded because the project changed.": "As alterações não guardadas no editor foram descartadas porque o projeto mudou.",
   "Delete item?": "Eliminar item?",
   "Move “{0}” to the Trash?": "Mover “{0}” para o Lixo?",
