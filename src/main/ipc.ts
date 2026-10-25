@@ -38,6 +38,8 @@ import { inputArgs, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueu
 import { draftOpeningMessage, onGoalChange, nativeGoalFailure } from './goal.js';
 import { cancelTaskRequest, runTaskRequest } from './task-request.js';
 import { randomUUID } from 'node:crypto';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { isValidTopic, normalizeServer, testPhonePush } from './phone-push.js';
 
 import { DEFAULT_PHONE_PUSH, type PhonePushSettings } from '../shared/phone-push.js';
@@ -71,7 +73,8 @@ import {
   GOAL_PROVIDERS,
   GOAL_REASONING_LEVELS,
   type AppState,
-  type Config
+  type Config,
+  type SettingsBackupChoice
 } from '../shared/types.js';
 import { MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
 import { DEFAULT_HANDOFF_LENGTH, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
@@ -100,7 +103,8 @@ import { addProject, addRemoteProject, expireArmedProjectCreates, getSessionProj
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile, serverFileSnapshot } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
-import { hasSecret, isEncryptionAvailable, secureStorageStatus, setAsideUnreadableSecrets, setSecret, storedSecretsUnreadable } from './secrets.js';
+import { hasSecret, isEncryptionAvailable, readSecretsFor, secureStorageStatus, setAsideUnreadableSecrets, setSecret, setSecrets, storedSecretsUnreadable, type SecretKey } from './secrets.js';
+import { BackupError, buildBackup, changedSettings, widerAccess, exportableSecret, openSecrets, overlaySettings, passphraseLongEnough, pickByShape, readBackup, settingsForBackup, type ParsedBackup } from './settings-backup.js';
 import { setupApiKeySlot } from '../shared/setup-profile.js';
 import { addSetupProfile, removeSetupProfile, switchSetupProfile } from './setup-profiles.js';
 import { bundledVersion, locateBinary } from './tunnel/locate.js';
@@ -765,8 +769,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     logInfo(`phone push: access token ${trimmed ? 'saved' : 'removed'}`);
     return buildState();
   });
-  handle('settings:save', async (payload) => {
-    const request = settingsSave.parse(payload);
+  /** One settings save: the Settings form's, and a settings backup's import. */
+  /**
+   * Saves the settings and reports, apart from the state, an error that came after they were
+   * written (worker history, login item, control API). An error before the write is thrown.
+   */
+  const saveSettingsReport = async (request: z.infer<typeof settingsSave>): Promise<{ state: AppState; lateError: unknown }> => {
     // The phone settings are checked only when this save changes them, and only while on: a damaged
     // stored value (hand-edited, or from an older version) must not block every other save, nor the
     // save that repairs it or switches it off.
@@ -859,17 +867,22 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         authorityPersistError = error instanceof Error ? error : new Error(String(error));
       }
     }
+    // The settings are written. A step after this that fails is reported, but never stops the
+    // steps after it: the app does not stay half-on, and an import is not left half done.
+    let runtimeError: unknown;
+    const step = async (run: () => unknown): Promise<void> => {
+      try { await run(); } catch (error) { runtimeError ??= error; }
+    };
     // Recording, workers and direct browser tools share the same extension transport.
     // Startup and settings saves use one eligibility rule.
-    if (browserExtensionRequired(next)) await startBridge();
-    else await stopBridge();
-    if (before.ui.chatBrowser !== next.ui.chatBrowser) await syncCosBrowser();
+    await step(() => browserExtensionRequired(next) ? startBridge() : stopBridge());
+    if (before.ui.chatBrowser !== next.ui.chatBrowser) await step(syncCosBrowser);
     if (before.capabilities.screen !== next.capabilities.screen || before.capabilities.control !== next.capabilities.control || before.readOnly !== next.readOnly) wakeBrowserWork('browser-control');
     // Permissions and the second tunnel id both decide whether the optional Desktop
     // connector should be published. Without this, enabling desktop access or pasting its
     // tunnel id left the connector unpublished until the user happened to reconnect, with
     // the card still saying "not published" and nothing explaining why.
-    await applySettings();
+    await step(applySettings);
     if (before.ui.autoRefreshPlugins !== next.ui.autoRefreshPlugins) wakeBrowserWork();
     logInfo('settings updated');
     // The config and runtime side effects above still complete so the app does not stay half-on,
@@ -893,22 +906,180 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // Stable connector URLs (#924): turning it on keeps the URLs running now, so nothing has to be
     // re-entered in ChatGPT; turning it off forgets them, and the next start rotates again.
     if ((before.mcp.persistentUrls === true) !== (next.mcp.persistentUrls === true)) {
-      if (next.mcp.persistentUrls === true) {
-        if (!(await rememberRunningSurfaceTokens())) logWarn('connector URLs: secure storage is unavailable, so they still change at the next start');
-        else logInfo('connector URLs: kept across restarts from now on');
-      } else {
-        await forgetSurfaceTokens();
-        logInfo('connector URLs: forgotten; the next start gives each connector a new one');
-      }
+      await step(async () => {
+        if (next.mcp.persistentUrls === true) {
+          if (!(await rememberRunningSurfaceTokens())) logWarn('connector URLs: secure storage is unavailable, so they still change at the next start');
+          else logInfo('connector URLs: kept across restarts from now on');
+        } else {
+          await forgetSurfaceTokens();
+          logInfo('connector URLs: forgotten; the next start gives each connector a new one');
+        }
+      });
     }
     // The listener reads this switch on every request, so a flip needs no restart; it is logged.
     if (before.controlApi.allowActions !== next.controlApi.allowActions) {
       logInfo('control API: actions ' + (next.controlApi.allowActions ? 'allowed' : 'refused'));
     }
-    if (authorityPersistError) throw authorityPersistError;
-    if (loginStartupError) throw loginStartupError;
-    if (controlApiError) throw controlApiError;
-    return buildState();
+    // Each of these came after the settings were written; the caller decides how to report it.
+    const lateError = authorityPersistError ?? runtimeError ?? loginStartupError ?? controlApiError ?? null;
+    if (runtimeError) logWarn(`settings saved, but a later step failed: ${runtimeError instanceof Error ? runtimeError.message : String(runtimeError)}`);
+    return { state: await buildState(), lateError };
+  };
+  const saveSettings = async (request: z.infer<typeof settingsSave>): Promise<AppState> => {
+    const { state, lateError } = await saveSettingsReport(request);
+    if (lateError) throw lateError;
+    return state;
+  };
+  handle('settings:save', async payload => saveSettings(settingsSave.parse(payload)));
+
+  // Settings backup. The file is read and checked in the main process; the renderer sees only a
+  // summary and a token, and saved keys never cross to it. Errors are sentences it translates.
+  let pendingImport: { token: string; backup: ParsedBackup; changed: string[]; wider: string[] } | null = null;
+  // What importing would change, as a save really applies it: mergeSettings keeps the fields the
+  // settings form does not own, so only changes that happen are counted. The interface language
+  // is applied beside the save, since the form never edits it.
+  const importPlan = (backup: ParsedBackup) => {
+    const config = getConfig();
+    const base = pickByShape(settingsPatch, config);
+    const merged = overlaySettings(settingsPatch, base, backup.settings);
+    const typed = settingsSave.parse({ base, patch: merged });
+    const saved = pickByShape(settingsPatch, mergeSettings(config, typed.base, typed.patch));
+    const asked = z.enum(UI_LANGUAGES).safeParse((merged.ui as { language?: unknown } | undefined)?.language);
+    const language = asked.success ? asked.data : config.ui.language;
+    const result = { ...saved, ui: { ...(saved.ui as object), language } };
+    return { base, merged, language, changed: changedSettings(base, result), wider: widerAccess(base, result) };
+  };
+  handle('settings:export', async payload => {
+    const { includeKeys, passphrase } = z.object({ includeKeys: z.boolean(), passphrase: z.string().max(1024).optional() }).strict().parse(payload);
+    // Checked before the keys are read, so a short passphrase never touches secure storage.
+    if (includeKeys && !passphraseLongEnough(passphrase ?? '')) {
+      logInfo('settings backup: export refused, the passphrase is too short; nothing was read or written');
+      throw new Error('Use a passphrase of at least 8 characters.');
+    }
+    const keys = includeKeys ? await readSecretsFor(exportableSecret).catch(error => {
+      logWarn(`settings backup: saved keys could not be read: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error('The saved keys could not be read, so no backup was made. Try again, or export without them.');
+    }) : null;
+    // Its errors are sentences the renderer translates (a short passphrase).
+    const text = await buildBackup({ settings: settingsForBackup(settingsPatch, getConfig()), appVersion: app.getVersion(), now: new Date(),
+      ...(keys ? { secrets: { values: keys, passphrase: passphrase! } } : {}) });
+    const options: Electron.SaveDialogOptions = { ...dialogLabel('Export settings'),
+      defaultPath: path.join(app.getPath('documents'), `chat-on-steroids-settings-${new Date().toISOString().slice(0, 10)}.json`),
+      filters: [{ name: mainText('Settings backups'), extensions: ['json'] }] };
+    const owner = getWindow();
+    const chosen = owner && !owner.isDestroyed() ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options);
+    if (chosen.canceled || !chosen.filePath) return null;
+    // Written beside the target and renamed, so a failed write never leaves half a backup; readable
+    // by this user only, since it may hold keys.
+    const temporary = `${chosen.filePath}.${randomUUID()}.tmp`;
+    try {
+      await fs.writeFile(temporary, text, { encoding: 'utf8', mode: 0o600 });
+      await fs.rename(temporary, chosen.filePath);
+    } catch (error) {
+      await fs.rm(temporary, { force: true }).catch(() => undefined);
+      throw error;
+    }
+    const keyCount = keys ? Object.keys(keys).length : 0;
+    logInfo(`settings backup: exported ${keyCount ? `with ${keyCount} saved key${keyCount === 1 ? '' : 's'}` : 'without saved keys'}`);
+    return { file: path.basename(chosen.filePath), keyCount };
+  });
+  handle('settings:importPick', async (): Promise<SettingsBackupChoice | null> => {
+    const options: Electron.OpenDialogOptions = { ...dialogLabel('Import settings'), properties: ['openFile'],
+      filters: [{ name: mainText('Settings backups'), extensions: ['json'] }] };
+    const owner = getWindow();
+    const selected = owner && !owner.isDestroyed() ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
+    if (selected.canceled || !selected.filePaths[0]) return null;
+    const file = selected.filePaths[0];
+    // Size first: a large file is refused without reading it.
+    if ((await fs.stat(file)).size > 4_000_000) {
+      logInfo('settings backup: refused the chosen file (too-large), it was not read');
+      throw new BackupError('too-large', 'This file is too large to be a settings backup.');
+    }
+    let backup: ParsedBackup;
+    try { backup = readBackup(await fs.readFile(file, 'utf8')); } catch (error) {
+      if (error instanceof BackupError) logInfo(`settings backup: refused the chosen file (${error.code})`);
+      throw error;
+    }
+    // A value this version's settings do not accept (an edited file, or a value a later version
+    // dropped) refuses the whole file: importing the rest would leave a half-applied backup.
+    let plan: ReturnType<typeof importPlan>;
+    try { plan = importPlan(backup); } catch (error) {
+      if (!(error instanceof z.ZodError)) throw error;
+      logInfo(`settings backup: refused the chosen file (invalid-settings at ${error.issues[0]?.path.join('.') || 'settings'}); nothing changed`);
+      throw new BackupError('invalid-settings', 'This backup has a setting this version does not accept, so nothing was imported.');
+    }
+    const { changed, wider } = plan;
+    pendingImport = { token: randomUUID(), backup, changed, wider };
+    return {
+      token: pendingImport.token, file: path.basename(file), appVersion: backup.appVersion, exportedAt: backup.exportedAt,
+      changed, wider, keyCount: backup.secretCount
+    };
+  });
+  handle('settings:importApply', async payload => {
+    const { token, includeKeys, passphrase } = z.object({ token: z.string().uuid(), includeKeys: z.boolean(), passphrase: z.string().max(1024).optional() }).strict().parse(payload);
+    if (!pendingImport || pendingImport.token !== token) {
+      logInfo('settings backup: import refused, its choice is gone or was already used; nothing changed');
+      throw new Error('Choose the backup file again.');
+    }
+    const { backup } = pendingImport;
+    // Keys open first: a wrong passphrase changes nothing, and the dialog can ask again.
+    let keys: Record<string, string> = {};
+    if (includeKeys && backup.secrets) {
+      try { keys = await openSecrets(backup.secrets, passphrase ?? ''); } catch (error) {
+        logInfo('settings backup: import refused, the passphrase did not open the saved keys; nothing changed');
+        throw error;
+      }
+    }
+    // Against the settings as they are now. If they changed since the file was chosen (a save still
+    // on its way, another window), the person confirmed a different import: it is refused, so more
+    // access is never granted without the warning the preview showed.
+    const { base, merged, language, changed, wider } = importPlan(backup);
+    if (JSON.stringify(changed) !== JSON.stringify(pendingImport.changed) || JSON.stringify(wider) !== JSON.stringify(pendingImport.wider)) {
+      pendingImport = null;
+      logInfo('settings backup: import refused, the settings changed after the file was chosen; nothing changed');
+      throw new Error('Your settings changed after the file was chosen. Choose it again.');
+    }
+    // Checked before anything changes, so a computer without secure storage gets a clear refusal
+    // rather than its settings changed and its keys missing.
+    if (Object.keys(keys).length && !(await isEncryptionAvailable())) {
+      logInfo('settings backup: import refused, secure storage is not available for the saved keys; nothing changed');
+      throw new Error('Secure storage is not available on this computer, so the saved keys cannot be imported. Import without them.');
+    }
+    // An unreadable key store would refuse the key write after the settings changed: refused first.
+    if (Object.keys(keys).length && storedSecretsUnreadable()) {
+      logInfo('settings backup: import refused, the saved keys on this computer cannot be read; nothing changed');
+      throw new Error('The saved keys on this computer cannot be read, so the backup\'s keys cannot be added. Import without them.');
+    }
+    // A save can fail after it wrote the settings (login registration, the control API, worker
+    // history): it finishes its own work and then reports. The import does the same, so the
+    // language and keys are not left out of a backup whose settings already changed.
+    // Said after "Imported", each a sentence the renderer translates on its own.
+    const warnings: string[] = [];
+    if (changed.length) {
+      // This save's own report, never an inference from the config: another window's save may land meanwhile.
+      const { lateError } = await saveSettingsReport(settingsSave.parse({ base, patch: merged }));
+      if (lateError) {
+        const message = lateError instanceof Error ? lateError.message : String(lateError);
+        warnings.push(message);
+        logWarn(`settings backup: the settings were saved, but a later step of the save failed (${message}); the import goes on`);
+      }
+    }
+    if (language !== getConfig().ui.language) await updateConfig(config => ({ ...config, ui: { ...config.ui, language } }));
+    // The settings are written by now: a key write that still fails is reported, never as a failed
+    // import, and never by undoing settings (an undo that fails halfway would be worse).
+    let keysFailed = false;
+    if (Object.keys(keys).length) {
+      try { await setSecrets(keys as Partial<Record<SecretKey, string>>); } catch (error) {
+        keysFailed = true;
+        logWarn(`settings backup: the settings were imported, but the saved keys could not be stored (${error instanceof Error ? error.message : String(error)})`);
+        warnings.push('The settings were imported, but the saved keys could not be stored. Add them again in Settings.');
+      }
+    }
+    pendingImport = null;
+    const keyCount = keysFailed ? 0 : Object.keys(keys).length;
+    logInfo(`settings backup: imported ${changed.length} changed setting${changed.length === 1 ? '' : 's'}` +
+      `${keyCount ? ` and ${keyCount} saved key${keyCount === 1 ? '' : 's'}` : ''}${backup.appVersion ? ` from a ${backup.appVersion} backup` : ''}`);
+    return { state: await buildState(), changedCount: changed.length, keyCount, ...(warnings.length ? { warnings } : {}) };
   });
 
   /** Approves one folder by path. The picker dialog and the drop zone both end here. */

@@ -77,14 +77,17 @@ describe('what reaches the phone', () => {
 });
 
 describe('when nothing is sent', () => {
+  // Each skip of a switched-on feature says why in the log. Switched off, it stays silent: that is
+  // every install that never turned it on, and a line per chat event would say nothing.
   it.each([
-    ['push is off', { enabled: false }, 'off'],
-    ['there is no topic', { topic: '' }, 'off'],
-    ['this kind is off', { needsYou: false }, 'kind-off']
-  ] as const)('%s', async (_name, over, reason) => {
-    const { push, sent } = setUp(over);
+    ['push is off', { enabled: false }, 'off', null],
+    ['there is no topic', { topic: '' }, 'off', 'phone push: not sent "needs you": the topic is not valid'],
+    ['this kind is off', { needsYou: false }, 'kind-off', 'phone push: not sent "needs you": this kind is switched off']
+  ] as const)('%s', async (_name, over, reason, line) => {
+    const { push, sent, log } = setUp(over);
     expect(await push.notify({ kind: 'needs-you', sessionId: 's1' })).toBe(reason);
     expect(sent).toEqual([]);
+    if (line) expect(log).toHaveBeenCalledWith(line); else expect(log).not.toHaveBeenCalled();
   });
 
   it('skips while the person is at the computer, unless asked to send anyway', async () => {
