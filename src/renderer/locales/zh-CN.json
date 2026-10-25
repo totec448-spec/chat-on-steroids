@@ -3117,7 +3117,6 @@
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "无法读取此电脑上保存的密钥，因此无法添加备份中的密钥。请不带密钥导入。",
   "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "设置已导入，但无法存储保存的密钥。请在设置中重新添加。",
   "Phone notifications, a settings backup, keys kept from ChatGPT, and high contrast.": "手机通知、设置备份、对 ChatGPT 隐藏密钥，以及高对比度。",
-  "Phone notifications": "手机通知",
   "Get a note on your phone when a chat needs you or a long chat finishes.": "聊天需要你或长聊天完成时，在手机上收到通知。",
   "Settings backup": "设置备份",
   "Move your settings to another computer; saved keys only if you choose.": "把设置带到另一台电脑；已保存的密钥只在你选择时包含。",
