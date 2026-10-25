@@ -31,7 +31,7 @@ Get a note on your phone when a chat needs you, move your settings to another co
 
 - **Tool calls answer sooner.** Chat On Steroids no longer saves a chat's summary before every tool result.
 - **Fewer "Suspicious instruction" cards from ChatGPT.** The app's own connector text now states facts only, so ChatGPT's check stops reading it as an instruction to the model.
-- **The connection to ChatGPT starts more reliably.** The bundled OpenAI tunnel client is updated to v0.0.17 and retries short failures while starting.
+- **The bundled OpenAI tunnel client** is updated to v0.0.18.
 - **After a restart or update,** a message to an existing chat goes out as soon as the connection has really moved over, and the app learns how long this computer needs, instead of waiting about two minutes.
 - **The context meter** fills toward the point where the chat compacts (or toward the large-chat warning when automatic compaction is off), instead of a limit that moved with your settings.
 - **Sidebar menus** no longer cut off longer labels in other languages, and the empty side panel shows its shortcut keys in your language.
