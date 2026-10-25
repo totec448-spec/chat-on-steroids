@@ -1,3 +1,4 @@
+import { sendCheckUrl } from '../shared/send-check.js';
 import { applyPhonePush, initPhonePushSettings, readPhonePush } from './phone-push-settings.js';
 import { initBrowserSetup } from './setup-browser.js';
 import { currentLanguage, ui, uiText, t, tn, initLanguage, onLanguageChange, setLanguage, type Language } from './i18n.js';
@@ -778,6 +779,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       playfulContinue: $<HTMLInputElement>('playfulContinue').checked,
       announceTurns: $<HTMLInputElement>('announceTurns').checked,
       customContinue: $<HTMLTextAreaElement>('customContinue').value.trim() || undefined,
+      sendCheckUrl: sendCheckDraft(previous),
       followOutput: $<HTMLInputElement>('followOutput').checked,
       mentionCore: $<HTMLInputElement>('mentionCore').checked,
       mentionPlugins: $<HTMLInputElement>('mentionPlugins').checked,
@@ -1041,6 +1043,20 @@ function connectorSuffixValid(): string | null {
   input.setAttribute('aria-invalid', String(!valid));
   $('connectorSuffixError').hidden = valid;
   return valid ? value : null;
+}
+/** #1794: the send check's address as typed, '' when empty (off), or null when not on this computer. */
+function sendCheckValid(): string | null {
+  const input = $<HTMLInputElement>('sendCheckUrl');
+  const value = input.value.trim();
+  const valid = value === '' ? '' : sendCheckUrl(value);
+  input.setAttribute('aria-invalid', String(valid === null));
+  $('sendCheckUrlError').hidden = valid !== null;
+  return valid;
+}
+/** An address that is not on this computer is never saved; the saved one stays until it is fixed. */
+function sendCheckDraft(previous: Config): string | undefined {
+  const valid = sendCheckValid();
+  return valid === null ? previous.ui.sendCheckUrl : valid || undefined;
 }
 function connectorSuffixDraft(previous: Config): string {
   return connectorSuffixValid() ?? previous.connectorSuffix ?? '';
@@ -1731,6 +1747,7 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('playfulContinue'), config.ui.playfulContinue === true, previousState?.config.ui.playfulContinue);
   applyChecked($<HTMLInputElement>('announceTurns'), config.ui.announceTurns === true, previousState?.config.ui.announceTurns);
   applyValue($<HTMLTextAreaElement>('customContinue'), config.ui.customContinue ?? '', previousState ? previousState.config.ui.customContinue ?? '' : undefined);
+  applyValue($<HTMLInputElement>('sendCheckUrl'), config.ui.sendCheckUrl ?? '', previousState ? previousState.config.ui.sendCheckUrl ?? '' : undefined);
   applyChecked($<HTMLInputElement>('followOutput'), config.ui.followOutput !== false, previousState?.config.ui.followOutput);
   applyChecked($<HTMLInputElement>('mentionCore'), config.ui.mentionCore !== false, previousState?.config.ui.mentionCore);
   applyChecked($<HTMLInputElement>('mentionPlugins'), config.ui.mentionPlugins === true, previousState?.config.ui.mentionPlugins);
@@ -2857,10 +2874,12 @@ for (const id of [
   'tunnelKind',
   'tunnelId',
   'desktopTunnelId',
-  'connectorSuffix'
+  'connectorSuffix',
+  'sendCheckUrl'
 ]) {
   $(id).addEventListener('change', () => void save());
 }
+$('sendCheckUrl').addEventListener('input', () => { sendCheckValid(); });
 $('connectorSuffix').addEventListener('input', () => { connectorSuffixValid(); });
 
 document.addEventListener('click', (event) => {

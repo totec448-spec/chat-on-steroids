@@ -3126,5 +3126,8 @@
   "High contrast, eight accent colors, line spacing and a more legible font.": "ハイコントラスト、8 つのアクセントカラー、行間、より読みやすいフォント。",
   "Held by your send check: {0}": "送信チェックにより保留中: {0}",
   "Held by your send check": "送信チェックにより保留中",
-  "Held: your send check did not answer": "保留中: 送信チェックから応答がありません"
+  "Held: your send check did not answer": "保留中: 送信チェックから応答がありません",
+  "Check automatic sends": "自動送信をチェック",
+  "Before each message the app sends by itself (Goal and Loop steps, automatic Continue, the fresh turn after a long one, workers), a program on this computer is asked whether it may go. Leave empty to turn this off. Messages you send are never asked about.": "アプリが自動で送るメッセージ(ゴールとループのステップ、自動続行、長いターン後の新しいターン、ワーカー)の前に、このコンピューター上のプログラムに送信してよいか確認します。空欄にするとオフになります。あなたが送るメッセージは確認されません。",
+  "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "このコンピューター上のポート付き http アドレスを使ってください。例: http://127.0.0.1:8080/check"
 }

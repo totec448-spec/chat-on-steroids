@@ -12,6 +12,9 @@
  */
 import { getConfig } from './config.js';
 import { logInfo } from './logger.js';
+import { sendCheckUrl } from '../shared/send-check.js';
+
+export { sendCheckUrl };
 
 export type SendCheckKind = 'goal-step' | 'loop-step' | 'continue' | 'recovery' | 'fresh-turn' | 'worker-start' | 'worker-message';
 
@@ -43,17 +46,6 @@ export function sendCheckRetryMs(): number { return retryMs; }
 export function setSendCheckRetryForTests(ms = SEND_CHECK_RETRY_MS): void { retryMs = ms; }
 const TIMEOUT_MS = 3_000;
 const MAX_REASON = 200;
-const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
-
-/** The address normalized, or null unless it is plain http on this computer with a port. */
-export function sendCheckUrl(raw: string): string | null {
-  const value = raw.trim();
-  if (!value) return null;
-  let url: URL;
-  try { url = new URL(value); } catch { return null; }
-  if (url.protocol !== 'http:' || !LOCAL_HOSTS.has(url.hostname) || !url.port || url.username || url.password) return null;
-  return url.href;
-}
 
 function cleanReason(value: unknown): string {
   if (typeof value !== 'string') return '';

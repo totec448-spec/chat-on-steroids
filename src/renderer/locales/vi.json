@@ -3126,5 +3126,8 @@
   "High contrast, eight accent colors, line spacing and a more legible font.": "Độ tương phản cao, tám màu nhấn, giãn dòng và phông chữ dễ đọc hơn.",
   "Held by your send check: {0}": "Bị giữ lại bởi bước kiểm tra gửi của bạn: {0}",
   "Held by your send check": "Bị giữ lại bởi bước kiểm tra gửi của bạn",
-  "Held: your send check did not answer": "Bị giữ lại: bước kiểm tra gửi của bạn không phản hồi"
+  "Held: your send check did not answer": "Bị giữ lại: bước kiểm tra gửi của bạn không phản hồi",
+  "Check automatic sends": "Kiểm tra các lần gửi tự động",
+  "Before each message the app sends by itself (Goal and Loop steps, automatic Continue, the fresh turn after a long one, workers), a program on this computer is asked whether it may go. Leave empty to turn this off. Messages you send are never asked about.": "Trước mỗi tin nhắn ứng dụng tự gửi (các bước Goal và Loop, Continue tự động, lượt mới sau một lượt dài, worker), một chương trình trên máy tính này được hỏi xem có được gửi không. Để trống để tắt. Tin nhắn bạn tự gửi không bao giờ bị hỏi.",
+  "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "Dùng một địa chỉ http trên máy tính này có cổng, ví dụ http://127.0.0.1:8080/check."
 }

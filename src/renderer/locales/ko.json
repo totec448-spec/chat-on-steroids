@@ -3126,5 +3126,8 @@
   "High contrast, eight accent colors, line spacing and a more legible font.": "고대비, 강조 색상 8가지, 줄 간격, 더 읽기 쉬운 글꼴.",
   "Held by your send check: {0}": "전송 확인 프로그램이 보류함: {0}",
   "Held by your send check": "전송 확인 프로그램이 보류함",
-  "Held: your send check did not answer": "보류됨: 전송 확인 프로그램이 응답하지 않았습니다"
+  "Held: your send check did not answer": "보류됨: 전송 확인 프로그램이 응답하지 않았습니다",
+  "Check automatic sends": "자동 전송 확인",
+  "Before each message the app sends by itself (Goal and Loop steps, automatic Continue, the fresh turn after a long one, workers), a program on this computer is asked whether it may go. Leave empty to turn this off. Messages you send are never asked about.": "앱이 스스로 보내는 각 메시지(Goal 및 Loop 단계, 자동 Continue, 긴 턴 뒤의 새 턴, 워커) 전에 이 컴퓨터의 프로그램에 보내도 되는지 묻습니다. 비워 두면 꺼집니다. 직접 보내는 메시지는 확인하지 않습니다.",
+  "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "포트가 있는 이 컴퓨터의 http 주소를 사용하세요. 예: http://127.0.0.1:8080/check"
 }

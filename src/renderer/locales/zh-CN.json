@@ -3126,5 +3126,8 @@
   "High contrast, eight accent colors, line spacing and a more legible font.": "高对比度、八种强调色、行距和更易读的字体。",
   "Held by your send check: {0}": "已被你的发送检查暂缓：{0}",
   "Held by your send check": "已被你的发送检查暂缓",
-  "Held: your send check did not answer": "已暂缓：你的发送检查没有响应"
+  "Held: your send check did not answer": "已暂缓：你的发送检查没有响应",
+  "Check automatic sends": "检查自动发送",
+  "Before each message the app sends by itself (Goal and Loop steps, automatic Continue, the fresh turn after a long one, workers), a program on this computer is asked whether it may go. Leave empty to turn this off. Messages you send are never asked about.": "应用自行发送的每条消息(目标和循环步骤、自动继续、长回合之后的新回合、worker)发出前,都会询问这台电脑上的一个程序是否可以发送。留空即关闭。你自己发送的消息从不询问。",
+  "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "请使用这台电脑上带端口的 http 地址,例如 http://127.0.0.1:8080/check。"
 }

@@ -2324,6 +2324,29 @@ it('saves Auto-select Skills from Settings and restores it on state push', async
   expect(toggle.checked).toBe(false);
 });
 
+it('saves the send check address only when it is on this computer, and empty turns it off (#1794)', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const doc = w.document;
+  const field = doc.getElementById('sendCheckUrl') as HTMLInputElement;
+  const error = doc.getElementById('sendCheckUrlError')!;
+  expect(field.value).toBe('');
+  const enter = (value: string) => { field.value = value; field.dispatchEvent(new w.Event('input', { bubbles: true })); field.dispatchEvent(new w.Event('change', { bubbles: true })); };
+  enter('https://example.com/check');
+  expect(error.hidden).toBe(false);
+  expect(field.getAttribute('aria-invalid')).toBe('true');
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(mounted.calls.some(call => call.ui?.sendCheckUrl === 'https://example.com/check')).toBe(false);
+  enter(' http://127.0.0.1:8080/check ');
+  expect(error.hidden).toBe(true);
+  await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui?.sendCheckUrl).toBe('http://127.0.0.1:8080/check'), { timeout: 5_000 });
+  enter('');
+  await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui).not.toHaveProperty('sendCheckUrl', 'http://127.0.0.1:8080/check'), { timeout: 5_000 });
+  expect(mounted.calls.at(-1)?.ui?.sendCheckUrl).toBeUndefined();
+  const { collectSettings, searchSettings } = await import('../src/renderer/settings-search.js');
+  expect(searchSettings(collectSettings(doc), 'automatic sends').map(entry => entry.title)).toContain('Check automatic sends');
+});
+
 it('saves and restores the global worker admission cap from Settings', async () => {
   const mounted = await mountChat();
   const w = mounted.window;
