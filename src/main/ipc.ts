@@ -101,7 +101,7 @@ import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFi
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
 import { hasSecret, isEncryptionAvailable, readSecretsFor, secureStorageStatus, setAsideUnreadableSecrets, setSecret, setSecrets, storedSecretsUnreadable, type SecretKey } from './secrets.js';
-import { BackupError, buildBackup, changedSettings, widerAccess, exportableSecret, openSecrets, overlaySettings, passphraseLongEnough, pickByShape, readBackup, type ParsedBackup } from './settings-backup.js';
+import { BackupError, buildBackup, changedSettings, widerAccess, exportableSecret, openSecrets, overlaySettings, passphraseLongEnough, pickByShape, readBackup, settingsForBackup, type ParsedBackup } from './settings-backup.js';
 import { setupApiKeySlot } from '../shared/setup-profile.js';
 import { addSetupProfile, removeSetupProfile, switchSetupProfile } from './setup-profiles.js';
 import { bundledVersion, locateBinary } from './tunnel/locate.js';
@@ -900,7 +900,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       throw new Error('The saved keys could not be read, so no backup was made. Try again, or export without them.');
     }) : null;
     // Its errors are sentences the renderer translates (a short passphrase).
-    const text = await buildBackup({ settings: pickByShape(settingsPatch, getConfig()), appVersion: app.getVersion(), now: new Date(),
+    const text = await buildBackup({ settings: settingsForBackup(settingsPatch, getConfig()), appVersion: app.getVersion(), now: new Date(),
       ...(keys ? { secrets: { values: keys, passphrase: passphrase! } } : {}) });
     const options: Electron.SaveDialogOptions = { ...dialogLabel('Export settings'),
       defaultPath: path.join(app.getPath('documents'), `chat-on-steroids-settings-${new Date().toISOString().slice(0, 10)}.json`),

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
-  BACKUP_FORMAT, BackupError, buildBackup, changedSettings, exportableSecret, openSecrets, overlaySettings, pickByShape, readBackup, widerAccess
+  BACKUP_FORMAT, BackupError, buildBackup, changedSettings, exportableSecret, openSecrets, overlaySettings, pickByShape, readBackup, settingsForBackup, widerAccess
 } from '../src/main/settings-backup.js';
 
 // A small stand-in for the Settings form's schema: nested objects, optional and strict parts.
@@ -124,6 +124,25 @@ describe('applying a backup over the current settings', () => {
     const merged = overlaySettings(schema, current, { ui: { theme: 'dark', futureSwitch: true }, futureSection: { on: true } });
     expect(merged).toEqual(current);
     expect(changedSettings(current, merged)).toEqual([]);
+  });
+
+  // macOS live test 2026-10-25: Developer mode was never switched, so it was missing from the backup,
+  // and importing that backup later left the switch on. An unset setting is written as null.
+  it('writes a setting that was never changed as null, so importing the backup puts it back', () => {
+    const exported = settingsForBackup(schema, { ...config, ui: { theme: 'dark' } });
+    expect(exported.ui).toEqual({ theme: 'dark', browserBridgePort: null, language: null });
+    expect(exported.rules).toBeNull();
+    const changedSince = { ...current, ui: { ...current.ui, language: 'fr' }, rules: ['ls'] };
+    const merged = overlaySettings(schema, changedSince, exported);
+    expect((merged.ui as Record<string, unknown>).language).toBeUndefined();
+    expect('language' in (merged.ui as object)).toBe(false);
+    expect(merged.rules).toBeUndefined();
+    expect(changedSettings(changedSince, merged)).toEqual(['rules', 'ui.language']);
+  });
+
+  it('ignores a null where a setting cannot be empty, as from a hand-edited file', () => {
+    const merged = overlaySettings(schema, current, { readOnly: null, ui: { theme: null }, goal: null });
+    expect(merged).toEqual(current);
   });
 
   it('replaces a list as a whole rather than mixing two lists', () => {
