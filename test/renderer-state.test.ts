@@ -4926,6 +4926,22 @@ describe('phone notifications in Settings', () => {
     expect(topic.value).toBe('cos-typing-in-progress');
   });
 
+  // A switch changed and saved while it keeps the focus: once the save comes back with that value, it
+  // counts as painted, so a later change made elsewhere still reaches it.
+  it('follows a later change elsewhere after a focused switch was changed and saved', async () => {
+    const mounted = await withPhone(phone({ includeDetails: false }));
+    const doc = mounted.window.document;
+    const details = doc.getElementById('phonePushDetails') as HTMLInputElement;
+    details.focus();
+    change(doc, 'phonePushDetails', true);
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.includeDetails).toBe(true));
+    mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush: phone({ includeDetails: true }) } };
+    mounted.push(mounted.state);
+    mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush: phone({ includeDetails: false }) } };
+    mounted.push(mounted.state);
+    expect(details.checked).toBe(false);
+  });
+
   it('keeps quiet hours that are not one of the choices when something else is saved', async () => {
     const mounted = await withPhone(phone({ finishedAfterMinutes: 7, quietHours: { from: '01:30', to: '05:15' } }));
     const doc = mounted.window.document;
