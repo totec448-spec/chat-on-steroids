@@ -24,7 +24,8 @@ export function readPhonePush(previous: PhonePushSettings | undefined): PhonePus
   const [from, to] = quiet.split('-');
   return {
     enabled: checkbox('phonePushEnabled').checked,
-    server: $<HTMLInputElement>('phonePushServer').value.trim() || DEFAULT_PHONE_PUSH.server,
+    // Cleared stays empty and is refused while on: ntfy.sh is chosen only with Default.
+    server: $<HTMLInputElement>('phonePushServer').value.trim(),
     topic: $<HTMLInputElement>('phonePushTopic').value.trim(),
     needsYou: checkbox('phonePushNeedsYou').checked,
     failures: checkbox('phonePushFailures').checked,
@@ -35,10 +36,23 @@ export function readPhonePush(previous: PhonePushSettings | undefined): PhonePus
   };
 }
 
-/** Paints the saved settings, leaving alone a field the person is typing in. */
+/** What each control showed when it was last painted, to tell a local edit from an untouched control. */
+const painted = new Map<string, string | boolean>();
+const shownValue = (element: HTMLElement): string | boolean =>
+  element instanceof HTMLInputElement && element.type === 'checkbox' ? element.checked : (element as HTMLInputElement).value;
+
+/**
+ * Paints the saved settings, leaving alone a field the person is editing. A focused control they
+ * have not changed follows the saved value, or a later save would write its stale value back.
+ */
 export function applyPhonePush(state: AppState): void {
   const push = { ...DEFAULT_PHONE_PUSH, ...state.config.ui.phonePush };
-  const set = (id: string, apply: () => void) => { if (document.activeElement !== $(id)) apply(); };
+  const set = (id: string, apply: () => void) => {
+    const element = $(id);
+    if (document.activeElement === element && painted.has(id) && painted.get(id) !== shownValue(element)) return;
+    apply();
+    painted.set(id, shownValue(element));
+  };
   set('phonePushEnabled', () => { checkbox('phonePushEnabled').checked = push.enabled; });
   $('phonePushOptions').hidden = !push.enabled;
   set('phonePushTopic', () => { $<HTMLInputElement>('phonePushTopic').value = push.topic; });
