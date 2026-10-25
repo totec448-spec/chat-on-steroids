@@ -166,6 +166,8 @@ const api = {
   importSettingsBackup: (token: string, includeKeys: boolean, passphrase?: string) =>
     // `warnings`: what went wrong after the settings were written, each a sentence of its own.
     call<{ state: AppState; changedCount: number; keyCount: number; warnings?: string[] }>('settings:importApply', { token, includeKeys, ...(passphrase !== undefined ? { passphrase } : {}) }),
+  testPhonePush: () => call<void>('phonePush:test', undefined),
+  setPhonePushToken: (token: string) => call<AppState>('phonePush:token', { token }),
   markWhatsNewSeen: () => call<void>('ui:whatsNewSeen'),
   /** The one-time automatic plugin refresh offer: true turns it on; either answer is kept. */
   answerPluginRefreshOffer: (turnOn: boolean) => call<AppState>('pluginRefresh:offer', { turnOn }),
