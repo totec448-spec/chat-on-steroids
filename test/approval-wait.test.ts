@@ -268,11 +268,12 @@ describe('the page detector', () => {
     const long = 'v'.repeat(290);
     dom.window.document.querySelector('main')!.innerHTML = `<div data-codex-approval-surface="true"><div role="alert"><dl>
       <div class="grid"><dt><div>Ordner</div></dt><dd><div>C:/demo</div></dd></div>
+      <div class="grid"><dt>Schlüssel</dt><dd><div>Access</div><div>key</div></dd></div>
       <div class="grid"><dt>Erster</dt><dt>Zweiter</dt><dd>Wert</dd></div>
       <div class="grid"><dt>Allein</dt></div><div class="grid"><dd>Fremd</dd></div>
       <div class="grid"><dt>Beschreibung lang</dt><dd>${long}</dd></div></dl></div>
       <button>Ablehnen<kbd>Esc</kbd></button><button>Einmal zulassen<kbd>⏎</kbd></button></div>`;
-    expect(api.approvalCard()?.lines).toEqual(['Ordner: C:/demo', 'Erster', 'Zweiter: Wert', 'Allein', 'Fremd', 'Beschreibung lang', long]);
+    expect(api.approvalCard()?.lines).toEqual(['Ordner: C:/demo', 'Schlüssel: Access key', 'Erster', 'Zweiter: Wert', 'Allein', 'Fremd', 'Beschreibung lang', long]);
   });
 
   // The live card on 2026-10-25 (German UI, a key-shaped value in the request) lists the shared data
