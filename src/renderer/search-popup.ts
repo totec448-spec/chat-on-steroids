@@ -3,8 +3,8 @@
  * choices. The file panel's base branch and the inbox sidebar's project filter both use it.
  *
  * The keyboard follows one pattern: Down from the field moves to the first choice, Enter in the
- * field picks the first one, Up/Down move between choices, Escape closes and gives focus back to
- * the trigger. A pointer press outside, or a window resize, closes it too. The trigger is read
+ * field picks the first one (a fallback choice only when nothing else matches), Up/Down move
+ * between choices, Escape closes and gives focus back to the trigger. A pointer press outside, or a window resize, closes it too. The trigger is read
  * through a function because a repaint may replace it while the popup is open.
  */
 import { el, icon } from './dom.js';
@@ -20,6 +20,10 @@ export interface SearchPopupChoice {
   lead?: Node;
   /** A small note after the label. */
   hint?: string;
+  /** Shown but not choosable, such as a ChatGPT Project another project already uses. */
+  disabled?: boolean;
+  /** Enter in the search field picks this one only when no other choice matches. */
+  fallback?: boolean;
   pick: () => void;
 }
 
@@ -35,6 +39,10 @@ export interface SearchPopupOptions {
   empty: () => string;
   /** Lines under the choices, such as a note that the list is incomplete. */
   notes?: () => string[];
+  /** A visible title above the search, when the popup opens without the person asking for it. */
+  heading?: () => string;
+  /** Closed without a choice: Escape, a press outside, or a resize. */
+  onDismiss?: () => void;
 }
 
 export interface SearchPopup {
@@ -47,11 +55,13 @@ let listboxIds = 0;
 
 export function createSearchPopup(options: SearchPopupOptions): SearchPopup {
   let menu: HTMLElement | null = null;
+  let picked = false;
   const part = (name: string): string => `${options.className}-${name}`;
 
   function close(restoreFocus = false): void {
     if (!menu) return;
     const leaving = menu; menu = null;
+    const dismissed = !picked; picked = false;
     // Leave like the other menus: a short fade while it stops taking input, then removal.
     leaving.inert = true; leaving.classList.add('is-leaving');
     const motion = !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches && typeof leaving.animate === 'function';
@@ -64,6 +74,7 @@ export function createSearchPopup(options: SearchPopupOptions): SearchPopup {
     const trigger = options.trigger();
     trigger?.setAttribute('aria-expanded', 'false');
     if (restoreFocus) trigger?.focus();
+    if (dismissed) options.onDismiss?.();
   }
   function dismiss(event: PointerEvent): void {
     const trigger = options.trigger();
@@ -104,26 +115,34 @@ export function createSearchPopup(options: SearchPopupOptions): SearchPopup {
         option.append(el('span', '', choice.label));
         if (choice.hint) option.append(el('span', part('hint'), choice.hint));
         if (choice.selected) option.append(icon('i-check'));
+        option.disabled = !!choice.disabled;
+        if (choice.fallback) option.dataset.fallback = 'true';
         // The chosen option is about to leave the page, so focus goes back to the trigger first.
-        option.addEventListener('click', () => { close(true); choice.pick(); });
+        option.addEventListener('click', () => { picked = true; close(true); choice.pick(); });
         items.append(option);
       }
       if (!items.childElementCount) notes.append(el('p', part('empty'), options.empty()));
-      for (const note of options.notes?.() ?? []) notes.append(el('p', part('empty'), note));
+      // A note is a short secondary line, set apart from the empty state above it; its whole text
+      // stays readable on hover when a narrow popup cuts it.
+      for (const note of options.notes?.() ?? []) { const line = el('p', part('note'), note); line.title = note; notes.append(line); }
       notes.hidden = !notes.childElementCount;
     };
     search.addEventListener('input', renderItems);
     search.addEventListener('keydown', event => {
-      if (event.key === 'ArrowDown') { event.preventDefault(); items.querySelector<HTMLButtonElement>('button')?.focus(); }
-      if (event.key === 'Enter') { event.preventDefault(); items.querySelector<HTMLButtonElement>('button')?.click(); }
+      if (event.key === 'ArrowDown') { event.preventDefault(); items.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus(); }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        (items.querySelector<HTMLButtonElement>('button:not(:disabled):not([data-fallback])') ?? items.querySelector<HTMLButtonElement>('button:not(:disabled)'))?.click();
+      }
     });
     items.addEventListener('keydown', event => {
-      const buttons = [...items.querySelectorAll<HTMLButtonElement>('button')];
+      const buttons = [...items.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];
       const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault(); buttons[Math.max(0, Math.min(buttons.length - 1, index + (event.key === 'ArrowDown' ? 1 : -1)))]?.focus();
       }
     });
+    if (options.heading) popup.append(el('p', part('heading'), options.heading()));
     popup.append(search, items, notes);
     const rect = trigger.getBoundingClientRect();
     popup.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 300))}px`;

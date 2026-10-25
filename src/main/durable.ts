@@ -65,7 +65,10 @@ export async function readDurable<T>(name: string, options: { strict?: boolean }
     const code = (err as NodeJS.ErrnoException).code;
     if (options.strict && code !== 'ENOENT') {
       // JSON parser diagnostics can contain stored content. Keep the public error generic.
-      throw new Error(`Could not read ${name} state`);
+      const error = new Error(`Could not read ${name} state`) as Error & { damaged?: boolean };
+      // Read, but not usable as state, as opposed to not readable right now.
+      if (!code) error.damaged = true;
+      throw error;
     }
     if (code && code !== 'ENOENT') {
       logWarn(`could not read ${name} state: ${(err as Error).message}`);
