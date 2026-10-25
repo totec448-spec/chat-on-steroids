@@ -3316,6 +3316,10 @@ a rendered error card; the existing rule stays that a live stream defers the rel
 once that error is gone. An exact no-action failure receipt releases the
 reserved reload budget; preservation after recovery spends none. Existing cooldown, claim,
 Stop/draft/tool, completion and after-turn gates continue to own action; no new timer exists.
+`clf-page-status` also carries `visibility` (`document.visibilityState`) and `hiddenForMs` (how long
+the page has been hidden, 0 while visible; a repeated hidden event does not restart it). Diagnostics
+only (#1752/#1837): the report shows them with the tab's page status, so a report can tell whether a
+hidden page explains late progress or unattributed calls. Nothing decides on them.
 The renderer keeps acknowledged Reloaded/Reopened receipts visible after tools resume, colors
 those notices with the existing accent, and explains the one-error-reload budget and subsequent
 silence wait. Trying/failed receipts do not prove a reload; only actual completion is resolved.
