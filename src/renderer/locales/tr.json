@@ -3179,5 +3179,8 @@
   "Keys stay with you": "Anahtarlar sizde kalır",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Araçların döndürdüğü içerikteki API anahtarları ve tokenlar, ChatGPT görmeden önce gizlenir.",
   "Easier to read": "Okuması daha kolay",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Yüksek kontrast, sekiz vurgu rengi, satır aralığı ve daha okunaklı bir yazı tipi."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Yüksek kontrast, sekiz vurgu rengi, satır aralığı ve daha okunaklı bir yazı tipi.",
+  "Held by your send check: {0}": "Gönderim denetiminiz tarafından bekletiliyor: {0}",
+  "Held by your send check": "Gönderim denetiminiz tarafından bekletiliyor",
+  "Held: your send check did not answer": "Bekletiliyor: gönderim denetiminiz yanıt vermedi"
 }

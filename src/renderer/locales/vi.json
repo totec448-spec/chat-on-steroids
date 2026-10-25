@@ -3123,5 +3123,8 @@
   "Keys stay with you": "Khóa ở lại với bạn",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Khóa API và token trong kết quả công cụ trả về được ẩn trước khi ChatGPT thấy.",
   "Easier to read": "Dễ đọc hơn",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Độ tương phản cao, tám màu nhấn, giãn dòng và phông chữ dễ đọc hơn."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Độ tương phản cao, tám màu nhấn, giãn dòng và phông chữ dễ đọc hơn.",
+  "Held by your send check: {0}": "Bị giữ lại bởi bước kiểm tra gửi của bạn: {0}",
+  "Held by your send check": "Bị giữ lại bởi bước kiểm tra gửi của bạn",
+  "Held: your send check did not answer": "Bị giữ lại: bước kiểm tra gửi của bạn không phản hồi"
 }
