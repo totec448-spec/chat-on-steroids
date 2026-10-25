@@ -193,6 +193,9 @@ it('says a ChatGPT page that is not a chat (a Dot, the library) is not followed,
   }
   // Observations from the page outrank the route: whatever the page records is shown as usual.
   expect(pipeline('https://chatgpt.com/dots/home', 3).why[1]).not.toContain('not a chat');
+  // No recorder answers on a page that is not a chat: nothing to reload, it is still not a chat.
+  const silent = (popup!.window as any).pipeline({ isChat: true, url: 'https://chatgpt.com/dots/home', recorder: false, page: null, pending: 0 }, true);
+  expect(silent.why[1]).toContain('not a chat');
 });
 
 it('marks the recording, chat, request and app rows as not applicable on a Dot page, and as a new chat at the start page', async () => {
