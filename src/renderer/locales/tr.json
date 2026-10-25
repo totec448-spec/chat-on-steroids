@@ -3184,6 +3184,7 @@
   "Held by your send check": "Gönderim denetiminiz tarafından bekletiliyor",
   "Held: your send check did not answer": "Bekletiliyor: gönderim denetiminiz yanıt vermedi",
   "Check automatic sends": "Otomatik gönderimleri denetle",
-  "Before each message the app sends by itself (Goal and Loop steps, automatic Continue, the fresh turn after a long one, workers), a program on this computer is asked whether it may go. Leave empty to turn this off. Messages you send are never asked about.": "Uygulamanın kendiliğinden gönderdiği her mesajdan önce (Hedef ve Döngü adımları, otomatik devam, uzun bir turdan sonraki yeni tur, worker'lar) bu bilgisayardaki bir programa gönderilip gönderilemeyeceği sorulur. Kapatmak için boş bırakın. Kendi gönderdiğiniz mesajlar hiçbir zaman sorulmaz.",
-  "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "Bu bilgisayarda port içeren bir http adresi kullanın, örneğin http://127.0.0.1:8080/check."
+  "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "Bu bilgisayarda port içeren bir http adresi kullanın, örneğin http://127.0.0.1:8080/check.",
+  "Ask a program on this computer before the app sends a message by itself. Empty: off.": "Uygulama kendiliğinden bir mesaj göndermeden önce bu bilgisayardaki bir programa sorar. Boş: kapalı.",
+  "It receives the full message text. If it says no or doesn't answer, the message waits.": "Program mesajın tam metnini alır. Hayır derse veya yanıt vermezse mesaj bekler."
 }

@@ -3128,6 +3128,7 @@
   "Held by your send check": "送信チェックにより保留中",
   "Held: your send check did not answer": "保留中: 送信チェックから応答がありません",
   "Check automatic sends": "自動送信をチェック",
-  "Before each message the app sends by itself (Goal and Loop steps, automatic Continue, the fresh turn after a long one, workers), a program on this computer is asked whether it may go. Leave empty to turn this off. Messages you send are never asked about.": "アプリが自動で送るメッセージ(ゴールとループのステップ、自動続行、長いターン後の新しいターン、ワーカー)の前に、このコンピューター上のプログラムに送信してよいか確認します。空欄にするとオフになります。あなたが送るメッセージは確認されません。",
-  "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "このコンピューター上のポート付き http アドレスを使ってください。例: http://127.0.0.1:8080/check"
+  "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "このコンピューター上のポート付き http アドレスを使ってください。例: http://127.0.0.1:8080/check",
+  "Ask a program on this computer before the app sends a message by itself. Empty: off.": "アプリが自動でメッセージを送る前に、このコンピューター上のプログラムに確認します。空欄: オフ。",
+  "It receives the full message text. If it says no or doesn't answer, the message waits.": "プログラムはメッセージの全文を受け取ります。拒否されるか応答がない場合、メッセージは待機します。"
 }
