@@ -95,8 +95,8 @@ it('uses ⌘ on a Mac, where Ctrl+/ is not the shortcut', async () => {
   expect(keys.get('Settings')).toEqual(['⌘,']);
   expect(keys.get('Save the file being edited')).toEqual(['⌘S']);
   expect(keys.get('Send to chat')).toEqual(['⌘⇧Enter']);
-  // Ctrl+Tab is Ctrl on every system, as in browsers.
-  expect(keys.get('Next chat')).toEqual(['Ctrl+Tab']);
+  // Ctrl+Tab is Control on every system, as in browsers.
+  expect(keys.get('Next chat')).toEqual(['⌃Tab']);
   // F11 is Show Desktop on a Mac, so full screen is the default View menu's ⌃⌘F there.
   expect(keys.get('Full screen')).toEqual(['⌃⌘F']);
   // Hold-to-talk is Windows only: no row on a Mac.
@@ -105,8 +105,8 @@ it('uses ⌘ on a Mac, where Ctrl+/ is not the shortcut', async () => {
   expect(keys.get('Send the other way while ChatGPT works')).toEqual(['⌘⇧Enter']);
   expect(keys.get('Move the focused chat or project')).toEqual(['⌥↑', '⌥↓']);
   expect(keys.get('Move a queued task')).toEqual(['⌥↑', '⌥↓']);
-  // The workspace panels' keys are Ctrl on every system.
-  expect(keys.get('Review')).toEqual(['Ctrl+Shift+1']);
+  // The workspace panels' keys are Control on every system, printed as the empty side panel does.
+  expect(keys.get('Review')).toEqual(['⌃⇧1']);
 });
 
 it('follows the Enter setting each time it opens, and closes with Escape, its button or the backdrop', async () => {
