@@ -46,7 +46,7 @@ describe('managed Skills store', () => {
     expect(instructions).toContain('# Installed skills');
     expect(instructions).toContain(JSON.stringify(path.join(userData, 'skills')));
     expect(instructions).toContain('No skills are installed');
-    expect(instructions).toContain('existing filesystem and command capabilities');
+    expect(instructions).toContain('Install or maintain requested skills with the file and command tools.');
   });
 
   it('imports exact text exclusively and uses simple inert frontmatter metadata', async () => {
