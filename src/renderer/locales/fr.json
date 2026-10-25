@@ -1309,7 +1309,7 @@
   "Discard these edits and continue?": "Abandonner ces modifications et continuer ?",
   "Discard": "Abandonner",
   "Detecting language…": "Détection de la langue…",
-  "Saved {0}": "Enregistré {0}",
+  "Saved {0}": "Enregistré : {0}",
   "Unsaved editor changes were discarded because the project changed.": "Les modifications non enregistrées de l'éditeur ont été abandonnées car le projet a changé.",
   "Delete item?": "Supprimer l'élément ?",
   "Move “{0}” to the Trash?": "Déplacer « {0} » vers la corbeille ?",
