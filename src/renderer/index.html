@@ -1416,7 +1416,8 @@
 
                   <div class="field goal-prompt" id="chatPersonalityPanel" hidden>
                     <label for="chatPersonality">Personality</label>
-                    <textarea dir="auto" id="chatPersonality" rows="8" spellcheck="false"></textarea>
+                    <textarea class="is-content-sized" dir="auto" id="chatPersonality" rows="3" spellcheck="false"></textarea>
+                    <p class="hint chat-style-state" id="chatPersonalityState" role="status"></p>
                     <p class="hint">Saved when you leave the editor and used from the next new chat. Leave it empty to send no personality at all.</p>
                     <div class="step-actions">
                       <button class="btn" id="chatPersonalityReset" type="button">Restore default</button>
@@ -1433,7 +1434,8 @@
 
                   <div class="field goal-prompt" id="chatWritingStylePanel" hidden>
                     <label for="chatWritingStyle">Writing style</label>
-                    <textarea dir="auto" id="chatWritingStyle" rows="14" spellcheck="false"></textarea>
+                    <textarea class="is-content-sized" dir="auto" id="chatWritingStyle" rows="3" spellcheck="false"></textarea>
+                    <p class="hint chat-style-state" id="chatWritingStyleState" role="status"></p>
                     <p class="hint">Saved when you leave the editor and used from the next new chat. Leave it empty to send no writing style at all.</p>
                     <div class="step-actions">
                       <button class="btn" id="chatWritingStyleReset" type="button">Restore default</button>

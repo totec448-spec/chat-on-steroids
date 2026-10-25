@@ -3301,5 +3301,8 @@
   "Saved when you leave the editor and used from the next new chat. Leave it empty to send no personality at all.": "Сохраняется при выходе из редактора и действует со следующего нового чата. Оставьте пустым, чтобы не отправлять характер.",
   "Writing style": "Стиль письма",
   "How it writes answers, technical explanations and pull request descriptions.": "Как он пишет ответы, технические объяснения и описания pull request.",
-  "Saved when you leave the editor and used from the next new chat. Leave it empty to send no writing style at all.": "Сохраняется при выходе из редактора и действует со следующего нового чата. Оставьте пустым, чтобы не отправлять стиль письма."
+  "Saved when you leave the editor and used from the next new chat. Leave it empty to send no writing style at all.": "Сохраняется при выходе из редактора и действует со следующего нового чата. Оставьте пустым, чтобы не отправлять стиль письма.",
+  "New chats use the built-in text.": "Новые чаты используют встроенный текст.",
+  "Saved. New chats leave this part out.": "Сохранено. Новые чаты обходятся без этой части.",
+  "Saved. New chats use your text.": "Сохранено. Новые чаты используют ваш текст."
 }

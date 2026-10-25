@@ -1741,6 +1741,11 @@ function apply(next: AppState): void {
   applyValue($<HTMLTextAreaElement>('customContinue'), config.ui.customContinue ?? '', previousState ? previousState.config.ui.customContinue ?? '' : undefined);
   applyValue($<HTMLTextAreaElement>('chatPersonality'), config.ui.chatPersonality ?? DEFAULT_CHAT_PERSONALITY, previousState ? previousState.config.ui.chatPersonality ?? DEFAULT_CHAT_PERSONALITY : undefined);
   applyValue($<HTMLTextAreaElement>('chatWritingStyle'), config.ui.chatWritingStyle ?? DEFAULT_CHAT_WRITING_STYLE, previousState ? previousState.config.ui.chatWritingStyle ?? DEFAULT_CHAT_WRITING_STYLE : undefined);
+  // What new chats get, as saved: the built-in text, the person's own, or nothing (Haz on #1859).
+  for (const [id, saved] of [['chatPersonality', config.ui.chatPersonality], ['chatWritingStyle', config.ui.chatWritingStyle]] as const) {
+    ui($(`${id}State`), 'textContent', () => saved === undefined ? t('New chats use the built-in text.')
+      : saved === '' ? t('Saved. New chats leave this part out.') : t('Saved. New chats use your text.'));
+  }
   applyChecked($<HTMLInputElement>('followOutput'), config.ui.followOutput !== false, previousState?.config.ui.followOutput);
   applyChecked($<HTMLInputElement>('mentionCore'), config.ui.mentionCore !== false, previousState?.config.ui.mentionCore);
   applyChecked($<HTMLInputElement>('mentionPlugins'), config.ui.mentionPlugins === true, previousState?.config.ui.mentionPlugins);

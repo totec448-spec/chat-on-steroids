@@ -4061,15 +4061,22 @@ it('saves Personality and Writing style from their editors: own text, left out w
     expect(panel.hidden).toBe(false);
     // The built-in text is what it starts from, so a change edits it rather than starting blank.
     expect(box.value).toBe(fallback);
+    // What new chats get, said under the editor once it is saved (Haz on #1859).
+    const said = () => doc.getElementById(`${id}State`)!.textContent;
+    expect(said()).toBe('New chats use the built-in text.');
+    expect(box.classList.contains('is-content-sized')).toBe(true);
     box.value = '  Short, plain answers.  ';
     box.dispatchEvent(new mounted.window.Event('change'));
     await waitFor(() => expect(mounted.calls.at(-1)?.ui[id]).toBe('Short, plain answers.'));
+    await waitFor(() => expect(said()).toBe('Saved. New chats use your text.'));
     box.value = '   ';
     box.dispatchEvent(new mounted.window.Event('change'));
     await waitFor(() => expect(mounted.calls.at(-1)?.ui[id]).toBe(''));
+    await waitFor(() => expect(said()).toBe('Saved. New chats leave this part out.'));
     (doc.getElementById(`${id}Reset`) as HTMLButtonElement).click();
     await waitFor(() => expect(mounted.calls.at(-1)?.ui).toMatchObject({ [id]: undefined }));
     expect(box.value).toBe(fallback);
+    await waitFor(() => expect(said()).toBe('New chats use the built-in text.'));
   }
   // Its own section, after Continuation prompts, not inside that section's card.
   const heading = [...doc.querySelectorAll('h2')].find(node => node.textContent === 'Chat instructions')!;
