@@ -3115,5 +3115,13 @@
   "Your settings changed after the file was chosen. Choose it again.": "Cài đặt của bạn đã thay đổi sau khi chọn tệp. Hãy chọn lại tệp.",
   "This backup has a setting this version does not accept, so nothing was imported.": "Bản sao lưu này có một cài đặt mà phiên bản này không chấp nhận, nên không có gì được nhập.",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "Không đọc được các khóa đã lưu trên máy này, nên không thể thêm các khóa của bản sao lưu. Hãy nhập mà không có chúng.",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Đã nhập cài đặt, nhưng không thể lưu các khóa. Hãy thêm lại chúng trong Cài đặt."
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Đã nhập cài đặt, nhưng không thể lưu các khóa. Hãy thêm lại chúng trong Cài đặt.",
+  "Phone notifications, a settings backup, keys kept from ChatGPT, and high contrast.": "Thông báo trên điện thoại, sao lưu cài đặt, ẩn khóa khỏi ChatGPT và độ tương phản cao.",
+  "Get a note on your phone when a chat needs you or a long chat finishes.": "Nhận thông báo trên điện thoại khi một cuộc trò chuyện cần bạn hoặc một cuộc trò chuyện dài đã xong.",
+  "Settings backup": "Sao lưu cài đặt",
+  "Move your settings to another computer; saved keys only if you choose.": "Mang cài đặt sang máy tính khác; khóa đã lưu chỉ khi bạn chọn.",
+  "Keys stay with you": "Khóa ở lại với bạn",
+  "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Khóa API và token trong kết quả công cụ trả về được ẩn trước khi ChatGPT thấy.",
+  "Easier to read": "Dễ đọc hơn",
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Độ tương phản cao, tám màu nhấn, giãn dòng và phông chữ dễ đọc hơn."
 }

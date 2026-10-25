@@ -3115,5 +3115,13 @@
   "Your settings changed after the file was chosen. Choose it again.": "選擇檔案後你的設定已變更。請重新選擇它。",
   "This backup has a setting this version does not accept, so nothing was imported.": "此備份包含此版本不接受的設定，因此未匯入任何內容。",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "無法讀取此電腦上儲存的金鑰，因此無法加入備份中的金鑰。請不帶金鑰匯入。",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "設定已匯入，但無法存放金鑰。請在設定中重新加入。"
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "設定已匯入，但無法存放金鑰。請在設定中重新加入。",
+  "Phone notifications, a settings backup, keys kept from ChatGPT, and high contrast.": "手機通知、設定備份、對 ChatGPT 隱藏金鑰，以及高對比。",
+  "Get a note on your phone when a chat needs you or a long chat finishes.": "聊天需要你或長聊天完成時，在手機上收到通知。",
+  "Settings backup": "設定備份",
+  "Move your settings to another computer; saved keys only if you choose.": "把設定帶到另一台電腦；已儲存的金鑰只在你選擇時包含。",
+  "Keys stay with you": "金鑰留在你這裡",
+  "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "工具傳回內容中的 API 金鑰和權杖會在 ChatGPT 看到之前被隱藏。",
+  "Easier to read": "更易閱讀",
+  "High contrast, eight accent colors, line spacing and a more legible font.": "高對比、八種強調色、行距和更易讀的字型。"
 }

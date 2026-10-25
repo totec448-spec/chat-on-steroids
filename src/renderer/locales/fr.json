@@ -3227,5 +3227,13 @@
   "Your settings changed after the file was chosen. Choose it again.": "Vos réglages ont changé après le choix du fichier. Choisissez-le à nouveau.",
   "This backup has a setting this version does not accept, so nothing was imported.": "Cette sauvegarde contient un réglage que cette version n’accepte pas, donc rien n’a été importé.",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "Les clés enregistrées sur cet ordinateur sont illisibles, donc les clés de la sauvegarde ne peuvent pas être ajoutées. Importez sans elles.",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Les réglages ont été importés, mais les clés enregistrées n’ont pas pu être stockées. Ajoutez-les à nouveau dans les Réglages."
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Les réglages ont été importés, mais les clés enregistrées n’ont pas pu être stockées. Ajoutez-les à nouveau dans les Réglages.",
+  "Phone notifications, a settings backup, keys kept from ChatGPT, and high contrast.": "Notifications sur le téléphone, sauvegarde des réglages, clés cachées à ChatGPT et contraste élevé.",
+  "Get a note on your phone when a chat needs you or a long chat finishes.": "Recevez une notification sur votre téléphone quand un chat a besoin de vous ou qu'un long chat se termine.",
+  "Settings backup": "Sauvegarde des réglages",
+  "Move your settings to another computer; saved keys only if you choose.": "Emportez vos réglages sur un autre ordinateur ; les clés enregistrées seulement si vous le souhaitez.",
+  "Keys stay with you": "Vos clés restent chez vous",
+  "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Les clés d'API et les jetons dans ce que renvoient les outils sont masqués avant que ChatGPT ne les voie.",
+  "Easier to read": "Plus facile à lire",
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Contraste élevé, huit couleurs d'accent, interligne et une police plus lisible."
 }
