@@ -83,7 +83,7 @@ app.whenReady().then(async () => {
       assert.equal(view.items,4,'Four highlights for 2.1.46');
       assert.equal(view.title,"What's new");
       assert.equal(view.version,'Version 2.1.46');
-      assert.match(view.lead,/^Chat groups, bookmarks, drafts that wait for you/);
+      assert.match(view.lead,/^Phone notifications, a settings backup, keys kept from ChatGPT/);
       assert.equal(view.focus,'whatsNewDone','"Got it" has the focus');
       assert.equal(view.ring,false,'It opens without a focus ring; the keyboard brings one');
       assert.ok(Math.abs(view.left-view.right)<=1 && Math.abs(view.top-view.bottom)<=1,'The dialog is centred: '+JSON.stringify(view));
