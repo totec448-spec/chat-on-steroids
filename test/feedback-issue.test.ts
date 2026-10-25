@@ -58,6 +58,22 @@ describe('the prefilled GitHub issue', () => {
     expect(url.length).toBeLessThanOrEqual(MAX_ISSUE_URL);
     expect(fields(url).problem).toMatch(/^(?:🙂)+…$/u);
   });
+
+  it('keeps a family or flag emoji whole when the title or the text is shortened', () => {
+    const family = '👨\u200D👩\u200D👧';
+    // Title: the 79-character cut lands just after the first joiner of the family.
+    const title = new URL(feedbackIssueUrl({ kind: 'bug', what: 'x'.repeat(77) + family + ' trip broke' }, env).url).searchParams.get('title')!;
+    expect(title.includes('\u200D') ? title.includes(family) : true).toBe(true);
+    // Text: shortened many times over, never ending in a broken family.
+    const { url, trimmed } = feedbackIssueUrl({ kind: 'bug', what: (family + ' ').repeat(2000) }, env);
+    expect(trimmed).toBe(true);
+    const what = new URL(url).searchParams.get('what')!;
+    const before = what.replace(/…$/u, '').trimEnd();
+    expect(before.endsWith(family)).toBe(true);
+    // Shortened only as far as needed: the link stays close to its limit, the text is not emptied.
+    expect(url.length).toBeLessThanOrEqual(MAX_ISSUE_URL);
+    expect(url.length).toBeGreaterThan(MAX_ISSUE_URL - 120);
+  });
 });
 
 describe('the operating system name', () => {
