@@ -8272,6 +8272,13 @@ describe('charts, diagrams and illustrated Markdown from recorded DIL', () => {
       .toEqual(['1T', '500B', '0']);
     expect([...figure.querySelectorAll('.markdown-dil-chart-guide span')].every(node => !node.textContent?.includes('…')))
       .toBe(true);
+    const lines = [...figure.querySelectorAll('.markdown-dil-chart-bars > .markdown-dil-chart-gridline')];
+    expect(lines.map(node => node.classList.item(1))).toEqual([
+      'markdown-dil-chart-gridline-top',
+      'markdown-dil-chart-gridline-middle',
+      'markdown-dil-chart-gridline-baseline'
+    ]);
+    expect(lines.map(node => node.getAttribute('aria-hidden'))).toEqual(['true', 'true', 'true']);
   });
 
   it('uses compact y-axis guides in German without losing the exact localized tooltip or aria value', async () => {

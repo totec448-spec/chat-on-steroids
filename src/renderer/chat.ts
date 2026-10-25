@@ -4379,6 +4379,14 @@ function staticBarChart(raw: string): HTMLElement | null {
     guide.append(label);
   }
   const columns = el('div', 'markdown-dil-chart-bars');
+  // Draw exactly the guide's three ticks: maximum, half-maximum, baseline.
+  // The lines share the bars' plot coordinates, rather than an unrelated
+  // repeating 25% background grid that never matched the guide labels.
+  for (const position of ['top', 'middle', 'baseline']) {
+    const line = el('div', `markdown-dil-chart-gridline markdown-dil-chart-gridline-${position}`);
+    line.setAttribute('aria-hidden', 'true');
+    columns.append(line);
+  }
   for (const item of items) {
     const column = el('div', 'markdown-dil-chart-column');
     const bar = el('div', 'markdown-dil-chart-bar');

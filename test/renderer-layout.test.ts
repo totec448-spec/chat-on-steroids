@@ -66,6 +66,27 @@ it('keeps recorded DIL surfaces on CoS tokens across themes and high-contrast pa
   const guideLabel = rule('.msg.rich .markdown-dil-chart-guide > span');
   expect(guideLabel).toContain('overflow: visible');
   expect(guideLabel).not.toContain('text-overflow: ellipsis');
+  // Guide text and gridlines must share the same top/middle/baseline geometry.
+  // The old quarter-spaced gradient had four lines for only three guide values.
+  const guide = rule('.msg.rich .markdown-dil-chart-guide');
+  const bars = rule('.msg.rich .markdown-dil-chart-bars');
+  expect(guide).toContain('justify-content: space-between');
+  expect(guide).toContain('box-sizing: border-box');
+  expect(bars).toContain('position: relative');
+  expect(guide).toContain('padding-bottom: var(--markdown-dil-label-height)');
+  expect(bars).toContain('padding-bottom: var(--markdown-dil-label-height)');
+  expect(bars).not.toContain('repeating-linear-gradient');
+  expect(rule('.msg.rich .markdown-dil-chart-guide > span:first-child')).toContain('translateY(-50%)');
+  expect(rule('.msg.rich .markdown-dil-chart-guide > span:last-child')).toContain('translateY(50%)');
+  const gridline = rule('.msg.rich .markdown-dil-chart-gridline');
+  expect(gridline).toContain('position: absolute');
+  expect(gridline).toContain('background: var(--line)');
+  expect(gridline).toContain('pointer-events: none');
+  expect(rule('.msg.rich .markdown-dil-chart-gridline-top')).toContain('top: 0');
+  expect(rule('.msg.rich .markdown-dil-chart-gridline-middle'))
+    .toContain('top: calc((100% - var(--markdown-dil-label-height)) / 2)');
+  expect(rule('.msg.rich .markdown-dil-chart-gridline-baseline'))
+    .toContain('top: calc(100% - var(--markdown-dil-label-height))');
   expect(css).toContain('@container (max-width: 330px)');
   for (const page of ['#ffffff', '#000000']) {
     const tokens = paletteTokens(page, '#ffcc00', 100, true);
