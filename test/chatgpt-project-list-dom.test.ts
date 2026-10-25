@@ -85,3 +85,24 @@ it('reports the sidebar Projects to the worker only when the list changed, and a
   await report();
   expect(ask).toHaveBeenCalledTimes(4);
 });
+
+it('reports an unchanged sidebar list again after a day, so a tab left open keeps its Projects in the picker', async () => {
+  const vm = await import('node:vm');
+  const { vi } = await import('vitest');
+  const source = readFileSync(new URL('../extension/content.js', import.meta.url), 'utf8');
+  const section = source.slice(source.indexOf('  const PROJECT_LIST_MS = '), source.indexOf('  /** Talks to the service worker.'));
+  let now = Date.parse('2026-10-25T12:00:00Z');
+  const ask = vi.fn(async () => ({ ok: true }));
+  const context = vm.createContext({ CLF_DOM: { projectsShown: () => [{ id: id('a'), name: 'Kunden' }] }, ask, document: { cookie: '' }, Date: { now: () => now } });
+  context.globalThis = context;
+  context.top = context;
+  vm.runInContext(`${section}\nglobalThis.report = reportProjectList;`, context);
+  const report = async () => { (context.report as () => void)(); await new Promise(resolve => setTimeout(resolve, 0)); };
+  await report();
+  now += 23 * 3_600_000;
+  await report();
+  expect(ask).toHaveBeenCalledTimes(1);
+  now += 2 * 3_600_000;
+  await report();
+  expect(ask).toHaveBeenCalledTimes(2);
+});

@@ -1437,8 +1437,11 @@
 
   const PROJECT_LIST_MS = 15_000;
   let reportedProjects = '';
+  let reportedProjectsAt = 0;
+  /** An unchanged list is sent again after a day, so a tab left open keeps its Projects from expiring in the app. */
+  const PROJECT_LIST_RENEW_MS = 24 * 3_600_000;
   /**
-   * Tells the app which Projects ChatGPT's sidebar lists (#1756), only when that list changed: the
+   * Tells the app which Projects ChatGPT's sidebar lists (#1756) when that list changed, and once a day: the
    * app offers them when a project is linked. An empty list (sidebar collapsed) is not reported.
    */
   function reportProjectList() {
@@ -1450,8 +1453,9 @@
     const cookie = String(document.cookie || '').split(';').map(part => part.trim()).find(part => part.startsWith('_account='));
     const workspace = cookie ? decodeURIComponent(cookie.slice('_account='.length)) || null : null;
     const signature = JSON.stringify([workspace, projects]);
-    if (signature === reportedProjects) return;
+    if (signature === reportedProjects && Date.now() - reportedProjectsAt < PROJECT_LIST_RENEW_MS) return;
     reportedProjects = signature;
+    reportedProjectsAt = Date.now();
     void ask({ type: 'project_catalog', projects, workspace }).then(reply => {
       if (!reply || reply.ok !== true) reportedProjects = '';
     }, () => { reportedProjects = ''; });
