@@ -501,7 +501,11 @@ void app.whenReady().then(async () => {
     focused: () => window?.isFocused() === true,
     quietHours: () => getConfig().ui.phonePush?.enabled ? getConfig().ui.phonePush?.quietHours ?? null : null,
     now: () => Date.now(),
-    play: kind => { if (window && !window.isDestroyed()) window.webContents.send('sound:cue', kind); },
+    play: kind => {
+      if (!window || window.isDestroyed()) return false;
+      window.webContents.send('sound:cue', kind);
+      return true;
+    },
     log: logInfo
   });
   // Phone notifications (ntfy): the app's network stack (system proxy) and the system's own idle
