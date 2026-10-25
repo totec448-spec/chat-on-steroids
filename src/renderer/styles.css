@@ -1553,6 +1553,8 @@ main {
 .root + .root {
   border-top: 1px solid var(--line);
 }
+/* The checkpoint switch sits in the folders card: inset and divided like a folder row. */
+#codeCheckpointsSetting { padding: 12px 20px; border-top: 1px solid var(--line); }
 
 .root > .ico { color: var(--faint); width: 15px; height: 15px; }
 
