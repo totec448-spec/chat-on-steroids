@@ -132,9 +132,11 @@ export function createPhonePush(deps: PhonePushDeps) {
       const settings = deps.settings();
       const name = KIND_NAME[event.kind];
       const skip = (result: PhonePushResult, why: string): PhonePushResult => { deps.log(`phone push: not sent "${name}": ${why}`); return result; };
-      if (!settings.enabled || !isValidTopic(settings.topic)) return 'off';
+      // Switched off is no decision to report: a line per chat event for every install that never turned it on.
+      if (!settings.enabled) return 'off';
+      if (!isValidTopic(settings.topic)) return skip('off', 'the topic is not valid');
       if ((event.kind === 'needs-you' && !settings.needsYou) || (event.kind === 'failed' && !settings.failures) ||
-          (event.kind === 'finished' && settings.finishedAfterMinutes === null)) return 'kind-off';
+          (event.kind === 'finished' && settings.finishedAfterMinutes === null)) return skip('kind-off', 'this kind is switched off');
       if (event.kind === 'finished' && event.workedMs !== undefined && event.workedMs < (settings.finishedAfterMinutes ?? 0) * 60_000) {
         return skip('short-turn', `the chat worked under ${settings.finishedAfterMinutes} min`);
       }
