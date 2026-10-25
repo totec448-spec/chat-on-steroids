@@ -3890,6 +3890,40 @@ describe('page checks for the diagnostics report', () => {
   });
 });
 
+// #1752/#1837: whether a hidden ChatGPT page explains late progress and unattributed calls can only be
+// told from a report that says, per tab, whether the page was visible and for how long it was hidden.
+describe('page visibility in the diagnostics status', () => {
+  it('says whether the page is visible, and how long it has been hidden', async () => {
+    live = await harness();
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({ visibility: 'visible', hiddenForMs: 0 });
+    Object.defineProperty(live.document, 'visibilityState', { configurable: true, value: 'hidden' });
+    live.document.dispatchEvent(new live.window.Event('visibilitychange'));
+    // The harness clock: ninety seconds pass while the page is hidden.
+    live.advance(90_000);
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({ visibility: 'hidden', hiddenForMs: 90_000 });
+    // A second hidden event (ChatGPT re-dispatches) does not restart the count.
+    live.document.dispatchEvent(new live.window.Event('visibilitychange'));
+    live.advance(10_000);
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({ hiddenForMs: 100_000 });
+    Object.defineProperty(live.document, 'visibilityState', { configurable: true, value: 'visible' });
+    live.document.dispatchEvent(new live.window.Event('visibilitychange'));
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({ visibility: 'visible', hiddenForMs: 0 });
+  });
+
+  it('counts from the load for a page that opens hidden, as a background tab does', async () => {
+    live = await harness(undefined, {}, document => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    });
+    // The script's own start-up moves the harness clock a little; the count runs from the load.
+    const atLoad = await live.runtimeMessage({ type: 'clf-page-status' }) as { visibility: string; hiddenForMs: number };
+    expect(atLoad.visibility).toBe('hidden');
+    expect(atLoad.hiddenForMs).toBeGreaterThan(0);
+    expect(atLoad.hiddenForMs).toBeLessThan(10_000);
+    live.advance(45_000);
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({ visibility: 'hidden', hiddenForMs: atLoad.hiddenForMs + 45_000 });
+  });
+});
+
 describe('H2 resume transport evidence', () => {
   it('H2 records stream_gone immediately in a non-English page without ending a live generation', async () => {
     live = await harness();
