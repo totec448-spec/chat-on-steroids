@@ -178,7 +178,10 @@ async function prepareNotice(sessionId: string, summary: string, userRequested =
           const verdict = await checkAutomaticSend({ kind: mode === 'loop' ? 'loop-step' : 'goal-step', id, attempt: 1, text: reply,
             chat: { session: sessionId, project: session?.projectId ?? null, worker: null } });
           if (!verdict.allowed) {
-            result = `${notification} The person's send check held the automatic Goal instruction, so none was queued. ${REMAINING}`;
+            // Nothing more is coming this turn, so the hold is released rather than kept waiting
+            // for a step that will not be sent; the next session_finish would only ask again.
+            await releaseSessionFinish(sessionId, turnId).catch(error => logWarn(`finish: hold not released after a send check hold: ${(error as Error).message}`));
+            result = "The person's send check held the automatic Goal instruction, so none was queued. The finish hold was released; ChatGPT may complete its answer.";
           } else if (!(await currentDecision())) {
             result = 'The turn changed or new user instructions took priority; the old Goal follow-up was discarded.';
           } else {
