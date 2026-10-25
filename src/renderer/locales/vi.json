@@ -3117,7 +3117,6 @@
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "Không đọc được các khóa đã lưu trên máy này, nên không thể thêm các khóa của bản sao lưu. Hãy nhập mà không có chúng.",
   "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Đã nhập cài đặt, nhưng không thể lưu các khóa. Hãy thêm lại chúng trong Cài đặt.",
   "Phone notifications, a settings backup, keys kept from ChatGPT, and high contrast.": "Thông báo trên điện thoại, sao lưu cài đặt, ẩn khóa khỏi ChatGPT và độ tương phản cao.",
-  "Phone notifications": "Thông báo trên điện thoại",
   "Get a note on your phone when a chat needs you or a long chat finishes.": "Nhận thông báo trên điện thoại khi một cuộc trò chuyện cần bạn hoặc một cuộc trò chuyện dài đã xong.",
   "Settings backup": "Sao lưu cài đặt",
   "Move your settings to another computer; saved keys only if you choose.": "Mang cài đặt sang máy tính khác; khóa đã lưu chỉ khi bạn chọn.",

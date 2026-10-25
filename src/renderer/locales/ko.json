@@ -3117,7 +3117,6 @@
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "이 컴퓨터에 저장된 키를 읽을 수 없어 백업의 키를 추가할 수 없습니다. 키 없이 가져오세요.",
   "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "설정은 가져왔지만 저장된 키를 보관하지 못했습니다. 설정에서 다시 추가하세요.",
   "Phone notifications, a settings backup, keys kept from ChatGPT, and high contrast.": "휴대폰 알림, 설정 백업, ChatGPT에게 숨기는 키, 고대비.",
-  "Phone notifications": "휴대폰 알림",
   "Get a note on your phone when a chat needs you or a long chat finishes.": "채팅에 내가 필요하거나 긴 채팅이 끝나면 휴대폰으로 알려 줍니다.",
   "Settings backup": "설정 백업",
   "Move your settings to another computer; saved keys only if you choose.": "설정을 다른 컴퓨터로 옮길 수 있습니다. 저장된 키는 원할 때만 포함됩니다.",

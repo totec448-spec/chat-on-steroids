@@ -3229,7 +3229,6 @@
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "Les clés enregistrées sur cet ordinateur sont illisibles, donc les clés de la sauvegarde ne peuvent pas être ajoutées. Importez sans elles.",
   "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Les réglages ont été importés, mais les clés enregistrées n’ont pas pu être stockées. Ajoutez-les à nouveau dans les Réglages.",
   "Phone notifications, a settings backup, keys kept from ChatGPT, and high contrast.": "Notifications sur le téléphone, sauvegarde des réglages, clés cachées à ChatGPT et contraste élevé.",
-  "Phone notifications": "Notifications sur le téléphone",
   "Get a note on your phone when a chat needs you or a long chat finishes.": "Recevez une notification sur votre téléphone quand un chat a besoin de vous ou qu'un long chat se termine.",
   "Settings backup": "Sauvegarde des réglages",
   "Move your settings to another computer; saved keys only if you choose.": "Emportez vos réglages sur un autre ordinateur ; les clés enregistrées seulement si vous le souhaitez.",
