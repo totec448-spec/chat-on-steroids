@@ -62,6 +62,7 @@
 .ph.ph-corners-in::before { content: '\e1ce'; }
 .ph.ph-corners-out::before { content: '\e1d0'; }
 .ph.ph-cube::before { content: '\e1da'; }
+.ph.ph-device-mobile::before { content: '\e1e0'; }
 .ph.ph-dots-three::before { content: '\e1fe'; }
 .ph.ph-dots-three-vertical::before { content: '\e208'; }
 .ph.ph-download-simple::before { content: '\e20c'; }

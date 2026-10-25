@@ -3860,6 +3860,23 @@ describe('through the MCP endpoint', () => {
     expect(JSON.stringify(agentsSchema)).not.toMatch(/join/i);
   });
 
+  // #1841: Codex sends every tool call as a new request. Its spawn promised results "at the end of
+  // later tool results", and a later status call answered "use agents action=spawn", so it
+  // waited for results that never came and started runs no later call could reach.
+  it('tells a caller without a chat, at spawn and at status, that later requests cannot reach the run', async () => {
+    await setEnabled(true, 3, true);
+    try {
+      const spawned = await agentsWithRequestId('wfr_codex_spawn', 'spawn', { workers: [{ task: 'read the file' }] });
+      expect(spawned).toMatch(/only later tool calls of this same request can reach the run/);
+      expect(spawned).not.toMatch(/arrive at the end of later tool results/);
+      const status = await agentsWithRequestId('wfr_codex_status', 'status');
+      expect(status).toMatch(/AGENTS_NO_CHAT/);
+      expect(status).not.toMatch(/Use agents action=spawn/);
+    } finally {
+      await setEnabled(true);
+    }
+  });
+
   it('returns empty status to an unrelated chat without exposing the other run', async () => {
     startSwarm(1);
     const text = await asChat('c-stranger', 'status');
