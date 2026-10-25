@@ -3171,5 +3171,14 @@
   "Not in this version": "Não existe nesta versão",
   "Start or cancel the prepared plan first, then ask again.": "Inicie ou cancele primeiro o plano preparado e peça de novo.",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "As chaves salvas neste computador não podem ser lidas, então as chaves do backup não podem ser adicionadas. Importe sem elas.",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "As configurações foram importadas, mas as chaves salvas não puderam ser armazenadas. Adicione-as de novo nas Configurações."
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "As configurações foram importadas, mas as chaves salvas não puderam ser armazenadas. Adicione-as de novo nas Configurações.",
+  "Phone notifications, a settings backup, keys kept from ChatGPT, and high contrast.": "Notificações no celular, backup das configurações, chaves escondidas do ChatGPT e alto contraste.",
+  "Phone notifications": "Notificações no celular",
+  "Get a note on your phone when a chat needs you or a long chat finishes.": "Receba um aviso no celular quando um chat precisar de você ou um chat longo terminar.",
+  "Settings backup": "Backup das configurações",
+  "Move your settings to another computer; saved keys only if you choose.": "Leve suas configurações para outro computador; as chaves salvas só se você quiser.",
+  "Keys stay with you": "Suas chaves ficam com você",
+  "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Chaves de API e tokens no que as ferramentas retornam são escondidos antes de o ChatGPT vê-los.",
+  "Easier to read": "Mais fácil de ler",
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Alto contraste, oito cores de destaque, espaçamento entre linhas e uma fonte mais legível."
 }

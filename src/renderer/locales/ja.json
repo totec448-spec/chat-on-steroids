@@ -3061,5 +3061,14 @@
   "Not in this version": "この版にはありません",
   "Start or cancel the prepared plan first, then ask again.": "先に準備済みのプランを開始するか取り消してから、もう一度お試しください。",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "このコンピューターに保存されたキーを読み取れないため、バックアップのキーを追加できません。キーなしでインポートしてください。",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "設定はインポートされましたが、保存されたキーを格納できませんでした。設定でもう一度追加してください。"
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "設定はインポートされましたが、保存されたキーを格納できませんでした。設定でもう一度追加してください。",
+  "Phone notifications, a settings backup, keys kept from ChatGPT, and high contrast.": "スマートフォン通知、設定のバックアップ、ChatGPT から隠すキー、ハイコントラスト。",
+  "Phone notifications": "スマートフォン通知",
+  "Get a note on your phone when a chat needs you or a long chat finishes.": "チャットがあなたを必要としたときや長いチャットが終わったときに、スマートフォンに通知します。",
+  "Settings backup": "設定のバックアップ",
+  "Move your settings to another computer; saved keys only if you choose.": "設定を別のコンピューターに移せます。保存済みのキーは選んだ場合だけ含まれます。",
+  "Keys stay with you": "キーは手元に",
+  "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "ツールが返す内容に含まれる API キーやトークンは、ChatGPT が見る前に隠されます。",
+  "Easier to read": "読みやすく",
+  "High contrast, eight accent colors, line spacing and a more legible font.": "ハイコントラスト、8 つのアクセントカラー、行間、より読みやすいフォント。"
 }
