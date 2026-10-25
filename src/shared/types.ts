@@ -978,3 +978,18 @@ export function capabilityTools(capability: Capability, platform?: PlatformFamil
     default: return [];
   }
 }
+
+/** A settings backup the person chose to import, as the page sees it: a summary, never its keys. */
+export interface SettingsBackupChoice {
+  /** Names this choice for the import that follows; one use. */
+  token: string;
+  file: string;
+  appVersion: string | null;
+  exportedAt: string | null;
+  /** Dotted paths of the settings that would change here, e.g. `ui.theme`. */
+  changed: string[];
+  /** Of those, the ones that give ChatGPT more access (`widerAccess`): a permission on, read-only off… */
+  wider: string[];
+  /** Saved keys the backup carries, locked with its passphrase. */
+  keyCount: number;
+}
