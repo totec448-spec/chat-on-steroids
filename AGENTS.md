@@ -343,6 +343,32 @@ read can set it; unavailable storage is the separate `secureStorage` state), and
 notice whose Start fresh asks first, then calls `credentials:start-fresh`. That tries one more read
 and, only if it still fails, renames the file to `secrets.unreadable-<UTC stamp>.bin` (kept, never
 read again) and starts an empty store. It returns whether anything was set aside.
+Settings backup (`settings-backup.ts`, Settings → General → Backup): a JSON file
+(`format: "chat-on-steroids-settings"`, `version: 1`) holding exactly what the Settings form saves
+(`settingsForBackup(settingsPatch, config)`: a setting never changed, so not stored, is written as
+`null`; on import `null` unsets a single setting where the schema allows unset and is ignored
+elsewhere, and a whole section as `null` (never set up there, e.g. `ui.phonePush`) keeps today's
+section, while a setting the file lacks, from an older backup, keeps today's value), minus per-computer parts: `connectorSuffix`, `tunnel`,
+`ui.browserBridgePort`, `mcp.persistentUrls`, `ui.browserPreferences`, `ui.cosBrowserTrayHint`,
+`ui.autoRefreshPluginsAsked`, `ui.startAtLogin` (roots, setup profiles and everything outside the form were never in it). IPC: `settings:export` { includeKeys, passphrase? } writes through a save
+dialog (atomic, mode 0600); `settings:importPick` reads and checks a file in the main process and
+returns `SettingsBackupChoice` (a one-use token, the changed dotted paths, the key count);
+`settings:importApply` { token, includeKeys, passphrase? } opens the keys first (a wrong passphrase
+changes nothing), then overlays the backup on today's settings (`overlaySettings`: a missing field
+keeps today's value, an unknown one is ignored, lists are whole) and runs the same `saveSettings`
+the form uses, with all its effects, then writes the keys with `setSecrets` in one commit. The
+preview counts only what that save really applies (`importPlan` runs `mergeSettings`), plus
+`ui.language`, which the import applies itself. A value the schema refuses refuses the whole file
+(`invalid-settings`); a preview whose `changed`/`wider` no longer match today's settings is refused
+and its token dropped. A save that fails after it wrote the settings (login item, control API,
+worker history) still gets the language and keys, and the reply carries its message in `warnings`.
+An unreadable key store refuses an import with keys before anything changes; a key write that
+still fails after the settings were written is a warning ("…could not be stored"), `keyCount` 0.
+A short export passphrase is refused before any key is read. Keys
+travel only when ticked: `openaiApiKey`, `openRouterApiKey`, `customProviderApiKey`, `ntfyToken` (#1800), `plugin:*`
+(never `bridgeToken`, `setup:*`, `mcp:path:*`), sealed with scrypt (N 2^17, r 8, p 1) and
+AES-256-GCM (16-byte tag, AAD = format/version); a crafted file's scrypt cost is bounded. Keys
+never reach the renderer. A backup's `ui.language` also switches the renderer's language.
 Settings writes fence changed tunnel IDs by profile identity/epoch; key writes name their exact
 profile. Connection lifecycle reuses the selected key and reconnects when the OpenAI profile
 epoch changes, even if its tunnel ID matches. Each Core MCP endpoint generation freezes the local
