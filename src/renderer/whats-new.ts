@@ -19,7 +19,7 @@ const RELEASES: Readonly<Record<string, Release>> = {
     highlights: [
       { icon: 'i-phone', title: () => t("Phone notifications"), text: () => t("Get a note on your phone when a chat needs you or a long chat finishes.") },
       { icon: 'i-export', title: () => t("Settings backup"), text: () => t("Move your settings to another computer; saved keys only if you choose.") },
-      { icon: 'i-shield', title: () => t("Keys stay with you"), text: () => t("API keys and tokens in what tools return are hidden before ChatGPT sees them.") },
+      { icon: 'i-lock', title: () => t("Keys stay with you"), text: () => t("API keys and tokens in what tools return are hidden before ChatGPT sees them.") },
       { icon: 'i-palette', title: () => t("Easier to read"), text: () => t("High contrast, eight accent colors, line spacing and a more legible font.") }
     ]
   },
