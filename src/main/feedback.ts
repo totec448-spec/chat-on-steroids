@@ -51,11 +51,15 @@ function extensionAnswer(extension: FeedbackEnvironment['extension'], version: s
   return extension.version === version ? 'Yes, and its version matches the app' : 'Yes, but I am not sure the versions match';
 }
 
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+/** Visible characters: a family or flag emoji is one, never cut apart. */
+const charsOf = (text: string): string[] => Array.from(graphemes.segment(text), part => part.segment);
+
 /** The first sentence or line, at most 80 characters. */
 function titleOf(text: string): string {
   const line = text.trim().split(/\r?\n/, 1)[0]!.trim();
   const sentence = /^(.+?[.!?])(?:\s|$)/u.exec(line)?.[1] ?? line;
-  const chars = [...sentence];
+  const chars = charsOf(sentence);
   if (chars.length <= 80) return sentence;
   const cut = chars.slice(0, 79).join('');
   const space = cut.lastIndexOf(' ');
@@ -86,11 +90,13 @@ export function feedbackIssueUrl(report: FeedbackReport, env: FeedbackEnvironmen
   let trimmed = false;
   while (url.length > MAX_ISSUE_URL) {
     const longest = text.reduce((a, b) => encodeURIComponent(b[1]).length > encodeURIComponent(a[1]).length ? b : a);
-    const chars = [...longest[1].replace(/…$/u, '')];
+    const chars = charsOf(longest[1].replace(/…$/u, ''));
     if (!chars.length) break;
-    // Each character costs at most 12 encoded characters (four UTF-8 bytes); cut enough at once.
+    // Drop characters from the end until their encoded length covers the excess. A character can
+    // cost far more than one byte (a family emoji is over 50 encoded), so it is measured, never assumed.
     const excess = url.length - MAX_ISSUE_URL;
-    const keep = Math.max(0, chars.length - Math.max(1, Math.ceil(excess / 12)));
+    let keep = chars.length, dropped = 0;
+    while (keep > 0 && dropped < excess) dropped += new URLSearchParams({ x: chars[--keep]! }).toString().length - 2;
     longest[1] = `${chars.slice(0, keep).join('').trimEnd()}…`;
     trimmed = true;
     url = build();
