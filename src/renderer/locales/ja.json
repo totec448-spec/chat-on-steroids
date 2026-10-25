@@ -3123,5 +3123,15 @@
   "Keys stay with you": "キーは手元に",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "ツールが返す内容に含まれる API キーやトークンは、ChatGPT が見る前に隠されます。",
   "Easier to read": "読みやすく",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "ハイコントラスト、8 つのアクセントカラー、行間、より読みやすいフォント。"
+  "High contrast, eight accent colors, line spacing and a more legible font.": "ハイコントラスト、8 つのアクセントカラー、行間、より読みやすいフォント。",
+  "Personality restored to default": "パーソナリティを既定に戻しました",
+  "Writing style restored to default": "文体を既定に戻しました",
+  "Chat instructions": "チャットへの指示",
+  "How ChatGPT talks and writes in new chats. Its tools, permissions and workers stay fixed.": "新しいチャットで ChatGPT がどう話し、どう書くか。ツール、権限、ワーカーは変わりません。",
+  "Personality": "パーソナリティ",
+  "Its tone and manner with you.": "あなたへの口調と接し方。",
+  "Saved when you leave the editor and used from the next new chat. Leave it empty to send no personality at all.": "エディターを離れると保存され、次の新しいチャットから使われます。空にするとパーソナリティを送りません。",
+  "Writing style": "文体",
+  "How it writes answers, technical explanations and pull request descriptions.": "回答、技術的な説明、プルリクエストの説明の書き方。",
+  "Saved when you leave the editor and used from the next new chat. Leave it empty to send no writing style at all.": "エディターを離れると保存され、次の新しいチャットから使われます。空にすると文体を送りません。"
 }

@@ -3123,5 +3123,15 @@
   "Keys stay with you": "Khóa ở lại với bạn",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Khóa API và token trong kết quả công cụ trả về được ẩn trước khi ChatGPT thấy.",
   "Easier to read": "Dễ đọc hơn",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Độ tương phản cao, tám màu nhấn, giãn dòng và phông chữ dễ đọc hơn."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Độ tương phản cao, tám màu nhấn, giãn dòng và phông chữ dễ đọc hơn.",
+  "Personality restored to default": "Đã khôi phục tính cách về mặc định",
+  "Writing style restored to default": "Đã khôi phục phong cách viết về mặc định",
+  "Chat instructions": "Hướng dẫn cho cuộc trò chuyện",
+  "How ChatGPT talks and writes in new chats. Its tools, permissions and workers stay fixed.": "Cách ChatGPT nói và viết trong các cuộc trò chuyện mới. Công cụ, quyền và worker của nó giữ nguyên.",
+  "Personality": "Tính cách",
+  "Its tone and manner with you.": "Giọng điệu và cách cư xử với bạn.",
+  "Saved when you leave the editor and used from the next new chat. Leave it empty to send no personality at all.": "Được lưu khi bạn rời trình chỉnh sửa và dùng từ cuộc trò chuyện mới tiếp theo. Để trống để không gửi tính cách nào.",
+  "Writing style": "Phong cách viết",
+  "How it writes answers, technical explanations and pull request descriptions.": "Cách nó viết câu trả lời, giải thích kỹ thuật và mô tả pull request.",
+  "Saved when you leave the editor and used from the next new chat. Leave it empty to send no writing style at all.": "Được lưu khi bạn rời trình chỉnh sửa và dùng từ cuộc trò chuyện mới tiếp theo. Để trống để không gửi phong cách viết nào."
 }

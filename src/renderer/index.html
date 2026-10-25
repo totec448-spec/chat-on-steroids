@@ -1403,6 +1403,44 @@
 
                   </div>
 
+                <!-- #1856: the two parts of each new chat's instructions the person may rewrite; the rest stays fixed. -->
+                <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Chat instructions</h2><p>How ChatGPT talks and writes in new chats. Its tools, permissions and workers stay fixed.</p></div></header>
+                <div class="settings-surface pane">
+                  <div class="setting">
+                    <span class="setting-text">
+                      <b>Personality</b>
+                      <em>Its tone and manner with you.</em>
+                    </span>
+                    <button class="btn" id="chatPersonalityEdit" type="button">Edit prompt</button>
+                  </div>
+
+                  <div class="field goal-prompt" id="chatPersonalityPanel" hidden>
+                    <label for="chatPersonality">Personality</label>
+                    <textarea dir="auto" id="chatPersonality" rows="8" spellcheck="false"></textarea>
+                    <p class="hint">Saved when you leave the editor and used from the next new chat. Leave it empty to send no personality at all.</p>
+                    <div class="step-actions">
+                      <button class="btn" id="chatPersonalityReset" type="button">Restore default</button>
+                    </div>
+                  </div>
+
+                  <div class="setting">
+                    <span class="setting-text">
+                      <b>Writing style</b>
+                      <em>How it writes answers, technical explanations and pull request descriptions.</em>
+                    </span>
+                    <button class="btn" id="chatWritingStyleEdit" type="button">Edit prompt</button>
+                  </div>
+
+                  <div class="field goal-prompt" id="chatWritingStylePanel" hidden>
+                    <label for="chatWritingStyle">Writing style</label>
+                    <textarea dir="auto" id="chatWritingStyle" rows="14" spellcheck="false"></textarea>
+                    <p class="hint">Saved when you leave the editor and used from the next new chat. Leave it empty to send no writing style at all.</p>
+                    <div class="step-actions">
+                      <button class="btn" id="chatWritingStyleReset" type="button">Restore default</button>
+                    </div>
+                  </div>
+                </div>
+
               </div>
             </div>
             <div class="composer-dock" id="composerDock"><div class="composer-dock-body"><div class="background-exec-status" id="backgroundExecStatus" role="status" hidden><i class="ico ph ph-terminal-window" aria-hidden="true"></i><span class="queue-label"></span><span class="background-exec-time"></span><svg class="disclosure-chevron background-exec-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false" hidden><path d="M6 3.5 10.5 8 6 12.5"></path></svg><button class="background-exec-stop" type="button"><i class="ico ph ph-power" aria-hidden="true"></i><span></span></button></div><div class="sr-only" id="backgroundExecLiveStatus" role="status" aria-live="polite" hidden></div><div class="background-exec-list" id="backgroundExecList" role="list" hidden></div><section class="agent-plan" id="agentPlan" aria-label="Agent task plan" hidden></section><div id="branchDraft" class="branch-draft" role="status" hidden></div><div id="editDraft" class="edit-draft" role="status" hidden></div><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div></div>

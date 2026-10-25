@@ -3291,5 +3291,15 @@
   "Keys stay with you": "Ключи остаются у вас",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "API-ключи и токены в том, что возвращают инструменты, скрываются до того, как их увидит ChatGPT.",
   "Easier to read": "Легче читать",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Высокая контрастность, восемь акцентных цветов, межстрочный интервал и более разборчивый шрифт."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Высокая контрастность, восемь акцентных цветов, межстрочный интервал и более разборчивый шрифт.",
+  "Personality restored to default": "Характер возвращён к стандартному",
+  "Writing style restored to default": "Стиль письма возвращён к стандартному",
+  "Chat instructions": "Инструкции для чата",
+  "How ChatGPT talks and writes in new chats. Its tools, permissions and workers stay fixed.": "Как ChatGPT говорит и пишет в новых чатах. Его инструменты, разрешения и воркеры не меняются.",
+  "Personality": "Характер",
+  "Its tone and manner with you.": "Его тон и манера общения с вами.",
+  "Saved when you leave the editor and used from the next new chat. Leave it empty to send no personality at all.": "Сохраняется при выходе из редактора и действует со следующего нового чата. Оставьте пустым, чтобы не отправлять характер.",
+  "Writing style": "Стиль письма",
+  "How it writes answers, technical explanations and pull request descriptions.": "Как он пишет ответы, технические объяснения и описания pull request.",
+  "Saved when you leave the editor and used from the next new chat. Leave it empty to send no writing style at all.": "Сохраняется при выходе из редактора и действует со следующего нового чата. Оставьте пустым, чтобы не отправлять стиль письма."
 }

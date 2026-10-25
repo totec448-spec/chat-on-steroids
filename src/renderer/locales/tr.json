@@ -3179,5 +3179,15 @@
   "Keys stay with you": "Anahtarlar sizde kalır",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Araçların döndürdüğü içerikteki API anahtarları ve tokenlar, ChatGPT görmeden önce gizlenir.",
   "Easier to read": "Okuması daha kolay",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Yüksek kontrast, sekiz vurgu rengi, satır aralığı ve daha okunaklı bir yazı tipi."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Yüksek kontrast, sekiz vurgu rengi, satır aralığı ve daha okunaklı bir yazı tipi.",
+  "Personality restored to default": "Kişilik varsayılana döndürüldü",
+  "Writing style restored to default": "Yazım üslubu varsayılana döndürüldü",
+  "Chat instructions": "Sohbet talimatları",
+  "How ChatGPT talks and writes in new chats. Its tools, permissions and workers stay fixed.": "ChatGPT'nin yeni sohbetlerde nasıl konuştuğu ve yazdığı. Araçları, izinleri ve worker'ları değişmez.",
+  "Personality": "Kişilik",
+  "Its tone and manner with you.": "Size karşı tonu ve tavrı.",
+  "Saved when you leave the editor and used from the next new chat. Leave it empty to send no personality at all.": "Düzenleyiciden çıktığınızda kaydedilir ve bir sonraki yeni sohbetten itibaren kullanılır. Hiç kişilik göndermemek için boş bırakın.",
+  "Writing style": "Yazım üslubu",
+  "How it writes answers, technical explanations and pull request descriptions.": "Yanıtları, teknik açıklamaları ve pull request açıklamalarını nasıl yazdığı.",
+  "Saved when you leave the editor and used from the next new chat. Leave it empty to send no writing style at all.": "Düzenleyiciden çıktığınızda kaydedilir ve bir sonraki yeni sohbetten itibaren kullanılır. Hiç yazım üslubu göndermemek için boş bırakın."
 }

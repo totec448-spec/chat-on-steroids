@@ -3123,5 +3123,15 @@
   "Keys stay with you": "키는 내 컴퓨터에",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "도구가 돌려주는 내용 속 API 키와 토큰은 ChatGPT가 보기 전에 숨겨집니다.",
   "Easier to read": "더 읽기 쉽게",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "고대비, 강조 색상 8가지, 줄 간격, 더 읽기 쉬운 글꼴."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "고대비, 강조 색상 8가지, 줄 간격, 더 읽기 쉬운 글꼴.",
+  "Personality restored to default": "성격을 기본값으로 되돌렸습니다",
+  "Writing style restored to default": "글쓰기 스타일을 기본값으로 되돌렸습니다",
+  "Chat instructions": "채팅 지침",
+  "How ChatGPT talks and writes in new chats. Its tools, permissions and workers stay fixed.": "새 채팅에서 ChatGPT가 말하고 쓰는 방식입니다. 도구, 권한, 워커는 그대로입니다.",
+  "Personality": "성격",
+  "Its tone and manner with you.": "당신을 대하는 말투와 태도입니다.",
+  "Saved when you leave the editor and used from the next new chat. Leave it empty to send no personality at all.": "편집기를 떠나면 저장되고 다음 새 채팅부터 적용됩니다. 비워 두면 성격을 보내지 않습니다.",
+  "Writing style": "글쓰기 스타일",
+  "How it writes answers, technical explanations and pull request descriptions.": "답변, 기술 설명, 풀 리퀘스트 설명을 쓰는 방식입니다.",
+  "Saved when you leave the editor and used from the next new chat. Leave it empty to send no writing style at all.": "편집기를 떠나면 저장되고 다음 새 채팅부터 적용됩니다. 비워 두면 글쓰기 스타일을 보내지 않습니다."
 }
