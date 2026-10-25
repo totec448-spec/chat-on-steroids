@@ -806,6 +806,13 @@ The normalized transport request ID owns its workspace, plan, terminals and prov
 family. File edits, commands, Desktop and Plugins retain their live capability/root checks;
 missing attribution never enables Read-only mode. Headerless calls keep legacy anonymous
 ordinary-tool custody but cannot invent a request plan or worker family.
+A request-owned family answers only to that request. Clients such as Codex send every tool call as a
+new request, so a later call is outside it: every refusal that would say AGENTS_BUSY (or "call spawn to
+start one") to a caller known only by its request id says AGENTS_NO_CHAT instead (`NoChatError`, a
+subclass): no ChatGPT chat identified, the run is out of reach, do not spawn again (#1841). The spawn
+reply of a request-owned prime (`primeOwnerSentence`) says the same up front and drops the "results arrive
+with later tool results" promise, and `status` from such a caller with no family refuses the same way
+instead of the empty answer that suggests spawning.
 The Identity notice is present even without a pending repair timer. It names the tools that
 remain usable, reports actual results and forbids replaying successful work to repair identity.
 One process/recipient refusal is never a global edit/terminal refusal. Code-mode children inherit
