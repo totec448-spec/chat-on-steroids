@@ -1049,8 +1049,12 @@ export function createFilePanel(options: FilePanelOptions) {
       }
     } finally {
       restoring = false;
-      if (project?.id === current.id) void reconcileGitChanges(true);
     }
+    if (project?.id !== current.id) return;
+    await reconcileGitChanges(true);
+    // The refresh removes the Restore button that had the keyboard: continue where Add to .gitignore does.
+    if (document.activeElement && document.activeElement !== document.body) return;
+    (options.reviewOnly ? refresh : backToFiles).focus({ preventScroll: true });
   }
 
   function changeStats(change: ProjectGitChange): HTMLElement {

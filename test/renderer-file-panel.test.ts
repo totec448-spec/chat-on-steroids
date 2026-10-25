@@ -400,14 +400,19 @@ it('compares against a code checkpoint and asks main to restore one file or all 
   expect(iconOf(restoreFile)).toContain('ph-arrow-counter-clockwise');
   expect(iconOf(host.querySelector('.file-checkpoint-bar button'))).toContain('ph-arrow-counter-clockwise');
   expect(iconOf(restoreFile)).not.toBe(iconOf(host.querySelector('[aria-label="Refresh changes"]')));
-  [...host.querySelectorAll<HTMLButtonElement>('.file-preview-actions button')].find(button => button.textContent === 'Restore file')!.click();
+  restoreFile.focus(); restoreFile.click();
   await tick(); await tick();
   expect(restore).toHaveBeenLastCalledWith(projectA.id, id, ['README.md'], 'checkpoint-2');
+  // The refresh after a restore removes the button that had the keyboard: it continues at Refresh.
+  const refreshChanges = host.querySelector<HTMLButtonElement>('[aria-label="Refresh changes"]');
+  expect(document.activeElement).toBe(refreshChanges);
   expect(document.querySelector('.toast')?.textContent).toBe('Restored 1 of 1 files');
   expect(host.querySelector('.file-change-row[data-path="README.md"]')).toBeNull();
 
-  host.querySelector<HTMLButtonElement>('.file-checkpoint-bar button')!.click(); await tick(); await tick();
+  const restoreAll = host.querySelector<HTMLButtonElement>('.file-checkpoint-bar button')!;
+  restoreAll.focus(); restoreAll.click(); await tick(); await tick();
   expect(restore).toHaveBeenLastCalledWith(projectA.id, id, null, 'checkpoint-1');
+  expect(document.activeElement).toBe(host.querySelector('[aria-label="Refresh changes"]'));
   expect(host.textContent).toContain('No changes since this checkpoint');
 });
 
