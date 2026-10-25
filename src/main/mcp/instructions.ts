@@ -138,7 +138,7 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
     );
     else lines.push('exec_command uses the host’s normal POSIX shell (zsh/bash/sh unless requested otherwise). The bundled ripgrep directory is first on PATH.');
     if (config.commandAllowlist.enabled) lines.push(
-      `The user's command rules are on (${config.commandAllowlist.mode === 'deny' ? 'blocklist' : 'allowlist'}). COMMAND_NOT_ALLOWED means those rules do not start that program; it is not Read-only mode or a failure. Starting it another way (another tool, another spelling, a script written with apply_patch) goes around the user's choice; ask the user to change the rules in Settings. The rules are checked when a program starts, not for its input or the processes it starts.`
+      `The user's command rules are on (${config.commandAllowlist.mode === 'deny' ? 'blocklist' : 'allowlist'}). COMMAND_NOT_ALLOWED is a refusal by those rules: the program was not started. It is not Read-only mode. Starting it another way (another tool, another spelling, a script written with apply_patch) goes around the user's choice; ask the user to change the rules in Settings. The rules are checked when a program starts, not for its input or the processes it starts.`
     );
   } else if (ctx.exposedFind ?? caps.search) {
     lines.push('find searches filenames or file contents without a shell. Narrow path and include patterns to the relevant area.');

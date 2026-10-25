@@ -155,7 +155,7 @@ describe('the user’s own connector instructions', () => {
       // The facts the lines carried are still there.
       expect(text).toMatch(/Enabled in Core: .*command=on/);
       expect(text).toContain('comes from ChatGPT before the call reaches CoS, so CoS neither ran nor refused it.');
-      expect(text).toContain('COMMAND_NOT_ALLOWED');
+      expect(text).toContain('COMMAND_NOT_ALLOWED is a refusal by those rules: the program was not started.');
     } finally { await saveConfig(config); }
   });
 
