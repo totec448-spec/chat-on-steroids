@@ -10,7 +10,7 @@ import { inQuietHours } from './phone-push.js';
 import type { QuietHours } from '../shared/phone-push.js';
 import type { SoundCue } from '../shared/sound-cues.js';
 
-export type SoundCueResult = 'played' | 'off' | 'at-window' | 'quiet-hours' | 'repeat';
+export type SoundCueResult = 'played' | 'off' | 'at-window' | 'quiet-hours' | 'repeat' | 'no-window';
 
 export interface SoundCueDeps {
   enabled(): boolean;
@@ -19,7 +19,8 @@ export interface SoundCueDeps {
   /** Phone notifications' quiet hours while those are on, else null. */
   quietHours(): QuietHours | null;
   now(): number;
-  play(kind: SoundCue): void;
+  /** Hands the cue to the window; false when no window could receive it. */
+  play(kind: SoundCue): boolean;
   log(line: string): void;
 }
 
@@ -35,9 +36,10 @@ export function createSoundCues(deps: SoundCueDeps): (kind: SoundCue, sessionId?
     const key = `${kind}:${sessionId ?? ''}`;
     const last = lastPlayed.get(key);
     if (last !== undefined && now - last < REPEAT_MS) return 'repeat';
+    // A cue no window received is not counted, so the next one plays once a window is there.
+    if (!deps.play(kind)) return 'no-window';
     lastPlayed.set(key, now);
     for (const [entry, at] of lastPlayed) if (now - at >= REPEAT_MS) lastPlayed.delete(entry);
-    deps.play(kind);
     return 'played';
   };
   return (kind, sessionId) => {

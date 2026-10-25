@@ -8,7 +8,7 @@ import { createSoundCues, type SoundCueDeps } from '../src/main/sound-cues.js';
  */
 function cues(over: Partial<SoundCueDeps> = {}) {
   let now = Date.parse('2026-10-24T12:00:00');
-  const play = vi.fn<SoundCueDeps['play']>(), log = vi.fn<SoundCueDeps['log']>();
+  const play = vi.fn<SoundCueDeps['play']>(() => true), log = vi.fn<SoundCueDeps['log']>();
   const deps: SoundCueDeps = { enabled: () => true, focused: () => false, quietHours: () => null, now: () => now, play, log, ...over };
   return { cue: createSoundCues(deps), deps: { play, log }, advance: (ms: number) => { now += ms; } };
 }
@@ -51,4 +51,13 @@ it('writes one log line for every decision, without the chat', () => {
   cue('finished', 'secret-session-id');
   expect(deps.log).toHaveBeenCalledWith('sound: finished not played (at-window)');
   expect(JSON.stringify(deps.log.mock.calls)).not.toContain('secret-session-id');
+});
+
+it('does not count a sound no window received, so it plays once a window can', () => {
+  let windowOpen = false;
+  const { cue, deps } = cues({ play: vi.fn<SoundCueDeps['play']>(() => windowOpen) });
+  expect(cue('needs-you', 's1')).toBe('no-window');
+  windowOpen = true;
+  expect(cue('needs-you', 's1')).toBe('played');
+  expect(deps.log.mock.calls.map(call => call[0])).toEqual(['sound: needs-you not played (no-window)', 'sound: needs-you played']);
 });
