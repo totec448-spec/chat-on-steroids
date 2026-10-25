@@ -46,6 +46,7 @@ Get a note on your phone when a chat needs you, move your settings to another co
 - **Core plugin checks** work when more than one valid ChatGPT connector identity exists for the app.
 - **Calling sub-agents from an app without a ChatGPT chat** (such as Codex) now gets a clear answer, instead of starting workers it can never hear back from.
 - **When an automatic Continue cannot be sent,** the activity log says why.
+- **With the built-in browser chosen,** a sub-agent chat could open in another browser that still had the main chat open, and never start there. It now opens in the built-in browser.
 - **ChatGPT's approval card in the app** ran each shared value into its label (for example "Access keysk-…"). Label and value are now kept apart.
 - **The "Saved" message** reads naturally in German, French and Portuguese.
 
