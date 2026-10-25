@@ -139,8 +139,10 @@ export function initShortcutsDialog(options: { enterSends(): boolean }): { open(
   };
   const open = (viaKeyboard: boolean): void => {
     dialog.classList.remove('is-closing');
+    // The keys can open it over the View menu, from one of its items. The item leaves with the menu,
+    // so the menu hands the keyboard back to its button first and the dialog returns it there.
+    closeRowMenu(Boolean((document.activeElement as Element | null)?.closest?.('[role="menu"]')));
     if (!dialog.open) opener = document.activeElement === document.body ? null : document.activeElement as HTMLElement | null;
-    closeRowMenu();
     // Painted on each open: the Enter setting or the language may have changed since the last one.
     paint(list, groups);
     if (!dialog.open) dialog.showModal();
