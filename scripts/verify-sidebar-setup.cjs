@@ -134,6 +134,27 @@ app.whenReady().then(async () => {
     for(let i=0;i<100 && await js(`document.querySelectorAll('.row-menu').length!==2`);i++) await new Promise(r=>setTimeout(r,10));
     const fits=await js(`[...document.querySelectorAll('.row-menu')].map(m=>{const r=m.getBoundingClientRect();return r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight})`);
     assert.deepEqual(fits,[true,true],'The menu and its Color submenu fit in the window');
+    // Every language's label fits: each item shows its translation in turn in the real menu, which
+    // may grow to its maximum width before a label is cut ("Geheimnisse vor ChatGPT verbergen" was).
+    const catalogs=Object.fromEntries(fs.readdirSync(path.join(root,'src/renderer/locales')).filter(f=>f.endsWith('.json'))
+      .map(f=>[f.slice(0,-5),JSON.parse(fs.readFileSync(path.join(root,'src/renderer/locales',f),'utf8'))]));
+    const cut=await js(`(${(catalogs=>{
+      const out=[];
+      for (const label of document.querySelector('.row-menu').querySelectorAll('.row-menu-label')) {
+        const shown=label.textContent;
+        // The page may already be in another language: find the English key of what it shows.
+        const english=Object.values(catalogs).flatMap(catalog=>Object.entries(catalog)).find(([,text])=>text===shown)?.[0] ?? shown;
+        for (const [language,catalog] of [['en',{[english]:english}],...Object.entries(catalogs)]) {
+          const text=catalog[english];
+          if (!text) continue;
+          label.textContent=text;
+          if (label.scrollWidth>label.clientWidth+1) out.push(`${language}: ${text}`);
+        }
+        label.textContent=shown;
+      }
+      return out;
+    }).toString()})(${JSON.stringify(catalogs)})`);
+    assert.deepEqual(cut,[],'A project menu label is cut in another language');
     assert.equal(await js(`document.activeElement.dataset.rowAction`),'color-none','The submenu opens on the current color');
     await screenshot('project-menu-color.png');
     press('Down');

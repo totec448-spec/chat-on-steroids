@@ -917,6 +917,9 @@
   "popup_pipeline_waiting_first_message": {
     "message": "Đang chờ tin nhắn đầu tiên."
   },
+  "popup_pipeline_not_a_chat": {
+    "message": "Trang ChatGPT này không phải là cuộc trò chuyện, nên ứng dụng không có gì để theo dõi ở đây. Hãy mở hoặc bắt đầu một cuộc trò chuyện."
+  },
   "popup_pipeline_waiting_latest_request_id": {
     "message": "Đã ghi cuộc trò chuyện. Đang chờ ID yêu cầu từ lượt mới nhất."
   },
@@ -985,6 +988,9 @@
   },
   "popup_status_new_chat": {
     "message": "cuộc trò chuyện mới"
+  },
+  "popup_status_not_a_chat": {
+    "message": "không phải cuộc trò chuyện"
   },
   "popup_status_none_open": {
     "message": "không có mục nào đang mở"

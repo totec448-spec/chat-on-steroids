@@ -262,6 +262,34 @@ describe('the page detector', () => {
     expect(api.approvalCard()).toBeNull();
   });
 
+  // Rows the live card may also produce: a term or value wrapped in its own div, two terms in a row,
+  // a term and a value in different rows, and a value too long to share a line with its label.
+  it('pairs a label only with the value of its own row, keeps wrapped parts together and never cuts a value', () => {
+    const long = 'v'.repeat(290);
+    dom.window.document.querySelector('main')!.innerHTML = `<div data-codex-approval-surface="true"><div role="alert"><dl>
+      <div class="grid"><dt><div>Ordner</div></dt><dd><div>C:/demo</div></dd></div>
+      <div class="grid"><dt>Schlüssel</dt><dd><div>Access</div><div>key</div></dd></div>
+      <div class="grid"><dt>Erster</dt><dt>Zweiter</dt><dd>Wert</dd></div>
+      <div class="grid"><dt>Allein</dt></div><div class="grid"><dd>Fremd</dd></div>
+      <div class="grid"><dt>Beschreibung lang</dt><dd>${long}</dd></div></dl></div>
+      <button>Ablehnen<kbd>Esc</kbd></button><button>Einmal zulassen<kbd>⏎</kbd></button></div>`;
+    expect(api.approvalCard()?.lines).toEqual(['Ordner: C:/demo', 'Schlüssel: Access key', 'Erster', 'Zweiter: Wert', 'Allein', 'Fremd', 'Beschreibung lang', long]);
+  });
+
+  // The live card on 2026-10-25 (German UI, a key-shaped value in the request) lists the shared data
+  // as a <dl>: a label and its value in one grid row. Read as one block they ran together into
+  // "Zugangsschlüsselsk-proj-…" in the app's copy of the card.
+  it('keeps a shared-data label and its value apart', () => {
+    dom.window.document.querySelector('main')!.innerHTML = `<div data-codex-approval-surface="true"><div role="alert">
+      <div>ChatGPT erlauben, Chat On Steroids Core zu verwenden?</div><div>Zu den geteilten Daten gehören:</div>
+      <dl class="@container"><div class="grid"><dt>Zugangsschlüssel</dt><dd><span class="min-w-0"><span>sk-proj-FAKE0123</span></span></dd></div>
+      <div class="grid"><dt>Befehl</dt><dd><span>echo test</span></dd></div>
+      <div class="grid"><dd>ohne Label</dd></div><div class="grid"><dt>Nur Label</dt></div></dl></div>
+      <button>Ablehnen<kbd>Esc</kbd></button><button>Einmal zulassen<kbd>⏎</kbd></button></div>`;
+    expect(api.approvalCard()?.lines).toEqual(['ChatGPT erlauben, Chat On Steroids Core zu verwenden?', 'Zu den geteilten Daten gehören:',
+      'Zugangsschlüssel: sk-proj-FAKE0123', 'Befehl: echo test', 'ohne Label', 'Nur Label']);
+  });
+
   it('presses Deny or Allow once by their key hints, never the options menu, and only on that card', () => {
     const main = dom.window.document.querySelector('main')!;
     main.innerHTML = liveCard();
