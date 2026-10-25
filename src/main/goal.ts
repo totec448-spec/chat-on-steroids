@@ -57,6 +57,7 @@ import { writeDurableNow, writeDurableSnapshotSoon, writeDurableSoon } from './d
 import { goalHelperPromptLimit, noteGoalHelperUnanswered, resetGoalHelperSizeForTests } from './goal-helper-size.js';
 export { GOAL_HELPER_SIZE_STATE, restoreGoalHelperSize } from './goal-helper-size.js';
 import { logInfo, logWarn } from './logger.js';
+import { checkAutomaticSend, sendCheckRetryMs } from './send-check.js';
 import { getSecret, secretsRevision } from './secrets.js';
 import { findSessionByConversation, getSession, readEvents, readHandoff, readRecentEvents, turnHasMcpCall } from './session/store.js';
 import { foldProgress } from '../shared/session.js';
@@ -1651,6 +1652,30 @@ export function discardPreparedGoalDraft(conversationId: string, token: string):
   return true;
 }
 
+/**
+ * #1794: the person's send check sees a step before its page may type it. A hold keeps the step as
+ * drafted and asks again about the same text after a while; it ends without a step once the draft
+ * is no longer this chat's (Goal turned off, the page moved on, a newer turn).
+ */
+async function sendCheckAllows(draft: GoalDraft): Promise<boolean> {
+  const project = (await getSession(draft.sessionId))?.projectId ?? null;
+  const wait = () => new Promise(resolve => setTimeout(resolve, sendCheckRetryMs()));
+  for (let attempt = 1; ; attempt++) {
+    if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return false;
+    if (!getConfig().ui.sendCheckUrl) return true;
+    // Goal or Loop turned off for this chat: nothing to ask about until it is on again.
+    while (!goalArmedFor(draft.conversationId) || !getConfig().goal.enabled) {
+      await wait();
+      if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return false;
+    }
+    const verdict = await checkAutomaticSend({ kind: draft.mode === 'loop' ? 'loop-step' : 'goal-step', id: draft.token, attempt,
+      text: draft.reply, chat: { session: draft.sessionId, project, worker: null } });
+    if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return false;
+    if (verdict.allowed) return true;
+    await wait();
+  }
+}
+
 function settle(draft: GoalDraft, stage: GoalStage, error: string | null = null): void {
   // A draft that was superseded is no longer this chat's draft, and must not be able to
   // publish a reply into the one that replaced it.
@@ -2035,6 +2060,9 @@ async function run(draft: GoalDraft): Promise<void> {
     // mistakes a person leaves behind go in. After the NO_REPLY test above, never before it.
     draft.reply = draft.backend === 'templates' ? humanReply(decision.reply.slice(0, -GOAL_MARKER_INSTRUCTION.length)) + GOAL_MARKER_INSTRUCTION : humanReply(decision.reply);
     logInfo(`goal: drafted ${decision.reply.length} characters for ${draft.conversationId} with ${draft.model}`);
+    // The drafting deadline is spent; a send check may hold this step much longer.
+    clearTimeout(timer);
+    if (!await sendCheckAllows(draft)) return;
     // Its page types it: the message it comes back as is marked the app's (#1655).
     noteAutomaticReply(draft.conversationId, draft.reply);
     settle(draft, 'ready');

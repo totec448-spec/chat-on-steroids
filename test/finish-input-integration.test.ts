@@ -69,4 +69,30 @@ describe('finish producer to durable injection integration', () => {
     expect((await listInputs())[0]!.state).toBe('cancelled');
     expect((await offerToolInput(session.id, conversationId, randomUUID(), Date.now() + 20)).messages).toEqual([]);
   });
+
+  it.each([['allow', 1], ['hold', 0]] as const)('asks the send check before a Session Finish step is queued (%s)', async (verdict, queued) => {
+    // #1794: the step can reach ChatGPT in a tool result, so it is asked about before it is filed.
+    directory = await makeTempDir('clf-finish-send-check-');
+    initConfigPath(directory); initDurableStore(directory); initSessionStore(directory);
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, finishTool: true, finishAction: 'goal', sendCheckUrl: 'http://127.0.0.1:8123/check' } });
+    const asked: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+      asked.push(JSON.parse(String(init.body)));
+      return Response.json(verdict === 'allow' ? { allow: true } : { allow: false, reason: 'budget' });
+    }));
+    try {
+      const conversationId = randomUUID();
+      const session = await createSession({ conversationId, title: 'Finish send check' });
+      hooks.caller = { sessionId: session.id, conversationId };
+      await appendEvent(session.id, { source: 'extension', kind: 'turn_start', turnId: 'turn-one', time: 1000 });
+      await observeSessionModel(session.id, conversationId, 'gpt-6-pro', 1500);
+      await setGoalSwitchNow(conversationId, 'goal', true);
+      hooks.followup.mockResolvedValue('Inspect the remaining work');
+      await announceSessionFinish(session.id, 'Wrapping up');
+      await settleSessionFinishForTests();
+      expect(asked).toEqual([expect.objectContaining({ kind: 'goal-step', text: 'Inspect the remaining work', attempt: 1,
+        chat: { session: session.id, project: null, worker: null } })]);
+      expect(await listInputs()).toHaveLength(queued);
+    } finally { vi.unstubAllGlobals(); }
+  });
 });

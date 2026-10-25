@@ -37,6 +37,10 @@ export interface SendCheckDeps {
 
 /** How long a held send waits before the program is asked again. */
 export const SEND_CHECK_RETRY_MS = 30_000;
+let retryMs = SEND_CHECK_RETRY_MS;
+/** The wait before asking again about a held send that waits in place (a Goal or Loop step). */
+export function sendCheckRetryMs(): number { return retryMs; }
+export function setSendCheckRetryForTests(ms = SEND_CHECK_RETRY_MS): void { retryMs = ms; }
 const TIMEOUT_MS = 3_000;
 const MAX_REASON = 200;
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
