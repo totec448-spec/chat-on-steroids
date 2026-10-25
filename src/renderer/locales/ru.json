@@ -3296,6 +3296,7 @@
   "Held by your send check": "Задержано вашей проверкой отправки",
   "Held: your send check did not answer": "Задержано: ваша проверка отправки не ответила",
   "Check automatic sends": "Проверять автоматические отправки",
-  "Before each message the app sends by itself (Goal and Loop steps, automatic Continue, the fresh turn after a long one, workers), a program on this computer is asked whether it may go. Leave empty to turn this off. Messages you send are never asked about.": "Перед каждым сообщением, которое приложение отправляет само (шаги Цели и Цикла, автоматическое Continue, новый ход после длинного, воркеры), программа на этом компьютере решает, можно ли его отправить. Оставьте пустым, чтобы выключить. Сообщения, которые отправляете вы, никогда не проверяются.",
-  "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "Укажите http-адрес на этом компьютере с портом, например http://127.0.0.1:8080/check."
+  "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "Укажите http-адрес на этом компьютере с портом, например http://127.0.0.1:8080/check.",
+  "Ask a program on this computer before the app sends a message by itself. Empty: off.": "Спрашивает программу на этом компьютере, прежде чем приложение само отправит сообщение. Пусто: выключено.",
+  "It receives the full message text. If it says no or doesn't answer, the message waits.": "Она получает полный текст сообщения. Если она отказывает или не отвечает, сообщение ждёт."
 }

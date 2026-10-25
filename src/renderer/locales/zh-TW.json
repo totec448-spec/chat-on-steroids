@@ -3128,6 +3128,7 @@
   "Held by your send check": "已被你的傳送檢查暫緩",
   "Held: your send check did not answer": "已暫緩：你的傳送檢查沒有回應",
   "Check automatic sends": "檢查自動傳送",
-  "Before each message the app sends by itself (Goal and Loop steps, automatic Continue, the fresh turn after a long one, workers), a program on this computer is asked whether it may go. Leave empty to turn this off. Messages you send are never asked about.": "應用程式自行傳送的每則訊息(目標和循環步驟、自動繼續、長回合之後的新回合、worker)送出前,都會詢問這台電腦上的一個程式是否可以傳送。留空即關閉。你自己傳送的訊息從不詢問。",
-  "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "請使用這台電腦上含連接埠的 http 位址,例如 http://127.0.0.1:8080/check。"
+  "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "請使用這台電腦上含連接埠的 http 位址,例如 http://127.0.0.1:8080/check。",
+  "Ask a program on this computer before the app sends a message by itself. Empty: off.": "在應用程式自行傳送訊息之前詢問這台電腦上的一個程式。留空:關閉。",
+  "It receives the full message text. If it says no or doesn't answer, the message waits.": "該程式會收到訊息的完整文字。如果它拒絕或沒有回應,訊息會等待。"
 }

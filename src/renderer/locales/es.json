@@ -3240,6 +3240,7 @@
   "Held by your send check": "Retenido por tu comprobación de envío",
   "Held: your send check did not answer": "Retenido: tu comprobación de envío no respondió",
   "Check automatic sends": "Comprobar envíos automáticos",
-  "Before each message the app sends by itself (Goal and Loop steps, automatic Continue, the fresh turn after a long one, workers), a program on this computer is asked whether it may go. Leave empty to turn this off. Messages you send are never asked about.": "Antes de cada mensaje que la app envía por sí misma (pasos de Objetivo y Bucle, Continuación automática, el turno nuevo tras uno largo, workers), se pregunta a un programa de este ordenador si puede enviarse. Déjalo vacío para desactivarlo. Los mensajes que envías tú nunca se consultan.",
-  "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "Usa una dirección http de este ordenador con puerto, por ejemplo http://127.0.0.1:8080/check."
+  "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "Usa una dirección http de este ordenador con puerto, por ejemplo http://127.0.0.1:8080/check.",
+  "Ask a program on this computer before the app sends a message by itself. Empty: off.": "Pregunta a un programa de este ordenador antes de que la app envíe un mensaje por sí misma. Vacío: desactivado.",
+  "It receives the full message text. If it says no or doesn't answer, the message waits.": "Recibe el texto completo del mensaje. Si dice que no o no responde, el mensaje espera."
 }
