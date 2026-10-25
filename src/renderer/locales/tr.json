@@ -3174,5 +3174,13 @@
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "Bu bilgisayardaki kayıtlı anahtarlar okunamıyor, bu yüzden yedeğin anahtarları eklenemiyor. Onlar olmadan içe aktar.",
   "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Ayarlar içe aktarıldı, ancak kayıtlı anahtarlar saklanamadı. Onları Ayarlar'da yeniden ekle.",
   "For chats that need you, failures and finished chats. Follows the quiet hours below.": "Sizi bekleyen sohbetler, hatalar ve biten sohbetler için. Aşağıdaki sessiz saatlere uyar.",
-  "No phone notifications and no sounds in these hours.": "Bu saatlerde telefon bildirimi ve ses yok."
+  "No phone notifications and no sounds in these hours.": "Bu saatlerde telefon bildirimi ve ses yok.",
+  "Phone notifications, a settings backup, keys kept from ChatGPT, and high contrast.": "Telefon bildirimleri, ayar yedeği, ChatGPT'den gizlenen anahtarlar ve yüksek kontrast.",
+  "Get a note on your phone when a chat needs you or a long chat finishes.": "Bir sohbetin size ihtiyacı olduğunda ya da uzun bir sohbet bittiğinde telefonunuza bildirim gelir.",
+  "Settings backup": "Ayar yedeği",
+  "Move your settings to another computer; saved keys only if you choose.": "Ayarlarınızı başka bir bilgisayara taşıyın; kayıtlı anahtarlar yalnızca siz isterseniz.",
+  "Keys stay with you": "Anahtarlar sizde kalır",
+  "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Araçların döndürdüğü içerikteki API anahtarları ve tokenlar, ChatGPT görmeden önce gizlenir.",
+  "Easier to read": "Okuması daha kolay",
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Yüksek kontrast, sekiz vurgu rengi, satır aralığı ve daha okunaklı bir yazı tipi."
 }

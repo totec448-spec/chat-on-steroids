@@ -3118,5 +3118,13 @@
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "Không đọc được các khóa đã lưu trên máy này, nên không thể thêm các khóa của bản sao lưu. Hãy nhập mà không có chúng.",
   "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Đã nhập cài đặt, nhưng không thể lưu các khóa. Hãy thêm lại chúng trong Cài đặt.",
   "For chats that need you, failures and finished chats. Follows the quiet hours below.": "Cho cuộc trò chuyện cần bạn, lỗi và cuộc trò chuyện đã xong. Tuân theo giờ yên lặng bên dưới.",
-  "No phone notifications and no sounds in these hours.": "Không có thông báo điện thoại và không có âm thanh trong những giờ này."
+  "No phone notifications and no sounds in these hours.": "Không có thông báo điện thoại và không có âm thanh trong những giờ này.",
+  "Phone notifications, a settings backup, keys kept from ChatGPT, and high contrast.": "Thông báo trên điện thoại, sao lưu cài đặt, ẩn khóa khỏi ChatGPT và độ tương phản cao.",
+  "Get a note on your phone when a chat needs you or a long chat finishes.": "Nhận thông báo trên điện thoại khi một cuộc trò chuyện cần bạn hoặc một cuộc trò chuyện dài đã xong.",
+  "Settings backup": "Sao lưu cài đặt",
+  "Move your settings to another computer; saved keys only if you choose.": "Mang cài đặt sang máy tính khác; khóa đã lưu chỉ khi bạn chọn.",
+  "Keys stay with you": "Khóa ở lại với bạn",
+  "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Khóa API và token trong kết quả công cụ trả về được ẩn trước khi ChatGPT thấy.",
+  "Easier to read": "Dễ đọc hơn",
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Độ tương phản cao, tám màu nhấn, giãn dòng và phông chữ dễ đọc hơn."
 }

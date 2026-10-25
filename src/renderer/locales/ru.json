@@ -3286,5 +3286,13 @@
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "Сохранённые на этом компьютере ключи не читаются, поэтому ключи из резервной копии добавить нельзя. Импортируйте без них.",
   "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Настройки импортированы, но сохранить ключи не удалось. Добавьте их снова в настройках.",
   "For chats that need you, failures and finished chats. Follows the quiet hours below.": "Для чатов, которым вы нужны, сбоев и завершённых чатов. Соблюдает тихие часы ниже.",
-  "No phone notifications and no sounds in these hours.": "В эти часы нет уведомлений на телефон и нет звуков."
+  "No phone notifications and no sounds in these hours.": "В эти часы нет уведомлений на телефон и нет звуков.",
+  "Phone notifications, a settings backup, keys kept from ChatGPT, and high contrast.": "Уведомления на телефон, резервная копия настроек, ключи скрыты от ChatGPT и высокая контрастность.",
+  "Get a note on your phone when a chat needs you or a long chat finishes.": "Сообщение на телефон, когда вы нужны чату или длинный чат завершился.",
+  "Settings backup": "Резервная копия настроек",
+  "Move your settings to another computer; saved keys only if you choose.": "Перенесите настройки на другой компьютер; сохранённые ключи — только если захотите.",
+  "Keys stay with you": "Ключи остаются у вас",
+  "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "API-ключи и токены в том, что возвращают инструменты, скрываются до того, как их увидит ChatGPT.",
+  "Easier to read": "Легче читать",
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Высокая контрастность, восемь акцентных цветов, межстрочный интервал и более разборчивый шрифт."
 }
