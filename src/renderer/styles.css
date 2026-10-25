@@ -2917,6 +2917,7 @@ input[readonly] {
   white-space: normal;
   line-height: calc(1.5 * var(--line-spacing, 1));
 }
+.msg.rich:has(.markdown-dil-photo-row) { container: message-content / inline-size; }
 
 /* Plain messages keep independent bidi paragraphs, including mixed-language pastes.
    Direction stays on text surfaces; the app shell and action rows do not mirror. */
@@ -3130,6 +3131,8 @@ input[readonly] {
 .msg.rich .markdown-dil-chart-note { color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); margin: 8px 0 0; }
 @container (max-width: 330px) {
   .msg.rich .markdown-dil-grid { grid-template-columns: 1fr; }
+}
+@container message-content (max-width: 330px) {
   .msg.rich .markdown-dil-photo-row { flex-direction: column; }
 }
 

@@ -4229,7 +4229,7 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
   // recorded rendering is the faithful presentation; without one, the directive lines are dropped.
   if (hasProviderDirective(text)) {
     const plain = withoutProviderDirectives(text);
-    if (resolvedCapture(capture)) return renderedMessage(capture, plain);
+    if (resolvedCapture(capture) && charts.length === 0) return renderedMessage(capture, plain);
     text = plain || t('This reply points to content from another message that was not recorded.');
   }
   const citations = text.includes('\uE200') ? citationLabels(text, capture) : new Map<string, string>();
