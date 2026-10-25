@@ -2261,6 +2261,35 @@ it('shows startup bind errors in the existing Setup status and clears them after
   expect(status.textContent).toContain('8768'); expect(status.textContent).not.toContain('EADDRINUSE');
 });
 
+it('keeps a switch the person changed while its save is pending, even after focus moved and an older state arrived', async () => {
+  // CodeRabbit on #1443: an older state push used to reset the switch once focus had left it,
+  // and the next save then read the reset value and undid the person's choice.
+  let release!: (result: any) => void; const calls: any[] = [];
+  const mounted = await mountChat({}, [], { saveSettings: (patch: any) => {
+    calls.push(structuredClone(patch));
+    const answer = { ok: true, data: { ...mounted.state, config: { ...mounted.state.config, ...structuredClone(patch) } } };
+    if (calls.length === 1) return new Promise(resolve => { release = () => resolve(answer); });
+    return Promise.resolve(answer);
+  } });
+  const w = mounted.window;
+  const developer = w.document.getElementById('developerMode') as HTMLInputElement;
+  const background = w.document.getElementById('backgroundChats') as HTMLInputElement;
+  // As the app's own config always does, the stored state names the switch's value.
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, developerMode: false } } });
+  expect(developer.checked).toBe(false);
+  developer.focus(); developer.checked = true; developer.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  developer.blur(); background.focus();
+  // A state push from before the save (it still says off) lands while the save is pending.
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, developerMode: false } } });
+  expect(developer.checked).toBe(true);
+  background.checked = true; background.dispatchEvent(new w.Event('change', { bubbles: true }));
+  release(undefined);
+  await waitFor(() => expect(calls).toHaveLength(2)); await settle();
+  expect(calls[1].ui.developerMode).toBe(true);
+  expect(developer.checked).toBe(true);
+});
+
 it('restores a rejected focused port and prevents an unrelated queued save from retrying it', async () => {
   let release!: (result: any) => void; const calls: any[] = [];
   const mounted = await mountChat({}, [], { saveSettings: (patch: any, base: any) => {
