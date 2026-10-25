@@ -5,6 +5,8 @@ import { exportImage, ImageExportError } from '../image-export.js';
 import { awaitRequestCorrelation } from '../session/correlation.js';
 import { announceSessionFinish, sessionFinishDeadline } from '../session/finish.js';
 import { getConfig } from '../config.js';
+import { createHash } from 'node:crypto';
+import { checkAutomaticSend } from '../send-check.js';
 import { liveConnectorName } from './surfaces.js';
 /**
  * The Core connector: reading, changing and running code on this PC.
@@ -1477,6 +1479,22 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           // Before any slot is reserved: a sleeping worker whose chat has since crossed the
           // context ceiling is not revivable, and this is the call that would otherwise wake it.
           const caller = await callerNow(startedAt, { runId: input.run_id, member: true });
+          // #1794: a message to a worker is a send the app makes by itself, so the person's send
+          // check sees each one first. One held message holds the whole call: nothing is queued.
+          if (getConfig().ui.sendCheckUrl) {
+            const source = caller.conversationId ? await findSessionByConversation(caller.conversationId) : null;
+            for (const item of items) {
+              if (item.to === PRIME_ID) continue;
+              const id = createHash('sha256').update(`${caller.conversationId}:${item.to}:${item.text}`).digest('hex').slice(0, 32);
+              const verdict = await checkAutomaticSend({ kind: 'worker-message', id, attempt: 1, text: item.text,
+                chat: { session: source?.id ?? null, project: source?.projectId ?? null, worker: item.to } });
+              if (!verdict.allowed) {
+                return fail(verdict.answered
+                  ? `The person's send check held this message to ${item.to}${verdict.reason ? `: ${verdict.reason}` : ''}. Nothing was queued.`
+                  : `The person's send check did not answer about this message to ${item.to}. Nothing was queued.`);
+              }
+            }
+          }
           await measureSleepingWorkers(caller);
           // One call, one identity resolution, one all-or-nothing delivery: a prime
           // redirecting its whole run cannot end up with two of its three messages sent.
