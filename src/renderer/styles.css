@@ -3098,7 +3098,7 @@ input[readonly] {
   text-align: end; padding-bottom: var(--markdown-dil-label-height); color: var(--soft); font-size: calc(11px * var(--text-scale, 1));
 }
 .msg.rich .markdown-dil-chart-guide > span {
-  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0; overflow: visible; white-space: nowrap;
 }
 .msg.rich .markdown-dil-chart-bars {
   display: flex; flex: 1; gap: 10px; align-items: stretch; min-width: 0;
