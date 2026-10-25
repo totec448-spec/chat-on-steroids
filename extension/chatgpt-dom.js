@@ -948,11 +948,17 @@ var CLF_DOM = (() => {
       // A term or value keeps what it wraps (a div inside a dd), so it is chosen before a plain block.
       const block = element => element.closest('dt, dd') || element.closest('div, p, li, h1, h2, h3, h4, h5, h6');
       const groups = new Map();
+      // Inside one term or value, text from two separate block wrappers stays two words.
+      const wrapper = new Map();
       const walker = document.createTreeWalker(clone, NodeFilter.SHOW_TEXT);
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
         const owner = node.parentElement && block(node.parentElement);
         if (!owner) continue;
-        groups.set(owner, (groups.get(owner) || '') + node.textContent);
+        const inner = node.parentElement.closest('div, p, li, h1, h2, h3, h4, h5, h6');
+        const part = owner.contains(inner) ? inner : owner;
+        const gap = wrapper.has(owner) && wrapper.get(owner) !== part ? ' ' : '';
+        wrapper.set(owner, part);
+        groups.set(owner, (groups.get(owner) || '') + gap + node.textContent);
       }
       const push = line => { if (line && lines.at(-1) !== line && lines.length < 8) lines.push(line); };
       // A label waits for the value of its own row; a second label, another row or any other block
