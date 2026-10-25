@@ -218,6 +218,9 @@
   function setData(node, key, value) { if (node.dataset[key] !== value) node.dataset[key] = value; }
   function setHidden(node, hidden) { if (node.hidden !== hidden) node.hidden = hidden; }
 
+  /** When this page last became hidden, for the diagnostics status; null while it is visible. */
+  let hiddenSince = typeof document !== 'undefined' && document.visibilityState === 'hidden' ? Date.now() : null;
+
   function listen(target, type, listener, options) {
     target.addEventListener(type, listener, options);
     rememberCleanup(() => target.removeEventListener(type, listener, options));
@@ -14278,6 +14281,9 @@
           queueBytes,
           ...currentRequestStatus(),
           overwrite: RENDER_STREAM === true,
+          // #1752/#1837: a hidden page renders late; the report says whether it was, and since when.
+          visibility: document.visibilityState,
+          hiddenForMs: hiddenSince === null ? 0 : Math.max(0, Date.now() - hiddenSince),
           // Kept in the diagnostics shape for older popups. Native relabelling was retired;
           // app-owned activity now appears only in the canonical chronological stream.
           painted: false,
@@ -14401,6 +14407,12 @@
       return false;
     };
     chrome.runtime.onMessage.addListener(runtimeMessage);
+    // The status says how long the page has been hidden; it is tracked wherever the status is answered.
+    if (typeof document !== 'undefined' && document.addEventListener) {
+      listen(document, 'visibilitychange', () => {
+        hiddenSince = document.visibilityState === 'hidden' ? (hiddenSince ?? Date.now()) : null;
+      });
+    }
     if (typeof chrome.runtime.onMessage.removeListener === 'function') {
       rememberCleanup(() => chrome.runtime.onMessage.removeListener(runtimeMessage));
     }
