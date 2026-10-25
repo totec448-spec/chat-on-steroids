@@ -9,7 +9,7 @@
 import { $, el } from './dom.js';
 import { t, ui } from './i18n.js';
 import { closeRowMenu } from './row-menu.js';
-import { holdToTalkShortcut, holdToTalkSupported, isMac, primaryShiftShortcut, primaryShortcut } from './shortcuts.js';
+import { controlShiftShortcut, holdToTalkShortcut, holdToTalkSupported, isMac, primaryShiftShortcut, primaryShortcut } from './shortcuts.js';
 
 export interface ShortcutRow {
   label: () => string;
@@ -24,9 +24,10 @@ export interface ShortcutGroup { title: () => string; column: 1 | 2; rows: Short
 
 const shift = (key: string): string => isMac() ? `⇧${key}` : `${t('Shift')}+${key}`;
 const alt = (key: string): string => isMac() ? `⌥${key}` : `Alt+${key}`;
-/** Ctrl on every system, as the chord is handled; the key names follow the UI language ("Strg"). */
-const ctrl = (key: string): string => `${t('Ctrl')}+${key}`;
-const ctrlShift = (key: string): string => `${t('Ctrl')}+${t('Shift')}+${key}`;
+/** Control on every system, as the chord is handled: "⌃Tab" on macOS, as the empty side panel prints
+ * its keys; elsewhere the key names follow the UI language ("Strg"). */
+const ctrl = (key: string): string => isMac() ? `⌃${key}` : `${t('Ctrl')}+${key}`;
+const ctrlShift = controlShiftShortcut;
 
 /** The shortcuts, grouped as the dialog shows them; `enterSends` is the Enter key setting. */
 export function shortcutGroups(enterSends: () => boolean): ShortcutGroup[] {
