@@ -362,7 +362,7 @@ worker history) still gets the language and keys, and the reply carries its mess
 An unreadable key store refuses an import with keys before anything changes; a key write that
 still fails after the settings were written is a warning ("…could not be stored"), `keyCount` 0.
 A short export passphrase is refused before any key is read. Keys
-travel only when ticked: `openaiApiKey`, `openRouterApiKey`, `customProviderApiKey`, `plugin:*`
+travel only when ticked: `openaiApiKey`, `openRouterApiKey`, `customProviderApiKey`, `ntfyToken` (#1800), `plugin:*`
 (never `bridgeToken`, `setup:*`, `mcp:path:*`), sealed with scrypt (N 2^17, r 8, p 1) and
 AES-256-GCM (16-byte tag, AAD = format/version); a crafted file's scrypt cost is bounded. Keys
 never reach the renderer. A backup's `ui.language` also switches the renderer's language.
