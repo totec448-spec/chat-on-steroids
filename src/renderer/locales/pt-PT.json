@@ -3227,5 +3227,13 @@
   "Your settings changed after the file was chosen. Choose it again.": "As suas definições mudaram depois de o ficheiro ser escolhido. Escolha-o novamente.",
   "This backup has a setting this version does not accept, so nothing was imported.": "Esta cópia de segurança tem uma definição que esta versão não aceita, por isso nada foi importado.",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "As chaves guardadas neste computador não podem ser lidas, por isso as chaves da cópia de segurança não podem ser adicionadas. Importe sem elas.",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "As definições foram importadas, mas as chaves guardadas não puderam ser armazenadas. Adicione-as novamente nas Definições."
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "As definições foram importadas, mas as chaves guardadas não puderam ser armazenadas. Adicione-as novamente nas Definições.",
+  "Phone notifications, a settings backup, keys kept from ChatGPT, and high contrast.": "Notificações no telemóvel, cópia de segurança das definições, chaves escondidas do ChatGPT e alto contraste.",
+  "Get a note on your phone when a chat needs you or a long chat finishes.": "Receba um aviso no telemóvel quando um chat precisa de si ou um chat longo termina.",
+  "Settings backup": "Cópia de segurança das definições",
+  "Move your settings to another computer; saved keys only if you choose.": "Leve as suas definições para outro computador; as chaves guardadas só se quiser.",
+  "Keys stay with you": "As suas chaves ficam consigo",
+  "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Chaves de API e tokens no que as ferramentas devolvem são escondidos antes de o ChatGPT os ver.",
+  "Easier to read": "Mais fácil de ler",
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Alto contraste, oito cores de destaque, espaçamento entre linhas e um tipo de letra mais legível."
 }

@@ -3171,5 +3171,13 @@
   "Your settings changed after the file was chosen. Choose it again.": "Deine Einstellungen haben sich geändert, nachdem die Datei gewählt wurde. Wähle sie erneut.",
   "This backup has a setting this version does not accept, so nothing was imported.": "Diese Sicherung enthält eine Einstellung, die diese Version nicht annimmt, daher wurde nichts importiert.",
   "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them.": "Die gespeicherten Schlüssel auf diesem Computer lassen sich nicht lesen, daher können die Schlüssel der Sicherung nicht hinzugefügt werden. Importiere ohne sie.",
-  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Die Einstellungen wurden importiert, aber die gespeicherten Schlüssel ließen sich nicht ablegen. Füge sie in den Einstellungen erneut hinzu."
+  "The settings were imported, but the saved keys could not be stored. Add them again in Settings.": "Die Einstellungen wurden importiert, aber die gespeicherten Schlüssel ließen sich nicht ablegen. Füge sie in den Einstellungen erneut hinzu.",
+  "Phone notifications, a settings backup, keys kept from ChatGPT, and high contrast.": "Benachrichtigungen aufs Handy, Einstellungen sichern, Schlüssel vor ChatGPT verborgen und hoher Kontrast.",
+  "Get a note on your phone when a chat needs you or a long chat finishes.": "Eine Nachricht aufs Handy, wenn ein Chat dich braucht oder ein langer Chat fertig ist.",
+  "Settings backup": "Einstellungen sichern",
+  "Move your settings to another computer; saved keys only if you choose.": "Nimm deine Einstellungen auf einen anderen Computer mit; gespeicherte Schlüssel nur, wenn du willst.",
+  "Keys stay with you": "Schlüssel bleiben bei dir",
+  "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "API-Schlüssel und Tokens in dem, was Tools zurückgeben, werden verborgen, bevor ChatGPT sie sieht.",
+  "Easier to read": "Leichter zu lesen",
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Hoher Kontrast, acht Akzentfarben, Zeilenabstand und eine besser lesbare Schrift."
 }
