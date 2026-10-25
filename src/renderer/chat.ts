@@ -4357,7 +4357,12 @@ function staticBarChart(raw: string): HTMLElement | null {
   const unit = typeof series.valueSuffix === 'string' && series.valueSuffix.length <= 8 ? series.valueSuffix : '';
   const title = typeof series.label === 'string' && series.label.length <= 120 ? series.label : '';
   const numbers = new Intl.NumberFormat(currentLanguage());
+  const compactNumbers = new Intl.NumberFormat(currentLanguage(), { notation: 'compact', maximumFractionDigits: 1 });
   const valueText = (value: number): string => `${numbers.format(value)}${unit}`;
+  // Never visually shorten an axis number mid-digit: a cut "500,000,00…" can
+  // look like a different magnitude. Keep its exact value as tooltip/ARIA.
+  const guideText = (value: number): string =>
+    numbers.format(value).length > 7 ? `${compactNumbers.format(value)}${unit}` : valueText(value);
   const figure = el('figure', 'markdown-dil-chart');
   figure.setAttribute('role', 'img');
   // Reuse source labels instead of introducing a hard-coded English fallback.
@@ -4367,8 +4372,10 @@ function staticBarChart(raw: string): HTMLElement | null {
   const plot = el('div', 'markdown-dil-chart-plot');
   const guide = el('div', 'markdown-dil-chart-guide');
   for (const value of [maximum, maximum / 2, 0]) {
-    const label = el('span', '', valueText(value));
-    label.title = label.textContent ?? '';
+    const fullValue = valueText(value);
+    const label = el('span', '', guideText(value));
+    label.title = fullValue;
+    label.setAttribute('aria-label', fullValue);
     guide.append(label);
   }
   const columns = el('div', 'markdown-dil-chart-bars');

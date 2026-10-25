@@ -63,6 +63,9 @@ it('keeps recorded DIL surfaces on CoS tokens across themes and high-contrast pa
   expect(rule('.msg.rich .markdown-dil-chart')).toContain('var(--text-scale, 1)');
   expect(rule('.msg.rich .markdown-dil-chart-x')).toContain('var(--markdown-dil-label-height)');
   expect(rule('.msg.rich .markdown-dil-chart-guide')).toContain('var(--markdown-dil-label-height)');
+  const guideLabel = rule('.msg.rich .markdown-dil-chart-guide > span');
+  expect(guideLabel).toContain('overflow: visible');
+  expect(guideLabel).not.toContain('text-overflow: ellipsis');
   expect(css).toContain('@container (max-width: 330px)');
   for (const page of ['#ffffff', '#000000']) {
     const tokens = paletteTokens(page, '#ffcc00', 100, true);

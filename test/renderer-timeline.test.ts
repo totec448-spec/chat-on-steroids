@@ -8265,8 +8265,34 @@ describe('charts, diagrams and illustrated Markdown from recorded DIL', () => {
     expect(first.textContent).toBe(label);
     expect(first.title).toBe(label);
     const guide = figure.querySelector<HTMLElement>('.markdown-dil-chart-guide span')!;
-    expect(guide.textContent).toBe('1,000,000,000,000');
-    expect(guide.title).toBe(guide.textContent);
+    expect(guide.textContent).toBe('1T');
+    expect(guide.title).toBe('1,000,000,000,000');
+    expect(guide.getAttribute('aria-label')).toBe('1,000,000,000,000');
+    expect([...figure.querySelectorAll('.markdown-dil-chart-guide span')].map(node => node.textContent))
+      .toEqual(['1T', '500B', '0']);
+    expect([...figure.querySelectorAll('.markdown-dil-chart-guide span')].every(node => !node.textContent?.includes('…')))
+      .toBe(true);
+  });
+
+  it('uses compact y-axis guides in German without losing the exact localized tooltip or aria value', async () => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value', label: 'Beispiel' }],
+      data: [{ group: 'Erste', value: 1e12 }, { group: 'Zweite', value: 5e11 }], yAxisMax: 1e12
+    } } })}\uE201`;
+    await boot([observation('Initial message.')]);
+    const { setLanguage } = await import('../src/renderer/i18n.js');
+    const { renderedMarkdown } = await import('../src/renderer/chat.js');
+    setLanguage('de');
+    try {
+      const figure = renderedMarkdown(widget).querySelector('.markdown-dil-chart')!;
+      const guides = [...figure.querySelectorAll<HTMLElement>('.markdown-dil-chart-guide span')];
+      expect(guides.map(label => label.textContent)).toEqual(['1 Bio.', '500 Mrd.', '0']);
+      expect(guides.map(label => label.title)).toEqual(['1.000.000.000.000', '500.000.000.000', '0']);
+      expect(guides.map(label => label.getAttribute('aria-label')))
+        .toEqual(['1.000.000.000.000', '500.000.000.000', '0']);
+      expect(figure.getAttribute('aria-label')).toContain('Erste 1.000.000.000.000');
+      expect(guides.every(label => !label.textContent?.includes('…'))).toBe(true);
+    } finally { setLanguage('en'); }
   });
 
   it('recovers the side-by-side table workflow only when its entire text matches', async () => {
