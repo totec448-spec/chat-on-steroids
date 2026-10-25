@@ -290,6 +290,66 @@ it("files an automatic Continue in the person's own words when they set a Contin
   } finally { clock.mockRestore(); }
 });
 
+it('asks the send check before handing out an automatic Continue, holds it on a refusal and asks again 30 s later', async () => {
+  // #1794: the local program is asked before every send the app makes by itself, never for a typed one.
+  const http = await import('node:http');
+  const asked: Array<Record<string, any>> = [];
+  let allow = false;
+  const server = http.createServer((req, res) => {
+    let raw = ''; req.on('data', chunk => { raw += chunk; });
+    req.on('end', () => {
+      asked.push(JSON.parse(raw));
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(allow ? { allow: true } : { allow: false, reason: 'quiet hours' }));
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as { port: number }).port;
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      ui: { ...defaultConfig().ui, sendCheckUrl: `http://127.0.0.1:${port}/check` } });
+    const { conversationId, session, row } = await silentTurnContinue('Send check holds a Continue', ms => now += ms);
+    expect((await post('/input/claim', { id: row.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input).toBeNull();
+    expect(asked).toEqual([{ version: 1, kind: 'continue', id: row.id, chat: { session: session.id, project: null, worker: null }, text: row.text, attempt: 1 }]);
+    expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ state: 'queued',
+      sendCheck: { attempt: 1, reason: 'quiet hours', answered: true, nextAt: now + 30_000 } });
+    // Held: not offered to a page, and not taken for a page that failed to pick it up (no reload).
+    expect((await input.pendingBrowserInputs()).some(item => item.id === row.id)).toBe(false);
+    expect((await input.pendingQueuedPickups()).some(item => item.inputId === row.id)).toBe(false);
+    // 30 s later it is offered again, and the program is asked again with the next attempt.
+    now += 30_001; allow = true;
+    expect((await input.pendingBrowserInputs()).some(item => item.id === row.id)).toBe(true);
+    const claimed = (await post('/input/claim', { id: row.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input;
+    expect(claimed).toMatchObject({ id: row.id });
+    expect(asked.at(-1)).toMatchObject({ kind: 'continue', attempt: 2 });
+    // A message the person typed is never asked about.
+    const before = asked.length;
+    const typed = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'typed by the person' });
+    await post('/input/claim', { id: typed.id, owner: 'a-document', conversationId, requiresAuthorization: true });
+    expect(asked).toHaveLength(before);
+  } finally {
+    clock.mockRestore();
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
+it('releases a held automatic send at once when the send check address is cleared', async () => {
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    // Nothing listens there: no answer holds the send.
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      ui: { ...defaultConfig().ui, sendCheckUrl: 'http://127.0.0.1:9/check' } });
+    const { conversationId, row } = await silentTurnContinue('Send check cleared', ms => now += ms);
+    expect((await post('/input/claim', { id: row.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input).toBeNull();
+    expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ sendCheck: { attempt: 1, answered: false, reason: '' } });
+    expect((await input.pendingBrowserInputs()).some(item => item.id === row.id)).toBe(false);
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+    expect((await input.pendingBrowserInputs()).some(item => item.id === row.id)).toBe(true);
+    expect((await post('/input/claim', { id: row.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input).toMatchObject({ id: row.id });
+  } finally { clock.mockRestore(); }
+});
+
 it('ends a Continue the page refuses before claiming because its answer is finished', async () => {
   // Measured 2026-10-02: a Continue filed for a turn whose final the app had missed was refused by
   // every page before claiming, because ChatGPT showed that final. Nothing was reported, so the

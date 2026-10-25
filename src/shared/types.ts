@@ -179,6 +179,8 @@ export interface UiPrefs {
   playfulContinue?: boolean;
   /** The person's own words in place of the built-in automatic Continue phrase (silence recovery only). Unset means the built-in phrases. */
   customContinue?: string;
+  /** #1794: local program asked before each automatic send (Goal/Loop step, Continue, recovery, fresh turn, worker); empty = off. */
+  sendCheckUrl?: string;
   /** Keep the chat at its end while it grows, here and on ChatGPT, until the reader scrolls up. On unless false. */
   followOutput?: boolean;
   /** Add the Chat On Steroids Core mention to the user's own prompts sent from the app. On unless false. */
