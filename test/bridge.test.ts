@@ -4063,6 +4063,26 @@ describe('capturing a sent handoff from the recorder', () => {
     expect((await sessionStoreModule.readHandoff(sessionId, handoffId!))?.text).toContain('carry on');
   });
 
+  // #1852, the same gap for Compact & Resume: chat A's page in a browser that is not the chosen one
+  // would open chat B there, and its page is refused as not chosen. B stays for the chosen browser.
+  it('hands chat B to no page in a browser that is not the chosen one', async () => {
+    const chrome = 'c'.repeat(32), builtIn = 'd'.repeat(32);
+    const before = getConfig().ui.chatBrowser;
+    await pair();
+    try {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+      await request('GET', '/status', { browser: builtIn, host: 'cos' });
+      const conversationId = 'c0c0c0c0-7870-4000-8000-000000000009';
+      const { token, anchor } = await sentHandoff(conversationId);
+      await request('POST', '/events', { body: { conversationId, events: generation('handoff-turn', 'assistant-final', `carry on\n\n${SAMPLE_BRIEF}`) } });
+      const bound = await request('POST', '/compact', { body: { conversationId, token, sourceMessageId: anchor }, browser: chrome, host: 'browser' });
+      expect(bound.body).toMatchObject({ bound: true, stored: true });
+      expect(bound.body.placement).toBeNull();
+    } finally {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: before } });
+    }
+  });
+
   it('keeps over 120 KB of a final handoff through /events, overflow storage and capture', async () => {
     await pair();
     const conversationId = 'c0c0c0c0-7870-4000-8000-000000000005';
@@ -8365,11 +8385,13 @@ describe('a worker chat that never opens', () => {
           expect(activity.body.placement).toBeNull();
           await new Promise(resolve => setTimeout(resolve, 25));
         }
+        // Said once, not once per poll, and only because a tab was waiting for this chat.
+        expect(getLog().filter(entry => entry.message.includes('/activity withheld a tab to open')).length).toBe(1);
         let placement: any;
         await vi.waitFor(async () => {
           placement ||= (await request('GET', '/status', { browser: builtIn, host: 'cos' })).body.placement;
           expect(placement?.id).toBeTruthy();
-        });
+        }, { timeout: 15_000, interval: 50 });
       } finally { const closed = once(socket, 'close'); socket.close(); await closed; }
     } finally {
       await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: before } });
