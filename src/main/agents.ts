@@ -164,6 +164,11 @@ export function primeOwnerSentence(caller: Caller, runId: string): string {
     'such as Codex sends every tool call as one) cannot reach it, and its results will not arrive there. ';
 }
 
+/** Whether a caller is known only by its own request id: no chat the app could identify, no local owner. */
+export function isRequestOnlyCaller(caller: Caller): boolean {
+  return requestOnlyCaller(exactCaller(caller));
+}
+
 /** The refusal for a caller outside every family it named or could own. */
 function busyFor(caller: Caller): AgentsBusyError {
   return requestOnlyCaller(exactCaller(caller)) ? new NoChatError() : new AgentsBusyError();
