@@ -3424,7 +3424,8 @@ neither are Stop or anything clicked in ChatGPT.
     keeps the draft and asks again every 30 s with the same `id` (the draft token); it stops asking
     while the chat's Goal/Loop is off and ends when the draft is no longer this chat's.
   - Session Finish steps: in `finish.ts` before `enqueueInput`, asked once, because the step can reach
-    ChatGPT in that tool call's own result. A hold queues nothing and the result says so.
+    ChatGPT in that tool call's own result. A hold queues nothing and releases the finish hold, so
+    ChatGPT finishes its answer instead of calling session_finish again to be asked again.
   - Worker start and wake: in `/commands/redeem` after the text is final. A hold answers the page
     `503 send_check_held` (retryable), asks at most every 30 s, and sets `lastError`, so a command
     whose deadline ends while held reports the hold. An allowed text is not asked about again.

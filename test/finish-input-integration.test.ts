@@ -93,6 +93,9 @@ describe('finish producer to durable injection integration', () => {
       expect(asked).toEqual([expect.objectContaining({ kind: 'goal-step', text: 'Inspect the remaining work', attempt: 1,
         chat: { session: session.id, project: null, worker: null } })]);
       expect(await listInputs()).toHaveLength(queued);
+      // Held, nothing more is coming: the finish hold is released so ChatGPT can finish its answer.
+      const { getSession } = await import('../src/main/session/store.js');
+      expect((await getSession(session.id))?.finishTurn?.released ?? false).toBe(verdict === 'hold');
     } finally { vi.unstubAllGlobals(); }
   });
 });
