@@ -7371,6 +7371,7 @@ export function chatSettingsPatch(current: Config): {
       loopBackend: $<HTMLSelectElement>('loopBackend').value as Config['goal']['loopBackend'],
       helperModel: $<HTMLSelectElement>('helperModel').value || current.goal.helperModel || DEFAULT_HELPER_CHAT_MODEL,
       helperReasoning: ($<HTMLSelectElement>('helperReasoning').value || current.goal.helperReasoning || 'high') as Config['goal']['helperReasoning'],
+      reviewerModel: $<HTMLSelectElement>('goalReviewer').value,
       provider: {
         kind: ($<HTMLSelectElement>('goalProvider').value || current.goal.provider?.kind || 'openrouter') as Config['goal']['provider']['kind'],
         baseUrl: $<HTMLInputElement>('goalBaseUrl').value
@@ -7772,6 +7773,7 @@ const CHAT_INPUTS = [
   'goalBackend',
   'loopBackend',
   'helperModel', 'helperReasoning',
+  'goalReviewer',
   'autoCompact',
   'autoCompactTokens',
   'maWorkers', 'globalMaWorkers',
@@ -7912,6 +7914,8 @@ export function chatApply(state: AppState, previous?: Config): void {
   // again matched no option and showed those settings blank (2.1.31 release check).
   applyChatValue($<HTMLSelectElement>('goalBackend'), config.goal.backend ?? 'chatgpt', previous?.goal.backend);
   applyChatValue($<HTMLSelectElement>('loopBackend'), config.goal.loopBackend ?? 'chatgpt', previous?.goal.loopBackend);
+  // The step reviewer is a worker chat (#1832): chosen while Sub-agents are off, it says so and offers them.
+  $('goalReviewerWorkersRow').hidden = !config.goal.reviewerModel || config.multiAgent.enabled;
   applyGoal(state, previous);
 
   // Extension bridge. Connecting is automatic, so this reports rather than asks.
@@ -9393,6 +9397,13 @@ export function initChat(next: Deps): void {
   }
 
   wireGoal(() => deps.save());
+  // Only the person's press turns Sub-agents on for the reviewer, through Home's own switch and save.
+  $('goalReviewerWorkers').addEventListener('click', () => {
+    const workers = $<HTMLInputElement>('homeMaEnabled');
+    if (workers.checked) return;
+    workers.checked = true;
+    workers.dispatchEvent(new Event('change', { bubbles: true }));
+  });
 
   $('bridgeUnpair').addEventListener('click', async () => {
     const state = await run(api.unpairExtension());

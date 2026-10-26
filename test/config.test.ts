@@ -873,6 +873,19 @@ describe('the goal loop settings', () => {
     expect(config.goal.objectivePrompt).toContain('Read it together with the original task');
   });
 
+  it('keeps the Goal step reviewer off by default, and loads a saved or damaged choice safely (#1832)', async () => {
+    expect(defaultConfig().goal.reviewerModel).toBe('');
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, reviewerModel: 'same' } });
+    expect((await loadConfig()).goal.reviewerModel).toBe('same');
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, reviewerModel: '  gpt-6-thinking ' } });
+    expect((await loadConfig()).goal.reviewerModel).toBe('gpt-6-thinking');
+    // A value no version wrote (too long, not text) turns the reviewer off rather than failing the file.
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, reviewerModel: 'x'.repeat(200) } });
+    const loaded = await loadConfig();
+    expect(loaded.goal.reviewerModel).toBe('');
+    expect(loaded.goal.helperModel).toBe(defaultConfig().goal.helperModel);
+  });
+
   it('moves the exact superseded helper models to GPT-6 and keeps any other choice', async () => {
     await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, helperModel: 'gpt-5.6-sol', helperReasoning: 'medium' } });
     // GPT-5.6 Sol is no longer in ChatGPT's catalog; the untouched shipped value adopts the current default.
@@ -908,6 +921,7 @@ describe('the goal loop settings', () => {
       impulseMinutes: 0,
       helperModel: 'gpt-6',
       helperReasoning: 'high',
+      reviewerModel: '',
       enabled: true,
       mode: 'loop',
       provider: { kind: 'openrouter', baseUrl: '' },
@@ -1055,6 +1069,7 @@ describe('the goal loop settings', () => {
       impulseMinutes: 0,
       helperModel: 'gpt-6',
       helperReasoning: 'high',
+      reviewerModel: '',
       enabled: false,
       mode: 'goal',
       provider: { kind: 'openrouter', baseUrl: '' },
