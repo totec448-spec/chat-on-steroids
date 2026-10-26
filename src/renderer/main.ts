@@ -28,6 +28,8 @@ import { initPet } from './pet.js';
 import { initPets } from './pets.js';
 import { initSkillsLibrary } from './skills-library.js';
 import { initWhatsNew } from './whats-new.js';
+import { playSoundCue } from './sound-cues.js';
+import { inQuietHours } from '../shared/phone-push.js';
 import { initSettingsSearch } from './settings-search.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
@@ -773,6 +775,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       autoConnect: $<HTMLInputElement>('autoConnect').checked,
       startAtLogin: $<HTMLInputElement>('startAtLogin').checked,
       turnNotifications: $<HTMLInputElement>('turnNotifications').checked,
+      sounds: $<HTMLInputElement>('soundCues').checked,
       localAppUsage: $<HTMLInputElement>('localAppUsage').checked,
       keepAwake: $<HTMLSelectElement>('keepAwake').value !== 'off',
       keepScreenAwake: $<HTMLSelectElement>('keepAwake').value === 'screen',
@@ -1724,6 +1727,7 @@ function apply(next: AppState): void {
   $<HTMLInputElement>('startAtLogin').disabled = next.loginStartupAvailable !== true;
   applyChecked($<HTMLInputElement>('startAtLogin'), config.ui.startAtLogin === true, previousState?.config.ui.startAtLogin);
   applyChecked($<HTMLInputElement>('turnNotifications'), config.ui.turnNotifications !== false, previousState ? previousState.config.ui.turnNotifications !== false : undefined);
+  applyChecked($<HTMLInputElement>('soundCues'), config.ui.sounds === true, previousState?.config.ui.sounds);
   applyChecked($<HTMLInputElement>('localAppUsage'), config.ui.localAppUsage !== false, previousState ? previousState.config.ui.localAppUsage !== false : undefined);
   // The saved switch, not the click, decides what the main process reads.
   if (previousState && (previousState.config.ui.localAppUsage !== false) !== (config.ui.localAppUsage !== false)) void refreshOtherApps(true);
@@ -2843,6 +2847,7 @@ for (const id of [
   'followUp',
   'enterSends',
   'turnNotifications',
+  'soundCues',
   'mentionCore',
   'mentionPlugins',
   'controlApiEnabled',
@@ -2867,6 +2872,12 @@ for (const id of [
   $(id).addEventListener('change', () => void save());
 }
 $('connectorSuffix').addEventListener('input', () => { connectorSuffixValid(); });
+// #1802: turning sounds on plays one, so the person hears what they chose.
+// Switching sounds on plays a sample, unless it is the quiet hours the switch promises to follow.
+$('soundCues').addEventListener('change', event => {
+  if ((event.target as HTMLInputElement).checked && !inQuietHours(state?.config.ui.phonePush?.quietHours ?? null, new Date())) playSoundCue('finished');
+});
+api.onSoundCue?.(playSoundCue);
 
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;

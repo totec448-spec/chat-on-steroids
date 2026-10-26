@@ -117,6 +117,17 @@ it.each(['playfulStatus', 'playfulContinue', 'followOutput', 'announceTurns'] as
   expect(getConfig().ui[key]).toBe(wanted);
 });
 
+it('saves Play sounds through Settings, off by default, and keeps it across a stale unrelated save (#1802)', async () => {
+  const base = getConfig();
+  expect(base.ui.sounds).toBe(false);
+  expect(await save({ ...base, ui: { ...base.ui, sounds: true } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.sounds).toBe(true);
+  expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.sounds).toBe(true);
+  expect(await save({ ...getConfig(), ui: { ...getConfig().ui, sounds: false } }, getConfig())).toMatchObject({ ok: true });
+  expect(getConfig().ui.sounds).toBe(false);
+});
+
 it('saves Auto-select Skills through Settings and preserves it across a stale unrelated save', async () => {
   const base = getConfig();
   const wanted = !(base.ui.autoSelectSkills ?? false);
