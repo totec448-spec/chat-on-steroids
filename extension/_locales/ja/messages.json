@@ -917,6 +917,9 @@
   "popup_pipeline_waiting_first_message": {
     "message": "最初のメッセージを待っています。"
   },
+  "popup_pipeline_not_a_chat": {
+    "message": "この ChatGPT ページはチャットではないため、アプリが追跡するものはありません。チャットを開くか開始してください。"
+  },
   "popup_pipeline_waiting_latest_request_id": {
     "message": "チャットを記録しました。最新ターンのリクエスト ID を待っています。"
   },
@@ -985,6 +988,9 @@
   },
   "popup_status_new_chat": {
     "message": "新しいチャット"
+  },
+  "popup_status_not_a_chat": {
+    "message": "チャットではありません"
   },
   "popup_status_none_open": {
     "message": "開いていません"

@@ -11,6 +11,7 @@ import type { RemoteFolder, Root } from '../shared/types.js';
 import { bindSessionProject, findSessionByConversation, getSession } from './session/store.js';
 import { workspaceForChat } from './workspace.js';
 import { logInfo } from './logger.js';
+import { isListedChatgptProject } from './chatgpt-project-catalog.js';
 import { CHATGPT_PROJECT_ID, PROJECT_COLORS, type ChatgptProjectLink, type LocalProject, type ProjectColor } from '../shared/projects.js';
 
 const at = z.number().finite().nonnegative();
@@ -44,8 +45,12 @@ export async function listProjects(): Promise<LocalProject[]> {
 export async function getProject(id: string): Promise<LocalProject | null> {
   return (await listProjects()).find(project => project.id === id) ?? null;
 }
-/** Folder picker callers approve roots separately; project selection cannot widen them. */
-export function addProject(folderPath: string): Promise<LocalProject> {
+/**
+ * Folder picker callers approve roots separately; project selection cannot widen them.
+ * `chatgpt: 'later'` leaves the native ChatGPT Project undecided while the person chooses between
+ * a new one and one they already have (#1756); `createChatgptProjectFor` or `linkChatgptProject` follows.
+ */
+export function addProject(folderPath: string, options: { chatgpt?: 'later' } = {}): Promise<LocalProject> {
   const operation = mutations.then(async () => {
     if (!path.isAbsolute(folderPath)) throw new Error('Choose an absolute local project folder');
     const resolved = await resolvePath(getConfig().roots, folderPath);
@@ -62,7 +67,7 @@ export function addProject(folderPath: string): Promise<LocalProject> {
     // Only a project created here gets a native ChatGPT Project; an existing or restored one
     // above keeps exactly what it had.
     const project: LocalProject = { id: randomUUID(), name: (path.basename(resolved.real) || resolved.real).slice(0, 160), path: resolved.real, createdAt: Date.now(),
-      chatgpt: { state: 'requested', requestId: randomUUID(), updatedAt: Date.now() } };
+      ...(options.chatgpt === 'later' ? {} : { chatgpt: { state: 'requested', requestId: randomUUID(), updatedAt: Date.now() } as const }) };
     await writeDurableNow('projects', [...projects, project]);
     logInfo(`projects: project ${project.id} asks for a new ChatGPT Project`);
     return project;
@@ -77,7 +82,7 @@ export function addProject(folderPath: string): Promise<LocalProject> {
  * The server is asked once, over SFTP: the folder must exist and be a folder. `~/app` resolves
  * against the server's home, the way `ssh -s sftp` resolves a relative path.
  */
-export function addRemoteProject(address: string, folder: string, deps: { connect?: (remote: RemoteFolder) => Promise<SftpClient> } = {}): Promise<LocalProject> {
+export function addRemoteProject(address: string, folder: string, deps: { connect?: (remote: RemoteFolder) => Promise<SftpClient> } = {}, options: { chatgpt?: 'later' } = {}): Promise<LocalProject> {
   const operation = mutations.then(async () => {
     const asked = parseRemote(address, folder);
     const client = await (deps.connect ?? sftpFor)(asked);
@@ -110,7 +115,7 @@ export function addRemoteProject(address: string, folder: string, deps: { connec
     }
     if (projects.length >= 200) throw new Error('Project catalog limit reached');
     const project: LocalProject = { id: randomUUID(), name: (path.posix.basename(realPath) || identity).slice(0, 160), path: identity, remote,
-      createdAt: Date.now(), chatgpt: { state: 'requested', requestId: randomUUID(), updatedAt: Date.now() } };
+      createdAt: Date.now(), ...(options.chatgpt === 'later' ? {} : { chatgpt: { state: 'requested', requestId: randomUUID(), updatedAt: Date.now() } as const }) };
     await writeDurableNow('projects', [...projects, project]);
     logInfo(`projects: project ${project.id} asks for a new ChatGPT Project`);
     return project;
@@ -131,6 +136,83 @@ export function setProjectColor(projectId: string, color: ProjectColor | null): 
     const { color: _, ...withoutColor } = project;
     const updated: LocalProject = normalized ? { ...withoutColor, color: normalized } : withoutColor;
     await writeDurableNow('projects', projects.map(row => row.id === projectId ? updated : row));
+    return updated;
+  });
+  mutations = operation.catch(() => undefined);
+  return operation;
+}
+
+/**
+ * Links a CoS project to a ChatGPT Project the account already has (#1756), by its id. Only a
+ * Project ChatGPT recently listed, never one another listed CoS project holds, and never over a
+ * creation in flight: none yet, a `failed` or `uncertain` one, or a mistaken link may be replaced.
+ */
+export function linkChatgptProject(projectId: string, chatgptId: string): Promise<LocalProject> {
+  const operation = mutations.then(async () => {
+    z.string().uuid().parse(projectId);
+    if (!CHATGPT_PROJECT_ID.test(chatgptId)) throw new Error('That is not a ChatGPT Project');
+    const projects = await listProjects();
+    const project = projects.find(row => row.id === projectId && !row.ungrouped);
+    if (!project) throw new Error('Project not found');
+    const link = project.chatgpt;
+    if (link?.state === 'linked' && link.id === chatgptId) return project;
+    const refuse = (why: string, message: string): never => {
+      logInfo(`projects: project ${projectId}: link to the ChatGPT Project ${chatgptId} refused (${why})`);
+      throw new Error(message);
+    };
+    if (link && link.state !== 'linked' && link.state !== 'failed' && link.state !== 'uncertain') refuse('its ChatGPT Project is being created', 'Its ChatGPT Project is being created');
+    if (!(await isListedChatgptProject(chatgptId))) refuse('not listed for this account', 'That Project is not one ChatGPT lists for this account');
+    const owner = projects.find(row => !row.ungrouped && row.id !== projectId && row.chatgpt?.state === 'linked' && row.chatgpt.id === chatgptId);
+    if (owner) refuse('already linked to another project', 'That ChatGPT Project is already linked to another project');
+    const updated: LocalProject = { ...project, chatgpt: { state: 'linked', id: chatgptId, updatedAt: Date.now() } };
+    await writeDurableNow('projects', projects.map(row => row.id === projectId ? updated : row));
+    logInfo(`projects: project ${projectId} linked to the existing ChatGPT Project ${chatgptId}`);
+    return updated;
+  });
+  mutations = operation.catch(() => undefined);
+  return operation;
+}
+
+/**
+ * Starts creating a new ChatGPT Project for a project that has none yet; one that has one keeps it,
+ * unless `replace` asks for a new one in place of a linked, failed or uncertain one (never over a
+ * creation in flight).
+ */
+export function createChatgptProjectFor(projectId: string, options: { replace?: boolean } = {}): Promise<LocalProject> {
+  const operation = mutations.then(async () => {
+    z.string().uuid().parse(projectId);
+    const projects = await listProjects();
+    const project = projects.find(row => row.id === projectId && !row.ungrouped);
+    if (!project) throw new Error('Project not found');
+    const link = project.chatgpt;
+    if (link && !options.replace) return project;
+    if (link && link.state !== 'linked' && link.state !== 'failed' && link.state !== 'uncertain') throw new Error('Its ChatGPT Project is being created');
+    const updated: LocalProject = { ...project, chatgpt: { state: 'requested', requestId: randomUUID(), updatedAt: Date.now() } };
+    if (link) logInfo(`projects: project ${projectId} asks for a new ChatGPT Project in place of its previous one`);
+    await writeDurableNow('projects', projects.map(row => row.id === projectId ? updated : row));
+    return updated;
+  });
+  mutations = operation.catch(() => undefined);
+  return operation;
+}
+
+/**
+ * Takes a project's ChatGPT Project link away (Haz on #1757): its new chats start outside any
+ * ChatGPT Project until another is chosen. Nothing in ChatGPT changes; the Project and its chats
+ * stay there. Never while a new one is being created.
+ */
+export function unlinkChatgptProject(projectId: string): Promise<LocalProject> {
+  const operation = mutations.then(async () => {
+    z.string().uuid().parse(projectId);
+    const projects = await listProjects();
+    const project = projects.find(row => row.id === projectId && !row.ungrouped);
+    if (!project) throw new Error('Project not found');
+    const link = project.chatgpt;
+    if (!link) return project;
+    if (link.state !== 'linked' && link.state !== 'failed' && link.state !== 'uncertain') throw new Error('Its ChatGPT Project is being created');
+    const { chatgpt: _, ...updated } = project;
+    await writeDurableNow('projects', projects.map(row => row.id === projectId ? updated : row));
+    logInfo(`projects: project ${projectId} no longer uses a ChatGPT Project (the Project stays in ChatGPT)`);
     return updated;
   });
   mutations = operation.catch(() => undefined);

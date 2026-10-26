@@ -23,6 +23,11 @@ const TITLES: Record<SurfaceId, MainText> = {
 
 const BODY: MainText = 'The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.';
 
+/** The same news in one line, for the phone: "Core connection lost. The tunnel disconnected …". */
+export function connectionLossLine(surface: SurfaceId, text: (source: MainText) => string): string {
+  return `${text(TITLES[surface])}. ${text(BODY)}`;
+}
+
 /** Electron presentation adapter kept separate from connection lifecycle/state. */
 export function showConnectionLossNotice(surface: SurfaceId, deps: ConnectionLossNoticeDeps): boolean {
   if (deps.isQuitting() || deps.isFocused() || !deps.isSupported()) return false;

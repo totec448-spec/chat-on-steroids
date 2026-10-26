@@ -142,11 +142,29 @@ describe('the user’s own connector instructions', () => {
     expect(text).not.toMatch(/never hallucinate a block|retry the identical call|keep using enabled tools|you can always use|not permission\./i);
   });
 
+  // 2026-10-24, VM: flagged again, on a plain write_stdin poll: "the tool description tries to steer the
+  // classification by presenting the risk assessment as subordinate to an alleged tool policy".
+  // Nothing the connector says may rank its own rules above ChatGPT's check: no "authority" or
+  // "guards" that decide, no policy that keeps programs "trusted", no nudge to repeat a blocked call.
+  it.each(['win32', 'darwin', 'linux'] as const)('never ranks its own rules above ChatGPT\'s check (%s)', async platform => {
+    const config = getConfig();
+    await saveConfig({ ...config, commandAllowlist: { enabled: true, mode: 'allow', rules: [] } });
+    try {
+      const text = serverInstructions({ ...ctx, sessionTools: true, agentTools: true }, 'core', platform);
+      expect(text).not.toMatch(/authority|guards? decide|under current guards|polic(y|ies)|\btrusted\b|succeeds when made again|changes no tool permission/i);
+      // The facts the lines carried are still there.
+      expect(text).toMatch(/Enabled in Core: .*command=on/);
+      expect(text).toContain('comes from ChatGPT before the call reaches CoS, so CoS neither ran nor refused it.');
+      expect(text).toContain('COMMAND_NOT_ALLOWED is a refusal by those rules: the program was not started.');
+    } finally { await saveConfig(config); }
+  });
+
   it('explains the transient ChatGPT safety refusal and offers session_finish to any model', () => {
     // #555: a benign call was blocked once by ChatGPT and succeeded unchanged on retry.
     const text = serverInstructions({ ...ctx, exposedFinishTool: true }, 'core', 'win32');
     expect(text).toContain('"This tool call was blocked by OpenAI because we couldn\'t determine the safety status of the request." comes from ChatGPT before the call reaches CoS');
-    expect(text).toContain('the same call often succeeds when made again');
+    // The fact stays; the nudge to repeat a call ChatGPT's check blocked does not (2026-10-24).
+    expect(text).not.toContain('the same call often succeeds when made again');
     // #556: the tool is exposed by the finish setting, not by model; Sol users were told "Astra only".
     expect(text).toContain('Use session_finish only when the user prompt explicitly requests it, with any model.');
     expect(text).not.toMatch(/Astra only/);

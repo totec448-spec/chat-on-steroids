@@ -102,6 +102,21 @@
 .pet-delete-warning { margin: 20px 0 0; padding-top: 18px; border-top: 1px solid var(--line); color: var(--soft); }
 .pet-delete-actions { display: flex; justify-content: flex-end; gap: 10px; margin: 22px -24px -24px; padding: 16px 24px; border-top: 1px solid var(--line); }
 .pet-delete-actions .btn { min-height: 38px; padding: 8px 14px; }
+/* Settings backup: the switch row's text starts on the dialog's text edge, its passphrase fields sit
+   close under it, and the file line reads as a caption above the summary. */
+.backup-dialog .setting { padding-inline: 0; }
+.backup-dialog .setting + .plugin-field, .backup-dialog .setting + div > .plugin-field:first-child { margin-top: 4px; }
+.backup-dialog #importSettingsSource { margin-bottom: 4px; color: var(--soft); }
+.backup-dialog #importSettingsSummary { margin-top: 0; }
+.backup-wider { margin: 0 0 12px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--red-wash); color: var(--red); }
+.backup-wider[hidden] { display: none; }
+.backup-review { margin: 0 0 12px; }
+.backup-review > summary { display: flex; align-items: center; gap: 6px; width: fit-content; cursor: pointer; color: var(--soft); list-style: none; }
+.backup-review > summary::-webkit-details-marker { display: none; }
+.backup-review > summary:hover { color: var(--ink); }
+.backup-review[open] .sum-chev { transform: rotate(90deg); }
+.backup-review ul { margin: 8px 0 0; padding-left: 18px; color: var(--soft); }
+.backup-review li + li { margin-top: 2px; }
 .pet-delete-confirm { border: 1px solid #b4262c; background: #b4262c; color: #fff; font-weight: 600; }
 .pet-delete-confirm:hover:not(:disabled) { border-color: #971f25; background: #971f25; color: #fff; }
 .pet-library-preview { display: grid; place-items: center; width: 58px; height: 64px; flex: 0 0 58px; overflow: hidden; border-radius: 12px; background: var(--sunk); }
@@ -192,7 +207,8 @@
 .plugin-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 .plugin-field { display: flex; flex-direction: column; gap: 7px; margin: 16px 0; font-size: calc(12px * var(--text-scale, 1)); font-weight: 600; }
 .plugin-field input, .plugin-field select { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--edge); border-radius: var(--r-sm); background: var(--sunk); color: var(--ink); font: inherit; }
-.plugin-field small { font-weight: 400; line-height: 1.5; }
+/* A field's hint reads like a setting's description: quiet, not the label's ink. */
+.plugin-field small { font-weight: 400; line-height: 1.5; font-size: calc(11.5px * var(--text-scale, 1)); color: var(--faint); }
 .plugin-steps { padding-left: 22px; font-size: calc(13px * var(--text-scale, 1)); line-height: 1.65; color: var(--soft); }
 .plugin-steps li { margin: 10px 0; }
 .plugin-legal { display: block; margin: 32px 0 4px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); line-height: 1.7; }
@@ -458,8 +474,9 @@ code {
 #viewMenu[aria-expanded='true'] { background: var(--hover); color: var(--ink); }
 #viewMenu .ico { --glyph: 18.5px; }
 /* A sidebar row's menu and its submenus (row-menu.ts): fixed in the window, above the sidebar. */
+/* As wide as its longest label needs, so a translated one ("Geheimnisse vor ChatGPT verbergen") is not cut. */
 :is(.row-menu, .row-menu-leaving) { --row-menu-hover: color-mix(in srgb, var(--popover, var(--card)) 86%, var(--ink));
-  position: fixed; z-index: 200; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; min-width: 196px; max-width: 280px; padding: 5px; color: var(--ink);
+  position: fixed; z-index: 200; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; min-width: min(196px, calc(100vw - 16px)); max-width: min(400px, calc(100vw - 16px)); padding: 5px; color: var(--ink);
   background: var(--popover, var(--card)); border: 1px solid var(--edge); border-radius: 10px; box-shadow: 0 8px 28px #0003;
   transform-origin: top left; animation: row-menu-in 140ms cubic-bezier(.2, .8, .2, 1); }
 .row-menu-leaving { pointer-events: none; animation: row-menu-out 100ms ease-in forwards; }
@@ -2632,6 +2649,8 @@ input[readonly] {
 .inbox-project-picker .file-branch-option { justify-content: flex-start; font-size: calc(12px * var(--text-scale, 1)); }
 .inbox-project-picker .file-branch-option > span:not(.file-branch-hint) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .inbox-project-picker .file-branch-option[aria-selected='true'] { background: var(--hover); }
+/* A ChatGPT Project another project already uses (#1756): listed for orientation, not choosable. */
+.inbox-project-picker .file-branch-option:disabled { opacity: .55; cursor: default; background: transparent; }
 .file-branch-hint { flex: none; color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); }
 .project-mark { --ico: 13px; --glyph: 13px; flex: none; color: var(--faint); }
 .project-mark[data-project-color='blue'] { color: #4c7fc1; }
@@ -3441,6 +3460,21 @@ input.num:disabled { opacity: .5; cursor: default; }
   max-width: 100%;
   white-space: normal;
 }
+
+/* Phone notifications: its options continue the card's rows, and a text field sits beside its
+   explanation, moving under it (with its button) when the row is narrow. */
+.phone-push-options > .setting:first-child { border-top: 1px solid var(--line); }
+.phone-push-field .phone-push-control { display: flex; flex: 1 1 280px; gap: 8px; min-width: 0; }
+.phone-push-control input { flex: 1 1 auto; min-width: 0; }
+.phone-push-control .btn { flex: 0 0 auto; justify-content: flex-end; text-align: end; }
+.phone-push-advanced { border-top: 1px solid var(--line); }
+.phone-push-advanced > summary { display: flex; align-items: center; gap: 6px; width: fit-content; padding: 12px 2px; cursor: pointer; color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); list-style: none; }
+.phone-push-advanced > summary::-webkit-details-marker { display: none; }
+.phone-push-advanced > summary:hover { color: var(--ink); }
+.phone-push-advanced[open] .sum-chev { transform: rotate(90deg); }
+/* The chevron's glyph sits 5px inside its box; its ink starts on the rows' text edge. */
+.phone-push-advanced > summary .sum-chev { margin-left: -5px; }
+.phone-push-advanced > .setting:first-of-type { border-top: 1px solid var(--line); }
 
 /* Inside a settings row the switch is one of several controls, not the thing the
    row pushes to the far end. */
@@ -4396,7 +4430,13 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .file-branch-option { width: 100%; min-height: 30px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 7px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-size: calc(11px * var(--text-scale, 1)); text-align: left; cursor: pointer; }
 .file-branch-option:hover, .file-branch-option:focus-visible { background: var(--hover); outline: none; }
 .file-branch-option .ico { flex: 0 0 auto; color: var(--accent); }
-.file-branch-empty { margin: 0; padding: 12px 7px; color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); }
+.file-branch-heading { margin: 0; padding: 2px 7px 1px; color: var(--muted); font-size: calc(11px * var(--text-scale, 1)); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* #1756: room for about six Projects before the list scrolls, and a one-line note under them. */
+.chatgpt-project-picker { max-height: min(340px, calc(100vh - 16px)); }
+.chatgpt-project-picker .file-branch-notes { border-top: 1px solid var(--line); padding-top: 4px; }
+.chatgpt-project-picker .file-branch-note { margin: 0; padding: 2px 7px 1px; color: var(--faint); font-size: calc(10.5px * var(--text-scale, 1)); line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chatgpt-project-picker .file-branch-option > .ico { flex: none; color: var(--muted); }
+.file-branch-empty, .file-branch-note { margin: 0; padding: 12px 7px; color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); }
 .file-changes-list { min-height: 0; flex: 1; overflow: auto; padding: 10px 7px 16px; }
 .file-change-group + .file-change-group { margin-top: 12px; }
 .file-change-group-title { margin: 0; padding: 4px 8px 6px; color: var(--faint); font-size: calc(10px * var(--text-scale, 1)); font-weight: 600; letter-spacing: .015em; }
