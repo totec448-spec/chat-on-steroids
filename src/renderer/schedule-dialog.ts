@@ -71,6 +71,7 @@ export function initScheduleDialog(
     event.preventDefault();
     if (busy) return;
     if (!text.value.trim()) { showError(t('Write the message to send.')); return; }
+    if (untilKind.value === 'date' && !until.value) { showError(t('Choose the end date.')); return; }
     showError(null);
     setBusy(true);
     try {

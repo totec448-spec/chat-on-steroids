@@ -3357,5 +3357,6 @@
   "every {0} hours": "каждые {0} часа",
   "every {0} hours|one": "каждый {0} час",
   "every {0} hours|few": "каждые {0} часа",
-  "every {0} hours|many": "каждые {0} часов"
+  "every {0} hours|many": "каждые {0} часов",
+  "Choose the end date.": "Выберите дату окончания."
 }

@@ -112,5 +112,5 @@ app.whenReady().then(async () => {
     }
     fs.writeFileSync(path.join(output, 'measurements.json'), JSON.stringify(results, null, 2));
     console.log('Passed: a scheduled run says so above its message (on time and late), on its task card and on the sent message, on the message edge, smaller and quieter, whole, in both themes.');
-  } finally { win.destroy(); app.exit(0); }
-}).catch(error => { console.error(error); app.exit(1); });
+  } finally { win.destroy(); }
+}).then(() => app.exit(0), error => { console.error(error); app.exit(1); });

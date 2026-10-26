@@ -3183,5 +3183,6 @@
   "Until": "截止",
   "Weekdays": "平日",
   "{0} hours": "{0} 小時",
-  "every {0} hours": "每 {0} 小時"
+  "every {0} hours": "每 {0} 小時",
+  "Choose the end date.": "請選擇結束日期。"
 }

@@ -3183,5 +3183,6 @@
   "Until": "截止",
   "Weekdays": "工作日",
   "{0} hours": "{0} 小时",
-  "every {0} hours": "每 {0} 小时"
+  "every {0} hours": "每 {0} 小时",
+  "Choose the end date.": "请选择结束日期。"
 }

@@ -3183,5 +3183,6 @@
   "Until": "終了",
   "Weekdays": "平日",
   "{0} hours": "{0} 時間",
-  "every {0} hours": "{0} 時間ごと"
+  "every {0} hours": "{0} 時間ごと",
+  "Choose the end date.": "終了日を選んでください。"
 }

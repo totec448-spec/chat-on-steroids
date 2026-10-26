@@ -542,7 +542,8 @@ void app.whenReady().then(async () => {
   // #1826: scheduled runs. Checked every 30 s and right after the computer wakes; a run missed
   // while it slept or the app was closed goes out once, labelled late.
   const scheduleDeps: RunnerDeps = {
-    session: async id => { const summary = await getSession(id).catch(() => null); return summary ? { id: summary.id, conversationId: summary.conversationId ?? null, activeTurnId: summary.activeTurnId ?? null } : null; },
+    // A lookup that fails is not a deleted chat: the runner keeps the schedule and asks again.
+    session: async id => { const summary = await getSession(id); return summary ? { id: summary.id, conversationId: summary.conversationId ?? null, activeTurnId: summary.activeTurnId ?? null } : null; },
     enqueue: input => enqueueInput(input),
     pending: async () => new Set((await listInputs()).filter(row => ['queued', 'browser', 'tool'].includes(row.state)).map(row => row.id)),
     log: logInfo

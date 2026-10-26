@@ -3299,5 +3299,6 @@
   "{0} hours|many": "{0} de horas",
   "every {0} hours": "cada {0} horas",
   "every {0} hours|one": "cada {0} hora",
-  "every {0} hours|many": "cada {0} de horas"
+  "every {0} hours|many": "cada {0} de horas",
+  "Choose the end date.": "Elige la fecha de fin."
 }
