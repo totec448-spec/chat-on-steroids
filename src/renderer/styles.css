@@ -198,6 +198,87 @@
 .plugin-about p, .plugin-legal > p:first-of-type { margin: 10px 0 0; }
 .plugin-source { overflow-wrap: anywhere; font-size: calc(12px * var(--text-scale, 1)); }
 .plugin-error { color: var(--red); background: var(--red-wash); padding: 12px; border-radius: var(--r-sm); overflow-wrap: anywhere; }
+/* Commit & PR: the fields scroll inside, the buttons stay in view; Git's own words keep their lines. */
+.commit-dialog { width: min(640px, calc(100vw - 40px)); }
+.commit-dialog[open] { display: flex; flex-direction: column; overflow: hidden; }
+.commit-form, .commit-done { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.commit-form[hidden], .commit-done[hidden] { display: none; }
+.commit-fields, .commit-done > .plugin-dialog-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.commit-form > .pet-delete-actions, .commit-done > .pet-delete-actions { flex-shrink: 0; margin: 0; }
+.commit-where { margin: 0 0 4px; color: var(--soft); overflow-wrap: anywhere; }
+.commit-dialog .plugin-field { margin: 14px 0; }
+.commit-dialog .plugin-field textarea { width: 100%; min-width: 0; min-height: 96px; padding: 10px 12px; border: 1px solid var(--edge); border-radius: var(--r-sm); background: var(--sunk); color: var(--ink); font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; resize: vertical; }
+.commit-dialog .plugin-field :is(textarea, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.commit-files-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 6px; font-size: calc(12px * var(--text-scale, 1)); font-weight: 600; }
+.commit-files-all { padding: 2px 8px; color: var(--soft); font-weight: 400; }
+.commit-files { max-height: 184px; overflow-y: auto; border: 1px solid var(--edge); border-radius: var(--r-sm); background: var(--sunk); }
+.commit-file { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 10px; cursor: pointer; }
+.commit-file + .commit-file { border-top: 1px solid var(--line); }
+.commit-file input { flex: none; margin: 0; accent-color: var(--accent); }
+.commit-file .file-change-status { flex: none; align-self: center; line-height: 1; }
+.commit-file-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.commit-flow { margin: 16px 0 0; padding: 0; border: 0; display: grid; gap: 6px; }
+.commit-flow legend { padding: 0; margin-bottom: 6px; font-size: calc(12px * var(--text-scale, 1)); font-weight: 600; }
+.commit-flow label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.commit-flow label:has(input:disabled) { color: var(--faint); cursor: default; }
+.commit-flow input { margin: 0; accent-color: var(--accent); }
+.commit-flow-note { margin: 8px 0 0; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); }
+.commit-dialog .plugin-error { margin: 12px 0 0; white-space: pre-wrap; }
+.commit-steps { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.commit-step { display: flex; align-items: center; gap: 10px; min-height: 28px; }
+.commit-step-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.commit-step-icon { flex: none; width: 16px; text-align: center; }
+.commit-step.is-done .commit-step-icon { color: var(--green); }
+.commit-step.is-failed .commit-step-icon { color: var(--red); }
+.commit-step-spinner { flex: none; width: 14px; height: 14px; margin: 0 1px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); animation: session-spin 0.8s linear infinite; }
+.commit-step-link { flex: none; padding: 4px 10px; }
+.file-commit-bar { flex: none; padding: 10px 12px; border-top: 1px solid var(--line); }
+.file-commit-bar .btn { width: 100%; justify-content: center; }
+/* Reduced motion stops every animation; a still quarter arc would look frozen, so the step shows a whole ring. */
+@media (prefers-reduced-motion: reduce) { .commit-step-spinner { border-color: var(--accent); } }
+/* Share as web page: the page itself, then the one choice about it. The frame takes the app's light or dark. */
+/* The preview gives way first: in a short window it shrinks so the dialog never needs a scroll bar. */
+.share-page-dialog { width: min(760px, calc(100vw - 40px)); }
+.share-page-dialog[open] { display: flex; flex-direction: column; overflow: hidden; }
+.share-page-dialog > .plugin-dialog-body { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.share-page-preview { position: relative; flex: 1 1 440px; max-height: 440px; min-height: 160px; margin: 16px 0 8px; border: 1px solid var(--edge); border-radius: var(--r-md); overflow: hidden; background: var(--page); }
+.share-page-preview iframe { display: block; width: 100%; height: 100%; border: 0; background: transparent; transition: opacity .15s ease; }
+.share-page-preview[aria-busy='true'] iframe { opacity: .4; }
+.share-page-loading { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); pointer-events: none; }
+.share-page-dialog .plugin-error { margin: 4px 0 0; }
+/* The switch row starts on the body's edge like the preview (a settings row is inset by 2px). */
+.share-page-dialog .share-page-hide { padding-left: 0; padding-right: 0; }
+.share-page-dialog .setting-text em.share-page-count { margin-top: 4px; color: var(--soft); }
+.share-page-dialog .setting-text em.share-page-count[hidden] { display: none; }
+/* Send feedback: the kind as two segments, the fields of that kind, then where it goes. */
+.feedback-dialog { width: min(640px, calc(100vw - 40px)); }
+/* The fields scroll inside; the head and the buttons stay in view, so Continue is never below the fold. */
+.feedback-dialog[open] { display: flex; flex-direction: column; overflow: hidden; }
+.feedback-form { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.feedback-form[hidden] { display: none; }
+.feedback-fields { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.feedback-form > .pet-delete-actions { flex-shrink: 0; margin: 0; }
+.feedback-kind { display: flex; flex-wrap: wrap; gap: 4px; width: fit-content; max-width: 100%; padding: 4px; border: 1px solid var(--edge); border-radius: 12px; background: var(--sunk); }
+.feedback-kind label { position: relative; display: flex; align-items: center; min-height: 34px; padding: 6px 14px; border-radius: 9px; color: var(--soft); font-size: calc(13px * var(--text-scale, 1)); cursor: pointer; }
+.feedback-kind label:hover { color: var(--ink); }
+.feedback-kind input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
+.feedback-kind label:has(input:checked) { background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent-edge); color: var(--ink); }
+.feedback-kind label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.feedback-update { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin: 16px 0 0; padding: 10px 12px; border-radius: var(--r-sm); background: var(--accent-wash); }
+.feedback-update[hidden] { display: none; }
+.feedback-update span { flex: 1 1 16rem; min-width: 0; }
+.feedback-dialog .plugin-field small { color: var(--faint); font-size: inherit; font-weight: 400; }
+.feedback-dialog .plugin-field textarea, .feedback-dialog .plugin-field select { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--edge); border-radius: var(--r-sm); background: var(--sunk); color: var(--ink); font: inherit; font-weight: 400; line-height: 1.5; }
+.feedback-dialog .plugin-field textarea { min-height: 64px; resize: vertical; }
+.feedback-dialog .plugin-field :is(textarea, select):focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.feedback-dialog .feedback-report { padding: 4px 0; }
+.feedback-report .btn { flex-shrink: 0; }
+.feedback-report.is-saved .setting-text em { color: var(--green); }
+.feedback-note { margin: 10px 0 0; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); }
+.feedback-dialog .plugin-error { margin: 12px 0 0; }
+.feedback-fields > .feedback-kind { margin-top: 0; }
+.feedback-dialog .plugin-field { margin: 14px 0; }
+.feedback-done > p:first-child { margin-top: 0; }
 .plugin-card-error { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--red); font-size: calc(11px * var(--text-scale, 1)); }
 .plugin-setup-status { margin: 0 0 20px; color: var(--soft); }
 .plugin-setup-copy { display: flex; gap: 8px; align-items: center; }
@@ -474,8 +555,9 @@ code {
 #viewMenu[aria-expanded='true'] { background: var(--hover); color: var(--ink); }
 #viewMenu .ico { --glyph: 18.5px; }
 /* A sidebar row's menu and its submenus (row-menu.ts): fixed in the window, above the sidebar. */
+/* As wide as its longest label needs, so a translated one ("Geheimnisse vor ChatGPT verbergen") is not cut. */
 :is(.row-menu, .row-menu-leaving) { --row-menu-hover: color-mix(in srgb, var(--popover, var(--card)) 86%, var(--ink));
-  position: fixed; z-index: 200; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; min-width: 196px; max-width: 280px; padding: 5px; color: var(--ink);
+  position: fixed; z-index: 200; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; min-width: min(196px, calc(100vw - 16px)); max-width: min(400px, calc(100vw - 16px)); padding: 5px; color: var(--ink);
   background: var(--popover, var(--card)); border: 1px solid var(--edge); border-radius: 10px; box-shadow: 0 8px 28px #0003;
   transform-origin: top left; animation: row-menu-in 140ms cubic-bezier(.2, .8, .2, 1); }
 .row-menu-leaving { pointer-events: none; animation: row-menu-out 100ms ease-in forwards; }
@@ -2650,6 +2732,8 @@ input[readonly] {
 .inbox-project-picker .file-branch-option { justify-content: flex-start; font-size: calc(12px * var(--text-scale, 1)); }
 .inbox-project-picker .file-branch-option > span:not(.file-branch-hint) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .inbox-project-picker .file-branch-option[aria-selected='true'] { background: var(--hover); }
+/* A ChatGPT Project another project already uses (#1756): listed for orientation, not choosable. */
+.inbox-project-picker .file-branch-option:disabled { opacity: .55; cursor: default; background: transparent; }
 .file-branch-hint { flex: none; color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); }
 .project-mark { --ico: 13px; --glyph: 13px; flex: none; color: var(--faint); }
 .project-mark[data-project-color='blue'] { color: #4c7fc1; }
@@ -3459,6 +3543,21 @@ input.num:disabled { opacity: .5; cursor: default; }
   max-width: 100%;
   white-space: normal;
 }
+
+/* Phone notifications: its options continue the card's rows, and a text field sits beside its
+   explanation, moving under it (with its button) when the row is narrow. */
+.phone-push-options > .setting:first-child { border-top: 1px solid var(--line); }
+.phone-push-field .phone-push-control { display: flex; flex: 1 1 280px; gap: 8px; min-width: 0; }
+.phone-push-control input { flex: 1 1 auto; min-width: 0; }
+.phone-push-control .btn { flex: 0 0 auto; justify-content: flex-end; text-align: end; }
+.phone-push-advanced { border-top: 1px solid var(--line); }
+.phone-push-advanced > summary { display: flex; align-items: center; gap: 6px; width: fit-content; padding: 12px 2px; cursor: pointer; color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); list-style: none; }
+.phone-push-advanced > summary::-webkit-details-marker { display: none; }
+.phone-push-advanced > summary:hover { color: var(--ink); }
+.phone-push-advanced[open] .sum-chev { transform: rotate(90deg); }
+/* The chevron's glyph sits 5px inside its box; its ink starts on the rows' text edge. */
+.phone-push-advanced > summary .sum-chev { margin-left: -5px; }
+.phone-push-advanced > .setting:first-of-type { border-top: 1px solid var(--line); }
 
 /* Inside a settings row the switch is one of several controls, not the thing the
    row pushes to the far end. */
@@ -4415,7 +4514,13 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .file-branch-option { width: 100%; min-height: 30px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 7px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-size: calc(11px * var(--text-scale, 1)); text-align: left; cursor: pointer; }
 .file-branch-option:hover, .file-branch-option:focus-visible { background: var(--hover); outline: none; }
 .file-branch-option .ico { flex: 0 0 auto; color: var(--accent); }
-.file-branch-empty { margin: 0; padding: 12px 7px; color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); }
+.file-branch-heading { margin: 0; padding: 2px 7px 1px; color: var(--muted); font-size: calc(11px * var(--text-scale, 1)); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* #1756: room for about six Projects before the list scrolls, and a one-line note under them. */
+.chatgpt-project-picker { max-height: min(340px, calc(100vh - 16px)); }
+.chatgpt-project-picker .file-branch-notes { border-top: 1px solid var(--line); padding-top: 4px; }
+.chatgpt-project-picker .file-branch-note { margin: 0; padding: 2px 7px 1px; color: var(--faint); font-size: calc(10.5px * var(--text-scale, 1)); line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chatgpt-project-picker .file-branch-option > .ico { flex: none; color: var(--muted); }
+.file-branch-empty, .file-branch-note { margin: 0; padding: 12px 7px; color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); }
 .file-branch-section { margin: 8px 0 0; padding: 6px 7px 4px; border-top: 1px solid var(--line); color: var(--faint); font-size: calc(10px * var(--text-scale, 1)); font-weight: 600; }
 .file-checkpoint-bar { display: flex; justify-content: flex-end; padding: 0 1px 8px; }
 .file-changes-list { min-height: 0; flex: 1; overflow: auto; padding: 10px 7px 16px; }

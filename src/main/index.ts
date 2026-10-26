@@ -7,7 +7,7 @@ import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js
  */
 
 import path from 'node:path';
-import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, powerMonitor, powerSaveBlocker, screen, session } from 'electron';
+import { app, Notification, BrowserWindow, ipcMain, Menu, Tray, nativeImage, nativeTheme, net, powerMonitor, powerSaveBlocker, screen, session } from 'electron';
 import { createKeepAwake, installKeepAwake } from './keep-awake.js';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { initConnectorProofPath, loadConnectorProof, notePluginInstalled } from './connector-proof.js';
@@ -32,7 +32,10 @@ import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, onLog, sna
 import { noteRuntimeEvent, tallyLogEntry } from './diagnostics-facts.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { workspaceTerminalsExited } from './workspace-terminal.js';
-import { initSecretsPath, keychainReadPending } from './secrets.js';
+import { getSecret, initSecretsPath, keychainReadPending } from './secrets.js';
+import { installPhonePush, pushToPhone } from './phone-push.js';
+import { createSoundReadiness, installSoundCues, soundCue, soundQuietHours } from './sound-cues.js';
+import { DEFAULT_PHONE_PUSH } from '../shared/phone-push.js';
 import { mainText, mainTextTranslations, onMainTextsChange, restoreMainTextTranslations } from './main-texts.js';
 import { isMainText } from '../shared/main-texts.js';
 import { executableFingerprint, initKeychainNotice } from './keychain-notice.js';
@@ -126,7 +129,7 @@ import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
 import { browserWindowIconPath } from './window-icon.js';
 import { approvedChatGptImageRequest, RENDERER_CONTENT_SECURITY_POLICY } from './renderer-csp.js';
 import { editContextMenuTemplate } from './edit-context-menu.js';
-import { showConnectionLossNotice } from './connection-loss-notice.js';
+import { connectionLossLine, showConnectionLossNotice } from './connection-loss-notice.js';
 
 /** Durable state file holding the multi-agent run. Hashes only, never credentials. */
 const SWARM_STATE = 'swarm';
@@ -278,6 +281,13 @@ function createWindow(): void {
 
 /** When a Session-finish or stuck notice last went out per chat, so a turn-done notice does not repeat it. */
 const chatNoticeAt = new Map<string, number>();
+/** A chat that waits for the person, for the phone: its own rules decide whether it goes out. */
+const phoneNeedsYou = (sessionId: string): void => {
+  soundCue('needs-you', sessionId);
+  void getSession(sessionId).catch(() => null).then(summary => pushToPhone({ kind: 'needs-you', sessionId,
+    chatTitle: summary?.title || 'Chat On Steroids', conversationId: summary?.conversationId ?? null }));
+};
+
 function showWindow(): void {
   // Defense in depth for every current or future native activation source. The explicit gate
   // below additionally protects the long pre-window startup interval, while this invariant makes
@@ -293,6 +303,7 @@ function showWindow(): void {
 }
 
 setFinishNotifier((title, body, sessionId, turnId) => {
+  phoneNeedsYou(sessionId);
   if (window?.isFocused() || !Notification.isSupported()) return false;
   chatNoticeAt.set(sessionId, Date.now());
   const write = (): void => {
@@ -315,6 +326,7 @@ setFinishNotifier((title, body, sessionId, turnId) => {
   return true;
 });
 setStuckNotifier((title, body, sessionId, opens = 'app') => {
+  phoneNeedsYou(sessionId);
   // A person looking at the app already has the timeline note this accompanies; interrupting
   // them with the same sentence is noise, exactly as the finish notice treats a focused window.
   if (window?.isFocused() || !Notification.isSupported()) return false;
@@ -334,14 +346,17 @@ setStuckNotifier((title, body, sessionId, opens = 'app') => {
   notice.show();
   return true;
 });
-setConnectionLossNotifier(surface => showConnectionLossNotice(surface, {
-  isQuitting: () => quitting,
-  isFocused: () => window?.isFocused() ?? false,
-  isSupported: () => Notification.isSupported(),
-  text: mainText,
-  create: options => new Notification(options),
-  showWindow
-}));
+setConnectionLossNotifier(surface => {
+  if (!quitting) { soundCue('failed'); void pushToPhone({ kind: 'failed', detail: connectionLossLine(surface, mainText) }); }
+  return showConnectionLossNotice(surface, {
+    isQuitting: () => quitting,
+    isFocused: () => window?.isFocused() ?? false,
+    isSupported: () => Notification.isSupported(),
+    text: mainText,
+    create: options => new Notification(options),
+    showWindow
+  });
+});
 
 setBrowserWorkArea(() => screen.getPrimaryDisplay().workArea);
 
@@ -480,6 +495,36 @@ void app.whenReady().then(async () => {
   onSessionChange(() => void keepAwake.refresh());
   setInterval(() => void keepAwake.refresh(), 60_000).unref();
   void keepAwake.refresh();
+  // #1802: the window plays the sound; a closed window (only the tray left) plays none, and nor
+  // does a page that is not listening yet (loading, reloading, crashed).
+  const soundReadiness = createSoundReadiness();
+  ipcMain.on('sound:ready', event => { if (window && !window.isDestroyed() && event.sender === window.webContents) soundReadiness.mark(event.sender); });
+  installSoundCues({
+    enabled: () => getConfig().ui.sounds === true,
+    focused: () => window?.isFocused() === true,
+    quietHours: () => soundQuietHours(getConfig().ui),
+    now: () => Date.now(),
+    play: kind => {
+      if (!window || window.isDestroyed() || !soundReadiness.ready(window.webContents)) return false;
+      window.webContents.send('sound:cue', kind);
+      return true;
+    },
+    log: logInfo
+  });
+  // Phone notifications (ntfy): the app's network stack (system proxy) and the system's own idle
+  // state, where three minutes without input, or a locked screen, count as away.
+  installPhonePush({
+    settings: () => ({ ...DEFAULT_PHONE_PUSH, ...getConfig().ui.phonePush }),
+    // A failed read is reported, not treated as no token (phone-push.ts refuses to send).
+    token: () => getSecret('ntfyToken'),
+    now: () => Date.now(),
+    idleState: () => powerMonitor.getSystemIdleState(180),
+    post: async (url, body, headers) => {
+      const reply = await net.fetch(url, { method: 'POST', body, headers, signal: AbortSignal.timeout(10_000) });
+      return { ok: reply.ok, status: reply.status };
+    },
+    log: logInfo
+  });
   // Codex's turn-completion notifications: a finished answer in a background window.
   const turnNotifier = createTurnNotifier({
     getSession,
@@ -491,6 +536,11 @@ void app.whenReady().then(async () => {
     focused: () => window?.isFocused() === true,
     automated: conversationId => goalSwitchEnabledFor(conversationId),
     recentlyNotified: id => Date.now() - (chatNoticeAt.get(id) ?? 0) < 120_000,
+    turnStartedAt: async id => {
+      const [start] = await readRecentEvents(id, 1, { kinds: ['turn_start'] });
+      return start?.time ?? null;
+    },
+    phone: event => { soundCue('finished', event.sessionId); void pushToPhone({ kind: 'finished', ...event }); },
     show: (title, body, sessionId) => {
       const notice = new Notification({ title, body });
       notice.on('click', () => {

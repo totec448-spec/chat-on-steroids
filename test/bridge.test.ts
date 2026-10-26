@@ -4063,6 +4063,26 @@ describe('capturing a sent handoff from the recorder', () => {
     expect((await sessionStoreModule.readHandoff(sessionId, handoffId!))?.text).toContain('carry on');
   });
 
+  // #1852, the same gap for Compact & Resume: chat A's page in a browser that is not the chosen one
+  // would open chat B there, and its page is refused as not chosen. B stays for the chosen browser.
+  it('hands chat B to no page in a browser that is not the chosen one', async () => {
+    const chrome = 'c'.repeat(32), builtIn = 'd'.repeat(32);
+    const before = getConfig().ui.chatBrowser;
+    await pair();
+    try {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+      await request('GET', '/status', { browser: builtIn, host: 'cos' });
+      const conversationId = 'c0c0c0c0-7870-4000-8000-000000000009';
+      const { token, anchor } = await sentHandoff(conversationId);
+      await request('POST', '/events', { body: { conversationId, events: generation('handoff-turn', 'assistant-final', `carry on\n\n${SAMPLE_BRIEF}`) } });
+      const bound = await request('POST', '/compact', { body: { conversationId, token, sourceMessageId: anchor }, browser: chrome, host: 'browser' });
+      expect(bound.body).toMatchObject({ bound: true, stored: true });
+      expect(bound.body.placement).toBeNull();
+    } finally {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: before } });
+    }
+  });
+
   it('keeps over 120 KB of a final handoff through /events, overflow storage and capture', async () => {
     await pair();
     const conversationId = 'c0c0c0c0-7870-4000-8000-000000000005';
@@ -5023,6 +5043,22 @@ describe('delivering a bootstrap', () => {
       expect(command.text).toContain('PROJECT_TASK_PRESERVED');
     }
     expect(command.text).not.toContain('SCOPED_AGENTS_TAIL');
+  });
+
+  it('records the Projects a ChatGPT page lists and refuses anything else (#1756)', async () => {
+    const { chatgptProjectChoices } = await import('../src/main/chatgpt-project-catalog.js');
+    await pair();
+    const listed = `g-p-${'f'.repeat(32)}`;
+    const sent = await request('POST', '/chatgpt-projects', { body: { projects: [{ id: listed, name: 'From the sidebar' }, { id: '../x', name: 'Bad' }] } });
+    expect(sent.body).toMatchObject({ ok: true, changed: true });
+    expect((await chatgptProjectChoices()).map(choice => choice.id)).toEqual([listed]);
+    expect((await request('POST', '/chatgpt-projects', { body: { projects: 'nope' } })).status).toBe(400);
+    expect((await request('POST', '/chatgpt-projects', { body: { projects: [{ id: listed, name: 'From the sidebar' }] } })).body).toMatchObject({ ok: true, changed: false });
+    // The same Project id reported from a workspace: the choices follow the workspace in use.
+    const team = `g-p-${'e'.repeat(32)}`;
+    expect((await request('POST', '/chatgpt-projects', { body: { projects: [{ id: team, name: 'Team' }], workspace: 'team-account-0001' } })).body).toMatchObject({ ok: true, changed: true });
+    expect((await chatgptProjectChoices()).map(choice => choice.id)).toEqual([team]);
+    expect((await request('POST', '/chatgpt-projects', { auth: null, body: { projects: [] } })).status).toBe(401);
   });
 
   it('puts a chat recorded inside a linked ChatGPT Project into its project before it runs commands (#1744)', async () => {
@@ -8338,6 +8374,43 @@ describe('a worker chat that never opens', () => {
     } finally {
       setShippedExtensionBuildForTest();
       const closed = once(socket, 'close'); socket.close(); await closed;
+    }
+  });
+
+  // #1852: with the built-in browser chosen, the prime chat still open in Chrome collected one of
+  // three worker tabs through its page's /activity poll. Chrome opened it, and the redeem route then
+  // refused that page as not the chosen browser, so the worker timed out.
+  it('hands a worker tab to no page in a browser that is not the chosen one', async () => {
+    const chrome = 'c'.repeat(32), builtIn = 'd'.repeat(32);
+    const before = getConfig().ui.chatBrowser;
+    await pair();
+    try {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+      await request('GET', '/status', { browser: builtIn, host: 'cos' });
+      const socket = new WebSocket(base.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
+      await once(socket, 'open');
+      const authenticated = once(socket, 'message'); socket.send(token!); await authenticated;
+      try {
+        const prime = '6addb72e-42c0-83eb-be7c-746ff547fa01';
+        await createSession({ conversationId: prime });
+        spawn({ workers: [{ task: 'built-in placement probe' }], caller: { conversationId: prime } });
+        // The prime chat's page in Chrome polls its own activity the whole time the tab is offered.
+        for (let poll = 0; poll < 40; poll++) {
+          const activity = await request('GET', `/activity?conversationId=${prime}`, { browser: chrome, host: 'browser' });
+          expect(activity.status).toBe(200);
+          expect(activity.body.placement).toBeNull();
+          await new Promise(resolve => setTimeout(resolve, 25));
+        }
+        // Said once, not once per poll, and only because a tab was waiting for this chat.
+        expect(getLog().filter(entry => entry.message.includes('/activity withheld a tab to open')).length).toBe(1);
+        let placement: any;
+        await vi.waitFor(async () => {
+          placement ||= (await request('GET', '/status', { browser: builtIn, host: 'cos' })).body.placement;
+          expect(placement?.id).toBeTruthy();
+        }, { timeout: 15_000, interval: 50 });
+      } finally { const closed = once(socket, 'close'); socket.close(); await closed; }
+    } finally {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: before } });
     }
   });
 

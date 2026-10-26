@@ -45,6 +45,12 @@ export const MAIN_TEXTS = [
   'You',
   'Export as HTML',
   'Export usage as CSV',
+  // Phone notifications (ntfy).
+  'A chat is waiting for you.',
+  'Something failed in Chat On Steroids.',
+  'A chat finished.',
+  'Finished after {0} min.',
+  'This is a test from Chat On Steroids. Phone notifications work.',
   'Import CoS Pet folder',
   'Export settings',
   'Import settings',
@@ -80,7 +86,11 @@ export const MAIN_TEXTS = [
   'ChatGPT finished.',
   // The Goal helper stopped without evidence that the requested work is complete.
   'Goal result needs review',
-  'The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.'
+  'The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.',
+  // A chat shared as a web page: the page's own labels ('You' is above).
+  'New chat',
+  'hidden',
+  'Shared from Chat On Steroids'
 ] as const;
 
 export type MainText = typeof MAIN_TEXTS[number];

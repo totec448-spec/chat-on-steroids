@@ -1,3 +1,4 @@
+import { applyPhonePush, initPhonePushSettings, readPhonePush } from './phone-push-settings.js';
 import { initBrowserSetup } from './setup-browser.js';
 import { currentLanguage, ui, uiText, t, tn, initLanguage, onLanguageChange, setLanguage, type Language } from './i18n.js';
 import { initSettingsBackup } from './settings-backup-dialog.js';
@@ -27,6 +28,8 @@ import { initPet } from './pet.js';
 import { initPets } from './pets.js';
 import { initSkillsLibrary } from './skills-library.js';
 import { initWhatsNew } from './whats-new.js';
+import { playSoundCue } from './sound-cues.js';
+import { inQuietHours } from '../shared/phone-push.js';
 import { initSettingsSearch } from './settings-search.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
@@ -61,7 +64,7 @@ import {
 } from '../shared/types.js';
 import type { SwarmState } from '../shared/session.js';
 import { $, ago, disclosureChevron, el, icon, run, shortAgo, toast } from './dom.js';
-import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatSearch, openChatView } from './chat.js';
+import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatSearch, openChatView, openFeedback } from './chat.js';
 import { publishStopNoticeTexts } from './stop-notices.js';
 import { publishMainTexts } from './main-texts.js';
 import { paintSharedTunnel } from './tunnel-warning.js';
@@ -123,6 +126,7 @@ initSettingsBackup(api, {
   },
   toast
 });
+initPhonePushSettings(api, { save: () => save(), applied: next => apply(next), toast });
 const settingsSearch = initSettingsSearch({
   open: tab => showTab(tab),
   shown: () => document.querySelector<HTMLElement>('.app')!.dataset.screen === 'settings'
@@ -194,12 +198,16 @@ let applying = false;
  * field still follows persisted state normally.
  */
 function applyValue(control: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, next: string, previous?: string): void {
-  const dirty = document.activeElement === control && previous !== undefined && control.value !== previous;
+  const dirty = (document.activeElement === control || requestedSettings !== null) && previous !== undefined && control.value !== previous;
   if (!dirty) control.value = next;
 }
 
+/**
+ * Like applyValue for a switch. A change also stays while a save is pending, focused or not: an
+ * older state push must not reset it, or the next save reads the reset value back (#1443 review).
+ */
 function applyChecked(control: HTMLInputElement, next: boolean, previous?: boolean): void {
-  const dirty = document.activeElement === control && previous !== undefined && control.checked !== previous;
+  const dirty = (document.activeElement === control || requestedSettings !== null) && previous !== undefined && control.checked !== previous;
   if (!dirty) control.checked = next;
 }
 /** The one expanded permission group, or null. One at a time keeps the layout still. */
@@ -707,14 +715,15 @@ function toolsOn(next: AppState): number {
 let settingsSaveQueue: Promise<void> = Promise.resolve();
 let requestedSettings: SettingsPatch | null = null;
 
-function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?: AppearanceSettings } = {}): Promise<void> {
-  if (applying || !state) return Promise.resolve();
+/** Resolves true once main saved the form, false when nothing was saved (an invalid field, a refusal). */
+function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?: AppearanceSettings } = {}): Promise<boolean> {
+  if (applying || !state) return Promise.resolve(false);
 
   const previous: AppState['config'] = requestedSettings
     ? { ...state.config, ...requestedSettings }
     : state.config;
   const commandAllowlist = readCommandAllowlist();
-  if (!commandAllowlist) return Promise.resolve();
+  if (!commandAllowlist) return Promise.resolve(false);
   const capabilities = { ...previous.capabilities };
   for (const input of document.querySelectorAll<HTMLInputElement>('[data-cap]')) {
     const capability = input.dataset.cap as Capability;
@@ -766,6 +775,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       autoConnect: $<HTMLInputElement>('autoConnect').checked,
       startAtLogin: $<HTMLInputElement>('startAtLogin').checked,
       turnNotifications: $<HTMLInputElement>('turnNotifications').checked,
+      sounds: $<HTMLInputElement>('soundCues').checked,
       localAppUsage: $<HTMLInputElement>('localAppUsage').checked,
       keepAwake: $<HTMLSelectElement>('keepAwake').value !== 'off',
       keepScreenAwake: $<HTMLSelectElement>('keepAwake').value === 'screen',
@@ -779,6 +789,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       mentionCore: $<HTMLInputElement>('mentionCore').checked,
       mentionPlugins: $<HTMLInputElement>('mentionPlugins').checked,
       privacyScreenshots: $<HTMLInputElement>('privacyScreenshots').checked,
+      phonePush: readPhonePush(previous.ui.phonePush),
       secretsShield: $<HTMLInputElement>('secretsShield').checked,
       theme: over.theme ?? previous.ui.theme,
       appearance: over.appearance ?? previous.ui.appearance
@@ -802,7 +813,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
   return work;
 }
 
-async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']): Promise<void> {
+async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']): Promise<boolean> {
   const toolSurfaceChanged =
     previous.multiAgent.enabled !== patch.multiAgent.enabled ||
     (Object.keys(patch.capabilities) as Capability[]).some((cap) => {
@@ -837,6 +848,7 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     } else if (toolSurfaceChanged) {
       toast(t("Tools changed. Start a new ChatGPT conversation to guarantee the new tool list is loaded."));
     }
+    return true;
   } else {
     await refresh();
     // A rejected select remains focused. Restore it even though ordinary pushes protect dirty
@@ -860,6 +872,7 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     if (state && (!requestedSettings || requestedSettings.ui.secretsShield === patch.ui.secretsShield)) {
       $<HTMLInputElement>('secretsShield').checked = state.config.ui.secretsShield !== false;
     }
+    return false;
   }
 }
 
@@ -1719,6 +1732,7 @@ function apply(next: AppState): void {
   $<HTMLInputElement>('startAtLogin').disabled = next.loginStartupAvailable !== true;
   applyChecked($<HTMLInputElement>('startAtLogin'), config.ui.startAtLogin === true, previousState?.config.ui.startAtLogin);
   applyChecked($<HTMLInputElement>('turnNotifications'), config.ui.turnNotifications !== false, previousState ? previousState.config.ui.turnNotifications !== false : undefined);
+  applyChecked($<HTMLInputElement>('soundCues'), config.ui.sounds === true, previousState?.config.ui.sounds);
   applyChecked($<HTMLInputElement>('localAppUsage'), config.ui.localAppUsage !== false, previousState ? previousState.config.ui.localAppUsage !== false : undefined);
   // The saved switch, not the click, decides what the main process reads.
   if (previousState && (previousState.config.ui.localAppUsage !== false) !== (config.ui.localAppUsage !== false)) void refreshOtherApps(true);
@@ -1757,6 +1771,7 @@ function apply(next: AppState): void {
     config.ui.privacyScreenshots,
     previousState?.config.ui.privacyScreenshots
   );
+  applyPhonePush(next);
   // Missing means on (#1797).
   applyChecked(
     $<HTMLInputElement>('secretsShield'),
@@ -2766,6 +2781,7 @@ async function saveDiagnosticsReport(): Promise<void> {
   }
 }
 for (const button of diagnosticsButtons) button.addEventListener('click', () => void saveDiagnosticsReport());
+$('sendFeedback').addEventListener('click', () => openFeedback());
 
 $('copyLogJson').addEventListener('click', async () => {
   const text = await run(api.getLogJson());
@@ -2837,6 +2853,7 @@ for (const id of [
   'followUp',
   'enterSends',
   'turnNotifications',
+  'soundCues',
   'mentionCore',
   'mentionPlugins',
   'controlApiEnabled',
@@ -2844,6 +2861,15 @@ for (const id of [
   'codeCheckpoints',
   'mcpPersistentUrls',
   'privacyScreenshots',
+  'phonePushEnabled',
+  'phonePushTopic',
+  'phonePushServer',
+  'phonePushNeedsYou',
+  'phonePushFailures',
+  'phonePushFinished',
+  'phonePushAway',
+  'phonePushQuiet',
+  'phonePushDetails',
   'secretsShield',
   'tunnelKind',
   'tunnelId',
@@ -2853,6 +2879,12 @@ for (const id of [
   $(id).addEventListener('change', () => void save());
 }
 $('connectorSuffix').addEventListener('input', () => { connectorSuffixValid(); });
+// #1802: turning sounds on plays one, so the person hears what they chose.
+// Switching sounds on plays a sample, unless it is the quiet hours the switch promises to follow.
+$('soundCues').addEventListener('change', event => {
+  if ((event.target as HTMLInputElement).checked && !inQuietHours(state?.config.ui.phonePush?.quietHours ?? null, new Date())) playSoundCue('finished');
+});
+api.onSoundCue?.(playSoundCue);
 
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
@@ -2905,7 +2937,7 @@ initPlugins(apply);
 initPets(api, pet);
 openSkillsLibrary = initSkillsLibrary(api);
 initBrowserPreferences();
-initChat({ save: () => save(), state: () => state });
+initChat({ save: async () => { await save(); }, state: () => state });
 
 void (async () => {
   await refresh();
