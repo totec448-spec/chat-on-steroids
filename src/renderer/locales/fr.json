@@ -3291,5 +3291,10 @@
   "Keys stay with you": "Vos clés restent chez vous",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Les clés d'API et les jetons dans ce que renvoient les outils sont masqués avant que ChatGPT ne les voie.",
   "Easier to read": "Plus facile à lire",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Contraste élevé, huit couleurs d'accent, interligne et une police plus lisible."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Contraste élevé, huit couleurs d'accent, interligne et une police plus lisible.",
+  "Copy as": "Copier en tant que",
+  "Plain text": "Texte brut",
+  "Plain text without code blocks": "Texte brut sans blocs de code",
+  "Formatted text": "Texte mis en forme",
+  "Only a copy can be plain text or formatted text": "Seule une copie peut être en texte brut ou en texte mis en forme"
 }

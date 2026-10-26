@@ -5185,6 +5185,31 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
   }
 }
 
+/** One of an answer's menus: an icon that opens its choices, closed by a choice, Escape or a press outside. */
+function answerMenu(glyph: string, label: string, choiceClass: string, items: readonly (readonly [string, () => unknown])[]): HTMLElement {
+  const menu = document.createElement('details');
+  menu.className = 'answer-export';
+  const trigger = el('summary', 'answer-action');
+  trigger.append(icon(glyph));
+  ui(trigger, 'title', () => t(label)); ui(trigger, 'aria-label', () => t(label));
+  const choices = el('div', 'answer-export-menu');
+  for (const [text, choose] of items) {
+    const choice = el('button', choiceClass, () => t(text)) as HTMLButtonElement;
+    choice.type = 'button';
+    // The choice hides with the menu, so focus goes back to the icon that opened it.
+    choice.addEventListener('click', () => { menu.open = false; trigger.focus(); void choose(); });
+    choices.append(choice);
+  }
+  menu.append(trigger, choices);
+  const close = (event: Event) => { if (menu.open && !menu.contains(event.target as Node)) menu.open = false; };
+  menu.addEventListener('toggle', () => {
+    if (menu.open) document.addEventListener('pointerdown', close, true);
+    else document.removeEventListener('pointerdown', close, true);
+  });
+  menu.addEventListener('keydown', event => { if (event.key === 'Escape') { menu.open = false; trigger.focus(); } });
+  return menu;
+}
+
 /**
  * Copy and export (Markdown, or the whole session as an HTML page) under the answer of a turn the
  * page reported as completed. Main builds the text from the log, reading back answers that were
@@ -5195,10 +5220,10 @@ function answerActions(turnId: string | null, messageId?: string, answer?: { tex
   const bar = el('div', 'answer-actions');
   const sessionId = selectedId;
   // A turn's answer is named by its turn; one recorded outside any turn by its message.
-  const exportTo = async (scope: 'answer' | 'session', target: 'clipboard' | 'file', format: 'markdown' | 'html' = 'markdown') => {
+  const exportTo = async (scope: 'answer' | 'session', target: 'clipboard' | 'file', format: 'markdown' | 'text' | 'text-no-code' | 'formatted' | 'html' = 'markdown') => {
     if (!sessionId || selectedId !== sessionId) return null;
     return run(api.exportMarkdown({ id: sessionId, scope, turnId: scope === 'answer' && turnId ? turnId : undefined,
-      messageId: scope === 'answer' && !turnId ? messageId : undefined, target, ...(format === 'html' ? { format } : {}) }));
+      messageId: scope === 'answer' && !turnId ? messageId : undefined, target, ...(format !== 'markdown' ? { format } : {}) }));
   };
   const copy = el('button', 'answer-action') as HTMLButtonElement;
   copy.type = 'button';
@@ -5213,33 +5238,20 @@ function answerActions(turnId: string | null, messageId?: string, answer?: { tex
     window.clearTimeout(copiedTimer);
     copiedTimer = window.setTimeout(() => { setIcon(copyGlyph, 'i-copy'); copy.classList.remove('is-done'); }, 1500);
   });
-  const menu = document.createElement('details');
-  menu.className = 'answer-export';
-  const trigger = el('summary', 'answer-action');
-  trigger.append(icon('i-export'));
-  ui(trigger, 'title', () => t('Export')); ui(trigger, 'aria-label', () => t('Export'));
-  const choices = el('div', 'answer-export-menu');
-  for (const [scope, format, label] of [['answer', 'markdown', () => t('This answer')], ['session', 'markdown', () => t('Whole session')],
-    ['session', 'html', () => t('Whole session as HTML')]] as const) {
-    const choice = el('button', 'answer-export-choice', label) as HTMLButtonElement;
-    choice.type = 'button';
-    choice.addEventListener('click', async () => {
-      menu.open = false;
-      // The clicked choice leaves the screen with the menu; focus goes back to the menu's own button.
-      trigger.focus();
-      const result = await exportTo(scope, 'file', format);
-      if (result?.done === 'saved') toast(t('Saved {0}', [result.name]));
-    });
-    choices.append(choice);
-  }
-  menu.append(trigger, choices);
-  const close = (event: Event) => { if (menu.open && !menu.contains(event.target as Node)) menu.open = false; };
-  menu.addEventListener('toggle', () => {
-    if (menu.open) document.addEventListener('pointerdown', close, true);
-    else document.removeEventListener('pointerdown', close, true);
-  });
-  menu.addEventListener('keydown', event => { if (event.key === 'Escape') { menu.open = false; trigger.focus(); } });
-  bar.append(copy, menu);
+  // Copy as: the same answer as plain text, without its code, or formatted for Word and mail.
+  const copyAs = answerMenu('i-file-text', 'Copy as', 'answer-copy-choice', ([
+    ['text', 'Plain text'], ['text-no-code', 'Plain text without code blocks'], ['formatted', 'Formatted text']
+  ] as const).map(([format, label]) => [label, async () => {
+    const result = await exportTo('answer', 'clipboard', format);
+    if (result?.done === 'copied') toast(t('Copied'));
+  }]));
+  const exportMenu = answerMenu('i-export', 'Export', 'answer-export-choice', ([
+    ['answer', 'markdown', 'This answer'], ['session', 'markdown', 'Whole session'], ['session', 'html', 'Whole session as HTML']
+  ] as const).map(([scope, format, label]) => [label, async () => {
+    const result = await exportTo(scope, 'file', format);
+    if (result?.done === 'saved') toast(t('Saved {0}', [result.name]));
+  }]));
+  bar.append(copy, copyAs, exportMenu);
   if (sessionId && messageId && NATIVE_ID.test(messageId) && answer) bar.append(bookmarkButton(sessionId, messageId, answer));
   const branch = branchPoint(messageId);
   if (branch) {

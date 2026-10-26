@@ -3179,5 +3179,10 @@
   "Keys stay with you": "Khóa ở lại với bạn",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Khóa API và token trong kết quả công cụ trả về được ẩn trước khi ChatGPT thấy.",
   "Easier to read": "Dễ đọc hơn",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Độ tương phản cao, tám màu nhấn, giãn dòng và phông chữ dễ đọc hơn."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Độ tương phản cao, tám màu nhấn, giãn dòng và phông chữ dễ đọc hơn.",
+  "Copy as": "Sao chép dưới dạng",
+  "Plain text": "Văn bản thuần",
+  "Plain text without code blocks": "Văn bản thuần không có khối mã",
+  "Formatted text": "Văn bản có định dạng",
+  "Only a copy can be plain text or formatted text": "Chỉ bản sao mới có thể là văn bản thuần hoặc văn bản có định dạng"
 }

@@ -3179,5 +3179,10 @@
   "Keys stay with you": "金鑰留在你這裡",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "工具傳回內容中的 API 金鑰和權杖會在 ChatGPT 看到之前被隱藏。",
   "Easier to read": "更易閱讀",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "高對比、八種強調色、行距和更易讀的字型。"
+  "High contrast, eight accent colors, line spacing and a more legible font.": "高對比、八種強調色、行距和更易讀的字型。",
+  "Copy as": "複製為",
+  "Plain text": "純文字",
+  "Plain text without code blocks": "不含程式碼區塊的純文字",
+  "Formatted text": "格式化文字",
+  "Only a copy can be plain text or formatted text": "只有複製才能使用純文字或格式化文字"
 }
