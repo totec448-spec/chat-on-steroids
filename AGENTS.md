@@ -1204,6 +1204,16 @@ the same actions as a turn's answer (`messageAnswerAnchors`); `sessions:exportMa
 by `messageId` instead of `turnId`, and refuses a turn's own answer named that way. `scope: 'latest'` names
 no answer: main picks the newest one that offers these actions (`latestAnswer`), a completed turn's or a turnless one.
 
+Share as web page (chat menu "Share as web page", `/share`, and the answer export menu's "Whole session as
+HTML"): `sessions:sharePage { id, target: 'preview', hide, lang }` → `{ done: 'preview', preview, html, hidden }`
+(`page-export.ts`, page built by `transcriptHtml`, §18). Keys and tokens are always hidden; `hide` also hides email addresses and user names in folder paths (the Share dialog starts with it on); `hidden` counts every hidden
+detail. `{ id, target: 'file', preview }` saves the page main kept for that preview id, not a rebuilt one,
+through `replaceFile` with overwrite confirmation, and refuses any other id. The dialog shows the preview
+in a `sandbox=""` srcdoc frame. Labels come from `MAIN_TEXTS` ('You', 'hidden', 'Shared from Chat On
+Steroids', 'New chat' for an untitled chat, 'Export as HTML' / 'HTML files' for the save dialog).
+Tests: `test/session-page-export.test.ts` (page, hiding, stale-preview refusal), `test/renderer-share-page.test.ts`
+(dialog); UI check `scripts/verify-share-page.cjs`.
+
 
 Bookmarked answers (#1719): `sessions:bookmarks { id }` → `SessionBookmark[]` (oldest answer first)
 and `sessions:bookmark { id, messageId, excerpt, messageTime, on }` → the chat's new list, in
@@ -4521,7 +4531,7 @@ Captured ChatGPT HTML passes a strict allowlist; authored plain text stays text.
 citation ranges use Unicode code points and map to UTF-16 before slicing. Exact uploaded-file
 names render as plain chips; unresolved file citations do not gain invented local links.
 Plain text leaving the timeline (Markdown export, search index and snippets, turn notifications and `modelFacingText` for Goal/Loop and completed answers) passes `providerEntitiesAsMarkdown` first: the raw text's private-use entities (U+E200 name U+E202 field … U+E201) become `[label](address)` for `url` and are dropped otherwise, so a link card never reads as "urlLabelhttps://…".
-`sessions:exportMarkdown` takes an optional `format: 'markdown' | 'html'` (Markdown when left out). `html` is accepted only with `scope: 'session'` and `target: 'file'`: main saves the same transcript as one self-contained page (`shared/html-export.ts` `transcriptHtml`). What a person wrote is escaped plain text; answers are Markdown drawn with raw HTML escaped, images reduced to their alt text and only http(s)/mailto links kept. The page has inline styles only and a `default-src 'none'` policy, so it runs no script and loads nothing. Its title and texts pass `redactSecretText` first; the Markdown export stays exact.
+A whole chat as one HTML page is built by `shared/html-export.ts` `transcriptHtml` and only through Share's preview (`sessions:sharePage`, §9): what a person wrote is escaped plain text; answers are Markdown drawn with raw HTML escaped (a block keeps its lines), a picture becomes a link to it and only http(s)/mailto links stay links. The page has inline styles only and a `default-src 'none'` policy, so it runs no script and loads nothing. Its title and texts always pass `redactSecretText`; with `hide`, also `redactPersonalText` (email addresses, the user name in home-folder paths). Every "[redacted]" then shows as one `.hidden` mark in the interface language, never inside a link or attribute; `hiddenCount` counts them. The Markdown export stays exact.
 An assistant message may carry `references`: the sources behind its inline
 `:chatgpt-content-reference{index="N"}` citations. `extension/fiber.js` `citedSources` reads
 them from each citation pill's own props (the list its hover card pages through, plus the reply
