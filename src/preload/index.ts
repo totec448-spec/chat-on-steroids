@@ -11,7 +11,7 @@ import type { InputAttachment } from '../shared/input.js';
 import type { UsageOverview } from '../shared/usage.js';
 import type { ProviderUsage } from '../shared/provider-usage.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
-import type { LocalProject, ProjectColor } from '../shared/projects.js';
+import type { ChatgptProjectChoice, LocalProject, ProjectColor } from '../shared/projects.js';
 import type { ProjectDirectoryListing, ProjectFileMutationResult, ProjectFilePreview, ProjectFileSaveResult, ProjectFilesChanged } from '../shared/project-files.js';
 import type { ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../shared/project-git.js';
 import type { PetLibraryState, PetOverlayControlState, PetRuntimeAsset } from '../shared/pets.js';
@@ -267,6 +267,8 @@ const api = {
   disconnect: () => call<AppState>('connection:disconnect'),
   runDiagnostics: () => call<Diagnosis>('diagnostics:run'),
   saveDiagnosticsReport: () => call<{ saved: false } | { saved: true; name: string }>('diagnostics:saveReport'),
+  openFeedbackIssue: (report: { kind: 'bug'; what: string; steps?: string; frequency?: 'Every time' | 'Sometimes' | 'It happened once' }
+    | { kind: 'idea'; problem: string; proposal: string }) => call<{ trimmed: boolean }>('feedback:openIssue', report),
   requestDesktopAccessibility: () => call<AppState>('desktop:requestAccessibility'),
   repairDesktopAccess: () => call<AppState>('desktop:repairPermissions'),
   getLog: () => call<LogEntry[]>('log:get'),
@@ -275,8 +277,10 @@ const api = {
   writeClipboard: (text: string) => call<boolean>('clipboard:write', { text }),
   // A code block's Save: main asks where, in a native dialog, and `name` is only its suggestion.
   saveCode: (request: { text: string; name: string }) => call<{ done: 'saved'; name: string } | { done: 'cancelled' }>('code:save', request),
-  exportMarkdown: (request: { id: string; scope: 'answer' | 'latest' | 'session'; turnId?: string; messageId?: string; target: 'clipboard' | 'file'; format?: 'markdown' | 'html' }) =>
+  exportMarkdown: (request: { id: string; scope: 'answer' | 'latest' | 'session'; turnId?: string; messageId?: string; target: 'clipboard' | 'file' }) =>
     call<{ done: 'copied' } | { done: 'saved'; name: string } | { done: 'cancelled' }>('sessions:exportMarkdown', request),
+  sharePage: (request: { id: string; target: 'preview'; hide: boolean; lang: string } | { id: string; target: 'file'; preview: string }) =>
+    call<{ done: 'preview'; preview: string; html: string; hidden: number } | { done: 'saved'; name: string } | { done: 'cancelled' }>('sessions:sharePage', request),
   // `external`: the system's own browser even for a page the CoS browser would open.
   openLink: (url: string, options: { external?: boolean } = {}) => call<boolean>('link:open', { url, ...(options.external ? { external: true } : {}) }),
   showCosBrowser: () => call<boolean>('cosBrowser:show'),
@@ -298,9 +302,14 @@ const api = {
   listSessions: (options?: { cursor?: SessionListCursor; limit?: number; projectId?: string }) =>
     call<SessionList>('sessions:list', options ?? {}),
   listProjects: () => call<LocalProject[]>('projects:list'),
-  addProject: () => call<LocalProject | null>('projects:add'),
-  addRemoteProject: (address: string, folder: string) => call<LocalProject>('projects:addRemote', { address, folder }),
+  // `chatgpt: 'later'`: the person picks a new or an existing ChatGPT Project next (#1756).
+  addProject: (options?: { chatgpt?: 'later' }) => call<LocalProject | null>('projects:add', options ?? {}),
+  addRemoteProject: (address: string, folder: string, options?: { chatgpt?: 'later' }) => call<LocalProject>('projects:addRemote', { address, folder, ...(options ?? {}) }),
   retryChatgptProject: (id: string) => call<LocalProject | null>('projects:chatgpt-retry', { id }),
+  chatgptProjectChoices: () => call<ChatgptProjectChoice[]>('projects:chatgpt-choices'),
+  linkChatgptProject: (id: string, chatgptId: string) => call<LocalProject>('projects:chatgpt-link', { id, chatgptId }),
+  createChatgptProject: (id: string, options: { replace?: boolean } = {}) => call<LocalProject>('projects:chatgpt-create', { id, ...(options.replace ? { replace: true } : {}) }),
+  unlinkChatgptProject: (id: string) => call<LocalProject>('projects:chatgpt-unlink', { id }),
   removeProject: (id: string) => call<LocalProject>('projects:remove', { id }),
   setProjectColor: (id: string, color: ProjectColor | null) => call<LocalProject>('projects:color', { id, color }),
   setProjectSecretsShieldOff: (id: string, off: boolean) => call<LocalProject>('projects:secrets-shield', { id, off }),

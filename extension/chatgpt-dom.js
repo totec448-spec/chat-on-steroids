@@ -3699,6 +3699,30 @@ var CLF_DOM = (() => {
       .map(link => projectHomeId(new URL(link.href, location.href).pathname)).filter(Boolean))], []);
   }
 
+  /**
+   * The Projects ChatGPT's sidebar lists right now, in its order (#1756). Each Project row carries
+   * its id and label as attributes, collapsed or not (measured 2026-10-21:
+   * `data-app-action-sidebar-project-id`, `-label`); an expanded one also links to its home, which
+   * older pages only have. A collapsed sidebar lists none, which says nothing about the account.
+   */
+  function projectsShown() {
+    return safe(() => {
+      const out = [];
+      const add = (rawId, rawName) => {
+        const id = String(rawId || '').toLowerCase();
+        const name = String(rawName || '').split('\n').map(part => part.trim()).find(Boolean) || '';
+        if (/^g-p-[0-9a-f]{32}$/.test(id) && name && !out.some(project => project.id === id) && out.length < 200) out.push({ id, name: name.slice(0, 200) });
+      };
+      for (const row of document.querySelectorAll('[data-app-action-sidebar-project-id]')) {
+        add(row.getAttribute('data-app-action-sidebar-project-id'), row.getAttribute('data-app-action-sidebar-project-label'));
+      }
+      for (const link of document.querySelectorAll('nav a[href], aside a[href]')) {
+        add(projectHomeId(new URL(link.href, location.href).pathname), link.innerText || link.textContent);
+      }
+      return out;
+    }, []);
+  }
+
   /** ChatGPT's open "Create project" dialog: its name field and its one submit button. */
   function projectCreateForm() {
     return safe(() => {
@@ -3770,6 +3794,7 @@ var CLF_DOM = (() => {
     projectCreateForm,
     revealSidebar,
     projectIdsShown,
+    projectsShown,
     fillProjectName,
     projectHomeId,
     sidebarListsProject,
