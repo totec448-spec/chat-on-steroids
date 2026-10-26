@@ -983,6 +983,9 @@
   "popup_pipeline_waiting_first_message": {
     "message": "Esperando el primer mensaje."
   },
+  "popup_pipeline_not_a_chat": {
+    "message": "Esta página de ChatGPT no es un chat, así que la app no tiene nada que seguir aquí. Abre o inicia un chat."
+  },
   "popup_pipeline_waiting_latest_request_id": {
     "message": "Chat registrado. Esperando un ID de solicitud del último turno."
   },
@@ -1051,6 +1054,9 @@
   },
   "popup_status_new_chat": {
     "message": "nuevo chat"
+  },
+  "popup_status_not_a_chat": {
+    "message": "no es un chat"
   },
   "popup_status_none_open": {
     "message": "ninguna abierta"
