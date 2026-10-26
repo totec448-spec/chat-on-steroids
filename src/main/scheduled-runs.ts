@@ -71,7 +71,15 @@ function serial<T>(work: () => Promise<T>): Promise<T> {
 /** A saved file this version cannot read as its own (a newer version's): run nothing from it, and never overwrite it. */
 let foreign = false;
 async function load(): Promise<ScheduledRun[]> {
-  const stored = await readDurable(STORE);
+  // Only a damaged file reads as empty: one that could not be read right now (busy, denied) refuses the
+  // change, or saving one chat's schedule would overwrite every other chat's.
+  let stored: unknown;
+  try {
+    stored = await readDurable(STORE, { strict: true });
+  } catch (error) {
+    if (!(error as { damaged?: boolean }).damaged) throw error;
+    stored = null;
+  }
   const raw = storeSchema.safeParse(stored);
   // Only a higher version is foreign; a damaged file of this version may be replaced, or a broken file would block schedules for good.
   const version = typeof stored === 'object' && stored !== null ? (stored as { version?: unknown }).version : undefined;
@@ -140,19 +148,27 @@ export function runDueSchedules(now: number, deps: RunnerDeps): Promise<void> {
   return serial(async () => {
     let schedules = await load();
     for (const run of [...schedules]) {
-      const due = dueRun(asSchedule(run), now);
-      if (!due) continue;
       const replace = async (next: ScheduledRun | null) => {
         schedules = next ? schedules.map(row => row.id === run.id ? next : row) : schedules.filter(row => row.id !== run.id);
         await save(schedules);
       };
+      // The chat first, for every schedule: a deleted chat's schedule goes with it even while paused or ended.
+      let session: Awaited<ReturnType<RunnerDeps['session']>>;
       try {
-        const session = await deps.session(run.sessionId);
+        session = await deps.session(run.sessionId);
         if (!session) {
           deps.log(`scheduled run: removed: its chat no longer exists (${run.sessionId})`);
           await replace(null);
           continue;
         }
+      } catch (error) {
+        // Not readable right now is not gone: kept, and checked again in 30 s.
+        deps.log(`scheduled run: its chat could not be read (${error instanceof Error ? error.message : String(error)}); checked again in 30 s (${run.sessionId})`);
+        continue;
+      }
+      const due = dueRun(asSchedule(run), now);
+      if (!due) continue;
+      try {
         if (run.lastInputId && (await deps.pending()).has(run.lastInputId)) {
           deps.log(`scheduled run: ${clock(due.dueAt)} skipped: the previous run still waits in the queue (${run.sessionId})`);
           await replace({ ...run, lastDueAt: due.dueAt });

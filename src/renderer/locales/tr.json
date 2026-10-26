@@ -3241,5 +3241,6 @@
   "{0} hours": "{0} saat",
   "{0} hours|one": "{0} saat",
   "every {0} hours": "her {0} saatte",
-  "every {0} hours|one": "her {0} saatte"
+  "every {0} hours|one": "her {0} saatte",
+  "Choose the end date.": "Bitiş tarihini seçin."
 }

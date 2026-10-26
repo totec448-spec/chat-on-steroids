@@ -3183,5 +3183,6 @@
   "Until": "종료",
   "Weekdays": "평일",
   "{0} hours": "{0}시간",
-  "every {0} hours": "{0}시간마다"
+  "every {0} hours": "{0}시간마다",
+  "Choose the end date.": "종료 날짜를 선택하세요."
 }

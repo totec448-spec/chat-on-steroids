@@ -112,3 +112,16 @@ it("says the main process's refusal in the chosen words and keeps the dialog ope
   await submit();
   expect($('scheduleError').textContent).toBe('Write the message to send.');
 });
+
+it('asks for the end date when "A date" is chosen without one, instead of saving a schedule that never ends (CodeRabbit)', async () => {
+  const { calls, opened } = await dialog();
+  await opened.open(SESSION, 'Check the issues');
+  change('scheduleUntilKind', 'date');
+  change('scheduleUntil', '');
+  await submit();
+  expect(calls.saveSchedule).not.toHaveBeenCalled();
+  expect($('scheduleError').hidden).toBe(false);
+  expect($('scheduleError').textContent).toBe('Choose the end date.');
+  expect($<HTMLDialogElement>('scheduleDialog').open).toBe(true);
+});
+

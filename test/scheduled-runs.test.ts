@@ -170,6 +170,8 @@ it('is accepted by the real queue, which keeps one row for the same run queued t
     const rows = (await input.listInputs()).filter(row => row.sessionId === session.id);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ text: 'Daily check', scheduled: { dueAt: local('2026-10-24T09:00:00'), late: false } });
+    // The retry is the same run, so the schedule records it as sent and the next time can see it waiting (CodeRabbit).
+    expect((await runs.listSchedules())[0]).toMatchObject({ lastInputId: rows[0]!.id, lastDueAt: local('2026-10-24T09:00:00') });
   } finally { input.resetInputForTests(); resetSessionStoreForTests(); }
 });
 
@@ -195,3 +197,36 @@ it('starts empty without a saved file, keeps the good schedules of a damaged one
     .rejects.toThrow('These schedules were saved by a newer version of Chat On Steroids. Update the app to change them.');
   expect(await durable.readDurable('scheduled-runs')).toEqual({ version: 2, schedules: 'x' });
 });
+
+it('refuses a change rather than overwrite schedules it could not read, and treats only a damaged file as empty (CodeRabbit)', async () => {
+  const { runs } = await setup();
+  await runs.saveSchedule({ sessionId: SESSION, text: 'Keep me', repeat: { kind: 'daily', at: '09:00' }, until: null }, local('2026-10-24T08:00:00'));
+  const durable = await import('../src/main/durable.js');
+  // As the real reader does on EBUSY/EACCES: null unless asked to be strict, then an error that is not "damaged".
+  const read = vi.spyOn(durable, 'readDurable').mockImplementationOnce(async (_name, options) => {
+    if (options?.strict) throw new Error('Could not read scheduled-runs state');
+    return null;
+  });
+  await expect(runs.saveSchedule({ sessionId: '2026-10-24-ffffffff', text: 'Other', repeat: { kind: 'daily', at: '09:00' }, until: null }, local('2026-10-24T08:00:00')))
+    .rejects.toThrow(/Could not read/);
+  read.mockRestore();
+  expect((await runs.listSchedules()).map(row => row.text)).toEqual(['Keep me']);
+});
+
+it('removes a deleted chat\'s schedule even while it is paused, and keeps one whose chat could not be read (CodeRabbit)', async () => {
+  let gone = false, unreadable = false;
+  const { runs, deps } = await setup({ session: async id => {
+    if (unreadable) throw new Error('metadata could not be read');
+    return id === SESSION && !gone ? { id, conversationId: 'chat-1', activeTurnId: null } : null;
+  } });
+  await runs.saveSchedule({ sessionId: SESSION, text: 'Paused one', repeat: { kind: 'daily', at: '09:00' }, until: null }, local('2026-10-24T08:00:00'));
+  await runs.setSchedulePaused(SESSION, true, local('2026-10-24T08:10:00'));
+  unreadable = true;
+  await runs.runDueSchedules(local('2026-10-24T08:20:00'), deps);
+  expect(await runs.listSchedules()).toHaveLength(1);
+  unreadable = false; gone = true;
+  await runs.runDueSchedules(local('2026-10-24T08:20:30'), deps);
+  expect(await runs.listSchedules()).toEqual([]);
+  expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('removed: its chat no longer exists'));
+});
+
