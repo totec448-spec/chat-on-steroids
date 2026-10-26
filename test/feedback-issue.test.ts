@@ -53,6 +53,17 @@ describe('the prefilled GitHub issue', () => {
     expect(shown.what).not.toMatch(/�/);
   });
 
+  it('keeps the link short even when the title is a few very long characters', () => {
+    // One "character" can be thousands of code points (combining marks), or a long emoji sequence.
+    const marks = `a${'\u0301'.repeat(3990)}`;
+    const family = '👨\u200d👩\u200d👧\u200d👦'.repeat(80);
+    for (const what of [marks, family]) {
+      const { url } = feedbackIssueUrl({ kind: 'bug', what }, env);
+      expect(url.length).toBeLessThanOrEqual(MAX_ISSUE_URL);
+      expect(encodeURIComponent(fields(url).title!).length).toBeLessThanOrEqual(900);
+    }
+  });
+
   it('cuts at whole characters even for emoji', () => {
     const { url } = feedbackIssueUrl({ kind: 'idea', problem: '🙂'.repeat(3000), proposal: 'p' }, env);
     expect(url.length).toBeLessThanOrEqual(MAX_ISSUE_URL);
