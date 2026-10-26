@@ -5126,3 +5126,19 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 @media (prefers-reduced-motion: reduce) { .chat-find { animation: none; } }
 ::highlight(chat-find) { background-color: var(--accent-wash); color: inherit; }
 ::highlight(chat-find-current) { background-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--ink); }
+
+/* #1826 scheduled runs: one quiet line above the chat's queue (Haz: no clock beside Send, none in the sidebar). */
+.schedule-line { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 10px; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); }
+.schedule-line[hidden] { display: none; }
+.schedule-line > .ico { flex: 0 0 auto; }
+.schedule-line > span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.schedule-line .btn-quiet { flex: 0 0 auto; border: 0; background: transparent; box-shadow: none; color: var(--soft); padding: 2px 8px; min-height: 0; }
+.schedule-line .btn-quiet:hover:not(:disabled) { color: var(--ink); background: var(--hover); }
+.schedule-dialog textarea { min-height: 0; field-sizing: content; max-height: 40vh; }
+.schedule-when { display: flex; gap: 12px; flex-wrap: wrap; }
+.schedule-when > .plugin-field { flex: 1 1 160px; margin: 0; }
+.schedule-when > .plugin-field[hidden] { display: none; }
+.schedule-dialog .plugin-field[hidden] { display: none; }
+.schedule-note { display: block; margin: 8px 0 0; color: var(--faint); font-size: calc(11.5px * var(--text-scale, 1)); line-height: 1.5; }
+.schedule-catch-up { margin-top: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.schedule-delete { margin-right: auto; color: var(--red); }
