@@ -82,7 +82,8 @@ import { CUSTOM_CONTINUE_MAX_CHARS } from '../shared/recovery.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange, rememberRunningSurfaceTokens } from './connection.js';
 import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema, settingsRecovered } from './config.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
-import { PROJECT_COLORS } from '../shared/projects.js';
+import { CHATGPT_PROJECT_ID, PROJECT_COLORS } from '../shared/projects.js';
+import { chatgptProjectChoices } from './chatgpt-project-catalog.js';
 import { bridgePortSelection } from './bridge-ports.js';
 import { clearAllGoalSwitches, draftTaskPlan, listGoalModels, MODEL_PAGE_SIZE, retireGoalDrafts, goalBackendFor, goalSwitchFor, setGoalSwitchNow, setGoalReplyActiveNow, setGoalObjectiveNow } from './goal.js';
 import { forgetExposedSurface } from './mcp/server.js';
@@ -99,7 +100,7 @@ import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { inFlightToolCalls } from './mcp/call-context.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, addRemoteProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff } from './projects.js';
+import { addProject, addRemoteProject, createChatgptProjectFor, linkChatgptProject, unlinkChatgptProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff } from './projects.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile, serverFileSnapshot } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
@@ -148,6 +149,8 @@ import { findInSession, locateMessage, locateSearchMatch, searchSessions } from 
 import { listBookmarks, setBookmark } from './session/bookmarks.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
 import { exportSessionMarkdown } from './session/markdown-export.js';
+import { exportSessionPage } from './session/page-export.js';
+import { feedbackIssueUrl, operatingSystemName, systemVersion } from './feedback.js';
 import { saveCodeFile } from './code-file.js';
 import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
 import { setChatsTrusted, trustedChatIds } from './session/trusted-chats.js';
@@ -1246,7 +1249,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     push('session:changed');
     return project;
   });
-  handle('projects:add', async () => {
+  handle('projects:add', async (payload) => {
+    const { chatgpt } = z.object({ chatgpt: z.literal('later').optional() }).strict().parse(payload ?? {});
     const window = getWindow();
     if (!window) throw new Error('No window');
     const result = await dialog.showOpenDialog(window, { ...dialogLabel('Choose a project folder for ChatGPT'), properties: ['openDirectory'] });
@@ -1258,7 +1262,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       const state = await approveRoot(folder);
       push('state:changed', state);
     }
-    const project = await addProject(folder);
+    const project = await addProject(folder, chatgpt ? { chatgpt } : {});
     push('session:changed');
     // Its native ChatGPT Project is created by the browser; tell it there is work.
     if (project.chatgpt?.state === 'requested') wakeBrowserWork();
@@ -1266,9 +1270,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   // A folder on a server (#1469): the address and folder as typed; the server is asked once.
   handle('projects:addRemote', async payload => {
-    const { address, folder } = (payload ?? {}) as { address?: unknown; folder?: unknown };
+    const { address, folder, chatgpt } = (payload ?? {}) as { address?: unknown; folder?: unknown; chatgpt?: unknown };
     if (typeof address !== 'string' || typeof folder !== 'string' || address.length > 300 || folder.length > 4096) throw new Error('Enter an SSH address and a folder');
-    const project = await addRemoteProject(address, folder);
+    const project = await addRemoteProject(address, folder, {}, chatgpt === 'later' ? { chatgpt: 'later' } : {});
     push('session:changed');
     if (project.chatgpt?.state === 'requested') wakeBrowserWork();
     return project;
@@ -1277,6 +1281,28 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
     const project = await retryProjectCreate(id);
     if (project) wakeBrowserWork();
+    push('session:changed');
+    return project;
+  });
+  // Linking a project to a ChatGPT Project the account already has (#1756).
+  handle('projects:chatgpt-choices', async () => chatgptProjectChoices());
+  handle('projects:chatgpt-link', async payload => {
+    const { id, chatgptId } = z.object({ id: z.string().uuid(), chatgptId: z.string().regex(CHATGPT_PROJECT_ID) }).strict().parse(payload);
+    const project = await linkChatgptProject(id, chatgptId);
+    push('session:changed');
+    return project;
+  });
+  handle('projects:chatgpt-create', async payload => {
+    const { id, replace } = z.object({ id: z.string().uuid(), replace: z.boolean().optional() }).strict().parse(payload);
+    const project = await createChatgptProjectFor(id, { replace: replace === true });
+    if (project.chatgpt?.state === 'requested') wakeBrowserWork();
+    push('session:changed');
+    return project;
+  });
+  // Unlinking leaves the ChatGPT Project and its chats in ChatGPT; the project's new chats start outside it.
+  handle('projects:chatgpt-unlink', async payload => {
+    const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
+    const project = await unlinkChatgptProject(id);
     push('session:changed');
     return project;
   });
@@ -1506,6 +1532,26 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('diagnostics:run', async () => runDiagnostics());
   // "Save diagnostics report": one plain-text file for a bug report, personal details removed
   // (see diagnostics-report.ts). Revealed after saving so the user reads what they would share.
+  // In-app feedback: GitHub's issue form, filled in, opens in the browser. The person reads it and
+  // submits it there; the app sends nothing itself. The diagnostics report is saved separately.
+  handle('feedback:openIssue', async (payload) => {
+    const text = (max: number) => z.string().max(max);
+    const report = z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('bug'), what: text(4000).refine(value => value.trim().length > 0), steps: text(4000).optional(),
+        frequency: z.enum(['Every time', 'Sometimes', 'It happened once']).optional() }).strict(),
+      z.object({ kind: z.literal('idea'), problem: text(4000).refine(value => value.trim().length > 0),
+        proposal: text(4000).refine(value => value.trim().length > 0) }).strict()
+    ]).parse(payload);
+    const bridge = await bridgeStatus();
+    const { url, trimmed } = feedbackIssueUrl(report, {
+      version: app.getVersion(), os: operatingSystemName(process.platform, systemVersion()), arch: process.arch,
+      extension: bridge.paired || bridge.extensionVersion ? { present: bridge.present, version: bridge.extensionVersion } : null
+    });
+    await shell.openExternal(url);
+    logInfo(`feedback: opened GitHub's ${report.kind === 'bug' ? 'bug report' : 'feature request'} form, filled in${trimmed ? ' (text shortened to fit the link)' : ''}`);
+    return { trimmed };
+  });
+
   handle('diagnostics:saveReport', async () => {
     const selfTest = await Promise.race([
       runDiagnostics().catch(() => null),
@@ -1568,19 +1614,29 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return saveCodeFile(text, name, getWindow());
   });
 
-  // Copy or save a completed turn's answer, or the session transcript, as Markdown, or save the
-  // transcript as an HTML page. Main reads the full text of answers that were cut in the log, so
-  // none comes out truncated.
+  // Copy or save a completed turn's answer, or the session transcript, as Markdown. Main reads
+  // the full text of answers that were cut in the log, so neither comes out truncated. A whole
+  // chat as a web page goes through sessions:sharePage, which previews it first.
   handle('sessions:exportMarkdown', async (payload) => {
     const request = z.object({
       id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
       scope: z.enum(['answer', 'latest', 'session']),
       turnId: z.string().min(1).max(200).optional(),
       messageId: z.string().min(1).max(200).optional(),
-      target: z.enum(['clipboard', 'file']),
-      format: z.enum(['markdown', 'html']).optional()
+      target: z.enum(['clipboard', 'file'])
     }).parse(payload);
     return exportSessionMarkdown(request, getWindow());
+  });
+
+  // Share a chat as one web page: the dialog previews exactly what Save writes, with or without
+  // the details the person chose to hide.
+  handle('sessions:sharePage', async (payload) => {
+    const id = z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i);
+    const request = z.discriminatedUnion('target', [
+      z.object({ id, target: z.literal('preview'), hide: z.boolean(), lang: z.string().max(35).regex(/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/) }),
+      z.object({ id, target: z.literal('file'), preview: z.string().uuid() })
+    ]).parse(payload);
+    return exportSessionPage(request, getWindow());
   });
 
   // The Install button. The renderer decides nothing about what is installed - it cannot

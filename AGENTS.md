@@ -1140,6 +1140,30 @@ has no row `data-app-action-sidebar-project-id` for it (`CLF_DOM.sidebarListsPro
 the sidebar is closed or the section collapsed, which proves nothing). The worker passes it on as
 the same `gone` only for the tab it opened for that message, still on that Project's home.
 An opening remembers its Project, so a retry's new Project gets its own tab.
+Linking to a Project the account already has (#1756): ChatGPT pages report the Projects their
+sidebar lists (`CLF_DOM.projectsShown`: rows' `data-app-action-sidebar-project-id`/`-label`, then
+links to a Project home; content.js `reportProjectList` every 15 s, only when the list changed and
+never empty) through worker `project_catalog` to `/chatgpt-projects`; `chatgpt-project-catalog.ts`
+keeps up to 200 (durable `chatgpt-projects`), a shorter report never removes one, entries leave
+after 30 days unseen, names are labels only. Each report carries the workspace ChatGPT lists them
+in (the `_account` cookie, null for a personal account); the catalog keeps a 16-hex SHA-256 prefix
+of it per entry, never the id, and offers or links only entries of the last reported workspace,
+because ChatGPT opens a Project only in its own workspace. Adding a folder with Projects to choose from passes
+`chatgpt: 'later'` (no link yet) and opens `chatgpt-project-picker.ts` on the new row: New or an
+existing Project; one held by another listed project is shown disabled. Closing the choice creates
+nothing (Haz on #1757), and when the row is not drawn nothing is created either: a toast says to
+choose from the project's ⋯ menu. `linkChatgptProject` accepts only a listed id, never one another
+listed project holds, and never over `requested`/`claimed`/`creating`; it may replace a `linked`,
+`failed` or `uncertain` one. `createChatgptProjectFor(id, { replace })` (IPC `projects:chatgpt-create`
+with `replace: true`) requests a new one in place of such a link; without `replace` a project that
+has one keeps it. `unlinkChatgptProject` (IPC `projects:chatgpt-unlink`) drops the link only: the
+Project and its chats stay in ChatGPT, new chats start outside any Project, and it is refused while
+one is being created. A project without one, or a failed/uncertain one, offers "Choose a ChatGPT
+Project…" in its menu; a linked one offers "Change ChatGPT Project…" (the same picker, current one
+marked, New first) and "Unlink ChatGPT Project". Closing the picker from the menu changes nothing.
+Tests: `test/chatgpt-project-link.test.ts`, `test/chatgpt-project-picker.test.ts`,
+`test/chatgpt-project-list-dom.test.ts`, `scripts/verify-chatgpt-project-picker.cjs`,
+`scripts/verify-chatgpt-project-menu.cjs`.
 A chat the person starts on chatgpt.com inside a linked Project joins that CoS project (#1744):
 the service worker's `events` handler reads the recording tab's URL (`tabChatgptProject`: the
 chat's own Project route, or the Project home only for a fresh chat's first, still unnamed
@@ -1180,6 +1204,16 @@ turn (copied branch history, an adopted chat's history, replies to messages type
 the same actions as a turn's answer (`messageAnswerAnchors`); `sessions:exportMarkdown` names them
 by `messageId` instead of `turnId`, and refuses a turn's own answer named that way. `scope: 'latest'` names
 no answer: main picks the newest one that offers these actions (`latestAnswer`), a completed turn's or a turnless one.
+
+Share as web page (chat menu "Share as web page", `/share`, and the answer export menu's "Whole session as
+HTML"): `sessions:sharePage { id, target: 'preview', hide, lang }` → `{ done: 'preview', preview, html, hidden }`
+(`page-export.ts`, page built by `transcriptHtml`, §18). Keys and tokens are always hidden; `hide` also hides email addresses and user names in folder paths (the Share dialog starts with it on); `hidden` counts every hidden
+detail. `{ id, target: 'file', preview }` saves the page main kept for that preview id, not a rebuilt one,
+through `replaceFile` with overwrite confirmation, and refuses any other id. The dialog shows the preview
+in a `sandbox=""` srcdoc frame. Labels come from `MAIN_TEXTS` ('You', 'hidden', 'Shared from Chat On
+Steroids', 'New chat' for an untitled chat, 'Export as HTML' / 'HTML files' for the save dialog).
+Tests: `test/session-page-export.test.ts` (page, hiding, stale-preview refusal), `test/renderer-share-page.test.ts`
+(dialog); UI check `scripts/verify-share-page.cjs`.
 
 
 Bookmarked answers (#1719): `sessions:bookmarks { id }` → `SessionBookmark[]` (oldest answer first)
@@ -4498,7 +4532,7 @@ Captured ChatGPT HTML passes a strict allowlist; authored plain text stays text.
 citation ranges use Unicode code points and map to UTF-16 before slicing. Exact uploaded-file
 names render as plain chips; unresolved file citations do not gain invented local links.
 Plain text leaving the timeline (Markdown export, search index and snippets, turn notifications and `modelFacingText` for Goal/Loop and completed answers) passes `providerEntitiesAsMarkdown` first: the raw text's private-use entities (U+E200 name U+E202 field … U+E201) become `[label](address)` for `url` and are dropped otherwise, so a link card never reads as "urlLabelhttps://…".
-`sessions:exportMarkdown` takes an optional `format: 'markdown' | 'html'` (Markdown when left out). `html` is accepted only with `scope: 'session'` and `target: 'file'`: main saves the same transcript as one self-contained page (`shared/html-export.ts` `transcriptHtml`). What a person wrote is escaped plain text; answers are Markdown drawn with raw HTML escaped, images reduced to their alt text and only http(s)/mailto links kept. The page has inline styles only and a `default-src 'none'` policy, so it runs no script and loads nothing. Its title and texts pass `redactSecretText` first; the Markdown export stays exact.
+A whole chat as one HTML page is built by `shared/html-export.ts` `transcriptHtml` and only through Share's preview (`sessions:sharePage`, §9): what a person wrote is escaped plain text; answers are Markdown drawn with raw HTML escaped (a block keeps its lines), a picture becomes a link to it and only http(s)/mailto links stay links. The page has inline styles only and a `default-src 'none'` policy, so it runs no script and loads nothing. Its title and texts always pass `redactSecretText`; with `hide`, also `redactPersonalText` (email addresses, the user name in home-folder paths). Every "[redacted]" then shows as one `.hidden` mark in the interface language, never inside a link or attribute; `hiddenCount` counts them. The Markdown export stays exact.
 An assistant message may carry `references`: the sources behind its inline
 `:chatgpt-content-reference{index="N"}` citations. `extension/fiber.js` `citedSources` reads
 them from each citation pill's own props (the list its hover card pages through, plus the reply
@@ -5551,6 +5585,16 @@ approved roots, tunnel profile/ids) become `<x:xxxx>`. Settings contribute only 
 and short option names; keys naming tunnels, profiles, paths, roots, prompts, URLs, keys or ids are
 dropped unless the value is a number or boolean. Never add message, task or title text to a section.
 Tests: `report-scrub.test.ts`, `diagnostics-report.test.ts` and `ipc.test.ts` (no personal value survives).
+
+Send feedback (Activity's button, `/feedback`; `feedback-dialog.ts`) writes a problem report or an idea
+and opens GitHub's issue form filled in: `feedback:openIssue { kind: 'bug', what, steps?, frequency? }`
+or `{ kind: 'idea', problem, proposal }` → `{ trimmed }`. Main builds the address (`feedback.ts`) with the
+form's own field ids and dropdown texts (`.github/ISSUE_TEMPLATE`; `feedback-issue.test.ts` fails when a
+template renames one), adds the version, system, architecture and what it knows of the extension, and
+opens it with `shell.openExternal`; nothing is sent from the app. Text that does not fit in a 7800-character
+link is shortened, longest field first, and `trimmed` makes the dialog put the whole text on the clipboard.
+A problem report needs the saved diagnostics report (the form closes reports without one); a newer release
+is pointed out first. The draft stays until it reached GitHub. One `feedback:` log line, never the text.
 
 ## 20. Build, installation, updater and release
 

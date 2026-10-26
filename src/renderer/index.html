@@ -74,7 +74,7 @@
                   <span class="acts"><button class="btn" id="addProject" type="button" title="Add a project folder" aria-label="Add a project folder"><i class="ico ph ph-plus" aria-hidden="true"></i></button></span>
                 </summary>
                 <div id="projectList"><p class="empty" role="status">Loading projects…</p></div>
-                <p class="empty sidebar-section-empty" id="projectsEmpty" hidden>No projects yet.</p>
+                <p class="empty sidebar-section-empty" id="projectsEmpty" hidden>No projects yet. Add a folder to get started.</p>
               </details>
               <details class="sidebar-session-section" id="chatsSection" open>
                 <summary class="sidebar-session-heading">
@@ -1552,6 +1552,9 @@
                 <button class="btn" id="copyLogText" type="button">
                   <i class="ico ph ph-copy" aria-hidden="true"></i>Text
                 </button>
+                <button class="btn" id="sendFeedback" type="button" title="Report a problem or suggest an idea. GitHub opens with it filled in.">
+                  <i class="ico ph ph-chat-text" aria-hidden="true"></i>Send feedback
+                </button>
                 <button class="btn" id="saveDiagnosticsReport" type="button" title="Save one file with versions, settings, the connection state and the log, with personal details removed, to attach to a bug report.">
                   <i class="ico ph ph-file-text" aria-hidden="true"></i>Diagnostics report
                 </button>
@@ -1582,6 +1585,49 @@
         <p id="sshProjectError" class="plugin-error" role="alert" hidden></p>
         <div class="pet-delete-actions"><button class="btn" id="sshProjectCancel" type="button">Cancel</button><button class="btn btn-solid" id="sshProjectSubmit" type="submit">Test and add</button></div>
       </form>
+    </dialog>
+    <dialog class="plugin-dialog share-page-dialog" id="sharePageDialog" aria-labelledby="sharePageTitle">
+      <div class="plugin-dialog-head"><h2 id="sharePageTitle">Share as web page</h2><button class="btn" id="sharePageClose" type="button">Close</button></div>
+      <form id="sharePageForm" class="plugin-dialog-body">
+        <p>Saves this chat as one web page file that opens in any browser. Nothing is uploaded: you decide who gets the file.</p>
+        <div class="share-page-preview" id="sharePagePreview">
+          <iframe id="sharePageFrame" sandbox="" referrerpolicy="no-referrer" title="Preview"></iframe>
+          <p class="share-page-loading" id="sharePageLoading">Preparing the preview…</p>
+        </div>
+        <label class="setting share-page-hide"><span class="setting-text"><b>Hide email addresses and user names</b><em>Keys and tokens are always hidden. Check the preview: other personal details may remain.</em><em class="share-page-count" id="sharePageCount" aria-live="polite" hidden></em></span><input id="sharePageHide" type="checkbox" /></label>
+        <p id="sharePageError" class="plugin-error" role="alert" hidden></p>
+        <div class="pet-delete-actions"><button class="btn" id="sharePageCancel" type="button">Cancel</button><button class="btn btn-solid" id="sharePageSave" type="submit">Save…</button></div>
+      </form>
+    </dialog>
+    <dialog class="plugin-dialog feedback-dialog" id="feedbackDialog" aria-labelledby="feedbackTitle">
+      <div class="plugin-dialog-head"><h2 id="feedbackTitle">Send feedback</h2><button class="btn" id="feedbackClose" type="button">Close</button></div>
+      <form id="feedbackForm" class="feedback-form" novalidate>
+        <div class="plugin-dialog-body feedback-fields">
+        <div class="feedback-kind" role="radiogroup" aria-label="Kind of feedback">
+          <label><input type="radio" name="feedbackKind" value="bug" checked /><span>Report a problem</span></label>
+          <label><input type="radio" name="feedbackKind" value="idea" /><span>Suggest an idea</span></label>
+        </div>
+        <div class="feedback-update" id="feedbackUpdate" hidden><span id="feedbackUpdateText"></span><button class="btn" id="feedbackUpdateOpen" type="button">Open Activity</button></div>
+        <div id="feedbackBug">
+          <label class="plugin-field" for="feedbackWhat"><span>What happened</span><textarea id="feedbackWhat" rows="3" maxlength="4000" placeholder="What you did, what happened, and what you expected instead."></textarea></label>
+          <label class="plugin-field" for="feedbackSteps"><span>Steps to reproduce <small>(optional)</small></span><textarea id="feedbackSteps" rows="2" maxlength="4000" placeholder="One step per line."></textarea></label>
+          <label class="plugin-field" for="feedbackFrequency"><span>How often does it happen?</span><select id="feedbackFrequency"><option value="">Not sure</option><option value="Every time">Every time</option><option value="Sometimes">Sometimes</option><option value="It happened once">It happened once</option></select></label>
+          <div class="setting feedback-report"><span class="setting-text"><b>Diagnostics report</b><em id="feedbackReportNote">Needed for a problem report. Read it before you attach it.</em></span><button class="btn" id="feedbackSaveReport" type="button">Save report…</button></div>
+        </div>
+        <div id="feedbackIdea" hidden>
+          <label class="plugin-field" for="feedbackProblem"><span>What problem would it solve?</span><textarea id="feedbackProblem" rows="3" maxlength="4000" placeholder="What you are trying to do, and what gets in the way."></textarea></label>
+          <label class="plugin-field" for="feedbackProposal"><span>What should the app do?</span><textarea id="feedbackProposal" rows="3" maxlength="4000" placeholder="How it would work for you."></textarea></label>
+        </div>
+        <p class="feedback-note">GitHub opens with this filled in. You submit it there; the app sends nothing.</p>
+        <p id="feedbackError" class="plugin-error" role="alert" hidden></p>
+        </div>
+        <div class="pet-delete-actions"><button class="btn" id="feedbackCancel" type="button">Cancel</button><button class="btn btn-solid" id="feedbackSubmit" type="submit">Continue on GitHub</button></div>
+      </form>
+      <div class="plugin-dialog-body feedback-done" id="feedbackDone" hidden>
+        <p id="feedbackDoneText"></p>
+        <p id="feedbackDoneTrimmed" hidden>Part of your text did not fit in the link. The whole text is on the clipboard, so you can paste it there.</p>
+        <div class="pet-delete-actions"><button class="btn btn-solid" id="feedbackDoneClose" type="button">Done</button></div>
+      </div>
     </dialog>
     <dialog class="search-dialog" id="searchDialog" aria-label="Search chats">
       <div class="search-dialog-field">

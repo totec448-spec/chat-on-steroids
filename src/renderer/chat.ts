@@ -110,6 +110,9 @@ import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMe
 import { createSearchPopup } from './search-popup.js';
 import { primaryShortcut } from './shortcuts.js';
 import { initSshProjectDialog } from './ssh-project-dialog.js';
+import { initSharePage } from './share-page.js';
+import { initFeedbackDialog } from './feedback-dialog.js';
+import { createChatgptProjectPicker } from './chatgpt-project-picker.js';
 
 const api = window.api;
 let chatSearch: ChatSearch | null = null;
@@ -281,6 +284,25 @@ function projectMenuItems(id: string): RowMenuItem[] {
   return [
     { action: 'group-new', icon: 'i-group', label: () => t('New group'), title: () => t('Add a group to sort this project\'s chats'),
       run: () => void newChatGroup(id) },
+    // A project without a ChatGPT Project, or whose creation failed, can take a new or an existing one (#1756).
+    ...(!link || link.state === 'failed' || link.state === 'uncertain' ? [{
+      action: 'chatgpt-link', icon: 'i-folder',
+      label: () => t('Choose a ChatGPT Project…'),
+      title: () => t('Use a new or an existing ChatGPT Project for this project\'s chats'),
+      run: () => { const project = projects.find(row => row.id === id); if (project) void chatgptProjectPicker.offer(project, 'menu'); }
+    } satisfies RowMenuItem] : []),
+    // A linked one can be changed or let go (Haz on #1757); unlinking deletes nothing in ChatGPT.
+    ...(link?.state === 'linked' ? [{
+      action: 'chatgpt-change', icon: 'i-swap',
+      label: () => t('Change ChatGPT Project…'),
+      title: () => t('Use another or a new ChatGPT Project for this project\'s new chats'),
+      run: () => { const project = projects.find(row => row.id === id); if (project) void chatgptProjectPicker.offer(project, 'menu'); }
+    } satisfies RowMenuItem, {
+      action: 'chatgpt-unlink', icon: 'i-unlink',
+      label: () => t('Unlink ChatGPT Project'),
+      title: () => t('New chats start outside any ChatGPT Project. The Project and its chats stay in ChatGPT.'),
+      run: () => void unlinkChatgptProjectOf(id)
+    } satisfies RowMenuItem] : []),
     // Only when its native ChatGPT Project could not be created; otherwise nothing about it shows.
     ...(link?.state === 'failed' || link?.state === 'uncertain' ? [{
       action: 'chatgpt-retry', icon: 'i-retry', disabled: retryingChatgptProject.has(id),
@@ -317,6 +339,28 @@ function projectMenuItems(id: string): RowMenuItem[] {
       run: () => void removeProjectFromSidebar(id)
     }
   ];
+}
+
+const chatgptProjectPicker = createChatgptProjectPicker({
+  api,
+  anchor: id => rowMenuButton(`project:${id}`),
+  onUpdated: updated => {
+    ++sessionsLoadGeneration;
+    projects = projects.map(row => row.id === updated.id ? updated : row);
+    paintSessions();
+    void refreshInputQueue();
+  },
+  onError: message => toast(t(message)),
+  onNotice: message => toast(message)
+});
+
+async function unlinkChatgptProjectOf(id: string): Promise<void> {
+  const updated = await run(api.unlinkChatgptProject(id));
+  if (!updated) return;
+  ++sessionsLoadGeneration;
+  projects = projects.map(row => row.id === updated.id ? updated : row);
+  paintSessions();
+  toast(t('Unlinked. The ChatGPT Project stays in ChatGPT.'));
 }
 
 const retryingChatgptProject = new Set<string>();
@@ -1181,7 +1225,9 @@ function sessionRow(summary: SessionSummary): HTMLElement {
       { action: 'open', icon: 'i-out', label: () => t('Open in browser'), title: () => t("Open this chat in your browser"), run: () => void run(api.openSessionChat(summary.id)) },
       // ChatGPT opens /c/<id> wherever the chat lives, a project included (#1107).
       { action: 'copy-link', icon: 'i-copy', label: () => t('Copy link'), title: () => t("Copy this chat's ChatGPT link"),
-        run: async () => { if (await run(api.writeClipboard(`https://chatgpt.com/c/${summary.conversationId}`))) toast(t('Link copied')); } }
+        run: async () => { if (await run(api.writeClipboard(`https://chatgpt.com/c/${summary.conversationId}`))) toast(t('Link copied')); } },
+      { action: 'share', icon: 'i-globe', label: () => t('Share as web page'),
+        title: () => t('Save this chat as one web page file to send to anyone. You see the page before it is saved.'), run: () => openSharePage(summary.id) }
     );
     items.push(...chatGroupMenuItems(summary));
     // The stop this app can actually make. It does not touch the running ChatGPT turn — nothing
@@ -1254,7 +1300,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
 let renaming: { id: string; original: string; value: string; start: number; end: number } | null = null;
 
 /** Slash commands that act on the open chat; New Chat does not offer them. */
-const CHAT_COMMANDS = new Set(['rename', 'pin', 'status', 'compact', 'copy', 'export', 'find']);
+const CHAT_COMMANDS = new Set(['rename', 'pin', 'status', 'compact', 'copy', 'export', 'share', 'find']);
 /** The commands that switch how the next message is sent; their rest is that message. */
 const MODE_COMMANDS = new Set(['plan', 'goal', 'loop']);
 /** The draft a typed /image is being sent from (#1701): that one message asks for a picture. */
@@ -1321,6 +1367,11 @@ function prefillComposer(text: string): void {
   input.dispatchEvent(new Event('input', { bubbles: true }));
   input.focus();
 }
+let feedbackDialog: ReturnType<typeof initFeedbackDialog> | null = null;
+/** Send feedback: from /feedback and from Activity's button. */
+export function openFeedback(): void {
+  (feedbackDialog ??= initFeedbackDialog(api, { update: () => deps.state()?.update ?? null, openActivity: () => openSettingsTab('activity') })).open();
+}
 function openSettingsTab(tab: string): void {
   $('workspaceSettings').click();
   document.querySelector<HTMLElement>(`[data-tab="${tab}"]`)?.click();
@@ -1355,14 +1406,20 @@ function runSlashCommand(name: string): void {
   else if (name === 'review') prefillComposer(t('Review the uncommitted changes in this project. Look for bugs, regressions and missing tests, and list what you find by severity with the file and line. Do not change any files.'));
   else if (name === 'init') prefillComposer(t('Create an AGENTS.md for this project. Read the project first, then describe how it is built, tested and run, how it is laid out, and the conventions a coding agent should follow. Keep it short and accurate.'));
   else if (name === 'usage') openSettingsTab('usage');
-  else if (name === 'feedback') openSettingsTab('activity');
+  else if (name === 'feedback') openFeedback();
   else if (name === 'plugins') $('sidebarPlugins').click();
   else if (name === 'pet') $('sidebarPets').click();
   else if (name === 'copy' && chat) void run(api.exportMarkdown({ id: chat.id, scope: 'latest', target: 'clipboard' }))
     .then(result => { if (result?.done === 'copied') toast(t('Answer copied')); });
   else if (name === 'export' && chat) void run(api.exportMarkdown({ id: chat.id, scope: 'session', target: 'file' }))
     .then(result => { if (result?.done === 'saved') toast(t('Saved {0}', [result.name])); });
+  else if (name === 'share' && chat) openSharePage(chat.id);
   else if (name === 'find' && chat) afterClick(() => chatFind?.open());
+}
+
+let sharePage: ReturnType<typeof initSharePage> | null = null;
+function openSharePage(sessionId: string): void {
+  (sharePage ??= initSharePage(api, name => toast(t('Saved {0}', [name])))).open(sessionId);
 }
 
 function startRename(summary: SessionSummary): void {
@@ -5147,10 +5204,10 @@ function answerActions(turnId: string | null, messageId?: string, answer?: { tex
   const bar = el('div', 'answer-actions');
   const sessionId = selectedId;
   // A turn's answer is named by its turn; one recorded outside any turn by its message.
-  const exportTo = async (scope: 'answer' | 'session', target: 'clipboard' | 'file', format: 'markdown' | 'html' = 'markdown') => {
+  const exportTo = async (scope: 'answer' | 'session', target: 'clipboard' | 'file') => {
     if (!sessionId || selectedId !== sessionId) return null;
     return run(api.exportMarkdown({ id: sessionId, scope, turnId: scope === 'answer' && turnId ? turnId : undefined,
-      messageId: scope === 'answer' && !turnId ? messageId : undefined, target, ...(format === 'html' ? { format } : {}) }));
+      messageId: scope === 'answer' && !turnId ? messageId : undefined, target }));
   };
   const copy = el('button', 'answer-action') as HTMLButtonElement;
   copy.type = 'button';
@@ -5179,7 +5236,9 @@ function answerActions(turnId: string | null, messageId?: string, answer?: { tex
       menu.open = false;
       // The clicked choice leaves the screen with the menu; focus goes back to the menu's own button.
       trigger.focus();
-      const result = await exportTo(scope, 'file', format);
+      // A web page is made to be passed on, so it is always previewed first (Share's dialog).
+      if (format === 'html') { if (sessionId && selectedId === sessionId) openSharePage(sessionId); return; }
+      const result = await exportTo(scope, 'file');
       if (result?.done === 'saved') toast(t('Saved {0}', [result.name]));
     });
     choices.append(choice);
@@ -8910,18 +8969,27 @@ export function initChat(next: Deps): void {
     expandedProjects.add(project.id);
     if (generation === selectionGeneration) selectNewChat(project.id); else paintSessions();
   };
+  // With ChatGPT Projects to choose from, a new project's own is decided right after it is added (#1756).
+  const offerChatgptProject = (project: LocalProject, known: ReadonlySet<string>, asked: boolean) => {
+    if (asked && !known.has(project.id) && !project.chatgpt) setTimeout(() => void chatgptProjectPicker.offer(project, 'added'), 0);
+  };
   const addLocalProject = async () => {
     const button = $<HTMLButtonElement>('addProject'); button.disabled = true;
     const generation = selectionGeneration;
     try {
-      const project = await run(api.addProject());
-      if (project) showAddedProject(project, generation);
+      const asked = await chatgptProjectPicker.hasChoices();
+      const known = new Set(projects.map(row => row.id));
+      const project = await run(asked ? api.addProject({ chatgpt: 'later' }) : api.addProject());
+      if (project) { showAddedProject(project, generation); offerChatgptProject(project, known, asked); }
     } finally { button.disabled = false; }
   };
   // The composer's Share a folder means a folder on this computer: straight to the picker.
   $('composerFolder').addEventListener('click', () => void addLocalProject());
   let sshDialogGeneration = 0;
-  const sshProjectDialog = initSshProjectDialog(api, project => showAddedProject(project, sshDialogGeneration));
+  const sshProjectDialog = initSshProjectDialog(api, (project, known, asked) => {
+    showAddedProject(project, sshDialogGeneration);
+    offerChatgptProject(project, known, asked);
+  }, async () => ({ asked: await chatgptProjectPicker.hasChoices(), known: new Set(projects.map(row => row.id)) }));
   // A folder on this computer, or one on a server (#1469).
   $('addProject').addEventListener('click', event => {
     event.preventDefault();
