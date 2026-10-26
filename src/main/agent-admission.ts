@@ -98,7 +98,10 @@ export async function spawnAgentWorkers(
   let sourceDirty = false;
   let allocationAttempted = false;
   try {
-    if (staged.newlyStaged && getConfig().multiAgent.autoWorktrees === true) {
+    // The Goal step reviewer (#1832) reads the step's uncommitted changes, so it never gets a checkout of its own.
+    if (staged.newlyStaged && input.workers.every(worker => worker.reviewer === true)) {
+      isolationNotes.push('The reviewer works in the Goal chat\'s own folder, so it sees the step\'s uncommitted changes.');
+    } else if (staged.newlyStaged && getConfig().multiAgent.autoWorktrees === true) {
       // A selected Local Project is durable even before this prime has made its first
       // file call. Fetch that binding explicitly instead of relying on the cwd cache.
       const source = await workspace();
