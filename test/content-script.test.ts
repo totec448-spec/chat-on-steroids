@@ -12903,6 +12903,22 @@ describe('evidence from the page context', () => {
     ]);
   });
 
+  it('still reports the newest stream request when sixteen older ones wait unconfirmed (#1752)', async () => {
+    const page = live = await harness();
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    // The app cannot place these yet (no call under them so far), so they stay pending.
+    page.reply.set('correlate', () => ({ ok: true, status: 200, data: { ok: true, conversationId, confirmed: [], complete: false } }));
+    const origin = (requestId: string) => page.window.dispatchEvent(new page.window.MessageEvent('message', {
+      source: page.window as unknown as Window, origin: 'https://chatgpt.com',
+      data: { type: 'cos-request-origin', conversationId, requestIds: [requestId], observedAt: 1_700_000_001_000 }
+    }));
+    for (let i = 0; i < 16; i++) { origin(`wfr_waiting_${i}`); await settle(); }
+    origin('wfr_current_turn');
+    await settle();
+    const asked = page.sent.filter((message) => message.type === 'correlate').flatMap((message) => message.calls.map((call: { requestId: string }) => call.requestId));
+    expect(asked).toContain('wfr_current_turn');
+  });
+
   it('does not correlate requests from a Goal helper temporary chat', async () => {
     live = await harness('https://chatgpt.com/c/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee?temporary-chat=true&cos-input=helper-decision#cos-input=helper-decision');
     live.reply.set('correlate', () => ({ ok: true, data: { ok: true, confirmed: ['wfr_helper'] } }));
