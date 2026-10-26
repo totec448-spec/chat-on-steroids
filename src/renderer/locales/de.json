@@ -3250,5 +3250,15 @@
   "Keys stay with you": "Schlüssel bleiben bei dir",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "API-Schlüssel und Tokens in dem, was Tools zurückgeben, werden verborgen, bevor ChatGPT sie sieht.",
   "Easier to read": "Leichter zu lesen",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Hoher Kontrast, acht Akzentfarben, Zeilenabstand und eine besser lesbare Schrift."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Hoher Kontrast, acht Akzentfarben, Zeilenabstand und eine besser lesbare Schrift.",
+  "A one-minute look at the composer, projects and Review.": "Ein kurzer Blick auf den Eingabebereich, Projekte und Review.",
+  "New here? Take a 1-minute tour.": "Neu hier? Mach die 1-Minuten-Tour.",
+  "No thanks": "Nein danke",
+  "Show me": "Zeig's mir",
+  "Skip tour": "Tour überspringen",
+  "Take the tour again": "Tour noch einmal",
+  "A project is a folder you approve, and its chats start there.": "Ein Projekt ist ein Ordner, den du freigibst, und seine Chats starten dort.",
+  "Review shows every change ChatGPT made to your files.": "Review zeigt jede Änderung, die ChatGPT an deinen Dateien gemacht hat.",
+  "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "Schreib hier deine Aufgabe und wähle Normal, Plan oder Goal dafür, wie ChatGPT daran arbeitet.",
+  "Tour": "Tour"
 }

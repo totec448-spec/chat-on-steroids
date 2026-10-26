@@ -3193,5 +3193,15 @@
   "Keys stay with you": "キーは手元に",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "ツールが返す内容に含まれる API キーやトークンは、ChatGPT が見る前に隠されます。",
   "Easier to read": "読みやすく",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "ハイコントラスト、8 つのアクセントカラー、行間、より読みやすいフォント。"
+  "High contrast, eight accent colors, line spacing and a more legible font.": "ハイコントラスト、8 つのアクセントカラー、行間、より読みやすいフォント。",
+  "A one-minute look at the composer, projects and Review.": "入力欄、プロジェクト、レビューを 1 分で紹介します。",
+  "New here? Take a 1-minute tour.": "はじめてですか? 1 分のツアーをどうぞ。",
+  "No thanks": "結構です",
+  "Show me": "見てみる",
+  "Skip tour": "ツアーをスキップ",
+  "Take the tour again": "もう一度ツアーを見る",
+  "A project is a folder you approve, and its chats start there.": "プロジェクトはあなたが許可したフォルダーで、そのチャットはそこで始まります。",
+  "Review shows every change ChatGPT made to your files.": "レビューには ChatGPT がファイルに加えたすべての変更が表示されます。",
+  "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "ここにタスクを書き、ChatGPT の進め方を通常、計画、ゴールから選びます。",
+  "Tour": "ツアー"
 }

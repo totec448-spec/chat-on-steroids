@@ -3364,5 +3364,15 @@
   "Keys stay with you": "Ключи остаются у вас",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "API-ключи и токены в том, что возвращают инструменты, скрываются до того, как их увидит ChatGPT.",
   "Easier to read": "Легче читать",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Высокая контрастность, восемь акцентных цветов, межстрочный интервал и более разборчивый шрифт."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Высокая контрастность, восемь акцентных цветов, межстрочный интервал и более разборчивый шрифт.",
+  "A one-minute look at the composer, projects and Review.": "Минутный обзор поля ввода, проектов и проверки.",
+  "New here? Take a 1-minute tour.": "Впервые здесь? Пройдите тур за 1 минуту.",
+  "No thanks": "Нет, спасибо",
+  "Show me": "Показать",
+  "Skip tour": "Пропустить тур",
+  "Take the tour again": "Пройти тур снова",
+  "A project is a folder you approve, and its chats start there.": "Проект — это папка, к которой вы дали доступ; её чаты начинаются там.",
+  "Review shows every change ChatGPT made to your files.": "В «Проверке» видно каждое изменение, которое ChatGPT внёс в ваши файлы.",
+  "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "Напишите здесь задачу и выберите «Обычный», «План» или «Цель» — как ChatGPT будет над ней работать.",
+  "Tour": "Тур"
 }

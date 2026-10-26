@@ -3193,5 +3193,15 @@
   "Keys stay with you": "密钥留在你这里",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "工具返回内容中的 API 密钥和令牌会在 ChatGPT 看到之前被隐藏。",
   "Easier to read": "更易阅读",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "高对比度、八种强调色、行距和更易读的字体。"
+  "High contrast, eight accent colors, line spacing and a more legible font.": "高对比度、八种强调色、行距和更易读的字体。",
+  "A one-minute look at the composer, projects and Review.": "用一分钟了解输入框、项目和审阅。",
+  "New here? Take a 1-minute tour.": "初次使用？看看 1 分钟导览。",
+  "No thanks": "不用了",
+  "Show me": "带我看看",
+  "Skip tour": "跳过导览",
+  "Take the tour again": "再看一次导览",
+  "A project is a folder you approve, and its chats start there.": "项目是你批准的文件夹，它的聊天从那里开始。",
+  "Review shows every change ChatGPT made to your files.": "审阅显示 ChatGPT 对你的文件做过的每一处更改。",
+  "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "在这里写下任务，并选择普通、计划或目标来决定 ChatGPT 的工作方式。",
+  "Tour": "导览"
 }

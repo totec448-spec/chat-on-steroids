@@ -4678,6 +4678,28 @@ it('offers where the built-in browser minimizes to, only while it is the chosen 
   expect(mounted.calls.at(-1)?.ui.cosBrowserMinimize).toBe('tray');
 });
 
+// #1833: Setup's last step offers the first-run tour once; Settings replays it, never offering it again.
+it('offers the tour after Setup only while it was never taken, and replays it from Settings', async () => {
+  const done = vi.fn(async () => ({ ok: true, data: undefined }));
+  const mounted = await mountChat({}, [], { markTourDone: done });
+  const w = mounted.window;
+  const offer = w.document.getElementById('tourOffer')!;
+  w.document.getElementById('readyStart')!.click();
+  await settle();
+  expect(offer.hidden).toBe(false);
+  (w.document.getElementById('tourOfferNo') as HTMLButtonElement).click();
+  await settle();
+  expect(offer.hidden).toBe(true);
+  expect(done).toHaveBeenCalledTimes(1);
+  // Once taken, Start a chat offers nothing.
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, tourDone: true } } });
+  await settle();
+  w.document.getElementById('readyStart')!.click();
+  await settle();
+  expect(offer.hidden).toBe(true);
+  expect(w.document.getElementById('takeTour')!.textContent).toBe('Take the tour again');
+});
+
 // Codex's "Enter key behavior", in General.
 it('offers which key sends, starting at Enter, and saves Cmd/Ctrl+Enter', async () => {
   const mounted = await mountChat({});
