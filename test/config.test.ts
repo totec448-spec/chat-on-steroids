@@ -126,6 +126,19 @@ describe('settings migration', () => {
       expect(loaded.readOnly).toBe(true);
     }
   });
+  it('loads the sounds switch saved before it existed, or damaged, as off, and keeps everything else', async () => {
+    const config = defaultConfig();
+    await saveConfig({ ...config, ui: { ...config.ui, sounds: true } });
+    expect((await loadConfig()).ui.sounds).toBe(true);
+    const { sounds: _, ...older } = config.ui;
+    for (const ui of [older, { ...older, sounds: 'yes' }, { ...older, sounds: 1 }, { ...older, sounds: null }]) {
+      await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...config, readOnly: true, ui: { ...ui, theme: 'light' } }), 'utf8');
+      const loaded = await loadConfig();
+      expect(loaded.ui.sounds).toBe(false);
+      expect(loaded.ui.theme).toBe('light');
+      expect(loaded.readOnly).toBe(true);
+    }
+  });
   it('drops removed file-saving settings without changing other saved choices', async () => {
     const config = defaultConfig();
     config.readOnly = true;

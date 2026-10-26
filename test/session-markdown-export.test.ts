@@ -92,49 +92,6 @@ it('copies an answer recorded without a turn by its message id, and only such an
   await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', target: 'clipboard' }, null)).rejects.toThrow('has not completed');
 });
 
-it('saves the session as a self-contained HTML page with credential shapes masked', async () => {
-  store.readOverflowText.mockResolvedValue('Use the key sk-proj-abcdefghijklmnopqrstuvwx and <b>bold</b>.');
-  electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/Explain it.html' });
-  await expect(exportSessionMarkdown({ id: 'session-1', scope: 'session', target: 'file', format: 'html' }, null))
-    .resolves.toEqual({ done: 'saved', name: 'Explain it.html' });
-  expect(electron.dialog.showSaveDialog.mock.calls[0]![0]).toMatchObject({
-    defaultPath: expect.stringContaining('Explain it.html'), filters: [{ name: 'HTML files', extensions: ['html'] }]
-  });
-  expect(electron.dialog.showSaveDialog.mock.calls[0]![0].properties).toContain('showOverwriteConfirmation');
-  const [file, page, label] = files.replaceFile.mock.calls[0] as unknown as [string, string, string];
-  expect([file, label]).toEqual(['/downloads/Explain it.html', 'HTML export']);
-  expect(page).toContain('<title>Explain: it?</title>');
-  expect(page).toContain('<p class="said" dir="auto">Explain it</p>');
-  expect(page).toContain('Use the key [redacted] and &lt;b&gt;bold&lt;/b&gt;.');
-  expect(page).not.toContain('sk-proj-');
-});
-
-it('names who wrote a message on the page in the interface language', async () => {
-  const { setMainTextTranslations } = await import('../src/main/main-texts.js');
-  setMainTextTranslations({ You: 'Du' });
-  try {
-    electron.dialog.showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/downloads/Explain it.html' });
-    await exportSessionMarkdown({ id: 'session-1', scope: 'session', target: 'file', format: 'html' }, null);
-    expect((files.replaceFile.mock.calls[0] as unknown as string[])[1]).toContain('<h2>Du</h2>');
-  } finally {
-    setMainTextTranslations({});
-  }
-});
-
-it('refuses an HTML export of one answer or to the clipboard', async () => {
-  await expect(exportSessionMarkdown({ id: 'session-1', scope: 'answer', turnId: 't1', target: 'file', format: 'html' }, null)).rejects.toThrow('whole session');
-  await expect(exportSessionMarkdown({ id: 'session-1', scope: 'session', target: 'clipboard', format: 'html' }, null)).rejects.toThrow('whole session');
-  expect(electron.dialog.showSaveDialog).not.toHaveBeenCalled();
-  expect(electron.clipboard.writeText).not.toHaveBeenCalled();
-});
-
-it('masks a credential in the chat title of an HTML page and of its suggested file name', async () => {
-  store.getSession.mockResolvedValue({ id: 'session-1', title: 'Rotate sk-proj-abcdefghijklmnopqrstuvwx' });
-  electron.dialog.showSaveDialog.mockResolvedValue({ canceled: true });
-  await expect(exportSessionMarkdown({ id: 'session-1', scope: 'session', target: 'file', format: 'html' }, null)).resolves.toEqual({ done: 'cancelled' });
-  expect(electron.dialog.showSaveDialog.mock.calls[0]![0].defaultPath).toMatch(/Rotate \[redacted\]\.html$/);
-});
-
 // /copy names no answer: it copies the chat's newest finished one, never a turn still being written.
 it('copies the newest finished answer for /copy, skipping a turn that is still open', async () => {
   const loose = { seq: 4, time: 4, source: 'extension', kind: 'assistant_message', messageId: 'loose-1', final: true, state: 'final',

@@ -152,6 +152,9 @@ import { findInSession, locateMessage, locateSearchMatch, searchSessions } from 
 import { listBookmarks, setBookmark } from './session/bookmarks.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
 import { exportSessionMarkdown } from './session/markdown-export.js';
+import { commitProjectChanges, createPullRequest, pushProject, readCommitState } from './project-commit.js';
+import { exportSessionPage } from './session/page-export.js';
+import { feedbackIssueUrl, operatingSystemName, systemVersion } from './feedback.js';
 import { saveCodeFile } from './code-file.js';
 import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
 import { setChatsTrusted, trustedChatIds } from './session/trusted-chats.js';
@@ -274,6 +277,7 @@ const settingsPatch = z.object({
     autoConnect: z.boolean(),
     startAtLogin: z.boolean().optional(),
     turnNotifications: z.boolean().optional(),
+    sounds: z.boolean().optional(),
     rotateTurnMinutes: z.number().int().min(0).max(120).optional(),
     rotateStopFallback: z.boolean().optional(),
     localAppUsage: z.boolean().optional(),
@@ -287,6 +291,8 @@ const settingsPatch = z.object({
       includeDetails: z.boolean()
     }).strict().optional(),
     secretsShield: z.boolean().optional(),
+    // Set from the Commit dialog (projectCommit:flow); a settings save carries it through.
+    commitFlow: z.enum(['commit', 'ask-push', 'pr']).optional(),
     theme: z.enum(['light', 'dark'])
   }),
   sessions: z.object({
@@ -462,6 +468,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       mentionPlugins: pick(current.ui.mentionPlugins, base.ui.mentionPlugins, wanted.ui.mentionPlugins),
       // Not part of the settings form: reported by the window and the extension, carried through.
       language: current.ui.language,
+      commitFlow: current.ui.commitFlow,
       browserPreferences: current.ui.browserPreferences,
       cosBrowserTrayHint: current.ui.cosBrowserTrayHint,
       finishTool: pick(current.ui.finishTool, base.ui.finishTool, wanted.ui.finishTool),
@@ -485,6 +492,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       autoConnect: pick(current.ui.autoConnect, base.ui.autoConnect, wanted.ui.autoConnect),
       startAtLogin: pick(current.ui.startAtLogin, base.ui.startAtLogin, wanted.ui.startAtLogin),
       turnNotifications: pick(current.ui.turnNotifications, base.ui.turnNotifications, wanted.ui.turnNotifications),
+      sounds: pick(current.ui.sounds === true, base.ui.sounds === true, wanted.ui.sounds ?? current.ui.sounds === true),
       rotateTurnMinutes: pick(current.ui.rotateTurnMinutes, base.ui.rotateTurnMinutes, wanted.ui.rotateTurnMinutes),
       rotateStopFallback: pick(current.ui.rotateStopFallback === true, base.ui.rotateStopFallback === true, wanted.ui.rotateStopFallback ?? current.ui.rotateStopFallback === true),
       localAppUsage: pick(current.ui.localAppUsage, base.ui.localAppUsage, wanted.ui.localAppUsage),
@@ -1392,6 +1400,39 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       baseRef: z.string().min(1).max(256).optional() }).strict().parse(payload);
     return readProjectGitSnapshot(projectId, baseRef);
   });
+  // Commit & PR from Review. Each step is its own call, so the dialog can stop after any of them.
+  handle('projectCommit:state', async payload => {
+    const { projectId } = z.object({ projectId: projectFileId }).strict().parse(payload);
+    return readCommitState(projectId);
+  });
+  // A changed file's path as Review listed it: relative, and never leaving the project.
+  const commitPath = projectRelativePath.min(1).refine(file => !/^(?:[\\/]|[A-Za-z]:)/.test(file) && !file.split(/[\\/]/).includes('..'),
+    'A path must stay inside the project.');
+  handle('projectCommit:commit', async payload => {
+    const request = z.object({ projectId: projectFileId, message: z.string().max(10_000), paths: z.array(commitPath).max(2_000),
+      newBranch: z.string().min(1).max(200).optional(), expectedToken: z.string().length(64).regex(/^[0-9a-f]+$/) }).strict().parse(payload);
+    return commitProjectChanges(request.projectId, request);
+  });
+  handle('projectCommit:push', async payload => {
+    const { projectId } = z.object({ projectId: projectFileId }).strict().parse(payload);
+    return pushProject(projectId);
+  });
+  handle('projectCommit:pullRequest', async payload => {
+    const { projectId, title, body } = z.object({ projectId: projectFileId, title: z.string().max(1_000), body: z.string().max(10_000) }).strict().parse(payload);
+    const result = await createPullRequest(projectId, { title, body });
+    // Without gh, GitHub's own page opens filled in; the person creates the pull request there.
+    if (result.via === 'browser') await shell.openExternal(result.url);
+    return result;
+  });
+  handle('projectCommit:flow', async payload => {
+    const { flow } = z.object({ flow: z.enum(['commit', 'ask-push', 'pr']) }).strict().parse(payload);
+    if (getConfig().ui.commitFlow !== flow) {
+      await updateConfig(config => ({ ...config, ui: { ...config.ui, commitFlow: flow } }));
+      // The dialog reads the choice from the window's copy of the state; it must not open with the old one.
+      push('state:changed', await buildState());
+    }
+    return true;
+  });
   handle('projectGit:diff', async payload => {
     const { projectId, path, baseRef, expectedRevision } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1),
       baseRef: z.string().min(1).max(256).optional(), expectedRevision: z.string().length(64).regex(/^[0-9a-f]+$/).optional() }).strict().parse(payload);
@@ -1546,6 +1587,26 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('diagnostics:run', async () => runDiagnostics());
   // "Save diagnostics report": one plain-text file for a bug report, personal details removed
   // (see diagnostics-report.ts). Revealed after saving so the user reads what they would share.
+  // In-app feedback: GitHub's issue form, filled in, opens in the browser. The person reads it and
+  // submits it there; the app sends nothing itself. The diagnostics report is saved separately.
+  handle('feedback:openIssue', async (payload) => {
+    const text = (max: number) => z.string().max(max);
+    const report = z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('bug'), what: text(4000).refine(value => value.trim().length > 0), steps: text(4000).optional(),
+        frequency: z.enum(['Every time', 'Sometimes', 'It happened once']).optional() }).strict(),
+      z.object({ kind: z.literal('idea'), problem: text(4000).refine(value => value.trim().length > 0),
+        proposal: text(4000).refine(value => value.trim().length > 0) }).strict()
+    ]).parse(payload);
+    const bridge = await bridgeStatus();
+    const { url, trimmed } = feedbackIssueUrl(report, {
+      version: app.getVersion(), os: operatingSystemName(process.platform, systemVersion()), arch: process.arch,
+      extension: bridge.paired || bridge.extensionVersion ? { present: bridge.present, version: bridge.extensionVersion } : null
+    });
+    await shell.openExternal(url);
+    logInfo(`feedback: opened GitHub's ${report.kind === 'bug' ? 'bug report' : 'feature request'} form, filled in${trimmed ? ' (text shortened to fit the link)' : ''}`);
+    return { trimmed };
+  });
+
   handle('diagnostics:saveReport', async () => {
     const selfTest = await Promise.race([
       runDiagnostics().catch(() => null),
@@ -1608,19 +1669,29 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return saveCodeFile(text, name, getWindow());
   });
 
-  // Copy or save a completed turn's answer, or the session transcript, as Markdown, or save the
-  // transcript as an HTML page. Main reads the full text of answers that were cut in the log, so
-  // none comes out truncated.
+  // Copy or save a completed turn's answer, or the session transcript, as Markdown. Main reads
+  // the full text of answers that were cut in the log, so neither comes out truncated. A whole
+  // chat as a web page goes through sessions:sharePage, which previews it first.
   handle('sessions:exportMarkdown', async (payload) => {
     const request = z.object({
       id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
       scope: z.enum(['answer', 'latest', 'session']),
       turnId: z.string().min(1).max(200).optional(),
       messageId: z.string().min(1).max(200).optional(),
-      target: z.enum(['clipboard', 'file']),
-      format: z.enum(['markdown', 'html']).optional()
+      target: z.enum(['clipboard', 'file'])
     }).parse(payload);
     return exportSessionMarkdown(request, getWindow());
+  });
+
+  // Share a chat as one web page: the dialog previews exactly what Save writes, with or without
+  // the details the person chose to hide.
+  handle('sessions:sharePage', async (payload) => {
+    const id = z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i);
+    const request = z.discriminatedUnion('target', [
+      z.object({ id, target: z.literal('preview'), hide: z.boolean(), lang: z.string().max(35).regex(/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/) }),
+      z.object({ id, target: z.literal('file'), preview: z.string().uuid() })
+    ]).parse(payload);
+    return exportSessionPage(request, getWindow());
   });
 
   // The Install button. The renderer decides nothing about what is installed - it cannot
