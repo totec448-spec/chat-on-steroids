@@ -5876,8 +5876,13 @@ it('offers copy and Markdown or HTML export under the answer of a completed turn
   expect(actions!.querySelector<HTMLDetailsElement>('details.answer-export')!.open).toBe(false);
   expect(w.document.activeElement).toBe(actions!.querySelector('details.answer-export > summary'));
   expect(api.exportMarkdown).toHaveBeenCalledWith({ id: summary([]).id, scope: 'session', turnId: undefined, target: 'file' });
+  // A web page is always previewed first: the choice opens Share's dialog and saves nothing by itself.
+  const calls = api.exportMarkdown.mock.calls.length;
+  api.sharePage = vi.fn(async () => ({ ok: true, data: { done: 'preview', preview: '00000000-0000-4000-8000-000000000000', html: '<html><head></head></html>', hidden: 0 } }));
   choices[2]!.click(); await settle();
-  expect(api.exportMarkdown).toHaveBeenLastCalledWith({ id: summary([]).id, scope: 'session', turnId: undefined, target: 'file', format: 'html' });
+  expect(w.document.querySelector<HTMLDialogElement>('#sharePageDialog')!.open).toBe(true);
+  expect(api.sharePage).toHaveBeenCalledWith({ id: summary([]).id, target: 'preview', hide: true, lang: 'en' });
+  expect(api.exportMarkdown.mock.calls.length).toBe(calls);
 });
 
 it('does not offer copy or export after an interrupted turn', async () => {
