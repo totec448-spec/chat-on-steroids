@@ -25,7 +25,7 @@ import {
   type PollHealth
 } from './tunnel/health.js';
 
-import type { Capabilities, Check, Diagnosis, MacOSDesktopAccessStatus, SurfaceId } from '../shared/types.js';
+import type { Capabilities, Check, Diagnosis, MacOSDesktopAccessStatus, SurfaceId, SurfaceStatus } from '../shared/types.js';
 import { connectorsSharingTunnel, type ConnectorTunnelIds } from '../shared/tunnel-ids.js';
 import { surfaceIsUseful } from './mcp/surfaces.js';
 import { refreshMacOSDesktopAccess } from './computer/index.js';
@@ -322,6 +322,17 @@ export function describeSeparateTunnels(tunnel: ConnectorTunnelIds): Check | nul
   };
 }
 
+/**
+ * #1872: the other connectors' tunnels. Only Core's tunnel was checked, so a Plugins tunnel OpenAI
+ * refused left the verdict at "Every required check passed". One failing row per connector in error,
+ * with its own reason; nothing for one that is live, starting or off.
+ */
+export function describeConnectorTunnels(surfaces: ReadonlyArray<Pick<SurfaceStatus, 'id' | 'state' | 'detail'>>): Check[] {
+  const labels: Record<SurfaceId, string> = { core: 'Core', desktop: 'Desktop', plugins: 'Plugins' };
+  return surfaces.filter(surface => surface.id !== 'core' && surface.state === 'error')
+    .map(surface => ({ name: `${labels[surface.id]} tunnel`, status: 'fail' as const, ok: false, detail: surface.detail }));
+}
+
 export async function runDiagnostics(): Promise<Diagnosis> {
   const checks: Check[] = [];
   const config = getConfig();
@@ -365,6 +376,7 @@ export async function runDiagnostics(): Promise<Diagnosis> {
   // 3. The tunnel process itself, after the one mistake in its settings that nothing else shows.
   const separate = config.tunnel.kind === 'openai' ? describeSeparateTunnels(config.tunnel) : null;
   if (separate) checks.push(separate);
+  checks.push(...describeConnectorTunnels(status.surfaces ?? []));
   const base = tunnelHealthBase();
   if (config.tunnel.kind !== 'openai') {
     checks.push({
