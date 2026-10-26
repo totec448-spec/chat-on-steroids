@@ -20,6 +20,7 @@ import { chatGroupName, chatGroupOf } from '../shared/chat-groups.js';
 import { requestName } from './name-dialog.js';
 import { KIND_ICON } from './agent-activity.js';
 import { createFilePanel } from './file-panel.js';
+import { initCommitDialog } from './commit-dialog.js';
 import { renderAgentPlan } from './agent-plan.js';
 import { userPromptText } from '../shared/user-prompt.js';
 import { messageReaction, withoutMessageReaction } from '../shared/message-reaction.js';
@@ -111,6 +112,8 @@ import { createSearchPopup } from './search-popup.js';
 import { primaryShortcut } from './shortcuts.js';
 import { initSshProjectDialog } from './ssh-project-dialog.js';
 import { renderTurnChanges, turnEdited, turnFinished, turnFrom } from './turn-changes.js';
+import { initSharePage } from './share-page.js';
+import { initFeedbackDialog } from './feedback-dialog.js';
 import { createChatgptProjectPicker } from './chatgpt-project-picker.js';
 
 const api = window.api;
@@ -499,6 +502,7 @@ let pendingNewInput: { id: string; generation: number } | null = null;
 let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
 let filePanel: ReturnType<typeof createFilePanel> | null = null;
 let reviewPanel: ReturnType<typeof createFilePanel> | null = null;
+let commitDialog: ReturnType<typeof initCommitDialog> | null = null;
 const expandedWorkers = new Set<string>();
 const inputDrafts = createComposerDrafts({
   // A chat's row shows whether it holds a draft, so a draft that comes or goes in a chat other
@@ -1224,7 +1228,9 @@ function sessionRow(summary: SessionSummary): HTMLElement {
       { action: 'open', icon: 'i-out', label: () => t('Open in browser'), title: () => t("Open this chat in your browser"), run: () => void run(api.openSessionChat(summary.id)) },
       // ChatGPT opens /c/<id> wherever the chat lives, a project included (#1107).
       { action: 'copy-link', icon: 'i-copy', label: () => t('Copy link'), title: () => t("Copy this chat's ChatGPT link"),
-        run: async () => { if (await run(api.writeClipboard(`https://chatgpt.com/c/${summary.conversationId}`))) toast(t('Link copied')); } }
+        run: async () => { if (await run(api.writeClipboard(`https://chatgpt.com/c/${summary.conversationId}`))) toast(t('Link copied')); } },
+      { action: 'share', icon: 'i-globe', label: () => t('Share as web page'),
+        title: () => t('Save this chat as one web page file to send to anyone. You see the page before it is saved.'), run: () => openSharePage(summary.id) }
     );
     items.push(...chatGroupMenuItems(summary));
     // The stop this app can actually make. It does not touch the running ChatGPT turn — nothing
@@ -1297,7 +1303,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
 let renaming: { id: string; original: string; value: string; start: number; end: number } | null = null;
 
 /** Slash commands that act on the open chat; New Chat does not offer them. */
-const CHAT_COMMANDS = new Set(['rename', 'pin', 'status', 'compact', 'copy', 'export', 'find']);
+const CHAT_COMMANDS = new Set(['rename', 'pin', 'status', 'compact', 'copy', 'export', 'share', 'find']);
 /** The commands that switch how the next message is sent; their rest is that message. */
 const MODE_COMMANDS = new Set(['plan', 'goal', 'loop']);
 /** The draft a typed /image is being sent from (#1701): that one message asks for a picture. */
@@ -1364,6 +1370,11 @@ function prefillComposer(text: string): void {
   input.dispatchEvent(new Event('input', { bubbles: true }));
   input.focus();
 }
+let feedbackDialog: ReturnType<typeof initFeedbackDialog> | null = null;
+/** Send feedback: from /feedback and from Activity's button. */
+export function openFeedback(): void {
+  (feedbackDialog ??= initFeedbackDialog(api, { update: () => deps.state()?.update ?? null, openActivity: () => openSettingsTab('activity') })).open();
+}
 function openSettingsTab(tab: string): void {
   $('workspaceSettings').click();
   document.querySelector<HTMLElement>(`[data-tab="${tab}"]`)?.click();
@@ -1398,14 +1409,20 @@ function runSlashCommand(name: string): void {
   else if (name === 'review') prefillComposer(t('Review the uncommitted changes in this project. Look for bugs, regressions and missing tests, and list what you find by severity with the file and line. Do not change any files.'));
   else if (name === 'init') prefillComposer(t('Create an AGENTS.md for this project. Read the project first, then describe how it is built, tested and run, how it is laid out, and the conventions a coding agent should follow. Keep it short and accurate.'));
   else if (name === 'usage') openSettingsTab('usage');
-  else if (name === 'feedback') openSettingsTab('activity');
+  else if (name === 'feedback') openFeedback();
   else if (name === 'plugins') $('sidebarPlugins').click();
   else if (name === 'pet') $('sidebarPets').click();
   else if (name === 'copy' && chat) void run(api.exportMarkdown({ id: chat.id, scope: 'latest', target: 'clipboard' }))
     .then(result => { if (result?.done === 'copied') toast(t('Answer copied')); });
   else if (name === 'export' && chat) void run(api.exportMarkdown({ id: chat.id, scope: 'session', target: 'file' }))
     .then(result => { if (result?.done === 'saved') toast(t('Saved {0}', [result.name])); });
+  else if (name === 'share' && chat) openSharePage(chat.id);
   else if (name === 'find' && chat) afterClick(() => chatFind?.open());
+}
+
+let sharePage: ReturnType<typeof initSharePage> | null = null;
+function openSharePage(sessionId: string): void {
+  (sharePage ??= initSharePage(api, name => toast(t('Saved {0}', [name])))).open(sessionId);
 }
 
 function startRename(summary: SessionSummary): void {
@@ -5190,10 +5207,10 @@ function answerActions(turnId: string | null, messageId?: string, answer?: { tex
   const bar = el('div', 'answer-actions');
   const sessionId = selectedId;
   // A turn's answer is named by its turn; one recorded outside any turn by its message.
-  const exportTo = async (scope: 'answer' | 'session', target: 'clipboard' | 'file', format: 'markdown' | 'html' = 'markdown') => {
+  const exportTo = async (scope: 'answer' | 'session', target: 'clipboard' | 'file') => {
     if (!sessionId || selectedId !== sessionId) return null;
     return run(api.exportMarkdown({ id: sessionId, scope, turnId: scope === 'answer' && turnId ? turnId : undefined,
-      messageId: scope === 'answer' && !turnId ? messageId : undefined, target, ...(format === 'html' ? { format } : {}) }));
+      messageId: scope === 'answer' && !turnId ? messageId : undefined, target }));
   };
   const copy = el('button', 'answer-action') as HTMLButtonElement;
   copy.type = 'button';
@@ -5222,7 +5239,9 @@ function answerActions(turnId: string | null, messageId?: string, answer?: { tex
       menu.open = false;
       // The clicked choice leaves the screen with the menu; focus goes back to the menu's own button.
       trigger.focus();
-      const result = await exportTo(scope, 'file', format);
+      // A web page is made to be passed on, so it is always previewed first (Share's dialog).
+      if (format === 'html') { if (sessionId && selectedId === sessionId) openSharePage(sessionId); return; }
+      const result = await exportTo(scope, 'file');
       if (result?.done === 'saved') toast(t('Saved {0}', [result.name]));
     });
     choices.append(choice);
@@ -8851,6 +8870,11 @@ export function initChat(next: Deps): void {
   filePanel.update(selectedLocalProject());
   reviewPanel = createFilePanel({
     host: chatHost, mount: docks.body, reviewOnly: true,
+    onCommit: projectId => (commitDialog ??= initCommitDialog(api, {
+      flow: () => deps.state()?.config.ui.commitFlow,
+      // The chat Review belongs to; its task starts the message.
+      task: id => { const chat = openChatSummary(); return selectedLocalProject()?.id === id && chat?.title?.trim() ? chat.title : null; }
+    })).open(projectId),
     onShow: () => docks.adopt('review'),
     // A new message: not an edit of an earlier question, which would replace the messages after it.
     // A narrow window shows the dock instead of the chat; it closes so the composer is in view.
