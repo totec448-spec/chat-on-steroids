@@ -1084,10 +1084,19 @@ function markAllSeen(projectId?: string): void {
 let sessionTooltipDismissed: string | null = null;
 
 function placeSessionTooltip(tip: HTMLElement, row: HTMLElement): void {
-  tip.textContent = row.title;
+  // While the app's tooltip shows, the row hands it its title (#1862): the browser shows no second one.
+  if (row.hasAttribute('title')) { row.dataset.tooltip = row.title; row.removeAttribute('title'); }
+  tip.textContent = row.dataset.tooltip ?? '';
   const bounds = row.getBoundingClientRect();
   tip.style.left = `${Math.min(bounds.right + 10, window.innerWidth - 290)}px`;
   tip.style.top = `${Math.min(bounds.top, window.innerHeight - 110)}px`;
+}
+
+/** The row's title again, once the app's tooltip is gone. */
+function giveBackTitle(row: HTMLElement): void {
+  if (row.dataset.tooltip === undefined) return;
+  if (!row.hasAttribute('title')) row.title = row.dataset.tooltip;
+  delete row.dataset.tooltip;
 }
 
 /** Unsent text waits in this chat's composer. The open chat shows its draft itself, so it never counts. */
@@ -1147,15 +1156,22 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     document.body.append(tip);
   };
   row.addEventListener('pointerenter', showTip);
+  // Repainted under the pointer while this chat's tooltip shows: the new row hands it its title too.
+  if (document.getElementById('sessionTooltip')?.dataset.for === summary.id) requestAnimationFrame(() => {
+    const current = document.getElementById('sessionTooltip');
+    if (current?.dataset.for === summary.id && row.isConnected) placeSessionTooltip(current, row);
+  });
   row.addEventListener('pointerleave', () => {
     if (sessionTooltipDismissed === summary.id) sessionTooltipDismissed = null;
     document.getElementById('sessionTooltip')?.remove();
+    giveBackTitle(row);
   });
   // A pointer's click puts the tooltip away until the pointer leaves the row, through the repaint that
   // follows. A keyboard's click puts nothing away: no pointer would leave to bring the tooltip back.
   row.addEventListener('click', () => {
     if (row.matches(':hover')) sessionTooltipDismissed = summary.id;
     document.getElementById('sessionTooltip')?.remove();
+    giveBackTitle(row);
   });
   // Unseen is presentation only and is appended last, so every existing lifecycle tone keeps
   // its previous priority (blocked/active/worker finished/failed).
