@@ -17,7 +17,7 @@ import { logInfo, logWarn } from './logger.js';
 import { reviewBrief, type ReviewFile } from './goal-review.js';
 import { unifiedDiff } from './text-diff.js';
 import { netTurnChanges, netTurnFileDiff, turnFileEdits, type ReviewReader } from './session/turn-changes.js';
-import { REVIEW_MAX_MS, occupiesSlot, requestWorkerBootstraps, requestWorkerRevivals, reviewerFor, stageMessages, type Caller } from './agents.js';
+import { REVIEW_MAX_MS, clearAgent, occupiesSlot, persistAgentAuthorityNow, requestWorkerBootstraps, requestWorkerRevivals, reviewerFor, stageMessages, type Caller } from './agents.js';
 import { getChatModels } from './chat-models.js';
 import { getConfig } from './config.js';
 import { goalDrivingMode, goalObjectiveFor } from './goal.js';
@@ -47,6 +47,8 @@ export interface StepReviewDeps {
   reviewer(conversationId: string): AgentInfo | null;
   spawn(caller: Caller, brief: string, model: string | null): Promise<string>;
   wake(caller: Caller, workerId: string, brief: string): Promise<void>;
+  /** Ends a working reviewer's review; its chat stays as history. */
+  cancel(info: AgentInfo): Promise<void>;
   now(): number;
   wait(ms: number): Promise<void>;
 }
@@ -175,6 +177,16 @@ export function reviewBlocks(review: DraftReview): boolean {
   return !!review && 'text' in review && /^BLOCKING:/i.test(review.text.trim());
 }
 
+/** The Goal stopped (switched off): a review in progress is cancelled, its chat stays as history. True when one was. */
+export async function cancelStepReview(conversationId: string, deps: Pick<StepReviewDeps, 'reviewer' | 'cancel'> = defaultDeps()): Promise<boolean> {
+  reviews.delete(conversationId);
+  const info = deps.reviewer(conversationId);
+  if (!info || !occupiesSlot(info.state)) return false;
+  await deps.cancel(info);
+  logInfo(`goal review: Goal stopped in ${conversationId}; the review by ${info.id} was cancelled, its chat stays`);
+  return true;
+}
+
 export function resetStepReviewsForTests(): void { reviews.clear(); }
 
 function defaultDeps(): StepReviewDeps {
@@ -205,6 +217,14 @@ function defaultDeps(): StepReviewDeps {
       const staged = stageMessages(caller, [{ to: workerId, text: brief }], { review: true });
       await acceptAgentMutation(staged, 'The review could not cross its durable acceptance barrier.');
       requestWorkerRevivals(staged.waking, staged.runId);
+    },
+    cancel: async info => {
+      // As the person's own Clear on the worker's row: the slot frees and its queued start or wake is withdrawn.
+      const outcome = clearAgent(info.id, info.runId);
+      if (outcome.cleared === 'none') return;
+      if (!(await persistAgentAuthorityNow())) throw new Error('the cancellation could not be saved');
+      const { cancelWorkerCommands } = await import('./bridge.js');
+      cancelWorkerCommands(outcome.reason, info.id, info.runId);
     },
     now: () => Date.now(),
     wait: ms => new Promise(resolve => setTimeout(resolve, ms))

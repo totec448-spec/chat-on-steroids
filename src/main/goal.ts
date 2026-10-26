@@ -1171,6 +1171,9 @@ export async function setGoalSwitchNow(
         publish: () => {
           publishGoalSwitches(staged);
           notifyGoalChange();
+          // Goal stopped here, or turned to Loop: a step review in progress is cancelled (#1832).
+          if (!next.enabled || next.mode !== 'goal') void import('./goal-reviewer.js')
+            .then(({ cancelStepReview }) => cancelStepReview(targetConversationId)).catch(() => undefined);
           return { enabled: next.enabled, mode: next.mode };
         }
       };
