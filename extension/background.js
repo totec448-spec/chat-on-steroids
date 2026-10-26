@@ -4008,6 +4008,18 @@ const HANDLERS = {
     if (['current', 'manual', 'complete', 'fail'].includes(message.action) && result.ok && result.data?.ok) void maintain();
     return result;
   },
+  /** The Projects a ChatGPT page's sidebar lists (#1756), for linking a project to one of them. */
+  async project_catalog(message, _sender, source) {
+    if (!ownsDocument(source) || !Array.isArray(message.projects) || message.projects.length > 400) return { ok: false };
+    const projects = message.projects
+      .filter((project) => project && typeof project.id === 'string' && /^g-p-[0-9a-f]{32}$/.test(project.id) && typeof project.name === 'string')
+      .map((project) => ({ id: project.id, name: project.name.slice(0, 200) }));
+    // Rows that were all invalid say nothing; an empty sidebar still names the workspace in use.
+    if (message.projects.length && !projects.length) return { ok: false };
+    const workspace = typeof message.workspace === 'string' && message.workspace.length <= 200 ? message.workspace : null;
+    const result = await call('/chatgpt-projects', { method: 'POST', body: JSON.stringify({ projects, workspace }) });
+    return { ok: result.ok === true };
+  },
   async model_catalog(message, _sender, source) {
     if (!ownsDocument(source) || typeof message.nonce !== 'string' || !/^[a-f0-9-]{36}$/i.test(message.nonce)) return { ok: false };
     const tab = await chrome.tabs.get(source.tab);
@@ -4999,6 +5011,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'stop_ack',
     'desktop_input',
     'model_catalog',
+    'project_catalog',
     'plugin_refresh',
     'project_create',
     'core_plugin',
