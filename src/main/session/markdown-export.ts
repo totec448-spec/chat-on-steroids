@@ -9,8 +9,6 @@ import { getSession, readEvents, readOverflowText } from './store.js';
 import { providerEntitiesAsMarkdown } from '../../shared/content-reference.js';
 import { dialogLabel, mainText } from '../main-texts.js';
 import { completedDilText } from '../../shared/dil-tables.js';
-import { transcriptHtml } from '../../shared/html-export.js';
-import { redactSecretText } from '../redaction.js';
 import { replaceFile } from '../replace-file.js';
 
 export type MarkdownExportRequest = {
@@ -22,14 +20,12 @@ export type MarkdownExportRequest = {
   /** An answer recorded outside any turn (copied branch history, an adopted chat's history). */
   messageId?: string;
   target: 'clipboard' | 'file';
-  /** `html` saves a whole session as one self-contained page; Markdown when left out. */
-  format?: 'markdown' | 'html';
 };
 
 export type MarkdownExportResult = { done: 'copied' } | { done: 'saved'; name: string } | { done: 'cancelled' };
 
 /** The whole text: an answer cut in the log is read back from the overflow copy beside it. */
-async function fullText(sessionId: string, stored: StoredText, html?: StoredText): Promise<string> {
+export async function fullText(sessionId: string, stored: StoredText, html?: StoredText): Promise<string> {
   // ChatGPT's link cards arrive as private-use markup; exported Markdown gets real links. A table
   // it drew in full but wrote with only its header gets its recorded rows (#1477).
   const text = !stored.truncated || !stored.assetId ? stored.text : (await readOverflowText(sessionId, stored.assetId)) ?? stored.text;
@@ -40,8 +36,6 @@ async function fullText(sessionId: string, stored: StoredText, html?: StoredText
 export async function exportSessionMarkdown(request: MarkdownExportRequest, owner: BrowserWindow | null): Promise<MarkdownExportResult> {
   const summary = await getSession(request.id);
   if (!summary) throw new Error('Session not found');
-  const html = request.format === 'html';
-  if (html && (request.scope !== 'session' || request.target !== 'file')) throw new Error('HTML export saves a whole session to a file');
   const events = await readEvents(request.id);
   let markdown: string;
   let name: string;
@@ -59,13 +53,9 @@ export async function exportSessionMarkdown(request: MarkdownExportRequest, owne
   } else {
     const entries = await Promise.all(transcriptEntries(events).map(async entry =>
       ({ role: entry.role, text: await fullText(request.id, entry.stored, entry.html) })));
-    // A page is made to be passed on, so the credential shapes chat text can hold are masked in it.
-    const title = html ? redactSecretText(summary.title) : summary.title;
-    markdown = html
-      ? transcriptHtml(title, entries.map(entry => ({ role: entry.role, text: redactSecretText(entry.text) })),
-        { user: mainText('You'), assistant: 'ChatGPT' })
-      : sessionMarkdown(title, entries);
-    name = markdownFileName(title, '', html ? 'html' : 'md');
+    // A whole chat as a web page goes through Share's preview instead (page-export.ts).
+    markdown = sessionMarkdown(summary.title, entries);
+    name = markdownFileName(summary.title);
   }
   if (request.target === 'clipboard') {
     await clipboard.writeText(markdown);
@@ -73,13 +63,13 @@ export async function exportSessionMarkdown(request: MarkdownExportRequest, owne
   }
   // Linux asks nothing about replacing a file unless told to.
   const options: SaveDialogOptions = {
-    ...dialogLabel(html ? 'Export as HTML' : 'Export as Markdown'),
+    ...dialogLabel('Export as Markdown'),
     defaultPath: path.join(app.getPath('downloads'), name),
-    filters: [html ? { name: mainText('HTML files'), extensions: ['html'] } : { name: mainText('Markdown files'), extensions: ['md'] }],
+    filters: [{ name: mainText('Markdown files'), extensions: ['md'] }],
     properties: ['showOverwriteConfirmation']
   };
   const result = owner ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options);
   if (result.canceled || !result.filePath) return { done: 'cancelled' };
-  await replaceFile(result.filePath, markdown, html ? 'HTML export' : 'Markdown export');
+  await replaceFile(result.filePath, markdown, 'Markdown export');
   return { done: 'saved', name: path.basename(result.filePath) };
 }

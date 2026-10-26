@@ -1585,6 +1585,19 @@
         <div class="pet-delete-actions"><button class="btn" id="sshProjectCancel" type="button">Cancel</button><button class="btn btn-solid" id="sshProjectSubmit" type="submit">Test and add</button></div>
       </form>
     </dialog>
+    <dialog class="plugin-dialog share-page-dialog" id="sharePageDialog" aria-labelledby="sharePageTitle">
+      <div class="plugin-dialog-head"><h2 id="sharePageTitle">Share as web page</h2><button class="btn" id="sharePageClose" type="button">Close</button></div>
+      <form id="sharePageForm" class="plugin-dialog-body">
+        <p>Saves this chat as one web page file that opens in any browser. Nothing is uploaded: you decide who gets the file.</p>
+        <div class="share-page-preview" id="sharePagePreview">
+          <iframe id="sharePageFrame" sandbox="" referrerpolicy="no-referrer" title="Preview"></iframe>
+          <p class="share-page-loading" id="sharePageLoading">Preparing the preview…</p>
+        </div>
+        <label class="setting share-page-hide"><span class="setting-text"><b>Hide email addresses and user names</b><em>Keys and tokens are always hidden. Check the preview: other personal details may remain.</em><em class="share-page-count" id="sharePageCount" aria-live="polite" hidden></em></span><input id="sharePageHide" type="checkbox" /></label>
+        <p id="sharePageError" class="plugin-error" role="alert" hidden></p>
+        <div class="pet-delete-actions"><button class="btn" id="sharePageCancel" type="button">Cancel</button><button class="btn btn-solid" id="sharePageSave" type="submit">Save…</button></div>
+      </form>
+    </dialog>
     <dialog class="plugin-dialog feedback-dialog" id="feedbackDialog" aria-labelledby="feedbackTitle">
       <div class="plugin-dialog-head"><h2 id="feedbackTitle">Send feedback</h2><button class="btn" id="feedbackClose" type="button">Close</button></div>
       <form id="feedbackForm" class="feedback-form" novalidate>

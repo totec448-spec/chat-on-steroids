@@ -83,6 +83,9 @@ export function mainTexts(): Record<MainText, string> {
     'Goal result needs review': t('Goal result needs review'),
     'The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.':
       t('The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.'),
+    'New chat': t('New chat'),
+    'hidden': t('hidden'),
+    'Shared from Chat On Steroids': t('Shared from Chat On Steroids'),
   };
 }
 
