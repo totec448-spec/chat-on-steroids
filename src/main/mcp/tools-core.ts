@@ -119,6 +119,9 @@ import {
   agentFamiliesForCaller,
   reconcileAgentRequestOwners,
   PRIME_ID,
+  primeOwnerSentence,
+  isRequestOnlyCaller,
+  NoChatError,
   requestWorkerBootstraps,
   requestWorkerRevivals,
   statusForCaller,
@@ -1400,7 +1403,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
               {
                 type: 'text' as const,
                 text:
-                  (becamePrime ? `This ${currentCaller().conversationId ? 'conversation' : 'request'} is now the prime agent of run ${runId}. ` : '') +
+                  (becamePrime ? primeOwnerSentence(currentCaller(), runId) : '') +
                   `${created.length} worker(s) matched: ${created.map((info) => `${info.id} (${info.label}, ${info.state}${info.model ? `, model ${info.model}` : ''}${info.reasoningEffort ? `, reasoning ${info.reasoningEffort}` : ''})`).join(', ')}. ` +
                   (invited.length > 0 ? 'New worker chats are opening with their briefs already in them. ' : '') +
                   (defaultNotes?.length ? `${defaultNotes.join(' ')} ` : '') +
@@ -1408,10 +1411,13 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                   (sleeping.length > 0
                     ? `${sleeping.map((worker) => worker.id).join(', ')} already finished that earlier piece and is sleeping in its existing chat; wake it with action=message instead of spawning a duplicate. `
                     : '') +
-                  'Carry on with your own work — results and ' +
-                  'messages arrive at the end of later tool results, so there is nothing to wait for and never anything ' +
-                  'to poll. A short correction with action=message while a worker is still going is far cheaper than ' +
-                  'the alternative.'
+                  // A request-owned run answers only that request (#1841): no promise of later results.
+                  (becamePrime && isRequestOnlyCaller(currentCaller())
+                    ? 'Do not wait for its results in a later, separate request; they cannot arrive there.'
+                    : 'Carry on with your own work — results and ' +
+                      'messages arrive at the end of later tool results, so there is nothing to wait for and never anything ' +
+                      'to poll. A short correction with action=message while a worker is still going is far cheaper than ' +
+                      'the alternative.')
               }
             ],
             structuredContent: {
@@ -1552,6 +1558,8 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
         const familyNotice = families.length > 1
           ? `\n\nYour worker families: ${families.map(family => `${family.run_id} (${family.running ? 'active' : 'retained'})`).join(', ')}. Use run_id to select a family; worker names are local to that family.`
           : '';
+        // Without a chat, an empty answer would send the caller to spawn a run it could never reach (#1841).
+        if (!me && !families.length && isRequestOnlyCaller(caller)) throw new NoChatError();
         if (!me) return {
           content: [{ type: 'text' as const, text: families.length
             ? `Select one of your worker families with run_id.${familyNotice}`

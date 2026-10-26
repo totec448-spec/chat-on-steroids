@@ -3,6 +3,7 @@ import { t, ui } from './i18n.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
 import { moveWorkDock } from './panel-motion.js';
 import { enableTabReorder, reorderKey } from './tab-reorder.js';
+import { controlShiftShortcut } from './shortcuts.js';
 
 export type DockView = 'review' | 'files' | 'agents' | 'terminal';
 type AdoptableView = Exclude<DockView, 'terminal'>;
@@ -261,7 +262,8 @@ export function createWorkspaceDocks(host: HTMLElement) {
     const quick = el('button', 'btn work-dock-quick') as HTMLButtonElement;
     quick.type = 'button'; quick.dataset.view = kind;
     quick.append(icon(glyph), el('span', '', () => t(label)));
-    quick.append(el('kbd', '', `Ctrl+Shift+${['review', 'terminal', 'files', 'agents'].indexOf(kind) + 1}`));
+    const digit = String(['review', 'terminal', 'files', 'agents'].indexOf(kind) + 1);
+    quick.append(el('kbd', '', () => controlShiftShortcut(digit)));
     quick.addEventListener('click', () => activate(kind)); launch.append(quick);
     refreshControls();
   };
