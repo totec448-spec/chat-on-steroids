@@ -13,11 +13,38 @@ function cues(over: Partial<SoundCueDeps> = {}) {
   return { cue: createSoundCues(deps), deps: { play, log }, advance: (ms: number) => { now += ms; } };
 }
 
-it('plays and logs nothing while the setting is off', () => {
-  const { cue, deps } = cues({ enabled: () => false });
+it('plays nothing while the setting is off, and says so once rather than for every event', () => {
+  let on = false;
+  const { cue, deps } = cues({ enabled: () => on });
   expect(cue('needs-you', 's1')).toBe('off');
+  expect(cue('finished', 's2')).toBe('off');
   expect(deps.play).not.toHaveBeenCalled();
-  expect(deps.log).not.toHaveBeenCalled();
+  expect(deps.log.mock.calls).toEqual([['sound: needs-you not played (off; sounds are off, later cues are not logged until they are on)']]);
+  // Switched on and off again: it says so once more.
+  on = true; cue('failed');
+  on = false; cue('failed');
+  expect(deps.log.mock.calls.at(-1)).toEqual(['sound: failed not played (off; sounds are off, later cues are not logged until they are on)']);
+});
+
+it('counts a cue as played only once the window says it can play sounds, and not across a reload (#1830)', async () => {
+  const { createSoundReadiness } = await import('../src/main/sound-cues.js');
+  const listeners = new Map<string, Array<() => void>>();
+  const page = { on: (event: string, run: () => void) => { listeners.set(event, [...(listeners.get(event) ?? []), run]); } };
+  const fire = (event: string) => { for (const run of listeners.get(event) ?? []) run(); };
+  const readiness = createSoundReadiness();
+  expect(readiness.ready(page)).toBe(false);
+  readiness.mark(page);
+  expect(readiness.ready(page)).toBe(true);
+  // A reload or a crashed page has no listener until it says so again.
+  fire('did-start-loading');
+  expect(readiness.ready(page)).toBe(false);
+  readiness.mark(page);
+  fire('render-process-gone');
+  expect(readiness.ready(page)).toBe(false);
+  expect(readiness.ready(null)).toBe(false);
+  // However often the page says it is ready, it is watched once.
+  readiness.mark(page); readiness.mark(page);
+  expect(listeners.get('did-start-loading')).toHaveLength(1);
 });
 
 it('plays needs-you and failed sounds even at the window, a finished one only in the background', () => {

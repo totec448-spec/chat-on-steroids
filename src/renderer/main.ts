@@ -29,6 +29,7 @@ import { initPets } from './pets.js';
 import { initSkillsLibrary } from './skills-library.js';
 import { initWhatsNew } from './whats-new.js';
 import { playSoundCue } from './sound-cues.js';
+import { inQuietHours } from '../shared/phone-push.js';
 import { initSettingsSearch } from './settings-search.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
@@ -2872,7 +2873,10 @@ for (const id of [
 }
 $('connectorSuffix').addEventListener('input', () => { connectorSuffixValid(); });
 // #1802: turning sounds on plays one, so the person hears what they chose.
-$('soundCues').addEventListener('change', event => { if ((event.target as HTMLInputElement).checked) playSoundCue('finished'); });
+// Switching sounds on plays a sample, unless it is the quiet hours the switch promises to follow.
+$('soundCues').addEventListener('change', event => {
+  if ((event.target as HTMLInputElement).checked && !inQuietHours(state?.config.ui.phonePush?.quietHours ?? null, new Date())) playSoundCue('finished');
+});
 api.onSoundCue?.(playSoundCue);
 
 document.addEventListener('click', (event) => {

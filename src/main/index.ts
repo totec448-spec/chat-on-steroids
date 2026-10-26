@@ -7,7 +7,7 @@ import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js
  */
 
 import path from 'node:path';
-import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, net, powerMonitor, powerSaveBlocker, screen, session } from 'electron';
+import { app, Notification, BrowserWindow, ipcMain, Menu, Tray, nativeImage, nativeTheme, net, powerMonitor, powerSaveBlocker, screen, session } from 'electron';
 import { createKeepAwake, installKeepAwake } from './keep-awake.js';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { initConnectorProofPath, loadConnectorProof, notePluginInstalled } from './connector-proof.js';
@@ -34,7 +34,7 @@ import { unifiedExecManager } from './codex/manager.js';
 import { workspaceTerminalsExited } from './workspace-terminal.js';
 import { getSecret, initSecretsPath, keychainReadPending } from './secrets.js';
 import { installPhonePush, pushToPhone } from './phone-push.js';
-import { installSoundCues, soundCue, soundQuietHours } from './sound-cues.js';
+import { createSoundReadiness, installSoundCues, soundCue, soundQuietHours } from './sound-cues.js';
 import { DEFAULT_PHONE_PUSH } from '../shared/phone-push.js';
 import { mainText, mainTextTranslations, onMainTextsChange, restoreMainTextTranslations } from './main-texts.js';
 import { isMainText } from '../shared/main-texts.js';
@@ -495,14 +495,17 @@ void app.whenReady().then(async () => {
   onSessionChange(() => void keepAwake.refresh());
   setInterval(() => void keepAwake.refresh(), 60_000).unref();
   void keepAwake.refresh();
-  // #1802: the window plays the sound; a closed window (only the tray left) plays none.
+  // #1802: the window plays the sound; a closed window (only the tray left) plays none, and nor
+  // does a page that is not listening yet (loading, reloading, crashed).
+  const soundReadiness = createSoundReadiness();
+  ipcMain.on('sound:ready', event => { if (window && !window.isDestroyed() && event.sender === window.webContents) soundReadiness.mark(event.sender); });
   installSoundCues({
     enabled: () => getConfig().ui.sounds === true,
     focused: () => window?.isFocused() === true,
     quietHours: () => soundQuietHours(getConfig().ui),
     now: () => Date.now(),
     play: kind => {
-      if (!window || window.isDestroyed()) return false;
+      if (!window || window.isDestroyed() || !soundReadiness.ready(window.webContents)) return false;
       window.webContents.send('sound:cue', kind);
       return true;
     },
