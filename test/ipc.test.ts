@@ -173,6 +173,32 @@ it('answers a turn\'s changed files and refuses a malformed request (#1827)', as
   expect(await call('sessions:turnChanges', { sessionId: session.id, turnId: 'x', from: -1 })).toMatchObject({ ok: false });
 });
 
+it('reads a turn\'s edits once for its card and its files, again after the chat changes, and logs a refused request (CodeRabbit)', async () => {
+  const session = await createSession({ conversationId: 'ipc-turn-changes-reuse', title: 'Changes' });
+  const call = (name: string, payload: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  const store = await import('../src/main/session/store.js');
+  const logger = await import('../src/main/logger.js');
+  const reads = vi.spyOn(store, 'readEvents');
+  const warn = vi.spyOn(logger, 'logWarn');
+  try {
+    const request = { sessionId: session.id, turnId: 'reused', from: 0 };
+    await call('sessions:turnChanges', request);
+    await call('sessions:turnFileDiff', { ...request, path: 'a.ts' });
+    await call('sessions:turnFileDiff', { ...request, path: 'b.ts' });
+    expect(reads.mock.calls.filter(([id]) => id === session.id)).toHaveLength(1);
+    const { notifyChanged } = await import('../src/main/session/recorder.js');
+    notifyChanged(session.id);
+    // Change notices are batched for 400 ms.
+    await new Promise(resolve => setTimeout(resolve, 600));
+    await call('sessions:turnChanges', request);
+    expect(reads.mock.calls.filter(([id]) => id === session.id)).toHaveLength(2);
+    expect(await call('sessions:turnChanges', { sessionId: session.id, turnId: 'x', from: -1 })).toMatchObject({ ok: false });
+    expect(warn).toHaveBeenCalledWith('ipc: sessions:turnChanges refused: invalid_payload');
+    expect(await call('sessions:turnFileDiff', { sessionId: session.id, turnId: 'x', from: 0 })).toMatchObject({ ok: false });
+    expect(warn).toHaveBeenCalledWith('ipc: sessions:turnFileDiff refused: invalid_payload');
+  } finally { reads.mockRestore(); warn.mockRestore(); }
+});
+
 it('enabling strict chat allowlisting keeps existing chats untrusted', async () => {
   const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
   resetTrustedChatsForTests();
