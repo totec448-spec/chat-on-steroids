@@ -64,6 +64,15 @@ describe('the prefilled GitHub issue', () => {
     }
   });
 
+  it('builds the link even when the text holds a broken character', () => {
+    // A lone half of a surrogate pair cannot be percent-encoded as it is; the link replaces it.
+    for (const what of ['\uD800 crashed', `${'x'.repeat(100)}\uDC00`]) {
+      const { url } = feedbackIssueUrl({ kind: 'bug', what }, env);
+      expect(url.length).toBeLessThanOrEqual(MAX_ISSUE_URL);
+      expect(fields(url).title).toBeTruthy();
+    }
+  });
+
   it('cuts at whole characters even for emoji', () => {
     const { url } = feedbackIssueUrl({ kind: 'idea', problem: '🙂'.repeat(3000), proposal: 'p' }, env);
     expect(url.length).toBeLessThanOrEqual(MAX_ISSUE_URL);
