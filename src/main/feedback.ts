@@ -55,13 +55,30 @@ const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 /** Visible characters: a family or flag emoji is one, never cut apart. */
 const charsOf = (text: string): string[] => Array.from(graphemes.segment(text), part => part.segment);
 
-/** The first sentence or line, at most 80 characters. */
+/** A title's share of the link: the shortening below never touches it, so it is bounded here. */
+const MAX_TITLE_ENCODED = 900;
+const encodedLength = (text: string): number => encodeURIComponent(text).length;
+
+/**
+ * The first sentence or line, at most 80 characters and 900 in the link. A character has no size
+ * limit (combining marks, long emoji sequences), so both bounds are needed; one character larger
+ * than the whole budget is the only one ever cut apart.
+ */
 function titleOf(text: string): string {
   const line = text.trim().split(/\r?\n/, 1)[0]!.trim();
   const sentence = /^(.+?[.!?])(?:\s|$)/u.exec(line)?.[1] ?? line;
   const chars = charsOf(sentence);
-  if (chars.length <= 80) return sentence;
-  const cut = chars.slice(0, 79).join('');
+  if (chars.length <= 80 && encodedLength(sentence) <= MAX_TITLE_ENCODED) return sentence;
+  // Room for the "…" that ends a shortened title.
+  const budget = MAX_TITLE_ENCODED - encodedLength('…');
+  const kept = chars.slice(0, 79);
+  while (kept.length > 1 && encodedLength(kept.join('')) > budget) kept.pop();
+  let cut = kept.join('');
+  if (encodedLength(cut) > budget) {
+    const points = Array.from(cut);
+    while (points.length > 1 && encodedLength(points.join('')) > budget) points.pop();
+    cut = points.join('');
+  }
   const space = cut.lastIndexOf(' ');
   return `${(space > 40 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
