@@ -74,7 +74,7 @@
                   <span class="acts"><button class="btn" id="addProject" type="button" title="Add a project folder" aria-label="Add a project folder"><i class="ico ph ph-plus" aria-hidden="true"></i></button></span>
                 </summary>
                 <div id="projectList"><p class="empty" role="status">Loading projects…</p></div>
-                <p class="empty sidebar-section-empty" id="projectsEmpty" hidden>No projects yet.</p>
+                <p class="empty sidebar-section-empty" id="projectsEmpty" hidden>No projects yet. Add a folder to get started.</p>
               </details>
               <details class="sidebar-session-section" id="chatsSection" open>
                 <summary class="sidebar-session-heading">
@@ -205,11 +205,39 @@
                 <label class="setting"><span class="setting-text"><b>Mention Plugins instead of Core</b><em>Ordinary messages the app sends mention Chat On Steroids Plugins. Goal, Loop, workers and recovery always mention Core. Messages you send in ChatGPT itself are unchanged.</em></span><input id="mentionPlugins" type="checkbox" /></label>
               </div>
             </section>
+            <section class="appearance-section" id="phonePushSettings">
+              <header class="settings-section-head"><div><h2>Phone notifications</h2><p>Hear about your chats on your phone while you are away from this computer.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <label class="setting"><span class="setting-text"><b>Send notifications to your phone</b><em>Through ntfy, a free notification app.</em></span><input id="phonePushEnabled" type="checkbox" /></label>
+                <div id="phonePushOptions" class="phone-push-options" hidden>
+                  <div class="setting phone-push-field"><label class="setting-text" for="phonePushTopic"><b>Topic</b><em>Subscribe to it in the ntfy app. Anyone who has it can read the messages.</em></label><div class="phone-push-control"><input id="phonePushTopic" type="text" maxlength="64" spellcheck="false" autocomplete="off" translate="no" /><button class="btn" id="phonePushCopyTopic" type="button">Copy</button></div></div>
+                  <div class="setting"><span class="setting-text"><b>Send a test</b><em id="phonePushTestStatus" role="status">A test never includes chat text.</em></span><button class="btn" id="phonePushTest" type="button">Send test</button></div>
+                  <label class="setting"><span class="setting-text"><b>When a chat needs you</b></span><input id="phonePushNeedsYou" type="checkbox" /></label>
+                  <label class="setting"><span class="setting-text"><b>When something fails</b></span><input id="phonePushFailures" type="checkbox" /></label>
+                  <label class="setting"><span class="setting-text"><b>When a chat finishes</b></span><select id="phonePushFinished"><option value="never">Never</option><option value="0">Always</option><option value="5">After 5 minutes of work</option><option value="15">After 15 minutes of work</option><option value="30">After 30 minutes of work</option><option value="60">After an hour of work</option></select></label>
+                  <label class="setting"><span class="setting-text"><b>Only when you are away</b><em>No input for 3 minutes, or a locked screen.</em></span><input id="phonePushAway" type="checkbox" /></label>
+                  <label class="setting"><span class="setting-text"><b>Quiet hours</b></span><select id="phonePushQuiet"><option value="">Off</option><option value="21:00-06:00" translate="no"></option><option value="22:00-07:00" translate="no"></option><option value="23:00-07:00" translate="no"></option><option value="23:00-08:00" translate="no"></option><option value="00:00-08:00" translate="no"></option></select></label>
+                  <label class="setting"><span class="setting-text"><b>Include chat names and answers</b><em>They go through the ntfy server, and anyone with the topic can read them.</em></span><input id="phonePushDetails" type="checkbox" /></label>
+                  <details class="phone-push-advanced" id="phonePushAdvanced"><summary><svg class="disclosure-chevron sum-chev" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Advanced</summary>
+                    <div class="setting phone-push-field"><label class="setting-text" for="phonePushServer"><b>Server</b><em>ntfy.sh, or your own ntfy server.</em></label><div class="phone-push-control"><input id="phonePushServer" type="text" inputmode="url" maxlength="2048" spellcheck="false" autocomplete="off" translate="no" /><button class="btn" id="phonePushServerDefault" type="button" title="Use ntfy.sh">Default</button></div></div>
+                    <div class="setting phone-push-field"><label class="setting-text" for="phonePushToken"><b>Access token</b><em id="phonePushTokenStatus">Only if your server needs one. Kept in secure storage.</em></label><div class="phone-push-control"><input id="phonePushToken" type="password" maxlength="512" autocomplete="off" /><button class="btn" id="phonePushTokenSave" type="button">Save token</button></div></div>
+                    <div class="setting"><span class="setting-text"><b>New topic</b><em>The old topic stops getting messages.</em></span><button class="btn" id="phonePushNewTopic" type="button">New topic</button></div>
+                  </details>
+                </div>
+              </div>
+            </section>
             <section class="appearance-section" id="privacySettings">
               <header class="settings-section-head"><div><h2>Privacy</h2><p>What ChatGPT gets to see on this computer.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
                 <label class="setting"><span class="setting-text"><b>Hide secrets from ChatGPT</b><em>API keys, tokens, private keys and passwords in what tools return are replaced with a short note before ChatGPT sees them. Your files stay as they are. A project can turn this off in its menu.</em></span><input id="secretsShield" type="checkbox" /></label>
                 <label class="setting" id="privacyScreenshotsSetting"><span class="setting-text"><b>Screenshot only the active window</b><em>For privacy, ChatGPT's screenshots show the window in front instead of the whole screen.</em></span><input id="privacyScreenshots" type="checkbox" /></label>
+              </div>
+            </section>
+            <section class="appearance-section" id="backupSettings">
+              <header class="settings-section-head"><div><h2>Backup</h2><p>Keep a copy of your settings, or move them to another computer.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <div class="setting"><span class="setting-text"><b>Export settings</b><em>Saves your settings to a file. Folders and this computer's connection to ChatGPT stay out.</em></span><button class="btn" id="exportSettings" type="button">Export…</button></div>
+                <div class="setting"><span class="setting-text"><b>Import settings</b><em>Takes the settings from a backup file. You see how many change before anything does.</em></span><button class="btn" id="importSettings" type="button">Import…</button></div>
               </div>
             </section>
             <section class="appearance-section">
@@ -1579,6 +1607,32 @@
         <button class="whats-new-link" id="whatsNewNotes" type="button"><i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Full release notes</button>
         <button class="whats-new-done" id="whatsNewDone" type="button">Got it</button>
       </footer>
+    </dialog>
+    <dialog class="plugin-dialog backup-dialog" id="exportSettingsDialog" aria-labelledby="exportSettingsTitle">
+      <div class="plugin-dialog-head"><h2 id="exportSettingsTitle">Export settings</h2><button class="btn" id="exportSettingsClose" type="button">Close</button></div>
+      <form id="exportSettingsForm" class="plugin-dialog-body">
+        <p>Folders and this computer's connection to ChatGPT are left out.</p>
+        <label class="setting"><span class="setting-text"><b>Include saved keys</b><em>Locked with a passphrase you choose.</em></span><input id="exportSettingsKeys" type="checkbox" /></label>
+        <div id="exportSettingsPassphrase" hidden>
+          <label class="plugin-field" for="exportSettingsPass"><span>Passphrase</span><input id="exportSettingsPass" type="password" maxlength="1024" autocomplete="new-password" /><small>At least 8 characters. A lost passphrase cannot be recovered.</small></label>
+          <label class="plugin-field" for="exportSettingsPassAgain"><span>Passphrase again</span><input id="exportSettingsPassAgain" type="password" maxlength="1024" autocomplete="new-password" /></label>
+        </div>
+        <p id="exportSettingsError" class="plugin-error" role="alert" hidden></p>
+        <div class="pet-delete-actions"><button class="btn" id="exportSettingsCancel" type="button">Cancel</button><button class="btn btn-solid" id="exportSettingsSubmit" type="submit">Export</button></div>
+      </form>
+    </dialog>
+    <dialog class="plugin-dialog backup-dialog" id="importSettingsDialog" aria-labelledby="importSettingsTitle">
+      <div class="plugin-dialog-head"><h2 id="importSettingsTitle">Import settings</h2><button class="btn" id="importSettingsClose" type="button">Close</button></div>
+      <form id="importSettingsForm" class="plugin-dialog-body">
+        <p id="importSettingsSource"></p>
+        <p id="importSettingsSummary" role="status"></p>
+        <p class="backup-wider" id="importSettingsWider" hidden></p>
+        <details class="backup-review" id="importSettingsReview" hidden><summary><svg class="disclosure-chevron sum-chev" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Review changes</summary><ul id="importSettingsChanges"></ul></details>
+        <label class="setting" id="importSettingsKeysRow" hidden><span class="setting-text"><b id="importSettingsKeysLabel"></b><em>Needs the passphrase chosen when the backup was made.</em></span><input id="importSettingsKeys" type="checkbox" /></label>
+        <label class="plugin-field" for="importSettingsPass" id="importSettingsPassRow" hidden><span>Passphrase</span><input id="importSettingsPass" type="password" maxlength="1024" autocomplete="off" /></label>
+        <p id="importSettingsError" class="plugin-error" role="alert" hidden></p>
+        <div class="pet-delete-actions"><button class="btn" id="importSettingsCancel" type="button">Cancel</button><button class="btn btn-solid" id="importSettingsSubmit" type="submit">Import</button></div>
+      </form>
     </dialog>
     <dialog id="setupProfileDialog" class="setup-profile-dialog" aria-labelledby="setupProfileDialogTitle">
       <form id="setupProfileForm">

@@ -943,18 +943,38 @@ var CLF_DOM = (() => {
       const clone = node.cloneNode(true);
       for (const drop of clone.querySelectorAll('button, kbd, svg, script, style, [aria-hidden="true"]')) drop.remove();
       const lines = [];
-      const block = element => element.closest('div, p, li, h1, h2, h3, h4, h5, h6');
+      // The shared data is a <dl> (2026-10-25): a label and its value share one grid row, so each
+      // term and definition is a block of its own, and a value follows its label as "label: value".
+      // A term or value keeps what it wraps (a div inside a dd), so it is chosen before a plain block.
+      const block = element => element.closest('dt, dd') || element.closest('div, p, li, h1, h2, h3, h4, h5, h6');
       const groups = new Map();
+      // Inside one term or value, text from two separate block wrappers stays two words.
+      const wrapper = new Map();
       const walker = document.createTreeWalker(clone, NodeFilter.SHOW_TEXT);
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
         const owner = node.parentElement && block(node.parentElement);
         if (!owner) continue;
-        groups.set(owner, (groups.get(owner) || '') + node.textContent);
+        const inner = node.parentElement.closest('div, p, li, h1, h2, h3, h4, h5, h6');
+        const part = owner.contains(inner) ? inner : owner;
+        const gap = wrapper.has(owner) && wrapper.get(owner) !== part ? ' ' : '';
+        wrapper.set(owner, part);
+        groups.set(owner, (groups.get(owner) || '') + gap + node.textContent);
       }
-      for (const text of groups.values()) {
+      const push = line => { if (line && lines.at(-1) !== line && lines.length < 8) lines.push(line); };
+      // A label waits for the value of its own row; a second label, another row or any other block
+      // shows it alone. A pair longer than a line keeps label and value on lines of their own.
+      let term = null;
+      for (const [owner, text] of groups) {
         const line = text.replace(/\s+/g, ' ').trim().slice(0, 300);
-        if (line && lines.at(-1) !== line && lines.length < 8) lines.push(line);
+        if (!line) continue;
+        const pairs = owner.tagName === 'DD' && term && term.row === owner.parentElement;
+        if (term && !pairs) push(term.line);
+        if (owner.tagName === 'DT') { term = { line, row: owner.parentElement }; continue; }
+        if (pairs && term.line.length + 2 + line.length <= 300) push(`${term.line}: ${line}`);
+        else { if (pairs) push(term.line); push(line); }
+        term = null;
       }
+      if (term) push(term.line);
       return { node, lines, allow: approvalButton(node, 'allow') !== null };
     }, null);
   }
@@ -3679,6 +3699,30 @@ var CLF_DOM = (() => {
       .map(link => projectHomeId(new URL(link.href, location.href).pathname)).filter(Boolean))], []);
   }
 
+  /**
+   * The Projects ChatGPT's sidebar lists right now, in its order (#1756). Each Project row carries
+   * its id and label as attributes, collapsed or not (measured 2026-10-21:
+   * `data-app-action-sidebar-project-id`, `-label`); an expanded one also links to its home, which
+   * older pages only have. A collapsed sidebar lists none, which says nothing about the account.
+   */
+  function projectsShown() {
+    return safe(() => {
+      const out = [];
+      const add = (rawId, rawName) => {
+        const id = String(rawId || '').toLowerCase();
+        const name = String(rawName || '').split('\n').map(part => part.trim()).find(Boolean) || '';
+        if (/^g-p-[0-9a-f]{32}$/.test(id) && name && !out.some(project => project.id === id) && out.length < 200) out.push({ id, name: name.slice(0, 200) });
+      };
+      for (const row of document.querySelectorAll('[data-app-action-sidebar-project-id]')) {
+        add(row.getAttribute('data-app-action-sidebar-project-id'), row.getAttribute('data-app-action-sidebar-project-label'));
+      }
+      for (const link of document.querySelectorAll('nav a[href], aside a[href]')) {
+        add(projectHomeId(new URL(link.href, location.href).pathname), link.innerText || link.textContent);
+      }
+      return out;
+    }, []);
+  }
+
   /** ChatGPT's open "Create project" dialog: its name field and its one submit button. */
   function projectCreateForm() {
     return safe(() => {
@@ -3750,6 +3794,7 @@ var CLF_DOM = (() => {
     projectCreateForm,
     revealSidebar,
     projectIdsShown,
+    projectsShown,
     fillProjectName,
     projectHomeId,
     sidebarListsProject,
