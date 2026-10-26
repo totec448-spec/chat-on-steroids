@@ -7,6 +7,7 @@
  * pruner. None of that is observable against an in-memory fake.
  */
 
+import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT } from '../src/shared/approval-wait.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -1345,6 +1346,42 @@ describe('session store', () => {
     expect(after?.errors).toBe(1);
     expect(after?.lastTurnOutcome).toBe('interrupted');
     expect(after?.estimatedTokens).toBeGreaterThanOrEqual(100);
+  });
+
+  it("keeps what a worker's dock line shows: a failed step, its last answer's first line, and a wait on ChatGPT's approval card (#1831)", async () => {
+    const summary = await createSession({ title: 'worker line' });
+    const at = summary.startedAt;
+    const call = (time: number, title: string, tone: 'neutral' | 'bad') => appendEvent(summary.id, {
+      time, source: 'mcp', kind: 'tool_call',
+      call: { callId: `call-${time}`, tool: 'exec', attribution: 'request_id', requestId: `wfr-${time}`, conversationId: 'c-line', attributionMethod: 'request_id',
+        args: { text: '{}', truncated: false, chars: 2 }, result: { text: 'x', truncated: false, chars: 1 }, outcome: 'ok', durationMs: 1,
+        summary: { title, tone, kind: 'run' } }
+    });
+    await call(at + 10, 'Ran npm test', 'bad');
+    expect(await getSession(summary.id)).toMatchObject({ lastToolActivity: { kind: 'run', title: 'Ran npm test', tone: 'bad' } });
+    await call(at + 20, 'Ran npm test again', 'neutral');
+    expect((await getSession(summary.id))!.lastToolActivity).toEqual({ kind: 'run', title: 'Ran npm test again' });
+    // ChatGPT's approval card holds the turn: the line says so until it is answered.
+    const approval = (time: number, text: string) => appendEvent(summary.id, {
+      time, source: 'app', kind: 'progress', progressId: `${APPROVAL_PROGRESS_PREFIX}c-line`, message: { text, truncated: false, chars: text.length }
+    });
+    await approval(at + 30, APPROVAL_WAITING_TEXT);
+    expect((await getSession(summary.id))!.approvalWaitingAt).toBe(at + 30);
+    await approval(at + 40, APPROVAL_ANSWERED_TEXT);
+    expect((await getSession(summary.id))!.approvalWaitingAt).toBeNull();
+    // The first line of the last final answer, without Markdown marks, bounded.
+    const answer = '## **Done.** All 12 tests pass now\n\nThe fix was in `parse()`.';
+    await upsertMessageEvent(summary.id, { kind: 'assistant_message', source: 'extension', time: at + 50, messageId: 'a-1', final: true,
+      message: { text: answer, truncated: false, chars: answer.length } });
+    expect((await getSession(summary.id))!.lastAnswerLine).toBe('Done. All 12 tests pass now');
+    // A later approval wait ends with the next step, even without its "answered" row.
+    await approval(at + 60, APPROVAL_WAITING_TEXT);
+    await call(at + 70, 'Edited a.ts', 'neutral');
+    expect((await getSession(summary.id))!.approvalWaitingAt).toBeNull();
+    await flushSessions();
+    resetSessionStoreForTests();
+    expect(await getSession(summary.id)).toMatchObject({ lastAnswerLine: 'Done. All 12 tests pass now', approvalWaitingAt: null,
+      lastToolActivity: { kind: 'run', title: 'Edited a.ts' } });
   });
 
   it('keeps the exact last attributed tool-call time separate from unrelated session activity', async () => {
