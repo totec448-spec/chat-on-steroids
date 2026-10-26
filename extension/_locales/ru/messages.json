@@ -512,6 +512,9 @@
   "content_goal_wait_tool_inactivity": {
     "message": "Ожидание паузы в работе инструментов"
   },
+  "content_goal_wait_reviewer": {
+    "message": "Ожидание рецензента"
+  },
   "content_goal_wait_workers": {
     "message": "Ожидание субагентов этого чата"
   },

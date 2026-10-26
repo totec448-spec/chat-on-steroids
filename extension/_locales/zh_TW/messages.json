@@ -503,6 +503,9 @@
   "content_goal_wait_tool_inactivity": {
     "message": "等待工具活動停止"
   },
+  "content_goal_wait_reviewer": {
+    "message": "正在等待審查者"
+  },
   "content_goal_wait_workers": {
     "message": "正在等待此對話的子代理"
   },

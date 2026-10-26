@@ -3336,5 +3336,6 @@
   "Sub-agents are off": "Yardımcı ajanlar kapalı",
   "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "Gözden geçiren, bir yardımcı ajan sohbeti olarak çalışır, bu yüzden Yardımcı ajanlar gerekir. Açılana kadar hiçbir şey gözden geçirilmez.",
   "Turn on Sub-agents": "Yardımcı ajanları aç",
-  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "Gözden geçiren, Hedef'in güvenle geçemeyeceği bir sorun buldu. Kontrol etmek için sohbeti açın."
+  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "Gözden geçiren, Hedef'in güvenle geçemeyeceği bir sorun buldu. Kontrol etmek için sohbeti açın.",
+  "Waiting for the reviewer": "Gözden geçiren bekleniyor"
 }

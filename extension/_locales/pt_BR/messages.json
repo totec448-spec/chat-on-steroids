@@ -509,6 +509,9 @@
   "content_goal_wait_tool_inactivity": {
     "message": "Aguardando as ferramentas ficarem inativas"
   },
+  "content_goal_wait_reviewer": {
+    "message": "Aguardando o revisor"
+  },
   "content_goal_wait_workers": {
     "message": "Aguardando os subagentes deste chat"
   },

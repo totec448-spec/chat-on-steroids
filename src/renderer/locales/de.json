@@ -3336,5 +3336,6 @@
   "Sub-agents are off": "Unteragenten sind aus",
   "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "Der Reviewer läuft als Worker-Chat und braucht deshalb Unteragenten. Bis sie an sind, wird nichts geprüft.",
   "Turn on Sub-agents": "Unteragenten einschalten",
-  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "Der Reviewer hat ein Problem gefunden, an dem Goal nicht sicher vorbeikommt. Öffne den Chat, um es zu prüfen."
+  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "Der Reviewer hat ein Problem gefunden, an dem Goal nicht sicher vorbeikommt. Öffne den Chat, um es zu prüfen.",
+  "Waiting for the reviewer": "Warte auf den Reviewer"
 }

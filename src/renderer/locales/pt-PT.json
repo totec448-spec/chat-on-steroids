@@ -3401,5 +3401,6 @@
   "Sub-agents are off": "Os subagentes estão desligados",
   "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "O revisor funciona como um chat de worker, por isso precisa dos Subagentes. Nada é revisto até estarem ligados.",
   "Turn on Sub-agents": "Ligar os Subagentes",
-  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "O revisor encontrou um problema que o Goal não pode ultrapassar com segurança. Abra o chat para o verificar."
+  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "O revisor encontrou um problema que o Goal não pode ultrapassar com segurança. Abra o chat para o verificar.",
+  "Waiting for the reviewer": "A aguardar o revisor"
 }

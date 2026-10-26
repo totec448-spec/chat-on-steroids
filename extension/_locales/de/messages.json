@@ -506,6 +506,9 @@
   "content_goal_wait_tool_inactivity": {
     "message": "Warte, bis die Tools ruhen"
   },
+  "content_goal_wait_reviewer": {
+    "message": "Warte auf den Reviewer"
+  },
   "content_goal_wait_workers": {
     "message": "Warte auf die Sub-Agenten dieses Chats"
   },

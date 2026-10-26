@@ -3271,5 +3271,6 @@
   "Sub-agents are off": "子代理已關閉",
   "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "審查者以子代理聊天執行，因此需要子代理。開啟之前不會審查任何內容。",
   "Turn on Sub-agents": "開啟子代理",
-  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "審查者發現了一個目標無法安全略過的問題。打開聊天查看。"
+  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "審查者發現了一個目標無法安全略過的問題。打開聊天查看。",
+  "Waiting for the reviewer": "正在等待審查者"
 }

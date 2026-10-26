@@ -3271,5 +3271,6 @@
   "Sub-agents are off": "子智能体已关闭",
   "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "审查者以子智能体聊天运行，因此需要子智能体。开启之前不会审查任何内容。",
   "Turn on Sub-agents": "开启子智能体",
-  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "审查者发现了一个目标无法安全跳过的问题。打开聊天查看。"
+  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "审查者发现了一个目标无法安全跳过的问题。打开聊天查看。",
+  "Waiting for the reviewer": "正在等待审查者"
 }

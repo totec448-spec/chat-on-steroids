@@ -4939,6 +4939,18 @@ it('names the wait for this chat’s own sub-agents without inventing a countdow
   expect(row.hidden).toBe(true);
 });
 
+it('names the wait for the Goal step reviewer (#1832)', async () => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  api.getSessionControls = async () => ({ ok: true, data: { automation: 'goal', objective: 'Ship it', blocked: '', job: null,
+    goalWait: { reason: 'reviewer', until: Date.now() + 300_000 }, goalDraft: null as unknown } });
+  await append([]);
+  const row = w.document.getElementById('goalLifecycle')!;
+  expect(row.hidden).toBe(false);
+  expect(row.textContent).toContain('Goal · Waiting for the reviewer');
+  expect(row.getAttribute('aria-busy')).toBe('true');
+});
+
 it('says a Goal waits for its closed chat, without a spinner or a countdown', async () => {
   const { w, append } = await boot([]);
   const api = (w as any).api;
