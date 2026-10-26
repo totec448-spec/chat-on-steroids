@@ -1343,6 +1343,49 @@ describe('root namespace invariants', () => {
 });
 
 /** Exercise the real IPC policy for both Settings buttons and authored chat links. */
+describe('Commit & PR', () => {
+  it('remembers how far Commit goes, and keeps it through a settings save', async () => {
+    expect(await handlers.get('projectCommit:flow')!(null, { flow: 'pr' })).toEqual({ ok: true, data: true });
+    expect(getConfig().ui.commitFlow).toBe('pr');
+    expect(((await handlers.get('projectCommit:flow')!(null, { flow: 'always' })) as { ok: boolean }).ok).toBe(false);
+    expect(getConfig().ui.commitFlow).toBe('pr');
+    // The Settings form does not own it; a save that changes something else carries it through.
+    const base = getConfig();
+    expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
+    expect(getConfig().ui.commitFlow).toBe('pr');
+  });
+
+  // A well-formed request for a project that does not exist reaches the commit and is refused there;
+  // each malformed one must be refused before, for its own field.
+  const wellFormed = { projectId: '6f9619ff-8b86-4d01-b42d-00cf4fc964ff', message: 'x', paths: ['a.ts'], expectedToken: 'a'.repeat(64) };
+  it.each([
+    { expectedToken: 'short' },
+    { paths: ['../outside.ts'] },
+    { paths: ['src/../../outside.ts'] },
+    { paths: ['C:\\Windows\\win.ini'] },
+    { message: 'x'.repeat(10_001) },
+    { amend: true }
+  ])('refuses a commit request before Git runs: %o', async change => {
+    const reached = (await handlers.get('projectCommit:commit')!(null, wellFormed)) as { ok: boolean; error: string };
+    expect(reached.ok).toBe(false);
+    const refused = (await handlers.get('projectCommit:commit')!(null, { ...wellFormed, ...change })) as { ok: boolean; error: string };
+    expect(refused.ok).toBe(false);
+    expect(refused.error).not.toBe(reached.error);
+    if (change.paths) expect(refused.error).toBe('A path must stay inside the project.');
+  });
+
+  it('tells the window the remembered choice at once, so the next Commit opens with it', async () => {
+    currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
+    try {
+      await handlers.get('projectCommit:flow')!(null, { flow: getConfig().ui.commitFlow === 'commit' ? 'pr' : 'commit' });
+      const sent = vi.mocked(currentWindow.webContents.send).mock.calls.find(([channel]) => channel === 'state:changed');
+      expect((sent?.[1] as { config: { ui: { commitFlow?: string } } } | undefined)?.config.ui.commitFlow).toBe(getConfig().ui.commitFlow);
+    } finally {
+      currentWindow = null;
+    }
+  });
+});
+
 describe('in-app feedback', () => {
   it("opens GitHub's form filled in, with the app's version, and says nothing was shortened", async () => {
     vi.mocked(app.getVersion).mockReturnValue('2.1.46');
