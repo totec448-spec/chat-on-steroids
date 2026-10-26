@@ -250,7 +250,14 @@ export async function commitProjectChanges(projectId: string, request: CommitReq
   };
   try {
     if (created) {
-      const made = await runGit(repo.root, ['switch', '-c', created]);
+      let made: Awaited<ReturnType<typeof runGit>>;
+      try { made = await runGit(repo.root, ['switch', '-c', created]); }
+      catch (error) {
+        // It never said how it ended (a timeout): if Git did switch, HEAD is on the new branch, which
+        // the rollback below takes back. A branch that was there before is refused by Git, never switched to.
+        switched = (await branchOf(repo).catch(() => null)) === created;
+        throw error;
+      }
       if (made.code !== 0) {
         // A branch made but not checked out would refuse the next try as "already exists".
         if ((await branchOf(repo)) !== created && (await runGit(repo.root, ['show-ref', '--verify', '--quiet', `refs/heads/${created}`])).code === 0) {

@@ -19,11 +19,14 @@ vi.mock('../src/main/logger.js', async original => {
 });
 
 // Lets a test make one Git command reject (a timeout, a spawn failure) instead of exiting non-zero.
-const gitFault = vi.hoisted(() => ({ reject: null as null | ((args: string[]) => boolean) }));
+const gitFault = vi.hoisted(() => ({ reject: null as null | ((args: string[]) => boolean), rejectAfter: null as null | ((args: string[]) => boolean) }));
 vi.mock('../src/main/project-git.js', async original => {
   const real = await original<typeof import('../src/main/project-git.js')>();
   return { ...real, runGit: (cwd: string, args: string[], ...rest: unknown[]) =>
-    gitFault.reject?.(args) ? Promise.reject(new Error('Git took too long to respond')) : (real.runGit as (...all: unknown[]) => unknown)(cwd, args, ...rest) };
+    gitFault.reject?.(args) ? Promise.reject(new Error('Git took too long to respond'))
+      // Git did its work but the app stopped waiting (a timeout after the fact).
+      : gitFault.rejectAfter?.(args) ? Promise.resolve((real.runGit as (...all: unknown[]) => Promise<unknown>)(cwd, args, ...rest)).then(() => { throw new Error('Git took too long to respond'); })
+      : (real.runGit as (...all: unknown[]) => unknown)(cwd, args, ...rest) };
 });
 
 const exec = promisify(execFile);
@@ -46,6 +49,7 @@ beforeEach(async () => {
   await saveConfig({ ...defaultConfig(), roots: [{ name: 'work', path: approved }] });
   setGhRunnerForTests(null);
   gitFault.reject = null;
+  gitFault.rejectAfter = null;
 });
 
 afterEach(async () => {
@@ -259,6 +263,21 @@ describe('commit', () => {
     expect(await git(root, 'branch', '--show-current')).toBe('main');
     expect(await git(root, 'branch', '--list', 'slow')).toBe('');
     expect(await git(root, 'diff', '--cached', '--name-only')).toBe('');
+  });
+
+  it('puts the branch back when creating it did not finish but Git had switched, and never removes a branch that was there before', async () => {
+    const { root, id } = await project();
+    await change(root);
+    gitFault.rejectAfter = args => args[0] === 'switch';
+    await expect(commitProjectChanges(id, { message: 'x', paths: ['kept.ts'], newBranch: 'half-made', expectedToken: await revision(id) })).rejects.toThrow('Git took too long to respond');
+    gitFault.rejectAfter = null;
+    expect(await git(root, 'branch', '--show-current')).toBe('main');
+    expect(await git(root, 'branch', '--list', 'half-made')).toBe('');
+    // A branch that already existed is refused and left alone.
+    await git(root, 'branch', 'mine');
+    await expect(commitProjectChanges(id, { message: 'x', paths: ['kept.ts'], newBranch: 'mine', expectedToken: await revision(id) })).rejects.toThrow('A branch with that name already exist');
+    expect(await git(root, 'branch', '--list', 'mine')).toContain('mine');
+    expect(await git(root, 'branch', '--show-current')).toBe('main');
   });
 
   it('refuses before reading when the changed files are too large to check', async () => {

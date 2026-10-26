@@ -51,6 +51,7 @@ export function initCommitDialog(api: Api, deps: { flow: () => CommitFlow | unde
   let generation = 0;
   let progress: Step[] = [];
   let next: (() => Promise<void>) | null = null;
+  const MAX_PR_TITLE = 256;
   let committedSubject = '';
   let committedBody = '';
 
@@ -116,14 +117,15 @@ export function initCommitDialog(api: Api, deps: { flow: () => CommitFlow | unde
     all.disabled = busy || !total;
   }
 
-  async function load(keepMessage: boolean): Promise<void> {
+  /** True once the list was read; false when it could not be (its error is shown) or a newer read took over. */
+  async function load(keepMessage: boolean): Promise<boolean> {
     const asked = ++generation;
     state = null;
     showError(null);
     paint();
     const reply = await api.commitState(projectId);
-    if (asked !== generation) return;
-    if (!reply.ok) { showError(failure(new Error(reply.error))); return; }
+    if (asked !== generation) return false;
+    if (!reply.ok) { showError(failure(new Error(reply.error))); return false; }
     const before = chosen;
     state = reply.data;
     const committable = state.changes.filter(change => change.status !== 'C').map(change => change.path);
@@ -137,6 +139,7 @@ export function initCommitDialog(api: Api, deps: { flow: () => CommitFlow | unde
     }
     paintFiles(state.changes);
     paint();
+    return true;
   }
 
   // ------------------------------------------------------------ the steps after Commit
@@ -221,16 +224,19 @@ export function initCommitDialog(api: Api, deps: { flow: () => CommitFlow | unde
         if (reply.error === CHANGED) {
           // What was reviewed moved on: the list is read again, the message kept, and the person decides again.
           busy = false;
-          await load(true);
-          showError(t('The changes changed, so the list was read again. Check it, then commit.'));
+          if (await load(true)) showError(t('The changes changed, so the list was read again. Check it, then commit.'));
           return;
         }
         showError(failure(new Error(reply.error)));
         return;
       }
       const [subject, ...rest] = text.split('\n');
-      committedSubject = subject!.trim();
-      committedBody = rest.join('\n').trim();
+      // GitHub takes a pull request title of at most 256 characters: the rest of a longer first line
+      // opens the description, so a retry never meets the same refusal again.
+      const first = Array.from(subject!.trim());
+      const cut = first.length > MAX_PR_TITLE;
+      committedSubject = cut ? `${first.slice(0, MAX_PR_TITLE - 1).join('')}…` : first.join('');
+      committedBody = [cut ? `…${first.slice(MAX_PR_TITLE - 1).join('')}` : '', rest.join('\n').trim()].filter(Boolean).join('\n\n');
       const count = chosen.size;
       progress = [];
       stepError.hidden = true;

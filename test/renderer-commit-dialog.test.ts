@@ -191,6 +191,28 @@ it('reads the list again when the changes moved on, keeping the message, and com
   expect($('commitForm').hidden).toBe(false);
 });
 
+it('says why when reading the list again fails, instead of claiming it was read', async () => {
+  let reads = 0;
+  await open({
+    commitState: vi.fn(() => ++reads === 1 ? ok(state()) : fail('Git took too long to respond')),
+    commitProject: vi.fn(() => fail('The changes changed. Review them again before committing.'))
+  });
+  await submit();
+  expect($('commitError').textContent).toContain('Git took too long to respond');
+  expect($('commitError').textContent).not.toContain('was read again');
+});
+
+it('keeps a pull request title within what GitHub takes, moving the rest of a long first line into the description', async () => {
+  const api = await open({}, 'pr');
+  const long = 'x'.repeat(1200);
+  $<HTMLTextAreaElement>('commitMessage').value = `${long}\n\nWhy it changed`;
+  await submit();
+  const [, title, body] = api.createPullRequest.mock.calls[0] as unknown as [string, string, string];
+  expect(title.length).toBeLessThanOrEqual(256);
+  expect(`${title}${body}`.replace(/…/g, '')).toContain('x'.repeat(1200 - 256));
+  expect(body).toContain('Why it changed');
+});
+
 it('needs a message and a file, and never commits a file in conflict', async () => {
   const api = await open({ commitState: vi.fn(() => ok(state({ changes: [change('a.ts'), change('b.ts', 'C')] }))) });
   const boxes = [...document.querySelectorAll<HTMLInputElement>('.commit-file input')];
