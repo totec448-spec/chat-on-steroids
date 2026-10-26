@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 vi.mock('../src/main/logger.js', () => ({ logInfo: (line: string) => logs.push(line), logWarn: (line: string) => logs.push(line) }));
 const logs: string[] = [];
 import { REVIEW_MAX_MS } from '../src/main/agents.js';
-import { resetStepReviewsForTests, reviewForDraft, reviewNote, startStepReview, stepFacts, type StepReviewDeps } from '../src/main/goal-reviewer.js';
+import { cancelStepReview, resetStepReviewsForTests, reviewForDraft, reviewNote, startStepReview, stepFacts, type StepReviewDeps } from '../src/main/goal-reviewer.js';
 import type { AgentInfo, SessionEvent, ToolCallRecord } from '../src/shared/session.js';
 
 /**
@@ -34,6 +34,7 @@ function deps(over: Partial<StepReviewDeps> = {}): StepReviewDeps {
       return 'worker-3';
     },
     wake: async (_caller, id) => { calls.push(`wake ${id}`); reviewer = { ...reviewer!, state: 'waking', result: null }; },
+    cancel: async () => undefined,
     now: () => clock,
     wait: async (ms) => { clock += ms; },
     ...over
@@ -142,3 +143,17 @@ it('reads a step\'s facts from the recording: its instruction, the request, the 
   expect(read).toMatchObject({ step: 'Add the button.', firstRequest: 'Ship the export', chatModel: 'gpt-6-thinking', more: 0 });
   expect(read.files).toEqual([expect.objectContaining({ path: 'src/a.ts', state: 'edited', diff: '@@ -1,1 +1,1 @@\n-a\n+b' })]);
 });
+
+it('cancels a review in progress when the Goal stops, and leaves a sleeping reviewer\'s chat alone', async () => {
+  const cancelled: string[] = [];
+  const d = deps({ cancel: async info => { cancelled.push(info.id); } });
+  await startStepReview(step, d);
+  expect(await cancelStepReview('c-goal', d)).toBe(true);
+  expect(cancelled).toEqual(['worker-3']);
+  expect(reviewForDraft('c-goal', 't-1', d)).toBeNull();
+  expect(logs.at(-1)).toBe('goal review: Goal stopped in c-goal; the review by worker-3 was cancelled, its chat stays');
+  reviewer = { id: 'worker-3', state: 'sleeping', result: 'x', revivable: true, model: null } as unknown as AgentInfo;
+  expect(await cancelStepReview('c-goal', d)).toBe(false);
+  expect(cancelled).toHaveLength(1);
+});
+

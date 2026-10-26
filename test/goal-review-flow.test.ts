@@ -15,11 +15,12 @@ vi.mock('electron', () => ({
     decryptStringAsync: async (buffer: Buffer) => ({ result: buffer.toString('utf8'), shouldReEncrypt: false })
   }
 }));
-const review = vi.hoisted(() => ({ started: [] as Array<{ conversationId: string; sessionId: string; turnId: string }>, current: null as unknown }));
+const review = vi.hoisted(() => ({ started: [] as Array<{ conversationId: string; sessionId: string; turnId: string }>, current: null as unknown, cancelled: [] as string[] }));
 vi.mock('../src/main/goal-reviewer.js', async (original) => ({
   ...await original<typeof import('../src/main/goal-reviewer.js')>(),
   startStepReview: async (input: { conversationId: string; sessionId: string; turnId: string }) => { review.started.push(input); return 'asked'; },
-  reviewForDraft: () => review.current
+  reviewForDraft: () => review.current,
+  cancelStepReview: async (conversationId: string) => { review.cancelled.push(conversationId); return true; }
 }));
 
 const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
@@ -65,7 +66,7 @@ beforeAll(async () => {
 afterAll(async () => { resetSessionStoreForTests(); await removeTempDir(dir); globalThis.fetch = realFetch; });
 beforeEach(async () => {
   goal.resetGoalStateForTests();
-  review.started.length = 0; review.current = null; bodies.length = 0;
+  review.started.length = 0; review.current = null; review.cancelled.length = 0; bodies.length = 0;
   await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, backend: 'api', loopBackend: 'api', enabled: true, model: 'deepseek/deepseek-v4-flash', reasoning: 'default' } });
   await setSecret('openRouterApiKey', 'sk-or-test');
 });
@@ -102,3 +103,14 @@ it('pauses Goal on a blocking finding instead of typing anything, and says why',
   const notes = (await readRecentEvents(sessionId, 20)).filter(event => event.kind === 'note');
   expect(JSON.stringify(notes)).toContain('the migration drops the users table');
 });
+
+it('cancels the review in progress when Goal is switched off for the chat, or turned to Loop', async () => {
+  await goal.setGoalSwitchNow('c-stop', 'goal', true);
+  expect(review.cancelled).toEqual([]);
+  await goal.setGoalSwitchNow('c-stop', 'goal', false);
+  await vi.waitFor(() => expect(review.cancelled).toEqual(['c-stop']));
+  await goal.setGoalSwitchNow('c-loop', 'goal', true);
+  await goal.setGoalSwitchNow('c-loop', 'loop', true);
+  await vi.waitFor(() => expect(review.cancelled).toEqual(['c-stop', 'c-loop']));
+});
+
