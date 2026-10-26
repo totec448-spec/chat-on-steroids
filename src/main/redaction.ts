@@ -37,3 +37,22 @@ export function redactSecretText(text: string): string {
   for (const [pattern, replacement] of SECRET_SHAPES) out = out.replace(pattern, replacement);
   return out;
 }
+
+const EMAIL = /(?<![\w.%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}(?![\w-])/g;
+/** `/Users/<name>` (macOS) and `/home/<name>` (Linux). */
+const UNIX_HOME = /(?<![\w.])(\/(?:Users|home)\/)([^/\s"'`<>()[\]]+)/g;
+/** `C:\Users\<name>`; a Windows user name may hold spaces, so a spaced one must end at a separator. */
+const WINDOWS_HOME = /(?<![\w])([A-Za-z]:[\\/]+(?:Users|Documents and Settings)[\\/]+)([^\\/\r\n"*:<>?|`]+?(?=[\\/])|[^\\/\s"*:<>?|`()[\]]+)/gi;
+/** Folders every system has; they name no person. */
+const SHARED_HOMES = /^(?:shared|public|default|default user|all users|\[redacted\])$/i;
+
+/**
+ * For a page the person chose to share with personal details hidden: email addresses and the user
+ * name in home-folder paths become "[redacted]", as `redactSecretText` leaves a key. Shared system
+ * folders (`/Users/Shared`, `C:\Users\Public`) name no one and stay. Version numbers, times, commit
+ * ids and `@handles` are not addresses and stay too.
+ */
+export function redactPersonalText(text: string): string {
+  const home = (whole: string, prefix: string, name: string): string => SHARED_HOMES.test(name) ? whole : `${prefix}[redacted]`;
+  return text.replace(EMAIL, '[redacted]').replace(UNIX_HOME, home).replace(WINDOWS_HOME, home);
+}

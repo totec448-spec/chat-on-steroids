@@ -1375,6 +1375,33 @@ describe('Commit & PR', () => {
   });
 });
 
+describe('in-app feedback', () => {
+  it("opens GitHub's form filled in, with the app's version, and says nothing was shortened", async () => {
+    vi.mocked(app.getVersion).mockReturnValue('2.1.46');
+    const reply = await handlers.get('feedback:openIssue')!(null, { kind: 'bug', what: 'The Stop button stays grey.', frequency: 'Sometimes' });
+    expect(reply).toEqual({ ok: true, data: { trimmed: false } });
+    const url = new URL(vi.mocked(shell.openExternal).mock.calls.at(-1)![0] as string);
+    expect(url.origin + url.pathname).toBe('https://github.com/totec448-spec/chat-on-steroids/issues/new');
+    expect(url.searchParams.get('template')).toBe('bug_report.yml');
+    expect(url.searchParams.get('version')).toBe('2.1.46');
+    expect(url.searchParams.get('operating_system')).toBeTruthy();
+    expect(url.searchParams.get('frequency')).toBe('Sometimes');
+  });
+
+  it.each([
+    { kind: 'bug', what: '   ' },
+    { kind: 'idea', problem: 'p', proposal: '' },
+    { kind: 'bug', what: 'x', template: 'blank.yml' },
+    { kind: 'bug', what: 'x', frequency: 'Always' },
+    { kind: 'bug', what: 'x'.repeat(4001) },
+    { kind: 'other', what: 'x' }
+  ])('opens nothing for a report the form cannot take: %o', async report => {
+    const before = vi.mocked(shell.openExternal).mock.calls.length;
+    expect(((await handlers.get('feedback:openIssue')!(null, report)) as { ok: boolean }).ok).toBe(false);
+    expect(vi.mocked(shell.openExternal).mock.calls.length).toBe(before);
+  });
+});
+
 describe('every link the window offers', () => {
   it('is one link:open will actually open', async () => {
     const { promises: fs } = await import('node:fs');

@@ -275,6 +275,8 @@ const api = {
     call<{ url: string; via: 'gh' | 'existing' | 'browser' }>('projectCommit:pullRequest', { projectId, title, body }),
   setCommitFlow: (flow: CommitFlow) => call<boolean>('projectCommit:flow', { flow }),
   saveDiagnosticsReport: () => call<{ saved: false } | { saved: true; name: string }>('diagnostics:saveReport'),
+  openFeedbackIssue: (report: { kind: 'bug'; what: string; steps?: string; frequency?: 'Every time' | 'Sometimes' | 'It happened once' }
+    | { kind: 'idea'; problem: string; proposal: string }) => call<{ trimmed: boolean }>('feedback:openIssue', report),
   requestDesktopAccessibility: () => call<AppState>('desktop:requestAccessibility'),
   repairDesktopAccess: () => call<AppState>('desktop:repairPermissions'),
   getLog: () => call<LogEntry[]>('log:get'),
@@ -283,8 +285,10 @@ const api = {
   writeClipboard: (text: string) => call<boolean>('clipboard:write', { text }),
   // A code block's Save: main asks where, in a native dialog, and `name` is only its suggestion.
   saveCode: (request: { text: string; name: string }) => call<{ done: 'saved'; name: string } | { done: 'cancelled' }>('code:save', request),
-  exportMarkdown: (request: { id: string; scope: 'answer' | 'latest' | 'session'; turnId?: string; messageId?: string; target: 'clipboard' | 'file'; format?: 'markdown' | 'html' }) =>
+  exportMarkdown: (request: { id: string; scope: 'answer' | 'latest' | 'session'; turnId?: string; messageId?: string; target: 'clipboard' | 'file' }) =>
     call<{ done: 'copied' } | { done: 'saved'; name: string } | { done: 'cancelled' }>('sessions:exportMarkdown', request),
+  sharePage: (request: { id: string; target: 'preview'; hide: boolean; lang: string } | { id: string; target: 'file'; preview: string }) =>
+    call<{ done: 'preview'; preview: string; html: string; hidden: number } | { done: 'saved'; name: string } | { done: 'cancelled' }>('sessions:sharePage', request),
   // `external`: the system's own browser even for a page the CoS browser would open.
   openLink: (url: string, options: { external?: boolean } = {}) => call<boolean>('link:open', { url, ...(options.external ? { external: true } : {}) }),
   showCosBrowser: () => call<boolean>('cosBrowser:show'),

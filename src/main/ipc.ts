@@ -150,6 +150,8 @@ import { listBookmarks, setBookmark } from './session/bookmarks.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
 import { exportSessionMarkdown } from './session/markdown-export.js';
 import { commitProjectChanges, createPullRequest, pushProject, readCommitState } from './project-commit.js';
+import { exportSessionPage } from './session/page-export.js';
+import { feedbackIssueUrl, operatingSystemName, systemVersion } from './feedback.js';
 import { saveCodeFile } from './code-file.js';
 import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
 import { setChatsTrusted, trustedChatIds } from './session/trusted-chats.js';
@@ -1565,6 +1567,26 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('diagnostics:run', async () => runDiagnostics());
   // "Save diagnostics report": one plain-text file for a bug report, personal details removed
   // (see diagnostics-report.ts). Revealed after saving so the user reads what they would share.
+  // In-app feedback: GitHub's issue form, filled in, opens in the browser. The person reads it and
+  // submits it there; the app sends nothing itself. The diagnostics report is saved separately.
+  handle('feedback:openIssue', async (payload) => {
+    const text = (max: number) => z.string().max(max);
+    const report = z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('bug'), what: text(4000).refine(value => value.trim().length > 0), steps: text(4000).optional(),
+        frequency: z.enum(['Every time', 'Sometimes', 'It happened once']).optional() }).strict(),
+      z.object({ kind: z.literal('idea'), problem: text(4000).refine(value => value.trim().length > 0),
+        proposal: text(4000).refine(value => value.trim().length > 0) }).strict()
+    ]).parse(payload);
+    const bridge = await bridgeStatus();
+    const { url, trimmed } = feedbackIssueUrl(report, {
+      version: app.getVersion(), os: operatingSystemName(process.platform, systemVersion()), arch: process.arch,
+      extension: bridge.paired || bridge.extensionVersion ? { present: bridge.present, version: bridge.extensionVersion } : null
+    });
+    await shell.openExternal(url);
+    logInfo(`feedback: opened GitHub's ${report.kind === 'bug' ? 'bug report' : 'feature request'} form, filled in${trimmed ? ' (text shortened to fit the link)' : ''}`);
+    return { trimmed };
+  });
+
   handle('diagnostics:saveReport', async () => {
     const selfTest = await Promise.race([
       runDiagnostics().catch(() => null),
@@ -1627,19 +1649,29 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return saveCodeFile(text, name, getWindow());
   });
 
-  // Copy or save a completed turn's answer, or the session transcript, as Markdown, or save the
-  // transcript as an HTML page. Main reads the full text of answers that were cut in the log, so
-  // none comes out truncated.
+  // Copy or save a completed turn's answer, or the session transcript, as Markdown. Main reads
+  // the full text of answers that were cut in the log, so neither comes out truncated. A whole
+  // chat as a web page goes through sessions:sharePage, which previews it first.
   handle('sessions:exportMarkdown', async (payload) => {
     const request = z.object({
       id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
       scope: z.enum(['answer', 'latest', 'session']),
       turnId: z.string().min(1).max(200).optional(),
       messageId: z.string().min(1).max(200).optional(),
-      target: z.enum(['clipboard', 'file']),
-      format: z.enum(['markdown', 'html']).optional()
+      target: z.enum(['clipboard', 'file'])
     }).parse(payload);
     return exportSessionMarkdown(request, getWindow());
+  });
+
+  // Share a chat as one web page: the dialog previews exactly what Save writes, with or without
+  // the details the person chose to hide.
+  handle('sessions:sharePage', async (payload) => {
+    const id = z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i);
+    const request = z.discriminatedUnion('target', [
+      z.object({ id, target: z.literal('preview'), hide: z.boolean(), lang: z.string().max(35).regex(/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/) }),
+      z.object({ id, target: z.literal('file'), preview: z.string().uuid() })
+    ]).parse(payload);
+    return exportSessionPage(request, getWindow());
   });
 
   // The Install button. The renderer decides nothing about what is installed - it cannot
