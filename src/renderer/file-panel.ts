@@ -27,6 +27,8 @@ interface FilePanelOptions {
   onAttach?: (attachment: InputAttachment) => void;
   /** Capture the current composer owner before staging starts, including its draft epoch. */
   captureAttachment?: () => (attachment: InputAttachment) => boolean;
+  /** Review's Commit button: opens the Commit dialog for this project. */
+  onCommit?: (projectId: string) => void;
   /** Puts a request in the composer for the person to read and send; never sends it. */
   onAskChat?: (request: string) => void;
 }
@@ -238,7 +240,16 @@ export function createFilePanel(options: FilePanelOptions) {
   const changesList = el('div', 'file-changes-list');
   changesList.setAttribute('role', 'region');
   ui(changesList, 'aria-label', () => t('Git changes'));
-  changesView.append(changesHeader, changesList);
+  // Commit sits under the working-tree changes it commits; a branch comparison has nothing to commit.
+  const commitBar = el('div', 'file-commit-bar'); commitBar.hidden = true;
+  // Whether the working tree's changes can be committed from here; shown only with their list, not over a diff.
+  let commitOffered = false;
+  const paintCommitBar = (): void => { commitBar.hidden = !commitOffered || mode === 'review' || (mode === 'changes' && gitDiffPath !== null); };
+  const commitButton = el('button', 'btn btn-solid file-commit-open', () => t('Commit…')) as HTMLButtonElement;
+  commitButton.type = 'button';
+  commitButton.addEventListener('click', () => { if (project) options.onCommit?.(project.id); });
+  commitBar.append(commitButton);
+  changesView.append(changesHeader, changesList, commitBar);
   const preview = el('section', 'file-preview'); preview.hidden = true;
   const previewResize = el('div', 'file-preview-resize');
   previewResize.tabIndex = 0;
@@ -1037,6 +1048,9 @@ export function createFilePanel(options: FilePanelOptions) {
 
   function renderChangesList(): void {
     changesList.replaceChildren();
+    commitOffered = !!(options.reviewOnly && options.onCommit && project && !project.remote && gitSnapshot?.state === 'ready'
+      && !gitSnapshot.comparison && !gitSnapshot.truncated && gitSnapshot.changes.some(change => change.status !== 'C'));
+    paintCommitBar();
     if (!project) {
       changesList.append(el('p', 'file-changes-empty', () => t('Changes is available only for chats in a local project.')));
       return;
@@ -1468,6 +1482,7 @@ export function createFilePanel(options: FilePanelOptions) {
     tree.hidden = showingChanges || showingReview;
     changesView.hidden = !showingChanges && !showingReview;
     changesList.hidden = showingDiff;
+    paintCommitBar();
     ui(changesHeaderTitle, 'textContent', () => t(showingReview ? 'Review edit' : showingDiff ? 'Diff' :
       options.reviewOnly && gitSnapshot?.state === 'ready' ? gitSnapshot.currentBranch ?? 'HEAD' : 'Working tree'));
     branchArrow.hidden = !options.reviewOnly || showingDiff || !project ||

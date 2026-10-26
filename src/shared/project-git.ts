@@ -52,3 +52,22 @@ export interface ProjectGitDiff {
 export interface ProjectGitChanged {
   projectId: string;
 }
+
+/** Commit & PR: whether the GitHub CLI can create a pull request here. */
+export type GhStatus = 'ready' | 'signed-out' | 'missing';
+export interface CommitState {
+  /** Null on a detached HEAD. */
+  branch: string | null;
+  /** The remote's default branch (its HEAD), when known. */
+  defaultBranch: string | null;
+  /** The remote pushes go to: the branch's upstream remote, else `origin`, else the only one. */
+  remote: string | null;
+  upstream: string | null;
+  github: { owner: string; repo: string } | null;
+  /** Only asked when the remote is on GitHub. */
+  gh: GhStatus | null;
+  /** The working-tree changes the dialog lists, as Review shows them. */
+  changes: ProjectGitChange[];
+  /** Names these changes and their exact content; Commit refuses anything else. */
+  token: string;
+}
