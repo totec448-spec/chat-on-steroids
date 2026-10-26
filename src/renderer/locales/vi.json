@@ -3270,5 +3270,6 @@
   "Same model as the Goal chat": "Cùng mô hình với cuộc trò chuyện Goal",
   "Sub-agents are off": "Tác nhân phụ đang tắt",
   "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "Người xem lại chạy như một cuộc trò chuyện worker, nên cần Tác nhân phụ. Chưa bật thì chưa có gì được xem lại.",
-  "Turn on Sub-agents": "Bật Tác nhân phụ"
+  "Turn on Sub-agents": "Bật Tác nhân phụ",
+  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "Người xem lại đã tìm thấy một vấn đề mà Goal không thể an toàn bỏ qua. Mở cuộc trò chuyện để kiểm tra."
 }

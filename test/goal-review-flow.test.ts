@@ -1,0 +1,104 @@
+/**
+ * #1832: where the Goal step reviewer meets Goal itself. A step that ends owing a Goal reply asks
+ * for its review; the next step's message carries the reviewer's answer after what the helper
+ * wrote (and the helper is told it is there), or says the reviewer did not answer in time; a
+ * blocking finding pauses Goal and tells the person instead of typing anything.
+ */
+import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
+
+vi.mock('electron', () => ({
+  app: { getPath: () => '', getVersion: () => '0.0.0' },
+  safeStorage: {
+    isAsyncEncryptionAvailable: async () => true,
+    getSelectedStorageBackend: () => 'gnome_libsecret',
+    encryptStringAsync: async (value: string) => Buffer.from(value, 'utf8'),
+    decryptStringAsync: async (buffer: Buffer) => ({ result: buffer.toString('utf8'), shouldReEncrypt: false })
+  }
+}));
+const review = vi.hoisted(() => ({ started: [] as Array<{ conversationId: string; sessionId: string; turnId: string }>, current: null as unknown }));
+vi.mock('../src/main/goal-reviewer.js', async (original) => ({
+  ...await original<typeof import('../src/main/goal-reviewer.js')>(),
+  startStepReview: async (input: { conversationId: string; sessionId: string; turnId: string }) => { review.started.push(input); return 'asked'; },
+  reviewForDraft: () => review.current
+}));
+
+const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
+const { initSecretsPath, setSecret } = await import('../src/main/secrets.js');
+const { initDurableStore } = await import('../src/main/durable.js');
+const { appendEvent, createSession, initSessionStore, resetSessionStoreForTests, readRecentEvents } = await import('../src/main/session/store.js');
+const goal = await import('../src/main/goal.js');
+const { makeTempDir, removeTempDir } = await import('./helpers.js');
+
+let dir: string;
+const realFetch = globalThis.fetch;
+const bodies: string[] = [];
+function decision(action: 'stop' | 'continue', reply = ''): Response {
+  return Response.json({ choices: [{ message: { content: JSON.stringify({ action, reply }) } }] });
+}
+async function settled(conversationId: string) {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const view = goal.goalViewFor(conversationId);
+    if (view && view.stage !== 'sending' && view.stage !== 'answering') return view;
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  throw new Error('the draft never settled');
+}
+const seed = async (conversationId: string): Promise<string> => {
+  const session = await createSession({ title: 'goal', conversationId });
+  await appendEvent(session.id, { time: 1_000, source: 'extension', kind: 'user_message', message: { text: 'ship it', truncated: false, chars: 7 } });
+  return session.id;
+};
+async function draftWith(conversationId: string, current: unknown, answer: Response) {
+  const sessionId = await seed(conversationId);
+  await goal.setGoalSwitchNow(conversationId, 'goal', true);
+  await goal.acceptGoalReplyNow({ conversationId, sessionId, replyId: `assistant-${conversationId}`, turnId: 'g-1', eventSeq: 3, blocked: false });
+  review.current = current;
+  globalThis.fetch = (async (_url: string, init: { body: string }) => { bodies.push(init.body); return answer; }) as never;
+  goal.startGoalDraft({ sessionId, conversationId, turnId: 'g-1' });
+  return { sessionId, view: await settled(conversationId) };
+}
+
+beforeAll(async () => {
+  dir = await makeTempDir('clf-goal-review-');
+  initConfigPath(dir); initSecretsPath(dir); initSessionStore(dir); initDurableStore(dir);
+});
+afterAll(async () => { resetSessionStoreForTests(); await removeTempDir(dir); globalThis.fetch = realFetch; });
+beforeEach(async () => {
+  goal.resetGoalStateForTests();
+  review.started.length = 0; review.current = null; bodies.length = 0;
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, backend: 'api', loopBackend: 'api', enabled: true, model: 'deepseek/deepseek-v4-flash', reasoning: 'default' } });
+  await setSecret('openRouterApiKey', 'sk-or-test');
+});
+afterEach(() => { globalThis.fetch = realFetch; });
+
+it('asks for a review when a step ends owing a Goal reply, and not for a blocked one', async () => {
+  const sessionId = await seed('c-start');
+  await goal.acceptGoalReplyNow({ conversationId: 'c-start', sessionId, replyId: 'assistant-start', turnId: 'g-start', eventSeq: 3, blocked: false });
+  await vi.waitFor(() => expect(review.started).toEqual([{ conversationId: 'c-start', sessionId, turnId: 'g-start' }]));
+  const blocked = await seed('c-blocked');
+  await goal.acceptGoalReplyNow({ conversationId: 'c-blocked', sessionId: blocked, replyId: 'assistant-blocked', turnId: 'g-b', eventSeq: 3, blocked: true });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect(review.started.map(row => row.conversationId)).toEqual(['c-start']);
+});
+
+it('puts the reviewer\'s findings after the helper\'s message, and tells the helper they are there', async () => {
+  const { view } = await draftWith('c-findings', { text: 'src/a.ts:12 the new branch never runs.' }, decision('continue', 'Now add the CSV export test.'));
+  expect(view.stage).toBe('ready');
+  expect(view.reply.endsWith('\n\nReviewer: src/a.ts:12 the new branch never runs.')).toBe(true);
+  expect(bodies.at(-1)).toContain('src/a.ts:12 the new branch never runs.');
+});
+
+it('says when the reviewer did not answer in time, and adds nothing for no problems', async () => {
+  expect((await draftWith('c-late', { timedOut: true }, decision('continue', 'Go on.'))).view.reply.endsWith('\n\nReviewer did not answer in time.')).toBe(true);
+  const clean = (await draftWith('c-clean', { text: 'No problems found.' }, decision('continue', 'Go on.'))).view.reply;
+  expect(clean).not.toContain('Reviewer');
+});
+
+it('pauses Goal on a blocking finding instead of typing anything, and says why', async () => {
+  const { sessionId, view } = await draftWith('c-blocking', { text: 'BLOCKING: the migration drops the users table.' }, decision('continue', 'Go on.'));
+  expect(view.stage).toBe('no-reply');
+  expect(bodies).toHaveLength(0);
+  expect(goal.goalSwitchFor('c-blocking').enabled).toBe(false);
+  const notes = (await readRecentEvents(sessionId, 20)).filter(event => event.kind === 'note');
+  expect(JSON.stringify(notes)).toContain('the migration drops the users table');
+});

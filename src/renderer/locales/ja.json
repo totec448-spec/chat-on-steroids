@@ -3270,5 +3270,6 @@
   "Same model as the Goal chat": "ゴールのチャットと同じモデル",
   "Sub-agents are off": "サブエージェントがオフです",
   "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "レビュー担当はワーカーのチャットとして動くため、サブエージェントが必要です。オンになるまで何もレビューされません。",
-  "Turn on Sub-agents": "サブエージェントをオンにする"
+  "Turn on Sub-agents": "サブエージェントをオンにする",
+  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "レビュー担当が、ゴールが安全に先へ進めない問題を見つけました。チャットを開いて確認してください。"
 }

@@ -3270,5 +3270,6 @@
   "Same model as the Goal chat": "Goal 채팅과 같은 모델",
   "Sub-agents are off": "서브에이전트가 꺼져 있습니다",
   "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "검토자는 워커 채팅으로 실행되므로 서브에이전트가 필요합니다. 켜기 전까지는 아무것도 검토하지 않습니다.",
-  "Turn on Sub-agents": "서브에이전트 켜기"
+  "Turn on Sub-agents": "서브에이전트 켜기",
+  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "검토자가 Goal이 안전하게 넘어갈 수 없는 문제를 찾았습니다. 채팅을 열어 확인하세요."
 }

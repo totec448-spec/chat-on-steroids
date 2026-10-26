@@ -723,6 +723,12 @@ export async function acceptGoalReplyNow(input: {
     persistGoalRepliesSoon();
     throw error;
   }
+  // A Goal step that owes its reply is reviewed if the person asked for that (#1832); never awaited.
+  if (goalReplies.get(input.conversationId)?.replyId === input.replyId.slice(0, 200) && goalReplies.get(input.conversationId)?.state === 'pending') {
+    void import('./goal-reviewer.js')
+      .then(({ startStepReview }) => startStepReview({ conversationId: input.conversationId, sessionId: input.sessionId, turnId: input.turnId }))
+      .catch(() => undefined);
+  }
 }
 
 function handleGoalReply(conversationId: string, turnId?: string): void {
@@ -1952,6 +1958,16 @@ async function run(draft: GoalDraft): Promise<void> {
     return settle(draft, 'failed', 'no_conversation');
   }
 
+  // The step reviewer's answer for this step (#1832): a blocking finding pauses Goal; any other goes
+  // after the message, and the helper is told it is there.
+  const { reviewForDraft, reviewNote, reviewBlocks } = await import('./goal-reviewer.js');
+  const stepReview = draft.mode === 'goal' ? reviewForDraft(draft.conversationId, draft.turnId) : null;
+  if (stepReview && 'text' in stepReview && reviewBlocks(stepReview)) return pauseForReview(draft, stepReview.text);
+  const reviewLine = reviewNote(stepReview);
+  const reviewContext = reviewLine
+    ? [`A reviewer read the files the last step changed. This line is added after your message exactly as it is, so do not repeat it; act on it if it matters:\n${reviewLine}`]
+    : [];
+
   const abort = new AbortController();
   draft.abort = abort;
   const timer = setTimeout(() => abort.abort(new DOMException('Goal request timed out', 'TimeoutError')), REQUEST_TIMEOUT_MS);
@@ -1973,8 +1989,8 @@ async function run(draft: GoalDraft): Promise<void> {
             ? [draft.loopSystemPrompt, goalObjectiveMessage(draft.objective)]
             : [draft.loopSystemPrompt]
           : draft.objective
-            ? [draft.objectiveSystemPrompt, goalObjectiveMessage(draft.objective)]
-            : [draft.systemPrompt],
+            ? [draft.objectiveSystemPrompt, goalObjectiveMessage(draft.objective), ...reviewContext]
+            : [draft.systemPrompt, ...reviewContext],
       messages: messages.length > 0 ? messages : [{ role: 'user', content: GOAL_OBJECTIVE_OPENING_TURN }],
       original: await originalRequestBlock(draft.sessionId, messages),
       trailer:
@@ -2018,7 +2034,7 @@ async function run(draft: GoalDraft): Promise<void> {
         if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return;
         return settle(draft, 'failed', 'goal_helper_stop_unverified');
       }
-      logInfo(`goal: ${draft.model} says the goal is met in ${draft.conversationId}; nothing was sent`);
+      logInfo(`goal: ${draft.model} says the goal is met in ${draft.conversationId}; nothing was sent${reviewLine ? ', including the reviewer\'s last findings' : ''}`);
       // Reaching the goal ends this Goal run, not the user's saved objective. Keeping the text
       // lets a reopened chat show what it was pursuing and lets a later manual correction such
       // as "that did not work" continue against the same objective. Nothing auto-restarts here:
@@ -2033,7 +2049,10 @@ async function run(draft: GoalDraft): Promise<void> {
     if (repeated !== null) return pauseRepeatingGoal(draft, repeated);
     // Typed rather than written. See humanReply: the em dashes go, and a couple of the
     // mistakes a person leaves behind go in. After the NO_REPLY test above, never before it.
-    draft.reply = draft.backend === 'templates' ? humanReply(decision.reply.slice(0, -GOAL_MARKER_INSTRUCTION.length)) + GOAL_MARKER_INSTRUCTION : humanReply(decision.reply);
+    const reviewed = reviewLine ? `\n\n${reviewLine}` : '';
+    draft.reply = draft.backend === 'templates'
+      ? humanReply(decision.reply.slice(0, -GOAL_MARKER_INSTRUCTION.length)) + reviewed + GOAL_MARKER_INSTRUCTION
+      : humanReply(decision.reply) + reviewed;
     logInfo(`goal: drafted ${decision.reply.length} characters for ${draft.conversationId} with ${draft.model}`);
     // Its page types it: the message it comes back as is marked the app's (#1655).
     noteAutomaticReply(draft.conversationId, draft.reply);
@@ -2532,6 +2551,21 @@ export function goalRepeatsItself(messages: readonly ChatMessage[], rounds = REP
   if (last.length < rounds) return null;
   const key = answerKey(last[0]!);
   return key && last.every(answer => answerKey(answer) === key) ? last.at(-1)!.trim() : null;
+}
+
+/** The step reviewer found a problem Goal cannot safely go past (#1832): pause, and tell the person. */
+async function pauseForReview(draft: GoalDraft, finding: string): Promise<void> {
+  logInfo(`goal: the reviewer found a problem Goal cannot safely go past in ${draft.conversationId}; pausing Goal`);
+  await setGoalSwitchNow(draft.conversationId, 'goal', false).catch(() => undefined);
+  const plain = finding.replace(/^BLOCKING:\s*/i, '');
+  const shown = plain.length > 300 ? `${plain.slice(0, 297)}...` : plain;
+  const { recordNote } = await import('./session/recorder.js');
+  await recordNote(draft.sessionId, `Goal paused: the reviewer found a problem Goal cannot safely go past ("${shown}"). ` +
+    'Check it, then send a message or switch Goal back on.').catch(() => undefined);
+  const { noticeChatStopped } = await import('./stuck-notice.js');
+  noticeChatStopped('Goal paused', 'The reviewer found a problem Goal cannot safely go past. Open the chat to check it.', draft.sessionId);
+  draft.reply = '';
+  settle(draft, 'no-reply');
 }
 
 async function pauseRepeatingGoal(draft: GoalDraft, answer: string): Promise<void> {
