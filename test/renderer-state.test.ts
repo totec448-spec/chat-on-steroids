@@ -1227,6 +1227,13 @@ it('never settles a chat waiting on approval, a stopped recovery or a block, nor
   plain.dispatchEvent(new mounted.window.Event('pointerleave'));
   expect(plain.title).toBe(said);
   expect(doc.getElementById('sessionTooltip')).toBeNull();
+  // Opening the row's menu puts the tooltip away and gives the row its title back at once.
+  plain.dispatchEvent(new mounted.window.Event('pointerenter'));
+  plain.dispatchEvent(new mounted.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  expect(doc.getElementById('sessionTooltip')).toBeNull();
+  expect(plain.title).toBe(said);
+  doc.dispatchEvent(new mounted.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  plain.dispatchEvent(new mounted.window.Event('pointerleave'));
   // The parent's line counts the worker that needs the person.
   expect(inboxCardState(doc, 'parent-approval').card.querySelector('.sess-workers')?.textContent).toBe('1 needs attention');
   expect(inboxCardState(doc, 'parent-recovery').card.querySelector('.sess-workers')?.textContent).toBe('1 needs attention');

@@ -1099,6 +1099,12 @@ function giveBackTitle(row: HTMLElement): void {
   delete row.dataset.tooltip;
 }
 
+/** Puts the app's tooltip away, and every row that handed it its title gets it back. */
+function removeSessionTooltip(): void {
+  document.getElementById('sessionTooltip')?.remove();
+  for (const row of document.querySelectorAll<HTMLElement>('.sess[data-tooltip]')) giveBackTitle(row);
+}
+
 /** Unsent text waits in this chat's composer. The open chat shows its draft itself, so it never counts. */
 function draftedChat(summary: SessionSummary): boolean { return summary.id !== selectedId && inputDrafts.has(summary.id); }
 
@@ -1163,14 +1169,14 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   });
   row.addEventListener('pointerleave', () => {
     if (sessionTooltipDismissed === summary.id) sessionTooltipDismissed = null;
-    document.getElementById('sessionTooltip')?.remove();
+    removeSessionTooltip();
     giveBackTitle(row);
   });
   // A pointer's click puts the tooltip away until the pointer leaves the row, through the repaint that
   // follows. A keyboard's click puts nothing away: no pointer would leave to bring the tooltip back.
   row.addEventListener('click', () => {
     if (row.matches(':hover')) sessionTooltipDismissed = summary.id;
-    document.getElementById('sessionTooltip')?.remove();
+    removeSessionTooltip();
     giveBackTitle(row);
   });
   // Unseen is presentation only and is appended last, so every existing lifecycle tone keeps
@@ -1303,8 +1309,8 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   const menu = (at?: { x: number; y: number }) => ({
     owner, at, label: () => shownSessionTitle(summary), anchor: () => rowMenuButton(owner), items: () => items
   });
-  more.addEventListener('click', (event) => { event.stopPropagation(); document.getElementById('sessionTooltip')?.remove(); toggleRowMenu(menu()); });
-  row.addEventListener('contextmenu', (event) => { event.preventDefault(); document.getElementById('sessionTooltip')?.remove(); openRowMenu(menu({ x: event.clientX, y: event.clientY })); });
+  more.addEventListener('click', (event) => { event.stopPropagation(); removeSessionTooltip(); toggleRowMenu(menu()); });
+  row.addEventListener('contextmenu', (event) => { event.preventDefault(); removeSessionTooltip(); openRowMenu(menu({ x: event.clientX, y: event.clientY })); });
   const actionBar = el('div', 'sess-actions');
   actionBar.append(more);
   row.append(top, actionBar);
@@ -1443,7 +1449,7 @@ function openSharePage(sessionId: string): void {
 function startRename(summary: SessionSummary): void {
   const current = summary.title || '';
   renaming = { id: summary.id, original: current, value: current, start: 0, end: current.length };
-  document.getElementById('sessionTooltip')?.remove();
+  removeSessionTooltip();
   paintSessions();
 }
 
@@ -2465,7 +2471,7 @@ function paintSessions(): void {
   // any other tooltip goes with its row.
   const tooltip = document.getElementById('sessionTooltip');
   if (tooltip && pointed && tooltip.dataset.for === pointedId) placeSessionTooltip(tooltip, pointed);
-  else tooltip?.remove();
+  else if (tooltip) removeSessionTooltip();
   for (const list of [projectList, chatList]) {
     for (const toggle of list.querySelectorAll<HTMLElement>('.sess > .worker-toggle')) {
       const before = arrowsBefore.get(toggle.parentElement!.dataset.id);
