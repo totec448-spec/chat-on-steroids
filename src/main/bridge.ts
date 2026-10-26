@@ -191,6 +191,7 @@ import { ownCoreHint,
   releaseQuiescentRun,
   retiredWorkerForConversation,
   waitingForSubAgents,
+  reviewerHoldUntil,
   sleepSilentWorkers,
   notePageGenerating,
   occupiesSlot,
@@ -7327,6 +7328,9 @@ async function goalWaitFor(conversationId: string, sessionId: string, now = Date
     return visible ? { reason: 'silence', until: visible.deadline } : null;
   }
   if (runningToolCalls(conversationId) > 0) return { reason: 'tools' };
+  // The Goal step reviewer's hold has a known end (#1832), so its wait shows a countdown.
+  const reviewUntil = reviewerHoldUntil(conversationId);
+  if (reviewUntil !== null) return { reason: 'reviewer', until: reviewUntil };
   // A run's own workers report back into this chat, so the next instruction waits for them
   // rather than deciding from a context that is about to change. No deadline: the wait ends
   // when the last worker stops, and a countdown would only be a second, guessed clock.

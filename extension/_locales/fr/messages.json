@@ -509,6 +509,9 @@
   "content_goal_wait_tool_inactivity": {
     "message": "En attente d'inactivité des outils"
   },
+  "content_goal_wait_reviewer": {
+    "message": "En attente du relecteur"
+  },
   "content_goal_wait_workers": {
     "message": "En attente des agents de ce chat"
   },

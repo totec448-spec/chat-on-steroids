@@ -1595,6 +1595,12 @@ export function waitingForSubAgents(conversationId: string | null | undefined): 
   return getConfig().multiAgent.waitForSubAgents === true && working.some(agent => agent.info.reviewer !== true);
 }
 
+/** Until when this chat's working Goal step reviewer holds its next step (#1832), or null when none does. */
+export function reviewerHoldUntil(conversationId: string | null | undefined, now = Date.now()): number | null {
+  const holding = workingWorkers(runForConversation(conversationId)).filter(agent => reviewerHolding(agent, now));
+  return holding.length ? Math.max(...holding.map(agent => agent.info.reviewAskedAt! + REVIEW_MAX_MS)) : null;
+}
+
 function reviewerHolding(agent: Agent, now = Date.now()): boolean {
   return agent.info.reviewer === true && typeof agent.info.reviewAskedAt === 'number' && now - agent.info.reviewAskedAt < REVIEW_MAX_MS;
 }

@@ -506,6 +506,9 @@
   "content_goal_wait_tool_inactivity": {
     "message": "Araç etkinliğinin durması bekleniyor"
   },
+  "content_goal_wait_reviewer": {
+    "message": "Gözden geçiren bekleniyor"
+  },
   "content_goal_wait_workers": {
     "message": "Bu sohbetin yardımcı ajanları bekleniyor"
   },
