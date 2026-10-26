@@ -60,6 +60,10 @@ describe('request correlation ownership', () => {
     observeRequestCorrelation({ requestId: 'wfr_01a0ec298ec4718b8145bf6a9c2413a2', conversationId: 'conv-wfr', sessionId: 's', messageId: 'm', tool: '', observedAt: 2 });
     expect(requestCorrelation('wfr_01a0ec298ec4718b8145bf6a9c2413a2')?.conversationId).toBe('conv-wfr');
     expect(requestCorrelation('wfr_01a0ec298ec4719b8145bf6a9c2413a2')).toBeNull();
+    // An exact-match id never shares a key with a UUID, even one spelled like it without the version digit.
+    expect(requestCorrelation('93ff44d2-cfea-f32-8ea7-7a991c9cfe49')).toBeNull();
+    observeRequestCorrelation({ requestId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'.slice(0, 14) + 'ccc-dddd-eeeeeeeeeeee', conversationId: 'conv-plain', sessionId: 's', messageId: 'm', tool: '', observedAt: 4 });
+    expect(requestCorrelation('aaaaaaaa-bbbb-4ccc-dddd-eeeeeeeeeeee')).toBeNull();
     // A second conversation claiming the same request through the other spelling is refused, as for one spelling.
     expect(observeRequestCorrelation({ requestId: call, conversationId: 'conv-other', sessionId: 'x', messageId: 'm', tool: '', observedAt: 3 })).toBe('refused');
   });

@@ -88,13 +88,15 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * digits are random, so they still name exactly one request. Any other id is joined as written.
  */
 function joinKey(requestId: string): string {
-  return UUID.test(requestId) ? `${requestId.slice(0, 14)}${requestId.slice(15)}`.toLowerCase() : requestId;
+  // Prefixed apart, so an exact-match id can never share a key with a UUID spelled like it.
+  return UUID.test(requestId) ? `uuid:${requestId.slice(0, 14)}${requestId.slice(15)}`.toLowerCase() : `id:${requestId}`;
 }
 
-function wake(requestId: string): void {
-  const held = waiters.get(joinKey(requestId));
+/** Wakes the waiters of one key (see joinKey). */
+function wake(key: string): void {
+  const held = waiters.get(key);
   if (!held) return;
-  waiters.delete(joinKey(requestId));
+  waiters.delete(key);
   for (const resolve of held) resolve();
 }
 
@@ -202,7 +204,7 @@ function merge(input: RequestCorrelation): 'stored' | 'same' | 'refused' {
     byRequest.set(key, { ...input });
     evidenceWindowStarts.delete(key);
     trim();
-    wake(input.requestId);
+    wake(key);
     return 'stored';
   }
 
@@ -429,5 +431,5 @@ export function resetCorrelationRegistryForTests(): void {
   evidenceWindowStarts.clear();
   restored = false;
   restoring = null;
-  for (const requestId of [...waiters.keys()]) wake(requestId);
+  for (const key of [...waiters.keys()]) wake(key);
 }
