@@ -7,7 +7,7 @@ vi.mock('../src/renderer/pet.js', () => ({ initPet: () => Object.assign(() => {}
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_GOAL_MODEL, DEFAULT_GOAL_SYSTEM_PROMPT } from '../src/shared/goal.js';
 import { DEFAULT_HANDOFF_PROMPT } from '../src/shared/handoff.js';
 import { BROWSER_READ_TOOLS, BROWSER_WRITE_TOOLS } from '../src/shared/browser-control.js';
@@ -2259,6 +2259,35 @@ it('shows startup bind errors in the existing Setup status and clears them after
   expect(status.textContent).toContain('Browser bridge could not start: port 8767: EADDRINUSE');
   mounted.push({ ...mounted.state, bridge: { running: true, port: 8768, paired: false, present: false, error: null } });
   expect(status.textContent).toContain('8768'); expect(status.textContent).not.toContain('EADDRINUSE');
+});
+
+it('keeps a switch the person changed while its save is pending, even after focus moved and an older state arrived', async () => {
+  // CodeRabbit on #1443: an older state push used to reset the switch once focus had left it,
+  // and the next save then read the reset value and undid the person's choice.
+  let release!: (result: any) => void; const calls: any[] = [];
+  const mounted = await mountChat({}, [], { saveSettings: (patch: any) => {
+    calls.push(structuredClone(patch));
+    const answer = { ok: true, data: { ...mounted.state, config: { ...mounted.state.config, ...structuredClone(patch) } } };
+    if (calls.length === 1) return new Promise(resolve => { release = () => resolve(answer); });
+    return Promise.resolve(answer);
+  } });
+  const w = mounted.window;
+  const developer = w.document.getElementById('developerMode') as HTMLInputElement;
+  const background = w.document.getElementById('backgroundChats') as HTMLInputElement;
+  // As the app's own config always does, the stored state names the switch's value.
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, developerMode: false } } });
+  expect(developer.checked).toBe(false);
+  developer.focus(); developer.checked = true; developer.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  developer.blur(); background.focus();
+  // A state push from before the save (it still says off) lands while the save is pending.
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, developerMode: false } } });
+  expect(developer.checked).toBe(true);
+  background.checked = true; background.dispatchEvent(new w.Event('change', { bubbles: true }));
+  release(undefined);
+  await waitFor(() => expect(calls).toHaveLength(2)); await settle();
+  expect(calls[1].ui.developerMode).toBe(true);
+  expect(developer.checked).toBe(true);
 });
 
 it('restores a rejected focused port and prevents an unrelated queued save from retrying it', async () => {
@@ -4671,4 +4700,350 @@ it('offers archiving retired worker chats, off by default, and saves it', async 
   archive.dispatchEvent(new w.Event('change', { bubbles: true }));
   await settle();
   expect(mounted.calls.at(-1)?.multiAgent.archiveWorkerChats).toBe(true);
+});
+
+describe('settings backup dialogs', () => {
+  const choice = (over: Record<string, unknown> = {}) => ({ token: '6f9619ff-8b86-4d01-b42d-00cf4fc964ff', file: 'backup.json', appVersion: '2.1.46',
+    exportedAt: '2026-10-23T08:00:00.000Z', changed: ['readOnly', 'ui.theme'], wider: [], keyCount: 1, ...over });
+  const submit = (doc: Document, form: string) => doc.getElementById(form)!.dispatchEvent(new doc.defaultView!.Event('submit', { bubbles: true, cancelable: true }));
+  const typeInto = (doc: Document, id: string, value: string) => {
+    const input = doc.getElementById(id) as HTMLInputElement;
+    input.value = value;
+    input.dispatchEvent(new doc.defaultView!.Event('input', { bubbles: true }));
+  };
+
+  it('exports without keys, and with keys only after a long enough, repeated passphrase', async () => {
+    const exportSettings = vi.fn(async (includeKeys: boolean) => ({ ok: true, data: { file: 'backup.json', keyCount: includeKeys ? 2 : 0 } }));
+    const mounted = await mountChat({}, [], { exportSettings });
+    const doc = mounted.window.document;
+    const dialog = doc.getElementById('exportSettingsDialog') as HTMLDialogElement;
+    (doc.getElementById('exportSettings') as HTMLButtonElement).click();
+    expect(dialog.open).toBe(true);
+    expect(doc.getElementById('exportSettingsPassphrase')!.hidden).toBe(true);
+    submit(doc, 'exportSettingsForm');
+    await waitFor(() => expect(dialog.open).toBe(false));
+    expect(exportSettings).toHaveBeenLastCalledWith(false, undefined);
+    await waitFor(() => expect(doc.querySelector('.toast')?.textContent).toBe('Saved backup.json.'));
+
+    (doc.getElementById('exportSettings') as HTMLButtonElement).click();
+    const keys = doc.getElementById('exportSettingsKeys') as HTMLInputElement;
+    keys.checked = true;
+    keys.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+    expect(doc.getElementById('exportSettingsPassphrase')!.hidden).toBe(false);
+    typeInto(doc, 'exportSettingsPass', 'short');
+    submit(doc, 'exportSettingsForm');
+    expect(doc.getElementById('exportSettingsError')!.textContent).toBe('Use a passphrase of at least 8 characters.');
+    typeInto(doc, 'exportSettingsPass', 'correct horse battery');
+    typeInto(doc, 'exportSettingsPassAgain', 'correct horse batterz');
+    submit(doc, 'exportSettingsForm');
+    expect(doc.getElementById('exportSettingsError')!.textContent).toBe('The two passphrases are not the same.');
+    expect(exportSettings).toHaveBeenCalledTimes(1);
+    typeInto(doc, 'exportSettingsPassAgain', 'correct horse battery');
+    submit(doc, 'exportSettingsForm');
+    await waitFor(() => expect(dialog.open).toBe(false));
+    expect(exportSettings).toHaveBeenLastCalledWith(true, 'correct horse battery');
+    // A closed dialog keeps no passphrase.
+    expect((doc.getElementById('exportSettingsPass') as HTMLInputElement).value).toBe('');
+    await waitFor(() => expect(doc.querySelector('.toast:last-of-type')?.textContent).toBe('Saved backup.json with 2 saved keys.'));
+  });
+
+  it('keeps the export dialog open when the file picker is cancelled, and shows a refusal', async () => {
+    const exportSettings = vi.fn().mockResolvedValueOnce({ ok: true, data: null })
+      .mockResolvedValueOnce({ ok: false, error: 'The saved keys could not be read, so no backup was made. Try again, or export without them.' });
+    const mounted = await mountChat({}, [], { exportSettings });
+    const doc = mounted.window.document;
+    (doc.getElementById('exportSettings') as HTMLButtonElement).click();
+    submit(doc, 'exportSettingsForm');
+    await waitFor(() => expect(exportSettings).toHaveBeenCalledTimes(1));
+    expect((doc.getElementById('exportSettingsDialog') as HTMLDialogElement).open).toBe(true);
+    submit(doc, 'exportSettingsForm');
+    await waitFor(() => expect(doc.getElementById('exportSettingsError')!.hidden).toBe(false));
+    expect(doc.getElementById('exportSettingsError')!.textContent).toContain('could not be read');
+  });
+
+  it('says how many settings change, asks for the passphrase of included keys, and applies the result', async () => {
+    const importSettingsBackup = vi.fn().mockResolvedValueOnce({ ok: false, error: 'That passphrase does not open the saved keys in this backup.' });
+    const mounted = await mountChat({}, [], { pickSettingsBackup: vi.fn(async () => ({ ok: true, data: choice() })), importSettingsBackup });
+    importSettingsBackup.mockResolvedValueOnce({ ok: true, data: { state: { ...mounted.state, config: { ...mounted.state.config, readOnly: true } }, changedCount: 2, keyCount: 1 } });
+    const doc = mounted.window.document;
+    (doc.getElementById('importSettings') as HTMLButtonElement).click();
+    const dialog = doc.getElementById('importSettingsDialog') as HTMLDialogElement;
+    await waitFor(() => expect(dialog.open).toBe(true));
+    expect(doc.getElementById('importSettingsSource')!.textContent).toMatch(/^backup\.json, saved on /);
+    expect(doc.getElementById('importSettingsSummary')!.textContent).toBe("2 settings will change. Folders and this computer's connection to ChatGPT stay as they are.");
+    expect(doc.getElementById('importSettingsKeysRow')!.hidden).toBe(false);
+    expect(doc.getElementById('importSettingsKeysLabel')!.textContent).toBe('Also import 1 saved key');
+    // Saved keys come along only when ticked.
+    const keys = doc.getElementById('importSettingsKeys') as HTMLInputElement;
+    expect(keys.checked).toBe(false);
+    expect(doc.getElementById('importSettingsPassRow')!.hidden).toBe(true);
+    keys.checked = true;
+    keys.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+    expect(doc.activeElement?.id).toBe('importSettingsPass');
+    submit(doc, 'importSettingsForm');
+    expect(doc.getElementById('importSettingsError')!.textContent).toBe('Enter the passphrase of this backup.');
+    expect(importSettingsBackup).not.toHaveBeenCalled();
+    typeInto(doc, 'importSettingsPass', 'wrong horse battery');
+    submit(doc, 'importSettingsForm');
+    await waitFor(() => expect(doc.getElementById('importSettingsError')!.textContent).toBe('That passphrase does not open the saved keys in this backup.'));
+    expect(dialog.open).toBe(true);
+    typeInto(doc, 'importSettingsPass', 'correct horse battery');
+    submit(doc, 'importSettingsForm');
+    await waitFor(() => expect(dialog.open).toBe(false));
+    expect(importSettingsBackup).toHaveBeenLastCalledWith(choice().token, true, 'correct horse battery');
+    await waitFor(() => expect(doc.querySelector('.toast')?.textContent).toBe('Imported: 2 settings changed. 1 saved key added.'));
+    expect((doc.getElementById('importSettingsPass') as HTMLInputElement).value).toBe('');
+  });
+
+  it('imports settings alone when the keys are unticked, and offers nothing to do when nothing differs', async () => {
+    const pick = vi.fn().mockResolvedValueOnce({ ok: true, data: choice() }).mockResolvedValueOnce({ ok: true, data: choice({ changed: [], keyCount: 0 }) });
+    const importSettingsBackup = vi.fn(async () => ({ ok: true, data: { state: mounted.state, changedCount: 2, keyCount: 0 } }));
+    const mounted = await mountChat({}, [], { pickSettingsBackup: pick, importSettingsBackup });
+    const doc = mounted.window.document;
+    (doc.getElementById('importSettings') as HTMLButtonElement).click();
+    await waitFor(() => expect((doc.getElementById('importSettingsDialog') as HTMLDialogElement).open).toBe(true));
+    expect((doc.getElementById('importSettingsKeys') as HTMLInputElement).checked).toBe(false);
+    expect(doc.getElementById('importSettingsPassRow')!.hidden).toBe(true);
+    submit(doc, 'importSettingsForm');
+    await waitFor(() => expect(importSettingsBackup).toHaveBeenCalledWith(choice().token, false, undefined));
+    await waitFor(() => expect((doc.getElementById('importSettingsDialog') as HTMLDialogElement).open).toBe(false));
+    (doc.getElementById('importSettings') as HTMLButtonElement).click();
+    await waitFor(() => expect((doc.getElementById('importSettingsDialog') as HTMLDialogElement).open).toBe(true));
+    expect(doc.getElementById('importSettingsSummary')!.textContent).toMatch(/^Every setting in this backup already matches yours\./);
+    expect(doc.getElementById('importSettingsKeysRow')!.hidden).toBe(true);
+    expect((doc.getElementById('importSettingsSubmit') as HTMLButtonElement).disabled).toBe(true);
+    expect(doc.activeElement?.id).toBe('importSettingsCancel');
+  });
+
+  it('says what failed after an import whose settings were saved anyway', async () => {
+    const mounted = await mountChat({}, [], { pickSettingsBackup: vi.fn(async () => ({ ok: true, data: choice({ keyCount: 0 }) })),
+      importSettingsBackup: vi.fn(async () => ({ ok: true, data: { state: mounted.state, changedCount: 2, keyCount: 0, warnings: ['login registration refused'] } })) });
+    const doc = mounted.window.document;
+    (doc.getElementById('importSettings') as HTMLButtonElement).click();
+    await waitFor(() => expect((doc.getElementById('importSettingsDialog') as HTMLDialogElement).open).toBe(true));
+    submit(doc, 'importSettingsForm');
+    await waitFor(() => expect(doc.querySelector('.toast')?.textContent).toBe('Imported: 2 settings changed. login registration refused'));
+  });
+
+  it('turns Import off once the chosen file has to be chosen again', async () => {
+    const importSettingsBackup = vi.fn(async () => ({ ok: false, error: 'Your settings changed after the file was chosen. Choose it again.' }));
+    const mounted = await mountChat({}, [], { pickSettingsBackup: vi.fn(async () => ({ ok: true, data: choice({ keyCount: 0 }) })), importSettingsBackup });
+    const doc = mounted.window.document;
+    (doc.getElementById('importSettings') as HTMLButtonElement).click();
+    await waitFor(() => expect((doc.getElementById('importSettingsDialog') as HTMLDialogElement).open).toBe(true));
+    submit(doc, 'importSettingsForm');
+    await waitFor(() => expect(doc.getElementById('importSettingsError')!.textContent).toBe('Your settings changed after the file was chosen. Choose it again.'));
+    expect((doc.getElementById('importSettingsSubmit') as HTMLButtonElement).disabled).toBe(true);
+    expect(doc.activeElement?.id).toBe('importSettingsCancel');
+    submit(doc, 'importSettingsForm');
+    expect(importSettingsBackup).toHaveBeenCalledTimes(1);
+  });
+
+  it('names what would give ChatGPT more access, and lists the other changes by Settings tab on request', async () => {
+    const pick = vi.fn(async () => ({ ok: true, data: choice({ keyCount: 0, changed: ['capabilities.command', 'readOnly', 'ui.appearance.dark.accent', 'ui.theme', 'goal.model', 'sessions.retainDays'],
+      wider: ['capabilities.command', 'readOnly'] }) }));
+    const mounted = await mountChat({}, [], { pickSettingsBackup: pick });
+    const doc = mounted.window.document;
+    (doc.getElementById('importSettings') as HTMLButtonElement).click();
+    await waitFor(() => expect((doc.getElementById('importSettingsDialog') as HTMLDialogElement).open).toBe(true));
+    expect(doc.getElementById('importSettingsWider')!.hidden).toBe(false);
+    expect(doc.getElementById('importSettingsWider')!.textContent).toBe('More access for ChatGPT: Run commands, Read-only mode off.');
+    const review = doc.getElementById('importSettingsReview') as HTMLDetailsElement;
+    expect([review.hidden, review.open]).toEqual([false, false]);
+    expect([...doc.querySelectorAll('#importSettingsChanges li')].map(item => item.textContent))
+      .toEqual(['Workspace: 2 settings', 'Appearance: 2 settings', 'Agents & automation: 1 setting', 'General: 1 setting']);
+  });
+
+  it('shows why a chosen file cannot be imported, and switches the language a backup brings', async () => {
+    const pick = vi.fn().mockResolvedValueOnce({ ok: false, error: 'This file is not a Chat On Steroids settings backup.' })
+      .mockResolvedValueOnce({ ok: true, data: choice({ keyCount: 0, changed: ['language'] }) });
+    const mounted = await mountChat({}, [], { pickSettingsBackup: pick,
+      importSettingsBackup: async () => ({ ok: true, data: { state: { ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, language: 'de' } } }, changedCount: 1, keyCount: 0 } }) });
+    const doc = mounted.window.document;
+    (doc.getElementById('importSettings') as HTMLButtonElement).click();
+    await waitFor(() => expect(doc.querySelector('.toast')?.textContent).toBe('This file is not a Chat On Steroids settings backup.'));
+    expect((doc.getElementById('importSettingsDialog') as HTMLDialogElement).open).toBe(false);
+    (doc.getElementById('importSettings') as HTMLButtonElement).click();
+    await waitFor(() => expect((doc.getElementById('importSettingsDialog') as HTMLDialogElement).open).toBe(true));
+    submit(doc, 'importSettingsForm');
+    await waitFor(() => expect(doc.documentElement.lang).toBe('de'));
+    const { setLanguage } = await import('../src/renderer/i18n.js');
+    setLanguage('en');
+  });
+});
+
+describe('phone notifications in Settings', () => {
+  const change = (doc: Document, id: string, value?: string | boolean) => {
+    const node = doc.getElementById(id) as HTMLInputElement | HTMLSelectElement;
+    if (typeof value === 'boolean') (node as HTMLInputElement).checked = value; else if (value !== undefined) node.value = value;
+    node.dispatchEvent(new doc.defaultView!.Event('change', { bubbles: true }));
+  };
+
+  const withPhone = async (phonePush: Record<string, unknown>, api: Record<string, (...args: any[]) => any> = {}) => {
+    const mounted = await mountChat({}, [], api);
+    mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush } };
+    mounted.push(mounted.state);
+    return mounted;
+  };
+  const phone = (over: Record<string, unknown> = {}) => ({ enabled: true, server: 'https://ntfy.sh', topic: 'cos-fixturetopic234567', needsYou: true, failures: true,
+    finishedAfterMinutes: 5, onlyWhenAway: true, quietHours: null, includeDetails: false, ...over });
+
+  it('starts off; turning it on picks a long random topic and saves the defaults', async () => {
+    const mounted = await mountChat();
+    const doc = mounted.window.document;
+    expect((doc.getElementById('phonePushEnabled') as HTMLInputElement).checked).toBe(false);
+    expect(doc.getElementById('phonePushOptions')!.hidden).toBe(true);
+    change(doc, 'phonePushEnabled', true);
+    expect(doc.getElementById('phonePushOptions')!.hidden).toBe(false);
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.enabled).toBe(true));
+    const saved = mounted.calls.at(-1).ui.phonePush;
+    expect(saved.topic).toMatch(/^cos-[a-km-np-z2-9]{20}$/);
+    expect(saved).toEqual({ enabled: true, server: 'https://ntfy.sh', topic: saved.topic, needsYou: true, failures: true,
+      finishedAfterMinutes: 5, onlyWhenAway: true, quietHours: null, includeDetails: false });
+  });
+
+  it('shows the essentials first and keeps server, token and a new topic behind Advanced; Copy copies the topic', async () => {
+    const writeClipboard = vi.fn(async () => ({ ok: true, data: true }));
+    const mounted = await withPhone(phone(), { writeClipboard });
+    const doc = mounted.window.document;
+    const advanced = doc.getElementById('phonePushAdvanced') as HTMLDetailsElement;
+    expect(advanced.open).toBe(false);
+    for (const id of ['phonePushServer', 'phonePushToken', 'phonePushNewTopic']) expect(advanced.contains(doc.getElementById(id))).toBe(true);
+    for (const id of ['phonePushTopic', 'phonePushCopyTopic', 'phonePushTest', 'phonePushDetails']) expect(advanced.contains(doc.getElementById(id))).toBe(false);
+    (doc.getElementById('phonePushCopyTopic') as HTMLButtonElement).click();
+    await waitFor(() => expect(writeClipboard).toHaveBeenCalledWith('cos-fixturetopic234567'));
+  });
+
+  it('saves when a chat counts as finished, quiet hours shown in local time, and the details switch', async () => {
+    const mounted = await withPhone(phone());
+    const doc = mounted.window.document;
+    const quiet = doc.getElementById('phonePushQuiet') as HTMLSelectElement;
+    expect([...quiet.options].map(option => option.textContent)).toContain('10:00 PM – 7:00 AM');
+    change(doc, 'phonePushFinished', 'never');
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.finishedAfterMinutes).toBeNull());
+    change(doc, 'phonePushQuiet', '22:00-07:00');
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.quietHours).toEqual({ from: '22:00', to: '07:00' }));
+    change(doc, 'phonePushDetails', true);
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.includeDetails).toBe(true));
+    expect(mounted.calls.at(-1).ui.phonePush.topic).toBe('cos-fixturetopic234567');
+  });
+
+  // A cleared server field is sent as it is and refused, never quietly replaced by ntfy.sh: that would
+  // move the messages (and, with details on, chat names) to a public server nobody chose.
+  it('sends a cleared server as empty instead of replacing it with ntfy.sh', async () => {
+    const mounted = await withPhone(phone({ server: 'https://ntfy.example.org' }));
+    const doc = mounted.window.document;
+    change(doc, 'phonePushServer', '   ');
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.server).toBe(''));
+  });
+
+  // A switch the person has focused but not changed still follows a change made elsewhere (another
+  // window, a backup import): a stale switch would put "include chat details" back on with the next save.
+  it('updates a focused phone control that was not edited, and keeps one that was', async () => {
+    const mounted = await withPhone(phone({ includeDetails: true }));
+    const doc = mounted.window.document;
+    const details = doc.getElementById('phonePushDetails') as HTMLInputElement;
+    details.focus();
+    mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush: phone({ includeDetails: false }) } };
+    mounted.push(mounted.state);
+    expect(details.checked).toBe(false);
+    const topic = doc.getElementById('phonePushTopic') as HTMLInputElement;
+    topic.focus();
+    topic.value = 'cos-typing-in-progress';
+    mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush: phone({ includeDetails: false, topic: 'cos-elsewhere' }) } };
+    mounted.push(mounted.state);
+    expect(topic.value).toBe('cos-typing-in-progress');
+  });
+
+  // A switch changed and saved while it keeps the focus: once the save comes back with that value, it
+  // counts as painted, so a later change made elsewhere still reaches it.
+  it('follows a later change elsewhere after a focused switch was changed and saved', async () => {
+    const mounted = await withPhone(phone({ includeDetails: false }));
+    const doc = mounted.window.document;
+    const details = doc.getElementById('phonePushDetails') as HTMLInputElement;
+    details.focus();
+    change(doc, 'phonePushDetails', true);
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.includeDetails).toBe(true));
+    mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush: phone({ includeDetails: true }) } };
+    mounted.push(mounted.state);
+    mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush: phone({ includeDetails: false }) } };
+    mounted.push(mounted.state);
+    expect(details.checked).toBe(false);
+  });
+
+  it('keeps quiet hours that are not one of the choices when something else is saved', async () => {
+    const mounted = await withPhone(phone({ finishedAfterMinutes: 7, quietHours: { from: '01:30', to: '05:15' } }));
+    const doc = mounted.window.document;
+    expect((doc.getElementById('phonePushQuiet') as HTMLSelectElement).value).toBe('custom');
+    // 7 minutes is not offered: it is shown as its own choice and kept, like the quiet hours.
+    const finished = doc.getElementById('phonePushFinished') as HTMLSelectElement;
+    expect(finished.value).toBe('7');
+    expect(finished.selectedOptions[0]!.textContent).toBe('After 7 minutes of work');
+    change(doc, 'phonePushAway', false);
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.onlyWhenAway).toBe(false));
+    expect(mounted.calls.at(-1).ui.phonePush.quietHours).toEqual({ from: '01:30', to: '05:15' });
+    expect(mounted.calls.at(-1).ui.phonePush.finishedAfterMinutes).toBe(7);
+    // Choosing an offered value drops the extra choice again.
+    change(doc, 'phonePushFinished', '30');
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.finishedAfterMinutes).toBe(30));
+    mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush: phone({ finishedAfterMinutes: 30 }) } };
+    mounted.push(mounted.state);
+    expect([...finished.options].map(option => option.value)).toEqual(['never', '0', '5', '15', '30', '60']);
+  });
+
+  it('sends a test after saving what was typed, and says when it did not arrive', async () => {
+    const testPhonePush = vi.fn().mockResolvedValueOnce({ ok: true, data: undefined })
+      .mockResolvedValueOnce({ ok: false, error: 'The ntfy server refused the message. Check the server, the topic and the access token.' });
+    const mounted = await withPhone(phone(), { testPhonePush });
+    const doc = mounted.window.document;
+    (doc.getElementById('phonePushTopic') as HTMLInputElement).value = 'cos-typedbutnotblurred';
+    const before = mounted.calls.length;
+    (doc.getElementById('phonePushTest') as HTMLButtonElement).click();
+    await waitFor(() => expect(doc.getElementById('phonePushTestStatus')!.textContent).toBe('Sent. Check your phone.'));
+    expect(mounted.calls.length).toBeGreaterThan(before);
+    expect(mounted.calls.at(-1).ui.phonePush.topic).toBe('cos-typedbutnotblurred');
+    (doc.getElementById('phonePushTest') as HTMLButtonElement).click();
+    await waitFor(() => expect(doc.getElementById('phonePushTestStatus')!.classList.contains('is-warn')).toBe(true));
+    expect(doc.getElementById('phonePushTestStatus')!.textContent).toContain('refused the message');
+  });
+
+  it('sends no test when the settings could not be saved', async () => {
+    const testPhonePush = vi.fn(async () => ({ ok: true, data: undefined }));
+    const mounted = await withPhone(phone(), { testPhonePush, saveSettings: async () => ({ ok: false, error: 'Fixture save refused' }) });
+    const doc = mounted.window.document;
+    (doc.getElementById('phonePushTest') as HTMLButtonElement).click();
+    await waitFor(() => expect(doc.getElementById('phonePushTestStatus')!.textContent).toBe('The settings could not be saved, so no test was sent.'));
+    expect(doc.getElementById('phonePushTestStatus')!.classList.contains('is-warn')).toBe(true);
+    expect(testPhonePush).not.toHaveBeenCalled();
+  });
+
+  it('keeps a token typed while the previous one was being saved', async () => {
+    let release: () => void = () => {};
+    const setPhonePushToken = vi.fn((token: string) => new Promise(resolve => { release = () => resolve({ ok: true, data: { ...mounted.state, hasPhonePushToken: token !== '' } }); }));
+    const mounted = await mountChat({}, [], { setPhonePushToken });
+    const doc = mounted.window.document;
+    const field = doc.getElementById('phonePushToken') as HTMLInputElement;
+    field.value = 'tk_first';
+    (doc.getElementById('phonePushTokenSave') as HTMLButtonElement).click();
+    await waitFor(() => expect(setPhonePushToken).toHaveBeenCalledWith('tk_first'));
+    field.value = 'tk_second_draft';
+    release();
+    await waitFor(() => expect(doc.getElementById('phonePushTokenStatus')!.textContent).toBe('A token is saved. Save an empty field to remove it.'));
+    expect(field.value).toBe('tk_second_draft');
+  });
+
+  it('saves and removes the access token without ever showing it again', async () => {
+    const setPhonePushToken = vi.fn(async (token: string) => ({ ok: true, data: { ...mounted.state, hasPhonePushToken: token !== '' } }));
+    const mounted = await mountChat({}, [], { setPhonePushToken });
+    const doc = mounted.window.document;
+    const field = doc.getElementById('phonePushToken') as HTMLInputElement;
+    field.value = 'tk_fixture_token';
+    (doc.getElementById('phonePushTokenSave') as HTMLButtonElement).click();
+    await waitFor(() => expect(setPhonePushToken).toHaveBeenCalledWith('tk_fixture_token'));
+    await waitFor(() => expect(field.value).toBe(''));
+    expect(doc.getElementById('phonePushTokenStatus')!.textContent).toBe('A token is saved. Save an empty field to remove it.');
+    (doc.getElementById('phonePushTokenSave') as HTMLButtonElement).click();
+    await waitFor(() => expect(setPhonePushToken).toHaveBeenLastCalledWith(''));
+    await waitFor(() => expect(doc.getElementById('phonePushTokenStatus')!.textContent).toMatch(/^Only if your server needs one/));
+  });
 });

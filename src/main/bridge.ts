@@ -28,6 +28,7 @@ import { callHoldOpen, holdCalls } from './rotation-hold.js';
 import { authorizedPluginRefreshPublications, hasRequestedPluginRefresh, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
 import { attachBrowserWake, wakeBrowserWork } from './browser-wake.js';
 import { noteRouteExistingChatSend, tunnelRouteSettling } from './tunnel/route-settle.js';
+import { noteChatgptProjects } from './chatgpt-project-catalog.js';
 import { armProjectCreate, bindChatToLinkedProject, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, markProjectGone, pendingProjectCreates } from './projects.js';
 import { wakeBrowserUrl } from './browser-startup.js';
 let browserWake: ReturnType<typeof attachBrowserWake> | null = null;
@@ -685,6 +686,26 @@ function staleCompanion(req: http.IncomingMessage): boolean {
 function notChosenBrowser(req: http.IncomingMessage): boolean {
   return getConfig().ui.chatBrowser === 'cos' && req.headers['x-extension-host'] !== 'cos' && cosExtensionPresent();
 }
+/**
+ * Whether a page in this browser may open new work handed to it: a worker's or a replacement's tab.
+ * #1852: the prime chat still open in Chrome collected a worker tab through its own page while the
+ * built-in browser was chosen, and the redeem route then refused that tab's page as not chosen.
+ */
+function opensNewWork(req: http.IncomingMessage, route: string, conversationId: string): boolean {
+  const reason = notChosenBrowser(req) ? 'another browser is chosen' : staleCompanion(req) ? 'its extension is out of date' : null;
+  if (!reason) return true;
+  // Said only when a tab was actually waiting for this chat, and once a minute per browser and route:
+  // a page polls every few seconds, and "nothing to hand out" is not a refusal.
+  const waiting = commands.some(entry => entry.owner === null && entry.placement?.conversationId === conversationId);
+  const key = `${route}\0${browserOf(req) ?? ''}\0${reason}`;
+  if (waiting && Date.now() - (withheldLoggedAt.get(key) ?? 0) >= WITHHELD_LOG_MS) {
+    withheldLoggedAt.set(key, Date.now());
+    logInfo(`bridge: ${route} withheld a tab to open from a page whose browser may not take new work (${reason})`);
+  }
+  return false;
+}
+const WITHHELD_LOG_MS = 60_000;
+const withheldLoggedAt = new Map<string, number>();
 function chosenBuiltInBrowser(req: http.IncomingMessage): boolean {
   return getConfig().ui.chatBrowser === 'cos' && req.headers['x-extension-host'] === 'cos';
 }
@@ -2578,6 +2599,19 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     return json(res, 400, { error: 'invalid_browser_request' }, origin);
   }
 
+  // The Projects a ChatGPT page lists in its sidebar (#1756): offered when linking a project.
+  if (route === '/chatgpt-projects' && req.method === 'POST') {
+    let body: Record<string, unknown>;
+    try {
+      body = (await readBody(req)) as Record<string, unknown>;
+    } catch (err) {
+      if ((err as Error).message === 'body_too_large') return tooLarge(res, origin);
+      return json(res, 400, { error: 'bad_request' }, origin);
+    }
+    if (!Array.isArray(body?.['projects']) || body['projects'].length > 400) return json(res, 400, { error: 'bad_request' }, origin);
+    const changed = await noteChatgptProjects(body['projects'] as Array<{ id: unknown; name: unknown }>, Date.now(), body['workspace']);
+    return json(res, 200, { ok: true, changed }, origin);
+  }
   if (route === '/models' && req.method === 'POST') {
     const accepted = observeChatModels(await readBody(req));
     if (accepted) changed();
@@ -3343,6 +3377,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const pageGenerating = url.searchParams.get('generating');
     if (pageGenerating === '1' || pageGenerating === '0') notePageGenerating(id, pageGenerating === '1');
     const retiredWorker = retiredWorkerForConversation(id);
+    // A page in a browser that may not take new work is handed no tab to open (#1852).
+    const opensWork = opensNewWork(req, '/activity', id);
     const superseded = await conversationWasSuperseded(id);
     /**
      * What is driving this chat, which is not a fact about the recorder.
@@ -3772,14 +3808,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // inspect Chrome's real tab set, routes it to that tab before it considers opening one.
         // Returning the same inert id here makes a live page the fast path; /status remains the
         // service-worker/restart path. Redeem is still the exclusive ownership boundary.
-        revival: pendingBrowserRevival(),
-        revivals: pendingBrowserRevivals(),
+        revival: opensWork ? pendingBrowserRevival() : null,
+        revivals: opensWork ? pendingBrowserRevivals() : [],
         // Recovery only. A placement is normally collected by the `/compact` reply that
         // produced it; this is where it is still found if that reply never reached the page —
         // a navigation, a dropped socket — so a lost response becomes a correctly placed tab
         // rather than an OS open in whichever window happened to have focus. Same one-shot:
         // whoever collects it first is the one that opens it.
-        placement: pendingBrowserPlacement(id),
+        placement: opensWork ? pendingBrowserPlacement(id) : null,
         // Browser recovery is delivered by /status, whose service-worker caller can scan every
         // actual ChatGPT tab immediately before deciding exact reload vs exact open. Keeping it
         // out of this document-local feed also lets a dead content script be recovered.
@@ -3973,7 +4009,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       // With the authored anchor durable, the recorder's bounded response to it is the capture
       // authority (#787): ChatGPT may remount a long answer under another assistant id, so the
       // page's mounted Fiber shape can miss a brief the recorder already holds complete.
-      const captured = await captureRecordedBrief(id, checkpointToken, anchor);
+      const captured = await captureRecordedBrief(id, checkpointToken, anchor, opensNewWork(req, '/compact', id));
       return captured
         ? json(res, captured.status, { ...captured.body, bound: true }, origin)
         : json(res, 200, { bound: true, job: resumeJobFor(entry.sessionId) }, origin);
@@ -4124,7 +4160,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       const token = typeof body['token'] === 'string' ? body['token'] : '';
       const entry = continuationByToken(token);
       if (!entry || entry.sessionId !== sessionId) return json(res, 409, { error: 'no_such_continuation' }, origin);
-      const captured = await captureCompactionBrief(id, entry, body['summary'], known);
+      const captured = await captureCompactionBrief(id, entry, body['summary'], known, opensNewWork(req, '/compact', id));
       return json(res, captured.status, captured.body, origin);
     }
 
@@ -6797,7 +6833,9 @@ async function captureCompactionBrief(
   conversationId: string,
   entry: ContinuationView,
   text: string,
-  known: SessionSummary | null
+  known: SessionSummary | null,
+  /** False for a page in a browser that may not open new work: chat B stays for the chosen one. */
+  collectPlacement = true
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const { sessionId, token } = entry;
   // The handoff owner freezes and budgets the brief with its saved plan and
@@ -6889,7 +6927,7 @@ async function captureCompactionBrief(
       commandId: command?.id ?? null,
       // Chat B, for A's own browser to open in A's own window. Null whenever delivery
       // already opened it through the OS, which is every path that has no page to tell.
-      placement: pendingBrowserPlacement(conversationId),
+      placement: collectPlacement ? pendingBrowserPlacement(conversationId) : null,
       job: resumeJobFor(sessionId)
     }
   };
@@ -6905,7 +6943,9 @@ async function captureCompactionBrief(
 async function captureRecordedBrief(
   conversationId: string,
   token: string,
-  anchor: string
+  anchor: string,
+  /** As for captureCompactionBrief: false for a page in a browser that may not open new work. */
+  collectPlacement = true
 ): Promise<{ status: number; body: Record<string, unknown> } | null> {
   const entry = continuationByToken(token);
   if (!entry || entry.from !== conversationId || entry.state !== 'awaiting-summary' ||
@@ -6922,7 +6962,7 @@ async function captureRecordedBrief(
   const current = continuationByToken(token);
   if (!current || current.state !== 'awaiting-summary' || current.sourceSend.state !== 'sent' ||
       current.sourceSend.messageId !== anchor) return null;
-  return captureCompactionBrief(conversationId, current, response.text, session);
+  return captureCompactionBrief(conversationId, current, response.text, session, collectPlacement);
 }
 
 /**

@@ -917,6 +917,9 @@
   "popup_pipeline_waiting_first_message": {
     "message": "正在等待首則訊息。"
   },
+  "popup_pipeline_not_a_chat": {
+    "message": "此 ChatGPT 頁面不是聊天，應用程式在這裡沒有可追蹤的內容。請開啟或開始一個聊天。"
+  },
   "popup_pipeline_waiting_latest_request_id": {
     "message": "聊天已記錄。正在等待最新回合的請求 ID。"
   },
@@ -985,6 +988,9 @@
   },
   "popup_status_new_chat": {
     "message": "新聊天"
+  },
+  "popup_status_not_a_chat": {
+    "message": "不是聊天"
   },
   "popup_status_none_open": {
     "message": "沒有已開啟的聊天"
