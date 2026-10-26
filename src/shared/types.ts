@@ -204,6 +204,8 @@ export interface UiPrefs {
   startAtLogin?: boolean;
   /** A notification when a chat finishes a turn while the window is in the background. Missing means on. */
   turnNotifications?: boolean;
+  /** #1802: a short sound when a chat needs you, something failed or a chat finished in the background. Missing means off. */
+  sounds?: boolean;
   /**
    * #1402: after this many minutes of one turn, the next tool result starts a fresh turn with an
    * automatic continue (0 = off). Missing means 30.
