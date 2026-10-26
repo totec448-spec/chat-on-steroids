@@ -8129,10 +8129,13 @@ function paintPendingInputs(): void {
 /** How a schedule repeats, in the chosen language: "every weekday at 09:00". */
 function repeatText(repeat: ScheduleRepeat): string {
   if (repeat.kind === 'hours') return repeat.every === 1 ? t('every hour') : tn('every {0} hour', 'every {0} hours', repeat.every);
-  if (repeat.kind === 'daily') return t('every day at {0}', [repeat.at]);
-  if (repeat.kind === 'weekdays') return t('every weekday at {0}', [repeat.at]);
+  // The stored wall-clock time, written the way the next time beside it is (09:00 or 9:00 AM).
+  const [hour, minute] = repeat.at.split(':').map(Number) as [number, number];
+  const at = new Date(2024, 0, 1, hour, minute).toLocaleTimeString(currentLanguage(), { hour: '2-digit', minute: '2-digit' });
+  if (repeat.kind === 'daily') return t('every day at {0}', [at]);
+  if (repeat.kind === 'weekdays') return t('every weekday at {0}', [at]);
   const day = new Intl.DateTimeFormat(currentLanguage(), { weekday: 'long' }).format(new Date(2024, 0, 7 + repeat.day));
-  return t('every {0} at {1}', [day, repeat.at]);
+  return t('every {0} at {1}', [day, at]);
 }
 
 let scheduleLineGeneration = 0;
