@@ -3264,5 +3264,11 @@
   "{0} put back": "{0} 个已还原",
   "and {0} more": "还有 {0} 个",
   "{0} more not listed": "另有 {0} 个未列出",
-  "Touched {0} files, no net change": "改动了 {0} 个文件，没有净变化"
+  "Touched {0} files, no net change": "改动了 {0} 个文件，没有净变化",
+  "Review each Goal step's changes": "检查每个目标步骤的更改",
+  "After a Goal step edits files, a reviewer worker checks those edits and its findings go into the next step. Each reviewed step takes longer and uses more of your ChatGPT usage. Only edits made with the edit tools are reviewed, not files changed by commands. Not used in Loop.": "目标步骤编辑文件后，一个审查子智能体会检查这些更改，发现的问题会写进下一步。每个被审查的步骤会更慢，也会消耗更多 ChatGPT 用量。只审查通过编辑工具做的更改，不审查命令改动的文件。循环中不使用。",
+  "Same model as the Goal chat": "与目标聊天相同的模型",
+  "Sub-agents are off": "子智能体已关闭",
+  "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "审查者以子智能体聊天运行，因此需要子智能体。开启之前不会审查任何内容。",
+  "Turn on Sub-agents": "开启子智能体"
 }

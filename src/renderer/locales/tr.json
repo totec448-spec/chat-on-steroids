@@ -3329,5 +3329,11 @@
   "{0} more not listed": "{0} tane daha listelenmedi",
   "{0} more not listed|one": "{0} tane daha listelenmedi",
   "Touched {0} files, no net change": "{0} dosyaya dokunuldu, net değişiklik yok",
-  "Touched {0} files, no net change|one": "{0} dosyaya dokunuldu, net değişiklik yok"
+  "Touched {0} files, no net change|one": "{0} dosyaya dokunuldu, net değişiklik yok",
+  "Review each Goal step's changes": "Her Hedef adımının değişikliklerini gözden geçir",
+  "After a Goal step edits files, a reviewer worker checks those edits and its findings go into the next step. Each reviewed step takes longer and uses more of your ChatGPT usage. Only edits made with the edit tools are reviewed, not files changed by commands. Not used in Loop.": "Bir Hedef adımı dosyaları düzenlediğinde, gözden geçiren bir yardımcı ajan bu değişiklikleri kontrol eder ve bulguları sonraki adıma eklenir. Gözden geçirilen her adım daha uzun sürer ve ChatGPT kullanımından daha fazla harcar. Yalnızca düzenleme araçlarıyla yapılan değişiklikler gözden geçirilir, komutların değiştirdiği dosyalar değil. Döngü'de kullanılmaz.",
+  "Same model as the Goal chat": "Hedef sohbetiyle aynı model",
+  "Sub-agents are off": "Yardımcı ajanlar kapalı",
+  "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "Gözden geçiren, bir yardımcı ajan sohbeti olarak çalışır, bu yüzden Yardımcı ajanlar gerekir. Açılana kadar hiçbir şey gözden geçirilmez.",
+  "Turn on Sub-agents": "Yardımcı ajanları aç"
 }

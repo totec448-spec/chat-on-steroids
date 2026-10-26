@@ -1146,6 +1146,18 @@ describe('settings writes from more than one UI', () => {
     expect(getConfig().ui.tabsToKeepOpen).toBe(6);
     expect(getConfig().goal).toMatchObject({ helperModel: 'account-helper', helperReasoning: 'medium', model: base.goal.model });
   });
+  it('saves the Goal step reviewer choice, keeps it through a stale unrelated save, and refuses a bad one (#1832)', async () => {
+    const base = defaultConfig();
+    await saveConfig(base);
+    expect((await save({ ...base, goal: { ...base.goal, reviewerModel: 'same' } }, base)).ok).toBe(true);
+    expect(getConfig().goal.reviewerModel).toBe('same');
+    // A form painted before that save does not carry the field back to off.
+    expect((await save({ ...base, ui: { ...base.ui, tabsToKeepOpen: 5 } }, base)).ok).toBe(true);
+    expect(getConfig().goal.reviewerModel).toBe('same');
+    const now = getConfig();
+    expect((await save({ ...now, goal: { ...now.goal, reviewerModel: 'y'.repeat(200) } }, now)).ok).toBe(false);
+    expect(getConfig().goal.reviewerModel).toBe('same');
+  });
   it('saves the secrets shield switch, and keeps it when a form without it saves (#1797)', async () => {
     const base = defaultConfig();
     await saveConfig(base);

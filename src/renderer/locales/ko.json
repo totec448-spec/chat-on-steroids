@@ -3264,5 +3264,11 @@
   "{0} put back": "{0}개 되돌림",
   "and {0} more": "외 {0}개",
   "{0} more not listed": "{0}개는 목록에 없음",
-  "Touched {0} files, no net change": "파일 {0}개를 건드렸지만 순 변경 없음"
+  "Touched {0} files, no net change": "파일 {0}개를 건드렸지만 순 변경 없음",
+  "Review each Goal step's changes": "각 Goal 단계의 변경 사항 검토",
+  "After a Goal step edits files, a reviewer worker checks those edits and its findings go into the next step. Each reviewed step takes longer and uses more of your ChatGPT usage. Only edits made with the edit tools are reviewed, not files changed by commands. Not used in Loop.": "Goal 단계에서 파일을 편집하면 검토 워커가 그 변경 사항을 확인하고, 발견한 내용은 다음 단계에 들어갑니다. 검토하는 단계는 더 오래 걸리고 ChatGPT 사용량을 더 씁니다. 편집 도구로 한 변경만 검토하며, 명령으로 바뀐 파일은 검토하지 않습니다. Loop에서는 사용하지 않습니다.",
+  "Same model as the Goal chat": "Goal 채팅과 같은 모델",
+  "Sub-agents are off": "서브에이전트가 꺼져 있습니다",
+  "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "검토자는 워커 채팅으로 실행되므로 서브에이전트가 필요합니다. 켜기 전까지는 아무것도 검토하지 않습니다.",
+  "Turn on Sub-agents": "서브에이전트 켜기"
 }
