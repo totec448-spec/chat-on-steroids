@@ -41,6 +41,29 @@ describe('request correlation ownership', () => {
     expect((await awaitRequestCorrelation('wfr-missing', 60))?.conversationId).toBe('conv-late');
   });
 
+  // #1752: ChatGPT sometimes sends a tool call's request id with another UUID version digit than the
+  // page's message holds (live: page 93ff44d2-cfea-4f32-…, calls 93ff44d2-cfea-9f32-…); every such call
+  // went unattributed. The other 31 hex digits are random, so they still name one request.
+  it('joins a request id that differs from the page\'s only in its UUID version digit', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+    const page = '93ff44d2-cfea-4f32-8ea7-7a991c9cfe49';
+    const call = '93ff44d2-cfea-9f32-8ea7-7a991c9cfe49';
+    const waiting = awaitRequestCorrelation(call, 20_000);
+    observeRequestCorrelation({ requestId: page, conversationId: 'conv-version', sessionId: 'session-version', messageId: 'm', tool: '', observedAt: 1 });
+    expect((await waiting)?.conversationId).toBe('conv-version');
+    expect(requestCorrelation(call)?.conversationId).toBe('conv-version');
+    expect(requestCorrelation(call.toUpperCase())?.conversationId).toBe('conv-version');
+    // Any other difference is another request.
+    expect(requestCorrelation('93ff44d2-cfea-9f32-8ea7-7a991c9cfe4a')).toBeNull();
+    expect(requestCorrelation('93ff44d2-cfeb-4f32-8ea7-7a991c9cfe49')).toBeNull();
+    // Ids that are not UUIDs are joined exactly, as before.
+    observeRequestCorrelation({ requestId: 'wfr_01a0ec298ec4718b8145bf6a9c2413a2', conversationId: 'conv-wfr', sessionId: 's', messageId: 'm', tool: '', observedAt: 2 });
+    expect(requestCorrelation('wfr_01a0ec298ec4718b8145bf6a9c2413a2')?.conversationId).toBe('conv-wfr');
+    expect(requestCorrelation('wfr_01a0ec298ec4719b8145bf6a9c2413a2')).toBeNull();
+    // A second conversation claiming the same request through the other spelling is refused, as for one spelling.
+    expect(observeRequestCorrelation({ requestId: call, conversationId: 'conv-other', sessionId: 'x', messageId: 'm', tool: '', observedAt: 3 })).toBe('refused');
+  });
+
   it('shares a deadline across overlapping callers instead of restarting their grace', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
     const first = awaitRequestCorrelation('wfr-overlap', 100);
