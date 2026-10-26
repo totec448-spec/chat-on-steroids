@@ -14,6 +14,15 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.46': {
+    lead: () => t("Phone notifications, a settings backup, keys kept from ChatGPT, and high contrast."),
+    highlights: [
+      { icon: 'i-phone', title: () => t("Phone notifications"), text: () => t("Get a note on your phone when a chat needs you or a long chat finishes.") },
+      { icon: 'i-export', title: () => t("Settings backup"), text: () => t("Move your settings to another computer; saved keys only if you choose.") },
+      { icon: 'i-lock', title: () => t("Keys stay with you"), text: () => t("API keys and tokens in what tools return are hidden before ChatGPT sees them.") },
+      { icon: 'i-palette', title: () => t("Easier to read"), text: () => t("High contrast, eight accent colors, line spacing and a more legible font.") }
+    ]
+  },
   '2.1.45': {
     lead: () => t("Chat groups, bookmarks, drafts that wait for you, and a better Review."),
     highlights: [

@@ -62,6 +62,7 @@
 .ph.ph-corners-in::before { content: '\e1ce'; }
 .ph.ph-corners-out::before { content: '\e1d0'; }
 .ph.ph-cube::before { content: '\e1da'; }
+.ph.ph-device-mobile::before { content: '\e1e0'; }
 .ph.ph-dots-three::before { content: '\e1fe'; }
 .ph.ph-dots-three-vertical::before { content: '\e208'; }
 .ph.ph-download-simple::before { content: '\e20c'; }
@@ -77,6 +78,8 @@
 .ph.ph-house::before { content: '\e2c2'; }
 .ph.ph-image::before { content: '\e2ca'; }
 .ph.ph-lightning::before { content: '\e2de'; }
+.ph.ph-link-break::before { content: '\e2e4'; }
+.ph.ph-arrows-left-right::before { content: '\e0a0'; }
 .ph.ph-browser::before { content: '\e0f4'; }
 .ph.ph-brain::before { content: '\e74e'; }
 .ph.ph-list::before { content: '\e2f0'; }
