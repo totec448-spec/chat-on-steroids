@@ -8116,6 +8116,49 @@ it("sums up what a finished answer changed, collapsed, counting only real change
   expect(card.querySelector('.turn-changes-review')!.textContent).toBe('Open in Review');
 });
 
+// CodeRabbit on #1836: a long turn's early edits can be outside the loaded page; a turn can gain an edit
+// after its card loaded; a turn can start again after it ended.
+it('asks for the card of an answer whose turn start is not loaded, and shows none when it edited nothing', async () => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  api.turnChanges = vi.fn(async () => ({ ok: true, data: { changes: [{ path: 'early.ts', state: 'edited', added: 2, removed: 1, approximate: false, diff: 'kept', edits: 1 }], total: 1 } }));
+  await append([
+    { seq: 501, time: T0 + 501_000, source: 'extension', kind: 'assistant_message', turnId: 't-long', messageId: 'a-long', message: text('All done.'), final: true, state: 'final' } as SessionEvent,
+    { seq: 502, time: T0 + 502_000, source: 'extension', kind: 'turn_end', turnId: 't-long', outcome: 'completed' } as SessionEvent
+  ]);
+  await append([]);
+  expect(api.turnChanges).toHaveBeenCalledWith(expect.any(String), 't-long', 0);
+  expect(w.document.querySelector('.turn-changes')?.textContent).toContain('Changed 1 file');
+});
+
+it('refreshes the card when its finished turn gains another edit, and hides it while the turn runs again', async () => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  let files = 1;
+  api.turnChanges = vi.fn(async () => ({ ok: true, data: { changes: Array.from({ length: files }, (_, i) => ({ path: `f${i}.ts`, state: 'edited', added: 1, removed: 0, approximate: false, diff: 'kept', edits: 1 })), total: files } }));
+  const edit = (seq: number, path: string): SessionEvent => {
+    const call = toolCall(seq, `edit-late-${seq}`) as Extract<SessionEvent, { kind: 'tool_call' }>;
+    return { ...call, turnId: 't-late', call: { ...call.call, tool: 'apply_patch', summary: { kind: 'edit', tone: 'good', title: `Edited ${path}` },
+      changes: [{ path, added: 1, removed: 0, approximate: false, reviewAssetId: `asset-${seq}` }] } } as SessionEvent;
+  };
+  await append([
+    { seq: 600, time: T0 + 600_000, source: 'extension', kind: 'turn_start', turnId: 't-late' } as SessionEvent,
+    edit(601, 'f0.ts'),
+    { seq: 602, time: T0 + 602_000, source: 'extension', kind: 'assistant_message', turnId: 't-late', messageId: 'a-late', message: text('Done.'), final: true, state: 'final' } as SessionEvent,
+    { seq: 603, time: T0 + 603_000, source: 'extension', kind: 'turn_end', turnId: 't-late', outcome: 'completed' } as SessionEvent
+  ]);
+  await append([]);
+  expect(w.document.querySelector('.turn-changes')?.textContent).toContain('Changed 1 file');
+  files = 2;
+  await append([edit(604, 'f1.ts')]);
+  await append([]);
+  expect(w.document.querySelector('.turn-changes')?.textContent).toContain('Changed 2 files');
+  // The same turn starts again: its card waits until it is over again.
+  await append([{ seq: 605, time: T0 + 605_000, source: 'extension', kind: 'turn_start', turnId: 't-late' } as SessionEvent]);
+  await append([]);
+  expect(w.document.querySelector('.turn-changes')).toBeNull();
+});
+
 it('shows no Changed files card for a turn whose only edits were a worker\'s, or that edited nothing', async () => {
   const { w, append } = await boot([]);
   const api = (w as any).api;

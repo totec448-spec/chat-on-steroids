@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { netTurnChanges, netTurnFileDiff, turnFileEdits } from '../src/main/session/turn-changes.js';
 import type { SessionEvent, ToolCallRecord } from '../src/shared/session.js';
 
@@ -104,3 +104,41 @@ it('reads the net diff from the stored edit records', async () => {
     expect(await netTurnFileDiff(files, 'other.ts', review)).toBeNull();
   } finally { store.resetSessionStoreForTests(); await removeTempDir(dir); }
 });
+
+it('keeps the net diff when only an edit between the first and the last lost its record (CodeRabbit)', async () => {
+  seq = 0;
+  const events = [call('t', [{ path: 'a.ts' }]), call('t', [{ path: 'a.ts', kept: false }]), call('t', [{ path: 'a.ts' }])];
+  const ends: Record<string, { before: string; after: string }> = {
+    [events[0]!.kind === 'tool_call' ? events[0]!.call.callId : '']: { before: 'one\n', after: 'two\n' },
+    [events[2]!.kind === 'tool_call' ? events[2]!.call.callId : '']: { before: 'three\n', after: 'four\n' }
+  };
+  const files = turnFileEdits(events, 't');
+  expect(files[0]).toMatchObject({ edits: 3, unavailable: null });
+  expect(await netTurnFileDiff(files, 'a.ts', async ({ callId }) => ends[callId] ?? null)).toEqual({ before: 'one\n', after: 'four\n' });
+  // An end that was not kept still makes the net diff unavailable.
+  const lastLost = turnFileEdits([call('u', [{ path: 'b.ts' }]), call('u', [{ path: 'b.ts', kept: false }])], 'u');
+  expect(lastLost[0]).toMatchObject({ unavailable: 'not-kept' });
+});
+
+it('says once why a recorded edit could not be shown, never its content (CodeRabbit)', async () => {
+  const { makeTempDir, removeTempDir } = await import('./helpers.js');
+  const dir = await makeTempDir('cos-turn-changes-log-');
+  const store = await import('../src/main/session/store.js');
+  const logger = await import('../src/main/logger.js');
+  const warn = vi.spyOn(logger, 'logWarn');
+  store.initSessionStore(dir);
+  try {
+    const session = await store.createSession({ title: 'Changes' });
+    const damaged = (await store.writeAsset(session.id, Buffer.from('{not json secret-content'), 'text/plain')).id;
+    expect(await store.readEditReviewAsset(session.id, damaged)).toBeNull();
+    expect(await store.readEditReviewAsset(session.id, damaged)).toBeNull();
+    expect(await store.readEditReviewAsset(session.id, 'f'.repeat(64))).toBeNull();
+    const lines = warn.mock.calls.map(call => String(call[0])).filter(line => line.startsWith('turn changes:'));
+    expect(lines).toEqual([
+      `turn changes: recorded edit ${damaged.slice(0, 12)} is damaged; its file shows approximate counts`,
+      `turn changes: recorded edit ${'f'.repeat(12)} is missing or too large; its file shows approximate counts`
+    ]);
+    expect(lines.join()).not.toContain('secret-content');
+  } finally { warn.mockRestore(); store.resetSessionStoreForTests(); await removeTempDir(dir); }
+});
+
