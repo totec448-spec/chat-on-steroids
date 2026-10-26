@@ -3254,5 +3254,22 @@
   "Keys stay with you": "Tus claves se quedan contigo",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Las claves de API y los tokens en lo que devuelven las herramientas se ocultan antes de que ChatGPT los vea.",
   "Easier to read": "Más fácil de leer",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Alto contraste, ocho colores de acento, interlineado y una fuente más legible."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Alto contraste, ocho colores de acento, interlineado y una fuente más legible.",
+  "Chat On Steroids wants to use your mouse and keyboard": "Chat On Steroids quiere usar tu ratón y teclado",
+  "Click": "Hacer clic",
+  "Double-click": "Hacer doble clic",
+  "Type": "Escribir",
+  "Press keys": "Pulsar teclas",
+  "Scroll": "Desplazar",
+  "Drag": "Arrastrar",
+  "Move the pointer": "Mover el puntero",
+  "Switch windows": "Cambiar de ventana",
+  "Open an app": "Abrir una app",
+  "Use the mouse and keyboard": "Usar el ratón y el teclado",
+  "{0} in {1}": "{0} en {1}",
+  "Go ahead": "Adelante",
+  "Ask before using the mouse and keyboard": "Preguntar antes de usar el ratón y el teclado",
+  "A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for 2 minutes, until you use the mouse or keyboard again. Browser steps never ask.": "Una pequeña pregunta en la esquina de la pantalla, con Adelante y Ahora no. Adelante deja seguir a ese chat 2 minutos, hasta que vuelvas a usar el ratón o el teclado. Los pasos del navegador nunca preguntan.",
+  "Ask while I'm using the computer": "Preguntar mientras uso el equipo",
+  "Always ask": "Preguntar siempre"
 }

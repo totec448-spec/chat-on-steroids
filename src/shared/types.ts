@@ -232,6 +232,12 @@ export interface UiPrefs {
   chatBrowser?: ChatBrowser;
   /** Where a minimized built-in browser window goes (default: the taskbar or Dock). */
   cosBrowserMinimize?: 'taskbar' | 'tray';
+  /**
+   * #1804: before a desktop step clicks, types or moves the pointer: never ask (missing, 'off'), ask
+   * while the person used the computer in the last 30 s ('active'), or ask whenever the chat holds no
+   * 2-minute Go ahead ('always').
+   */
+  desktopAsk?: 'off' | 'active' | 'always';
   /** Explicit choice, never inherited from the OS: the window looks how you left it. */
   theme: 'light' | 'dark';
   appearance?: import('./appearance.js').AppearanceSettings;

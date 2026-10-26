@@ -5326,6 +5326,20 @@ shown in Settings and as the chat notice `#desktopAccessNotice` with Repair perm
 own missing entries (`MACOS_BUNDLE_ID`, electron-builder's `appId`), a screen-source request for
 Screen Recording and Electron's Accessibility prompt, so macOS asks again for the running build.
 
+**Ask before the mouse and keyboard (#1804).** `ui.desktopAsk` (`off` default, `active`, `always`;
+macOS and Windows only, Settings row `#desktopAsk` under the control permission) gates every step
+that takes the real pointer or keyboard: the Windows input methods (`windowsStep`) and the macOS
+`computer` tool's pointer/keyboard actions (`macosStep`; waits and clipboard steps never ask).
+Browser tools never ask. The rule is `shared/desktop-ask.ts`: the person's input counts only after
+the app's own last step ended plus the idle clock's 1 s resolution; under 30 s is "active"; a
+locked screen is away; missing idle information asks; Go ahead grants that chat (session, else
+conversation, else transport key; none means no grant) 2 minutes, ended early by the person's next
+input. `main/desktop-ask.ts` asks one question at a time in arrival order and re-checks a step that
+waited. `main/desktop-ask-window.ts` shows the non-activating top-right panel (preload
+`desktop-ask` → `desktop-ask:answer`, sender-checked); no answer in 60 s, closing or a crashed
+page is a refusal. A refusal is the tool error `DECLINED_BY_USER: …` and nothing runs; nothing
+retries by itself. One `desktop ask:` log line per decision, never the step's text.
+
 `computer/index.ts` owns native actions, capture frames/accessibility refs, batching and
 postconditions. Registrars own live capability checks. Windows `windows-api.ts` implements the
 13 Window2 methods: `list_windows`, `get_window`, `list_apps`, `launch_app`, `get_window_state`,

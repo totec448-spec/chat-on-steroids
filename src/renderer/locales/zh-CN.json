@@ -3142,5 +3142,22 @@
   "Keys stay with you": "密钥留在你这里",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "工具返回内容中的 API 密钥和令牌会在 ChatGPT 看到之前被隐藏。",
   "Easier to read": "更易阅读",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "高对比度、八种强调色、行距和更易读的字体。"
+  "High contrast, eight accent colors, line spacing and a more legible font.": "高对比度、八种强调色、行距和更易读的字体。",
+  "Chat On Steroids wants to use your mouse and keyboard": "Chat On Steroids 想使用你的鼠标和键盘",
+  "Click": "点击",
+  "Double-click": "双击",
+  "Type": "输入",
+  "Press keys": "按键",
+  "Scroll": "滚动",
+  "Drag": "拖动",
+  "Move the pointer": "移动指针",
+  "Switch windows": "切换窗口",
+  "Open an app": "打开应用",
+  "Use the mouse and keyboard": "使用鼠标和键盘",
+  "{0} in {1}": "在 {1} 中{0}",
+  "Go ahead": "继续",
+  "Ask before using the mouse and keyboard": "使用鼠标和键盘前先询问",
+  "A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for 2 minutes, until you use the mouse or keyboard again. Browser steps never ask.": "屏幕角落会出现一个小提问，带有“继续”和“暂不”。选择“继续”后，该聊天可继续 2 分钟，直到你再次使用鼠标或键盘。浏览器步骤从不询问。",
+  "Ask while I'm using the computer": "我在使用电脑时询问",
+  "Always ask": "总是询问"
 }

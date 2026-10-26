@@ -117,6 +117,17 @@ it.each(['playfulStatus', 'playfulContinue', 'followOutput', 'announceTurns'] as
   expect(getConfig().ui[key]).toBe(wanted);
 });
 
+it('saves the ask-before-mouse-and-keyboard choice (#1804), keeps it through a stale save, and refuses an unknown one', async () => {
+  const base = getConfig();
+  expect(await save({ ...base, ui: { ...base.ui, desktopAsk: 'always' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.desktopAsk).toBe('always');
+  expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.desktopAsk).toBe('always');
+  const now = getConfig();
+  expect(await save({ ...now, ui: { ...now.ui, desktopAsk: 'sometimes' } }, now)).toMatchObject({ ok: false });
+  expect(getConfig().ui.desktopAsk).toBe('always');
+});
+
 it('saves Auto-select Skills through Settings and preserves it across a stale unrelated save', async () => {
   const base = getConfig();
   const wanted = !(base.ui.autoSelectSkills ?? false);

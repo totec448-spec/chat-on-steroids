@@ -5124,3 +5124,11 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 @media (prefers-reduced-motion: reduce) { .chat-find { animation: none; } }
 ::highlight(chat-find) { background-color: var(--accent-wash); color: inherit; }
 ::highlight(chat-find-current) { background-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--ink); }
+
+/* #1804: asking before the mouse and keyboard are used, under the permission to control them.
+   No box of its own: the text in the rows' text column, the choice under it. */
+.tools .tool.desktop-ask-row { cursor: default; }
+.tools .tool.desktop-ask-row:hover { background: none; }
+.tools .tool.desktop-ask-row[hidden] { display: none; }
+.tools .tool.desktop-ask-row > span, .tools .tool.desktop-ask-row > select { grid-column: 2; }
+.tools .tool.desktop-ask-row > select { justify-self: start; max-width: 100%; }

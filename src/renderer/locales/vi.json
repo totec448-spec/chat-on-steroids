@@ -3142,5 +3142,22 @@
   "Keys stay with you": "Khóa ở lại với bạn",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Khóa API và token trong kết quả công cụ trả về được ẩn trước khi ChatGPT thấy.",
   "Easier to read": "Dễ đọc hơn",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Độ tương phản cao, tám màu nhấn, giãn dòng và phông chữ dễ đọc hơn."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Độ tương phản cao, tám màu nhấn, giãn dòng và phông chữ dễ đọc hơn.",
+  "Chat On Steroids wants to use your mouse and keyboard": "Chat On Steroids muốn dùng chuột và bàn phím của bạn",
+  "Click": "Nhấp",
+  "Double-click": "Nhấp đúp",
+  "Type": "Gõ",
+  "Press keys": "Nhấn phím",
+  "Scroll": "Cuộn",
+  "Drag": "Kéo",
+  "Move the pointer": "Di chuyển con trỏ",
+  "Switch windows": "Chuyển cửa sổ",
+  "Open an app": "Mở một ứng dụng",
+  "Use the mouse and keyboard": "Dùng chuột và bàn phím",
+  "{0} in {1}": "{0} trong {1}",
+  "Go ahead": "Tiếp tục",
+  "Ask before using the mouse and keyboard": "Hỏi trước khi dùng chuột và bàn phím",
+  "A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for 2 minutes, until you use the mouse or keyboard again. Browser steps never ask.": "Một câu hỏi nhỏ ở góc màn hình, với Tiếp tục và Để sau. Tiếp tục cho cuộc trò chuyện đó làm tiếp trong 2 phút, cho đến khi bạn dùng lại chuột hoặc bàn phím. Các bước trong trình duyệt không bao giờ hỏi.",
+  "Ask while I'm using the computer": "Hỏi khi tôi đang dùng máy tính",
+  "Always ask": "Luôn hỏi"
 }

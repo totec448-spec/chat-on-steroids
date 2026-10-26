@@ -3142,5 +3142,22 @@
   "Keys stay with you": "키는 내 컴퓨터에",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "도구가 돌려주는 내용 속 API 키와 토큰은 ChatGPT가 보기 전에 숨겨집니다.",
   "Easier to read": "더 읽기 쉽게",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "고대비, 강조 색상 8가지, 줄 간격, 더 읽기 쉬운 글꼴."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "고대비, 강조 색상 8가지, 줄 간격, 더 읽기 쉬운 글꼴.",
+  "Chat On Steroids wants to use your mouse and keyboard": "Chat On Steroids가 마우스와 키보드를 사용하려고 합니다",
+  "Click": "클릭",
+  "Double-click": "더블클릭",
+  "Type": "입력",
+  "Press keys": "키 누르기",
+  "Scroll": "스크롤",
+  "Drag": "드래그",
+  "Move the pointer": "포인터 이동",
+  "Switch windows": "창 전환",
+  "Open an app": "앱 열기",
+  "Use the mouse and keyboard": "마우스와 키보드 사용",
+  "{0} in {1}": "{1}에서 {0}",
+  "Go ahead": "계속",
+  "Ask before using the mouse and keyboard": "마우스와 키보드를 쓰기 전에 묻기",
+  "A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for 2 minutes, until you use the mouse or keyboard again. Browser steps never ask.": "화면 모서리에 계속 / 나중에 버튼이 있는 작은 질문이 나타납니다. 계속을 누르면 그 채팅은 2분 동안, 또는 마우스나 키보드를 다시 쓸 때까지 진행합니다. 브라우저 단계는 묻지 않습니다.",
+  "Ask while I'm using the computer": "컴퓨터를 사용하는 동안 묻기",
+  "Always ask": "항상 묻기"
 }
