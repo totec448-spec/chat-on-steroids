@@ -145,7 +145,7 @@ let filterFor: string | null = null;
 
 interface Deps {
   /** The renderer's single save path — reads every control, including ours. */
-  save: () => Promise<void>;
+  save: () => Promise<boolean>;
   state: () => AppState | null;
 }
 
@@ -7533,7 +7533,7 @@ function applyGoal(state: AppState, previous?: Config): void {
   if (goalModels.length > 0) paintGoalModels();
 }
 
-function wireGoal(save: () => Promise<void>): void {
+function wireGoal(save: () => Promise<boolean>): void {
   $<HTMLTextAreaElement>('handoffPrompt').maxLength = MAX_HANDOFF_PROMPT_CHARS;
   $('handoffPromptEdit').addEventListener('click', () => {
     const panel = $('handoffPromptPanel');
@@ -7556,8 +7556,7 @@ function wireGoal(save: () => Promise<void>): void {
   });
   $('customContinueReset').addEventListener('click', async () => {
     $<HTMLTextAreaElement>('customContinue').value = '';
-    await save();
-    toast(t('Continue prompt restored to default'));
+    if (await save()) toast(t('Continue prompt restored to default'));
   });
   // #1856: Personality and Writing style of new chats; main.ts owns the ui fields they save into.
   for (const [id, fallback, restored] of [
@@ -7573,8 +7572,8 @@ function wireGoal(save: () => Promise<void>): void {
     });
     $(`${id}Reset`).addEventListener('click', async () => {
       $<HTMLTextAreaElement>(id).value = fallback;
-      await save();
-      toast(restored());
+      // Said only when the save went through; a refused one keeps the person's text stored.
+      if (await save()) toast(restored());
     });
   }
   $<HTMLTextAreaElement>('goalPrompt').maxLength = MAX_GOAL_SYSTEM_PROMPT_CHARS;
