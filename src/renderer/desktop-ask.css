@@ -2,12 +2,13 @@
 :root { --page: #f4f4f5; --ink: #0c0c0e; --soft: #56565e; --edge: #dcdce1; --hover: #e7e7ea; --accent: #486f9d; color-scheme: light; }
 :root[data-theme="dark"] { --page: #181818; --ink: #eceeeb; --soft: #b5b7b3; --edge: #363834; --hover: #2c2d2b; --accent: #b0cbed; color-scheme: dark; }
 * { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; }
+html, body { margin: 0; }
 body {
   background: var(--page); color: var(--ink); overflow: hidden; cursor: default; user-select: none;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing: antialiased;
 }
-.desktop-ask { display: flex; flex-direction: column; justify-content: space-between; gap: 12px; height: 100%; padding: 14px 16px; border: 1px solid var(--edge); border-radius: 10px; }
+/* As tall as its words: the window takes this height before it shows (a longer language wraps the title). */
+.desktop-ask { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; border: 1px solid var(--edge); }
 .desktop-ask-text { min-width: 0; }
 h1 { margin: 0; font-size: 13px; font-weight: 650; line-height: 1.35; }
 .step, .chat { margin: 3px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; line-height: 1.4; }

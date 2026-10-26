@@ -19,6 +19,7 @@ import type { MainText } from '../shared/main-texts.js';
 
 const WIDTH = 360;
 const HEIGHT = 118;
+const MAX_HEIGHT = 240;
 const MARGIN = 16;
 
 const STEP_TEXT: Record<DesktopStepWords, MainText> = {
@@ -68,7 +69,16 @@ export function showDesktopAskPrompt(prompt: DesktopAskPrompt): Promise<'go' | '
     // Closed some other way (the system, a crash): nothing was allowed.
     win.on('closed', () => finish('not-now'));
     win.webContents.on('render-process-gone', () => finish('not-now'));
-    win.once('ready-to-show', () => { if (!win.isDestroyed()) win.showInactive(); });
+    // As tall as its words, then shown without taking the focus.
+    win.webContents.once('did-finish-load', () => {
+      void win.webContents.executeJavaScript('document.querySelector(".desktop-ask").getBoundingClientRect().height')
+        .catch(() => HEIGHT)
+        .then(height => {
+          if (win.isDestroyed()) return;
+          win.setBounds({ ...win.getBounds(), height: Math.min(MAX_HEIGHT, Math.max(HEIGHT, Math.ceil(Number(height) || HEIGHT))) });
+          win.showInactive();
+        });
+    });
     const query = {
       title: mainText('Chat On Steroids wants to use your mouse and keyboard'), step: stepLine(prompt), chat: (prompt.chat ?? '').slice(0, 120),
       go: mainText('Go ahead'), notNow: mainText('Not now'),
