@@ -143,3 +143,29 @@ it("words a Windows step and names its window's app, and asks nothing of steps t
   expect(macosStep([{ type: 'keypress' }])).toEqual({ words: 'keys', app: null });
   expect(macosStep([{ type: 'wait' }, { type: 'read_clipboard' }, { type: 'write_clipboard' }])).toBeNull();
 });
+
+it('says in the log that a call with no known chat asks again, since Go ahead has no chat to cover (live VM test)', async () => {
+  // ChatGPT's connector is stateless (no MCP session id), so an unattributed call has no key at all.
+  const ask = gate('always');
+  answers = ['go', 'go'];
+  const nobody = { sessionId: null, conversationId: null, transportKey: null };
+  expect(await ask.admit({ words: 'launch', app: 'notepad.exe' }, nobody)).toBeNull();
+  ask.stepEnded();
+  clock += 1_000;
+  expect(await ask.admit({ words: 'launch', app: 'notepad.exe' }, nobody)).toBeNull();
+  expect(asked).toHaveLength(2);
+  expect(logs).toEqual([
+    'desktop ask: allowed an app launch (always); no chat is known for this call, so its next step asks again',
+    'desktop ask: allowed an app launch (always); no chat is known for this call, so its next step asks again'
+  ]);
+});
+
+it('words the step with its app: the app a step goes to, or the app it opens (live VM test)', async () => {
+  const { stepLine } = await import('../src/main/desktop-ask.js');
+  const same = (text: string) => text;
+  expect(stepLine({ words: 'click', app: 'Notepad' }, same)).toBe('Click in Notepad');
+  // Opening an app names that app as what opens, not as where the step happens.
+  expect(stepLine({ words: 'launch', app: 'notepad.exe' }, same)).toBe('Open notepad.exe');
+  expect(stepLine({ words: 'launch', app: null }, same)).toBe('Open an app');
+  expect(stepLine({ words: 'type', app: 'x'.repeat(200) }, same)).toBe(`Type in ${'x'.repeat(80)}`);
+});

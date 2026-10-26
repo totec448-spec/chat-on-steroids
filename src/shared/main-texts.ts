@@ -98,6 +98,7 @@ export const MAIN_TEXTS = [
   '{0} in {1}',
   'Go ahead',
   'Not now',
+  'Open {0}',
   // A chat shared as a web page: the page's own labels ('You' is above).
   'New chat',
   'hidden',
