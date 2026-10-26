@@ -1104,13 +1104,15 @@ function noteFinishWork(summary: SessionSummary, event: SessionEvent): void {
 /** The first line of an answer with its Markdown marks taken off, at most 200 characters, or null. */
 export function answerLine(text: string): string | null {
   for (const raw of text.split('\n')) {
+    // A code fence's marker, on the raw line: stripping inline marks first would turn ``` into `.
+    if (/^\s*(?:```|~~~)/.test(raw)) continue;
     const line = raw
       .replace(/^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)/, '')
       .replace(/(\*\*|__|\*|_|`)(.+?)\1/g, '$2')
       .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
       .replace(/\s+/g, ' ')
       .trim();
-    if (line && !/^(?:```.*|---+|\*\*\*+)$/.test(line)) return line.length > 200 ? `${line.slice(0, 199)}…` : line;
+    if (line && !/^(?:---+|\*\*\*+)$/.test(line)) return line.length > 200 ? `${line.slice(0, 199)}…` : line;
   }
   return null;
 }
@@ -1142,8 +1144,9 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
         // A failed or doubtful step keeps its tool row's color in the worker's dock line (#1831).
         ...(tone === 'bad' || tone === 'warn' ? { tone } : {})
       };
-      // A new step means ChatGPT's approval card, if one held the turn, was answered.
-      summary.approvalWaitingAt = null;
+      // A new step means ChatGPT's approval card, if one held the turn, was answered. By time, not by
+      // the order events are applied in: a rebuild applies canonical answers after the journal.
+      if ((summary.approvalWaitingAt ?? 0) <= event.time) summary.approvalWaitingAt = null;
     }
     if (event.call.endsActivity === true) {
       summary.lastFinishReportAt = Math.max(summary.lastFinishReportAt ?? 0, event.time);
@@ -1159,7 +1162,7 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
   if (event.kind === 'assistant_message' && (event.final === true || event.state === 'final')) {
     if (event.time >= (summary.lastAssistantFinalAt ?? 0)) {
       summary.lastAnswerLine = answerLine(event.message.text);
-      summary.approvalWaitingAt = null;
+      if ((summary.approvalWaitingAt ?? 0) <= event.time) summary.approvalWaitingAt = null;
     }
     summary.lastAssistantFinalAt = Math.max(summary.lastAssistantFinalAt ?? 0, event.time);
   }

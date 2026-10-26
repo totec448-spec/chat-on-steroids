@@ -562,4 +562,8 @@ it("gives each worker one line of what it is doing: a wait on ChatGPT's approval
   // Nothing to say yet: no empty line.
   panel.update('p', [worker('b', { toolCalls: 0, lastToolCallAt: null, lastToolActivity: null })]);
   expect(line('b')).toBeNull();
+  // Being woken for a new job: its previous answer belongs to the old job, so it is not shown (CodeRabbit).
+  states.c = 'waking';
+  panel.update('p', [worker('c', { lastAssistantFinalAt: now - 1_000, lastAnswerLine: 'Done. All 12 tests pass now' })]);
+  expect(line('c')).toBeNull();
 });
