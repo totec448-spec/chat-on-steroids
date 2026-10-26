@@ -165,6 +165,16 @@ describe('send check (#1794)', () => {
       expect(asked[0]!.chat).toEqual({ session: sessionId, project: null, worker: null });
     } finally { setSendCheckRetryForTests(); }
   });
+  it('checks a step of a chat whose own switch is on while the app-wide Goal is off (CodeRabbit)', async () => {
+    const id = 'send-check-chat-switch';
+    const { asked, sessionId } = await checked(id, [{ allow: true }]);
+    const config = (await import('../src/main/config.js')).getConfig();
+    await saveConfig({ ...config, goal: { ...config.goal, enabled: false } });
+    expect(goal.goalArmedFor(id)).toBe(true);
+    goal.startGoalDraft({ conversationId: id, sessionId, turnId: 'chat-switch-turn' });
+    await vi.waitFor(() => expect(goal.goalViewFor(id)?.stage).toBe('ready'), { timeout: 5_000, interval: 10 });
+    expect(asked.map(body => body.kind)).toEqual(['goal-step']);
+  });
   it('stops asking about a held step once Goal is turned off for the chat', async () => {
     const { setSendCheckRetryForTests } = await import('../src/main/send-check.js');
     setSendCheckRetryForTests(30);

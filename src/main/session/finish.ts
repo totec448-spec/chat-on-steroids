@@ -180,8 +180,14 @@ async function prepareNotice(sessionId: string, summary: string, userRequested =
           if (!verdict.allowed) {
             // Nothing more is coming this turn, so the hold is released rather than kept waiting
             // for a step that will not be sent; the next session_finish would only ask again.
-            await releaseSessionFinish(sessionId, turnId).catch(error => logWarn(`finish: hold not released after a send check hold: ${(error as Error).message}`));
-            result = "The person's send check held the automatic Goal instruction, so none was queued. The finish hold was released; ChatGPT may complete its answer.";
+            try {
+              await releaseSessionFinish(sessionId, turnId);
+              result = "The person's send check held the automatic Goal instruction, so none was queued. The finish hold was released; ChatGPT may complete its answer.";
+            } catch (error) {
+              // Said as it is: a release that was not saved leaves the hold in place.
+              logWarn(`finish: hold not released after a send check hold: ${(error as Error).message}`);
+              result = `The person's send check held the automatic Goal instruction, so none was queued. The finish hold could not be released (${(error as Error).message}), so it stays in place.`;
+            }
           } else if (!(await currentDecision())) {
             result = 'The turn changed or new user instructions took priority; the old Goal follow-up was discarded.';
           } else {

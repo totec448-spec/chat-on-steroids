@@ -98,4 +98,32 @@ describe('finish producer to durable injection integration', () => {
       expect((await getSession(session.id))?.finishTurn?.released ?? false).toBe(verdict === 'hold');
     } finally { vi.unstubAllGlobals(); }
   });
+
+  it('does not say the hold was released when that release could not be saved (CodeRabbit)', async () => {
+    directory = await makeTempDir('clf-finish-send-check-release-');
+    initConfigPath(directory); initDurableStore(directory); initSessionStore(directory);
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, finishTool: true, finishAction: 'goal', sendCheckUrl: 'http://127.0.0.1:8123/check' } });
+    const conversationId = randomUUID();
+    const session = await createSession({ conversationId, title: 'Finish release fails' });
+    // The check holds the step, and meanwhile a new turn starts: the old turn's hold cannot be released.
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      await appendEvent(session.id, { source: 'extension', kind: 'turn_start', turnId: 'turn-two', time: 3000 });
+      return Response.json({ allow: false, reason: 'budget' });
+    }));
+    try {
+      hooks.caller = { sessionId: session.id, conversationId };
+      await appendEvent(session.id, { source: 'extension', kind: 'turn_start', turnId: 'turn-one', time: 1000 });
+      await observeSessionModel(session.id, conversationId, 'gpt-6-pro', 1500);
+      await setGoalSwitchNow(conversationId, 'goal', true);
+      hooks.followup.mockResolvedValue('Inspect the remaining work');
+      await announceSessionFinish(session.id, 'Wrapping up');
+      await settleSessionFinishForTests();
+      const { readEvents } = await import('../src/main/session/store.js');
+      const said = JSON.stringify(await readEvents(session.id));
+      expect(said).toContain("The person's send check held the automatic Goal instruction, so none was queued.");
+      expect(said).not.toContain('The finish hold was released');
+      expect(said).toContain('The finish hold could not be released');
+    } finally { vi.unstubAllGlobals(); }
+  });
 });
+
