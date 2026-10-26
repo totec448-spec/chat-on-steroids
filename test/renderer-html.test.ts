@@ -204,6 +204,56 @@ describe('captured ChatGPT rendered HTML', () => {
     expect(renderedMarkdown(source).querySelector('.markdown-dil-chart')).not.toBeNull();
   });
 
+  it.each([
+    { name: 'blockquote ends at a blank line', nested: '> ```json\n> example\n\nPlain text.' },
+    { name: 'blockquote ends at an unquoted line', nested: '> ```json\n> example\nPlain text.' },
+    { name: 'list item ends at a shallower line', nested: '- ```json\n  example\nPlain text.' },
+    { name: 'list continuation fence ends with its item', nested: '- Example\n  ```json\n  example\nPlain text.' }
+  ])('renders a canonical chart after a nested unclosed fence when $name', ({ nested }) => {
+    const chart = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Valid later chart', value: 7 }]
+    } } })}\uE201`;
+    const rendered = renderedMarkdown(`${nested}\n\n${chart}\n\nAfter the chart.`);
+    expect(rendered.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(rendered.querySelector('.markdown-dil-chart')?.getAttribute('aria-label')).toContain('Valid later chart 7');
+    expect(rendered.textContent).toContain('After the chart.');
+  });
+
+  it('recognizes a new top-level fence on the line that ends a blockquote fence', () => {
+    const chart = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Outside', value: 9 }]
+    } } })}\uE201`;
+    const rendered = renderedMarkdown(`> \`\`\`text\n> quoted code\n\`\`\`text\n${chart}\n\`\`\`\n\n${chart}`);
+    expect(rendered.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(rendered.querySelector('pre code')?.textContent).toContain('quoted code');
+    expect([...rendered.querySelectorAll('pre code')].some(code => code.textContent?.includes(chart))).toBe(true);
+  });
+
+  it('does not rescan the same paragraph text for every recorded-layout match start', () => {
+    const source = Array.from({ length: 40 }, () => 'Repeated').join('\n\n');
+    const html = '<div data-d-component="box" data-d-has-border="">' +
+      Array.from({ length: 35 }, () => '<p>Repeated</p>').join('') + '<p>Missing</p></div>';
+    const descriptor = Object.getOwnPropertyDescriptor(dom.window.Node.prototype, 'textContent')!;
+    let repeatedReads = 0;
+    Object.defineProperty(dom.window.Node.prototype, 'textContent', {
+      ...descriptor,
+      get(this: Node) {
+        const value = descriptor.get!.call(this) as string | null;
+        if (this.nodeType === 3 && value === 'Repeated') repeatedReads++;
+        return value;
+      }
+    });
+    try {
+      const rendered = renderedMarkdown(source, whole(html));
+      expect(rendered.querySelector('.markdown-dil-panel')).toBeNull();
+      expect(rendered.querySelectorAll('p')).toHaveLength(40);
+      // One word extraction per canonical paragraph, not 40 per start position.
+      expect(repeatedReads).toBeLessThan(160);
+    } finally {
+      Object.defineProperty(dom.window.Node.prototype, 'textContent', descriptor);
+    }
+  });
+
   it('renders the recorded native URL token as its authored label and opens it through validated IPC', () => {
     const openLink = vi.fn(async () => ({ ok: true, data: true }));
     (dom.window as any).api.openLink = openLink;
