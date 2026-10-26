@@ -1747,7 +1747,13 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('playfulContinue'), config.ui.playfulContinue === true, previousState?.config.ui.playfulContinue);
   applyChecked($<HTMLInputElement>('announceTurns'), config.ui.announceTurns === true, previousState?.config.ui.announceTurns);
   applyValue($<HTMLTextAreaElement>('customContinue'), config.ui.customContinue ?? '', previousState ? previousState.config.ui.customContinue ?? '' : undefined);
-  applyValue($<HTMLInputElement>('sendCheckUrl'), config.ui.sendCheckUrl ?? '', previousState ? previousState.config.ui.sendCheckUrl ?? '' : undefined);
+  // An address that is not on this computer is never saved, so it stays in the field with its
+  // error until the person fixes it; the error always matches what the field holds.
+  const sendCheckField = $<HTMLInputElement>('sendCheckUrl');
+  const typed = sendCheckField.value.trim();
+  if (typed === '' || sendCheckUrl(typed) !== null)
+    applyValue(sendCheckField, config.ui.sendCheckUrl ?? '', previousState ? previousState.config.ui.sendCheckUrl ?? '' : undefined);
+  sendCheckValid();
   applyChecked($<HTMLInputElement>('followOutput'), config.ui.followOutput !== false, previousState?.config.ui.followOutput);
   applyChecked($<HTMLInputElement>('mentionCore'), config.ui.mentionCore !== false, previousState?.config.ui.mentionCore);
   applyChecked($<HTMLInputElement>('mentionPlugins'), config.ui.mentionPlugins === true, previousState?.config.ui.mentionPlugins);

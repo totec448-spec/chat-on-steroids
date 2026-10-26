@@ -162,7 +162,7 @@ export function automaticSendKind(row: Pick<InputEntry, 'recovery' | 'purpose' |
 }
 
 /** Held by the send check until its next ask; clearing the check's address releases it at once. */
-function heldBySendCheck(row: InputEntry, now = Date.now()): boolean {
+export function heldBySendCheck(row: InputEntry, now = Date.now()): boolean {
   return !!row.sendCheck && !!getConfig().ui.sendCheckUrl && row.sendCheck.nextAt > now;
 }
 const STATE = 'session-input';
@@ -1789,7 +1789,9 @@ export function claimBrowserInput(id: string, owner: string, conversationId: str
     if (entry.projectId) await projectWorkspace(entry.projectId);
     if (entry.sessionId) {
       if (current.some((row) => !sameDelivery(entry, row) && row.sessionId === entry.sessionId && ['browser', 'tool'].includes(row.state))) return null;
-      const first = ordered(current).find((row) => row.sessionId === entry.sessionId && row.state === 'queued' && queuedFollowup(row) === queuedFollowup(entry) && row.dueAt <= Date.now());
+      // A row the send check holds waits apart: it never holds back a later message (#1794).
+      const first = ordered(current).find((row) => row.sessionId === entry.sessionId && row.state === 'queued' && queuedFollowup(row) === queuedFollowup(entry) &&
+        row.dueAt <= Date.now() && !heldBySendCheck(row));
       // Follow-ups were already elected by completedStageBoundary with live
       // transport eligibility. Direct messages retain their separate FIFO.
       if (entry.state === 'queued' && !queuedFollowup(entry) && first !== entry) return null;

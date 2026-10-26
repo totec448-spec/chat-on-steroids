@@ -2347,6 +2347,34 @@ it('saves the send check address only when it is on this computer, and empty tur
   expect(searchSettings(collectSettings(doc), 'automatic sends').map(entry => entry.title)).toContain('Check automatic sends');
 });
 
+it('keeps a refused send check address in the field with its error through a repaint, and shows a damaged saved one as wrong (CodeRabbit)', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const doc = w.document;
+  const field = doc.getElementById('sendCheckUrl') as HTMLInputElement;
+  const error = doc.getElementById('sendCheckUrlError')!;
+  field.focus();
+  field.value = 'https://example.com/check';
+  field.dispatchEvent(new w.Event('input', { bubbles: true }));
+  field.blur();
+  field.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await new Promise(resolve => setTimeout(resolve, 50));
+  // A state push after the (unsaved) change: the typed text and its error stay.
+  mounted.push({ ...mounted.state });
+  expect(field.value).toBe('https://example.com/check');
+  expect(error.hidden).toBe(false);
+  // Fixed by the person: the error goes with the next repaint too.
+  field.value = '';
+  field.dispatchEvent(new w.Event('input', { bubbles: true }));
+  mounted.push({ ...mounted.state });
+  expect(error.hidden).toBe(true);
+  expect(field.getAttribute('aria-invalid')).toBe('false');
+  // A saved value this computer would never accept is shown as wrong, not as fine.
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, sendCheckUrl: 'damaged' } } });
+  expect(field.value).toBe('damaged');
+  expect(error.hidden).toBe(false);
+});
+
 it('saves and restores the global worker admission cap from Settings', async () => {
   const mounted = await mountChat();
   const w = mounted.window;

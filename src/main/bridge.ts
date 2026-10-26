@@ -37,7 +37,7 @@ export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
-import { automaticSendKind, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation } from './session/input.js';
+import { automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation } from './session/input.js';
 /**
  * The local bridge between the Chrome extension and this app.
  *
@@ -2989,6 +2989,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const automatic = (await listInputs()).find(row => row.id === body.id && row.state === 'queued');
     const kind = automatic ? automaticSendKind(automatic) : null;
     if (automatic && kind && getConfig().ui.sendCheckUrl) {
+      // A held row is not asked about again before its next ask, however often a page claims it.
+      if (heldBySendCheck(automatic)) return json(res, 200, { input: null }, origin);
       const attempt = (automatic.sendCheck?.attempt ?? 0) + 1;
       const project = automatic.projectId ?? (automatic.sessionId ? (await getSession(automatic.sessionId))?.projectId : undefined) ?? null;
       const verdict = await checkAutomaticSend({ kind, id: automatic.id, attempt, text: automatic.text,
@@ -4914,14 +4916,16 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // 30 s; the command's own deadline still ends it, then with the hold as its reason.
     if ((command.spec.type === 'worker' || command.spec.type === 'revive') && getConfig().ui.sendCheckUrl && described.text &&
         command.sendCheck?.allowedText !== described.text) {
-      const spec = command.spec;
+      const spec = command.spec, claimedAt = command.claimedAt;
       if (command.sendCheck && Date.now() < command.sendCheck.nextAt) return json(res, 503, { error: 'send_check_held', retryable: true }, origin);
       const attempt = (command.sendCheck?.attempt ?? 0) + 1;
       const prime = primeConversation(spec.runId);
       const source = prime ? await findSessionByConversation(prime, { requireUnique: true }) : null;
       const verdict = await checkAutomaticSend({ kind: spec.type === 'worker' ? 'worker-start' : 'worker-message', id: command.id, attempt,
         text: described.text, chat: { session: source?.id ?? null, project: source?.projectId ?? null, worker: spec.agent } });
-      if (!commands.includes(command) || command.owner !== client) return json(res, 409, { error: 'command_taken' }, origin);
+      // The owner alone cannot tell a replaced command redeemed again by this same page: the spec and claim must be the asked ones.
+      if (!commands.includes(command) || command.owner !== client || command.spec !== spec || command.claimedAt !== claimedAt)
+        return json(res, 409, { error: 'command_taken' }, origin);
       if (!verdict.allowed) {
         command.sendCheck = { attempt, nextAt: Date.now() + SEND_CHECK_RETRY_MS };
         command.lastError = verdict.answered

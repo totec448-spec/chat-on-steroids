@@ -1663,8 +1663,9 @@ async function sendCheckAllows(draft: GoalDraft): Promise<boolean> {
   for (let attempt = 1; ; attempt++) {
     if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return false;
     if (!getConfig().ui.sendCheckUrl) return true;
-    // Goal or Loop turned off for this chat: nothing to ask about until it is on again.
-    while (!goalArmedFor(draft.conversationId) || !getConfig().goal.enabled) {
+    // Goal or Loop turned off for this chat: nothing to ask about until it is on again. The chat's
+    // own switch decides, as for the draft itself; the app-wide default is only what it inherits.
+    while (!goalArmedFor(draft.conversationId)) {
       await wait();
       if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return false;
     }

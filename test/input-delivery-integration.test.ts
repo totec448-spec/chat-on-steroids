@@ -317,6 +317,11 @@ it('asks the send check before handing out an automatic Continue, holds it on a 
     // Held: not offered to a page, and not taken for a page that failed to pick it up (no reload).
     expect((await input.pendingBrowserInputs()).some(item => item.id === row.id)).toBe(false);
     expect((await input.pendingQueuedPickups()).some(item => item.inputId === row.id)).toBe(false);
+    // A page that still knows its id and claims it again inside the 30 s is not a second ask (CodeRabbit).
+    now += 5_000;
+    expect((await post('/input/claim', { id: row.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input).toBeNull();
+    expect(asked).toHaveLength(1);
+    now -= 5_000;
     // 30 s later it is offered again, and the program is asked again with the next attempt.
     now += 30_001; allow = true;
     expect((await input.pendingBrowserInputs()).some(item => item.id === row.id)).toBe(true);
@@ -332,6 +337,21 @@ it('asks the send check before handing out an automatic Continue, holds it on a 
     clock.mockRestore();
     await new Promise(resolve => server.close(resolve));
   }
+});
+
+it('lets a message the person types go while an automatic send before it is held by the send check (CodeRabbit)', async () => {
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    // Nothing listens there: no answer holds the automatic Continue.
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      ui: { ...defaultConfig().ui, sendCheckUrl: 'http://127.0.0.1:9/check' } });
+    const { conversationId, session, row } = await silentTurnContinue('Held Continue, typed message', ms => now += ms);
+    expect((await post('/input/claim', { id: row.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input).toBeNull();
+    const typed = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'typed by the person' });
+    now += 1;
+    expect((await post('/input/claim', { id: typed.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input)
+      .toMatchObject({ id: typed.id });
+  } finally { clock.mockRestore(); }
 });
 
 it('releases a held automatic send at once when the send check address is cleared', async () => {
