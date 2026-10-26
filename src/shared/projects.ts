@@ -40,3 +40,12 @@ export type ChatgptProjectLink =
 
 /** ChatGPT addresses a Project as `g-p-` and 32 hex digits; nothing else is one. */
 export const CHATGPT_PROJECT_ID = /^g-p-[0-9a-f]{32}$/;
+
+/** A ChatGPT Project the account already has, offered to link a CoS project to (#1756). */
+export interface ChatgptProjectChoice {
+  id: string;
+  /** As ChatGPT's sidebar showed it; a label only, never used to link. */
+  name: string;
+  /** The CoS project already linked to it; a ChatGPT Project belongs to one CoS project. */
+  linkedTo: { id: string; name: string } | null;
+}
