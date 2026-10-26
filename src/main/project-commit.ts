@@ -325,8 +325,11 @@ export async function pushProject(projectId: string): Promise<{ branch: string; 
   // GIT_TERMINAL_PROMPT stops Git's own prompts, not ssh's: a host key or a key passphrase would be
   // asked on the terminal the app was started from. The person's own ssh command is left as set.
   if (!env['GIT_SSH'] && !env['GIT_SSH_COMMAND'] && !(await text(repo, ['config', '--get', 'core.sshCommand']))) env['GIT_SSH_COMMAND'] = 'ssh -o BatchMode=yes';
+  // Always to the branch's own name on the remote. A plain `git push` would follow push.default and the
+  // upstream: a branch made from origin/main tracks main, and is then refused or pushed into main.
+  // The upstream is set only when there is none.
   const tracking = !facts.upstream;
-  const args = tracking ? ['push', '--porcelain', '-u', facts.remote, `HEAD:refs/heads/${branch}`] : ['push', '--porcelain'];
+  const args = ['push', '--porcelain', ...(tracking ? ['-u'] : []), facts.remote, `HEAD:refs/heads/${branch}`];
   const pushed = await runGit(repo.root, args, undefined, { timeoutMs: PUSH_TIMEOUT_MS, env });
   if (pushed.code !== 0) {
     logWarn('git push: refused by the remote or not reachable');

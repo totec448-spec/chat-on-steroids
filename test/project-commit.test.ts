@@ -310,6 +310,22 @@ describe('push', () => {
     await expect(pushProject(id)).resolves.toEqual({ branch: 'raise-kept', remote: 'origin', tracking: false });
   });
 
+  it('pushes a branch that tracks origin/main to its own name, never into main', async () => {
+    // `git switch -c feature origin/main` makes feature track origin/main (branch.autoSetupMerge).
+    const { root, id, origin } = await project();
+    await git(root, 'fetch', 'origin');
+    await git(root, 'switch', '-c', 'feature', 'origin/main');
+    const mainBefore = await git(origin, 'rev-parse', 'main');
+    await change(root);
+    await commitProjectChanges(id, { message: 'Feature work', paths: ['kept.ts'], expectedToken: await revision(id) });
+    for (const pushDefault of ['simple', 'upstream']) {
+      await git(root, 'config', 'push.default', pushDefault);
+      await expect(pushProject(id)).resolves.toMatchObject({ branch: 'feature', remote: 'origin' });
+      expect(await git(origin, 'log', '-1', '--format=%s', 'feature')).toBe('Feature work');
+      expect(await git(origin, 'rev-parse', 'main')).toBe(mainBefore);
+    }
+  });
+
   it('says when the remote has work this branch does not, instead of forcing', async () => {
     const { root, id, origin } = await project();
     const clone = path.join(directory, 'clone');
