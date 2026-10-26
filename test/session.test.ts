@@ -1382,6 +1382,18 @@ describe('session store', () => {
     resetSessionStoreForTests();
     expect(await getSession(summary.id)).toMatchObject({ lastAnswerLine: 'Done. All 12 tests pass now', approvalWaitingAt: null,
       lastToolActivity: { kind: 'run', title: 'Edited a.ts' } });
+    // Applied out of order, as a history rebuild applies canonical answers after the journal (CodeRabbit):
+    // an answer older than a wait does not end that wait.
+    await approval(at + 80, APPROVAL_WAITING_TEXT);
+    await upsertMessageEvent(summary.id, { kind: 'assistant_message', source: 'extension', time: at + 75, messageId: 'a-older', final: true,
+      message: { text: 'Older answer', truncated: false, chars: 12 } });
+    expect((await getSession(summary.id))!.approvalWaitingAt).toBe(at + 80);
+  });
+
+  it('skips tilde fences when it takes an answer\'s first line (CodeRabbit)', async () => {
+    const { answerLine } = await import('../src/main/session/store.js');
+    expect(answerLine('~~~ts\nconst x = 1;\n~~~')).toBe('const x = 1;');
+    expect(answerLine('```\nplain\n```')).toBe('plain');
   });
 
   it('keeps the exact last attributed tool-call time separate from unrelated session activity', async () => {

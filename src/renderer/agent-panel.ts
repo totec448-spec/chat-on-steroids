@@ -211,7 +211,8 @@ export function createAgentPanel(options: {
           line.dataset.kind = worker.lastToolActivity.kind;
           if (worker.lastToolActivity.tone) line.dataset.tone = worker.lastToolActivity.tone;
           line.style.setProperty('--phase', `${-(Date.now() % 1800)}ms`);
-        } else if (worker.lastAnswerLine && (answered || !working)) {
+        } else if (worker.lastAnswerLine && (answered || !working) && state !== 'waking') {
+          // A worker being woken has a new job; its previous answer belongs to the old one.
           line = el('span', 'agent-card-line agent-card-answer', worker.lastAnswerLine);
         }
         // Cut to the card's width; the whole line is one hover away and part of the row's name.
