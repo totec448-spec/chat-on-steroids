@@ -57,7 +57,8 @@ const charsOf = (text: string): string[] => Array.from(graphemes.segment(text), 
 
 /** A title's share of the link: the shortening below never touches it, so it is bounded here. */
 const MAX_TITLE_ENCODED = 900;
-const encodedLength = (text: string): number => encodeURIComponent(text).length;
+// Measured as the link writes it: URLSearchParams, which also replaces a lone surrogate instead of throwing.
+const encodedLength = (text: string): number => new URLSearchParams({ t: text }).toString().length - 2;
 
 /**
  * The first sentence or line, at most 80 characters and 900 in the link. A character has no size
