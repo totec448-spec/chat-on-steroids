@@ -92,19 +92,22 @@ it('leaves out widget resource references the Plugins server cannot serve, and n
   };
   const onlyWidget: Tool = { ...tool('list_directory'), _meta: { ui: { resourceUri: page } } };
   const otherScheme: Tool = { ...tool('start_process'), _meta: { 'openai/outputTemplate': 'https://example.test/template.html' } };
+  const flagOnly: Tool = { ...tool('get_usage'), _meta: { 'openai/widgetAccessible': true, fixture: 'unchanged' } };
   const plain = tool('get_config');
-  const row: PluginExposureSource = { id: 'one', name: 'Desktop Commander', enabled: true, disabledTools: [], tools: [withWidget, onlyWidget, otherScheme, plain] };
+  const row: PluginExposureSource = { id: 'one', name: 'Desktop Commander', enabled: true, disabledTools: [], tools: [withWidget, onlyWidget, otherScheme, flagOnly, plain] };
   const before = structuredClone(row.tools);
   const result = pluginExposure([row]);
-  expect(result.tools.map(item => item.name)).toEqual(['read_file', 'list_directory', 'start_process', 'get_config']);
+  expect(result.tools.map(item => item.name)).toEqual(['read_file', 'list_directory', 'start_process', 'get_usage', 'get_config']);
   expect(result.tools[0]).toEqual({ ...withWidget, _meta: { ui: { visibility: ['model', 'app'] }, 'openai/toolInvocation/invoking': 'Reading…', fixture: 'unchanged' } });
   expect(result.tools[1]).toEqual({ ...onlyWidget, _meta: {} });
   // No resource of any scheme can be read from this server.
   expect(result.tools[2]).toEqual({ ...otherScheme, _meta: {} });
-  expect(result.tools[3]).toBe(plain);
+  // The widget flag alone says nothing ChatGPT could use without a widget, so it goes too.
+  expect(result.tools[3]).toEqual({ ...flagOnly, _meta: { fixture: 'unchanged' } });
+  expect(result.tools[4]).toBe(plain);
   // The installed catalog, the call owners and the Plugins screen keep the upstream declaration.
   expect(row.tools).toEqual(before);
-  expect([...result.owners.keys()]).toEqual(['read_file', 'list_directory', 'start_process', 'get_config']);
+  expect([...result.owners.keys()]).toEqual(['read_file', 'list_directory', 'start_process', 'get_usage', 'get_config']);
   expect(JSON.stringify(result.tools)).not.toContain('ui://');
 });
 

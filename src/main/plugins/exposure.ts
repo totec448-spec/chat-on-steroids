@@ -27,14 +27,14 @@ const WIDGET_KEYS = ['ui/resourceUri', 'openai/outputTemplate'] as const;
  * The copy ChatGPT gets, without widget resource references (#1870). The Plugins server serves no
  * resources (its catalogs are empty, #1557), so a tool naming one, like an MCP Apps `ui://` page,
  * made ChatGPT's resource read fail and the whole connector failed to enroll (-32602). Only those
- * references go, with the widget flag that depends on them; names, schemas, annotations and every
+ * references go, with the widget flag that only means something with one; names, schemas, annotations and every
  * other key stay as the plugin declared them, and the installed catalog is not changed.
  */
 function withoutWidgets(tool: Tool): Tool {
   const meta = tool._meta;
   if (!meta) return tool;
   const ui = meta.ui && typeof meta.ui === 'object' && !Array.isArray(meta.ui) ? meta.ui as Record<string, unknown> : null;
-  if (!WIDGET_KEYS.some(key => key in meta) && !(ui && 'resourceUri' in ui)) return tool;
+  if (!WIDGET_KEYS.some(key => key in meta) && !('openai/widgetAccessible' in meta) && !(ui && 'resourceUri' in ui)) return tool;
   const { 'openai/widgetAccessible': _accessible, ...rest } = meta;
   for (const key of WIDGET_KEYS) delete rest[key];
   if (ui) {
