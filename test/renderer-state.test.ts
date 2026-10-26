@@ -4700,6 +4700,29 @@ it('offers the tour after Setup only while it was never taken, and replays it fr
   expect(w.document.getElementById('takeTour')!.textContent).toBe('Take the tour again');
 });
 
+// CodeRabbit on #1867: an answer in this window counts at once; a write that failed says so.
+it('offers the tour no second time in this window once answered, and says when that answer could not be saved', async () => {
+  const done = vi.fn(async () => ({ ok: true, data: undefined }));
+  const mounted = await mountChat({}, [], { markTourDone: done });
+  const w = mounted.window;
+  const offer = w.document.getElementById('tourOffer')!;
+  w.document.getElementById('readyStart')!.click();
+  await settle();
+  (w.document.getElementById('tourOfferNo') as HTMLButtonElement).click();
+  await settle();
+  // No state push since: Start again offers nothing.
+  w.document.getElementById('readyStart')!.click();
+  await settle();
+  expect(offer.hidden).toBe(true);
+  vi.resetModules();
+  const failing = await mountChat({}, [], { markTourDone: vi.fn(async () => ({ ok: false, error: 'disk full' })) });
+  failing.window.document.getElementById('readyStart')!.click();
+  await settle();
+  (failing.window.document.getElementById('tourOfferNo') as HTMLButtonElement).click();
+  await settle();
+  expect([...failing.window.document.querySelectorAll('.toast')].map(node => node.textContent)).toContain("The tour choice couldn't be saved, so it may be offered again.");
+});
+
 // Codex's "Enter key behavior", in General.
 it('offers which key sends, starting at Enter, and saves Cmd/Ctrl+Enter', async () => {
   const mounted = await mountChat({});

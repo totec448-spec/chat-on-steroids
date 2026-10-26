@@ -27,7 +27,7 @@ const $ = (id: string) => document.getElementById(id)!;
 const settle = async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); };
 async function tour() {
   const { initTour } = await import('../src/renderer/tour.js');
-  const markDone = vi.fn(async () => undefined);
+  const markDone = vi.fn(async () => true);
   return { tour: initTour({ markDone }), markDone };
 }
 const key = (name: string) => document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: name, bubbles: true }));
@@ -95,3 +95,20 @@ it('leaves out a step whose control is not on screen (a collapsed sidebar)', asy
   expect($('tourStep').textContent).toBe('2 of 2');
   expect($('tourNext').textContent).toBe('Done');
 });
+
+// CodeRabbit on #1867: steps only for controls really on screen; the tour's keys only while focus is in its card.
+it('leaves out a control hidden by style or outside the window, and leaves the composer\'s keys alone', async () => {
+  const { tour: t } = await tour();
+  $('addProject').style.visibility = 'hidden';
+  $('rightDockToggle').getBoundingClientRect = () => ({ x: 5000, y: 100, left: 5000, top: 100, right: 5200, bottom: 140, width: 200, height: 40, toJSON: () => ({}) }) as DOMRect;
+  t.start();
+  expect($('tourStep').textContent).toBe('1 of 1');
+  // Focus in the composer: arrows and Enter are the composer's, not the tour's.
+  const input = document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.focus();
+  const event = new dom.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+  input.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(false);
+  expect($('tourCard').hidden).toBe(false);
+});
+

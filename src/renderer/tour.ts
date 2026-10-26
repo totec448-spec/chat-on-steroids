@@ -19,7 +19,8 @@ const STEPS: Step[] = [
 
 const GAP = 12;
 
-export function initTour(deps: { markDone(): Promise<unknown> }): { offer(): void; start(): void } {
+/** `markDone` says whether the once-only answer was saved; the caller tells the person when it was not. */
+export function initTour(deps: { markDone(): Promise<boolean> }): { offer(): void; start(): void } {
   const $ = (id: string) => document.getElementById(id)!;
   const offerBar = $('tourOffer'), card = $('tourCard'), ring = $('tourRing');
   const text = $('tourText'), stepLabel = $('tourStep'), next = $('tourNext') as HTMLButtonElement;
@@ -27,10 +28,15 @@ export function initTour(deps: { markDone(): Promise<unknown> }): { offer(): voi
   let index = 0;
   let target: HTMLElement | null = null;
 
+  // On screen for real: not hidden by an attribute or a style, with a box inside the window.
   const shown = (node: HTMLElement | null): node is HTMLElement => {
     if (!node || node.closest('[hidden]')) return false;
+    for (let at: HTMLElement | null = node; at; at = at.parentElement) {
+      const style = window.getComputedStyle(at);
+      if (style.display === 'none' || style.visibility === 'hidden') return false;
+    }
     const box = node.getBoundingClientRect();
-    return box.width > 0 && box.height > 0;
+    return box.width > 0 && box.height > 0 && box.right > 0 && box.bottom > 0 && box.left < window.innerWidth && box.top < window.innerHeight;
   };
 
   function place(): void {
@@ -50,6 +56,16 @@ export function initTour(deps: { markDone(): Promise<unknown> }): { offer(): voi
     const cardTop = below ? box.bottom + 4 + GAP : Math.max(GAP, box.top - 4 - GAP - height);
     const cardLeft = Math.min(Math.max(GAP, box.left), window.innerWidth - width - GAP);
     Object.assign(card.style, { left: `${cardLeft}px`, top: `${cardTop}px` });
+  }
+
+  /** A step whose control left the screen (a narrower window, a collapsed sidebar) is left out. */
+  function onResize(): void {
+    if (shown(target)) { place(); return; }
+    const current = steps[index];
+    steps = steps.filter(step => step === current ? false : shown(document.getElementById(step.target)));
+    if (!steps.length) { end(); return; }
+    index = Math.min(index, steps.length - 1);
+    paint();
   }
 
   function paint(): void {
@@ -73,7 +89,7 @@ export function initTour(deps: { markDone(): Promise<unknown> }): { offer(): voi
     card.hidden = true;
     ring.hidden = true;
     document.removeEventListener('keydown', onKey, true);
-    window.removeEventListener('resize', place);
+    window.removeEventListener('resize', onResize);
     void deps.markDone().catch(() => undefined);
     (document.getElementById('chatInput') as HTMLTextAreaElement | null)?.focus();
   }
@@ -87,7 +103,8 @@ export function initTour(deps: { markDone(): Promise<unknown> }): { offer(): voi
   }
 
   function onKey(event: KeyboardEvent): void {
-    if (card.hidden) return;
+    // The card does not trap the focus: keys elsewhere, the composer's included, stay theirs.
+    if (card.hidden || !card.contains(document.activeElement)) return;
     if (event.key === 'Escape') { event.preventDefault(); end(); }
     // Enter on another button (Skip tour) does what that button says.
     else if (event.key === 'ArrowRight' || (event.key === 'Enter' && !((event.target as Element | null)?.tagName === 'BUTTON' && event.target !== next))) { event.preventDefault(); go(1); }
@@ -100,7 +117,7 @@ export function initTour(deps: { markDone(): Promise<unknown> }): { offer(): voi
     if (!steps.length) { void deps.markDone().catch(() => undefined); return; }
     index = 0;
     document.addEventListener('keydown', onKey, true);
-    window.addEventListener('resize', place);
+    window.addEventListener('resize', onResize);
     paint();
   }
 

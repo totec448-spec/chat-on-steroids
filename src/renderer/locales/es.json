@@ -3317,5 +3317,6 @@
   "A project is a folder you approve, and its chats start there.": "Un proyecto es una carpeta que apruebas, y sus chats empiezan ahí.",
   "Review shows every change ChatGPT made to your files.": "Revisión muestra cada cambio que ChatGPT hizo en tus archivos.",
   "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "Escribe aquí tu tarea y elige Normal, Plan u Objetivo según cómo debe trabajar ChatGPT en ella.",
-  "Tour": "Recorrido"
+  "Tour": "Recorrido",
+  "The tour choice couldn't be saved, so it may be offered again.": "No se pudo guardar tu elección sobre el recorrido, así que puede que se ofrezca de nuevo."
 }

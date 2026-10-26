@@ -5177,7 +5177,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .tour-offer .btn-quiet:hover:not(:disabled) { color: var(--ink); background: var(--hover); }
 .tour-ring { position: fixed; z-index: 9998; pointer-events: none; border-radius: 12px; box-shadow: 0 0 0 2px var(--accent), 0 0 0 100vmax rgba(0, 0, 0, .28); transition: left 160ms, top 160ms, width 160ms, height 160ms; }
 .tour-ring[hidden] { display: none; }
-.tour-card { position: fixed; z-index: 9999; max-width: calc(100vw - 24px); padding: 14px 14px 10px; border: 1px solid var(--edge); border-radius: 12px; background: var(--card); color: var(--ink); box-shadow: 0 12px 32px rgba(0, 0, 0, .22); }
+.tour-card { position: fixed; z-index: 9999; max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); overflow: auto; padding: 14px 14px 10px; border: 1px solid var(--edge); border-radius: 12px; background: var(--card); color: var(--ink); box-shadow: 0 12px 32px rgba(0, 0, 0, .22); }
 .tour-card[hidden] { display: none; }
 .tour-text { margin: 0 0 10px; font-size: calc(13px * var(--text-scale, 1)); line-height: 1.45; }
 .tour-actions { display: flex; align-items: center; gap: 6px; }

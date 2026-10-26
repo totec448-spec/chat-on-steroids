@@ -3203,5 +3203,6 @@
   "A project is a folder you approve, and its chats start there.": "Dự án là một thư mục bạn cho phép, và các cuộc trò chuyện của nó bắt đầu ở đó.",
   "Review shows every change ChatGPT made to your files.": "Xem lại hiển thị mọi thay đổi ChatGPT đã làm với tệp của bạn.",
   "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "Viết nhiệm vụ của bạn ở đây và chọn Bình thường, Plan hoặc Goal cho cách ChatGPT làm việc.",
-  "Tour": "Hướng dẫn"
+  "Tour": "Hướng dẫn",
+  "The tour choice couldn't be saved, so it may be offered again.": "Không lưu được lựa chọn về phần hướng dẫn, nên nó có thể được đề xuất lại."
 }
