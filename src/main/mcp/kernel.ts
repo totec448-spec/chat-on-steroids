@@ -85,7 +85,8 @@ import {
   releaseQuiescentRun,
   retiredWorkerForConversation,
   stageQueuedWorkerRevivals,
-  swarmRunning
+  swarmRunning,
+  isReviewerConversation
 } from '../agents.js';
 import type { SurfaceId } from './surfaces.js';
 import { noteServedRequest } from '../connector-identity.js';
@@ -1553,8 +1554,10 @@ export function createRegistrar(server: McpServer | null, ctx: ToolContext, surf
         return entry ? entry.run(args) : fail('UNKNOWN_TOOL: this tool is not available on this connector.');
       }, parent);
     },
-    register(name, config, handler) {
+    register(name, config, unchecked) {
       names.push(name);
+      const readOnly = config.annotations?.readOnlyHint === true;
+      const handler: typeof unchecked = async args => reviewerRefusal(name, readOnly) ?? unchecked(args);
       handlers.set(name, { description: config.description, run: async args => {
         const parsed = await config.inputSchema.safeParseAsync(args);
         if (parsed.success) return handler(parsed.data);
@@ -1606,6 +1609,21 @@ export function createRegistrar(server: McpServer | null, ctx: ToolContext, surf
       );
     }
   };
+}
+
+/** What the Goal step reviewer may run besides read-only tools: commands to read diffs and run tests, and its report. */
+const REVIEWER_TOOLS = new Set(['exec_command', 'write_stdin', 'agents']);
+
+/**
+ * The Goal step reviewer only reads (#1832, Haz's review). In its own chat, a tool not marked
+ * read-only is refused before it runs; commands stay, since it reads diffs and runs tests with
+ * them and is told not to change anything. A call whose chat is not known is not a reviewer's.
+ */
+export function reviewerRefusal(name: string, readOnly: boolean): ToolResult | null {
+  if (readOnly || REVIEWER_TOOLS.has(name) || !isReviewerConversation(currentCall()?.caller.conversationId)) return null;
+  logInfo(`goal review: ${name} refused in the reviewer's chat, which only reads`);
+  return fail(`TOOL_DISABLED: ${name} is not available to the Goal step reviewer, which only reads. ` +
+    'Report what should change instead; the Goal chat makes the changes.');
 }
 
 // ------------------------------------------------------------------ formatters
