@@ -1206,8 +1206,7 @@ no answer: main picks the newest one that offers these actions (`latestAnswer`),
 
 Share as web page (chat menu "Share as web page", `/share`, and the answer export menu's "Whole session as
 HTML"): `sessions:sharePage { id, target: 'preview', hide, lang }` → `{ done: 'preview', preview, html, hidden }`
-(`page-export.ts`, page built by `transcriptHtml`, §18). Keys and tokens are always hidden; `hide` (off
-unless chosen) also hides email addresses and user names in folder paths; `hidden` counts every hidden
+(`page-export.ts`, page built by `transcriptHtml`, §18). Keys and tokens are always hidden; `hide` also hides email addresses and user names in folder paths (the Share dialog starts with it on); `hidden` counts every hidden
 detail. `{ id, target: 'file', preview }` saves the page main kept for that preview id, not a rebuilt one,
 through `replaceFile` with overwrite confirmation, and refuses any other id. The dialog shows the preview
 in a `sandbox=""` srcdoc frame. Labels come from `MAIN_TEXTS` ('You', 'hidden', 'Shared from Chat On
