@@ -4678,6 +4678,35 @@ it('offers where the built-in browser minimizes to, only while it is the chosen 
   expect(mounted.calls.at(-1)?.ui.cosBrowserMinimize).toBe('tray');
 });
 
+// #1804 (Haz's review): the choice sits right under the permission to control the mouse and keyboard.
+it('offers to ask before using the mouse and keyboard, off by default, under the control permission, and saves it', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const choice = w.document.getElementById('desktopAsk') as HTMLSelectElement;
+  const row = choice.closest<HTMLElement>('.desktop-ask-row')!;
+  expect(row.previousElementSibling!.querySelector('[data-cap="control"]')).not.toBeNull();
+  expect([...choice.options].map(option => option.value)).toEqual(['off', 'active', 'always']);
+  expect([...choice.options].map(option => option.textContent)).toEqual(['Off', "Ask while I'm using the computer", 'Always ask']);
+  expect(choice.value).toBe('off');
+  expect(row.textContent).toContain('Browser steps never ask');
+  choice.value = 'active';
+  choice.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.ui.desktopAsk).toBe('active');
+  // A saved choice is shown; where the app cannot tell when the computer was last used, the row is hidden.
+  const state = structuredClone(mounted.state);
+  state.config.ui = { ...state.config.ui, desktopAsk: 'always' };
+  mounted.push(state);
+  await settle();
+  expect(choice.value).toBe('always');
+  expect(row.hidden).toBe(false);
+  const linux = structuredClone(state);
+  linux.platform = { ...(linux.platform ?? {}), family: 'linux', name: 'Linux', desktopAutomation: false };
+  mounted.push(linux);
+  await settle();
+  expect(row.hidden).toBe(true);
+});
+
 // Codex's "Enter key behavior", in General.
 it('offers which key sends, starting at Enter, and saves Cmd/Ctrl+Enter', async () => {
   const mounted = await mountChat({});

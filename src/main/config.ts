@@ -345,6 +345,8 @@ const configSchema = z.object({
     chatBrowser: z.enum(CHAT_BROWSERS).optional().default('chrome'),
     /** Where a minimized built-in browser window goes. */
     cosBrowserMinimize: z.enum(['taskbar', 'tray']).optional().default('taskbar'),
+    /** #1804: ask before a desktop step takes the real mouse or keyboard. Off unless chosen. */
+    desktopAsk: z.enum(['off', 'active', 'always']).optional().catch(undefined),
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
     playfulContinue: z.boolean().optional(),

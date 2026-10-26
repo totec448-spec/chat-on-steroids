@@ -31,6 +31,12 @@ vi.mock('../src/main/computer/index.js', () => ({
   waitForWindow: vi.fn()
 }));
 
+const ask = vi.hoisted(() => ({ refusal: null as string | null, asked: [] as unknown[], ended: 0 }));
+vi.mock('../src/main/desktop-ask-window.js', () => ({
+  askBeforeDesktopStep: async (...step: unknown[]) => { ask.asked.push(step); return ask.refusal; },
+  desktopStepEnded: () => { ask.ended++; }
+}));
+
 import { registerMacOSDesktopTools as registerDesktopTools } from '../src/main/mcp/tools-desktop-macos.js';
 
 function caps(over: Partial<Capabilities>): Capabilities {
@@ -53,6 +59,28 @@ function caps(over: Partial<Capabilities>): Capabilities {
 }
 
 describe('macOS Desktop computer permission normalization', () => {
+  it('asks before steps that take the mouse or keyboard (#1804), runs nothing when refused, and not for waits or the clipboard', async () => {
+    const liveCaps = caps({ control: true, clipboardRead: true });
+    let computerHandler: ((input: any) => Promise<any>) | null = null;
+    registerDesktopTools({ ctx: { privacyScreenshots: false }, caps: liveCaps, exposedCaps: liveCaps, sessionToolsLive: false, sessionToolsExposed: false,
+      agentToolsLive: false, agentToolsExposed: false, findExposed: false,
+      register(name: string, _config: unknown, handler: (input: any) => Promise<any>) { if (name === 'computer') computerHandler = handler; },
+      guarded: vi.fn() } as never);
+    ask.asked.length = 0; ask.ended = 0; computer.actAndCapture.mockClear();
+    await computerHandler!({ actions: [{ type: 'wait', ms: 0 }, { type: 'read_clipboard' }] });
+    expect(ask.asked).toEqual([]);
+    await computerHandler!({ actions: [{ type: 'click', x: 1, y: 2 }, { type: 'wait', ms: 0 }] });
+    expect(ask.asked).toEqual([['click', null]]);
+    expect(ask.ended).toBe(1);
+    ask.refusal = 'DECLINED_BY_USER: The person did not answer within 60 seconds. No input ran.';
+    computer.actAndCapture.mockClear();
+    const refused = await computerHandler!({ actions: [{ type: 'type', text: 'hello' }] });
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0].text).toContain('DECLINED_BY_USER');
+    expect(computer.actAndCapture).not.toHaveBeenCalled();
+    ask.refusal = null;
+  });
+
   it('allows wait in a clipboard-only batch without demanding mouse/keyboard control', async () => {
     const liveCaps = caps({ clipboardRead: true });
     let computerHandler: ((input: any) => Promise<any>) | null = null;

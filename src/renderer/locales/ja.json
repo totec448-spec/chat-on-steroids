@@ -3142,5 +3142,22 @@
   "Keys stay with you": "キーは手元に",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "ツールが返す内容に含まれる API キーやトークンは、ChatGPT が見る前に隠されます。",
   "Easier to read": "読みやすく",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "ハイコントラスト、8 つのアクセントカラー、行間、より読みやすいフォント。"
+  "High contrast, eight accent colors, line spacing and a more legible font.": "ハイコントラスト、8 つのアクセントカラー、行間、より読みやすいフォント。",
+  "Chat On Steroids wants to use your mouse and keyboard": "Chat On Steroids がマウスとキーボードを使おうとしています",
+  "Click": "クリック",
+  "Double-click": "ダブルクリック",
+  "Type": "入力",
+  "Press keys": "キーを押す",
+  "Scroll": "スクロール",
+  "Drag": "ドラッグ",
+  "Move the pointer": "ポインターを動かす",
+  "Switch windows": "ウインドウを切り替える",
+  "Open an app": "アプリを開く",
+  "Use the mouse and keyboard": "マウスとキーボードを使う",
+  "{0} in {1}": "{1} で{0}",
+  "Go ahead": "続ける",
+  "Ask before using the mouse and keyboard": "マウスとキーボードを使う前に確認",
+  "A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for 2 minutes, until you use the mouse or keyboard again. Browser steps never ask.": "画面の隅に小さな確認が出ます (続ける / 今はしない)。続けると、そのチャットは 2 分間、またはあなたがマウスかキーボードを使うまで続けられます。ブラウザーの操作は確認しません。",
+  "Ask while I'm using the computer": "コンピューターを使っている間は確認",
+  "Always ask": "常に確認"
 }

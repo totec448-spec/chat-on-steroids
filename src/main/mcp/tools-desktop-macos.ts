@@ -1,3 +1,5 @@
+import { askBeforeDesktopStep, desktopStepEnded } from '../desktop-ask-window.js';
+import { macosStep } from '../desktop-ask.js';
 import { toolDeclaration } from './tool-declarations.js';
 /**
  * The Desktop connector: seeing and driving the native desktop.
@@ -542,6 +544,12 @@ export function registerMacOSDesktopTools(reg: SurfaceRegistrar): void {
                     timeoutMs: verify.timeout_ms
                   }
             : undefined;
+          // #1804: steps that take the real mouse or keyboard may first ask the person at the computer.
+          const step = macosStep(parsed);
+          if (step) {
+            const refusal = await askBeforeDesktopStep(step.words, step.app);
+            if (refusal) return fail(refusal);
+          }
           // One lock, one operation: the picture that verifies these actions must be taken
           // before anyone else can touch the desktop.
           const result = await actAndCapture(parsed, {
@@ -557,7 +565,7 @@ export function registerMacOSDesktopTools(reg: SurfaceRegistrar): void {
                     preferActiveWindow: ctx.privacyScreenshots
                   }
                 : undefined
-          });
+          }).finally(() => { if (step) desktopStepEnded(); });
           const cursor = result.cursor;
           const pointer = cursor
             ? cursor.image

@@ -3254,5 +3254,22 @@
   "Keys stay with you": "Vos clés restent chez vous",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Les clés d'API et les jetons dans ce que renvoient les outils sont masqués avant que ChatGPT ne les voie.",
   "Easier to read": "Plus facile à lire",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Contraste élevé, huit couleurs d'accent, interligne et une police plus lisible."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Contraste élevé, huit couleurs d'accent, interligne et une police plus lisible.",
+  "Chat On Steroids wants to use your mouse and keyboard": "Chat On Steroids veut utiliser votre souris et votre clavier",
+  "Click": "Cliquer",
+  "Double-click": "Double-cliquer",
+  "Type": "Taper",
+  "Press keys": "Appuyer sur des touches",
+  "Scroll": "Faire défiler",
+  "Drag": "Glisser",
+  "Move the pointer": "Déplacer le pointeur",
+  "Switch windows": "Changer de fenêtre",
+  "Open an app": "Ouvrir une app",
+  "Use the mouse and keyboard": "Utiliser la souris et le clavier",
+  "{0} in {1}": "{0} dans {1}",
+  "Go ahead": "Continuer",
+  "Ask before using the mouse and keyboard": "Demander avant d’utiliser la souris et le clavier",
+  "A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for 2 minutes, until you use the mouse or keyboard again. Browser steps never ask.": "Une petite question dans le coin de l’écran, avec Continuer et Pas maintenant. Continuer laisse ce chat poursuivre 2 minutes, jusqu’à ce que vous utilisiez à nouveau la souris ou le clavier. Les étapes du navigateur ne demandent jamais.",
+  "Ask while I'm using the computer": "Demander pendant que j’utilise l’ordinateur",
+  "Always ask": "Toujours demander"
 }
