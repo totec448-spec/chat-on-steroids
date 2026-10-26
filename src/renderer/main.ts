@@ -2733,10 +2733,18 @@ $('installUpdate').addEventListener('click', installUpdate);
 $('connectionPopoverToggle').addEventListener('click', () => void toggleConnection());
 $('wizConnect').addEventListener('click', () => void toggleConnection());
 // #1833: Setup's last step offers the first-run tour once; Settings replays it.
-const tour = initTour({ markDone: () => api.markTourDone() });
+// The answer counts in this window at once, before the saved setting comes back in a state push.
+let tourAnswered = false;
+const tour = initTour({ markDone: async () => {
+  tourAnswered = true;
+  const reply = await api.markTourDone().catch(() => null);
+  if (reply?.ok) return true;
+  toast(t("The tour choice couldn't be saved, so it may be offered again."));
+  return false;
+} });
 $('readyStart').addEventListener('click', () => {
   showTab('chat');
-  if (state && state.config.ui.tourDone !== true) tour.offer();
+  if (state && state.config.ui.tourDone !== true && !tourAnswered) tour.offer();
 });
 $('takeTour').addEventListener('click', () => {
   showTab('chat');
