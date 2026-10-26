@@ -111,6 +111,8 @@ import { createSearchPopup } from './search-popup.js';
 import { primaryShortcut } from './shortcuts.js';
 import { initSshProjectDialog } from './ssh-project-dialog.js';
 import { createChatgptProjectPicker } from './chatgpt-project-picker.js';
+import { initScheduleDialog } from './schedule-dialog.js';
+import { nextRunAfter, type ScheduleRepeat } from '../shared/schedule.js';
 
 const api = window.api;
 let chatSearch: ChatSearch | null = null;
@@ -166,6 +168,8 @@ let loadedOlderSessions = false;
 const projectHistory = new Map<string, { cursor: { updatedAt: number; id: string } | null; asked: boolean; loading: boolean; failed?: boolean }>();
 let activeId: string | null = null;
 let selectedId: string | null = null;
+/** #1826: the chat's schedule dialog, opened from its ⋯ menu and its schedule line. */
+let scheduleDialog: { open(sessionId: string, draft: string): Promise<void> } | null = null;
 let newChatSelected = true;
 let selectedProjectId: string | null = null;
 /** Branch in new chat (#482): the reply the new chat being written will branch from, if any. */
@@ -1225,6 +1229,11 @@ function sessionRow(summary: SessionSummary): HTMLElement {
       { action: 'copy-link', icon: 'i-copy', label: () => t('Copy link'), title: () => t("Copy this chat's ChatGPT link"),
         run: async () => { if (await run(api.writeClipboard(`https://chatgpt.com/c/${summary.conversationId}`))) toast(t('Link copied')); } }
     );
+    // #1826: a chat sends its own message at set times; workers are started by their prime, never on a clock.
+    if (summary.origin?.kind !== 'worker') {
+      items.push({ action: 'schedule', icon: 'i-clock', label: () => t('Schedule…'), title: () => t('Send a message into this chat at set times'),
+        run: () => void scheduleDialog?.open(summary.id, summary.id === selectedId ? $<HTMLTextAreaElement>('chatInput').value : '') });
+    }
     items.push(...chatGroupMenuItems(summary));
     // The stop this app can actually make. It does not touch the running ChatGPT turn — nothing
     // here can — it takes this chat's tools away, and a model whose every call is refused with
@@ -8117,7 +8126,45 @@ function paintPendingInputs(): void {
   reconcileChildren(host, [...next, ...host.querySelectorAll<HTMLElement>(':scope > .queued-input')]);
   holdSentMessage();
 }
+/** How a schedule repeats, in the chosen language: "every weekday at 09:00". */
+function repeatText(repeat: ScheduleRepeat): string {
+  if (repeat.kind === 'hours') return repeat.every === 1 ? t('every hour') : tn('every {0} hour', 'every {0} hours', repeat.every);
+  if (repeat.kind === 'daily') return t('every day at {0}', [repeat.at]);
+  if (repeat.kind === 'weekdays') return t('every weekday at {0}', [repeat.at]);
+  const day = new Intl.DateTimeFormat(currentLanguage(), { weekday: 'long' }).format(new Date(2024, 0, 7 + repeat.day));
+  return t('every {0} at {1}', [day, repeat.at]);
+}
+
+let scheduleLineGeneration = 0;
+/** #1826: the selected chat's schedule as one quiet line above its queue, with Pause and Edit. */
+async function paintScheduleLine(): Promise<void> {
+  const request = ++scheduleLineGeneration;
+  const sessionId = selectedId;
+  const line = $('scheduleLine');
+  const reply = sessionId ? await api.getSchedule(sessionId) : null;
+  if (request !== scheduleLineGeneration || sessionId !== selectedId) return;
+  const schedule = reply?.ok ? reply.data : null;
+  line.hidden = !schedule;
+  if (!schedule) return;
+  const clock = (instant: number, weekday: boolean) => new Date(instant).toLocaleString(currentLanguage(),
+    weekday ? { weekday: 'short', hour: '2-digit', minute: '2-digit' } : { hour: '2-digit', minute: '2-digit' });
+  const next = nextRunAfter(schedule, Math.max(Date.now(), schedule.lastDueAt ?? 0));
+  const parts = [schedule.paused ? t('Paused') : t('Scheduled'), repeatText(schedule.repeat)];
+  if (schedule.missedDueAt !== undefined) parts.push(t('missed {0}', [clock(schedule.missedDueAt, false)]));
+  if (!schedule.paused) parts.push(next === null ? t('ended') : t('next {0}', [clock(next, true)]));
+  ui($('scheduleLineText'), 'textContent', () => parts.join(' · '));
+  const pause = $<HTMLButtonElement>('scheduleLinePause');
+  ui(pause, 'textContent', () => schedule.paused ? t('Resume') : t('Pause'));
+  pause.onclick = async () => {
+    pause.disabled = true;
+    try { await run(api.pauseSchedule(schedule.sessionId, !schedule.paused)); } finally { pause.disabled = false; }
+    void paintScheduleLine();
+  };
+  $<HTMLButtonElement>('scheduleLineEdit').onclick = () => void scheduleDialog?.open(schedule.sessionId, '');
+}
+
 async function refreshInputQueue(): Promise<void> {
+  void paintScheduleLine();
   const request = ++inputQueueGeneration;
   const selection = selectionGeneration;
   const [all, pausedHelpers] = await Promise.all([run(api.listInputs()), run(api.listPausedHelpers())]);
@@ -8981,6 +9028,7 @@ export function initChat(next: Deps): void {
   };
   // The composer's Share a folder means a folder on this computer: straight to the picker.
   $('composerFolder').addEventListener('click', () => void addLocalProject());
+  scheduleDialog = initScheduleDialog(api, () => void paintScheduleLine());
   let sshDialogGeneration = 0;
   const sshProjectDialog = initSshProjectDialog(api, (project, known, asked) => {
     showAddedProject(project, sshDialogGeneration);

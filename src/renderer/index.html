@@ -1405,7 +1405,7 @@
 
               </div>
             </div>
-            <div class="composer-dock" id="composerDock"><div class="composer-dock-body"><div class="background-exec-status" id="backgroundExecStatus" role="status" hidden><i class="ico ph ph-terminal-window" aria-hidden="true"></i><span class="queue-label"></span><span class="background-exec-time"></span><svg class="disclosure-chevron background-exec-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false" hidden><path d="M6 3.5 10.5 8 6 12.5"></path></svg><button class="background-exec-stop" type="button"><i class="ico ph ph-power" aria-hidden="true"></i><span></span></button></div><div class="sr-only" id="backgroundExecLiveStatus" role="status" aria-live="polite" hidden></div><div class="background-exec-list" id="backgroundExecList" role="list" hidden></div><section class="agent-plan" id="agentPlan" aria-label="Agent task plan" hidden></section><div id="branchDraft" class="branch-draft" role="status" hidden></div><div id="editDraft" class="edit-draft" role="status" hidden></div><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div></div>
+            <div class="composer-dock" id="composerDock"><div class="composer-dock-body"><div class="background-exec-status" id="backgroundExecStatus" role="status" hidden><i class="ico ph ph-terminal-window" aria-hidden="true"></i><span class="queue-label"></span><span class="background-exec-time"></span><svg class="disclosure-chevron background-exec-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false" hidden><path d="M6 3.5 10.5 8 6 12.5"></path></svg><button class="background-exec-stop" type="button"><i class="ico ph ph-power" aria-hidden="true"></i><span></span></button></div><div class="sr-only" id="backgroundExecLiveStatus" role="status" aria-live="polite" hidden></div><div class="background-exec-list" id="backgroundExecList" role="list" hidden></div><section class="agent-plan" id="agentPlan" aria-label="Agent task plan" hidden></section><div id="branchDraft" class="branch-draft" role="status" hidden></div><div id="editDraft" class="edit-draft" role="status" hidden></div><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="scheduleLine" class="schedule-line" role="status" hidden><i class="ico ph ph-clock" aria-hidden="true"></i><span id="scheduleLineText"></span><button class="btn btn-quiet" id="scheduleLinePause" type="button">Pause</button><button class="btn btn-quiet" id="scheduleLineEdit" type="button">Edit</button></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div></div>
             <form class="composer" id="composer">
               <div id="skillPicker" class="skill-autocomplete" aria-label="Skills" hidden></div>
               <div id="composerSelectedSkills" class="composer-selected-skills" aria-label="Selected skills" hidden></div>
@@ -1580,6 +1580,28 @@
         <label class="plugin-field" for="sshProjectFolder"><span>Folder on the server</span><input id="sshProjectFolder" required autocomplete="off" spellcheck="false" placeholder="/srv/app or ~/app" /></label>
         <p id="sshProjectError" class="plugin-error" role="alert" hidden></p>
         <div class="pet-delete-actions"><button class="btn" id="sshProjectCancel" type="button">Cancel</button><button class="btn btn-solid" id="sshProjectSubmit" type="submit">Test and add</button></div>
+      </form>
+    </dialog>
+    <!-- #1826 (Haz's review): one schedule per chat, set from its ⋯ menu. Missed runs are skipped unless caught up. -->
+    <dialog class="plugin-dialog schedule-dialog" id="scheduleDialog" aria-labelledby="scheduleTitle">
+      <div class="plugin-dialog-head"><h2 id="scheduleTitle">Schedule</h2><button class="btn" id="scheduleClose" type="button">Close</button></div>
+      <form id="scheduleForm" class="plugin-dialog-body">
+        <label class="plugin-field" for="scheduleText"><span>Message</span><textarea id="scheduleText" rows="3" dir="auto" spellcheck="true"></textarea></label>
+        <label class="plugin-field" for="scheduleRepeat"><span>Repeat</span><select id="scheduleRepeat">
+          <option value="hours">Every few hours</option><option value="daily">Every day</option><option value="weekdays">Weekdays</option><option value="weekly">Every week</option>
+        </select></label>
+        <div class="schedule-when">
+          <label class="plugin-field" id="scheduleEveryField" for="scheduleEvery" hidden><span>Every</span><select id="scheduleEvery"></select></label>
+          <label class="plugin-field" id="scheduleDayField" for="scheduleDay" hidden><span>On</span><select id="scheduleDay"></select></label>
+          <label class="plugin-field" id="scheduleAtField" for="scheduleAt"><span>At</span><input id="scheduleAt" type="time" required /></label>
+        </div>
+        <small class="schedule-note" id="scheduleZone"></small>
+        <label class="plugin-field" for="scheduleUntilKind"><span>Until</span><select id="scheduleUntilKind"><option value="forever">Forever</option><option value="date">A date</option></select></label>
+        <label class="plugin-field" id="scheduleUntilField" for="scheduleUntil" hidden><span>Last day</span><input id="scheduleUntil" type="date" /></label>
+        <label class="setting schedule-catch-up"><span class="setting-text"><b>Catch up missed runs</b><em>Off: a time missed while the app was closed or asleep is skipped. On: one late run goes out when it is back.</em></span><input id="scheduleCatchUp" type="checkbox" /></label>
+        <small class="schedule-note">The schedule lives on this computer, and the computer is not woken for it.</small>
+        <p id="scheduleError" class="plugin-error" role="alert" hidden></p>
+        <div class="pet-delete-actions"><button class="btn btn-quiet schedule-delete" id="scheduleDelete" type="button" hidden>Delete schedule</button><button class="btn" id="scheduleCancel" type="button">Cancel</button><button class="btn btn-solid" id="scheduleSubmit" type="submit">Save schedule</button></div>
       </form>
     </dialog>
     <dialog class="search-dialog" id="searchDialog" aria-label="Search chats">
