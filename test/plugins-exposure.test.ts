@@ -79,3 +79,43 @@ it('uses the same bounded publication for discovery and callable ownership', () 
   expect(result.owners.has(`tool_${PLUGIN_MAX_TOOLS}`)).toBe(false);
   expect(result.issues.get('one')?.get(`tool_${PLUGIN_MAX_TOOLS}`)).toContain('limit');
 });
+
+// #1870: the Plugins server serves no resources, so a tool's widget template (an MCP Apps `ui://` page,
+// or ChatGPT's own output template key) would make ChatGPT read a resource that is not there, and the
+// whole connector failed to enroll (-32602). Only those references leave the published copy.
+it('leaves out widget resource references the Plugins server cannot serve, and nothing else (#1870)', () => {
+  const page = 'ui://desktop-commander/file-preview';
+  const withWidget: Tool = {
+    ...tool('read_file'),
+    _meta: { 'ui/resourceUri': page, 'openai/outputTemplate': page, 'openai/widgetAccessible': true,
+      ui: { resourceUri: page, visibility: ['model', 'app'] }, 'openai/toolInvocation/invoking': 'Reading…', fixture: 'unchanged' },
+  };
+  const onlyWidget: Tool = { ...tool('list_directory'), _meta: { ui: { resourceUri: page } } };
+  const otherScheme: Tool = { ...tool('start_process'), _meta: { 'openai/outputTemplate': 'https://example.test/template.html' } };
+  const flagOnly: Tool = { ...tool('get_usage'), _meta: { 'openai/widgetAccessible': true, fixture: 'unchanged' } };
+  const plain = tool('get_config');
+  const row: PluginExposureSource = { id: 'one', name: 'Desktop Commander', enabled: true, disabledTools: [], tools: [withWidget, onlyWidget, otherScheme, flagOnly, plain] };
+  const before = structuredClone(row.tools);
+  const result = pluginExposure([row]);
+  expect(result.tools.map(item => item.name)).toEqual(['read_file', 'list_directory', 'start_process', 'get_usage', 'get_config']);
+  expect(result.tools[0]).toEqual({ ...withWidget, _meta: { ui: { visibility: ['model', 'app'] }, 'openai/toolInvocation/invoking': 'Reading…', fixture: 'unchanged' } });
+  expect(result.tools[1]).toEqual({ ...onlyWidget, _meta: {} });
+  // No resource of any scheme can be read from this server.
+  expect(result.tools[2]).toEqual({ ...otherScheme, _meta: {} });
+  // The widget flag alone says nothing ChatGPT could use without a widget, so it goes too.
+  expect(result.tools[3]).toEqual({ ...flagOnly, _meta: { fixture: 'unchanged' } });
+  expect(result.tools[4]).toBe(plain);
+  // The installed catalog, the call owners and the Plugins screen keep the upstream declaration.
+  expect(row.tools).toEqual(before);
+  expect([...result.owners.keys()]).toEqual(['read_file', 'list_directory', 'start_process', 'get_usage', 'get_config']);
+  expect(JSON.stringify(result.tools)).not.toContain('ui://');
+});
+
+it('counts the published copy, not the upstream declaration, against the schema budget (#1870)', () => {
+  const big = (name: string): Tool => ({ ...tool(name), _meta: { 'openai/outputTemplate': `ui://x/${'p'.repeat(60000)}` } });
+  const row: PluginExposureSource = { id: 'one', name: 'Big', enabled: true, disabledTools: [], tools: Array.from({ length: 6 }, (_, i) => big(`big_${i}`)) };
+  expect(Buffer.byteLength(JSON.stringify(row.tools))).toBeGreaterThan(PLUGIN_MAX_SCHEMA_BYTES);
+  const result = pluginExposure([row]);
+  expect(result.tools).toHaveLength(6);
+  expect(result.issues.size).toBe(0);
+});
