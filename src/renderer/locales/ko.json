@@ -3142,5 +3142,16 @@
   "Keys stay with you": "키는 내 컴퓨터에",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "도구가 돌려주는 내용 속 API 키와 토큰은 ChatGPT가 보기 전에 숨겨집니다.",
   "Easier to read": "더 읽기 쉽게",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "고대비, 강조 색상 8가지, 줄 간격, 더 읽기 쉬운 글꼴."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "고대비, 강조 색상 8가지, 줄 간격, 더 읽기 쉬운 글꼴.",
+  "Changed and put back in this answer: no net change.": "이 답변에서 변경했다가 되돌렸습니다: 순 변경 없음.",
+  "created": "생성됨",
+  "deleted": "삭제됨",
+  "edited": "편집됨",
+  "no net change": "순 변경 없음",
+  "Open in Review": "리뷰에서 열기",
+  "Changed {0} files": "파일 {0}개 변경",
+  "{0} put back": "{0}개 되돌림",
+  "and {0} more": "외 {0}개",
+  "{0} more not listed": "{0}개는 목록에 없음",
+  "Touched {0} files, no net change": "파일 {0}개를 건드렸지만 순 변경 없음"
 }

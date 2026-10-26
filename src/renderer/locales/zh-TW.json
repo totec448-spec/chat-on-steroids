@@ -3142,5 +3142,16 @@
   "Keys stay with you": "金鑰留在你這裡",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "工具傳回內容中的 API 金鑰和權杖會在 ChatGPT 看到之前被隱藏。",
   "Easier to read": "更易閱讀",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "高對比、八種強調色、行距和更易讀的字型。"
+  "High contrast, eight accent colors, line spacing and a more legible font.": "高對比、八種強調色、行距和更易讀的字型。",
+  "Changed and put back in this answer: no net change.": "在此回答中變更後又還原：沒有淨變化。",
+  "created": "已建立",
+  "deleted": "已刪除",
+  "edited": "已編輯",
+  "no net change": "無淨變化",
+  "Open in Review": "在檢閱中開啟",
+  "Changed {0} files": "變更了 {0} 個檔案",
+  "{0} put back": "{0} 個已還原",
+  "and {0} more": "還有 {0} 個",
+  "{0} more not listed": "另有 {0} 個未列出",
+  "Touched {0} files, no net change": "變動了 {0} 個檔案，沒有淨變化"
 }

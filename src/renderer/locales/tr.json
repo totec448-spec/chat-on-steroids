@@ -3198,5 +3198,21 @@
   "Keys stay with you": "Anahtarlar sizde kalır",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Araçların döndürdüğü içerikteki API anahtarları ve tokenlar, ChatGPT görmeden önce gizlenir.",
   "Easier to read": "Okuması daha kolay",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Yüksek kontrast, sekiz vurgu rengi, satır aralığı ve daha okunaklı bir yazı tipi."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Yüksek kontrast, sekiz vurgu rengi, satır aralığı ve daha okunaklı bir yazı tipi.",
+  "Changed and put back in this answer: no net change.": "Bu yanıtta değiştirildi ve geri alındı: net değişiklik yok.",
+  "created": "oluşturuldu",
+  "deleted": "silindi",
+  "edited": "düzenlendi",
+  "no net change": "net değişiklik yok",
+  "Open in Review": "İncelemede aç",
+  "Changed {0} files": "{0} dosya değişti",
+  "Changed {0} files|one": "{0} dosya değişti",
+  "{0} put back": "{0} geri alındı",
+  "{0} put back|one": "{0} geri alındı",
+  "and {0} more": "ve {0} tane daha",
+  "and {0} more|one": "ve {0} tane daha",
+  "{0} more not listed": "{0} tane daha listelenmedi",
+  "{0} more not listed|one": "{0} tane daha listelenmedi",
+  "Touched {0} files, no net change": "{0} dosyaya dokunuldu, net değişiklik yok",
+  "Touched {0} files, no net change|one": "{0} dosyaya dokunuldu, net değişiklik yok"
 }
