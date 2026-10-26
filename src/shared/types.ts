@@ -1,3 +1,4 @@
+import type { PhonePushSettings } from './phone-push.js';
 import type { ReasoningEffort, RecordingStorageLimitGiB } from './session.js';
 import type { PluginRefreshStatus } from './plugin-refresh.js';
 import { WINDOWS_COMPUTER_READ_METHODS, WINDOWS_COMPUTER_INPUT_METHODS } from './windows-computer.js';
@@ -223,6 +224,8 @@ export interface UiPrefs {
   keepScreenAwake?: boolean;
   /** Default screenshots to the active window instead of the whole primary monitor. */
   privacyScreenshots: boolean;
+  /** Phone notifications through ntfy; missing means off. */
+  phonePush?: PhonePushSettings;
   /** Mask API keys, tokens, private keys and secret settings in what tools return to ChatGPT. Missing means on. */
   secretsShield?: boolean;
   /** Browser for app-originated launches; connected source tabs retain placement ownership. */
@@ -870,6 +873,8 @@ export interface AppState {
   hasGoalKey: boolean;
   /** True when a custom-provider key is stored. Only meaningful beside a custom endpoint, which may also run keyless. */
   hasCustomProviderKey: boolean;
+  /** An ntfy access token is saved (never the token itself). */
+  hasPhonePushToken?: boolean;
   /** Resolved path of the tunnel binary we would run, or null if we cannot find one. */
   resolvedBinary: string | null;
   /** Version of the tunnel-client copy shipped inside the app, for diagnostics. */
@@ -977,4 +982,19 @@ export function capabilityTools(capability: Capability, platform?: PlatformFamil
     case 'clipboardWrite': return ['write_clipboard'];
     default: return [];
   }
+}
+
+/** A settings backup the person chose to import, as the page sees it: a summary, never its keys. */
+export interface SettingsBackupChoice {
+  /** Names this choice for the import that follows; one use. */
+  token: string;
+  file: string;
+  appVersion: string | null;
+  exportedAt: string | null;
+  /** Dotted paths of the settings that would change here, e.g. `ui.theme`. */
+  changed: string[];
+  /** Of those, the ones that give ChatGPT more access (`widerAccess`): a permission on, read-only off… */
+  wider: string[];
+  /** Saved keys the backup carries, locked with its passphrase. */
+  keyCount: number;
 }

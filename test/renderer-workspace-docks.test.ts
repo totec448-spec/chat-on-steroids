@@ -260,3 +260,25 @@ it('keeps a greyed-out tab\'s reason in the app\'s language when the language ch
   expect(quick.title).toBe('Open a project to use Files and Review');
 });
 
+
+// The empty panel named its keys "Ctrl+Shift+3" in every language, beside "Strg+Umschalt+…" everywhere
+// else in German. They are Control on every system, so a Mac reads them with its own symbols.
+it('labels the empty panel keys as this keyboard prints them, in the language', async () => {
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  const kbd = () => document.querySelector('#workDockRight .work-dock-quick[data-view=files] kbd')!.textContent;
+  try {
+    vi.stubGlobal('navigator', { platform: 'Win32' });
+    setup().docks.register('files', 'Files', 'i-folder', vi.fn(), vi.fn(), () => true);
+    expect(kbd()).toBe('Ctrl+Shift+3');
+    setLanguage('de');
+    expect(kbd()).toBe('Strg+Umschalt+3');
+    setLanguage('en');
+    dom.window.close();
+    vi.stubGlobal('navigator', { platform: 'MacIntel' });
+    setup().docks.register('files', 'Files', 'i-folder', vi.fn(), vi.fn(), () => true);
+    expect(kbd()).toBe('⌃⇧3');
+  } finally {
+    setLanguage('en');
+    vi.unstubAllGlobals();
+  }
+});

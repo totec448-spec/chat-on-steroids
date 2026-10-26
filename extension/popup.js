@@ -73,6 +73,25 @@ const ATTRIBUTION = {
 };
 
 /**
+ * Whether a ChatGPT URL is a route a chat lives on or starts from: the start page, a chat, or a
+ * Project or GPT with its chats. Other ChatGPT pages (a Dot at `/dots/…`, the library, a shared
+ * snapshot) have no chat the app can follow, so the popup says so instead of waiting (#1855).
+ */
+function chatRoute(url) {
+  try {
+    const { pathname } = new URL(String(url || ''));
+    return /^\/(?:g\/[^/]+(?:\/project)?\/?|(?:g\/[^/]+\/)?c\/[^/]+\/?)?$/i.test(pathname);
+  } catch {
+    return true;
+  }
+}
+
+/** A ChatGPT tab on a page that is not a chat, with nothing recorded or bound that says otherwise. */
+function notAChat(info) {
+  return Boolean(info && info.isChat && !info.conversationId && !(info.page && info.page.events) && !chatRoute(info.url));
+}
+
+/**
  * The three stages, from evidence each layer produced independently.
  *
  * Global transport failures explain a blocked path. Success needs this chat's session
@@ -87,6 +106,10 @@ function pipeline(info, ready) {
   const calls = page && Array.isArray(page.trace) ? page.trace : [];
 
   if (!info || !info.isChat) return { read: ['off'], sent: ['off'], proc: ['off'], why: ['', ''] };
+  // Before the recorder: on a page that is not a chat there is nothing to record or reload.
+  if (notAChat(info)) {
+    return { read: ['off'], sent: ['off'], proc: ['off'], why: ['', t('popup_pipeline_not_a_chat', 'This ChatGPT page is not a chat, so the app has nothing to follow here. Open or start a chat.')] };
+  }
   if (!info.recorder) {
     return { read: ['failed'], sent: ['off'], proc: ['off'], why: ['bad', t('popup_pipeline_no_recorder', 'No recorder in this tab. Reload the page.')] };
   }
@@ -396,26 +419,28 @@ async function refresh() {
   const isChat = Boolean(info && info.isChat);
   const page = info && info.page;
 
+  // On a ChatGPT page that is not a chat there is nothing to record, so no row claims a chat.
+  const elsewhere = notAChat(info);
   row('tab', isChat ? 'ok' : 'off', isChat ? '' : t('popup_status_none_open', 'none open'));
   row(
     'rec',
-    !isChat ? 'off' : info.recorder ? 'ok' : 'no',
-    !isChat ? '' : info.recorder ? (page.generating ? t('popup_status_answering', 'answering') : '') : t('popup_status_reload', 'reload')
+    !isChat || elsewhere ? 'off' : info.recorder ? 'ok' : 'no',
+    !isChat || elsewhere ? '' : info.recorder ? (page.generating ? t('popup_status_answering', 'answering') : '') : t('popup_status_reload', 'reload')
   );
 
   const chatId = info && info.conversationId;
   idRow(
     'chat',
-    !isChat ? 'off' : chatId ? 'ok' : 'wait',
-    !isChat ? '' : chatId ? shorten(chatId, 8) : t('popup_status_new_chat', 'new chat'),
+    !isChat || elsewhere ? 'off' : chatId ? 'ok' : 'wait',
+    !isChat ? '' : elsewhere ? t('popup_status_not_a_chat', 'not a chat') : chatId ? shorten(chatId, 8) : t('popup_status_new_chat', 'new chat'),
     chatId
   );
 
   const requestId = page && page.requestId;
   idRow(
     'req',
-    !isChat ? 'off' : requestId ? 'ok' : 'wait',
-    !isChat ? '' : requestId ? shorten(requestId, 9) : t('popup_status_none_yet', 'none yet'),
+    !isChat || elsewhere ? 'off' : requestId ? 'ok' : 'wait',
+    !isChat || elsewhere ? '' : requestId ? shorten(requestId, 9) : t('popup_status_none_yet', 'none yet'),
     requestId
   );
 
@@ -431,8 +456,8 @@ async function refresh() {
   const flowing = Array.isArray(page?.trace) && page.trace.some(call => call.app === 'request_id');
   row(
     'app',
-    !isChat ? 'off' : broken ? 'no' : flowing ? 'ok' : 'wait',
-    !isChat
+    !isChat || elsewhere ? 'off' : broken ? 'no' : flowing ? 'ok' : 'wait',
+    !isChat || elsewhere
       ? ''
       : broken
         ? t('popup_status_blocked', 'blocked')

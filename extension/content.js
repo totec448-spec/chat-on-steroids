@@ -218,6 +218,9 @@
   function setData(node, key, value) { if (node.dataset[key] !== value) node.dataset[key] = value; }
   function setHidden(node, hidden) { if (node.hidden !== hidden) node.hidden = hidden; }
 
+  /** When this page last became hidden, for the diagnostics status; null while it is visible. */
+  let hiddenSince = typeof document !== 'undefined' && document.visibilityState === 'hidden' ? Date.now() : null;
+
   function listen(target, type, listener, options) {
     target.addEventListener(type, listener, options);
     rememberCleanup(() => target.removeEventListener(type, listener, options));
@@ -1433,6 +1436,35 @@
       release();
     }
     return Boolean(keepAwakeRelease);
+  }
+
+  const PROJECT_LIST_MS = 15_000;
+  let reportedProjects = '';
+  let reportedProjectsAt = 0;
+  /** An unchanged list is sent again after a day, so a tab left open keeps its Projects from expiring in the app. */
+  const PROJECT_LIST_RENEW_MS = 24 * 3_600_000;
+  /**
+   * Tells the app which Projects ChatGPT's sidebar lists (#1756) when that list changed, and once a day: the
+   * app offers them when a project is linked. An empty list still names the workspace in use, so the
+   * app stops offering another workspace's Projects; it removes none it already knows.
+   */
+  function reportProjectList() {
+    if (globalThis.top !== globalThis) return;
+    const projects = CLF_DOM.projectsShown();
+    // The workspace these are listed in: ChatGPT opens a Project only in its own workspace, and
+    // names the one in use in this cookie (absent for a personal account). Read, never sent elsewhere.
+    const cookie = String(document.cookie || '').split(';').map(part => part.trim()).find(part => part.startsWith('_account='));
+    // A malformed escape must not throw on every pass and stop the reports: it counts as given.
+    const raw = cookie ? cookie.slice('_account='.length) : '';
+    let workspace = null;
+    try { workspace = decodeURIComponent(raw) || null; } catch { workspace = raw || null; }
+    const signature = JSON.stringify([workspace, projects]);
+    if (signature === reportedProjects && Date.now() - reportedProjectsAt < PROJECT_LIST_RENEW_MS) return;
+    reportedProjects = signature;
+    reportedProjectsAt = Date.now();
+    void ask({ type: 'project_catalog', projects, workspace }).then(reply => {
+      if (!reply || reply.ok !== true) reportedProjects = '';
+    }, () => { reportedProjects = ''; });
   }
 
   /** Talks to the service worker. Returns null once the extension is reloaded. */
@@ -14252,6 +14284,9 @@
           queueBytes,
           ...currentRequestStatus(),
           overwrite: RENDER_STREAM === true,
+          // #1752/#1837: a hidden page renders late; the report says whether it was, and since when.
+          visibility: document.visibilityState,
+          hiddenForMs: hiddenSince === null ? 0 : Math.max(0, Date.now() - hiddenSince),
           // Kept in the diagnostics shape for older popups. Native relabelling was retired;
           // app-owned activity now appears only in the canonical chronological stream.
           painted: false,
@@ -14375,6 +14410,12 @@
       return false;
     };
     chrome.runtime.onMessage.addListener(runtimeMessage);
+    // The status says how long the page has been hidden; it is tracked wherever the status is answered.
+    if (typeof document !== 'undefined' && document.addEventListener) {
+      listen(document, 'visibilitychange', () => {
+        hiddenSince = document.visibilityState === 'hidden' ? (hiddenSince ?? Date.now()) : null;
+      });
+    }
     if (typeof chrome.runtime.onMessage.removeListener === 'function') {
       rememberCleanup(() => chrome.runtime.onMessage.removeListener(runtimeMessage));
     }
@@ -14425,6 +14466,7 @@
   watchToolRows();
   watchTranscript();
   watchChatEnd();
+  every(PROJECT_LIST_MS, reportProjectList);
 
   every(OBSERVE_MS, () => {
     recoverConversationLoad();
