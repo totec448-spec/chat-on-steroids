@@ -1586,6 +1586,31 @@
         <div class="pet-delete-actions"><button class="btn" id="sshProjectCancel" type="button">Cancel</button><button class="btn btn-solid" id="sshProjectSubmit" type="submit">Test and add</button></div>
       </form>
     </dialog>
+    <dialog class="plugin-dialog commit-dialog" id="commitDialog" aria-labelledby="commitTitle">
+      <div class="plugin-dialog-head"><h2 id="commitTitle">Commit changes</h2><button class="btn" id="commitClose" type="button">Close</button></div>
+      <form id="commitForm" class="commit-form" novalidate>
+        <div class="plugin-dialog-body commit-fields">
+          <p class="commit-where" id="commitWhere"></p>
+          <label class="plugin-field" for="commitMessage"><span>Message</span><textarea id="commitMessage" rows="5" maxlength="10000"></textarea></label>
+          <div class="commit-files-head"><span id="commitFilesLabel"></span><button class="btn commit-files-all" id="commitFilesAll" type="button">Select none</button></div>
+          <div class="commit-files" id="commitFiles" role="group" aria-labelledby="commitFilesLabel"></div>
+          <fieldset class="commit-flow">
+            <legend>Then</legend>
+            <label><input type="radio" name="commitFlow" value="commit" /><span>Nothing else</span></label>
+            <label><input type="radio" name="commitFlow" value="ask-push" /><span>Ask whether to push</span></label>
+            <label><input type="radio" name="commitFlow" value="pr" /><span>Push and open a pull request</span></label>
+          </fieldset>
+          <p class="commit-flow-note" id="commitFlowNote" hidden></p>
+          <label class="plugin-field" for="commitBranch" id="commitBranchField" hidden><span>New branch</span><input id="commitBranch" maxlength="200" autocomplete="off" spellcheck="false" /></label>
+          <p id="commitError" class="plugin-error" role="alert" hidden></p>
+        </div>
+        <div class="pet-delete-actions"><button class="btn" id="commitCancel" type="button">Cancel</button><button class="btn btn-solid" id="commitSubmit" type="submit">Commit</button></div>
+      </form>
+      <div class="commit-done" id="commitDone" hidden>
+        <div class="plugin-dialog-body"><ol class="commit-steps" id="commitSteps"></ol><p id="commitStepError" class="plugin-error" role="alert" hidden></p></div>
+        <div class="pet-delete-actions"><button class="btn" id="commitNotNow" type="button" hidden>Not now</button><button class="btn btn-solid" id="commitStepAction" type="button" hidden></button><button class="btn btn-solid" id="commitDoneClose" type="button">Done</button></div>
+      </div>
+    </dialog>
     <dialog class="plugin-dialog share-page-dialog" id="sharePageDialog" aria-labelledby="sharePageTitle">
       <div class="plugin-dialog-head"><h2 id="sharePageTitle">Share as web page</h2><button class="btn" id="sharePageClose" type="button">Close</button></div>
       <form id="sharePageForm" class="plugin-dialog-body">
