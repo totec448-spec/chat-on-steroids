@@ -1,7 +1,7 @@
 import { REASONING_EFFORTS } from '../src/shared/session.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_GOAL_MODEL,
   defaultConfig,
@@ -1210,3 +1210,22 @@ describe('a settings file the app cannot read as is', () => {
     expect(await fs.readFile(path.join(dir, saved[0]!), 'utf8')).toBe(content);
   });
 });
+
+// #1856 (CodeRabbit): a damaged saved chat style falls back to the built-in text and says so once, never its content.
+it('logs a damaged saved chat style without its text, and nothing for an absent one', async () => {
+  const logger = await import('../src/main/logger.js');
+  const warn = vi.spyOn(logger, 'logWarn');
+  const { MAX_CHAT_STYLE_CHARS } = await import('../src/shared/chat-style.js');
+  await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, chatPersonality: 'secret-ish ' + 'x'.repeat(MAX_CHAT_STYLE_CHARS) } });
+  const loaded = await loadConfig();
+  expect(loaded.ui.chatPersonality).toBeUndefined();
+  const lines = warn.mock.calls.map(call => String(call[0])).filter(line => line.includes('chatPersonality'));
+  expect(lines).toEqual(['config: the saved ui.chatPersonality was damaged (too long); new chats use the built-in text']);
+  expect(lines.join()).not.toContain('secret-ish');
+  warn.mockClear();
+  await saveConfig(defaultConfig());
+  await loadConfig();
+  expect(warn.mock.calls.filter(call => String(call[0]).includes('chatPersonality'))).toEqual([]);
+  warn.mockRestore();
+});
+

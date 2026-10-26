@@ -302,6 +302,14 @@ const commandAllowlistRuleSchema = z.string().max(MAX_COMMAND_ALLOWLIST_RULE_CHA
 });
 
 /** The damaged phone server is said once per start: the schema runs on every config read. */
+/** #1856: a damaged saved chat style falls back to the built-in text, said once per load and never with its content. */
+function chatStyleField(field: 'chatPersonality' | 'chatWritingStyle') {
+  return z.string().max(MAX_CHAT_STYLE_CHARS).optional().catch(({ input }) => {
+    logWarn(`config: the saved ui.${field} was damaged (${typeof input === 'string' ? 'too long' : 'not text'}); new chats use the built-in text`);
+    return undefined;
+  });
+}
+
 let damagedPhoneServerLogged = false;
 
 const configSchema = z.object({
@@ -353,8 +361,8 @@ const configSchema = z.object({
     // Empty, too long or damaged falls back to the built-in Continue phrases.
     customContinue: z.string().trim().min(1).max(CUSTOM_CONTINUE_MAX_CHARS).optional().catch(undefined),
     /** #1856: the person's Personality and Writing style for new chats; absent = default, '' = left out. */
-    chatPersonality: z.string().max(MAX_CHAT_STYLE_CHARS).optional().catch(undefined),
-    chatWritingStyle: z.string().max(MAX_CHAT_STYLE_CHARS).optional().catch(undefined),
+    chatPersonality: chatStyleField('chatPersonality'),
+    chatWritingStyle: chatStyleField('chatWritingStyle'),
     /** Keep the chat at its end while it grows, in the app and on ChatGPT, until the reader scrolls up. */
     followOutput: z.boolean().optional().default(true),
     mentionCore: z.boolean().optional().default(true),

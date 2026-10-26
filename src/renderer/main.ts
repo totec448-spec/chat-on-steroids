@@ -2929,7 +2929,7 @@ initPlugins(apply);
 initPets(api, pet);
 openSkillsLibrary = initSkillsLibrary(api);
 initBrowserPreferences();
-initChat({ save: async () => { await save(); }, state: () => state });
+initChat({ save: () => save(), state: () => state });
 
 void (async () => {
   await refresh();

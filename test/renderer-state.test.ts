@@ -4086,6 +4086,14 @@ it('saves Personality and Writing style from their editors: own text, left out w
   expect(searchSettings(collectSettings(doc), 'writing style').map(entry => entry.title)).toContain('Writing style');
 });
 
+it('says a chat style was restored only when that save went through (#1856, CodeRabbit)', async () => {
+  const mounted = await mountChat({}, [], { saveSettings: async () => ({ ok: false, error: 'Settings could not be saved.' }) });
+  const doc = mounted.window.document;
+  (doc.getElementById('chatPersonalityReset') as HTMLButtonElement).click();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect([...doc.querySelectorAll('.toast')].map(node => node.textContent)).not.toContain('Personality restored to default');
+});
+
 it('offers the handoff length, starting at the thorough default, and saves a shorter choice', async () => {
   const mounted = await mountChat({ hasGoalKey: true });
   const length = mounted.window.document.getElementById('handoffLength') as HTMLSelectElement;
