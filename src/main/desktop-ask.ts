@@ -1,5 +1,6 @@
 import { logInfo } from './logger.js';
 import { ASK_GRANT_MS, desktopAskDecision, type DesktopAskMode } from '../shared/desktop-ask.js';
+import type { MainText } from '../shared/main-texts.js';
 
 /**
  * The gate in front of every desktop step that takes the real mouse or keyboard (#1804). The
@@ -74,8 +75,9 @@ export function createDesktopAsk(deps: DesktopAskDeps): {
     const answer = await deps.prompt({ ...step, chat: await deps.chatName(caller).catch(() => null) });
     if (answer === 'go') {
       const since = deps.now();
+      // A call with no known chat (ChatGPT's connector has no session id) has nothing to grant.
       if (key) grants.set(key, { since, until: since + ASK_GRANT_MS });
-      logInfo(`desktop ask: allowed ${what} (${decision.why}); this chat runs without asking for 2 min`);
+      logInfo(`desktop ask: allowed ${what} (${decision.why}); ${key ? 'this chat runs without asking for 2 min' : 'no chat is known for this call, so its next step asks again'}`);
       return null;
     }
     if (key) grants.delete(key);
@@ -127,4 +129,20 @@ export function macosStep(actions: ReadonlyArray<{ type: string }>): { words: De
   const kinds = new Set(actions.map(action => MACOS_WORDS[action.type]).filter((words): words is DesktopStepWords => Boolean(words)));
   if (!kinds.size) return null;
   return { words: kinds.size === 1 ? [...kinds][0]! : 'input', app: null };
+}
+
+const STEP_TEXT: Record<DesktopStepWords, MainText> = {
+  click: 'Click', 'double-click': 'Double-click', type: 'Type', keys: 'Press keys', scroll: 'Scroll', drag: 'Drag',
+  move: 'Move the pointer', focus: 'Switch windows', launch: 'Open an app', input: 'Use the mouse and keyboard'
+};
+
+/**
+ * The step in words, with its app when the step names one: "Click in Notepad". Opening an app
+ * names the app it opens instead: "Open notepad.exe".
+ */
+export function stepLine(prompt: { words: DesktopStepWords; app: string | null }, text: (key: MainText) => string): string {
+  if (!prompt.app) return text(STEP_TEXT[prompt.words]);
+  const app = prompt.app.slice(0, 80);
+  if (prompt.words === 'launch') return text('Open {0}').replace('{0}', app);
+  return text('{0} in {1}').replace('{0}', text(STEP_TEXT[prompt.words])).replace('{1}', app);
 }

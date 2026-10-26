@@ -97,6 +97,7 @@ export function mainTexts(): Record<MainText, string> {
     '{0} in {1}': t('{0} in {1}'),
     'Go ahead': t('Go ahead'),
     'Not now': t('Not now'),
+    'Open {0}': t('Open {0}'),
     'New chat': t('New chat'),
     'hidden': t('hidden'),
     'Shared from Chat On Steroids': t('Shared from Chat On Steroids'),

@@ -12,26 +12,14 @@ import { getConfig } from './config.js';
 import { mainText } from './main-texts.js';
 import { currentCaller } from './mcp/call-context.js';
 import { findSessionByConversation, getSession } from './session/store.js';
-import { createDesktopAsk, type DesktopAskCaller, type DesktopAskPrompt, type DesktopStepWords } from './desktop-ask.js';
+import { createDesktopAsk, stepLine, type DesktopAskCaller, type DesktopAskPrompt, type DesktopStepWords } from './desktop-ask.js';
 import { ASK_ANSWER_MS, type DesktopAskMode } from '../shared/desktop-ask.js';
 import { defaultAppearance } from '../shared/appearance.js';
-import type { MainText } from '../shared/main-texts.js';
 
 const WIDTH = 360;
 const HEIGHT = 118;
 const MAX_HEIGHT = 240;
 const MARGIN = 16;
-
-const STEP_TEXT: Record<DesktopStepWords, MainText> = {
-  click: 'Click', 'double-click': 'Double-click', type: 'Type', keys: 'Press keys', scroll: 'Scroll', drag: 'Drag',
-  move: 'Move the pointer', focus: 'Switch windows', launch: 'Open an app', input: 'Use the mouse and keyboard'
-};
-
-/** The step in words, with its app when the step names one: "Click in Notepad". */
-export function stepLine(prompt: Pick<DesktopAskPrompt, 'words' | 'app'>): string {
-  const step = mainText(STEP_TEXT[prompt.words]);
-  return prompt.app ? mainText('{0} in {1}').replace('{0}', step).replace('{1}', prompt.app.slice(0, 80)) : step;
-}
 
 export function showDesktopAskPrompt(prompt: DesktopAskPrompt): Promise<'go' | 'not-now' | 'timeout'> {
   const ui = getConfig().ui;
@@ -80,7 +68,7 @@ export function showDesktopAskPrompt(prompt: DesktopAskPrompt): Promise<'go' | '
         });
     });
     const query = {
-      title: mainText('Chat On Steroids wants to use your mouse and keyboard'), step: stepLine(prompt), chat: (prompt.chat ?? '').slice(0, 120),
+      title: mainText('Chat On Steroids wants to use your mouse and keyboard'), step: stepLine(prompt, mainText), chat: (prompt.chat ?? '').slice(0, 120),
       go: mainText('Go ahead'), notNow: mainText('Not now'),
       theme, background: palette.background, accent: palette.accent, lang: ui.language ?? 'en'
     };
