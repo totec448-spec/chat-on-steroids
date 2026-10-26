@@ -24,9 +24,6 @@ const CHANGE_DEBOUNCE_MS = 180;
 
 export interface GitResult { code: number; stdout: Buffer; stderr: string; }
 export interface RepositoryContext { projectId: string; projectReal: string; root: string; gitDir: string; commonDir: string; prefix: string; }
-/** Checkpoint commands only: a temporary index outside the repository, and no replacement objects. */
-/** `input` is written to Git's standard input (a list for `--batch-check`). */
-export interface GitOptions { indexFile?: string; noReplaceObjects?: boolean; input?: string; }
 
 function sameFile(left: Stats, right: Stats): boolean {
   return left.dev === right.dev && left.ino === right.ino && left.size === right.size &&
@@ -128,9 +125,19 @@ export function gitExecutable(
   throw new Error('Git was not found on PATH');
 }
 
-export async function runGit(cwd: string, args: string[], maxBytes = MAX_GIT_OUTPUT_BYTES, options: GitOptions = {}): Promise<GitResult> {
+/**
+ * What a call needs beyond a plain read: text on standard input (a commit message, a list for
+ * `--batch-check`), more time (a push over the network), extra environment (never prompt for a
+ * password or a host key), and for checkpoint commands only a temporary index outside the
+ * repository and no replacement objects.
+ */
+export interface GitRunOptions { input?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv; indexFile?: string; noReplaceObjects?: boolean }
+/** The checkpoint code's name for the same options. */
+export type GitOptions = GitRunOptions;
+
+export async function runGit(cwd: string, args: string[], maxBytes = MAX_GIT_OUTPUT_BYTES, options: GitRunOptions = {}): Promise<GitResult> {
   const executable = gitExecutable();
-  const env = cleanGitEnvironment();
+  const env = { ...cleanGitEnvironment(), ...options.env };
   if (options.indexFile) env['GIT_INDEX_FILE'] = options.indexFile;
   return new Promise((resolve, reject) => {
     const child = spawn(executable, ['--no-optional-locks', ...(options.noReplaceObjects ? ['--no-replace-objects'] : []), ...args], {
@@ -154,7 +161,7 @@ export async function runGit(cwd: string, args: string[], maxBytes = MAX_GIT_OUT
     const timer = setTimeout(() => {
       child.kill();
       finish(new Error('Git took too long to respond'));
-    }, GIT_TIMEOUT_MS);
+    }, options.timeoutMs ?? GIT_TIMEOUT_MS);
     child.once('error', error => finish(error));
     child.stdout!.on('data', (chunk: Buffer) => {
       stdoutBytes += chunk.length;

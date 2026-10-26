@@ -1,3 +1,4 @@
+import { DEFAULT_PHONE_PUSH } from '../shared/phone-push.js';
 import { DEFAULT_HELPER_CHAT_MODEL, SUPERSEDED_HELPER_CHAT_MODELS } from '../shared/chat-models.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
 import { DEFAULT_RECORDING_STORAGE_GIB, REASONING_EFFORTS, RECORDING_STORAGE_LIMITS_GIB, type RecordingStorageLimitGiB } from '../shared/session.js';
@@ -301,6 +302,9 @@ const commandAllowlistRuleSchema = z.string().max(MAX_COMMAND_ALLOWLIST_RULE_CHA
   if (message) ctx.addIssue({ code: 'custom', message });
 });
 
+/** The damaged phone server is said once per start: the schema runs on every config read. */
+let damagedPhoneServerLogged = false;
+
 const configSchema = z.object({
   // A config written by hand — or by a build before `/skills` was reserved — must not be
   // able to claim a reserved virtual root. Renamed rather than rejected: a single bad root
@@ -377,6 +381,8 @@ const configSchema = z.object({
     autoConnect: z.boolean(),
     startAtLogin: z.boolean().optional().default(false),
     turnNotifications: z.boolean().optional().default(true),
+    // #1802: a short sound when a chat needs you, fails or finishes. Missing means off.
+    sounds: z.boolean().optional().default(false),
     // #1402: a fresh turn after this many minutes of one (0 = off). A malformed value keeps the default.
     rotateTurnMinutes: z.number().int().min(0).max(120).optional().default(30).catch(30),
     rotateStopFallback: z.boolean().optional().default(false).catch(false),
@@ -385,8 +391,32 @@ const configSchema = z.object({
     keepAwake: z.boolean().optional().default(true),
     keepScreenAwake: z.boolean().optional().default(false),
     privacyScreenshots: z.boolean().optional().default(false),
+    // Phone notifications through ntfy. Each field repairs on its own, so a damaged one never
+    // turns the rest off. A damaged server is the exception: it switches them off with no server,
+    // because falling back to ntfy.sh would send to a server nobody chose (a missing one is the default).
+    phonePush: z.preprocess(raw => {
+      if (!raw || typeof raw !== 'object' || !('server' in raw)) return raw;
+      const server = (raw as { server: unknown }).server;
+      if (typeof server === 'string' && server.length <= 2048) return raw;
+      // Said once per start, never with the value: it may be anything a hand edit left there.
+      if (!damagedPhoneServerLogged) { damagedPhoneServerLogged = true; logWarn('phone notifications: the saved server setting was damaged, so they are off until a server is chosen again'); }
+      return { ...raw, enabled: false, server: '' };
+    }, z.object({
+      enabled: z.boolean().catch(false),
+      server: z.string().max(2048).optional().default(DEFAULT_PHONE_PUSH.server).catch(''),
+      topic: z.string().max(64).catch(''),
+      needsYou: z.boolean().catch(true),
+      failures: z.boolean().catch(true),
+      finishedAfterMinutes: z.number().int().min(0).max(240).nullable().catch(DEFAULT_PHONE_PUSH.finishedAfterMinutes),
+      onlyWhenAway: z.boolean().catch(true),
+      quietHours: z.object({ from: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), to: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/) }).nullable().catch(null),
+      includeDetails: z.boolean().catch(false)
+    })).optional().catch(undefined),
     // Masking credentials in tool output before ChatGPT sees them (#1797). On unless turned off.
     secretsShield: z.boolean().optional().default(true),
+    // How far Commit in Review goes (#1824 follow-up): commit only, then ask to push, or push and
+    // open a pull request. Remembered from the Commit dialog; missing or damaged means ask-push.
+    commitFlow: z.enum(['commit', 'ask-push', 'pr']).optional().catch(undefined),
     // Dark is the design the app is drawn for, and a config written before the theme
     // existed has no stored answer to override — so it is the default rather than the
     // fallback. An explicit `light` is somebody's own choice and is never touched.
@@ -610,7 +640,7 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform, rele
     // Fresh installs refresh changed connector tools on their own: a permission chosen in Setup
     // changes the tool list, and nothing else tells a new user to refresh the plugin in ChatGPT.
     // Older configs keep the schema default (off).
-    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, keepAwake: true, keepScreenAwake: false, cosBrowserMinimize: 'taskbar', turnNotifications: true, rotateTurnMinutes: 30, rotateStopFallback: false, localAppUsage: true, privacyScreenshots: false, secretsShield: true, theme: 'dark', autoRefreshPlugins: true, autoSelectSkills: false, backgroundChats: true, backgroundPlacement: 'window', followUp: 'steer', enterSends: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true, mentionPlugins: false,
+    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, keepAwake: true, keepScreenAwake: false, cosBrowserMinimize: 'taskbar', turnNotifications: true, sounds: false, rotateTurnMinutes: 30, rotateStopFallback: false, localAppUsage: true, privacyScreenshots: false, secretsShield: true, theme: 'dark', autoRefreshPlugins: true, autoSelectSkills: false, backgroundChats: true, backgroundPlacement: 'window', followUp: 'steer', enterSends: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true, mentionPlugins: false,
       // The built-in browser is opt-in: Chrome with the companion stays the default for new and
       // existing installs alike, and the built-in one runs only once someone chooses it.
       chatBrowser: 'chrome' },

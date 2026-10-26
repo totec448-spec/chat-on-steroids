@@ -41,6 +41,9 @@ import { cancelTaskRequest, runTaskRequest } from './task-request.js';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { isValidTopic, normalizeServer, testPhonePush } from './phone-push.js';
+
+import { DEFAULT_PHONE_PUSH, type PhonePushSettings } from '../shared/phone-push.js';
 import { retryGoalBrowserHelper } from './goal.js';
 import { requestBrowserPreferences } from './browser-preferences.js';
 import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser } from './session/start-input.js';
@@ -80,7 +83,8 @@ import { CUSTOM_CONTINUE_MAX_CHARS } from '../shared/recovery.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange, rememberRunningSurfaceTokens } from './connection.js';
 import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema, settingsRecovered } from './config.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
-import { PROJECT_COLORS } from '../shared/projects.js';
+import { CHATGPT_PROJECT_ID, PROJECT_COLORS } from '../shared/projects.js';
+import { chatgptProjectChoices } from './chatgpt-project-catalog.js';
 import { bridgePortSelection } from './bridge-ports.js';
 import { clearAllGoalSwitches, draftTaskPlan, listGoalModels, MODEL_PAGE_SIZE, retireGoalDrafts, goalBackendFor, goalSwitchFor, setGoalSwitchNow, setGoalReplyActiveNow, setGoalObjectiveNow } from './goal.js';
 import { forgetExposedSurface } from './mcp/server.js';
@@ -97,7 +101,7 @@ import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { inFlightToolCalls } from './mcp/call-context.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, addRemoteProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff } from './projects.js';
+import { addProject, addRemoteProject, createChatgptProjectFor, linkChatgptProject, unlinkChatgptProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff } from './projects.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile, serverFileSnapshot } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
@@ -146,6 +150,9 @@ import { findInSession, locateMessage, locateSearchMatch, searchSessions } from 
 import { listBookmarks, setBookmark } from './session/bookmarks.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
 import { exportSessionMarkdown } from './session/markdown-export.js';
+import { commitProjectChanges, createPullRequest, pushProject, readCommitState } from './project-commit.js';
+import { exportSessionPage } from './session/page-export.js';
+import { feedbackIssueUrl, operatingSystemName, systemVersion } from './feedback.js';
 import { saveCodeFile } from './code-file.js';
 import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
 import { setChatsTrusted, trustedChatIds } from './session/trusted-chats.js';
@@ -177,6 +184,14 @@ import {
   onMacOSDesktopAccessChange,
   refreshMacOSDesktopAccess
 } from './computer/index.js';
+
+/** Why phone settings cannot be saved as they are, or null. Only an enabled form is checked. */
+function phonePushProblem(push: { enabled: boolean; topic: string; server: string }): string | null {
+  if (!push.enabled) return null;
+  if (!isValidTopic(push.topic)) return 'Choose a topic of letters, digits, - and _ (up to 64).';
+  if (!normalizeServer(push.server)) return 'Enter the address of an ntfy server, such as https://ntfy.sh.';
+  return null;
+}
 
 /** Fixed native Settings destinations; authored chat links use the shared web/mail policy. */
 const ALLOWED_LINKS = new Set([
@@ -260,13 +275,22 @@ const settingsPatch = z.object({
     autoConnect: z.boolean(),
     startAtLogin: z.boolean().optional(),
     turnNotifications: z.boolean().optional(),
+    sounds: z.boolean().optional(),
     rotateTurnMinutes: z.number().int().min(0).max(120).optional(),
     rotateStopFallback: z.boolean().optional(),
     localAppUsage: z.boolean().optional(),
     keepAwake: z.boolean().optional(),
     keepScreenAwake: z.boolean().optional(),
     privacyScreenshots: z.boolean(),
+    phonePush: z.object({
+      enabled: z.boolean(), server: z.string().max(2048), topic: z.string().max(64), needsYou: z.boolean(), failures: z.boolean(),
+      finishedAfterMinutes: z.number().int().min(0).max(240).nullable(), onlyWhenAway: z.boolean(),
+      quietHours: z.object({ from: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), to: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/) }).strict().nullable(),
+      includeDetails: z.boolean()
+    }).strict().optional(),
     secretsShield: z.boolean().optional(),
+    // Set from the Commit dialog (projectCommit:flow); a settings save carries it through.
+    commitFlow: z.enum(['commit', 'ask-push', 'pr']).optional(),
     theme: z.enum(['light', 'dark'])
   }),
   sessions: z.object({
@@ -365,6 +389,18 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     throw new Error('Setup profile changed. Edit the tunnel ID in the selected profile again.');
   }
   const pick = <T>(live: T, before: T, next: T): T => (Object.is(before, next) ? live : next);
+  // Field by field, like the rest of the form: a change elsewhere never undoes one made here.
+  const mergePhonePush = (live: PhonePushSettings | undefined, before: PhonePushSettings | undefined, next: PhonePushSettings | undefined): PhonePushSettings | undefined => {
+    if (!next) return live;
+    const now = live ?? DEFAULT_PHONE_PUSH, was = before ?? DEFAULT_PHONE_PUSH;
+    const field = <K extends keyof PhonePushSettings>(key: K): PhonePushSettings[K] =>
+      JSON.stringify(was[key]) === JSON.stringify(next[key]) ? now[key] : next[key];
+    const merged: PhonePushSettings = {
+      enabled: field('enabled'), server: field('server'), topic: field('topic'), needsYou: field('needsYou'), failures: field('failures'),
+      finishedAfterMinutes: field('finishedAfterMinutes'), onlyWhenAway: field('onlyWhenAway'), quietHours: field('quietHours'), includeDetails: field('includeDetails')
+    };
+    return { ...merged, server: normalizeServer(merged.server) ?? merged.server.trim() };
+  };
   const pickRules = (live: string[], before: string[], next: string[]): string[] =>
     before.length === next.length && before.every((rule, index) => rule === next[index]) ? live : next;
   const capabilities = Object.fromEntries(
@@ -436,6 +472,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       mentionPlugins: pick(current.ui.mentionPlugins, base.ui.mentionPlugins, wanted.ui.mentionPlugins),
       // Not part of the settings form: reported by the window and the extension, carried through.
       language: current.ui.language,
+      commitFlow: current.ui.commitFlow,
       browserPreferences: current.ui.browserPreferences,
       cosBrowserTrayHint: current.ui.cosBrowserTrayHint,
       finishTool: pick(current.ui.finishTool, base.ui.finishTool, wanted.ui.finishTool),
@@ -459,6 +496,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       autoConnect: pick(current.ui.autoConnect, base.ui.autoConnect, wanted.ui.autoConnect),
       startAtLogin: pick(current.ui.startAtLogin, base.ui.startAtLogin, wanted.ui.startAtLogin),
       turnNotifications: pick(current.ui.turnNotifications, base.ui.turnNotifications, wanted.ui.turnNotifications),
+      sounds: pick(current.ui.sounds === true, base.ui.sounds === true, wanted.ui.sounds ?? current.ui.sounds === true),
       rotateTurnMinutes: pick(current.ui.rotateTurnMinutes, base.ui.rotateTurnMinutes, wanted.ui.rotateTurnMinutes),
       rotateStopFallback: pick(current.ui.rotateStopFallback === true, base.ui.rotateStopFallback === true, wanted.ui.rotateStopFallback ?? current.ui.rotateStopFallback === true),
       localAppUsage: pick(current.ui.localAppUsage, base.ui.localAppUsage, wanted.ui.localAppUsage),
@@ -469,6 +507,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         base.ui.privacyScreenshots,
         wanted.ui.privacyScreenshots
       ),
+      phonePush: mergePhonePush(current.ui.phonePush, base.ui.phonePush, wanted.ui.phonePush),
       // Missing means on, here as in the saved settings.
       secretsShield: pick(current.ui.secretsShield !== false, base.ui.secretsShield !== false, wanted.ui.secretsShield ?? current.ui.secretsShield !== false),
       theme: pick(current.ui.theme, base.ui.theme, wanted.ui.theme)
@@ -612,6 +651,7 @@ async function buildState(): Promise<AppState> {
     hasApiKey: await hasSecret(setupApiKeySlot(config.tunnel.profileId)),
     hasGoalKey: await hasSecret('openRouterApiKey'),
     hasCustomProviderKey: await hasSecret('customProviderApiKey'),
+    hasPhonePushToken: await hasSecret('ntfyToken'),
     // After the reads above: only a read can find the file unreadable.
     credentialsUnreadable: storedSecretsUnreadable(),
     resolvedBinary: resolvedBinary(config),
@@ -729,12 +769,31 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return state;
   });
 
+  // Phone notifications: a test message now, and the optional access token (kept in secure storage).
+  handle('phonePush:test', async () => { await testPhonePush(); });
+  handle('phonePush:token', async payload => {
+    const { token } = z.object({ token: z.string().max(512) }).strict().parse(payload);
+    const trimmed = token.trim();
+    if (trimmed && !/^[\x21-\x7e]+$/.test(trimmed)) {
+      // Never the token itself.
+      logWarn('phone push: access token not saved: it has spaces or other characters a token cannot have');
+      throw new Error('An access token is letters, digits and symbols, without spaces.');
+    }
+    await setSecret('ntfyToken', trimmed);
+    logInfo(`phone push: access token ${trimmed ? 'saved' : 'removed'}`);
+    return buildState();
+  });
   /** One settings save: the Settings form's, and a settings backup's import. */
   /**
    * Saves the settings and reports, apart from the state, an error that came after they were
    * written (worker history, login item, control API). An error before the write is thrown.
    */
   const saveSettingsReport = async (request: z.infer<typeof settingsSave>): Promise<{ state: AppState; lateError: unknown }> => {
+    // The phone settings are checked only when this save changes them, and only while on: a damaged
+    // stored value (hand-edited, or from an older version) must not block every other save, nor the
+    // save that repairs it or switches it off.
+    const push = request.patch.ui.phonePush;
+    const phoneChanged = !!push && JSON.stringify(push) !== JSON.stringify(request.base.ui.phonePush);
     const before = getConfig();
     const next = await updateConfig(async config => {
       if (request.patch.ui.browserBridgePort !== undefined &&
@@ -743,6 +802,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         throw new Error('Browser bridge port is controlled by CLF_BRIDGE_PORTS.');
       }
       const proposed = { ...config, ...mergeSettings(config, request.base, request.patch) };
+      // Checked as it will be saved: the form may be stale, and the merge keeps fields another
+      // window changed meanwhile (a cleared topic stays cleared while this save turns it on).
+      if (phoneChanged && proposed.ui.phonePush) {
+        const problem = phonePushProblem(proposed.ui.phonePush);
+        if (problem) {
+          logWarn(`settings save refused: ${problem}`);
+          throw new Error(problem);
+        }
+      }
       // If an earlier Off retirement failed, On must retry it before admission.
       if (!config.ui.finishTool && proposed.ui.finishTool) await cancelFinishInputs(false);
       else if (!config.goal.impulseMinutes && (proposed.goal.impulseMinutes ?? 0) > 0) await cancelFinishInputs(true);
@@ -1195,7 +1263,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     push('session:changed');
     return project;
   });
-  handle('projects:add', async () => {
+  handle('projects:add', async (payload) => {
+    const { chatgpt } = z.object({ chatgpt: z.literal('later').optional() }).strict().parse(payload ?? {});
     const window = getWindow();
     if (!window) throw new Error('No window');
     const result = await dialog.showOpenDialog(window, { ...dialogLabel('Choose a project folder for ChatGPT'), properties: ['openDirectory'] });
@@ -1207,7 +1276,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       const state = await approveRoot(folder);
       push('state:changed', state);
     }
-    const project = await addProject(folder);
+    const project = await addProject(folder, chatgpt ? { chatgpt } : {});
     push('session:changed');
     // Its native ChatGPT Project is created by the browser; tell it there is work.
     if (project.chatgpt?.state === 'requested') wakeBrowserWork();
@@ -1215,9 +1284,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   // A folder on a server (#1469): the address and folder as typed; the server is asked once.
   handle('projects:addRemote', async payload => {
-    const { address, folder } = (payload ?? {}) as { address?: unknown; folder?: unknown };
+    const { address, folder, chatgpt } = (payload ?? {}) as { address?: unknown; folder?: unknown; chatgpt?: unknown };
     if (typeof address !== 'string' || typeof folder !== 'string' || address.length > 300 || folder.length > 4096) throw new Error('Enter an SSH address and a folder');
-    const project = await addRemoteProject(address, folder);
+    const project = await addRemoteProject(address, folder, {}, chatgpt === 'later' ? { chatgpt: 'later' } : {});
     push('session:changed');
     if (project.chatgpt?.state === 'requested') wakeBrowserWork();
     return project;
@@ -1226,6 +1295,28 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
     const project = await retryProjectCreate(id);
     if (project) wakeBrowserWork();
+    push('session:changed');
+    return project;
+  });
+  // Linking a project to a ChatGPT Project the account already has (#1756).
+  handle('projects:chatgpt-choices', async () => chatgptProjectChoices());
+  handle('projects:chatgpt-link', async payload => {
+    const { id, chatgptId } = z.object({ id: z.string().uuid(), chatgptId: z.string().regex(CHATGPT_PROJECT_ID) }).strict().parse(payload);
+    const project = await linkChatgptProject(id, chatgptId);
+    push('session:changed');
+    return project;
+  });
+  handle('projects:chatgpt-create', async payload => {
+    const { id, replace } = z.object({ id: z.string().uuid(), replace: z.boolean().optional() }).strict().parse(payload);
+    const project = await createChatgptProjectFor(id, { replace: replace === true });
+    if (project.chatgpt?.state === 'requested') wakeBrowserWork();
+    push('session:changed');
+    return project;
+  });
+  // Unlinking leaves the ChatGPT Project and its chats in ChatGPT; the project's new chats start outside it.
+  handle('projects:chatgpt-unlink', async payload => {
+    const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
+    const project = await unlinkChatgptProject(id);
     push('session:changed');
     return project;
   });
@@ -1315,6 +1406,39 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { projectId, baseRef } = z.object({ projectId: projectFileId,
       baseRef: z.string().min(1).max(256).optional() }).strict().parse(payload);
     return readProjectGitSnapshot(projectId, baseRef);
+  });
+  // Commit & PR from Review. Each step is its own call, so the dialog can stop after any of them.
+  handle('projectCommit:state', async payload => {
+    const { projectId } = z.object({ projectId: projectFileId }).strict().parse(payload);
+    return readCommitState(projectId);
+  });
+  // A changed file's path as Review listed it: relative, and never leaving the project.
+  const commitPath = projectRelativePath.min(1).refine(file => !/^(?:[\\/]|[A-Za-z]:)/.test(file) && !file.split(/[\\/]/).includes('..'),
+    'A path must stay inside the project.');
+  handle('projectCommit:commit', async payload => {
+    const request = z.object({ projectId: projectFileId, message: z.string().max(10_000), paths: z.array(commitPath).max(2_000),
+      newBranch: z.string().min(1).max(200).optional(), expectedToken: z.string().length(64).regex(/^[0-9a-f]+$/) }).strict().parse(payload);
+    return commitProjectChanges(request.projectId, request);
+  });
+  handle('projectCommit:push', async payload => {
+    const { projectId } = z.object({ projectId: projectFileId }).strict().parse(payload);
+    return pushProject(projectId);
+  });
+  handle('projectCommit:pullRequest', async payload => {
+    const { projectId, title, body } = z.object({ projectId: projectFileId, title: z.string().max(1_000), body: z.string().max(10_000) }).strict().parse(payload);
+    const result = await createPullRequest(projectId, { title, body });
+    // Without gh, GitHub's own page opens filled in; the person creates the pull request there.
+    if (result.via === 'browser') await shell.openExternal(result.url);
+    return result;
+  });
+  handle('projectCommit:flow', async payload => {
+    const { flow } = z.object({ flow: z.enum(['commit', 'ask-push', 'pr']) }).strict().parse(payload);
+    if (getConfig().ui.commitFlow !== flow) {
+      await updateConfig(config => ({ ...config, ui: { ...config.ui, commitFlow: flow } }));
+      // The dialog reads the choice from the window's copy of the state; it must not open with the old one.
+      push('state:changed', await buildState());
+    }
+    return true;
   });
   handle('projectGit:diff', async payload => {
     const { projectId, path, baseRef, expectedRevision } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1),
@@ -1478,6 +1602,26 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('diagnostics:run', async () => runDiagnostics());
   // "Save diagnostics report": one plain-text file for a bug report, personal details removed
   // (see diagnostics-report.ts). Revealed after saving so the user reads what they would share.
+  // In-app feedback: GitHub's issue form, filled in, opens in the browser. The person reads it and
+  // submits it there; the app sends nothing itself. The diagnostics report is saved separately.
+  handle('feedback:openIssue', async (payload) => {
+    const text = (max: number) => z.string().max(max);
+    const report = z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('bug'), what: text(4000).refine(value => value.trim().length > 0), steps: text(4000).optional(),
+        frequency: z.enum(['Every time', 'Sometimes', 'It happened once']).optional() }).strict(),
+      z.object({ kind: z.literal('idea'), problem: text(4000).refine(value => value.trim().length > 0),
+        proposal: text(4000).refine(value => value.trim().length > 0) }).strict()
+    ]).parse(payload);
+    const bridge = await bridgeStatus();
+    const { url, trimmed } = feedbackIssueUrl(report, {
+      version: app.getVersion(), os: operatingSystemName(process.platform, systemVersion()), arch: process.arch,
+      extension: bridge.paired || bridge.extensionVersion ? { present: bridge.present, version: bridge.extensionVersion } : null
+    });
+    await shell.openExternal(url);
+    logInfo(`feedback: opened GitHub's ${report.kind === 'bug' ? 'bug report' : 'feature request'} form, filled in${trimmed ? ' (text shortened to fit the link)' : ''}`);
+    return { trimmed };
+  });
+
   handle('diagnostics:saveReport', async () => {
     const selfTest = await Promise.race([
       runDiagnostics().catch(() => null),
@@ -1540,19 +1684,29 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return saveCodeFile(text, name, getWindow());
   });
 
-  // Copy or save a completed turn's answer, or the session transcript, as Markdown, or save the
-  // transcript as an HTML page. Main reads the full text of answers that were cut in the log, so
-  // none comes out truncated.
+  // Copy or save a completed turn's answer, or the session transcript, as Markdown. Main reads
+  // the full text of answers that were cut in the log, so neither comes out truncated. A whole
+  // chat as a web page goes through sessions:sharePage, which previews it first.
   handle('sessions:exportMarkdown', async (payload) => {
     const request = z.object({
       id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
       scope: z.enum(['answer', 'latest', 'session']),
       turnId: z.string().min(1).max(200).optional(),
       messageId: z.string().min(1).max(200).optional(),
-      target: z.enum(['clipboard', 'file']),
-      format: z.enum(['markdown', 'html']).optional()
+      target: z.enum(['clipboard', 'file'])
     }).parse(payload);
     return exportSessionMarkdown(request, getWindow());
+  });
+
+  // Share a chat as one web page: the dialog previews exactly what Save writes, with or without
+  // the details the person chose to hide.
+  handle('sessions:sharePage', async (payload) => {
+    const id = z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i);
+    const request = z.discriminatedUnion('target', [
+      z.object({ id, target: z.literal('preview'), hide: z.boolean(), lang: z.string().max(35).regex(/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/) }),
+      z.object({ id, target: z.literal('file'), preview: z.string().uuid() })
+    ]).parse(payload);
+    return exportSessionPage(request, getWindow());
   });
 
   // The Install button. The renderer decides nothing about what is installed - it cannot

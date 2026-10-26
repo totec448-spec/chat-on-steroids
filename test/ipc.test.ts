@@ -117,6 +117,17 @@ it.each(['playfulStatus', 'playfulContinue', 'followOutput', 'announceTurns'] as
   expect(getConfig().ui[key]).toBe(wanted);
 });
 
+it('saves Play sounds through Settings, off by default, and keeps it across a stale unrelated save (#1802)', async () => {
+  const base = getConfig();
+  expect(base.ui.sounds).toBe(false);
+  expect(await save({ ...base, ui: { ...base.ui, sounds: true } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.sounds).toBe(true);
+  expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.sounds).toBe(true);
+  expect(await save({ ...getConfig(), ui: { ...getConfig().ui, sounds: false } }, getConfig())).toMatchObject({ ok: true });
+  expect(getConfig().ui.sounds).toBe(false);
+});
+
 it('saves Auto-select Skills through Settings and preserves it across a stale unrelated save', async () => {
   const base = getConfig();
   const wanted = !(base.ui.autoSelectSkills ?? false);
@@ -575,6 +586,31 @@ it('adds picker-selected projects, reuses containing approval, and leaves cancel
   expect(await handlers.get('sessions:toolEditReview')!(null, {
     sessionId: first.data.id, callId: 'not-a-uuid', changeIndex: 0
   })).toMatchObject({ ok: false });
+});
+
+it('adds a folder whose ChatGPT Project the person picks next, and links or creates it (#1756)', async () => {
+  currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
+  const folder = path.join(dir, 'link-project');
+  await fs.mkdir(path.join(folder, 'other'), { recursive: true });
+  await saveConfig({ ...defaultConfig(), roots: [] });
+  await writeDurableNow('projects', []);
+  const { noteChatgptProjects } = await import('../src/main/chatgpt-project-catalog.js');
+  const listed = `g-p-${'e'.repeat(32)}`;
+  await noteChatgptProjects([{ id: listed, name: 'Existing' }]);
+  vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: false, filePaths: [folder] });
+  const later = await handlers.get('projects:add')!(null, { chatgpt: 'later' }) as any;
+  expect(later.ok, later.error).toBe(true);
+  expect(later.data.chatgpt).toBeUndefined();
+  expect(await handlers.get('projects:add')!(null, { chatgpt: 'now' })).toMatchObject({ ok: false });
+  expect((await handlers.get('projects:chatgpt-choices')!(null, {}) as any).data).toEqual([{ id: listed, name: 'Existing', linkedTo: null }]);
+  expect(await handlers.get('projects:chatgpt-link')!(null, { id: later.data.id, chatgptId: 'g-p-x' })).toMatchObject({ ok: false });
+  const linked = await handlers.get('projects:chatgpt-link')!(null, { id: later.data.id, chatgptId: listed }) as any;
+  expect(linked).toMatchObject({ ok: true, data: { chatgpt: { state: 'linked', id: listed } } });
+  expect((await handlers.get('projects:chatgpt-choices')!(null, {}) as any).data[0].linkedTo).toEqual({ id: later.data.id, name: 'link-project' });
+  vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: false, filePaths: [path.join(folder, 'other')] });
+  const second = await handlers.get('projects:add')!(null, { chatgpt: 'later' }) as any;
+  const created = await handlers.get('projects:chatgpt-create')!(null, { id: second.data.id }) as any;
+  expect(created).toMatchObject({ ok: true, data: { chatgpt: { state: 'requested' } } });
 });
 
 it('does not install a stale Git watch after a newer Files project watch', async () => {
@@ -1322,6 +1358,76 @@ describe('root namespace invariants', () => {
 });
 
 /** Exercise the real IPC policy for both Settings buttons and authored chat links. */
+describe('Commit & PR', () => {
+  it('remembers how far Commit goes, and keeps it through a settings save', async () => {
+    expect(await handlers.get('projectCommit:flow')!(null, { flow: 'pr' })).toEqual({ ok: true, data: true });
+    expect(getConfig().ui.commitFlow).toBe('pr');
+    expect(((await handlers.get('projectCommit:flow')!(null, { flow: 'always' })) as { ok: boolean }).ok).toBe(false);
+    expect(getConfig().ui.commitFlow).toBe('pr');
+    // The Settings form does not own it; a save that changes something else carries it through.
+    const base = getConfig();
+    expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
+    expect(getConfig().ui.commitFlow).toBe('pr');
+  });
+
+  // A well-formed request for a project that does not exist reaches the commit and is refused there;
+  // each malformed one must be refused before, for its own field.
+  const wellFormed = { projectId: '6f9619ff-8b86-4d01-b42d-00cf4fc964ff', message: 'x', paths: ['a.ts'], expectedToken: 'a'.repeat(64) };
+  it.each([
+    { expectedToken: 'short' },
+    { paths: ['../outside.ts'] },
+    { paths: ['src/../../outside.ts'] },
+    { paths: ['C:\\Windows\\win.ini'] },
+    { message: 'x'.repeat(10_001) },
+    { amend: true }
+  ])('refuses a commit request before Git runs: %o', async change => {
+    const reached = (await handlers.get('projectCommit:commit')!(null, wellFormed)) as { ok: boolean; error: string };
+    expect(reached.ok).toBe(false);
+    const refused = (await handlers.get('projectCommit:commit')!(null, { ...wellFormed, ...change })) as { ok: boolean; error: string };
+    expect(refused.ok).toBe(false);
+    expect(refused.error).not.toBe(reached.error);
+    if (change.paths) expect(refused.error).toBe('A path must stay inside the project.');
+  });
+
+  it('tells the window the remembered choice at once, so the next Commit opens with it', async () => {
+    currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
+    try {
+      await handlers.get('projectCommit:flow')!(null, { flow: getConfig().ui.commitFlow === 'commit' ? 'pr' : 'commit' });
+      const sent = vi.mocked(currentWindow.webContents.send).mock.calls.find(([channel]) => channel === 'state:changed');
+      expect((sent?.[1] as { config: { ui: { commitFlow?: string } } } | undefined)?.config.ui.commitFlow).toBe(getConfig().ui.commitFlow);
+    } finally {
+      currentWindow = null;
+    }
+  });
+});
+
+describe('in-app feedback', () => {
+  it("opens GitHub's form filled in, with the app's version, and says nothing was shortened", async () => {
+    vi.mocked(app.getVersion).mockReturnValue('2.1.46');
+    const reply = await handlers.get('feedback:openIssue')!(null, { kind: 'bug', what: 'The Stop button stays grey.', frequency: 'Sometimes' });
+    expect(reply).toEqual({ ok: true, data: { trimmed: false } });
+    const url = new URL(vi.mocked(shell.openExternal).mock.calls.at(-1)![0] as string);
+    expect(url.origin + url.pathname).toBe('https://github.com/totec448-spec/chat-on-steroids/issues/new');
+    expect(url.searchParams.get('template')).toBe('bug_report.yml');
+    expect(url.searchParams.get('version')).toBe('2.1.46');
+    expect(url.searchParams.get('operating_system')).toBeTruthy();
+    expect(url.searchParams.get('frequency')).toBe('Sometimes');
+  });
+
+  it.each([
+    { kind: 'bug', what: '   ' },
+    { kind: 'idea', problem: 'p', proposal: '' },
+    { kind: 'bug', what: 'x', template: 'blank.yml' },
+    { kind: 'bug', what: 'x', frequency: 'Always' },
+    { kind: 'bug', what: 'x'.repeat(4001) },
+    { kind: 'other', what: 'x' }
+  ])('opens nothing for a report the form cannot take: %o', async report => {
+    const before = vi.mocked(shell.openExternal).mock.calls.length;
+    expect(((await handlers.get('feedback:openIssue')!(null, report)) as { ok: boolean }).ok).toBe(false);
+    expect(vi.mocked(shell.openExternal).mock.calls.length).toBe(before);
+  });
+});
+
 describe('every link the window offers', () => {
   it('is one link:open will actually open', async () => {
     const { promises: fs } = await import('node:fs');
@@ -2936,5 +3042,83 @@ describe('settings backup over IPC', () => {
       .toEqual({ ok: false, error: 'Your settings changed after the file was chosen. Choose it again.' });
     expect(getConfig()).toMatchObject({ readOnly: true, ui: { theme: 'light' } });
     expect(await apply({ token: picked.data.token, includeKeys: false })).toEqual({ ok: false, error: 'Choose the backup file again.' });
+  });
+});
+
+describe('phone notifications over IPC', () => {
+  const phone = (over: Record<string, unknown> = {}) => ({ enabled: true, server: 'https://ntfy.sh/', topic: 'cos-fixturetopic234567', needsYou: true, failures: true,
+    finishedAfterMinutes: 5, onlyWhenAway: true, quietHours: null, includeDetails: false, ...over });
+  beforeAll(() => {
+    // An earlier test registers the handlers against a destroyed window; these use the live one.
+    registerIpc(() => currentWindow as any, () => { quitToInstallCalls += 1; });
+  });
+
+  it('saves the settings with the server tidied, and refuses a bad topic or server only while on', async () => {
+    const base = getConfig();
+    expect((await save({ ...base, ui: { ...base.ui, phonePush: phone() } }, base)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ enabled: true, server: 'https://ntfy.sh', topic: 'cos-fixturetopic234567' });
+    const now = getConfig();
+    expect(await save({ ...now, ui: { ...now.ui, phonePush: phone({ topic: 'has space' }) } }, now))
+      .toEqual({ ok: false, error: 'Choose a topic of letters, digits, - and _ (up to 64).' });
+    expect(await save({ ...now, ui: { ...now.ui, phonePush: phone({ server: 'https://ntfy.sh/mytopic' }) } }, now))
+      .toEqual({ ok: false, error: 'Enter the address of an ntfy server, such as https://ntfy.sh.' });
+    // Switched off, a half-filled form still saves.
+    expect((await save({ ...now, ui: { ...now.ui, phonePush: phone({ enabled: false, topic: '' }) } }, now)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ enabled: false, topic: '' });
+  });
+
+  it('checks the settings as they will be saved, not the stale form, and logs a refusal', async () => {
+    const { getLog } = await import('../src/main/logger.js');
+    // Off, with a topic: the form the renderer still shows.
+    const base = getConfig();
+    expect((await save({ ...base, ui: { ...base.ui, phonePush: phone({ enabled: false }) } }, base)).ok).toBe(true);
+    const stale = getConfig();
+    // Meanwhile another window clears the topic.
+    expect((await save({ ...stale, ui: { ...stale.ui, phonePush: phone({ enabled: false, topic: '' }) } }, stale)).ok).toBe(true);
+    // The stale form only turns it on: alone it looks complete, merged it has no topic.
+    expect(await save({ ...stale, ui: { ...stale.ui, phonePush: phone({ enabled: true }) } }, stale))
+      .toEqual({ ok: false, error: 'Choose a topic of letters, digits, - and _ (up to 64).' });
+    expect(getConfig().ui.phonePush).toMatchObject({ enabled: false, topic: '' });
+    expect(getLog().some(entry => entry.message.includes('settings save refused: Choose a topic of letters'))).toBe(true);
+  });
+
+  it('never lets a damaged saved phone setting block other saves, or the save that repairs it', async () => {
+    // A hand-edited or older config: on, with no topic and a server with a path.
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, phonePush: phone({ topic: '', server: 'https://ntfy.sh/mytopic' }) } });
+    const stored = getConfig();
+    // An unrelated change carries the stored phone settings unchanged: it saves.
+    expect((await save({ ...stored, ui: { ...stored.ui, theme: 'light' } }, stored)).ok).toBe(true);
+    // Editing the phone settings is checked: still bad is refused, repaired or switched off saves.
+    const now = getConfig();
+    expect(await save({ ...now, ui: { ...now.ui, phonePush: phone({ topic: '' }) } }, now)).toMatchObject({ ok: false });
+    expect((await save({ ...now, ui: { ...now.ui, phonePush: phone() } }, now)).ok).toBe(true);
+    const fixed = getConfig();
+    expect((await save({ ...fixed, ui: { ...fixed.ui, phonePush: phone({ enabled: false, topic: '' }) } }, fixed)).ok).toBe(true);
+  });
+
+  it('merges field by field, so a form from before a change does not undo it', async () => {
+    const base = getConfig();
+    await save({ ...base, ui: { ...base.ui, phonePush: phone() } }, base);
+    const before = getConfig();
+    // Another window turned on details meanwhile.
+    await save({ ...before, ui: { ...before.ui, phonePush: phone({ server: 'https://ntfy.sh', includeDetails: true }) } }, before);
+    // This form still shows details off and changes only the quiet hours.
+    expect((await save({ ...before, ui: { ...before.ui, phonePush: { ...before.ui.phonePush!, quietHours: { from: '22:00', to: '07:00' } } } }, before)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ includeDetails: true, quietHours: { from: '22:00', to: '07:00' } });
+  });
+
+  it('keeps the access token in secure storage and says only whether one is saved', async () => {
+    const { getSecret } = await import('../src/main/secrets.js');
+    const saved = await handlers.get('phonePush:token')!(null, { token: '  tk_fixture  ' }) as any;
+    expect(saved).toMatchObject({ ok: true, data: { hasPhonePushToken: true } });
+    expect(JSON.stringify(saved)).not.toContain('tk_fixture');
+    expect(await getSecret('ntfyToken')).toBe('tk_fixture');
+    expect(await handlers.get('phonePush:token')!(null, { token: 'tk_fixture with gap' })).toEqual({ ok: false, error: 'An access token is letters, digits and symbols, without spaces.' });
+    const { getLog } = await import('../src/main/logger.js');
+    const refused = getLog().filter(entry => entry.message.startsWith('phone push: access token'));
+    expect(refused.at(-1)?.message).toBe('phone push: access token not saved: it has spaces or other characters a token cannot have');
+    expect(refused.some(entry => entry.message.includes('tk_fixture'))).toBe(false);
+    expect(await handlers.get('phonePush:token')!(null, { token: '' })).toMatchObject({ ok: true, data: { hasPhonePushToken: false } });
+    expect(await getSecret('ntfyToken')).toBeNull();
   });
 });

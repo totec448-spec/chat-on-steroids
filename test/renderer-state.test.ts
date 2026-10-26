@@ -1602,7 +1602,7 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
   expect(row(chat.id).querySelectorAll('.sess-actions button').length).toBe(1);
   const actions = (): Array<string | undefined> => [...doc.querySelectorAll<HTMLElement>('.row-menu .row-menu-item')].map(item => item.dataset.rowAction);
   rowMenuItem(row(chat.id), 'rename');
-  expect(actions()).toEqual(['pin', 'rename', 'open', 'copy-link', 'block', 'remove']);
+  expect(actions()).toEqual(['pin', 'rename', 'open', 'copy-link', 'share', 'block', 'remove']);
   expect(doc.querySelector('.row-menu [data-row-action="remove"]')!.classList.contains('is-danger')).toBe(true);
   closeRowMenus(doc);
   // A row that is not a chat offers only what applies to it.
@@ -2261,6 +2261,35 @@ it('shows startup bind errors in the existing Setup status and clears them after
   expect(status.textContent).toContain('8768'); expect(status.textContent).not.toContain('EADDRINUSE');
 });
 
+it('keeps a switch the person changed while its save is pending, even after focus moved and an older state arrived', async () => {
+  // CodeRabbit on #1443: an older state push used to reset the switch once focus had left it,
+  // and the next save then read the reset value and undid the person's choice.
+  let release!: (result: any) => void; const calls: any[] = [];
+  const mounted = await mountChat({}, [], { saveSettings: (patch: any) => {
+    calls.push(structuredClone(patch));
+    const answer = { ok: true, data: { ...mounted.state, config: { ...mounted.state.config, ...structuredClone(patch) } } };
+    if (calls.length === 1) return new Promise(resolve => { release = () => resolve(answer); });
+    return Promise.resolve(answer);
+  } });
+  const w = mounted.window;
+  const developer = w.document.getElementById('developerMode') as HTMLInputElement;
+  const background = w.document.getElementById('backgroundChats') as HTMLInputElement;
+  // As the app's own config always does, the stored state names the switch's value.
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, developerMode: false } } });
+  expect(developer.checked).toBe(false);
+  developer.focus(); developer.checked = true; developer.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  developer.blur(); background.focus();
+  // A state push from before the save (it still says off) lands while the save is pending.
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, developerMode: false } } });
+  expect(developer.checked).toBe(true);
+  background.checked = true; background.dispatchEvent(new w.Event('change', { bubbles: true }));
+  release(undefined);
+  await waitFor(() => expect(calls).toHaveLength(2)); await settle();
+  expect(calls[1].ui.developerMode).toBe(true);
+  expect(developer.checked).toBe(true);
+});
+
 it('restores a rejected focused port and prevents an unrelated queued save from retrying it', async () => {
   let release!: (result: any) => void; const calls: any[] = [];
   const mounted = await mountChat({}, [], { saveSettings: (patch: any, base: any) => {
@@ -2507,6 +2536,61 @@ it('puts the secrets shield switch back after a save that was refused, so a late
   follow.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
   await waitFor(() => expect(saves.length).toBeGreaterThan(1));
   expect(saves.at(-1).ui.secretsShield).toBe(true);
+});
+
+it('puts the Play sounds switch back after a save that was refused (#1830)', async () => {
+  let refuse = true;
+  const saves: any[] = [];
+  const mounted = await mountChat({}, [], { saveSettings: (patch: any) => {
+    saves.push(structuredClone(patch));
+    if (refuse) return Promise.resolve({ ok: false, error: 'Settings could not be saved.' });
+    return Promise.resolve({ ok: true, data: mounted.state });
+  } });
+  const doc = mounted.window.document;
+  const sounds = doc.getElementById('soundCues') as HTMLInputElement;
+  sounds.focus();
+  sounds.checked = true;
+  sounds.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(saves.at(-1)?.ui.sounds).toBe(true));
+  await waitFor(() => expect(sounds.checked).toBe(false));
+  refuse = false;
+  const follow = doc.getElementById('followOutput') as HTMLInputElement;
+  follow.checked = !follow.checked;
+  follow.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(saves.length).toBeGreaterThan(1));
+  expect(saves.at(-1).ui.sounds).toBe(false);
+});
+
+it('plays the sample sound when Play sounds is switched on, but not during the quiet hours (#1830)', async () => {
+  const tones: number[] = [];
+  const param = () => ({ value: 0, setValueAtTime: () => undefined, linearRampToValueAtTime: () => undefined, exponentialRampToValueAtTime: () => undefined });
+  class FakeContext {
+    state = 'running'; currentTime = 0; destination = {};
+    resume = async () => undefined;
+    createOscillator() { return { type: '', frequency: param(), connect: (next: unknown) => next, start: (at: number) => tones.push(at), stop: () => undefined }; }
+    createGain() { return { gain: param(), connect: (next: unknown) => next }; }
+  }
+  vi.stubGlobal('AudioContext', FakeContext);
+  try {
+    const now = new Date();
+    const clock = (hours: number) => `${String((now.getHours() + hours + 24) % 24).padStart(2, '0')}:00`;
+    const mounted = await mountChat();
+    mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush: { quietHours: { from: clock(0), to: clock(2) } } } } } as any);
+    await settle();
+    const doc = mounted.window.document;
+    const sounds = doc.getElementById('soundCues') as HTMLInputElement;
+    sounds.checked = true;
+    sounds.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+    await settle();
+    expect(tones).toEqual([]);
+    // Outside the quiet hours the switch plays its sample.
+    mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush: { quietHours: { from: clock(2), to: clock(4) } } } } } as any);
+    await settle();
+    sounds.checked = false; sounds.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+    sounds.checked = true; sounds.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+    await settle();
+    expect(tones.length).toBeGreaterThan(0);
+  } finally { vi.unstubAllGlobals(); }
 });
 
 it('says why an Activity list is empty, in the app language, and drops the note once a line arrives', async () => {
@@ -4860,5 +4944,192 @@ describe('settings backup dialogs', () => {
     await waitFor(() => expect(doc.documentElement.lang).toBe('de'));
     const { setLanguage } = await import('../src/renderer/i18n.js');
     setLanguage('en');
+  });
+});
+
+describe('phone notifications in Settings', () => {
+  const change = (doc: Document, id: string, value?: string | boolean) => {
+    const node = doc.getElementById(id) as HTMLInputElement | HTMLSelectElement;
+    if (typeof value === 'boolean') (node as HTMLInputElement).checked = value; else if (value !== undefined) node.value = value;
+    node.dispatchEvent(new doc.defaultView!.Event('change', { bubbles: true }));
+  };
+
+  const withPhone = async (phonePush: Record<string, unknown>, api: Record<string, (...args: any[]) => any> = {}) => {
+    const mounted = await mountChat({}, [], api);
+    mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush } };
+    mounted.push(mounted.state);
+    return mounted;
+  };
+  const phone = (over: Record<string, unknown> = {}) => ({ enabled: true, server: 'https://ntfy.sh', topic: 'cos-fixturetopic234567', needsYou: true, failures: true,
+    finishedAfterMinutes: 5, onlyWhenAway: true, quietHours: null, includeDetails: false, ...over });
+
+  it('starts off; turning it on picks a long random topic and saves the defaults', async () => {
+    const mounted = await mountChat();
+    const doc = mounted.window.document;
+    expect((doc.getElementById('phonePushEnabled') as HTMLInputElement).checked).toBe(false);
+    expect(doc.getElementById('phonePushOptions')!.hidden).toBe(true);
+    change(doc, 'phonePushEnabled', true);
+    expect(doc.getElementById('phonePushOptions')!.hidden).toBe(false);
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.enabled).toBe(true));
+    const saved = mounted.calls.at(-1).ui.phonePush;
+    expect(saved.topic).toMatch(/^cos-[a-km-np-z2-9]{20}$/);
+    expect(saved).toEqual({ enabled: true, server: 'https://ntfy.sh', topic: saved.topic, needsYou: true, failures: true,
+      finishedAfterMinutes: 5, onlyWhenAway: true, quietHours: null, includeDetails: false });
+  });
+
+  it('shows the essentials first and keeps server, token and a new topic behind Advanced; Copy copies the topic', async () => {
+    const writeClipboard = vi.fn(async () => ({ ok: true, data: true }));
+    const mounted = await withPhone(phone(), { writeClipboard });
+    const doc = mounted.window.document;
+    const advanced = doc.getElementById('phonePushAdvanced') as HTMLDetailsElement;
+    expect(advanced.open).toBe(false);
+    for (const id of ['phonePushServer', 'phonePushToken', 'phonePushNewTopic']) expect(advanced.contains(doc.getElementById(id))).toBe(true);
+    for (const id of ['phonePushTopic', 'phonePushCopyTopic', 'phonePushTest', 'phonePushDetails']) expect(advanced.contains(doc.getElementById(id))).toBe(false);
+    (doc.getElementById('phonePushCopyTopic') as HTMLButtonElement).click();
+    await waitFor(() => expect(writeClipboard).toHaveBeenCalledWith('cos-fixturetopic234567'));
+  });
+
+  it('keeps quiet hours visible and saved with phone notifications off, since sounds follow them too (Haz on #1830)', async () => {
+    const mounted = await withPhone(phone({ enabled: false }));
+    const doc = mounted.window.document;
+    const quiet = doc.getElementById('phonePushQuiet') as HTMLSelectElement;
+    expect(doc.getElementById('phonePushOptions')!.hidden).toBe(true);
+    expect(doc.getElementById('phonePushOptions')!.contains(quiet)).toBe(false);
+    expect(quiet.closest('[hidden]')).toBeNull();
+    change(doc, 'phonePushQuiet', '22:00-07:00');
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush).toMatchObject({ enabled: false, quietHours: { from: '22:00', to: '07:00' } }));
+  });
+
+  it('saves when a chat counts as finished, quiet hours shown in local time, and the details switch', async () => {
+    const mounted = await withPhone(phone());
+    const doc = mounted.window.document;
+    const quiet = doc.getElementById('phonePushQuiet') as HTMLSelectElement;
+    expect([...quiet.options].map(option => option.textContent)).toContain('10:00 PM – 7:00 AM');
+    change(doc, 'phonePushFinished', 'never');
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.finishedAfterMinutes).toBeNull());
+    change(doc, 'phonePushQuiet', '22:00-07:00');
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.quietHours).toEqual({ from: '22:00', to: '07:00' }));
+    change(doc, 'phonePushDetails', true);
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.includeDetails).toBe(true));
+    expect(mounted.calls.at(-1).ui.phonePush.topic).toBe('cos-fixturetopic234567');
+  });
+
+  // A cleared server field is sent as it is and refused, never quietly replaced by ntfy.sh: that would
+  // move the messages (and, with details on, chat names) to a public server nobody chose.
+  it('sends a cleared server as empty instead of replacing it with ntfy.sh', async () => {
+    const mounted = await withPhone(phone({ server: 'https://ntfy.example.org' }));
+    const doc = mounted.window.document;
+    change(doc, 'phonePushServer', '   ');
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.server).toBe(''));
+  });
+
+  // A switch the person has focused but not changed still follows a change made elsewhere (another
+  // window, a backup import): a stale switch would put "include chat details" back on with the next save.
+  it('updates a focused phone control that was not edited, and keeps one that was', async () => {
+    const mounted = await withPhone(phone({ includeDetails: true }));
+    const doc = mounted.window.document;
+    const details = doc.getElementById('phonePushDetails') as HTMLInputElement;
+    details.focus();
+    mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush: phone({ includeDetails: false }) } };
+    mounted.push(mounted.state);
+    expect(details.checked).toBe(false);
+    const topic = doc.getElementById('phonePushTopic') as HTMLInputElement;
+    topic.focus();
+    topic.value = 'cos-typing-in-progress';
+    mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush: phone({ includeDetails: false, topic: 'cos-elsewhere' }) } };
+    mounted.push(mounted.state);
+    expect(topic.value).toBe('cos-typing-in-progress');
+  });
+
+  // A switch changed and saved while it keeps the focus: once the save comes back with that value, it
+  // counts as painted, so a later change made elsewhere still reaches it.
+  it('follows a later change elsewhere after a focused switch was changed and saved', async () => {
+    const mounted = await withPhone(phone({ includeDetails: false }));
+    const doc = mounted.window.document;
+    const details = doc.getElementById('phonePushDetails') as HTMLInputElement;
+    details.focus();
+    change(doc, 'phonePushDetails', true);
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.includeDetails).toBe(true));
+    mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush: phone({ includeDetails: true }) } };
+    mounted.push(mounted.state);
+    mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush: phone({ includeDetails: false }) } };
+    mounted.push(mounted.state);
+    expect(details.checked).toBe(false);
+  });
+
+  it('keeps quiet hours that are not one of the choices when something else is saved', async () => {
+    const mounted = await withPhone(phone({ finishedAfterMinutes: 7, quietHours: { from: '01:30', to: '05:15' } }));
+    const doc = mounted.window.document;
+    expect((doc.getElementById('phonePushQuiet') as HTMLSelectElement).value).toBe('custom');
+    // 7 minutes is not offered: it is shown as its own choice and kept, like the quiet hours.
+    const finished = doc.getElementById('phonePushFinished') as HTMLSelectElement;
+    expect(finished.value).toBe('7');
+    expect(finished.selectedOptions[0]!.textContent).toBe('After 7 minutes of work');
+    change(doc, 'phonePushAway', false);
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.onlyWhenAway).toBe(false));
+    expect(mounted.calls.at(-1).ui.phonePush.quietHours).toEqual({ from: '01:30', to: '05:15' });
+    expect(mounted.calls.at(-1).ui.phonePush.finishedAfterMinutes).toBe(7);
+    // Choosing an offered value drops the extra choice again.
+    change(doc, 'phonePushFinished', '30');
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.finishedAfterMinutes).toBe(30));
+    mounted.state.config = { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush: phone({ finishedAfterMinutes: 30 }) } };
+    mounted.push(mounted.state);
+    expect([...finished.options].map(option => option.value)).toEqual(['never', '0', '5', '15', '30', '60']);
+  });
+
+  it('sends a test after saving what was typed, and says when it did not arrive', async () => {
+    const testPhonePush = vi.fn().mockResolvedValueOnce({ ok: true, data: undefined })
+      .mockResolvedValueOnce({ ok: false, error: 'The ntfy server refused the message. Check the server, the topic and the access token.' });
+    const mounted = await withPhone(phone(), { testPhonePush });
+    const doc = mounted.window.document;
+    (doc.getElementById('phonePushTopic') as HTMLInputElement).value = 'cos-typedbutnotblurred';
+    const before = mounted.calls.length;
+    (doc.getElementById('phonePushTest') as HTMLButtonElement).click();
+    await waitFor(() => expect(doc.getElementById('phonePushTestStatus')!.textContent).toBe('Sent. Check your phone.'));
+    expect(mounted.calls.length).toBeGreaterThan(before);
+    expect(mounted.calls.at(-1).ui.phonePush.topic).toBe('cos-typedbutnotblurred');
+    (doc.getElementById('phonePushTest') as HTMLButtonElement).click();
+    await waitFor(() => expect(doc.getElementById('phonePushTestStatus')!.classList.contains('is-warn')).toBe(true));
+    expect(doc.getElementById('phonePushTestStatus')!.textContent).toContain('refused the message');
+  });
+
+  it('sends no test when the settings could not be saved', async () => {
+    const testPhonePush = vi.fn(async () => ({ ok: true, data: undefined }));
+    const mounted = await withPhone(phone(), { testPhonePush, saveSettings: async () => ({ ok: false, error: 'Fixture save refused' }) });
+    const doc = mounted.window.document;
+    (doc.getElementById('phonePushTest') as HTMLButtonElement).click();
+    await waitFor(() => expect(doc.getElementById('phonePushTestStatus')!.textContent).toBe('The settings could not be saved, so no test was sent.'));
+    expect(doc.getElementById('phonePushTestStatus')!.classList.contains('is-warn')).toBe(true);
+    expect(testPhonePush).not.toHaveBeenCalled();
+  });
+
+  it('keeps a token typed while the previous one was being saved', async () => {
+    let release: () => void = () => {};
+    const setPhonePushToken = vi.fn((token: string) => new Promise(resolve => { release = () => resolve({ ok: true, data: { ...mounted.state, hasPhonePushToken: token !== '' } }); }));
+    const mounted = await mountChat({}, [], { setPhonePushToken });
+    const doc = mounted.window.document;
+    const field = doc.getElementById('phonePushToken') as HTMLInputElement;
+    field.value = 'tk_first';
+    (doc.getElementById('phonePushTokenSave') as HTMLButtonElement).click();
+    await waitFor(() => expect(setPhonePushToken).toHaveBeenCalledWith('tk_first'));
+    field.value = 'tk_second_draft';
+    release();
+    await waitFor(() => expect(doc.getElementById('phonePushTokenStatus')!.textContent).toBe('A token is saved. Save an empty field to remove it.'));
+    expect(field.value).toBe('tk_second_draft');
+  });
+
+  it('saves and removes the access token without ever showing it again', async () => {
+    const setPhonePushToken = vi.fn(async (token: string) => ({ ok: true, data: { ...mounted.state, hasPhonePushToken: token !== '' } }));
+    const mounted = await mountChat({}, [], { setPhonePushToken });
+    const doc = mounted.window.document;
+    const field = doc.getElementById('phonePushToken') as HTMLInputElement;
+    field.value = 'tk_fixture_token';
+    (doc.getElementById('phonePushTokenSave') as HTMLButtonElement).click();
+    await waitFor(() => expect(setPhonePushToken).toHaveBeenCalledWith('tk_fixture_token'));
+    await waitFor(() => expect(field.value).toBe(''));
+    expect(doc.getElementById('phonePushTokenStatus')!.textContent).toBe('A token is saved. Save an empty field to remove it.');
+    (doc.getElementById('phonePushTokenSave') as HTMLButtonElement).click();
+    await waitFor(() => expect(setPhonePushToken).toHaveBeenLastCalledWith(''));
+    await waitFor(() => expect(doc.getElementById('phonePushTokenStatus')!.textContent).toMatch(/^Only if your server needs one/));
   });
 });

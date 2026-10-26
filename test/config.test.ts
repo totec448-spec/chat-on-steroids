@@ -126,6 +126,19 @@ describe('settings migration', () => {
       expect(loaded.readOnly).toBe(true);
     }
   });
+  it('loads the sounds switch saved before it existed, or damaged, as off, and keeps everything else', async () => {
+    const config = defaultConfig();
+    await saveConfig({ ...config, ui: { ...config.ui, sounds: true } });
+    expect((await loadConfig()).ui.sounds).toBe(true);
+    const { sounds: _, ...older } = config.ui;
+    for (const ui of [older, { ...older, sounds: 'yes' }, { ...older, sounds: 1 }, { ...older, sounds: null }]) {
+      await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...config, readOnly: true, ui: { ...ui, theme: 'light' } }), 'utf8');
+      const loaded = await loadConfig();
+      expect(loaded.ui.sounds).toBe(false);
+      expect(loaded.ui.theme).toBe('light');
+      expect(loaded.readOnly).toBe(true);
+    }
+  });
   it('drops removed file-saving settings without changing other saved choices', async () => {
     const config = defaultConfig();
     config.readOnly = true;
@@ -180,6 +193,24 @@ describe('settings migration', () => {
     expect((await loadConfig()).ui).toMatchObject({ startAtLogin: false, autoConnect: true });
     await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, startAtLogin: true, autoConnect: false } });
     expect((await loadConfig()).ui).toMatchObject({ startAtLogin: true, autoConnect: false });
+  });
+  it('turns phone notifications off, rather than pointing them at ntfy.sh, when the saved server is damaged', async () => {
+    const phone = { enabled: true, server: 'https://push.example.org', topic: 'cos-fixturetopic234567', needsYou: true, failures: true,
+      finishedAfterMinutes: 5, onlyWhenAway: true, quietHours: null, includeDetails: true };
+    for (const server of ['x'.repeat(3000), 42, null]) {
+      await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...defaultConfig(), ui: { ...defaultConfig().ui, phonePush: { ...phone, server } } }), 'utf8');
+      // Chat details must never go to a server nobody chose: off, and no server at all.
+      expect((await loadConfig()).ui.phonePush, String(server).slice(0, 8)).toMatchObject({ enabled: false, server: '', topic: phone.topic, includeDetails: true });
+    }
+    // Said in the log, once, and never with the damaged value.
+    const { getLog } = await import('../src/main/logger.js');
+    const lines = getLog().filter(entry => entry.message.startsWith('phone notifications: the saved server setting was damaged'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.message).not.toContain('xxxx');
+    // A missing server is the default, as before.
+    const { server: _server, ...withoutServer } = phone;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...defaultConfig(), ui: { ...defaultConfig().ui, phonePush: withoutServer } }), 'utf8');
+    expect((await loadConfig()).ui.phonePush).toMatchObject({ enabled: true, server: 'https://ntfy.sh' });
   });
   it('rotates long turns after 30 minutes for fresh, legacy and malformed settings, keeping saved choices', async () => {
     expect(defaultConfig().ui.rotateTurnMinutes).toBe(30);

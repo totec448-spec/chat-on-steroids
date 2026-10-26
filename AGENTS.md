@@ -213,6 +213,8 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Command policy | Off, in Allowlist mode, with no rules. | Missing legacy settings stay Off; a missing mode defaults to Allowlist. Rules and mode persist while Off. An enabled empty Allowlist rejects every launch; an enabled empty Denylist permits simple supported commands. |
 | Plugin auto-refresh | On. | Configs written before the setting existed read Off (schema default); conservative recovery also turns it off. While it is off and `ui.autoRefreshPluginsAsked` is not set, the window offers it once (`pluginRefresh:offer`); either answer sets `autoRefreshPluginsAsked`, which a settings save never clears. Local status/discovery never claims ChatGPT refreshed its connector snapshot. |
 | Turn-done notifications | On (`ui.turnNotifications`, missing means on). | Codex's turn-completion notification. `turn-notifications.ts` watches session changes and notifies once per newer `lastTurnEndAt` of a top-level chat whose outcome is `completed` and has no new active turn, while the window is unfocused. Seeded from the session list at startup, so older turns never notify. Workers, helpers, chats whose Goal/Loop switch is on, and chats that got a Session-finish or stuck notice in the last 2 minutes stay quiet. The body is the answer's first paragraph as plain text (140 characters); a click opens the chat. |
+| Phone notifications | Off (`ui.phonePush`, missing means off). | ntfy (`phone-push.ts`, Settings → General → Phone notifications). Three kinds: needs you (the Session finish and stuck/approval notifiers), failures (tunnel loss), finished (the turn notifier hands every completed top-level chat over with `workedMs` from the turn's `turn_start` event, whether or not the window is focused). The phone keeps its own rules: kind switches, finished only after `finishedAfterMinutes` (null never, 0 always; an unknown length counts as long), quiet hours (local, may wrap midnight), away = `powerMonitor.getSystemIdleState(180)` is idle/locked/unknown, at most once per chat and kind in 2 min and 20 an hour; a message that did not arrive does not count. JSON publish to the server root (UTF-8 safe), optional Bearer token from secure storage (`ntfyToken`, IPC `phonePush:token`, `AppState.hasPhonePushToken`). By default a message only says what happened; `includeDetails` adds the chat's name, the answer's start and a `click` link to the ChatGPT chat. One `phone push:` log line per decision, never the message. `phonePush:test` sends now regardless of the rules. |
+| Sounds (#1802) | Off (`ui.sounds`, missing means off). | Settings → General → Chats → Play sounds. `main/sound-cues.ts` decides at the same three points that hand events to the phone (needs you, failed, finished): finished only while the window is not focused, nothing during phone notifications' quiet hours while those are on, at most once per chat and kind in 2 min. It sends `sound:cue` (`SoundCue` in `shared/sound-cues.ts`) to the window, which plays a short Web Audio tone (`renderer/sound-cues.ts`, no audio files); with no window (tray only) nothing plays. One `sound:` log line per decision except when off. Turning the setting on plays the finished sound once as a preview. |
 | Fresh turns for long work | Every 30 minutes (`ui.rotateTurnMinutes`: 0 off, 20/30/45/60; missing or malformed means 30). | #1402. Measured: turns up to ~35 minutes ended cleanly, 37–64 minutes almost always broke; Stop + "continue" by hand never did. `turn-rotation.ts` `considerTurnRotation` runs on each attributed tool call (`noteCallAttribution`, after its `grantActivity`) for the chat's exact running turn. Once that turn's own `turn_start` is `rotateTurnMinutes` old, `input.ts` `fileRotationInput` files one `purpose: 'rotation'` direct-turn message (`rotationMessage()`, Core mention kept) into exactly that turn. The native send makes ChatGPT end the turn as interrupted and continue in a fresh one; the call in flight keeps its result. It must go in while that call still waits for its answer (#1662, measured 2026-10-18: 6/6 clean while a call ran; sent in the gap after a result ChatGPT sometimes queued it behind the reply, and a Stop during a call made the model run it again). So the kernel opens `rotation-hold.ts` `openCallHold` around recording an attributed call, rotation is considered only while `callHoldOpen`, and the bridge's `awaitRotationDelivery` holds the call's answer until the row is sent or settled; a row still unauthorized after 15 s is withdrawn (`withdrawUnsentRotation`, cancelled without an error) and the call answers. The page never stops a turn for it: offered no Send (ChatGPT shows only Stop at that moment), it sends nothing and reports `desktop_input` `fail` with `error` = `input.ts` `ROTATION_DECLINED` word for word and `detail: 'no-send'`; `failBrowserInput` cancels the row with that error, `rotationDelivery` answers `declined`, the held call answers at once, and `noteRotationDeclined` lets a tool result a minute later try again without spending one of the turn's two filings (at most six declines per turn; measured 2026-10-20 on Loop chats, where every continue fell on a Stop moment). Never for Pro, worker or helper chats, and never at the result of a Goal/Loop hold tool (`GOAL_HOLD_TOOLS`: `session_finish`, `keep_astra_on_forever`), which is Loop's next instruction. Goal and Loop chats rotate like any other (2.1.43): the rotated turn ends without a final answer, so no Goal/Loop decision is filed for it, and its continue is recorded with empty `authoredText`, which the Goal helper's transcript leaves out; never for a blocked chat, beside another pending message, or into a different turn. One per turn: a refused filing retries after 1 minute, one the page did not take after 5. A rotation row is not `manualInput`: a page that cannot take it during the turn drops it rather than keeping it for after the turn, and the timeline raises no delivery notice for it. A message of the user's own cancels a rotation that was never handed out. |
 | Stop fallback for fresh turns | Off (`ui.rotateStopFallback`, experimental; disabled while fresh turns are off). | Where ChatGPT shows only Stop at a tool result it offers no Send for the continue (`ROTATION_DECLINED`, `no-send`). After `STOP_FALLBACK_AFTER_DECLINES` (2) such declines in one turn and the usual minute, the next held result takes the fallback instead of a third continue (`stopFallbackDue`/`noteStopFallback`, once per turn): `rotation-fence.ts` arms a fence (the kernel refuses that chat's calls with `ROTATION_FENCE_REFUSAL`, nothing runs, so a Stop landing mid-call cannot repeat a call, #1662), and 500 ms later `stopSessionTurn(…, { rotation: true })` queues the native Stop without turning Goal/Loop off or cancelling Compact & Resume. The stopped end of exactly that turn lifts the fence and files `fileRotationContinueAfterStop`: a `purpose: 'rotation'`, `afterStop: true` ordinary message (no `directTurn`), which `typedAfterStop` lets through once the turn shows stopped and nothing runs. The fence lifts after 60 s without a stopped end. Live 2026-10-20 (VM): Stop 1 s after a result, then "continue", repeated no step (2 runs). |
 | Follow-up behavior | Join the running turn (`ui.followUp: 'steer'`; a broken value loads as that). | Codex's "Follow-up behavior". Each running turn starts the composer's delivery choice from this default (`queue` selects After this turn); a choice made in the send menu lasts for that turn. Cmd/Ctrl+Shift+Enter sends the other way (`sendComposer('auto' \| 'after-turn')`); with no running turn it is an ordinary send. |
@@ -809,6 +811,13 @@ The normalized transport request ID owns its workspace, plan, terminals and prov
 family. File edits, commands, Desktop and Plugins retain their live capability/root checks;
 missing attribution never enables Read-only mode. Headerless calls keep legacy anonymous
 ordinary-tool custody but cannot invent a request plan or worker family.
+A request-owned family answers only to that request. Clients such as Codex send every tool call as a
+new request, so a later call is outside it: every refusal that would say AGENTS_BUSY (or "call spawn to
+start one") to a caller known only by its request id says AGENTS_NO_CHAT instead (`NoChatError`, a
+subclass): no ChatGPT chat identified, the run is out of reach, do not spawn again (#1841). The spawn
+reply of a request-owned prime (`primeOwnerSentence`) says the same up front and drops the "results arrive
+with later tool results" promise, and `status` from such a caller with no family refuses the same way
+instead of the empty answer that suggests spawning.
 The Identity notice is present even without a pending repair timer. It names the tools that
 remain usable, reports actual results and forbids replaying successful work to repair identity.
 One process/recipient refusal is never a global edit/terminal refusal. Code-mode children inherit
@@ -1134,6 +1143,30 @@ has no row `data-app-action-sidebar-project-id` for it (`CLF_DOM.sidebarListsPro
 the sidebar is closed or the section collapsed, which proves nothing). The worker passes it on as
 the same `gone` only for the tab it opened for that message, still on that Project's home.
 An opening remembers its Project, so a retry's new Project gets its own tab.
+Linking to a Project the account already has (#1756): ChatGPT pages report the Projects their
+sidebar lists (`CLF_DOM.projectsShown`: rows' `data-app-action-sidebar-project-id`/`-label`, then
+links to a Project home; content.js `reportProjectList` every 15 s, only when the list changed and
+never empty) through worker `project_catalog` to `/chatgpt-projects`; `chatgpt-project-catalog.ts`
+keeps up to 200 (durable `chatgpt-projects`), a shorter report never removes one, entries leave
+after 30 days unseen, names are labels only. Each report carries the workspace ChatGPT lists them
+in (the `_account` cookie, null for a personal account); the catalog keeps a 16-hex SHA-256 prefix
+of it per entry, never the id, and offers or links only entries of the last reported workspace,
+because ChatGPT opens a Project only in its own workspace. Adding a folder with Projects to choose from passes
+`chatgpt: 'later'` (no link yet) and opens `chatgpt-project-picker.ts` on the new row: New or an
+existing Project; one held by another listed project is shown disabled. Closing the choice creates
+nothing (Haz on #1757), and when the row is not drawn nothing is created either: a toast says to
+choose from the project's ⋯ menu. `linkChatgptProject` accepts only a listed id, never one another
+listed project holds, and never over `requested`/`claimed`/`creating`; it may replace a `linked`,
+`failed` or `uncertain` one. `createChatgptProjectFor(id, { replace })` (IPC `projects:chatgpt-create`
+with `replace: true`) requests a new one in place of such a link; without `replace` a project that
+has one keeps it. `unlinkChatgptProject` (IPC `projects:chatgpt-unlink`) drops the link only: the
+Project and its chats stay in ChatGPT, new chats start outside any Project, and it is refused while
+one is being created. A project without one, or a failed/uncertain one, offers "Choose a ChatGPT
+Project…" in its menu; a linked one offers "Change ChatGPT Project…" (the same picker, current one
+marked, New first) and "Unlink ChatGPT Project". Closing the picker from the menu changes nothing.
+Tests: `test/chatgpt-project-link.test.ts`, `test/chatgpt-project-picker.test.ts`,
+`test/chatgpt-project-list-dom.test.ts`, `scripts/verify-chatgpt-project-picker.cjs`,
+`scripts/verify-chatgpt-project-menu.cjs`.
 A chat the person starts on chatgpt.com inside a linked Project joins that CoS project (#1744):
 the service worker's `events` handler reads the recording tab's URL (`tabChatgptProject`: the
 chat's own Project route, or the Project home only for a fresh chat's first, still unnamed
@@ -1174,6 +1207,16 @@ turn (copied branch history, an adopted chat's history, replies to messages type
 the same actions as a turn's answer (`messageAnswerAnchors`); `sessions:exportMarkdown` names them
 by `messageId` instead of `turnId`, and refuses a turn's own answer named that way. `scope: 'latest'` names
 no answer: main picks the newest one that offers these actions (`latestAnswer`), a completed turn's or a turnless one.
+
+Share as web page (chat menu "Share as web page", `/share`, and the answer export menu's "Whole session as
+HTML"): `sessions:sharePage { id, target: 'preview', hide, lang }` → `{ done: 'preview', preview, html, hidden }`
+(`page-export.ts`, page built by `transcriptHtml`, §18). Keys and tokens are always hidden; `hide` also hides email addresses and user names in folder paths (the Share dialog starts with it on); `hidden` counts every hidden
+detail. `{ id, target: 'file', preview }` saves the page main kept for that preview id, not a rebuilt one,
+through `replaceFile` with overwrite confirmation, and refuses any other id. The dialog shows the preview
+in a `sandbox=""` srcdoc frame. Labels come from `MAIN_TEXTS` ('You', 'hidden', 'Shared from Chat On
+Steroids', 'New chat' for an untitled chat, 'Export as HTML' / 'HTML files' for the save dialog).
+Tests: `test/session-page-export.test.ts` (page, hiding, stale-preview refusal), `test/renderer-share-page.test.ts`
+(dialog); UI check `scripts/verify-share-page.cjs`.
 
 
 Bookmarked answers (#1719): `sessions:bookmarks { id }` → `SessionBookmark[]` (oldest answer first)
@@ -2358,7 +2401,9 @@ The bridge projects that browser apart using the explicit `x-extension-host: bro
 its browser id. While the CoS browser is chosen and its companion present, any other companion
 takes no new work (#1516): `/status` offers it no inputs, revivals, Project creations, plugin
 refreshes or model-list requests; `/input/claim` and `/repairs/claim` refuse it and
-`/commands/redeem` answers 409 `not_chosen_browser`. It still records and stops what the person
+`/commands/redeem` answers 409 `not_chosen_browser`. A page there gets no worker or replacement
+tab to open through `/activity` or its `/compact` reply either (`opensNewWork`, #1852), which also
+holds for an out-of-date companion. It still records and stops what the person
 opens there, and works on as before once the CoS browser is gone. The chosen CoS browser takes a
 new chat's opening custody over from another browser. `browser-proof.ts` keeps, across restarts, the version last seen there and
 ChatGPT's last signed-in answer, so a closed browser keeps its state and a logout stays a logout;
@@ -4508,7 +4553,7 @@ Captured ChatGPT HTML passes a strict allowlist; authored plain text stays text.
 citation ranges use Unicode code points and map to UTF-16 before slicing. Exact uploaded-file
 names render as plain chips; unresolved file citations do not gain invented local links.
 Plain text leaving the timeline (Markdown export, search index and snippets, turn notifications and `modelFacingText` for Goal/Loop and completed answers) passes `providerEntitiesAsMarkdown` first: the raw text's private-use entities (U+E200 name U+E202 field … U+E201) become `[label](address)` for `url` and are dropped otherwise, so a link card never reads as "urlLabelhttps://…".
-`sessions:exportMarkdown` takes an optional `format: 'markdown' | 'html'` (Markdown when left out). `html` is accepted only with `scope: 'session'` and `target: 'file'`: main saves the same transcript as one self-contained page (`shared/html-export.ts` `transcriptHtml`). What a person wrote is escaped plain text; answers are Markdown drawn with raw HTML escaped, images reduced to their alt text and only http(s)/mailto links kept. The page has inline styles only and a `default-src 'none'` policy, so it runs no script and loads nothing. Its title and texts pass `redactSecretText` first; the Markdown export stays exact.
+A whole chat as one HTML page is built by `shared/html-export.ts` `transcriptHtml` and only through Share's preview (`sessions:sharePage`, §9): what a person wrote is escaped plain text; answers are Markdown drawn with raw HTML escaped (a block keeps its lines), a picture becomes a link to it and only http(s)/mailto links stay links. The page has inline styles only and a `default-src 'none'` policy, so it runs no script and loads nothing. Its title and texts always pass `redactSecretText`; with `hide`, also `redactPersonalText` (email addresses, the user name in home-folder paths). Every "[redacted]" then shows as one `.hidden` mark in the interface language, never inside a link or attribute; `hiddenCount` counts them. The Markdown export stays exact.
 An assistant message may carry `references`: the sources behind its inline
 `:chatgpt-content-reference{index="N"}` citations. `extension/fiber.js` `citedSources` reads
 them from each citation pill's own props (the list its hover card pages through, plus the reply
@@ -4755,7 +4800,7 @@ passes only a LocalProject UUID and project-relative path through fixed IPC; mai
 approved project/root and Git metadata before reading status or a diff. Git inspection is strictly
 read-only: it strips inherited Git repository/index redirects, uses optional-lock-free bounded
 subprocesses and exposes no stage, commit, reset,
-checkout or push authority. Review projects `M/A/D/R/U`, plus `C` for every unmerged index state
+checkout or push authority. The one Git write path is Commit & PR (below), in its own module. Review projects `M/A/D/R/U`, plus `C` for every unmerged index state
 (`DD/AU/UD/UA/DU/AA/UU`) so an unfinished merge is never shown as an ordinary edit; a conflicted
 file missing from the worktree diffs as empty. A working-tree conflict's diff also carries
 `conflict`: index stages 1-3 (base, ours/HEAD, theirs) through the same bounded `cat-file` reads,
@@ -4795,6 +4840,39 @@ its content still hashes to what that new checkpoint captured; a file edited in 
 skipped and reported. Line endings follow the repository's Git settings, as a checkout would
 write them, and parent folders removed since the checkpoint are recreated. Symlinks, submodules and paths outside the project are never written.
 HEAD, branches and the user's index are untouched.
+Commit & PR (`src/main/project-commit.ts`, `renderer/commit-dialog.ts`) is Review's only Git write
+path, and only on the person's own press in the Commit dialog (Review's footer button, shown for a
+local project's working tree, not for a branch comparison or a truncated set). The model has no
+route to it. `projectCommit:state { projectId }` → `CommitState` (branch or null, the remote's
+default branch, push remote, upstream, `github { owner, repo }`, `gh: ready | signed-out | missing`,
+the changes, and a `token`). The token hashes the change list and every changed file's bytes
+(Review's own revision covers only paths and line counts), and `projectCommit:commit { projectId,
+message, paths, newBranch?, expectedToken }` refuses with "The changes changed…" unless the files
+are exactly what the dialog listed. It refuses conflicts, a merge/cherry-pick/revert in progress
+and a detached HEAD without `newBranch`. It runs `git add -A` and `git commit` on exactly the
+chosen pathspecs (literal, NUL-separated on stdin), so what the person staged for other files stays
+staged. A rename commits both paths but stages only the new one. A commit that does not happen
+(Git cannot stage, a hook or Git refuses) reads the index back from a `git write-tree` taken
+before, so a hand-picked part of a file (`git add -p`) stays staged as it was; an index that cannot
+be written as a tree falls back to unstaging only what it staged. A branch it created is removed
+after HEAD is pointed back (`symbolic-ref`, which works while another program holds the index).
+Hooks run. Paths with `..` or an absolute start are refused before Git runs.
+`projectCommit:push` pushes the current branch (`-u <remote> HEAD:refs/heads/<branch>` when it has
+no upstream) with `GIT_TERMINAL_PROMPT=0` and, unless `GIT_SSH`, `GIT_SSH_COMMAND` or
+`core.sshCommand` is set, `GIT_SSH_COMMAND=ssh -o BatchMode=yes` (ssh would otherwise ask for a host
+key or passphrase on the terminal the app was started from); it never forces.
+`projectCommit:pullRequest { projectId, title, body }`
+uses `gh pr create` (found on PATH or in its installers' folders, `GH_PROMPT_DISABLED=1`) when gh is
+signed in, opens an existing pull request for the branch instead of failing, targets the `upstream`
+remote's repository for a fork, and otherwise opens GitHub's compare page filled in. When the
+default branch is not known here (no remote HEAD, no main or master) it names no base, so GitHub
+uses the repository's default, and the dialog asks for a new branch for a pull request.
+`projectCommit:flow` saves `config.ui.commitFlow` (`commit | ask-push | pr`, missing = ask-push),
+pushes `state:changed` so the next dialog opens with it, and a Settings save carries it through.
+While a push or pull request runs, the dialog cannot be closed: its result belongs to it. Errors are fixed sentences the window translates; Git's, a hook's or gh's own words
+follow after a line break, untranslated. One `git commit:` / `git push:` / `pull request:` log line
+per outcome, never the message or file names. Tests: `project-commit.test.ts` (real repositories,
+a bare remote), `commit-message.test.ts`, `renderer-commit-dialog.test.ts`, `verify-commit-dialog.cjs`.
 
 An exact successful `apply_patch` may also retain a bounded immutable before/after review asset
 beside the session record. That historical review belongs to the recorded tool call, not to HEAD or
@@ -5577,6 +5655,16 @@ approved roots, tunnel profile/ids) become `<x:xxxx>`. Settings contribute only 
 and short option names; keys naming tunnels, profiles, paths, roots, prompts, URLs, keys or ids are
 dropped unless the value is a number or boolean. Never add message, task or title text to a section.
 Tests: `report-scrub.test.ts`, `diagnostics-report.test.ts` and `ipc.test.ts` (no personal value survives).
+
+Send feedback (Activity's button, `/feedback`; `feedback-dialog.ts`) writes a problem report or an idea
+and opens GitHub's issue form filled in: `feedback:openIssue { kind: 'bug', what, steps?, frequency? }`
+or `{ kind: 'idea', problem, proposal }` → `{ trimmed }`. Main builds the address (`feedback.ts`) with the
+form's own field ids and dropdown texts (`.github/ISSUE_TEMPLATE`; `feedback-issue.test.ts` fails when a
+template renames one), adds the version, system, architecture and what it knows of the extension, and
+opens it with `shell.openExternal`; nothing is sent from the app. Text that does not fit in a 7800-character
+link is shortened, longest field first, and `trimmed` makes the dialog put the whole text on the clipboard.
+A problem report needs the saved diagnostics report (the form closes reports without one); a newer release
+is pointed out first. The draft stays until it reached GitHub. One `feedback:` log line, never the text.
 
 ## 20. Build, installation, updater and release
 
