@@ -2518,6 +2518,61 @@ it('puts the secrets shield switch back after a save that was refused, so a late
   expect(saves.at(-1).ui.secretsShield).toBe(true);
 });
 
+it('puts the Play sounds switch back after a save that was refused (#1830)', async () => {
+  let refuse = true;
+  const saves: any[] = [];
+  const mounted = await mountChat({}, [], { saveSettings: (patch: any) => {
+    saves.push(structuredClone(patch));
+    if (refuse) return Promise.resolve({ ok: false, error: 'Settings could not be saved.' });
+    return Promise.resolve({ ok: true, data: mounted.state });
+  } });
+  const doc = mounted.window.document;
+  const sounds = doc.getElementById('soundCues') as HTMLInputElement;
+  sounds.focus();
+  sounds.checked = true;
+  sounds.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(saves.at(-1)?.ui.sounds).toBe(true));
+  await waitFor(() => expect(sounds.checked).toBe(false));
+  refuse = false;
+  const follow = doc.getElementById('followOutput') as HTMLInputElement;
+  follow.checked = !follow.checked;
+  follow.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(saves.length).toBeGreaterThan(1));
+  expect(saves.at(-1).ui.sounds).toBe(false);
+});
+
+it('plays the sample sound when Play sounds is switched on, but not during the quiet hours (#1830)', async () => {
+  const tones: number[] = [];
+  const param = () => ({ value: 0, setValueAtTime: () => undefined, linearRampToValueAtTime: () => undefined, exponentialRampToValueAtTime: () => undefined });
+  class FakeContext {
+    state = 'running'; currentTime = 0; destination = {};
+    resume = async () => undefined;
+    createOscillator() { return { type: '', frequency: param(), connect: (next: unknown) => next, start: (at: number) => tones.push(at), stop: () => undefined }; }
+    createGain() { return { gain: param(), connect: (next: unknown) => next }; }
+  }
+  vi.stubGlobal('AudioContext', FakeContext);
+  try {
+    const now = new Date();
+    const clock = (hours: number) => `${String((now.getHours() + hours + 24) % 24).padStart(2, '0')}:00`;
+    const mounted = await mountChat();
+    mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush: { quietHours: { from: clock(0), to: clock(2) } } } } } as any);
+    await settle();
+    const doc = mounted.window.document;
+    const sounds = doc.getElementById('soundCues') as HTMLInputElement;
+    sounds.checked = true;
+    sounds.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+    await settle();
+    expect(tones).toEqual([]);
+    // Outside the quiet hours the switch plays its sample.
+    mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush: { quietHours: { from: clock(2), to: clock(4) } } } } } as any);
+    await settle();
+    sounds.checked = false; sounds.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+    sounds.checked = true; sounds.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+    await settle();
+    expect(tones.length).toBeGreaterThan(0);
+  } finally { vi.unstubAllGlobals(); }
+});
+
 it('says why an Activity list is empty, in the app language, and drops the note once a line arrives', async () => {
   let addLine: ((entry: unknown) => void) | undefined;
   const mounted = await mountChat({}, [], { onLogEntry: (fn: (entry: unknown) => void) => { addLine = fn; return () => undefined; } });

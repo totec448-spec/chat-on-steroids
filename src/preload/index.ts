@@ -457,6 +457,8 @@ const api = {
   onSoundCue: (listener: (kind: SoundCue) => void): (() => void) => {
     const wrapped = (_event: unknown, kind: SoundCue): void => listener(kind);
     ipcRenderer.on('sound:cue', wrapped);
+    // From now on a cue reaches this page; until then main does not count one as played.
+    ipcRenderer.send('sound:ready');
     return () => ipcRenderer.removeListener('sound:cue', wrapped);
   },
   onWriteSession: (listener: (id: string) => void): (() => void) => {
