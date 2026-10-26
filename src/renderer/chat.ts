@@ -4169,12 +4169,24 @@ export function finishedBlocks(text: string): string {
 /** Locate Markdown fences, including ones nested under blockquotes and list items. */
 function fencedMarkdownRanges(text: string): Array<{ start: number; end: number }> {
   const ranges: Array<{ start: number; end: number }> = [];
-  let fence: { start: number; marker: string; width: number; nested: boolean } | null = null;
+  let fence: { start: number; marker: string; width: number; nested: boolean; quoteDepth: number; listIndent: number | null } | null = null;
+  let listIndent: number | null = null;
   for (let start = 0; start < text.length;) {
     const newline = text.indexOf('\n', start);
     const end = newline < 0 ? text.length : newline + 1;
     const line = text.slice(start, newline < 0 ? end : newline).replace(/\r$/, '');
+    const quotePrefix = /^(?:[ \t]*>[ \t]?)+/.exec(line)?.[0] ?? '';
+    const quoteDepth = (quotePrefix.match(/>/g) ?? []).length;
+    const content = line.slice(quotePrefix.length);
+    const indent = /^(?:[ ]|\t)*/.exec(content)?.[0].length ?? 0;
     const body = line.replace(/^(?:[ \t]*(?:>|[-*+]|\d{1,9}[.)])(?=[ \t]|$)[ \t]?)*/, '');
+    // Marked ends a nested fence when its quote/list container ends, even
+    // without closing backticks. The first outside line may open another fence.
+    if (fence && (quoteDepth < fence.quoteDepth ||
+        (fence.listIndent !== null && content.trim() && indent < fence.listIndent))) {
+      ranges.push({ start: fence.start, end: start });
+      fence = null;
+    }
     if (fence) {
       // A top-level fence cannot be closed by a list/blockquote-prefixed line.
       const close = (fence.nested ? /^[ \t]*(`{3,}|~{3,})[ \t]*$/ : /^ {0,3}(`{3,}|~{3,})[ \t]*$/)
@@ -4184,10 +4196,13 @@ function fencedMarkdownRanges(text: string): Array<{ start: number; end: number 
         fence = null;
       }
     } else {
+      const marker = /^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+/.exec(content);
+      if (marker) listIndent = marker[0].length;
+      else if (content.trim() && listIndent !== null && indent < listIndent) listIndent = null;
       const nested = body.length !== line.length;
       const open = (nested ? /^[ \t]*(`{3,}|~{3,})(.*)$/ : /^ {0,3}(`{3,}|~{3,})(.*)$/).exec(body);
       if (open && (open[1]![0] === '~' || !open[2]!.includes('`'))) {
-        fence = { start, marker: open[1]![0]!, width: open[1]!.length, nested };
+        fence = { start, marker: open[1]![0]!, width: open[1]!.length, nested, quoteDepth, listIndent };
       }
     }
     start = end;
@@ -4575,11 +4590,12 @@ function restoreRecordedDilLayouts(box: HTMLElement, capture?: StoredText): void
     const minimumWords = kind === 'photo' || (kind === 'panel' && images.length > 0) ? 3 : 5;
     if (expected.length < minimumWords || expected.length > 500) continue;
     const nodes = [...box.children];
+    const wordsByNode: Array<string[] | undefined> = [];
     const matches: Array<{ start: number; end: number }> = [];
     for (let start = 0; start < nodes.length; start++) {
       let matched = 0;
       for (let end = start; end < Math.min(nodes.length, start + 40); end++) {
-        const words = visibleWords(nodes[end]!);
+        const words = wordsByNode[end] ?? (wordsByNode[end] = visibleWords(nodes[end]!));
         // A preceding empty/removed widget is not another valid start for the same
         // visible span. Otherwise one photo after a provider image marker may look
         // ambiguous even though its prose occurs only once.
