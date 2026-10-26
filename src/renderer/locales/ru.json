@@ -3465,5 +3465,6 @@
   "Same model as the Goal chat": "Та же модель, что и в чате «Цели»",
   "Sub-agents are off": "Субагенты выключены",
   "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "Рецензент работает как чат воркера, поэтому ему нужны субагенты. Пока они не включены, ничего не проверяется.",
-  "Turn on Sub-agents": "Включить субагентов"
+  "Turn on Sub-agents": "Включить субагентов",
+  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "Рецензент нашёл проблему, мимо которой «Цель» не может безопасно пройти. Откройте чат, чтобы проверить её."
 }

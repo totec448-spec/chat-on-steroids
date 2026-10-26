@@ -3335,5 +3335,6 @@
   "Same model as the Goal chat": "Dasselbe Modell wie der Goal-Chat",
   "Sub-agents are off": "Unteragenten sind aus",
   "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "Der Reviewer läuft als Worker-Chat und braucht deshalb Unteragenten. Bis sie an sind, wird nichts geprüft.",
-  "Turn on Sub-agents": "Unteragenten einschalten"
+  "Turn on Sub-agents": "Unteragenten einschalten",
+  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "Der Reviewer hat ein Problem gefunden, an dem Goal nicht sicher vorbeikommt. Öffne den Chat, um es zu prüfen."
 }
