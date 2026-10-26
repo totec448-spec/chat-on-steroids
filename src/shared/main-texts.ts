@@ -97,7 +97,11 @@ export const MAIN_TEXTS = [
   'Use the mouse and keyboard',
   '{0} in {1}',
   'Go ahead',
-  'Not now'
+  'Not now',
+  // A chat shared as a web page: the page's own labels ('You' is above).
+  'New chat',
+  'hidden',
+  'Shared from Chat On Steroids'
 ] as const;
 
 export type MainText = typeof MAIN_TEXTS[number];

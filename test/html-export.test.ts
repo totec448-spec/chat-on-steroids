@@ -1,5 +1,5 @@
-import { expect, it } from 'vitest';
-import { transcriptHtml } from '../src/shared/html-export.js';
+import { describe, expect, it } from 'vitest';
+import { hiddenCount, transcriptHtml } from '../src/shared/html-export.js';
 
 const body = (html: string) => html.slice(html.indexOf('<main>'), html.indexOf('</main>'));
 
@@ -32,7 +32,8 @@ it('shows markup inside an answer as text and keeps only web and mail links', ()
   expect(html).toContain('<a href="https://example.com/a?b=1&amp;c=2" title="Guide" rel="noreferrer">docs</a>');
   expect(html).toContain('<a href="mailto:you@example.com" rel="noreferrer">mail</a>');
   expect(html).toContain('run file');
-  expect(html).toContain('<p>diagram</p>');
+  // A picture would load from its host when the page opens: it becomes a link to it instead.
+  expect(html).toContain('<a href="https://example.com/diagram.png" rel="noreferrer">diagram</a>');
 });
 
 it('names an untitled chat and leaves out empty messages', () => {
@@ -40,4 +41,43 @@ it('names an untitled chat and leaves out empty messages', () => {
   expect(html).toContain('<h1>Chat</h1>');
   expect(html).not.toContain('<h2>You</h2>');
   expect(html).toContain('<h2>ChatGPT</h2>');
+});
+
+it('keeps the lines of a block of markup, and names a picture without a description by its address', () => {
+  const html = body(transcriptHtml('Chat', [{ role: 'assistant', text: '<div>\n<b>one</b>\n</div>\n\n![](https://example.com/p.png)' }]));
+  expect(html).toContain('<p>&lt;div&gt;<br>\n&lt;b&gt;one&lt;/b&gt;<br>\n&lt;/div&gt;</p>');
+  expect(html).toContain('<a href="https://example.com/p.png" rel="noreferrer">https://example.com/p.png</a>');
+});
+
+it('states its language, the date and where it came from, and names an untitled chat as asked', () => {
+  const html = transcriptHtml(' ', [{ role: 'user', text: 'Hi' }], { user: 'Du', assistant: 'ChatGPT' },
+    { lang: 'de', date: '24. Oktober 2026', footer: 'Geteilt aus Chat On Steroids', untitled: 'Neuer Chat' });
+  expect(html).toContain('<html lang="de">');
+  expect(html).toContain('<title>Neuer Chat</title>');
+  expect(html).toContain('<h1>Neuer Chat</h1>\n<p class="date">24. Oktober 2026</p>');
+  expect(html).toContain('<footer>Geteilt aus Chat On Steroids</footer>');
+});
+
+describe('hidden details', () => {
+  const page = (title: string, text: string) => transcriptHtml(title, [{ role: 'user', text: 'x' }, { role: 'assistant', text }],
+    { user: 'You', assistant: 'ChatGPT' }, { hidden: 'hidden' });
+
+  it('shows each one as a mark in the interface language, and counts them', () => {
+    const html = page('Key [redacted]', 'Use `[redacted]` and\n\n-----BEGIN KEY-----\n[redacted private key]');
+    expect(html).toContain('<title>Key hidden</title>');
+    expect(html).toContain('<h1>Key <span class="hidden">hidden</span></h1>');
+    expect(html).toContain('<code><span class="hidden">hidden</span></code>');
+    expect(html.match(/class="hidden"/g)).toHaveLength(3);
+    expect(hiddenCount(html)).toBe(3);
+  });
+
+  it('never puts one inside a link, where its address would carry it', () => {
+    const html = body(page('Chat', '[write](mailto:[redacted]) and [docs](https://example.com "for [redacted]")'));
+    expect(html).toContain('write and <a href="https://example.com/" rel="noreferrer">docs</a>');
+    expect(html).not.toContain('title=');
+  });
+
+  it('leaves the words alone when the page is not asked to mark them', () => {
+    expect(body(transcriptHtml('Chat', [{ role: 'assistant', text: 'a [redacted] b' }]))).toContain('a [redacted] b');
+  });
 });

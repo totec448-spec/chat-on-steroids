@@ -109,10 +109,11 @@ export const APP_COMMANDS = [
   { command: 'usage', name: 'Usage', description: 'Open usage and token statistics.', glyph: 'i-chart' },
   { command: 'plugins', name: 'Plugins', description: 'Open the plugins and their status.', glyph: 'i-plug' },
   { command: 'pet', name: 'Pet', description: 'Open the pets.', glyph: 'i-paw' },
-  { command: 'feedback', name: 'Feedback', description: 'Open the diagnostics report to attach to a bug report.', glyph: 'i-warning' },
-  // The open chat's answer copy, Markdown export and Find in chat.
+  { command: 'feedback', name: 'Feedback', description: 'Report a problem or suggest an idea.', glyph: 'i-warning' },
+  // The open chat's answer copy, Markdown export, web page to share and Find in chat.
   { command: 'copy', name: 'Copy', description: 'Copy the newest answer in this chat.', glyph: 'i-copy' },
   { command: 'export', name: 'Export', description: 'Save this chat as a Markdown file.', glyph: 'i-export' },
+  { command: 'share', name: 'Share', description: 'Save this chat as a web page to share.', glyph: 'i-globe' },
   { command: 'find', name: 'Find', description: 'Find text in this chat.', glyph: 'i-search' }
   // The command or the name the menu shows: a German menu says "Umbenennen" for /rename.
 ] as const;

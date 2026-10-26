@@ -19,8 +19,8 @@ const UNTRACKED_STAT_BATCH = 16;
 const GIT_TIMEOUT_MS = 15_000;
 const CHANGE_DEBOUNCE_MS = 180;
 
-interface GitResult { code: number; stdout: Buffer; stderr: string; }
-interface RepositoryContext { projectId: string; projectReal: string; root: string; gitDir: string; commonDir: string; prefix: string; }
+export interface GitResult { code: number; stdout: Buffer; stderr: string; }
+export interface RepositoryContext { projectId: string; projectReal: string; root: string; gitDir: string; commonDir: string; prefix: string; }
 
 function sameFile(left: Stats, right: Stats): boolean {
   return left.dev === right.dev && left.ino === right.ino && left.size === right.size &&
@@ -122,12 +122,25 @@ export function gitExecutable(
   throw new Error('Git was not found on PATH');
 }
 
-async function runGit(cwd: string, args: string[], maxBytes = MAX_GIT_OUTPUT_BYTES): Promise<GitResult> {
+/**
+ * What a write needs beyond a read: text on standard input (a commit message), more time (a push
+ * over the network) and extra environment (never prompt for a password or a host key).
+ */
+export interface GitRunOptions { input?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv }
+
+export async function runGit(cwd: string, args: string[], maxBytes = MAX_GIT_OUTPUT_BYTES, options: GitRunOptions = {}): Promise<GitResult> {
   const executable = gitExecutable();
   return new Promise((resolve, reject) => {
     const child = spawn(executable, ['--no-optional-locks', ...args], {
-      cwd, env: cleanGitEnvironment(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']
+      cwd, env: { ...cleanGitEnvironment(), ...options.env }, windowsHide: true,
+      stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe']
     });
+    if (options.input !== undefined) {
+      // Git may exit before it reads all of it (an early refusal); the exit code says what happened,
+      // and an unhandled EPIPE here would be an uncaught exception in the main process.
+      child.stdin!.on('error', () => undefined);
+      child.stdin!.end(options.input, 'utf8');
+    }
     const stdout: Buffer[] = [], stderr: Buffer[] = [];
     let stdoutBytes = 0, stderrBytes = 0, settled = false;
     const finish = (error?: Error, code = -1): void => {
@@ -140,16 +153,16 @@ async function runGit(cwd: string, args: string[], maxBytes = MAX_GIT_OUTPUT_BYT
     const timer = setTimeout(() => {
       child.kill();
       finish(new Error('Git took too long to respond'));
-    }, GIT_TIMEOUT_MS);
+    }, options.timeoutMs ?? GIT_TIMEOUT_MS);
     child.once('error', error => finish(error));
-    child.stdout.on('data', (chunk: Buffer) => {
+    child.stdout!.on('data', (chunk: Buffer) => {
       stdoutBytes += chunk.length;
       if (stdoutBytes > maxBytes) {
         child.kill(); finish(new Error('Git returned too much data')); return;
       }
       stdout.push(chunk);
     });
-    child.stderr.on('data', (chunk: Buffer) => {
+    child.stderr!.on('data', (chunk: Buffer) => {
       stderrBytes += chunk.length;
       if (stderrBytes <= 64 * 1024) stderr.push(chunk);
     });
@@ -157,7 +170,7 @@ async function runGit(cwd: string, args: string[], maxBytes = MAX_GIT_OUTPUT_BYT
   });
 }
 
-function decode(buffer: Buffer): string {
+export function decode(buffer: Buffer): string {
   return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
 }
 
@@ -175,7 +188,7 @@ function projectRelative(value: string, prefix: string): string | null {
   return safe.startsWith(`${prefix}/`) ? safe.slice(prefix.length + 1) : null;
 }
 
-async function repositoryContext(projectId: string): Promise<RepositoryContext | null> {
+export async function repositoryContext(projectId: string): Promise<RepositoryContext | null> {
   if ((await getProject(projectId))?.remote) throw new Error('Git changes of a project on a server are not shown in the app yet.');
   const project = await projectFileTarget(projectId, '', { allowRoot: true });
   const result = await runGit(project.real, ['rev-parse', '--show-toplevel', '--absolute-git-dir', '--git-common-dir']);

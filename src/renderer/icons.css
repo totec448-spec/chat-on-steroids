@@ -53,6 +53,7 @@
 .ph.ph-caret-up::before { content: '\e13c'; }
 .ph.ph-chart-line::before { content: '\e154'; }
 .ph.ph-chat-circle::before { content: '\e168'; }
+.ph.ph-chat-text::before { content: '\e17a'; }
 .ph.ph-check::before { content: '\e182'; }
 .ph.ph-check-circle::before { content: '\e184'; }
 .ph.ph-checks::before { content: '\e53a'; }
