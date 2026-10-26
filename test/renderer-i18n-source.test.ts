@@ -127,7 +127,7 @@ it('translates every error the Files panel, projects, pets, skills and settings 
   // and linking a ChatGPT Project.
   const sources = ['src/main/project-files.ts', 'src/main/projects.ts', 'src/main/pet-library.ts', 'src/main/skills.ts',
     'src/main/skill-github.ts', 'src/main/skill-metadata.ts', 'src/main/skill-package.ts', 'src/shared/skills.ts', 'src/main/ipc.ts',
-    'src/main/session/markdown-export.ts', 'src/main/session/bookmarks.ts', 'src/main/chat-groups.ts', 'src/main/session/search.ts',
+    'src/main/session/markdown-export.ts', 'src/main/session/page-export.ts', 'src/main/project-commit.ts', 'src/main/session/bookmarks.ts', 'src/main/chat-groups.ts', 'src/main/session/search.ts',
     'src/main/remote/ssh.ts',
     // Setup profiles, the terminal, attachments and images, project instructions, Git Review,
     // secure storage and handoffs: each shows its error to the person (2.1.45 pass).
