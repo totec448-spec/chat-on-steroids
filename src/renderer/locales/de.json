@@ -3198,5 +3198,21 @@
   "Keys stay with you": "Schlüssel bleiben bei dir",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "API-Schlüssel und Tokens in dem, was Tools zurückgeben, werden verborgen, bevor ChatGPT sie sieht.",
   "Easier to read": "Leichter zu lesen",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Hoher Kontrast, acht Akzentfarben, Zeilenabstand und eine besser lesbare Schrift."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Hoher Kontrast, acht Akzentfarben, Zeilenabstand und eine besser lesbare Schrift.",
+  "Changed and put back in this answer: no net change.": "In dieser Antwort geändert und zurückgesetzt: keine Änderung unterm Strich.",
+  "created": "erstellt",
+  "deleted": "gelöscht",
+  "edited": "bearbeitet",
+  "no net change": "keine Änderung",
+  "Open in Review": "In Review öffnen",
+  "Changed {0} files": "{0} Dateien geändert",
+  "Changed {0} files|one": "{0} Datei geändert",
+  "{0} put back": "{0} zurückgesetzt",
+  "{0} put back|one": "{0} zurückgesetzt",
+  "and {0} more": "und {0} weitere",
+  "and {0} more|one": "und {0} weitere",
+  "{0} more not listed": "{0} weitere nicht aufgeführt",
+  "{0} more not listed|one": "{0} weitere nicht aufgeführt",
+  "Touched {0} files, no net change": "{0} Dateien angefasst, keine Änderung unterm Strich",
+  "Touched {0} files, no net change|one": "{0} Datei angefasst, keine Änderung unterm Strich"
 }

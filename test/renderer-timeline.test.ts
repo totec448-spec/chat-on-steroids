@@ -8060,3 +8060,71 @@ describe('a formula in an answer', () => {
     expect(w.document.querySelector('.row-menu')).toBeNull();
   });
 });
+
+// #1827 (Haz's review): one collapsed "Changed files" summary under a finished answer that edited files.
+it("sums up what a finished answer changed, collapsed, counting only real changes, with each file's net diff and Open in Review", async () => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Repo', path: '/repo', createdAt: 1 };
+  const { w, append } = await boot([], true, [], [project]);
+  const api = (w as any).api;
+  const changes = [
+    { path: 'src/app.ts', state: 'edited', added: 30, removed: 5, approximate: false, diff: 'kept', edits: 3 },
+    { path: 'src/new-page.ts', state: 'created', added: 12, removed: 0, approximate: false, diff: 'kept', edits: 1 },
+    { path: 'old/helper.ts', state: 'unchanged', added: 0, removed: 0, approximate: false, diff: 'kept', edits: 2 },
+    { path: 'big.json', state: 'edited', added: 400, removed: 2, approximate: true, diff: 'too-large', edits: 1 }
+  ];
+  api.turnChanges = vi.fn(async () => ({ ok: true, data: { changes, total: 4 } }));
+  api.turnFileDiff = vi.fn(async () => ({ ok: true, data: { before: 'a\n', after: 'a\nb\n' } }));
+  const edit = (seq: number, path: string, kind: 'edit' | 'create', agent?: string): SessionEvent => {
+    const call = toolCall(seq, `edit-${seq}`) as Extract<SessionEvent, { kind: 'tool_call' }>;
+    return { ...call, turnId: 't-edit', ...(agent ? { agent } : {}), call: { ...call.call, tool: 'apply_patch', summary: { kind, tone: 'good', title: `Edited ${path}` },
+      changes: [{ path, added: 1, removed: 0, approximate: false, reviewAssetId: `asset-${seq}` }] } } as SessionEvent;
+  };
+  const answer = (seq: number): SessionEvent => ({ seq, time: T0 + seq * 1000, source: 'extension', kind: 'assistant_message', turnId: 't-edit',
+    messageId: 'answer-edit', message: text('Done: three files.'), final: true, state: 'final' } as SessionEvent);
+  await append([
+    { seq: 10, time: T0 + 10_000, source: 'extension', kind: 'turn_start', turnId: 't-edit' } as SessionEvent,
+    edit(11, 'src/app.ts', 'edit'), edit(12, 'src/new-page.ts', 'create'), answer(13)
+  ]);
+  // Still running: no card yet, so it never changes under the reader.
+  expect(w.document.querySelector('.turn-changes')).toBeNull();
+  await append([{ seq: 14, time: T0 + 14_000, source: 'extension', kind: 'turn_end', turnId: 't-edit', outcome: 'completed' } as SessionEvent]);
+  await append([]);
+  const card = w.document.querySelector<HTMLDetailsElement>('.turn-changes')!;
+  expect(card).not.toBeNull();
+  expect(api.turnChanges).toHaveBeenCalledWith(expect.any(String), 't-edit', 10);
+  // Collapsed, even for a few files; the headline counts net changes only, and says the rest.
+  expect(card.open).toBe(false);
+  expect(card.querySelector('summary')!.textContent).toBe('Changed 3 files · +442 −7 (approx.) · 1 put back');
+  card.open = true; card.dispatchEvent(new w.Event('toggle'));
+  const rows = [...card.querySelectorAll<HTMLDetailsElement>('.turn-change')];
+  expect(rows.map(row => row.querySelector('summary')!.textContent)).toEqual([
+    'src/app.ts+30 −5edited', 'src/new-page.ts+12created', 'old/helper.tsno net change', 'big.json+400 −2 (approx.)edited'
+  ]);
+  // A file's net diff loads when its row opens; one the recording did not keep says so.
+  rows[0]!.open = true; rows[0]!.dispatchEvent(new w.Event('toggle'));
+  await settle();
+  expect(api.turnFileDiff).toHaveBeenCalledWith(expect.any(String), 't-edit', 10, 'src/app.ts');
+  rows[3]!.open = true; rows[3]!.dispatchEvent(new w.Event('toggle'));
+  await settle();
+  expect(rows[3]!.textContent).toContain('Diff unavailable: this edit was too large to keep');
+  expect(api.turnFileDiff).toHaveBeenCalledTimes(1);
+  expect(card.querySelector('.turn-changes-review')!.textContent).toBe('Open in Review');
+});
+
+it('shows no Changed files card for a turn whose only edits were a worker\'s, or that edited nothing', async () => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  api.turnChanges = vi.fn(async () => ({ ok: true, data: { changes: [], total: 0 } }));
+  const worker = toolCall(21, 'worker-edit') as Extract<SessionEvent, { kind: 'tool_call' }>;
+  await append([
+    { seq: 20, time: T0 + 20_000, source: 'extension', kind: 'turn_start', turnId: 't-w' } as SessionEvent,
+    { ...worker, turnId: 't-w', agent: 'worker-1', call: { ...worker.call, tool: 'apply_patch', summary: { kind: 'edit', tone: 'good', title: 'Edited a.ts' },
+      changes: [{ path: 'a.ts', added: 1, removed: 0, approximate: false }] } } as SessionEvent,
+    { ...toolCall(22, 'read-only'), turnId: 't-w' } as SessionEvent,
+    { seq: 23, time: T0 + 23_000, source: 'extension', kind: 'assistant_message', turnId: 't-w', messageId: 'a-w', message: text('Read it.'), final: true, state: 'final' } as SessionEvent,
+    { seq: 24, time: T0 + 24_000, source: 'extension', kind: 'turn_end', turnId: 't-w', outcome: 'completed' } as SessionEvent
+  ]);
+  await append([]);
+  expect(w.document.querySelector('.turn-changes')).toBeNull();
+  expect(api.turnChanges).not.toHaveBeenCalled();
+});

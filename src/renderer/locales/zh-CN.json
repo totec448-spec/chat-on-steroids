@@ -3142,5 +3142,16 @@
   "Keys stay with you": "密钥留在你这里",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "工具返回内容中的 API 密钥和令牌会在 ChatGPT 看到之前被隐藏。",
   "Easier to read": "更易阅读",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "高对比度、八种强调色、行距和更易读的字体。"
+  "High contrast, eight accent colors, line spacing and a more legible font.": "高对比度、八种强调色、行距和更易读的字体。",
+  "Changed and put back in this answer: no net change.": "在此回答中改动后又还原：没有净变化。",
+  "created": "已创建",
+  "deleted": "已删除",
+  "edited": "已编辑",
+  "no net change": "无净变化",
+  "Open in Review": "在审阅中打开",
+  "Changed {0} files": "更改了 {0} 个文件",
+  "{0} put back": "{0} 个已还原",
+  "and {0} more": "还有 {0} 个",
+  "{0} more not listed": "另有 {0} 个未列出",
+  "Touched {0} files, no net change": "改动了 {0} 个文件，没有净变化"
 }
