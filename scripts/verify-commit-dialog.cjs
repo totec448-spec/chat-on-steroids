@@ -188,8 +188,11 @@ app.whenReady().then(async () => {
       assert.equal(await js(`document.querySelector('input[name="commitFlow"]:checked').value`), name === 'dark' ? 'ask-push' : 'pr');
       await layout(`${name} form`);
       await screenshot(`${name}-form`);
+      // The button says what it will do (Haz on #1825): the count, and for a pull request that it pushes too.
+      await js(`(()=>{const i=document.querySelector('input[name="commitFlow"][value="ask-push"]');i.click();})()`);
+      assert.equal(await js(`document.getElementById('commitSubmit').textContent`), 'Commit 2 files');
       await js(`(()=>{const i=document.querySelector('input[name="commitFlow"][value="pr"]');i.click();})()`);
-      assert.equal(await js(`document.getElementById('commitSubmit').textContent`), 'Commit and open pull request');
+      assert.equal(await js(`document.getElementById('commitSubmit').textContent`), 'Commit 2 files, push and open a pull request');
       await layout(`${name} pull request`);
       await js(`document.getElementById('commitSubmit').click()`);
       await until(`document.querySelectorAll('.commit-step.is-done').length===3`);
