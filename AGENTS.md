@@ -4145,6 +4145,46 @@ and do not trigger source reloads while awaiting intervention. Normal and restor
 resumes share one projection: move objective/switch, retire A's debt, and let B earn its own.
 Current persistence/publication exceptions are in §21.
 
+### Goal step reviewer (#1832)
+
+Off by default (`goal.reviewerModel`: `''` off, `'same'` the Goal chat's own model, or a model id
+the account offers; an unoffered id falls back to the chat's model with one log line). Settings →
+Agents & automation → Goal says the cost (a second model pass per reviewed step) and the coverage:
+only edits made with the edit tools are reviewed, not files changed by commands, and never in Loop.
+Chosen while Sub-agents are off, the row offers **Turn on Sub-agents** (Home's own switch, only on
+the person's press).
+
+When `acceptGoalReplyNow` records a **pending** Goal reply in `goal` mode, `goal-reviewer.ts`
+`startStepReview` (never awaited) reads the step's own edits (`session/turn-changes.ts`, the
+"Changed files" records) and, when there are any, writes the brief (`goal-review.ts`): the Goal,
+the step's instruction, every changed file with its state, counts and number of edits, then the net
+unified diffs (`text-diff.ts`) in first-changed order, whole, as many as fit `REVIEW_BRIEF_CHARS`;
+the rest are named for the reviewer to read through Core. The reviewer is a worker in the Goal
+chat's **own family** (so the Sub-agents dock and the chat's inbox show it like any worker), marked
+`reviewer` in the broker: label "Reviewer", a brief budget of `REVIEW_TEXT_CHARS` (app-written,
+never the agents tool's 4,000-character task), never an isolated Git worktree (it must see the
+uncommitted step), one per chat, reused (a sleeping one is woken with the next brief through
+`stageMessages(..., { review: true })`), replaced when it cannot be woken or the chosen model
+changed. No free worker slot: retried every 15 s up to `REVIEW_MAX_MS`, then not reviewed.
+
+It only reads: in a reviewer's own chat the kernel refuses every tool not marked read-only before it
+runs (`reviewerRefusal`, Core, Desktop and plugin tools alike), except `exec_command`/`write_stdin`
+(diffs and tests; the brief tells it to change nothing) and `agents`. A working reviewer holds its
+chat's next Goal step through `waitingForSubAgents`, whatever `waitForSubAgents` says, for at most
+`REVIEW_MAX_MS` from when it was asked; `goalWaitFor` names it `reviewer` with that deadline (the
+app's Goal row and the page's composer status both say "Waiting for the reviewer").
+
+The draft (`goal.ts run()`) takes `reviewForDraft` for exactly that step: an answer goes after the
+helper's message as `Reviewer: …` (and the helper is told it is there), "No problems found" adds
+nothing, an overdue review adds "Reviewer did not answer in time." An answer starting `BLOCKING:`
+pauses Goal (switch off, a timeline note with the finding, the stopped-chat notice) instead of
+typing anything; ordinary findings never raise a notice. Switching the chat's Goal off or to Loop
+cancels a review in progress (as the person's own Clear on the worker's row); its chat stays.
+Tests: `goal-review.test.ts`, `text-diff.test.ts`, `goal-reviewer.test.ts`, `goal-review-flow.test.ts`,
+`kernel-reviewer-readonly.test.ts`, the reviewer cases in `agents.test.ts`, `mcp-worktree-spawn.test.ts`,
+`bridge.test.ts`, `renderer-chat-models.test.ts`, `renderer-state.test.ts`, `renderer-timeline.test.ts`
+and `content-script.test.ts`.
+
 ## 18. Desktop workspace, plugins, connection and native control
 
 Dark is the default theme. Theme selection belongs in Appearance settings; the main header
