@@ -199,6 +199,7 @@
                 <label class="setting"><span class="setting-text"><b>Messages during a running turn</b><em id="followUpHint" translate="no"></em></span><select id="followUp"><option value="steer">Join the running turn</option><option value="queue">Wait until the turn ends</option></select></label>
                 <label class="setting"><span class="setting-text"><b>Send messages with</b><em id="enterSendsHint" translate="no"></em></span><select id="enterSends"><option value="enter">Enter</option><option value="modifier" id="enterSendsModifier" translate="no"></option></select></label>
                 <label class="setting"><span class="setting-text"><b>Keep awake while a chat works</b><em>Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose “The computer and screen”.</em></span><select id="keepAwake"><option value="off">Off</option><option value="computer">The computer</option><option value="screen">The computer and screen</option></select></label>
+                <div class="setting"><span class="setting-text"><b>Tour</b><em>A one-minute look at the composer, projects and Review.</em></span><button class="btn" id="takeTour" type="button">Take the tour again</button></div>
                 <label class="setting"><span class="setting-text"><b>Playful status words</b><em>Show rotating gym jokes instead of “Working”.</em></span><input id="playfulStatus" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Playful asides in automatic Continue</b><em>Add a random fun fact or meme joke to each automatic Continue, marked for the model to ignore.</em></span><input id="playfulContinue" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Mention Chat On Steroids Core</b><em>Makes sure ChatGPT can use this app in every chat. Turn it off if ChatGPT starts plain questions with an unneeded tool call. Workers, Goal, Loop and Continue always keep the mention.</em></span><input id="mentionCore" type="checkbox" /></label>
@@ -1406,7 +1407,7 @@
               </div>
             </div>
             <div class="composer-dock" id="composerDock"><div class="composer-dock-body"><div class="background-exec-status" id="backgroundExecStatus" role="status" hidden><i class="ico ph ph-terminal-window" aria-hidden="true"></i><span class="queue-label"></span><span class="background-exec-time"></span><svg class="disclosure-chevron background-exec-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false" hidden><path d="M6 3.5 10.5 8 6 12.5"></path></svg><button class="background-exec-stop" type="button"><i class="ico ph ph-power" aria-hidden="true"></i><span></span></button></div><div class="sr-only" id="backgroundExecLiveStatus" role="status" aria-live="polite" hidden></div><div class="background-exec-list" id="backgroundExecList" role="list" hidden></div><section class="agent-plan" id="agentPlan" aria-label="Agent task plan" hidden></section><div id="branchDraft" class="branch-draft" role="status" hidden></div><div id="editDraft" class="edit-draft" role="status" hidden></div><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div></div>
-            <form class="composer" id="composer">
+            <div class="tour-offer" id="tourOffer" role="status" hidden><span>New here? Take a 1-minute tour.</span><button class="btn btn-quiet" id="tourOfferYes" type="button">Show me</button><button class="btn btn-quiet" id="tourOfferNo" type="button">No thanks</button></div><form class="composer" id="composer">
               <div id="skillPicker" class="skill-autocomplete" aria-label="Skills" hidden></div>
               <div id="composerSelectedSkills" class="composer-selected-skills" aria-label="Selected skills" hidden></div>
               <label class="sr-only" for="chatInput">Message ChatGPT</label>
@@ -1689,5 +1690,11 @@
       </form>
     </dialog>
     <script type="module" src="./main.ts"></script>
-  </body>
+      <!-- #1833: the first-run tour. A ring around the real control and one card beside it. -->
+    <div class="tour-ring" id="tourRing" aria-hidden="true" hidden></div>
+    <div class="tour-card" id="tourCard" role="dialog" aria-labelledby="tourText" aria-describedby="tourStep" hidden tabindex="-1">
+      <p class="tour-text" id="tourText"></p>
+      <div class="tour-actions"><span class="tour-step" id="tourStep"></span><button class="btn btn-quiet" id="tourSkip" type="button">Skip tour</button><button class="btn btn-solid" id="tourNext" type="button">Next</button></div>
+    </div>
+</body>
 </html>

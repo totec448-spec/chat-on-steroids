@@ -3250,5 +3250,15 @@
   "Keys stay with you": "Anahtarlar sizde kalır",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Araçların döndürdüğü içerikteki API anahtarları ve tokenlar, ChatGPT görmeden önce gizlenir.",
   "Easier to read": "Okuması daha kolay",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Yüksek kontrast, sekiz vurgu rengi, satır aralığı ve daha okunaklı bir yazı tipi."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Yüksek kontrast, sekiz vurgu rengi, satır aralığı ve daha okunaklı bir yazı tipi.",
+  "A one-minute look at the composer, projects and Review.": "Yazma alanına, projelere ve İncelemeye bir dakikalık bakış.",
+  "New here? Take a 1-minute tour.": "Yeni misiniz? 1 dakikalık turu yapın.",
+  "No thanks": "Hayır, teşekkürler",
+  "Show me": "Göster",
+  "Skip tour": "Turu atla",
+  "Take the tour again": "Turu tekrar yap",
+  "A project is a folder you approve, and its chats start there.": "Proje, izin verdiğiniz bir klasördür ve sohbetleri orada başlar.",
+  "Review shows every change ChatGPT made to your files.": "İnceleme, ChatGPT'nin dosyalarınızda yaptığı her değişikliği gösterir.",
+  "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "Görevinizi buraya yazın ve ChatGPT'nin nasıl çalışacağını Normal, Plan veya Hedef ile seçin.",
+  "Tour": "Tur"
 }

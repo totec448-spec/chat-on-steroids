@@ -3193,5 +3193,15 @@
   "Keys stay with you": "Khóa ở lại với bạn",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Khóa API và token trong kết quả công cụ trả về được ẩn trước khi ChatGPT thấy.",
   "Easier to read": "Dễ đọc hơn",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Độ tương phản cao, tám màu nhấn, giãn dòng và phông chữ dễ đọc hơn."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Độ tương phản cao, tám màu nhấn, giãn dòng và phông chữ dễ đọc hơn.",
+  "A one-minute look at the composer, projects and Review.": "Xem nhanh một phút về ô soạn thảo, dự án và Xem lại.",
+  "New here? Take a 1-minute tour.": "Bạn mới dùng? Hãy xem hướng dẫn 1 phút.",
+  "No thanks": "Không, cảm ơn",
+  "Show me": "Cho tôi xem",
+  "Skip tour": "Bỏ qua hướng dẫn",
+  "Take the tour again": "Xem lại hướng dẫn",
+  "A project is a folder you approve, and its chats start there.": "Dự án là một thư mục bạn cho phép, và các cuộc trò chuyện của nó bắt đầu ở đó.",
+  "Review shows every change ChatGPT made to your files.": "Xem lại hiển thị mọi thay đổi ChatGPT đã làm với tệp của bạn.",
+  "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "Viết nhiệm vụ của bạn ở đây và chọn Bình thường, Plan hoặc Goal cho cách ChatGPT làm việc.",
+  "Tour": "Hướng dẫn"
 }

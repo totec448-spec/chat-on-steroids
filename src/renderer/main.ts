@@ -28,6 +28,7 @@ import { initPet } from './pet.js';
 import { initPets } from './pets.js';
 import { initSkillsLibrary } from './skills-library.js';
 import { initWhatsNew } from './whats-new.js';
+import { initTour } from './tour.js';
 import { initSettingsSearch } from './settings-search.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
@@ -2731,7 +2732,17 @@ $('updateInstall').addEventListener('click', installUpdate);
 $('installUpdate').addEventListener('click', installUpdate);
 $('connectionPopoverToggle').addEventListener('click', () => void toggleConnection());
 $('wizConnect').addEventListener('click', () => void toggleConnection());
-$('readyStart').addEventListener('click', () => showTab('chat'));
+// #1833: Setup's last step offers the first-run tour once; Settings replays it.
+const tour = initTour({ markDone: () => api.markTourDone() });
+$('readyStart').addEventListener('click', () => {
+  showTab('chat');
+  if (state && state.config.ui.tourDone !== true) tour.offer();
+});
+$('takeTour').addEventListener('click', () => {
+  showTab('chat');
+  // After the chat view has laid out, so each step finds its control on screen.
+  requestAnimationFrame(() => tour.start());
+});
 $('showCosBrowser').addEventListener('click', event => void run(
   (event.currentTarget as HTMLElement).dataset.signedIn === 'true' ? api.signOutChatGpt() : api.showCosBrowser()));
 /** Setup's browser choice is the same save as choosing it in Settings, so both share one rule. */
