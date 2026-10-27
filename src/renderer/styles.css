@@ -5135,7 +5135,12 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .schedule-line .btn-quiet { flex: 0 0 auto; border: 0; background: transparent; box-shadow: none; color: var(--soft); padding: 2px 8px; min-height: 0; }
 .schedule-line .btn-quiet:hover:not(:disabled) { color: var(--ink); background: var(--hover); }
 .schedule-dialog textarea { min-height: 0; field-sizing: content; max-height: 40vh; }
-.schedule-when { display: flex; gap: 12px; flex-wrap: wrap; }
+.schedule-when { display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0 0; }
+/* The body's padding is the space above the first field; its own margin would double it. */
+.schedule-dialog #scheduleFields > .plugin-field:first-child { margin-top: 0; }
+#scheduleFields[hidden] { display: none; }
+/* Unreadable: only the reason stays, above Retry. */
+.schedule-dialog #scheduleFields[hidden] + .plugin-error { margin-top: 0; }
 .schedule-when > .plugin-field { flex: 1 1 160px; margin: 0; }
 .schedule-when > .plugin-field[hidden] { display: none; }
 .schedule-dialog .plugin-field[hidden] { display: none; }
