@@ -5408,3 +5408,27 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 @media (prefers-reduced-motion: reduce) { .chat-find { animation: none; } }
 ::highlight(chat-find) { background-color: var(--accent-wash); color: inherit; }
 ::highlight(chat-find-current) { background-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--ink); }
+
+/* #1827: what a finished answer changed. One quiet line under its actions, closed; open, a row per
+   file in the edit cards' type and colors, with that file's net diff. */
+.turn-changes { margin: 6px 0 0; min-width: 0; }
+.turn-changes[hidden] { display: none; }
+.turn-changes-head { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 6px; margin-left: -6px; border-radius: var(--r-sm);
+  color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; cursor: pointer; list-style: none; }
+.turn-changes-head::-webkit-details-marker { display: none; }
+.turn-changes-head:hover { color: var(--ink); background: var(--hover); }
+.turn-changes-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn-changes-chevron { flex: none; transition: transform 140ms; }
+.turn-changes[open] > summary .turn-changes-chevron { transform: rotate(90deg); }
+.turn-changes-list { display: grid; gap: 6px; margin-top: 6px; }
+.turn-change { min-width: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--page); }
+.turn-change-head { display: flex; align-items: baseline; gap: 8px; padding: 7px 10px; cursor: pointer; list-style: none; font: calc(11px * var(--text-scale, 1)) var(--mono); }
+.turn-change-head::-webkit-details-marker { display: none; }
+.turn-change-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn-change-count { flex: none; color: var(--soft); font-variant-numeric: tabular-nums; }
+.turn-change-state { flex: none; color: var(--faint); font-family: var(--sans, inherit); }
+.turn-change[data-state='unchanged'] .turn-change-path { color: var(--faint); }
+.turn-change > .unified-diff { border-top: 1px solid var(--line); }
+.turn-change > .unified-diff > .meta { margin: 0; padding: 8px 10px; }
+.turn-changes-review { justify-self: start; }
+@media (prefers-reduced-motion: reduce) { .turn-changes-chevron { transition: none; } }
