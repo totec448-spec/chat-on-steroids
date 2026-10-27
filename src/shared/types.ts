@@ -182,6 +182,11 @@ export interface UiPrefs {
   playfulContinue?: boolean;
   /** The person's own words in place of the built-in automatic Continue phrase (silence recovery only). Unset means the built-in phrases. */
   customContinue?: string;
+  /** #1856: Personality and Writing style for new chats; absent = the built-in text, '' = left out. */
+  chatPersonality?: string;
+  chatWritingStyle?: string;
+  /** #1794: local program asked before each automatic send (Goal/Loop step, Continue, recovery, fresh turn, worker); empty = off. */
+  sendCheckUrl?: string;
   /** Keep the chat at its end while it grows, here and on ChatGPT, until the reader scrolls up. On unless false. */
   followOutput?: boolean;
   /** Add the Chat On Steroids Core mention to the user's own prompts sent from the app. On unless false. */
@@ -453,6 +458,16 @@ export interface ControlApiSettings {
   allowActions: boolean;
 }
 
+/** How chats treat their Local Project's files. */
+export interface ProjectsSettings {
+  /**
+   * Take a Git tree checkpoint before each turn's first patch (`src/main/checkpoints`). Off by
+   * default. Turning it off stops new checkpoints only: existing ones stay listed in Review and
+   * Restore keeps working.
+   */
+  codeCheckpoints: boolean;
+}
+
 export interface Config {
   /**
    * Names this computer's connectors in ChatGPT, for one ChatGPT account used on several
@@ -474,6 +489,7 @@ export interface Config {
   goal: GoalSettings;
   mcp: McpSettings;
   controlApi: ControlApiSettings;
+  projects: ProjectsSettings;
 }
 
 export type ConnectionState =

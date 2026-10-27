@@ -1,9 +1,11 @@
+import { DEFAULT_CHAT_PERSONALITY, DEFAULT_CHAT_WRITING_STYLE, MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
 import { hasProviderDirective, resolvedCapture, withoutProviderDirectives } from '../shared/content-reference.js';
 import { completedDilText } from '../shared/dil-tables.js';
 import { markdownVisibleText } from '../shared/markdown-text.js';
 import { providerEntitiesAsMarkdown } from '../shared/content-reference.js';
 import { initChatSearch, type ChatSearch } from './chat-search.js';
 import { initChatFind } from './chat-find.js';
+import { initQuoteSelection, type QuoteSelection } from './quote-selection.js';
 import { initChatCycle } from './chat-cycle.js';
 import { createWorkspaceTerminal } from './workspace-terminal.js';
 import { sendTerminalSelection } from './terminal-selection.js';
@@ -109,7 +111,7 @@ import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT
 import { STRICT_REFUSAL_PROGRESS_PREFIX, UNPROVEN_WORKER_NOTICE, UNTRUSTED_NOTICE, UNTRUSTED_WORKER_NOTICE } from '../shared/trust-notices.js';
 import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
 import { createSearchPopup } from './search-popup.js';
-import { primaryShortcut } from './shortcuts.js';
+import { holdToTalkShortcut, holdToTalkSupported, primaryShortcut } from './shortcuts.js';
 import { initSshProjectDialog } from './ssh-project-dialog.js';
 import { renderTurnChanges, turnEditCount, turnFinished, turnFrom } from './turn-changes.js';
 import { initSharePage } from './share-page.js';
@@ -119,6 +121,7 @@ import { createChatgptProjectPicker } from './chatgpt-project-picker.js';
 const api = window.api;
 let chatSearch: ChatSearch | null = null;
 let chatFind: ReturnType<typeof initChatFind> | null = null;
+let quoteSelection: QuoteSelection | null = null;
 
 
 /**
@@ -149,7 +152,7 @@ let filterFor: string | null = null;
 
 interface Deps {
   /** The renderer's single save path — reads every control, including ours. */
-  save: () => Promise<void>;
+  save: () => Promise<boolean>;
   state: () => AppState | null;
 }
 
@@ -571,18 +574,6 @@ let dictationStopGuard: number | null = null;
 // microphone button does, so the phrase in progress is kept and nothing is sent.
 let heldDictation: DictationSession | null = null;
 
-/**
- * Only Windows gets the chord, and only Windows names it. There Ctrl+Space toggles Chinese IMEs,
- * Shift+Space switches their character width and Alt+Space opens the window menu, while
- * Ctrl+Shift+Space is no Windows or IME default (pressing Space cancels a Ctrl+Shift layout switch,
- * as with the docks' Ctrl+Shift+1–4). macOS owns Ctrl+Space, Ctrl+Option+Space, Cmd+Space and
- * Ctrl+Cmd+Space, and IBus/Fcitx own Super+Space and Ctrl+Space on Linux; dictation is Windows-only
- * today, so those platforms would need their own pick.
- */
-function holdToTalkSupported(): boolean {
-  return /^Win/.test(navigator.platform);
-}
-
 function clearDictationStopGuard(): void {
   if (dictationStopGuard === null) return;
   window.clearTimeout(dictationStopGuard);
@@ -627,7 +618,7 @@ function paintDictation(): void {
   button.setAttribute('aria-pressed', String(active));
   button.setAttribute('aria-label', t(label));
   button.title = available && holdToTalkSupported() && (dictationPhase === 'idle' || dictationPhase === 'error')
-    ? `${t(label)} (${t('hold {0}', [`${t('Ctrl')}+${t('Shift')}+${t('Space')}`])})` : t(label);
+    ? `${t(label)} (${t('hold {0}', [holdToTalkShortcut()])})` : t(label);
   // Native Windows errors remain verbatim; known UI labels/statuses use the
   // existing locale catalog with English fallback until translations are merged.
   status.textContent = dictationNotice ? t(dictationNotice) : '';
@@ -1085,10 +1076,25 @@ function markAllSeen(projectId?: string): void {
 let sessionTooltipDismissed: string | null = null;
 
 function placeSessionTooltip(tip: HTMLElement, row: HTMLElement): void {
-  tip.textContent = row.title;
+  // While the app's tooltip shows, the row hands it its title (#1862): the browser shows no second one.
+  if (row.hasAttribute('title')) { row.dataset.tooltip = row.title; row.removeAttribute('title'); }
+  tip.textContent = row.dataset.tooltip ?? '';
   const bounds = row.getBoundingClientRect();
   tip.style.left = `${Math.min(bounds.right + 10, window.innerWidth - 290)}px`;
   tip.style.top = `${Math.min(bounds.top, window.innerHeight - 110)}px`;
+}
+
+/** The row's title again, once the app's tooltip is gone. */
+function giveBackTitle(row: HTMLElement): void {
+  if (row.dataset.tooltip === undefined) return;
+  if (!row.hasAttribute('title')) row.title = row.dataset.tooltip;
+  delete row.dataset.tooltip;
+}
+
+/** Puts the app's tooltip away, and every row that handed it its title gets it back. */
+function removeSessionTooltip(): void {
+  document.getElementById('sessionTooltip')?.remove();
+  for (const row of document.querySelectorAll<HTMLElement>('.sess[data-tooltip]')) giveBackTitle(row);
 }
 
 /** Unsent text waits in this chat's composer. The open chat shows its draft itself, so it never counts. */
@@ -1148,15 +1154,22 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     document.body.append(tip);
   };
   row.addEventListener('pointerenter', showTip);
+  // Repainted under the pointer while this chat's tooltip shows: the new row hands it its title too.
+  if (document.getElementById('sessionTooltip')?.dataset.for === summary.id) requestAnimationFrame(() => {
+    const current = document.getElementById('sessionTooltip');
+    if (current?.dataset.for === summary.id && row.isConnected) placeSessionTooltip(current, row);
+  });
   row.addEventListener('pointerleave', () => {
     if (sessionTooltipDismissed === summary.id) sessionTooltipDismissed = null;
-    document.getElementById('sessionTooltip')?.remove();
+    removeSessionTooltip();
+    giveBackTitle(row);
   });
   // A pointer's click puts the tooltip away until the pointer leaves the row, through the repaint that
   // follows. A keyboard's click puts nothing away: no pointer would leave to bring the tooltip back.
   row.addEventListener('click', () => {
     if (row.matches(':hover')) sessionTooltipDismissed = summary.id;
-    document.getElementById('sessionTooltip')?.remove();
+    removeSessionTooltip();
+    giveBackTitle(row);
   });
   // Unseen is presentation only and is appended last, so every existing lifecycle tone keeps
   // its previous priority (blocked/active/worker finished/failed).
@@ -1288,8 +1301,8 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   const menu = (at?: { x: number; y: number }) => ({
     owner, at, label: () => shownSessionTitle(summary), anchor: () => rowMenuButton(owner), items: () => items
   });
-  more.addEventListener('click', (event) => { event.stopPropagation(); document.getElementById('sessionTooltip')?.remove(); toggleRowMenu(menu()); });
-  row.addEventListener('contextmenu', (event) => { event.preventDefault(); document.getElementById('sessionTooltip')?.remove(); openRowMenu(menu({ x: event.clientX, y: event.clientY })); });
+  more.addEventListener('click', (event) => { event.stopPropagation(); removeSessionTooltip(); toggleRowMenu(menu()); });
+  row.addEventListener('contextmenu', (event) => { event.preventDefault(); removeSessionTooltip(); openRowMenu(menu({ x: event.clientX, y: event.clientY })); });
   const actionBar = el('div', 'sess-actions');
   actionBar.append(more);
   row.append(top, actionBar);
@@ -1428,7 +1441,7 @@ function openSharePage(sessionId: string): void {
 function startRename(summary: SessionSummary): void {
   const current = summary.title || '';
   renaming = { id: summary.id, original: current, value: current, start: 0, end: current.length };
-  document.getElementById('sessionTooltip')?.remove();
+  removeSessionTooltip();
   paintSessions();
 }
 
@@ -2450,7 +2463,7 @@ function paintSessions(): void {
   // any other tooltip goes with its row.
   const tooltip = document.getElementById('sessionTooltip');
   if (tooltip && pointed && tooltip.dataset.for === pointedId) placeSessionTooltip(tooltip, pointed);
-  else tooltip?.remove();
+  else if (tooltip) removeSessionTooltip();
   for (const list of [projectList, chatList]) {
     for (const toggle of list.querySelectorAll<HTMLElement>('.sess > .worker-toggle')) {
       const before = arrowsBefore.get(toggle.parentElement!.dataset.id);
@@ -4104,7 +4117,7 @@ const LIST_ITEM = /^ {0,3}(?:[-*+]|\d+[.)])\s/;
 /** A list item, or a line indented into one. */
 const LIST_LINE = /^\s*(?:[-*+]|\d+[.)])\s|^(?: {2,}|\t)/;
 /** A line of an indented code block. */
-const CODE_LINE = /^(?: {4,}|\t)/;
+const CODE_LINE = /^(?: {4,}| {0,3}\t)/;
 /**
  * The finished blocks of an answer ChatGPT is still writing: up to its last blank line outside an
  * open code fence, writing block or display formula, or the end of a fence or writing block that
@@ -4167,17 +4180,150 @@ export function finishedBlocks(text: string): string {
   return text.slice(0, end);
 }
 
+/** Markdown indentation uses four-column tab stops, not character counts. */
+function indentColumns(line: string): number {
+  let columns = 0;
+  for (const char of line) {
+    if (char === ' ') columns++;
+    else if (char === '\t') columns += 4 - (columns % 4);
+    else break;
+  }
+  return columns;
+}
+
+/** Locate Markdown fences, including ones nested under blockquotes and list items. */
+function fencedMarkdownRanges(text: string): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = [];
+  let fence: { start: number; marker: string; width: number; nested: boolean; quoteDepth: number; listIndent: number | null } | null = null;
+  let listIndent: number | null = null;
+  for (let start = 0; start < text.length;) {
+    const newline = text.indexOf('\n', start);
+    const end = newline < 0 ? text.length : newline + 1;
+    const line = text.slice(start, newline < 0 ? end : newline).replace(/\r$/, '');
+    const quotePrefix = /^(?:[ \t]*>[ \t]?)+/.exec(line)?.[0] ?? '';
+    const quoteDepth = (quotePrefix.match(/>/g) ?? []).length;
+    const content = line.slice(quotePrefix.length);
+    const indent = indentColumns(content);
+    const body = line.replace(/^(?:[ \t]*(?:>|[-*+]|\d{1,9}[.)])(?=[ \t]|$)[ \t]?)*/, '');
+    // Marked ends a nested fence when its quote/list container ends, even
+    // without closing backticks. The first outside line may open another fence.
+    if (fence && (quoteDepth < fence.quoteDepth ||
+        (fence.listIndent !== null && content.trim() && indent < fence.listIndent))) {
+      ranges.push({ start: fence.start, end: start });
+      fence = null;
+    }
+    if (fence) {
+      // A top-level fence cannot be closed by a list/blockquote-prefixed line.
+      const close = (fence.nested ? /^[ \t]*(`{3,}|~{3,})[ \t]*$/ : /^ {0,3}(`{3,}|~{3,})[ \t]*$/)
+        .exec(fence.nested ? body : line)?.[1];
+      if (close && close[0] === fence.marker && close.length >= fence.width) {
+        ranges.push({ start: fence.start, end });
+        fence = null;
+      }
+    } else {
+      const marker = /^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+/.exec(content);
+      if (marker) listIndent = indentColumns(marker[0].replace(/\S/g, ' '));
+      else if (content.trim() && listIndent !== null && indent < listIndent) listIndent = null;
+      const nested = body.length !== line.length;
+      const open = (nested ? /^[ \t]*(`{3,}|~{3,})(.*)$/ : /^ {0,3}(`{3,}|~{3,})(.*)$/).exec(body);
+      if (open && (open[1]![0] === '~' || !open[2]!.includes('`'))) {
+        fence = { start, marker: open[1]![0]!, width: open[1]!.length, nested, quoteDepth, listIndent };
+      }
+    }
+    start = end;
+  }
+  if (fence) ranges.push({ start: fence.start, end: text.length });
+  return ranges;
+}
+
+/** Protect both fenced blocks and inline backtick spans before inserting chart slots. */
+function markdownCodeRanges(text: string): Array<{ start: number; end: number }> {
+  const fences = fencedMarkdownRanges(text);
+  const ranges = [...fences];
+  // Four-space and tab-indented blocks are code too. A blank line can continue
+  // one, but an unindented nonblank line ends it before its own content.
+  let indentedStart: number | null = null;
+  let afterBlank = true;
+  let fenceIndex = 0;
+  let listContentIndent: number | null = null;
+  for (let at = 0; at < text.length;) {
+    const newline = text.indexOf('\n', at);
+    const end = newline < 0 ? text.length : newline + 1;
+    const line = text.slice(at, newline < 0 ? end : newline).replace(/\r$/, '');
+    while (fences[fenceIndex] && at >= fences[fenceIndex]!.end) fenceIndex++;
+    if (fences[fenceIndex] && at >= fences[fenceIndex]!.start) {
+      // A top-level fence at a shallower column ends the preceding list.
+      // Otherwise its old offset makes following four-space code look like
+      // a list continuation; nested fences must keep their list context.
+      if (at === fences[fenceIndex]!.start && listContentIndent !== null &&
+          indentColumns(line) < listContentIndent && /^ {0,3}(`{3,}|~{3,})/.test(line)) {
+        listContentIndent = null;
+      }
+      if (indentedStart !== null) ranges.push({ start: indentedStart, end: at });
+      indentedStart = null;
+      // A completed fenced block is a block boundary, even without an empty
+      // line: Marked accepts an indented code block immediately after it.
+      afterBlank = end === fences[fenceIndex]!.end;
+    } else {
+      // Indented list content begins at the marker's text column. Its code
+      // blocks need *another* four columns, unlike a plain four-space continuation.
+      const marker = /^([ ]*)(?:[-*+]|\d{1,9}[.)])([ \t]+)/.exec(line);
+      const codeIndent = listContentIndent !== null && indentColumns(line) >= listContentIndent + 4;
+      if (marker && !(codeIndent && (afterBlank || indentedStart !== null)) && (marker[1]!.length <= 3 ||
+          (listContentIndent !== null && indentColumns(marker[1]!) >= listContentIndent))) {
+        listContentIndent = indentColumns(marker[0].replace(/\S/g, ' '));
+      } else if (line.trim() && listContentIndent !== null && indentColumns(line) < listContentIndent) {
+        listContentIndent = null;
+      }
+      if (indentedStart === null) {
+        if (afterBlank && CODE_LINE.test(line) &&
+            (listContentIndent === null || indentColumns(line) >= listContentIndent + 4)) indentedStart = at;
+      } else if (line.trim() && (listContentIndent === null
+        ? !CODE_LINE.test(line) : indentColumns(line) < listContentIndent + 4)) {
+        ranges.push({ start: indentedStart, end: at });
+        indentedStart = null;
+      }
+      afterBlank = !line.trim();
+    }
+    at = end;
+  }
+  if (indentedStart !== null) ranges.push({ start: indentedStart, end: text.length });
+  let start = 0;
+  for (const fence of [...fences, { start: text.length, end: text.length }]) {
+    const outside = text.slice(start, fence.start);
+    // Inline code cannot span paragraph breaks: unmatched ticks in separate paragraphs
+    // must not suppress a valid chart between them.
+    for (const span of outside.matchAll(/(?<![`\\])(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g)) {
+      const at = start + span.index;
+      ranges.push({ start: at, end: at + span[0].length });
+    }
+    start = fence.end;
+  }
+  return ranges;
+}
+
 export function renderedMarkdown(source: string, capture?: StoredText, references?: readonly MessageReference[]): HTMLElement {
   // Fiber's canonical text can be complete while a background provider tab still
   // paints its first words. Render this revision directly; captured DOM HTML is
   // never evidence that it contains the current message revision.
   // A table ChatGPT drew in full but wrote with only its header (#1477) gets its recorded rows.
   let text = completedDilText(withoutMessageReaction(source), capture).slice(0, MAX_RENDERED_HTML_CHARS);
+  const charts: HTMLElement[] = [];
+  const codeExamples = text.includes('\uE200genui\uE202') ? markdownCodeRanges(text) : [];
+  // This provider chart carries its own data in the canonical answer. Unlike a captured
+  // drawing, that data is tied to the current revision and needs no recovery guesswork.
+  text = text.replace(/\uE200genui\uE202([^\uE200\uE201]{1,16000})\uE201/g, (match, raw: string, at: number) => {
+    // Fenced and inline code examples must remain literal, never a chart placeholder.
+    if (codeExamples.some(range => at < range.end && at + match.length > range.start)) return match;
+    const chart = staticBarChart(raw);
+    if (!chart) return match;
+    return `\n\n\uE030${charts.push(chart) - 1}\uE031\n\n`;
+  });
   // A ChatGPT directive this app cannot draw (#574 and whatever ChatGPT adds next): the page's own
   // recorded rendering is the faithful presentation; without one, the directive lines are dropped.
   if (hasProviderDirective(text)) {
     const plain = withoutProviderDirectives(text);
-    if (resolvedCapture(capture)) return renderedMessage(capture, plain);
+    if (resolvedCapture(capture) && charts.length === 0 && !plain) return renderedMessage(capture, plain);
     text = plain || t('This reply points to content from another message that was not recorded.');
   }
   const citations = text.includes('\uE200') ? citationLabels(text, capture) : new Map<string, string>();
@@ -4235,6 +4381,10 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
   const box = renderedMessage({ text: html, chars: html.length, truncated: html.length > MAX_RENDERED_HTML_CHARS }, text);
   drawMath(box, math);
   writingPanels(box, writing);
+  if (charts.length) for (const paragraph of box.querySelectorAll('p')) {
+    const index = paragraph.textContent?.match(/^\uE030(\d+)\uE031$/)?.[1];
+    if (index !== undefined && charts[Number(index)]) paragraph.replaceWith(charts[Number(index)]!);
+  }
   if (capture?.text && !capture.truncated && capture.text.length <= MAX_RENDERED_HTML_CHARS) {
     const template = document.createElement('template');
     template.innerHTML = capture.text;
@@ -4257,6 +4407,7 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
       if (pill) anchor.replaceWith(citationPill(pill));
     }
   }
+  restoreRecordedDilLayouts(box, capture);
   return box;
 }
 
@@ -4272,7 +4423,224 @@ const CODE_EXTENSIONS: ReadonlyMap<string, string> = new Map(Object.entries({
   swift: 'swift', c: 'c', cpp: 'cpp', 'c++': 'cpp', cs: 'cs', csharp: 'cs', rb: 'rb', ruby: 'rb', php: 'php', diff: 'diff'
 }));
 
-export function renderedMessage(html: StoredText | null | undefined, fallback: string): HTMLElement {
+/** Render only the constrained bar-chart schema carried by the *current* Markdown. */
+function staticBarChart(raw: string): HTMLElement | null {
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { return null; }
+  const top = (parsed as { charts_widget_v2?: { content?: unknown } })?.charts_widget_v2?.content;
+  if (!top || typeof top !== 'object') return null;
+  const chart = top as { chartType?: unknown; xKey?: unknown; data?: unknown; series?: unknown; yAxisMin?: unknown; yAxisMax?: unknown; meta?: { footer?: unknown } };
+  if (chart.chartType !== 'bar' || typeof chart.xKey !== 'string' || !Array.isArray(chart.data) ||
+      !Array.isArray(chart.series) || chart.data.length < 1 || chart.data.length > 12 || chart.series.length !== 1) return null;
+  if (!chart.series[0] || typeof chart.series[0] !== 'object') return null;
+  const series = chart.series[0] as { dataKey?: unknown; label?: unknown; valueSuffix?: unknown };
+  if (typeof series.dataKey !== 'string' || !/^[\w-]{1,48}$/.test(series.dataKey) ||
+      !/^[\w-]{1,48}$/.test(chart.xKey) ||
+      (chart.yAxisMin !== undefined && chart.yAxisMin !== 0)) return null;
+  const items: Array<{ label: string; value: number }> = [];
+  for (const row of chart.data) {
+    if (!row || typeof row !== 'object') return null;
+    const value = (row as Record<string, unknown>)[series.dataKey];
+    const label = (row as Record<string, unknown>)[chart.xKey];
+    if (typeof label !== 'string' || label.length > 36 || !Number.isFinite(value) ||
+        typeof value !== 'number' || value < 0 || value > 1e12) return null;
+    items.push({ label, value });
+  }
+  const maximum = chart.yAxisMax === undefined ? Math.max(1, ...items.map(item => item.value)) : chart.yAxisMax;
+  if (typeof maximum !== 'number' || !Number.isFinite(maximum) || maximum <= 0 || maximum < Math.max(...items.map(item => item.value))) return null;
+  const unit = typeof series.valueSuffix === 'string' && series.valueSuffix.length <= 8 ? series.valueSuffix : '';
+  const title = typeof series.label === 'string' && series.label.length <= 120 ? series.label : '';
+  const numbers = new Intl.NumberFormat(currentLanguage());
+  const compactNumbers = new Intl.NumberFormat(currentLanguage(), { notation: 'compact', maximumFractionDigits: 1 });
+  const valueText = (value: number): string => `${numbers.format(value)}${unit}`;
+  // Never visually shorten an axis number mid-digit: a cut "500,000,00…" can
+  // look like a different magnitude. Keep its exact value as tooltip/ARIA.
+  const guideText = (value: number): string =>
+    numbers.format(value).length > 7 ? `${compactNumbers.format(value)}${unit}` : valueText(value);
+  const figure = el('figure', 'markdown-dil-chart');
+  figure.setAttribute('role', 'img');
+  // Reuse source labels instead of introducing a hard-coded English fallback.
+  const valuesLabel = items.map(item => `${item.label} ${valueText(item.value)}`).join(', ');
+  figure.setAttribute('aria-label', title ? `${title}: ${valuesLabel}` : valuesLabel);
+  if (title) figure.append(el('figcaption', 'markdown-dil-chart-heading', title));
+  const plot = el('div', 'markdown-dil-chart-plot');
+  const guide = el('div', 'markdown-dil-chart-guide');
+  for (const value of [maximum, maximum / 2, 0]) {
+    const fullValue = valueText(value);
+    const label = el('span', '', guideText(value));
+    label.title = fullValue;
+    label.setAttribute('aria-label', fullValue);
+    guide.append(label);
+  }
+  const columns = el('div', 'markdown-dil-chart-bars');
+  // Draw exactly the guide's three ticks: maximum, half-maximum, baseline.
+  // The lines share the bars' plot coordinates, rather than an unrelated
+  // repeating 25% background grid that never matched the guide labels.
+  for (const position of ['top', 'middle', 'baseline']) {
+    const line = el('div', `markdown-dil-chart-gridline markdown-dil-chart-gridline-${position}`);
+    line.setAttribute('aria-hidden', 'true');
+    columns.append(line);
+  }
+  for (const item of items) {
+    const column = el('div', 'markdown-dil-chart-column');
+    const bar = el('div', 'markdown-dil-chart-bar');
+    bar.style.height = `${item.value / maximum * 100}%`;
+    bar.title = `${item.label}: ${valueText(item.value)}`;
+    const axisLabel = el('span', 'markdown-dil-chart-x', item.label);
+    axisLabel.title = item.label;
+    column.append(bar, axisLabel);
+    columns.append(column);
+  }
+  plot.append(guide, columns);
+  figure.append(plot);
+  if (typeof chart.meta?.footer === 'string' && chart.meta.footer.length <= 500)
+    figure.append(el('p', 'markdown-dil-chart-note', chart.meta.footer));
+  return figure;
+}
+
+/**
+ * DIL card, workflow, steps and illustration layouts flatten into prose in Markdown.
+ * A recorded drawing may restore one static layout, but must not replace a newer canonical
+ * revision: only a unique, consecutive run of the current reply's complete visible words
+ * permits restoring a bounded, sanitized fragment. Everything else remains canonical.
+ */
+function visibleWords(node: Node): string[] {
+  const words: string[] = [];
+  const walk = (current: Node): void => {
+    if (current.nodeType === 3) {
+      // A changed sign, decimal separator, percent, currency, status emoji or
+      // comparison symbol must invalidate a recorded layout, even when its words match.
+      words.push(...(current.textContent ?? '').normalize('NFKC').toLocaleLowerCase()
+        .match(/[+\-−]?\p{N}+(?:[.,]\p{N}+)*[%‰]?|\p{Sc}|[\p{L}\p{N}]+|[\p{So}\p{Sm}]/gu) ?? []);
+      return;
+    }
+    // These inert spans replace captured SVG icons only after sanitizing. They
+    // have no equivalent text in the canonical reply, so exclude their glyphs.
+    if (current.nodeType === 1 && (current as Element).matches('svg, script, style, template, [hidden], [aria-hidden="true"], .markdown-dil-success-icon, .markdown-dil-down-icon')) return;
+    for (const child of current.childNodes) walk(child);
+  };
+  walk(node);
+  return words;
+}
+
+/** Restrict static SVG images to simple vector primitives, with no links or fetchable assets. */
+function safeRecordedSvg(source: string): string | null {
+  if (source.length > 70000 || !source.startsWith('data:image/svg+xml;charset=utf-8,')) return null;
+  let decoded: string;
+  try { decoded = decodeURIComponent(source.slice('data:image/svg+xml;charset=utf-8,'.length)); }
+  catch { return null; }
+  if (decoded.length > 30000 || /<!DOCTYPE|<!ENTITY|<\?xml-stylesheet/i.test(decoded)) return null;
+  const view = document.defaultView;
+  if (!view) return null;
+  const parsed = new view.DOMParser().parseFromString(decoded, 'image/svg+xml');
+  const root = parsed.documentElement;
+  if (root.localName !== 'svg' || root.namespaceURI !== 'http://www.w3.org/2000/svg') return null;
+  // Text in a data-URL drawing cannot be checked against the canonical reply.
+  // Refuse labelled SVGs rather than risk showing stale values from a capture.
+  const tags = new Set(['svg', 'g', 'path', 'line', 'rect', 'circle', 'ellipse', 'polyline', 'polygon']);
+  const attributes = new Set(['viewBox', 'width', 'height', 'x', 'y', 'x1', 'x2', 'y1', 'y2', 'cx', 'cy', 'r', 'rx', 'ry', 'd',
+    'points', 'fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-opacity', 'fill-opacity', 'text-anchor',
+    'font-size', 'font-weight', 'opacity', 'transform', 'fill-rule', 'stroke-linecap', 'stroke-linejoin']);
+  let count = 0;
+  const validate = (node: Element): boolean => {
+    if (++count > 700 || !tags.has(node.localName) || node.namespaceURI !== 'http://www.w3.org/2000/svg') return false;
+    for (const attr of [...node.attributes]) {
+      if (attr.name === 'xmlns' || attr.name.startsWith('xmlns:')) { node.removeAttributeNode(attr); continue; }
+      if (attr.name.startsWith('on') || attr.name === 'href' || attr.name === 'xlink:href' ||
+          /url\s*\(|https?:|data:|javascript:|[<>]/i.test(attr.value) || attr.value.length > 3000) return false;
+      if (!attributes.has(attr.name)) { node.removeAttributeNode(attr); continue; }
+      if (attr.value === 'currentColor') node.setAttribute(attr.name, '#a6afb9');
+    }
+    return [...node.children].every(child => validate(child));
+  };
+  if (!validate(root)) return null;
+  // Serialize only the allowlisted SVG tree, not the provider's original data URL.
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new view.XMLSerializer().serializeToString(root))}`;
+}
+
+function safeRecordedImage(url: string): string | null {
+  if (url.length > 2048) return null;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' && parsed.hostname === 'images.openai.com' &&
+      /^\/static-rsc-[a-z0-9-]+\/[\w-]+$/.test(parsed.pathname) &&
+      (!parsed.search || parsed.search === '?purpose=inline') && !parsed.hash ? parsed.href : null;
+  } catch { return null; }
+}
+
+function restoreRecordedDilLayouts(box: HTMLElement, capture?: StoredText): void {
+  if (!capture?.text || capture.truncated || capture.text.length > MAX_RENDERED_HTML_CHARS ||
+      !capture.text.includes('data-d-component=')) return;
+  const template = document.createElement('template');
+  template.innerHTML = capture.text;
+  const candidate = (node: Element): 'card' | 'panel' | 'steps' | 'photo' | null => {
+    const component = node.getAttribute('data-d-component');
+    if (component === 'card') return node.querySelector('[data-d-component="grid"]') ? 'card' : null;
+    if (component === 'box' && node.hasAttribute('data-d-has-border') &&
+        !node.closest('[data-d-component="card"]')) return 'panel';
+    if (component === 'box' && node.children.length === 2 &&
+        [...node.children].every(child => child.getAttribute('data-d-component') === 'row') &&
+        [...node.children].every(child => /^\d+$/.test(child.querySelector('[data-d-component="title"]')?.textContent?.trim() ?? '')))
+      return 'steps';
+    if (component === 'row' && node.querySelector('[data-d-component="image"]') &&
+        node.querySelector('p')) return 'photo';
+    return null;
+  };
+  const candidates = [...template.content.querySelectorAll('[data-d-component]')]
+    .map(node => ({ node, kind: candidate(node) })).filter((value): value is { node: Element; kind: 'card' | 'panel' | 'steps' | 'photo' } => !!value.kind)
+    .filter(value => !value.node.parentElement?.closest('[data-d-component="card"]'))
+    .slice(0, 16);
+  for (const { node, kind } of candidates) {
+    const copy = node.cloneNode(true) as Element;
+    if (kind === 'photo') {
+      // Search-image overlays include functional controls; inline entity "pressables"
+      // also wrap visible words. Keep their inert text, but never their behavior.
+      for (const button of copy.querySelectorAll('[role="button"]')) button.replaceWith(...button.childNodes);
+      for (const button of copy.querySelectorAll('button')) button.remove();
+      for (const hidden of copy.querySelectorAll('[hidden], [aria-hidden="true"]')) hidden.remove();
+    }
+    if (copy.querySelector('a, button, input, select, textarea, form, iframe, video, canvas, [contenteditable]') ||
+        copy.querySelector('[hidden], [aria-hidden="true"]')) continue;
+    const images = [...copy.querySelectorAll('img')];
+    if (images.length > 1 || images.some(img =>
+      img.getAttribute('data-d-component') !== 'svg' && !img.closest('[data-d-component="image"]'))) continue;
+    if (images.some(img => !(img.getAttribute('data-d-component') === 'svg'
+      ? safeRecordedSvg(img.getAttribute('src') ?? '') : safeRecordedImage(img.getAttribute('src') ?? '')))) continue;
+    const expected = visibleWords(copy);
+    const minimumWords = kind === 'photo' || (kind === 'panel' && images.length > 0) ? 3 : 5;
+    if (expected.length < minimumWords || expected.length > 500) continue;
+    const nodes = [...box.children];
+    const wordsByNode: Array<string[] | undefined> = [];
+    const matches: Array<{ start: number; end: number }> = [];
+    for (let start = 0; start < nodes.length; start++) {
+      let matched = 0;
+      for (let end = start; end < Math.min(nodes.length, start + 40); end++) {
+        const words = wordsByNode[end] ?? (wordsByNode[end] = visibleWords(nodes[end]!));
+        // A preceding empty/removed widget is not another valid start for the same
+        // visible span. Otherwise one photo after a provider image marker may look
+        // ambiguous even though its prose occurs only once.
+        if (!words.length && matched === 0) break;
+        if (words.some((word, index) => expected[matched + index] !== word)) break;
+        matched += words.length;
+        if (matched === expected.length) { matches.push({ start, end }); break; }
+      }
+    }
+    if (matches.length !== 1) continue;
+    // The same sanitizer removes every untrusted style, class and event attribute.
+    // Only an exact, unique canonical text span authorizes reconstructing a static layout.
+    const markup = copy.outerHTML;
+    const safe = renderedMessage({ text: markup, chars: markup.length, truncated: false }, '', true);
+    const panel = safe.firstElementChild;
+    if (!panel || visibleWords(panel).join('\u0000') !== expected.join('\u0000')) continue;
+    panel.classList.add(kind === 'panel' ? 'markdown-dil-panel' : kind === 'steps' ? 'markdown-dil-steps' :
+      kind === 'photo' ? 'markdown-dil-photo-row' : 'markdown-dil-card');
+    const { start, end } = matches[0]!;
+    nodes[start]!.replaceWith(panel);
+    for (let at = start + 1; at <= end; at++) nodes[at]!.remove();
+  }
+}
+
+export function renderedMessage(html: StoredText | null | undefined, fallback: string, dilCard = false): HTMLElement {
   const box = el('div', 'msg');
   // Same reason as textBlock, for the markdown path — and it is the fallback rather than the
   // authority: an element below that carried its own direction keeps it.
@@ -4291,6 +4659,47 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
   // Parsing untrusted captured HTML constructs a second tree before sanitisation. Bound it
   // before innerHTML so a valid but huge recorded turn cannot freeze/OOM the renderer.
   template.innerHTML = html.text.slice(0, MAX_RENDERED_HTML_CHARS);
+  const dilLayout = new Map<Element, string[]>();
+  const staticImages = new Map<Element, string>();
+  if (dilCard) {
+    const components = new Set(['card', 'box', 'grid', 'grid-item', 'row', 'col', 'badge', 'divider', 'title', 'text', 'caption']);
+    for (const img of template.content.querySelectorAll('img')) {
+      const src = img.getAttribute('data-d-component') === 'svg'
+        ? safeRecordedSvg(img.getAttribute('src') ?? '') : safeRecordedImage(img.getAttribute('src') ?? '');
+      if (!src) continue;
+      const placeholder = document.createElement('span');
+      img.replaceWith(placeholder);
+      staticImages.set(placeholder, src);
+    }
+    for (const node of template.content.querySelectorAll('[data-d-component]')) {
+      const component = node.getAttribute('data-d-component') ?? '';
+      if (component === 'icon' && node.tagName.toLowerCase() === 'svg') {
+        // Only the recorded success icon has an app-owned, inert checkmark replacement.
+        if (node.getAttribute('style')?.includes('--color-text-success')) {
+          const check = document.createElement('span');
+          check.textContent = '✓';
+          node.replaceWith(check);
+          dilLayout.set(check, ['markdown-dil-success-icon']);
+        }
+        else if (node.querySelector('path[d^="M12.707 18.707"]')) {
+          const arrow = document.createElement('span');
+          arrow.textContent = '↓';
+          node.replaceWith(arrow);
+          dilLayout.set(arrow, ['markdown-dil-down-icon']);
+        }
+        continue;
+      }
+      if (!components.has(component)) continue;
+      const classes = [`markdown-dil-${component}`];
+      if (node.hasAttribute('data-d-default-strong')) classes.push('markdown-dil-strong');
+      if (component === 'row' && node.getAttribute('data-d-justify') === 'between') classes.push('markdown-dil-row-between');
+      if (component === 'badge' && node.getAttribute('data-color') === 'success') classes.push('markdown-dil-success');
+      if (component === 'box' && node.hasAttribute('data-d-has-border')) classes.push('markdown-dil-bordered');
+      if (component === 'box' && node.getAttribute('data-d-align') === 'center') classes.push('markdown-dil-centered');
+      if (component === 'text' && node.hasAttribute('data-d-text-align')) classes.push('markdown-dil-centered');
+      dilLayout.set(node, classes);
+    }
+  }
   // Preserve user-facing native forms before the sanitizer intentionally removes active form
   // elements. These replacement nodes contain text only and undergo that same sanitizer.
   const prompts = nativePromptCards(template.content);
@@ -4307,6 +4716,27 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
     safeHref: safeRenderedHref,
     preserveDirection: true
   });
+  for (const [node, classes] of dilLayout) {
+    if (template.content.contains(node)) node.classList.add(...classes);
+  }
+  if (dilCard) for (const img of staticImages) {
+    const [slot, src] = img;
+    if (!template.content.contains(slot)) continue;
+    const image = document.createElement('img');
+    image.className = src.startsWith('data:') ? 'markdown-dil-svg' : 'markdown-dil-photo';
+    image.src = src;
+    image.alt = '';
+    image.loading = 'lazy';
+    image.referrerPolicy = 'no-referrer';
+    // A missing/offline illustration is decorative: leave the canonical reply
+    // readable rather than keeping an empty media column or a broken icon.
+    image.addEventListener('error', () => {
+      const photoColumn = image.closest('.markdown-dil-photo-row > .markdown-dil-box:first-child');
+      if (photoColumn) photoColumn.remove();
+      else image.remove();
+    });
+    slot.replaceWith(image);
+  }
   // Only reapply our own presentation class, after the capture's untrusted classes are gone.
   for (const prompt of prompts) prompt.card.classList.add('native-prompt-readonly');
   box.append(template.content);
@@ -7605,7 +8035,7 @@ function applyGoal(state: AppState, previous?: Config): void {
   if (goalModels.length > 0) paintGoalModels();
 }
 
-function wireGoal(save: () => Promise<void>): void {
+function wireGoal(save: () => Promise<boolean>): void {
   $<HTMLTextAreaElement>('handoffPrompt').maxLength = MAX_HANDOFF_PROMPT_CHARS;
   $('handoffPromptEdit').addEventListener('click', () => {
     const panel = $('handoffPromptPanel');
@@ -7628,9 +8058,39 @@ function wireGoal(save: () => Promise<void>): void {
   });
   $('customContinueReset').addEventListener('click', async () => {
     $<HTMLTextAreaElement>('customContinue').value = '';
-    await save();
-    toast(t('Continue prompt restored to default'));
+    if (await save()) toast(t('Continue prompt restored to default'));
   });
+  // #1856: Personality and Writing style of new chats; main.ts owns the ui fields they save into.
+  for (const [id, fallback, restored] of [
+    ['chatPersonality', DEFAULT_CHAT_PERSONALITY, () => t('Personality restored to default')],
+    ['chatWritingStyle', DEFAULT_CHAT_WRITING_STYLE, () => t('Writing style restored to default')]
+  ] as const) {
+    $<HTMLTextAreaElement>(id).maxLength = MAX_CHAT_STYLE_CHARS;
+    $(`${id}Edit`).addEventListener('click', async () => {
+      const panel = $(`${id}Panel`), box = $<HTMLTextAreaElement>(id);
+      if (!panel.hidden) {
+        // Closing with text not yet stored: it closes only once that text is saved. A refused save
+        // keeps the editor open with what was typed, instead of hiding it behind the stored value.
+        const draft = box.value, typed = draft.trim();
+        const wanted = typed === fallback.trim() ? undefined : typed;
+        // A failed save reloads the settings; a text stored before a later step of that save failed
+        // counts as saved, so only a text that really isn't stored keeps the editor open.
+        if (wanted !== deps.state()?.config.ui[id] && !(await save()) && wanted !== deps.state()?.config.ui[id]) {
+          box.value = draft;
+          box.focus();
+          return;
+        }
+      }
+      panel.hidden = !panel.hidden;
+      ui($(`${id}Edit`), 'textContent', () => panel.hidden ? t('Edit prompt') : t('Close prompt'));
+      if (!panel.hidden) box.focus();
+    });
+    $(`${id}Reset`).addEventListener('click', async () => {
+      $<HTMLTextAreaElement>(id).value = fallback;
+      // Said only when the save went through; a refused one keeps the person's text stored.
+      if (await save()) toast(restored());
+    });
+  }
   $<HTMLTextAreaElement>('goalPrompt').maxLength = MAX_GOAL_SYSTEM_PROMPT_CHARS;
   $('goalPromptEdit').addEventListener('click', () => {
     const panel = $('goalPromptPanel');
@@ -7797,7 +8257,9 @@ const CHAT_INPUTS = [
   'recordingStorageLimit',
   'goalPrompt',
   'goalObjectivePrompt',
-  'goalLoopPrompt'
+  'goalLoopPrompt',
+  'chatPersonality',
+  'chatWritingStyle'
 ];
 
 /** Writes app state into this panel's controls. Called from the renderer's apply(). */
@@ -7824,8 +8286,23 @@ let bridgePresent = true;
  * ChatGPT would otherwise keep that call's result (#1231). Mid-turn sends do not wait for calls,
  * and an after-turn message also waits for the answer to end, so neither claims this reason.
  */
-function queuedWaitReason(entry: InputEntry): 'extension' | 'tool-call' | 'chatgpt-project' | 'chatgpt-project-failed' | 'project-removed' | null {
+/** Why the person's send check holds this automatic send (#1794), or null when it does not. */
+function sendCheckHold(entry: InputEntry): string | null {
+  if (!heldBySendCheck(entry)) return null;
+  const hold = entry.sendCheck!;
+  if (!hold.answered) return t('Held: your send check did not answer');
+  return hold.reason ? t('Held by your send check: {0}', [hold.reason]) : t('Held by your send check');
+}
+/** Whether a send check is configured, from the last applied state; clearing it releases every hold at once. */
+let sendCheckConfigured = false;
+/** The app's own rule (session/input.ts): held only while a check is configured and its next ask is still ahead. */
+function heldBySendCheck(entry: InputEntry): boolean {
+  return entry.state === 'queued' && !!entry.sendCheck && sendCheckConfigured && entry.sendCheck.nextAt > Date.now();
+}
+
+function queuedWaitReason(entry: InputEntry): 'send-check' | 'extension' | 'tool-call' | 'chatgpt-project' | 'chatgpt-project-failed' | 'project-removed' | null {
   if (entry.state !== 'queued' || entry.error || entry.dueAt > Date.now() || entry.delivery === 'tool') return null;
+  if (heldBySendCheck(entry)) return 'send-check';
   if (!bridgePresent) return 'extension';
   const project = chatgptProjectWait(entry);
   if (project) return project;
@@ -7837,6 +8314,7 @@ export function chatApply(state: AppState, previous?: Config): void {
   const { config, bridge } = state;
   applyRouteSettling(state.status.routeSettlingUntil ?? 0);
   if (bridgePresent !== bridge.present) { bridgePresent = bridge.present; paintPendingInputs(); }
+  if (sendCheckConfigured !== !!config.ui.sendCheckUrl) { sendCheckConfigured = !!config.ui.sendCheckUrl; paintPendingInputs(); }
   if (visible && selectedId) void refreshSessionControls();
   applyChatModels(config, previous);
   // After the picker took this state: the meter's Pro rule reads the picker, and before it could
@@ -8001,7 +8479,7 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   if (!visibleInputIds.has(entry.id)) row.classList.add('is-entering');
   visibleInputIds.add(entry.id);
   if (visibleInputIds.size > 100) visibleInputIds.delete(visibleInputIds.values().next().value!);
-  const status = () => entry.error ? t(entry.error) : held ? t("Sending in a moment…") : waiting === 'extension' ? t("Waiting for the browser extension to connect") : waiting === 'tool-call' ? t("Waiting for the running tool call to finish") : waiting === 'chatgpt-project' ? t("Creating this project in ChatGPT…") : waiting === 'chatgpt-project-failed' ? t("This project's ChatGPT Project isn't available. Retry it from the project's menu.") : waiting === 'project-removed' ? t("This chat's project was removed from the sidebar. Add its folder again to send this message, or cancel it.") : (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString(currentLanguage())]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
+  const status = () => entry.error ? t(entry.error) : held ? t("Sending in a moment…") : waiting === 'send-check' ? sendCheckHold(entry)! : waiting === 'extension' ? t("Waiting for the browser extension to connect") : waiting === 'tool-call' ? t("Waiting for the running tool call to finish") : waiting === 'chatgpt-project' ? t("Creating this project in ChatGPT…") : waiting === 'chatgpt-project-failed' ? t("This project's ChatGPT Project isn't available. Retry it from the project's menu.") : waiting === 'project-removed' ? t("This chat's project was removed from the sidebar. Add its folder again to send this message, or cancel it.") : (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString(currentLanguage())]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
   const files = el('div', 'message-attachments');
   if (entry.attachments?.length) files.append(...entry.attachments.map(file => attachmentCard(file)));
   for (const image of entry.images ?? []) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; files.append(preview); }
@@ -8125,7 +8603,7 @@ function paintPendingInputs(): void {
   const host = $('inputQueue');
   const previous = new Map([...host.querySelectorAll<HTMLElement>(':scope > .pending-message')].map(row => [row.dataset.inputId, row]));
   const next = rows.filter(entry => !historicalAutomaticInput(entry)).map(entry => {
-    const sig = JSON.stringify([entry.text, entry.state, entry.error, entry.dueAt, notice(entry), routeHeld(entry), queuedWaitReason(entry), entry.stagesApplied,
+    const sig = JSON.stringify([entry.text, entry.state, entry.error, entry.dueAt, notice(entry), routeHeld(entry), queuedWaitReason(entry), entry.sendCheck, entry.stagesApplied,
       entry.stages, entry.attachments?.map(file => file.id), entry.images?.map(image => [image.name, image.dataUrl.length]),
       hasLaterModelActivity(entry.deliveredAt ?? entry.offeredAt ?? entry.createdAt)]);
     const old = previous.get(entry.id);
@@ -8181,7 +8659,9 @@ async function refreshInputQueue(): Promise<void> {
     const card = el('div', 'queued-input'); card.dataset.inputId = entry.id;
     if (projectedIds.has(entry.id)) ui(card, 'aria-label', () => t("Plan stage · waiting for the first message to be sent"));
     if (entry.recovery) ui(card, 'aria-label', () => t('Automatic Continue'));
-    const label = el('span', 'queue-label', entry.recovery ? () => `${t('Automatic Continue')} · ${entry.text}` : entry.text);
+    // Held by the send check: the card says so in place of the text, which stays in the tooltip.
+    const label = el('span', 'queue-label', entry.recovery ? () => `${t('Automatic Continue')} · ${sendCheckHold(entry) ?? entry.text}` : entry.text);
+    card.classList.toggle('is-held', !!sendCheckHold(entry));
     ui(label, 'title', () => `${entry.recovery
       ? t('Resumes without a final answer. If ChatGPT is still generating, the silent turn is stopped before Continue is sent.')
       : entry.state === 'queued' ? (entry.mode === 'after-turn' ? t("After the next completed answer") : t("At Session finish or after a completed answer")) : t("Awaiting receipt")} · ${entry.text}`);
@@ -8544,6 +9024,7 @@ export function openChatView(name: string): void {
 }
 
 function showView(name: string): void {
+  quoteSelection?.reset();
   const pane = $('chatBody');
   if (name === 'settings') retireDictation();
   const leavingTimeline = timelineShown() && name !== 'timeline';
@@ -8569,6 +9050,7 @@ function showView(name: string): void {
 }
 
 function selectSession(id: string): void {
+  quoteSelection?.reset();
   newChatBranch = null;
   // An edit belongs to its chat: leaving it gives the composer back the draft it held before.
   if (editingQuestion) endEditing(true);
@@ -8617,6 +9099,7 @@ function selectSession(id: string): void {
 }
 
 function selectNewChat(projectId: string | null = null, branch: typeof newChatBranch = null): void {
+  quoteSelection?.reset();
   if (editingQuestion) endEditing(true);
   newChatBranch = branch;
   rememberDraft(); selectionGeneration++; chatFind?.selectionChanged(); replaceComposerDraft(); pendingNewInput = null;
@@ -8647,7 +9130,7 @@ export function initChat(next: Deps): void {
     ...chatGroups.groups.map(group => ({ id: group.id, scope: chatGroupsScope(group.projectId) })),
     ...sessions.filter(entry => !isUnattributedSession(entry) && entry.origin?.kind !== 'worker')
       .map(entry => ({ id: entry.id, scope: pinnedSortScope(chatSortList(entry), pinnedChat(entry)) }))
-  ], paintSessions);
+  ], paintSessions, removeSessionTooltip);
   void run(api.chatGroups()).then(state => { if (state) { chatGroups = state; paintSessions(); } });
   deps = next;
   initComposerDictation();
@@ -9200,6 +9683,7 @@ export function initChat(next: Deps): void {
     reveal: revealChatLocation,
     row: rowForLocation
   });
+  quoteSelection = initQuoteSelection({ timeline: $('timeline'), input: $<HTMLTextAreaElement>('chatInput'), blocked: () => !!currentPreparedPlan() });
   chatSearch = initChatSearch({
     select: (id, match) => {
       if (id !== selectedId) { pendingNewInput = null; selectSession(id); }
