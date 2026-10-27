@@ -17,6 +17,7 @@ import type { SessionEvent } from '../../shared/session.js';
 import { assignSessionProject, getProject, getSessionProject, localProjectPath, projectWorkspace } from '../projects.js';
 import { isChatBlocked } from './blocked-chats.js';
 import { wakeBrowserWork } from '../browser-wake.js';
+import os from 'node:os';
 import { logInfo, logWarn } from '../logger.js';
 import { noteChatOrigin } from './recorder.js';
 import { seedBranchHistory } from './branch-history.js';
@@ -201,6 +202,8 @@ type InputDeliveryHooks = {
   prepareText?: (entry: Readonly<InputEntry>, limits: PromptLimits, authored: string) => string | Promise<string>;
   applyAutomation: (conversationId: string, automation: NonNullable<InputArgs['automation']>, phase: 'before-send' | 'after-send', objective?: string, loopAfterTurn?: boolean) => Promise<void>;
   changed: () => void;
+  /** What the browser side looked like, for the log line of a message no browser picked up (#1878). */
+  pickupContext?: () => string;
 };
 let deliveryHooks: InputDeliveryHooks | null = null;
 /** Installed once by IPC before bridge/MCP startup; avoids a Goal/input import cycle. */
@@ -604,6 +607,12 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
   }
   if (next.some((row, index) => row !== current[index])) {
     await commit(next);
+    for (const [index, row] of next.entries()) if (row.pickupFailedAt !== undefined && current[index]?.pickupFailedAt === undefined) {
+      const gb = (bytes: number) => (bytes / 1024 ** 3).toFixed(1);
+      let context = '';
+      try { context = deliveryHooks?.pickupContext?.() ?? ''; } catch { /* the line still says what happened */ }
+      logWarn(`input ${row.id}: not sent, no browser picked it up within 60 s (${context ? `${context}; ` : ''}${gb(os.freemem())} GB of ${gb(os.totalmem())} GB memory free)`);
+    }
     for (const [index, row] of next.entries()) if (row.recovery && row.state === 'cancelled' &&
       current[index]?.state !== 'cancelled')
       logInfo(`input ${row.id}: ${row.error ?? 'Automatic Continue wait retired after its session left the chat.'} conversation=${row.conversationId} turn=${row.silenceBoundary?.turnId}`);
