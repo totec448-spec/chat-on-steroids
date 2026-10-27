@@ -4254,7 +4254,8 @@ function markdownCodeRanges(text: string): Array<{ start: number; end: number }>
       // Indented list content begins at the marker's text column. Its code
       // blocks need *another* four columns, unlike a plain four-space continuation.
       const marker = /^([ ]*)(?:[-*+]|\d{1,9}[.)])([ \t]+)/.exec(line);
-      if (marker && (marker[1]!.length <= 3 ||
+      const codeIndent = listContentIndent !== null && indentColumns(line) >= listContentIndent + 4;
+      if (marker && !(codeIndent && (afterBlank || indentedStart !== null)) && (marker[1]!.length <= 3 ||
           (listContentIndent !== null && indentColumns(marker[1]!) >= listContentIndent))) {
         listContentIndent = indentColumns(marker[0].replace(/\S/g, ' '));
       } else if (line.trim() && listContentIndent !== null && indentColumns(line) < listContentIndent) {
