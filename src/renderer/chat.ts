@@ -8054,11 +8054,22 @@ function wireGoal(save: () => Promise<boolean>): void {
     ['chatWritingStyle', DEFAULT_CHAT_WRITING_STYLE, () => t('Writing style restored to default')]
   ] as const) {
     $<HTMLTextAreaElement>(id).maxLength = MAX_CHAT_STYLE_CHARS;
-    $(`${id}Edit`).addEventListener('click', () => {
-      const panel = $(`${id}Panel`);
+    $(`${id}Edit`).addEventListener('click', async () => {
+      const panel = $(`${id}Panel`), box = $<HTMLTextAreaElement>(id);
+      if (!panel.hidden) {
+        // Closing with text not yet stored: it closes only once that text is saved. A refused save
+        // keeps the editor open with what was typed, instead of hiding it behind the stored value.
+        const draft = box.value, typed = draft.trim();
+        const wanted = typed === fallback.trim() ? undefined : typed;
+        if (wanted !== deps.state()?.config.ui[id] && !(await save())) {
+          box.value = draft;
+          box.focus();
+          return;
+        }
+      }
       panel.hidden = !panel.hidden;
       ui($(`${id}Edit`), 'textContent', () => panel.hidden ? t('Edit prompt') : t('Close prompt'));
-      if (!panel.hidden) $<HTMLTextAreaElement>(id).focus();
+      if (!panel.hidden) box.focus();
     });
     $(`${id}Reset`).addEventListener('click', async () => {
       $<HTMLTextAreaElement>(id).value = fallback;
