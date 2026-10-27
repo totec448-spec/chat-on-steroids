@@ -1,4 +1,5 @@
 import { DEFAULT_CHAT_PERSONALITY, DEFAULT_CHAT_WRITING_STYLE } from '../shared/chat-style.js';
+import { sendCheckUrl } from '../shared/send-check.js';
 import { applyPhonePush, initPhonePushSettings, readPhonePush } from './phone-push-settings.js';
 import { initBrowserSetup } from './setup-browser.js';
 import { currentLanguage, ui, uiText, t, tn, initLanguage, onLanguageChange, setLanguage, type Language } from './i18n.js';
@@ -789,6 +790,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       customContinue: $<HTMLTextAreaElement>('customContinue').value.trim() || undefined,
       chatPersonality: chatStyleDraft('chatPersonality', DEFAULT_CHAT_PERSONALITY),
       chatWritingStyle: chatStyleDraft('chatWritingStyle', DEFAULT_CHAT_WRITING_STYLE),
+      sendCheckUrl: sendCheckDraft(previous),
       followOutput: $<HTMLInputElement>('followOutput').checked,
       mentionCore: $<HTMLInputElement>('mentionCore').checked,
       mentionPlugins: $<HTMLInputElement>('mentionPlugins').checked,
@@ -1062,6 +1064,20 @@ function connectorSuffixValid(): string | null {
 function chatStyleDraft(id: 'chatPersonality' | 'chatWritingStyle', fallback: string): string | undefined {
   const value = $<HTMLTextAreaElement>(id).value.trim();
   return value === fallback.trim() ? undefined : value;
+}
+/** #1794: the send check's address as typed, '' when empty (off), or null when not on this computer. */
+function sendCheckValid(): string | null {
+  const input = $<HTMLInputElement>('sendCheckUrl');
+  const value = input.value.trim();
+  const valid = value === '' ? '' : sendCheckUrl(value);
+  input.setAttribute('aria-invalid', String(valid === null));
+  $('sendCheckUrlError').hidden = valid !== null;
+  return valid;
+}
+/** An address that is not on this computer is never saved; the saved one stays until it is fixed. */
+function sendCheckDraft(previous: Config): string | undefined {
+  const valid = sendCheckValid();
+  return valid === null ? previous.ui.sendCheckUrl : valid || undefined;
 }
 function connectorSuffixDraft(previous: Config): string {
   return connectorSuffixValid() ?? previous.connectorSuffix ?? '';
@@ -1760,6 +1776,13 @@ function apply(next: AppState): void {
     ui($(`${id}State`), 'textContent', () => saved === undefined ? t('New chats use the built-in text.')
       : saved === '' ? t('Saved. New chats leave this part out.') : t('Saved. New chats use your text.'));
   }
+  // An address that is not on this computer is never saved, so it stays in the field with its
+  // error until the person fixes it; the error always matches what the field holds.
+  const sendCheckField = $<HTMLInputElement>('sendCheckUrl');
+  const typed = sendCheckField.value.trim();
+  if (typed === '' || sendCheckUrl(typed) !== null)
+    applyValue(sendCheckField, config.ui.sendCheckUrl ?? '', previousState ? previousState.config.ui.sendCheckUrl ?? '' : undefined);
+  sendCheckValid();
   applyChecked($<HTMLInputElement>('followOutput'), config.ui.followOutput !== false, previousState?.config.ui.followOutput);
   applyChecked($<HTMLInputElement>('mentionCore'), config.ui.mentionCore !== false, previousState?.config.ui.mentionCore);
   applyChecked($<HTMLInputElement>('mentionPlugins'), config.ui.mentionPlugins === true, previousState?.config.ui.mentionPlugins);
@@ -2890,10 +2913,12 @@ for (const id of [
   'tunnelKind',
   'tunnelId',
   'desktopTunnelId',
-  'connectorSuffix'
+  'connectorSuffix',
+  'sendCheckUrl'
 ]) {
   $(id).addEventListener('change', () => void save());
 }
+$('sendCheckUrl').addEventListener('input', () => { sendCheckValid(); });
 $('connectorSuffix').addEventListener('input', () => { connectorSuffixValid(); });
 // #1802: turning sounds on plays one, so the person hears what they chose.
 // Switching sounds on plays a sample, unless it is the quiet hours the switch promises to follow.

@@ -185,6 +185,8 @@ export interface UiPrefs {
   /** #1856: Personality and Writing style for new chats; absent = the built-in text, '' = left out. */
   chatPersonality?: string;
   chatWritingStyle?: string;
+  /** #1794: local program asked before each automatic send (Goal/Loop step, Continue, recovery, fresh turn, worker); empty = off. */
+  sendCheckUrl?: string;
   /** Keep the chat at its end while it grows, here and on ChatGPT, until the reader scrolls up. On unless false. */
   followOutput?: boolean;
   /** Add the Chat On Steroids Core mention to the user's own prompts sent from the app. On unless false. */

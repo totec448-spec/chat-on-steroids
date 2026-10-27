@@ -3745,8 +3745,8 @@ input.num:disabled { opacity: .5; cursor: default; }
 /* Phone notifications: its options continue the card's rows, and a text field sits beside its
    explanation, moving under it (with its button) when the row is narrow. */
 .phone-push-options > .setting:first-child { border-top: 1px solid var(--line); }
-.phone-push-field .phone-push-control { display: flex; flex: 1 1 280px; gap: 8px; min-width: 0; }
-.phone-push-control input { flex: 1 1 auto; min-width: 0; }
+.phone-push-field .phone-push-control, .setting-text-field .setting-text-control { display: flex; flex: 1 1 280px; gap: 8px; min-width: 0; }
+.phone-push-control input, .setting-text-control input { flex: 1 1 auto; min-width: 0; }
 .phone-push-control .btn { flex: 0 0 auto; justify-content: flex-end; text-align: end; }
 .phone-push-advanced { border-top: 1px solid var(--line); }
 .phone-push-advanced > summary { display: flex; align-items: center; gap: 6px; width: fit-content; padding: 12px 2px; cursor: pointer; color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); list-style: none; }
