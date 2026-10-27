@@ -19,6 +19,7 @@ import path from 'node:path';
 import type { ConnectionState, TunnelHealth, TunnelSettings } from '../../shared/types.js';
 import { childEnv, terminateProcessTree } from '../exec.js';
 import { logError, logInfo, logWarn } from '../logger.js';
+import { markStartup } from '../startup-timing.js';
 import { ago, POLL_FRESH_MS, readClientStatus, readPollHealth } from './health.js';
 import { locateBinary } from './locate.js';
 import { proxyEnvironment, proxyForLog } from './proxy.js';
@@ -378,6 +379,7 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
     const first = run.shown !== 'connected';
     run.shown = 'connected';
     if (first) logInfo(`${tag} connected`);
+    if (first && opts.label === 'core') markStartup('tunnel');
     // A reconnect after an outage is the same process, whose route never moved.
     if (!run.routed) { run.routed = true; noteTunnelClientConnected(); }
     // Re-reported on every tick, so the UI can show how fresh the proof is.
