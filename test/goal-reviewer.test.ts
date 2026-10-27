@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 vi.mock('../src/main/logger.js', () => ({ logInfo: (line: string) => logs.push(line), logWarn: (line: string) => logs.push(line) }));
 const logs: string[] = [];
 import { REVIEW_MAX_MS } from '../src/main/agents.js';
-import { cancelStepReview, resetStepReviewsForTests, reviewForDraft, reviewNote, startStepReview, stepFacts, type StepReviewDeps } from '../src/main/goal-reviewer.js';
+import { awaitStepReview, cancelStepReview, resetStepReviewsForTests, reviewForDraft, reviewNote, startStepReview, stepFacts, type StepReviewDeps } from '../src/main/goal-reviewer.js';
 import type { AgentInfo, SessionEvent, ToolCallRecord } from '../src/shared/session.js';
 
 /**
@@ -123,6 +123,7 @@ it('writes the next step\'s line: findings, a timeout, a blocking finding, or no
   expect(reviewNote({ timedOut: true })).toBe('Reviewer did not answer in time.');
   expect(reviewNote({ text: 'src/a.ts:1 missing label.' })).toBe('Reviewer: src/a.ts:1 missing label.');
   expect(reviewNote({ pending: true })).toBe('');
+  expect(reviewNote({ unavailable: true })).toBe('Reviewer could not review this step.');
   expect(reviewNote(null)).toBe('');
   expect(reviewNote({ text: 'x'.repeat(10_000) }).length).toBeLessThanOrEqual(4_011);
 });
@@ -155,5 +156,35 @@ it('cancels a review in progress when the Goal stops, and leaves a sleeping revi
   reviewer = { id: 'worker-3', state: 'sleeping', result: 'x', revivable: true, model: null } as unknown as AgentInfo;
   expect(await cancelStepReview('c-goal', d)).toBe(false);
   expect(cancelled).toHaveLength(1);
+});
+
+// VM 141 live test, 2026-10-26: the Goal helper decided the next step 8 s before the reviewer answered,
+// because the draft took the review as it stood then ("pending" wrote nothing).
+it('counts a review that is still finding a worker slot as pending, and a reviewer that stopped without answering as unavailable', async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const d = deps({ facts: async () => { await gate; return { ...facts, files: stepFiles }; } });
+  const started = startStepReview(step, d);
+  expect(reviewForDraft('c-goal', 't-1', d)).toEqual({ pending: true });
+  release();
+  await started;
+  reviewer = { ...reviewer!, state: 'failed', result: null };
+  expect(reviewForDraft('c-goal', 't-1', d)).toEqual({ unavailable: true });
+  reviewer = null;
+  expect(reviewForDraft('c-goal', 't-1', d)).toEqual({ unavailable: true });
+});
+
+it('waits for the review of the step before the next step is decided, and stops waiting when the draft is no longer wanted', async () => {
+  const d = deps({ wait: async (ms) => {
+    clock += ms;
+    if (clock - 1_000_000 >= 3_000) reviewer = { ...reviewer!, state: 'sleeping', result: 'src/a.ts:1 off by one.', sleptAt: clock };
+  } });
+  await startStepReview(step, d);
+  expect(await awaitStepReview('c-goal', 't-1', () => true, d)).toEqual({ text: 'src/a.ts:1 off by one.' });
+  resetStepReviewsForTests(); reviewer = null; clock = 1_000_000;
+  await startStepReview(step, d);
+  let wanted = 2;
+  expect(await awaitStepReview('c-goal', 't-1', () => wanted-- > 0, deps())).toBeNull();
+  expect(await awaitStepReview('c-other', 't-1', () => true, d)).toBeNull();
 });
 

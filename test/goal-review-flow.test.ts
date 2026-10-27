@@ -20,6 +20,10 @@ vi.mock('../src/main/goal-reviewer.js', async (original) => ({
   ...await original<typeof import('../src/main/goal-reviewer.js')>(),
   startStepReview: async (input: { conversationId: string; sessionId: string; turnId: string }) => { review.started.push(input); return 'asked'; },
   reviewForDraft: () => review.current,
+  awaitStepReview: async (_conversationId: string, _turnId: string, wanted: () => boolean) => {
+    while (review.current && typeof review.current === 'object' && 'pending' in review.current && wanted()) await new Promise(resolve => setTimeout(resolve, 5));
+    return review.current;
+  },
   cancelStepReview: async (conversationId: string) => { review.cancelled.push(conversationId); return true; }
 }));
 
@@ -112,5 +116,20 @@ it('cancels the review in progress when Goal is switched off for the chat, or tu
   await goal.setGoalSwitchNow('c-loop', 'goal', true);
   await goal.setGoalSwitchNow('c-loop', 'loop', true);
   await vi.waitFor(() => expect(review.cancelled).toEqual(['c-stop', 'c-loop']));
+});
+
+it('waits for a review still in progress before the helper decides the next step, then carries its findings', async () => {
+  const sessionId = await seed('c-wait');
+  await goal.setGoalSwitchNow('c-wait', 'goal', true);
+  await goal.acceptGoalReplyNow({ conversationId: 'c-wait', sessionId, replyId: 'assistant-c-wait', turnId: 'g-1', eventSeq: 3, blocked: false });
+  review.current = { pending: true };
+  globalThis.fetch = (async (_url: string, init: { body: string }) => { bodies.push(init.body); return decision('continue', 'Go on.'); }) as never;
+  goal.startGoalDraft({ sessionId, conversationId: 'c-wait', turnId: 'g-1' });
+  await new Promise(resolve => setTimeout(resolve, 60));
+  expect(bodies).toHaveLength(0);
+  review.current = { text: 'src/sum.js:1 sum subtracts.' };
+  const view = await settled('c-wait');
+  expect(view.reply.endsWith('\n\nReviewer: src/sum.js:1 sum subtracts.')).toBe(true);
+  expect(bodies.at(-1)).toContain('src/sum.js:1 sum subtracts.');
 });
 
