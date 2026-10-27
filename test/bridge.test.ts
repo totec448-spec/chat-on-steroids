@@ -55,6 +55,7 @@ const {
   bridgePort,
   bridgeStatus,
   companionDiagnostics,
+  browserPickupContext,
   recoveryStoppedChats,
   sessionControlsFor,
   cancelAssistantRecovery,
@@ -573,6 +574,10 @@ describe('who is allowed to talk to it', () => {
       page: { composer: true, sendArea: false, modelMenu: true, plusMenu: false, language: null }
     });
     expect(JSON.stringify(snapshot)).not.toContain('must not be forwarded');
+    // #1878: the same counts go into the log line of a message no browser picked up.
+    expect(browserPickupContext()).toMatch(/^wake channel (not )?connected; ChatGPT tabs 5 open, 1 discarded, 1 frozen, 0 loading, 0 in the background window, reported \d+ s ago$/);
+    resetBridgeForTests();
+    expect(browserPickupContext()).toMatch(/^wake channel (not )?connected; no tab report from the browser yet$/);
   });
 
   it('keeps the extension preferences it stored and hands them and the app language back in /status', async () => {
@@ -5043,6 +5048,22 @@ describe('delivering a bootstrap', () => {
       expect(command.text).toContain('PROJECT_TASK_PRESERVED');
     }
     expect(command.text).not.toContain('SCOPED_AGENTS_TAIL');
+  });
+
+  it('records the Projects a ChatGPT page lists and refuses anything else (#1756)', async () => {
+    const { chatgptProjectChoices } = await import('../src/main/chatgpt-project-catalog.js');
+    await pair();
+    const listed = `g-p-${'f'.repeat(32)}`;
+    const sent = await request('POST', '/chatgpt-projects', { body: { projects: [{ id: listed, name: 'From the sidebar' }, { id: '../x', name: 'Bad' }] } });
+    expect(sent.body).toMatchObject({ ok: true, changed: true });
+    expect((await chatgptProjectChoices()).map(choice => choice.id)).toEqual([listed]);
+    expect((await request('POST', '/chatgpt-projects', { body: { projects: 'nope' } })).status).toBe(400);
+    expect((await request('POST', '/chatgpt-projects', { body: { projects: [{ id: listed, name: 'From the sidebar' }] } })).body).toMatchObject({ ok: true, changed: false });
+    // The same Project id reported from a workspace: the choices follow the workspace in use.
+    const team = `g-p-${'e'.repeat(32)}`;
+    expect((await request('POST', '/chatgpt-projects', { body: { projects: [{ id: team, name: 'Team' }], workspace: 'team-account-0001' } })).body).toMatchObject({ ok: true, changed: true });
+    expect((await chatgptProjectChoices()).map(choice => choice.id)).toEqual([team]);
+    expect((await request('POST', '/chatgpt-projects', { auth: null, body: { projects: [] } })).status).toBe(401);
   });
 
   it('puts a chat recorded inside a linked ChatGPT Project into its project before it runs commands (#1744)', async () => {
