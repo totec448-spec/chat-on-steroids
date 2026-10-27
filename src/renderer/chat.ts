@@ -8061,7 +8061,9 @@ function wireGoal(save: () => Promise<boolean>): void {
         // keeps the editor open with what was typed, instead of hiding it behind the stored value.
         const draft = box.value, typed = draft.trim();
         const wanted = typed === fallback.trim() ? undefined : typed;
-        if (wanted !== deps.state()?.config.ui[id] && !(await save())) {
+        // A failed save reloads the settings; a text stored before a later step of that save failed
+        // counts as saved, so only a text that really isn't stored keeps the editor open.
+        if (wanted !== deps.state()?.config.ui[id] && !(await save()) && wanted !== deps.state()?.config.ui[id]) {
           box.value = draft;
           box.focus();
           return;
