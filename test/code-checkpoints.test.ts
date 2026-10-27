@@ -607,7 +607,27 @@ it('reports a failed tree check as an error, and a missing tree as gone', async 
   const oid = 'a'.repeat(40), gone = 'b'.repeat(40);
   const failed = async () => ({ code: 128, stdout: Buffer.from(''), stderr: 'fatal: unable to read the object database\n' });
   await expect(presentTrees({ projectReal: root }, [oid], failed as never)).rejects.toThrow('Git could not check the checkpoints: fatal: unable to read the object database');
-  const answered = async () => ({ code: 0, stdout: Buffer.from(`${oid} tree\n${gone} missing\n`), stderr: '' });
+  const options: unknown[] = [];
+  const answered = async (_cwd: string, _args: string[], _max: unknown, given: unknown) => {
+    options.push(given);
+    return { code: 0, stdout: Buffer.from(`${oid} tree\n${gone} missing\n`), stderr: '' };
+  };
   expect([...await presentTrees({ projectReal: root }, [oid, gone], answered as never)]).toEqual([oid]);
+  // CodeRabbit: a replacement ref must not make a kept tree look cleaned up.
+  expect(options).toEqual([expect.objectContaining({ noReplaceObjects: true })]);
+});
+
+// CodeRabbit on #1443: a refused checkpoint comparison is logged once, with the checkpoint and why.
+it('logs a refused checkpoint comparison once, with the checkpoint and the reason', async () => {
+  const warn = vi.spyOn(logger, 'logWarn');
+  try {
+    const ref = `${CHECKPOINT_REF_PREFIX}${'f'.repeat(32)}`;
+    const snapshot = await readProjectGitSnapshot(projectId, ref);
+    expect(snapshot.state).toBe('unavailable');
+    const lines = warn.mock.calls.map(call => String(call[0])).filter(line => line.includes(ref));
+    expect(lines).toEqual([`project git: checkpoint ${ref} of ${projectId} not compared: not in the checkpoint list`]);
+  } finally {
+    warn.mockRestore();
+  }
 });
 
