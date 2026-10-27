@@ -416,6 +416,38 @@ it('compares against a code checkpoint and asks main to restore one file or all 
   expect(host.textContent).toContain('No changes since this checkpoint');
 });
 
+// CodeRabbit on #1443: a restore that finishes after the pane was hidden, or after an A→B→A project switch,
+// moves no focus and starts no refresh of its own.
+it('leaves focus alone when the pane was hidden or the project switched away and back while a restore ran', async () => {
+  const id = 'e'.repeat(32), ref = `checkpoint:${id}`;
+  const checkpoints = [{ ref, createdAt: new Date(2026, 9, 13, 9, 30).getTime(), reason: 'turn' as const, available: true }];
+  const changes: ProjectGitSnapshot['changes'] = [{ status: 'M', path: 'README.md', additions: 1, deletions: 1, binary: false }];
+  (window.api.getProjectGitSnapshot as any).mockImplementation((_id: string, selected?: string) => ok({
+    ...cleanGit(), currentBranch: 'feature', branches: [{ ref: 'refs/heads/feature', label: 'feature' }], checkpoints,
+    ...(selected ? { comparison: { ref: selected, label: '', baseOid: 'a'.repeat(40), headOid: 'b'.repeat(40), checkpoint: true },
+      revision: 'checkpoint-1', changes } : {})
+  }));
+  for (const interrupt of ['switch', 'hide'] as const) {
+    let finish!: () => void;
+    const restore = vi.fn(() => new Promise(resolve => { finish = () => resolve({ ok: true, data: { confirmed: true, restored: ['README.md'], skipped: [], undoRef: null } }); }));
+    Object.assign(window.api, { restoreCheckpoint: restore });
+    const panel = createFilePanel({ host, reviewOnly: true });
+    panel.update(projectA); await panel.show(); await tick();
+    host.querySelector<HTMLButtonElement>('.file-branch-trigger')!.click();
+    [...document.querySelectorAll<HTMLButtonElement>('.file-branch-option')].at(-1)!.click(); await tick();
+    const restoreAll = host.querySelector<HTMLButtonElement>('.file-checkpoint-bar button')!;
+    restoreAll.focus(); restoreAll.click(); await tick();
+    expect(restore, interrupt).toHaveBeenCalledTimes(1);
+    if (interrupt === 'switch') { panel.update(projectB); panel.update(projectA); } else panel.hide();
+    (document.activeElement as HTMLElement | null)?.blur();
+    const snapshots = (window.api.getProjectGitSnapshot as any).mock.calls.length;
+    finish(); await tick(); await tick();
+    expect(document.activeElement, interrupt).toBe(document.body);
+    if (interrupt === 'hide') expect((window.api.getProjectGitSnapshot as any).mock.calls.length, interrupt).toBe(snapshots);
+    panel.hide(); host.replaceChildren();
+  }
+});
+
 it('gives focus back to the branch trigger when a branch is chosen with the keyboard', async () => {
   const branches = [{ ref: 'refs/heads/main', label: 'main' }];
   (window.api.getProjectGitSnapshot as any).mockImplementation(() => ok({ ...cleanGit(), currentBranch: 'feature', branches }));

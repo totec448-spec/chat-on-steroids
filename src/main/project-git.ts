@@ -12,7 +12,7 @@ import { getConfig } from './config.js';
 import { rawPromises as fs } from './rawfs.js';
 import { projectFileTarget } from './project-files.js';
 import { isContained } from './sandbox.js';
-import { logInfo } from './logger.js';
+import { logInfo, logWarn } from './logger.js';
 
 const MAX_GIT_OUTPUT_BYTES = 4 * 1024 * 1024;
 const MAX_CHANGES = 2_000;
@@ -420,8 +420,15 @@ export async function readProjectGitSnapshot(projectId: string, baseRef?: string
   if (!context) return { projectId, state: 'not-repository', changes: [], truncated: false, revision: '' };
   try {
     const identity = await branchIdentity(context);
-    const checkpoints = await checkpointChoices(context, projectId);
+    // A list that can't be read leaves the other views working; only a checkpoint comparison needs it.
+    let listError: unknown = null;
+    const checkpoints = await checkpointChoices(context, projectId).catch((error: unknown) => {
+      listError = error;
+      logWarn(`project git: checkpoints for ${projectId} could not be listed: ${error instanceof Error ? error.message : String(error)}`);
+      return [];
+    });
     if (baseRef?.startsWith(CHECKPOINT_REF_PREFIX)) {
+      if (listError) throw listError;
       const entry = await findCheckpoint(projectId, baseRef.slice(CHECKPOINT_REF_PREFIX.length));
       if (!entry) throw new Error('This checkpoint is no longer available');
       if (!checkpoints.find(choice => choice.ref === baseRef)?.available) throw new Error('This checkpoint is no longer available. Git has cleaned it up.');
