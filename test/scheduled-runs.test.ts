@@ -230,3 +230,18 @@ it('removes a deleted chat\'s schedule even while it is paused, and keeps one wh
   expect(deps.log).toHaveBeenCalledWith(expect.stringContaining('removed: its chat no longer exists'));
 });
 
+// CodeRabbit on #1835: a run missed before the end date is never sent, and that is now said once.
+it('says once that a run missed before the end date is not sent, and stays quiet while waiting or paused', async () => {
+  const { runs, deps, queued } = await setup();
+  await runs.saveSchedule({ sessionId: SESSION, text: 'Daily', repeat: { kind: 'daily', at: '09:00' }, until: local('2026-10-22T23:00:00') }, local('2026-10-20T10:00:00'));
+  await runs.runDueSchedules(local('2026-10-20T12:00:00'), deps);
+  expect(deps.log).not.toHaveBeenCalled();
+  await runs.runDueSchedules(local('2026-10-24T12:00:00'), deps);
+  expect(queued).toEqual([]);
+  expect(deps.log).toHaveBeenCalledTimes(1);
+  expect(deps.log).toHaveBeenCalledWith(expect.stringMatching(/^scheduled run: 09:00 not sent: the schedule ended before it could run \(/));
+  expect((await runs.listSchedules()).find(row => row.sessionId === SESSION)).toMatchObject({ lastDueAt: local('2026-10-22T09:00:00'), missedDueAt: local('2026-10-22T09:00:00') });
+  await runs.runDueSchedules(local('2026-10-25T12:00:00'), deps);
+  expect(deps.log).toHaveBeenCalledTimes(1);
+});
+
