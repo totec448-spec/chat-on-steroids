@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { checkpointBeforePatch, restoreCheckpoint } from '../src/main/checkpoints/index.js';
 import { addCheckpoint, listCheckpoints, MAX_CHECKPOINTS_PER_PROJECT, resetCheckpointsForTests } from '../src/main/checkpoints/store.js';
+import * as checkpointStore from '../src/main/checkpoints/store.js';
 import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { emptyEvidence, runInCallContext, type CallContext } from '../src/main/mcp/call-context.js';
@@ -580,3 +581,24 @@ it('rehashes a file edited in the same second as the last index write, even with
   const [checkpoint] = await listCheckpoints(projectId);
   expect(await git(root, 'show', `${checkpoint!.treeOid}:app.ts`)).toBe('export const value = 7;\n');
 });
+
+// CodeRabbit on #1443: reading the checkpoint list failing must not take the plain Working tree view with it.
+it('keeps the Review snapshot when the checkpoint list cannot be read, and says why only for a checkpoint comparison', async () => {
+  await fs.writeFile(path.join(root, 'app.ts'), 'export const value = 2;\n');
+  const warn = vi.spyOn(logger, 'logWarn');
+  const list = vi.spyOn(checkpointStore, 'listCheckpoints').mockRejectedValue(new Error('checkpoint list unreadable'));
+  try {
+    const snapshot = await readProjectGitSnapshot(projectId);
+    expect(snapshot.state).toBe('ready');
+    expect(snapshot.changes.map(change => change.path)).toContain('app.ts');
+    expect(snapshot.checkpoints).toEqual([]);
+    expect(warn.mock.calls.map(call => String(call[0]))).toContainEqual(expect.stringContaining('checkpoint list unreadable'));
+    const compared = await readProjectGitSnapshot(projectId, `${CHECKPOINT_REF_PREFIX}missing`);
+    expect(compared.state).toBe('unavailable');
+    expect(compared.message).toContain('checkpoint list unreadable');
+  } finally {
+    list.mockRestore();
+    warn.mockRestore();
+  }
+});
+

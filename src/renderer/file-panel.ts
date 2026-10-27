@@ -264,6 +264,8 @@ export function createFilePanel(options: FilePanelOptions) {
 
   let project: LocalProject | null = null;
   let generation = 0;
+  /** Changes when the pane hides, its project changes or Review is left: a restore's follow-up then stops. */
+  let viewEpoch = 0;
   let selection: Selection = { path: '', kind: 'root' };
   let previewPath: string | null = null;
   let previewValue: ProjectFilePreview | null = null;
@@ -501,7 +503,7 @@ export function createFilePanel(options: FilePanelOptions) {
 
   function hide(): void {
     closeBranchMenu();
-    generation++;
+    generation++; viewEpoch++;
     if (gitReconcileTimer !== null) window.clearTimeout(gitReconcileTimer);
     gitReconcileTimer = null;
     destroyPdfViewer();
@@ -1046,8 +1048,10 @@ export function createFilePanel(options: FilePanelOptions) {
   }
 
   async function restoreFromCheckpoint(paths: string[] | null): Promise<void> {
-    const current = project, snapshot = gitSnapshot, ref = selectedBaseRef;
+    const current = project, snapshot = gitSnapshot, ref = selectedBaseRef, epoch = viewEpoch, view = mode;
     if (!current || !ref || snapshot?.state !== 'ready' || !snapshot.comparison?.checkpoint || restoring) return;
+    // The same project, pane and view as when the restore started (an A→B→A switch or a hide in between ends it).
+    const sameView = () => project?.id === current.id && viewEpoch === epoch && mode === view && !pane.hidden;
     restoring = true;
     try {
       const result = await run(window.api.restoreCheckpoint(current.id, ref.slice(CHECKPOINT_REF_PREFIX.length), paths, snapshot.revision));
@@ -1061,10 +1065,10 @@ export function createFilePanel(options: FilePanelOptions) {
     } finally {
       restoring = false;
     }
-    if (project?.id !== current.id) return;
+    if (!sameView()) return;
     await reconcileGitChanges(true);
     // The refresh removes the Restore button that had the keyboard: continue where Add to .gitignore does.
-    if (document.activeElement && document.activeElement !== document.body) return;
+    if (!sameView() || (document.activeElement && document.activeElement !== document.body)) return;
     (options.reviewOnly ? refresh : backToFiles).focus({ preventScroll: true });
   }
 
@@ -1252,7 +1256,7 @@ export function createFilePanel(options: FilePanelOptions) {
 
   function leaveReview(): void {
     if (mode !== 'review') return;
-    reviewGeneration++;
+    reviewGeneration++; viewEpoch++;
     reviewSource = null; reviewValue = null;
     mode = reviewReturnMode;
     destroyDiffViewer();
@@ -1849,7 +1853,7 @@ export function createFilePanel(options: FilePanelOptions) {
       gitReconcileTimer = null;
       gitSnapshot = null; gitLoading = false; gitDiffPath = null; gitDiffValue = null;
       reviewGeneration++; reviewSource = null; reviewValue = null; mode = options.reviewOnly ? 'changes' : 'files';
-      generation++;
+      generation++; viewEpoch++;
       listings.clear(); expanded = new Set(['']); selection = { path: '', kind: 'root' };
       previewPath = null; previewValue = null;
       if (!next) { hide(); render(); return; }
