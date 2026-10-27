@@ -13,7 +13,7 @@ import type { ProviderUsage } from '../shared/provider-usage.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
 import type { ChatgptProjectChoice, LocalProject, ProjectColor } from '../shared/projects.js';
 import type { ProjectDirectoryListing, ProjectFileMutationResult, ProjectFilePreview, ProjectFileSaveResult, ProjectFilesChanged } from '../shared/project-files.js';
-import type { ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../shared/project-git.js';
+import type { CheckpointRestoreResult, ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../shared/project-git.js';
 import type { PetLibraryState, PetOverlayControlState, PetRuntimeAsset } from '../shared/pets.js';
 import type { SkillSummary, ManagedSkill, GitHubSkillUpdateCheck, SkillLibrary, SkillsDraftScope } from '../shared/skills.js';
 import type { RunningToolActivity, SessionChange, SessionSearchReply, SessionSearchLocation, SessionBookmark, ToolEditReview } from '../shared/session.js';
@@ -29,7 +29,9 @@ import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '..
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import type { AppState, Capabilities, CompanionDiagnostics, Config, Diagnosis, LogEntry, SettingsBackupChoice } from '../shared/types.js';
+import type { AppState, Capabilities, CommitFlow, CompanionDiagnostics, Config, Diagnosis, LogEntry, SettingsBackupChoice } from '../shared/types.js';
+import type { SoundCue } from '../shared/sound-cues.js';
+import type { CommitState } from '../shared/project-git.js';
 import type {
   Handoff,
   ImageStorageClearMode,
@@ -62,6 +64,8 @@ export interface SettingsPatch {
   mcp: Config['mcp'];
   /** Optional so callers that save other sections never have to carry it. */
   controlApi?: Config['controlApi'];
+  /** Optional for the same reason. */
+  projects?: Config['projects'];
   /** This computer's connector name suffix; omitted by callers that do not edit it. */
   connectorSuffix?: string;
 }
@@ -267,6 +271,14 @@ const api = {
   connect: () => call<AppState>('connection:connect'),
   disconnect: () => call<AppState>('connection:disconnect'),
   runDiagnostics: () => call<Diagnosis>('diagnostics:run'),
+  // Commit & PR from Review (project-commit.ts).
+  commitState: (projectId: string) => call<CommitState>('projectCommit:state', { projectId }),
+  commitProject: (request: { projectId: string; message: string; paths: string[]; newBranch?: string; expectedToken: string }) =>
+    call<{ commit: string; branch: string }>('projectCommit:commit', request),
+  pushProject: (projectId: string) => call<{ branch: string; remote: string; tracking: boolean }>('projectCommit:push', { projectId }),
+  createPullRequest: (projectId: string, title: string, body: string) =>
+    call<{ url: string; via: 'gh' | 'existing' | 'browser' }>('projectCommit:pullRequest', { projectId, title, body }),
+  setCommitFlow: (flow: CommitFlow) => call<boolean>('projectCommit:flow', { flow }),
   saveDiagnosticsReport: () => call<{ saved: false } | { saved: true; name: string }>('diagnostics:saveReport'),
   openFeedbackIssue: (report: { kind: 'bug'; what: string; steps?: string; frequency?: 'Every time' | 'Sometimes' | 'It happened once' }
     | { kind: 'idea'; problem: string; proposal: string }) => call<{ trimmed: boolean }>('feedback:openIssue', report),
@@ -334,6 +346,8 @@ const api = {
   getProjectGitDiff: (projectId: string, path: string, baseRef?: string, expectedRevision?: string) => call<ProjectGitDiff>('projectGit:diff', {
     projectId, path, ...(baseRef ? { baseRef } : {}), ...(expectedRevision ? { expectedRevision } : {})
   }),
+  restoreCheckpoint: (projectId: string, checkpointId: string, paths: string[] | null, expectedRevision: string) =>
+    call<CheckpointRestoreResult>('checkpoints:restore', { projectId, checkpointId, paths, expectedRevision }),
   getToolEditReview: (sessionId: string, callId: string, changeIndex: number) =>
     call<ToolEditReview | null>('sessions:toolEditReview', { sessionId, callId, changeIndex }),
   onProjectGitChanged: (listener: (event: ProjectGitChanged) => void): (() => void) => {
@@ -453,6 +467,14 @@ const api = {
     const wrapped = (_event: unknown, change?: SessionChange): void => listener(change);
     ipcRenderer.on('session:changed', wrapped);
     return () => ipcRenderer.removeListener('session:changed', wrapped);
+  },
+  /** #1802: the main process decided a sound plays now. */
+  onSoundCue: (listener: (kind: SoundCue) => void): (() => void) => {
+    const wrapped = (_event: unknown, kind: SoundCue): void => listener(kind);
+    ipcRenderer.on('sound:cue', wrapped);
+    // From now on a cue reaches this page; until then main does not count one as played.
+    ipcRenderer.send('sound:ready');
+    return () => ipcRenderer.removeListener('sound:cue', wrapped);
   },
   onWriteSession: (listener: (id: string) => void): (() => void) => {
     const wrapped = (_event: unknown, id: string): void => listener(id);
