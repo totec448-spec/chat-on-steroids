@@ -8,6 +8,7 @@ import { setStopNoticeTranslations } from './stuck-notice.js';
 import { dialogLabel, mainText, setMainTextTranslations } from './main-texts.js';
 import { MAIN_TEXTS } from '../shared/main-texts.js';
 import { MAX_TASK_REQUEST_CHARS } from '../shared/task-progress.js';
+import { restoreCheckpoint } from './checkpoints/index.js';
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
 import { startControlApi, stopControlApi } from './control-api.js';
 import { appearanceSchema } from './appearance-schema.js';
@@ -325,6 +326,7 @@ const settingsPatch = z.object({
   }),
   mcp: z.object({ instructions: z.string().trim().max(MAX_MCP_INSTRUCTIONS_CHARS), persistentUrls: z.boolean().optional() }).strict().optional(),
   controlApi: z.object({ enabled: z.boolean(), allowActions: z.boolean().optional() }).strict().optional(),
+  projects: z.object({ codeCheckpoints: z.boolean() }).strict().optional(),
   goal: z.object({
     impulseMinutes: z.number().int().min(0).max(60).optional(),
     includeToolCalls: z.boolean().optional(),
@@ -380,7 +382,7 @@ type SettingsSnapshot = z.infer<typeof settingsPatch>;
  * unchanged between `base` and `wanted` was not edited by this renderer save and therefore keeps
  * the current main-process value. A field that differs was deliberately edited here and wins.
  */
-function mergeSettings(current: Config, base: SettingsSnapshot, wanted: SettingsSnapshot): Omit<SettingsSnapshot, 'controlApi'> & { controlApi: Config['controlApi'] } {
+function mergeSettings(current: Config, base: SettingsSnapshot, wanted: SettingsSnapshot): Omit<SettingsSnapshot, 'controlApi' | 'projects'> & { controlApi: Config['controlApi']; projects: Config['projects'] } {
   const tunnelEdited = (['tunnelId', 'desktopTunnelId', 'pluginsTunnelId'] as const)
     .some(key => (base.tunnel[key] ?? '') !== (wanted.tunnel[key] ?? ''));
   if (tunnelEdited && ((base.tunnel.profileId ?? 'default') !== (current.tunnel.profileId ?? 'default') ||
@@ -418,6 +420,10 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       : pick(current.controlApi.allowActions, base.controlApi?.allowActions ?? false, wanted.controlApi.allowActions);
     controlApi = { enabled, allowActions: enabled && allowActions === true };
   }
+  // A form that omits the section leaves the live value alone.
+  const projects: Config['projects'] = wanted.projects
+    ? { codeCheckpoints: pick(current.projects.codeCheckpoints, base.projects?.codeCheckpoints ?? false, wanted.projects.codeCheckpoints) }
+    : current.projects;
   return {
     ...(wanted.connectorSuffix === undefined ? {} : {
       connectorSuffix: pick(current.connectorSuffix ?? '', base.connectorSuffix ?? '', wanted.connectorSuffix)
@@ -425,6 +431,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     mcp: wanted.mcp ? { instructions: pick(current.mcp.instructions, base.mcp?.instructions ?? '', wanted.mcp.instructions),
       persistentUrls: pick(current.mcp.persistentUrls === true, base.mcp?.persistentUrls === true, wanted.mcp.persistentUrls ?? current.mcp.persistentUrls === true) } : current.mcp,
     controlApi,
+    projects,
     capabilities,
     readOnly: pick(current.readOnly, base.readOnly, wanted.readOnly),
     commandAllowlist: {
@@ -927,6 +934,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // The listener reads this switch on every request, so a flip needs no restart; it is logged.
     if (before.controlApi.allowActions !== next.controlApi.allowActions) {
       logInfo('control API: actions ' + (next.controlApi.allowActions ? 'allowed' : 'refused'));
+    }
+    if (before.projects.codeCheckpoints !== next.projects.codeCheckpoints) {
+      logInfo('code checkpoints: ' + (next.projects.codeCheckpoints ? 'on' : 'off'));
     }
     // Each of these came after the settings were written; the caller decides how to report it.
     const lateError = authorityPersistError ?? runtimeError ?? loginStartupError ?? controlApiError ?? null;
@@ -1435,6 +1445,29 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { projectId, path, baseRef, expectedRevision } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1),
       baseRef: z.string().min(1).max(256).optional(), expectedRevision: z.string().length(64).regex(/^[0-9a-f]+$/).optional() }).strict().parse(payload);
     return readProjectGitDiff(projectId, path, baseRef, expectedRevision);
+  });
+  handle('checkpoints:restore', async payload => {
+    const { projectId, checkpointId, paths, expectedRevision } = z.object({ projectId: projectFileId,
+      checkpointId: z.string().regex(/^[0-9a-f]{32}$/), paths: z.array(projectRelativePath.min(1)).min(1).max(256).nullable(),
+      expectedRevision: z.string().length(64).regex(/^[0-9a-f]+$/) }).strict().parse(payload);
+    // Approval comes from this trusted dialog, never from a renderer boolean; the default keeps the files.
+    return restoreCheckpoint(projectId, checkpointId, paths, expectedRevision, async selected => {
+      const shown = selected.slice(0, 25).map(name => `  - ${name.replace(/[\x00-\x1f\x7f]/g, '?').slice(0, 180)}`);
+      const { response } = await dialog.showMessageBox({
+        type: 'warning',
+        title: mainText('Restore files from this checkpoint?'),
+        message: mainText('Restore files from this checkpoint?'),
+        detail: [
+          mainText('Files return to their checkpoint version; files added since are removed. Current files are saved first, so you can undo this in Review.'),
+          '', ...shown, ...(selected.length > shown.length ? [mainText('More files are not shown.')] : [])
+        ].join('\n'),
+        buttons: [mainText('Keep current files'), mainText('Restore files')],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true
+      });
+      return response === 1;
+    });
   });
   handle('sessions:toolEditReview', async payload => {
     const { sessionId, callId, changeIndex } = z.object({

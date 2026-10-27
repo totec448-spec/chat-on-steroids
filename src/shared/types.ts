@@ -453,6 +453,16 @@ export interface ControlApiSettings {
   allowActions: boolean;
 }
 
+/** How chats treat their Local Project's files. */
+export interface ProjectsSettings {
+  /**
+   * Take a Git tree checkpoint before each turn's first patch (`src/main/checkpoints`). Off by
+   * default. Turning it off stops new checkpoints only: existing ones stay listed in Review and
+   * Restore keeps working.
+   */
+  codeCheckpoints: boolean;
+}
+
 export interface Config {
   /**
    * Names this computer's connectors in ChatGPT, for one ChatGPT account used on several
@@ -474,6 +484,7 @@ export interface Config {
   goal: GoalSettings;
   mcp: McpSettings;
   controlApi: ControlApiSettings;
+  projects: ProjectsSettings;
 }
 
 export type ConnectionState =
