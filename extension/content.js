@@ -14232,7 +14232,7 @@
       if (message.type === 'clf-recorder-ping') {
         // `busy`: this page is mid-turn or mid-handoff, so the extension must not reload under it.
         sendResponse({ ok: true, recorderVersion: RECORDER_VERSION,
-          busy: Boolean(generating || CLF_DOM.generating() || desktopInputBusy || pluginRefreshBusy || modelCatalogBusy || pendingTools > 0) });
+          busy: Boolean(generating || CLF_DOM.generating() || CLF_DOM.approvalWaiting() || desktopInputBusy || pluginRefreshBusy || modelCatalogBusy || pendingTools > 0) });
         return false;
       }
       if (message.type === 'clf-repair-check') {
@@ -14270,7 +14270,8 @@
           ok: true,
           // ChatGPT's own account that a response is streaming right now, as opposed to the
           // recorder's `generating`, which also holds while a turn waits on a local tool.
-          streaming: CLF_DOM.generating(),
+          // An active tool approval card also holds an open turn stream while hiding Stop.
+          streaming: CLF_DOM.generating() || CLF_DOM.approvalWaiting(),
           // Only the current recorder generation's still-visible recoverable transport error.
           // Historical failed turns can remain mounted in the DOM and must not authorize a
           // reload of a newer response.

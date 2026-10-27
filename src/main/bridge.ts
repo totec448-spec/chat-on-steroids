@@ -10146,6 +10146,12 @@ async function takePendingRepairs(
     const unclaimed = repair.reason !== 'unattributed' && repairNeedsClaim(repair) && repair.state === 'handed' && !repair.claimed;
     if (repair.state !== 'queued' && !unclaimed) continue;
     if (now < repair.notBefore) continue;
+    // Keep the due repair queued: skipping its incident candidate would spend the pass,
+    // and marking it handed before this hold would leave nothing eligible after an answer.
+    if (repair.reason === 'unattributed' && approvalCardWaiting(conversationId, now)) {
+      logInfo(`bridge: holding the unattributed refresh for ${conversationId}: ChatGPT's tool approval card is waiting for the user`);
+      continue;
+    }
     if (unclaimed) {
       repair.offers = (repair.offers ?? 1) + 1;
       if (repair.offers > UNCLAIMED_REPAIR_OFFERS) {
@@ -10195,8 +10201,14 @@ async function takePendingRepairs(
     const currentSession = repair.attribution ? await getSession(repair.sessionId) : null;
     const allowed = await attributionRepairAllowed(repair, currentSession) && await assistantRepairCurrent(conversationId, repair) &&
       await silenceRepairCurrent(conversationId, repair) && compactionRepairCurrent(conversationId, repair);
+    // The card can appear during the asynchronous progress/authority reads above.
+    const heldByApproval = repair.reason === 'unattributed' && approvalCardWaiting(conversationId);
+    if (heldByApproval && repairsInFlight.get(conversationId) === repair && !repair.claimed) {
+      repair.state = 'queued';
+      logInfo(`bridge: holding the unattributed refresh for ${conversationId}: ChatGPT's tool approval card is waiting for the user`);
+    }
     if (allowed && repairsInFlight.get(conversationId) === repair && !isChatBlocked(conversationId) &&
-        !stopRequestedFor(conversationId))
+        !stopRequestedFor(conversationId) && !heldByApproval)
       {
         ready.push({ conversationId, token: repair.token, reason: repair.reason, focus: repair.reason === 'compaction',
           ...(repairNeedsClaim(repair) ? { requiresClaim: true } : {}),
