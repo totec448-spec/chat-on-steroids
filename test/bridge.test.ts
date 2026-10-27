@@ -55,6 +55,7 @@ const {
   bridgePort,
   bridgeStatus,
   companionDiagnostics,
+  browserPickupContext,
   recoveryStoppedChats,
   sessionControlsFor,
   cancelAssistantRecovery,
@@ -573,6 +574,10 @@ describe('who is allowed to talk to it', () => {
       page: { composer: true, sendArea: false, modelMenu: true, plusMenu: false, language: null }
     });
     expect(JSON.stringify(snapshot)).not.toContain('must not be forwarded');
+    // #1878: the same counts go into the log line of a message no browser picked up.
+    expect(browserPickupContext()).toMatch(/^wake channel (not )?connected; ChatGPT tabs 5 open, 1 discarded, 1 frozen, 0 loading, 0 in the background window, reported \d+ s ago$/);
+    resetBridgeForTests();
+    expect(browserPickupContext()).toMatch(/^wake channel (not )?connected; no tab report from the browser yet$/);
   });
 
   it('keeps the extension preferences it stored and hands them and the app language back in /status', async () => {
