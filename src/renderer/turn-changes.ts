@@ -26,16 +26,16 @@ export function turnEdited(events: readonly SessionEvent[], turnId: string): boo
 }
 
 /**
- * Whether the turn is over: its latest boundary is its end, or a later turn began. A turn that
- * started again after it ended is running again.
+ * Whether the turn is over: its latest boundary is its end, or another turn began after both its
+ * answer and that boundary. A turn that started again after its answer runs until one does.
  */
 export function turnFinished(events: readonly SessionEvent[], turnId: string, anchorSeq: number): boolean {
   let latest: SessionEvent | null = null;
   for (const event of events)
     if ((event.kind === 'turn_start' || event.kind === 'turn_end') && event.turnId === turnId && (!latest || event.seq > latest.seq)) latest = event;
   if (latest?.kind === 'turn_end') return true;
-  if (latest && latest.seq > anchorSeq) return false;
-  return events.some(event => event.seq > anchorSeq && event.kind === 'turn_start' && event.turnId !== turnId);
+  const after = Math.max(anchorSeq, latest?.seq ?? anchorSeq);
+  return events.some(event => event.seq > after && event.kind === 'turn_start' && event.turnId !== turnId);
 }
 
 /** Where the store's read of the turn starts: its first recorded row, or the top when that is not loaded. */
