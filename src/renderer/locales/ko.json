@@ -3296,5 +3296,13 @@
   "Save the file being edited": "편집 중인 파일 저장",
   "Copy the selection": "선택 항목 복사",
   "Turn off Plugins connection": "Plugins 연결 끄기",
-  "Plugins connection turned off": "Plugins 연결을 껐습니다"
+  "Plugins connection turned off": "Plugins 연결을 껐습니다",
+  "No projects yet.": "아직 프로젝트가 없습니다.",
+  "Held by your send check: {0}": "전송 확인 프로그램이 보류함: {0}",
+  "Held by your send check": "전송 확인 프로그램이 보류함",
+  "Held: your send check did not answer": "보류됨: 전송 확인 프로그램이 응답하지 않았습니다",
+  "Check automatic sends": "자동 전송 확인",
+  "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "포트가 있는 이 컴퓨터의 http 주소를 사용하세요. 예: http://127.0.0.1:8080/check",
+  "Ask a program on this computer before the app sends a message by itself. Empty: off.": "앱이 스스로 메시지를 보내기 전에 이 컴퓨터의 프로그램에 묻습니다. 비어 있음: 꺼짐.",
+  "It receives the full message text. If it says no or doesn't answer, the message waits.": "프로그램은 메시지 전체 텍스트를 받습니다. 거부하거나 응답하지 않으면 메시지는 대기합니다."
 }

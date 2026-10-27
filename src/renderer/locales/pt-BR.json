@@ -3416,5 +3416,13 @@
   "Save the file being edited": "Salvar o arquivo em edição",
   "Copy the selection": "Copiar a seleção",
   "Turn off Plugins connection": "Desativar a conexão do Plugins",
-  "Plugins connection turned off": "Conexão do Plugins desativada"
+  "Plugins connection turned off": "Conexão do Plugins desativada",
+  "No projects yet.": "Ainda não há projetos.",
+  "Held by your send check: {0}": "Retida pela sua verificação de envio: {0}",
+  "Held by your send check": "Retida pela sua verificação de envio",
+  "Held: your send check did not answer": "Retida: sua verificação de envio não respondeu",
+  "Check automatic sends": "Verificar envios automáticos",
+  "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "Use um endereço http neste computador com porta, como http://127.0.0.1:8080/check.",
+  "Ask a program on this computer before the app sends a message by itself. Empty: off.": "Pergunta a um programa neste computador antes de o app enviar uma mensagem por conta própria. Vazio: desligado.",
+  "It receives the full message text. If it says no or doesn't answer, the message waits.": "Ele recebe o texto completo da mensagem. Se disser não ou não responder, a mensagem espera."
 }

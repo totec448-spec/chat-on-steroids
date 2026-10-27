@@ -251,6 +251,8 @@ const settingsPatch = z.object({
     playfulContinue: z.boolean().optional(),
     announceTurns: z.boolean().optional(),
     customContinue: z.string().trim().max(CUSTOM_CONTINUE_MAX_CHARS).optional(),
+    // #1794: the renderer saves only an address on this computer; main checks it again before use.
+    sendCheckUrl: z.string().trim().max(300).optional(),
     followOutput: z.boolean().optional(),
     mentionCore: z.boolean().optional(),
     mentionPlugins: z.boolean().optional(),
@@ -468,6 +470,8 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       announceTurns: pick(current.ui.announceTurns, base.ui.announceTurns, wanted.ui.announceTurns),
       // An emptied field means the built-in phrases again.
       customContinue: pick(current.ui.customContinue, base.ui.customContinue, wanted.ui.customContinue || undefined),
+      // An emptied address turns the send check off.
+      sendCheckUrl: pick(current.ui.sendCheckUrl, base.ui.sendCheckUrl, wanted.ui.sendCheckUrl || undefined),
       followOutput: pick(current.ui.followOutput, base.ui.followOutput, wanted.ui.followOutput),
       mentionCore: pick(current.ui.mentionCore, base.ui.mentionCore, wanted.ui.mentionCore),
       mentionPlugins: pick(current.ui.mentionPlugins, base.ui.mentionPlugins, wanted.ui.mentionPlugins),

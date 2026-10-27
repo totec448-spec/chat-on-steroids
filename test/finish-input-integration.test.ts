@@ -69,4 +69,61 @@ describe('finish producer to durable injection integration', () => {
     expect((await listInputs())[0]!.state).toBe('cancelled');
     expect((await offerToolInput(session.id, conversationId, randomUUID(), Date.now() + 20)).messages).toEqual([]);
   });
+
+  it.each([['allow', 1], ['hold', 0]] as const)('asks the send check before a Session Finish step is queued (%s)', async (verdict, queued) => {
+    // #1794: the step can reach ChatGPT in a tool result, so it is asked about before it is filed.
+    directory = await makeTempDir('clf-finish-send-check-');
+    initConfigPath(directory); initDurableStore(directory); initSessionStore(directory);
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, finishTool: true, finishAction: 'goal', sendCheckUrl: 'http://127.0.0.1:8123/check' } });
+    const asked: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+      asked.push(JSON.parse(String(init.body)));
+      return Response.json(verdict === 'allow' ? { allow: true } : { allow: false, reason: 'budget' });
+    }));
+    try {
+      const conversationId = randomUUID();
+      const session = await createSession({ conversationId, title: 'Finish send check' });
+      hooks.caller = { sessionId: session.id, conversationId };
+      await appendEvent(session.id, { source: 'extension', kind: 'turn_start', turnId: 'turn-one', time: 1000 });
+      await observeSessionModel(session.id, conversationId, 'gpt-6-pro', 1500);
+      await setGoalSwitchNow(conversationId, 'goal', true);
+      hooks.followup.mockResolvedValue('Inspect the remaining work');
+      await announceSessionFinish(session.id, 'Wrapping up');
+      await settleSessionFinishForTests();
+      expect(asked).toEqual([expect.objectContaining({ kind: 'goal-step', text: 'Inspect the remaining work', attempt: 1,
+        chat: { session: session.id, project: null, worker: null } })]);
+      expect(await listInputs()).toHaveLength(queued);
+      // Held, nothing more is coming: the finish hold is released so ChatGPT can finish its answer.
+      const { getSession } = await import('../src/main/session/store.js');
+      expect((await getSession(session.id))?.finishTurn?.released ?? false).toBe(verdict === 'hold');
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('does not say the hold was released when that release could not be saved (CodeRabbit)', async () => {
+    directory = await makeTempDir('clf-finish-send-check-release-');
+    initConfigPath(directory); initDurableStore(directory); initSessionStore(directory);
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, finishTool: true, finishAction: 'goal', sendCheckUrl: 'http://127.0.0.1:8123/check' } });
+    const conversationId = randomUUID();
+    const session = await createSession({ conversationId, title: 'Finish release fails' });
+    // The check holds the step, and meanwhile a new turn starts: the old turn's hold cannot be released.
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      await appendEvent(session.id, { source: 'extension', kind: 'turn_start', turnId: 'turn-two', time: 3000 });
+      return Response.json({ allow: false, reason: 'budget' });
+    }));
+    try {
+      hooks.caller = { sessionId: session.id, conversationId };
+      await appendEvent(session.id, { source: 'extension', kind: 'turn_start', turnId: 'turn-one', time: 1000 });
+      await observeSessionModel(session.id, conversationId, 'gpt-6-pro', 1500);
+      await setGoalSwitchNow(conversationId, 'goal', true);
+      hooks.followup.mockResolvedValue('Inspect the remaining work');
+      await announceSessionFinish(session.id, 'Wrapping up');
+      await settleSessionFinishForTests();
+      const { readEvents } = await import('../src/main/session/store.js');
+      const said = JSON.stringify(await readEvents(session.id));
+      expect(said).toContain("The person's send check held the automatic Goal instruction, so none was queued.");
+      expect(said).not.toContain('The finish hold was released');
+      expect(said).toContain('The finish hold could not be released');
+    } finally { vi.unstubAllGlobals(); }
+  });
 });
+

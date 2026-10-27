@@ -9,7 +9,7 @@ import {
   fileSilenceInput, deferSilenceInput, revokeSilenceInputs, pendingQueuedPickups, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, enqueueInput,
   failBrowserInput, listInputs, offerToolInput as offerToolInputBatch, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
   authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy, retryUnclaimedInput,
-  noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS
+  noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS, holdInputForSendCheck
 } from '../src/main/session/input.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import { editReplacement } from '../src/main/session/edits.js';
@@ -313,6 +313,26 @@ describe('durable user input ownership', () => {
   });
   // #1402: turns past ~35 minutes break; a native send into the running turn ends it as interrupted
   // and continues in a fresh one, a command in flight keeping its result (measured 2026-10-09).
+  it('does not count time held by the send check against the 60-second browser pickup deadline (CodeRabbit)', async () => {
+    binding.model = 'gpt-5.6-sol'; binding.activeTurnId = 'plain-turn';
+    binding.end = { kind: 'turn_start', outcome: '', turnId: 'plain-turn', time: 900 };
+    const row = await fileRotationInput(sessionId, 'plain-turn');
+    expect(row).toMatchObject({ purpose: 'rotation', transportIntent: 'browser', state: 'queued' });
+    // Held at 50 s and again at 80 s, as the program keeps saying no.
+    now += 50_000;
+    expect(await holdInputForSendCheck(row!.id, 1, 'not now', true)).toBe(true);
+    now += 30_000;
+    expect(await holdInputForSendCheck(row!.id, 2, 'not now', true)).toBe(true);
+    now += 25_000;
+    expect((await listInputs()).find(entry => entry.id === row!.id)).toMatchObject({ state: 'queued' });
+    // Released at 110 s: the browser gets its full minute from there, and no more.
+    now += 5_000 + 59_000;
+    expect((await listInputs()).find(entry => entry.id === row!.id)).toMatchObject({ state: 'queued' });
+    now += 2_000;
+    expect((await listInputs()).find(entry => entry.id === row!.id)).toMatchObject({ state: 'failed',
+      error: 'Not sent: the browser did not pick up this message within 60 seconds.' });
+  });
+
   it('files one rotation into the running turn as an automatic message, only when nothing else waits', async () => {
     binding.model = 'gpt-5.6-sol'; binding.activeTurnId = 'plain-turn';
     binding.end = { kind: 'turn_start', outcome: '', turnId: 'plain-turn', time: 900 };

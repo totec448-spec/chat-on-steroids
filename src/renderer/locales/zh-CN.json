@@ -3296,5 +3296,13 @@
   "Save the file being edited": "保存正在编辑的文件",
   "Copy the selection": "复制所选内容",
   "Turn off Plugins connection": "关闭 Plugins 连接",
-  "Plugins connection turned off": "已关闭 Plugins 连接"
+  "Plugins connection turned off": "已关闭 Plugins 连接",
+  "No projects yet.": "还没有项目。",
+  "Held by your send check: {0}": "已被你的发送检查暂缓：{0}",
+  "Held by your send check": "已被你的发送检查暂缓",
+  "Held: your send check did not answer": "已暂缓：你的发送检查没有响应",
+  "Check automatic sends": "检查自动发送",
+  "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "请使用这台电脑上带端口的 http 地址,例如 http://127.0.0.1:8080/check。",
+  "Ask a program on this computer before the app sends a message by itself. Empty: off.": "在应用自行发送消息之前询问这台电脑上的一个程序。留空:关闭。",
+  "It receives the full message text. If it says no or doesn't answer, the message waits.": "该程序会收到消息的完整文本。如果它拒绝或没有响应,消息会等待。"
 }
