@@ -17283,6 +17283,36 @@ describe('native ChatGPT Project for a new CoS project', () => {
   });
 });
 
+// CodeRabbit on #1858: a page asking for a message the send check still holds gets nothing, and that
+// is logged once per hold (the page asks every few seconds), with the reason and when it is asked again.
+describe('a message the send check holds', () => {
+  it('answers a page\'s claim with nothing and logs it once per hold', async () => {
+    await pair();
+    const input = await import('../src/main/session/input.js');
+    const logger = await import('../src/main/logger.js');
+    input.resetInputForTests();
+    await writeDurableNow('session-input', []);
+    const session = await createSession({ conversationId: randomUUID() });
+    const row = await input.enqueueInput({ id: randomUUID(), sessionId: session.id, text: 'Continue', mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null });
+    const nextAt = Date.now() + 30_000;
+    await writeDurableNow('session-input', (await input.listInputs()).map(entry => entry.id === row.id
+      ? { ...entry, afterStop: true, sendCheck: { attempt: 1, nextAt, reason: 'one at a time', answered: true } } : entry));
+    input.resetInputForTests();
+    await saveConfig({ ...suiteConfig, ui: { ...suiteConfig.ui, sendCheckUrl: 'http://127.0.0.1:9/check' } });
+    const info = vi.spyOn(logger, 'logInfo');
+    try {
+      const claim = () => request('POST', '/input/claim', { body: { id: row.id, owner: '9:page:0', conversationId: session.conversationId } });
+      expect((await claim()).body.input).toBeNull();
+      expect((await claim()).body.input).toBeNull();
+      const lines = info.mock.calls.map(call => String(call[0])).filter(line => line.includes(row.id));
+      expect(lines).toEqual([`send check: fresh-turn ${row.id} attempt 1 still held until ${new Date(nextAt).toISOString()} (one at a time); a page asked to send it`]);
+    } finally {
+      info.mockRestore();
+      await saveConfig(suiteConfig);
+    }
+  });
+});
+
 /** A chat ChatGPT says it deleted (`conversation_deleted`, read by the page from ChatGPT's own answer). */
 describe('a chat deleted in ChatGPT', () => {
   it('ends only the messages still waiting for that chat, with the real reason', async () => {
