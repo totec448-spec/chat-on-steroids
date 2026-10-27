@@ -20,6 +20,31 @@ export interface PluginExposureSource {
   disabledTools: readonly string[];
 }
 
+/** ChatGPT's widget keys: each names a resource ChatGPT reads from this same server to draw the tool's result. */
+const WIDGET_KEYS = ['ui/resourceUri', 'openai/outputTemplate'] as const;
+
+/**
+ * The copy ChatGPT gets, without widget resource references (#1870). The Plugins server serves no
+ * resources (its catalogs are empty, #1557), so a tool naming one, like an MCP Apps `ui://` page,
+ * made ChatGPT's resource read fail and the whole connector failed to enroll (-32602). Only those
+ * references go, with the widget flag that only means something with one; names, schemas, annotations and every
+ * other key stay as the plugin declared them, and the installed catalog is not changed.
+ */
+function withoutWidgets(tool: Tool): Tool {
+  const meta = tool._meta;
+  if (!meta) return tool;
+  const ui = meta.ui && typeof meta.ui === 'object' && !Array.isArray(meta.ui) ? meta.ui as Record<string, unknown> : null;
+  if (!WIDGET_KEYS.some(key => key in meta) && !('openai/widgetAccessible' in meta) && !(ui && 'resourceUri' in ui)) return tool;
+  const { 'openai/widgetAccessible': _accessible, ...rest } = meta;
+  for (const key of WIDGET_KEYS) delete rest[key];
+  if (ui) {
+    const { resourceUri: _uri, ...other } = ui;
+    if (Object.keys(other).length) rest.ui = other;
+    else delete rest.ui;
+  }
+  return { ...tool, _meta: rest };
+}
+
 /** One projection for discovery, UI and call ownership. Upstream names never change. */
 export function pluginExposure(sources: readonly PluginExposureSource[]): {
   tools: Tool[];
@@ -55,12 +80,13 @@ export function pluginExposure(sources: readonly PluginExposureSource[]): {
     const disabled = new Set(source.disabledTools);
     for (const tool of source.tools) {
       if (disabled.has(tool.name) || claims.get(tool.name)!.length !== 1) continue;
-      const size = Buffer.byteLength(JSON.stringify(tool));
+      const published = withoutWidgets(tool);
+      const size = Buffer.byteLength(JSON.stringify(published));
       if (tools.length >= PLUGIN_MAX_TOOLS || bytes + size > PLUGIN_MAX_SCHEMA_BYTES) {
         issue(source.id, tool.name, 'Not exposed because the Plugins connector has reached its tool or schema size limit.');
         continue;
       }
-      tools.push(tool);
+      tools.push(published);
       owners.set(tool.name, source.id);
       bytes += size;
     }

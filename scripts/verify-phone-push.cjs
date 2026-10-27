@@ -86,11 +86,29 @@ app.whenReady().then(async () => {
         fs.writeFileSync(path.join(output, `phone-${tag}.png`), (await win.webContents.capturePage(result.box)).toPNG());
       }
       if (advanced) assert.equal(result.inputLefts.length === 1 && result.fieldRights.length === 1, true, 'all three fields on one grid ' + tag);
+      if (!advanced) {
+        // #1802: Play sounds sits under "Notify when a chat finishes", on the same edges, nothing cut.
+        const sound = await win.webContents.executeJavaScript(`(()=>{
+          const rows = ['turnNotifications', 'soundCues'].map(id => document.getElementById(id).closest('.setting'));
+          rows[0].scrollIntoView({ block: 'center' });
+          const r = rows.map(row => row.getBoundingClientRect()), switches = rows.map(row => row.querySelector('input').getBoundingClientRect());
+          const texts = rows.map(row => row.querySelector('.setting-text').getBoundingClientRect());
+          const cut = rows.flatMap(row => [...row.querySelectorAll('b, em')]).filter(el => el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflow !== 'visible').length;
+          return { adjacent: rows[0].nextElementSibling === rows[1], rights: [...new Set(switches.map(s => Math.round(s.right)))], lefts: [...new Set(texts.map(t => Math.round(t.left)))],
+            inside: switches.every((s, i) => s.right <= r[i].right + 0.5 && s.left >= texts[i].right - 0.5), cut, title: rows[1].querySelector('b').textContent,
+            box: { x: Math.max(0, Math.floor(r[0].left) - 16), y: Math.max(0, Math.floor(r[0].top) - 12), width: Math.ceil(r[0].width) + 32, height: Math.ceil(r[1].bottom - r[0].top) + 24 } }; })()`);
+        results.push({ tag: tag + '-sounds', ...sound });
+        assert.ok(sound.adjacent && sound.rights.length === 1 && sound.lefts.length === 1 && sound.inside && sound.cut === 0, 'Play sounds row aligned and whole ' + tag + JSON.stringify(sound));
+        if (zoom === 1 && width === 1100 && ['en', 'de', 'ja'].includes(language)) {
+          await win.webContents.executeJavaScript('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 50))))');
+          fs.writeFileSync(path.join(output, `sounds-${language}.png`), (await win.webContents.capturePage(sound.box)).toPNG());
+        }
+      }
       }
     }
   }
   win.setContentSize(1100, 900); win.webContents.setZoomFactor(1);
   fs.writeFileSync(path.join(output, 'measurements.json'), JSON.stringify(results, null, 2));
-  console.log('Passed: phone notifications keep one edge for fields and switches, cut nothing and keep controls on one line in all 13 languages (English, German and Russian also narrow and zoomed).');
+  console.log('Passed: Play sounds sits aligned under Notify when a chat finishes, and phone notifications keep one edge for fields and switches, cut nothing and keep controls on one line in all 13 languages (English, German and Russian also narrow and zoomed).');
   win.destroy(); app.exit(0);
 }).catch(error => { console.error(error); app.exit(1); });

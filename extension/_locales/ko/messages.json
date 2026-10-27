@@ -917,6 +917,9 @@
   "popup_pipeline_waiting_first_message": {
     "message": "첫 메시지 대기 중."
   },
+  "popup_pipeline_not_a_chat": {
+    "message": "이 ChatGPT 페이지는 대화가 아니어서 앱이 따라갈 내용이 없습니다. 대화를 열거나 시작하세요."
+  },
   "popup_pipeline_waiting_latest_request_id": {
     "message": "대화가 기록되었습니다. 최신 턴의 요청 ID를 기다리는 중입니다."
   },
@@ -985,6 +988,9 @@
   },
   "popup_status_new_chat": {
     "message": "새 대화"
+  },
+  "popup_status_not_a_chat": {
+    "message": "대화 아님"
   },
   "popup_status_none_open": {
     "message": "열린 항목 없음"
