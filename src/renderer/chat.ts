@@ -4261,7 +4261,8 @@ function markdownCodeRanges(text: string): Array<{ start: number; end: number }>
       if (indentedStart === null) {
         if (afterBlank && CODE_LINE.test(line) &&
             (listContentIndent === null || indentColumns(line) >= listContentIndent + 4)) indentedStart = at;
-      } else if (line.trim() && !CODE_LINE.test(line)) {
+      } else if (line.trim() && (listContentIndent === null
+        ? !CODE_LINE.test(line) : indentColumns(line) < listContentIndent + 4)) {
         ranges.push({ start: indentedStart, end: at });
         indentedStart = null;
       }
