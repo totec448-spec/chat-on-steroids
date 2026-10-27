@@ -4283,6 +4283,25 @@ it('keeps a chat style editor open with the typed text when its save is refused,
   expect(close.textContent).toBe('Close prompt');
 });
 
+it('closes a chat style editor when its text was stored although a later step of that save failed (#1856, CodeRabbit)', async () => {
+  let mounted: Awaited<ReturnType<typeof mountChat>> | undefined;
+  mounted = await mountChat({}, [], { saveSettings: async (patch: any) => {
+    // Stored first, then a later side effect of the save fails: the answer says no.
+    mounted!.state.config = { ...mounted!.state.config, ...structuredClone(patch) };
+    return { ok: false, error: 'A later step of saving failed.' };
+  } });
+  const doc = mounted.window.document;
+  const panel = doc.getElementById('chatPersonalityPanel')!;
+  const box = doc.getElementById('chatPersonality') as HTMLTextAreaElement;
+  const edit = doc.getElementById('chatPersonalityEdit') as HTMLButtonElement;
+  edit.click();
+  box.value = 'Answer like a calm colleague.';
+  box.dispatchEvent(new mounted.window.Event('change'));
+  edit.click();
+  await waitFor(() => expect(panel.hidden).toBe(true));
+  expect(mounted.state.config.ui.chatPersonality).toBe('Answer like a calm colleague.');
+});
+
 it('offers the handoff length, starting at the thorough default, and saves a shorter choice', async () => {
   const mounted = await mountChat({ hasGoalKey: true });
   const length = mounted.window.document.getElementById('handoffLength') as HTMLSelectElement;
