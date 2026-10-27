@@ -3036,7 +3036,11 @@ function paintGoalProgress(): void {
   }
   if (phase === 'settling' && wait?.until) {
     const seconds = Math.max(0, Math.ceil((wait.until - Date.now()) / 1000));
-    const timer = el('span', 'recovery-countdown', seconds ? t('Check in {0}', [`${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`]) : t('Checking for activity…'));
+    const left = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    // The reviewer's deadline is when Goal goes on without the review (#1832), not another check.
+    const timer = el('span', 'recovery-countdown', wait.reason === 'reviewer'
+      ? (seconds ? t('Continues without the review in {0}', [left]) : t('Continuing without the review…'))
+      : seconds ? t('Check in {0}', [left]) : t('Checking for activity…'));
     timer.setAttribute('role', 'timer'); timer.setAttribute('aria-live', 'off'); row.append(timer);
   }
 }

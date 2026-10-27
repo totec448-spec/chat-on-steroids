@@ -21844,7 +21844,7 @@ describe('the goal loop', () => {
     });
     // #1832: the step reviewer's limit is known, so its countdown shows.
     expect(view({ phase: 'settling', wait: { reason: 'reviewer', until: live.window.Date.now() + 125_000 } })).toMatchObject({
-      stage: 'Waiting for the reviewer', detail: 'Checking again in 2:05'
+      stage: 'Waiting for the reviewer', detail: 'Continues without the review in 2:05'
     });
     expect(view({ phase: 'settling', wait: { reason: 'listening', until: live.window.Date.now() + 60_000 } })).toMatchObject({
       stage: 'Waiting for activity after recovery', detail: 'Checking again in 1:00'

@@ -509,6 +509,9 @@
   "content_goal_wait_tool_inactivity": {
     "message": "Esperando a que cese la actividad de las herramientas"
   },
+  "content_goal_reviewer_deadline": {
+    "message": "Continúa sin la revisión en $1"
+  },
   "content_goal_wait_reviewer": {
     "message": "Esperando al revisor"
   },

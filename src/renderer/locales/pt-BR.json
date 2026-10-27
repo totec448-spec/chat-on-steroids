@@ -3402,5 +3402,7 @@
   "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "O revisor funciona como um chat de worker, então precisa dos Subagentes. Nada é revisado até que eles estejam ligados.",
   "Turn on Sub-agents": "Ligar os Subagentes",
   "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "O revisor encontrou um problema que o Goal não pode ignorar com segurança. Abra o chat para verificar.",
-  "Waiting for the reviewer": "Aguardando o revisor"
+  "Waiting for the reviewer": "Aguardando o revisor",
+  "Continues without the review in {0}": "Continua sem a revisão em {0}",
+  "Continuing without the review…": "Continuando sem a revisão…"
 }

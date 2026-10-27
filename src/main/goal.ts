@@ -2042,6 +2042,13 @@ async function run(draft: GoalDraft): Promise<void> {
         return settle(draft, 'failed', 'goal_helper_stop_unverified');
       }
       logInfo(`goal: ${draft.model} says the goal is met in ${draft.conversationId}; nothing was sent${reviewLine ? ', including the reviewer\'s last findings' : ''}`);
+      // Findings with no next step to carry them are shown in the chat instead (#1832).
+      if (stepReview && 'text' in stepReview && reviewLine.startsWith('Reviewer: ')) {
+        const { recordNote } = await import('./session/recorder.js');
+        await recordNote(draft.sessionId, `Goal reached. The reviewer's findings on the last step were not sent to ChatGPT: ${reviewLine.slice('Reviewer: '.length)}`)
+          .catch(() => undefined);
+        if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return;
+      }
       // Reaching the goal ends this Goal run, not the user's saved objective. Keeping the text
       // lets a reopened chat show what it was pursuing and lets a later manual correction such
       // as "that did not work" continue against the same objective. Nothing auto-restarts here:
