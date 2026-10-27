@@ -249,6 +249,8 @@ const api = {
   /** Sets an unreadable credentials file aside (kept as a backup) so keys can be saved again. */
   startFreshCredentials: () => call<{ state: AppState; setAside: boolean }>('credentials:start-fresh'),
   saveSettings: (patch: SettingsPatch, base: SettingsPatch) => call<AppState>('settings:save', { patch, base }),
+  /** The settings a new install starts with; Settings marks and resets rows against them. */
+  getSettingDefaults: () => call<Config>('settings:defaults'),
   addRoot: () => call<AppState>('roots:add'),
   /** A folder dropped on the window; only the preload can learn a dropped File's path. */
   addRootPath: (file: File) => call<AppState>('roots:addPath', { path: webUtils.getPathForFile(file) }),

@@ -477,3 +477,9 @@ details.connector[open] > summary .connector-chevron { transform: rotate(90deg);
 .is-found { animation: setting-found 1600ms ease-out; }
 @keyframes setting-found { from, 35% { background-color: var(--accent-wash); box-shadow: 0 0 0 8px var(--accent-wash); } }
 @media (prefers-reduced-motion: reduce) { .is-found { animation: none; background-color: var(--accent-wash); box-shadow: 0 0 0 8px var(--accent-wash); } }
+/* A setting that is not its default: a dot after its name, and a quiet reset just before its control. */
+.setting.is-changed > .setting-text > b::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-inline-start: 7px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
+.setting > .btn.setting-reset { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--faint); }
+.setting > .btn.setting-reset[hidden] { display: none; }
+.setting > .btn.setting-reset:hover { background: var(--hover); color: var(--ink); }
+.setting > .btn.setting-reset .ico { --ico: 14px; --glyph: 14px; }
