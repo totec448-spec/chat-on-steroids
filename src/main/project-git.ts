@@ -396,10 +396,11 @@ export async function checkpointChanges(context: RepositoryContext, treeOid: str
  * Git keeps no reference to a checkpoint's tree (one would show in the person's own `git log --all`),
  * so its garbage collection may remove an old one. One batch read says which trees are still there.
  */
-async function presentTrees(context: RepositoryContext, oids: readonly string[]): Promise<Set<string>> {
+export async function presentTrees(context: Pick<RepositoryContext, 'projectReal'>, oids: readonly string[], run: typeof runGit = runGit): Promise<Set<string>> {
   if (!oids.length) return new Set();
-  const listed = await runGit(context.projectReal, ['cat-file', '--batch-check=%(objectname) %(objecttype)'], undefined, { input: `${oids.join('\n')}\n` });
-  if (listed.code !== 0) return new Set();
+  const listed = await run(context.projectReal, ['cat-file', '--batch-check=%(objectname) %(objecttype)'], undefined, { input: `${oids.join('\n')}\n` });
+  // A missing tree is a "missing" line with exit 0; a failed read must not pass for "Git cleaned them all up".
+  if (listed.code !== 0) throw new Error(`Git could not check the checkpoints: ${listed.stderr.trim().slice(0, 200) || `exit ${listed.code}`}`);
   return new Set(decode(listed.stdout).split('\n').map(line => line.split(' ')).filter(([, type]) => type === 'tree').map(([oid]) => oid!));
 }
 

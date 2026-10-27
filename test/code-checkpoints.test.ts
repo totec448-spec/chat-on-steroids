@@ -13,7 +13,7 @@ import { createRegistrar, type ToolContext, type ToolResult } from '../src/main/
 import { registerCoreTools } from '../src/main/mcp/tools-core.js';
 import * as logger from '../src/main/logger.js';
 import * as projectGit from '../src/main/project-git.js';
-import { readProjectGitDiff, readProjectGitSnapshot } from '../src/main/project-git.js';
+import { presentTrees, readProjectGitDiff, readProjectGitSnapshot } from '../src/main/project-git.js';
 import { addProject } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 import * as sessions from '../src/main/session/store.js';
@@ -600,5 +600,14 @@ it('keeps the Review snapshot when the checkpoint list cannot be read, and says 
     list.mockRestore();
     warn.mockRestore();
   }
+});
+
+// CodeRabbit on #1443: Git failing to read the trees is an error, not "every checkpoint was cleaned up".
+it('reports a failed tree check as an error, and a missing tree as gone', async () => {
+  const oid = 'a'.repeat(40), gone = 'b'.repeat(40);
+  const failed = async () => ({ code: 128, stdout: Buffer.from(''), stderr: 'fatal: unable to read the object database\n' });
+  await expect(presentTrees({ projectReal: root }, [oid], failed as never)).rejects.toThrow('Git could not check the checkpoints: fatal: unable to read the object database');
+  const answered = async () => ({ code: 0, stdout: Buffer.from(`${oid} tree\n${gone} missing\n`), stderr: '' });
+  expect([...await presentTrees({ projectReal: root }, [oid, gone], answered as never)]).toEqual([oid]);
 });
 
