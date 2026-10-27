@@ -3398,5 +3398,9 @@
   "Easier to read": "Más fácil de leer",
   "High contrast, eight accent colors, line spacing and a more legible font.": "Alto contraste, ocho colores de acento, interlineado y una fuente más legible.",
   "Quote": "Citar",
-  "Start or cancel the prepared plan first, then quote again.": "Inicia o cancela primero el plan preparado y vuelve a citar."
+  "Start or cancel the prepared plan first, then quote again.": "Inicia o cancela primero el plan preparado y vuelve a citar.",
+  "New-chat model": "Modelo para chats nuevos",
+  "The model and effort a new chat in this project starts with": "El modelo y el esfuerzo con que empieza un chat nuevo en este proyecto",
+  "Same as Settings": "Igual que en Ajustes",
+  "Pick a model in the composer first": "Elige antes un modelo en el editor"
 }

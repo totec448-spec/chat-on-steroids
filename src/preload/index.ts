@@ -11,7 +11,7 @@ import type { InputAttachment } from '../shared/input.js';
 import type { UsageOverview } from '../shared/usage.js';
 import type { ProviderUsage } from '../shared/provider-usage.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
-import type { ChatgptProjectChoice, LocalProject, ProjectColor } from '../shared/projects.js';
+import type { ChatgptProjectChoice, LocalProject, ProjectChatDefaults, ProjectChatDefaultsSkip, ProjectColor } from '../shared/projects.js';
 import type { ProjectDirectoryListing, ProjectFileMutationResult, ProjectFilePreview, ProjectFileSaveResult, ProjectFilesChanged } from '../shared/project-files.js';
 import type { CheckpointRestoreResult, ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../shared/project-git.js';
 import type { PetLibraryState, PetOverlayControlState, PetRuntimeAsset } from '../shared/pets.js';
@@ -323,6 +323,9 @@ const api = {
   unlinkChatgptProject: (id: string) => call<LocalProject>('projects:chatgpt-unlink', { id }),
   removeProject: (id: string) => call<LocalProject>('projects:remove', { id }),
   setProjectColor: (id: string, color: ProjectColor | null) => call<LocalProject>('projects:color', { id, color }),
+  setProjectChatDefaults: (id: string, defaults: ProjectChatDefaults | null) => call<LocalProject>('projects:chatDefaults', { id, defaults }),
+  /** The composer found a project's own pair unusable on this account and started on the Settings default; main logs it. */
+  noteProjectChatDefaultsSkipped: (reason: ProjectChatDefaultsSkip) => call<null>('projects:chatDefaultsSkipped', { reason }),
   setProjectSecretsShieldOff: (id: string, off: boolean) => call<LocalProject>('projects:secrets-shield', { id, off }),
   listProjectFiles: (projectId: string, directory = '') => call<ProjectDirectoryListing>('projectFiles:list', { projectId, directory }),
   watchProjectFiles: (projectId: string | null, directories: string[]) => call<boolean>('projectFiles:watch', { projectId, directories }),

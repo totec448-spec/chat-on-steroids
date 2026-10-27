@@ -3278,5 +3278,9 @@
   "Easier to read": "読みやすく",
   "High contrast, eight accent colors, line spacing and a more legible font.": "ハイコントラスト、8 つのアクセントカラー、行間、より読みやすいフォント。",
   "Quote": "引用",
-  "Start or cancel the prepared plan first, then quote again.": "先に準備済みのプランを開始するか取り消してから、もう一度引用してください。"
+  "Start or cancel the prepared plan first, then quote again.": "先に準備済みのプランを開始するか取り消してから、もう一度引用してください。",
+  "New-chat model": "新規チャットのモデル",
+  "The model and effort a new chat in this project starts with": "このプロジェクトの新規チャットが最初に使うモデルと思考レベル",
+  "Same as Settings": "設定と同じ",
+  "Pick a model in the composer first": "先に入力欄でモデルを選んでください"
 }

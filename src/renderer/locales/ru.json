@@ -3458,5 +3458,9 @@
   "Easier to read": "Легче читать",
   "High contrast, eight accent colors, line spacing and a more legible font.": "Высокая контрастность, восемь акцентных цветов, межстрочный интервал и более разборчивый шрифт.",
   "Quote": "Цитировать",
-  "Start or cancel the prepared plan first, then quote again.": "Сначала запустите или отмените подготовленный план, затем процитируйте снова."
+  "Start or cancel the prepared plan first, then quote again.": "Сначала запустите или отмените подготовленный план, затем процитируйте снова.",
+  "New-chat model": "Модель для нового чата",
+  "The model and effort a new chat in this project starts with": "Модель и уровень, с которыми начинается новый чат в этом проекте",
+  "Same as Settings": "Как в настройках",
+  "Pick a model in the composer first": "Сначала выберите модель в поле ввода"
 }

@@ -7,7 +7,7 @@ import { bindBrowserInputProject, claimBrowserInput, enqueueInput, listInputs, p
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { flushDurable, initDurableStore, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import { createSession, getSession, initSessionStore, rebindSession, resetSessionStoreForTests, setSessionOrigin } from '../src/main/session/store.js';
-import { addProject, armProjectCreate, assignSessionProject, bindChatToLinkedProject, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, getSessionProject, inheritSessionProject, listProjects, markProjectGone, pendingProjectCreates, PROJECT_CREATE_ARMED_MS, PROJECT_CREATE_CLAIM_MS, projectWorkspace, removeProject, retryProjectCreate, sessionSecretsShieldOff, setProjectColor, setProjectSecretsShieldOff } from '../src/main/projects.js';
+import { addProject, armProjectCreate, assignSessionProject, bindChatToLinkedProject, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, getSessionProject, inheritSessionProject, listProjects, markProjectGone, pendingProjectCreates, PROJECT_CREATE_ARMED_MS, PROJECT_CREATE_CLAIM_MS, projectWorkspace, removeProject, retryProjectCreate, sessionSecretsShieldOff, setProjectChatDefaults, setProjectColor, setProjectSecretsShieldOff } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 import { resetWorkspaces, setWorkspaceFor } from '../src/main/workspace.js';
 
@@ -47,6 +47,21 @@ it('persists only predefined presentation colors without changing project worksp
   expect(await listProjects()).toEqual([colored]);
   await expect(setProjectColor(project.id, 'chartreuse' as any)).rejects.toThrow();
   expect(await setProjectColor(project.id, null)).toEqual(project);
+});
+
+it('keeps a project\'s own new-chat model and effort, and drops a malformed one instead of the catalog', async () => {
+  const project = await addProject(path.join(approved, 'first'));
+  const other = await addProject(path.join(approved, 'second'));
+  const chosen = await setProjectChatDefaults(project.id, { model: 'gpt-5.6-sol', reasoningEffort: 'high' });
+  expect(chosen).toEqual({ ...project, chatDefaults: { model: 'gpt-5.6-sol', reasoningEffort: 'high' } });
+  resetDurableForTests(); initDurableStore(directory);
+  expect(await listProjects()).toEqual([chosen, other]);
+  await expect(setProjectChatDefaults(project.id, { model: 'gpt-5.6-sol', reasoningEffort: 'loud' as any })).rejects.toThrow();
+  await expect(setProjectChatDefaults(project.id, { model: '' } as any)).rejects.toThrow();
+  expect(await setProjectChatDefaults(project.id, null)).toEqual(project);
+  // A pair written by a newer or broken build must not take every project off the sidebar.
+  await writeDurableNow('projects', [{ ...project, chatDefaults: { model: 'gpt-6', reasoningEffort: 'loud' } }, other]);
+  expect(await listProjects()).toEqual([project, other]);
 });
 
 it('turns the secrets shield off for one project\'s chats only, durably (#1797)', async () => {

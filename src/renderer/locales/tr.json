@@ -3338,5 +3338,9 @@
   "Easier to read": "Okuması daha kolay",
   "High contrast, eight accent colors, line spacing and a more legible font.": "Yüksek kontrast, sekiz vurgu rengi, satır aralığı ve daha okunaklı bir yazı tipi.",
   "Quote": "Alıntıla",
-  "Start or cancel the prepared plan first, then quote again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden alıntılayın."
+  "Start or cancel the prepared plan first, then quote again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden alıntılayın.",
+  "New-chat model": "Yeni sohbet modeli",
+  "The model and effort a new chat in this project starts with": "Bu projedeki yeni bir sohbetin başladığı model ve düzey",
+  "Same as Settings": "Ayarlardaki gibi",
+  "Pick a model in the composer first": "Önce yazma alanında bir model seçin"
 }

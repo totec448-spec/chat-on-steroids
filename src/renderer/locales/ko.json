@@ -3278,5 +3278,9 @@
   "Easier to read": "더 읽기 쉽게",
   "High contrast, eight accent colors, line spacing and a more legible font.": "고대비, 강조 색상 8가지, 줄 간격, 더 읽기 쉬운 글꼴.",
   "Quote": "인용",
-  "Start or cancel the prepared plan first, then quote again.": "먼저 준비된 계획을 시작하거나 취소한 다음 다시 인용하세요."
+  "Start or cancel the prepared plan first, then quote again.": "먼저 준비된 계획을 시작하거나 취소한 다음 다시 인용하세요.",
+  "New-chat model": "새 채팅 모델",
+  "The model and effort a new chat in this project starts with": "이 프로젝트의 새 채팅이 시작할 때 쓰는 모델과 노력 수준",
+  "Same as Settings": "설정과 같음",
+  "Pick a model in the composer first": "먼저 입력창에서 모델을 고르세요"
 }

@@ -3278,5 +3278,9 @@
   "Easier to read": "Dễ đọc hơn",
   "High contrast, eight accent colors, line spacing and a more legible font.": "Độ tương phản cao, tám màu nhấn, giãn dòng và phông chữ dễ đọc hơn.",
   "Quote": "Trích dẫn",
-  "Start or cancel the prepared plan first, then quote again.": "Hãy bắt đầu hoặc hủy kế hoạch đã chuẩn bị trước, rồi trích dẫn lại."
+  "Start or cancel the prepared plan first, then quote again.": "Hãy bắt đầu hoặc hủy kế hoạch đã chuẩn bị trước, rồi trích dẫn lại.",
+  "New-chat model": "Mô hình cho chat mới",
+  "The model and effort a new chat in this project starts with": "Mô hình và mức suy luận mà chat mới trong dự án này dùng lúc bắt đầu",
+  "Same as Settings": "Giống trong Cài đặt",
+  "Pick a model in the composer first": "Hãy chọn mô hình trong ô soạn trước"
 }

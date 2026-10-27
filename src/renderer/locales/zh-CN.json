@@ -3278,5 +3278,9 @@
   "Easier to read": "更易阅读",
   "High contrast, eight accent colors, line spacing and a more legible font.": "高对比度、八种强调色、行距和更易读的字体。",
   "Quote": "引用",
-  "Start or cancel the prepared plan first, then quote again.": "请先开始或取消已准备好的计划，然后再引用一次。"
+  "Start or cancel the prepared plan first, then quote again.": "请先开始或取消已准备好的计划，然后再引用一次。",
+  "New-chat model": "新聊天模型",
+  "The model and effort a new chat in this project starts with": "此项目中新聊天开始时使用的模型和思考强度",
+  "Same as Settings": "与设置相同",
+  "Pick a model in the composer first": "请先在输入框中选择模型"
 }
