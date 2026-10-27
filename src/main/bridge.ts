@@ -852,6 +852,8 @@ function inputHeldElsewhere(input: { id: string; conversationId: string | null }
 }
 
 let versionWarned = false;
+/** The send-check hold (by attempt) each held message's claim was last logged for. */
+const heldClaimsLogged = new Map<string, number>();
 let latestCompanionDiagnostics: CompanionDiagnostics | null = null;
 let companionDiagnosticsRevision = 0;
 const companionDiagnosticsWaiters = new Set<() => void>();
@@ -2990,7 +2992,16 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const kind = automatic ? automaticSendKind(automatic) : null;
     if (automatic && kind && getConfig().ui.sendCheckUrl) {
       // A held row is not asked about again before its next ask, however often a page claims it.
-      if (heldBySendCheck(automatic)) return json(res, 200, { input: null }, origin);
+      if (heldBySendCheck(automatic)) {
+        // Pages ask every few seconds: said once per hold.
+        const hold = automatic.sendCheck!;
+        if (heldClaimsLogged.get(automatic.id) !== hold.attempt) {
+          heldClaimsLogged.set(automatic.id, hold.attempt);
+          if (heldClaimsLogged.size > 256) heldClaimsLogged.delete(heldClaimsLogged.keys().next().value!);
+          logInfo(`send check: ${kind} ${automatic.id} attempt ${hold.attempt} still held until ${new Date(hold.nextAt).toISOString()} (${hold.reason}); a page asked to send it`);
+        }
+        return json(res, 200, { input: null }, origin);
+      }
       const attempt = (automatic.sendCheck?.attempt ?? 0) + 1;
       const project = automatic.projectId ?? (automatic.sessionId ? (await getSession(automatic.sessionId))?.projectId : undefined) ?? null;
       const verdict = await checkAutomaticSend({ kind, id: automatic.id, attempt, text: automatic.text,
