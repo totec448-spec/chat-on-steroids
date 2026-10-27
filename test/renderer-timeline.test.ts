@@ -1929,7 +1929,9 @@ it('keeps the project visible when its removal fails, and lets the removal be tr
 });
 
 it('offers a new chat beside a project\'s menu, and its color as a submenu and removal inside it', async () => {
-  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary', createdAt: 1 };
+  // Linked to its ChatGPT Project: a project without one also offers choosing it (#1756, tested on its own).
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary', createdAt: 1,
+    chatgpt: { state: 'linked' as const, id: `g-p-${'d'.repeat(32)}`, updatedAt: 1 } };
   const { w } = await boot([], false, [], [project]);
   const group = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
   // Two buttons on the row: the primary new chat, then one "⋯"; a right click opens the same menu.
@@ -1938,10 +1940,14 @@ it('offers a new chat beside a project\'s menu, and its color as a submenu and r
   expect(button.getAttribute('aria-expanded')).toBe('true');
   const menu = w.document.querySelector<HTMLElement>('.row-menu')!;
   expect(menu.getAttribute('role')).toBe('menu');
-  expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['group-new', 'color', 'secrets-shield', 'remove']);
+  expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['group-new', 'chatgpt-change', 'chatgpt-unlink', 'color', 'secrets-shield', 'remove']);
   expect(menuItem(w, 'remove').classList.contains('is-danger')).toBe(true);
   expect(w.document.activeElement).toBe(menuItem(w, 'group-new'));
   // Keyboard: Down and Up move, Right opens the color submenu on the current choice, Left comes back.
+  menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  expect(w.document.activeElement).toBe(menuItem(w, 'chatgpt-change'));
+  menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  expect(w.document.activeElement).toBe(menuItem(w, 'chatgpt-unlink'));
   menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
   expect(w.document.activeElement).toBe(menuItem(w, 'color'));
   menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
@@ -2162,6 +2168,92 @@ it('offers a local folder and a server folder from the sidebar +, and marks a se
   expect(badge?.getAttribute('title')).toBe('me@devbox');
 });
 
+// #1756: with ChatGPT Projects to choose from, a new project's own is picked right after adding it.
+describe('choosing a ChatGPT Project for a project', () => {
+  const existing = `g-p-${'a'.repeat(32)}`, taken = `g-p-${'b'.repeat(32)}`;
+  const local = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee3', name: 'Local', path: '/local', createdAt: 3 };
+  async function adding(choices: unknown[]) {
+    const { w } = await boot([], false);
+    const api = (w as any).api;
+    api.chatgptProjectChoices = vi.fn(async () => ({ ok: true, data: choices }));
+    api.addProject = vi.fn(async () => ({ ok: true, data: local }));
+    api.linkChatgptProject = vi.fn(async (id: string, chatgptId: string) => ({ ok: true, data: { ...local, id, chatgpt: { state: 'linked', id: chatgptId, updatedAt: 4 } } }));
+    api.createChatgptProject = vi.fn(async (id: string) => ({ ok: true, data: { ...local, id, chatgpt: { state: 'requested', requestId: 'cccccccc-bbbb-4ccc-8ddd-eeeeeeeeeeee', updatedAt: 4 } } }));
+    (w.document.getElementById('addProject') as HTMLButtonElement).click();
+    await settle();
+    w.document.querySelector<HTMLButtonElement>('[data-row-action="add-local-project"]')!.click();
+    await settle(); await settle();
+    const options = () => [...w.document.querySelectorAll<HTMLButtonElement>('.chatgpt-project-picker [role="option"]')];
+    return { w, api, options };
+  }
+  const listed = [{ id: existing, name: 'Existing', linkedTo: null }, { id: taken, name: 'Taken', linkedTo: { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee9', name: 'Other' } }];
+
+  it('links the new project to a Project the account already has', async () => {
+    const { w, api, options } = await adding(listed);
+    expect(api.addProject).toHaveBeenCalledWith({ chatgpt: 'later' });
+    expect(options().map(option => option.textContent)).toEqual(['New ChatGPT Project “Local”', 'Existing', 'TakenLinked to Other']);
+    expect(options()[2]!.disabled).toBe(true);
+    expect(options().map(option => option.title)).toEqual(['New ChatGPT Project “Local”', 'Existing', 'Taken\nLinked to Other']);
+    options()[1]!.click();
+    await settle();
+    expect(api.linkChatgptProject).toHaveBeenCalledWith(local.id, existing);
+    expect(api.createChatgptProject).not.toHaveBeenCalled();
+    expect(w.document.querySelector('.chatgpt-project-picker')).toBeNull();
+  });
+
+  it('creates nothing when the choice is closed, and says it can be made later from the menu', async () => {
+    const { w, api } = await adding(listed);
+    expect(w.document.querySelector('.chatgpt-project-picker')!.textContent).toContain('Or choose later from the ⋯ menu.');
+    w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(api.createChatgptProject).not.toHaveBeenCalled();
+    expect(api.linkChatgptProject).not.toHaveBeenCalled();
+  });
+
+  it('adds as before when ChatGPT listed nothing to choose', async () => {
+    const { w, api } = await adding([listed[1]]);
+    expect(api.addProject).toHaveBeenCalledWith();
+    expect(w.document.querySelector('.chatgpt-project-picker')).toBeNull();
+    expect(api.createChatgptProject).not.toHaveBeenCalled();
+  });
+
+  it('offers the choice from the menu of a project without one, and closing it there changes nothing', async () => {
+    const { w } = await boot([], false, [], [local]);
+    const api = (w as any).api;
+    api.chatgptProjectChoices = vi.fn(async () => ({ ok: true, data: listed }));
+    api.createChatgptProject = vi.fn();
+    const menuButton = w.document.querySelector<HTMLButtonElement>(`[data-row-menu="project:${local.id}"]`)!;
+    menuButton.click();
+    w.document.querySelector<HTMLButtonElement>('.row-menu [data-row-action="chatgpt-link"]')!.click();
+    await settle();
+    // A project with no ChatGPT Project can also start a new one from here.
+    expect([...w.document.querySelectorAll('.chatgpt-project-picker [role="option"]')].map(option => option.textContent))
+      .toEqual(['New ChatGPT Project “Local”', 'Existing', 'TakenLinked to Other']);
+    w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(w.document.querySelector('.chatgpt-project-picker')).toBeNull();
+    expect(api.createChatgptProject).not.toHaveBeenCalled();
+  });
+
+  it('unlinks a linked project from its menu, and says the ChatGPT Project stays in ChatGPT', async () => {
+    const linked = { ...local, chatgpt: { state: 'linked' as const, id: existing, updatedAt: 4 } };
+    const { w } = await boot([], false, [], [linked]);
+    const api = (w as any).api;
+    api.unlinkChatgptProject = vi.fn(async () => ({ ok: true, data: local }));
+    const menuButton = w.document.querySelector<HTMLButtonElement>(`[data-row-menu="project:${local.id}"]`)!;
+    menuButton.click();
+    expect(w.document.querySelector('.row-menu [data-row-action="chatgpt-link"]')).toBeNull();
+    w.document.querySelector<HTMLButtonElement>('.row-menu [data-row-action="chatgpt-unlink"]')!.click();
+    await settle();
+    expect(api.unlinkChatgptProject).toHaveBeenCalledWith(local.id);
+    expect(w.document.body.textContent).toContain('Unlinked. The ChatGPT Project stays in ChatGPT.');
+    // Unlinked, the menu offers choosing one again instead of changing or unlinking.
+    menuButton.click();
+    expect(w.document.querySelector('.row-menu [data-row-action="chatgpt-unlink"]')).toBeNull();
+    expect(w.document.querySelector('.row-menu [data-row-action="chatgpt-link"]')).not.toBeNull();
+  });
+});
+
 it('sends a new chat at once with Automatic when no model list is readable and none was asked for (#864)', async () => {
   // ChatGPT Go and Free show no model picker, so Send used to wait two minutes for a list that never came.
   const { w, live } = await boot([], false, [], [], { noModels: true });
@@ -2336,7 +2428,9 @@ it('keeps working state per chat and marks only completed background chats as un
 });
 
 it("marks every New response seen from the header, or one project's from its menu, and leaves a working chat working", async () => {
-  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: '/workspace', createdAt: 1 };
+  // Linked to a ChatGPT Project, so its menu holds no "Choose a ChatGPT Project…" (#1756).
+  const project: LocalProject = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: '/workspace', createdAt: 1,
+    chatgpt: { state: 'linked', id: `g-p-${'a'.repeat(32)}`, updatedAt: 1 } };
   const startedAt = Date.now();
   const chat = (id: string, projectId?: string): SessionSummary => ({ ...summary([]), id, title: id, conversationId: `conversation-${id}`, chatIds: [`conversation-${id}`],
     projectId, updatedAt: startedAt, lastToolCallAt: startedAt, activityExpiresAt: startedAt + 60_000 });
@@ -2349,7 +2443,7 @@ it("marks every New response seen from the header, or one project's from its men
   const refresh = async () => { (w.document.getElementById('chatRefresh') as HTMLButtonElement).click(); await settle(); };
   expect(header().hidden).toBe(true);
   projectMenu(w, project.id);
-  expect(actions()).toEqual(['group-new', 'color', 'secrets-shield', 'remove']);
+  expect(actions()).toEqual(['group-new', 'chatgpt-change', 'chatgpt-unlink', 'color', 'secrets-shield', 'remove']);
   w.document.querySelector<HTMLElement>('.row-menu')!.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 
   // p1, p2 and u1 finish in the background; p3 is still running.
@@ -2363,13 +2457,13 @@ it("marks every New response seen from the header, or one project's from its men
   expect(header().hidden).toBe(false);
 
   projectMenu(w, project.id);
-  expect(actions()).toEqual(['group-new', 'mark-seen', 'color', 'secrets-shield', 'remove']);
+  expect(actions()).toEqual(['group-new', 'chatgpt-change', 'chatgpt-unlink', 'mark-seen', 'color', 'secrets-shield', 'remove']);
   menuItem(w, 'mark-seen').click();
   await settle();
   expect(unseen()).toEqual(['u1']);
   expect(row('p3').querySelector('.session-status.is-active')).not.toBeNull();
   projectMenu(w, project.id);
-  expect(actions()).toEqual(['group-new', 'color', 'secrets-shield', 'remove']);
+  expect(actions()).toEqual(['group-new', 'chatgpt-change', 'chatgpt-unlink', 'color', 'secrets-shield', 'remove']);
   w.document.querySelector<HTMLElement>('.row-menu')!.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 
   header().focus();
@@ -5814,8 +5908,13 @@ it('offers copy and Markdown or HTML export under the answer of a completed turn
   expect(actions!.querySelector<HTMLDetailsElement>('details.answer-export')!.open).toBe(false);
   expect(w.document.activeElement).toBe(actions!.querySelector('details.answer-export > summary'));
   expect(api.exportMarkdown).toHaveBeenCalledWith({ id: summary([]).id, scope: 'session', turnId: undefined, target: 'file' });
+  // A web page is always previewed first: the choice opens Share's dialog and saves nothing by itself.
+  const calls = api.exportMarkdown.mock.calls.length;
+  api.sharePage = vi.fn(async () => ({ ok: true, data: { done: 'preview', preview: '00000000-0000-4000-8000-000000000000', html: '<html><head></head></html>', hidden: 0 } }));
   choices[2]!.click(); await settle();
-  expect(api.exportMarkdown).toHaveBeenLastCalledWith({ id: summary([]).id, scope: 'session', turnId: undefined, target: 'file', format: 'html' });
+  expect(w.document.querySelector<HTMLDialogElement>('#sharePageDialog')!.open).toBe(true);
+  expect(api.sharePage).toHaveBeenCalledWith({ id: summary([]).id, target: 'preview', hide: true, lang: 'en' });
+  expect(api.exportMarkdown.mock.calls.length).toBe(calls);
 });
 
 it('does not offer copy or export after an interrupted turn', async () => {
@@ -7950,6 +8049,506 @@ describe('bookmarked answers', () => {
     expect(api.listBookmarks).toHaveBeenCalledWith(summary([]).id);
     expect((w.document.getElementById('chatBookmarks') as HTMLButtonElement).hidden).toBe(false);
     expect(w.document.querySelector('.answer-actions .answer-bookmark')!.getAttribute('aria-pressed')).toBe('true');
+  });
+});
+
+describe('recorded DIL cards inside a Markdown answer', () => {
+  const source = [
+    'Introduction remains ordinary Markdown.', '',
+    '**Sample archive verification** (Passed)', '',
+    'Documents indexed', '', '# 1,234', '',
+    'Collections checked', '', '# 28', '',
+    'Records verified', '', '# 45,678', '',
+    'Index witnesses', '', '# 11', '', '---', '',
+    'Integrity and consistency checks passed', '',
+    'Original examples were not modified', '',
+    'The explanation after the card stays in the reply.'
+  ].join('\n');
+  const metric = (label: string, value: string): string =>
+    `<div data-d-component="grid-item"><p data-d-component="text" data-d-size="xs">${label}</p>` +
+    `<h1 data-d-component="title" data-d-size="xl">${value}</h1></div>`;
+  const card = '<div data-d-component="card" onclick="alert(1)" style="background: hotpink">' +
+    '<div data-d-component="row" data-d-justify="between"><p data-d-component="text">' +
+    '<span data-d-component="text" data-d-default-strong="">Sample archive verification</span></p>' +
+    '<div data-d-component="badge" data-color="success">Passed</div></div>' +
+    '<div data-d-component="grid" style="grid-template-columns: repeat(2,1fr)">' +
+    metric('Documents indexed', '1,234') + metric('Collections checked', '28') +
+    metric('Records verified', '45,678') + metric('Index witnesses', '11') +
+    '</div><div data-d-component="divider"></div>' +
+    '<div data-d-component="row"><svg data-d-component="icon" style="color: var(--color-text-success)"><path d="M0 0"/></svg>' +
+    '<p data-d-component="text">Integrity and consistency checks passed</p></div>' +
+    '<div data-d-component="row"><svg data-d-component="icon" style="color: var(--color-text-success)"></svg>' +
+    '<p data-d-component="text">Original examples were not modified</p></div></div>';
+  const captured = (markup = card): string =>
+    `<div><p>Introduction remains ordinary Markdown.</p>${markup}` +
+    '<p>The explanation after the card stays in the reply.</p></div>';
+  const answer = (body: string, markup = captured()): SessionEvent => ({
+    seq: 1, origin: 1, time: T0, source: 'extension', kind: 'assistant_message', messageId: 'dil-card',
+    message: text(body), renderedHtml: text(markup), state: 'final', final: true
+  });
+
+  it('restores the compact grid, success badge and static icons without replacing surrounding prose', async () => {
+    const { w } = await boot([answer(source)]);
+    const message = w.document.querySelector('.ev-assistant_message .msg.rich')!;
+    const panel = message.querySelector('.markdown-dil-card')!;
+    expect(panel).not.toBeNull();
+    expect(panel.querySelectorAll('.markdown-dil-grid-item')).toHaveLength(4);
+    expect([...panel.querySelectorAll('.markdown-dil-title')].map(node => node.textContent)).toEqual(['1,234', '28', '45,678', '11']);
+    expect(panel.querySelector('.markdown-dil-badge.markdown-dil-success')?.textContent).toBe('Passed');
+    expect(panel.querySelectorAll('.markdown-dil-success-icon')).toHaveLength(2);
+    expect(message.firstElementChild?.textContent).toBe('Introduction remains ordinary Markdown.');
+    expect(message.lastElementChild?.textContent).toBe('The explanation after the card stays in the reply.');
+    expect([...message.querySelectorAll('h1')]).toHaveLength(4);
+    expect(message.querySelector('[onclick], [style], svg, script')).toBeNull();
+  });
+
+  it('rejects an out-of-date card whose metric no longer matches the canonical answer', async () => {
+    const changed = source.replace('45,678', '45,679');
+    const { w } = await boot([answer(changed)]);
+    const message = w.document.querySelector('.ev-assistant_message .msg.rich')!;
+    expect(message.querySelector('.markdown-dil-card')).toBeNull();
+    expect(message.textContent).toContain('45,679');
+    expect(message.textContent).not.toContain('45,678');
+  });
+
+  it.each([
+    { recorded: '+12%', current: '-12%' },
+    { recorded: '45,678', current: '45.678' },
+    { recorded: '45,678', current: '-45,678' },
+    { recorded: '12%', current: '12' },
+    { recorded: '$100', current: '€100' }
+  ])('refuses a recorded metric $recorded when the current reply says $current', async ({ recorded, current }) => {
+    const { w } = await boot([answer(source.replace('45,678', current), captured(card.replace('45,678', recorded)))]);
+    const root = w.document.querySelector('.ev-assistant_message .msg.rich')!;
+    expect(root.querySelector('.markdown-dil-card')).toBeNull();
+    expect(root.textContent).toContain(current);
+  });
+
+  it.each([
+    { recorded: '✅ Tests', current: '❌ Tests' },
+    { recorded: '🟢 Online', current: '🔴 Online' },
+    { recorded: '⚠️ Warning', current: '✅ Warning' },
+    { recorded: '✓ Checks', current: '✗ Checks' },
+    { recorded: '↑ 12%', current: '↓ 12%' },
+    { recorded: '< 5 ms', current: '> 5 ms' },
+    { recorded: '≤ 5 ms', current: '≥ 5 ms' },
+    { recorded: '± 3', current: '~ 3' }
+  ])('refuses a stale recorded card when only the status or comparison symbol changed ($recorded to $current)', async ({ recorded, current }) => {
+    const { w } = await boot([answer(source.replace('45,678', current), captured(card.replace('45,678', recorded)))]);
+    const root = w.document.querySelector('.ev-assistant_message .msg.rich')!;
+    expect(root.querySelector('.markdown-dil-card')).toBeNull();
+    expect(root.textContent).toContain(current);
+  });
+
+  it('restores a recorded card whose status emoji still matches the current answer', async () => {
+    const updated = '✅ Tests';
+    const { w } = await boot([answer(source.replace('45,678', updated), captured(card.replace('45,678', updated)))]);
+    expect(w.document.querySelector('.ev-assistant_message .msg.rich .markdown-dil-card')).not.toBeNull();
+  });
+
+  it('keeps a recorded card with the app-replaced decorative down-arrow icon', async () => {
+    const withArrow = card.replace(
+      '<svg data-d-component="icon" style="color: var(--color-text-success)"></svg>',
+      '<svg data-d-component="icon"><path d="M12.707 18.707L1 1"/></svg>'
+    );
+    const { w } = await boot([answer(source, captured(withArrow))]);
+    const panel = w.document.querySelector('.ev-assistant_message .msg.rich .markdown-dil-card');
+    expect(panel).not.toBeNull();
+    expect(panel!.querySelectorAll('.markdown-dil-down-icon')).toHaveLength(1);
+  });
+
+  it('does not restore captured cards that contain active controls or links', async () => {
+    const { w } = await boot([answer(source, captured(card.replace('</div></div>', '<button>Click</button></div></div>')))]);
+    const message = w.document.querySelector('.ev-assistant_message .msg.rich')!;
+    expect(message.querySelector('.markdown-dil-card')).toBeNull();
+    expect(message.querySelector('button')).toBeNull();
+    expect(message.textContent).toContain('Documents indexed');
+  });
+
+  it('does not reveal hidden captured text when sanitized layout would remove its visibility attributes', async () => {
+    const hidden = card.replace('<div data-d-component="divider"></div>',
+      '<div data-d-component="divider" aria-hidden="true">Unrecorded hidden text</div>');
+    const { w } = await boot([answer(source, captured(hidden))]);
+    const message = w.document.querySelector('.ev-assistant_message .msg.rich')!;
+    expect(message.querySelector('.markdown-dil-card')).toBeNull();
+    expect(message.textContent).not.toContain('Unrecorded hidden text');
+  });
+
+  it('does not guess which identical canonical span to replace', async () => {
+    const cardSource = source.split('Introduction remains ordinary Markdown.\n\n')[1]!
+      .split('\n\nThe explanation after the card stays in the reply.')[0]!;
+    const { w } = await boot([answer(`${cardSource}\n\n${cardSource}`)]);
+    expect(w.document.querySelector('.markdown-dil-card')).toBeNull();
+  });
+
+  it.each(['missing', 'truncated'] as const)('keeps the canonical Markdown when a recorded layout is %s', async kind => {
+    const capture = kind === 'missing' ? undefined : { ...text(captured()), truncated: true };
+    const event = { ...answer(source), renderedHtml: capture };
+    const { w } = await boot([event]);
+    const root = w.document.querySelector('.ev-assistant_message .msg.rich')!;
+    expect(root.querySelector('.markdown-dil-card')).toBeNull();
+    expect(root.textContent).toContain('Introduction remains ordinary Markdown.');
+    expect(root.textContent).toContain('Documents indexed');
+    expect(root.textContent).toContain('The explanation after the card stays in the reply.');
+  });
+});
+
+describe('charts, diagrams and illustrated Markdown from recorded DIL', () => {
+  const observation = (body: string, html = '<p>Unrelated provider drawing.</p>'): SessionEvent => ({
+    seq: 1, origin: 1, time: T0, source: 'extension', kind: 'assistant_message', messageId: 'rich-layout',
+    message: text(body), renderedHtml: text(html), state: 'final', final: true
+  });
+  const message = (w: { document: Document }): Element => w.document.querySelector('.ev-assistant_message .msg.rich')!;
+
+  it('renders bounded chart data from the canonical widget rather than trusting a captured plot', async () => {
+    const directive = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value', label: 'Sample values', valueSuffix: '%' }],
+      data: [{ group: 'A', value: 4 }, { group: 'B', value: 9 }, { group: 'C', value: 15 }],
+      meta: { footer: 'Illustrative values only' }
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Intro.\n\n${directive}\n\nAfter the chart.`)]);
+    const root = message(w);
+    expect(root.querySelector('.markdown-dil-chart')).not.toBeNull();
+    expect([...root.querySelectorAll('.markdown-dil-chart-x')].map(item => item.textContent)).toEqual(['A', 'B', 'C']);
+    expect([...root.querySelectorAll<HTMLElement>('.markdown-dil-chart-bar')].map(item => item.style.height)).toEqual(['26.666666666666668%', '60%', '100%']);
+    expect(root.querySelector('.markdown-dil-chart')?.getAttribute('aria-label')).toContain('C 15%');
+    expect(root.querySelectorAll('.markdown-dil-chart-column')).toHaveLength(3);
+    expect(root.lastElementChild?.textContent).toBe('After the chart.');
+  });
+
+  it('restores chart placeholders whose zero-based index has three digits', async () => {
+    const directive = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(Array.from({ length: 101 }, (_, i) => `Chart ${i + 1}.\n\n${directive}`).join('\n\n'))]);
+    const root = message(w);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(101);
+    expect(root.textContent).not.toContain('\uE030100\uE031');
+  });
+
+  it.each([
+    { opening: '```json', closing: '```' },
+    { opening: '~~~~example', closing: '~~~~' }
+  ])('keeps a chart example literal inside $opening but draws one outside the fence', async ({ opening, closing }) => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Example code:\n\n${opening}\n${widget}\n${closing}\n\n${widget}\n\nAfter.`)]);
+    const root = message(w);
+    expect(root.querySelector('pre code')?.textContent).toContain(widget);
+    expect(root.querySelector('pre code')?.textContent).not.toContain('\uE030');
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(root.lastElementChild?.textContent).toBe('After.');
+  });
+
+  it('keeps a chart example literal in an unclosed Markdown fence', async () => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Example:\n\n\`\`\`json\n${widget}`)]);
+    const root = message(w);
+    expect(root.querySelector('pre code')?.textContent).toContain(widget);
+    expect(root.querySelector('.markdown-dil-chart')).toBeNull();
+  });
+
+  it.each(['- ```', '> ```'])('does not close a top-level chart code fence at %s', async misleadingCloser => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation('Example:\n\n```json\n' + misleadingCloser + '\n' + widget + '\n```\n\n' + widget + '\n\nAfter.')]);
+    const root = message(w);
+    expect(root.querySelector('pre code')?.textContent).toContain(widget);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(root.lastElementChild?.textContent).toBe('After.');
+  });
+
+  it.each([
+    { name: 'content line', markdown: (widget: string) => 'Example:\n\n```json\n    ```\n' + widget + '\n```\n\n' + widget },
+    { name: 'indented opener', markdown: (widget: string) => 'Example:\n\n    ```\n\n' + widget }
+  ])('respects Marked top-level fence indentation for $name', async ({ markdown, name }) => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(markdown(widget))]);
+    const root = message(w);
+    if (name === 'content line') {
+      expect(root.querySelector('pre code')?.textContent).toContain(widget);
+      expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    } else {
+      expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+      expect(root.textContent).not.toContain('\uE030');
+    }
+  });
+
+  it.each([
+    { spaces: '    ', charts: 2 },
+    { spaces: '      ', charts: 1 }
+  ])('distinguishes list-continuation charts from nested indented code at $spaces spaces', async ({ spaces, charts }) => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation('- Revenue\n\n' + spaces + widget + '\n\n' + widget)]);
+    const root = message(w);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(charts);
+    if (charts === 1) expect(root.querySelector('li pre code')?.textContent).toContain(widget);
+    expect(root.textContent).not.toContain('\uE030');
+  });
+
+  it('protects four-space code after a top-level fence ends a list', async () => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation('- List item\n\n```txt\nStandalone example\n```\n    ' + widget + '\n\n' + widget)]);
+    const root = message(w);
+    expect([...root.querySelectorAll('pre code')].map(node => node.textContent).join('\n')).toContain(widget);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(root.textContent).not.toContain('\uE030');
+  });
+
+  it('does not hide a valid chart between unrelated backticks in separate paragraphs', async () => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation('Unmatched ` before.\n\n' + widget + '\n\nUnmatched ` after.')]);
+    const root = message(w);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(root.textContent).toContain('Unmatched');
+  });
+
+  it.each([
+    { name: 'four spaces', indent: '    ' },
+    { name: 'a tab', indent: '\t' }
+  ])('keeps a chart directive literal inside code indented by $name', async ({ indent }) => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Example:\n\n${indent}${widget}\n\n${widget}\n\nAfter.`)]);
+    const root = message(w);
+    expect(root.querySelector('pre code')?.textContent).toContain(widget);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(root.lastElementChild?.textContent).toBe('After.');
+  });
+
+  it.each(['    ', '\t'])('keeps %s indented chart code immediately after a closed fence', async indent => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation('```txt\nExisting example\n```\n' + indent + widget + '\n\n' + widget + '\n\nAfter.')]);
+    const root = message(w);
+    expect([...root.querySelectorAll('pre code')].map(node => node.textContent).join('\n')).toContain(widget);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(root.lastElementChild?.textContent).toBe('After.');
+  });
+
+  it.each([
+    { name: 'blockquote fence', example: (widget: string) => `> \`\`\`json\n> ${widget}\n> \`\`\``, code: 'blockquote pre code' },
+    { name: 'list-item fence', example: (widget: string) => `- \`\`\`json\n  ${widget}\n  \`\`\``, code: 'li pre code' },
+    { name: 'inline backticks', example: (widget: string) => `Example: \`${widget}\``, code: 'p code' },
+    { name: 'double inline backticks', example: (widget: string) => `Example: \`\`${widget}\`\``, code: 'p code' }
+  ])('keeps a chart example literal in $name and renders the following chart', async ({ example, code }) => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Example code:\n\n${example(widget)}\n\n${widget}\n\nAfter.`)]);
+    const root = message(w);
+    expect(root.querySelector(code)?.textContent).toContain(widget);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(root.lastElementChild?.textContent).toBe('After.');
+  });
+
+  it('formats chart values, axis guides, tooltips and accessibility text in the chosen app language', async () => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value', label: 'Vergleich' }],
+      data: [{ group: 'Erste', value: 45678 }, { group: 'Zweite', value: 7.5 }], yAxisMax: 45678
+    } } })}\uE201`;
+    await boot([observation('Initial message.')]);
+    const { setLanguage } = await import('../src/renderer/i18n.js');
+    const { renderedMarkdown } = await import('../src/renderer/chat.js');
+    setLanguage('de');
+    try {
+      const figure = renderedMarkdown(widget).querySelector('.markdown-dil-chart')!;
+      expect(figure.getAttribute('aria-label')).toBe('Vergleich: Erste 45.678, Zweite 7,5');
+      expect([...figure.querySelectorAll('.markdown-dil-chart-guide span')].map(node => node.textContent))
+        .toEqual(['45.678', '22.839', '0']);
+      expect([...figure.querySelectorAll<HTMLElement>('.markdown-dil-chart-bar')].map(bar => bar.title))
+        .toEqual(['Erste: 45.678', 'Zweite: 7,5']);
+    } finally { setLanguage('en'); }
+  });
+
+  it.each([
+    { label: 'negative', data: [{ group: 'A', value: -1 }] },
+    { label: 'non-numeric', data: [{ group: 'A', value: 'many' }] },
+    { label: 'non-finite', data: [{ group: 'A', value: Number.POSITIVE_INFINITY }] },
+    { label: 'oversized', data: [{ group: 'A', value: 1e13 }] },
+    { label: 'invalid minimum', data: [{ group: 'A', value: 1 }], yAxisMin: -2 },
+    { label: 'invalid maximum', data: [{ group: 'A', value: 5 }], yAxisMax: 4 },
+    { label: 'non-numeric maximum', data: [{ group: 'A', value: 5 }], yAxisMax: '100' }
+  ])('rejects $label chart values without changing the canonical surrounding text', async content => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], ...content
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Before.\n\n${widget}\n\nAfter.`)]);
+    const root = message(w);
+    expect(root.querySelector('.markdown-dil-chart')).toBeNull();
+    expect(root.textContent).toContain('Before.');
+    expect(root.textContent).toContain('After.');
+  });
+
+  it('ignores malformed chart payloads without crashing the timeline', async () => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [null], data: [{ group: 'A', value: 1 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Start.\n\n${widget}\n\nEnd.`)]);
+    const root = message(w);
+    expect(root.querySelector('.markdown-dil-chart')).toBeNull();
+    expect(root.textContent).toContain('Start.');
+    expect(root.textContent).toContain('End.');
+  });
+
+  it('uses the original chart data as its accessible label without adding English text', async () => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }],
+      data: [{ group: 'Échantillon A', value: 2 }, { group: 'Échantillon B', value: 5 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Before.\n\n${widget}\n\nAfter.`)]);
+    expect(message(w).querySelector('.markdown-dil-chart')?.getAttribute('aria-label'))
+      .toBe('Échantillon A 2, Échantillon B 5');
+  });
+
+  it('retains full 36-character chart labels and long guide values for tooltips and accessibility', async () => {
+    const label = 'Fictional group with a long label 12';
+    expect(label).toHaveLength(36);
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value', label: 'Example chart' }],
+      data: [{ group: label, value: 4 }, { group: 'Other', value: 12 }], yAxisMax: 1e12
+    } } })}\uE201`;
+    const { w } = await boot([observation(`A fictional chart.\n\n${widget}`)]);
+    const figure = message(w).querySelector('.markdown-dil-chart')!;
+    expect(figure.getAttribute('aria-label')).toContain(`${label} 4`);
+    const first = figure.querySelector<HTMLElement>('.markdown-dil-chart-x')!;
+    expect(first.textContent).toBe(label);
+    expect(first.title).toBe(label);
+    const guide = figure.querySelector<HTMLElement>('.markdown-dil-chart-guide span')!;
+    expect(guide.textContent).toBe('1T');
+    expect(guide.title).toBe('1,000,000,000,000');
+    expect(guide.getAttribute('aria-label')).toBe('1,000,000,000,000');
+    expect([...figure.querySelectorAll('.markdown-dil-chart-guide span')].map(node => node.textContent))
+      .toEqual(['1T', '500B', '0']);
+    expect([...figure.querySelectorAll('.markdown-dil-chart-guide span')].every(node => !node.textContent?.includes('…')))
+      .toBe(true);
+    const lines = [...figure.querySelectorAll('.markdown-dil-chart-bars > .markdown-dil-chart-gridline')];
+    expect(lines.map(node => node.classList.item(1))).toEqual([
+      'markdown-dil-chart-gridline-top',
+      'markdown-dil-chart-gridline-middle',
+      'markdown-dil-chart-gridline-baseline'
+    ]);
+    expect(lines.map(node => node.getAttribute('aria-hidden'))).toEqual(['true', 'true', 'true']);
+  });
+
+  it('uses compact y-axis guides in German without losing the exact localized tooltip or aria value', async () => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value', label: 'Beispiel' }],
+      data: [{ group: 'Erste', value: 1e12 }, { group: 'Zweite', value: 5e11 }], yAxisMax: 1e12
+    } } })}\uE201`;
+    await boot([observation('Initial message.')]);
+    const { setLanguage } = await import('../src/renderer/i18n.js');
+    const { renderedMarkdown } = await import('../src/renderer/chat.js');
+    setLanguage('de');
+    try {
+      const figure = renderedMarkdown(widget).querySelector('.markdown-dil-chart')!;
+      const guides = [...figure.querySelectorAll<HTMLElement>('.markdown-dil-chart-guide span')];
+      expect(guides.map(label => label.textContent)).toEqual(['1 Bio.', '500 Mrd.', '0']);
+      expect(guides.map(label => label.title)).toEqual(['1.000.000.000.000', '500.000.000.000', '0']);
+      expect(guides.map(label => label.getAttribute('aria-label')))
+        .toEqual(['1.000.000.000.000', '500.000.000.000', '0']);
+      expect(figure.getAttribute('aria-label')).toContain('Erste 1.000.000.000.000');
+      expect(guides.every(label => !label.textContent?.includes('…'))).toBe(true);
+    } finally { setLanguage('en'); }
+  });
+
+  it('recovers the side-by-side table workflow only when its entire text matches', async () => {
+    const body = [
+      'Before.', '', '**Genetics**', '', 'Variants', '', '| ID | SNP |', '| --- | --- |', '| P1 | 0 |', '| P2 | 1 |', '',
+      '**Microbiome**', '', 'Species', '', '| ID | Bacteria |', '| --- | --- |', '| P1 | 4% |', '| P2 | 9% |', '',
+      'Match by ID', '', '**Association test**', '', 'Test each SNP.', '', 'After.'
+    ].join('\n');
+    const table = (title: string, subtitle: string, last: string, a: string, b: string) =>
+      `<div data-d-component="grid-item"><p><strong>${title}</strong></p><p>${subtitle}</p>` +
+      `<table><tr><th>ID</th><th>${last}</th></tr><tr><td>P1</td><td>${a}</td></tr><tr><td>P2</td><td>${b}</td></tr></table></div>`;
+    const workflow = `<div data-d-component="box" data-d-has-border=""><div data-d-component="grid">` +
+      table('Genetics', 'Variants', 'SNP', '0', '1') + table('Microbiome', 'Species', 'Bacteria', '4%', '9%') +
+      `</div><p>Match by ID</p><div data-d-component="box" data-d-has-border=""><p><strong>Association test</strong></p>` +
+      `<p>Test each SNP.</p></div></div>`;
+    const { w } = await boot([observation(body, `<p>Before.</p>${workflow}<p>After.</p>`)]);
+    const root = message(w);
+    expect(root.querySelector('.markdown-dil-panel .markdown-dil-grid')).not.toBeNull();
+    expect(root.querySelectorAll('.markdown-dil-panel .markdown-dil-grid-item')).toHaveLength(2);
+    expect(root.querySelector('.markdown-dil-panel .markdown-dil-bordered')).not.toBeNull();
+    expect(root.firstElementChild?.textContent).toBe('Before.');
+    expect(root.lastElementChild?.textContent).toBe('After.');
+  });
+
+  it('rebuilds an ordered two-step panel without turning step numbers into oversized headings', async () => {
+    const body = '1\n\n**Step one**\n\nStart here.\n\n2\n\n**Step two**\n\nFinish here.';
+    const step = (number: number, heading: string, text: string) => `<div data-d-component="row"><div data-d-component="box">` +
+      `<h2 data-d-component="title">${number}</h2></div><div data-d-component="box"><p><strong>${heading}</strong></p><p>${text}</p></div></div>`;
+    const { w } = await boot([observation(body, `<div data-d-component="box">${step(1, 'Step one', 'Start here.')}${step(2, 'Step two', 'Finish here.')}</div>`)]);
+    expect(message(w).querySelectorAll('.markdown-dil-steps > .markdown-dil-row')).toHaveLength(2);
+  });
+
+  it('restores a local vector figure after excluding all external SVG capabilities', async () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50" width="100" height="50"><line x1="0" y1="0" x2="100" y2="50" stroke="currentColor"/><circle cx="60" cy="25" r="4" fill="blue"/></svg>';
+    const captured = (image: string): string => `<div data-d-component="box" data-d-has-border=""><p>Illustrative plot</p>` +
+      `<img data-d-component="svg" src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(image)}">` +
+      `<p>Schematic only.</p></div>`;
+    const body = 'Illustrative plot\n\nSchematic only.';
+    const { w } = await boot([observation(body, captured(svg))]);
+    const restored = message(w).querySelector<HTMLImageElement>('.markdown-dil-panel img.markdown-dil-svg');
+    expect(restored?.src).toContain('data:image/svg+xml;charset=utf-8,');
+    expect(decodeURIComponent(restored!.src)).toContain('<circle');
+    const poisoned = svg.replace('</svg>', '<script>alert(1)</script></svg>');
+    dom?.window.close(); dom = null; vi.resetModules();
+    const { w: other } = await boot([observation(body, captured(poisoned))]);
+    expect(message(other).querySelector('.markdown-dil-panel')).toBeNull();
+    expect(message(other).querySelector('script, img')).toBeNull();
+  });
+
+  it.each(['text', 'tspan'])('refuses a recorded SVG containing %s labels that cannot be revision-matched', async tag => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><g><${tag}>Old value 12</${tag}></g></svg>`;
+    const captured = `<div data-d-component="box" data-d-has-border=""><p>Illustrative plot</p>` +
+      `<img data-d-component="svg" src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}">` +
+      `<p>Schematic only.</p></div>`;
+    const { w } = await boot([observation('Illustrative plot\n\nSchematic only.', captured)]);
+    const root = message(w);
+    expect(root.querySelector('.markdown-dil-panel, .markdown-dil-svg')).toBeNull();
+    expect(root.textContent).toContain('Illustrative plot');
+    expect(root.textContent).not.toContain('Old value 12');
+  });
+
+  it('allows only static first-party search illustrations, not arbitrary recorded image requests', async () => {
+    const html = (url: string): string => `<div data-d-component="row"><div data-d-component="box">` +
+      `<div data-d-component="image"><img src="${url}" alt=""></div></div>` +
+      `<div data-d-component="box"><p><strong>Example item</strong></p><p>Short explanation.</p></div></div>`;
+    const body = '**Example item**\n\nShort explanation.';
+    const { w } = await boot([observation(body, html('https://images.openai.com/static-rsc-4/Example01234'))]);
+    expect(message(w).querySelector('.markdown-dil-photo-row img.markdown-dil-photo')).not.toBeNull();
+    dom?.window.close(); dom = null; vi.resetModules();
+    const { w: other } = await boot([observation(body, html('https://untrusted.invalid/track'))]);
+    expect(message(other).querySelector('.markdown-dil-photo-row')).toBeNull();
+  });
+
+  it('keeps the canonical answer readable if a recorded illustration cannot load', async () => {
+    const captured = '<div data-d-component="row"><div data-d-component="box">' +
+      '<div data-d-component="image"><img src="https://images.openai.com/static-rsc-4/Example01234"></div></div>' +
+      '<div data-d-component="box"><p><strong>Example item</strong></p><p>Short explanation.</p></div></div>';
+    const { w } = await boot([observation('**Example item**\n\nShort explanation.', captured)]);
+    const row = message(w).querySelector('.markdown-dil-photo-row')!;
+    const image = row.querySelector<HTMLImageElement>('img.markdown-dil-photo')!;
+    expect(image.referrerPolicy).toBe('no-referrer');
+    image.dispatchEvent(new w.Event('error'));
+    expect(row.querySelector('.markdown-dil-photo, .markdown-dil-box:first-child:empty')).toBeNull();
+    expect(row.textContent).toContain('Example item');
+    expect(row.textContent).toContain('Short explanation.');
   });
 });
 

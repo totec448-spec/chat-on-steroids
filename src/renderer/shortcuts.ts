@@ -21,6 +21,23 @@ export function primaryShiftShortcut(key: string): string {
   return isMac() ? `⌘⇧${key}` : `${t('Ctrl')}+${t('Shift')}+${key}`;
 }
 
+/**
+ * Hold-to-talk in the message box. Only Windows gets the chord, and only Windows names it. There
+ * Ctrl+Space toggles Chinese IMEs, Shift+Space switches their character width and Alt+Space opens
+ * the window menu, while Ctrl+Shift+Space is no Windows or IME default (pressing Space cancels a
+ * Ctrl+Shift layout switch, as with the docks' Ctrl+Shift+1–4). macOS owns Ctrl+Space,
+ * Ctrl+Option+Space, Cmd+Space and Ctrl+Cmd+Space, and IBus/Fcitx own Super+Space and Ctrl+Space
+ * on Linux; dictation is Windows-only today, so those platforms would need their own pick.
+ */
+export function holdToTalkSupported(): boolean {
+  return /^Win/.test(navigator.platform);
+}
+
+/** "Ctrl+Shift+Space" (or "Strg+Umschalt+Leertaste"): Ctrl on every system, as the chord is handled. */
+export function holdToTalkShortcut(): string {
+  return `${t('Ctrl')}+${t('Shift')}+${t('Space')}`;
+}
+
 /** A key that is Control on every system: "⌃⇧1" on macOS, "Ctrl+Shift+1" (or "Strg+Umschalt+1") elsewhere. */
 export function controlShiftShortcut(key: string): string {
   return isMac() ? `⌃⇧${key}` : `${t('Ctrl')}+${t('Shift')}+${key}`;

@@ -1438,6 +1438,35 @@
     return Boolean(keepAwakeRelease);
   }
 
+  const PROJECT_LIST_MS = 15_000;
+  let reportedProjects = '';
+  let reportedProjectsAt = 0;
+  /** An unchanged list is sent again after a day, so a tab left open keeps its Projects from expiring in the app. */
+  const PROJECT_LIST_RENEW_MS = 24 * 3_600_000;
+  /**
+   * Tells the app which Projects ChatGPT's sidebar lists (#1756) when that list changed, and once a day: the
+   * app offers them when a project is linked. An empty list still names the workspace in use, so the
+   * app stops offering another workspace's Projects; it removes none it already knows.
+   */
+  function reportProjectList() {
+    if (globalThis.top !== globalThis) return;
+    const projects = CLF_DOM.projectsShown();
+    // The workspace these are listed in: ChatGPT opens a Project only in its own workspace, and
+    // names the one in use in this cookie (absent for a personal account). Read, never sent elsewhere.
+    const cookie = String(document.cookie || '').split(';').map(part => part.trim()).find(part => part.startsWith('_account='));
+    // A malformed escape must not throw on every pass and stop the reports: it counts as given.
+    const raw = cookie ? cookie.slice('_account='.length) : '';
+    let workspace = null;
+    try { workspace = decodeURIComponent(raw) || null; } catch { workspace = raw || null; }
+    const signature = JSON.stringify([workspace, projects]);
+    if (signature === reportedProjects && Date.now() - reportedProjectsAt < PROJECT_LIST_RENEW_MS) return;
+    reportedProjects = signature;
+    reportedProjectsAt = Date.now();
+    void ask({ type: 'project_catalog', projects, workspace }).then(reply => {
+      if (!reply || reply.ok !== true) reportedProjects = '';
+    }, () => { reportedProjects = ''; });
+  }
+
   /** Talks to the service worker. Returns null once the extension is reloaded. */
   async function ask(message, current = null) {
     // A new/reloaded document claims its browser-supplied MessageSender.documentId before
@@ -12787,7 +12816,10 @@
     // New chats can receive their stream id before /c/<id>. The existing observer
     // drains a bounded set when that exact route appears; navigation retires it.
     for (const requestId of requestIds) {
-      if (requestOwnersConfirmed.get(requestId) === claimed || pendingStreamOrigins.has(requestId) || pendingStreamOrigins.size >= 16) continue;
+      if (requestOwnersConfirmed.get(requestId) === claimed || pendingStreamOrigins.has(requestId)) continue;
+      // Sixteen at most. The newest is the turn running now; an old one the app could not place
+      // yet (no call under it so far) gives way, instead of the current turn's id being dropped (#1752).
+      if (pendingStreamOrigins.size >= 16) pendingStreamOrigins.delete(pendingStreamOrigins.keys().next().value);
       pendingStreamOrigins.set(requestId, { conversationId: claimed, observedAt, epoch, deadline: Date.now() + 15 * 60_000 });
     }
     flushStreamRequestOrigins();
@@ -14437,6 +14469,7 @@
   watchToolRows();
   watchTranscript();
   watchChatEnd();
+  every(PROJECT_LIST_MS, reportProjectList);
 
   every(OBSERVE_MS, () => {
     recoverConversationLoad();

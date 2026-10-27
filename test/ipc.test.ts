@@ -117,6 +117,17 @@ it.each(['playfulStatus', 'playfulContinue', 'followOutput', 'announceTurns'] as
   expect(getConfig().ui[key]).toBe(wanted);
 });
 
+it('saves Play sounds through Settings, off by default, and keeps it across a stale unrelated save (#1802)', async () => {
+  const base = getConfig();
+  expect(base.ui.sounds).toBe(false);
+  expect(await save({ ...base, ui: { ...base.ui, sounds: true } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.sounds).toBe(true);
+  expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.sounds).toBe(true);
+  expect(await save({ ...getConfig(), ui: { ...getConfig().ui, sounds: false } }, getConfig())).toMatchObject({ ok: true });
+  expect(getConfig().ui.sounds).toBe(false);
+});
+
 it('saves Auto-select Skills through Settings and preserves it across a stale unrelated save', async () => {
   const base = getConfig();
   const wanted = !(base.ui.autoSelectSkills ?? false);
@@ -124,6 +135,21 @@ it('saves Auto-select Skills through Settings and preserves it across a stale un
   expect(getConfig().ui.autoSelectSkills).toBe(wanted);
   expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
   expect(getConfig().ui.autoSelectSkills).toBe(wanted);
+});
+
+it('saves the Code checkpoints switch through Settings, preserves it across a stale unrelated save and keeps it when omitted', async () => {
+  const base = getConfig();
+  expect(base.projects.codeCheckpoints).toBe(false);
+  expect(await save({ ...base, projects: { codeCheckpoints: true } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().projects.codeCheckpoints).toBe(true);
+  expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().projects.codeCheckpoints).toBe(true);
+  const { projects: _omitted, ...withoutProjects } = getConfig();
+  expect(await save(withoutProjects as never, withoutProjects as never)).toMatchObject({ ok: true });
+  expect(getConfig().projects.codeCheckpoints).toBe(true);
+  const live = getConfig();
+  expect(await save({ ...live, projects: { codeCheckpoints: false } }, live)).toMatchObject({ ok: true });
+  expect(getConfig().projects.codeCheckpoints).toBe(false);
 });
 
 it('saves the Continue prompt from Settings, keeps it through a stale save, and clears it when emptied', async () => {
@@ -572,6 +598,31 @@ it('adds picker-selected projects, reuses containing approval, and leaves cancel
   expect(await handlers.get('sessions:toolEditReview')!(null, {
     sessionId: first.data.id, callId: 'not-a-uuid', changeIndex: 0
   })).toMatchObject({ ok: false });
+});
+
+it('adds a folder whose ChatGPT Project the person picks next, and links or creates it (#1756)', async () => {
+  currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
+  const folder = path.join(dir, 'link-project');
+  await fs.mkdir(path.join(folder, 'other'), { recursive: true });
+  await saveConfig({ ...defaultConfig(), roots: [] });
+  await writeDurableNow('projects', []);
+  const { noteChatgptProjects } = await import('../src/main/chatgpt-project-catalog.js');
+  const listed = `g-p-${'e'.repeat(32)}`;
+  await noteChatgptProjects([{ id: listed, name: 'Existing' }]);
+  vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: false, filePaths: [folder] });
+  const later = await handlers.get('projects:add')!(null, { chatgpt: 'later' }) as any;
+  expect(later.ok, later.error).toBe(true);
+  expect(later.data.chatgpt).toBeUndefined();
+  expect(await handlers.get('projects:add')!(null, { chatgpt: 'now' })).toMatchObject({ ok: false });
+  expect((await handlers.get('projects:chatgpt-choices')!(null, {}) as any).data).toEqual([{ id: listed, name: 'Existing', linkedTo: null }]);
+  expect(await handlers.get('projects:chatgpt-link')!(null, { id: later.data.id, chatgptId: 'g-p-x' })).toMatchObject({ ok: false });
+  const linked = await handlers.get('projects:chatgpt-link')!(null, { id: later.data.id, chatgptId: listed }) as any;
+  expect(linked).toMatchObject({ ok: true, data: { chatgpt: { state: 'linked', id: listed } } });
+  expect((await handlers.get('projects:chatgpt-choices')!(null, {}) as any).data[0].linkedTo).toEqual({ id: later.data.id, name: 'link-project' });
+  vi.mocked(dialog.showOpenDialog).mockResolvedValue({ canceled: false, filePaths: [path.join(folder, 'other')] });
+  const second = await handlers.get('projects:add')!(null, { chatgpt: 'later' }) as any;
+  const created = await handlers.get('projects:chatgpt-create')!(null, { id: second.data.id }) as any;
+  expect(created).toMatchObject({ ok: true, data: { chatgpt: { state: 'requested' } } });
 });
 
 it('does not install a stale Git watch after a newer Files project watch', async () => {
@@ -1319,6 +1370,76 @@ describe('root namespace invariants', () => {
 });
 
 /** Exercise the real IPC policy for both Settings buttons and authored chat links. */
+describe('Commit & PR', () => {
+  it('remembers how far Commit goes, and keeps it through a settings save', async () => {
+    expect(await handlers.get('projectCommit:flow')!(null, { flow: 'pr' })).toEqual({ ok: true, data: true });
+    expect(getConfig().ui.commitFlow).toBe('pr');
+    expect(((await handlers.get('projectCommit:flow')!(null, { flow: 'always' })) as { ok: boolean }).ok).toBe(false);
+    expect(getConfig().ui.commitFlow).toBe('pr');
+    // The Settings form does not own it; a save that changes something else carries it through.
+    const base = getConfig();
+    expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
+    expect(getConfig().ui.commitFlow).toBe('pr');
+  });
+
+  // A well-formed request for a project that does not exist reaches the commit and is refused there;
+  // each malformed one must be refused before, for its own field.
+  const wellFormed = { projectId: '6f9619ff-8b86-4d01-b42d-00cf4fc964ff', message: 'x', paths: ['a.ts'], expectedToken: 'a'.repeat(64) };
+  it.each([
+    { expectedToken: 'short' },
+    { paths: ['../outside.ts'] },
+    { paths: ['src/../../outside.ts'] },
+    { paths: ['C:\\Windows\\win.ini'] },
+    { message: 'x'.repeat(10_001) },
+    { amend: true }
+  ])('refuses a commit request before Git runs: %o', async change => {
+    const reached = (await handlers.get('projectCommit:commit')!(null, wellFormed)) as { ok: boolean; error: string };
+    expect(reached.ok).toBe(false);
+    const refused = (await handlers.get('projectCommit:commit')!(null, { ...wellFormed, ...change })) as { ok: boolean; error: string };
+    expect(refused.ok).toBe(false);
+    expect(refused.error).not.toBe(reached.error);
+    if (change.paths) expect(refused.error).toBe('A path must stay inside the project.');
+  });
+
+  it('tells the window the remembered choice at once, so the next Commit opens with it', async () => {
+    currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
+    try {
+      await handlers.get('projectCommit:flow')!(null, { flow: getConfig().ui.commitFlow === 'commit' ? 'pr' : 'commit' });
+      const sent = vi.mocked(currentWindow.webContents.send).mock.calls.find(([channel]) => channel === 'state:changed');
+      expect((sent?.[1] as { config: { ui: { commitFlow?: string } } } | undefined)?.config.ui.commitFlow).toBe(getConfig().ui.commitFlow);
+    } finally {
+      currentWindow = null;
+    }
+  });
+});
+
+describe('in-app feedback', () => {
+  it("opens GitHub's form filled in, with the app's version, and says nothing was shortened", async () => {
+    vi.mocked(app.getVersion).mockReturnValue('2.1.46');
+    const reply = await handlers.get('feedback:openIssue')!(null, { kind: 'bug', what: 'The Stop button stays grey.', frequency: 'Sometimes' });
+    expect(reply).toEqual({ ok: true, data: { trimmed: false } });
+    const url = new URL(vi.mocked(shell.openExternal).mock.calls.at(-1)![0] as string);
+    expect(url.origin + url.pathname).toBe('https://github.com/totec448-spec/chat-on-steroids/issues/new');
+    expect(url.searchParams.get('template')).toBe('bug_report.yml');
+    expect(url.searchParams.get('version')).toBe('2.1.46');
+    expect(url.searchParams.get('operating_system')).toBeTruthy();
+    expect(url.searchParams.get('frequency')).toBe('Sometimes');
+  });
+
+  it.each([
+    { kind: 'bug', what: '   ' },
+    { kind: 'idea', problem: 'p', proposal: '' },
+    { kind: 'bug', what: 'x', template: 'blank.yml' },
+    { kind: 'bug', what: 'x', frequency: 'Always' },
+    { kind: 'bug', what: 'x'.repeat(4001) },
+    { kind: 'other', what: 'x' }
+  ])('opens nothing for a report the form cannot take: %o', async report => {
+    const before = vi.mocked(shell.openExternal).mock.calls.length;
+    expect(((await handlers.get('feedback:openIssue')!(null, report)) as { ok: boolean }).ok).toBe(false);
+    expect(vi.mocked(shell.openExternal).mock.calls.length).toBe(before);
+  });
+});
+
 describe('every link the window offers', () => {
   it('is one link:open will actually open', async () => {
     const { promises: fs } = await import('node:fs');
