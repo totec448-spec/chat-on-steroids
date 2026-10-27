@@ -239,6 +239,16 @@ describe('captured ChatGPT rendered HTML', () => {
     expect(rendered.textContent).not.toContain('\uE030');
   });
 
+  it('ends indented list code when indentation drops below the list code column', () => {
+    const chart = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Visible value', value: 3 }]
+    } } })}\uE201`;
+    const rendered = renderedMarkdown(`- Item\n\n      Code example\n    ${chart}\n\n${chart}`);
+    expect(rendered.querySelector('pre code')?.textContent).toContain('Code example');
+    expect(rendered.querySelectorAll('.markdown-dil-chart')).toHaveLength(2);
+    expect(rendered.textContent).not.toContain('\uE030');
+  });
+
   it('does not rescan the same paragraph text for every recorded-layout match start', () => {
     const source = Array.from({ length: 40 }, () => 'Repeated').join('\n\n');
     const html = '<div data-d-component="box" data-d-has-border="">' +
