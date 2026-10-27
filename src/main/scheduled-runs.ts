@@ -17,7 +17,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { readDurable, writeDurableNow } from './durable.js';
-import { dueRun, validSchedule, type Schedule, type ScheduleRepeat } from '../shared/schedule.js';
+import { SCHEDULE_ON_TIME_MS, dueRun, validSchedule, type Schedule, type ScheduleRepeat } from '../shared/schedule.js';
 import { MAX_CHATGPT_MESSAGE_CHARS } from '../shared/user-prompt.js';
 
 const STORE = 'scheduled-runs';
@@ -167,7 +167,21 @@ export function runDueSchedules(now: number, deps: RunnerDeps): Promise<void> {
         continue;
       }
       const due = dueRun(asSchedule(run), now);
-      if (!due) continue;
+      if (!due) {
+        // An ended schedule sends nothing; a run it missed before its end date is said once, and kept as "Missed".
+        if (run.until !== null && !run.paused && now > run.until + SCHEDULE_ON_TIME_MS) {
+          const missed = dueRun({ ...asSchedule(run), until: null }, run.until);
+          if (missed) {
+            try {
+              await replace({ ...run, lastDueAt: missed.dueAt, missedDueAt: missed.dueAt });
+              deps.log(`scheduled run: ${clock(missed.dueAt)} not sent: the schedule ended before it could run (${run.sessionId})`);
+            } catch (error) {
+              deps.log(`scheduled run: ${clock(missed.dueAt)} not recorded yet (${error instanceof Error ? error.message : String(error)}); checked again in 30 s (${run.sessionId})`);
+            }
+          }
+        }
+        continue;
+      }
       try {
         if (run.lastInputId && (await deps.pending()).has(run.lastInputId)) {
           deps.log(`scheduled run: ${clock(due.dueAt)} skipped: the previous run still waits in the queue (${run.sessionId})`);
