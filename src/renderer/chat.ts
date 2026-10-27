@@ -4166,6 +4166,17 @@ export function finishedBlocks(text: string): string {
   return text.slice(0, end);
 }
 
+/** Markdown indentation uses four-column tab stops, not character counts. */
+function indentColumns(line: string): number {
+  let columns = 0;
+  for (const char of line) {
+    if (char === ' ') columns++;
+    else if (char === '\t') columns += 4 - (columns % 4);
+    else break;
+  }
+  return columns;
+}
+
 /** Locate Markdown fences, including ones nested under blockquotes and list items. */
 function fencedMarkdownRanges(text: string): Array<{ start: number; end: number }> {
   const ranges: Array<{ start: number; end: number }> = [];
@@ -4178,7 +4189,7 @@ function fencedMarkdownRanges(text: string): Array<{ start: number; end: number 
     const quotePrefix = /^(?:[ \t]*>[ \t]?)+/.exec(line)?.[0] ?? '';
     const quoteDepth = (quotePrefix.match(/>/g) ?? []).length;
     const content = line.slice(quotePrefix.length);
-    const indent = /^(?:[ ]|\t)*/.exec(content)?.[0].length ?? 0;
+    const indent = indentColumns(content);
     const body = line.replace(/^(?:[ \t]*(?:>|[-*+]|\d{1,9}[.)])(?=[ \t]|$)[ \t]?)*/, '');
     // Marked ends a nested fence when its quote/list container ends, even
     // without closing backticks. The first outside line may open another fence.
@@ -4197,7 +4208,7 @@ function fencedMarkdownRanges(text: string): Array<{ start: number; end: number 
       }
     } else {
       const marker = /^ {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+/.exec(content);
-      if (marker) listIndent = marker[0].length;
+      if (marker) listIndent = indentColumns(marker[0].replace(/\S/g, ' '));
       else if (content.trim() && listIndent !== null && indent < listIndent) listIndent = null;
       const nested = body.length !== line.length;
       const open = (nested ? /^[ \t]*(`{3,}|~{3,})(.*)$/ : /^ {0,3}(`{3,}|~{3,})(.*)$/).exec(body);
@@ -4221,15 +4232,6 @@ function markdownCodeRanges(text: string): Array<{ start: number; end: number }>
   let afterBlank = true;
   let fenceIndex = 0;
   let listContentIndent: number | null = null;
-  const indentColumns = (line: string): number => {
-    let columns = 0;
-    for (const char of line) {
-      if (char === ' ') columns++;
-      else if (char === '\t') columns += 4 - (columns % 4);
-      else break;
-    }
-    return columns;
-  };
   for (let at = 0; at < text.length;) {
     const newline = text.indexOf('\n', at);
     const end = newline < 0 ? text.length : newline + 1;
@@ -4252,7 +4254,7 @@ function markdownCodeRanges(text: string): Array<{ start: number; end: number }>
       // Indented list content begins at the marker's text column. Its code
       // blocks need *another* four columns, unlike a plain four-space continuation.
       const marker = /^([ ]{0,3})(?:[-*+]|\d{1,9}[.)])([ \t]+)/.exec(line);
-      if (marker) listContentIndent = marker[0].length;
+      if (marker) listContentIndent = indentColumns(marker[0].replace(/\S/g, ' '));
       else if (line.trim() && listContentIndent !== null && indentColumns(line) < listContentIndent) {
         listContentIndent = null;
       }

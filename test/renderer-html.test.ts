@@ -229,6 +229,16 @@ describe('captured ChatGPT rendered HTML', () => {
     expect([...rendered.querySelectorAll('pre code')].some(code => code.textContent?.includes(chart))).toBe(true);
   });
 
+  it('keeps tab-indented list fence content literal and renders the chart after it', () => {
+    const chart = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Sample', value: 7 }]
+    } } })}\uE201`;
+    const rendered = renderedMarkdown(`- \`\`\`json\n\tstill in the list fence\n  ${chart}\n  \`\`\`\n\n${chart}`);
+    expect(rendered.querySelector('pre code')?.textContent).toContain(chart);
+    expect(rendered.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(rendered.textContent).not.toContain('\uE030');
+  });
+
   it('does not rescan the same paragraph text for every recorded-layout match start', () => {
     const source = Array.from({ length: 40 }, () => 'Repeated').join('\n\n');
     const html = '<div data-d-component="box" data-d-has-border="">' +
