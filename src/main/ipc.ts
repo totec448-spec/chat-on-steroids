@@ -126,7 +126,8 @@ import {
   stopBridge,
   sweepStaleSwarm,
   unpair,
-  followChatInBackground
+  followChatInBackground,
+  browserPickupContext
 } from './bridge.js';
 import { extensionDir } from './extension-path.js';
 import { APP_VERSION, extensionDownloadUrl } from './version.js';
@@ -2378,6 +2379,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     target.webContents.send(channel, ...args);
   };
   configureInputDelivery({
+    pickupContext: () => browserPickupContext(),
     recoveryAllowed: recoveryInputAllowed,
     callsHoldRecovery: recoveryHeldByCalls,
     activity: sessionInputActivity,
