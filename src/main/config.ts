@@ -365,6 +365,13 @@ const configSchema = z.object({
     /** #1856: the person's Personality and Writing style for new chats; absent = default, '' = left out. */
     chatPersonality: chatStyleField('chatPersonality'),
     chatWritingStyle: chatStyleField('chatWritingStyle'),
+    /**
+     * #1794: the local program asked before each send the app makes by itself; absent or empty is off.
+     * A damaged value stays set as one that is not on this computer, so the gate holds instead of opening.
+     * The app never saves null (an empty field is left out), so a saved null is damage too.
+     */
+    sendCheckUrl: z.unknown().transform(value => value === undefined ? undefined
+      : typeof value === 'string' ? value.trim().slice(0, 300) || undefined : 'damaged').optional(),
     /** Keep the chat at its end while it grows, in the app and on ChatGPT, until the reader scrolls up. */
     followOutput: z.boolean().optional().default(true),
     mentionCore: z.boolean().optional().default(true),
