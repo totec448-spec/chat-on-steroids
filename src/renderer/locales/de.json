@@ -3339,5 +3339,6 @@
   "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "Der Reviewer hat ein Problem gefunden, an dem Goal nicht sicher vorbeikommt. Öffne den Chat, um es zu prüfen.",
   "Waiting for the reviewer": "Warte auf den Reviewer",
   "Continues without the review in {0}": "Weiter ohne Review in {0}",
-  "Continuing without the review…": "Weiter ohne Review …"
+  "Continuing without the review…": "Weiter ohne Review …",
+  "The request was not valid.": "Die Anfrage war ungültig."
 }

@@ -3274,5 +3274,6 @@
   "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "검토자가 Goal이 안전하게 넘어갈 수 없는 문제를 찾았습니다. 채팅을 열어 확인하세요.",
   "Waiting for the reviewer": "검토자 대기 중",
   "Continues without the review in {0}": "{0} 후 검토 없이 계속",
-  "Continuing without the review…": "검토 없이 계속하는 중…"
+  "Continuing without the review…": "검토 없이 계속하는 중…",
+  "The request was not valid.": "요청이 올바르지 않습니다."
 }

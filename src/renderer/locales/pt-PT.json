@@ -3404,5 +3404,6 @@
   "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "O revisor encontrou um problema que o Goal não pode ultrapassar com segurança. Abra o chat para o verificar.",
   "Waiting for the reviewer": "A aguardar o revisor",
   "Continues without the review in {0}": "Continua sem a revisão dentro de {0}",
-  "Continuing without the review…": "A continuar sem a revisão…"
+  "Continuing without the review…": "A continuar sem a revisão…",
+  "The request was not valid.": "O pedido não era válido."
 }
