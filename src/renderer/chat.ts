@@ -1084,10 +1084,25 @@ function markAllSeen(projectId?: string): void {
 let sessionTooltipDismissed: string | null = null;
 
 function placeSessionTooltip(tip: HTMLElement, row: HTMLElement): void {
-  tip.textContent = row.title;
+  // While the app's tooltip shows, the row hands it its title (#1862): the browser shows no second one.
+  if (row.hasAttribute('title')) { row.dataset.tooltip = row.title; row.removeAttribute('title'); }
+  tip.textContent = row.dataset.tooltip ?? '';
   const bounds = row.getBoundingClientRect();
   tip.style.left = `${Math.min(bounds.right + 10, window.innerWidth - 290)}px`;
   tip.style.top = `${Math.min(bounds.top, window.innerHeight - 110)}px`;
+}
+
+/** The row's title again, once the app's tooltip is gone. */
+function giveBackTitle(row: HTMLElement): void {
+  if (row.dataset.tooltip === undefined) return;
+  if (!row.hasAttribute('title')) row.title = row.dataset.tooltip;
+  delete row.dataset.tooltip;
+}
+
+/** Puts the app's tooltip away, and every row that handed it its title gets it back. */
+function removeSessionTooltip(): void {
+  document.getElementById('sessionTooltip')?.remove();
+  for (const row of document.querySelectorAll<HTMLElement>('.sess[data-tooltip]')) giveBackTitle(row);
 }
 
 /** Unsent text waits in this chat's composer. The open chat shows its draft itself, so it never counts. */
@@ -1147,15 +1162,22 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     document.body.append(tip);
   };
   row.addEventListener('pointerenter', showTip);
+  // Repainted under the pointer while this chat's tooltip shows: the new row hands it its title too.
+  if (document.getElementById('sessionTooltip')?.dataset.for === summary.id) requestAnimationFrame(() => {
+    const current = document.getElementById('sessionTooltip');
+    if (current?.dataset.for === summary.id && row.isConnected) placeSessionTooltip(current, row);
+  });
   row.addEventListener('pointerleave', () => {
     if (sessionTooltipDismissed === summary.id) sessionTooltipDismissed = null;
-    document.getElementById('sessionTooltip')?.remove();
+    removeSessionTooltip();
+    giveBackTitle(row);
   });
   // A pointer's click puts the tooltip away until the pointer leaves the row, through the repaint that
   // follows. A keyboard's click puts nothing away: no pointer would leave to bring the tooltip back.
   row.addEventListener('click', () => {
     if (row.matches(':hover')) sessionTooltipDismissed = summary.id;
-    document.getElementById('sessionTooltip')?.remove();
+    removeSessionTooltip();
+    giveBackTitle(row);
   });
   // Unseen is presentation only and is appended last, so every existing lifecycle tone keeps
   // its previous priority (blocked/active/worker finished/failed).
@@ -1287,8 +1309,8 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   const menu = (at?: { x: number; y: number }) => ({
     owner, at, label: () => shownSessionTitle(summary), anchor: () => rowMenuButton(owner), items: () => items
   });
-  more.addEventListener('click', (event) => { event.stopPropagation(); document.getElementById('sessionTooltip')?.remove(); toggleRowMenu(menu()); });
-  row.addEventListener('contextmenu', (event) => { event.preventDefault(); document.getElementById('sessionTooltip')?.remove(); openRowMenu(menu({ x: event.clientX, y: event.clientY })); });
+  more.addEventListener('click', (event) => { event.stopPropagation(); removeSessionTooltip(); toggleRowMenu(menu()); });
+  row.addEventListener('contextmenu', (event) => { event.preventDefault(); removeSessionTooltip(); openRowMenu(menu({ x: event.clientX, y: event.clientY })); });
   const actionBar = el('div', 'sess-actions');
   actionBar.append(more);
   row.append(top, actionBar);
@@ -1427,7 +1449,7 @@ function openSharePage(sessionId: string): void {
 function startRename(summary: SessionSummary): void {
   const current = summary.title || '';
   renaming = { id: summary.id, original: current, value: current, start: 0, end: current.length };
-  document.getElementById('sessionTooltip')?.remove();
+  removeSessionTooltip();
   paintSessions();
 }
 
@@ -2449,7 +2471,7 @@ function paintSessions(): void {
   // any other tooltip goes with its row.
   const tooltip = document.getElementById('sessionTooltip');
   if (tooltip && pointed && tooltip.dataset.for === pointedId) placeSessionTooltip(tooltip, pointed);
-  else tooltip?.remove();
+  else if (tooltip) removeSessionTooltip();
   for (const list of [projectList, chatList]) {
     for (const toggle of list.querySelectorAll<HTMLElement>('.sess > .worker-toggle')) {
       const before = arrowsBefore.get(toggle.parentElement!.dataset.id);
@@ -8635,7 +8657,7 @@ export function initChat(next: Deps): void {
     ...chatGroups.groups.map(group => ({ id: group.id, scope: chatGroupsScope(group.projectId) })),
     ...sessions.filter(entry => !isUnattributedSession(entry) && entry.origin?.kind !== 'worker')
       .map(entry => ({ id: entry.id, scope: pinnedSortScope(chatSortList(entry), pinnedChat(entry)) }))
-  ], paintSessions);
+  ], paintSessions, removeSessionTooltip);
   void run(api.chatGroups()).then(state => { if (state) { chatGroups = state; paintSessions(); } });
   deps = next;
   initComposerDictation();
