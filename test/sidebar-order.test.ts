@@ -5,7 +5,7 @@ import { createSidebarOrder } from '../src/renderer/sidebar-order.js';
 let dom: JSDOM;
 afterEach(() => dom?.window.close());
 
-function fixture(saved?: string) {
+function fixture(saved?: string, dismissTooltip?: () => void) {
   dom = new JSDOM('<div class="scroll"><div id="list"></div></div>', { url: 'https://local.test', pretendToBeVisual: true });
   const w = dom.window;
   Object.assign(globalThis, { window: w, document: w.document });
@@ -22,7 +22,7 @@ function fixture(saved?: string) {
       return row;
     }));
   });
-  const order = createSidebarOrder(list, () => entries, paint); paint();
+  const order = createSidebarOrder(list, () => entries, paint, dismissTooltip); paint();
   const row = (id: string) => [...list.children].find(node => (node as HTMLElement).dataset.id === id) as HTMLElement;
   const pointer = (target: Element | Window, type: string, y: number) => target.dispatchEvent(new w.MouseEvent(type, {
     bubbles: true, cancelable: true, button: 0, clientX: 20, clientY: y,
@@ -92,3 +92,17 @@ it('supports keyboard movement, preserves focus and tolerates corrupt preference
   expect(f.ids('project')).toEqual(['b', 'a', 'c']);
   expect(f.w.document.activeElement).toBe(f.row('b'));
 });
+
+// #1862: the app's tooltip holds the row's title while it shows, so a drag puts it away the way that
+// gives the title back, and only once the drag really starts.
+it('puts the chat tooltip away through the app\'s own cleanup when a drag starts', () => {
+  const dismiss = vi.fn();
+  const f = fixture(undefined, dismiss);
+  f.pointer(f.row('a'), 'pointerdown', 10); f.pointer(f.list, 'pointermove', 12);
+  expect(dismiss).not.toHaveBeenCalled();
+  f.pointer(f.list, 'pointermove', 60);
+  expect(dismiss).toHaveBeenCalledTimes(1);
+  f.pointer(f.list, 'pointermove', 90); f.pointer(f.w as unknown as Window, 'pointerup', 90);
+  expect(dismiss).toHaveBeenCalledTimes(1);
+});
+

@@ -625,15 +625,21 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
       routed: false
     };
     current = run;
+    // #1872: OpenAI answered this run's metadata request with "Tunnel not found".
+    let tunnelNotFound = false;
 
-    const rejectAuthentication = (): void => {
+    const rejectAuthentication = (status: unknown, reason: string): void => {
       stopped = true;
       current = null;
       clearTimer();
       retirement = stopTree(proc).then(() => undefined);
+      // Logged, with the status and OpenAI's own short reason; the key never appears in either.
+      logWarn(`${tag}: OpenAI refused the tunnel (HTTP ${typeof status === 'number' ? status : '?'})${reason ? `: ${reason.slice(0, 160)}` : ''}; stopped`);
       opts.report({
         state: 'auth-failed',
-        detail: 'OpenAI refused access to this tunnel. Check its account, organization, API key and tunnel ID in Connection settings.'
+        detail: tunnelNotFound
+          ? "OpenAI doesn't know this tunnel ID for this API key's organization: it was deleted, or created in another organization or project. Create a tunnel there and enter its ID in Connection settings."
+          : 'OpenAI refused access to this tunnel. Check its account, organization, API key and tunnel ID in Connection settings.'
       });
     };
 
@@ -657,8 +663,9 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
         if (isBenignHarpoonChannelEvent(level, message, event)) return;
         if (level === 'ERROR' || level === 'FATAL' || level === 'WARN') {
           const errText = tunnelEventText(event['error']);
+          if (/\b404\b[^]*\bTunnel not found\b/i.test(errText)) tunnelNotFound = true;
           if (tunnelAuthRejected(message, errText, event['status_code'])) {
-            rejectAuthentication();
+            rejectAuthentication(event['status_code'], errText);
             return;
           }
           run.lastError = `${level} ${message}${errText ? `: ${errText}` : ''}`.slice(0, 400);
@@ -677,8 +684,9 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
         // Older clients or crash paths may still print plain text.
       }
       if (/\b(error|fatal|warn)\b/i.test(line)) {
+        if (/\b404\b[^]*\bTunnel not found\b/i.test(line)) tunnelNotFound = true;
         if (tunnelAuthRejected('', line)) {
-          rejectAuthentication();
+          rejectAuthentication(Number(/\b(401|403)\b/.exec(line)?.[1]) || null, '');
           return;
         }
         run.lastError = line.slice(0, 400);
