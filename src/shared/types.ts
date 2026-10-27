@@ -75,6 +75,9 @@ export type Capabilities = Record<Capability, boolean>;
 /** Host family reported to the renderer. */
 export type PlatformFamily = 'windows' | 'macos' | 'linux' | 'other';
 
+/** Commit only; commit, then ask to push; or commit, push and open a pull request. */
+export type CommitFlow = 'commit' | 'ask-push' | 'pr';
+
 export interface PlatformInfo {
   family: PlatformFamily;
   /** Friendly operating-system name for setup/help copy. */
@@ -203,6 +206,8 @@ export interface UiPrefs {
   startAtLogin?: boolean;
   /** A notification when a chat finishes a turn while the window is in the background. Missing means on. */
   turnNotifications?: boolean;
+  /** #1802: a short sound when a chat needs you, something failed or a chat finished in the background. Missing means off. */
+  sounds?: boolean;
   /**
    * #1402: after this many minutes of one turn, the next tool result starts a fresh turn with an
    * automatic continue (0 = off). Missing means 30.
@@ -230,6 +235,8 @@ export interface UiPrefs {
   phonePush?: PhonePushSettings;
   /** Mask API keys, tokens, private keys and secret settings in what tools return to ChatGPT. Missing means on. */
   secretsShield?: boolean;
+  /** How far Commit in Review goes; missing means commit, then ask to push. */
+  commitFlow?: CommitFlow;
   /** Browser for app-originated launches; connected source tabs retain placement ownership. */
   chatBrowser?: ChatBrowser;
   /** Where a minimized built-in browser window goes (default: the taskbar or Dock). */
@@ -448,6 +455,16 @@ export interface ControlApiSettings {
   allowActions: boolean;
 }
 
+/** How chats treat their Local Project's files. */
+export interface ProjectsSettings {
+  /**
+   * Take a Git tree checkpoint before each turn's first patch (`src/main/checkpoints`). Off by
+   * default. Turning it off stops new checkpoints only: existing ones stay listed in Review and
+   * Restore keeps working.
+   */
+  codeCheckpoints: boolean;
+}
+
 export interface Config {
   /**
    * Names this computer's connectors in ChatGPT, for one ChatGPT account used on several
@@ -469,6 +486,7 @@ export interface Config {
   goal: GoalSettings;
   mcp: McpSettings;
   controlApi: ControlApiSettings;
+  projects: ProjectsSettings;
 }
 
 export type ConnectionState =
