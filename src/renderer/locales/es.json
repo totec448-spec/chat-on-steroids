@@ -3414,5 +3414,7 @@
   "Move a queued task": "Mover una tarea en cola",
   "Move the focused tab": "Mover la pestaña enfocada",
   "Save the file being edited": "Guardar el archivo que se edita",
-  "Copy the selection": "Copiar la selección"
+  "Copy the selection": "Copiar la selección",
+  "Turn off Plugins connection": "Desactivar la conexión de Plugins",
+  "Plugins connection turned off": "Conexión de Plugins desactivada"
 }
