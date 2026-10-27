@@ -27,6 +27,7 @@ it('says what it cannot see, that it only reads, and how to answer', () => {
   expect(brief).toMatch(/files changed by commands are not listed/i);
   expect(brief).toMatch(/do not edit, create, move or delete files/i);
   expect(brief).toContain('No problems found.');
+  expect(brief).toContain('the review is the RESULT');
   expect(brief).toContain('BLOCKING:');
 });
 

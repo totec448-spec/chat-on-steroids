@@ -156,6 +156,21 @@ export async function startStepReview(input: { conversationId: string; sessionId
   }
 }
 
+const REPORT_HEADER = /^[ \t]*(?:\*\*)?(RESULT|CHANGES|VALIDATION|BLOCKERS)(?:\*\*)?[ \t]*:(?:\*\*)?[ \t]*/gim;
+
+/**
+ * The review in a reviewer's answer. Workers finish under RESULT / CHANGES / VALIDATION / BLOCKERS
+ * (the agents tool asks for it), and the brief puts the review in RESULT; any other answer is the review.
+ */
+export function reviewAnswer(text: string): string {
+  const headers = [...text.matchAll(REPORT_HEADER)];
+  const result = headers.findIndex(match => match[1]!.toUpperCase() === 'RESULT');
+  if (result < 0) return text.trim();
+  const start = headers[result]!.index! + headers[result]![0].length;
+  const end = headers[result + 1]?.index ?? text.length;
+  return text.slice(start, end).trim() || text.trim();
+}
+
 /** The review of exactly this step for its next message: the answer, a timeout, still pending, or none asked. */
 export function reviewForDraft(conversationId: string, turnId: string, deps: Pick<StepReviewDeps, 'reviewer' | 'now'> = defaultDeps()): DraftReview {
   const row = reviews.get(conversationId);
@@ -164,7 +179,7 @@ export function reviewForDraft(conversationId: string, turnId: string, deps: Pic
   if (!row.workerId) return deps.now() - row.askedAt >= REVIEW_MAX_MS ? { timedOut: true } : { pending: true };
   const info = deps.reviewer(conversationId);
   const fresh = !!info && info.id === row.workerId;
-  if (fresh && info.result?.trim() && (info.sleptAt ?? info.finishedAt ?? 0) >= row.askedAt) return { text: info.result.trim() };
+  if (fresh && info.result?.trim() && (info.sleptAt ?? info.finishedAt ?? 0) >= row.askedAt) return { text: reviewAnswer(info.result) };
   // The reviewer stopped (failed, cleared, or slept) without answering this step: nothing more will come.
   if (!fresh || !occupiesSlot(info.state)) return { unavailable: true };
   return deps.now() - row.askedAt >= REVIEW_MAX_MS ? { timedOut: true } : { pending: true };

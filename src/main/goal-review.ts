@@ -64,6 +64,7 @@ export function reviewBrief(input: ReviewBriefInput): string {
     'Review this Goal step\'s changes. You only read: do not edit, create, move or delete files, and do not run commands that change anything.',
     'Report real problems in these changes only: bugs, wrong or missing tests, callers this breaks, edge cases the step skipped. Give each one with its file and line. If there are none, answer exactly: No problems found.',
     'Start your answer with "BLOCKING:" only when the Goal cannot safely go on: data loss, a broken build, or a security problem the next step would build on.',
+    'When you finish with RESULT / CHANGES / VALIDATION / BLOCKERS, the review is the RESULT: put the problems, "No problems found." or "BLOCKING: ..." there.',
     '',
     `The Goal: ${clip(input.objective.trim(), TEXT_CHARS)}`,
     `This step's instruction: ${clip(input.step.trim(), TEXT_CHARS)}`,

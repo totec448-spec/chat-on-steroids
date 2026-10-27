@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 vi.mock('../src/main/logger.js', () => ({ logInfo: (line: string) => logs.push(line), logWarn: (line: string) => logs.push(line) }));
 const logs: string[] = [];
 import { REVIEW_MAX_MS } from '../src/main/agents.js';
-import { awaitStepReview, cancelStepReview, resetStepReviewsForTests, reviewForDraft, reviewNote, startStepReview, stepFacts, type StepReviewDeps } from '../src/main/goal-reviewer.js';
+import { awaitStepReview, cancelStepReview, reviewAnswer, resetStepReviewsForTests, reviewForDraft, reviewNote, startStepReview, stepFacts, type StepReviewDeps } from '../src/main/goal-reviewer.js';
 import type { AgentInfo, SessionEvent, ToolCallRecord } from '../src/shared/session.js';
 
 /**
@@ -186,5 +186,21 @@ it('waits for the review of the step before the next step is decided, and stops 
   let wanted = 2;
   expect(await awaitStepReview('c-goal', 't-1', () => wanted-- > 0, deps())).toBeNull();
   expect(await awaitStepReview('c-other', 't-1', () => true, d)).toBeNull();
+});
+
+// VM 141 live test, 2026-10-27: workers finish under RESULT / CHANGES / VALIDATION / BLOCKERS, so a clean
+// review read "RESULT: No problems found. CHANGES: …" and went into the chat as findings.
+it('takes the review from the RESULT section of a worker report, and the whole answer otherwise', async () => {
+  expect(reviewAnswer('RESULT: No problems found.\nCHANGES: None (read-only review).\nVALIDATION: Read both files.\nBLOCKERS: None.')).toBe('No problems found.');
+  expect(reviewAnswer('RESULT: BLOCKING: the migration drops the users table.\nCHANGES: None\nBLOCKERS: None')).toBe('BLOCKING: the migration drops the users table.');
+  expect(reviewAnswer('RESULT:\n- src/a.ts:1 the label is missing.\n- src/b.ts:2 off by one.\n\nCHANGES: None.')).toBe('- src/a.ts:1 the label is missing.\n- src/b.ts:2 off by one.');
+  expect(reviewAnswer('**RESULT:** src/a.ts:1 off by one.\n**CHANGES:** none')).toBe('src/a.ts:1 off by one.');
+  expect(reviewAnswer('src/a.ts:1 off by one.')).toBe('src/a.ts:1 off by one.');
+  const d = deps();
+  await startStepReview(step, d);
+  reviewer = { ...reviewer!, state: 'sleeping', result: 'RESULT: No problems found.\nCHANGES: None.\nVALIDATION: Read it.\nBLOCKERS: None.', sleptAt: clock + 1 };
+  const review = reviewForDraft('c-goal', 't-1', d);
+  expect(review).toEqual({ text: 'No problems found.' });
+  expect(reviewNote(review)).toBe('');
 });
 
