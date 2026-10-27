@@ -3337,6 +3337,8 @@
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Araçların döndürdüğü içerikteki API anahtarları ve tokenlar, ChatGPT görmeden önce gizlenir.",
   "Easier to read": "Okuması daha kolay",
   "High contrast, eight accent colors, line spacing and a more legible font.": "Yüksek kontrast, sekiz vurgu rengi, satır aralığı ve daha okunaklı bir yazı tipi.",
+  "Quote": "Alıntıla",
+  "Start or cancel the prepared plan first, then quote again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden alıntılayın.",
   "Message box": "Mesaj kutusu",
   "New line": "Yeni satır",
   "Send the other way while ChatGPT works": "ChatGPT çalışırken diğer şekilde gönder",
