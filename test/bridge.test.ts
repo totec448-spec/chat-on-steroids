@@ -332,8 +332,8 @@ function wake(items: ReadonlyArray<{ to: string; text: string }>): void {
   if (staged.waking.length > 0) requestWorkerRevivals(staged.waking);
 }
 
-async function waitForOpened(count = 1): Promise<void> {
-  await vi.waitFor(() => expect(opened).toHaveLength(count));
+async function waitForOpened(count = 1, timeout?: number): Promise<void> {
+  await vi.waitFor(() => expect(opened).toHaveLength(count), timeout ? { timeout } : undefined);
 }
 
 async function waitForRevival(): Promise<{ id: string; conversationId: string }> {
@@ -4878,7 +4878,7 @@ describe('delivering a bootstrap', () => {
       await saveConfig({ ...suiteConfig, ui: { ...suiteConfig.ui, sendCheckUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}/check` } });
       await pair();
       spawn({ workers: [{ task: 'Rewrite the recorder fixture' }], caller: { conversationId: PRIME_CHAT } });
-      await waitForOpened(1);
+      await waitForOpened(1, 5_000);
       const id = new URL(opened[0]!).searchParams.get('clf')!;
       const held = await request('POST', '/commands/redeem', { body: { id, client: 'tab-1' } });
       expect(held.status).toBe(503);
@@ -4898,6 +4898,39 @@ describe('delivering a bootstrap', () => {
     } finally {
       clock.mockRestore();
       await new Promise(resolve => server.close(resolve));
+    }
+  });
+
+  it('asks a newly configured send check again for a worker start an earlier program allowed (CodeRabbit)', async () => {
+    const http = await import('node:http');
+    const servers: Array<import('node:http').Server> = [];
+    const asked: Array<{ program: number; body: Record<string, any> }> = [];
+    const program = async (index: number, allow: boolean): Promise<string> => {
+      const server = http.createServer((req, res) => {
+        let raw = ''; req.on('data', chunk => { raw += chunk; });
+        req.on('end', () => { asked.push({ program: index, body: JSON.parse(raw) }); res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(allow ? { allow: true } : { allow: false, reason: 'not now' })); });
+      });
+      await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+      servers.push(server);
+      return `http://127.0.0.1:${(server.address() as { port: number }).port}/check`;
+    };
+    try {
+      await saveConfig({ ...suiteConfig, ui: { ...suiteConfig.ui, sendCheckUrl: await program(1, true) } });
+      await pair();
+      spawn({ workers: [{ task: 'Rewrite the recorder fixture' }], caller: { conversationId: PRIME_CHAT } });
+      await waitForOpened(1, 5_000);
+      const id = new URL(opened[0]!).searchParams.get('clf')!;
+      expect((await redeem(id, 'tab-1')).id).toBe(id);
+      expect(asked.map(row => row.program)).toEqual([1]);
+      // The person points the check at another program: the same start is not waved through on the first one's answer.
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, sendCheckUrl: await program(2, false) } });
+      const held = await request('POST', '/commands/redeem', { body: { id, client: 'tab-1' } });
+      expect(held.status).toBe(503);
+      expect(held.body).toMatchObject({ error: 'send_check_held', retryable: true });
+      expect(asked.map(row => row.program)).toEqual([1, 2]);
+    } finally {
+      for (const server of servers) await new Promise(resolve => server.close(resolve));
     }
   });
 

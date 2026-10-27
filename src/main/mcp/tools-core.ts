@@ -1483,7 +1483,8 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           // #1794: a message to a worker is a send the app makes by itself, so the person's send
           // check sees each one first. One held message holds the whole call: nothing is queued.
           if (getConfig().ui.sendCheckUrl) {
-            const source = caller.conversationId ? await findSessionByConversation(caller.conversationId) : null;
+            // Unique or none: a chat current on two sessions must not hand the check another session's project.
+            const source = caller.conversationId ? await findSessionByConversation(caller.conversationId, { requireUnique: true }) : null;
             for (const item of items) {
               if (item.to === PRIME_ID) continue;
               const id = createHash('sha256').update(`${caller.conversationId}:${item.to}:${item.text}`).digest('hex').slice(0, 32);

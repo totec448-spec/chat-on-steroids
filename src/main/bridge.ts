@@ -474,7 +474,7 @@ interface Command {
   timer: NodeJS.Timeout | null;
   lastError: string | null;
   /** #1794: the send check held this worker's start or wake; asked again from `nextAt`. Not persisted. */
-  sendCheck?: { attempt: number; nextAt: number; allowedText?: string };
+  sendCheck?: { attempt: number; nextAt: number; allowed?: { text: string; spec: CommandSpec; url: string } };
   /**
    * The page that redeemed this command, while its lease holds.
    *
@@ -4956,9 +4956,12 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // #1794: a worker's start or wake is an automatic send, first checked with the person's send
     // check. Held, the page keeps redeeming (retryable) and the program is asked at most every
     // 30 s; the command's own deadline still ends it, then with the hold as its reason.
+    // An allow answers this text, this payload and this program: a replaced payload or another
+    // configured program is asked again.
+    const allowed = command.sendCheck?.allowed;
     if ((command.spec.type === 'worker' || command.spec.type === 'revive') && getConfig().ui.sendCheckUrl && described.text &&
-        command.sendCheck?.allowedText !== described.text) {
-      const spec = command.spec, claimedAt = command.claimedAt;
+        (allowed?.text !== described.text || allowed.spec !== command.spec || allowed.url !== getConfig().ui.sendCheckUrl)) {
+      const spec = command.spec, claimedAt = command.claimedAt, url = getConfig().ui.sendCheckUrl!;
       if (command.sendCheck && Date.now() < command.sendCheck.nextAt) return json(res, 503, { error: 'send_check_held', retryable: true }, origin);
       const attempt = (command.sendCheck?.attempt ?? 0) + 1;
       const prime = primeConversation(spec.runId);
@@ -4976,7 +4979,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         changed();
         return json(res, 503, { error: 'send_check_held', retryable: true }, origin);
       }
-      command.sendCheck = { attempt, nextAt: 0, allowedText: described.text };
+      command.sendCheck = { attempt, nextAt: 0, allowed: { text: described.text, spec, url } };
       if (command.lastError?.startsWith("the person's send check")) { command.lastError = null; changed(); }
     }
     const liveResume = command.spec.type === 'resume' ? continuationByToken(command.spec.token) : null;
@@ -6370,6 +6373,8 @@ function queue(spec: CommandSpec): Command {
       // — and its deadline starts again from this delivery, because this is new work.
       existing.spec = spec;
       existing.lastError = null;
+      // New work: the send check's hold and answer were about the payload it replaced.
+      delete existing.sendCheck;
     }
     changed();
     persistCommands();

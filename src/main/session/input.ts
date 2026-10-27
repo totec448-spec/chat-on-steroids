@@ -582,7 +582,8 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
     if (row.state === 'queued' && row.mode === 'auto' && !row.opening && !row.finishOwner && !row.silenceBoundary &&
         (row.transportIntent === 'browser' || (!row.transportIntent && !row.sessionId)) &&
         !row.error?.startsWith('Message queued. ') &&
-        Date.now() - Math.max(row.createdAt, row.dueAt) >= 60_000)
+        // Time the person's send check held it is not the browser's: its minute starts when the hold ends (#1794).
+        Date.now() - Math.max(row.createdAt, row.dueAt, row.sendCheck?.nextAt ?? 0) >= 60_000)
       return { ...row, state: 'failed', pickupFailedAt: Date.now(), error: 'Not sent: the browser did not pick up this message within 60 seconds.' };
     // Preparation can expire before Send. Once authorized, this exact claim owns
     // the uncertain outcome until receipt or explicit cancellation, regardless of

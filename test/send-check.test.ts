@@ -102,6 +102,8 @@ it('keeps a damaged saved address set, so the gate holds instead of opening', as
     expect(await saved('  ')).toBeUndefined();
     expect(await saved(' http://127.0.0.1:8123/check ')).toBe('http://127.0.0.1:8123/check');
     expect(await saved(42)).toBe('damaged');
+    // The app never saves null (an empty field is omitted), so a null is damage, not Off (CodeRabbit).
+    expect(await saved(null)).toBe('damaged');
     expect(sendCheckUrl('damaged')).toBeNull();
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });

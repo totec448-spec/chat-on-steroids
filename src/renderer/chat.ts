@@ -8243,14 +8243,21 @@ let bridgePresent = true;
  */
 /** Why the person's send check holds this automatic send (#1794), or null when it does not. */
 function sendCheckHold(entry: InputEntry): string | null {
-  if (entry.state !== 'queued' || !entry.sendCheck) return null;
-  if (!entry.sendCheck.answered) return t('Held: your send check did not answer');
-  return entry.sendCheck.reason ? t('Held by your send check: {0}', [entry.sendCheck.reason]) : t('Held by your send check');
+  if (!heldBySendCheck(entry)) return null;
+  const hold = entry.sendCheck!;
+  if (!hold.answered) return t('Held: your send check did not answer');
+  return hold.reason ? t('Held by your send check: {0}', [hold.reason]) : t('Held by your send check');
+}
+/** Whether a send check is configured, from the last applied state; clearing it releases every hold at once. */
+let sendCheckConfigured = false;
+/** The app's own rule (session/input.ts): held only while a check is configured and its next ask is still ahead. */
+function heldBySendCheck(entry: InputEntry): boolean {
+  return entry.state === 'queued' && !!entry.sendCheck && sendCheckConfigured && entry.sendCheck.nextAt > Date.now();
 }
 
 function queuedWaitReason(entry: InputEntry): 'send-check' | 'extension' | 'tool-call' | 'chatgpt-project' | 'chatgpt-project-failed' | 'project-removed' | null {
   if (entry.state !== 'queued' || entry.error || entry.dueAt > Date.now() || entry.delivery === 'tool') return null;
-  if (entry.sendCheck) return 'send-check';
+  if (heldBySendCheck(entry)) return 'send-check';
   if (!bridgePresent) return 'extension';
   const project = chatgptProjectWait(entry);
   if (project) return project;
@@ -8262,6 +8269,7 @@ export function chatApply(state: AppState, previous?: Config): void {
   const { config, bridge } = state;
   applyRouteSettling(state.status.routeSettlingUntil ?? 0);
   if (bridgePresent !== bridge.present) { bridgePresent = bridge.present; paintPendingInputs(); }
+  if (sendCheckConfigured !== !!config.ui.sendCheckUrl) { sendCheckConfigured = !!config.ui.sendCheckUrl; paintPendingInputs(); }
   if (visible && selectedId) void refreshSessionControls();
   applyChatModels(config, previous);
   // After the picker took this state: the meter's Pro rule reads the picker, and before it could
