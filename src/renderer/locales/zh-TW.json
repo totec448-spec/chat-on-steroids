@@ -3264,5 +3264,6 @@
   "{0} put back": "{0} 個已還原",
   "and {0} more": "還有 {0} 個",
   "{0} more not listed": "另有 {0} 個未列出",
-  "Touched {0} files, no net change": "變動了 {0} 個檔案，沒有淨變化"
+  "Touched {0} files, no net change": "變動了 {0} 個檔案，沒有淨變化",
+  "The request was not valid.": "請求無效。"
 }

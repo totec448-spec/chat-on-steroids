@@ -3329,5 +3329,6 @@
   "{0} more not listed": "{0} weitere nicht aufgeführt",
   "{0} more not listed|one": "{0} weitere nicht aufgeführt",
   "Touched {0} files, no net change": "{0} Dateien angefasst, keine Änderung unterm Strich",
-  "Touched {0} files, no net change|one": "{0} Datei angefasst, keine Änderung unterm Strich"
+  "Touched {0} files, no net change|one": "{0} Datei angefasst, keine Änderung unterm Strich",
+  "The request was not valid.": "Die Anfrage war ungültig."
 }
