@@ -6,15 +6,17 @@ import type { Stats } from 'node:fs';
 import path from 'node:path';
 import type { ProjectGitChange, ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot, ProjectGitStatus } from '../shared/project-git.js';
 import { getConfig } from './config.js';
-import { rawPromises as fs } from './rawfs.js';
-import { projectFileTarget } from './project-files.js';
-import { isContained } from './sandbox.js';
 import { logInfo } from './logger.js';
+import { rawPromises as fs } from './rawfs.js';
+import { boundedImageDataUrl, hasPdfHeader, projectFileTarget, projectPreviewKind } from './project-files.js';
+import { isContained } from './sandbox.js';
 
 const MAX_GIT_OUTPUT_BYTES = 4 * 1024 * 1024;
 const MAX_CHANGES = 2_000;
 const MAX_BRANCHES = 1_000;
 const MAX_DIFF_SIDE_BYTES = 512 * 1024;
+/** An image or PDF side is read up to the Files image preview limit; Review shows it, not its bytes as text. */
+const MAX_MEDIA_SIDE_BYTES = 5 * 1024 * 1024;
 const UNTRACKED_STAT_BATCH = 16;
 const GIT_TIMEOUT_MS = 15_000;
 const CHANGE_DEBOUNCE_MS = 180;
@@ -431,6 +433,20 @@ function textFromBytes(bytes: Buffer): string | null {
   try { return decode(bytes); } catch { return null; }
 }
 
+/** One side of a diff. `bytes` is null when the file does not exist on that side or is too large. */
+interface DiffSide { bytes: Buffer | null; tooLarge: boolean; }
+
+async function readHeadSide(context: RepositoryContext, relative: string, oid = 'HEAD', limit = MAX_DIFF_SIDE_BYTES): Promise<DiffSide> {
+  const object = `${oid}:${repositoryPath(context, relative)}`;
+  const size = await runGit(context.projectReal, ['cat-file', '-s', object], 128);
+  if (size.code !== 0) return { bytes: null, tooLarge: false };
+  const bytes = Number(decode(size.stdout).trim());
+  if (!Number.isFinite(bytes) || bytes > limit) return { bytes: null, tooLarge: true };
+  const content = await runGit(context.projectReal, ['cat-file', 'blob', object], limit + 1);
+  if (content.code !== 0) throw new Error(content.stderr || 'The Git base could not be read');
+  return { bytes: content.stdout, tooLarge: false };
+}
+
 /** One bounded blob, or null when the object does not exist. */
 async function readBlob(context: RepositoryContext, object: string): Promise<{ text: string | null; tooLarge: boolean } | null> {
   const size = await runGit(context.projectReal, ['cat-file', '-s', object], 128);
@@ -440,10 +456,6 @@ async function readBlob(context: RepositoryContext, object: string): Promise<{ t
   const content = await runGit(context.projectReal, ['cat-file', 'blob', object], MAX_DIFF_SIDE_BYTES + 1);
   if (content.code !== 0) throw new Error(content.stderr || 'The Git base could not be read');
   return { text: textFromBytes(content.stdout), tooLarge: false };
-}
-
-async function readHeadFile(context: RepositoryContext, relative: string, oid = 'HEAD'): Promise<{ text: string | null; tooLarge: boolean }> {
-  return await readBlob(context, `${oid}:${repositoryPath(context, relative)}`) ?? { text: '', tooLarge: false };
 }
 
 /** Index stages 1-3 of an unmerged path; none when a present side is binary, too large or unreadable. */
@@ -479,9 +491,27 @@ async function readConflictStages(context: RepositoryContext, relative: string):
   return { base: base ?? null, ours: ours ?? null, theirs: theirs ?? null };
 }
 
-async function readWorkingFile(projectId: string, relative: string): Promise<{ text: string | null; tooLarge: boolean }> {
-  const result = await readWorkingBytes(projectId, relative, MAX_DIFF_SIDE_BYTES);
-  return { text: result.tooLarge ? null : textFromBytes(result.bytes), tooLarge: result.tooLarge };
+async function readWorkingSide(projectId: string, relative: string, limit = MAX_DIFF_SIDE_BYTES): Promise<DiffSide> {
+  const result = await readWorkingBytes(projectId, relative, limit);
+  return result.tooLarge ? { bytes: null, tooLarge: true } : { bytes: result.bytes, tooLarge: false };
+}
+
+function sideText(side: DiffSide): { text: string | null; tooLarge: boolean } {
+  if (side.tooLarge || (side.bytes && side.bytes.length > MAX_DIFF_SIDE_BYTES)) return { text: null, tooLarge: true };
+  return { text: side.bytes ? textFromBytes(side.bytes) : '', tooLarge: false };
+}
+
+/** Both sides in the form Files previews them, or why a present side cannot be shown. */
+async function diffMedia(kind: 'image' | 'pdf', base: DiffSide, current: DiffSide): Promise<{ media: NonNullable<ProjectGitDiff['media']> } | { reason: string }> {
+  if (base.tooLarge || current.tooLarge) return { reason: `a side is over ${MAX_MEDIA_SIDE_BYTES / 1024 / 1024} MiB` };
+  const encode = async (bytes: Buffer | null): Promise<string | null | undefined> => {
+    if (!bytes) return null;
+    if (kind === 'image') return await boundedImageDataUrl(bytes) ?? undefined;
+    return hasPdfHeader(bytes) ? bytes.toString('base64') : undefined;
+  };
+  const [before, after] = await Promise.all([encode(base.bytes), encode(current.bytes)]);
+  if (before === undefined || after === undefined) return { reason: kind === 'image' ? 'a side is not an image the preview can decode' : 'a side has no PDF header' };
+  return { media: { kind, base: before, current: after } };
 }
 
 export async function readProjectGitDiff(projectId: string, relativePath: string, baseRef?: string, expectedRevision?: string): Promise<ProjectGitDiff> {
@@ -492,26 +522,42 @@ export async function readProjectGitDiff(projectId: string, relativePath: string
   if (!change) throw new Error('This file is no longer changed');
   const context = await repositoryContext(projectId);
   if (!context) throw new Error('This folder is not a Git repository');
-  const base = change.status === 'A' || change.status === 'U'
-    ? { text: '', tooLarge: false }
-    : await readHeadFile(context, change.previousPath ?? change.path, snapshot.comparison?.baseOid);
-  const current = change.status === 'D'
-    ? { text: '', tooLarge: false }
+  const kind = projectPreviewKind(change.path);
+  const previousKind = change.previousPath ? projectPreviewKind(change.previousPath) : kind;
+  const mediaKind = kind && previousKind === kind ? kind : null;
+  // A rename across kinds has no Before/After: a PNG and a PDF, or an image and a text file, cannot be set side by side.
+  if (!mediaKind && (kind || previousKind)) {
+    logInfo(`Review: no Before/After for a file renamed from ${previousKind ?? 'a non-media file'} to ${kind ?? 'a non-media file'}; the two sides are different kinds, so it falls back to the normal diff`);
+  }
+  const limit = mediaKind ? MAX_MEDIA_SIDE_BYTES : MAX_DIFF_SIDE_BYTES;
+  const baseSide = change.status === 'A' || change.status === 'U'
+    ? { bytes: null, tooLarge: false }
+    : await readHeadSide(context, change.previousPath ?? change.path, snapshot.comparison?.baseOid, limit);
+  const currentSide = change.status === 'D'
+    ? { bytes: null, tooLarge: false }
     : snapshot.comparison
-      ? await readHeadFile(context, change.path, snapshot.comparison.headOid)
+      ? await readHeadSide(context, change.path, snapshot.comparison.headOid, limit)
       // A conflict deleted on both sides has no working file; its diff is the HEAD side removed.
       : change.status === 'C'
-        ? await readWorkingFile(projectId, change.path).catch((error: unknown) => {
-          if ((error as NodeJS.ErrnoException)?.code === 'ENOENT' || /not found|no longer|does not exist/i.test(String((error as Error)?.message))) return { text: '', tooLarge: false };
+        ? await readWorkingSide(projectId, change.path, limit).catch((error: unknown) => {
+          if ((error as NodeJS.ErrnoException)?.code === 'ENOENT' || /not found|no longer|does not exist/i.test(String((error as Error)?.message))) return { bytes: null, tooLarge: false };
           throw error;
         })
-        : await readWorkingFile(projectId, change.path);
+        : await readWorkingSide(projectId, change.path, limit);
+  const identity = {
+    projectId, status: change.status, path: change.path, previousPath: change.previousPath,
+    additions: change.additions, deletions: change.deletions
+  };
+  const shown = mediaKind ? await diffMedia(mediaKind, baseSide, currentSide) : null;
+  if (shown && 'media' in shown) return { ...identity, binary: true, tooLarge: false, baseText: null, currentText: null, media: shown.media };
+  if (shown) logInfo(`Review: no Before/After for a changed ${mediaKind}; ${shown.reason}, so it falls back to the normal diff`);
+  const base = sideText(baseSide);
+  const current = sideText(currentSide);
   const tooLarge = base.tooLarge || current.tooLarge;
   const binary = change.binary || (!tooLarge && (base.text === null || current.text === null));
   const conflict = change.status === 'C' && !snapshot.comparison ? await readConflictStages(context, change.path) : undefined;
   return {
-    projectId, status: change.status, path: change.path, previousPath: change.previousPath,
-    additions: change.additions, deletions: change.deletions, binary, tooLarge,
+    ...identity, binary, tooLarge,
     baseText: binary || tooLarge ? null : base.text,
     currentText: binary || tooLarge ? null : current.text,
     note: tooLarge ? 'This diff is too large to display.' : binary ? 'Binary diff · preview unavailable' : undefined,
