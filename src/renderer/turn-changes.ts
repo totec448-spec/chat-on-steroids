@@ -39,8 +39,17 @@ export function turnFinished(events: readonly SessionEvent[], turnId: string, an
 }
 
 /** Where the store's read of the turn starts: its first recorded row, or the top when that is not loaded. */
+/**
+ * Where a turn's edits are read from: its first start when that is loaded, else the chat's start.
+ * An app-authored reopening (a turn_start with \`detail\`) is not the first start: the turn's earlier
+ * edits lie before it, possibly outside the loaded page (CodeRabbit on #1836).
+ */
 export function turnFrom(events: readonly SessionEvent[], turnId: string): number {
-  return events.find(event => event.kind === 'turn_start' && event.turnId === turnId)?.seq ?? 0;
+  return firstTurnStart(events, turnId)?.seq ?? 0;
+}
+/** The turn's own first start, if loaded; a reopening never stands in for it. */
+export function firstTurnStart(events: readonly SessionEvent[], turnId: string): SessionEvent | undefined {
+  return events.find(event => event.kind === 'turn_start' && event.turnId === turnId && !event.detail);
 }
 
 const MAX_DIFF_CHARS = 512 * 1024;

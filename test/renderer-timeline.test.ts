@@ -8673,6 +8673,22 @@ it('asks for the card of an answer whose turn start is not loaded, and shows non
   expect(w.document.querySelector('.turn-changes')?.textContent).toContain('Changed 1 file');
 });
 
+it('reads a reopened turn from its first start when only the reopening is loaded (CodeRabbit)', async () => {
+  // The first turn_start and its edits left the loaded page; the app-authored reopening (with \`detail\`) is still there.
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  api.turnChanges = vi.fn(async () => ({ ok: true, data: { changes: [{ path: 'early.ts', state: 'edited', added: 2, removed: 1, approximate: false, diff: 'kept', edits: 1 }], total: 1 } }));
+  await append([
+    { seq: 700, time: T0 + 700_000, source: 'app', kind: 'turn_start', turnId: 't-reopened', detail: 'a tool call proved the turn was still running' } as SessionEvent,
+    { seq: 701, time: T0 + 701_000, source: 'extension', kind: 'assistant_message', turnId: 't-reopened', messageId: 'a-reopened', message: text('All done.'), final: true, state: 'final' } as SessionEvent,
+    { seq: 702, time: T0 + 702_000, source: 'extension', kind: 'turn_end', turnId: 't-reopened', outcome: 'completed' } as SessionEvent
+  ]);
+  await append([]);
+  // Not from 700: that would leave out every edit made before the reopening.
+  expect(api.turnChanges).toHaveBeenCalledWith(expect.any(String), 't-reopened', 0);
+  expect(w.document.querySelector('.turn-changes')?.textContent).toContain('Changed 1 file');
+});
+
 it('refreshes the card when its finished turn gains another edit, and hides it while the turn runs again', async () => {
   const { w, append } = await boot([]);
   const api = (w as any).api;
