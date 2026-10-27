@@ -79,6 +79,8 @@ import {
   type SwarmSnapshot
 } from './agents.js';
 import { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } from './durable.js';
+import { performance } from 'node:perf_hooks';
+import { createStartupTiming, installStartupTiming, markStartup, STARTUP_STATE } from './startup-timing.js';
 import { loadConnectorIdentity } from './connector-identity.js';
 import { initControlApiPath, shutdownControlApi, startControlApi } from './control-api.js';
 import { restoreRequestCorrelations } from './session/correlation.js';
@@ -226,7 +228,7 @@ function createWindow(): void {
 
   // A renderer that fails to load leaves a blank window with no other clue, so
   // record it where the diagnostics panel can show it.
-  window.webContents.on('did-finish-load', () => logInfo('window loaded'));
+  window.webContents.on('did-finish-load', () => { logInfo('window loaded'); markStartup('window'); });
   window.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown' || input.key !== 'F11' || input.isAutoRepeat) return;
     event.preventDefault();
@@ -430,6 +432,11 @@ void app.whenReady().then(async () => {
   // This guard is intentionally before even app.getPath/init* calls. A secondary instance, or a
   // primary that was told to quit before ready, must never touch the primary's shared userData.
   if (!shouldBeginAppBootstrap(hasSingleInstanceLock, quitting)) return;
+  // Startup timing (ms since the process started); saved and compared once the store is open.
+  const startupTiming = createStartupTiming({ clock: () => performance.now(), now: Date.now, version: app.getVersion(), log: logInfo,
+    save: runs => writeDurableSoon(STARTUP_STATE, runs) });
+  installStartupTiming(startupTiming);
+  markStartup('ready');
   powerMonitor.on('suspend', suspendConnectionLossNotices);
   powerMonitor.on('resume', resumeConnectionLossNotices);
   // Counted for the diagnostics report: kinds of warnings, ended page and helper processes, sleep.
@@ -458,6 +465,7 @@ void app.whenReady().then(async () => {
   try { await initSkillsPath(userData); }
   catch (error) { logWarn(`Skills library unavailable: ${error instanceof Error ? error.message : String(error)}`); }
   initDurableStore(userData);
+  startupTiming.restore(await readDurable<unknown>(STARTUP_STATE));
   savedWindowBounds = await readDurable<unknown>(WINDOW_BOUNDS_STATE);
   restoreMainTextTranslations(await readDurable<unknown>(MAIN_TEXTS_STATE));
   await loadConnectorIdentity();
@@ -470,6 +478,7 @@ void app.whenReady().then(async () => {
   await restoreChatModels();
   if (windowActivation.isDisabled()) return;
   await loadConfig();
+  markStartup('config');
   setRecordingStorageLimit(getConfig().sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB);
   await loadConnectorProof();
   await loadWorkerArchive();
@@ -737,6 +746,7 @@ void app.whenReady().then(async () => {
   onMainTextsChange(refreshTray);
   onMainTextsChange(() => writeDurableSoon(MAIN_TEXTS_STATE, mainTextTranslations()));
 
+  markStartup('restored');
   logInfo('app started');
 
   // Historical Unattributed repair may legitimately scan and rewrite a large legacy bucket.

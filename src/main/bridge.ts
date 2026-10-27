@@ -113,6 +113,7 @@ import {
   startGoalDraft
 } from './goal.js';
 import { logInfo, logWarn } from './logger.js';
+import { markStartup } from './startup-timing.js';
 import {
   closeConversation,
   liveConversations,
@@ -1418,6 +1419,7 @@ function noteExtensionVersion(req: http.IncomingMessage): void {
     announcedExtensions.set(key, Date.now());
     if (announcedExtensions.size > 16) announcedExtensions.delete(announcedExtensions.keys().next().value!);
     logInfo(`bridge: browser extension ${extensionVersion} connected${stamp ? ` (build ${stamp})` : ''}`);
+    markStartup('extension');
     // Chrome answers "which manifest did I load" with the version and keeps running whatever
     // service worker it already had, so an extension folder replaced under a live browser
     // reports the new version and runs the old code — and every symptom after that points
