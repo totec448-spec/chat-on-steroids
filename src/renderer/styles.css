@@ -1651,6 +1651,8 @@ main {
 .root + .root {
   border-top: 1px solid var(--line);
 }
+/* The checkpoint switch sits in the folders card: inset and divided like a folder row. */
+#codeCheckpointsSetting { padding: 12px 20px; border-top: 1px solid var(--line); }
 
 .root > .ico { color: var(--faint); width: 15px; height: 15px; }
 
@@ -4495,12 +4497,13 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .file-changes-header-title { color: var(--ink); font-size: calc(11px * var(--text-scale, 1)); font-weight: 650; }
 .file-branch-arrow { display: inline-flex; align-items: center; color: var(--faint); }
 .file-branch-arrow .ico, .ico.file-change-arrow { --ico: 12px; --glyph: 12px; }
-.file-branch-trigger { display: inline-flex; align-items: center; gap: 4px; min-height: 28px; max-width: 190px; padding: 4px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--soft); font: inherit; font-size: calc(11px * var(--text-scale, 1)); cursor: pointer; }
+/* Room for a checkpoint's date and time; it shrinks only when the panel is narrower than the label. */
+.file-branch-trigger { display: inline-flex; flex: 0 1 auto; align-items: center; gap: 4px; min-width: 0; min-height: 28px; max-width: 320px; padding: 4px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--soft); font: inherit; font-size: calc(11px * var(--text-scale, 1)); cursor: pointer; }
 .file-branch-trigger:hover, .file-branch-trigger[aria-expanded="true"] { background: var(--hover); color: var(--ink); }
 .file-branch-trigger:focus-visible { outline: 1px solid var(--accent-edge); outline-offset: -1px; }
 .file-branch-trigger-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-branch-trigger .ico { flex: 0 0 auto; --ico: 13px; --glyph: 13px; transform: rotate(90deg); }
-.file-branch-stats { display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: calc(10px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; }
+.file-branch-stats { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; font-family: var(--mono); font-size: calc(10px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; }
 .file-branch-stats .is-added { color: var(--green); }
 .file-branch-stats .is-deleted { color: var(--red); }
 .file-branch-arrow[hidden], .file-branch-trigger[hidden], .file-branch-stats[hidden] { display: none; }
@@ -4518,6 +4521,8 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .chatgpt-project-picker .file-branch-note { margin: 0; padding: 2px 7px 1px; color: var(--faint); font-size: calc(10.5px * var(--text-scale, 1)); line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chatgpt-project-picker .file-branch-option > .ico { flex: none; color: var(--muted); }
 .file-branch-empty, .file-branch-note { margin: 0; padding: 12px 7px; color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); }
+.file-branch-section { margin: 8px 0 0; padding: 6px 7px 4px; border-top: 1px solid var(--line); color: var(--faint); font-size: calc(10px * var(--text-scale, 1)); font-weight: 600; }
+.file-checkpoint-bar { display: flex; justify-content: flex-end; padding: 0 1px 8px; }
 .file-changes-list { min-height: 0; flex: 1; overflow: auto; padding: 10px 7px 16px; }
 .file-change-group + .file-change-group { margin-top: 12px; }
 .file-change-group-title { margin: 0; padding: 4px 8px 6px; color: var(--faint); font-size: calc(10px * var(--text-scale, 1)); font-weight: 600; letter-spacing: .015em; }
