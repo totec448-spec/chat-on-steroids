@@ -219,6 +219,29 @@ describe('OpenAI tunnel process ownership', () => {
     }
   });
 
+  // #1872: the tunnel ID was gone on OpenAI's side ("404: Tunnel not found"), and the refusal that
+  // followed said only "refused access", and was never logged.
+  it('says the tunnel ID is not known when OpenAI refuses a tunnel it reported as not found, and logs the refusal', async () => {
+    vi.useFakeTimers();
+    const logger = await import('../src/main/logger.js');
+    const warn = vi.spyOn(logger, 'logWarn');
+    const reports: any[] = [];
+    const handle = await startTunnel({ localUrl: 'http://127.0.0.1:1234/secret', settings, apiKey: 'test', report: r => reports.push(r) });
+    try {
+      await vi.advanceTimersByTimeAsync(10);
+      const child = fixture.children[0];
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ level: 'WARN', msg: 'tunnel metadata fetch failed', error: 'controlplane client: unexpected metadata status 404: Tunnel not found' }) + '\n'));
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ level: 'WARN', msg: 'poll failed; backing off', status_code: 403, error: 'tunnel_use_forbidden' }) + '\n'));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(reports.at(-1)).toMatchObject({ state: 'auth-failed' });
+      expect(reports.at(-1).detail).toContain("OpenAI doesn't know this tunnel ID");
+      expect(warn.mock.calls.map(call => String(call[0]))).toContainEqual(expect.stringMatching(/OpenAI refused the tunnel \(HTTP 403\)/));
+    } finally {
+      warn.mockRestore();
+      await handle.stop();
+    }
+  });
+
   // 2026-10-15 from 17:17 UTC on two machines: OpenAI's tunnel service answered every poll with
   // 503/504 and the app said "No internet" while this computer's internet worked.
   it('says OpenAI\'s tunnel service is down, not the internet, when the control plane answers with 5xx', async () => {
