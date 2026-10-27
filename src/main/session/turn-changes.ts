@@ -33,6 +33,7 @@ export interface TurnFileEdits {
 /** The turn's edits per file, in the order each file was first changed. */
 export function turnFileEdits(events: readonly SessionEvent[], turnId: string): TurnFileEdits[] {
   const files = new Map<string, TurnFileEdits>();
+  const firstMissing = new Map<string, TurnFileEdits['unavailable']>();
   for (const event of events) {
     if (event.kind !== 'tool_call' || event.turnId !== turnId || (event.agent && WORKER.test(event.agent))) continue;
     if (event.call.outcome !== 'ok') continue;
@@ -42,6 +43,7 @@ export function turnFileEdits(events: readonly SessionEvent[], turnId: string): 
       const missing = change.reviewAssetId ? null : change.reviewUnavailable ?? 'not-kept';
       const prior = files.get(change.path);
       if (!prior) {
+        firstMissing.set(change.path, missing);
         files.set(change.path, { path: change.path, first: at, last: at, edits: 1, recordedAdded: change.added, recordedRemoved: change.removed,
           recordedApproximate: change.approximate, created: kind === 'create', deleted: kind === 'delete', unavailable: missing });
         continue;
@@ -50,7 +52,8 @@ export function turnFileEdits(events: readonly SessionEvent[], turnId: string): 
       prior.recordedAdded += change.added; prior.recordedRemoved += change.removed;
       prior.recordedApproximate ||= change.approximate;
       prior.deleted = kind === 'delete';
-      prior.unavailable ??= missing;
+      // Only the two ends make the net diff: an edit between them that lost its record changes nothing.
+      prior.unavailable = firstMissing.get(change.path) ?? missing;
     }
   }
   return [...files.values()];
