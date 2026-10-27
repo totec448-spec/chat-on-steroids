@@ -14,16 +14,28 @@ import { t, tn, ui } from './i18n.js';
 
 const WORKER = /^worker-\d+$/;
 
-/** Whether the chat's own calls in this turn recorded a successful edit; a worker's do not count. */
-export function turnEdited(events: readonly SessionEvent[], turnId: string): boolean {
-  return events.some(event => event.kind === 'tool_call' && event.turnId === turnId && !(event.agent && WORKER.test(event.agent)) &&
-    event.call.outcome === 'ok' && (event.call.changes?.length ?? 0) > 0);
+/** How many of the chat's own calls in this turn recorded a successful edit, as loaded; a worker's do not count. */
+export function turnEditCount(events: readonly SessionEvent[], turnId: string): number {
+  return events.filter(event => event.kind === 'tool_call' && event.turnId === turnId && !(event.agent && WORKER.test(event.agent)) &&
+    event.call.outcome === 'ok' && (event.call.changes?.length ?? 0) > 0).length;
 }
 
-/** Whether the turn is over: its end was recorded, or a later turn began. */
+/** Whether the chat's own calls in this turn recorded a successful edit; a worker's do not count. */
+export function turnEdited(events: readonly SessionEvent[], turnId: string): boolean {
+  return turnEditCount(events, turnId) > 0;
+}
+
+/**
+ * Whether the turn is over: its latest boundary is its end, or a later turn began. A turn that
+ * started again after it ended is running again.
+ */
 export function turnFinished(events: readonly SessionEvent[], turnId: string, anchorSeq: number): boolean {
-  return events.some(event => (event.kind === 'turn_end' && event.turnId === turnId) ||
-    (event.seq > anchorSeq && event.kind === 'turn_start' && event.turnId !== turnId));
+  let latest: SessionEvent | null = null;
+  for (const event of events)
+    if ((event.kind === 'turn_start' || event.kind === 'turn_end') && event.turnId === turnId && (!latest || event.seq > latest.seq)) latest = event;
+  if (latest?.kind === 'turn_end') return true;
+  if (latest && latest.seq > anchorSeq) return false;
+  return events.some(event => event.seq > anchorSeq && event.kind === 'turn_start' && event.turnId !== turnId);
 }
 
 /** Where the store's read of the turn starts: its first recorded row, or the top when that is not loaded. */
