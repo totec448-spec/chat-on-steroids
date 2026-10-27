@@ -13,7 +13,7 @@ import type { ProviderUsage } from '../shared/provider-usage.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
 import type { ChatgptProjectChoice, LocalProject, ProjectColor } from '../shared/projects.js';
 import type { ProjectDirectoryListing, ProjectFileMutationResult, ProjectFilePreview, ProjectFileSaveResult, ProjectFilesChanged } from '../shared/project-files.js';
-import type { ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../shared/project-git.js';
+import type { CheckpointRestoreResult, ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../shared/project-git.js';
 import type { PetLibraryState, PetOverlayControlState, PetRuntimeAsset } from '../shared/pets.js';
 import type { SkillSummary, ManagedSkill, GitHubSkillUpdateCheck, SkillLibrary, SkillsDraftScope } from '../shared/skills.js';
 import type { RunningToolActivity, SessionChange, SessionSearchReply, SessionSearchLocation, SessionBookmark, ToolEditReview } from '../shared/session.js';
@@ -65,6 +65,8 @@ export interface SettingsPatch {
   mcp: Config['mcp'];
   /** Optional so callers that save other sections never have to carry it. */
   controlApi?: Config['controlApi'];
+  /** Optional for the same reason. */
+  projects?: Config['projects'];
   /** This computer's connector name suffix; omitted by callers that do not edit it. */
   connectorSuffix?: string;
 }
@@ -343,6 +345,8 @@ const api = {
   getProjectGitDiff: (projectId: string, path: string, baseRef?: string, expectedRevision?: string) => call<ProjectGitDiff>('projectGit:diff', {
     projectId, path, ...(baseRef ? { baseRef } : {}), ...(expectedRevision ? { expectedRevision } : {})
   }),
+  restoreCheckpoint: (projectId: string, checkpointId: string, paths: string[] | null, expectedRevision: string) =>
+    call<CheckpointRestoreResult>('checkpoints:restore', { projectId, checkpointId, paths, expectedRevision }),
   getToolEditReview: (sessionId: string, callId: string, changeIndex: number) =>
     call<ToolEditReview | null>('sessions:toolEditReview', { sessionId, callId, changeIndex }),
   /** #1827: what one answer changed, per file, read from the turn's first event (`from`, a sequence number) on. */

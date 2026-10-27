@@ -287,7 +287,7 @@ describe('visible Chat refresh', () => {
 
     const { chatVisible, initChat } = await import('../src/renderer/chat.js');
     initChat({
-      save: async () => undefined,
+      save: async () => true,
       state: () => ({ config: { sessions: { record: true, limitTokens: 533000 }, compaction: { auto: true, autoTokens: 400000 }, ui: { developerMode: true } } }) as any
     });
     chatVisible(true);
@@ -358,7 +358,7 @@ describe('visible Chat refresh', () => {
     Object.defineProperty(w, 'api', { value: api, configurable: true });
 
     const { chatVisible, initChat } = await import('../src/renderer/chat.js');
-    initChat({ save: async () => undefined, state: () => ({ config: { sessions: { record: true, limitTokens: 533000 }, compaction: { auto: true, autoTokens: 400000 }, ui: { developerMode: true } } }) as any });
+    initChat({ save: async () => true, state: () => ({ config: { sessions: { record: true, limitTokens: 533000 }, compaction: { auto: true, autoTokens: 400000 }, ui: { developerMode: true } } }) as any });
     chatVisible(true);
     await vi.waitFor(() => expect(listCalls).toHaveLength(1));
     await vi.waitFor(() =>
@@ -415,7 +415,7 @@ describe('scoped session change refresh', () => {
     }, { get(target, prop) { return prop in target ? (target as any)[prop] : (..._args: any[]) => ok(null); } });
     Object.defineProperty(w, 'api', { value: api, configurable: true });
     const { chatVisible, initChat } = await import('../src/renderer/chat.js');
-    initChat({ save: async () => undefined,
+    initChat({ save: async () => true,
       state: () => ({ config: { sessions: { record: true, limitTokens: 533000 }, compaction: { auto: true, autoTokens: 400000 }, ui: { developerMode: true } } }) as any });
     chatVisible(true);
     await vi.waitFor(() => expect(w.document.querySelector(`#sessionList [data-id="${state.a.id}"]`)).not.toBeNull());

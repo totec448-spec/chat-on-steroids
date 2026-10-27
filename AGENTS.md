@@ -219,6 +219,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Stop fallback for fresh turns | Off (`ui.rotateStopFallback`, experimental; disabled while fresh turns are off). | Where ChatGPT shows only Stop at a tool result it offers no Send for the continue (`ROTATION_DECLINED`, `no-send`). After `STOP_FALLBACK_AFTER_DECLINES` (2) such declines in one turn and the usual minute, the next held result takes the fallback instead of a third continue (`stopFallbackDue`/`noteStopFallback`, once per turn): `rotation-fence.ts` arms a fence (the kernel refuses that chat's calls with `ROTATION_FENCE_REFUSAL`, nothing runs, so a Stop landing mid-call cannot repeat a call, #1662), and 500 ms later `stopSessionTurn(…, { rotation: true })` queues the native Stop without turning Goal/Loop off or cancelling Compact & Resume. The stopped end of exactly that turn lifts the fence and files `fileRotationContinueAfterStop`: a `purpose: 'rotation'`, `afterStop: true` ordinary message (no `directTurn`), which `typedAfterStop` lets through once the turn shows stopped and nothing runs. The fence lifts after 60 s without a stopped end. Live 2026-10-20 (VM): Stop 1 s after a result, then "continue", repeated no step (2 runs). |
 | Follow-up behavior | Join the running turn (`ui.followUp: 'steer'`; a broken value loads as that). | Codex's "Follow-up behavior". Each running turn starts the composer's delivery choice from this default (`queue` selects After this turn); a choice made in the send menu lasts for that turn. Cmd/Ctrl+Shift+Enter sends the other way (`sendComposer('auto' \| 'after-turn')`); with no running turn it is an ordinary send. |
 | Enter key | Enter sends (`ui.enterSends`, missing means true). | Codex's "Enter key behavior". With `false`, Enter adds a line in the composer and Cmd/Ctrl+Enter sends; Shift+Enter always adds a line and Cmd/Ctrl+Shift+Enter keeps sending the other way (Follow-up behavior). |
+| Code checkpoints | Off (`projects.codeCheckpoints`; missing or malformed means Off). | Settings → Workspace, Folders: “Save a checkpoint before each turn's first edit”. `checkpointBeforePatch` reads `getConfig()` in the main process at capture time (never a renderer claim), so a flip applies to the next patch without a restart. Off stops new turn checkpoints only: existing ones stay listed in Review and Restore, including its own “Before restore” undo entry, keeps working. §10. |
 | Keep awake | The computer (`ui.keepAwake` on, missing means on; `ui.keepScreenAwake` off). | Codex's "Prevent sleep while running". One select: Off / The computer / The computer and screen. `keep-awake.ts` holds `powerSaveBlocker` (`prevent-app-suspension`: the system stays awake, the screen may sleep; with `keepScreenAwake`, `prevent-display-sleep`, because Windows Modern Standby laptops go to standby once the screen turns off whatever else is held, and the hold is swapped when the choice changes) while any session is working by `sessionWorkingAt` with the bridge's `sessionActivityExpiresAt` deadline, so a chat that died mid-turn releases it when its deadline passes. Refreshed on session changes, at the nearest deadline, every 60 s and when the setting changes. |
 | Browser bridge port | Auto. | `ui.browserBridgePort` accepts Auto or 8765–8769. Auto falls back to 18765–18769, then 38765–38769 (`BROWSER_BRIDGE_AUTO_PORTS`, mirrored by the extension's `PORTS`; #1314: Windows reserved the primary range). Effective `CLF_BRIDGE_PORTS` overrides it and disables the Settings control. |
 | Background chats | On. | Omitted legacy settings use On; explicit saved On/Off remains exact. Cold Windows startup requests a minimized browser window. |
@@ -240,12 +241,14 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Config/security | `src/main/config.ts`, `platform.ts`, `secrets.ts`, `sandbox.ts`, `redaction.ts`; `src/shared/types.ts`, `capabilities.ts`: permission and host projection, secrets, approved paths. |
 | Publication | `src/main/connection.ts`, `mcp/server.ts`, `mcp/surfaces.ts`, `tunnel/{index,health,locate}.ts`, `diagnostics.ts`: endpoint/tunnel generation and truthful status. |
 | Local control API | `src/main/control-api.ts`, `src/main/control-reads.ts`, `src/main/control-actions.ts`, `src/shared/control-api.ts`: opt-in loopback listener, per-launch token, allowlisted read-only projections of other owners, and (behind `controlApi.allowActions`) send and cancel through the outbox and Stop through `stopSessionTurn`. Owns no fact. The session list and event page it serves come from `session/read-model.ts`, the same functions the renderer's IPC handlers call. |
+| Send check (#1794) | `src/main/send-check.ts`, `src/shared/send-check.ts`; gates in `bridge.ts` (`/input/claim`, `/commands/redeem`), `goal.ts` (`sendCheckAllows`), `session/finish.ts`, `mcp/tools-core.ts` (agents `message`) |
 | Tool dispatch | `src/main/mcp/{tools,kernel,inbound,call-context,tool-declarations}.ts`, `tools-core.ts`, `tools-desktop.ts`, `tools-plugins.ts`: declarations, exact caller, live guards and evidence. |
 | Code composition | `src/main/mcp/code-mode-{tool,runtime,worker}.ts`: surface-scoped `exec`, QuickJS admission, limits and explicit emissions. |
 | Instructions/plan | `src/main/mcp/{instructions,coding-instructions,plan-tool}.ts`, `src/shared/agent-plan.ts`, `src/renderer/agent-plan.ts`: executor contract and displayed progress plan. |
 | Local files/processes | `src/main/{rawfs,fsops,search,ripgrep,env,toolchain,exec,exec-hints,text-match,diffstat}.ts`, `src/main/codex/*`, `src/shared/background-exec.ts`: bounded filesystem/shell implementation and the read-only renderer projection of live exec children. |
 | Terminal custody | `src/main/codex/{manager,ownership,unified-exec,unified-exec-constants,shell,command-batch,head-tail-buffer,truncate,exec-output}.ts`. |
 | Patching/images | `src/main/codex/apply-patch/*`, `codex/{filesystem,read-backend,view-image}.ts`. |
+| Code checkpoints | `src/main/checkpoints/`: per-turn Git tree snapshots taken before a turn's first patch, their ledger, and confirmed per-file restore. `project-git.ts` projects the comparison. |
 | Projects/cwd | `src/main/projects.ts`, `workspace.ts`, `src/shared/projects.ts`: explicit local folder catalog, session binding, inherited/learned workspaces. |
 | Project Files UI | `src/main/project-files.ts`, `project-file-watcher.ts`, `src/shared/project-files.ts`, `src/renderer/{file-panel,file-code-editor,file-pdf-viewer,work-panel-resize}.ts`: bounded project views, revision-checked saves and renderer-owned drafts. |
 | Durable history | `src/main/session/{store,recorder,correlation,summarize,progress}.ts`, `src/shared/{session,chronology}.ts`: canonical messages, tool truth, chronology and indexes. |
@@ -281,6 +284,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Input and checkpoints | `input.ts` / `state/session-input.json` | Serialized acceptance, frozen payload, exclusive claim and receipt; stages belong here. |
 | Native upload originals | `input-attachments.ts` / `input-attachments/` | Immutable bytes, opaque ids; outbox owns membership and retention. |
 | Project catalog | `projects.ts` / `state/projects.json` | Serialized catalog mutation; session metadata owns association. |
+| Code checkpoints | `checkpoints/store.ts` / `state/code-checkpoints.json`; tree objects in the project's own Git object store | Entry written only after `write-tree` returned its tree. Bounded per project (20); a restore's "Before restore" entry never evicts the checkpoint being restored (the oldest other one makes room). An evicted or pruned tree reads as unavailable, never as an empty comparison. |
 | Browser commands/results | `bridge.ts` / `state/bridge-commands.json`; extension ACK outbox | Intent and exact lease before text; receipt durable before ACK custody is retired. |
 | Direct browser tool calls | `browser-control.ts` process epoch/pending claims; extension `storage.session.cosBrowserControl` | One claim per command; browser incarnation plus local-session tab lease. MV3 retains custody/receipt, never replays input. App restart invalidates outstanding claims. |
 | Workers and inboxes | `agents.ts` / swarm snapshot and retired-worker fences | Stage → critical durable snapshot → publish/open/report. |
@@ -466,7 +470,12 @@ not intercepted.
 
 `mcp/coding-instructions.ts` contains adapted upstream collaboration prose with provenance;
 `mcp/instructions.ts` adds currently available local-tool guidance and the user's bounded
-standing additions. There is no extra instructions tool or per-chat “already sent prompt” flag.
+standing additions. Its Personality and Writing style parts (#1856) live in `src/shared/chat-style.ts`
+and are the person's to replace (`ui.chatPersonality`, `ui.chatWritingStyle`, Settings → Agents &
+automation → Chat instructions): absent is the built-in text, `''` leaves that part out with its
+heading, and a `# ` heading typed into one becomes `## `, so it cannot pose as a fixed section.
+Everything else in that prose stays fixed. The plugin schema hash covers tools only, so an edit
+needs no plugin refresh; it reaches new chats' first messages and the MCP instructions. There is no extra instructions tool or per-chat “already sent prompt” flag.
 
 The whole message has a **96,000 UTF-16-character ceiling**, plus the input transport's UTF-8
 byte envelope. For eligible openings, authored work, complete Core instructions and selected
@@ -1286,6 +1295,24 @@ Partial multi-file failure uses bounded rollback snapshots. Restore only a path 
 what **this patch produced**; a concurrent external edit must never be overwritten. Preserve
 the port's explicit line-ending mode and readable parse/match failures.
 
+**Code checkpoints.** With `projects.codeCheckpoints` On (default Off), after a patch has verified and before it executes, the first patch of a
+turn (standalone or intercepted from `exec_command`) in a session's own Local Project Git
+repository takes one checkpoint: a temporary index outside the repository, seeded as a copy of the
+repository's own index (`rev-parse --git-path index`) so its stat data lets `add -A` hash only
+what changed, then `add -A` of the project folder and `write-tree`. With no index to copy, or when
+the seeded index cannot be written as a tree, it starts again from `read-tree` of HEAD. Paths
+outside the project keep what the seed holds; nothing compares or restores them. It writes Git objects only: no ref, branch, HEAD,
+user index or working file changes, and every checkpoint Git command passes
+`--no-replace-objects`. The key is the exact proven session plus `responseTurnId(activeTurnId)`;
+with no active turn it is that request id, and an unproven session, a session without a project,
+a non-Git project or a patch whose files lie outside the project takes none. Concurrent patches
+of one turn share one capture. Capture is bounded in time; a failure or timeout is logged and
+the turn takes no checkpoint, not even from a later patch (the first one has already run), and
+the patch result, permissions and rollback stay exactly as without checkpoints. Commands that edit files through the shell are not checkpointed by
+themselves; a later patch in the same turn does not move the turn's checkpoint. With the setting Off the
+check happens first, at capture time, and the patch takes no checkpoint and runs no Git command for it. Listing, comparing and
+`restoreCheckpoint` do not read the setting.
+
 ### Terminal execution and custody
 
 One app-lifetime `codex/manager.ts` owns `UnifiedExecProcessManager`. `exec_command` runs a shell,
@@ -1489,6 +1516,16 @@ a worker's or helper's, whose tasks come from the app. Messages without text, st
 queued inputs are not recalled either. The list is read at the first press, so a message recorded
 while paging doesn't shift it. Each recalled message is announced through the sr-only polite region
 `#recallAnnounce`. Recall only fills the composer; nothing is stored and nothing is sent.
+Quote a selection (`quote-selection.ts`): words selected inside one message's text (`.said .msg` in
+`#timeline`, not the read-only agent pane) get a floating Quote button once the pointer is up.
+It appends them to the draft as a Markdown quote after what is typed, with an empty line below and
+the caret there. The text is read from the DOM by `selectedText`, not the selection's own string:
+lines per block and `<br>`, code and plain messages verbatim, a KaTeX formula as its TeX, and the panels'
+`.tool-output-header` controls and hidden nodes left out. A selection over the terminal block's caps
+(400 lines, 20,000 characters) keeps its last lines under the same "Only the end of the selection is
+here" line, cut by `limitedSelection`, and goes into the draft with `draftWithTerminalBlock`. It only
+fills the composer; nothing is sent. Switching chat, starting a new one or changing view calls the
+returned `reset()` (it also drops a selection in the timeline and a scheduled update), and a click reads the selection again, so a stale quote never reaches the composer.
 Esc to stop (`escapeStopsTurn` in `chat.ts`): while the open chat's turn runs and Send shows Stop
 (composer empty, no files, no prepared plan), a first plain Esc in the composer only arms Stop and
 says "Press Esc again to stop the turn" in `#composerStatus`; a second plain Esc within 1.5 s stops
@@ -3433,6 +3470,41 @@ Block persists the exact conversation's local-tool refusal across all MCP surfac
 user release/deletion removes it. It does not remotely terminate ChatGPT or erase history.
 Neither action may spill into another local session merely because labels or timing match.
 
+### Send check: a local veto before automatic sends (#1794)
+
+`ui.sendCheckUrl` (Settings → General → For developers → Check automatic sends) names a program on
+this computer (`http://127.0.0.1|localhost|[::1]:<port>/…`, see `src/shared/send-check.ts`). Empty is
+off. When it is set, every send the app makes by itself is asked about first with one `POST`:
+`{ version: 1, kind, id, chat: { session, project, worker }, text, attempt }`. The kinds are
+`goal-step`, `loop-step`, `continue` (automatic Continue), `fresh-turn` (rotation and its after-Stop
+continue), `worker-start` and `worker-message`. A message a person sends is never asked about, and
+neither are Stop or anything clicked in ChatGPT.
+
+- **Veto-only.** `200 {allow:true}` lets the send go; `200 {allow:false, reason?}` holds it. Anything
+  else (no answer within 3 s, an error, another status or body, a redirect) holds it too: a crashed
+  checker never opens the gate. A saved address that is not on this computer is never contacted and
+  holds. The answer can never change the text, model or target.
+- **One log line per decision**, never with the message: `send check: <kind> <id> attempt N allowed|held (why)`.
+- **Where it is asked**, each before anything is typed or filed:
+  - Outbox rows (`continue`, `fresh-turn`): in `/input/claim` before `claimBrowserInput`, outside the
+    queue's lock. A hold stores `sendCheck {attempt, nextAt, reason, answered}` on the row;
+    `pendingBrowserInputs` and `pendingQueuedPickups` skip it until `nextAt` (30 s), so a held row is
+    neither offered nor taken for a failed pickup. Clearing the address releases it at once. The row
+    must still be queued with the same text after the ask, or it is asked about again.
+  - Goal/Loop steps: in `goal.ts run()` after the step is written, before it is settled `ready`. A hold
+    keeps the draft and asks again every 30 s with the same `id` (the draft token); it stops asking
+    while the chat's Goal/Loop is off and ends when the draft is no longer this chat's.
+  - Session Finish steps: in `finish.ts` before `enqueueInput`, asked once, because the step can reach
+    ChatGPT in that tool call's own result. A hold queues nothing and releases the finish hold, so
+    ChatGPT finishes its answer instead of calling session_finish again to be asked again.
+  - Worker start and wake: in `/commands/redeem` after the text is final. A hold answers the page
+    `503 send_check_held` (retryable), asks at most every 30 s, and sets `lastError`, so a command
+    whose deadline ends while held reports the hold. An allowed text is not asked about again.
+  - Messages to a worker (agents `message`): before staging. One held message fails the whole call
+    and nothing is queued. Messages to the prime are not asked about.
+- Not in phase 1: Compact & Resume prompts, the Goal helper's Temporary Chat, `/goal/open` opening
+  messages, and events about what happened after a send (#82).
+
 ## 15. Compact & Resume: same session, new frontend
 
 **Intent:** preserve one local session S, its project, history, input queue, prime/worker family
@@ -4789,8 +4861,9 @@ as three read-only panes with a toggle back to the diff; Ask chat to resolve onl
 composer with a request naming the file (or, while a prepared Plan waits to be sent, only says to start or cancel it first), and nothing writes, stages or marks it resolved.
 It also projects ancestor-folder markers and
 bounded unified diffs; Files may open it from its toolbar. Files and Review are alternate right
-tabs; Review does not add a second file watcher or expose file-write actions, with one
-exception that is a Files write, not a Git one: an untracked (`U`) working-tree row's context
+tabs; Review does not add a second file watcher. It writes files in two cases only: checkpoint
+Restore, which it requests from `checkpoints/` and never performs itself, and a Files write that
+is not a Git one: an untracked (`U`) working-tree row's context
 menu offers Add to .gitignore for that file or its folder. After a confirmation it appends one
 anchored, escaped line (`/dist/`) to the project folder's `.gitignore` through the existing
 `projectFiles:create`/`projectFiles:preview`/`projectFiles:save` IPC. The file is read before the
@@ -4804,6 +4877,20 @@ comparison identity, and a changed ref/HEAD cannot publish an old diff as curren
 A non-repository, binary file, oversized diff or truncated change set is an
 explicit state rather than a reason to invent content or mutate the worktree.
 
+The same picker lists the project's code checkpoints (§10), newest first, as `checkpoint:<id>`
+choices. A checkpoint comparison reads the checkpoint tree into a temporary index and reports
+working-tree changes against it, untracked files included, without writing objects; it has the
+same identity rules as a branch comparison. Restore (one file from its diff, or all listed
+files) sends the checkpoint id, the paths and that comparison revision, which also covers each
+listed file's identity (inode, size, mtime). Main recomputes the comparison and refuses a changed
+revision, asks for confirmation in its own dialog (`MAIN_TEXTS`, default Keep), checks the
+revision again after the dialog, then first takes a "Before restore" checkpoint of the current
+state, so a restore can itself be undone.
+Each file is rewritten (through `cat-file --filters`, temp file and rename) or removed only if
+its content still hashes to what that new checkpoint captured; a file edited in between is
+skipped and reported. Line endings follow the repository's Git settings, as a checkout would
+write them, and parent folders removed since the checkpoint are recreated. Symlinks, submodules and paths outside the project are never written.
+HEAD, branches and the user's index are untouched.
 Commit & PR (`src/main/project-commit.ts`, `renderer/commit-dialog.ts`) is Review's only Git write
 path, and only on the person's own press in the Commit dialog (Review's footer button, shown for a
 local project's working tree, not for a branch comparison or a truncated set). The model has no
@@ -5329,7 +5416,12 @@ one icon button (≡) in the title bar opening the row menus' menu (`row-menu.ts
 each action with its icon and this keyboard's shortcut (not the sidebar toggle, which sits beside it), a
 pets label that says what it will do (Show/Hide pets), zoom steps that keep it open with Actual size's value updating
 (a zoom's resize repositions it instead of closing it), and Show browser (the CoS browser) only while the
-built-in browser is the ChatGPT browser. Appearance rows align controls at a shared minimum height and Setup uses a stable
+built-in browser is the ChatGPT browser. Its last item, Keyboard shortcuts, and ⌘/ (macOS) / Ctrl+/ (not in the
+terminal or the file editor, nor over another dialog) open `#shortcutsDialog` (`renderer/shortcuts-dialog.ts`): only keys the
+renderer or the window handles, labelled by `shortcuts.ts`, the message box's Enter rows following `ui.enterSends`
+and hold-to-talk shown on Windows only. Each row names the file that owns its keys (`source`); a new shortcut adds its
+row there in the same change, and `test/renderer-shortcuts-dialog.test.ts` fails when a renderer file handles modifier
+keys that no row names. Appearance rows align controls at a shared minimum height and Setup uses a stable
 responsive title/language grid across locales.
 The companion sends a bounded snapshot on the authenticated `/diagnostics` route, outside the
 authority-bearing `/status` response. One pending diagnostic page read is shared; current
@@ -5555,7 +5647,7 @@ the whole run replaying one long workflow; avoid optimizing speculative edge cas
 | Unexpected tab/reload/model/refresh | operation owner → browser election → native observation | `bridge*`, `browser*`, `extension`, `content-script`, `model-*`, `plugin-refresh*` |
 | Lost compaction or Goal debt | continuation/goal → store → bridge | `continuation`, `resume`, `goal*`, `session-finish` |
 | Transcript order, UI clobber, usage | store/chronology → IPC → renderer | `session`, `chronology`, `renderer-*`, `timeline-scroll`, `session-usage`, `usage-observer` |
-| Files/patch/output/code-mode | concrete tool owner → kernel serialization | `codex-*`, `exec-*`, `code-mode-*`, `mcp-tool-declarations` |
+| Files/patch/output/code-mode | concrete tool owner → kernel serialization | `codex-*`, `exec-*`, `code-mode-*`, `mcp-tool-declarations`, `code-checkpoints` |
 | Plugins/auth/native Desktop | manager/exposure/OAuth or computer frame owner | `plugins-*`, `computer*`, `tools-desktop-*`, `macos-*` |
 | Startup/connection/shipping | lifecycle/config/connection or packaging script | `config`, `window-*`, `shutdown`, `tunnel*`, `control-api`, `packaging`, `update`, `third-party-notices` |
 

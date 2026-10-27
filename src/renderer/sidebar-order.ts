@@ -4,7 +4,8 @@ const MAX_IDS = 5000;
 export const SIDEBAR_PROJECT_SCOPE = ':projects';
 type Entry = { id: string; scope: string };
 
-export function createSidebarOrder(list: HTMLElement, entries: () => Entry[], repaint: () => void) {
+export function createSidebarOrder(list: HTMLElement, entries: () => Entry[], repaint: () => void,
+  dismissTooltip: () => void = () => document.getElementById('sessionTooltip')?.remove()) {
   const orders = new Map<string, string[]>();
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -89,7 +90,7 @@ export function createSidebarOrder(list: HTMLElement, entries: () => Entry[], re
       drag.active = true; suppressClick = true;
       list.setPointerCapture(event.pointerId);
       list.classList.add('is-sorting'); drag.row.classList.add('is-sorting');
-      document.getElementById('sessionTooltip')?.remove();
+      dismissTooltip();
     }
     event.preventDefault();
     const scroll = list.closest<HTMLElement>('.scroll');

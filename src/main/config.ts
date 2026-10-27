@@ -1,3 +1,4 @@
+import { MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
 import { DEFAULT_PHONE_PUSH } from '../shared/phone-push.js';
 import { DEFAULT_HELPER_CHAT_MODEL, SUPERSEDED_HELPER_CHAT_MODELS } from '../shared/chat-models.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
@@ -294,6 +295,8 @@ export const MAX_MCP_INSTRUCTIONS_CHARS = 4000;
 const DEFAULT_MCP = { instructions: '', persistentUrls: false } as const;
 /** Off for fresh installs and for every config written before the switches existed. */
 const DEFAULT_CONTROL_API = { enabled: false, allowActions: false } as const;
+/** Off for fresh installs and for every config written before the switch existed. */
+const DEFAULT_PROJECTS = { codeCheckpoints: false } as const;
 const DEFAULT_COMMAND_ALLOWLIST = { enabled: false, mode: 'allow', rules: [] } as const;
 const commandAllowlistRuleSchema = z.string().max(MAX_COMMAND_ALLOWLIST_RULE_CHARS).superRefine((rule, ctx) => {
   const message = validateCommandAllowlistRule(rule);
@@ -301,6 +304,14 @@ const commandAllowlistRuleSchema = z.string().max(MAX_COMMAND_ALLOWLIST_RULE_CHA
 });
 
 /** The damaged phone server is said once per start: the schema runs on every config read. */
+/** #1856: a damaged saved chat style falls back to the built-in text, said once per load and never with its content. */
+function chatStyleField(field: 'chatPersonality' | 'chatWritingStyle') {
+  return z.string().max(MAX_CHAT_STYLE_CHARS).optional().catch(({ input }) => {
+    logWarn(`config: the saved ui.${field} was damaged (${typeof input === 'string' ? 'too long' : 'not text'}); new chats use the built-in text`);
+    return undefined;
+  });
+}
+
 let damagedPhoneServerLogged = false;
 
 const configSchema = z.object({
@@ -351,6 +362,16 @@ const configSchema = z.object({
     announceTurns: z.boolean().optional(),
     // Empty, too long or damaged falls back to the built-in Continue phrases.
     customContinue: z.string().trim().min(1).max(CUSTOM_CONTINUE_MAX_CHARS).optional().catch(undefined),
+    /** #1856: the person's Personality and Writing style for new chats; absent = default, '' = left out. */
+    chatPersonality: chatStyleField('chatPersonality'),
+    chatWritingStyle: chatStyleField('chatWritingStyle'),
+    /**
+     * #1794: the local program asked before each send the app makes by itself; absent or empty is off.
+     * A damaged value stays set as one that is not on this computer, so the gate holds instead of opening.
+     * The app never saves null (an empty field is left out), so a saved null is damage too.
+     */
+    sendCheckUrl: z.unknown().transform(value => value === undefined ? undefined
+      : typeof value === 'string' ? value.trim().slice(0, 300) || undefined : 'damaged').optional(),
     /** Keep the chat at its end while it grows, in the app and on ChatGPT, until the reader scrolls up. */
     followOutput: z.boolean().optional().default(true),
     mentionCore: z.boolean().optional().default(true),
@@ -604,7 +625,15 @@ const configSchema = z.object({
     .transform((value) => ({ enabled: value.enabled, allowActions: value.enabled && value.allowActions }))
     .optional()
     .default({ ...DEFAULT_CONTROL_API })
-    .catch({ ...DEFAULT_CONTROL_API })
+    .catch({ ...DEFAULT_CONTROL_API }),
+  // Opt-in, so a malformed value repairs to off without touching the rest of the file.
+  projects: z
+    .object({
+      codeCheckpoints: z.boolean().optional().default(DEFAULT_PROJECTS.codeCheckpoints).catch(DEFAULT_PROJECTS.codeCheckpoints)
+    })
+    .optional()
+    .default({ ...DEFAULT_PROJECTS })
+    .catch({ ...DEFAULT_PROJECTS })
 });
 
 /**
@@ -639,7 +668,8 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform, rele
     multiAgent: { ...FIRST_LAUNCH_MULTI_AGENT },
     goal: { ...DEFAULT_GOAL },
     mcp: { ...DEFAULT_MCP },
-    controlApi: { ...DEFAULT_CONTROL_API }
+    controlApi: { ...DEFAULT_CONTROL_API },
+    projects: { ...DEFAULT_PROJECTS }
   };
 }
 
