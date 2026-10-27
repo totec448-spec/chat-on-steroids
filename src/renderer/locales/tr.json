@@ -3354,5 +3354,7 @@
   "Move a queued task": "Sıradaki görevi taşı",
   "Move the focused tab": "Odaktaki sekmeyi taşı",
   "Save the file being edited": "Düzenlenen dosyayı kaydet",
-  "Copy the selection": "Seçimi kopyala"
+  "Copy the selection": "Seçimi kopyala",
+  "Turn off Plugins connection": "Plugins bağlantısını kapat",
+  "Plugins connection turned off": "Plugins bağlantısı kapatıldı"
 }

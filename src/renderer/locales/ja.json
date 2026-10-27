@@ -3294,5 +3294,7 @@
   "Move a queued task": "キュー内のタスクを移動",
   "Move the focused tab": "フォーカス中のタブを移動",
   "Save the file being edited": "編集中のファイルを保存",
-  "Copy the selection": "選択範囲をコピー"
+  "Copy the selection": "選択範囲をコピー",
+  "Turn off Plugins connection": "Plugins の接続をオフにする",
+  "Plugins connection turned off": "Plugins の接続をオフにしました"
 }
