@@ -1169,7 +1169,9 @@ it('says when the send check holds an automatic message, with its reason', async
   const api = (w as any).api;
   const chat = await import('../src/renderer/chat.js');
   const state = (await api.getState()).data;
-  chat.chatApply({ ...state, bridge: { ...state.bridge, present: true } });
+  const checked = (url: string | undefined) => chat.chatApply({ ...state, bridge: { ...state.bridge, present: true },
+    config: { ...state.config, ui: { ...state.config.ui, sendCheckUrl: url } } });
+  checked('http://127.0.0.1:8123/check');
   const hold = (attempt: number, reason: string, answered: boolean) => ({ attempt, nextAt: Date.now() + 30_000, reason, answered });
   const held: InputEntry = { id: 'held-one', sessionId: summary(live.events).id, state: 'queued', owner: null, text: 'Continue',
     mode: 'after-turn', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: 'chat-a',
@@ -1190,6 +1192,14 @@ it('says when the send check holds an automatic message, with its reason', async
     authoredSource: 'none', sendCheck: hold(1, 'budget', true) };
   await append([]); await append([]);
   expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').toContain('Held by your send check: budget');
+  // The person clears the check's address: the app releases the message at once, and the queue stops saying it is held (CodeRabbit).
+  checked(undefined); await append([]); await append([]);
+  expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').not.toContain('Held');
+  // A hold whose next ask has come is no longer a hold either.
+  checked('http://127.0.0.1:8123/check');
+  live.inputs[0] = { ...live.inputs[0]!, sendCheck: { attempt: 2, nextAt: Date.now() - 1, reason: 'budget', answered: true } };
+  await append([]); await append([]);
+  expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').not.toContain('Held');
 });
 
 it('says why a queued message waits: no extension, or a running tool call', async () => {

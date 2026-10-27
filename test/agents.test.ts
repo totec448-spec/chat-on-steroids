@@ -4930,6 +4930,26 @@ describe('through the MCP endpoint', () => {
     }
   });
 
+  it('names no session to the send check when the prime chat is current on two sessions (CodeRabbit)', async () => {
+    const previous = getConfig();
+    await saveConfig({ ...previous, ui: { ...previous.ui, sendCheckUrl: 'http://127.0.0.1:8123/check' } });
+    const asked: Array<Record<string, any>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+      asked.push(JSON.parse(String(init.body)));
+      return Response.json({ allow: false, reason: 'review first' });
+    }));
+    try {
+      await createSession({ conversationId: PRIME_CHAT });
+      await createSession({ conversationId: PRIME_CHAT });
+      spawn({ caller: prime, workers: [{ task: 'Checked worker' }] });
+      await asChat(PRIME_CHAT, 'message', { to: 'worker-1', text: 'Also update the docs' });
+      expect(asked).toEqual([expect.objectContaining({ kind: 'worker-message', chat: expect.objectContaining({ session: null, project: null }) })]);
+    } finally {
+      vi.unstubAllGlobals();
+      await saveConfig(previous);
+    }
+  });
+
   it('lets existing primes exchange messages by explicit run address without exposing foreign workers', async () => {
     const primeB: Caller = { conversationId: 'mcp-peer-prime-b' };
     const a = spawn({ caller: prime, workers: [{ task: 'A worker' }] });
