@@ -80,10 +80,23 @@ interface PersistedCorrelations {
   entries: RequestCorrelation[];
 }
 
-function wake(requestId: string): void {
-  const held = waiters.get(requestId);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/**
+ * The key a request id is joined on. ChatGPT sometimes sends a tool call's request id with another
+ * UUID version digit than the page's message holds (live, #1752: the page had 93ff44d2-cfea-4f32-…,
+ * the calls came as 93ff44d2-cfea-9f32-…), and every such call went unattributed. The other 31 hex
+ * digits are random, so they still name exactly one request. Any other id is joined as written.
+ */
+function joinKey(requestId: string): string {
+  // Prefixed apart, so an exact-match id can never share a key with a UUID spelled like it.
+  return UUID.test(requestId) ? `uuid:${requestId.slice(0, 14)}${requestId.slice(15)}`.toLowerCase() : `id:${requestId}`;
+}
+
+/** Wakes the waiters of one key (see joinKey). */
+function wake(key: string): void {
+  const held = waiters.get(key);
   if (!held) return;
-  waiters.delete(requestId);
+  waiters.delete(key);
   for (const resolve of held) resolve();
 }
 
@@ -185,12 +198,13 @@ function storedOwner(raw: unknown): RequestCorrelation | null {
  * request into the newer epoch.
  */
 function merge(input: RequestCorrelation): 'stored' | 'same' | 'refused' {
-  const previous = byRequest.get(input.requestId);
+  const key = joinKey(input.requestId);
+  const previous = byRequest.get(key);
   if (!previous) {
-    byRequest.set(input.requestId, { ...input });
-    evidenceWindowStarts.delete(input.requestId);
+    byRequest.set(key, { ...input });
+    evidenceWindowStarts.delete(key);
     trim();
-    wake(input.requestId);
+    wake(key);
     return 'stored';
   }
 
@@ -203,8 +217,8 @@ function merge(input: RequestCorrelation): 'stored' | 'same' | 'refused' {
     // trim() uses insertion order as the bounded registry's freshness order. Updating the
     // timestamp without moving this key left a live, repeatedly observed old request at the
     // eviction head, so enough newer ids could discard it while genuinely stale ids stayed.
-    byRequest.delete(input.requestId);
-    byRequest.set(input.requestId, previous);
+    byRequest.delete(key);
+    byRequest.set(key, previous);
   }
   return 'same';
 }
@@ -337,7 +351,7 @@ export function observeRequestCorrelations(
 ): Array<'stored' | 'same' | 'refused'> {
   let changed = false;
   const results = inputs.map((input) => {
-    const previousObservedAt = byRequest.get(input.requestId)?.observedAt;
+    const previousObservedAt = byRequest.get(joinKey(input.requestId))?.observedAt;
     const result = merge(input);
     // A same-owner observation can still advance durable freshness/order. Persist that too so
     // an app restart cannot resurrect the pre-refresh eviction order. A refusal changes nothing
@@ -354,7 +368,7 @@ export function observeRequestCorrelations(
     const requestId = inputs[index]!.requestId;
     if (attaching.has(requestId)) continue;
     attaching.add(requestId);
-    const owner = byRequest.get(requestId);
+    const owner = byRequest.get(joinKey(requestId));
     if (!owner) continue;
     if (results[index] === 'stored') publishCorrelation(owner);
     void attachRequestPlan(owner).catch(error => {
@@ -370,7 +384,7 @@ export function observeRequestCorrelations(
 /** Exact request-id lookup. An id no page has proved yet resolves to null. */
 export function requestCorrelation(requestId: string | null | undefined): RequestCorrelation | null {
   if (!requestId) return null;
-  const held = byRequest.get(requestId);
+  const held = byRequest.get(joinKey(requestId));
   return held ? { ...held } : null;
 }
 
@@ -384,9 +398,10 @@ export async function awaitRequestCorrelation(requestId: string | null | undefin
   if (immediate || timeoutMs <= 0) return immediate;
 
   const now = performance.now();
-  const startedAt = evidenceWindowStarts.get(requestId) ?? now;
-  if (!evidenceWindowStarts.has(requestId)) {
-    evidenceWindowStarts.set(requestId, startedAt);
+  const key = joinKey(requestId);
+  const startedAt = evidenceWindowStarts.get(key) ?? now;
+  if (!evidenceWindowStarts.has(key)) {
+    evidenceWindowStarts.set(key, startedAt);
     if (evidenceWindowStarts.size > MAX_EVIDENCE_WINDOWS) {
       evidenceWindowStarts.delete(evidenceWindowStarts.keys().next().value!);
     }
@@ -396,12 +411,12 @@ export async function awaitRequestCorrelation(requestId: string | null | undefin
 
   let timer: NodeJS.Timeout | null = null;
   await new Promise<void>((resolve) => {
-    const set = waiters.get(requestId) ?? new Set<() => void>();
+    const set = waiters.get(key) ?? new Set<() => void>();
     set.add(resolve);
-    waiters.set(requestId, set);
+    waiters.set(key, set);
     timer = setTimeout(() => {
       set.delete(resolve);
-      if (set.size === 0) waiters.delete(requestId);
+      if (set.size === 0) waiters.delete(key);
       resolve();
     }, remainingMs);
     timer.unref?.();
@@ -416,5 +431,5 @@ export function resetCorrelationRegistryForTests(): void {
   evidenceWindowStarts.clear();
   restored = false;
   restoring = null;
-  for (const requestId of [...waiters.keys()]) wake(requestId);
+  for (const key of [...waiters.keys()]) wake(key);
 }
