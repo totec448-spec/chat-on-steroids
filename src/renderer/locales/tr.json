@@ -3329,5 +3329,6 @@
   "{0} more not listed": "{0} tane daha listelenmedi",
   "{0} more not listed|one": "{0} tane daha listelenmedi",
   "Touched {0} files, no net change": "{0} dosyaya dokunuldu, net değişiklik yok",
-  "Touched {0} files, no net change|one": "{0} dosyaya dokunuldu, net değişiklik yok"
+  "Touched {0} files, no net change|one": "{0} dosyaya dokunuldu, net değişiklik yok",
+  "The request was not valid.": "İstek geçerli değildi."
 }

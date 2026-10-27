@@ -3394,5 +3394,6 @@
   "{0} more not listed|many": "mais {0} não listados",
   "Touched {0} files, no net change": "{0} arquivos mexidos, nenhuma mudança líquida",
   "Touched {0} files, no net change|one": "{0} arquivo mexido, nenhuma mudança líquida",
-  "Touched {0} files, no net change|many": "{0} de arquivos mexidos, nenhuma mudança líquida"
+  "Touched {0} files, no net change|many": "{0} de arquivos mexidos, nenhuma mudança líquida",
+  "The request was not valid.": "A solicitação não era válida."
 }

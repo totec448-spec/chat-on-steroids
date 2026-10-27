@@ -3264,5 +3264,6 @@
   "{0} put back": "{0} 個を元に戻した",
   "and {0} more": "ほか {0} 件",
   "{0} more not listed": "ほか {0} 件は一覧外",
-  "Touched {0} files, no net change": "{0} 個のファイルに触れたが、正味の変更なし"
+  "Touched {0} files, no net change": "{0} 個のファイルに触れたが、正味の変更なし",
+  "The request was not valid.": "リクエストが無効でした。"
 }
