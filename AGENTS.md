@@ -4939,6 +4939,14 @@ only the bounded viewport. Unavailable reads reset lazy-load admission so closin
 retries, while a pending or successful read remains single-flight/cached. Inline syntax uses the
 file viewer's palette in the selected theme; dark overrides are scoped to dark mode for both
 surfaces. The existing Review dock remains available.
+Per answer (#1827, `main/session/turn-changes.ts`): `sessions:turnChanges` { sessionId, turnId, from }
+groups a turn's successful recorded edits by path (first-change order, the prime's own calls only,
+never a `worker-N` agent's) and gives each file one net diff, the first edit's before against the
+last edit's after, read from the review assets by id (`readEditReviewAsset`), counted with
+`lineDelta`: `edited`, `created`, `deleted` or `unchanged` (put back, or made and removed). An end the
+recording did not keep falls back to the summed recorded counts, marked approximate, with `diff`
+saying why. At most 50 files; `total` says how many there are. `sessions:turnFileDiff` adds `path`
+and returns that net before/after. `from` is the turn's first sequence number, so the read starts there.
 
 Unchanged session/directory updates preserve preview DOM and pending code loads. File reads keep
 the previous accepted preview until replacement content is ready; hidden previews stay hidden.

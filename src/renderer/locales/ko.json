@@ -3317,5 +3317,17 @@
   "Saved when you leave the editor and used from the next new chat. Leave it empty to send no writing style at all.": "편집기를 떠나면 저장되고 다음 새 채팅부터 적용됩니다. 비워 두면 글쓰기 스타일을 보내지 않습니다.",
   "New chats use the built-in text.": "새 채팅은 기본 제공 텍스트를 사용합니다.",
   "Saved. New chats leave this part out.": "저장했습니다. 새 채팅에서는 이 부분을 뺍니다.",
-  "Saved. New chats use your text.": "저장했습니다. 새 채팅은 직접 쓴 텍스트를 사용합니다."
+  "Saved. New chats use your text.": "저장했습니다. 새 채팅은 직접 쓴 텍스트를 사용합니다.",
+  "Changed and put back in this answer: no net change.": "이 답변에서 변경했다가 되돌렸습니다: 순 변경 없음.",
+  "created": "생성됨",
+  "deleted": "삭제됨",
+  "edited": "편집됨",
+  "no net change": "순 변경 없음",
+  "Open in Review": "리뷰에서 열기",
+  "Changed {0} files": "파일 {0}개 변경",
+  "{0} put back": "{0}개 되돌림",
+  "and {0} more": "외 {0}개",
+  "{0} more not listed": "{0}개는 목록에 없음",
+  "Touched {0} files, no net change": "파일 {0}개를 건드렸지만 순 변경 없음",
+  "The request was not valid.": "요청이 올바르지 않습니다."
 }

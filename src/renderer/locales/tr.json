@@ -3377,5 +3377,22 @@
   "Saved when you leave the editor and used from the next new chat. Leave it empty to send no writing style at all.": "Düzenleyiciden çıktığınızda kaydedilir ve bir sonraki yeni sohbetten itibaren kullanılır. Hiç yazım üslubu göndermemek için boş bırakın.",
   "New chats use the built-in text.": "Yeni sohbetler yerleşik metni kullanır.",
   "Saved. New chats leave this part out.": "Kaydedildi. Yeni sohbetler bu bölümü atlar.",
-  "Saved. New chats use your text.": "Kaydedildi. Yeni sohbetler sizin metninizi kullanır."
+  "Saved. New chats use your text.": "Kaydedildi. Yeni sohbetler sizin metninizi kullanır.",
+  "Changed and put back in this answer: no net change.": "Bu yanıtta değiştirildi ve geri alındı: net değişiklik yok.",
+  "created": "oluşturuldu",
+  "deleted": "silindi",
+  "edited": "düzenlendi",
+  "no net change": "net değişiklik yok",
+  "Open in Review": "İncelemede aç",
+  "Changed {0} files": "{0} dosya değişti",
+  "Changed {0} files|one": "{0} dosya değişti",
+  "{0} put back": "{0} geri alındı",
+  "{0} put back|one": "{0} geri alındı",
+  "and {0} more": "ve {0} tane daha",
+  "and {0} more|one": "ve {0} tane daha",
+  "{0} more not listed": "{0} tane daha listelenmedi",
+  "{0} more not listed|one": "{0} tane daha listelenmedi",
+  "Touched {0} files, no net change": "{0} dosyaya dokunuldu, net değişiklik yok",
+  "Touched {0} files, no net change|one": "{0} dosyaya dokunuldu, net değişiklik yok",
+  "The request was not valid.": "İstek geçerli değildi."
 }

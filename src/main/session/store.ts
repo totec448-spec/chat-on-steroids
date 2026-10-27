@@ -2375,7 +2375,30 @@ export async function readHydratedActivityCall(
   });
 }
 
+/** Recorded edits already said to be unreadable, so a card drawn again does not say it again. */
+const unreadableEdits = new Set<string>();
+function noteUnreadableEdit(assetId: string, why: string): void {
+  if (unreadableEdits.has(assetId)) return;
+  if (unreadableEdits.size >= 256) unreadableEdits.delete(unreadableEdits.values().next().value!);
+  unreadableEdits.add(assetId);
+  logWarn(`turn changes: recorded edit ${assetId.slice(0, 12)} ${why}; its file shows approximate counts`);
+}
+
+/** One recorded edit's before and after by its stored asset (#1827); null when gone, too large or damaged. */
+export async function readEditReviewAsset(sessionId: string, assetId: string): Promise<{ before: string; after: string } | null> {
+  assertSessionId(sessionId);
+  const data = await readAsset(sessionId, assetId, 512 * 1024);
+  if (!data) { noteUnreadableEdit(assetId, 'is missing or too large'); return null; }
+  try {
+    const parsed = JSON.parse(data.toString('utf8')) as { before?: unknown; after?: unknown };
+    if (typeof parsed.before === 'string' && typeof parsed.after === 'string') return { before: parsed.before, after: parsed.after };
+  } catch { /* said below */ }
+  noteUnreadableEdit(assetId, 'is damaged');
+  return null;
+}
+
 /** Retrieves one immutable, bounded edit artifact by its durable session/call/index identity. */
+
 export async function readToolEditReview(sessionId: string, callId: string, changeIndex: number): Promise<ToolEditReview | null> {
   assertSessionId(sessionId);
   if (!/^[0-9a-f-]{36}$/i.test(callId) || !Number.isSafeInteger(changeIndex) || changeIndex < 0 || changeIndex >= 64) return null;

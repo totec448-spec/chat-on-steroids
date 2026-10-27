@@ -3317,5 +3317,17 @@
   "Saved when you leave the editor and used from the next new chat. Leave it empty to send no writing style at all.": "Được lưu khi bạn rời trình chỉnh sửa và dùng từ cuộc trò chuyện mới tiếp theo. Để trống để không gửi phong cách viết nào.",
   "New chats use the built-in text.": "Cuộc trò chuyện mới dùng văn bản có sẵn.",
   "Saved. New chats leave this part out.": "Đã lưu. Cuộc trò chuyện mới bỏ qua phần này.",
-  "Saved. New chats use your text.": "Đã lưu. Cuộc trò chuyện mới dùng văn bản của bạn."
+  "Saved. New chats use your text.": "Đã lưu. Cuộc trò chuyện mới dùng văn bản của bạn.",
+  "Changed and put back in this answer: no net change.": "Đã thay đổi rồi hoàn lại trong câu trả lời này: không có thay đổi thực.",
+  "created": "đã tạo",
+  "deleted": "đã xóa",
+  "edited": "đã sửa",
+  "no net change": "không có thay đổi thực",
+  "Open in Review": "Mở trong Xem lại",
+  "Changed {0} files": "Đã thay đổi {0} tệp",
+  "{0} put back": "{0} đã hoàn lại",
+  "and {0} more": "và {0} tệp khác",
+  "{0} more not listed": "còn {0} tệp không liệt kê",
+  "Touched {0} files, no net change": "Đã chạm {0} tệp, không có thay đổi thực",
+  "The request was not valid.": "Yêu cầu không hợp lệ."
 }

@@ -29,6 +29,7 @@ import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '..
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import type { TurnFileChange } from '../main/session/turn-changes.js';
 import type { AppState, Capabilities, CommitFlow, CompanionDiagnostics, Config, Diagnosis, LogEntry, SettingsBackupChoice } from '../shared/types.js';
 import type { SoundCue } from '../shared/sound-cues.js';
 import type { CommitState } from '../shared/project-git.js';
@@ -348,6 +349,9 @@ const api = {
     call<CheckpointRestoreResult>('checkpoints:restore', { projectId, checkpointId, paths, expectedRevision }),
   getToolEditReview: (sessionId: string, callId: string, changeIndex: number) =>
     call<ToolEditReview | null>('sessions:toolEditReview', { sessionId, callId, changeIndex }),
+  /** #1827: what one answer changed, per file, read from the turn's first event (`from`, a sequence number) on. */
+  turnChanges: (sessionId: string, turnId: string, from: number) => call<{ changes: TurnFileChange[]; total: number }>('sessions:turnChanges', { sessionId, turnId, from }),
+  turnFileDiff: (sessionId: string, turnId: string, from: number, path: string) => call<{ before: string; after: string } | null>('sessions:turnFileDiff', { sessionId, turnId, from, path }),
   onProjectGitChanged: (listener: (event: ProjectGitChanged) => void): (() => void) => {
     const wrapped = (_event: unknown, change: ProjectGitChanged): void => listener(change);
     ipcRenderer.on('projectGit:changed', wrapped);

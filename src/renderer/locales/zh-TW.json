@@ -3317,5 +3317,17 @@
   "Saved when you leave the editor and used from the next new chat. Leave it empty to send no writing style at all.": "離開編輯器時儲存,從下一個新聊天開始使用。留空則不傳送任何寫作風格。",
   "New chats use the built-in text.": "新聊天使用內建文字。",
   "Saved. New chats leave this part out.": "已儲存。新聊天不包含這一部分。",
-  "Saved. New chats use your text.": "已儲存。新聊天使用你的文字。"
+  "Saved. New chats use your text.": "已儲存。新聊天使用你的文字。",
+  "Changed and put back in this answer: no net change.": "在此回答中變更後又還原：沒有淨變化。",
+  "created": "已建立",
+  "deleted": "已刪除",
+  "edited": "已編輯",
+  "no net change": "無淨變化",
+  "Open in Review": "在檢閱中開啟",
+  "Changed {0} files": "變更了 {0} 個檔案",
+  "{0} put back": "{0} 個已還原",
+  "and {0} more": "還有 {0} 個",
+  "{0} more not listed": "另有 {0} 個未列出",
+  "Touched {0} files, no net change": "變動了 {0} 個檔案，沒有淨變化",
+  "The request was not valid.": "請求無效。"
 }
