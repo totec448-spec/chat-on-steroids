@@ -3458,5 +3458,21 @@
   "Easier to read": "Легче читать",
   "High contrast, eight accent colors, line spacing and a more legible font.": "Высокая контрастность, восемь акцентных цветов, межстрочный интервал и более разборчивый шрифт.",
   "Quote": "Цитировать",
-  "Start or cancel the prepared plan first, then quote again.": "Сначала запустите или отмените подготовленный план, затем процитируйте снова."
+  "Start or cancel the prepared plan first, then quote again.": "Сначала запустите или отмените подготовленный план, затем процитируйте снова.",
+  "Message box": "Поле сообщения",
+  "New line": "Новая строка",
+  "Send the other way while ChatGPT works": "Отправить другим способом, пока ChatGPT работает",
+  "Earlier messages, in an empty message box": "Прежние сообщения, в пустом поле сообщения",
+  "Sidebar": "Боковая панель",
+  "Move the focused chat or project": "Переместить выбранный чат или проект",
+  "Workspace panels": "Панели рабочего пространства",
+  "Next chat": "Следующий чат",
+  "Previous chat": "Предыдущий чат",
+  "Full screen": "Полный экран",
+  "Stop the turn, twice in an empty message box": "Остановить ход, дважды в пустом поле сообщения",
+  "Hold to dictate": "Удерживать для голосового ввода",
+  "Move a queued task": "Переместить задачу в очереди",
+  "Move the focused tab": "Переместить выбранную вкладку",
+  "Save the file being edited": "Сохранить редактируемый файл",
+  "Copy the selection": "Копировать выделенное"
 }

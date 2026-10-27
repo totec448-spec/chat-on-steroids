@@ -3398,5 +3398,21 @@
   "Easier to read": "Más fácil de leer",
   "High contrast, eight accent colors, line spacing and a more legible font.": "Alto contraste, ocho colores de acento, interlineado y una fuente más legible.",
   "Quote": "Citar",
-  "Start or cancel the prepared plan first, then quote again.": "Inicia o cancela primero el plan preparado y vuelve a citar."
+  "Start or cancel the prepared plan first, then quote again.": "Inicia o cancela primero el plan preparado y vuelve a citar.",
+  "Message box": "Cuadro de mensaje",
+  "New line": "Línea nueva",
+  "Send the other way while ChatGPT works": "Enviar de la otra forma mientras ChatGPT trabaja",
+  "Earlier messages, in an empty message box": "Mensajes anteriores, en un cuadro de mensaje vacío",
+  "Sidebar": "Barra lateral",
+  "Move the focused chat or project": "Mover el chat o proyecto enfocado",
+  "Workspace panels": "Paneles del espacio de trabajo",
+  "Next chat": "Chat siguiente",
+  "Previous chat": "Chat anterior",
+  "Full screen": "Pantalla completa",
+  "Stop the turn, twice in an empty message box": "Detener el turno, dos veces en un cuadro de mensaje vacío",
+  "Hold to dictate": "Mantener para dictar",
+  "Move a queued task": "Mover una tarea en cola",
+  "Move the focused tab": "Mover la pestaña enfocada",
+  "Save the file being edited": "Guardar el archivo que se edita",
+  "Copy the selection": "Copiar la selección"
 }

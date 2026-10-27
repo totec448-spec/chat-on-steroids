@@ -78,6 +78,7 @@
 .ph.ph-globe-hemisphere-west::before { content: '\e28c'; }
 .ph.ph-house::before { content: '\e2c2'; }
 .ph.ph-image::before { content: '\e2ca'; }
+.ph.ph-keyboard::before { content: '\e2d8'; }
 .ph.ph-lightning::before { content: '\e2de'; }
 .ph.ph-link-break::before { content: '\e2e4'; }
 .ph.ph-arrows-left-right::before { content: '\e0a0'; }

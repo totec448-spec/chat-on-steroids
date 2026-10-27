@@ -46,6 +46,7 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-globe': 'globe-hemisphere-west',
   'i-home': 'house',
   'i-image': 'image',
+  'i-keyboard': 'keyboard',
   'i-lock': 'lock-key',
   'i-unlink': 'link-break',
   'i-swap': 'arrows-left-right',

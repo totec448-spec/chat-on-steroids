@@ -110,7 +110,7 @@ import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT
 import { STRICT_REFUSAL_PROGRESS_PREFIX, UNPROVEN_WORKER_NOTICE, UNTRUSTED_NOTICE, UNTRUSTED_WORKER_NOTICE } from '../shared/trust-notices.js';
 import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
 import { createSearchPopup } from './search-popup.js';
-import { primaryShortcut } from './shortcuts.js';
+import { holdToTalkShortcut, holdToTalkSupported, primaryShortcut } from './shortcuts.js';
 import { initSshProjectDialog } from './ssh-project-dialog.js';
 import { initSharePage } from './share-page.js';
 import { initFeedbackDialog } from './feedback-dialog.js';
@@ -572,18 +572,6 @@ let dictationStopGuard: number | null = null;
 // microphone button does, so the phrase in progress is kept and nothing is sent.
 let heldDictation: DictationSession | null = null;
 
-/**
- * Only Windows gets the chord, and only Windows names it. There Ctrl+Space toggles Chinese IMEs,
- * Shift+Space switches their character width and Alt+Space opens the window menu, while
- * Ctrl+Shift+Space is no Windows or IME default (pressing Space cancels a Ctrl+Shift layout switch,
- * as with the docks' Ctrl+Shift+1–4). macOS owns Ctrl+Space, Ctrl+Option+Space, Cmd+Space and
- * Ctrl+Cmd+Space, and IBus/Fcitx own Super+Space and Ctrl+Space on Linux; dictation is Windows-only
- * today, so those platforms would need their own pick.
- */
-function holdToTalkSupported(): boolean {
-  return /^Win/.test(navigator.platform);
-}
-
 function clearDictationStopGuard(): void {
   if (dictationStopGuard === null) return;
   window.clearTimeout(dictationStopGuard);
@@ -628,7 +616,7 @@ function paintDictation(): void {
   button.setAttribute('aria-pressed', String(active));
   button.setAttribute('aria-label', t(label));
   button.title = available && holdToTalkSupported() && (dictationPhase === 'idle' || dictationPhase === 'error')
-    ? `${t(label)} (${t('hold {0}', [`${t('Ctrl')}+${t('Shift')}+${t('Space')}`])})` : t(label);
+    ? `${t(label)} (${t('hold {0}', [holdToTalkShortcut()])})` : t(label);
   // Native Windows errors remain verbatim; known UI labels/statuses use the
   // existing locale catalog with English fallback until translations are merged.
   status.textContent = dictationNotice ? t(dictationNotice) : '';
