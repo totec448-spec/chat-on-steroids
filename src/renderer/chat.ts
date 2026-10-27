@@ -4103,7 +4103,7 @@ const LIST_ITEM = /^ {0,3}(?:[-*+]|\d+[.)])\s/;
 /** A list item, or a line indented into one. */
 const LIST_LINE = /^\s*(?:[-*+]|\d+[.)])\s|^(?: {2,}|\t)/;
 /** A line of an indented code block. */
-const CODE_LINE = /^(?: {4,}|\t)/;
+const CODE_LINE = /^(?: {4,}| {0,3}\t)/;
 /**
  * The finished blocks of an answer ChatGPT is still writing: up to its last blank line outside an
  * open code fence, writing block or display formula, or the end of a fence or writing block that
