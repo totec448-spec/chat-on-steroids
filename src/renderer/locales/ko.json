@@ -3294,5 +3294,7 @@
   "Move a queued task": "대기 중인 작업 이동",
   "Move the focused tab": "포커스된 탭 이동",
   "Save the file being edited": "편집 중인 파일 저장",
-  "Copy the selection": "선택 항목 복사"
+  "Copy the selection": "선택 항목 복사",
+  "Turn off Plugins connection": "Plugins 연결 끄기",
+  "Plugins connection turned off": "Plugins 연결을 껐습니다"
 }

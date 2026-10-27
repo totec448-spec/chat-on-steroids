@@ -3294,5 +3294,7 @@
   "Move a queued task": "移動排隊任務",
   "Move the focused tab": "移動目前聚焦的分頁",
   "Save the file being edited": "儲存正在編輯的檔案",
-  "Copy the selection": "複製所選內容"
+  "Copy the selection": "複製所選內容",
+  "Turn off Plugins connection": "關閉 Plugins 連線",
+  "Plugins connection turned off": "已關閉 Plugins 連線"
 }

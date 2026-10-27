@@ -285,6 +285,8 @@
 .plugin-setup-copy input { flex: 1; min-width: 0; }
 .plugin-setup-copy .btn { flex: 0 0 auto; color: var(--ink); }
 .plugin-setup-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 20px; }
+/* Turning the connection off (#1872): last and apart from the setup actions, in red like other removals. */
+.plugin-setup-actions .plugin-destructive { margin-left: auto; color: var(--red); }
 .plugin-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 .plugin-field { display: flex; flex-direction: column; gap: 7px; margin: 16px 0; font-size: calc(12px * var(--text-scale, 1)); font-weight: 600; }
 .plugin-field input, .plugin-field select { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--edge); border-radius: var(--r-sm); background: var(--sunk); color: var(--ink); font: inherit; }

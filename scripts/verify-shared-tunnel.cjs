@@ -112,7 +112,27 @@ app.whenReady().then(async () => {
     await frame();
     assert.match((await note('tunnelIdShared')).text,/auch für Plugins eingetragen/);
     await capture('setup-shared-de-640');
-    console.log('Shared tunnel ID passed: Setup and the Plugins dialog name the other connector, live while typing, in both themes and German.');
+
+    // #1872: a saved Plugins ID can be turned off again; only that ID is cleared, and the dialog closes.
+    win.setContentSize(1100,900);
+    await js(`document.querySelector('[data-language="en"]').click();document.querySelector('[data-tab="plugins"]')?.click();document.getElementById('pluginsSetupLink').click()`);
+    for(let i=0;i<100 && !(await js(`!!document.getElementById('pluginsTunnelId')`));i++) await new Promise(resolve=>setTimeout(resolve,25));
+    const offButton=`[...document.querySelectorAll('#pluginDialog button')].find(node=>node.textContent==='Turn off Plugins connection')`;
+    assert.equal(await js(`!!${offButton}`),true,'The Plugins dialog offers to turn off a saved connection');
+    await capture('plugins-dialog-turn-off');
+    const saved=await js('window.saves.length');
+    await js(`${offButton}.click()`);
+    for(let i=0;i<100 && (await js('window.saves.length'))===saved;i++) await new Promise(resolve=>setTimeout(resolve,25));
+    const patch=await js('window.saves.at(-1)');
+    assert.equal(patch.tunnel.pluginsTunnelId,'','Turning off clears the Plugins ID');
+    assert.equal(patch.tunnel.tunnelId,'tunnel_0123456789abcdef0123456789abcdef','Core keeps its ID');
+    await frame();
+    assert.equal(await js(`!!document.getElementById('pluginDialog')`),false,'The dialog closes');
+    await js(`document.getElementById('pluginsSetupLink').click()`);
+    for(let i=0;i<100 && !(await js(`!!document.getElementById('pluginsTunnelId')`));i++) await new Promise(resolve=>setTimeout(resolve,25));
+    assert.equal(await js(`!!${offButton}`),false,'Nothing saved, nothing to turn off');
+    await capture('plugins-dialog-off');
+    console.log('Shared tunnel ID passed: Setup and the Plugins dialog name the other connector, live while typing, in both themes and German; a saved Plugins connection turns off.');
   } finally {
     win?.destroy();await server.close();
   }

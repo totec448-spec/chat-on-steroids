@@ -3294,5 +3294,7 @@
   "Move a queued task": "Di chuyển một tác vụ đã xếp hàng",
   "Move the focused tab": "Di chuyển tab đang chọn",
   "Save the file being edited": "Lưu tệp đang chỉnh sửa",
-  "Copy the selection": "Sao chép phần đã chọn"
+  "Copy the selection": "Sao chép phần đã chọn",
+  "Turn off Plugins connection": "Tắt kết nối Plugins",
+  "Plugins connection turned off": "Đã tắt kết nối Plugins"
 }
