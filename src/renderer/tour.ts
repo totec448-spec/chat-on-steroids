@@ -58,17 +58,18 @@ export function initTour(deps: { markDone(): Promise<boolean> }): { offer(): voi
     Object.assign(card.style, { left: `${cardLeft}px`, top: `${cardTop}px` });
   }
 
-  /** A step whose control left the screen (a narrower window, a collapsed sidebar) is left out. */
+  /** A step whose control left the screen (a narrower window, a collapsed sidebar) is left out, the current one too. */
   function onResize(): void {
-    if (shown(target)) { place(); return; }
     const current = steps[index];
-    steps = steps.filter(step => step === current ? false : shown(document.getElementById(step.target)));
+    const stays = shown(target);
+    steps = steps.filter(step => step === current ? stays : shown(document.getElementById(step.target)));
     if (!steps.length) { end(); return; }
-    index = Math.min(index, steps.length - 1);
-    paint();
+    // A resize repaints without taking the focus from where the person is typing.
+    index = stays ? steps.indexOf(current!) : Math.min(index, steps.length - 1);
+    paint(false);
   }
 
-  function paint(): void {
+  function paint(moveFocus = true): void {
     target?.classList.remove('is-tour-target');
     const step = steps[index]!;
     target = document.getElementById(step.target);
@@ -80,7 +81,7 @@ export function initTour(deps: { markDone(): Promise<boolean> }): { offer(): voi
     ring.hidden = false;
     card.hidden = false;
     place();
-    next.focus();
+    if (moveFocus) next.focus();
   }
 
   function end(): void {
@@ -95,7 +96,9 @@ export function initTour(deps: { markDone(): Promise<boolean> }): { offer(): voi
   }
 
   function go(delta: number): void {
-    const to = index + delta;
+    // A control can leave the screen without a resize (a sidebar collapsed by a click): skip it.
+    let to = index + delta;
+    while (to >= 0 && to < steps.length && !shown(document.getElementById(steps[to]!.target))) to += delta;
     if (to < 0) return;
     if (to >= steps.length) { end(); return; }
     index = to;
