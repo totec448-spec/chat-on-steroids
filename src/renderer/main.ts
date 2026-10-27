@@ -19,6 +19,7 @@ import { initUsage, refreshOtherApps, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
 import { initAppShortcuts } from './app-shortcuts.js';
 import { initViewMenu } from './view-menu.js';
+import { initShortcutsDialog } from './shortcuts-dialog.js';
 import { initPlugins, applyPluginsState } from './plugins.js';
 import { initBrowserPreferences } from './browser-preferences.js';
 import { initSetupGuide } from './setup-guide.js';
@@ -2920,6 +2921,7 @@ async function refresh(): Promise<void> {
 
 buildGroups();
 initSidebarResize();
+const shortcutsDialog = initShortcutsDialog({ enterSends: () => state?.config.ui.enterSends !== false });
 initAppShortcuts({
   newChat: $('newChat'),
   settings: $('workspaceSettings'),
@@ -2927,6 +2929,7 @@ initAppShortcuts({
 });
 const viewMenu = initViewMenu({
   search: openChatSearch,
+  shortcuts: shortcutsDialog.open,
   cosBrowser: () => state?.config.ui.chatBrowser === 'cos',
   showCosBrowser: () => void run(api.showCosBrowser()),
   pets: { toggle: () => pet.toggle(), visible: () => pet.isVisible() },

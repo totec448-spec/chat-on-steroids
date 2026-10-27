@@ -3278,5 +3278,21 @@
   "Easier to read": "더 읽기 쉽게",
   "High contrast, eight accent colors, line spacing and a more legible font.": "고대비, 강조 색상 8가지, 줄 간격, 더 읽기 쉬운 글꼴.",
   "Quote": "인용",
-  "Start or cancel the prepared plan first, then quote again.": "먼저 준비된 계획을 시작하거나 취소한 다음 다시 인용하세요."
+  "Start or cancel the prepared plan first, then quote again.": "먼저 준비된 계획을 시작하거나 취소한 다음 다시 인용하세요.",
+  "Message box": "메시지 상자",
+  "New line": "줄 바꿈",
+  "Send the other way while ChatGPT works": "ChatGPT가 작업하는 동안 다른 방식으로 보내기",
+  "Earlier messages, in an empty message box": "이전 메시지 (메시지 상자가 비어 있을 때)",
+  "Sidebar": "사이드바",
+  "Move the focused chat or project": "포커스된 채팅이나 프로젝트 이동",
+  "Workspace panels": "워크스페이스 패널",
+  "Next chat": "다음 채팅",
+  "Previous chat": "이전 채팅",
+  "Full screen": "전체 화면",
+  "Stop the turn, twice in an empty message box": "턴 중지, 빈 메시지 상자에서 두 번 누르기",
+  "Hold to dictate": "누르고 있는 동안 받아쓰기",
+  "Move a queued task": "대기 중인 작업 이동",
+  "Move the focused tab": "포커스된 탭 이동",
+  "Save the file being edited": "편집 중인 파일 저장",
+  "Copy the selection": "선택 항목 복사"
 }

@@ -3278,5 +3278,21 @@
   "Easier to read": "読みやすく",
   "High contrast, eight accent colors, line spacing and a more legible font.": "ハイコントラスト、8 つのアクセントカラー、行間、より読みやすいフォント。",
   "Quote": "引用",
-  "Start or cancel the prepared plan first, then quote again.": "先に準備済みのプランを開始するか取り消してから、もう一度引用してください。"
+  "Start or cancel the prepared plan first, then quote again.": "先に準備済みのプランを開始するか取り消してから、もう一度引用してください。",
+  "Message box": "メッセージ欄",
+  "New line": "改行",
+  "Send the other way while ChatGPT works": "ChatGPT の作業中にもう一方の方法で送信",
+  "Earlier messages, in an empty message box": "以前のメッセージ（メッセージ欄が空のとき）",
+  "Sidebar": "サイドバー",
+  "Move the focused chat or project": "フォーカス中のチャットやプロジェクトを移動",
+  "Workspace panels": "ワークスペースのパネル",
+  "Next chat": "次のチャット",
+  "Previous chat": "前のチャット",
+  "Full screen": "全画面表示",
+  "Stop the turn, twice in an empty message box": "ターンを停止（空のメッセージ欄で2回押す）",
+  "Hold to dictate": "押し続けて音声入力",
+  "Move a queued task": "キュー内のタスクを移動",
+  "Move the focused tab": "フォーカス中のタブを移動",
+  "Save the file being edited": "編集中のファイルを保存",
+  "Copy the selection": "選択範囲をコピー"
 }

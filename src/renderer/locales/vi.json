@@ -3278,5 +3278,21 @@
   "Easier to read": "Dễ đọc hơn",
   "High contrast, eight accent colors, line spacing and a more legible font.": "Độ tương phản cao, tám màu nhấn, giãn dòng và phông chữ dễ đọc hơn.",
   "Quote": "Trích dẫn",
-  "Start or cancel the prepared plan first, then quote again.": "Hãy bắt đầu hoặc hủy kế hoạch đã chuẩn bị trước, rồi trích dẫn lại."
+  "Start or cancel the prepared plan first, then quote again.": "Hãy bắt đầu hoặc hủy kế hoạch đã chuẩn bị trước, rồi trích dẫn lại.",
+  "Message box": "Ô tin nhắn",
+  "New line": "Xuống dòng",
+  "Send the other way while ChatGPT works": "Gửi theo cách còn lại khi ChatGPT đang làm việc",
+  "Earlier messages, in an empty message box": "Tin nhắn trước đây, khi ô tin nhắn trống",
+  "Sidebar": "Thanh bên",
+  "Move the focused chat or project": "Di chuyển cuộc trò chuyện hoặc dự án đang chọn",
+  "Workspace panels": "Các bảng của không gian làm việc",
+  "Next chat": "Cuộc trò chuyện tiếp theo",
+  "Previous chat": "Cuộc trò chuyện trước",
+  "Full screen": "Toàn màn hình",
+  "Stop the turn, twice in an empty message box": "Dừng lượt, nhấn hai lần trong ô tin nhắn trống",
+  "Hold to dictate": "Giữ để đọc chính tả",
+  "Move a queued task": "Di chuyển một tác vụ đã xếp hàng",
+  "Move the focused tab": "Di chuyển tab đang chọn",
+  "Save the file being edited": "Lưu tệp đang chỉnh sửa",
+  "Copy the selection": "Sao chép phần đã chọn"
 }

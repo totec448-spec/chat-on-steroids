@@ -3338,5 +3338,21 @@
   "Easier to read": "Okuması daha kolay",
   "High contrast, eight accent colors, line spacing and a more legible font.": "Yüksek kontrast, sekiz vurgu rengi, satır aralığı ve daha okunaklı bir yazı tipi.",
   "Quote": "Alıntıla",
-  "Start or cancel the prepared plan first, then quote again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden alıntılayın."
+  "Start or cancel the prepared plan first, then quote again.": "Önce hazırlanan planı başlatın veya iptal edin, sonra yeniden alıntılayın.",
+  "Message box": "Mesaj kutusu",
+  "New line": "Yeni satır",
+  "Send the other way while ChatGPT works": "ChatGPT çalışırken diğer şekilde gönder",
+  "Earlier messages, in an empty message box": "Önceki mesajlar, mesaj kutusu boşken",
+  "Sidebar": "Kenar çubuğu",
+  "Move the focused chat or project": "Odaktaki sohbeti veya projeyi taşı",
+  "Workspace panels": "Çalışma alanı panelleri",
+  "Next chat": "Sonraki sohbet",
+  "Previous chat": "Önceki sohbet",
+  "Full screen": "Tam ekran",
+  "Stop the turn, twice in an empty message box": "Turu durdur, boş mesaj kutusunda iki kez",
+  "Hold to dictate": "Basılı tutarak sesle yaz",
+  "Move a queued task": "Sıradaki görevi taşı",
+  "Move the focused tab": "Odaktaki sekmeyi taşı",
+  "Save the file being edited": "Düzenlenen dosyayı kaydet",
+  "Copy the selection": "Seçimi kopyala"
 }
