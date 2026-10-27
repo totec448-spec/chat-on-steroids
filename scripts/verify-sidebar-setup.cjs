@@ -243,7 +243,9 @@ app.whenReady().then(async () => {
       await js(`document.getElementById('setupProfile').scrollIntoView({block:'center'})`);
       await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
       await js(`document.getElementById('setupProfile').click()`);
-      await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+      // A slow runner applies the menu's flip a frame or two after it opens (CI, 2026-10-26: measured
+      // below the viewport two frames in). Wait until its place holds still for two frames, at most ~30.
+      await js(`new Promise(r=>{const m=document.getElementById('setupProfileMenu');let last='',same=0,n=0;const tick=()=>{const b=m.getBoundingClientRect();const now=[b.top,b.left,b.bottom,b.right].join();same=now===last?same+1:0;last=now;if(same>=2||++n>=30)r();else requestAnimationFrame(tick);};requestAnimationFrame(tick);})`);
       const profileBounds = await js(`(() => {const r=document.getElementById('setupProfileMenu').getBoundingClientRect();return {width:r.width,left:r.left,right:r.right,top:r.top,bottom:r.bottom,viewport:[innerWidth,innerHeight],open:document.getElementById('setupProfileMenu').matches(':popover-open')}})()`);
       assert.ok(profileBounds.width>0 && profileBounds.right<=profileBounds.viewport[0] && profileBounds.left>=0 && profileBounds.top>=0 && profileBounds.bottom<=profileBounds.viewport[1],JSON.stringify({width,zoom,profileBounds}));
       assert.equal(await js(`document.querySelector('[data-remove-profile-id]').disabled`),true);

@@ -11,6 +11,7 @@ import { draftFastFollowup, conversationMessages, automaticFinishEnabled, goalDr
 import { hasEligibleToolInput, finishNeedsBrowserInput, onInputChange, listInputs, enqueueInput } from './input.js';
 
 import { logInfo, logWarn } from '../logger.js';
+import { checkAutomaticSend } from '../send-check.js';
 import { retryTaskRequest } from '../task-request.js';
 
 let notify: ((title: string, body: string, sessionId: string, turnId: string) => boolean | void) | null = null;
@@ -172,9 +173,28 @@ async function prepareNotice(sessionId: string, summary: string, userRequested =
         } else {
           const hash = createHash('sha256').update(`${sessionId}:${progressId}`).digest('hex');
           const id = `${hash.slice(0,8)}-${hash.slice(8,12)}-5${hash.slice(13,16)}-8${hash.slice(17,20)}-${hash.slice(20,32)}`;
-          await enqueueInput({ id, sessionId, text: reply, mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null },
-            { turnId, periodic: false, mode, ...(userRequested ? { userRequested: true } : {}) });
-          result = `${notification} An automatic Goal instruction is queued once. ${REMAINING}`;
+          // #1794: the step can reach ChatGPT in this tool's own result, so it is asked about before it
+          // is filed. Asked once: a hold here ends this check, it does not keep the tool call waiting.
+          const verdict = await checkAutomaticSend({ kind: mode === 'loop' ? 'loop-step' : 'goal-step', id, attempt: 1, text: reply,
+            chat: { session: sessionId, project: session?.projectId ?? null, worker: null } });
+          if (!verdict.allowed) {
+            // Nothing more is coming this turn, so the hold is released rather than kept waiting
+            // for a step that will not be sent; the next session_finish would only ask again.
+            try {
+              await releaseSessionFinish(sessionId, turnId);
+              result = "The person's send check held the automatic Goal instruction, so none was queued. The finish hold was released; ChatGPT may complete its answer.";
+            } catch (error) {
+              // Said as it is: a release that was not saved leaves the hold in place.
+              logWarn(`finish: hold not released after a send check hold: ${(error as Error).message}`);
+              result = `The person's send check held the automatic Goal instruction, so none was queued. The finish hold could not be released (${(error as Error).message}), so it stays in place.`;
+            }
+          } else if (!(await currentDecision())) {
+            result = 'The turn changed or new user instructions took priority; the old Goal follow-up was discarded.';
+          } else {
+            await enqueueInput({ id, sessionId, text: reply, mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null },
+              { turnId, periodic: false, mode, ...(userRequested ? { userRequested: true } : {}) });
+            result = `${notification} An automatic Goal instruction is queued once. ${REMAINING}`;
+          }
         }
       } else if (mode === 'goal' && settings.finishHoldOnStop === true) {
         unverifiedStop = true;
