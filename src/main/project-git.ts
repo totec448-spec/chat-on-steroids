@@ -398,7 +398,9 @@ export async function checkpointChanges(context: RepositoryContext, treeOid: str
  */
 export async function presentTrees(context: Pick<RepositoryContext, 'projectReal'>, oids: readonly string[], run: typeof runGit = runGit): Promise<Set<string>> {
   if (!oids.length) return new Set();
-  const listed = await run(context.projectReal, ['cat-file', '--batch-check=%(objectname) %(objecttype)'], undefined, { input: `${oids.join('\n')}\n` });
+  // As the comparison and blob reads: a replacement ref must not make a kept tree look cleaned up.
+  const listed = await run(context.projectReal, ['cat-file', '--batch-check=%(objectname) %(objecttype)'], undefined,
+    { input: `${oids.join('\n')}\n`, noReplaceObjects: true });
   // A missing tree is a "missing" line with exit 0; a failed read must not pass for "Git cleaned them all up".
   if (listed.code !== 0) throw new Error(`Git could not check the checkpoints: ${listed.stderr.trim().slice(0, 200) || `exit ${listed.code}`}`);
   return new Set(decode(listed.stdout).split('\n').map(line => line.split(' ')).filter(([, type]) => type === 'tree').map(([oid]) => oid!));
@@ -429,12 +431,20 @@ export async function readProjectGitSnapshot(projectId: string, baseRef?: string
       return [];
     });
     if (baseRef?.startsWith(CHECKPOINT_REF_PREFIX)) {
+      // Already logged where the list failed.
       if (listError) throw listError;
+      // Every other refusal of a checkpoint comparison is logged once, with the checkpoint and why.
+      const refuse = (reason: string, message: string): never => {
+        logWarn(`project git: checkpoint ${baseRef} of ${projectId} not compared: ${reason}`);
+        throw new Error(message);
+      };
       const entry = await findCheckpoint(projectId, baseRef.slice(CHECKPOINT_REF_PREFIX.length));
-      if (!entry) throw new Error('This checkpoint is no longer available');
-      if (!checkpoints.find(choice => choice.ref === baseRef)?.available) throw new Error('This checkpoint is no longer available. Git has cleaned it up.');
-      const changes = await checkpointChanges(context, entry.treeOid);
-      const comparison = { ref: baseRef, label: '', baseOid: entry.treeOid, headOid: identity.headOid ?? '', checkpoint: true as const };
+      if (!entry) refuse('not in the checkpoint list', 'This checkpoint is no longer available');
+      if (!checkpoints.find(choice => choice.ref === baseRef)?.available) refuse('its tree is gone (Git cleaned it up)', 'This checkpoint is no longer available. Git has cleaned it up.');
+      // The tree can also go between the check above and this read.
+      const changes = await checkpointChanges(context, entry!.treeOid).catch((error: unknown) =>
+        refuse(`its changes could not be read (${error instanceof Error ? error.message : String(error)})`, error instanceof Error ? error.message : String(error)));
+      const comparison = { ref: baseRef, label: '', baseOid: entry!.treeOid, headOid: identity.headOid ?? '', checkpoint: true as const };
       // Restore is confirmed against this revision, so a same-size line edit must change it too.
       const files = await Promise.all(changes.map(change => fs.lstat(path.join(context.projectReal, ...change.path.split('/')))
         .then(stat => `${stat.ino}:${stat.size}:${stat.mtimeMs}`, () => null)));
