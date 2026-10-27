@@ -1160,6 +1160,48 @@ describe("a new chat's first message held for its project's ChatGPT Project", ()
   });
 });
 
+it('says when the send check holds an automatic message, with its reason', async () => {
+  // #1794: a held Continue or fresh turn shows why it waits, so the person can cancel it or fix the program.
+  const asked = Date.now() - 12_000;
+  const { w, live, append } = await boot([
+    { kind: 'user_message', seq: 1, origin: 1, time: asked, source: 'extension', messageId: 'q-held', message: text('Build it') }
+  ]);
+  const api = (w as any).api;
+  const chat = await import('../src/renderer/chat.js');
+  const state = (await api.getState()).data;
+  const checked = (url: string | undefined) => chat.chatApply({ ...state, bridge: { ...state.bridge, present: true },
+    config: { ...state.config, ui: { ...state.config.ui, sendCheckUrl: url } } });
+  checked('http://127.0.0.1:8123/check');
+  const hold = (attempt: number, reason: string, answered: boolean) => ({ attempt, nextAt: Date.now() + 30_000, reason, answered });
+  const held: InputEntry = { id: 'held-one', sessionId: summary(live.events).id, state: 'queued', owner: null, text: 'Continue',
+    mode: 'after-turn', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: 'chat-a',
+    recovery: { questionId: 'q-held', pro: false, busyUntil: 0, phase: 'ready' }, sendCheck: hold(2, 'quiet hours', true) };
+  const card = () => w.document.querySelector('#finishQueue .queued-input')!.textContent ?? '';
+  live.inputs.push(held);
+  await append([]); await append([]);
+  expect(card()).toContain('Held by your send check: quiet hours');
+  live.inputs[0] = { ...held, sendCheck: hold(3, '', false) };
+  await append([]); await append([]);
+  expect(card()).toContain('Held: your send check did not answer');
+  live.inputs[0] = { ...held, sendCheck: hold(4, '', true) };
+  await append([]); await append([]);
+  expect(card()).toContain('Held by your send check');
+  // The fresh turn after a long one waits in the message queue, and says the same there.
+  live.inputs[0] = { id: 'rotation-one', sessionId: summary(live.events).id, state: 'queued', owner: null, text: 'Continue in a fresh turn',
+    mode: 'auto', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: 'chat-a', purpose: 'rotation',
+    authoredSource: 'none', sendCheck: hold(1, 'budget', true) };
+  await append([]); await append([]);
+  expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').toContain('Held by your send check: budget');
+  // The person clears the check's address: the app releases the message at once, and the queue stops saying it is held (CodeRabbit).
+  checked(undefined); await append([]); await append([]);
+  expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').not.toContain('Held');
+  // A hold whose next ask has come is no longer a hold either.
+  checked('http://127.0.0.1:8123/check');
+  live.inputs[0] = { ...live.inputs[0]!, sendCheck: { attempt: 2, nextAt: Date.now() - 1, reason: 'budget', answered: true } };
+  await append([]); await append([]);
+  expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').not.toContain('Held');
+});
+
 it('says why a queued message waits: no extension, or a running tool call', async () => {
   const asked = Date.now() - 12_000;
   const { w, live, append } = await boot([

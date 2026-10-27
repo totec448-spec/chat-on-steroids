@@ -3476,5 +3476,13 @@
   "Save the file being edited": "Сохранить редактируемый файл",
   "Copy the selection": "Копировать выделенное",
   "Turn off Plugins connection": "Отключить подключение Plugins",
-  "Plugins connection turned off": "Подключение Plugins отключено"
+  "Plugins connection turned off": "Подключение Plugins отключено",
+  "No projects yet.": "Проектов пока нет.",
+  "Held by your send check: {0}": "Задержано вашей проверкой отправки: {0}",
+  "Held by your send check": "Задержано вашей проверкой отправки",
+  "Held: your send check did not answer": "Задержано: ваша проверка отправки не ответила",
+  "Check automatic sends": "Проверять автоматические отправки",
+  "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "Укажите http-адрес на этом компьютере с портом, например http://127.0.0.1:8080/check.",
+  "Ask a program on this computer before the app sends a message by itself. Empty: off.": "Спрашивает программу на этом компьютере, прежде чем приложение само отправит сообщение. Пусто: выключено.",
+  "It receives the full message text. If it says no or doesn't answer, the message waits.": "Она получает полный текст сообщения. Если она отказывает или не отвечает, сообщение ждёт."
 }
