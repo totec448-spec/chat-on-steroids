@@ -3433,5 +3433,9 @@
   "Keys stay with you": "Ключи остаются у вас",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "API-ключи и токены в том, что возвращают инструменты, скрываются до того, как их увидит ChatGPT.",
   "Easier to read": "Легче читать",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Высокая контрастность, восемь акцентных цветов, межстрочный интервал и более разборчивый шрифт."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Высокая контрастность, восемь акцентных цветов, межстрочный интервал и более разборчивый шрифт.",
+  "At this pace, runs out {0} (estimate)": "При таком темпе закончится {0} (оценка)",
+  "At this pace, lasts until the reset (estimate)": "При таком темпе хватит до сброса (оценка)",
+  "From this limit's readings over about the last hour. A planning estimate; ChatGPT decides the limit.": "По показаниям этого лимита примерно за последний час. Оценка для планирования; лимит определяет ChatGPT.",
+  "{0}: remaining over time": "{0}: остаток во времени"
 }

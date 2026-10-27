@@ -3253,5 +3253,9 @@
   "Keys stay with you": "キーは手元に",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "ツールが返す内容に含まれる API キーやトークンは、ChatGPT が見る前に隠されます。",
   "Easier to read": "読みやすく",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "ハイコントラスト、8 つのアクセントカラー、行間、より読みやすいフォント。"
+  "High contrast, eight accent colors, line spacing and a more legible font.": "ハイコントラスト、8 つのアクセントカラー、行間、より読みやすいフォント。",
+  "At this pace, runs out {0} (estimate)": "このペースだと{0}に上限到達（推定）",
+  "At this pace, lasts until the reset (estimate)": "このペースならリセットまで持ちます（推定）",
+  "From this limit's readings over about the last hour. A planning estimate; ChatGPT decides the limit.": "この上限のおよそ直近1時間の記録から算出。計画用の推定で、上限はChatGPTが決めます。",
+  "{0}: remaining over time": "{0}：残りの推移"
 }

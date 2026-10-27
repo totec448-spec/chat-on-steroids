@@ -3253,5 +3253,9 @@
   "Keys stay with you": "密钥留在你这里",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "工具返回内容中的 API 密钥和令牌会在 ChatGPT 看到之前被隐藏。",
   "Easier to read": "更易阅读",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "高对比度、八种强调色、行距和更易读的字体。"
+  "High contrast, eight accent colors, line spacing and a more legible font.": "高对比度、八种强调色、行距和更易读的字体。",
+  "At this pace, runs out {0} (estimate)": "按此速度，将在{0}用完（估算）",
+  "At this pace, lasts until the reset (estimate)": "按此速度，可用到重置（估算）",
+  "From this limit's readings over about the last hour. A planning estimate; ChatGPT decides the limit.": "根据此限额大约最近一小时的读数。仅供规划的估算；限额由 ChatGPT 决定。",
+  "{0}: remaining over time": "{0}：剩余量变化"
 }

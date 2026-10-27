@@ -3253,5 +3253,9 @@
   "Keys stay with you": "키는 내 컴퓨터에",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "도구가 돌려주는 내용 속 API 키와 토큰은 ChatGPT가 보기 전에 숨겨집니다.",
   "Easier to read": "더 읽기 쉽게",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "고대비, 강조 색상 8가지, 줄 간격, 더 읽기 쉬운 글꼴."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "고대비, 강조 색상 8가지, 줄 간격, 더 읽기 쉬운 글꼴.",
+  "At this pace, runs out {0} (estimate)": "이 속도라면 {0} 소진 (추정)",
+  "At this pace, lasts until the reset (estimate)": "이 속도라면 초기화까지 충분합니다 (추정)",
+  "From this limit's readings over about the last hour. A planning estimate; ChatGPT decides the limit.": "이 한도의 최근 약 1시간 기록으로 계산합니다. 계획용 추정이며, 한도는 ChatGPT가 정합니다.",
+  "{0}: remaining over time": "{0}: 남은 양 추이"
 }

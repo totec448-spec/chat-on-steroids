@@ -3373,5 +3373,9 @@
   "Keys stay with you": "As suas chaves ficam consigo",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Chaves de API e tokens no que as ferramentas devolvem são escondidos antes de o ChatGPT os ver.",
   "Easier to read": "Mais fácil de ler",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Alto contraste, oito cores de destaque, espaçamento entre linhas e um tipo de letra mais legível."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Alto contraste, oito cores de destaque, espaçamento entre linhas e um tipo de letra mais legível.",
+  "At this pace, runs out {0} (estimate)": "A este ritmo, esgota-se {0} (estimativa)",
+  "At this pace, lasts until the reset (estimate)": "A este ritmo, dura até à reposição (estimativa)",
+  "From this limit's readings over about the last hour. A planning estimate; ChatGPT decides the limit.": "Com base nas leituras deste limite em cerca da última hora. Uma estimativa para planear; o ChatGPT decide o limite.",
+  "{0}: remaining over time": "{0}: restante ao longo do tempo"
 }

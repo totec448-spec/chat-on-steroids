@@ -3313,5 +3313,9 @@
   "Keys stay with you": "Anahtarlar sizde kalır",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Araçların döndürdüğü içerikteki API anahtarları ve tokenlar, ChatGPT görmeden önce gizlenir.",
   "Easier to read": "Okuması daha kolay",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Yüksek kontrast, sekiz vurgu rengi, satır aralığı ve daha okunaklı bir yazı tipi."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Yüksek kontrast, sekiz vurgu rengi, satır aralığı ve daha okunaklı bir yazı tipi.",
+  "At this pace, runs out {0} (estimate)": "Bu hızla {0} biter (tahmin)",
+  "At this pace, lasts until the reset (estimate)": "Bu hızla sıfırlanmaya kadar yeter (tahmin)",
+  "From this limit's readings over about the last hour. A planning estimate; ChatGPT decides the limit.": "Bu sınırın yaklaşık son bir saatlik okumalarından. Planlama için bir tahmin; sınırı ChatGPT belirler.",
+  "{0}: remaining over time": "{0}: zaman içinde kalan"
 }

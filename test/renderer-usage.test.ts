@@ -469,3 +469,56 @@ it('shows usage while the project list is still loading, then names the By proje
   expect(breakdown.open).toBe(true);
   expect(document.activeElement).toBe(summary);
 });
+
+it('shows when a limit runs out at its recent pace, labeled an estimate, with its trend line', async () => {
+  dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
+  const now = Date.now(), minute = 60000;
+  const data: UsageOverview = { contextTokenCap: 256_000, tokens: 0, models: [], days: [], projects: [], sessions: 1, messages: { through: now, days: [] }, limits: [
+    // 60 → 40 in an hour: two more hours at this pace.
+    { model: 'gpt-6-pro', scope: 'model', remaining: 40, remainingPercent: null, resetAt: null, windowSeconds: 10800, observedAt: now,
+      readings: [{ at: now - 60 * minute, value: 60, resetAt: null }, { at: now, value: 40, resetAt: null }] },
+    // A slow drop that outlasts the reset in an hour.
+    { model: 'Codex', scope: 'codex', remaining: null, remainingPercent: 45, resetAt: now + 60 * minute, windowSeconds: 18000, observedAt: now,
+      readings: [{ at: now - 30 * minute, value: 50, resetAt: now + 60 * minute }, { at: now, value: 45, resetAt: now + 60 * minute }] },
+    { model: 'deep_research', scope: 'feature', remaining: 5, remainingPercent: null, resetAt: null, windowSeconds: null, observedAt: now, readings: [{ at: now, value: 5, resetAt: null }] }
+  ] };
+  Object.assign(dom.window, { api: { getUsage: async () => ({ ok: true, data }), getChatModels: async () => ({ ok: true, data: { models: [] } }) } });
+  const { initLanguage } = await import('../src/renderer/i18n.js'); initLanguage();
+  const usage = await import('../src/renderer/usage.js'); usage.initUsage(); await usage.refreshUsage();
+  const rows = [...dom.window.document.querySelectorAll('#usageLimits .usage-limit')];
+  expect(rows[0]!.querySelector('.usage-pace')?.textContent).toBe('At this pace, runs out in 2 hours (estimate)');
+  expect(rows[0]!.querySelector('svg.usage-trend')?.getAttribute('aria-label')).toBe('gpt-6-pro: remaining over time');
+  expect(rows[0]!.querySelector('polyline')?.getAttribute('points')).toBe('0.0,2.0 100.0,11.3');
+  expect(rows[2]!.querySelector('.usage-pace')?.textContent).toBe('At this pace, lasts until the reset (estimate)');
+  expect(rows[1]!.querySelector('.usage-pace')).toBeNull();
+  expect(rows[1]!.querySelector('svg.usage-trend')).toBeNull();
+});
+
+it('keeps the focus on a limit’s pace line when a refresh replaces the rows, and falls back to Refresh', async () => {
+  dom = new JSDOM(readFileSync(new URL('../src/renderer/index.html', import.meta.url), 'utf8'), { url: 'https://local.test/' });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document); vi.stubGlobal('localStorage', dom.window.localStorage);
+  const now = Date.now(), minute = 60000;
+  const slow = { model: 'gpt-6-pro', scope: 'model' as const, remaining: 40, remainingPercent: null, resetAt: null, windowSeconds: 10800, observedAt: now,
+    readings: [{ at: now - 60 * minute, value: 60, resetAt: null }, { at: now, value: 40, resetAt: null }] };
+  let data: UsageOverview = { contextTokenCap: 256_000, tokens: 0, models: [], days: [], projects: [], sessions: 1, messages: { through: now, days: [] }, limits: [slow] };
+  Object.assign(dom.window, { api: { getUsage: async () => ({ ok: true, data }), getChatModels: async () => ({ ok: true, data: { models: [] } }) } });
+  const { initLanguage } = await import('../src/renderer/i18n.js'); initLanguage();
+  const usage = await import('../src/renderer/usage.js'); usage.initUsage(); await usage.refreshUsage();
+  const pace = () => document.querySelector('#usageLimits .usage-pace') as HTMLElement;
+  const first = pace(); first.focus();
+  expect(document.activeElement).toBe(first);
+  await usage.refreshUsage();
+  expect(pace()).not.toBe(first);
+  expect(document.activeElement).toBe(pace());
+  // The same limit no longer has a pace line: Refresh takes the focus, not the page.
+  pace().focus();
+  data = { ...data, limits: [{ ...slow, readings: [{ at: now, value: 40, resetAt: null }] }] };
+  await usage.refreshUsage();
+  expect(document.querySelector('#usageLimits .usage-pace')).toBeNull();
+  expect(document.activeElement).toBe(document.getElementById('refreshUsage'));
+  // Focus elsewhere on the page is left alone.
+  const other = document.getElementById('refreshUsage') as HTMLElement; other.focus();
+  await usage.refreshUsage();
+  expect(document.activeElement).toBe(other);
+});
