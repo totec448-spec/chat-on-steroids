@@ -4174,11 +4174,19 @@ chat's next Goal step through `waitingForSubAgents`, whatever `waitForSubAgents`
 `REVIEW_MAX_MS` from when it was asked; `goalWaitFor` names it `reviewer` with that deadline (the
 app's Goal row and the page's composer status both say "Waiting for the reviewer").
 
-The draft (`goal.ts run()`) takes `reviewForDraft` for exactly that step: an answer goes after the
-helper's message as `Reviewer: …` (and the helper is told it is there), "No problems found" adds
-nothing, an overdue review adds "Reviewer did not answer in time." An answer starting `BLOCKING:`
-pauses Goal (switch off, a timeline note with the finding, the stopped-chat notice) instead of
-typing anything; ordinary findings never raise a notice. Switching the chat's Goal off or to Loop
+The draft (`goal.ts run()`) starts when the step ends, before the review is in, so it **waits**
+for it (`awaitStepReview`, polling `reviewForDraft` every second): while the review still looks for
+a worker slot or runs, up to `REVIEW_MAX_MS` from when it was asked, and no longer once the draft is
+replaced. Meanwhile the Goal row shows the `reviewer` wait ("Continues without the review in m:ss"),
+not "Preparing a continuation". (VM 141, 2026-10-26: without the wait the helper decided 8 s before
+the reviewer answered.) Workers finish under RESULT / CHANGES / VALIDATION / BLOCKERS, so the review
+is that RESULT (`reviewAnswer`; the brief says so), else the whole answer. It goes after the helper's
+message as `Reviewer: …` (and the helper is told it is there); "No problems found" adds nothing, an
+overdue review adds "Reviewer did not answer in time.", and a reviewer that stopped without
+answering (failed, cleared) ends the wait at once with "Reviewer could not review this step." An
+answer starting `BLOCKING:` pauses Goal (switch off, a timeline note with the finding, the
+stopped-chat notice) instead of typing anything; ordinary findings never raise a notice. When the
+helper ends the Goal with findings still unsent, they become a note in the chat. Switching the chat's Goal off or to Loop
 cancels a review in progress (as the person's own Clear on the worker's row); its chat stays.
 Tests: `goal-review.test.ts`, `text-diff.test.ts`, `goal-reviewer.test.ts`, `goal-review-flow.test.ts`,
 `kernel-reviewer-readonly.test.ts`, the reviewer cases in `agents.test.ts`, `mcp-worktree-spawn.test.ts`,
