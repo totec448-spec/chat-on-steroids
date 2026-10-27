@@ -12,7 +12,9 @@
  */
 
 import { mainText } from './main-texts.js';
-import { DEFAULT_PHONE_PUSH, type PhonePushSettings, type QuietHours } from '../shared/phone-push.js';
+import { DEFAULT_PHONE_PUSH, inQuietHours, type PhonePushSettings } from '../shared/phone-push.js';
+// Re-exported: phone notifications and sounds share one rule for the quiet hours.
+export { inQuietHours };
 
 export { DEFAULT_PHONE_PUSH, type PhonePushSettings };
 
@@ -69,19 +71,6 @@ export function normalizeServer(input: string): string | null {
   return `${url.protocol}//${url.host}`;
 }
 
-const minutesOf = (clock: string): number | null => {
-  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(clock);
-  return match ? Number(match[1]) * 60 + Number(match[2]) : null;
-};
-
-/** Whether `date` (local time) falls in the quiet hours; they may wrap midnight. Equal ends mean none. */
-export function inQuietHours(quiet: QuietHours | null, date: Date): boolean {
-  if (!quiet) return false;
-  const from = minutesOf(quiet.from), to = minutesOf(quiet.to);
-  if (from === null || to === null || from === to) return false;
-  const now = date.getHours() * 60 + date.getMinutes();
-  return from < to ? now >= from && now < to : now >= from || now < to;
-}
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 /** One line of at most `max` visible characters: an emoji (a family, a flag) is never cut apart. */

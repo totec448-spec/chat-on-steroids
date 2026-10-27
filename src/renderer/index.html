@@ -196,6 +196,7 @@
               <div class="settings-surface pane appearance-settings-card">
                 <label class="setting"><span class="setting-text"><b>Follow new output</b><em>Stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.</em></span><input id="followOutput" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Notify when a chat finishes</b><em>A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.</em></span><input id="turnNotifications" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Play sounds</b><em>For chats that need you, failures and finished chats. Follows the quiet hours below.</em></span><input id="soundCues" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Messages during a running turn</b><em id="followUpHint" translate="no"></em></span><select id="followUp"><option value="steer">Join the running turn</option><option value="queue">Wait until the turn ends</option></select></label>
                 <label class="setting"><span class="setting-text"><b>Send messages with</b><em id="enterSendsHint" translate="no"></em></span><select id="enterSends"><option value="enter">Enter</option><option value="modifier" id="enterSendsModifier" translate="no"></option></select></label>
                 <label class="setting"><span class="setting-text"><b>Keep awake while a chat works</b><em>Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose “The computer and screen”.</em></span><select id="keepAwake"><option value="off">Off</option><option value="computer">The computer</option><option value="screen">The computer and screen</option></select></label>
@@ -210,6 +211,7 @@
               <header class="settings-section-head"><div><h2>Phone notifications</h2><p>Hear about your chats on your phone while you are away from this computer.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
                 <label class="setting"><span class="setting-text"><b>Send notifications to your phone</b><em>Through ntfy, a free notification app.</em></span><input id="phonePushEnabled" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Quiet hours</b><em>No phone notifications and no sounds in these hours.</em></span><select id="phonePushQuiet"><option value="">Off</option><option value="21:00-06:00" translate="no"></option><option value="22:00-07:00" translate="no"></option><option value="23:00-07:00" translate="no"></option><option value="23:00-08:00" translate="no"></option><option value="00:00-08:00" translate="no"></option></select></label>
                 <div id="phonePushOptions" class="phone-push-options" hidden>
                   <div class="setting phone-push-field"><label class="setting-text" for="phonePushTopic"><b>Topic</b><em>Subscribe to it in the ntfy app. Anyone who has it can read the messages.</em></label><div class="phone-push-control"><input id="phonePushTopic" type="text" maxlength="64" spellcheck="false" autocomplete="off" translate="no" /><button class="btn" id="phonePushCopyTopic" type="button">Copy</button></div></div>
                   <div class="setting"><span class="setting-text"><b>Send a test</b><em id="phonePushTestStatus" role="status">A test never includes chat text.</em></span><button class="btn" id="phonePushTest" type="button">Send test</button></div>
@@ -217,7 +219,6 @@
                   <label class="setting"><span class="setting-text"><b>When something fails</b></span><input id="phonePushFailures" type="checkbox" /></label>
                   <label class="setting"><span class="setting-text"><b>When a chat finishes</b></span><select id="phonePushFinished"><option value="never">Never</option><option value="0">Always</option><option value="5">After 5 minutes of work</option><option value="15">After 15 minutes of work</option><option value="30">After 30 minutes of work</option><option value="60">After an hour of work</option></select></label>
                   <label class="setting"><span class="setting-text"><b>Only when you are away</b><em>No input for 3 minutes, or a locked screen.</em></span><input id="phonePushAway" type="checkbox" /></label>
-                  <label class="setting"><span class="setting-text"><b>Quiet hours</b></span><select id="phonePushQuiet"><option value="">Off</option><option value="21:00-06:00" translate="no"></option><option value="22:00-07:00" translate="no"></option><option value="23:00-07:00" translate="no"></option><option value="23:00-08:00" translate="no"></option><option value="00:00-08:00" translate="no"></option></select></label>
                   <label class="setting"><span class="setting-text"><b>Include chat names and answers</b><em>They go through the ntfy server, and anyone with the topic can read them.</em></span><input id="phonePushDetails" type="checkbox" /></label>
                   <details class="phone-push-advanced" id="phonePushAdvanced"><summary><svg class="disclosure-chevron sum-chev" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Advanced</summary>
                     <div class="setting phone-push-field"><label class="setting-text" for="phonePushServer"><b>Server</b><em>ntfy.sh, or your own ntfy server.</em></label><div class="phone-push-control"><input id="phonePushServer" type="text" inputmode="url" maxlength="2048" spellcheck="false" autocomplete="off" translate="no" /><button class="btn" id="phonePushServerDefault" type="button" title="Use ntfy.sh">Default</button></div></div>
@@ -515,6 +516,7 @@
                       Nothing shared yet. Press Add or drop a folder here. ChatGPT sees short names
                       like <code>/project</code> — your real system paths are never sent.
                     </p>
+                    <label class="setting" id="codeCheckpointsSetting"><span class="setting-text"><b>Save a checkpoint before each turn's first edit</b><em>Checkpoints are temporary: Git may clean up old ones. Off: no new ones are taken.</em></span><input id="codeCheckpoints" type="checkbox" /></label>
                   </div>
                 </section>
 
@@ -1586,6 +1588,31 @@
         <div class="pet-delete-actions"><button class="btn" id="sshProjectCancel" type="button">Cancel</button><button class="btn btn-solid" id="sshProjectSubmit" type="submit">Test and add</button></div>
       </form>
     </dialog>
+    <dialog class="plugin-dialog commit-dialog" id="commitDialog" aria-labelledby="commitTitle">
+      <div class="plugin-dialog-head"><h2 id="commitTitle">Commit changes</h2><button class="btn" id="commitClose" type="button">Close</button></div>
+      <form id="commitForm" class="commit-form" novalidate>
+        <div class="plugin-dialog-body commit-fields">
+          <p class="commit-where" id="commitWhere"></p>
+          <label class="plugin-field" for="commitMessage"><span>Message</span><textarea id="commitMessage" rows="5" maxlength="10000"></textarea></label>
+          <div class="commit-files-head"><span id="commitFilesLabel"></span><button class="btn commit-files-all" id="commitFilesAll" type="button">Select none</button></div>
+          <div class="commit-files" id="commitFiles" role="group" aria-labelledby="commitFilesLabel"></div>
+          <fieldset class="commit-flow">
+            <legend>Then</legend>
+            <label><input type="radio" name="commitFlow" value="commit" /><span>Nothing else</span></label>
+            <label><input type="radio" name="commitFlow" value="ask-push" /><span>Ask whether to push</span></label>
+            <label><input type="radio" name="commitFlow" value="pr" /><span>Push and open a pull request</span></label>
+          </fieldset>
+          <p class="commit-flow-note" id="commitFlowNote" hidden></p>
+          <label class="plugin-field" for="commitBranch" id="commitBranchField" hidden><span>New branch</span><input id="commitBranch" maxlength="200" autocomplete="off" spellcheck="false" /></label>
+          <p id="commitError" class="plugin-error" role="alert" hidden></p>
+        </div>
+        <div class="pet-delete-actions"><button class="btn" id="commitCancel" type="button">Cancel</button><button class="btn btn-solid" id="commitSubmit" type="submit">Commit</button></div>
+      </form>
+      <div class="commit-done" id="commitDone" hidden>
+        <div class="plugin-dialog-body"><ol class="commit-steps" id="commitSteps"></ol><p id="commitStepError" class="plugin-error" role="alert" hidden></p></div>
+        <div class="pet-delete-actions"><button class="btn" id="commitNotNow" type="button" hidden>Not now</button><button class="btn btn-solid" id="commitStepAction" type="button" hidden></button><button class="btn btn-solid" id="commitDoneClose" type="button">Done</button></div>
+      </div>
+    </dialog>
     <dialog class="plugin-dialog share-page-dialog" id="sharePageDialog" aria-labelledby="sharePageTitle">
       <div class="plugin-dialog-head"><h2 id="sharePageTitle">Share as web page</h2><button class="btn" id="sharePageClose" type="button">Close</button></div>
       <form id="sharePageForm" class="plugin-dialog-body">
@@ -1654,6 +1681,13 @@
         <button class="whats-new-link" id="whatsNewNotes" type="button"><i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Full release notes</button>
         <button class="whats-new-done" id="whatsNewDone" type="button">Got it</button>
       </footer>
+    </dialog>
+    <dialog class="search-dialog shortcuts-dialog" id="shortcutsDialog" aria-labelledby="shortcutsTitle">
+      <header class="shortcuts-head">
+        <h2 id="shortcutsTitle">Keyboard shortcuts</h2>
+        <button class="btn shortcuts-close" id="shortcutsClose" type="button" title="Close" aria-label="Close"><i class="ico ph ph-x" aria-hidden="true"></i></button>
+      </header>
+      <div class="shortcuts-list" id="shortcutsList"></div>
     </dialog>
     <dialog class="plugin-dialog backup-dialog" id="exportSettingsDialog" aria-labelledby="exportSettingsTitle">
       <div class="plugin-dialog-head"><h2 id="exportSettingsTitle">Export settings</h2><button class="btn" id="exportSettingsClose" type="button">Close</button></div>

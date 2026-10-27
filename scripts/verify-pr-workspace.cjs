@@ -74,7 +74,14 @@ app.whenReady().then(async () => {
         watchProjectFiles:()=>ok(true),previewProjectFile:(id,name)=>ok(info(id,name)),
         getProjectGitSnapshot:(id,baseRef)=>ok({projectId:id,state:'ready',truncated:false,revision:baseRef?'fixture-compared':'fixture-dirty',
           currentBranch:'feature',branches:[{ref:'refs/remotes/origin/main',label:'origin/main'},{ref:'refs/heads/feature',label:'feature'}],
-          ...(baseRef?{comparison:{ref:baseRef,label:'origin/main',baseOid:'a'.repeat(40),headOid:'b'.repeat(40)}}:{}),changes:baseRef?[
+          checkpoints:[{ref:'checkpoint:'+'d'.repeat(32),createdAt:Date.UTC(2026,9,13,9,42),reason:'restore',available:true},
+            {ref:'checkpoint:'+'c'.repeat(32),createdAt:Date.UTC(2026,9,13,9,30),reason:'turn',available:true},
+            {ref:'checkpoint:'+'b'.repeat(32),createdAt:Date.UTC(2026,9,1,8,0),reason:'turn',available:false}],
+          ...(baseRef?{comparison:{ref:baseRef,label:baseRef.startsWith('checkpoint:')?'':'origin/main',baseOid:'a'.repeat(40),headOid:'b'.repeat(40),
+            ...(baseRef.startsWith('checkpoint:')?{checkpoint:true}:{})}}:{}),changes:baseRef?.startsWith('checkpoint:')?[
+          {status:'M',path:'README.md',additions:2,deletions:1,binary:false},
+          {status:'A',path:'src/created.ts',additions:12,deletions:0,binary:false}
+        ]:baseRef?[
           {status:'M',path:'README.md',additions:2,deletions:1,binary:false}
         ]:[
           {status:'M',path:'README.md',additions:2,deletions:1,binary:false},
@@ -159,6 +166,28 @@ app.whenReady().then(async () => {
     await screenshot('review-branch-compare');
     await js(`document.querySelector('.review-panel .file-branch-trigger').click();document.querySelector('.file-branch-option').click()`);
     await until(`document.querySelectorAll('.review-panel .file-change-row').length===2`);
+    await js(`document.querySelector('.review-panel .file-branch-trigger').click()`);
+    // The shared searchable picker shows checkpoints as options with a translated
+    // hint, rather than the legacy .file-branch-section heading.
+    // A checkpoint whose tree Git cleaned up is listed as such (#1443, checkpoints are temporary).
+    await until(`(()=>{const hints=[...document.querySelectorAll('.file-branch-menu .file-branch-option .file-branch-hint')].map(hint=>hint.textContent);return hints.length===3&&hints[0]===window.fixture.t('Checkpoints')&&hints[1]===window.fixture.t('Checkpoints')&&hints[2]===window.fixture.t('Cleaned up')})()`);
+    assert.deepEqual(await js(`[...document.querySelectorAll('.file-branch-menu .file-branch-option')].slice(-3).map(option=>option.querySelector('span')?.textContent.split(' · ')[0])`),
+      await js(`[window.fixture.t('Before restore'),window.fixture.t('Before turn'),window.fixture.t('Before turn')]`));
+    await screenshot('review-checkpoint-menu');
+    await js(`[...document.querySelectorAll('.file-branch-option')].at(-1).click()`);
+    await until(`document.querySelector('.review-panel .file-branch-trigger')?.textContent.startsWith(window.fixture.t('Before turn')) && document.querySelectorAll('.review-panel .file-change-row').length===2 && !!document.querySelector('.review-panel .file-checkpoint-bar button')`);
+    // A checkpoint's date and time are read whole while the header has room for them; a label may
+    // shorten only when the header's other parts leave it no space (a narrow window or runner).
+    const cut = await js(`(() => { const label = document.querySelector('.review-panel .file-branch-trigger-label');
+      const header = label.closest('.file-changes-header-content');
+      const used = [...header.children].filter(child => !child.hidden).reduce((sum, child) => sum + child.getBoundingClientRect().width, 0);
+      const gaps = parseFloat(getComputedStyle(header).columnGap || '0') * Math.max(0, [...header.children].filter(child => !child.hidden).length - 1);
+      const room = header.clientWidth - used - gaps;
+      return { cut: label.scrollWidth > label.clientWidth + 1, room, text: label.textContent }; })()`);
+    if (cut.cut && cut.room > 2) throw new Error('The checkpoint label is cut although the Review header has room: ' + JSON.stringify(cut));
+    await screenshot('review-checkpoint-compare');
+    await js(`document.querySelector('.review-panel .file-branch-trigger').click();document.querySelector('.file-branch-option').click()`);
+    await until(`document.querySelectorAll('.review-panel .file-change-row').length===2 && !document.querySelector('.review-panel .file-checkpoint-bar')`);
     assert.equal(await js('document.querySelector(".review-panel .file-change-row[data-path=\\"README.md\\"] .file-change-status").textContent'),'M');
     assert.ok(await js(`!document.querySelector('.review-panel .file-panel-toolbar') && !!document.querySelector('.review-panel .file-changes-header .file-panel-refresh')`));
     assert.deepEqual(await js(`[...document.querySelectorAll('.header-dock-controls > button')].map(button=>button.id)`),
@@ -303,6 +332,18 @@ app.whenReady().then(async () => {
     await until(`${viewItem('zoom-reset')}?.querySelector('.row-menu-hint').textContent==='100%'`);
     await js(`document.getElementById('viewMenu').click()`);
     await until(`!document.querySelector('.row-menu')`);
+    // Keyboard shortcuts from a real Ctrl+/ (⌘/ on a Mac): every row's keys inside the card; Escape closes it.
+    win.webContents.sendInputEvent({type:'keyDown',keyCode:'/',modifiers:[process.platform==='darwin'?'meta':'control']});
+    await until(`document.getElementById('shortcutsDialog').open`);
+    const shortcuts=await js(`(()=>{const d=document.getElementById('shortcutsDialog'),b=d.getBoundingClientRect();return {rows:d.querySelectorAll('dt').length,outside:[...d.querySelectorAll('dt, kbd')].filter(n=>{const r=n.getBoundingClientRect();return r.left<b.left-1||r.right>b.right+1}).length}})()`);
+    assert.deepEqual(shortcuts,{rows:process.platform==='win32'?30:29,outside:0}); await screenshot('shortcuts-dialog');
+    win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});
+    await until(`!document.getElementById('shortcutsDialog').open`);
+    await js(`document.getElementById('viewMenu').click()`);
+    await js(`${viewItem('shortcuts')}.click()`);
+    await until(`document.getElementById('shortcutsDialog').open&&!document.querySelector('.row-menu')`);
+    await js(`document.getElementById('shortcutsClose').click()`);
+    await until(`!document.getElementById('shortcutsDialog').open`);
     await js(`document.querySelector('[data-tab=appearance]').click();window.fixture.setLanguage('en')`);
     const heights=await js(`['appearanceFont','appearanceSize','setupProfile'].map(id=>{const n=document.getElementById(id).closest('.setting');return n.getBoundingClientRect().height})`);
     assert.ok(Math.max(...heights)-Math.min(...heights)<2,JSON.stringify(heights));

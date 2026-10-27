@@ -20,6 +20,7 @@ async function mount(options: { cos: boolean }) {
   const { initViewMenu } = await import('../src/renderer/view-menu.js');
   const menu = initViewMenu({
     search: () => calls.push('search'),
+    shortcuts: viaKeyboard => calls.push(viaKeyboard ? 'shortcuts:keys' : 'shortcuts'),
     cosBrowser: () => options.cos,
     showCosBrowser: () => calls.push('cos-browser'),
     pets: { toggle: () => { pets = !pets; calls.push('pets'); }, visible: () => pets },
@@ -53,11 +54,12 @@ it('opens one menu with each action, its icon and its shortcut, the CoS browser 
     ['pets', 'Show pets', null],
     ['zoom-in', 'Zoom in', 'Ctrl++'],
     ['zoom-out', 'Zoom out', 'Ctrl+−'],
-    ['zoom-reset', 'Actual size', 'Ctrl+0']
+    ['zoom-reset', 'Actual size', 'Ctrl+0'],
+    ['shortcuts', 'Keyboard shortcuts', 'Ctrl+/']
   ]);
   // Every item draws its icon, and the groups are separated.
-  expect(view.open()!.querySelectorAll('.row-menu-item > .ico').length).toBe(5);
-  expect(view.open()!.querySelectorAll('.row-menu-separator').length).toBe(2);
+  expect(view.open()!.querySelectorAll('.row-menu-item > .ico').length).toBe(6);
+  expect(view.open()!.querySelectorAll('.row-menu-separator').length).toBe(3);
   // The same button closes it.
   view.button.click();
   expect(view.open()).toBeNull();
@@ -65,11 +67,21 @@ it('opens one menu with each action, its icon and its shortcut, the CoS browser 
 
   const cos = await mount({ cos: true });
   cos.button.click();
-  expect(cos.items().map(([action]) => action)).toEqual(['search', 'cos-browser', 'pets', 'zoom-in', 'zoom-out', 'zoom-reset']);
+  expect(cos.items().map(([action]) => action)).toEqual(['search', 'cos-browser', 'pets', 'zoom-in', 'zoom-out', 'zoom-reset', 'shortcuts']);
   expect(cos.item('cos-browser').querySelector('.row-menu-label')!.textContent).toBe('Show browser');
   cos.item('cos-browser').click();
   expect(cos.calls).toEqual(['cos-browser']);
   expect(cos.open()).toBeNull();
+});
+
+it('tells the shortcuts item whether the keys or a pointer chose it', async () => {
+  const view = await mount({ cos: false });
+  view.button.click();
+  // A pointer click carries a detail of 1; Enter and Space click with 0.
+  view.item('shortcuts').dispatchEvent(new view.doc.defaultView!.MouseEvent('click', { bubbles: true, detail: 1 }));
+  view.button.click();
+  view.item('shortcuts').dispatchEvent(new view.doc.defaultView!.MouseEvent('click', { bubbles: true, detail: 0 }));
+  expect(view.calls).toEqual(['shortcuts', 'shortcuts:keys']);
 });
 
 it('says what the pets toggle will do, runs actions and closes; zoom steps keep it open with the value updating', async () => {
@@ -79,7 +91,10 @@ it('says what the pets toggle will do, runs actions and closes; zoom steps keep 
   expect(view.open()).toBeNull();
   view.button.click();
   view.item('pets').click();
-  expect(view.calls).toEqual(['search', 'pets']);
+  view.button.click();
+  view.item('shortcuts').click();
+  expect(view.open()).toBeNull();
+  expect(view.calls).toEqual(['search', 'pets', 'shortcuts:keys']);
   view.button.click();
   expect(view.item('pets').querySelector('.row-menu-label')!.textContent).toBe('Hide pets');
 
