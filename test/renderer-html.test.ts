@@ -267,6 +267,20 @@ describe('captured ChatGPT rendered HTML', () => {
     expect(rendered.textContent).not.toContain('\uE030');
   });
 
+  it.each([
+    { name: 'code block start', before: '' },
+    { name: 'code block continuation', before: '      Earlier code line\n' }
+  ])('keeps a deeply indented list-looking code example literal at $name', ({ before }) => {
+    const chart = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Outside code', value: 6 }]
+    } } })}\uE201`;
+    const rendered = renderedMarkdown(`- Item\n\n${before}      - example\n        ${chart}\n\n${chart}`);
+    expect(rendered.querySelector('pre code')?.textContent).toContain('- example');
+    expect(rendered.querySelector('pre code')?.textContent).toContain(chart);
+    expect(rendered.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(rendered.textContent).not.toContain('\uE030');
+  });
+
   it.each([' \t', '  \t', '   \t'])('keeps a chart in mixed-space tab indented code literal (%j)', indent => {
     const chart = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
       chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Outside code', value: 3 }]
