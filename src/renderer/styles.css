@@ -2419,6 +2419,11 @@ textarea {
 /* One instruction, not a whole prompt: a few lines are enough. */
 #customContinue { min-height: 88px; }
 
+/* Chat instructions (#1856): as tall as the text, from three lines up to most of the window, so a
+   short Personality does not open as a tall empty box; longer text scrolls inside. */
+.goal-prompt textarea.is-content-sized { field-sizing: content; min-height: calc(3lh + 18px); max-height: min(60vh, 560px); }
+.chat-style-state { margin-top: 2px; }
+
 input[readonly] {
   background: var(--sunk);
   color: var(--soft);

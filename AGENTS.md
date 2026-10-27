@@ -470,7 +470,12 @@ not intercepted.
 
 `mcp/coding-instructions.ts` contains adapted upstream collaboration prose with provenance;
 `mcp/instructions.ts` adds currently available local-tool guidance and the user's bounded
-standing additions. There is no extra instructions tool or per-chat “already sent prompt” flag.
+standing additions. Its Personality and Writing style parts (#1856) live in `src/shared/chat-style.ts`
+and are the person's to replace (`ui.chatPersonality`, `ui.chatWritingStyle`, Settings → Agents &
+automation → Chat instructions): absent is the built-in text, `''` leaves that part out with its
+heading, and a `# ` heading typed into one becomes `## `, so it cannot pose as a fixed section.
+Everything else in that prose stays fixed. The plugin schema hash covers tools only, so an edit
+needs no plugin refresh; it reaches new chats' first messages and the MCP instructions. There is no extra instructions tool or per-chat “already sent prompt” flag.
 
 The whole message has a **96,000 UTF-16-character ceiling**, plus the input transport's UTF-8
 byte envelope. For eligible openings, authored work, complete Core instructions and selected

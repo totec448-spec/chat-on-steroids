@@ -164,6 +164,19 @@ it('saves the Continue prompt from Settings, keeps it through a stale save, and 
   expect(getConfig().ui.customContinue).toBeUndefined();
 });
 
+it('saves Personality and Writing style from Settings: own text, emptied, and back to default (#1856)', async () => {
+  const base = getConfig();
+  expect(await save({ ...base, ui: { ...base.ui, chatPersonality: '  Be brief.  ', chatWritingStyle: '' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui).toMatchObject({ chatPersonality: 'Be brief.', chatWritingStyle: '' });
+  expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui).toMatchObject({ chatPersonality: 'Be brief.', chatWritingStyle: '' });
+  const saved = getConfig();
+  expect(await save({ ...saved, ui: { ...saved.ui, chatPersonality: 'x'.repeat(8001) } }, saved)).toMatchObject({ ok: false });
+  expect(await save({ ...saved, ui: { ...saved.ui, chatPersonality: undefined, chatWritingStyle: undefined } }, saved)).toMatchObject({ ok: true });
+  expect(getConfig().ui.chatPersonality).toBeUndefined();
+  expect(getConfig().ui.chatWritingStyle).toBeUndefined();
+});
+
 it('saves the send check address from Settings, keeps it through a stale save, and clears it when emptied (#1794)', async () => {
   const base = getConfig();
   expect(await save({ ...base, ui: { ...base.ui, sendCheckUrl: ' http://127.0.0.1:8091/check ' } }, base)).toMatchObject({ ok: true });
