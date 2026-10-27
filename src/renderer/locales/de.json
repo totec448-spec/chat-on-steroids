@@ -3313,5 +3313,7 @@
   "Keys stay with you": "Schlüssel bleiben bei dir",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "API-Schlüssel und Tokens in dem, was Tools zurückgeben, werden verborgen, bevor ChatGPT sie sieht.",
   "Easier to read": "Leichter zu lesen",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Hoher Kontrast, acht Akzentfarben, Zeilenabstand und eine besser lesbare Schrift."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Hoher Kontrast, acht Akzentfarben, Zeilenabstand und eine besser lesbare Schrift.",
+  "Switch to {0} to open this file.": "Wechsle zu {0}, um diese Datei zu öffnen.",
+  "{0}+click to open in Files": "{0}+Klick öffnet in Dateien"
 }

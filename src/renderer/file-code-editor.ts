@@ -9,6 +9,8 @@ export interface ProjectCodeEditor {
   language: string;
   getValue(): string;
   focus(): void;
+  /** Puts the cursor at a 1-based line and column, clamped to the text, and scrolls it to the middle. */
+  goTo(line: number, column?: number): void;
   destroy(): void;
 }
 
@@ -129,6 +131,11 @@ export async function createProjectCodeEditor(options: {
     language: description?.name ?? 'Plain text',
     getValue: () => view.state.sliceDoc(),
     focus: () => view.focus(),
+    goTo: (line, column = 1) => {
+      const doc = view.state.doc, target = doc.line(Math.min(Math.max(1, line), doc.lines));
+      const anchor = target.from + Math.min(Math.max(0, column - 1), target.length);
+      view.dispatch({ selection: { anchor }, effects: EditorView.scrollIntoView(anchor, { y: 'center' }) });
+    },
     destroy: () => view.destroy()
   };
 }

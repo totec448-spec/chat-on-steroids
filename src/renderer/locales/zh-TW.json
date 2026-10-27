@@ -3253,5 +3253,7 @@
   "Keys stay with you": "金鑰留在你這裡",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "工具傳回內容中的 API 金鑰和權杖會在 ChatGPT 看到之前被隱藏。",
   "Easier to read": "更易閱讀",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "高對比、八種強調色、行距和更易讀的字型。"
+  "High contrast, eight accent colors, line spacing and a more legible font.": "高對比、八種強調色、行距和更易讀的字型。",
+  "Switch to {0} to open this file.": "切換到 {0} 以開啟此檔案。",
+  "{0}+click to open in Files": "{0}+點按以在檔案中開啟"
 }

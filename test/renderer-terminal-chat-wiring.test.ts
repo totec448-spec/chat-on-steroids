@@ -3,9 +3,9 @@ import path from 'node:path';
 import { JSDOM } from 'jsdom';
 import { afterEach, expect, it, vi } from 'vitest';
 
-const terminals = vi.hoisted(() => ({ options: [] as { id?: string; onSendSelection?: (text: string) => boolean }[], moveTab: vi.fn() }));
+const terminals = vi.hoisted(() => ({ options: [] as { id?: string; onSendSelection?: (text: string) => boolean; onOpenFile?: unknown; projectById?: (id: string) => unknown }[], moveTab: vi.fn() }));
 vi.mock('../src/renderer/workspace-terminal.js', () => ({
-  createWorkspaceTerminal: (_toggle: unknown, _mount: unknown, options: { id?: string; onSendSelection?: (text: string) => boolean }) => {
+  createWorkspaceTerminal: (_toggle: unknown, _mount: unknown, options: { id?: string; onSendSelection?: (text: string) => boolean; onOpenFile?: unknown; projectById?: (id: string) => unknown }) => {
     terminals.options.push(options);
     return { update: vi.fn(), show: vi.fn(), hide: vi.fn(), newTab: vi.fn(() => null), tabs: vi.fn(() => options.id ? ['pty-1', 'pty-2'].map(id => ({ id, title: id, exited: false, previous: true })) : []),
       selectTab: vi.fn(), closeTab: vi.fn(), moveTab: terminals.moveTab };
@@ -57,4 +57,14 @@ it('passes a moved right-dock terminal tab on to the right terminal, so its save
   w.document.querySelector('#workDockRight [role=tablist]')!
     .dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', ctrlKey: true, shiftKey: true, bubbles: true }));
   expect(terminals.moveTab).toHaveBeenCalledWith('pty-1', 1);
+});
+
+it('gives both terminals file links next to Send to chat, resolving the project of a tab by id', async () => {
+  await boot();
+  for (const options of terminals.options) {
+    expect(options.onOpenFile).toBeTypeOf('function');
+    expect(options.onSendSelection).toBeTypeOf('function');
+    // No project has that id here, so a restored tab of a removed project links nothing.
+    expect(options.projectById?.('missing')).toBeNull();
+  }
 });

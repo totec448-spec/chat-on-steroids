@@ -1,8 +1,14 @@
 import { JSDOM } from 'jsdom';
 import { afterEach, expect, it, vi } from 'vitest';
 
+// Each registered link provider, and the one printed line every terminal shows.
+const links = vi.hoisted(() => ({ providers: [] as { provideLinks(y: number, callback: (found?: { activate(event: { ctrlKey: boolean; metaKey: boolean }): void }[]) => void): void }[],
+  line: 'src/app.ts:42:7 - error' }));
 vi.mock('@xterm/xterm', () => ({ Terminal: class {
   cols = 80; rows = 24; options: Record<string, unknown> = {};
+  buffer = { active: { getLine: (y: number) => y === 0 ? { length: links.line.length,
+    getCell: (x: number) => ({ getChars: () => links.line[x]!, getWidth: () => 1 }) } : undefined } };
+  registerLinkProvider(provider: (typeof links.providers)[number]): void { links.providers.push(provider); }
   loadAddon(): void {}
   open(node: HTMLElement): void { const screen = node.ownerDocument.createElement('div'); screen.className = 'xterm'; node.append(screen); }
   onData(): void {}
@@ -20,9 +26,9 @@ import { createWorkspaceTerminal } from '../src/renderer/workspace-terminal.js';
 
 const KEY = 'chat-on-steroids.terminal-tabs.workspaceTerminal';
 let dom: JSDOM;
-afterEach(() => dom?.window.close());
+afterEach(() => { dom?.window.close(); links.providers.length = 0; });
 
-function setup(saved?: unknown) {
+function setup(saved?: unknown, options: Parameters<typeof createWorkspaceTerminal>[2] = {}) {
   dom = new JSDOM('<div class="app"><div id="mount"></div></div>', { url: 'https://local.test', pretendToBeVisual: true });
   const shells = new Map<string, string>();
   const api = {
@@ -39,7 +45,7 @@ function setup(saved?: unknown) {
   Object.assign(globalThis, { window: dom.window, document: dom.window.document, ResizeObserver: dom.window.ResizeObserver,
     requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window), getComputedStyle: dom.window.getComputedStyle.bind(dom.window) });
   if (saved !== undefined) dom.window.localStorage.setItem(KEY, typeof saved === 'string' ? saved : JSON.stringify(saved));
-  const terminal = createWorkspaceTerminal(vi.fn(), document.getElementById('mount')!);
+  const terminal = createWorkspaceTerminal(vi.fn(), document.getElementById('mount')!, options);
   return { api, terminal, panel: document.getElementById('workspaceTerminal')! };
 }
 const saved = () => JSON.parse(dom.window.localStorage.getItem(KEY) ?? 'null') as unknown;
@@ -107,4 +113,37 @@ it('brings back at most eight valid remembered tabs, each dock from its own list
   expect(terminal.tabs().map(entry => entry.title)).toEqual(Array.from({ length: 8 }, (_, index) => `shell ${index}`));
   const right = createWorkspaceTerminal(vi.fn(), document.getElementById('mount')!, { id: 'workspaceTerminalRight', dockedTabs: true });
   expect(right.tabs()).toEqual([]);
+});
+
+it('links file locations in a restored tab to the project saved with it, not the one selected now', async () => {
+  const other = { id: 'c1e0a7d4-5b1f-4c52-8f6e-3a9d2b7e4c10', name: 'other' } as typeof project;
+  const catalog = [project!, other!, { ...project!, id: '0f5c3a52-9d6e-4a0b-b1c4-6e2f8d7a9b33', name: 'server', remote: { host: 'example.test' } as never }] as typeof project[];
+  const onOpenFile = vi.fn();
+  const first = setup(undefined, { onOpenFile, projectById: id => catalog.find(row => row!.id === id) ?? null });
+  first.terminal.update(project); first.terminal.newTab(); await settle();
+  // A tab started now links to its own project.
+  expect(links.providers).toHaveLength(1);
+  links.providers.length = 0;
+
+  const { terminal, panel } = setup(saved(), { onOpenFile, projectById: id => catalog.find(row => row!.id === id) ?? null });
+  terminal.update(other);
+  // Nothing is linked before the shell starts.
+  expect(links.providers).toHaveLength(0);
+  panel.querySelector<HTMLButtonElement>('.terminal-previous .btn')!.click();
+  await settle();
+  expect(links.providers).toHaveLength(1);
+  let found: { activate(event: { ctrlKey: boolean; metaKey: boolean }): void }[] | undefined;
+  links.providers[0]!.provideLinks(1, value => { found = value; });
+  expect(found).toHaveLength(1);
+  found![0]!.activate({ ctrlKey: true, metaKey: true });
+  expect(onOpenFile).toHaveBeenCalledWith(project, expect.objectContaining({ path: 'src/app.ts', line: 42, column: 7 }));
+});
+
+it('links nothing in a project-less or server project tab', async () => {
+  const server = { id: '0f5c3a52-9d6e-4a0b-b1c4-6e2f8d7a9b33', name: 'server', remote: { host: 'example.test' } } as unknown as typeof project;
+  const { terminal } = setup(undefined, { onOpenFile: vi.fn(), projectById: id => id === server!.id ? server : null });
+  terminal.update(null); terminal.newTab();
+  terminal.update(server); terminal.newTab();
+  await settle();
+  expect(links.providers).toHaveLength(0);
 });

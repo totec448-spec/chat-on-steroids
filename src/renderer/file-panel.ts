@@ -264,6 +264,8 @@ export function createFilePanel(options: FilePanelOptions) {
   let generation = 0;
   let selection: Selection = { path: '', kind: 'root' };
   let previewPath: string | null = null;
+  /** The line a terminal link asked for, shown once that file's code surface is mounted. */
+  let lineTarget: { path: string; line: number; column: number } | null = null;
   let previewValue: ProjectFilePreview | null = null;
   let renderedPreview: ProjectFilePreview | null = null;
   let pendingCodePreview: ProjectFilePreview | null = null;
@@ -581,7 +583,8 @@ export function createFilePanel(options: FilePanelOptions) {
     if (!listings.has(entry.path)) await loadDirectory(entry.path);
   }
 
-  async function selectFile(entry: ProjectFileEntry): Promise<void> {
+  async function selectFile(entry: ProjectFileEntry, at: { line: number; column: number } | null = null): Promise<void> {
+    lineTarget = at && { path: entry.path, ...at };
     if (entry.path === editingPath) return;
     if (editingPath) {
       if (!(await leaveEditorIfNeeded())) return;
@@ -903,6 +906,7 @@ export function createFilePanel(options: FilePanelOptions) {
     codeEditor = created;
     languageLabel.textContent = created.language;
     updateEditorDirtyState();
+    revealLineTarget();
     created.focus();
   }
 
@@ -924,6 +928,41 @@ export function createFilePanel(options: FilePanelOptions) {
     languageLabel.textContent = created.language;
     publish();
     codeViewer = created;
+    revealLineTarget();
+  }
+
+  function revealLineTarget(): void {
+    const target = lineTarget;
+    if (!target || previewPath !== target.path) return;
+    // Wait for a mount still in flight rather than moving the viewer it replaces.
+    const surface = editingPath === target.path ? codeEditor
+      : !pendingCodePreview && renderedPreview?.path === target.path ? codeViewer : null;
+    if (!surface) return;
+    lineTarget = null;
+    surface.goTo(target.line, target.column);
+  }
+
+  /** Opens a project file in Files with one line in view, as a terminal file link asks. False when the line is not in view. */
+  async function openFileAt(projectId: string, relative: string, line: number, column: number): Promise<boolean> {
+    if (options.reviewOnly || project?.id !== projectId) return false;
+    if (mode === 'review') leaveReview();
+    showFiles();
+    // The project id alone cannot tell a round trip A -> B -> A from no change at all.
+    const epoch = generation;
+    if (pane.hidden) await show(false);
+    if (project?.id !== projectId || mode !== 'files' || generation !== epoch) return false;
+    await selectFile({ name: baseName(relative), path: relative, kind: 'file', bytes: null }, { line, column });
+    // A rendered Markdown preview has no lines, so its source opens in the editor, the panel's only view of that text.
+    // Nothing is remembered: the next file opens rendered again, and View goes back.
+    const markdown = /\.(?:md|markdown)$/i.test(relative);
+    if (markdown && editingPath !== relative && project?.id === projectId && previewPath === relative
+      && previewValue?.path === relative && editablePreview(previewValue)) {
+      await startEditing(previewValue);
+      // A later link may have set its own target while this editor mounted; leave that one.
+      if (editingPath !== relative && lineTarget?.path === relative) lineTarget = null;
+    }
+    revealLineTarget();
+    return previewPath === relative && (!markdown || editingPath === relative);
   }
 
   async function mountPdfViewer(value: ProjectFilePreview & { pdfDataBase64: string }, host: HTMLElement, revision: string): Promise<void> {
@@ -1765,6 +1804,7 @@ export function createFilePanel(options: FilePanelOptions) {
     show,
     mountAt(parent: HTMLElement): void { if (pane.parentElement !== parent) parent.append(pane); },
     openReview,
+    openFileAt,
     visible: () => !pane.hidden,
     update(next: LocalProject | null): void {
       const changed = project?.id !== next?.id;
@@ -1775,6 +1815,7 @@ export function createFilePanel(options: FilePanelOptions) {
       project = next;
       if (changed) watchSignature = '';
       if (changed) { closeBranchMenu(); selectedBaseRef = null; }
+      if (changed) lineTarget = null;
       if (options.toggle) {
         options.toggle.hidden = next === null;
         ui(options.toggle, 'title', () => next ? t('Files · {0}', [next.name]) : t('Files'));

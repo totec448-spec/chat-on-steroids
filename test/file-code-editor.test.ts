@@ -80,6 +80,18 @@ it('uses the same highlighted CodeMirror surface as a read-only viewer', async (
   viewer.destroy();
 });
 
+it('puts the cursor on a requested line and column, clamped to the text', async () => {
+  const viewer = await createProjectCodeEditor({ parent: document.getElementById('editor')!, filename: 'app.ts', text: 'one\ntwo words\nthree\n', readOnly: true });
+  const head = () => viewer.view.state.selection.main.head;
+  viewer.goTo(2, 5);
+  expect(head()).toBe(viewer.view.state.doc.line(2).from + 4);
+  viewer.goTo(99, 99);
+  expect(head()).toBe(viewer.view.state.doc.length);
+  viewer.goTo(0);
+  expect(head()).toBe(0);
+  viewer.destroy();
+});
+
 it('preserves CRLF and the final newline when editing and bounds retained text', async () => {
   const editor = await createProjectCodeEditor({ parent: document.getElementById('editor')!, filename: 'notes.txt', text: '\uFEFFone\r\ntwo\r\n' });
   expect(editor.getValue()).toBe('\uFEFFone\r\ntwo\r\n');

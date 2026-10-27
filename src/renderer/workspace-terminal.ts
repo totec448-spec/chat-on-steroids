@@ -8,6 +8,7 @@ import { enableTabReorder, reorderKey } from './tab-reorder.js';
 import { rememberedTerminals, rememberTerminals, type RememberedTerminal } from './terminal-memory.js';
 import { isMac, primaryShiftShortcut } from './shortcuts.js';
 import type { LocalProject } from '../shared/projects.js';
+import { terminalFileLinkProvider, type TerminalFileLink } from './terminal-file-links.js';
 
 type Tab = { id: string; projectId: string | null; cwd: string; title: string; node: HTMLElement; term: Terminal; fit: FitAddon;
   ready: boolean; exited: boolean; previous: boolean; queued: number; writes: Promise<void> };
@@ -18,7 +19,10 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
   options: { id?: string; onEmpty?: () => void; onClosePanel?: () => void;
     dockedTabs?: boolean; onTabsChanged?: () => void;
     /** Adds selected terminal text to the composer; false when nothing was added. */
-    onSendSelection?: (text: string) => boolean } = {}) {
+    onSendSelection?: (text: string) => boolean;
+    /** Opens a file location from the output in Files. `projectById` names the project a tab belongs to, also after a restart. */
+    onOpenFile?: (project: LocalProject, link: TerminalFileLink) => void;
+    projectById?: (id: string) => LocalProject | null } = {}) {
   const app = document.querySelector<HTMLElement>('.app')!;
   const panel = el('section', 'workspace-terminal'); panel.id = options.id ?? 'workspaceTerminal'; panel.hidden = true;
   ui(panel, 'aria-label', () => t('Terminal'));
@@ -165,6 +169,16 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
       }
       return true;
     });
+    // Locations in the output open in Files, in the project the tab started in (a restored tab has no
+    // current project). A server project's paths are not on this disk.
+    const linkFiles = (owner: Tab, cwd: string): void => {
+      const openFile = options.onOpenFile, found = owner.projectId ? options.projectById?.(owner.projectId) : null;
+      if (!openFile || !found || found.remote) return;
+      owner.term.registerLinkProvider(terminalFileLinkProvider(owner.term, cwd, {
+        open: link => { const current = owner.projectId ? options.projectById?.(owner.projectId) : null; if (current) openFile(current, link); },
+        hover: over => { owner.node.title = over ? t('{0}+click to open in Files', [isMac() ? '⌘' : t('Ctrl')]) : cwd; }
+      }));
+    };
     const start = async (): Promise<void> => {
       const result = await window.api.terminalCreate(id, tab.projectId, Math.min(500, term.cols), Math.min(200, term.rows));
       if (!tabs.has(id)) { void window.api.terminalClose(id); return; }
@@ -172,6 +186,7 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
       else {
         tab.ready = true; tab.cwd = result.data.cwd; node.title = result.data.cwd;
         if (!restored) tab.title = scope ? `${scope.name} · ${result.data.shell}` : result.data.shell;
+        linkFiles(tab, result.data.cwd);
       }
       remember(); paint(); fit(); options.onTabsChanged?.(); if (open && selected === id) term.focus();
     };

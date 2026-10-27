@@ -6,6 +6,7 @@ import { initChatSearch, type ChatSearch } from './chat-search.js';
 import { initChatFind } from './chat-find.js';
 import { initChatCycle } from './chat-cycle.js';
 import { createWorkspaceTerminal } from './workspace-terminal.js';
+import type { TerminalFileLink } from './terminal-file-links.js';
 import { sendTerminalSelection } from './terminal-selection.js';
 import { createWorkspaceDocks } from './workspace-docks.js';
 import { currentLanguage, ui, t, tn } from './i18n.js';
@@ -8902,12 +8903,20 @@ export function initChat(next: Deps): void {
     onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); }
   });
   reviewPanel.update(selectedLocalProject());
+  // Files shows the selected chat's project; a shell keeps the project it started in.
+  const openTerminalFile = (project: LocalProject, link: TerminalFileLink): void => {
+    if (selectedLocalProject()?.id !== project.id) { toast(t('Switch to {0} to open this file.', [project.name])); return; }
+    void filePanel?.openFileAt(project.id, link.path, link.line, link.column);
+  };
+  const terminalProject = (id: string): LocalProject | null => projects.find(project => project.id === id) ?? null;
   const onSendSelection = (text: string): boolean => sendTerminalSelection($<HTMLTextAreaElement>('chatInput'), text);
   workspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.bottomBody,
-    { onEmpty: () => docks.setBottomOpen(false), onClosePanel: () => docks.setBottomOpen(false), onSendSelection });
+    { onEmpty: () => docks.setBottomOpen(false), onClosePanel: () => docks.setBottomOpen(false), onSendSelection,
+      onOpenFile: openTerminalFile, projectById: terminalProject });
   workspaceTerminal.update(selectedLocalProject());
   rightWorkspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.body,
-    { id: 'workspaceTerminalRight', dockedTabs: true, onTabsChanged: () => docks.sync(), onSendSelection });
+    { id: 'workspaceTerminalRight', dockedTabs: true, onTabsChanged: () => docks.sync(), onSendSelection,
+      onOpenFile: openTerminalFile, projectById: terminalProject });
   rightWorkspaceTerminal.update(selectedLocalProject());
   docks.register('review', 'Review', 'i-git-diff', mount => {
     reviewPanel?.mountAt(mount); void reviewPanel?.show();
