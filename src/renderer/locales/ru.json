@@ -3474,5 +3474,7 @@
   "Move a queued task": "Переместить задачу в очереди",
   "Move the focused tab": "Переместить выбранную вкладку",
   "Save the file being edited": "Сохранить редактируемый файл",
-  "Copy the selection": "Копировать выделенное"
+  "Copy the selection": "Копировать выделенное",
+  "Turn off Plugins connection": "Отключить подключение Plugins",
+  "Plugins connection turned off": "Подключение Plugins отключено"
 }
