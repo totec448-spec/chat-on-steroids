@@ -1216,7 +1216,10 @@ it('logs a damaged saved chat style without its text, and nothing for an absent 
   const logger = await import('../src/main/logger.js');
   const warn = vi.spyOn(logger, 'logWarn');
   const { MAX_CHAT_STYLE_CHARS } = await import('../src/shared/chat-style.js');
-  await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, chatPersonality: 'secret-ish ' + 'x'.repeat(MAX_CHAT_STYLE_CHARS) } });
+  // On disk, as a damaged file has it: saveConfig would already drop the value before writing.
+  await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...defaultConfig(),
+    ui: { ...defaultConfig().ui, chatPersonality: 'secret-ish ' + 'x'.repeat(MAX_CHAT_STYLE_CHARS) } }), 'utf8');
+  warn.mockClear();
   const loaded = await loadConfig();
   expect(loaded.ui.chatPersonality).toBeUndefined();
   const lines = warn.mock.calls.map(call => String(call[0])).filter(line => line.includes('chatPersonality'));
