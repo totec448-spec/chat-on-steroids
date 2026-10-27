@@ -204,6 +204,14 @@ describe('captured ChatGPT rendered HTML', () => {
     expect(renderedMarkdown(source).querySelector('.markdown-dil-chart')).not.toBeNull();
   });
 
+  it('keeps current canonical prose rather than a stale resolved capture beside an unknown directive', () => {
+    const source = '**Current revision.**\n\n::chatgpt-entity{type="place" id="42"}';
+    const rendered = renderedMarkdown(source, whole('<p>Previous revision.</p>'));
+    expect(rendered.querySelector('strong')?.textContent).toBe('Current revision.');
+    expect(rendered.textContent).not.toContain('Previous revision.');
+    expect(rendered.textContent).not.toContain('::chatgpt-entity');
+  });
+
   it.each([
     { name: 'blockquote ends at a blank line', nested: '> ```json\n> example\n\nPlain text.' },
     { name: 'blockquote ends at an unquoted line', nested: '> ```json\n> example\nPlain text.' },
@@ -246,6 +254,16 @@ describe('captured ChatGPT rendered HTML', () => {
     const rendered = renderedMarkdown(`- Item\n\n      Code example\n    ${chart}\n\n${chart}`);
     expect(rendered.querySelector('pre code')?.textContent).toContain('Code example');
     expect(rendered.querySelectorAll('.markdown-dil-chart')).toHaveLength(2);
+    expect(rendered.textContent).not.toContain('\uE030');
+  });
+
+  it('renders a canonical chart inside a nested list instead of swallowing it as indented code', () => {
+    const chart = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Nested sample', value: 4 }]
+    } } })}\uE201`;
+    const rendered = renderedMarkdown(`- Item\n\n    - sub item\n\n        ${chart}\n\n${chart}`);
+    expect(rendered.querySelectorAll('.markdown-dil-chart')).toHaveLength(2);
+    expect(rendered.textContent).toContain('Nested sample');
     expect(rendered.textContent).not.toContain('\uE030');
   });
 
