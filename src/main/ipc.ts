@@ -1,3 +1,4 @@
+import { MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
 import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
 import { forgetSurfaceTokens } from './mcp/persistent-paths.js';
 import { firefoxAddonUrl } from '../shared/firefox-addon.js';
@@ -251,6 +252,9 @@ const settingsPatch = z.object({
     playfulContinue: z.boolean().optional(),
     announceTurns: z.boolean().optional(),
     customContinue: z.string().trim().max(CUSTOM_CONTINUE_MAX_CHARS).optional(),
+    // #1856: absent is the built-in text; '' leaves that part out.
+    chatPersonality: z.string().trim().max(MAX_CHAT_STYLE_CHARS).optional(),
+    chatWritingStyle: z.string().trim().max(MAX_CHAT_STYLE_CHARS).optional(),
     // #1794: the renderer saves only an address on this computer; main checks it again before use.
     sendCheckUrl: z.string().trim().max(300).optional(),
     followOutput: z.boolean().optional(),
@@ -470,6 +474,9 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       announceTurns: pick(current.ui.announceTurns, base.ui.announceTurns, wanted.ui.announceTurns),
       // An emptied field means the built-in phrases again.
       customContinue: pick(current.ui.customContinue, base.ui.customContinue, wanted.ui.customContinue || undefined),
+      // Unlike the Continue prompt, an emptied part is kept as '': it means "leave this part out".
+      chatPersonality: pick(current.ui.chatPersonality, base.ui.chatPersonality, wanted.ui.chatPersonality),
+      chatWritingStyle: pick(current.ui.chatWritingStyle, base.ui.chatWritingStyle, wanted.ui.chatWritingStyle),
       // An emptied address turns the send check off.
       sendCheckUrl: pick(current.ui.sendCheckUrl, base.ui.sendCheckUrl, wanted.ui.sendCheckUrl || undefined),
       followOutput: pick(current.ui.followOutput, base.ui.followOutput, wanted.ui.followOutput),

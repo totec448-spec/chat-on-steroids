@@ -3304,5 +3304,18 @@
   "Check automatic sends": "檢查自動傳送",
   "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "請使用這台電腦上含連接埠的 http 位址,例如 http://127.0.0.1:8080/check。",
   "Ask a program on this computer before the app sends a message by itself. Empty: off.": "在應用程式自行傳送訊息之前詢問這台電腦上的一個程式。留空:關閉。",
-  "It receives the full message text. If it says no or doesn't answer, the message waits.": "該程式會收到訊息的完整文字。如果它拒絕或沒有回應,訊息會等待。"
+  "It receives the full message text. If it says no or doesn't answer, the message waits.": "該程式會收到訊息的完整文字。如果它拒絕或沒有回應,訊息會等待。",
+  "Personality restored to default": "已將個性恢復為預設",
+  "Writing style restored to default": "已將寫作風格恢復為預設",
+  "Chat instructions": "聊天說明",
+  "How ChatGPT talks and writes in new chats. Its tools, permissions and workers stay fixed.": "ChatGPT 在新聊天中如何說話和寫作。它的工具、權限和 worker 保持不變。",
+  "Personality": "個性",
+  "Its tone and manner with you.": "它對你的語氣和態度。",
+  "Saved when you leave the editor and used from the next new chat. Leave it empty to send no personality at all.": "離開編輯器時儲存,從下一個新聊天開始使用。留空則不傳送任何個性。",
+  "Writing style": "寫作風格",
+  "How it writes answers, technical explanations and pull request descriptions.": "它如何撰寫回答、技術說明和拉取要求描述。",
+  "Saved when you leave the editor and used from the next new chat. Leave it empty to send no writing style at all.": "離開編輯器時儲存,從下一個新聊天開始使用。留空則不傳送任何寫作風格。",
+  "New chats use the built-in text.": "新聊天使用內建文字。",
+  "Saved. New chats leave this part out.": "已儲存。新聊天不包含這一部分。",
+  "Saved. New chats use your text.": "已儲存。新聊天使用你的文字。"
 }

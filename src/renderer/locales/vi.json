@@ -3304,5 +3304,18 @@
   "Check automatic sends": "Kiểm tra các lần gửi tự động",
   "Use an http address on this computer with a port, such as http://127.0.0.1:8080/check.": "Dùng một địa chỉ http trên máy tính này có cổng, ví dụ http://127.0.0.1:8080/check.",
   "Ask a program on this computer before the app sends a message by itself. Empty: off.": "Hỏi một chương trình trên máy tính này trước khi ứng dụng tự gửi tin nhắn. Để trống: tắt.",
-  "It receives the full message text. If it says no or doesn't answer, the message waits.": "Chương trình nhận toàn bộ nội dung tin nhắn. Nếu nó từ chối hoặc không trả lời, tin nhắn sẽ chờ."
+  "It receives the full message text. If it says no or doesn't answer, the message waits.": "Chương trình nhận toàn bộ nội dung tin nhắn. Nếu nó từ chối hoặc không trả lời, tin nhắn sẽ chờ.",
+  "Personality restored to default": "Đã khôi phục tính cách về mặc định",
+  "Writing style restored to default": "Đã khôi phục phong cách viết về mặc định",
+  "Chat instructions": "Hướng dẫn cho cuộc trò chuyện",
+  "How ChatGPT talks and writes in new chats. Its tools, permissions and workers stay fixed.": "Cách ChatGPT nói và viết trong các cuộc trò chuyện mới. Công cụ, quyền và worker của nó giữ nguyên.",
+  "Personality": "Tính cách",
+  "Its tone and manner with you.": "Giọng điệu và cách cư xử với bạn.",
+  "Saved when you leave the editor and used from the next new chat. Leave it empty to send no personality at all.": "Được lưu khi bạn rời trình chỉnh sửa và dùng từ cuộc trò chuyện mới tiếp theo. Để trống để không gửi tính cách nào.",
+  "Writing style": "Phong cách viết",
+  "How it writes answers, technical explanations and pull request descriptions.": "Cách nó viết câu trả lời, giải thích kỹ thuật và mô tả pull request.",
+  "Saved when you leave the editor and used from the next new chat. Leave it empty to send no writing style at all.": "Được lưu khi bạn rời trình chỉnh sửa và dùng từ cuộc trò chuyện mới tiếp theo. Để trống để không gửi phong cách viết nào.",
+  "New chats use the built-in text.": "Cuộc trò chuyện mới dùng văn bản có sẵn.",
+  "Saved. New chats leave this part out.": "Đã lưu. Cuộc trò chuyện mới bỏ qua phần này.",
+  "Saved. New chats use your text.": "Đã lưu. Cuộc trò chuyện mới dùng văn bản của bạn."
 }
