@@ -112,3 +112,24 @@ it('leaves out a control hidden by style or outside the window, and leaves the c
   expect($('tourCard').hidden).toBe(false);
 });
 
+// CodeRabbit on #1867: a resize that hides a later step's control while the current one stays drops that
+// step too, and Next never opens a step whose control left the screen.
+it('drops a later step hidden by a resize while the current step stays, and Next skips a control that left', async () => {
+  const { tour: t } = await tour();
+  t.start();
+  expect($('tourStep').textContent).toBe('1 of 3');
+  $('addProject').getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0, toJSON: () => ({}) }) as DOMRect;
+  const input = document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.focus();
+  window.dispatchEvent(new dom.window.Event('resize'));
+  expect(document.querySelector('.is-tour-target')?.id).toBe('composer');
+  expect($('tourStep').textContent).toBe('1 of 2');
+  // The resize leaves the focus where the person was typing.
+  expect(document.activeElement).toBe(input);
+  ($('tourNext') as HTMLButtonElement).focus();
+  // Without a resize event (a sidebar collapsed by a click): Next still skips the control that left.
+  $('rightDockToggle').style.display = 'none';
+  ($('tourNext') as HTMLButtonElement).click(); await settle();
+  expect($('tourCard').hidden).toBe(true);
+});
+
