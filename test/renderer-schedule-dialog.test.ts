@@ -125,3 +125,30 @@ it('asks for the end date when "A date" is chosen without one, instead of saving
   expect($<HTMLDialogElement>('scheduleDialog').open).toBe(true);
 });
 
+
+it('never opens an editable new schedule when the saved one could not be read, and offers Retry (Haz)', async () => {
+  // A schedule exists, but the first read fails: a "new" schedule here would overwrite it on Save.
+  const reads = [Promise.resolve({ ok: false as const, error: 'The schedule could not be read.' }), ok(record({ text: 'Check the issues' }))];
+  const { calls, opened } = await dialog(null, { getSchedule: vi.fn(() => reads.shift()) });
+  await opened.open(SESSION, 'A draft that must not replace the saved message');
+  expect($<HTMLDialogElement>('scheduleDialog').open).toBe(true);
+  expect($('scheduleError').hidden).toBe(false);
+  expect($('scheduleError').textContent).toBe('The schedule could not be read.');
+  for (const id of ['scheduleText', 'scheduleRepeat', 'scheduleAt', 'scheduleUntilKind', 'scheduleCatchUp']) expect($<HTMLInputElement>(id).disabled, id).toBe(true);
+  expect($('scheduleFields').hidden).toBe(true);
+  expect($('scheduleSubmit').hidden).toBe(true);
+  expect($('scheduleDelete').hidden).toBe(true);
+  await submit();
+  expect(calls.saveSchedule).not.toHaveBeenCalled();
+  // Retry reads it again; once it can be read, the saved schedule is what the dialog edits.
+  expect($('scheduleRetry').hidden).toBe(false);
+  $('scheduleRetry').click();
+  await settle();
+  expect($('scheduleError').hidden).toBe(true);
+  expect($<HTMLTextAreaElement>('scheduleText').value).toBe('Check the issues');
+  expect($<HTMLTextAreaElement>('scheduleText').disabled).toBe(false);
+  expect($('scheduleFields').hidden).toBe(false);
+  expect($('scheduleSubmit').hidden).toBe(false);
+  expect($('scheduleDelete').hidden).toBe(false);
+  expect($('scheduleRetry').hidden).toBe(true);
+});

@@ -1586,22 +1586,26 @@
     <dialog class="plugin-dialog schedule-dialog" id="scheduleDialog" aria-labelledby="scheduleTitle">
       <div class="plugin-dialog-head"><h2 id="scheduleTitle">Schedule</h2><button class="btn" id="scheduleClose" type="button">Close</button></div>
       <form id="scheduleForm" class="plugin-dialog-body">
+        <div id="scheduleFields">
         <label class="plugin-field" for="scheduleText"><span>Message</span><textarea id="scheduleText" rows="3" dir="auto" spellcheck="true"></textarea></label>
-        <label class="plugin-field" for="scheduleRepeat"><span>Repeat</span><select id="scheduleRepeat">
-          <option value="hours">Every few hours</option><option value="daily">Every day</option><option value="weekdays">Weekdays</option><option value="weekly">Every week</option>
-        </select></label>
         <div class="schedule-when">
+          <label class="plugin-field" for="scheduleRepeat"><span>Repeat</span><select id="scheduleRepeat">
+            <option value="hours">Every few hours</option><option value="daily">Every day</option><option value="weekdays">Weekdays</option><option value="weekly">Every week</option>
+          </select></label>
           <label class="plugin-field" id="scheduleEveryField" for="scheduleEvery" hidden><span>Every</span><select id="scheduleEvery"></select></label>
           <label class="plugin-field" id="scheduleDayField" for="scheduleDay" hidden><span>On</span><select id="scheduleDay"></select></label>
           <label class="plugin-field" id="scheduleAtField" for="scheduleAt"><span>At</span><input id="scheduleAt" type="time" required /></label>
         </div>
         <small class="schedule-note" id="scheduleZone"></small>
-        <label class="plugin-field" for="scheduleUntilKind"><span>Until</span><select id="scheduleUntilKind"><option value="forever">Forever</option><option value="date">A date</option></select></label>
-        <label class="plugin-field" id="scheduleUntilField" for="scheduleUntil" hidden><span>Last day</span><input id="scheduleUntil" type="date" /></label>
-        <label class="setting schedule-catch-up"><span class="setting-text"><b>Catch up missed runs</b><em>Off: a time missed while the app was closed or asleep is skipped. On: one late run goes out when it is back.</em></span><input id="scheduleCatchUp" type="checkbox" /></label>
-        <small class="schedule-note">The schedule lives on this computer, and the computer is not woken for it.</small>
+        <div class="schedule-when">
+          <label class="plugin-field" for="scheduleUntilKind"><span>Until</span><select id="scheduleUntilKind"><option value="forever">Forever</option><option value="date">A date</option></select></label>
+          <label class="plugin-field" id="scheduleUntilField" for="scheduleUntil" hidden><span>Last day</span><input id="scheduleUntil" type="date" /></label>
+        </div>
+        <label class="setting schedule-catch-up"><span class="setting-text"><b>Catch up missed runs</b><em>Off: skip missed runs. On: send one late run.</em></span><input id="scheduleCatchUp" type="checkbox" /></label>
+        <small class="schedule-note">Runs on this computer; does not wake it.</small>
+        </div>
         <p id="scheduleError" class="plugin-error" role="alert" hidden></p>
-        <div class="pet-delete-actions"><button class="btn btn-quiet schedule-delete" id="scheduleDelete" type="button" hidden>Delete schedule</button><button class="btn" id="scheduleCancel" type="button">Cancel</button><button class="btn btn-solid" id="scheduleSubmit" type="submit">Save schedule</button></div>
+        <div class="pet-delete-actions"><button class="btn btn-quiet schedule-delete" id="scheduleDelete" type="button" hidden>Delete schedule</button><button class="btn" id="scheduleCancel" type="button">Cancel</button><button class="btn btn-solid" id="scheduleRetry" type="button" hidden>Retry</button><button class="btn btn-solid" id="scheduleSubmit" type="submit">Save schedule</button></div>
       </form>
     </dialog>
     <dialog class="search-dialog" id="searchDialog" aria-label="Search chats">

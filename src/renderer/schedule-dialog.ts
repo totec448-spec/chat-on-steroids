@@ -27,8 +27,14 @@ export function initScheduleDialog(
   const error = $('scheduleError');
   const remove = $<HTMLButtonElement>('scheduleDelete');
   const submit = $<HTMLButtonElement>('scheduleSubmit');
-  let sessionId = '';
+  const retry = $<HTMLButtonElement>('scheduleRetry');
+  const fieldset = $('scheduleFields');
+  const fields = [text, repeat, every, day, at, untilKind, until, catchUp];
+  let sessionId = '', draftText = '';
   let busy = false;
+  // Set while the saved schedule could not be read: nothing here may be edited or saved, since a
+  // "new" schedule would overwrite the one that exists (Haz on #1835).
+  let unreadable = false;
 
   const close = () => { if (typeof dialog.close === 'function') dialog.close(); else dialog.removeAttribute('open'); };
   const showError = (message: string | null) => { error.hidden = !message; error.textContent = message ?? ''; };
@@ -69,7 +75,7 @@ export function initScheduleDialog(
   untilKind.addEventListener('change', showFields);
   form.addEventListener('submit', async event => {
     event.preventDefault();
-    if (busy) return;
+    if (busy || unreadable) return;
     if (!text.value.trim()) { showError(t('Write the message to send.')); return; }
     if (untilKind.value === 'date' && !until.value) { showError(t('Choose the end date.')); return; }
     showError(null);
@@ -92,28 +98,47 @@ export function initScheduleDialog(
     } finally { setBusy(false); }
   });
   for (const id of ['scheduleCancel', 'scheduleClose']) $(id).addEventListener('click', () => close());
+  retry.addEventListener('click', () => { void load(); });
+
+  /** Reads the chat's schedule and fills the form from it, or shows why it can't be edited now. */
+  async function load(): Promise<void> {
+    showError(null);
+    const reply = await api.getSchedule(sessionId);
+    unreadable = !reply.ok;
+    for (const field of fields) field.disabled = unreadable;
+    // Nothing that could be mistaken for the saved schedule is shown while it can't be read.
+    fieldset.hidden = unreadable;
+    submit.hidden = unreadable;
+    retry.hidden = !unreadable;
+    if (!reply.ok) {
+      remove.hidden = true;
+      showError(t(reply.error));
+      retry.focus();
+      return;
+    }
+    const existing = reply.data;
+    text.value = existing?.text ?? draftText.trim();
+    const kind = existing?.repeat.kind ?? 'weekdays';
+    repeat.value = kind;
+    every.value = String(existing?.repeat.kind === 'hours' ? existing.repeat.every : 2);
+    at.value = existing && existing.repeat.kind !== 'hours' ? existing.repeat.at : '09:00';
+    day.value = String(existing?.repeat.kind === 'weekly' ? existing.repeat.day : 1);
+    untilKind.value = existing?.until ? 'date' : 'forever';
+    until.value = existing?.until ? dateOf(existing.until) : '';
+    catchUp.checked = existing?.catchUp === true;
+    remove.hidden = !existing;
+    showFields();
+    text.focus();
+  }
 
   return {
     async open(id: string, draft: string): Promise<void> {
       sessionId = id;
-      showError(null);
+      draftText = draft;
       setBusy(false);
       fillChoices();
-      const reply = await api.getSchedule(id);
-      const existing = reply.ok ? reply.data : null;
-      text.value = existing?.text ?? draft.trim();
-      const kind = existing?.repeat.kind ?? 'weekdays';
-      repeat.value = kind;
-      every.value = String(existing?.repeat.kind === 'hours' ? existing.repeat.every : 2);
-      at.value = existing && existing.repeat.kind !== 'hours' ? existing.repeat.at : '09:00';
-      day.value = String(existing?.repeat.kind === 'weekly' ? existing.repeat.day : 1);
-      untilKind.value = existing?.until ? 'date' : 'forever';
-      until.value = existing?.until ? dateOf(existing.until) : '';
-      catchUp.checked = existing?.catchUp === true;
-      remove.hidden = !existing;
-      showFields();
       if (typeof dialog.showModal === 'function') dialog.showModal(); else dialog.setAttribute('open', '');
-      text.focus();
+      await load();
     }
   };
 }
