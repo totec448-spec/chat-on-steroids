@@ -1217,6 +1217,23 @@ it('never settles a chat waiting on approval, a stopped recovery or a block, nor
     expect(row.title, id).toMatch(new RegExp(`^${id} · Failed · `));
   }
   expect(doc.querySelector('.inbox-settled > .sess[data-id="plain"] .sess-state')).toBeNull();
+  // One tooltip at a time (#1862): while the app's own shows, the row hands it its title, so the browser
+  // shows no second one; the title comes back when the pointer leaves.
+  const plain = doc.querySelector<HTMLElement>('.inbox-settled > .sess[data-id="plain"]')!;
+  const said = plain.title;
+  plain.dispatchEvent(new mounted.window.Event('pointerenter'));
+  expect(plain.hasAttribute('title')).toBe(false);
+  expect(doc.getElementById('sessionTooltip')!.textContent).toBe(said);
+  plain.dispatchEvent(new mounted.window.Event('pointerleave'));
+  expect(plain.title).toBe(said);
+  expect(doc.getElementById('sessionTooltip')).toBeNull();
+  // Opening the row's menu puts the tooltip away and gives the row its title back at once.
+  plain.dispatchEvent(new mounted.window.Event('pointerenter'));
+  plain.dispatchEvent(new mounted.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  expect(doc.getElementById('sessionTooltip')).toBeNull();
+  expect(plain.title).toBe(said);
+  doc.dispatchEvent(new mounted.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  plain.dispatchEvent(new mounted.window.Event('pointerleave'));
   // The parent's line counts the worker that needs the person.
   expect(inboxCardState(doc, 'parent-approval').card.querySelector('.sess-workers')?.textContent).toBe('1 needs attention');
   expect(inboxCardState(doc, 'parent-recovery').card.querySelector('.sess-workers')?.textContent).toBe('1 needs attention');
