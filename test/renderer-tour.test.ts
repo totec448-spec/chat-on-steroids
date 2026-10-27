@@ -133,3 +133,32 @@ it('drops a later step hidden by a resize while the current step stays, and Next
   expect($('tourCard').hidden).toBe(true);
 });
 
+
+// CodeRabbit on #1867: a step skipped without a resize (a sidebar collapsed by a click) leaves the count too.
+it('counts only the steps still on screen after Next skips one that left without a resize', async () => {
+  const { tour: t } = await tour();
+  t.start();
+  expect($('tourStep').textContent).toBe('1 of 3');
+  $('addProject').style.display = 'none';
+  ($('tourNext') as HTMLButtonElement).click(); await settle();
+  expect(document.querySelector('.is-tour-target')?.id).toBe('rightDockToggle');
+  expect($('tourStep').textContent).toBe('2 of 2');
+  key('ArrowLeft');
+  expect(document.querySelector('.is-tour-target')?.id).toBe('composer');
+  expect($('tourStep').textContent).toBe('1 of 2');
+});
+
+it('drops the current step when its control left without a resize, going back or forth', async () => {
+  const { tour: t } = await tour();
+  t.start();
+  ($('tourNext') as HTMLButtonElement).click(); await settle();
+  expect($('tourStep').textContent).toBe('2 of 3');
+  $('addProject').style.display = 'none';
+  key('ArrowLeft');
+  expect(document.querySelector('.is-tour-target')?.id).toBe('composer');
+  expect($('tourStep').textContent).toBe('1 of 2');
+  $('composer').style.display = 'none';
+  key('ArrowLeft');
+  expect(document.querySelector('.is-tour-target')?.id).toBe('rightDockToggle');
+  expect($('tourStep').textContent).toBe('1 of 1');
+});

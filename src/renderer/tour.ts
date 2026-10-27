@@ -96,11 +96,20 @@ export function initTour(deps: { markDone(): Promise<boolean> }): { offer(): voi
   }
 
   function go(delta: number): void {
-    // A control can leave the screen without a resize (a sidebar collapsed by a click): skip it.
-    let to = index + delta;
-    while (to >= 0 && to < steps.length && !shown(document.getElementById(steps[to]!.target))) to += delta;
-    if (to < 0) return;
-    if (to >= steps.length) { end(); return; }
+    // A control can leave the screen without a resize (a sidebar collapsed by a click): its step is
+    // dropped like on a resize, the current one too, so the count only names steps still shown.
+    const current = steps[index]!;
+    const stays = shown(target);
+    steps = steps.filter(step => step === current || shown(document.getElementById(step.target)));
+    const at = steps.indexOf(current);
+    let to = at + delta;
+    if (!stays) { steps.splice(at, 1); if (delta > 0) to = at; }
+    if (!steps.length || to >= steps.length) { end(); return; }
+    if (to < 0) {
+      // Back from the first step: nothing to go to, unless the current one left (then the next is shown).
+      if (stays) return;
+      to = 0;
+    }
     index = to;
     paint();
   }
