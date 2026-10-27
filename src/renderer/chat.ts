@@ -4253,9 +4253,11 @@ function markdownCodeRanges(text: string): Array<{ start: number; end: number }>
     } else {
       // Indented list content begins at the marker's text column. Its code
       // blocks need *another* four columns, unlike a plain four-space continuation.
-      const marker = /^([ ]{0,3})(?:[-*+]|\d{1,9}[.)])([ \t]+)/.exec(line);
-      if (marker) listContentIndent = indentColumns(marker[0].replace(/\S/g, ' '));
-      else if (line.trim() && listContentIndent !== null && indentColumns(line) < listContentIndent) {
+      const marker = /^([ ]*)(?:[-*+]|\d{1,9}[.)])([ \t]+)/.exec(line);
+      if (marker && (marker[1]!.length <= 3 ||
+          (listContentIndent !== null && indentColumns(marker[1]!) >= listContentIndent))) {
+        listContentIndent = indentColumns(marker[0].replace(/\S/g, ' '));
+      } else if (line.trim() && listContentIndent !== null && indentColumns(line) < listContentIndent) {
         listContentIndent = null;
       }
       if (indentedStart === null) {
@@ -4306,7 +4308,7 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
   // recorded rendering is the faithful presentation; without one, the directive lines are dropped.
   if (hasProviderDirective(text)) {
     const plain = withoutProviderDirectives(text);
-    if (resolvedCapture(capture) && charts.length === 0) return renderedMessage(capture, plain);
+    if (resolvedCapture(capture) && charts.length === 0 && !plain) return renderedMessage(capture, plain);
     text = plain || t('This reply points to content from another message that was not recorded.');
   }
   const citations = text.includes('\uE200') ? citationLabels(text, capture) : new Map<string, string>();
