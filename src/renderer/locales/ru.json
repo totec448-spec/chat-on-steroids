@@ -3433,5 +3433,10 @@
   "Keys stay with you": "Ключи остаются у вас",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "API-ключи и токены в том, что возвращают инструменты, скрываются до того, как их увидит ChatGPT.",
   "Easier to read": "Легче читать",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Высокая контрастность, восемь акцентных цветов, межстрочный интервал и более разборчивый шрифт."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Высокая контрастность, восемь акцентных цветов, межстрочный интервал и более разборчивый шрифт.",
+  "Recent files": "Недавние файлы",
+  "Attach {0} again": "Прикрепить {0} снова",
+  "Recent files could not be loaded": "Не удалось загрузить недавние файлы",
+  "No files attached in the last 24 hours": "За последние 24 часа файлы не прикреплялись",
+  "Recent files are already in this message": "Недавние файлы уже в этом сообщении"
 }

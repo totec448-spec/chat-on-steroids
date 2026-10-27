@@ -239,6 +239,9 @@ const api = {
     } catch { return { ok: false, error: 'Could not read the attachment' }; }
   },
   attachText: (text: string) => call<InputAttachment>('sessions:attachText', { text }),
+  /** Files still in staging (the last 24 hours, or held by a pending message), most recently used first. */
+  recentAttachments: () => call<InputAttachment[]>('sessions:recentAttachments'),
+  reattachFiles: (ids: string[]) => call<InputAttachment[]>('sessions:reattach', { ids }),
   getUsage: () => call<UsageOverview>('usage:get'),
   /** Codex's and Claude Code's usage from their logs here; `fresh` skips the 30-second cache. */
   getProviderUsage: (fresh = false) => call<ProviderUsage>('usage:providers', { fresh }),

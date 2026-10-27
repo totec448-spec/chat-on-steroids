@@ -4781,6 +4781,21 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .composer-skills-row > #composerSkills { flex: 1; }
 .composer-skills-row > #composerAddSkill { width: 36px; height: 36px; padding: 0; flex: none; justify-content: center; color: var(--soft); }
 .composer-skills-row > #composerAddSkill .ico { --ico: 15px; }
+/* Recent files: staged originals in a flyout beside the + menu, each one click to attach again. A flyout
+   leaves the menu's rows where they were, so the pointer never lands on a file it did not aim at. */
+.attachment-library { position: absolute; left: calc(100% + 6px); bottom: 0; width: 260px; max-height: min(320px, 60vh); overflow-y: auto; box-sizing: border-box; padding: 7px; background: var(--popover, var(--card)); border: 1px solid var(--edge); border-radius: 14px; box-shadow: 0 8px 30px #0005; }
+.attachment-library.is-above { left: 0; bottom: calc(100% + 6px); }
+#attachRecent[aria-expanded=true] { background: var(--hover); }
+.composer-popover #attachRecent > .attachment-library-caret { margin-left: auto; --ico: 13px; --glyph: 13px; }
+.attachment-library[hidden] { display: none; }
+.composer-popover .attachment-library-item { gap: 8px; padding: 5px 8px; }
+.attachment-library-thumb { flex: none; width: 28px; height: 28px; display: grid; place-items: center; overflow: hidden; border-radius: 6px; background: var(--sunk); color: var(--soft); }
+.attachment-library-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.attachment-library-thumb .ico { --ico: 15px; --glyph: 15px; }
+.attachment-library-details { min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.attachment-library-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-library-meta, .attachment-library-note { color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
+.attachment-library-note { margin: 0; padding: 8px 10px; }
 
 .workspace-terminal { position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--page); }
 .workspace-terminal[hidden] { display: none; }

@@ -7,6 +7,7 @@ import { sessionsRoot } from './store.js';
 import type { InputAttachment } from '../../shared/input.js';
 import { injectableAttachments, MAX_INPUT_IMAGES } from '../../shared/input.js';
 import { normalizeInputImage } from './input-images.js';
+import { logWarn } from '../logger.js';
 
 export const MAX_ATTACHMENT_BYTES = 512 * 1024 * 1024;
 export const ATTACHMENT_CHUNK_BYTES = 512 * 1024;
@@ -31,6 +32,63 @@ export function stageInputAttachments(sources: AttachmentSource[], retained: Set
   staging = next.catch(() => undefined);
   return next;
 }
+const STAGING_TTL_MS = 24 * 60 * 60 * 1000;
+export const MAX_RECENT_ATTACHMENTS = 24;
+/** Staged originals the next prune would keep, most recently used first: metadata, never paths. */
+export function listRecentAttachments(retained: Set<string>): Promise<InputAttachment[]> {
+  const next = staging.then(async () => {
+    const dir = directory(), found: Array<{ attachment: InputAttachment; usedAt: number }> = [];
+    // No staging folder yet means nothing was ever staged; any other failure is not an empty list.
+    const names = await fs.readdir(dir).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return [] as string[];
+      logWarn(`Recent files: could not read the staging folder (${error.code ?? 'unknown error'})`);
+      throw new Error(`Recent files could not be read (${error.code ?? 'unknown error'})`);
+    });
+    for (const name of names) {
+      if (!/^[a-f0-9-]{36}$/.test(name)) continue;
+      if (!z.string().uuid().safeParse(name).success) { logWarn(`Recent files: left out staged entry ${name}, its name is not a valid id`); continue; }
+      const file = fileFor(name);
+      try {
+        const stat = await fs.stat(file);
+        if (!retained.has(name) && Date.now() - stat.mtimeMs > STAGING_TTL_MS) continue;
+        let attachment: InputAttachment;
+        try { attachment = attachmentSchema.parse(JSON.parse(await fs.readFile(file + '.json', 'utf8'))); }
+        catch { logWarn(`Recent files: left out staged file ${name}, its record is missing or unreadable`); continue; }
+        if (attachment.id === name && attachment.size === stat.size) found.push({ attachment, usedAt: stat.mtimeMs });
+        else logWarn(`Recent files: left out staged file ${name}, its record does not match the stored bytes`);
+      } catch (error) { logWarn(`Recent files: left out staged file ${name}, the original could not be read (${(error as NodeJS.ErrnoException).code ?? 'unknown error'})`); }
+    }
+    return found.sort((a, b) => b.usedAt - a.usedAt).slice(0, MAX_RECENT_ATTACHMENTS).map(entry => entry.attachment);
+  });
+  staging = next.catch(() => undefined);
+  return next;
+}
+/**
+ * Hand already staged originals to a new draft by id, renewing their age under the prune lock.
+ * An expired original that no pending message holds is refused, as the next prune would delete it.
+ */
+export function reuseInputAttachments(ids: string[], retained: Set<string>): Promise<InputAttachment[]> {
+  const next = staging.then(async () => {
+    const attachments: InputAttachment[] = [];
+    for (const id of ids) {
+      const file = fileFor(id);
+      try {
+        const attachment = attachmentSchema.parse(JSON.parse(await fs.readFile(file + '.json', 'utf8')));
+        const stat = await fs.stat(file);
+        if (attachment.id !== id || stat.size !== attachment.size || (!retained.has(id) && Date.now() - stat.mtimeMs > STAGING_TTL_MS)) throw new Error('changed');
+        attachments.push(attachment);
+      } catch {
+        logWarn(`Recent files: refused to attach staged file ${id} again, it expired, is gone or changed`);
+        throw new Error('Attachment is missing or changed; attach it again');
+      }
+    }
+    const now = new Date();
+    for (const attachment of attachments) await fs.utimes(fileFor(attachment.id), now, now);
+    return attachments;
+  });
+  staging = next.catch(() => undefined);
+  return next;
+}
 async function stageBatch(sources: AttachmentSource[], retained: Set<string>): Promise<InputAttachment[]> {
   const dir = directory();
   await fs.mkdir(dir, { recursive: true });
@@ -38,7 +96,7 @@ async function stageBatch(sources: AttachmentSource[], retained: Set<string>): P
   for (const name of await fs.readdir(dir)) {
     if (!/^[a-f0-9-]{36}$/.test(name)) continue;
     const file = fileFor(name), stat = await fs.stat(file);
-    if (!retained.has(name) && Date.now() - stat.mtimeMs > 24 * 60 * 60 * 1000) {
+    if (!retained.has(name) && Date.now() - stat.mtimeMs > STAGING_TTL_MS) {
       await fs.unlink(file); await fs.unlink(file + '.json').catch(() => undefined);
     } else used += stat.size;
   }

@@ -359,6 +359,36 @@ it('validates dropped file count and stages arbitrary native file types', async 
   expect(await drop({ files: [path.join(process.cwd(), 'package.json')] })).toMatchObject({ ok: true, data: [expect.objectContaining({ name: 'package.json', mimeType: 'application/json' })] });
 });
 
+it('lists staged files as recent attachments and reattaches only by staged id', async () => {
+  const call = (channel: string, payload?: unknown) => handlers.get(channel)!(null, payload) as Promise<any>;
+  const staged = (await call('sessions:attachText', { text: 'recent attachment' })).data;
+  expect((await call('sessions:recentAttachments')).data).toContainEqual(staged);
+  expect(await call('sessions:reattach', { ids: [staged.id] })).toEqual({ ok: true, data: [staged] });
+  expect(await call('sessions:reattach', { ids: [] })).toMatchObject({ ok: false });
+  expect(await call('sessions:reattach', { ids: [path.join(process.cwd(), 'package.json')] })).toMatchObject({ ok: false });
+  expect(await call('sessions:reattach', { ids: ['0f3c9a7e-5b21-4d8a-9c6e-000000000000'] })).toMatchObject({ ok: false, error: 'Attachment is missing or changed; attach it again' });
+});
+
+it('logs why a reattach request was refused, never the ids', async () => {
+  const call = (channel: string, payload?: unknown) => handlers.get(channel)!(null, payload) as Promise<any>;
+  const { getLog } = await import('../src/main/logger.js');
+  const id = '0f3c9a7e-5b21-4d8a-9c6e-000000000000';
+  const before = getLog().length;
+  expect(await call('sessions:reattach', { ids: [] })).toMatchObject({ ok: false });
+  expect(await call('sessions:reattach', { ids: ['not-an-id'] })).toMatchObject({ ok: false });
+  expect(await call('sessions:reattach', { ids: Array.from({ length: 21 }, () => id) })).toMatchObject({ ok: false });
+  expect(await call('sessions:reattach', { ids: [id], extra: true })).toMatchObject({ ok: false });
+  const lines = getLog().slice(before).filter(entry => entry.message.startsWith('Recent files:'));
+  expect(lines.map(entry => entry.message)).toEqual([
+    'Recent files: refused a reattach request, no files',
+    'Recent files: refused a reattach request, a file id is not valid',
+    'Recent files: refused a reattach request, more than 20 files',
+    'Recent files: refused a reattach request, the request is malformed'
+  ]);
+  expect(lines.every(entry => entry.level === 'warn')).toBe(true);
+  expect(JSON.stringify(lines)).not.toContain('not-an-id');
+});
+
 it('publishes Goal draft progress through the session refresh channel without a new transcript event', async () => {
   const { startGoalDraft, resetGoalStateForTests } = await import('../src/main/goal.js');
   const session = await createSession({ title: 'Goal progress', conversationId: 'ipc-goal-progress' });

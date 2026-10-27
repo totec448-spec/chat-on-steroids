@@ -3253,5 +3253,10 @@
   "Keys stay with you": "キーは手元に",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "ツールが返す内容に含まれる API キーやトークンは、ChatGPT が見る前に隠されます。",
   "Easier to read": "読みやすく",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "ハイコントラスト、8 つのアクセントカラー、行間、より読みやすいフォント。"
+  "High contrast, eight accent colors, line spacing and a more legible font.": "ハイコントラスト、8 つのアクセントカラー、行間、より読みやすいフォント。",
+  "Recent files": "最近のファイル",
+  "Attach {0} again": "{0} をもう一度添付",
+  "Recent files could not be loaded": "最近のファイルを読み込めませんでした",
+  "No files attached in the last 24 hours": "過去 24 時間に添付したファイルはありません",
+  "Recent files are already in this message": "最近のファイルはすでにこのメッセージに追加されています"
 }

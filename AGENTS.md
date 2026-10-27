@@ -1870,6 +1870,18 @@ its native editor behavior. Async import results carry both the draft key and it
 generation. Navigation, Send, accepted planning and retry replacement retire that owner so a
 late file cannot attach to a later draft, while ordinary edits and parallel imports remain valid.
 
+Recent files in the composer's + menu (`renderer/attachment-library.ts`) lists what staging still
+holds, from any chat: `sessions:recentAttachments` (preload `recentAttachments`) returns at most
+`MAX_RECENT_ATTACHMENTS` staged sidecars, most recently used first, skipping entries the next
+prune would delete (older than 24 hours and not held by a pending outbox row) and any whose
+sidecar is missing or disagrees with the original. Picking one calls `sessions:reattach` (preload
+`reattachFiles`) with staged ids only; it re-reads each sidecar, refuses an original the next prune
+would delete (a list left open past the 24-hour mark), renews the age of the rest under the same
+lock as pruning, then returns the stored metadata to the draft owner captured at the click.
+Ids already in the visible draft are not offered; when that leaves nothing, the list says the
+recent files are already in this message instead of that none were attached. The library keeps no
+copy, index or path of its own, and the 24-hour expiry is unchanged.
+
 Bridge chunks are bounded to 512 KiB and require the exact pre-send claimed input and attachment
 membership. Native upload completion and final provider submission are separate checks.
 Explicit image injection freezes `attachmentDelivery: tool` plus normalized `toolImages` in

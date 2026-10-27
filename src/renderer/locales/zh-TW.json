@@ -3253,5 +3253,10 @@
   "Keys stay with you": "金鑰留在你這裡",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "工具傳回內容中的 API 金鑰和權杖會在 ChatGPT 看到之前被隱藏。",
   "Easier to read": "更易閱讀",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "高對比、八種強調色、行距和更易讀的字型。"
+  "High contrast, eight accent colors, line spacing and a more legible font.": "高對比、八種強調色、行距和更易讀的字型。",
+  "Recent files": "最近的檔案",
+  "Attach {0} again": "再次附加 {0}",
+  "Recent files could not be loaded": "無法載入最近的檔案",
+  "No files attached in the last 24 hours": "過去 24 小時內沒有附加檔案",
+  "Recent files are already in this message": "最近的檔案已在此訊息中"
 }

@@ -3373,5 +3373,10 @@
   "Keys stay with you": "Vos clés restent chez vous",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Les clés d'API et les jetons dans ce que renvoient les outils sont masqués avant que ChatGPT ne les voie.",
   "Easier to read": "Plus facile à lire",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Contraste élevé, huit couleurs d'accent, interligne et une police plus lisible."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Contraste élevé, huit couleurs d'accent, interligne et une police plus lisible.",
+  "Recent files": "Fichiers récents",
+  "Attach {0} again": "Joindre à nouveau {0}",
+  "Recent files could not be loaded": "Impossible de charger les fichiers récents",
+  "No files attached in the last 24 hours": "Aucun fichier joint au cours des dernières 24 heures",
+  "Recent files are already in this message": "Les fichiers récents sont déjà dans ce message"
 }
