@@ -113,7 +113,7 @@ import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMe
 import { createSearchPopup } from './search-popup.js';
 import { holdToTalkShortcut, holdToTalkSupported, primaryShortcut } from './shortcuts.js';
 import { initSshProjectDialog } from './ssh-project-dialog.js';
-import { renderTurnChanges, turnEditCount, turnFinished, turnFrom } from './turn-changes.js';
+import { firstTurnStart, renderTurnChanges, turnEditCount, turnFinished, turnFrom } from './turn-changes.js';
 import { initSharePage } from './share-page.js';
 import { initFeedbackDialog } from './feedback-dialog.js';
 import { createChatgptProjectPicker } from './chatgpt-project-picker.js';
@@ -6680,7 +6680,7 @@ function paintDetail(followBottom = historyBefore === null): void {
     // loaded asks too, and its card stays hidden when the turn edited nothing. A new edit refreshes it.
     const loadedEdits = answerTurn ? turnEditCount(events, answerTurn) : 0;
     const changedFiles = !!answerTurn && item.kind === 'event' && turnFinished(events, answerTurn, item.event.seq) &&
-      (loadedEdits > 0 || !events.some(event => event.kind === 'turn_start' && event.turnId === answerTurn));
+      (loadedEdits > 0 || !firstTurnStart(events, answerTurn));
     const held = item.kind === 'event' && item.event.kind === 'assistant_message' && writing && item.event.seq === writing.seq
       ? { ...item.event, message: { ...item.event.message, text: writing.shown, chars: writing.shown.length } } : null;
     // A held message is drawn again only when a block finishes or its sources change: each chunk
