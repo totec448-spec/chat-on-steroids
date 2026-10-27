@@ -133,3 +133,13 @@ it('waits for a review still in progress before the helper decides the next step
   expect(bodies.at(-1)).toContain('src/sum.js:1 sum subtracts.');
 });
 
+// VM 141 live test, 2026-10-27: the helper ended the Goal and the reviewer's findings went only to the log.
+it('shows the reviewer\'s last findings in the chat when the Goal ends without another step, and nothing for no problems', async () => {
+  const met = await draftWith('c-met', { text: 'src/sum.js:1 sum subtracts.' }, decision('stop'));
+  expect(met.view.stage).toBe('no-reply');
+  const notes = (await readRecentEvents(met.sessionId, 20)).filter(event => event.kind === 'note');
+  expect(JSON.stringify(notes)).toContain('src/sum.js:1 sum subtracts.');
+  const clean = await draftWith('c-met-clean', { text: 'No problems found.' }, decision('stop'));
+  expect((await readRecentEvents(clean.sessionId, 20)).filter(event => event.kind === 'note')).toEqual([]);
+});
+

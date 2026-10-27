@@ -503,6 +503,9 @@
   "content_goal_wait_tool_inactivity": {
     "message": "等待工具活动停止"
   },
+  "content_goal_reviewer_deadline": {
+    "message": "$1 后不等审查继续"
+  },
   "content_goal_wait_reviewer": {
     "message": "正在等待审查者"
   },

@@ -4949,6 +4949,8 @@ it('names the wait for the Goal step reviewer (#1832)', async () => {
   expect(row.hidden).toBe(false);
   expect(row.textContent).toContain('Goal · Waiting for the reviewer');
   expect(row.getAttribute('aria-busy')).toBe('true');
+  // At the deadline Goal goes on without the review, so the countdown says that, not "Check in".
+  expect(row.querySelector('[role="timer"]')?.textContent).toMatch(/^Continues without the review in [45]:\d\d$/);
   // The next step's draft waits for the review before asking the helper: it says so, not "Preparing".
   api.getSessionControls = async () => ({ ok: true, data: { automation: 'goal', objective: 'Ship it', blocked: '', job: null,
     goalWait: { reason: 'reviewer', until: Date.now() + 300_000 }, goalDraft: { stage: 'sending', model: 'fixture', text: '', error: null } } });
