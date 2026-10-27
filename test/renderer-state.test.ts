@@ -4215,6 +4215,23 @@ it('says a chat style was restored only when that save went through (#1856, Code
   expect([...doc.querySelectorAll('.toast')].map(node => node.textContent)).not.toContain('Personality restored to default');
 });
 
+it('keeps a chat style editor open with the typed text when its save is refused, and closes it once saved (#1856, CodeRabbit)', async () => {
+  const mounted = await mountChat({}, [], { saveSettings: async () => ({ ok: false, error: 'Settings could not be saved.' }) });
+  const doc = mounted.window.document;
+  const panel = doc.getElementById('chatPersonalityPanel')!;
+  const box = doc.getElementById('chatPersonality') as HTMLTextAreaElement;
+  const close = doc.getElementById('chatPersonalityEdit') as HTMLButtonElement;
+  close.click();
+  expect(panel.hidden).toBe(false);
+  box.value = 'Answer like a calm colleague.';
+  box.dispatchEvent(new mounted.window.Event('change'));
+  close.click();
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(panel.hidden).toBe(false);
+  expect(box.value).toBe('Answer like a calm colleague.');
+  expect(close.textContent).toBe('Close prompt');
+});
+
 it('offers the handoff length, starting at the thorough default, and saves a shorter choice', async () => {
   const mounted = await mountChat({ hasGoalKey: true });
   const length = mounted.window.document.getElementById('handoffLength') as HTMLSelectElement;
