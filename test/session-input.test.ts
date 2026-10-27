@@ -13,6 +13,7 @@ import {
 } from '../src/main/session/input.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import { editReplacement } from '../src/main/session/edits.js';
+import * as logger from '../src/main/logger.js';
 import { noteChatOrigin } from '../src/main/session/recorder.js';
 import { stageInputAttachment } from '../src/main/session/input-attachments.js';
 import { listUsageSessions, turnHasMcpCall } from '../src/main/session/store.js';
@@ -127,6 +128,24 @@ describe('durable user input ownership', () => {
     expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ id: row.id, state: 'failed', pickupRetryCount: 1 });
     now += 120_000;
     expect(await retryUnclaimedInput(row.id)).toBeNull();
+  });
+  // #1878: a message no browser picked up became "Not sent" without a log line, so the report showed
+  // only the automatic requeue and nothing about the browser at that moment.
+  it('logs a pickup timeout once, with what the browser side looked like', async () => {
+    binding.model = 'gpt-5.6-sol'; binding.finishEnabled = false;
+    configureInputDelivery({ applyAutomation: automate, changed, recoveryAllowed: () => binding.recoveryAllowed,
+      pickupContext: () => 'wake channel connected; ChatGPT tabs 14 open, 3 discarded, 2 loading' });
+    const warn = vi.spyOn(logger, 'logWarn');
+    try {
+      const row = await enqueueInput(input());
+      now += 60_001;
+      await listInputs(); await listInputs();
+      const lines = warn.mock.calls.map(call => String(call[0])).filter(line => line.includes(row.id));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatch(new RegExp(`^input ${row.id}: not sent, no browser picked it up within 60 s \\(wake channel connected; ChatGPT tabs 14 open, 3 discarded, 2 loading; [0-9.]+ GB of [0-9.]+ GB memory free\\)$`));
+    } finally {
+      warn.mockRestore();
+    }
   });
   it('does not retry a pickup timeout after the user dismissed its browser chat', async () => {
     binding.model = 'gpt-5.6-sol'; binding.finishEnabled = false;
