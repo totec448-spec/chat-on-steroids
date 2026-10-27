@@ -294,6 +294,8 @@ export const MAX_MCP_INSTRUCTIONS_CHARS = 4000;
 const DEFAULT_MCP = { instructions: '', persistentUrls: false } as const;
 /** Off for fresh installs and for every config written before the switches existed. */
 const DEFAULT_CONTROL_API = { enabled: false, allowActions: false } as const;
+/** Off for fresh installs and for every config written before the switch existed. */
+const DEFAULT_PROJECTS = { codeCheckpoints: false } as const;
 const DEFAULT_COMMAND_ALLOWLIST = { enabled: false, mode: 'allow', rules: [] } as const;
 const commandAllowlistRuleSchema = z.string().max(MAX_COMMAND_ALLOWLIST_RULE_CHARS).superRefine((rule, ctx) => {
   const message = validateCommandAllowlistRule(rule);
@@ -604,7 +606,15 @@ const configSchema = z.object({
     .transform((value) => ({ enabled: value.enabled, allowActions: value.enabled && value.allowActions }))
     .optional()
     .default({ ...DEFAULT_CONTROL_API })
-    .catch({ ...DEFAULT_CONTROL_API })
+    .catch({ ...DEFAULT_CONTROL_API }),
+  // Opt-in, so a malformed value repairs to off without touching the rest of the file.
+  projects: z
+    .object({
+      codeCheckpoints: z.boolean().optional().default(DEFAULT_PROJECTS.codeCheckpoints).catch(DEFAULT_PROJECTS.codeCheckpoints)
+    })
+    .optional()
+    .default({ ...DEFAULT_PROJECTS })
+    .catch({ ...DEFAULT_PROJECTS })
 });
 
 /**
@@ -639,7 +649,8 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform, rele
     multiAgent: { ...FIRST_LAUNCH_MULTI_AGENT },
     goal: { ...DEFAULT_GOAL },
     mcp: { ...DEFAULT_MCP },
-    controlApi: { ...DEFAULT_CONTROL_API }
+    controlApi: { ...DEFAULT_CONTROL_API },
+    projects: { ...DEFAULT_PROJECTS }
   };
 }
 

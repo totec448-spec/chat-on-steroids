@@ -137,6 +137,21 @@ it('saves Auto-select Skills through Settings and preserves it across a stale un
   expect(getConfig().ui.autoSelectSkills).toBe(wanted);
 });
 
+it('saves the Code checkpoints switch through Settings, preserves it across a stale unrelated save and keeps it when omitted', async () => {
+  const base = getConfig();
+  expect(base.projects.codeCheckpoints).toBe(false);
+  expect(await save({ ...base, projects: { codeCheckpoints: true } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().projects.codeCheckpoints).toBe(true);
+  expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().projects.codeCheckpoints).toBe(true);
+  const { projects: _omitted, ...withoutProjects } = getConfig();
+  expect(await save(withoutProjects as never, withoutProjects as never)).toMatchObject({ ok: true });
+  expect(getConfig().projects.codeCheckpoints).toBe(true);
+  const live = getConfig();
+  expect(await save({ ...live, projects: { codeCheckpoints: false } }, live)).toMatchObject({ ok: true });
+  expect(getConfig().projects.codeCheckpoints).toBe(false);
+});
+
 it('saves the Continue prompt from Settings, keeps it through a stale save, and clears it when emptied', async () => {
   const base = getConfig();
   expect(await save({ ...base, ui: { ...base.ui, customContinue: '  Keep going, and run the tests at the end.  ' } }, base)).toMatchObject({ ok: true });

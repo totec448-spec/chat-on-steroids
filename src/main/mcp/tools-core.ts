@@ -39,6 +39,7 @@ import { SandboxError, isAbsoluteVirtualPath, isNativeWindowsPath, resolvePath, 
 import { currentWorkspace, primeWorkspace } from '../workspace.js';
 import { getSessionProject } from '../projects.js';
 import { acceptAgentMutation, measureSleepingWorkers, spawnAgentWorkers } from '../agent-admission.js';
+import { checkpointBeforePatch } from '../checkpoints/index.js';
 import type { Capabilities, Root } from '../../shared/types.js';
 import { commandHasSameArguments, evaluateCommandAllowlist } from '../../shared/command-allowlist.js';
 import type { FileChange } from '../../shared/session.js';
@@ -1956,6 +1957,7 @@ async function runParsedPatch(
     }
   }
 
+  await checkpointBeforePatch([...resolution.virtualPaths.keys()]);
   const execution = await executeApplyPatch({
     patch: effectiveArgs.patch,
     cwd: effectiveBase.real,
