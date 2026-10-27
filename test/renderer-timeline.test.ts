@@ -4949,6 +4949,12 @@ it('names the wait for the Goal step reviewer (#1832)', async () => {
   expect(row.hidden).toBe(false);
   expect(row.textContent).toContain('Goal · Waiting for the reviewer');
   expect(row.getAttribute('aria-busy')).toBe('true');
+  // The next step's draft waits for the review before asking the helper: it says so, not "Preparing".
+  api.getSessionControls = async () => ({ ok: true, data: { automation: 'goal', objective: 'Ship it', blocked: '', job: null,
+    goalWait: { reason: 'reviewer', until: Date.now() + 300_000 }, goalDraft: { stage: 'sending', model: 'fixture', text: '', error: null } } });
+  await append([]);
+  expect(row.textContent).toContain('Goal · Waiting for the reviewer');
+  expect(row.textContent).not.toContain('Preparing a continuation');
 });
 
 it('says a Goal waits for its closed chat, without a spinner or a countdown', async () => {

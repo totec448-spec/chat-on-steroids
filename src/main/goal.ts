@@ -1963,8 +1963,12 @@ async function run(draft: GoalDraft): Promise<void> {
 
   // The step reviewer's answer for this step (#1832): a blocking finding pauses Goal; any other goes
   // after the message, and the helper is told it is there.
-  const { reviewForDraft, reviewNote, reviewBlocks } = await import('./goal-reviewer.js');
-  const stepReview = draft.mode === 'goal' ? reviewForDraft(draft.conversationId, draft.turnId) : null;
+  // A review still in progress is waited for (the helper must not decide without it): VM 141, 2026-10-26.
+  const { awaitStepReview, reviewNote, reviewBlocks } = await import('./goal-reviewer.js');
+  const stepReview = draft.mode === 'goal'
+    ? await awaitStepReview(draft.conversationId, draft.turnId, () => !draft.acknowledged && drafts.get(draft.conversationId) === draft)
+    : null;
+  if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return;
   if (stepReview && 'text' in stepReview && reviewBlocks(stepReview)) return pauseForReview(draft, stepReview.text);
   const reviewLine = reviewNote(stepReview);
   const reviewContext = reviewLine

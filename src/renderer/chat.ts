@@ -3001,6 +3001,8 @@ function paintGoalProgress(): void {
   if (entry) { phase = entry.state; error = entry.error ?? undefined; }
   if (draft && (!off || finishDraft) && (finishDraft || !['saving', 'failed'].includes(phase))) { phase = draft.stage; text = draft.text; error = draft.error ?? undefined; }
   else if (wait && !['saving', 'failed'].includes(phase)) { phase = 'settling'; text = ''; error = undefined; }
+  // The next step's draft waits for the Goal step reviewer before it asks the helper (#1832).
+  if (phase === 'sending' && wait?.reason === 'reviewer') { phase = 'settling'; text = ''; error = undefined; }
   const labels: Record<string, string> = { saving: t("Saving task…"), saved: t("Task saved · waiting for the next completed answer"),
     preparing: t("Preparing the opening message…"), generating: t("Generating the opening message…"), ready: t("Message ready · awaiting ChatGPT delivery"),
     sending: t("Preparing a continuation…"), answering: t("Generating a continuation…"), queued: t("Opening message queued"),

@@ -22,6 +22,8 @@ import { getChatModels } from './chat-models.js';
 import { getConfig } from './config.js';
 import { goalDrivingMode, goalObjectiveFor } from './goal.js';
 
+/** How often the next step's draft looks again for a review still in progress. */
+const DRAFT_POLL_MS = 1_000;
 /** How often a review that found every worker slot busy tries again. */
 const SLOT_RETRY_MS = 15_000;
 /** The reviewer's answer in the next step's message, at most. */
@@ -54,7 +56,7 @@ export interface StepReviewDeps {
 }
 
 export type StepReviewStart = 'asked' | 'off' | 'repeat' | 'loop' | 'no-workers' | 'no-edits' | 'busy' | 'no-slot' | 'failed';
-export type DraftReview = { text: string } | { timedOut: true } | { pending: true } | null;
+export type DraftReview = { text: string } | { timedOut: true } | { unavailable: true } | { pending: true } | null;
 
 interface ReviewRow { turnId: string; askedAt: number; workerId: string | null }
 /** The step each Goal chat's reviewer was last asked about. In memory: after a restart Goal just goes on. */
@@ -157,16 +159,39 @@ export async function startStepReview(input: { conversationId: string; sessionId
 /** The review of exactly this step for its next message: the answer, a timeout, still pending, or none asked. */
 export function reviewForDraft(conversationId: string, turnId: string, deps: Pick<StepReviewDeps, 'reviewer' | 'now'> = defaultDeps()): DraftReview {
   const row = reviews.get(conversationId);
-  if (!row || row.turnId !== turnId || !row.workerId) return null;
+  if (!row || row.turnId !== turnId) return null;
+  // Still reading the step or waiting for a worker slot: startStepReview drops the row when it gives up.
+  if (!row.workerId) return deps.now() - row.askedAt >= REVIEW_MAX_MS ? { timedOut: true } : { pending: true };
   const info = deps.reviewer(conversationId);
-  if (info && info.id === row.workerId && info.result?.trim() && (info.sleptAt ?? info.finishedAt ?? 0) >= row.askedAt) return { text: info.result.trim() };
+  const fresh = !!info && info.id === row.workerId;
+  if (fresh && info.result?.trim() && (info.sleptAt ?? info.finishedAt ?? 0) >= row.askedAt) return { text: info.result.trim() };
+  // The reviewer stopped (failed, cleared, or slept) without answering this step: nothing more will come.
+  if (!fresh || !occupiesSlot(info.state)) return { unavailable: true };
   return deps.now() - row.askedAt >= REVIEW_MAX_MS ? { timedOut: true } : { pending: true };
+}
+
+/**
+ * The review of this step once it is in, for the draft of the next step: the draft waits for a review
+ * still in progress (at most until REVIEW_MAX_MS from when it was asked), and stops waiting, with no
+ * review, as soon as `wanted` says the draft is no longer needed.
+ */
+export async function awaitStepReview(conversationId: string, turnId: string, wanted: () => boolean,
+  deps: Pick<StepReviewDeps, 'reviewer' | 'now' | 'wait'> = defaultDeps()): Promise<DraftReview> {
+  let logged = false;
+  for (;;) {
+    const review = reviewForDraft(conversationId, turnId, deps);
+    if (!review || !('pending' in review)) return review;
+    if (!wanted()) return null;
+    if (!logged) { logInfo(`goal review: the next step in ${conversationId} waits for the review of step ${turnId}`); logged = true; }
+    await deps.wait(DRAFT_POLL_MS);
+  }
 }
 
 /** The line the next step's message gets; nothing for "No problems found" or no review. */
 export function reviewNote(review: DraftReview): string {
   if (!review || 'pending' in review) return '';
   if ('timedOut' in review) return 'Reviewer did not answer in time.';
+  if ('unavailable' in review) return 'Reviewer could not review this step.';
   const text = review.text.trim();
   if (/^no problems found\.?$/i.test(text)) return '';
   return `Reviewer: ${text.length > NOTE_CHARS ? `${text.slice(0, NOTE_CHARS - 1)}…` : text}`;
