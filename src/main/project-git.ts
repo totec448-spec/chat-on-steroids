@@ -5,11 +5,14 @@ import { statSync, watch as watchFs, type FSWatcher } from 'node:fs';
 import type { Stats } from 'node:fs';
 import path from 'node:path';
 import type { ProjectGitChange, ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot, ProjectGitStatus } from '../shared/project-git.js';
+import os from 'node:os';
+import { CHECKPOINT_REF_PREFIX } from '../shared/project-git.js';
+import { findCheckpoint, listCheckpoints } from './checkpoints/store.js';
 import { getConfig } from './config.js';
 import { rawPromises as fs } from './rawfs.js';
 import { projectFileTarget } from './project-files.js';
 import { isContained } from './sandbox.js';
-import { logInfo } from './logger.js';
+import { logInfo, logWarn } from './logger.js';
 
 const MAX_GIT_OUTPUT_BYTES = 4 * 1024 * 1024;
 const MAX_CHANGES = 2_000;
@@ -19,8 +22,8 @@ const UNTRACKED_STAT_BATCH = 16;
 const GIT_TIMEOUT_MS = 15_000;
 const CHANGE_DEBOUNCE_MS = 180;
 
-interface GitResult { code: number; stdout: Buffer; stderr: string; }
-interface RepositoryContext { projectId: string; projectReal: string; root: string; gitDir: string; commonDir: string; prefix: string; }
+export interface GitResult { code: number; stdout: Buffer; stderr: string; }
+export interface RepositoryContext { projectId: string; projectReal: string; root: string; gitDir: string; commonDir: string; prefix: string; }
 
 function sameFile(left: Stats, right: Stats): boolean {
   return left.dev === right.dev && left.ino === right.ino && left.size === right.size &&
@@ -122,12 +125,30 @@ export function gitExecutable(
   throw new Error('Git was not found on PATH');
 }
 
-async function runGit(cwd: string, args: string[], maxBytes = MAX_GIT_OUTPUT_BYTES): Promise<GitResult> {
+/**
+ * What a call needs beyond a plain read: text on standard input (a commit message, a list for
+ * `--batch-check`), more time (a push over the network), extra environment (never prompt for a
+ * password or a host key), and for checkpoint commands only a temporary index outside the
+ * repository and no replacement objects.
+ */
+export interface GitRunOptions { input?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv; indexFile?: string; noReplaceObjects?: boolean }
+/** The checkpoint code's name for the same options. */
+export type GitOptions = GitRunOptions;
+
+export async function runGit(cwd: string, args: string[], maxBytes = MAX_GIT_OUTPUT_BYTES, options: GitRunOptions = {}): Promise<GitResult> {
   const executable = gitExecutable();
+  const env = { ...cleanGitEnvironment(), ...options.env };
+  if (options.indexFile) env['GIT_INDEX_FILE'] = options.indexFile;
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, ['--no-optional-locks', ...args], {
-      cwd, env: cleanGitEnvironment(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']
+    const child = spawn(executable, ['--no-optional-locks', ...(options.noReplaceObjects ? ['--no-replace-objects'] : []), ...args], {
+      cwd, env, windowsHide: true, stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe']
     });
+    if (options.input !== undefined) {
+      // Git may exit before it reads all of it (an early refusal); the exit code says what happened,
+      // and an unhandled EPIPE here would be an uncaught exception in the main process.
+      child.stdin!.on('error', () => undefined);
+      child.stdin!.end(options.input, 'utf8');
+    }
     const stdout: Buffer[] = [], stderr: Buffer[] = [];
     let stdoutBytes = 0, stderrBytes = 0, settled = false;
     const finish = (error?: Error, code = -1): void => {
@@ -140,16 +161,16 @@ async function runGit(cwd: string, args: string[], maxBytes = MAX_GIT_OUTPUT_BYT
     const timer = setTimeout(() => {
       child.kill();
       finish(new Error('Git took too long to respond'));
-    }, GIT_TIMEOUT_MS);
+    }, options.timeoutMs ?? GIT_TIMEOUT_MS);
     child.once('error', error => finish(error));
-    child.stdout.on('data', (chunk: Buffer) => {
+    child.stdout!.on('data', (chunk: Buffer) => {
       stdoutBytes += chunk.length;
       if (stdoutBytes > maxBytes) {
         child.kill(); finish(new Error('Git returned too much data')); return;
       }
       stdout.push(chunk);
     });
-    child.stderr.on('data', (chunk: Buffer) => {
+    child.stderr!.on('data', (chunk: Buffer) => {
       stderrBytes += chunk.length;
       if (stderrBytes <= 64 * 1024) stderr.push(chunk);
     });
@@ -157,7 +178,7 @@ async function runGit(cwd: string, args: string[], maxBytes = MAX_GIT_OUTPUT_BYT
   });
 }
 
-function decode(buffer: Buffer): string {
+export function decode(buffer: Buffer): string {
   return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
 }
 
@@ -175,7 +196,7 @@ function projectRelative(value: string, prefix: string): string | null {
   return safe.startsWith(`${prefix}/`) ? safe.slice(prefix.length + 1) : null;
 }
 
-async function repositoryContext(projectId: string): Promise<RepositoryContext | null> {
+export async function repositoryContext(projectId: string): Promise<RepositoryContext | null> {
   if ((await getProject(projectId))?.remote) throw new Error('Git changes of a project on a server are not shown in the app yet.');
   const project = await projectFileTarget(projectId, '', { allowRoot: true });
   const result = await runGit(project.real, ['rev-parse', '--show-toplevel', '--absolute-git-dir', '--git-common-dir']);
@@ -339,6 +360,58 @@ async function untrackedStats(context: RepositoryContext, relative: string): Pro
   }
 }
 
+/** A private index file outside the repository, removed afterwards; the user's index is never read or written. */
+export async function withTemporaryIndex<T>(work: (indexFile: string) => Promise<T>): Promise<T> {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'cos-checkpoint-'));
+  try { return await work(path.join(directory, 'index')); }
+  finally { await fs.rm(directory, { recursive: true, force: true }).catch(() => undefined); }
+}
+
+/** Working-tree changes against a checkpoint tree, untracked files included, without writing objects. */
+export async function checkpointChanges(context: RepositoryContext, treeOid: string): Promise<ProjectGitChange[]> {
+  const changes = await withTemporaryIndex(async indexFile => {
+    const git = (args: string[]) => runGit(context.projectReal, args, MAX_GIT_OUTPUT_BYTES, { indexFile, noReplaceObjects: true });
+    if ((await git(['read-tree', treeOid])).code !== 0) throw new Error('This checkpoint is no longer available');
+    // A freshly read index has no stat data; refresh it so unchanged files are not reported.
+    await git(['update-index', '-q', '--refresh']);
+    const status = await git(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignore-submodules=all', '--no-renames', '--', '.']);
+    const stats = await git(['diff', '--numstat', '-z', '--no-ext-diff', '--no-textconv', '--no-renames', '--', '.']);
+    if (status.code !== 0 || stats.code !== 0) throw new Error(status.stderr || stats.stderr || 'Git comparison failed');
+    const measured = parseNumstat(stats.stdout, context.prefix);
+    const result: ProjectGitChange[] = [];
+    for (const record of splitZero(status.stdout)) {
+      const xy = record.slice(0, 2), file = projectRelative(record.slice(3), context.prefix);
+      const kind: ProjectGitStatus | null = xy === '??' ? 'A' : xy[1] === 'D' ? 'D' : xy[1] === ' ' || xy === '!!' ? null : 'M';
+      if (!file || !kind) continue;
+      result.push({ status: kind, path: file, additions: null, deletions: null, binary: false, ...measured.get(file) });
+      if (result.length >= MAX_CHANGES) break;
+    }
+    return result;
+  });
+  for (const change of changes.filter(entry => entry.status === 'A')) Object.assign(change, await untrackedStats(context, change.path));
+  return changes;
+}
+
+/**
+ * Git keeps no reference to a checkpoint's tree (one would show in the person's own `git log --all`),
+ * so its garbage collection may remove an old one. One batch read says which trees are still there.
+ */
+export async function presentTrees(context: Pick<RepositoryContext, 'projectReal'>, oids: readonly string[], run: typeof runGit = runGit): Promise<Set<string>> {
+  if (!oids.length) return new Set();
+  // As the comparison and blob reads: a replacement ref must not make a kept tree look cleaned up.
+  const listed = await run(context.projectReal, ['cat-file', '--batch-check=%(objectname) %(objecttype)'], undefined,
+    { input: `${oids.join('\n')}\n`, noReplaceObjects: true });
+  // A missing tree is a "missing" line with exit 0; a failed read must not pass for "Git cleaned them all up".
+  if (listed.code !== 0) throw new Error(`Git could not check the checkpoints: ${listed.stderr.trim().slice(0, 200) || `exit ${listed.code}`}`);
+  return new Set(decode(listed.stdout).split('\n').map(line => line.split(' ')).filter(([, type]) => type === 'tree').map(([oid]) => oid!));
+}
+
+async function checkpointChoices(context: RepositoryContext, projectId: string): Promise<NonNullable<ProjectGitSnapshot['checkpoints']>> {
+  const entries = await listCheckpoints(projectId);
+  const present = await presentTrees(context, [...new Set(entries.map(entry => entry.treeOid))]);
+  return entries.map(entry => ({ ref: `${CHECKPOINT_REF_PREFIX}${entry.id}`, createdAt: entry.createdAt, reason: entry.reason, available: present.has(entry.treeOid) }));
+}
+
 function unavailable(projectId: string, message: string): ProjectGitSnapshot {
   return { projectId, state: 'unavailable', changes: [], truncated: false, revision: '', message };
 }
@@ -350,6 +423,38 @@ export async function readProjectGitSnapshot(projectId: string, baseRef?: string
   if (!context) return { projectId, state: 'not-repository', changes: [], truncated: false, revision: '' };
   try {
     const identity = await branchIdentity(context);
+    // A list that can't be read leaves the other views working; only a checkpoint comparison needs it.
+    let listError: unknown = null;
+    const checkpoints = await checkpointChoices(context, projectId).catch((error: unknown) => {
+      listError = error;
+      logWarn(`project git: checkpoints for ${projectId} could not be listed: ${error instanceof Error ? error.message : String(error)}`);
+      return [];
+    });
+    if (baseRef?.startsWith(CHECKPOINT_REF_PREFIX)) {
+      // Already logged where the list failed.
+      if (listError) throw listError;
+      // Every other refusal of a checkpoint comparison is logged once, with the checkpoint and why.
+      const refuse = (reason: string, message: string): never => {
+        logWarn(`project git: checkpoint ${baseRef} of ${projectId} not compared: ${reason}`);
+        throw new Error(message);
+      };
+      const entry = await findCheckpoint(projectId, baseRef.slice(CHECKPOINT_REF_PREFIX.length));
+      if (!entry) refuse('not in the checkpoint list', 'This checkpoint is no longer available');
+      if (!checkpoints.find(choice => choice.ref === baseRef)?.available) refuse('its tree is gone (Git cleaned it up)', 'This checkpoint is no longer available. Git has cleaned it up.');
+      // The tree can also go between the check above and this read.
+      const changes = await checkpointChanges(context, entry!.treeOid).catch((error: unknown) =>
+        refuse(`its changes could not be read (${error instanceof Error ? error.message : String(error)})`, error instanceof Error ? error.message : String(error)));
+      const comparison = { ref: baseRef, label: '', baseOid: entry!.treeOid, headOid: identity.headOid ?? '', checkpoint: true as const };
+      // Restore is confirmed against this revision, so a same-size line edit must change it too.
+      const files = await Promise.all(changes.map(change => fs.lstat(path.join(context.projectReal, ...change.path.split('/')))
+        .then(stat => `${stat.ino}:${stat.size}:${stat.mtimeMs}`, () => null)));
+      return {
+        projectId, state: 'ready', changes, truncated: changes.length >= MAX_CHANGES,
+        revision: createHash('sha256').update(JSON.stringify([comparison, changes, files])).digest('hex'),
+        currentBranch: identity.currentBranch, branches: identity.branches,
+        branchesTruncated: identity.branchesTruncated, checkpoints, comparison
+      };
+    }
     if (baseRef) {
       const branch = identity.branches.find(entry => entry.ref === baseRef);
       if (!branch) throw new Error('The selected comparison branch is no longer available');
@@ -376,7 +481,7 @@ export async function readProjectGitSnapshot(projectId: string, baseRef?: string
         projectId, state: 'ready', changes, truncated: changes.length >= MAX_CHANGES,
         revision: createHash('sha256').update(JSON.stringify([comparison, changes])).digest('hex'),
         currentBranch: identity.currentBranch, branches: identity.branches,
-        branchesTruncated: identity.branchesTruncated, comparison
+        branchesTruncated: identity.branchesTruncated, checkpoints, comparison
       };
     }
     const hasHead = await headExists(context);
@@ -403,7 +508,7 @@ export async function readProjectGitSnapshot(projectId: string, baseRef?: string
     const revision = createHash('sha256').update(JSON.stringify(changes)).digest('hex');
     return { projectId, state: 'ready', changes, truncated, revision,
       currentBranch: identity.currentBranch, branches: identity.branches,
-      branchesTruncated: identity.branchesTruncated };
+      branchesTruncated: identity.branchesTruncated, checkpoints };
   } catch (error) {
     return unavailable(projectId, error instanceof Error ? error.message : String(error));
   }
@@ -419,18 +524,18 @@ function textFromBytes(bytes: Buffer): string | null {
 }
 
 /** One bounded blob, or null when the object does not exist. */
-async function readBlob(context: RepositoryContext, object: string): Promise<{ text: string | null; tooLarge: boolean } | null> {
-  const size = await runGit(context.projectReal, ['cat-file', '-s', object], 128);
+async function readBlob(context: RepositoryContext, object: string, options: GitOptions = {}): Promise<{ text: string | null; tooLarge: boolean } | null> {
+  const size = await runGit(context.projectReal, ['cat-file', '-s', object], 128, options);
   if (size.code !== 0) return null;
   const bytes = Number(decode(size.stdout).trim());
   if (!Number.isFinite(bytes) || bytes > MAX_DIFF_SIDE_BYTES) return { text: null, tooLarge: true };
-  const content = await runGit(context.projectReal, ['cat-file', 'blob', object], MAX_DIFF_SIDE_BYTES + 1);
+  const content = await runGit(context.projectReal, ['cat-file', 'blob', object], MAX_DIFF_SIDE_BYTES + 1, options);
   if (content.code !== 0) throw new Error(content.stderr || 'The Git base could not be read');
   return { text: textFromBytes(content.stdout), tooLarge: false };
 }
 
-async function readHeadFile(context: RepositoryContext, relative: string, oid = 'HEAD'): Promise<{ text: string | null; tooLarge: boolean }> {
-  return await readBlob(context, `${oid}:${repositoryPath(context, relative)}`) ?? { text: '', tooLarge: false };
+async function readHeadFile(context: RepositoryContext, relative: string, oid = 'HEAD', options: GitOptions = {}): Promise<{ text: string | null; tooLarge: boolean }> {
+  return await readBlob(context, `${oid}:${repositoryPath(context, relative)}`, options) ?? { text: '', tooLarge: false };
 }
 
 /** Index stages 1-3 of an unmerged path; none when a present side is binary, too large or unreadable. */
@@ -479,12 +584,13 @@ export async function readProjectGitDiff(projectId: string, relativePath: string
   if (!change) throw new Error('This file is no longer changed');
   const context = await repositoryContext(projectId);
   if (!context) throw new Error('This folder is not a Git repository');
+  const checkpoint = snapshot.comparison?.checkpoint === true;
   const base = change.status === 'A' || change.status === 'U'
     ? { text: '', tooLarge: false }
-    : await readHeadFile(context, change.previousPath ?? change.path, snapshot.comparison?.baseOid);
+    : await readHeadFile(context, change.previousPath ?? change.path, snapshot.comparison?.baseOid, { noReplaceObjects: checkpoint });
   const current = change.status === 'D'
     ? { text: '', tooLarge: false }
-    : snapshot.comparison
+    : snapshot.comparison && !checkpoint
       ? await readHeadFile(context, change.path, snapshot.comparison.headOid)
       // A conflict deleted on both sides has no working file; its diff is the HEAD side removed.
       : change.status === 'C'

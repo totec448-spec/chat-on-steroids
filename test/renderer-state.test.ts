@@ -1217,6 +1217,23 @@ it('never settles a chat waiting on approval, a stopped recovery or a block, nor
     expect(row.title, id).toMatch(new RegExp(`^${id} · Failed · `));
   }
   expect(doc.querySelector('.inbox-settled > .sess[data-id="plain"] .sess-state')).toBeNull();
+  // One tooltip at a time (#1862): while the app's own shows, the row hands it its title, so the browser
+  // shows no second one; the title comes back when the pointer leaves.
+  const plain = doc.querySelector<HTMLElement>('.inbox-settled > .sess[data-id="plain"]')!;
+  const said = plain.title;
+  plain.dispatchEvent(new mounted.window.Event('pointerenter'));
+  expect(plain.hasAttribute('title')).toBe(false);
+  expect(doc.getElementById('sessionTooltip')!.textContent).toBe(said);
+  plain.dispatchEvent(new mounted.window.Event('pointerleave'));
+  expect(plain.title).toBe(said);
+  expect(doc.getElementById('sessionTooltip')).toBeNull();
+  // Opening the row's menu puts the tooltip away and gives the row its title back at once.
+  plain.dispatchEvent(new mounted.window.Event('pointerenter'));
+  plain.dispatchEvent(new mounted.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+  expect(doc.getElementById('sessionTooltip')).toBeNull();
+  expect(plain.title).toBe(said);
+  doc.dispatchEvent(new mounted.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  plain.dispatchEvent(new mounted.window.Event('pointerleave'));
   // The parent's line counts the worker that needs the person.
   expect(inboxCardState(doc, 'parent-approval').card.querySelector('.sess-workers')?.textContent).toBe('1 needs attention');
   expect(inboxCardState(doc, 'parent-recovery').card.querySelector('.sess-workers')?.textContent).toBe('1 needs attention');
@@ -1602,7 +1619,7 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
   expect(row(chat.id).querySelectorAll('.sess-actions button').length).toBe(1);
   const actions = (): Array<string | undefined> => [...doc.querySelectorAll<HTMLElement>('.row-menu .row-menu-item')].map(item => item.dataset.rowAction);
   rowMenuItem(row(chat.id), 'rename');
-  expect(actions()).toEqual(['pin', 'rename', 'open', 'copy-link', 'block', 'remove']);
+  expect(actions()).toEqual(['pin', 'rename', 'open', 'copy-link', 'share', 'block', 'remove']);
   expect(doc.querySelector('.row-menu [data-row-action="remove"]')!.classList.contains('is-danger')).toBe(true);
   closeRowMenus(doc);
   // A row that is not a chat offers only what applies to it.
@@ -2353,6 +2370,77 @@ it('saves Auto-select Skills from Settings and restores it on state push', async
   expect(toggle.checked).toBe(false);
 });
 
+it('saves the send check address only when it is on this computer, and empty turns it off (#1794)', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const doc = w.document;
+  const field = doc.getElementById('sendCheckUrl') as HTMLInputElement;
+  const error = doc.getElementById('sendCheckUrlError')!;
+  expect(field.value).toBe('');
+  const enter = (value: string) => { field.value = value; field.dispatchEvent(new w.Event('input', { bubbles: true })); field.dispatchEvent(new w.Event('change', { bubbles: true })); };
+  enter('https://example.com/check');
+  expect(error.hidden).toBe(false);
+  expect(field.getAttribute('aria-invalid')).toBe('true');
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(mounted.calls.some(call => call.ui?.sendCheckUrl === 'https://example.com/check')).toBe(false);
+  enter(' http://127.0.0.1:8080/check ');
+  expect(error.hidden).toBe(true);
+  await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui?.sendCheckUrl).toBe('http://127.0.0.1:8080/check'), { timeout: 5_000 });
+  enter('');
+  await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui).not.toHaveProperty('sendCheckUrl', 'http://127.0.0.1:8080/check'), { timeout: 5_000 });
+  expect(mounted.calls.at(-1)?.ui?.sendCheckUrl).toBeUndefined();
+  const { collectSettings, searchSettings } = await import('../src/renderer/settings-search.js');
+  expect(searchSettings(collectSettings(doc), 'automatic sends').map(entry => entry.title)).toContain('Check automatic sends');
+});
+
+it('keeps a refused send check address in the field with its error through a repaint, and shows a damaged saved one as wrong (CodeRabbit)', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const doc = w.document;
+  const field = doc.getElementById('sendCheckUrl') as HTMLInputElement;
+  const error = doc.getElementById('sendCheckUrlError')!;
+  field.focus();
+  field.value = 'https://example.com/check';
+  field.dispatchEvent(new w.Event('input', { bubbles: true }));
+  field.blur();
+  field.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await new Promise(resolve => setTimeout(resolve, 50));
+  // A state push after the (unsaved) change: the typed text and its error stay.
+  mounted.push({ ...mounted.state });
+  expect(field.value).toBe('https://example.com/check');
+  expect(error.hidden).toBe(false);
+  // Fixed by the person: the error goes with the next repaint too.
+  field.value = '';
+  field.dispatchEvent(new w.Event('input', { bubbles: true }));
+  mounted.push({ ...mounted.state });
+  expect(error.hidden).toBe(true);
+  expect(field.getAttribute('aria-invalid')).toBe('false');
+  // A saved value this computer would never accept is shown as wrong, not as fine.
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, sendCheckUrl: 'damaged' } } });
+  expect(field.value).toBe('damaged');
+  expect(error.hidden).toBe(false);
+});
+
+it('saves and restores the Code checkpoints switch on the Workspace page, and finds it in Settings search', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const doc = w.document;
+  const toggle = doc.getElementById('codeCheckpoints') as HTMLInputElement;
+  expect(doc.querySelector('[data-panel="home"]')!.contains(toggle)).toBe(true);
+  expect(toggle.checked).toBe(false);
+  toggle.checked = true;
+  toggle.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await vi.waitFor(() => expect(mounted.calls).toHaveLength(1), { timeout: 5_000 });
+  expect(mounted.calls[0].projects).toEqual({ codeCheckpoints: true });
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, projects: { codeCheckpoints: false } } });
+  expect(toggle.checked).toBe(false);
+
+  const { collectSettings, searchSettings } = await import('../src/renderer/settings-search.js');
+  const found = searchSettings(collectSettings(doc), 'checkpoint');
+  expect(found.map(entry => entry.title)).toContain("Save a checkpoint before each turn's first edit");
+  expect(found.find(entry => entry.target.contains(toggle))?.tab).toBe('home');
+});
+
 it('saves and restores the global worker admission cap from Settings', async () => {
   const mounted = await mountChat();
   const w = mounted.window;
@@ -2516,6 +2604,61 @@ it('puts the secrets shield switch back after a save that was refused, so a late
   follow.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
   await waitFor(() => expect(saves.length).toBeGreaterThan(1));
   expect(saves.at(-1).ui.secretsShield).toBe(true);
+});
+
+it('puts the Play sounds switch back after a save that was refused (#1830)', async () => {
+  let refuse = true;
+  const saves: any[] = [];
+  const mounted = await mountChat({}, [], { saveSettings: (patch: any) => {
+    saves.push(structuredClone(patch));
+    if (refuse) return Promise.resolve({ ok: false, error: 'Settings could not be saved.' });
+    return Promise.resolve({ ok: true, data: mounted.state });
+  } });
+  const doc = mounted.window.document;
+  const sounds = doc.getElementById('soundCues') as HTMLInputElement;
+  sounds.focus();
+  sounds.checked = true;
+  sounds.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(saves.at(-1)?.ui.sounds).toBe(true));
+  await waitFor(() => expect(sounds.checked).toBe(false));
+  refuse = false;
+  const follow = doc.getElementById('followOutput') as HTMLInputElement;
+  follow.checked = !follow.checked;
+  follow.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(saves.length).toBeGreaterThan(1));
+  expect(saves.at(-1).ui.sounds).toBe(false);
+});
+
+it('plays the sample sound when Play sounds is switched on, but not during the quiet hours (#1830)', async () => {
+  const tones: number[] = [];
+  const param = () => ({ value: 0, setValueAtTime: () => undefined, linearRampToValueAtTime: () => undefined, exponentialRampToValueAtTime: () => undefined });
+  class FakeContext {
+    state = 'running'; currentTime = 0; destination = {};
+    resume = async () => undefined;
+    createOscillator() { return { type: '', frequency: param(), connect: (next: unknown) => next, start: (at: number) => tones.push(at), stop: () => undefined }; }
+    createGain() { return { gain: param(), connect: (next: unknown) => next }; }
+  }
+  vi.stubGlobal('AudioContext', FakeContext);
+  try {
+    const now = new Date();
+    const clock = (hours: number) => `${String((now.getHours() + hours + 24) % 24).padStart(2, '0')}:00`;
+    const mounted = await mountChat();
+    mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush: { quietHours: { from: clock(0), to: clock(2) } } } } } as any);
+    await settle();
+    const doc = mounted.window.document;
+    const sounds = doc.getElementById('soundCues') as HTMLInputElement;
+    sounds.checked = true;
+    sounds.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+    await settle();
+    expect(tones).toEqual([]);
+    // Outside the quiet hours the switch plays its sample.
+    mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, phonePush: { quietHours: { from: clock(2), to: clock(4) } } } } } as any);
+    await settle();
+    sounds.checked = false; sounds.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+    sounds.checked = true; sounds.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+    await settle();
+    expect(tones.length).toBeGreaterThan(0);
+  } finally { vi.unstubAllGlobals(); }
 });
 
 it('says why an Activity list is empty, in the app language, and drops the note once a line arrives', async () => {
@@ -4075,6 +4218,90 @@ it('saves the Continue prompt from its editor, and Restore default sends the bui
   expect(prompt.value).toBe('');
 });
 
+it('saves Personality and Writing style from their editors: own text, left out when empty, default again on Restore (#1856)', async () => {
+  const { DEFAULT_CHAT_PERSONALITY, DEFAULT_CHAT_WRITING_STYLE, MAX_CHAT_STYLE_CHARS } = await import('../src/shared/chat-style.js');
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const automation = doc.querySelector('[data-view="settings"]')!;
+  for (const [id, fallback] of [['chatPersonality', DEFAULT_CHAT_PERSONALITY], ['chatWritingStyle', DEFAULT_CHAT_WRITING_STYLE]] as const) {
+    const panel = doc.getElementById(`${id}Panel`)!;
+    const box = doc.getElementById(id) as HTMLTextAreaElement;
+    expect(automation.contains(box)).toBe(true);
+    expect(box.maxLength).toBe(MAX_CHAT_STYLE_CHARS);
+    expect(panel.hidden).toBe(true);
+    (doc.getElementById(`${id}Edit`) as HTMLButtonElement).click();
+    expect(panel.hidden).toBe(false);
+    // The built-in text is what it starts from, so a change edits it rather than starting blank.
+    expect(box.value).toBe(fallback);
+    // What new chats get, said under the editor once it is saved (Haz on #1859).
+    const said = () => doc.getElementById(`${id}State`)!.textContent;
+    expect(said()).toBe('New chats use the built-in text.');
+    expect(box.classList.contains('is-content-sized')).toBe(true);
+    box.value = '  Short, plain answers.  ';
+    box.dispatchEvent(new mounted.window.Event('change'));
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui[id]).toBe('Short, plain answers.'));
+    await waitFor(() => expect(said()).toBe('Saved. New chats use your text.'));
+    box.value = '   ';
+    box.dispatchEvent(new mounted.window.Event('change'));
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui[id]).toBe(''));
+    await waitFor(() => expect(said()).toBe('Saved. New chats leave this part out.'));
+    (doc.getElementById(`${id}Reset`) as HTMLButtonElement).click();
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui).toMatchObject({ [id]: undefined }));
+    expect(box.value).toBe(fallback);
+    await waitFor(() => expect(said()).toBe('New chats use the built-in text.'));
+  }
+  // Its own section, after Continuation prompts, not inside that section's card.
+  const heading = [...doc.querySelectorAll('h2')].find(node => node.textContent === 'Chat instructions')!;
+  expect(heading).toBeTruthy();
+  expect(heading.closest('.settings-surface')).toBeNull();
+  const { collectSettings, searchSettings } = await import('../src/renderer/settings-search.js');
+  expect(searchSettings(collectSettings(doc), 'writing style').map(entry => entry.title)).toContain('Writing style');
+});
+
+it('says a chat style was restored only when that save went through (#1856, CodeRabbit)', async () => {
+  const mounted = await mountChat({}, [], { saveSettings: async () => ({ ok: false, error: 'Settings could not be saved.' }) });
+  const doc = mounted.window.document;
+  (doc.getElementById('chatPersonalityReset') as HTMLButtonElement).click();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect([...doc.querySelectorAll('.toast')].map(node => node.textContent)).not.toContain('Personality restored to default');
+});
+
+it('keeps a chat style editor open with the typed text when its save is refused, and closes it once saved (#1856, CodeRabbit)', async () => {
+  const mounted = await mountChat({}, [], { saveSettings: async () => ({ ok: false, error: 'Settings could not be saved.' }) });
+  const doc = mounted.window.document;
+  const panel = doc.getElementById('chatPersonalityPanel')!;
+  const box = doc.getElementById('chatPersonality') as HTMLTextAreaElement;
+  const close = doc.getElementById('chatPersonalityEdit') as HTMLButtonElement;
+  close.click();
+  expect(panel.hidden).toBe(false);
+  box.value = 'Answer like a calm colleague.';
+  box.dispatchEvent(new mounted.window.Event('change'));
+  close.click();
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(panel.hidden).toBe(false);
+  expect(box.value).toBe('Answer like a calm colleague.');
+  expect(close.textContent).toBe('Close prompt');
+});
+
+it('closes a chat style editor when its text was stored although a later step of that save failed (#1856, CodeRabbit)', async () => {
+  let mounted: Awaited<ReturnType<typeof mountChat>> | undefined;
+  mounted = await mountChat({}, [], { saveSettings: async (patch: any) => {
+    // Stored first, then a later side effect of the save fails: the answer says no.
+    mounted!.state.config = { ...mounted!.state.config, ...structuredClone(patch) };
+    return { ok: false, error: 'A later step of saving failed.' };
+  } });
+  const doc = mounted.window.document;
+  const panel = doc.getElementById('chatPersonalityPanel')!;
+  const box = doc.getElementById('chatPersonality') as HTMLTextAreaElement;
+  const edit = doc.getElementById('chatPersonalityEdit') as HTMLButtonElement;
+  edit.click();
+  box.value = 'Answer like a calm colleague.';
+  box.dispatchEvent(new mounted.window.Event('change'));
+  edit.click();
+  await waitFor(() => expect(panel.hidden).toBe(true));
+  expect(mounted.state.config.ui.chatPersonality).toBe('Answer like a calm colleague.');
+});
+
 it('offers the handoff length, starting at the thorough default, and saves a shorter choice', async () => {
   const mounted = await mountChat({ hasGoalKey: true });
   const length = mounted.window.document.getElementById('handoffLength') as HTMLSelectElement;
@@ -4912,6 +5139,17 @@ describe('phone notifications in Settings', () => {
     for (const id of ['phonePushTopic', 'phonePushCopyTopic', 'phonePushTest', 'phonePushDetails']) expect(advanced.contains(doc.getElementById(id))).toBe(false);
     (doc.getElementById('phonePushCopyTopic') as HTMLButtonElement).click();
     await waitFor(() => expect(writeClipboard).toHaveBeenCalledWith('cos-fixturetopic234567'));
+  });
+
+  it('keeps quiet hours visible and saved with phone notifications off, since sounds follow them too (Haz on #1830)', async () => {
+    const mounted = await withPhone(phone({ enabled: false }));
+    const doc = mounted.window.document;
+    const quiet = doc.getElementById('phonePushQuiet') as HTMLSelectElement;
+    expect(doc.getElementById('phonePushOptions')!.hidden).toBe(true);
+    expect(doc.getElementById('phonePushOptions')!.contains(quiet)).toBe(false);
+    expect(quiet.closest('[hidden]')).toBeNull();
+    change(doc, 'phonePushQuiet', '22:00-07:00');
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush).toMatchObject({ enabled: false, quietHours: { from: '22:00', to: '07:00' } }));
   });
 
   it('saves when a chat counts as finished, quiet hours shown in local time, and the details switch', async () => {

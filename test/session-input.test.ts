@@ -9,10 +9,11 @@ import {
   fileSilenceInput, deferSilenceInput, revokeSilenceInputs, pendingQueuedPickups, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, enqueueInput,
   failBrowserInput, listInputs, offerToolInput as offerToolInputBatch, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
   authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy, retryUnclaimedInput,
-  noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS
+  noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS, holdInputForSendCheck
 } from '../src/main/session/input.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import { editReplacement } from '../src/main/session/edits.js';
+import * as logger from '../src/main/logger.js';
 import { noteChatOrigin } from '../src/main/session/recorder.js';
 import { stageInputAttachment } from '../src/main/session/input-attachments.js';
 import { listUsageSessions, turnHasMcpCall } from '../src/main/session/store.js';
@@ -127,6 +128,24 @@ describe('durable user input ownership', () => {
     expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ id: row.id, state: 'failed', pickupRetryCount: 1 });
     now += 120_000;
     expect(await retryUnclaimedInput(row.id)).toBeNull();
+  });
+  // #1878: a message no browser picked up became "Not sent" without a log line, so the report showed
+  // only the automatic requeue and nothing about the browser at that moment.
+  it('logs a pickup timeout once, with what the browser side looked like', async () => {
+    binding.model = 'gpt-5.6-sol'; binding.finishEnabled = false;
+    configureInputDelivery({ applyAutomation: automate, changed, recoveryAllowed: () => binding.recoveryAllowed,
+      pickupContext: () => 'wake channel connected; ChatGPT tabs 14 open, 3 discarded, 2 loading' });
+    const warn = vi.spyOn(logger, 'logWarn');
+    try {
+      const row = await enqueueInput(input());
+      now += 60_001;
+      await listInputs(); await listInputs();
+      const lines = warn.mock.calls.map(call => String(call[0])).filter(line => line.includes(row.id));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatch(new RegExp(`^input ${row.id}: not sent, no browser picked it up within 60 s \\(wake channel connected; ChatGPT tabs 14 open, 3 discarded, 2 loading; [0-9.]+ GB of [0-9.]+ GB memory free\\)$`));
+    } finally {
+      warn.mockRestore();
+    }
   });
   it('does not retry a pickup timeout after the user dismissed its browser chat', async () => {
     binding.model = 'gpt-5.6-sol'; binding.finishEnabled = false;
@@ -294,6 +313,26 @@ describe('durable user input ownership', () => {
   });
   // #1402: turns past ~35 minutes break; a native send into the running turn ends it as interrupted
   // and continues in a fresh one, a command in flight keeping its result (measured 2026-10-09).
+  it('does not count time held by the send check against the 60-second browser pickup deadline (CodeRabbit)', async () => {
+    binding.model = 'gpt-5.6-sol'; binding.activeTurnId = 'plain-turn';
+    binding.end = { kind: 'turn_start', outcome: '', turnId: 'plain-turn', time: 900 };
+    const row = await fileRotationInput(sessionId, 'plain-turn');
+    expect(row).toMatchObject({ purpose: 'rotation', transportIntent: 'browser', state: 'queued' });
+    // Held at 50 s and again at 80 s, as the program keeps saying no.
+    now += 50_000;
+    expect(await holdInputForSendCheck(row!.id, 1, 'not now', true)).toBe(true);
+    now += 30_000;
+    expect(await holdInputForSendCheck(row!.id, 2, 'not now', true)).toBe(true);
+    now += 25_000;
+    expect((await listInputs()).find(entry => entry.id === row!.id)).toMatchObject({ state: 'queued' });
+    // Released at 110 s: the browser gets its full minute from there, and no more.
+    now += 5_000 + 59_000;
+    expect((await listInputs()).find(entry => entry.id === row!.id)).toMatchObject({ state: 'queued' });
+    now += 2_000;
+    expect((await listInputs()).find(entry => entry.id === row!.id)).toMatchObject({ state: 'failed',
+      error: 'Not sent: the browser did not pick up this message within 60 seconds.' });
+  });
+
   it('files one rotation into the running turn as an automatic message, only when nothing else waits', async () => {
     binding.model = 'gpt-5.6-sol'; binding.activeTurnId = 'plain-turn';
     binding.end = { kind: 'turn_start', outcome: '', turnId: 'plain-turn', time: 900 };

@@ -53,6 +53,7 @@
 .ph.ph-caret-up::before { content: '\e13c'; }
 .ph.ph-chart-line::before { content: '\e154'; }
 .ph.ph-chat-circle::before { content: '\e168'; }
+.ph.ph-chat-text::before { content: '\e17a'; }
 .ph.ph-check::before { content: '\e182'; }
 .ph.ph-check-circle::before { content: '\e184'; }
 .ph.ph-checks::before { content: '\e53a'; }
@@ -77,6 +78,7 @@
 .ph.ph-globe-hemisphere-west::before { content: '\e28c'; }
 .ph.ph-house::before { content: '\e2c2'; }
 .ph.ph-image::before { content: '\e2ca'; }
+.ph.ph-keyboard::before { content: '\e2d8'; }
 .ph.ph-lightning::before { content: '\e2de'; }
 .ph.ph-link-break::before { content: '\e2e4'; }
 .ph.ph-arrows-left-right::before { content: '\e0a0'; }
@@ -100,6 +102,7 @@
 .ph.ph-power::before { content: '\e3da'; }
 .ph.ph-prohibit::before { content: '\e3de'; }
 .ph.ph-puzzle-piece::before { content: '\e596'; }
+.ph.ph-quotes::before { content: '\e660'; }
 .ph.ph-robot::before { content: '\e762'; }
 .ph.ph-shield-check::before { content: '\e40c'; }
 .ph.ph-sidebar-simple::before { content: '\ec24'; }

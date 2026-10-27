@@ -10,7 +10,7 @@
  * that server does not have, which is exactly the confusion the split exists to end.
  */
 
-import { CODING_INSTRUCTIONS } from './coding-instructions.js';
+import { codingInstructions } from './coding-instructions.js';
 import { skillCatalogInstructions } from '../skills.js';
 import { listSkillLibrary, skillLibraryInstructions } from '../skill-library.js';
 import type { SkillLibrary } from '../../shared/skills.js';
@@ -96,7 +96,7 @@ function coreInstructions(ctx: ToolContext, platform: NodeJS.Platform, skills: s
     `command=${caps.command ? 'on' : 'off'}`
   ].join(' ');
   const lines = [
-    CODING_INSTRUCTIONS,
+    codingInstructions({ personality: config.ui.chatPersonality, writingStyle: config.ui.chatWritingStyle }),
     skills,
     '',
     '# Local tools',
