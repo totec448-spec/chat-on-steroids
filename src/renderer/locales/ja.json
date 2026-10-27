@@ -3277,6 +3277,8 @@
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "ツールが返す内容に含まれる API キーやトークンは、ChatGPT が見る前に隠されます。",
   "Easier to read": "読みやすく",
   "High contrast, eight accent colors, line spacing and a more legible font.": "ハイコントラスト、8 つのアクセントカラー、行間、より読みやすいフォント。",
+  "Quote": "引用",
+  "Start or cancel the prepared plan first, then quote again.": "先に準備済みのプランを開始するか取り消してから、もう一度引用してください。",
   "Message box": "メッセージ欄",
   "New line": "改行",
   "Send the other way while ChatGPT works": "ChatGPT の作業中にもう一方の方法で送信",

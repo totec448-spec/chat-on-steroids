@@ -102,6 +102,7 @@
 .ph.ph-power::before { content: '\e3da'; }
 .ph.ph-prohibit::before { content: '\e3de'; }
 .ph.ph-puzzle-piece::before { content: '\e596'; }
+.ph.ph-quotes::before { content: '\e660'; }
 .ph.ph-robot::before { content: '\e762'; }
 .ph.ph-shield-check::before { content: '\e40c'; }
 .ph.ph-sidebar-simple::before { content: '\ec24'; }

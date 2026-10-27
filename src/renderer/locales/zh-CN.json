@@ -3277,6 +3277,8 @@
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "工具返回内容中的 API 密钥和令牌会在 ChatGPT 看到之前被隐藏。",
   "Easier to read": "更易阅读",
   "High contrast, eight accent colors, line spacing and a more legible font.": "高对比度、八种强调色、行距和更易读的字体。",
+  "Quote": "引用",
+  "Start or cancel the prepared plan first, then quote again.": "请先开始或取消已准备好的计划，然后再引用一次。",
   "Message box": "消息框",
   "New line": "换行",
   "Send the other way while ChatGPT works": "在 ChatGPT 工作时按另一种方式发送",

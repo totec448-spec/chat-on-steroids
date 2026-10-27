@@ -3457,6 +3457,8 @@
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "API-ключи и токены в том, что возвращают инструменты, скрываются до того, как их увидит ChatGPT.",
   "Easier to read": "Легче читать",
   "High contrast, eight accent colors, line spacing and a more legible font.": "Высокая контрастность, восемь акцентных цветов, межстрочный интервал и более разборчивый шрифт.",
+  "Quote": "Цитировать",
+  "Start or cancel the prepared plan first, then quote again.": "Сначала запустите или отмените подготовленный план, затем процитируйте снова.",
   "Message box": "Поле сообщения",
   "New line": "Новая строка",
   "Send the other way while ChatGPT works": "Отправить другим способом, пока ChatGPT работает",
