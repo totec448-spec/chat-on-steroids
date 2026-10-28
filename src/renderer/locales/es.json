@@ -3459,5 +3459,17 @@
   "Touched {0} files, no net change": "{0} archivos tocados, sin cambio neto",
   "Touched {0} files, no net change|one": "{0} archivo tocado, sin cambio neto",
   "Touched {0} files, no net change|many": "{0} de archivos tocados, sin cambio neto",
-  "The request was not valid.": "La solicitud no era válida."
+  "The request was not valid.": "La solicitud no era válida.",
+  "Needs your answer in ChatGPT": "Necesita tu respuesta en ChatGPT",
+  "A one-minute look at the composer, projects and Review.": "Un vistazo de un minuto al editor, los proyectos y Revisión.",
+  "New here? Take a 1-minute tour.": "¿Eres nuevo? Haz el recorrido de 1 minuto.",
+  "No thanks": "No, gracias",
+  "Show me": "Muéstramelo",
+  "Skip tour": "Saltar recorrido",
+  "Take the tour again": "Hacer el recorrido otra vez",
+  "A project is a folder you approve, and its chats start there.": "Un proyecto es una carpeta que apruebas, y sus chats empiezan ahí.",
+  "This panel holds Review, with every change ChatGPT made to your files.": "Este panel incluye Revisión, con cada cambio que ChatGPT hizo en tus archivos.",
+  "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "Escribe aquí tu tarea y elige Normal, Plan u Objetivo según cómo debe trabajar ChatGPT en ella.",
+  "Tour": "Recorrido",
+  "The tour choice couldn't be saved, so it may be offered again.": "No se pudo guardar tu elección sobre el recorrido, así que puede que se ofrezca de nuevo."
 }

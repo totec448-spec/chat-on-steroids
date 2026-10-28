@@ -3394,5 +3394,17 @@
   "{0} more not listed|one": "{0} tane daha listelenmedi",
   "Touched {0} files, no net change": "{0} dosyaya dokunuldu, net değişiklik yok",
   "Touched {0} files, no net change|one": "{0} dosyaya dokunuldu, net değişiklik yok",
-  "The request was not valid.": "İstek geçerli değildi."
+  "The request was not valid.": "İstek geçerli değildi.",
+  "Needs your answer in ChatGPT": "ChatGPT'de yanıtınızı bekliyor",
+  "A one-minute look at the composer, projects and Review.": "Yazma alanına, projelere ve İncelemeye bir dakikalık bakış.",
+  "New here? Take a 1-minute tour.": "Yeni misiniz? 1 dakikalık turu yapın.",
+  "No thanks": "Hayır, teşekkürler",
+  "Show me": "Göster",
+  "Skip tour": "Turu atla",
+  "Take the tour again": "Turu tekrar yap",
+  "A project is a folder you approve, and its chats start there.": "Proje, izin verdiğiniz bir klasördür ve sohbetleri orada başlar.",
+  "This panel holds Review, with every change ChatGPT made to your files.": "Bu panelde, ChatGPT'nin dosyalarınızda yaptığı her değişikliği gösteren İnceleme bulunur.",
+  "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "Görevinizi buraya yazın ve ChatGPT'nin nasıl çalışacağını Normal, Plan veya Hedef ile seçin.",
+  "Tour": "Tur",
+  "The tour choice couldn't be saved, so it may be offered again.": "Tur tercihin kaydedilemedi, bu yüzden yeniden önerilebilir."
 }

@@ -197,6 +197,8 @@ export interface UiPrefs {
   language?: import('./ui-language.js').UiLanguage;
   /** The version this install last started as; What's New shows once per real update (#1172). */
   lastSeenVersion?: string;
+  /** #1833: the first-run tour was taken, skipped or declined. Main-owned (ui:tourDone); Settings only replays it. */
+  tourDone?: boolean;
   /**
    * The extension's own preferences as it last reported them stored. The app keeps them so a
    * reinstalled extension, which starts with empty storage under a new id, gets them back.

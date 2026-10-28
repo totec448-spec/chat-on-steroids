@@ -4576,8 +4576,13 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
   .agent-panel-row .agent-card-avatar::before { animation: none; }
   .agent-card-activity { animation: none; color: var(--soft); background: none; }
 }
-/* A failed worker's last action: where it stopped, plainly. */
-.agent-card-last { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.4; }
+/* A failed worker's last action: where it stopped, plainly. A worker's answer, and ChatGPT's approval
+   card holding it (#1831), sit on the same quiet line. */
+.agent-card-last, .agent-card-answer, .agent-card-approval { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--soft);
+  font-size: calc(12px * var(--text-scale, 1)); line-height: 1.4; }
+/* Held by the approval card: the timeline's waiting row's emphasis. A failed step: the tool row's red, without the sheen. */
+.agent-card-approval { color: var(--ink); font-weight: 500; }
+.agent-card-activity[data-tone='bad'] { animation: none; background: none; color: var(--red); }
 /* A worker's two views (#105): pills like the dock's tabs, on their own line under its name. */
 .agent-panel-header:has(.agent-panel-views) { flex-wrap: wrap; row-gap: 10px; padding-bottom: 10px; }
 .agent-panel-views { display: flex; gap: 4px; flex-basis: 100%; min-width: 0; }
@@ -5409,6 +5414,22 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 ::highlight(chat-find) { background-color: var(--accent-wash); color: inherit; }
 ::highlight(chat-find-current) { background-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--ink); }
 
+/* #1833 first-run tour: the offer is one quiet line above the composer; a step is a ring around the
+   real control (the rest of the window dimmed a little, still visible) and a card in the menus' style. */
+.tour-offer { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 6px; padding: 4px 4px 4px 12px; color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); }
+.tour-offer[hidden] { display: none; }
+.tour-offer > span { flex: 1 1 auto; min-width: 0; }
+.tour-offer .btn-quiet { border: 0; background: transparent; box-shadow: none; color: var(--soft); padding: 3px 10px; min-height: 0; }
+.tour-offer .btn-quiet:hover:not(:disabled) { color: var(--ink); background: var(--hover); }
+.tour-ring { position: fixed; z-index: 9998; pointer-events: none; border-radius: 12px; box-shadow: 0 0 0 2px var(--accent), 0 0 0 100vmax rgba(0, 0, 0, .28); transition: left 160ms, top 160ms, width 160ms, height 160ms; }
+.tour-ring[hidden] { display: none; }
+.tour-card { position: fixed; z-index: 9999; max-width: calc(100vw - 24px); max-height: calc(100vh - 24px); overflow: auto; padding: 14px 14px 10px; border: 1px solid var(--edge); border-radius: 12px; background: var(--card); color: var(--ink); box-shadow: 0 12px 32px rgba(0, 0, 0, .22); }
+.tour-card[hidden] { display: none; }
+.tour-text { margin: 0 0 10px; font-size: calc(13px * var(--text-scale, 1)); line-height: 1.45; }
+.tour-actions { display: flex; align-items: center; gap: 6px; }
+.tour-step { flex: 1 1 auto; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; }
+.tour-actions .btn { min-height: 30px; padding: 5px 12px; }
+@media (prefers-reduced-motion: reduce) { .tour-ring { transition: none; } }
 /* #1827: what a finished answer changed. One quiet line under its actions, closed; open, a row per
    file in the edit cards' type and colors, with that file's net diff. */
 .turn-changes { margin: 6px 0 0; min-width: 0; }

@@ -31,6 +31,7 @@ import { initPet } from './pet.js';
 import { initPets } from './pets.js';
 import { initSkillsLibrary } from './skills-library.js';
 import { initWhatsNew } from './whats-new.js';
+import { initTour } from './tour.js';
 import { playSoundCue } from './sound-cues.js';
 import { inQuietHours } from '../shared/phone-push.js';
 import { initSettingsSearch } from './settings-search.js';
@@ -254,7 +255,10 @@ function placePermissions(tab: string): void {
   if (permissionSurface.parentElement !== target) target.append(permissionSurface);
 }
 
+/** Set once the tour exists (below); leaving the chat screen ends a running tour quietly. */
+let stopTour: () => void = () => undefined;
 function showTab(name: string): void {
+  if (name !== 'chat') stopTour();
   if (name === 'skills') openSkillsLibrary();
   placePermissions(name);
   const library = name === 'plugins' || name === 'skills' || name === 'pets';
@@ -2442,10 +2446,14 @@ function atBottom(view: HTMLElement): boolean {
   return view.scrollTop + view.clientHeight >= view.scrollHeight - 24;
 }
 
-/** Puts a feed back on its newest line. Safe on a hidden panel: it is re-applied on show. */
+/**
+ * Puts a feed back on its newest line. Only on screen: reading the scroll height lays the page out,
+ * and the app logs every few seconds, so a closed page waits until showTab re-applies it on show.
+ */
 function stickToNewest(id: string): void {
   if (pinned.get(id) === false) return;
   const view = $(id);
+  if (!view.closest('.panel')?.classList.contains('is-active')) return;
   view.scrollTop = view.scrollHeight;
 }
 
@@ -2780,7 +2788,29 @@ $('updateInstall').addEventListener('click', installUpdate);
 $('installUpdate').addEventListener('click', installUpdate);
 $('connectionPopoverToggle').addEventListener('click', () => void toggleConnection());
 $('wizConnect').addEventListener('click', () => void toggleConnection());
-$('readyStart').addEventListener('click', () => showTab('chat'));
+// #1833: Setup's last step offers the first-run tour once; Settings replays it.
+// The answer counts in this window at once, before the saved setting comes back in a state push.
+let tourAnswered = false;
+const tour = initTour({ markDone: async () => {
+  tourAnswered = true;
+  const reply = await api.markTourDone().catch(() => null);
+  if (reply?.ok) return true;
+  toast(t("The tour choice couldn't be saved, so it may be offered again."));
+  return false;
+} });
+// A replay from Settings starts on the next frame; leaving chat before it cancels it too (CodeRabbit).
+let tourFrame = 0;
+stopTour = () => { if (tourFrame) cancelAnimationFrame(tourFrame); tourFrame = 0; tour.stop(); };
+$('readyStart').addEventListener('click', () => {
+  showTab('chat');
+  if (state && state.config.ui.tourDone !== true && !tourAnswered) tour.offer();
+});
+$('takeTour').addEventListener('click', () => {
+  showTab('chat');
+  // After the chat view has laid out, so each step finds its control on screen.
+  if (tourFrame) cancelAnimationFrame(tourFrame);
+  tourFrame = requestAnimationFrame(() => { tourFrame = 0; tour.start(); });
+});
 $('showCosBrowser').addEventListener('click', event => void run(
   (event.currentTarget as HTMLElement).dataset.signedIn === 'true' ? api.signOutChatGpt() : api.showCosBrowser()));
 /** Setup's browser choice is the same save as choosing it in Settings, so both share one rule. */

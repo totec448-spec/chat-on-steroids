@@ -117,6 +117,16 @@ it.each(['playfulStatus', 'playfulContinue', 'followOutput', 'announceTurns'] as
   expect(getConfig().ui[key]).toBe(wanted);
 });
 
+it('remembers that the first-run tour was taken or declined, through any later settings save (#1833)', async () => {
+  expect(getConfig().ui.tourDone).toBeUndefined();
+  await handlers.get('ui:tourDone')!(null, undefined);
+  expect(getConfig().ui.tourDone).toBe(true);
+  // The Settings form does not own it; a save that changes something else keeps it.
+  const base = getConfig();
+  expect(await save({ ...base, ui: { ...base.ui, tourDone: false, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.tourDone).toBe(true);
+});
+
 it('saves Play sounds through Settings, off by default, and keeps it across a stale unrelated save (#1802)', async () => {
   const base = getConfig();
   expect(base.ui.sounds).toBe(false);
