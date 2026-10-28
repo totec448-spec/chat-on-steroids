@@ -229,6 +229,17 @@ describe('ago', () => {
     expect(ago(now - 3 * 3_600_000, now)).toBe('3h ago');
   });
 
+  it('goes on to days, weeks, months and years instead of hundreds of hours (2.1.47 round)', () => {
+    const hour = 3_600_000, day = 24 * hour;
+    expect(ago(now - 23 * hour, now)).toBe('23h ago');
+    expect(ago(now - 24 * hour, now)).toBe('1d ago');
+    expect(ago(now - 6 * day, now)).toBe('6d ago');
+    expect(ago(now - 16 * day, now)).toBe('2w ago');
+    expect(ago(now - 45 * day, now)).toBe('1mo ago');
+    expect(ago(now - 300 * day, now)).toBe('10mo ago');
+    expect(ago(now - 800 * day, now)).toBe('2y ago');
+  });
+
   it('never reports a negative age from a clock skew', () => {
     expect(ago(now + 60_000, now)).toBe('just now');
   });
