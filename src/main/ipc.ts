@@ -96,6 +96,7 @@ import { runDiagnostics } from './diagnostics.js';
 import { collectReportFacts, readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts, memoryFacts } from './diagnostics-report.js';
 import { listSessions, readTurnTraces } from './session/store.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, logWarn, onLog } from './logger.js';
+import { markStartup } from './startup-timing.js';
 import { managedWorktreeCleanupOffers, acknowledgeManagedWorktreeCleanupOffer } from './agents.js';
 import { listOfferedWorkerWorktrees, disposeOfferedWorkerWorktree, WorkerWorktreeError } from './worktrees/index.js';
 import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
@@ -781,6 +782,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // `did-finish-load`, it can only happen after the renderer's first IPC request has completed
     // secure-storage availability/decryption probes and the rest of the initial state snapshot.
     logInfo('renderer state ready');
+    markStartup('renderer');
     return state;
   });
 
