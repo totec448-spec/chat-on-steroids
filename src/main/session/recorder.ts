@@ -1765,14 +1765,30 @@ const WEBP_MIN_SAVING_BYTES = 1024;
  */
 async function losslessWebp(png: Buffer): Promise<Buffer | null> {
   try {
+    const image = sharp(png, { limitInputPixels: 40_000_000, animated: false });
+    // WebP holds 8 bits a channel: a deeper PNG would lose precision, so it stays as it came (CodeRabbit).
+    const { depth } = await image.metadata();
+    if (depth && depth !== 'uchar' && depth !== 'char') return keptPng(`it has ${depth === 'ushort' ? 16 : 'more than 8'}-bit channels`);
     // `exact` keeps the colors under transparent pixels and the color profile is kept: otherwise
     // a "lossless" copy can still show different colors (measured on real screenshots).
-    const webp = await sharp(png, { limitInputPixels: 40_000_000, animated: false }).keepIccProfile()
-      .webp({ lossless: true, effort: 4, exact: true }).toBuffer();
-    return webp.length + WEBP_MIN_SAVING_BYTES <= png.length && webp.length <= png.length * 0.9 ? webp : null;
-  } catch {
-    return null;
+    const webp = await image.keepIccProfile().webp({ lossless: true, effort: 4, exact: true }).toBuffer();
+    if (webp.length + WEBP_MIN_SAVING_BYTES <= png.length && webp.length <= png.length * 0.9) return webp;
+    return keptPng('WebP would save too little');
+  } catch (error) {
+    return keptPng(`it could not be converted: ${(error instanceof Error ? error.message : String(error)).slice(0, 120)}`);
   }
+}
+
+/** Each reason a screenshot stays PNG is logged, at most once a minute, so many screenshots don't flood the log. */
+const keptPngLogged = new Map<string, number>();
+function keptPng(reason: string): null {
+  const now = Date.now();
+  if (now - (keptPngLogged.get(reason) ?? 0) >= 60_000) {
+    keptPngLogged.set(reason, now);
+    if (keptPngLogged.size > 32) keptPngLogged.delete(keptPngLogged.keys().next().value!);
+    logInfo(`recording: kept a screenshot as PNG because ${reason}`);
+  }
+  return null;
 }
 
 // ------------------------------------------------------- extension events

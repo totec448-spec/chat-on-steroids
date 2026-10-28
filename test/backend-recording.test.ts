@@ -324,3 +324,23 @@ it('stores a recorded screenshot as lossless WebP when that saves space, with ex
   expect(second.call.assets![0]!.mimeType).toBe('image/png');
   expect(await readAsset(id!, second.call.assets![0]!.id)).toEqual(Buffer.from(tiny, 'base64'));
 });
+
+it('keeps a 16-bit PNG as it came, since WebP holds 8 bits a channel, and logs why a screenshot stayed PNG (CodeRabbit)', async () => {
+  const sharp = (await import('sharp')).default;
+  const { onLog } = await import('../src/main/logger.js');
+  const lines: string[] = [];
+  const stop = onLog(entry => { lines.push(entry.message); });
+  try {
+    const id = await sessionForConversation('conv-webp-16bit');
+    const width = 400, height = 240, raw = Buffer.alloc(width * height * 3);
+    for (let at = 0; at < raw.length; at += 3) { const x = (at / 3) % width; raw[at] = x < 200 ? 30 : 230; raw[at + 1] = 120; raw[at + 2] = x % 40 < 3 ? 0 : 200; }
+    const deep = await sharp(raw, { raw: { width, height, channels: 3 } }).toColourspace('rgb16').png().toBuffer();
+    expect((await sharp(deep).metadata()).depth).toBe('ushort');
+    await recordToolCall({ ...call('webp-16bit', 'conv-webp-16bit'), tool: 'screenshot', content: [{ type: 'image', data: deep.toString('base64'), mimeType: 'image/png' }] });
+    const event = (await readEvents(id!, { kinds: ['tool_call'] }))[0]!;
+    if (event.kind !== 'tool_call') throw new Error('missing recorded call');
+    expect(event.call.assets![0]!.mimeType).toBe('image/png');
+    expect(await readAsset(id!, event.call.assets![0]!.id)).toEqual(deep);
+    expect(lines.some(line => line.includes('kept a screenshot as PNG') && line.includes('16-bit'))).toBe(true);
+  } finally { stop(); }
+});
