@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { dueRun, nextRunAfter, validSchedule, type Schedule } from '../src/shared/schedule.js';
+import { dueRun, nextRunAfter, sameLocalDay, validSchedule, type Schedule } from '../src/shared/schedule.js';
 
 /**
  * #1826: when a chat's scheduled message is due. Times are local wall-clock times; a run missed
@@ -119,4 +119,13 @@ describe('valid schedule', () => {
     expect(validSchedule({ kind: 'weekly', day: 7, at: '09:00' })).toBe(false);
     expect(validSchedule({ kind: 'weekdays', at: '9:00' })).toBe(false);
   });
+});
+
+it('tells whether two times fall on the same local day, so a time today needs no weekday (2.1.47 round)', () => {
+  const morning = new Date(2026, 9, 28, 7, 17).getTime();
+  expect(sameLocalDay(morning, new Date(2026, 9, 28, 23, 59).getTime())).toBe(true);
+  expect(sameLocalDay(morning, new Date(2026, 9, 29, 0, 0).getTime())).toBe(false);
+  expect(sameLocalDay(morning, new Date(2026, 9, 27, 23, 59).getTime())).toBe(false);
+  // The same weekday a week later is not today.
+  expect(sameLocalDay(morning, new Date(2026, 10, 4, 7, 17).getTime())).toBe(false);
 });
