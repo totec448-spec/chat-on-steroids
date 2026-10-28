@@ -3338,7 +3338,7 @@
   "Skip tour": "ツアーをスキップ",
   "Take the tour again": "もう一度ツアーを見る",
   "A project is a folder you approve, and its chats start there.": "プロジェクトはあなたが許可したフォルダーで、そのチャットはそこで始まります。",
-  "Review shows every change ChatGPT made to your files.": "レビューには ChatGPT がファイルに加えたすべての変更が表示されます。",
+  "This panel holds Review, with every change ChatGPT made to your files.": "このパネルにはレビューがあり、ChatGPT がファイルに加えたすべての変更を確認できます。",
   "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "ここにタスクを書き、ChatGPT の進め方を通常、計画、ゴールから選びます。",
   "Tour": "ツアー",
   "The tour choice couldn't be saved, so it may be offered again.": "ツアーの選択を保存できなかったため、もう一度表示されることがあります。"

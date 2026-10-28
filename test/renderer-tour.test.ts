@@ -162,3 +162,24 @@ it('drops the current step when its control left without a resize, going back or
   expect(document.querySelector('.is-tour-target')?.id).toBe('rightDockToggle');
   expect($('tourStep').textContent).toBe('1 of 1');
 });
+
+it('ends quietly when the person leaves the chat screen, without counting that as Skip or Done (CodeRabbit)', async () => {
+  const { tour: t, markDone } = await tour();
+  t.start();
+  key('ArrowRight'); await settle();
+  expect($('tourCard').hidden).toBe(false);
+  // Settings opened mid-tour: the card and ring would point at a screen that is no longer there.
+  t.stop();
+  expect($('tourCard').hidden).toBe(true);
+  expect($('tourRing').hidden).toBe(true);
+  expect(document.querySelector('.is-tour-target')).toBeNull();
+  expect(markDone).not.toHaveBeenCalled();
+  // Its keys are gone too, and a stop with no tour running does nothing.
+  key('ArrowRight'); await settle();
+  expect($('tourCard').hidden).toBe(true);
+  t.stop();
+  // It can still be offered or replayed later.
+  t.start();
+  expect($('tourCard').hidden).toBe(false);
+  expect($('tourStep').textContent).toBe('1 of 3');
+});

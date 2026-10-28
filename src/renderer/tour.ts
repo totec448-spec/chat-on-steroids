@@ -14,13 +14,13 @@ interface Step { target: string; text: () => string }
 const STEPS: Step[] = [
   { target: 'composer', text: () => t('Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.') },
   { target: 'addProject', text: () => t('A project is a folder you approve, and its chats start there.') },
-  { target: 'rightDockToggle', text: () => t('Review shows every change ChatGPT made to your files.') }
+  { target: 'rightDockToggle', text: () => t('This panel holds Review, with every change ChatGPT made to your files.') }
 ];
 
 const GAP = 12;
 
 /** `markDone` says whether the once-only answer was saved; the caller tells the person when it was not. */
-export function initTour(deps: { markDone(): Promise<boolean> }): { offer(): void; start(): void } {
+export function initTour(deps: { markDone(): Promise<boolean> }): { offer(): void; start(): void; stop(): void } {
   const $ = (id: string) => document.getElementById(id)!;
   const offerBar = $('tourOffer'), card = $('tourCard'), ring = $('tourRing');
   const text = $('tourText'), stepLabel = $('tourStep'), next = $('tourNext') as HTMLButtonElement;
@@ -84,13 +84,17 @@ export function initTour(deps: { markDone(): Promise<boolean> }): { offer(): voi
     if (moveFocus) next.focus();
   }
 
-  function end(): void {
+  /** Takes the tour off the screen; only Done and Skip (end) also record the once-only answer. */
+  function hide(): void {
     target?.classList.remove('is-tour-target');
     target = null;
     card.hidden = true;
     ring.hidden = true;
     document.removeEventListener('keydown', onKey, true);
     window.removeEventListener('resize', onResize);
+  }
+  function end(): void {
+    hide();
     void deps.markDone().catch(() => undefined);
     (document.getElementById('chatInput') as HTMLTextAreaElement | null)?.focus();
   }
@@ -138,5 +142,7 @@ export function initTour(deps: { markDone(): Promise<boolean> }): { offer(): voi
   $('tourOfferYes').addEventListener('click', () => start());
   $('tourOfferNo').addEventListener('click', () => { offerBar.hidden = true; void deps.markDone().catch(() => undefined); });
 
-  return { offer() { offerBar.hidden = false; }, start };
+  // Leaving the chat screen (Settings, a library) ends a running tour quietly: its card would point at
+  // controls that are no longer shown. Neither Skip nor Done: Settings can still replay it.
+  return { offer() { offerBar.hidden = false; }, start, stop() { if (!card.hidden) hide(); } };
 }

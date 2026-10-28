@@ -3338,7 +3338,7 @@
   "Skip tour": "跳过导览",
   "Take the tour again": "再看一次导览",
   "A project is a folder you approve, and its chats start there.": "项目是你批准的文件夹，它的聊天从那里开始。",
-  "Review shows every change ChatGPT made to your files.": "审阅显示 ChatGPT 对你的文件做过的每一处更改。",
+  "This panel holds Review, with every change ChatGPT made to your files.": "这个面板里有审阅，列出 ChatGPT 对你的文件做过的每一处更改。",
   "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "在这里写下任务，并选择普通、计划或目标来决定 ChatGPT 的工作方式。",
   "Tour": "导览",
   "The tour choice couldn't be saved, so it may be offered again.": "无法保存你对导览的选择，所以可能会再次提示。"
