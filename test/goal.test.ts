@@ -941,6 +941,19 @@ describe('the reply', () => {
     expect(goal.goalOutcomeFor('c-met')).toMatchObject({ stage: 'no-reply', turnId: 'g-1', reply: '' });
   });
 
+  it('does not record "the goal is met" from a draft whose objective changed while it ran (CodeRabbit)', async () => {
+    const sessionId = await seed('c-met-moved');
+    await goal.setGoalObjectiveNow('c-met-moved', 'Old objective');
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    globalThis.fetch = (async () => { await gate; return stream([delta('NO_REPLY'), 'data: [DONE]\n']); }) as never;
+    goal.startGoalDraft({ sessionId, conversationId: 'c-met-moved', turnId: 'g-1' });
+    await goal.setGoalObjectiveNow('c-met-moved', 'A new objective');
+    release();
+    await settled('c-met-moved');
+    expect(goal.snapshotGoalOutcomes().outcomes.some(row => row.conversationId === 'c-met-moved')).toBe(false);
+  });
+
   it('still says "the goal is met" after a restart, until a newer draft or a switch change replaces it (2.1.47 round)', async () => {
     // Since 2.1.27 the window said "Pursuing goal" again after a restart, for a run that had ended.
     const sessionId = await seed('c-met-restart');
@@ -962,6 +975,11 @@ describe('the reply', () => {
     goal.startGoalDraft({ sessionId, conversationId: 'c-met-restart', turnId: 'g-2' });
     await settled('c-met-restart');
     expect(goal.snapshotGoalOutcomes().outcomes.some(row => row.conversationId === 'c-met-restart')).toBe(false);
+    // Saving the switch as it already is changes nothing, so the outcome stays (CodeRabbit).
+    goal.restoreGoalOutcomes(saved);
+    const same = goal.goalSwitchFor('c-met-restart');
+    await goal.setGoalSwitchNow('c-met-restart', same.mode, same.enabled);
+    expect(goal.snapshotGoalOutcomes().outcomes.some(row => row.conversationId === 'c-met-restart')).toBe(true);
     // A damaged saved file is ignored row by row.
     goal.restoreGoalOutcomes({ version: 1, savedAt: 1, outcomes: [{ conversationId: '../bad', turnId: 'g-1', model: 'm', backend: 'api', at: 1 } as never] });
     expect(goal.snapshotGoalOutcomes().outcomes).toEqual([]);
