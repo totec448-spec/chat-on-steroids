@@ -3626,7 +3626,7 @@ async function performBrowserRepairs(repairs, policy) {
         if (status?.ok === true && status.streaming === true &&
             (reason !== 'assistant-error' || status.assistantError === false)) {
           // Not a failure: ChatGPT is answering, and the app says so instead of "Reload failed".
-          await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}&why=streaming`);
+          await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}&why=streaming${status.approval === true ? '&approval=1' : ''}`);
           continue;
         }
         if (reason === 'assistant-error' && status?.ok === true && status.assistantError === false) {
