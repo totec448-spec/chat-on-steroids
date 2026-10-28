@@ -2370,6 +2370,57 @@ it('saves Auto-select Skills from Settings and restores it on state push', async
   expect(toggle.checked).toBe(false);
 });
 
+it('saves the send check address only when it is on this computer, and empty turns it off (#1794)', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const doc = w.document;
+  const field = doc.getElementById('sendCheckUrl') as HTMLInputElement;
+  const error = doc.getElementById('sendCheckUrlError')!;
+  expect(field.value).toBe('');
+  const enter = (value: string) => { field.value = value; field.dispatchEvent(new w.Event('input', { bubbles: true })); field.dispatchEvent(new w.Event('change', { bubbles: true })); };
+  enter('https://example.com/check');
+  expect(error.hidden).toBe(false);
+  expect(field.getAttribute('aria-invalid')).toBe('true');
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(mounted.calls.some(call => call.ui?.sendCheckUrl === 'https://example.com/check')).toBe(false);
+  enter(' http://127.0.0.1:8080/check ');
+  expect(error.hidden).toBe(true);
+  await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui?.sendCheckUrl).toBe('http://127.0.0.1:8080/check'), { timeout: 5_000 });
+  enter('');
+  await vi.waitFor(() => expect(mounted.calls.at(-1)?.ui).not.toHaveProperty('sendCheckUrl', 'http://127.0.0.1:8080/check'), { timeout: 5_000 });
+  expect(mounted.calls.at(-1)?.ui?.sendCheckUrl).toBeUndefined();
+  const { collectSettings, searchSettings } = await import('../src/renderer/settings-search.js');
+  expect(searchSettings(collectSettings(doc), 'automatic sends').map(entry => entry.title)).toContain('Check automatic sends');
+});
+
+it('keeps a refused send check address in the field with its error through a repaint, and shows a damaged saved one as wrong (CodeRabbit)', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const doc = w.document;
+  const field = doc.getElementById('sendCheckUrl') as HTMLInputElement;
+  const error = doc.getElementById('sendCheckUrlError')!;
+  field.focus();
+  field.value = 'https://example.com/check';
+  field.dispatchEvent(new w.Event('input', { bubbles: true }));
+  field.blur();
+  field.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await new Promise(resolve => setTimeout(resolve, 50));
+  // A state push after the (unsaved) change: the typed text and its error stay.
+  mounted.push({ ...mounted.state });
+  expect(field.value).toBe('https://example.com/check');
+  expect(error.hidden).toBe(false);
+  // Fixed by the person: the error goes with the next repaint too.
+  field.value = '';
+  field.dispatchEvent(new w.Event('input', { bubbles: true }));
+  mounted.push({ ...mounted.state });
+  expect(error.hidden).toBe(true);
+  expect(field.getAttribute('aria-invalid')).toBe('false');
+  // A saved value this computer would never accept is shown as wrong, not as fine.
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, sendCheckUrl: 'damaged' } } });
+  expect(field.value).toBe('damaged');
+  expect(error.hidden).toBe(false);
+});
+
 it('saves and restores the Code checkpoints switch on the Workspace page, and finds it in Settings search', async () => {
   const mounted = await mountChat();
   const w = mounted.window;
@@ -4165,6 +4216,90 @@ it('saves the Continue prompt from its editor, and Restore default sends the bui
   (doc.getElementById('customContinueReset') as HTMLButtonElement).click();
   await waitFor(() => expect(mounted.calls.at(-1)?.ui).toMatchObject({ customContinue: undefined }));
   expect(prompt.value).toBe('');
+});
+
+it('saves Personality and Writing style from their editors: own text, left out when empty, default again on Restore (#1856)', async () => {
+  const { DEFAULT_CHAT_PERSONALITY, DEFAULT_CHAT_WRITING_STYLE, MAX_CHAT_STYLE_CHARS } = await import('../src/shared/chat-style.js');
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const automation = doc.querySelector('[data-view="settings"]')!;
+  for (const [id, fallback] of [['chatPersonality', DEFAULT_CHAT_PERSONALITY], ['chatWritingStyle', DEFAULT_CHAT_WRITING_STYLE]] as const) {
+    const panel = doc.getElementById(`${id}Panel`)!;
+    const box = doc.getElementById(id) as HTMLTextAreaElement;
+    expect(automation.contains(box)).toBe(true);
+    expect(box.maxLength).toBe(MAX_CHAT_STYLE_CHARS);
+    expect(panel.hidden).toBe(true);
+    (doc.getElementById(`${id}Edit`) as HTMLButtonElement).click();
+    expect(panel.hidden).toBe(false);
+    // The built-in text is what it starts from, so a change edits it rather than starting blank.
+    expect(box.value).toBe(fallback);
+    // What new chats get, said under the editor once it is saved (Haz on #1859).
+    const said = () => doc.getElementById(`${id}State`)!.textContent;
+    expect(said()).toBe('New chats use the built-in text.');
+    expect(box.classList.contains('is-content-sized')).toBe(true);
+    box.value = '  Short, plain answers.  ';
+    box.dispatchEvent(new mounted.window.Event('change'));
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui[id]).toBe('Short, plain answers.'));
+    await waitFor(() => expect(said()).toBe('Saved. New chats use your text.'));
+    box.value = '   ';
+    box.dispatchEvent(new mounted.window.Event('change'));
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui[id]).toBe(''));
+    await waitFor(() => expect(said()).toBe('Saved. New chats leave this part out.'));
+    (doc.getElementById(`${id}Reset`) as HTMLButtonElement).click();
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui).toMatchObject({ [id]: undefined }));
+    expect(box.value).toBe(fallback);
+    await waitFor(() => expect(said()).toBe('New chats use the built-in text.'));
+  }
+  // Its own section, after Continuation prompts, not inside that section's card.
+  const heading = [...doc.querySelectorAll('h2')].find(node => node.textContent === 'Chat instructions')!;
+  expect(heading).toBeTruthy();
+  expect(heading.closest('.settings-surface')).toBeNull();
+  const { collectSettings, searchSettings } = await import('../src/renderer/settings-search.js');
+  expect(searchSettings(collectSettings(doc), 'writing style').map(entry => entry.title)).toContain('Writing style');
+});
+
+it('says a chat style was restored only when that save went through (#1856, CodeRabbit)', async () => {
+  const mounted = await mountChat({}, [], { saveSettings: async () => ({ ok: false, error: 'Settings could not be saved.' }) });
+  const doc = mounted.window.document;
+  (doc.getElementById('chatPersonalityReset') as HTMLButtonElement).click();
+  await new Promise(resolve => setTimeout(resolve, 20));
+  expect([...doc.querySelectorAll('.toast')].map(node => node.textContent)).not.toContain('Personality restored to default');
+});
+
+it('keeps a chat style editor open with the typed text when its save is refused, and closes it once saved (#1856, CodeRabbit)', async () => {
+  const mounted = await mountChat({}, [], { saveSettings: async () => ({ ok: false, error: 'Settings could not be saved.' }) });
+  const doc = mounted.window.document;
+  const panel = doc.getElementById('chatPersonalityPanel')!;
+  const box = doc.getElementById('chatPersonality') as HTMLTextAreaElement;
+  const close = doc.getElementById('chatPersonalityEdit') as HTMLButtonElement;
+  close.click();
+  expect(panel.hidden).toBe(false);
+  box.value = 'Answer like a calm colleague.';
+  box.dispatchEvent(new mounted.window.Event('change'));
+  close.click();
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(panel.hidden).toBe(false);
+  expect(box.value).toBe('Answer like a calm colleague.');
+  expect(close.textContent).toBe('Close prompt');
+});
+
+it('closes a chat style editor when its text was stored although a later step of that save failed (#1856, CodeRabbit)', async () => {
+  let mounted: Awaited<ReturnType<typeof mountChat>> | undefined;
+  mounted = await mountChat({}, [], { saveSettings: async (patch: any) => {
+    // Stored first, then a later side effect of the save fails: the answer says no.
+    mounted!.state.config = { ...mounted!.state.config, ...structuredClone(patch) };
+    return { ok: false, error: 'A later step of saving failed.' };
+  } });
+  const doc = mounted.window.document;
+  const panel = doc.getElementById('chatPersonalityPanel')!;
+  const box = doc.getElementById('chatPersonality') as HTMLTextAreaElement;
+  const edit = doc.getElementById('chatPersonalityEdit') as HTMLButtonElement;
+  edit.click();
+  box.value = 'Answer like a calm colleague.';
+  box.dispatchEvent(new mounted.window.Event('change'));
+  edit.click();
+  await waitFor(() => expect(panel.hidden).toBe(true));
+  expect(mounted.state.config.ui.chatPersonality).toBe('Answer like a calm colleague.');
 });
 
 it('offers the handoff length, starting at the thorough default, and saves a shorter choice', async () => {

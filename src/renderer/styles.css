@@ -285,6 +285,8 @@
 .plugin-setup-copy input { flex: 1; min-width: 0; }
 .plugin-setup-copy .btn { flex: 0 0 auto; color: var(--ink); }
 .plugin-setup-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 20px; }
+/* Turning the connection off (#1872): last and apart from the setup actions, in red like other removals. */
+.plugin-setup-actions .plugin-destructive { margin-left: auto; color: var(--red); }
 .plugin-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
 .plugin-field { display: flex; flex-direction: column; gap: 7px; margin: 16px 0; font-size: calc(12px * var(--text-scale, 1)); font-weight: 600; }
 .plugin-field input, .plugin-field select { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--edge); border-radius: var(--r-sm); background: var(--sunk); color: var(--ink); font: inherit; }
@@ -2417,6 +2419,11 @@ textarea {
 /* One instruction, not a whole prompt: a few lines are enough. */
 #customContinue { min-height: 88px; }
 
+/* Chat instructions (#1856): as tall as the text, from three lines up to most of the window, so a
+   short Personality does not open as a tall empty box; longer text scrolls inside. */
+.goal-prompt textarea.is-content-sized { field-sizing: content; min-height: calc(3lh + 18px); max-height: min(60vh, 560px); }
+.chat-style-state { margin-top: 2px; }
+
 input[readonly] {
   background: var(--sunk);
   color: var(--soft);
@@ -3738,8 +3745,8 @@ input.num:disabled { opacity: .5; cursor: default; }
 /* Phone notifications: its options continue the card's rows, and a text field sits beside its
    explanation, moving under it (with its button) when the row is narrow. */
 .phone-push-options > .setting:first-child { border-top: 1px solid var(--line); }
-.phone-push-field .phone-push-control { display: flex; flex: 1 1 280px; gap: 8px; min-width: 0; }
-.phone-push-control input { flex: 1 1 auto; min-width: 0; }
+.phone-push-field .phone-push-control, .setting-text-field .setting-text-control { display: flex; flex: 1 1 280px; gap: 8px; min-width: 0; }
+.phone-push-control input, .setting-text-control input { flex: 1 1 auto; min-width: 0; }
 .phone-push-control .btn { flex: 0 0 auto; justify-content: flex-end; text-align: end; }
 .phone-push-advanced { border-top: 1px solid var(--line); }
 .phone-push-advanced > summary { display: flex; align-items: center; gap: 6px; width: fit-content; padding: 12px 2px; cursor: pointer; color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); list-style: none; }
@@ -4569,8 +4576,13 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
   .agent-panel-row .agent-card-avatar::before { animation: none; }
   .agent-card-activity { animation: none; color: var(--soft); background: none; }
 }
-/* A failed worker's last action: where it stopped, plainly. */
-.agent-card-last { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.4; }
+/* A failed worker's last action: where it stopped, plainly. A worker's answer, and ChatGPT's approval
+   card holding it (#1831), sit on the same quiet line. */
+.agent-card-last, .agent-card-answer, .agent-card-approval { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--soft);
+  font-size: calc(12px * var(--text-scale, 1)); line-height: 1.4; }
+/* Held by the approval card: the timeline's waiting row's emphasis. A failed step: the tool row's red, without the sheen. */
+.agent-card-approval { color: var(--ink); font-weight: 500; }
+.agent-card-activity[data-tone='bad'] { animation: none; background: none; color: var(--red); }
 /* A worker's two views (#105): pills like the dock's tabs, on their own line under its name. */
 .agent-panel-header:has(.agent-panel-views) { flex-wrap: wrap; row-gap: 10px; padding-bottom: 10px; }
 .agent-panel-views { display: flex; gap: 4px; flex-basis: 100%; min-width: 0; }
@@ -5418,3 +5430,26 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .tour-step { flex: 1 1 auto; color: var(--faint); font-size: calc(12px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; }
 .tour-actions .btn { min-height: 30px; padding: 5px 12px; }
 @media (prefers-reduced-motion: reduce) { .tour-ring { transition: none; } }
+/* #1827: what a finished answer changed. One quiet line under its actions, closed; open, a row per
+   file in the edit cards' type and colors, with that file's net diff. */
+.turn-changes { margin: 6px 0 0; min-width: 0; }
+.turn-changes[hidden] { display: none; }
+.turn-changes-head { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 6px; margin-left: -6px; border-radius: var(--r-sm);
+  color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); font-variant-numeric: tabular-nums; cursor: pointer; list-style: none; }
+.turn-changes-head::-webkit-details-marker { display: none; }
+.turn-changes-head:hover { color: var(--ink); background: var(--hover); }
+.turn-changes-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn-changes-chevron { flex: none; transition: transform 140ms; }
+.turn-changes[open] > summary .turn-changes-chevron { transform: rotate(90deg); }
+.turn-changes-list { display: grid; gap: 6px; margin-top: 6px; }
+.turn-change { min-width: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--page); }
+.turn-change-head { display: flex; align-items: baseline; gap: 8px; padding: 7px 10px; cursor: pointer; list-style: none; font: calc(11px * var(--text-scale, 1)) var(--mono); }
+.turn-change-head::-webkit-details-marker { display: none; }
+.turn-change-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn-change-count { flex: none; color: var(--soft); font-variant-numeric: tabular-nums; }
+.turn-change-state { flex: none; color: var(--faint); font-family: var(--sans, inherit); }
+.turn-change[data-state='unchanged'] .turn-change-path { color: var(--faint); }
+.turn-change > .unified-diff { border-top: 1px solid var(--line); }
+.turn-change > .unified-diff > .meta { margin: 0; padding: 8px 10px; }
+.turn-changes-review { justify-self: start; }
+@media (prefers-reduced-motion: reduce) { .turn-changes-chevron { transition: none; } }

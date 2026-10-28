@@ -1160,6 +1160,48 @@ describe("a new chat's first message held for its project's ChatGPT Project", ()
   });
 });
 
+it('says when the send check holds an automatic message, with its reason', async () => {
+  // #1794: a held Continue or fresh turn shows why it waits, so the person can cancel it or fix the program.
+  const asked = Date.now() - 12_000;
+  const { w, live, append } = await boot([
+    { kind: 'user_message', seq: 1, origin: 1, time: asked, source: 'extension', messageId: 'q-held', message: text('Build it') }
+  ]);
+  const api = (w as any).api;
+  const chat = await import('../src/renderer/chat.js');
+  const state = (await api.getState()).data;
+  const checked = (url: string | undefined) => chat.chatApply({ ...state, bridge: { ...state.bridge, present: true },
+    config: { ...state.config, ui: { ...state.config.ui, sendCheckUrl: url } } });
+  checked('http://127.0.0.1:8123/check');
+  const hold = (attempt: number, reason: string, answered: boolean) => ({ attempt, nextAt: Date.now() + 30_000, reason, answered });
+  const held: InputEntry = { id: 'held-one', sessionId: summary(live.events).id, state: 'queued', owner: null, text: 'Continue',
+    mode: 'after-turn', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: 'chat-a',
+    recovery: { questionId: 'q-held', pro: false, busyUntil: 0, phase: 'ready' }, sendCheck: hold(2, 'quiet hours', true) };
+  const card = () => w.document.querySelector('#finishQueue .queued-input')!.textContent ?? '';
+  live.inputs.push(held);
+  await append([]); await append([]);
+  expect(card()).toContain('Held by your send check: quiet hours');
+  live.inputs[0] = { ...held, sendCheck: hold(3, '', false) };
+  await append([]); await append([]);
+  expect(card()).toContain('Held: your send check did not answer');
+  live.inputs[0] = { ...held, sendCheck: hold(4, '', true) };
+  await append([]); await append([]);
+  expect(card()).toContain('Held by your send check');
+  // The fresh turn after a long one waits in the message queue, and says the same there.
+  live.inputs[0] = { id: 'rotation-one', sessionId: summary(live.events).id, state: 'queued', owner: null, text: 'Continue in a fresh turn',
+    mode: 'auto', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: 'chat-a', purpose: 'rotation',
+    authoredSource: 'none', sendCheck: hold(1, 'budget', true) };
+  await append([]); await append([]);
+  expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').toContain('Held by your send check: budget');
+  // The person clears the check's address: the app releases the message at once, and the queue stops saying it is held (CodeRabbit).
+  checked(undefined); await append([]); await append([]);
+  expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').not.toContain('Held');
+  // A hold whose next ask has come is no longer a hold either.
+  checked('http://127.0.0.1:8123/check');
+  live.inputs[0] = { ...live.inputs[0]!, sendCheck: { attempt: 2, nextAt: Date.now() - 1, reason: 'budget', answered: true } };
+  await append([]); await append([]);
+  expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').not.toContain('Held');
+});
+
 it('says why a queued message waits: no extension, or a running tool call', async () => {
   const asked = Date.now() - 12_000;
   const { w, live, append } = await boot([
@@ -8564,4 +8606,131 @@ describe('a formula in an answer', () => {
     expect(rightClick(w, paragraph.querySelector('.math-inline.is-source')!)).toBe(false);
     expect(w.document.querySelector('.row-menu')).toBeNull();
   });
+});
+
+// #1827 (Haz's review): one collapsed "Changed files" summary under a finished answer that edited files.
+it("sums up what a finished answer changed, collapsed, counting only real changes, with each file's net diff and Open in Review", async () => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Repo', path: '/repo', createdAt: 1 };
+  const { w, append } = await boot([], true, [], [project]);
+  const api = (w as any).api;
+  const changes = [
+    { path: 'src/app.ts', state: 'edited', added: 30, removed: 5, approximate: false, diff: 'kept', edits: 3 },
+    { path: 'src/new-page.ts', state: 'created', added: 12, removed: 0, approximate: false, diff: 'kept', edits: 1 },
+    { path: 'old/helper.ts', state: 'unchanged', added: 0, removed: 0, approximate: false, diff: 'kept', edits: 2 },
+    { path: 'big.json', state: 'edited', added: 400, removed: 2, approximate: true, diff: 'too-large', edits: 1 }
+  ];
+  api.turnChanges = vi.fn(async () => ({ ok: true, data: { changes, total: 4 } }));
+  api.turnFileDiff = vi.fn(async () => ({ ok: true, data: { before: 'a\n', after: 'a\nb\n' } }));
+  const edit = (seq: number, path: string, kind: 'edit' | 'create', agent?: string): SessionEvent => {
+    const call = toolCall(seq, `edit-${seq}`) as Extract<SessionEvent, { kind: 'tool_call' }>;
+    return { ...call, turnId: 't-edit', ...(agent ? { agent } : {}), call: { ...call.call, tool: 'apply_patch', summary: { kind, tone: 'good', title: `Edited ${path}` },
+      changes: [{ path, added: 1, removed: 0, approximate: false, reviewAssetId: `asset-${seq}` }] } } as SessionEvent;
+  };
+  const answer = (seq: number): SessionEvent => ({ seq, time: T0 + seq * 1000, source: 'extension', kind: 'assistant_message', turnId: 't-edit',
+    messageId: 'answer-edit', message: text('Done: three files.'), final: true, state: 'final' } as SessionEvent);
+  await append([
+    { seq: 10, time: T0 + 10_000, source: 'extension', kind: 'turn_start', turnId: 't-edit' } as SessionEvent,
+    edit(11, 'src/app.ts', 'edit'), edit(12, 'src/new-page.ts', 'create'), answer(13)
+  ]);
+  // Still running: no card yet, so it never changes under the reader.
+  expect(w.document.querySelector('.turn-changes')).toBeNull();
+  await append([{ seq: 14, time: T0 + 14_000, source: 'extension', kind: 'turn_end', turnId: 't-edit', outcome: 'completed' } as SessionEvent]);
+  await append([]);
+  const card = w.document.querySelector<HTMLDetailsElement>('.turn-changes')!;
+  expect(card).not.toBeNull();
+  expect(api.turnChanges).toHaveBeenCalledWith(expect.any(String), 't-edit', 10);
+  // Collapsed, even for a few files; the headline counts net changes only, and says the rest.
+  expect(card.open).toBe(false);
+  expect(card.querySelector('summary')!.textContent).toBe('Changed 3 files · +442 −7 (approx.) · 1 put back');
+  card.open = true; card.dispatchEvent(new w.Event('toggle'));
+  const rows = [...card.querySelectorAll<HTMLDetailsElement>('.turn-change')];
+  expect(rows.map(row => row.querySelector('summary')!.textContent)).toEqual([
+    'src/app.ts+30 −5edited', 'src/new-page.ts+12created', 'old/helper.tsno net change', 'big.json+400 −2 (approx.)edited'
+  ]);
+  // A file's net diff loads when its row opens; one the recording did not keep says so.
+  rows[0]!.open = true; rows[0]!.dispatchEvent(new w.Event('toggle'));
+  await settle();
+  expect(api.turnFileDiff).toHaveBeenCalledWith(expect.any(String), 't-edit', 10, 'src/app.ts');
+  rows[3]!.open = true; rows[3]!.dispatchEvent(new w.Event('toggle'));
+  await settle();
+  expect(rows[3]!.textContent).toContain('Diff unavailable: this edit was too large to keep');
+  expect(api.turnFileDiff).toHaveBeenCalledTimes(1);
+  expect(card.querySelector('.turn-changes-review')!.textContent).toBe('Open in Review');
+});
+
+// CodeRabbit on #1836: a long turn's early edits can be outside the loaded page; a turn can gain an edit
+// after its card loaded; a turn can start again after it ended.
+it('asks for the card of an answer whose turn start is not loaded, and shows none when it edited nothing', async () => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  api.turnChanges = vi.fn(async () => ({ ok: true, data: { changes: [{ path: 'early.ts', state: 'edited', added: 2, removed: 1, approximate: false, diff: 'kept', edits: 1 }], total: 1 } }));
+  await append([
+    { seq: 501, time: T0 + 501_000, source: 'extension', kind: 'assistant_message', turnId: 't-long', messageId: 'a-long', message: text('All done.'), final: true, state: 'final' } as SessionEvent,
+    { seq: 502, time: T0 + 502_000, source: 'extension', kind: 'turn_end', turnId: 't-long', outcome: 'completed' } as SessionEvent
+  ]);
+  await append([]);
+  expect(api.turnChanges).toHaveBeenCalledWith(expect.any(String), 't-long', 0);
+  expect(w.document.querySelector('.turn-changes')?.textContent).toContain('Changed 1 file');
+});
+
+it('reads a reopened turn from its first start when only the reopening is loaded (CodeRabbit)', async () => {
+  // The first turn_start and its edits left the loaded page; the app-authored reopening (with \`detail\`) is still there.
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  api.turnChanges = vi.fn(async () => ({ ok: true, data: { changes: [{ path: 'early.ts', state: 'edited', added: 2, removed: 1, approximate: false, diff: 'kept', edits: 1 }], total: 1 } }));
+  await append([
+    { seq: 700, time: T0 + 700_000, source: 'app', kind: 'turn_start', turnId: 't-reopened', detail: 'a tool call proved the turn was still running' } as SessionEvent,
+    { seq: 701, time: T0 + 701_000, source: 'extension', kind: 'assistant_message', turnId: 't-reopened', messageId: 'a-reopened', message: text('All done.'), final: true, state: 'final' } as SessionEvent,
+    { seq: 702, time: T0 + 702_000, source: 'extension', kind: 'turn_end', turnId: 't-reopened', outcome: 'completed' } as SessionEvent
+  ]);
+  await append([]);
+  // Not from 700: that would leave out every edit made before the reopening.
+  expect(api.turnChanges).toHaveBeenCalledWith(expect.any(String), 't-reopened', 0);
+  expect(w.document.querySelector('.turn-changes')?.textContent).toContain('Changed 1 file');
+});
+
+it('refreshes the card when its finished turn gains another edit, and hides it while the turn runs again', async () => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  let files = 1;
+  api.turnChanges = vi.fn(async () => ({ ok: true, data: { changes: Array.from({ length: files }, (_, i) => ({ path: `f${i}.ts`, state: 'edited', added: 1, removed: 0, approximate: false, diff: 'kept', edits: 1 })), total: files } }));
+  const edit = (seq: number, path: string): SessionEvent => {
+    const call = toolCall(seq, `edit-late-${seq}`) as Extract<SessionEvent, { kind: 'tool_call' }>;
+    return { ...call, turnId: 't-late', call: { ...call.call, tool: 'apply_patch', summary: { kind: 'edit', tone: 'good', title: `Edited ${path}` },
+      changes: [{ path, added: 1, removed: 0, approximate: false, reviewAssetId: `asset-${seq}` }] } } as SessionEvent;
+  };
+  await append([
+    { seq: 600, time: T0 + 600_000, source: 'extension', kind: 'turn_start', turnId: 't-late' } as SessionEvent,
+    edit(601, 'f0.ts'),
+    { seq: 602, time: T0 + 602_000, source: 'extension', kind: 'assistant_message', turnId: 't-late', messageId: 'a-late', message: text('Done.'), final: true, state: 'final' } as SessionEvent,
+    { seq: 603, time: T0 + 603_000, source: 'extension', kind: 'turn_end', turnId: 't-late', outcome: 'completed' } as SessionEvent
+  ]);
+  await append([]);
+  expect(w.document.querySelector('.turn-changes')?.textContent).toContain('Changed 1 file');
+  files = 2;
+  await append([edit(604, 'f1.ts')]);
+  await append([]);
+  expect(w.document.querySelector('.turn-changes')?.textContent).toContain('Changed 2 files');
+  // The same turn starts again: its card waits until it is over again.
+  await append([{ seq: 605, time: T0 + 605_000, source: 'extension', kind: 'turn_start', turnId: 't-late' } as SessionEvent]);
+  await append([]);
+  expect(w.document.querySelector('.turn-changes')).toBeNull();
+});
+
+it('shows no Changed files card for a turn whose only edits were a worker\'s, or that edited nothing', async () => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  api.turnChanges = vi.fn(async () => ({ ok: true, data: { changes: [], total: 0 } }));
+  const worker = toolCall(21, 'worker-edit') as Extract<SessionEvent, { kind: 'tool_call' }>;
+  await append([
+    { seq: 20, time: T0 + 20_000, source: 'extension', kind: 'turn_start', turnId: 't-w' } as SessionEvent,
+    { ...worker, turnId: 't-w', agent: 'worker-1', call: { ...worker.call, tool: 'apply_patch', summary: { kind: 'edit', tone: 'good', title: 'Edited a.ts' },
+      changes: [{ path: 'a.ts', added: 1, removed: 0, approximate: false }] } } as SessionEvent,
+    { ...toolCall(22, 'read-only'), turnId: 't-w' } as SessionEvent,
+    { seq: 23, time: T0 + 23_000, source: 'extension', kind: 'assistant_message', turnId: 't-w', messageId: 'a-w', message: text('Read it.'), final: true, state: 'final' } as SessionEvent,
+    { seq: 24, time: T0 + 24_000, source: 'extension', kind: 'turn_end', turnId: 't-w', outcome: 'completed' } as SessionEvent
+  ]);
+  await append([]);
+  expect(w.document.querySelector('.turn-changes')).toBeNull();
+  expect(api.turnChanges).not.toHaveBeenCalled();
 });

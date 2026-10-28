@@ -241,6 +241,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Config/security | `src/main/config.ts`, `platform.ts`, `secrets.ts`, `sandbox.ts`, `redaction.ts`; `src/shared/types.ts`, `capabilities.ts`: permission and host projection, secrets, approved paths. |
 | Publication | `src/main/connection.ts`, `mcp/server.ts`, `mcp/surfaces.ts`, `tunnel/{index,health,locate}.ts`, `diagnostics.ts`: endpoint/tunnel generation and truthful status. |
 | Local control API | `src/main/control-api.ts`, `src/main/control-reads.ts`, `src/main/control-actions.ts`, `src/shared/control-api.ts`: opt-in loopback listener, per-launch token, allowlisted read-only projections of other owners, and (behind `controlApi.allowActions`) send and cancel through the outbox and Stop through `stopSessionTurn`. Owns no fact. The session list and event page it serves come from `session/read-model.ts`, the same functions the renderer's IPC handlers call. |
+| Send check (#1794) | `src/main/send-check.ts`, `src/shared/send-check.ts`; gates in `bridge.ts` (`/input/claim`, `/commands/redeem`), `goal.ts` (`sendCheckAllows`), `session/finish.ts`, `mcp/tools-core.ts` (agents `message`) |
 | Tool dispatch | `src/main/mcp/{tools,kernel,inbound,call-context,tool-declarations}.ts`, `tools-core.ts`, `tools-desktop.ts`, `tools-plugins.ts`: declarations, exact caller, live guards and evidence. |
 | Code composition | `src/main/mcp/code-mode-{tool,runtime,worker}.ts`: surface-scoped `exec`, QuickJS admission, limits and explicit emissions. |
 | Instructions/plan | `src/main/mcp/{instructions,coding-instructions,plan-tool}.ts`, `src/shared/agent-plan.ts`, `src/renderer/agent-plan.ts`: executor contract and displayed progress plan. |
@@ -469,7 +470,12 @@ not intercepted.
 
 `mcp/coding-instructions.ts` contains adapted upstream collaboration prose with provenance;
 `mcp/instructions.ts` adds currently available local-tool guidance and the user's bounded
-standing additions. There is no extra instructions tool or per-chat “already sent prompt” flag.
+standing additions. Its Personality and Writing style parts (#1856) live in `src/shared/chat-style.ts`
+and are the person's to replace (`ui.chatPersonality`, `ui.chatWritingStyle`, Settings → Agents &
+automation → Chat instructions): absent is the built-in text, `''` leaves that part out with its
+heading, and a `# ` heading typed into one becomes `## `, so it cannot pose as a fixed section.
+Everything else in that prose stays fixed. The plugin schema hash covers tools only, so an edit
+needs no plugin refresh; it reaches new chats' first messages and the MCP instructions. There is no extra instructions tool or per-chat “already sent prompt” flag.
 
 The whole message has a **96,000 UTF-16-character ceiling**, plus the input transport's UTF-8
 byte envelope. For eligible openings, authored work, complete Core instructions and selected
@@ -3464,6 +3470,41 @@ Block persists the exact conversation's local-tool refusal across all MCP surfac
 user release/deletion removes it. It does not remotely terminate ChatGPT or erase history.
 Neither action may spill into another local session merely because labels or timing match.
 
+### Send check: a local veto before automatic sends (#1794)
+
+`ui.sendCheckUrl` (Settings → General → For developers → Check automatic sends) names a program on
+this computer (`http://127.0.0.1|localhost|[::1]:<port>/…`, see `src/shared/send-check.ts`). Empty is
+off. When it is set, every send the app makes by itself is asked about first with one `POST`:
+`{ version: 1, kind, id, chat: { session, project, worker }, text, attempt }`. The kinds are
+`goal-step`, `loop-step`, `continue` (automatic Continue), `fresh-turn` (rotation and its after-Stop
+continue), `worker-start` and `worker-message`. A message a person sends is never asked about, and
+neither are Stop or anything clicked in ChatGPT.
+
+- **Veto-only.** `200 {allow:true}` lets the send go; `200 {allow:false, reason?}` holds it. Anything
+  else (no answer within 3 s, an error, another status or body, a redirect) holds it too: a crashed
+  checker never opens the gate. A saved address that is not on this computer is never contacted and
+  holds. The answer can never change the text, model or target.
+- **One log line per decision**, never with the message: `send check: <kind> <id> attempt N allowed|held (why)`.
+- **Where it is asked**, each before anything is typed or filed:
+  - Outbox rows (`continue`, `fresh-turn`): in `/input/claim` before `claimBrowserInput`, outside the
+    queue's lock. A hold stores `sendCheck {attempt, nextAt, reason, answered}` on the row;
+    `pendingBrowserInputs` and `pendingQueuedPickups` skip it until `nextAt` (30 s), so a held row is
+    neither offered nor taken for a failed pickup. Clearing the address releases it at once. The row
+    must still be queued with the same text after the ask, or it is asked about again.
+  - Goal/Loop steps: in `goal.ts run()` after the step is written, before it is settled `ready`. A hold
+    keeps the draft and asks again every 30 s with the same `id` (the draft token); it stops asking
+    while the chat's Goal/Loop is off and ends when the draft is no longer this chat's.
+  - Session Finish steps: in `finish.ts` before `enqueueInput`, asked once, because the step can reach
+    ChatGPT in that tool call's own result. A hold queues nothing and releases the finish hold, so
+    ChatGPT finishes its answer instead of calling session_finish again to be asked again.
+  - Worker start and wake: in `/commands/redeem` after the text is final. A hold answers the page
+    `503 send_check_held` (retryable), asks at most every 30 s, and sets `lastError`, so a command
+    whose deadline ends while held reports the hold. An allowed text is not asked about again.
+  - Messages to a worker (agents `message`): before staging. One held message fails the whole call
+    and nothing is queued. Messages to the prime are not asked about.
+- Not in phase 1: Compact & Resume prompts, the Goal helper's Temporary Chat, `/goal/open` opening
+  messages, and events about what happened after a send (#82).
+
 ## 15. Compact & Resume: same session, new frontend
 
 **Intent:** preserve one local session S, its project, history, input queue, prime/worker family
@@ -4898,6 +4939,14 @@ only the bounded viewport. Unavailable reads reset lazy-load admission so closin
 retries, while a pending or successful read remains single-flight/cached. Inline syntax uses the
 file viewer's palette in the selected theme; dark overrides are scoped to dark mode for both
 surfaces. The existing Review dock remains available.
+Per answer (#1827, `main/session/turn-changes.ts`): `sessions:turnChanges` { sessionId, turnId, from }
+groups a turn's successful recorded edits by path (first-change order, the prime's own calls only,
+never a `worker-N` agent's) and gives each file one net diff, the first edit's before against the
+last edit's after, read from the review assets by id (`readEditReviewAsset`), counted with
+`lineDelta`: `edited`, `created`, `deleted` or `unchanged` (put back, or made and removed). An end the
+recording did not keep falls back to the summed recorded counts, marked approximate, with `diff`
+saying why. At most 50 files; `total` says how many there are. `sessions:turnFileDiff` adds `path`
+and returns that net before/after. `from` is the turn's first sequence number, so the read starts there.
 
 Unchanged session/directory updates preserve preview DOM and pending code loads. File reads keep
 the previous accepted preview until replacement content is ready; hidden previews stay hidden.

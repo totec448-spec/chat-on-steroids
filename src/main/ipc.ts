@@ -1,3 +1,4 @@
+import { MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
 import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
 import { forgetSurfaceTokens } from './mcp/persistent-paths.js';
 import { firefoxAddonUrl } from '../shared/firefox-addon.js';
@@ -144,8 +145,11 @@ import {
   setRecordingStorageLimit,
   readHandoff,
   readToolEditReview,
+  readEditReviewAsset,
+  readEvents,
   withSessionMutationFence
 } from './session/store.js';
+import { netTurnChanges, netTurnFileDiff, turnFileEdits, type EditAt } from './session/turn-changes.js';
 import { forgetSession, notifyChanged, onSessionChange } from './session/recorder.js';
 import { findInSession, locateMessage, locateSearchMatch, searchSessions } from './session/search.js';
 import { listBookmarks, setBookmark } from './session/bookmarks.js';
@@ -251,6 +255,11 @@ const settingsPatch = z.object({
     playfulContinue: z.boolean().optional(),
     announceTurns: z.boolean().optional(),
     customContinue: z.string().trim().max(CUSTOM_CONTINUE_MAX_CHARS).optional(),
+    // #1856: absent is the built-in text; '' leaves that part out.
+    chatPersonality: z.string().trim().max(MAX_CHAT_STYLE_CHARS).optional(),
+    chatWritingStyle: z.string().trim().max(MAX_CHAT_STYLE_CHARS).optional(),
+    // #1794: the renderer saves only an address on this computer; main checks it again before use.
+    sendCheckUrl: z.string().trim().max(300).optional(),
     followOutput: z.boolean().optional(),
     mentionCore: z.boolean().optional(),
     mentionPlugins: z.boolean().optional(),
@@ -468,6 +477,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       announceTurns: pick(current.ui.announceTurns, base.ui.announceTurns, wanted.ui.announceTurns),
       // An emptied field means the built-in phrases again.
       customContinue: pick(current.ui.customContinue, base.ui.customContinue, wanted.ui.customContinue || undefined),
+      // Unlike the Continue prompt, an emptied part is kept as '': it means "leave this part out".
+      chatPersonality: pick(current.ui.chatPersonality, base.ui.chatPersonality, wanted.ui.chatPersonality),
+      chatWritingStyle: pick(current.ui.chatWritingStyle, base.ui.chatWritingStyle, wanted.ui.chatWritingStyle),
+      // An emptied address turns the send check off.
+      sendCheckUrl: pick(current.ui.sendCheckUrl, base.ui.sendCheckUrl, wanted.ui.sendCheckUrl || undefined),
       followOutput: pick(current.ui.followOutput, base.ui.followOutput, wanted.ui.followOutput),
       mentionCore: pick(current.ui.mentionCore, base.ui.mentionCore, wanted.ui.mentionCore),
       mentionPlugins: pick(current.ui.mentionPlugins, base.ui.mentionPlugins, wanted.ui.mentionPlugins),
@@ -1449,6 +1463,44 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { projectId, path, baseRef, expectedRevision } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1),
       baseRef: z.string().min(1).max(256).optional(), expectedRevision: z.string().length(64).regex(/^[0-9a-f]+$/).optional() }).strict().parse(payload);
     return readProjectGitDiff(projectId, path, baseRef, expectedRevision);
+  });
+  // #1827: what one answer changed, per file, read from the turn's start on.
+  const turnChangesRequest = z.object({ sessionId: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i), turnId: z.string().min(1).max(256),
+    from: z.number().int().nonnegative() });
+  // Read once for a turn's card and each of its files' diffs, not once per request; any change to
+  // the chat reads it again, since a turn can still gain an edit.
+  const turnEditsRead = new Map<string, Promise<ReturnType<typeof turnFileEdits>>>();
+  onSessionChange(change => {
+    for (const key of [...turnEditsRead.keys()])
+      if (!change.sessionIds || change.sessionIds.some(id => key.startsWith(`${id}\0`))) turnEditsRead.delete(key);
+  });
+  const turnEdits = (request: z.infer<typeof turnChangesRequest>) => {
+    const key = `${request.sessionId}\0${request.turnId}\0${request.from}`;
+    let read = turnEditsRead.get(key);
+    if (!read) {
+      read = readEvents(request.sessionId, { from: request.from, kinds: ['tool_call'] }).then(events => turnFileEdits(events, request.turnId));
+      turnEditsRead.set(key, read);
+      read.catch(() => turnEditsRead.delete(key));
+      if (turnEditsRead.size > 64) turnEditsRead.delete(turnEditsRead.keys().next().value!);
+    }
+    return read;
+  };
+  /** A malformed request is refused with one fixed log line, never its paths or ids. */
+  const turnRequest = <T extends z.ZodTypeAny>(channel: string, schema: T, payload: unknown): z.infer<T> => {
+    const parsed = schema.safeParse(payload);
+    if (parsed.success) return parsed.data;
+    logWarn(`ipc: ${channel} refused: invalid_payload`);
+    throw new Error('The request was not valid.');
+  };
+  const reviewOf = (sessionId: string) => (at: EditAt) => at.assetId ? readEditReviewAsset(sessionId, at.assetId) : Promise.resolve(null);
+  handle('sessions:turnChanges', async payload => {
+    const request = turnRequest('sessions:turnChanges', turnChangesRequest.strict(), payload);
+    const files = await turnEdits(request);
+    return { changes: await netTurnChanges(files, reviewOf(request.sessionId)), total: files.length };
+  });
+  handle('sessions:turnFileDiff', async payload => {
+    const request = turnRequest('sessions:turnFileDiff', turnChangesRequest.extend({ path: z.string().min(1).max(4096) }).strict(), payload);
+    return netTurnFileDiff(await turnEdits(request), request.path, reviewOf(request.sessionId));
   });
   handle('checkpoints:restore', async payload => {
     const { projectId, checkpointId, paths, expectedRevision } = z.object({ projectId: projectFileId,

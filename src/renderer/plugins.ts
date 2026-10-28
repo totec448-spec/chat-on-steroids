@@ -87,7 +87,7 @@ function showConnection(): void {
   if (!appState) { toast(t("Connection settings are still loading.")); return; }
   const { config, hasApiKey, status } = appState;
   const surface = status.surfaces.find(item => item.id === 'plugins');
-  const { body } = dialog(() => t("Plugin setup"));
+  const { box, body } = dialog(() => t("Plugin setup"));
   body.append(el('p', '', () => t("Connect once. Your enabled plugins share this one plugin in ChatGPT.")));
   const connectionStatus = el('p', 'plugin-setup-status'); connectionStatus.id = 'pluginSetupStatus'; body.append(connectionStatus);
   const copy = (label: string, value: string) => {
@@ -128,7 +128,22 @@ function showConnection(): void {
     }
     const next = await run(window.api.connect());
     if (next) { applyAppState(next); applyPluginsState(next); toast(t("Plugin connection saved")); }
-  }, true)); body.append(actions);
+  }, true));
+  // A saved ID can be cleared again (#1872): Plugins is optional, and a tunnel OpenAI doesn't know
+  // otherwise leaves a failing connection behind. Installed plugins and the other surfaces stay.
+  if (config.tunnel.kind === 'openai' && config.tunnel.pluginsTunnelId?.trim()) {
+    const off = button(() => t("Turn off Plugins connection"), async () => {
+      if (!appState) return;
+      const { capabilities, readOnly, commandAllowlist, tunnel: previousTunnel, ui, sessions, compaction, multiAgent, goal, mcp } = appState.config;
+      const base: SettingsPatch = { capabilities, readOnly, commandAllowlist, tunnel: previousTunnel, ui, sessions, compaction, multiAgent, goal, mcp };
+      const next = await run(window.api.saveSettings({ ...base, tunnel: { ...previousTunnel, pluginsTunnelId: '' } }, base));
+      if (!next) return;
+      applyAppState(next); applyPluginsState(next); box.close(); toast(t("Plugins connection turned off"));
+    });
+    off.classList.add('plugin-destructive');
+    actions.append(off);
+  }
+  body.append(actions);
   applyPluginsState(appState);
 }
 function renderInstalled(): void {
