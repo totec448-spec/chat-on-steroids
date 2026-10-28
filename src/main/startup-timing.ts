@@ -34,6 +34,8 @@ function validRun(value: unknown): StartupRun | null {
     if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return null;
     steps[step] = ms;
   }
+  // Saved only from "usable" on (see mark), so a run without that step is damage, not a start.
+  if (steps[USABLE] === undefined) return null;
   return { at: row.at, version: row.version.slice(0, 40), steps };
 }
 
