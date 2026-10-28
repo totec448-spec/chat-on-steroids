@@ -8760,8 +8760,9 @@ it('jumps between your own messages with Alt+↑ / Alt+↓, marked like a search
   expect(own[1]!.classList.contains('is-search-hit')).toBe(true);
   press('ArrowDown');
   expect(scrolled).toEqual(['Second']);
-  // In the message box the keys stay the box's own.
+  // In the message box the keys stay the box's own, and in the sidebar they move a chat or project.
   press('ArrowUp', doc.getElementById('chatInput')!);
+  press('ArrowUp', doc.querySelector('.sidebar') ?? doc.body);
   expect(scrolled).toEqual(['Second']);
   // Other modifiers are not this shortcut.
   doc.body.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, shiftKey: true, bubbles: true }));
