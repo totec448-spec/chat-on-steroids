@@ -3331,7 +3331,7 @@
   "Touched {0} files, no net change": "{0} Dateien angefasst, keine Änderung unterm Strich",
   "Touched {0} files, no net change|one": "{0} Datei angefasst, keine Änderung unterm Strich",
   "Review each Goal step's changes": "Änderungen jedes Goal-Schritts prüfen",
-  "After a Goal step edits files, a reviewer worker checks those edits and its findings go into the next step. Each reviewed step takes longer and uses more of your ChatGPT usage. Only edits made with the edit tools are reviewed, not files changed by commands. Not used in Loop.": "Wenn ein Goal-Schritt Dateien bearbeitet, prüft ein Reviewer-Worker diese Änderungen, und seine Befunde gehen in den nächsten Schritt. Jeder geprüfte Schritt dauert länger und verbraucht mehr von deiner ChatGPT-Nutzung. Geprüft werden nur Änderungen mit den Bearbeitungswerkzeugen, nicht Dateien, die Befehle geändert haben. Nicht in Loop.",
+  "A reviewer worker checks each Goal step's edits; its findings go into the next step. Uses more of your ChatGPT usage and covers only edits made with the edit tools.": "Ein Reviewer-Worker prüft die Änderungen jedes Goal-Schritts; seine Befunde gehen in den nächsten Schritt. Verbraucht mehr von deiner ChatGPT-Nutzung und prüft nur Änderungen mit den Bearbeitungswerkzeugen.",
   "Same model as the Goal chat": "Dasselbe Modell wie der Goal-Chat",
   "Sub-agents are off": "Unteragenten sind aus",
   "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "Der Reviewer läuft als Worker-Chat und braucht deshalb Unteragenten. Bis sie an sind, wird nichts geprüft.",

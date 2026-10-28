@@ -3266,7 +3266,7 @@
   "{0} more not listed": "另有 {0} 個未列出",
   "Touched {0} files, no net change": "變動了 {0} 個檔案，沒有淨變化",
   "Review each Goal step's changes": "檢查每個目標步驟的變更",
-  "After a Goal step edits files, a reviewer worker checks those edits and its findings go into the next step. Each reviewed step takes longer and uses more of your ChatGPT usage. Only edits made with the edit tools are reviewed, not files changed by commands. Not used in Loop.": "目標步驟編輯檔案後，一個審查子代理會檢查這些變更，發現的問題會寫進下一步。每個被審查的步驟會更慢，也會消耗更多 ChatGPT 用量。只審查透過編輯工具做的變更，不審查指令改動的檔案。循環中不使用。",
+  "A reviewer worker checks each Goal step's edits; its findings go into the next step. Uses more of your ChatGPT usage and covers only edits made with the edit tools.": "一個審查子代理會檢查每個目標步驟的變更，發現的問題會寫進下一步。會消耗更多 ChatGPT 用量，且只審查透過編輯工具做的變更。",
   "Same model as the Goal chat": "與目標聊天相同的模型",
   "Sub-agents are off": "子代理已關閉",
   "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "審查者以子代理聊天執行，因此需要子代理。開啟之前不會審查任何內容。",

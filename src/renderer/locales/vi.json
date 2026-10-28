@@ -3266,7 +3266,7 @@
   "{0} more not listed": "còn {0} tệp không liệt kê",
   "Touched {0} files, no net change": "Đã chạm {0} tệp, không có thay đổi thực",
   "Review each Goal step's changes": "Xem lại thay đổi của từng bước Goal",
-  "After a Goal step edits files, a reviewer worker checks those edits and its findings go into the next step. Each reviewed step takes longer and uses more of your ChatGPT usage. Only edits made with the edit tools are reviewed, not files changed by commands. Not used in Loop.": "Khi một bước Goal sửa tệp, một worker xem lại sẽ kiểm tra các thay đổi đó và những gì nó phát hiện được đưa vào bước tiếp theo. Mỗi bước được xem lại mất nhiều thời gian hơn và dùng nhiều lượt ChatGPT hơn. Chỉ các thay đổi bằng công cụ chỉnh sửa được xem lại, không phải tệp do lệnh thay đổi. Không dùng trong Loop.",
+  "A reviewer worker checks each Goal step's edits; its findings go into the next step. Uses more of your ChatGPT usage and covers only edits made with the edit tools.": "Một worker đánh giá kiểm tra các thay đổi của từng bước Goal; các phát hiện được đưa vào bước tiếp theo. Dùng nhiều mức sử dụng ChatGPT hơn và chỉ xét các thay đổi làm bằng công cụ chỉnh sửa.",
   "Same model as the Goal chat": "Cùng mô hình với cuộc trò chuyện Goal",
   "Sub-agents are off": "Tác nhân phụ đang tắt",
   "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "Người xem lại chạy như một cuộc trò chuyện worker, nên cần Tác nhân phụ. Chưa bật thì chưa có gì được xem lại.",

@@ -34,7 +34,7 @@ function tools() {
   const caps = { ...defaultConfig().capabilities, edit: true, create: true, command: true };
   const registrar = createRegistrar(server as never, { roots: [], caps, readOnly: false }, 'core');
   const tool = (name: string, readOnly: boolean) => registrar.register(name, {
-    description: name, inputSchema: z.object({}),
+    description: name, inputSchema: z.object({ action: z.string().optional(), cmd: z.string().optional() }),
     ...(readOnly ? { annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } } : {})
   }, async () => { ran.calls.push(name); return ok(`${name} ran`); });
   tool('apply_patch', false);
@@ -42,7 +42,7 @@ function tools() {
   tool('exec_command', false);
   tool('agents', false);
   tool('click', false);
-  return (name: string, chat: string) => withInboundRequestId(`req-${chat}`, () => calls.get(name)!({}));
+  return (name: string, chat: string, args: object = {}) => withInboundRequestId(`req-${chat}`, () => calls.get(name)!(args));
 }
 
 it('refuses every tool that changes things in the reviewer\'s own chat, before it runs', async () => {
@@ -50,15 +50,32 @@ it('refuses every tool that changes things in the reviewer\'s own chat, before i
   for (const name of ['apply_patch', 'click']) {
     const result = await call(name, 'chat-reviewer');
     expect(result.isError).toBe(true);
-    expect(result.content[0]!.text).toContain(`TOOL_DISABLED: ${name} is not available to the Goal step reviewer, which only reads`);
+    expect(result.content[0]!.text).toContain(`TOOL_DISABLED: ${name} is not available to the Goal step reviewer`);
   }
   expect(ran.calls).toEqual([]);
 });
 
 it('lets the reviewer read, run commands and report', async () => {
   const call = tools();
-  for (const name of ['read_file', 'exec_command', 'agents']) expect((await call(name, 'chat-reviewer')).isError).not.toBe(true);
-  expect(ran.calls).toEqual(['read_file', 'exec_command', 'agents']);
+  for (const name of ['read_file', 'exec_command']) expect((await call(name, 'chat-reviewer')).isError).not.toBe(true);
+  for (const action of ['status', 'finish']) expect((await call('agents', 'chat-reviewer', { action })).isError).not.toBe(true);
+  expect(ran.calls).toEqual(['read_file', 'exec_command', 'agents', 'agents']);
+});
+
+it('never lets the reviewer start or message other workers (Haz on #1879)', async () => {
+  // A reviewer that could spawn or wake a worker could have another chat write the Goal's files.
+  const call = tools();
+  for (const action of ['spawn', 'message', undefined]) {
+    const result = await call('agents', 'chat-reviewer', action ? { action } : {});
+    expect(result.isError, String(action)).toBe(true);
+    expect(result.content[0]!.text).toContain('TOOL_DISABLED: agents');
+  }
+  expect(ran.calls).toEqual([]);
+  // Commands still run, writing ones included: the reviewer is told and documented to run tests, not to be read-only.
+  expect((await call('exec_command', 'chat-reviewer', { cmd: 'npm test > report.txt' })).isError).not.toBe(true);
+  expect(ran.calls).toEqual(['exec_command']);
+  // Another chat keeps the agents tool whole.
+  expect((await call('agents', 'chat-goal', { action: 'spawn' })).isError).not.toBe(true);
 });
 
 it('changes nothing for any other chat', async () => {

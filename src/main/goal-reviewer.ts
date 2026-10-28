@@ -2,7 +2,7 @@
  * The Goal step reviewer at work (#1832, Haz's review). When a Goal step that edited files ends,
  * the Goal chat's reviewer worker is asked to read the step's changes; its answer goes into the
  * next step's message. The brief is `goal-review.ts`; the worker, its hold on the chat and its
- * read-only chat are the broker's and the kernel's (`agents.ts`, `mcp/kernel.ts`).
+ * reviewer chat (no edits, no workers) are the broker's and the kernel's (`agents.ts`, `mcp/kernel.ts`).
  *
  * One reviewer per Goal chat, reused: a sleeping one is woken with the next step's brief, and a
  * new one starts only when there is none, it can no longer be woken, or the chosen model changed.
