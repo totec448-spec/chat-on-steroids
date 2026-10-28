@@ -47,7 +47,7 @@ import { goalErrorKey, goalErrorMessage } from '../shared/goal-errors.js';
 import { userPromptText } from '../shared/user-prompt.js';
 import { planProgressText, type TaskProgressUpdate } from '../shared/task-progress.js';
 import { TaskRequestError } from './task-request.js';
-import { GOAL_MARKER_INSTRUCTION, templateGoalDecision } from '../shared/goal-templates.js';
+import { GOAL_MARKER_INSTRUCTION, templateGoalDecision, toolCallFootnote } from '../shared/goal-templates.js';
 import type { GoalBackend } from '../shared/types.js';
 import { defaultConfig, getConfig } from './config.js';
 import { getChatModels, refreshForUnoffered } from './chat-models.js';
@@ -2776,8 +2776,7 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
   for (const [turn, at] of lastAnswerOfTurn) {
     const before = carried.get(turn) ?? 0;
     const count = (callsByTurn.get(turn) ?? 0) + before;
-    const continued = before ? `, ${before} of them before Chat On Steroids continued it in a fresh turn` : '';
-    ordered[at] = { ...ordered[at]!, content: `${ordered[at]!.content}\n\n[Chat On Steroids: ${count} tool call${count === 1 ? '' : 's'} ran in this turn${continued}. Arguments and results are not shown.]` };
+    ordered[at] = { ...ordered[at]!, content: `${ordered[at]!.content}\n\n${toolCallFootnote(count, before)}` };
   }
   for (const text of deliveredInput.slice(-5)) {
     const content = clip(userPromptText(text) ?? text, MAX_USER_MESSAGE_CHARS);

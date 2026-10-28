@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { recordLoopMcpProof } from './goal-mcp-proof.js';
-import { GOAL_CONTINUATIONS, GOAL_MARKER_INSTRUCTION, templateGoalDecision } from '../src/shared/goal-templates.js';
+import { GOAL_CONTINUATIONS, GOAL_MARKER_INSTRUCTION, templateGoalDecision, toolCallFootnote } from '../src/shared/goal-templates.js';
 import { promises as fs } from 'node:fs';
 const browser = vi.hoisted(() => ({ request: vi.fn(), authorize: vi.fn(), inputs: [] as Array<{ id: string; sessionId: string; finishOwner?: { turnId: string; periodic: boolean } }> }));
 vi.mock('../src/main/session/input.js', () => ({ requestBrowserDecision: browser.request, authorizeBrowserHelperRetry: browser.authorize, listInputs: async () => browser.inputs }));
@@ -597,6 +597,19 @@ describe('Goal decision backends', () => {
     for (const text of ['prefix [[COS_GOAL:COMPLETE]]', '[[COS_GOAL:COMPLETE]]\nMore work', '[[COS_GOAL:complete]]']) {
       expect(templateGoalDecision(text, 0).action).toBe('invalid');
     }
+  });
+  it('reads the marker above the app\'s own tool-call note, and only that note (#1894)', () => {
+    // Offline Goal saw the note the app adds to an answer that made tool calls as the last line, so
+    // every valid marker read as missing.
+    for (const note of [toolCallFootnote(125, 0), toolCallFootnote(1, 0), toolCallFootnote(40, 12)]) {
+      expect(templateGoalDecision(`Done with step 3.\n[[COS_GOAL:CONTINUE]]\n\n${note}`, 0).action).toBe('continue');
+      expect(templateGoalDecision(`All done.\n[[COS_GOAL:COMPLETE]]\n\n${note}`, 0)).toEqual({ action: 'stop' });
+      // The note is not a marker, and a marker still has to be the answer's own last line.
+      expect(templateGoalDecision(`Working.\n\n${note}`, 0)).toEqual({ action: 'invalid', error: 'goal_marker_missing' });
+      expect(templateGoalDecision(`[[COS_GOAL:COMPLETE]]\nMore work\n\n${note}`, 0).action).toBe('invalid');
+    }
+    // Anything else after the marker still makes it missing.
+    expect(templateGoalDecision('[[COS_GOAL:COMPLETE]]\n[Chat On Steroids: some other note]', 0).action).toBe('invalid');
   });
   it('uses browser JSON decisions without an API key and refuses prose', async () => {
     await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, backend: 'chatgpt' } });
