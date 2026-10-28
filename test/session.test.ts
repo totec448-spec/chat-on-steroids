@@ -7,6 +7,7 @@
  * pruner. None of that is observable against an in-memory fake.
  */
 
+import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT } from '../src/shared/approval-wait.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -1345,6 +1346,77 @@ describe('session store', () => {
     expect(after?.errors).toBe(1);
     expect(after?.lastTurnOutcome).toBe('interrupted');
     expect(after?.estimatedTokens).toBeGreaterThanOrEqual(100);
+  });
+
+  it("keeps what a worker's dock line shows: a failed step, its last answer's first line, and a wait on ChatGPT's approval card (#1831)", async () => {
+    const summary = await createSession({ title: 'worker line' });
+    const at = summary.startedAt;
+    const call = (time: number, title: string, tone: 'neutral' | 'bad') => appendEvent(summary.id, {
+      time, source: 'mcp', kind: 'tool_call',
+      call: { callId: `call-${time}`, tool: 'exec', attribution: 'request_id', requestId: `wfr-${time}`, conversationId: 'c-line', attributionMethod: 'request_id',
+        args: { text: '{}', truncated: false, chars: 2 }, result: { text: 'x', truncated: false, chars: 1 }, outcome: 'ok', durationMs: 1,
+        summary: { title, tone, kind: 'run' } }
+    });
+    await call(at + 10, 'Ran npm test', 'bad');
+    expect(await getSession(summary.id)).toMatchObject({ lastToolActivity: { kind: 'run', title: 'Ran npm test', tone: 'bad' } });
+    await call(at + 20, 'Ran npm test again', 'neutral');
+    expect((await getSession(summary.id))!.lastToolActivity).toEqual({ kind: 'run', title: 'Ran npm test again' });
+    // ChatGPT's approval card holds the turn: the line says so until it is answered.
+    const approval = (time: number, text: string) => appendEvent(summary.id, {
+      time, source: 'app', kind: 'progress', progressId: `${APPROVAL_PROGRESS_PREFIX}c-line`, message: { text, truncated: false, chars: text.length }
+    });
+    await approval(at + 30, APPROVAL_WAITING_TEXT);
+    expect((await getSession(summary.id))!.approvalWaitingAt).toBe(at + 30);
+    await approval(at + 40, APPROVAL_ANSWERED_TEXT);
+    expect((await getSession(summary.id))!.approvalWaitingAt).toBeNull();
+    // The first line of the last final answer, without Markdown marks, bounded.
+    const answer = '## **Done.** All 12 tests pass now\n\nThe fix was in `parse()`.';
+    await upsertMessageEvent(summary.id, { kind: 'assistant_message', source: 'extension', time: at + 50, messageId: 'a-1', final: true,
+      message: { text: answer, truncated: false, chars: answer.length } });
+    expect((await getSession(summary.id))!.lastAnswerLine).toBe('Done. All 12 tests pass now');
+    // A later approval wait ends with the next step, even without its "answered" row.
+    await approval(at + 60, APPROVAL_WAITING_TEXT);
+    await call(at + 70, 'Edited a.ts', 'neutral');
+    expect((await getSession(summary.id))!.approvalWaitingAt).toBeNull();
+    await flushSessions();
+    resetSessionStoreForTests();
+    expect(await getSession(summary.id)).toMatchObject({ lastAnswerLine: 'Done. All 12 tests pass now', approvalWaitingAt: null,
+      lastToolActivity: { kind: 'run', title: 'Edited a.ts' } });
+    // Applied out of order, as a history rebuild applies canonical answers after the journal (CodeRabbit):
+    // an answer older than a wait does not end that wait.
+    await approval(at + 80, APPROVAL_WAITING_TEXT);
+    await upsertMessageEvent(summary.id, { kind: 'assistant_message', source: 'extension', time: at + 75, messageId: 'a-older', final: true,
+      message: { text: 'Older answer', truncated: false, chars: 12 } });
+    expect((await getSession(summary.id))!.approvalWaitingAt).toBe(at + 80);
+  });
+
+  it('rebuilds a worker line saved before it existed, so an older chat shows its last answer (CodeRabbit)', async () => {
+    const summary = await createSession({ title: 'legacy worker line' });
+    const answer = 'Finished the migration.';
+    await upsertMessageEvent(summary.id, { kind: 'assistant_message', source: 'extension', time: summary.startedAt + 10, messageId: 'a-legacy', final: true,
+      message: { text: answer, truncated: false, chars: answer.length } });
+    await flushSessions();
+    // As a version before #1831 saved it: neither field is there.
+    const strip = (value: any): any => {
+      if (Array.isArray(value)) return value.map(strip);
+      if (!value || typeof value !== 'object') return value;
+      const out: Record<string, unknown> = {};
+      for (const [key, item] of Object.entries(value)) if (key !== 'lastAnswerLine' && key !== 'approvalWaitingAt') out[key] = strip(item);
+      return out;
+    };
+    for (const name of ['meta.json', 'meta.backup.json']) {
+      const file = path.join(sessionsRoot(), summary.id, name);
+      const saved = await fs.readFile(file, 'utf8').catch(() => null);
+      if (saved !== null) await fs.writeFile(file, JSON.stringify(strip(JSON.parse(saved))));
+    }
+    resetSessionStoreForTests();
+    expect(await getSession(summary.id)).toMatchObject({ lastAnswerLine: 'Finished the migration.', approvalWaitingAt: null });
+  });
+
+  it('skips tilde fences when it takes an answer\'s first line (CodeRabbit)', async () => {
+    const { answerLine } = await import('../src/main/session/store.js');
+    expect(answerLine('~~~ts\nconst x = 1;\n~~~')).toBe('const x = 1;');
+    expect(answerLine('```\nplain\n```')).toBe('plain');
   });
 
   it('keeps the exact last attributed tool-call time separate from unrelated session activity', async () => {
