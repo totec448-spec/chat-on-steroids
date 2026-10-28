@@ -54,6 +54,17 @@ describe('startup timing', () => {
     expect(timer.lines()[1]).toBe('Earlier starts (9): usable after 1.60 s typically, 1.20 s at the fastest, 2.00 s at the slowest');
   });
 
+  it('drops a saved run that never became usable, which this app never saves (CodeRabbit)', () => {
+    const earlier = [
+      ...Array.from({ length: 9 }, (_, index) => ({ at: index, version: '2.1.46', steps: { ready: 300 } })),
+      { at: 50, version: '2.1.46', steps: { ready: 300, renderer: 1_700 } }
+    ];
+    const { timer, saved, at } = timing(earlier);
+    at(1_500); timer.mark('renderer');
+    expect(saved.at(-1)!.map(run => run.steps.renderer)).toEqual([1_700, 1_500]);
+    expect(timer.lines()[1]).toBe('Earlier starts (1): usable after 1.70 s typically, 1.70 s at the fastest, 1.70 s at the slowest');
+  });
+
   it('says so when this start is not usable yet, and leaves out earlier starts when there are none', () => {
     const { timer, at } = timing('not a list');
     at(400); timer.mark('ready');

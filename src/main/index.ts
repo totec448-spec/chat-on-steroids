@@ -727,6 +727,8 @@ void app.whenReady().then(async () => {
       app.quit();
     }
   );
+  // Chats are restored here; the window, once enabled, can ask for its state before the pet overlay is ready.
+  markStartup('restored');
   windowActivation.enable();
   if (!isBackgroundLaunch(process.argv)) windowActivation.request();
   // The desktop pet overlay is independent of the main window once started; it stays hidden
@@ -746,7 +748,6 @@ void app.whenReady().then(async () => {
   onMainTextsChange(refreshTray);
   onMainTextsChange(() => writeDurableSoon(MAIN_TEXTS_STATE, mainTextTranslations()));
 
-  markStartup('restored');
   logInfo('app started');
 
   // Historical Unattributed repair may legitimately scan and rewrite a large legacy bucket.

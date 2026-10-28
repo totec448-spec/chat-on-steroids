@@ -1419,7 +1419,6 @@ function noteExtensionVersion(req: http.IncomingMessage): void {
     announcedExtensions.set(key, Date.now());
     if (announcedExtensions.size > 16) announcedExtensions.delete(announcedExtensions.keys().next().value!);
     logInfo(`bridge: browser extension ${extensionVersion} connected${stamp ? ` (build ${stamp})` : ''}`);
-    markStartup('extension');
     // Chrome answers "which manifest did I load" with the version and keeps running whatever
     // service worker it already had, so an extension folder replaced under a live browser
     // reports the new version and runs the old code — and every symptom after that points
@@ -2520,6 +2519,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       return { token, reused };
     });
     if (!provisioned) return json(res, 409, { error: 'browser_disconnected' }, origin);
+    // Accepted and holding its token: the extension is connected (an announced version alone could still be refused).
+    markStartup('extension');
     const appeared = noteBrowserSeen(req);
     if (!provisioned.reused) {
       logInfo('bridge: browser extension connected and provisioned');

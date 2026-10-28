@@ -843,6 +843,7 @@ async function startCloudflared(opts: TunnelStartOptions): Promise<TunnelHandle>
       settled = true;
       const publicUrl = `${match[0]}${local.pathname}`;
       logInfo('quick tunnel connected');
+      markStartup('tunnel');
       opts.report({
         state: 'connected',
         detail: 'Connected. Paste the URL below into ChatGPT as a custom connector.',
