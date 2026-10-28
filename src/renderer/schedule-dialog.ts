@@ -35,10 +35,14 @@ export function initScheduleDialog(
   // Set while the saved schedule could not be read: nothing here may be edited or saved, since a
   // "new" schedule would overwrite the one that exists (Haz on #1835).
   let unreadable = false;
+  // Set while a read runs. Each read has its number: a late answer for an earlier opening (another
+  // chat, or this one before it was opened again) is dropped, never shown in this one (CodeRabbit).
+  let loading = false;
+  let reading = 0;
 
   const close = () => { if (typeof dialog.close === 'function') dialog.close(); else dialog.removeAttribute('open'); };
   const showError = (message: string | null) => { error.hidden = !message; error.textContent = message ?? ''; };
-  const setBusy = (next: boolean) => { busy = next; submit.disabled = next; remove.disabled = next; };
+  const setBusy = (next: boolean) => { busy = next; submit.disabled = next || loading; remove.disabled = next; };
 
   const option = (label: string, value: string) => { const node = document.createElement('option'); node.value = value; node.textContent = label; return node; };
   // The lists are written in the chosen language each time the dialog opens.
@@ -75,7 +79,7 @@ export function initScheduleDialog(
   untilKind.addEventListener('change', showFields);
   form.addEventListener('submit', async event => {
     event.preventDefault();
-    if (busy || unreadable) return;
+    if (busy || unreadable || loading) return;
     if (!text.value.trim()) { showError(t('Write the message to send.')); return; }
     if (untilKind.value === 'date' && !until.value) { showError(t('Choose the end date.')); return; }
     showError(null);
@@ -88,7 +92,7 @@ export function initScheduleDialog(
     } finally { setBusy(false); }
   });
   remove.addEventListener('click', async () => {
-    if (busy) return;
+    if (busy || loading) return;
     setBusy(true);
     try {
       const reply = await api.deleteSchedule(sessionId);
@@ -102,8 +106,20 @@ export function initScheduleDialog(
 
   /** Reads the chat's schedule and fills the form from it, or shows why it can't be edited now. */
   async function load(): Promise<void> {
+    const mine = ++reading, owner = sessionId;
     showError(null);
-    const reply = await api.getSchedule(sessionId);
+    // Until this chat's own schedule is read, nothing can be edited or saved, and nothing an
+    // earlier opening left in the fields stays there.
+    loading = true;
+    for (const field of fields) field.disabled = true;
+    submit.disabled = true;
+    remove.hidden = true;
+    retry.hidden = true;
+    text.value = '';
+    const reply = await api.getSchedule(owner);
+    if (mine !== reading || owner !== sessionId) return;
+    loading = false;
+    submit.disabled = busy;
     unreadable = !reply.ok;
     for (const field of fields) field.disabled = unreadable;
     // Nothing that could be mistaken for the saved schedule is shown while it can't be read.

@@ -152,3 +152,33 @@ it('never opens an editable new schedule when the saved one could not be read, a
   expect($('scheduleDelete').hidden).toBe(false);
   expect($('scheduleRetry').hidden).toBe(true);
 });
+
+it("never fills one chat's dialog with another chat's late read, and offers nothing to edit or save while reading (CodeRabbit)", async () => {
+  const reads = new Map<string, (value: unknown) => void>();
+  const { calls, opened } = await dialog(null, {
+    getSchedule: vi.fn((id: string) => new Promise(resolve => reads.set(id, resolve)))
+  });
+  const OTHER = 'session-bbbb-0002';
+  void opened.open(SESSION, '');
+  await settle();
+  // While the read runs, the form can't be edited or saved.
+  expect($<HTMLTextAreaElement>('scheduleText').disabled).toBe(true);
+  expect($<HTMLButtonElement>('scheduleSubmit').disabled).toBe(true);
+  $('scheduleCancel').click();
+  const second = opened.open(OTHER, 'Draft for B');
+  await settle();
+  // A's read answers late: B's dialog stays B's, still waiting for its own read.
+  reads.get(SESSION)!({ ok: true, data: record({ text: "A's schedule" }) });
+  await settle();
+  expect($<HTMLTextAreaElement>('scheduleText').value).not.toBe("A's schedule");
+  expect($<HTMLButtonElement>('scheduleSubmit').disabled).toBe(true);
+  await submit();
+  expect(calls.saveSchedule).not.toHaveBeenCalled();
+  reads.get(OTHER)!({ ok: true, data: null });
+  await second;
+  expect($<HTMLTextAreaElement>('scheduleText').value).toBe('Draft for B');
+  expect($<HTMLTextAreaElement>('scheduleText').disabled).toBe(false);
+  expect($<HTMLButtonElement>('scheduleSubmit').disabled).toBe(false);
+  await submit();
+  expect(calls.saveSchedule).toHaveBeenCalledWith(expect.objectContaining({ sessionId: OTHER, text: 'Draft for B' }));
+});
