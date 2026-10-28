@@ -62,17 +62,24 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
 
   const query = (): string => field.value.trim();
 
+  // What a chosen action or setting does, once the dialog has closed: while it fades out it is still
+  // modal and the rest of the window inert, so a setting's control could not take focus (CodeRabbit).
+  let afterClose: (() => void) | null = null;
   /**
    * Closes after the exit animation, so the box fades out instead of vanishing. With no animation
-   * (reduced motion, or no stylesheet) it closes at once.
+   * (reduced motion, or no stylesheet) it closes at once. `after` runs once it is closed.
    */
-  const close = (): void => {
-    if (!dialog.open || dialog.classList.contains('is-closing')) return;
+  const close = (after?: () => void): void => {
+    if (!dialog.open) { after?.(); return; }
+    if (after) afterClose = after;
+    if (dialog.classList.contains('is-closing')) return;
     dialog.classList.add('is-closing');
     const finish = (): void => {
       if (!dialog.classList.contains('is-closing')) return;
       dialog.classList.remove('is-closing');
       dialog.close();
+      const then = afterClose; afterClose = null;
+      then?.();
     };
     const animation = window.getComputedStyle(dialog).animationName;
     if (!animation || animation === 'none') { finish(); return; }
@@ -135,7 +142,7 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
       box.append(...keys.map(key => el('kbd', '', key)));
       button.append(box);
     }
-    button.addEventListener('click', () => { close(); action.run(); });
+    button.addEventListener('click', () => close(() => action.run()));
     return button;
   };
   const settingRow = (setting: PaletteSetting): HTMLButtonElement => {
@@ -143,7 +150,7 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
     button.type = 'button';
     button.setAttribute('role', 'listitem');
     button.append(marked('b', '', setting.title), marked('span', 'search-snippet', setting.place));
-    button.addEventListener('click', () => { close(); setting.open(); });
+    button.addEventListener('click', () => close(() => setting.open()));
     return button;
   };
 
@@ -202,6 +209,8 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
   };
 
   const open = (): void => {
+    // Opened again while fading out: what was chosen before is not done after all.
+    afterClose = null;
     dialog.classList.remove('is-closing');
     // A chat's row menu is not part of the dialog: left open, it stayed over the dialog and after it.
     closeRowMenu();
