@@ -2661,6 +2661,27 @@ it('plays the sample sound when Play sounds is switched on, but not during the q
   } finally { vi.unstubAllGlobals(); }
 });
 
+it('does not measure the Activity feeds for each log line while their pages are closed, and opens them on the newest line', async () => {
+  // Idle CPU (2026-10-27): the app logs every few seconds, and each line made both hidden feeds read
+  // their scroll height, which lays out the page.
+  let addLine: ((entry: unknown) => void) | undefined;
+  const mounted = await mountChat({}, [], { onLogEntry: (fn: (entry: unknown) => void) => { addLine = fn; return () => undefined; } });
+  const doc = mounted.window.document;
+  let reads = 0;
+  for (const id of ['homeFeed', 'fullFeed']) {
+    Object.defineProperty(doc.getElementById(id)!, 'scrollHeight', { configurable: true, get: () => { reads++; return 900; } });
+  }
+  expect(doc.querySelector('.panel[data-panel="activity"]')!.classList.contains('is-active')).toBe(false);
+  for (let line = 0; line < 5; line++) addLine!({ time: Date.now(), level: 'info', message: `tunnel probe ${line}` });
+  expect(reads).toBe(0);
+  (doc.querySelector('[data-tab="activity"]') as HTMLElement).click();
+  expect(doc.getElementById('fullFeed')!.scrollTop).toBe(900);
+  // On screen, a new line keeps the feed on its newest line.
+  doc.getElementById('fullFeed')!.scrollTop = 0;
+  addLine!({ time: Date.now(), level: 'info', message: 'tunnel probe 5' });
+  expect(doc.getElementById('fullFeed')!.scrollTop).toBe(900);
+});
+
 it('says why an Activity list is empty, in the app language, and drops the note once a line arrives', async () => {
   let addLine: ((entry: unknown) => void) | undefined;
   const mounted = await mountChat({}, [], { onLogEntry: (fn: (entry: unknown) => void) => { addLine = fn; return () => undefined; } });

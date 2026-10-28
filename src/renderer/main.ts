@@ -2446,10 +2446,14 @@ function atBottom(view: HTMLElement): boolean {
   return view.scrollTop + view.clientHeight >= view.scrollHeight - 24;
 }
 
-/** Puts a feed back on its newest line. Safe on a hidden panel: it is re-applied on show. */
+/**
+ * Puts a feed back on its newest line. Only on screen: reading the scroll height lays the page out,
+ * and the app logs every few seconds, so a closed page waits until showTab re-applies it on show.
+ */
 function stickToNewest(id: string): void {
   if (pinned.get(id) === false) return;
   const view = $(id);
+  if (!view.closest('.panel')?.classList.contains('is-active')) return;
   view.scrollTop = view.scrollHeight;
 }
 
