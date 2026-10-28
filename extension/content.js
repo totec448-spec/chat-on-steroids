@@ -2217,8 +2217,10 @@
     // example when ChatGPT stopped loading the chat's history (2026-10-28): there is nothing to
     // click, and the page takes no message while it holds the turn. The person asked to stop it,
     // so this page ends it as stopped. Exact work that arrives later reopens it as usual.
-    // An approval card also hides Stop; that turn waits for a person, it is not unseen.
-    const unseenHeld = () => current() && generating && !CLF_DOM.generating() && !CLF_DOM.approvalWaiting() && !pageTurnIds.get(expected);
+    // An approval card also hides Stop; that turn waits for a person, it is not unseen. "Nothing of
+    // it" is this generation's section as the page stands now, with or without an id, not an id
+    // seen earlier: an answer can leave the page when its history stops loading (CodeRabbit).
+    const unseenHeld = () => current() && generating && !CLF_DOM.generating() && !CLF_DOM.approvalWaiting() && !generationTurn();
     if (unseenHeld()) {
       const reply = await ask({ type: 'stop_redeem', id: commandId, client: RUN_ID, conversationId: target });
       observe();

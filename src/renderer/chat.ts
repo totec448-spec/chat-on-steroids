@@ -8950,13 +8950,19 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
     if (!controlAction) return;
     const target = selectedId, selection = selectionGeneration;
     const sameSelection = () => selectedId === target && selectionGeneration === selection;
+    // The turn the button showed Stop for, before the refresh can change it (CodeRabbit).
+    const shownTurn = controlledSessionId === target && controlledSelection === selection ? controlledTurnId ?? controlledHeldTurnId : null;
     await refreshSessionControls();
     if (!sameSelection()) return;
     // An actual turn takes precedence over queued follow-ups. Stop never silently
     // becomes cancellation of a different pending input in that same chat.
-    if (target && controlledSessionId === target && controlledSelection === selection && (controlledTurnId || controlledHeldTurnId)) {
+    const nowTurn = target && controlledSessionId === target && controlledSelection === selection ? controlledTurnId ?? controlledHeldTurnId : null;
+    if (nowTurn && (!shownTurn || nowTurn === shownTurn)) {
       await stopCurrentTurn(); return;
     }
+    // The turn it showed Stop for ended or changed meanwhile (or the read failed): stop nothing
+    // else, and cancel nothing either.
+    if (shownTurn) return;
     const pending = pendingComposerInput();
     if (pending && ['queued', 'browser'].includes(pending.state)) {
       const wasStarting = startingInputs.has(pending.id);
@@ -9736,6 +9742,8 @@ export function initChat(next: Deps): void {
     const controlAction = event.submitter === $('chatSend') && $('chatSend').dataset.action === 'stop';
     if (currentPreparedPlan()) void sendPreparedPlan();
     else if (!controlAction && /^\s*\/[a-z]/i.test($<HTMLTextAreaElement>('chatInput').value)) void sendTypedCommand(controlAction);
+    // The button showed Stop (or Cancel): that is what it does, also with Plan armed (CodeRabbit).
+    else if (controlAction) void sendComposer(undefined, undefined, undefined, true);
     else if (taskPlans.has(draftKey())) {
       if (!$('createPlan').dataset.busy) void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt');
     } else void sendComposer(undefined, undefined, undefined, controlAction);

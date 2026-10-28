@@ -921,7 +921,6 @@ export function setGoalObjective(conversationId: string, text: string): string {
  */
 export async function setGoalObjectiveNow(conversationId: string, text: string): Promise<string> {
   const goal = text.trim();
-  if (goal !== (goalObjectives.get(conversationId) ?? '')) forgetGoalOutcome(conversationId);
   return saveGoalControl(pendingGoalObjectives, conversationId, GOAL_OBJECTIVES_STATE, snapshotGoalObjectives, (targetConversationId) => {
     const next = new Map(goalObjectives);
     next.delete(targetConversationId);
@@ -929,6 +928,7 @@ export async function setGoalObjectiveNow(conversationId: string, text: string):
     return {
       snapshot: goalObjectivesSnapshot(next),
       publish: () => {
+        if (goal !== (goalObjectives.get(targetConversationId) ?? '')) forgetGoalOutcome(targetConversationId);
         goalObjectives.delete(targetConversationId);
         if (goal) goalObjectives.set(targetConversationId, goal);
         persistGoalObjectives();
@@ -1187,7 +1187,6 @@ export async function setGoalSwitchNow(
   on: boolean,
   afterTurn?: boolean
 ): Promise<{ enabled: boolean; mode: GoalMode }> {
-  forgetGoalOutcome(conversationId);
   if (!on && goalSwitchFor(conversationId).mode === which) {
     invalidateGoalControlWrites(pendingGoalSwitches, [conversationId]);
   }
@@ -1211,6 +1210,8 @@ export async function setGoalSwitchNow(
         snapshot: goalSwitchesSnapshot(staged),
         publish: () => {
           publishGoalSwitches(staged);
+          // Only an accepted change ends the kept "goal is met" (CodeRabbit).
+          forgetGoalOutcome(targetConversationId);
           notifyGoalChange();
           return { enabled: next.enabled, mode: next.mode };
         }
