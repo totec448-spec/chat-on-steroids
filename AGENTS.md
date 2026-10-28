@@ -4167,9 +4167,11 @@ uncommitted step), one per chat, reused (a sleeping one is woken with the next b
 `stageMessages(..., { review: true })`), replaced when it cannot be woken or the chosen model
 changed. No free worker slot: retried every 15 s up to `REVIEW_MAX_MS`, then not reviewed.
 
-It only reads: in a reviewer's own chat the kernel refuses every tool not marked read-only before it
-runs (`reviewerRefusal`, Core, Desktop and plugin tools alike), except `exec_command`/`write_stdin`
-(diffs and tests; the brief tells it to change nothing) and `agents`. A working reviewer holds its
+It reviews, it doesn't author: in a reviewer's own chat the kernel refuses every tool not marked
+read-only before it runs (`reviewerRefusal`, Core, Desktop and plugin tools alike), except
+`exec_command`/`write_stdin` (diffs and tests) and the `agents` actions `status` and `finish`; spawning
+or messaging a worker is refused, so no other chat can write for it. Commands are not read-only: a test
+run can write files, so nothing calls the reviewer read-only, and its brief asks it not to change files. A working reviewer holds its
 chat's next Goal step through `waitingForSubAgents`, whatever `waitForSubAgents` says, for at most
 `REVIEW_MAX_MS` from when it was asked; `goalWaitFor` names it `reviewer` with that deadline (the
 app's Goal row and the page's composer status both say "Waiting for the reviewer").

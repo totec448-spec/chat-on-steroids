@@ -3266,7 +3266,7 @@
   "{0} more not listed": "ほか {0} 件は一覧外",
   "Touched {0} files, no net change": "{0} 個のファイルに触れたが、正味の変更なし",
   "Review each Goal step's changes": "ゴールの各ステップの変更をレビュー",
-  "After a Goal step edits files, a reviewer worker checks those edits and its findings go into the next step. Each reviewed step takes longer and uses more of your ChatGPT usage. Only edits made with the edit tools are reviewed, not files changed by commands. Not used in Loop.": "ゴールのステップでファイルが編集されると、レビュー担当のワーカーがその変更を確認し、指摘は次のステップに含まれます。レビューするステップは時間がかかり、ChatGPTの使用量も増えます。レビューされるのは編集ツールによる変更だけで、コマンドで変更されたファイルは対象外です。ループでは使われません。",
+  "A reviewer worker checks each Goal step's edits; its findings go into the next step. Uses more of your ChatGPT usage and covers only edits made with the edit tools.": "レビュー担当のワーカーがゴールの各ステップの変更を確認し、指摘は次のステップに含まれます。ChatGPTの使用量が増え、対象は編集ツールによる変更だけです。",
   "Same model as the Goal chat": "ゴールのチャットと同じモデル",
   "Sub-agents are off": "サブエージェントがオフです",
   "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "レビュー担当はワーカーのチャットとして動くため、サブエージェントが必要です。オンになるまで何もレビューされません。",

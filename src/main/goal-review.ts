@@ -1,7 +1,7 @@
 /**
  * The Goal step reviewer (#1832, Haz's review): after a Goal step that edited files, a worker in
  * the Goal chat's own family reads the step's changes and reports problems into the next step.
- * It only reads. This file is what it is told; the broker, the hold and the next message are
+ * It reviews and may run commands such as tests, but it does not change files or start workers. This file is what it is told; the broker, the hold and the next message are
  * elsewhere (see AGENTS.md, "Goal step reviewer").
  *
  * Provenance before volume: every file the step changed is named with its counts and how many
@@ -61,7 +61,7 @@ function listed(file: ReviewFile): string {
 
 export function reviewBrief(input: ReviewBriefInput): string {
   const head = [
-    'Review this Goal step\'s changes. You only read: do not edit, create, move or delete files, and do not run commands that change anything.',
+    'Review this Goal step\'s changes. Read files and run commands such as tests as you need, but do not edit, create, move or delete files, and do not start or message other workers: the Goal chat makes the changes.',
     'Report real problems in these changes only: bugs, wrong or missing tests, callers this breaks, edge cases the step skipped. Give each one with its file and line. If there are none, answer exactly: No problems found.',
     'Start your answer with "BLOCKING:" only when the Goal cannot safely go on: data loss, a broken build, or a security problem the next step would build on.',
     'When you finish with RESULT / CHANGES / VALIDATION / BLOCKERS, the review is the RESULT: put the problems, "No problems found." or "BLOCKING: ..." there.',
