@@ -8676,14 +8676,20 @@ async function paintScheduleLine(): Promise<void> {
   if (schedule.missedDueAt !== undefined) parts.push(t('missed {0}', [clock(schedule.missedDueAt)]));
   if (!schedule.paused) parts.push(next === null ? t('ended') : t('next {0}', [clock(next)]));
   ui($('scheduleLineText'), 'textContent', () => parts.join(' · '));
+  // Pause and Edit drawn like the Goal row's: the dock's own icon actions, named by tooltip.
   const pause = $<HTMLButtonElement>('scheduleLinePause');
-  ui(pause, 'textContent', () => schedule.paused ? t('Resume') : t('Pause'));
+  const pauseLabel = () => schedule.paused ? t('Resume schedule') : t('Pause schedule');
+  pause.replaceChildren(icon(schedule.paused ? 'i-play' : 'i-power'));
+  ui(pause, 'title', pauseLabel); ui(pause, 'aria-label', pauseLabel);
   pause.onclick = async () => {
     pause.disabled = true;
     try { await run(api.pauseSchedule(schedule.sessionId, !schedule.paused)); } finally { pause.disabled = false; }
     void paintScheduleLine();
   };
-  $<HTMLButtonElement>('scheduleLineEdit').onclick = () => void scheduleDialog?.open(schedule.sessionId, '');
+  const edit = $<HTMLButtonElement>('scheduleLineEdit');
+  if (!edit.firstChild) edit.append(icon('i-pencil'));
+  ui(edit, 'title', () => t('Edit schedule')); ui(edit, 'aria-label', () => t('Edit schedule'));
+  edit.onclick = () => void scheduleDialog?.open(schedule.sessionId, '');
 }
 
 async function refreshInputQueue(): Promise<void> {
