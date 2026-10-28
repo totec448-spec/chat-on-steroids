@@ -3183,11 +3183,11 @@ var CLF_DOM = (() => {
         const data = event.data;
         if (event.source !== window || event.origin !== location.origin || data?.source !== 'clf-picker-reply' || data.nonce !== nonce || data.v !== 1) return;
         const state = data.picker;
-        const groupId = value => typeof value === 'string' && value.length <= 80 && /^[\p{L}\p{N}._ -]+$/u.test(value) && value.trim() === value && value.trim();
+        const groupId = value => typeof value === 'string' && value.length <= 80 && /^[\p{L}\p{N}._: -]+$/u.test(value) && value.trim() === value && value.trim();
         const valid = state && typeof state.version === 'string' && Number.isInteger(state.currentBucket) &&
-          Array.isArray(state.versions) && state.versions.length > 0 && state.versions.length <= 20 &&
+          Array.isArray(state.versions) && state.versions.length > 0 && state.versions.length <= 48 &&
           state.versions.every(v => groupId(v.id) && typeof v.label === 'string' && v.label.length > 0 && v.label.length <= 80) &&
-          Array.isArray(state.choices) && state.choices.length > 0 && state.choices.length <= 12 &&
+          Array.isArray(state.choices) && state.choices.length > 0 && state.choices.length <= 48 &&
           state.choices.every(c => Number.isInteger(c.bucket) && typeof c.id === 'string' && /^[a-zA-Z0-9._-]{1,80}$/.test(c.id) && typeof c.label === 'string' && c.label.length > 0 && c.label.length <= 80 &&
             groupId(c.familyId) && typeof c.familyLabel === 'string' && c.familyLabel.length > 0 && c.familyLabel.length <= 80 &&
             ['none','minimal','low','medium','high','xhigh','max','ultra','pro'].includes(c.effort) && typeof c.available === 'boolean') &&

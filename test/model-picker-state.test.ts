@@ -90,7 +90,7 @@ function fixture(versionCaption = '', closeDelay: number | null = 0) {
     if (closeDelay) win.setTimeout(close, closeDelay); else close();
   });
   win.eval(fiberSource); win.eval(domSource);
-  return { api: (win as any).CLF_DOM, state, props, selections, actions, freeze: () => { frozen = true; } };
+  return { api: (win as any).CLF_DOM, state, props, selections, versions, actions, freeze: () => { frozen = true; } };
 }
 it('confirms the exact selected pair without moving through other model versions', async () => {
   const f = fixture('', 30);
@@ -610,4 +610,17 @@ it('retains the Chat max-to-xhigh mapping without a Work owner flag', async () =
   f.state.currentSelection.thinkingEffort = 'max';
   expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'xhigh')).toBe(true);
   expect(f.state.currentSelection.thinkingEffort).toBe('max');
+});
+
+// #1905: ChatGPT's unified picker lists every model in an existing chat; one entry the reader did not
+// accept (a colon in a version id, a Work lane with an effort it has no word for, more than twelve
+// choices) made the whole picker unreadable, and every send into an existing chat failed.
+it('confirms the selected pair when the picker also lists models it cannot read (#1905)', async () => {
+  const f = fixture();
+  f.versions.push({ id: 'gpt-6-pro:', displayTextForIntelligence: 'Pro', enabled: true }, { id: 'work:agent', displayTextForIntelligence: 'Agent', enabled: true });
+  const extra = (bucket: number, modelSlug: string, thinkingEffort: string) => ({ bucket, modelSlug, thinkingEffort, availability: { status: 'available' },
+    category: { modelLane: 'thinking', shortLabel: `Model ${bucket}` } });
+  f.state.bucketSelections = [...f.state.bucketSelections, extra(4, 'gpt-6-work', 'auto'),
+    ...Array.from({ length: 10 }, (_, i) => extra(20 + i, `other-model-${i}`, 'standard'))] as never;
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(true);
 });
