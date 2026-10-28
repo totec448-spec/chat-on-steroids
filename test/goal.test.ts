@@ -256,6 +256,29 @@ describe('what leaves this machine', () => {
     expect(JSON.stringify(projected)).not.toMatch(/exec_command|SECRET_ARGUMENT|SECRET_RESULT/);
   });
 
+  it('gives the Offline marker check the answer as written, not the app\'s tool-call note after it (#1894)', async () => {
+    const session = await createSession({ title: 'offline marker', conversationId: 'offline-marker' });
+    await appendEvent(session.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'Run the step', chars: 12, truncated: false } });
+    await appendEvent(session.id, { time: 110, source: 'mcp', kind: 'tool_call', turnId: 'marker-turn', call: {
+      callId: 'marker-call', tool: 'exec_command', attribution: 'request_id', requestId: 'marker-request', conversationId: session.conversationId,
+      attributionMethod: 'request_id', outcome: 'ok', durationMs: 1, args: { text: '{}', chars: 2, truncated: false },
+      result: { text: 'ok', chars: 2, truncated: false }, summary: { kind: 'run', tone: 'neutral', title: 'Ran a command' } } });
+    await appendEvent(session.id, { time: 120, source: 'extension', kind: 'assistant_message', turnId: 'marker-turn', messageId: 'marker-final', final: true,
+      message: { text: 'Step done.\n[[COS_GOAL:CONTINUE]]', chars: 31, truncated: false } });
+    const messages = await goal.conversationMessages(session.id);
+    // The helper still sees the note...
+    expect(messages.at(-1)!.content).toMatch(/\[Chat On Steroids: 1 tool call ran in this turn/);
+    // ...the marker check reads the answer itself.
+    expect(goal.templateDecisionText(messages)).toBe('Step done.\n[[COS_GOAL:CONTINUE]]');
+    // A note the model wrote itself is part of its answer.
+    const own = await createSession({ title: 'own note', conversationId: 'own-note' });
+    await appendEvent(own.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'Go', chars: 2, truncated: false } });
+    const fake = 'Done.\n[[COS_GOAL:COMPLETE]]\n\n[Chat On Steroids: 1 tool call ran in this turn. Arguments and results are not shown.]';
+    await appendEvent(own.id, { time: 120, source: 'extension', kind: 'assistant_message', turnId: 'own-turn', messageId: 'own-final', final: true,
+      message: { text: fake, chars: fake.length, truncated: false } });
+    expect(goal.templateDecisionText(await goal.conversationMessages(own.id))).toBe(fake);
+  });
+
   // 2.1.43, live on Windows: a Goal step split by two fresh turns ran its five commands as 2 + 2 + 1.
   // The rotated turns have no answer, so the helper saw "1 tool call" and asked three more times.
   it('counts the calls of the turns a fresh turn continued into the answer that finished them', async () => {

@@ -47,7 +47,7 @@ import { goalErrorKey, goalErrorMessage } from '../shared/goal-errors.js';
 import { userPromptText } from '../shared/user-prompt.js';
 import { planProgressText, type TaskProgressUpdate } from '../shared/task-progress.js';
 import { TaskRequestError } from './task-request.js';
-import { GOAL_MARKER_INSTRUCTION, templateGoalDecision } from '../shared/goal-templates.js';
+import { GOAL_MARKER_INSTRUCTION, templateGoalDecision, toolCallFootnote } from '../shared/goal-templates.js';
 import type { GoalBackend } from '../shared/types.js';
 import { defaultConfig, getConfig } from './config.js';
 import { getChatModels, refreshForUnoffered } from './chat-models.js';
@@ -2038,7 +2038,7 @@ async function run(draft: GoalDraft): Promise<void> {
   draft.abort = abort;
   const timer = setTimeout(() => abort.abort(new DOMException('Goal request timed out', 'TimeoutError')), REQUEST_TIMEOUT_MS);
   try {
-    const decision = draft.backend === 'templates' ? templateGoalDecision(messages.filter((message) => message.role === 'assistant').at(-1)?.content ?? '', Math.floor(Math.random() * 200), Math.floor(Math.random() * 200)) : await requestDrivingDecision({
+    const decision = draft.backend === 'templates' ? templateGoalDecision(templateDecisionText(messages), Math.floor(Math.random() * 200), Math.floor(Math.random() * 200)) : await requestDrivingDecision({
       backend: draft.backend,
       endpoint,
       reasoning,
@@ -2183,7 +2183,7 @@ export async function draftFastFollowup(sessionId: string, signal: AbortSignal =
   if (!objective && !messages.some(message => message.role === 'user')) throw new Error('No recorded user request is available for Goal');
   const prompt = mode === 'loop' ? settings.loopPrompt : objective ? settings.objectivePrompt : settings.prompt;
   const decision = backend === 'templates'
-    ? templateGoalDecision(messages.filter(message => message.role === 'assistant').at(-1)?.content ?? '', Math.floor(Math.random() * 200), Math.floor(Math.random() * 200))
+    ? templateGoalDecision(templateDecisionText(messages), Math.floor(Math.random() * 200), Math.floor(Math.random() * 200))
     : await requestDrivingDecision({ sourceSessionId: sessionId, backend, endpoint, reasoning: settings.reasoning, key: key ?? '', model: settings.model, mode,
     system: objective ? [prompt, goalObjectiveMessage(objective)] : [prompt],
     messages,
@@ -2633,6 +2633,18 @@ async function pauseRepeatingGoal(draft: GoalDraft, answer: string): Promise<voi
   settle(draft, 'no-reply');
 }
 
+/**
+ * An answer as the model wrote it, for messages the app added its tool-call note to (#1894). Kept
+ * beside the message, not in it: messages are serialized whole into the helper's prompt.
+ */
+const answerBeforeNote = new WeakMap<ChatMessage, string>();
+
+/** What the Offline marker check reads: the newest answer as written, without the app's own note. */
+export function templateDecisionText(messages: readonly ChatMessage[]): string {
+  const last = messages.filter(message => message.role === 'assistant').at(-1);
+  return last ? answerBeforeNote.get(last) ?? last.content : '';
+}
+
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
@@ -2833,8 +2845,10 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
   for (const [turn, at] of lastAnswerOfTurn) {
     const before = carried.get(turn) ?? 0;
     const count = (callsByTurn.get(turn) ?? 0) + before;
-    const continued = before ? `, ${before} of them before Chat On Steroids continued it in a fresh turn` : '';
-    ordered[at] = { ...ordered[at]!, content: `${ordered[at]!.content}\n\n[Chat On Steroids: ${count} tool call${count === 1 ? '' : 's'} ran in this turn${continued}. Arguments and results are not shown.]` };
+    const answer = ordered[at]!;
+    const noted = { ...answer, content: `${answer.content}\n\n${toolCallFootnote(count, before)}` };
+    answerBeforeNote.set(noted, answerBeforeNote.get(answer) ?? answer.content);
+    ordered[at] = noted;
   }
   for (const text of deliveredInput.slice(-5)) {
     const content = clip(userPromptText(text) ?? text, MAX_USER_MESSAGE_CHARS);
