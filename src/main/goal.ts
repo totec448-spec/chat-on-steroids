@@ -903,6 +903,7 @@ export function goalObjectiveFor(conversationId: string): string {
 export function setGoalObjective(conversationId: string, text: string): string {
   invalidateGoalControlWrites(pendingGoalObjectives, [conversationId]);
   const goal = text.trim();
+  if (goal !== (goalObjectives.get(conversationId) ?? '')) forgetGoalOutcome(conversationId);
   goalObjectives.delete(conversationId);
   if (goal) goalObjectives.set(conversationId, goal);
   persistGoalObjectives();
@@ -927,6 +928,7 @@ export async function setGoalObjectiveNow(conversationId: string, text: string):
     return {
       snapshot: goalObjectivesSnapshot(next),
       publish: () => {
+        if (goal !== (goalObjectives.get(targetConversationId) ?? '')) forgetGoalOutcome(targetConversationId);
         goalObjectives.delete(targetConversationId);
         if (goal) goalObjectives.set(targetConversationId, goal);
         persistGoalObjectives();
@@ -974,6 +976,51 @@ export function applyGoalSwitch<T extends { enabled: boolean; mode: GoalMode }>(
   if (which === null || on === null) return goal;
   if (on) return { ...goal, enabled: true, mode: which };
   return goal.enabled && goal.mode === which ? { ...goal, enabled: false } : goal;
+}
+
+/**
+ * "The goal is met", per chat, kept across a restart (2.1.47 round): the in-memory draft that
+ * says so dies with the process, and the window then said "Pursuing goal" for a run that had
+ * ended (since 2.1.27). Only the met decision is kept, and only until that chat gets a newer
+ * draft, a switch change or a new objective. It never drives anything; it is what the window shows.
+ */
+export const GOAL_OUTCOMES_STATE = 'goal-outcomes';
+type GoalOutcomeRow = { turnId: string; model: string; backend: GoalBackend; at: number };
+export interface GoalOutcomesSnapshot {
+  version: 1;
+  savedAt: number;
+  outcomes: Array<{ conversationId: string } & GoalOutcomeRow>;
+}
+const goalOutcomes = new Map<string, GoalOutcomeRow>();
+const MAX_GOAL_OUTCOMES = 400;
+
+export function snapshotGoalOutcomes(): GoalOutcomesSnapshot {
+  return { version: 1, savedAt: Date.now(), outcomes: [...goalOutcomes.entries()].map(([conversationId, row]) => ({ conversationId, ...row })) };
+}
+
+export function restoreGoalOutcomes(snapshot: GoalOutcomesSnapshot | null): void {
+  goalOutcomes.clear();
+  if (!snapshot || snapshot.version !== 1 || !Array.isArray(snapshot.outcomes)) return;
+  for (const raw of snapshot.outcomes.slice(-MAX_GOAL_OUTCOMES)) {
+    if (!raw || typeof raw.conversationId !== 'string' || !/^[0-9a-z-]{8,256}$/i.test(raw.conversationId)) continue;
+    if (typeof raw.turnId !== 'string' || !raw.turnId || raw.turnId.length > 200 || typeof raw.model !== 'string' || raw.model.length > 200) continue;
+    if (raw.backend !== 'api' && raw.backend !== 'chatgpt' && raw.backend !== 'templates') continue;
+    goalOutcomes.set(raw.conversationId, { turnId: raw.turnId, model: raw.model, backend: raw.backend, at: Number.isSafeInteger(raw.at) ? raw.at : Date.now() });
+  }
+}
+
+function noteGoalMet(draft: GoalDraft): void {
+  // A draft for an objective changed while it ran did not decide about the new one (CodeRabbit).
+  if ((draft.objective ?? '') !== goalObjectiveFor(draft.conversationId)) return;
+  goalOutcomes.delete(draft.conversationId);
+  goalOutcomes.set(draft.conversationId, { turnId: draft.turnId, model: draft.model, backend: draft.backend, at: Date.now() });
+  // Oldest first in insertion order.
+  while (goalOutcomes.size > MAX_GOAL_OUTCOMES) goalOutcomes.delete(goalOutcomes.keys().next().value!);
+  writeDurableSoon(GOAL_OUTCOMES_STATE, snapshotGoalOutcomes());
+}
+
+function forgetGoalOutcome(conversationId: string): void {
+  if (goalOutcomes.delete(conversationId)) writeDurableSoon(GOAL_OUTCOMES_STATE, snapshotGoalOutcomes());
 }
 
 /** Durable state file for per-chat Goal/Loop switches. */
@@ -1156,7 +1203,8 @@ export async function setGoalSwitchNow(
       if (!before && [...goalSwitches.values()].filter(row => row.role === 'decision').length >= MAX_GOAL_SWITCHES) {
         throw new Error('goal_switch_capacity');
       }
-      const next = applyGoalSwitch(goalSwitchFor(targetConversationId), which, on);
+      const was = goalSwitchFor(targetConversationId);
+      const next = applyGoalSwitch(was, which, on);
       const staged = new Map(goalSwitches);
       staged.set(targetConversationId, { enabled: next.enabled, mode: next.mode,
         afterTurn: afterTurn ?? before?.afterTurn ?? false, at: Date.now() });
@@ -1165,6 +1213,8 @@ export async function setGoalSwitchNow(
         snapshot: goalSwitchesSnapshot(staged),
         publish: () => {
           publishGoalSwitches(staged);
+          // Only an accepted change ends the kept "goal is met"; saving it as it was does not (CodeRabbit).
+          if (was.enabled !== next.enabled || was.mode !== next.mode) forgetGoalOutcome(targetConversationId);
           notifyGoalChange();
           return { enabled: next.enabled, mode: next.mode };
         }
@@ -1301,7 +1351,11 @@ export function goalViewFor(conversationId: string, clientId?: string): GoalDraf
  */
 export function goalOutcomeFor(conversationId: string): GoalDraftView | null {
   const draft = drafts.get(conversationId);
-  return draft?.acknowledged && draft.stage === 'no-reply' ? view(draft) : null;
+  if (draft) return draft.acknowledged && draft.stage === 'no-reply' ? view(draft) : null;
+  // After a restart: the kept decision, with nothing to type and nothing to retry.
+  const kept = goalOutcomes.get(conversationId);
+  return kept ? { token: '', conversationId, turnId: kept.turnId, stage: 'no-reply', backend: kept.backend, model: kept.model,
+    text: '', reply: '', error: null, retryable: false } : null;
 }
 
 export async function retryGoalBrowserHelper(sourceSessionId: string, inputId: string): Promise<boolean> {
@@ -1539,6 +1593,7 @@ export async function claimGoalRecoveryStopNow(conversationId: string, replyId: 
 
 export function resetGoalStateForTests(): void {
   for (const draft of drafts.values()) draft.abort?.abort();
+  goalOutcomes.clear();
   resetGoalHelperSizeForTests();
   invalidateGoalControlWrites(pendingGoalObjectives);
   invalidateGoalControlWrites(pendingGoalSwitches);
@@ -1629,6 +1684,7 @@ export function startGoalDraft(input: StartGoalDraftInput): GoalDraftView {
     abort: null
   };
   drafts.set(input.conversationId, draft);
+  forgetGoalOutcome(input.conversationId);
   notifyGoalChange();
   if (!input.deferStart) beginGoalDraft(input.conversationId, draft.token);
   return view(draft);
@@ -2045,6 +2101,7 @@ async function run(draft: GoalDraft): Promise<void> {
         return settle(draft, 'failed', 'goal_helper_stop_unverified');
       }
       logInfo(`goal: ${draft.model} says the goal is met in ${draft.conversationId}; nothing was sent`);
+      if (drafts.get(draft.conversationId) === draft) noteGoalMet(draft);
       // Reaching the goal ends this Goal run, not the user's saved objective. Keeping the text
       // lets a reopened chat show what it was pursuing and lets a later manual correction such
       // as "that did not work" continue against the same objective. Nothing auto-restarts here:
