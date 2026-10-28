@@ -379,6 +379,8 @@ export type SessionEvent =
       messageId?: string;
       /** Exact app outbox identity, attached after a tool handout or proven native delivery. */
       inputId?: string;
+      /** #1826: the message was a run of the chat's schedule, due then, and sent late when `late`. */
+      scheduled?: { dueAt: number; late: boolean };
       /** Tool handout remains unconfirmed until a later exact invocation proves receipt. */
       inputDelivery?: 'offered' | 'confirmed';
       /** Original app-authored text, excluding transport-only control instructions. */
