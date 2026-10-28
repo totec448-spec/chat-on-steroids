@@ -1224,13 +1224,24 @@ it("shows the chat's schedule as one quiet line, with Pause and Edit, and a miss
     vi.setSystemTime(new Date(2026, 9, 30, 10, 0));
     await append([]); await append([]);
     expect(w.document.getElementById('scheduleLineText')!.textContent).toMatch(/· next Mon,? 09:00( AM)?$/);
-    (w.document.getElementById('scheduleLinePause') as HTMLButtonElement).click();
+    // Pause and Edit are the dock's own icon actions, like the Goal row's, named for screen readers.
+    const pause = () => w.document.getElementById('scheduleLinePause')!;
+    const edit = w.document.getElementById('scheduleLineEdit')!;
+    expect(pause().classList.contains('dock-action')).toBe(true);
+    expect(edit.classList.contains('dock-action')).toBe(true);
+    expect(pause().getAttribute('aria-label')).toBe('Pause schedule');
+    expect(pause().title).toBe('Pause schedule');
+    expect(pause().querySelector('.ico')).not.toBeNull();
+    expect(edit.getAttribute('aria-label')).toBe('Edit schedule');
+    expect(edit.querySelector('.ico')).not.toBeNull();
+    pause().click();
     await append([]);
     expect(api.pauseSchedule).toHaveBeenCalledWith(sessionId, true);
     api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, paused: true } }));
     await append([]); await append([]);
     expect(line().textContent).toMatch(/^Paused · every weekday at 09:00/);
-    expect(w.document.getElementById('scheduleLinePause')!.textContent).toBe('Resume');
+    expect(pause().getAttribute('aria-label')).toBe('Resume schedule');
+    expect(pause().title).toBe('Resume schedule');
     // A run missed while the app was closed says so, beside the next time.
     const missed = new Date(); missed.setHours(9, 0, 0, 0);
     api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, missedDueAt: missed.getTime() } }));
@@ -8707,10 +8718,11 @@ it("sums up what a finished answer changed, collapsed, counting only real change
   const { w, append } = await boot([], true, [], [project]);
   const api = (w as any).api;
   const changes = [
-    { path: 'src/app.ts', state: 'edited', added: 30, removed: 5, approximate: false, diff: 'kept', edits: 3 },
-    { path: 'src/new-page.ts', state: 'created', added: 12, removed: 0, approximate: false, diff: 'kept', edits: 1 },
-    { path: 'old/helper.ts', state: 'unchanged', added: 0, removed: 0, approximate: false, diff: 'kept', edits: 2 },
-    { path: 'big.json', state: 'edited', added: 400, removed: 2, approximate: true, diff: 'too-large', edits: 1 }
+    // Recorded as the tools saw them: under the approved root's virtual name.
+    { path: '/repo/src/app.ts', state: 'edited', added: 30, removed: 5, approximate: false, diff: 'kept', edits: 3 },
+    { path: '/repo/src/new-page.ts', state: 'created', added: 12, removed: 0, approximate: false, diff: 'kept', edits: 1 },
+    { path: '/repo/old/helper.ts', state: 'unchanged', added: 0, removed: 0, approximate: false, diff: 'kept', edits: 2 },
+    { path: '/repo/big.json', state: 'edited', added: 400, removed: 2, approximate: true, diff: 'too-large', edits: 1 }
   ];
   api.turnChanges = vi.fn(async () => ({ ok: true, data: { changes, total: 4 } }));
   api.turnFileDiff = vi.fn(async () => ({ ok: true, data: { before: 'a\n', after: 'a\nb\n' } }));
@@ -8737,13 +8749,15 @@ it("sums up what a finished answer changed, collapsed, counting only real change
   expect(card.querySelector('summary')!.textContent).toBe('Changed 3 files · +442 −7 (approx.) · 1 put back');
   card.open = true; card.dispatchEvent(new w.Event('toggle'));
   const rows = [...card.querySelectorAll<HTMLDetailsElement>('.turn-change')];
+  // Each file named the way its tool row names it, without the root's virtual name; the full path in the tooltip.
   expect(rows.map(row => row.querySelector('summary')!.textContent)).toEqual([
     'src/app.ts+30 −5edited', 'src/new-page.ts+12created', 'old/helper.tsno net change', 'big.json+400 −2 (approx.)edited'
   ]);
+  expect(rows[0]!.querySelector('summary')!.title).toBe('/repo/src/app.ts');
   // A file's net diff loads when its row opens; one the recording did not keep says so.
   rows[0]!.open = true; rows[0]!.dispatchEvent(new w.Event('toggle'));
   await settle();
-  expect(api.turnFileDiff).toHaveBeenCalledWith(expect.any(String), 't-edit', 10, 'src/app.ts');
+  expect(api.turnFileDiff).toHaveBeenCalledWith(expect.any(String), 't-edit', 10, '/repo/src/app.ts');
   rows[3]!.open = true; rows[3]!.dispatchEvent(new w.Event('toggle'));
   await settle();
   expect(rows[3]!.textContent).toContain('Diff unavailable: this edit was too large to keep');

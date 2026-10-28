@@ -1,5 +1,6 @@
 import type { SessionEvent } from '../shared/session.js';
 import type { TurnFileChange } from '../main/session/turn-changes.js';
+import { shortPath } from '../shared/virtual-path.js';
 import { disclosureChevron, el, run } from './dom.js';
 import { t, tn, ui } from './i18n.js';
 
@@ -107,7 +108,8 @@ function fileRow(change: TurnFileChange, options: { sessionId: string; turnId: s
   row.className = 'turn-change';
   row.dataset.state = change.state;
   const head = el('summary', 'turn-change-head');
-  const path = el('span', 'turn-change-path', change.path);
+  // Named the way the answer's tool rows name it; the full path stays in the tooltip.
+  const path = el('span', 'turn-change-path', change.path.startsWith('/') ? shortPath(change.path) : change.path);
   head.append(path);
   const shown = counts(change);
   if (shown && change.state !== 'unchanged') head.append(el('span', 'turn-change-count', () => counts(change)));
