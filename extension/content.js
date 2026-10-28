@@ -2213,6 +2213,30 @@
         status: stopped ? 'sent' : 'failed', error: stopped ? undefined : 'native_stop_unavailable_or_turn_changed' });
       return stopped;
     }
+    // A turn this page still holds although ChatGPT shows neither Stop nor any answer of it, for
+    // example when ChatGPT stopped loading the chat's history (2026-10-28): there is nothing to
+    // click, and the page takes no message while it holds the turn. The person asked to stop it,
+    // so this page ends it as stopped. Exact work that arrives later reopens it as usual.
+    // An approval card also hides Stop; that turn waits for a person, it is not unseen.
+    const unseenHeld = () => current() && generating && !CLF_DOM.generating() && !CLF_DOM.approvalWaiting() && !pageTurnIds.get(expected);
+    if (unseenHeld()) {
+      const reply = await ask({ type: 'stop_redeem', id: commandId, client: RUN_ID, conversationId: target });
+      observe();
+      const command = reply?.command;
+      if (!reply?.ok || command?.type !== 'stop' || command.turnId !== expected || command.conversationId !== target) return false;
+      const stopped = unseenHeld();
+      if (stopped) {
+        stopRequestedAt = Date.now();
+        finishGeneration(generationTurn(), { outcome: 'stopped', detail: t('content_turn_stop_unseen',
+          'Stopped here: ChatGPT no longer showed this answer running.') });
+        void flush();
+        stoppedAppCommands.add(commandId);
+        if (stoppedAppCommands.size > 100) stoppedAppCommands.delete(stoppedAppCommands.values().next().value);
+      }
+      await ask({ type: 'stop_ack', id: commandId, client: RUN_ID, conversationId: target, turnId: expected,
+        status: stopped ? 'sent' : 'failed', error: stopped ? undefined : 'native_stop_unavailable_or_turn_changed' });
+      return stopped;
+    }
     const native = currentAssistantTurn();
     const nativeId = pageTurnIds.get(expected);
     const latestNative = () => CLF_DOM.turns().at(-1);

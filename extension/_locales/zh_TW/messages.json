@@ -698,6 +698,9 @@
   "content_turn_stop_requested": {
     "message": "已要求停止；原生頁面已不再顯示產生中狀態。"
   },
+  "content_turn_stop_unseen": {
+    "message": "已在此停止：ChatGPT 已不再顯示此回答正在進行。"
+  },
   "content_unknown_error": {
     "message": "未知錯誤"
   },

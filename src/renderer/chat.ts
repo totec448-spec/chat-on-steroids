@@ -2973,6 +2973,8 @@ function mergeDetailDelta(delta: SessionEvent[]): void {
 let controlsGeneration = 0;
 let controlledSessionId: string | null = null;
 let controlledTurnId: string | null = null;
+/** A turn the page still holds after the app stopped counting it as work: Stop only, no Working (2.1.47 round). */
+let controlledHeldTurnId: string | null = null;
 let controlledSelection = -1;
 let controlledStopPending = false;
 let controlledFinishWaiting = false;
@@ -3115,7 +3117,8 @@ function paintDeliveryControls(): void {
   if (canInject && explicitInjection && $<HTMLSelectElement>('sendMode').value === 'auto') $<HTMLSelectElement>('sendMode').value = 'tool';
   if (!canInject && !canSendDirectly && !queueAtFinish) $<HTMLSelectElement>('sendMode').value = 'auto';
   const pending = pendingComposerInput();
-  const stop = (working || !!pending) && !currentPreparedPlan() && !authoredComposerText().trim() && !(imageDrafts.get(draftKey())?.length);
+  const held = selectedId !== null && controlledSessionId === selectedId && controlledSelection === selectionGeneration && controlledHeldTurnId !== null;
+  const stop = (working || held || !!pending) && !currentPreparedPlan() && !authoredComposerText().trim() && !(imageDrafts.get(draftKey())?.length);
   // Hover selects delivery for the next message. Clicking the empty-composer
   // Stop still acts immediately; there is no second Stop action in the menu.
   $('sendOptions').hidden = !canInject && !canSendDirectly && !queueAtFinish;
@@ -3124,12 +3127,12 @@ function paintDeliveryControls(): void {
   send.disabled = !!preparedPlan && (preparedPlan.sending || preparedPlan.stages.some(stage => !stage.trim()));
   send.dataset.action = stop ? 'stop' : 'send';
   ui(send, 'aria-label', () => stop ? (controlledStopPending ? t("Stop requested") : t("Stop turn")) : t("Send message"));
-  if (stop && !working && pending) ui(send, 'aria-label', () => t("Cancel delivery"));
+  if (stop && !working && !held && pending) ui(send, 'aria-label', () => t("Cancel delivery"));
   const planAction = selectedId && !chatKnownIdle(selectedId) ? t("Queue plan at Session finish") : t("Start full plan");
   if (preparedPlan && !stop) send.setAttribute('aria-label', planAction);
   else if (planMode && !stop) ui(send, 'aria-label', () => t("Generate plan"));
   send.classList.toggle('is-plan-ready', !!preparedPlan && !stop);
-  ui(send, 'title', () => stop && !working && pending ? t("Cancel delivery") : preparedPlan && !stop ? planAction : planMode && !stop ? t("Click to generate plan") : '');
+  ui(send, 'title', () => stop && !working && !held && pending ? t("Cancel delivery") : preparedPlan && !stop ? planAction : planMode && !stop ? t("Click to generate plan") : '');
   send.classList.toggle('is-stop', stop);
   for (const button of $('sendOptions').querySelectorAll<HTMLElement>('[data-delivery]')) {
     button.setAttribute('aria-checked', String(button.dataset.delivery === (nativeFiles && working && $<HTMLSelectElement>('sendMode').value !== 'tool' ? 'after-turn' : $<HTMLSelectElement>('sendMode').value)));
@@ -3441,14 +3444,14 @@ async function refreshSessionControls(): Promise<void> {
     for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
   }
   paintAutomationSwitch();
-  if (!id) { controlledSessionId = null; controlledTurnId = null; controlledPageless = false; paintDeliveryControls(); menu.hidden = false;
+  if (!id) { controlledSessionId = null; controlledTurnId = null; controlledHeldTurnId = null; controlledPageless = false; paintDeliveryControls(); menu.hidden = false;
     $<HTMLTextAreaElement>('sessionObjective').disabled = false;
     paintTaskActions();
     for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
     return; }
   const opening = pendingComposerInputs.find(row => row.opening && row.sessionId === id && ['queued', 'browser'].includes(row.state));
   if (!sessions.find(row => row.id === id)?.conversationId) {
-    controlledSessionId = id; controlledSelection = selectionGeneration; controlledTurnId = null;
+    controlledSessionId = id; controlledSelection = selectionGeneration; controlledTurnId = null; controlledHeldTurnId = null;
     controlledCanInject = false; controlledCanSendDirectly = false; controlledQueueAtFinish = false;
     controlledStopPending = false; controlledFinishWaiting = false; controlledPageless = false;
     menu.hidden = false;
@@ -3469,6 +3472,7 @@ async function refreshSessionControls(): Promise<void> {
   controlledSessionId = id;
   controlledSelection = selectionGeneration;
   controlledTurnId = controls?.activeTurnId ?? null;
+  controlledHeldTurnId = controls?.heldTurnId ?? null;
   goalDraftView = controls?.goalDraft ?? null;
   goalWaitView = controls?.goalWait ?? null;
   finishGoalDraftView = controls?.finishGoalDraft ?? null;
@@ -8923,7 +8927,7 @@ function showAutoSkillReceipt(entry: Pick<InputEntry, 'autoSkills'>): void {
   if (entry.autoSkills?.length) toast(t('Auto-selected Skill: /{0}', [entry.autoSkills[0]!.id]));
 }
 async function stopCurrentTurn(): Promise<void> {
-  const id = selectedId, turnId = controlledTurnId, generation = selectionGeneration;
+  const id = selectedId, turnId = controlledTurnId ?? controlledHeldTurnId, generation = selectionGeneration;
   if (!id || controlledSessionId !== id || controlledSelection !== generation || !turnId || controlledStopPending) return;
   controlledStopPending = true; paintDeliveryControls();
   try { await run(api.stopSessionTurn(id, turnId)); }
@@ -8950,7 +8954,7 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
     if (!sameSelection()) return;
     // An actual turn takes precedence over queued follow-ups. Stop never silently
     // becomes cancellation of a different pending input in that same chat.
-    if (target && controlledSessionId === target && controlledSelection === selection && controlledTurnId) {
+    if (target && controlledSessionId === target && controlledSelection === selection && (controlledTurnId || controlledHeldTurnId)) {
       await stopCurrentTurn(); return;
     }
     const pending = pendingComposerInput();

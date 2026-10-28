@@ -2067,6 +2067,12 @@ export type SessionControlsView = {
   proLoopDelivery?: boolean;
   objective: string;
   activeTurnId: string | null;
+  /**
+   * A turn this chat's page still holds open although the app no longer counts it as work (its
+   * activity ended; 2.1.47 round). The page takes no message while it holds one, so Stop is
+   * offered for it: the app shows no Working, but the person is not left without a way out.
+   */
+  heldTurnId?: string | null;
   finishHeld: boolean;
   queueAtFinish?: boolean;
   canInject?: boolean;
@@ -2109,13 +2115,15 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
   const activeTurnId = session.browserRecoveryDismissedAt === undefined && session.activeTurnId &&
     (stopping || runningToolCalls(id) > 0 || (activityExpiry !== undefined ? activityExpiry !== null && activityExpiry > Date.now() :
       live?.activeTurnId === session.activeTurnId)) ? session.activeTurnId : null;
+  const heldTurnId = !activeTurnId && !blocked && session.activeTurnId && session.browserRecoveryDismissedAt === undefined &&
+    live?.activeTurnId === session.activeTurnId ? session.activeTurnId : null;
   const finishHeld = !blocked && await sessionFinishHeld(sessionId, activeTurnId, id);
   const draft = goalViewFor(id) ?? goalOutcomeFor(id);
   const inputPolicy = await sessionInputPolicy(sessionId, sessionInputActivity(session));
   const plan = await readSessionPlan(sessionId);
   const finishWaiting = await sessionFinishWaiting(sessionId, activeTurnId, id);
   const recovery = await sessionRecoveryCountdowns(sessionId, id);
-  return { sessionId, plan, conversationId: id, activeTurnId, finishHeld,
+  return { sessionId, plan, conversationId: id, activeTurnId, heldTurnId, finishHeld,
     recovery,
     queueAtFinish: !blocked && inputPolicy.queueAtFinish, canInject: !blocked && inputPolicy.canInject,
     canSendDirectly: !blocked && !!inputPolicy.directTurn,
@@ -2154,12 +2162,17 @@ const ROTATION_STOP_DELAY_MS = 500;
  * app stops the turn to continue it in a fresh one (`ui.rotateStopFallback`), so Goal or Loop and a
  * pending Compact & Resume stay as they are.
  */
+/** The turn Stop may name: the running one, or one the page still holds after its activity ended. */
+async function stoppableTurn(sessionId: string): Promise<string | null> {
+  const controls = await sessionControlsFor(sessionId);
+  return controls.activeTurnId ?? controls.heldTurnId ?? null;
+}
 export async function stopSessionTurn(sessionId: string, expectedTurnId: string, options: { rotation?: boolean } = {}): Promise<SessionControlsView> {
   const id = await controlledConversation(sessionId);
   const assertCurrent = async () => {
     const latest = await getSession(sessionId);
     if (latest?.conversationId !== id || latest.activeTurnId !== expectedTurnId || !expectedTurnId ||
-        await conversationWasSuperseded(id) || (await sessionControlsFor(sessionId)).activeTurnId !== expectedTurnId) throw new Error('active_turn_changed');
+        await conversationWasSuperseded(id) || await stoppableTurn(sessionId) !== expectedTurnId) throw new Error('active_turn_changed');
   };
   await assertCurrent();
   if (!options.rotation) {

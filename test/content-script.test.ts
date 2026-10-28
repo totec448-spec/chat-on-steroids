@@ -23382,6 +23382,26 @@ describe('app Stop command uses current native turn proof', () => {
     ]);
   });
 
+  it('ends a turn it holds when ChatGPT shows neither Stop nor any answer of it, on the app\'s Stop (2.1.47 round)', async () => {
+    // 2026-10-28: ChatGPT stopped loading the chat's history, so the turn's answer never appeared
+    // and this page held the turn for hours, taking no message. Stop had nothing to click.
+    live = await harness(undefined, { stop_ack: () => ({ ok: true }) });
+    startGenerating(live.document);
+    live.hook.observe(); await settle(); await live.hook.flush();
+    const turnId = emitted(live.sent, 'turn_start').at(-1)!.event.turnId;
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    live.reply.set('stop_redeem', () => ({ ok: true, command: { type: 'stop', turnId, conversationId } }));
+    stopGenerating(live.document);
+    live.advance(30_000);
+    live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end')).toEqual([]);
+    expect(await live.runtimeMessage({ type: 'clf-stop-turn', id: '2222222222222222', turnId, conversationId })).toEqual({ ok: true });
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end').map(row => row.event)).toEqual([
+      expect.objectContaining({ turnId, outcome: 'stopped', detail: 'Stopped here: ChatGPT no longer showed this answer running.' })
+    ]);
+  });
+
   it('does not confirm a Stop command while the native page continues generating', async () => {
     const h = await setup();
     expect(await live!.runtimeMessage(h.request)).toEqual({ ok: true });

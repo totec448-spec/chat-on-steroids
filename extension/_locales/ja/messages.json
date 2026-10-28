@@ -698,6 +698,9 @@
   "content_turn_stop_requested": {
     "message": "停止を要求しました。ネイティブページでは生成中の表示がなくなりました。"
   },
+  "content_turn_stop_unseen": {
+    "message": "ここで停止しました。ChatGPT にはこの回答が実行中と表示されなくなっていました。"
+  },
   "content_unknown_error": {
     "message": "不明なエラー"
   },
