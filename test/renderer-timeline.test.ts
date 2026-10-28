@@ -1195,36 +1195,59 @@ describe("a new chat's first message held for its project's ChatGPT Project", ()
 });
 
 it("shows the chat's schedule as one quiet line, with Pause and Edit, and a missed run (#1826)", async () => {
-  const asked = Date.now() - 12_000;
-  const { w, live, append } = await boot([
-    { kind: 'user_message', seq: 1, origin: 1, time: asked, source: 'extension', messageId: 'q-sched', message: text('Check the issues') }
-  ]);
-  const api = (w as any).api;
-  const sessionId = summary(live.events).id;
-  const line = () => w.document.getElementById('scheduleLine')!;
-  // No schedule: no line.
-  api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: null }));
-  await append([]); await append([]);
-  expect(line().hidden).toBe(true);
-  const schedule = { id: '0b6c4e1c-1f1e-4a4f-9d39-3c2f0e1a2b3c', sessionId, text: 'Check the issues', repeat: { kind: 'weekdays', at: '09:00' },
-    until: null, paused: false, createdAt: Date.now() - 86_400_000, lastDueAt: null };
-  api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: schedule }));
-  api.pauseSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, paused: true } }));
-  await append([]); await append([]);
-  expect(line().hidden).toBe(false);
-  expect(line().textContent).toMatch(/^Scheduled · every weekday at 09:00( AM)? · next .+09:00/);
-  (w.document.getElementById('scheduleLinePause') as HTMLButtonElement).click();
-  await append([]);
-  expect(api.pauseSchedule).toHaveBeenCalledWith(sessionId, true);
-  api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, paused: true } }));
-  await append([]); await append([]);
-  expect(line().textContent).toMatch(/^Paused · every weekday at 09:00/);
-  expect(w.document.getElementById('scheduleLinePause')!.textContent).toBe('Resume');
-  // A run missed while the app was closed says so, beside the next time.
-  const missed = new Date(); missed.setHours(9, 0, 0, 0);
-  api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, missedDueAt: missed.getTime() } }));
-  await append([]); await append([]);
-  expect(line().textContent).toContain('missed 09:00');
+  // A Wednesday at 08:00, so the weekday run at 09:00 is later today: the time alone (2.1.47 round).
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(2026, 9, 28, 8, 0));
+  try {
+    const asked = Date.now() - 12_000;
+    const { w, live, append } = await boot([
+      { kind: 'user_message', seq: 1, origin: 1, time: asked, source: 'extension', messageId: 'q-sched', message: text('Check the issues') }
+    ]);
+    const api = (w as any).api;
+    const sessionId = summary(live.events).id;
+    const line = () => w.document.getElementById('scheduleLine')!;
+    // No schedule: no line.
+    api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: null }));
+    await append([]); await append([]);
+    expect(line().hidden).toBe(true);
+    const schedule = { id: '0b6c4e1c-1f1e-4a4f-9d39-3c2f0e1a2b3c', sessionId, text: 'Check the issues', repeat: { kind: 'weekdays', at: '09:00' },
+      until: null, paused: false, createdAt: Date.now() - 86_400_000, lastDueAt: null };
+    api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: schedule }));
+    api.pauseSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, paused: true } }));
+    await append([]); await append([]);
+    expect(line().hidden).toBe(false);
+    expect(line().textContent).toMatch(/^Scheduled · every weekday at 09:00( AM)? · next (\S+ )?09:00/);
+    // A next run later today is its time alone; on another day it names the day (2.1.47 round).
+    const next = w.document.getElementById('scheduleLineText')!.textContent!.match(/· next (.+)$/)![1]!;
+    expect(next).toMatch(/^09:00( AM)?$/);
+    // Friday 10:00: the next weekday run is Monday's, so the day is named (CodeRabbit).
+    vi.setSystemTime(new Date(2026, 9, 30, 10, 0));
+    await append([]); await append([]);
+    expect(w.document.getElementById('scheduleLineText')!.textContent).toMatch(/· next Mon,? 09:00( AM)?$/);
+    // Pause and Edit are the dock's own icon actions, like the Goal row's, named for screen readers.
+    const pause = () => w.document.getElementById('scheduleLinePause')!;
+    const edit = w.document.getElementById('scheduleLineEdit')!;
+    expect(pause().classList.contains('dock-action')).toBe(true);
+    expect(edit.classList.contains('dock-action')).toBe(true);
+    expect(pause().getAttribute('aria-label')).toBe('Pause schedule');
+    expect(pause().title).toBe('Pause schedule');
+    expect(pause().querySelector('.ico')).not.toBeNull();
+    expect(edit.getAttribute('aria-label')).toBe('Edit schedule');
+    expect(edit.querySelector('.ico')).not.toBeNull();
+    pause().click();
+    await append([]);
+    expect(api.pauseSchedule).toHaveBeenCalledWith(sessionId, true);
+    api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, paused: true } }));
+    await append([]); await append([]);
+    expect(line().textContent).toMatch(/^Paused · every weekday at 09:00/);
+    expect(pause().getAttribute('aria-label')).toBe('Resume schedule');
+    expect(pause().title).toBe('Resume schedule');
+    // A run missed while the app was closed says so, beside the next time.
+    const missed = new Date(); missed.setHours(9, 0, 0, 0);
+    api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, missedDueAt: missed.getTime() } }));
+    await append([]); await append([]);
+    expect(line().textContent).toContain('missed 09:00');
+  } finally { vi.useRealTimers(); }
 });
 
 it('says when the send check holds an automatic message, with its reason', async () => {
@@ -4109,6 +4132,52 @@ it('stops directly from the empty composer without a second Stop menu action', a
   expect(input.value).toBe('');
 });
 
+it('offers Stop for a turn the page still holds after the app stopped counting it as work, without saying Working (2.1.47 round)', async () => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  const stop = vi.fn(async () => ({ ok: true, data: {} }));
+  api.stopSessionTurn = stop;
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { sessionId: id, conversationId: 'chat-a', automation: 'off', objective: '',
+    activeTurnId: null, heldTurnId: 'page-held-turn', finishHeld: false, blocked: '', job: null } });
+  await append([]); await append([]);
+  const send = w.document.getElementById('chatSend') as HTMLButtonElement;
+  expect(send.dataset.action).toBe('stop');
+  expect(send.getAttribute('aria-label')).toBe('Stop turn');
+  expect(w.document.getElementById('chatState')!.classList.contains('is-working')).toBe(false);
+  send.click();
+  await settle();
+  expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'page-held-turn');
+  // Nothing held: the ordinary Send.
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { sessionId: id, conversationId: 'chat-a', automation: 'off', objective: '',
+    activeTurnId: null, heldTurnId: null, finishHeld: false, blocked: '', job: null } });
+  await append([]); await append([]);
+  expect(send.dataset.action).toBe('send');
+});
+
+it('stops a held turn from the button with Plan armed, and stops nothing else when that turn changed meanwhile (CodeRabbit)', async () => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  const stop = vi.fn(async () => ({ ok: true, data: {} }));
+  const plan = vi.fn(async () => ({ ok: true, data: null }));
+  api.stopSessionTurn = stop; api.draftTaskPlan = plan;
+  const controls = (turns: { activeTurnId: string | null; heldTurnId: string | null }) => async (id: string) => ({ ok: true,
+    data: { sessionId: id, conversationId: 'chat-a', automation: 'off', objective: '', finishHeld: false, blocked: '', job: null, ...turns } });
+  api.getSessionControls = controls({ activeTurnId: null, heldTurnId: 'page-held-turn' });
+  await append([]); await append([]);
+  (w.document.getElementById('createPlan') as HTMLButtonElement).click();
+  await settle();
+  const send = w.document.getElementById('chatSend') as HTMLButtonElement;
+  expect(send.dataset.action).toBe('stop');
+  send.click(); await settle();
+  expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'page-held-turn');
+  expect(plan).not.toHaveBeenCalled();
+  // Shown for the held turn, but by the time it is read again a different turn runs: that one is not stopped.
+  stop.mockClear();
+  api.getSessionControls = controls({ activeTurnId: 'replacement-turn', heldTurnId: null });
+  send.click(); await settle();
+  expect(stop).not.toHaveBeenCalled();
+});
+
 describe('Esc in the empty composer during a turn', () => {
   const esc = (w: JSDOM['window'], init: KeyboardEventInit = {}) => {
     const event = new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...init });
@@ -4539,6 +4608,20 @@ it('docks recent app repair progress without hiding authored lookalikes', async 
   expect(w.document.querySelector('.ev-assistant_message')!.textContent).toContain('Reopened chat');
   w.document.getElementById('newChat')!.click();
   expect(w.document.getElementById('recoveryStatus')!.hidden).toBe(true);
+});
+
+it('translates the historical approval deferral in the timeline and recovery notice', async () => {
+  const { w } = await boot([{ seq: 1, time: Date.now(), source: 'app', kind: 'progress',
+    progressId: 'browser-repair:approval-deferred',
+    message: text('Reload was deferred because ChatGPT showed a tool approval card.') }], true, [], [], { developerMode: true });
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  try {
+    setLanguage('es');
+    const translated = 'Se pospuso la recarga porque ChatGPT mostró una tarjeta de aprobación de herramientas.';
+    expect(w.document.querySelector('.ev-progress')!.textContent).toContain(translated);
+    expect(w.document.getElementById('recoveryStatus')!.textContent).toContain(translated);
+    expect(w.document.querySelector('.approval-wait')).toBeNull();
+  } finally { setLanguage('en'); }
 });
 
 it('keeps historical repair details in developer mode without reviving a status', async () => {
@@ -5007,26 +5090,31 @@ it.each(['navigate', 'objective edit', 'mode change', 'automation change'] as co
 });
 
 it('shows Loop settling, its real waiting deadline, and generated text in the same row', async () => {
-  const { w, append } = await boot([]);
-  const api = (w as any).api;
-  const controls = { automation: 'loop', objective: 'Continue the task', blocked: '', job: null,
-    goalWait: { reason: 'quiet', until: Date.now() + 125_000 }, goalDraft: null as unknown };
-  api.getSessionControls = async () => ({ ok: true, data: controls });
-  await append([]);
-  const row = w.document.getElementById('goalLifecycle')!;
-  expect(row.hidden).toBe(false);
-  expect(row.textContent).toContain('Loop · Waiting for tool inactivity');
-  expect(row.querySelector('[role="timer"]')?.textContent).toContain('2:05');
-  expect(row.getAttribute('aria-busy')).toBe('true');
-  controls.goalDraft = { stage: 'answering', model: 'fixture', text: 'Continue with the remaining checks', error: null };
-  await append([]);
-  expect(w.document.getElementById('goalLifecycle')).toBe(row);
-  expect(row.textContent).toContain('Generating a continuation');
-  expect(row.textContent).toContain('Continue with the remaining checks');
-  expect(row.querySelector('[role="timer"]')).toBeNull();
-  controls.automation = 'off'; await append([]);
-  expect(row.hidden).toBe(true);
-  expect(row.textContent).toBe('');
+  // The clock stands still, so a slow run cannot tick the countdown from 2:05 to 2:04 (2.1.47 round).
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(2026, 9, 28, 12, 0));
+  try {
+    const { w, append } = await boot([]);
+    const api = (w as any).api;
+    const controls = { automation: 'loop', objective: 'Continue the task', blocked: '', job: null,
+      goalWait: { reason: 'quiet', until: Date.now() + 125_000 }, goalDraft: null as unknown };
+    api.getSessionControls = async () => ({ ok: true, data: controls });
+    await append([]);
+    const row = w.document.getElementById('goalLifecycle')!;
+    expect(row.hidden).toBe(false);
+    expect(row.textContent).toContain('Loop · Waiting for tool inactivity');
+    expect(row.querySelector('[role="timer"]')?.textContent).toContain('2:05');
+    expect(row.getAttribute('aria-busy')).toBe('true');
+    controls.goalDraft = { stage: 'answering', model: 'fixture', text: 'Continue with the remaining checks', error: null };
+    await append([]);
+    expect(w.document.getElementById('goalLifecycle')).toBe(row);
+    expect(row.textContent).toContain('Generating a continuation');
+    expect(row.textContent).toContain('Continue with the remaining checks');
+    expect(row.querySelector('[role="timer"]')).toBeNull();
+    controls.automation = 'off'; await append([]);
+    expect(row.hidden).toBe(true);
+    expect(row.textContent).toBe('');
+  } finally { vi.useRealTimers(); }
 });
 
 it('names the wait for this chat’s own sub-agents without inventing a countdown', async () => {
@@ -8681,10 +8769,11 @@ it("sums up what a finished answer changed, collapsed, counting only real change
   const { w, append } = await boot([], true, [], [project]);
   const api = (w as any).api;
   const changes = [
-    { path: 'src/app.ts', state: 'edited', added: 30, removed: 5, approximate: false, diff: 'kept', edits: 3 },
-    { path: 'src/new-page.ts', state: 'created', added: 12, removed: 0, approximate: false, diff: 'kept', edits: 1 },
-    { path: 'old/helper.ts', state: 'unchanged', added: 0, removed: 0, approximate: false, diff: 'kept', edits: 2 },
-    { path: 'big.json', state: 'edited', added: 400, removed: 2, approximate: true, diff: 'too-large', edits: 1 }
+    // Recorded as the tools saw them: under the approved root's virtual name.
+    { path: '/repo/src/app.ts', state: 'edited', added: 30, removed: 5, approximate: false, diff: 'kept', edits: 3 },
+    { path: '/repo/src/new-page.ts', state: 'created', added: 12, removed: 0, approximate: false, diff: 'kept', edits: 1 },
+    { path: '/repo/old/helper.ts', state: 'unchanged', added: 0, removed: 0, approximate: false, diff: 'kept', edits: 2 },
+    { path: '/repo/big.json', state: 'edited', added: 400, removed: 2, approximate: true, diff: 'too-large', edits: 1 }
   ];
   api.turnChanges = vi.fn(async () => ({ ok: true, data: { changes, total: 4 } }));
   api.turnFileDiff = vi.fn(async () => ({ ok: true, data: { before: 'a\n', after: 'a\nb\n' } }));
@@ -8711,13 +8800,19 @@ it("sums up what a finished answer changed, collapsed, counting only real change
   expect(card.querySelector('summary')!.textContent).toBe('Changed 3 files · +442 −7 (approx.) · 1 put back');
   card.open = true; card.dispatchEvent(new w.Event('toggle'));
   const rows = [...card.querySelectorAll<HTMLDetailsElement>('.turn-change')];
+  // Each file named the way its tool row names it, without the root's virtual name; the full path in the tooltip.
   expect(rows.map(row => row.querySelector('summary')!.textContent)).toEqual([
     'src/app.ts+30 −5edited', 'src/new-page.ts+12created', 'old/helper.tsno net change', 'big.json+400 −2 (approx.)edited'
   ]);
+  expect(rows[0]!.querySelector('summary')!.title).toBe('/repo/src/app.ts');
+  // Two approved roots with the same file: the shortened names would be equal, so both keep their root (CodeRabbit).
+  const { turnChangeLabels } = await import('../src/renderer/turn-changes.js');
+  expect(turnChangeLabels(['/repo-a/src/app.ts', '/repo-b/src/app.ts', '/repo-a/README.md', 'notes.md']))
+    .toEqual(['/repo-a/src/app.ts', '/repo-b/src/app.ts', 'README.md', 'notes.md']);
   // A file's net diff loads when its row opens; one the recording did not keep says so.
   rows[0]!.open = true; rows[0]!.dispatchEvent(new w.Event('toggle'));
   await settle();
-  expect(api.turnFileDiff).toHaveBeenCalledWith(expect.any(String), 't-edit', 10, 'src/app.ts');
+  expect(api.turnFileDiff).toHaveBeenCalledWith(expect.any(String), 't-edit', 10, '/repo/src/app.ts');
   rows[3]!.open = true; rows[3]!.dispatchEvent(new w.Event('toggle'));
   await settle();
   expect(rows[3]!.textContent).toContain('Diff unavailable: this edit was too large to keep');

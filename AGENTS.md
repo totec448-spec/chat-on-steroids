@@ -289,7 +289,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Direct browser tool calls | `browser-control.ts` process epoch/pending claims; extension `storage.session.cosBrowserControl` | One claim per command; browser incarnation plus local-session tab lease. MV3 retains custody/receipt, never replays input. App restart invalidates outstanding claims. |
 | Workers and inboxes | `agents.ts` / swarm snapshot and retired-worker fences | Stage → critical durable snapshot → publish/open/report. |
 | Compaction | `continuation.ts` / continuation WAL + session metadata | Disk ownership decides restart outcome; transport phase alone does not. |
-| Goal control | `goal.ts` / `goal-objectives`, `goal-switches`, `goal-replies` | Objective, mode and reply debt are separate concepts; draft memory is disposable. See §21 for remaining atomicity gaps. |
+| Goal control | `goal.ts` / `goal-objectives`, `goal-switches`, `goal-replies`, `goal-outcomes` | Objective, mode and reply debt are separate concepts; draft memory is disposable. `goal-outcomes` keeps only a chat's "goal is met" decision for the window across a restart; a newer draft, a switch change or a new objective clears it, and it never drives anything. See §21 for remaining atomicity gaps. |
 | Stop/block/finish | Stop command; `blocked-chats.ts` durable set; finish facts in recorded progress/session projection | Each names exact chat/turn; no false terminal event. |
 | Browser repair | `bridge.ts` process-memory episodes | Re-earn from live evidence; never restore an old reload token as action authority. |
 | Catalog/usage | Saved successful `chat-models`; derived `usage-cache`; live usage snapshot | Catalog is observation, not a send receipt; estimates are not provider billing. |
@@ -3488,6 +3488,11 @@ without renewing on retries. Browser election is saved before opening; lost rece
 and user closure do not grant another opening for that command. A reopened page adopts the
 pending Stop only after matching its original native question, and rechecks that identity before
 clicking Stop. Newer questions never inherit the old Stop's authority.
+A turn the page still holds after the app stopped counting it as work (its activity ended; e.g.
+ChatGPT stopped loading the chat's history, so the answer never appeared) is `heldTurnId` in the
+session controls: the composer offers Stop for it without showing Working, and `stopSessionTurn`
+accepts it. The page, finding neither ChatGPT's Stop, an approval card nor any answer of that turn,
+ends it as `stopped` with the detail `content_turn_stop_unseen`; later exact work reopens it as usual.
 Block persists the exact conversation's local-tool refusal across all MCP surfaces; only a
 user release/deletion removes it. It does not remotely terminate ChatGPT or erase history.
 Neither action may spill into another local session merely because labels or timing match.
