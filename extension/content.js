@@ -13265,9 +13265,10 @@
       const input = reply?.data?.input;
       if (!input) return false;
       if (!idle()) return false;
-      const fail = async (error) => {
+      // `detail` is a language-independent code for the app; the error itself is in the page's language.
+      const fail = async (error, detail) => {
         const why = deletedConversations.has(target.toLowerCase()) ? CONVERSATION_DELETED : error;
-        await ask({ type: 'desktop_input', id: input.id, owner: input.owner, fail: true, error: why }); return false;
+        await ask({ type: 'desktop_input', id: input.id, owner: input.owner, fail: true, error: why, ...(detail && why === error ? { detail } : {}) }); return false;
       };
       if (await chatGptSignedOut()) return fail(t(
         'content_delivery_signed_out',
@@ -13279,7 +13280,7 @@
       if (!(await CLF_DOM.selectModelSettings(input.model, input.reasoningEffort, idle))) return fail(t(
         'content_delivery_model_unconfirmed',
         'Requested model or reasoning could not be confirmed'
-      ));
+      ), 'model-unconfirmed');
       editor = await CLF_DOM.openQuestionEdit(replaced, idle);
       if (editor.failure) { const failure = editor.failure; editor = null; return fail(EDIT_FAILURES[failure]()); }
       let insertionFailure = '';
@@ -13472,9 +13473,9 @@
       if (!onTarget()) { noteWithdraw(offTarget()); return false; }
       withdrawableRecoveryDraft = Boolean(input.recovery) && !(input.images || []).length && !(input.attachments || []).length;
       // A chat ChatGPT deleted fails every check after it (its tab moves home); say why instead.
-      const fail = async (error) => {
+      const fail = async (error, detail) => {
         const why = target && deletedConversations.has(target.toLowerCase()) ? CONVERSATION_DELETED : error;
-        await ask({ type: 'desktop_input', id: input.id, owner: input.owner, fail: true, error: why }); return false;
+        await ask({ type: 'desktop_input', id: input.id, owner: input.owner, fail: true, error: why, ...(detail && why === error ? { detail } : {}) }); return false;
       };
       // ChatGPT restores its shared home draft even in a newly opened input tab.
       // This exact claimed bootstrap owns replacement text; existing chats and
@@ -13541,12 +13542,13 @@
       const providerLimitation = () => CLF_DOM.errors().find(error => error.blocking === true)?.text;
       const limitation = providerLimitation();
       if (limitation) return fail(limitation);
-      if (!intoRunningTurn() && !(await CLF_DOM.selectModelSettings(input.model, input.reasoningEffort, onTarget))) return fail(
-        providerLimitation() || t(
+      if (!intoRunningTurn() && !(await CLF_DOM.selectModelSettings(input.model, input.reasoningEffort, onTarget))) {
+        const limited = providerLimitation();
+        return fail(limited || t(
           'content_delivery_model_unconfirmed',
           'Requested model or reasoning could not be confirmed'
-        )
-      );
+        ), limited ? undefined : 'model-unconfirmed');
+      }
       // Native picker closure can precede re-enabling the same editor. Wait before
       // its one insertion; a disabled editing host is not a rejected helper prompt.
       if (!await waitPageView(writableComposer, () => onTarget() && (!!message.directTurn || !CLF_DOM.generating()), 15000)) return fail(t(
