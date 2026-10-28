@@ -66,6 +66,32 @@ it('keeps a message sent mid-turn above the answer that ended that turn, even wh
   expect(transcriptEntries(events).map(entry => entry.stored.text)).toEqual(['Fix the build', 'Also run the tests', 'Built and tested']);
 });
 
+it('places an answer once, by its revisions together, so an older final snapshot cannot lift it above a mid-turn message (CodeRabbit)', () => {
+  // A legacy journal kept two final snapshots of one answer, the first opened before the mid-turn message.
+  const events = [
+    { seq: 1, time: 1000, source: 'app', kind: 'user_message', messageId: 'q1', message: text('Fix the build') },
+    { seq: 2, time: 1010, source: 'extension', kind: 'turn_start', turnId: 'g-3' },
+    { seq: 4, time: 1100, authoredAt: 1020, source: 'extension', kind: 'assistant_message', turnId: 'g-3', messageId: 'a1', message: text('Built'), final: true, state: 'final' },
+    { seq: 5, time: 1200, source: 'app', kind: 'user_message', turnId: 'g-3', messageId: 'q2', message: text('Also run the tests') },
+    { seq: 9, time: 1900, authoredAt: 1020, source: 'extension', kind: 'assistant_message', turnId: 'g-3', messageId: 'a1', message: text('Built and tested'), final: true, state: 'final' },
+    { seq: 10, time: 2000, source: 'extension', kind: 'turn_end', turnId: 'g-3', outcome: 'completed' }
+  ] as unknown as SessionEvent[];
+  expect(transcriptEntries(events).map(entry => entry.stored.text)).toEqual(['Fix the build', 'Also run the tests', 'Built and tested']);
+});
+
+it('keeps a message recorded without a turn where it was recorded (CodeRabbit)', () => {
+  const events = [
+    { seq: 1, time: 1000, source: 'app', kind: 'user_message', messageId: 'q1', message: text('First question') },
+    { seq: 2, time: 1010, source: 'extension', kind: 'turn_start', turnId: 'g-4' },
+    { seq: 3, time: 1100, source: 'extension', kind: 'assistant_message', turnId: 'g-4', messageId: 'a1', message: text('First answer'), final: true, state: 'final' },
+    { seq: 4, time: 1200, source: 'extension', kind: 'turn_end', turnId: 'g-4', outcome: 'completed' },
+    { seq: 5, time: 1300, source: 'extension', kind: 'assistant_message', messageId: 'a2', message: text('An answer read after a reload'), final: true, state: 'final' },
+    { seq: 6, time: 1400, source: 'app', kind: 'user_message', messageId: 'q2', message: text('Second question') }
+  ] as unknown as SessionEvent[];
+  expect(transcriptEntries(events).map(entry => entry.stored.text))
+    .toEqual(['First question', 'First answer', 'An answer read after a reload', 'Second question']);
+});
+
 it('prefers the text a person typed over the transport copy of their message', () => {
   seq = 0;
   const events = [user('t1', 'Do it\n\n<control instructions>', { authoredText: 'Do it' })];

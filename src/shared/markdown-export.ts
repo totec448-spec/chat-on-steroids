@@ -1,4 +1,4 @@
-import { chronological } from './chronology.js';
+import { chronological, positionOf } from './chronology.js';
 import { continuationMarkerOf, type SessionEvent, type StoredText } from './session.js';
 
 /* Copy and Markdown export of what was said in a chat. Selection is pure so the renderer (which
@@ -26,19 +26,25 @@ export function transcriptEntries(events: readonly SessionEvent[]): TranscriptEn
   // A revision replaces a message's text but not its place: messages come in the order the chat
   // shows them (the shared reading order), the text from each one's latest revision. A later work
   // stamp on a revision, such as a delivery confirmed after the answer, does not move it.
-  const place = new Map<SessionEvent, number>();
-  chronological(events).forEach((event, index) => place.set(event, index));
-  const messages = new Map<string, { latest: Said; place: number }>();
+  // Revisions are collapsed first, to the latest one at the message's first position, so an older
+  // final snapshot of an answer (legacy journals kept several) cannot lift it above a later message.
+  const revisions = new Map<string, Said[]>();
   let anonymous = 0;
   for (const event of events) {
     if (event.kind !== 'user_message' && event.kind !== 'assistant_message') continue;
     if (event.kind === 'assistant_message' && !event.final) continue;
     const id = event.messageId ? `${event.kind}\u0000${event.messageId}` : `anonymous\u0000${anonymous++}`;
-    const previous = messages.get(id);
-    const at = Math.min(previous?.place ?? Number.POSITIVE_INFINITY, place.get(event)!);
-    messages.set(id, { latest: !previous || event.seq > previous.latest.seq ? event : previous.latest, place: at });
+    revisions.set(id, [...(revisions.get(id) ?? []), event]);
   }
-  return [...messages.values()]
+  const collapsed = [...revisions.values()].map(list => {
+    const latest = list.reduce((newest, event) => event.seq > newest.seq ? event : newest);
+    return { latest, placed: { ...latest, origin: Math.min(...list.map(positionOf)) } as Said };
+  });
+  const place = new Map<SessionEvent, number>();
+  const others = events.filter(event => event.kind !== 'user_message' && event.kind !== 'assistant_message');
+  chronological([...others, ...collapsed.map(entry => entry.placed)]).forEach((event, index) => place.set(event, index));
+  const messages = collapsed.map(({ latest, placed }) => ({ latest, place: place.get(placed)! }));
+  return messages
     .filter(({ latest }) => !continuationMarkerOf(latest.message.text) && spoken(latest).text.trim())
     .sort((a, b) => a.place - b.place || a.latest.seq - b.latest.seq)
     .map(({ latest }) => ({ role: latest.kind === 'user_message' ? 'user' as const : 'assistant' as const,
