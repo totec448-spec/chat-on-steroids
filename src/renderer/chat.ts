@@ -107,7 +107,7 @@ import {
 import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS, type HandoffLength } from '../shared/handoff.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
 import { $, ago, clockTime, compactNumber, disclosureChevron, el, icon, run, setIcon, toast } from './dom.js';
-import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
+import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_REPAIR_DEFERRED_TEXT, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
 import { STRICT_REFUSAL_PROGRESS_PREFIX, UNPROVEN_WORKER_NOTICE, UNTRUSTED_NOTICE, UNTRUSTED_WORKER_NOTICE } from '../shared/trust-notices.js';
 import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
 import { createSearchPopup } from './search-popup.js';
@@ -5400,6 +5400,11 @@ function approvalRowText(text: string): string {
   return text;
 }
 
+function repairRowText(text: string): string {
+  return text === APPROVAL_REPAIR_DEFERRED_TEXT
+    ? t('Reload was deferred because ChatGPT showed a tool approval card.') : text;
+}
+
 /** A strict-trust notice in the interface language; older wordings stay as recorded. Literal keys for the catalog audit. */
 function trustNoticeText(text: string): string {
   if (text === UNTRUSTED_NOTICE) return t("A tool call from an untrusted chat was refused. To allow it, open this chat's ⋯ menu in the sidebar (or right-click its row) and choose Trust chat.");
@@ -5529,6 +5534,7 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
         return el('p', 'meta is-progress', () => t(goalErrorMessage('goal_helper_stop_unverified')));
       }
       if (event.progressId?.startsWith(STRICT_REFUSAL_PROGRESS_PREFIX)) return el('p', 'meta is-progress', () => trustNoticeText(event.message.text));
+      if (event.source === 'app' && event.progressId?.startsWith('browser-repair:')) return el('p', 'meta is-progress', () => repairRowText(event.message.text));
       if (!event.progressId?.startsWith(APPROVAL_PROGRESS_PREFIX)) return el('p', 'meta is-progress', event.message.text);
       // ChatGPT's own tool approval card stands in this chat's page (approval-wait.ts). The app
       // writes the English source; only the user can answer the card, so the row opens the page.
@@ -6844,7 +6850,7 @@ function paintRecoveryStatus(): boolean {
   if (host.hidden) return paintRecoveryVerdict(host, sessionId);
   if (!host.hidden && recovery?.kind === 'progress') {
     const row = el('div', 'recovery-notice');
-    row.append(icon('i-pulse'), el('span', 'queue-label', recovery.message.text),
+    row.append(icon('i-pulse'), el('span', 'queue-label', () => repairRowText(recovery.message.text)),
       dockAction(() => t('Dismiss recovery notice'), 'i-x', () => {
         if (sessionId) dismissedRecoveryNotices.set(sessionId, revision);
         host.hidden = true; host.replaceChildren();

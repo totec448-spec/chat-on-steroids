@@ -2010,6 +2010,7 @@
   "Link copied": "リンクをコピーしました",
   "ChatGPT is waiting for your approval": "ChatGPT があなたの承認を待っています",
   "The tool approval ChatGPT asked for in this chat was answered.": "このチャットで ChatGPT が求めたツールの承認に応答しました。",
+  "Reload was deferred because ChatGPT showed a tool approval card.": "ChatGPT がツールの承認カードを表示したため、再読み込みを延期しました。",
   "What's new": "新機能",
   "Full release notes": "リリースノート全文",
   "Version {0}": "バージョン {0}",

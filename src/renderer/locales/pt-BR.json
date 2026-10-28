@@ -2080,6 +2080,7 @@
   "Link copied": "Link copiado",
   "ChatGPT is waiting for your approval": "O ChatGPT está aguardando sua aprovação",
   "The tool approval ChatGPT asked for in this chat was answered.": "A aprovação de ferramenta que o ChatGPT pediu neste chat foi respondida.",
+  "Reload was deferred because ChatGPT showed a tool approval card.": "O recarregamento foi adiado porque o ChatGPT mostrou um cartão de aprovação de ferramenta.",
   "What's new": "Novidades",
   "Full release notes": "Notas completas da versão",
   "Version {0}": "Versão {0}",

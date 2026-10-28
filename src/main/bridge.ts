@@ -132,7 +132,7 @@ import {
 } from './session/recorder.js';
 import { noticeApprovalWaiting, noticeChatStopped } from './stuck-notice.js';
 import { approvalAnswerFor, approvalCardWaiting, noteApprovalCard, parseApprovalCard, parseApprovalResult, resetApprovalWaits, settleApprovalAnswer, type ApprovalWaitDeps } from './approval-wait.js';
-import { APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT } from '../shared/approval-wait.js';
+import { APPROVAL_PROGRESS_PREFIX, APPROVAL_REPAIR_DEFERRED_TEXT, APPROVAL_WAITING_TEXT } from '../shared/approval-wait.js';
 import {
   autoCompactionReady,
   automaticCompactionAllowed,
@@ -2769,7 +2769,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (repaired) {
       await confirmRepair(repaired.slice(0, 64), action);
     } else if (repairFailed) {
-      await failRepairAttempt(repairFailed.slice(0, 64), action, url.searchParams.get('why'), url.searchParams.get('detail')?.slice(0, 80) ?? null);
+      await failRepairAttempt(repairFailed.slice(0, 64), action, url.searchParams.get('why'), url.searchParams.get('detail')?.slice(0, 80) ?? null, url.searchParams.get('approval') === '1');
     }
     const repairHeld = url.searchParams.get('repairHeld');
     if (repairHeld) noteRepairHeld(repairHeld.slice(0, 64), url.searchParams.get('why'));
@@ -10229,6 +10229,12 @@ async function takePendingRepairs(
     const unclaimed = repair.reason !== 'unattributed' && repairNeedsClaim(repair) && repair.state === 'handed' && !repair.claimed;
     if (repair.state !== 'queued' && !unclaimed) continue;
     if (now < repair.notBefore) continue;
+    // Keep the due repair queued: skipping its incident candidate would spend the pass,
+    // and marking it handed before this hold would leave nothing eligible after an answer.
+    if (repair.reason === 'unattributed' && approvalCardWaiting(conversationId, now)) {
+      logInfo(`bridge: holding the unattributed refresh for ${conversationId}: ChatGPT's tool approval card is waiting for the user`);
+      continue;
+    }
     if (unclaimed) {
       repair.offers = (repair.offers ?? 1) + 1;
       if (repair.offers > UNCLAIMED_REPAIR_OFFERS) {
@@ -10278,8 +10284,15 @@ async function takePendingRepairs(
     const currentSession = repair.attribution ? await getSession(repair.sessionId) : null;
     const allowed = await attributionRepairAllowed(repair, currentSession) && await assistantRepairCurrent(conversationId, repair) &&
       await silenceRepairCurrent(conversationId, repair) && compactionRepairCurrent(conversationId, repair);
+    // The card can appear during the asynchronous progress/authority reads above.
+    const heldByApproval = repair.reason === 'unattributed' && approvalCardWaiting(conversationId);
+    if (heldByApproval && repairsInFlight.get(conversationId) === repair && !repair.claimed) {
+      await updateRepairProgress(conversationId, repair, APPROVAL_REPAIR_DEFERRED_TEXT);
+      repair.state = 'queued';
+      logInfo(`bridge: holding the unattributed refresh for ${conversationId}: ChatGPT's tool approval card is waiting for the user`);
+    }
     if (allowed && repairsInFlight.get(conversationId) === repair && !isChatBlocked(conversationId) &&
-        !stopRequestedFor(conversationId))
+        !stopRequestedFor(conversationId) && !heldByApproval)
       {
         ready.push({ conversationId, token: repair.token, reason: repair.reason, focus: repair.reason === 'compaction',
           ...(repairNeedsClaim(repair) ? { requiresClaim: true } : {}),
@@ -10482,14 +10495,21 @@ async function failRepairAttempt(
   token: string,
   action: 'reloaded' | 'reopened' | 'resumed' | 'preserved' | 'present' | null,
   why: string | null = null,
-  changeDetail: string | null = null
+  changeDetail: string | null = null,
+  approval = false
 ): Promise<void> {
   for (const [conversationId, repair] of repairsInFlight) {
     if (repair.state !== 'handed' || repair.token !== token) continue;
     // ChatGPT recovered by itself and is answering: the page keeps the reload for after the answer
     // instead of ending it. Nothing failed, so it is neither a warning nor a "Reload failed" row.
     const streaming = why === 'streaming';
-    if (streaming) {
+    const heldByApproval = repair.reason === 'unattributed' && streaming && approval;
+    if (heldByApproval) {
+      // The pre-navigation page check can see the card before the next activity poll.
+      await noteApprovalCard(conversationId, true, repair.sessionId, approvalWaitDeps);
+      if (repairsInFlight.get(conversationId) !== repair) return;
+      logInfo(`bridge: holding the unattributed refresh for ${conversationId}: ChatGPT's tool approval card is waiting for the user`);
+    } else if (streaming) {
       if (!repair.awaitingStream)
         logInfo(`bridge: ChatGPT is answering again in ${conversationId}; the ${repair.reason} repair waits until it finishes`);
     } else {
@@ -10497,11 +10517,11 @@ async function failRepairAttempt(
       const detail = why && Object.hasOwn(REPAIR_FAIL_REASONS, why) ? `: ${REPAIR_FAIL_REASONS[why]}${exact ? ` — ${exact}` : ''}` : '';
       logWarn(`bridge: the browser reported failed ${repair.reason} recovery for ${conversationId} (${action ?? 'action unspecified'}${detail})`);
     }
-    repair.awaitingStream = streaming;
+    repair.awaitingStream = streaming && !heldByApproval;
     await updateRepairProgress(
       conversationId,
       repair,
-      streaming
+      heldByApproval ? APPROVAL_REPAIR_DEFERRED_TEXT : streaming
         ? repair.attribution ? 'Not reloaded: ChatGPT is answering.' : 'ChatGPT is answering again; recovery waits until it finishes.'
         : `${action === 'reopened' ? 'Reopen' : action === 'resumed' ? 'Resume' : 'Reload'} failed while ${repairPurpose(repair).during}${repair.attribution ? '.' : '; will retry.'}`
     );
@@ -10513,7 +10533,7 @@ async function failRepairAttempt(
       // Navigation is transient; keep the same repair episode and retry after the short navigation cooldown.
       repair.notBefore = Math.max(repair.notBefore, Date.now() + NAVIGATION_RECOVERY_COOLDOWN_MS);
     }
-    if (repair.reason === 'unattributed') repair.state = 'done';
+    if (repair.reason === 'unattributed' && !heldByApproval) repair.state = 'done';
     else {
       repair.state = 'queued';
       repair.claimed = false;

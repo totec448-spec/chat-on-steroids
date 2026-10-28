@@ -2010,6 +2010,7 @@
   "Link copied": "Đã sao chép liên kết",
   "ChatGPT is waiting for your approval": "ChatGPT đang chờ bạn phê duyệt",
   "The tool approval ChatGPT asked for in this chat was answered.": "Yêu cầu phê duyệt công cụ mà ChatGPT đưa ra trong cuộc trò chuyện này đã được trả lời.",
+  "Reload was deferred because ChatGPT showed a tool approval card.": "Đã hoãn tải lại vì ChatGPT hiển thị thẻ phê duyệt công cụ.",
   "What's new": "Có gì mới",
   "Full release notes": "Ghi chú phát hành đầy đủ",
   "Version {0}": "Phiên bản {0}",

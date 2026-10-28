@@ -2045,6 +2045,7 @@
   "Link copied": "Bağlantı kopyalandı",
   "ChatGPT is waiting for your approval": "ChatGPT onayını bekliyor",
   "The tool approval ChatGPT asked for in this chat was answered.": "ChatGPT'nin bu sohbette istediği araç onayı yanıtlandı.",
+  "Reload was deferred because ChatGPT showed a tool approval card.": "ChatGPT bir araç onay kartı gösterdiği için yeniden yükleme ertelendi.",
   "What's new": "Yenilikler",
   "Full release notes": "Tüm sürüm notları",
   "Version {0}": "Sürüm {0}",

@@ -19597,6 +19597,22 @@ describe('one live isolated-world recorder per document', () => {
     expect(emitted(live.sent, 'app_sightings').map(row => row.event.apps)).toEqual([[sighting]]);
   });
 
+  it('reports streaming and recorder busy while an approval card hides Stop', async () => {
+    live = await harness();
+    const card = live.document.createElement('div');
+    card.setAttribute('data-codex-approval-surface', 'true');
+    card.append(live.document.createElement('button'), live.document.createElement('button'));
+    card.getClientRects = () => [{ width: 600, height: 200 }] as unknown as DOMRectList;
+    live.document.body.append(card);
+    expect((live.window as any).CLF_DOM.generating()).toBe(false);
+    expect((live.window as any).CLF_DOM.approvalWaiting()).toBe(true);
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({ streaming: true, approval: true });
+    expect(await live.runtimeMessage({ type: 'clf-recorder-ping' })).toMatchObject({ busy: true });
+    card.remove();
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({ streaming: false, approval: false });
+    expect(await live.runtimeMessage({ type: 'clf-recorder-ping' })).toMatchObject({ busy: false });
+  });
+
   it('reports the recorder protocol version rather than the unrelated Fiber protocol version', async () => {
     live = await harness();
 
