@@ -1,7 +1,7 @@
 import { REASONING_EFFORTS } from '../src/shared/session.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_GOAL_MODEL,
   defaultConfig,
@@ -126,6 +126,19 @@ describe('settings migration', () => {
       expect(loaded.readOnly).toBe(true);
     }
   });
+  it('loads the sounds switch saved before it existed, or damaged, as off, and keeps everything else', async () => {
+    const config = defaultConfig();
+    await saveConfig({ ...config, ui: { ...config.ui, sounds: true } });
+    expect((await loadConfig()).ui.sounds).toBe(true);
+    const { sounds: _, ...older } = config.ui;
+    for (const ui of [older, { ...older, sounds: 'yes' }, { ...older, sounds: 1 }, { ...older, sounds: null }]) {
+      await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...config, readOnly: true, ui: { ...ui, theme: 'light' } }), 'utf8');
+      const loaded = await loadConfig();
+      expect(loaded.ui.sounds).toBe(false);
+      expect(loaded.ui.theme).toBe('light');
+      expect(loaded.readOnly).toBe(true);
+    }
+  });
   it('drops removed file-saving settings without changing other saved choices', async () => {
     const config = defaultConfig();
     config.readOnly = true;
@@ -226,6 +239,25 @@ describe('settings migration', () => {
     expect((await loadConfig()).ui.localAppUsage).toBe(true);
     await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, localAppUsage: false } });
     expect((await loadConfig()).ui.localAppUsage).toBe(false);
+  });
+  it('keeps Code checkpoints off for fresh, legacy and malformed configs while preserving explicit opt-in', async () => {
+    expect(defaultConfig().projects).toEqual({ codeCheckpoints: false });
+    const load = async (projects: unknown) => {
+      const stored = { ...defaultConfig(), readOnly: false } as Record<string, unknown>;
+      if (projects === undefined) delete stored.projects; else stored.projects = projects;
+      await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(stored), 'utf8');
+      return loadConfig();
+    };
+    expect((await load(undefined)).projects).toEqual({ codeCheckpoints: false });
+    expect((await load({})).projects).toEqual({ codeCheckpoints: false });
+    expect((await load({ codeCheckpoints: true })).projects).toEqual({ codeCheckpoints: true });
+    // A bad value repairs to off without sending the rest of the file through (read-only) recovery.
+    const loaded = await load({ codeCheckpoints: 'yes' });
+    expect(loaded.projects).toEqual({ codeCheckpoints: false });
+    expect(loaded.readOnly).toBe(false);
+    expect((await load('on')).projects).toEqual({ codeCheckpoints: false });
+    await saveConfig({ ...defaultConfig(), projects: { codeCheckpoints: true } });
+    expect((await loadConfig()).projects.codeCheckpoints).toBe(true);
   });
   it('keeps the local control API off for fresh, legacy and malformed configs while preserving explicit opt-in', async () => {
     expect(defaultConfig().controlApi).toEqual({ enabled: false, allowActions: false });
@@ -1210,3 +1242,25 @@ describe('a settings file the app cannot read as is', () => {
     expect(await fs.readFile(path.join(dir, saved[0]!), 'utf8')).toBe(content);
   });
 });
+
+// #1856 (CodeRabbit): a damaged saved chat style falls back to the built-in text and says so once, never its content.
+it('logs a damaged saved chat style without its text, and nothing for an absent one', async () => {
+  const logger = await import('../src/main/logger.js');
+  const warn = vi.spyOn(logger, 'logWarn');
+  const { MAX_CHAT_STYLE_CHARS } = await import('../src/shared/chat-style.js');
+  // On disk, as a damaged file has it: saveConfig would already drop the value before writing.
+  await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...defaultConfig(),
+    ui: { ...defaultConfig().ui, chatPersonality: 'secret-ish ' + 'x'.repeat(MAX_CHAT_STYLE_CHARS) } }), 'utf8');
+  warn.mockClear();
+  const loaded = await loadConfig();
+  expect(loaded.ui.chatPersonality).toBeUndefined();
+  const lines = warn.mock.calls.map(call => String(call[0])).filter(line => line.includes('chatPersonality'));
+  expect(lines).toEqual(['config: the saved ui.chatPersonality was damaged (too long); new chats use the built-in text']);
+  expect(lines.join()).not.toContain('secret-ish');
+  warn.mockClear();
+  await saveConfig(defaultConfig());
+  await loadConfig();
+  expect(warn.mock.calls.filter(call => String(call[0]).includes('chatPersonality'))).toEqual([]);
+  warn.mockRestore();
+});
+

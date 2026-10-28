@@ -23,6 +23,7 @@ import { injectedUserMessage, recordedRequestTurn, responseTurnId, type Timeline
 import type { SessionSummary } from '../shared/session.js';
 import { messageReferences } from '../shared/session.js';
 import { turnTrace } from '../shared/turn-trace.js';
+import { checkAutomaticSend, SEND_CHECK_RETRY_MS } from './send-check.js';
 import { publishBrowserDecision, authorizeBrowserInput, sessionInputPolicy, collectRecordedBrowserDecision, fileRotationInput, fileRotationContinueAfterStop, rotationDelivery, withdrawUnsentRotation, type InputActivity } from './session/input.js';
 import { callHoldOpen, holdCalls } from './rotation-hold.js';
 import { authorizedPluginRefreshPublications, hasRequestedPluginRefresh, pendingPluginRefreshes, claimPluginRefresh, requireManualPluginRefresh, completePluginRefresh, failPluginRefresh } from './plugin-refresh.js';
@@ -37,7 +38,7 @@ export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
-import { pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation } from './session/input.js';
+import { automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation } from './session/input.js';
 /**
  * The local bridge between the Chrome extension and this app.
  *
@@ -112,6 +113,7 @@ import {
   startGoalDraft
 } from './goal.js';
 import { logInfo, logWarn } from './logger.js';
+import { markStartup } from './startup-timing.js';
 import {
   closeConversation,
   liveConversations,
@@ -472,6 +474,8 @@ interface Command {
    */
   timer: NodeJS.Timeout | null;
   lastError: string | null;
+  /** #1794: the send check held this worker's start or wake; asked again from `nextAt`. Not persisted. */
+  sendCheck?: { attempt: number; nextAt: number; allowed?: { text: string; spec: CommandSpec; url: string } };
   /**
    * The page that redeemed this command, while its lease holds.
    *
@@ -850,7 +854,11 @@ function inputHeldElsewhere(input: { id: string; conversationId: string | null }
 }
 
 let versionWarned = false;
+/** The send-check hold (by attempt) each held message's claim was last logged for. */
+const heldClaimsLogged = new Map<string, number>();
 let latestCompanionDiagnostics: CompanionDiagnostics | null = null;
+/** When this app received that report: the browser's own clock may differ. */
+let latestCompanionDiagnosticsAt = 0;
 let companionDiagnosticsRevision = 0;
 const companionDiagnosticsWaiters = new Set<() => void>();
 
@@ -1012,8 +1020,22 @@ function recordCompanionDiagnostics(value: unknown): void {
   // reports its defaults, and those must not overwrite the choices it is about to get back.
   if (diagnosticObject(value)?.preferencesStored === true) rememberBrowserPreferences(next.preferences);
   latestCompanionDiagnostics = next;
+  latestCompanionDiagnosticsAt = Date.now();
   companionDiagnosticsRevision += 1;
   for (const waiter of companionDiagnosticsWaiters) waiter();
+}
+
+/**
+ * The browser side as last known, for the log line of a message no browser picked up (#1878): the
+ * wake channel and the ChatGPT tab counts from the extension's latest report, with its age. Never waits.
+ */
+export function browserPickupContext(now = Date.now()): string {
+  const wake = `wake channel ${browserWakeConnected() ? 'connected' : 'not connected'}`;
+  const tabs = latestCompanionDiagnostics?.environment?.tabs;
+  if (!tabs) return `${wake}; no tab report from the browser yet`;
+  const age = Math.max(0, Math.round((now - latestCompanionDiagnosticsAt) / 1000));
+  return `${wake}; ChatGPT tabs ${tabs.open} open, ${tabs.discarded} discarded, ${tabs.frozen} frozen, ${tabs.loading} loading, ` +
+    `${tabs.inBackgroundWindow} in the background window, reported ${age} s ago`;
 }
 
 /** Ask the companion for a fresh popup-equivalent snapshot, but keep a bounded wait. */
@@ -1042,6 +1064,7 @@ export function companionDiagnostics(): Promise<CompanionDiagnostics | null> {
 
 function clearCompanionDiagnostics(): void {
   latestCompanionDiagnostics = null;
+  latestCompanionDiagnosticsAt = 0;
   companionDiagnosticsRevision++;
   for (const waiter of companionDiagnosticsWaiters) waiter();
 }
@@ -2496,6 +2519,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       return { token, reused };
     });
     if (!provisioned) return json(res, 409, { error: 'browser_disconnected' }, origin);
+    // Accepted and holding its token: the extension is connected (an announced version alone could still be refused).
+    markStartup('extension');
     const appeared = noteBrowserSeen(req);
     if (!provisioned.reused) {
       logInfo('bridge: browser extension connected and provisioned');
@@ -2995,6 +3020,33 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       // A branch (#482) is made where its source chat lives in ChatGPT, never on a Project's page.
       const link = entry?.projectId && entry.purpose !== 'decision' && !entry.lifetime && !entry.branch ? (await getProject(entry.projectId))?.chatgpt : undefined;
       if (link && (link.state !== 'linked' || body.project !== link.id)) return json(res, 200, { input: null }, origin);
+    }
+    // #1794: an automatic send is first checked with the person's send check, outside the queue's lock.
+    const automatic = (await listInputs()).find(row => row.id === body.id && row.state === 'queued');
+    const kind = automatic ? automaticSendKind(automatic) : null;
+    if (automatic && kind && getConfig().ui.sendCheckUrl) {
+      // A held row is not asked about again before its next ask, however often a page claims it.
+      if (heldBySendCheck(automatic)) {
+        // Pages ask every few seconds: said once per hold.
+        const hold = automatic.sendCheck!;
+        if (heldClaimsLogged.get(automatic.id) !== hold.attempt) {
+          heldClaimsLogged.set(automatic.id, hold.attempt);
+          if (heldClaimsLogged.size > 256) heldClaimsLogged.delete(heldClaimsLogged.keys().next().value!);
+          logInfo(`send check: ${kind} ${automatic.id} attempt ${hold.attempt} still held until ${new Date(hold.nextAt).toISOString()} (${hold.reason}); a page asked to send it`);
+        }
+        return json(res, 200, { input: null }, origin);
+      }
+      const attempt = (automatic.sendCheck?.attempt ?? 0) + 1;
+      const project = automatic.projectId ?? (automatic.sessionId ? (await getSession(automatic.sessionId))?.projectId : undefined) ?? null;
+      const verdict = await checkAutomaticSend({ kind, id: automatic.id, attempt, text: automatic.text,
+        chat: { session: automatic.sessionId ?? null, project, worker: target ? agentForOwnedConversation(target) : null } });
+      if (!verdict.allowed) {
+        if (await holdInputForSendCheck(automatic.id, attempt, verdict.reason, verdict.answered)) changed();
+        return json(res, 200, { input: null }, origin);
+      }
+      // What was allowed is what goes: a row edited or withdrawn meanwhile is asked about again.
+      const now = (await listInputs()).find(row => row.id === body.id);
+      if (now?.state !== 'queued' || now.text !== automatic.text) return json(res, 200, { input: null }, origin);
     }
     const input = await claimBrowserInput(body.id, body.owner, target, body.requiresAuthorization === true);
     // The first message for an existing chat after a new tunnel-client is what the hold learns from.
@@ -4904,6 +4956,35 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       }
     }
     if (!commands.includes(command) || command.owner !== client) return json(res, 409, { error: 'command_taken' }, origin);
+    // #1794: a worker's start or wake is an automatic send, first checked with the person's send
+    // check. Held, the page keeps redeeming (retryable) and the program is asked at most every
+    // 30 s; the command's own deadline still ends it, then with the hold as its reason.
+    // An allow answers this text, this payload and this program: a replaced payload or another
+    // configured program is asked again.
+    const allowed = command.sendCheck?.allowed;
+    if ((command.spec.type === 'worker' || command.spec.type === 'revive') && getConfig().ui.sendCheckUrl && described.text &&
+        (allowed?.text !== described.text || allowed.spec !== command.spec || allowed.url !== getConfig().ui.sendCheckUrl)) {
+      const spec = command.spec, claimedAt = command.claimedAt, url = getConfig().ui.sendCheckUrl!;
+      if (command.sendCheck && Date.now() < command.sendCheck.nextAt) return json(res, 503, { error: 'send_check_held', retryable: true }, origin);
+      const attempt = (command.sendCheck?.attempt ?? 0) + 1;
+      const prime = primeConversation(spec.runId);
+      const source = prime ? await findSessionByConversation(prime, { requireUnique: true }) : null;
+      const verdict = await checkAutomaticSend({ kind: spec.type === 'worker' ? 'worker-start' : 'worker-message', id: command.id, attempt,
+        text: described.text, chat: { session: source?.id ?? null, project: source?.projectId ?? null, worker: spec.agent } });
+      // The owner alone cannot tell a replaced command redeemed again by this same page: the spec and claim must be the asked ones.
+      if (!commands.includes(command) || command.owner !== client || command.spec !== spec || command.claimedAt !== claimedAt)
+        return json(res, 409, { error: 'command_taken' }, origin);
+      if (!verdict.allowed) {
+        command.sendCheck = { attempt, nextAt: Date.now() + SEND_CHECK_RETRY_MS };
+        command.lastError = verdict.answered
+          ? `the person's send check held it${verdict.reason ? `: ${verdict.reason}` : ''}`
+          : "the person's send check did not answer";
+        changed();
+        return json(res, 503, { error: 'send_check_held', retryable: true }, origin);
+      }
+      command.sendCheck = { attempt, nextAt: 0, allowed: { text: described.text, spec, url } };
+      if (command.lastError?.startsWith("the person's send check")) { command.lastError = null; changed(); }
+    }
     const liveResume = command.spec.type === 'resume' ? continuationByToken(command.spec.token) : null;
     if (command.spec.type === 'resume' && (!liveResume || !sendUnattempted(liveResume.destinationSend)))
       return json(res, 409, { error: 'command_already_sent', final: true }, origin);
@@ -6295,6 +6376,8 @@ function queue(spec: CommandSpec): Command {
       // — and its deadline starts again from this delivery, because this is new work.
       existing.spec = spec;
       existing.lastError = null;
+      // New work: the send check's hold and answer were about the payload it replaced.
+      delete existing.sendCheck;
     }
     changed();
     persistCommands();

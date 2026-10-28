@@ -20,6 +20,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { collectSettings, searchSettings } from '../src/renderer/settings-search.js';
 import { sessionWorkingAt } from '../src/shared/session-activity.js';
 import { CHAT_ACTIVE_MS, type SessionSummary } from '../src/shared/session.js';
+import { contrastRatio, paletteTokens } from '../src/shared/appearance.js';
 
 let document: Document;
 let css = '';
@@ -38,6 +39,65 @@ beforeAll(async () => {
   css = styles + '\n' + await fs.readFile(path.join(process.cwd(), 'src/renderer/settings.css'), 'utf8');
   chatSource = chat;
   menuSource = await fs.readFile(path.join(process.cwd(), 'src', 'renderer', 'row-menu.ts'), 'utf8');
+});
+
+it('keeps recorded DIL surfaces on CoS tokens across themes and high-contrast palettes', () => {
+  const rule = (selector: string): string => {
+    const start = css.indexOf(selector + ' {');
+    expect(start, selector).toBeGreaterThanOrEqual(0);
+    return css.slice(start, css.indexOf('}', start));
+  };
+  const bar = rule('.msg.rich .markdown-dil-chart-bar');
+  expect(bar).toContain('background: var(--accent-fill, var(--accent))');
+  expect(bar).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+  const card = rule('.msg.rich .markdown-dil-card');
+  expect(card).toContain('background: var(--card)');
+  expect(card).toContain('border: 1px solid var(--line)');
+  expect(card).toContain('var(--line-spacing, 1)');
+  const badge = rule('.msg.rich .markdown-dil-badge.markdown-dil-success');
+  expect(badge).toContain('var(--green-wash)');
+  expect(badge).toContain('var(--green-line)');
+  expect(rule('.msg.rich .markdown-dil-panel')).toContain('background: var(--card)');
+  // Nested workflow tables must collapse with the same narrow-container rule as cards.
+  expect(rule('.msg.rich .markdown-dil-panel .markdown-dil-grid')).not.toContain('grid-template-columns');
+  expect(rule('.msg.rich .markdown-dil-chart')).toContain('var(--text-scale, 1)');
+  expect(rule('.msg.rich .markdown-dil-chart-x')).toContain('var(--markdown-dil-label-height)');
+  expect(rule('.msg.rich .markdown-dil-chart-guide')).toContain('var(--markdown-dil-label-height)');
+  const guideLabel = rule('.msg.rich .markdown-dil-chart-guide > span');
+  expect(guideLabel).toContain('overflow: visible');
+  expect(guideLabel).not.toContain('text-overflow: ellipsis');
+  // Guide text and gridlines must share the same top/middle/baseline geometry.
+  // The old quarter-spaced gradient had four lines for only three guide values.
+  const guide = rule('.msg.rich .markdown-dil-chart-guide');
+  const bars = rule('.msg.rich .markdown-dil-chart-bars');
+  expect(guide).toContain('justify-content: space-between');
+  expect(guide).toContain('box-sizing: border-box');
+  expect(bars).toContain('position: relative');
+  expect(guide).toContain('padding-bottom: var(--markdown-dil-label-height)');
+  expect(bars).toContain('padding-bottom: var(--markdown-dil-label-height)');
+  expect(bars).not.toContain('repeating-linear-gradient');
+  expect(rule('.msg.rich .markdown-dil-chart-guide > span:first-child')).toContain('translateY(-50%)');
+  expect(rule('.msg.rich .markdown-dil-chart-guide > span:last-child')).toContain('translateY(50%)');
+  const gridline = rule('.msg.rich .markdown-dil-chart-gridline');
+  expect(gridline).toContain('position: absolute');
+  expect(gridline).toContain('background: var(--line)');
+  expect(gridline).toContain('pointer-events: none');
+  expect(rule('.msg.rich .markdown-dil-chart-gridline-top')).toContain('top: 0');
+  expect(rule('.msg.rich .markdown-dil-chart-gridline-middle'))
+    .toContain('top: calc((100% - var(--markdown-dil-label-height)) / 2)');
+  expect(rule('.msg.rich .markdown-dil-chart-gridline-baseline'))
+    .toContain('top: calc(100% - var(--markdown-dil-label-height))');
+  // Image/text rows respond to the real message width, not the wider session card.
+  // Keep the unnamed card/panel query for nested two-column grids.
+  expect(rule('.msg.rich:has(.markdown-dil-photo-row)')).toContain('container: message-content / inline-size');
+  expect(rule('.msg.rich')).not.toContain('container:');
+  expect(css).toContain('@container (max-width: 330px) {\n  .msg.rich .markdown-dil-grid');
+  expect(css).toContain('@container message-content (max-width: 330px) {\n  .msg.rich .markdown-dil-photo-row');
+  for (const page of ['#ffffff', '#000000']) {
+    const tokens = paletteTokens(page, '#ffcc00', 100, true);
+    expect(contrastRatio(tokens['--accent-fill']!, tokens['--page']!)).toBeGreaterThanOrEqual(7);
+    expect(contrastRatio(tokens['--soft']!, tokens['--card']!)).toBeGreaterThanOrEqual(7);
+  }
 });
 
 it('finds settings on every settings page by name, description and section, never a row its page hides', () => {

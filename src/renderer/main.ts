@@ -1,3 +1,5 @@
+import { DEFAULT_CHAT_PERSONALITY, DEFAULT_CHAT_WRITING_STYLE } from '../shared/chat-style.js';
+import { sendCheckUrl } from '../shared/send-check.js';
 import { applyPhonePush, initPhonePushSettings, readPhonePush } from './phone-push-settings.js';
 import { initBrowserSetup } from './setup-browser.js';
 import { currentLanguage, ui, uiText, t, tn, initLanguage, onLanguageChange, setLanguage, type Language } from './i18n.js';
@@ -19,6 +21,7 @@ import { initUsage, refreshOtherApps, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
 import { initAppShortcuts } from './app-shortcuts.js';
 import { initViewMenu } from './view-menu.js';
+import { initShortcutsDialog } from './shortcuts-dialog.js';
 import { initPlugins, applyPluginsState } from './plugins.js';
 import { initBrowserPreferences } from './browser-preferences.js';
 import { initSetupGuide } from './setup-guide.js';
@@ -28,6 +31,9 @@ import { initPet } from './pet.js';
 import { initPets } from './pets.js';
 import { initSkillsLibrary } from './skills-library.js';
 import { initWhatsNew } from './whats-new.js';
+import { initTour } from './tour.js';
+import { playSoundCue } from './sound-cues.js';
+import { inQuietHours } from '../shared/phone-push.js';
 import { initSettingsSearch } from './settings-search.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
@@ -62,7 +68,7 @@ import {
 } from '../shared/types.js';
 import type { SwarmState } from '../shared/session.js';
 import { $, ago, disclosureChevron, el, icon, run, shortAgo, toast } from './dom.js';
-import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatSearch, openChatView } from './chat.js';
+import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatSearch, openChatView, openFeedback } from './chat.js';
 import { publishStopNoticeTexts } from './stop-notices.js';
 import { publishMainTexts } from './main-texts.js';
 import { paintSharedTunnel } from './tunnel-warning.js';
@@ -249,7 +255,10 @@ function placePermissions(tab: string): void {
   if (permissionSurface.parentElement !== target) target.append(permissionSurface);
 }
 
+/** Set once the tour exists (below); leaving the chat screen ends a running tour quietly. */
+let stopTour: () => void = () => undefined;
 function showTab(name: string): void {
+  if (name !== 'chat') stopTour();
   if (name === 'skills') openSkillsLibrary();
   placePermissions(name);
   const library = name === 'plugins' || name === 'skills' || name === 'pets';
@@ -773,6 +782,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       autoConnect: $<HTMLInputElement>('autoConnect').checked,
       startAtLogin: $<HTMLInputElement>('startAtLogin').checked,
       turnNotifications: $<HTMLInputElement>('turnNotifications').checked,
+      sounds: $<HTMLInputElement>('soundCues').checked,
       localAppUsage: $<HTMLInputElement>('localAppUsage').checked,
       keepAwake: $<HTMLSelectElement>('keepAwake').value !== 'off',
       keepScreenAwake: $<HTMLSelectElement>('keepAwake').value === 'screen',
@@ -782,6 +792,9 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       playfulContinue: $<HTMLInputElement>('playfulContinue').checked,
       announceTurns: $<HTMLInputElement>('announceTurns').checked,
       customContinue: $<HTMLTextAreaElement>('customContinue').value.trim() || undefined,
+      chatPersonality: chatStyleDraft('chatPersonality', DEFAULT_CHAT_PERSONALITY),
+      chatWritingStyle: chatStyleDraft('chatWritingStyle', DEFAULT_CHAT_WRITING_STYLE),
+      sendCheckUrl: sendCheckDraft(previous),
       followOutput: $<HTMLInputElement>('followOutput').checked,
       mentionCore: $<HTMLInputElement>('mentionCore').checked,
       mentionPlugins: $<HTMLInputElement>('mentionPlugins').checked,
@@ -792,6 +805,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       appearance: over.appearance ?? previous.ui.appearance
     },
     controlApi: { enabled: $<HTMLInputElement>('controlApiEnabled').checked, allowActions: $<HTMLInputElement>('controlApiAllowActions').checked },
+    projects: { codeCheckpoints: $<HTMLInputElement>('codeCheckpoints').checked },
     ...chatPatch,
     // After the chat patch, which still carries the stored mcp settings it no longer edits.
     mcp: { instructions: previous.mcp?.instructions ?? '', persistentUrls: $<HTMLInputElement>('mcpPersistentUrls').checked }
@@ -828,6 +842,7 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     compaction: previous.compaction,
     mcp: previous.mcp ?? { instructions: '', persistentUrls: false },
     controlApi: previous.controlApi ?? { enabled: false, allowActions: false },
+    projects: previous.projects ?? { codeCheckpoints: false },
     multiAgent: previous.multiAgent,
     goal: previous.goal
   };
@@ -859,6 +874,9 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     }
     if (state && (!requestedSettings || requestedSettings.controlApi?.enabled === patch.controlApi?.enabled)) {
       $<HTMLInputElement>('controlApiEnabled').checked = state.config.controlApi?.enabled === true;
+    }
+    if (state && (!requestedSettings || requestedSettings.projects?.codeCheckpoints === patch.projects?.codeCheckpoints)) {
+      $<HTMLInputElement>('codeCheckpoints').checked = state.config.projects?.codeCheckpoints === true;
     }
     // And the secrets shield: an unticked switch left by a refused save must not turn it off later.
     if (state && (!requestedSettings || requestedSettings.ui.secretsShield === patch.ui.secretsShield)) {
@@ -1045,6 +1063,25 @@ function connectorSuffixValid(): string | null {
   input.setAttribute('aria-invalid', String(!valid));
   $('connectorSuffixError').hidden = valid;
   return valid ? value : null;
+}
+/** #1856: the built-in text is saved as absent, so a later release's wording reaches it; empty leaves the part out. */
+function chatStyleDraft(id: 'chatPersonality' | 'chatWritingStyle', fallback: string): string | undefined {
+  const value = $<HTMLTextAreaElement>(id).value.trim();
+  return value === fallback.trim() ? undefined : value;
+}
+/** #1794: the send check's address as typed, '' when empty (off), or null when not on this computer. */
+function sendCheckValid(): string | null {
+  const input = $<HTMLInputElement>('sendCheckUrl');
+  const value = input.value.trim();
+  const valid = value === '' ? '' : sendCheckUrl(value);
+  input.setAttribute('aria-invalid', String(valid === null));
+  $('sendCheckUrlError').hidden = valid !== null;
+  return valid;
+}
+/** An address that is not on this computer is never saved; the saved one stays until it is fixed. */
+function sendCheckDraft(previous: Config): string | undefined {
+  const valid = sendCheckValid();
+  return valid === null ? previous.ui.sendCheckUrl : valid || undefined;
 }
 function connectorSuffixDraft(previous: Config): string {
   return connectorSuffixValid() ?? previous.connectorSuffix ?? '';
@@ -1724,6 +1761,7 @@ function apply(next: AppState): void {
   $<HTMLInputElement>('startAtLogin').disabled = next.loginStartupAvailable !== true;
   applyChecked($<HTMLInputElement>('startAtLogin'), config.ui.startAtLogin === true, previousState?.config.ui.startAtLogin);
   applyChecked($<HTMLInputElement>('turnNotifications'), config.ui.turnNotifications !== false, previousState ? previousState.config.ui.turnNotifications !== false : undefined);
+  applyChecked($<HTMLInputElement>('soundCues'), config.ui.sounds === true, previousState?.config.ui.sounds);
   applyChecked($<HTMLInputElement>('localAppUsage'), config.ui.localAppUsage !== false, previousState ? previousState.config.ui.localAppUsage !== false : undefined);
   // The saved switch, not the click, decides what the main process reads.
   if (previousState && (previousState.config.ui.localAppUsage !== false) !== (config.ui.localAppUsage !== false)) void refreshOtherApps(true);
@@ -1735,10 +1773,25 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('playfulContinue'), config.ui.playfulContinue === true, previousState?.config.ui.playfulContinue);
   applyChecked($<HTMLInputElement>('announceTurns'), config.ui.announceTurns === true, previousState?.config.ui.announceTurns);
   applyValue($<HTMLTextAreaElement>('customContinue'), config.ui.customContinue ?? '', previousState ? previousState.config.ui.customContinue ?? '' : undefined);
+  applyValue($<HTMLTextAreaElement>('chatPersonality'), config.ui.chatPersonality ?? DEFAULT_CHAT_PERSONALITY, previousState ? previousState.config.ui.chatPersonality ?? DEFAULT_CHAT_PERSONALITY : undefined);
+  applyValue($<HTMLTextAreaElement>('chatWritingStyle'), config.ui.chatWritingStyle ?? DEFAULT_CHAT_WRITING_STYLE, previousState ? previousState.config.ui.chatWritingStyle ?? DEFAULT_CHAT_WRITING_STYLE : undefined);
+  // What new chats get, as saved: the built-in text, the person's own, or nothing (Haz on #1859).
+  for (const [id, saved] of [['chatPersonality', config.ui.chatPersonality], ['chatWritingStyle', config.ui.chatWritingStyle]] as const) {
+    ui($(`${id}State`), 'textContent', () => saved === undefined ? t('New chats use the built-in text.')
+      : saved === '' ? t('Saved. New chats leave this part out.') : t('Saved. New chats use your text.'));
+  }
+  // An address that is not on this computer is never saved, so it stays in the field with its
+  // error until the person fixes it; the error always matches what the field holds.
+  const sendCheckField = $<HTMLInputElement>('sendCheckUrl');
+  const typed = sendCheckField.value.trim();
+  if (typed === '' || sendCheckUrl(typed) !== null)
+    applyValue(sendCheckField, config.ui.sendCheckUrl ?? '', previousState ? previousState.config.ui.sendCheckUrl ?? '' : undefined);
+  sendCheckValid();
   applyChecked($<HTMLInputElement>('followOutput'), config.ui.followOutput !== false, previousState?.config.ui.followOutput);
   applyChecked($<HTMLInputElement>('mentionCore'), config.ui.mentionCore !== false, previousState?.config.ui.mentionCore);
   applyChecked($<HTMLInputElement>('mentionPlugins'), config.ui.mentionPlugins === true, previousState?.config.ui.mentionPlugins);
   applyChecked($<HTMLInputElement>('controlApiEnabled'), config.controlApi?.enabled === true, previousState?.config.controlApi?.enabled);
+  applyChecked($<HTMLInputElement>('codeCheckpoints'), config.projects?.codeCheckpoints === true, previousState?.config.projects?.codeCheckpoints);
   applyChecked($<HTMLInputElement>('mcpPersistentUrls'), config.mcp?.persistentUrls === true, previousState?.config.mcp?.persistentUrls);
   // Stable URLs live only in the OS-backed secret store; without it they keep rotating.
   $<HTMLInputElement>('mcpPersistentUrls').disabled = next.secureStorage?.available === false && config.mcp?.persistentUrls !== true;
@@ -2393,10 +2446,14 @@ function atBottom(view: HTMLElement): boolean {
   return view.scrollTop + view.clientHeight >= view.scrollHeight - 24;
 }
 
-/** Puts a feed back on its newest line. Safe on a hidden panel: it is re-applied on show. */
+/**
+ * Puts a feed back on its newest line. Only on screen: reading the scroll height lays the page out,
+ * and the app logs every few seconds, so a closed page waits until showTab re-applies it on show.
+ */
 function stickToNewest(id: string): void {
   if (pinned.get(id) === false) return;
   const view = $(id);
+  if (!view.closest('.panel')?.classList.contains('is-active')) return;
   view.scrollTop = view.scrollHeight;
 }
 
@@ -2731,7 +2788,29 @@ $('updateInstall').addEventListener('click', installUpdate);
 $('installUpdate').addEventListener('click', installUpdate);
 $('connectionPopoverToggle').addEventListener('click', () => void toggleConnection());
 $('wizConnect').addEventListener('click', () => void toggleConnection());
-$('readyStart').addEventListener('click', () => showTab('chat'));
+// #1833: Setup's last step offers the first-run tour once; Settings replays it.
+// The answer counts in this window at once, before the saved setting comes back in a state push.
+let tourAnswered = false;
+const tour = initTour({ markDone: async () => {
+  tourAnswered = true;
+  const reply = await api.markTourDone().catch(() => null);
+  if (reply?.ok) return true;
+  toast(t("The tour choice couldn't be saved, so it may be offered again."));
+  return false;
+} });
+// A replay from Settings starts on the next frame; leaving chat before it cancels it too (CodeRabbit).
+let tourFrame = 0;
+stopTour = () => { if (tourFrame) cancelAnimationFrame(tourFrame); tourFrame = 0; tour.stop(); };
+$('readyStart').addEventListener('click', () => {
+  showTab('chat');
+  if (state && state.config.ui.tourDone !== true && !tourAnswered) tour.offer();
+});
+$('takeTour').addEventListener('click', () => {
+  showTab('chat');
+  // After the chat view has laid out, so each step finds its control on screen.
+  if (tourFrame) cancelAnimationFrame(tourFrame);
+  tourFrame = requestAnimationFrame(() => { tourFrame = 0; tour.start(); });
+});
 $('showCosBrowser').addEventListener('click', event => void run(
   (event.currentTarget as HTMLElement).dataset.signedIn === 'true' ? api.signOutChatGpt() : api.showCosBrowser()));
 /** Setup's browser choice is the same save as choosing it in Settings, so both share one rule. */
@@ -2771,6 +2850,7 @@ async function saveDiagnosticsReport(): Promise<void> {
   }
 }
 for (const button of diagnosticsButtons) button.addEventListener('click', () => void saveDiagnosticsReport());
+$('sendFeedback').addEventListener('click', () => openFeedback());
 
 $('copyLogJson').addEventListener('click', async () => {
   const text = await run(api.getLogJson());
@@ -2842,10 +2922,12 @@ for (const id of [
   'followUp',
   'enterSends',
   'turnNotifications',
+  'soundCues',
   'mentionCore',
   'mentionPlugins',
   'controlApiEnabled',
   'controlApiAllowActions',
+  'codeCheckpoints',
   'mcpPersistentUrls',
   'privacyScreenshots',
   'phonePushEnabled',
@@ -2861,11 +2943,19 @@ for (const id of [
   'tunnelKind',
   'tunnelId',
   'desktopTunnelId',
-  'connectorSuffix'
+  'connectorSuffix',
+  'sendCheckUrl'
 ]) {
   $(id).addEventListener('change', () => void save());
 }
+$('sendCheckUrl').addEventListener('input', () => { sendCheckValid(); });
 $('connectorSuffix').addEventListener('input', () => { connectorSuffixValid(); });
+// #1802: turning sounds on plays one, so the person hears what they chose.
+// Switching sounds on plays a sample, unless it is the quiet hours the switch promises to follow.
+$('soundCues').addEventListener('change', event => {
+  if ((event.target as HTMLInputElement).checked && !inQuietHours(state?.config.ui.phonePush?.quietHours ?? null, new Date())) playSoundCue('finished');
+});
+api.onSoundCue?.(playSoundCue);
 
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
@@ -2901,6 +2991,7 @@ async function refresh(): Promise<void> {
 
 buildGroups();
 initSidebarResize();
+const shortcutsDialog = initShortcutsDialog({ enterSends: () => state?.config.ui.enterSends !== false });
 initAppShortcuts({
   newChat: $('newChat'),
   settings: $('workspaceSettings'),
@@ -2908,6 +2999,7 @@ initAppShortcuts({
 });
 const viewMenu = initViewMenu({
   search: openChatSearch,
+  shortcuts: shortcutsDialog.open,
   cosBrowser: () => state?.config.ui.chatBrowser === 'cos',
   showCosBrowser: () => void run(api.showCosBrowser()),
   pets: { toggle: () => pet.toggle(), visible: () => pet.isVisible() },
@@ -2918,7 +3010,7 @@ initPlugins(apply);
 initPets(api, pet);
 openSkillsLibrary = initSkillsLibrary(api);
 initBrowserPreferences();
-initChat({ save: async () => { await save(); }, state: () => state });
+initChat({ save: () => save(), state: () => state });
 
 void (async () => {
   await refresh();
