@@ -3268,7 +3268,7 @@
   "{0} in {1}": "{1} で{0}",
   "Go ahead": "続ける",
   "Ask before using the mouse and keyboard": "マウスとキーボードを使う前に確認",
-  "A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for 2 minutes, until you use the mouse or keyboard again. Browser steps never ask.": "画面の隅に小さな確認が出ます (続ける / 今はしない)。続けると、そのチャットは 2 分間、またはあなたがマウスかキーボードを使うまで続けられます。ブラウザーの操作は確認しません。",
+  "A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for up to 2 minutes, until you use the mouse or keyboard again; a step the app can't match to a chat asks again. Browser steps never ask.": "画面の隅に小さな確認が出ます (続ける / 今はしない)。続けると、そのチャットは最大 2 分間、またはあなたがマウスかキーボードを使うまで続けられます。アプリがどのチャットか判別できない操作は、もう一度確認します。ブラウザーの操作は確認しません。",
   "Ask while I'm using the computer": "コンピューターを使っている間は確認",
   "Always ask": "常に確認"
 }

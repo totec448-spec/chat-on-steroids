@@ -13,7 +13,7 @@ import { mainText } from './main-texts.js';
 import { currentCaller } from './mcp/call-context.js';
 import { findSessionByConversation, getSession } from './session/store.js';
 import { createDesktopAsk, stepLine, type DesktopAskCaller, type DesktopAskPrompt, type DesktopStepWords } from './desktop-ask.js';
-import { ASK_ANSWER_MS, type DesktopAskMode } from '../shared/desktop-ask.js';
+import { ASK_ANSWER_MS, desktopAskColors, type DesktopAskMode } from '../shared/desktop-ask.js';
 import { defaultAppearance } from '../shared/appearance.js';
 
 const WIDTH = 360;
@@ -24,7 +24,7 @@ const MARGIN = 16;
 export function showDesktopAskPrompt(prompt: DesktopAskPrompt): Promise<'go' | 'not-now' | 'timeout'> {
   const ui = getConfig().ui;
   const theme = ui.theme === 'dark' ? 'dark' : 'light';
-  const palette = (ui.appearance ?? defaultAppearance())[theme];
+  const palette = desktopAskColors(ui.appearance ?? defaultAppearance(), theme);
   const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
   const win = new BrowserWindow({
     x: Math.round(area.x + area.width - WIDTH - MARGIN), y: Math.round(area.y + MARGIN), width: WIDTH, height: HEIGHT,
@@ -70,7 +70,8 @@ export function showDesktopAskPrompt(prompt: DesktopAskPrompt): Promise<'go' | '
     const query = {
       title: mainText('Chat On Steroids wants to use your mouse and keyboard'), step: stepLine(prompt, mainText), chat: (prompt.chat ?? '').slice(0, 120),
       go: mainText('Go ahead'), notNow: mainText('Not now'),
-      theme, background: palette.background, accent: palette.accent, lang: ui.language ?? 'en'
+      theme, background: palette.background, accent: palette.accent, ink: palette.ink, soft: palette.soft, edge: palette.edge,
+      hover: palette.hover, lang: ui.language ?? 'en'
     };
     if (process.env.ELECTRON_RENDERER_URL) {
       const base = process.env.ELECTRON_RENDERER_URL.endsWith('/') ? process.env.ELECTRON_RENDERER_URL : `${process.env.ELECTRON_RENDERER_URL}/`;

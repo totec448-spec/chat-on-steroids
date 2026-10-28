@@ -3328,7 +3328,7 @@
   "{0} in {1}": "{1} içinde {0}",
   "Go ahead": "Devam et",
   "Ask before using the mouse and keyboard": "Fare ve klavyeyi kullanmadan önce sor",
-  "A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for 2 minutes, until you use the mouse or keyboard again. Browser steps never ask.": "Ekranın köşesinde Devam et ve Şimdi değil seçenekli küçük bir soru. Devam et, o sohbetin 2 dakika boyunca, sen fareyi veya klavyeyi yeniden kullanana kadar devam etmesine izin verir. Tarayıcı adımları hiç sormaz.",
+  "A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for up to 2 minutes, until you use the mouse or keyboard again; a step the app can't match to a chat asks again. Browser steps never ask.": "Ekranın köşesinde Devam et ve Şimdi değil seçenekli küçük bir soru. Devam et, o sohbetin en fazla 2 dakika boyunca, sen fareyi veya klavyeyi yeniden kullanana kadar devam etmesine izin verir; uygulamanın bir sohbetle eşleştiremediği bir adım yeniden sorar. Tarayıcı adımları hiç sormaz.",
   "Ask while I'm using the computer": "Bilgisayarı kullanırken sor",
   "Always ask": "Her zaman sor"
 }

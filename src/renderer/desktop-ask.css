@@ -11,8 +11,10 @@ body {
 .desktop-ask { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; border: 1px solid var(--edge); }
 .desktop-ask-text { min-width: 0; }
 h1 { margin: 0; font-size: 13px; font-weight: 650; line-height: 1.35; }
-.step, .chat { margin: 3px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; line-height: 1.4; }
-.chat { color: var(--soft); font-size: 12px; }
+.step, .chat { margin: 3px 0 0; overflow: hidden; font-size: 12.5px; line-height: 1.4; }
+/* The step wraps: its end names the app it goes to, the part a cut line would lose (Haz on #1864). */
+.step { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow-wrap: anywhere; }
+.chat { color: var(--soft); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .chat[hidden] { display: none; }
 .desktop-ask-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .btn { min-height: 30px; padding: 5px 12px; border: 1px solid var(--edge); border-radius: 8px; background: transparent; color: var(--ink);
@@ -22,3 +24,11 @@ h1 { margin: 0; font-size: 13px; font-weight: 650; line-height: 1.35; }
 .btn-solid { border-color: var(--ink); background: var(--ink); color: var(--page); }
 .btn-solid:hover { background: var(--ink); opacity: .88; }
 html:lang(ja) body, html:lang(zh-CN) body, html:lang(zh-TW) body, html:lang(ko) body { letter-spacing: 0; }
+/* The system's high contrast colors (Windows contrast themes): the frame and both buttons stay visible,
+   and Go ahead keeps the system's highlight so it stays the clear primary choice. */
+@media (forced-colors: active) {
+  .desktop-ask { border-color: CanvasText; }
+  .btn { border-color: ButtonText; background: ButtonFace; color: ButtonText; }
+  .btn-solid { forced-color-adjust: none; border-color: Highlight; background: Highlight; color: HighlightText; }
+  .btn:focus-visible { outline-color: Highlight; }
+}

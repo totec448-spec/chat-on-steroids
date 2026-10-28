@@ -536,7 +536,7 @@ function desktopAskRow(): HTMLElement {
   const row = el('label', 'tool desktop-ask-row');
   const body = el('span');
   body.append(el('strong', '', () => t('Ask before using the mouse and keyboard')),
-    el('em', '', () => t("A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for 2 minutes, until you use the mouse or keyboard again. Browser steps never ask.")));
+    el('em', '', () => t("A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for up to 2 minutes, until you use the mouse or keyboard again; a step the app can't match to a chat asks again. Browser steps never ask.")));
   const select = document.createElement('select');
   select.id = 'desktopAsk';
   const choices: Array<[string, () => string]> = [['off', () => t('Off')], ['active', () => t("Ask while I'm using the computer")], ['always', () => t('Always ask')]];

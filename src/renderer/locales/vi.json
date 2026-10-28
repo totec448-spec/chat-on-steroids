@@ -3268,7 +3268,7 @@
   "{0} in {1}": "{0} trong {1}",
   "Go ahead": "Tiếp tục",
   "Ask before using the mouse and keyboard": "Hỏi trước khi dùng chuột và bàn phím",
-  "A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for 2 minutes, until you use the mouse or keyboard again. Browser steps never ask.": "Một câu hỏi nhỏ ở góc màn hình, với Tiếp tục và Để sau. Tiếp tục cho cuộc trò chuyện đó làm tiếp trong 2 phút, cho đến khi bạn dùng lại chuột hoặc bàn phím. Các bước trong trình duyệt không bao giờ hỏi.",
+  "A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for up to 2 minutes, until you use the mouse or keyboard again; a step the app can't match to a chat asks again. Browser steps never ask.": "Một câu hỏi nhỏ ở góc màn hình, với Tiếp tục và Để sau. Tiếp tục cho cuộc trò chuyện đó làm tiếp tối đa 2 phút, cho đến khi bạn dùng lại chuột hoặc bàn phím; bước nào ứng dụng không gắn được với một cuộc trò chuyện sẽ hỏi lại. Các bước trong trình duyệt không bao giờ hỏi.",
   "Ask while I'm using the computer": "Hỏi khi tôi đang dùng máy tính",
   "Always ask": "Luôn hỏi"
 }

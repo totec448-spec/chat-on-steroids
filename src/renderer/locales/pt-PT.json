@@ -3388,7 +3388,7 @@
   "{0} in {1}": "{0} em {1}",
   "Go ahead": "Avançar",
   "Ask before using the mouse and keyboard": "Perguntar antes de usar o rato e o teclado",
-  "A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for 2 minutes, until you use the mouse or keyboard again. Browser steps never ask.": "Uma pequena pergunta no canto do ecrã, com Avançar e Agora não. Avançar deixa esse chat continuar durante 2 minutos, até voltar a usar o rato ou o teclado. Os passos do navegador nunca perguntam.",
+  "A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for up to 2 minutes, until you use the mouse or keyboard again; a step the app can't match to a chat asks again. Browser steps never ask.": "Uma pequena pergunta no canto do ecrã, com Avançar e Agora não. Avançar deixa esse chat continuar até 2 minutos, até voltar a usar o rato ou o teclado; um passo que a app não consegue associar a um chat volta a perguntar. Os passos do navegador nunca perguntam.",
   "Ask while I'm using the computer": "Perguntar enquanto uso o computador",
   "Always ask": "Perguntar sempre"
 }
