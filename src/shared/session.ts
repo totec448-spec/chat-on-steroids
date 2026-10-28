@@ -379,6 +379,8 @@ export type SessionEvent =
       messageId?: string;
       /** Exact app outbox identity, attached after a tool handout or proven native delivery. */
       inputId?: string;
+      /** #1826: the message was a run of the chat's schedule, due then, and sent late when `late`. */
+      scheduled?: { dueAt: number; late: boolean };
       /** Tool handout remains unconfirmed until a later exact invocation proves receipt. */
       inputDelivery?: 'offered' | 'confirmed';
       /** Original app-authored text, excluding transport-only control instructions. */
@@ -708,10 +710,14 @@ export interface SessionSummary {
    * The full tool row remains in session history. This exists so overview surfaces can show
    * useful worker activity without loading each worker transcript.
    */
-  lastToolActivity?: Pick<ActivitySummary, 'kind' | 'title'> | null;
+  lastToolActivity?: (Pick<ActivitySummary, 'kind' | 'title'> & { tone?: 'bad' | 'warn' }) | null;
   workerAssignment?: WorkerAssignmentSummary;
   /** Observation time of the newest stable final assistant message. */
   lastAssistantFinalAt?: number | null;
+  /** First line of that answer, plain and bounded: a worker's dock line once it answered (#1831). */
+  lastAnswerLine?: string | null;
+  /** Since when ChatGPT's tool approval card holds this chat; null once answered or moved on (#1831). */
+  approvalWaitingAt?: number | null;
   /**
    * Time of the newest turn end, whatever ended it: the model finishing, the user pressing
    * stop, or an error. The other end of "recent activity" beside `lastAssistantFinalAt`, which

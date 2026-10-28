@@ -728,6 +728,9 @@
   "content_turn_stop_requested": {
     "message": "Se solicitó detener; la página nativa ya no muestra generación."
   },
+  "content_turn_stop_unseen": {
+    "message": "Detenido aquí: ChatGPT ya no mostraba esta respuesta en curso."
+  },
   "content_unknown_error": {
     "message": "error desconocido"
   },

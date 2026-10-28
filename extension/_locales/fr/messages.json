@@ -728,6 +728,9 @@
   "content_turn_stop_requested": {
     "message": "Un arrêt a été demandé ; la page native n’indique plus de génération en cours."
   },
+  "content_turn_stop_unseen": {
+    "message": "Arrêté ici : ChatGPT n’affichait plus cette réponse en cours."
+  },
   "content_unknown_error": {
     "message": "erreur inconnue"
   },

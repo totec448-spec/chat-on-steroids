@@ -3623,10 +3623,14 @@ async function performBrowserRepairs(repairs, policy) {
         // transport error has disappeared. A still-visible error keeps the existing reload path.
         const status = await tabReply(target.id, { type: 'clf-page-status' },
           documentId ? { documentId } : undefined);
+        if (status?.ok === true && status.conversationId !== conversationId) {
+          await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}&why=changed&detail=other-chat`);
+          continue;
+        }
         if (status?.ok === true && status.streaming === true &&
             (reason !== 'assistant-error' || status.assistantError === false)) {
           // Not a failure: ChatGPT is answering, and the app says so instead of "Reload failed".
-          await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}&why=streaming`);
+          await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}&why=streaming${status.approval === true ? '&approval=1' : ''}`);
           continue;
         }
         if (reason === 'assistant-error' && status?.ok === true && status.assistantError === false) {

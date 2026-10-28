@@ -698,6 +698,9 @@
   "content_turn_stop_requested": {
     "message": "Đã yêu cầu dừng; trang gốc không còn hiển thị trạng thái đang tạo."
   },
+  "content_turn_stop_unseen": {
+    "message": "Đã dừng tại đây: ChatGPT không còn hiển thị câu trả lời này đang chạy."
+  },
   "content_unknown_error": {
     "message": "lỗi không xác định"
   },

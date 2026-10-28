@@ -524,3 +524,46 @@ it('keeps a failed worker\'s last action in the roster', () => {
   expect(document.querySelector('.agent-card-last')?.textContent).toBe('Last action: Ran npm test');
   expect(document.querySelector('.agent-card-activity')).toBeNull();
 });
+
+it("gives each worker one line of what it is doing: a wait on ChatGPT's approval, its step, its answer (#1831)", () => {
+  dom = new JSDOM('<main></main>'); Object.assign(globalThis, { document: dom.window.document });
+  const host = document.querySelector('main')!;
+  const now = Date.now();
+  const states: Record<string, string> = { a: 'active', b: 'active', c: 'sleeping' };
+  const panel = createAgentPanel({ host, load: async () => ({ events: [] }), render: () => [], openMain: vi.fn(), working: worker => states[worker.id] === 'active',
+    agent: worker => ({ state: states[worker.id] as any, task: 'Task', conversationId: `c-${worker.id}` }) });
+  const worker = (id: string, extra: Partial<SessionSummary>) => ({ id, title: id, conversationId: `c-${id}`, startedAt: now - 60_000, updatedAt: now,
+    toolCalls: 3, lastToolCallAt: now - 5_000, lastToolActivity: { kind: 'run', title: 'Ran npm test' }, origin: { kind: 'worker', fromSessionId: 'p', agentId: `worker-${id}`, task: 'Task' },
+    ...extra }) as SessionSummary;
+  const line = (id: string) => host.querySelector<HTMLElement>(`[data-worker-session="${id}"] .agent-card-line`);
+  panel.update('p', [
+    // Held by ChatGPT's approval card: that comes first, whatever else it did.
+    worker('a', { approvalWaitingAt: now - 1_000 }),
+    // A failed step keeps its tool row's color.
+    worker('b', { lastToolActivity: { kind: 'run', title: 'Ran npm test -- dashboard', tone: 'bad' } }),
+    // Finished: it keeps the first line of its last answer.
+    worker('c', { endedAt: now, lastAssistantFinalAt: now - 1_000, lastAnswerLine: 'Done. All 12 tests pass now' })
+  ]);
+  panel.show();
+  expect(line('a')!.textContent).toBe('Needs your answer in ChatGPT');
+  expect(line('a')!.dataset.tone).toBe('warn');
+  expect(line('b')!.textContent).toBe('Ran npm test -- dashboard');
+  expect(line('b')!.dataset.tone).toBe('bad');
+  expect(line('c')!.textContent).toBe('Done. All 12 tests pass now');
+  expect(line('c')!.classList.contains('agent-card-answer')).toBe(true);
+  // A long line is cut by the card's width; the whole of it is one hover away, and part of the row's name.
+  for (const id of ['a', 'b', 'c']) {
+    expect(line(id)!.title).toBe(line(id)!.textContent);
+    expect(host.querySelector<HTMLElement>(`[data-worker-session="${id}"]`)!.title).toContain(line(id)!.textContent!);
+  }
+  // A working worker that answered after its last step shows that answer, not the older step.
+  panel.update('p', [worker('b', { lastAssistantFinalAt: now - 1_000, lastAnswerLine: 'Found it: a stale fixture' })]);
+  expect(line('b')!.textContent).toBe('Found it: a stale fixture');
+  // Nothing to say yet: no empty line.
+  panel.update('p', [worker('b', { toolCalls: 0, lastToolCallAt: null, lastToolActivity: null })]);
+  expect(line('b')).toBeNull();
+  // Being woken for a new job: its previous answer belongs to the old job, so it is not shown (CodeRabbit).
+  states.c = 'waking';
+  panel.update('p', [worker('c', { lastAssistantFinalAt: now - 1_000, lastAnswerLine: 'Done. All 12 tests pass now' })]);
+  expect(line('c')).toBeNull();
+});
