@@ -1,4 +1,4 @@
-import { AGE_SUFFIX, ageOf } from '../shared/age.js';
+import { ageOf, type AgeUnit } from '../shared/age.js';
 import { currentLanguage, t, ui } from './i18n.js';
 /**
  * The handful of DOM helpers both panels need.
@@ -204,11 +204,21 @@ export function ago(atMs: number | null): string {
     .format(-age.value, age.unit);
 }
 
-/** The same age as one glanceable token: "8s", "2m", "3d", "—" when there is nothing. */
+/**
+ * The same age as one glanceable token in the person's language: "8s", "2m", "3d", "2w", "4mo" in
+ * English, "—" when there is nothing. The catalogs, not the platform's narrow units: those write
+ * four months as "4m" beside four minutes in English, Spanish and Japanese (CodeRabbit on #1902).
+ */
 export function shortAgo(atMs: number | null): string {
   if (atMs === null) return '—';
   const age = ageOf(atMs, Date.now());
-  return age ? `${age.value}${AGE_SUFFIX[age.unit]}` : t("now");
+  return age ? compactAgeText(age.value, age.unit) : t("now");
+}
+
+/** One age as a compact token from the catalogs: "45s", "4m", "5h", "3d", "2w", "4mo", "2y" in English. */
+export function compactAgeText(value: number, unit: AgeUnit): string {
+  const key = { second: "{0}s", minute: "{0}m", hour: "{0}h", day: "{0}d", week: "{0}w", month: "{0}mo", year: "{0}y" }[unit];
+  return t(key, [value]);
 }
 
 /** A clock time for one event in a timeline. */
