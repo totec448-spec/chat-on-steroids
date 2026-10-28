@@ -5033,26 +5033,31 @@ it.each(['navigate', 'objective edit', 'mode change', 'automation change'] as co
 });
 
 it('shows Loop settling, its real waiting deadline, and generated text in the same row', async () => {
-  const { w, append } = await boot([]);
-  const api = (w as any).api;
-  const controls = { automation: 'loop', objective: 'Continue the task', blocked: '', job: null,
-    goalWait: { reason: 'quiet', until: Date.now() + 125_000 }, goalDraft: null as unknown };
-  api.getSessionControls = async () => ({ ok: true, data: controls });
-  await append([]);
-  const row = w.document.getElementById('goalLifecycle')!;
-  expect(row.hidden).toBe(false);
-  expect(row.textContent).toContain('Loop · Waiting for tool inactivity');
-  expect(row.querySelector('[role="timer"]')?.textContent).toContain('2:05');
-  expect(row.getAttribute('aria-busy')).toBe('true');
-  controls.goalDraft = { stage: 'answering', model: 'fixture', text: 'Continue with the remaining checks', error: null };
-  await append([]);
-  expect(w.document.getElementById('goalLifecycle')).toBe(row);
-  expect(row.textContent).toContain('Generating a continuation');
-  expect(row.textContent).toContain('Continue with the remaining checks');
-  expect(row.querySelector('[role="timer"]')).toBeNull();
-  controls.automation = 'off'; await append([]);
-  expect(row.hidden).toBe(true);
-  expect(row.textContent).toBe('');
+  // The clock stands still, so a slow run cannot tick the countdown from 2:05 to 2:04 (2.1.47 round).
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(2026, 9, 28, 12, 0));
+  try {
+    const { w, append } = await boot([]);
+    const api = (w as any).api;
+    const controls = { automation: 'loop', objective: 'Continue the task', blocked: '', job: null,
+      goalWait: { reason: 'quiet', until: Date.now() + 125_000 }, goalDraft: null as unknown };
+    api.getSessionControls = async () => ({ ok: true, data: controls });
+    await append([]);
+    const row = w.document.getElementById('goalLifecycle')!;
+    expect(row.hidden).toBe(false);
+    expect(row.textContent).toContain('Loop · Waiting for tool inactivity');
+    expect(row.querySelector('[role="timer"]')?.textContent).toContain('2:05');
+    expect(row.getAttribute('aria-busy')).toBe('true');
+    controls.goalDraft = { stage: 'answering', model: 'fixture', text: 'Continue with the remaining checks', error: null };
+    await append([]);
+    expect(w.document.getElementById('goalLifecycle')).toBe(row);
+    expect(row.textContent).toContain('Generating a continuation');
+    expect(row.textContent).toContain('Continue with the remaining checks');
+    expect(row.querySelector('[role="timer"]')).toBeNull();
+    controls.automation = 'off'; await append([]);
+    expect(row.hidden).toBe(true);
+    expect(row.textContent).toBe('');
+  } finally { vi.useRealTimers(); }
 });
 
 it('names the wait for this chat’s own sub-agents without inventing a countdown', async () => {
