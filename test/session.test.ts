@@ -1390,6 +1390,29 @@ describe('session store', () => {
     expect((await getSession(summary.id))!.approvalWaitingAt).toBe(at + 80);
   });
 
+  it('rebuilds a worker line saved before it existed, so an older chat shows its last answer (CodeRabbit)', async () => {
+    const summary = await createSession({ title: 'legacy worker line' });
+    const answer = 'Finished the migration.';
+    await upsertMessageEvent(summary.id, { kind: 'assistant_message', source: 'extension', time: summary.startedAt + 10, messageId: 'a-legacy', final: true,
+      message: { text: answer, truncated: false, chars: answer.length } });
+    await flushSessions();
+    // As a version before #1831 saved it: neither field is there.
+    const strip = (value: any): any => {
+      if (Array.isArray(value)) return value.map(strip);
+      if (!value || typeof value !== 'object') return value;
+      const out: Record<string, unknown> = {};
+      for (const [key, item] of Object.entries(value)) if (key !== 'lastAnswerLine' && key !== 'approvalWaitingAt') out[key] = strip(item);
+      return out;
+    };
+    for (const name of ['meta.json', 'meta.backup.json']) {
+      const file = path.join(sessionsRoot(), summary.id, name);
+      const saved = await fs.readFile(file, 'utf8').catch(() => null);
+      if (saved !== null) await fs.writeFile(file, JSON.stringify(strip(JSON.parse(saved))));
+    }
+    resetSessionStoreForTests();
+    expect(await getSession(summary.id)).toMatchObject({ lastAnswerLine: 'Finished the migration.', approvalWaitingAt: null });
+  });
+
   it('skips tilde fences when it takes an answer\'s first line (CodeRabbit)', async () => {
     const { answerLine } = await import('../src/main/session/store.js');
     expect(answerLine('~~~ts\nconst x = 1;\n~~~')).toBe('const x = 1;');
