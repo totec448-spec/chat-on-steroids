@@ -9447,11 +9447,29 @@ export function initChat(next: Deps): void {
     if (files.length + (imageDrafts.get(owner.key)?.length ?? 0) > 20) { toast(t('Attach up to 20 files per message')); return; }
     appendImages(owner, await run(api.dropFiles(files)));
   });
+  // #1884 (Haz): files dragged over the window go to the message being written, so the composer says
+  // so while they are over it: the existing composer outlined, and its own placeholder as the one-line
+  // hint (no overlay, nothing to collide with the Plan row above). The Folders card keeps its own drops.
+  // dragover repeats while the drag lasts, so a missed leave ends it too.
+  let dropGlow: ReturnType<typeof setTimeout> | undefined;
+  let placeholderBeforeDrop: string | null = null;
+  const fileDrop = (on: boolean) => {
+    clearTimeout(dropGlow);
+    if (on) dropGlow = setTimeout(() => fileDrop(false), 300);
+    $('composer').classList.toggle('is-file-drop', on);
+    const input = $<HTMLTextAreaElement>('chatInput');
+    if (on && placeholderBeforeDrop === null) { placeholderBeforeDrop = input.placeholder; input.placeholder = t('Drop to attach, up to 20 files'); }
+    if (!on && placeholderBeforeDrop !== null) { input.placeholder = placeholderBeforeDrop; placeholderBeforeDrop = null; }
+  };
   window.addEventListener('dragover', event => {
-    if ((event.target as Element | null)?.closest?.('#foldersCard') || !event.dataTransfer?.types?.includes?.('Files')) return;
+    if ((event.target as Element | null)?.closest?.('#foldersCard') || !event.dataTransfer?.types?.includes?.('Files')) { fileDrop(false); return; }
     event.preventDefault(); event.dataTransfer.dropEffect = 'copy';
+    fileDrop(true);
   });
+  window.addEventListener('dragleave', event => { if (!event.relatedTarget) fileDrop(false); });
+  window.addEventListener('dragend', () => fileDrop(false));
   window.addEventListener('drop', async event => {
+    fileDrop(false);
     if ((event.target as Element | null)?.closest?.('#foldersCard') || !event.dataTransfer?.types?.includes?.('Files')) return;
     event.preventDefault();
     const files = Array.from(event.dataTransfer.files), owner = composerDraftOwner();

@@ -2562,6 +2562,7 @@ input[readonly] {
 /* One hairline for the input and every row stacked above it. */
 .card.is-session { position: relative; container: chat-session / inline-size; --welcome-resting-composer: calc(84px + 24px * var(--text-scale, 1)); --composer-edge: color-mix(in srgb, var(--ink) 6%, var(--card)); }
 .card.is-session:has(> .composer:focus-within, > .composer-dock:focus-within) { --composer-edge: color-mix(in srgb, var(--ink) 8%, var(--card)); }
+.composer.is-file-drop { outline: 2px dashed var(--accent); outline-offset: -1px; }
 .composer { --hover: color-mix(in srgb, var(--card) 88%, var(--ink)); --control-selected: color-mix(in srgb, var(--card) 94%, var(--ink)); --control-pressed: color-mix(in srgb, var(--card) 82%, var(--ink)); position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto auto 36px; align-content: end; align-items: center; gap: 8px; width: calc(100% - 48px); max-width: 860px; margin: 14px auto 24px; border: 1px solid var(--composer-edge); border-radius: 22px; background: var(--card); padding: 14px 12px 10px; }
 /* Keep the upstream resting optical center independent of a growing draft. */
 #timelineEmpty { position: absolute; top: calc(50% - var(--welcome-resting-composer) / 2 + 1em + 8px - 5vh); left: 24px; right: 24px; min-height: 0; margin: 0; padding: 0; transform: translateY(-50%); pointer-events: none; }

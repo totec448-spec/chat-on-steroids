@@ -3395,5 +3395,6 @@
   "Touched {0} files, no net change": "{0} dosyaya dokunuldu, net değişiklik yok",
   "Touched {0} files, no net change|one": "{0} dosyaya dokunuldu, net değişiklik yok",
   "The request was not valid.": "İstek geçerli değildi.",
-  "Needs your answer in ChatGPT": "ChatGPT'de yanıtınızı bekliyor"
+  "Needs your answer in ChatGPT": "ChatGPT'de yanıtınızı bekliyor",
+  "Drop to attach, up to 20 files": "Eklemek için bırakın, en fazla 20 dosya"
 }
