@@ -17,7 +17,7 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); dom.window.close(); });
 
 const hour = 3_600_000, day = 24 * hour;
-async function inLanguage(locale: 'en' | 'de' | 'fr') {
+async function inLanguage(locale: 'en' | 'de' | 'fr' | 'ja') {
   const i18n = await import('../src/renderer/i18n.js');
   i18n.initLanguage(); i18n.setLanguage(locale);
   return import('../src/renderer/dom.js');
@@ -44,4 +44,12 @@ it('says them in the chosen language, never with a bare minus sign', async () =>
   const said = fr.ago(Date.now() - 16 * day);
   expect(said).toMatch(/^il y a 2 sem/);
   expect(said.startsWith('-')).toBe(false);
+});
+
+it('writes the compact tokens from the catalogs, so months never read like minutes (CodeRabbit)', async () => {
+  const ja = await inLanguage('ja' as never);
+  expect([ja.shortAgo(Date.now() - 4 * 60_000), ja.shortAgo(Date.now() - 120 * day), ja.shortAgo(Date.now() - 16 * day)]).toEqual(['4分', '4か月', '2週']);
+  vi.resetModules();
+  const de = await inLanguage('de');
+  expect([de.shortAgo(Date.now() - 2 * day), de.shortAgo(Date.now() - 800 * day)]).toEqual(['2 T.', '2 J.']);
 });
