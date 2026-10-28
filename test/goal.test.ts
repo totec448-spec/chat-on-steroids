@@ -941,6 +941,32 @@ describe('the reply', () => {
     expect(goal.goalOutcomeFor('c-met')).toMatchObject({ stage: 'no-reply', turnId: 'g-1', reply: '' });
   });
 
+  it('still says "the goal is met" after a restart, until a newer draft or a switch change replaces it (2.1.47 round)', async () => {
+    // Since 2.1.27 the window said "Pursuing goal" again after a restart, for a run that had ended.
+    const sessionId = await seed('c-met-restart');
+    globalThis.fetch = (async () => stream([delta('NO_REPLY'), 'data: [DONE]\n'])) as never;
+    goal.startGoalDraft({ sessionId, conversationId: 'c-met-restart', turnId: 'g-1' });
+    const view = await settled('c-met-restart');
+    expect(goal.ackGoalDraft('c-met-restart', view.token)).toBe(true);
+    const saved = goal.snapshotGoalOutcomes();
+    goal.resetGoalStateForTests();
+    expect(goal.goalOutcomeFor('c-met-restart')).toBeNull();
+    goal.restoreGoalOutcomes(saved);
+    expect(goal.goalOutcomeFor('c-met-restart')).toMatchObject({ stage: 'no-reply', turnId: 'g-1', reply: '', error: null });
+    // Turning the chat's Goal off (or on again) is a new decision: the old outcome no longer stands.
+    await goal.setGoalSwitchNow('c-met-restart', 'goal', false);
+    expect(goal.goalOutcomeFor('c-met-restart')).toBeNull();
+    goal.restoreGoalOutcomes(saved);
+    // A newer turn's draft replaces it too.
+    globalThis.fetch = (async () => stream([delta('Check the tests again.'), 'data: [DONE]\n'])) as never;
+    goal.startGoalDraft({ sessionId, conversationId: 'c-met-restart', turnId: 'g-2' });
+    await settled('c-met-restart');
+    expect(goal.snapshotGoalOutcomes().outcomes.some(row => row.conversationId === 'c-met-restart')).toBe(false);
+    // A damaged saved file is ignored row by row.
+    goal.restoreGoalOutcomes({ version: 1, savedAt: 1, outcomes: [{ conversationId: '../bad', turnId: 'g-1', model: 'm', backend: 'api', at: 1 } as never] });
+    expect(goal.snapshotGoalOutcomes().outcomes).toEqual([]);
+  });
+
   /**
    * "The goal is met" needs nothing typed, so it must not wait for a page to come and act on it.
    * Seen live on Windows (2026-10-05): the chat's tab closed while the model was deciding, its

@@ -92,15 +92,18 @@ import { restoreRouteHold } from './tunnel/route-settle.js';
 import { stopComputerHelper } from './computer/index.js';
 import {
   GOAL_OBJECTIVES_STATE,
+  GOAL_OUTCOMES_STATE,
   GOAL_REPLIES_STATE,
   GOAL_SWITCHES_STATE,
   GOAL_HELPER_SIZE_STATE,
   restoreGoalHelperSize,
   goalSwitchEnabledFor,
   restoreGoalObjectives,
+  restoreGoalOutcomes,
   restoreGoalReplies,
   restoreGoalSwitches,
   type GoalObjectivesSnapshot,
+  type GoalOutcomesSnapshot,
   type GoalRepliesSnapshot,
   type GoalSwitchesSnapshot
 } from './goal.js';
@@ -599,6 +602,9 @@ void app.whenReady().then(async () => {
   const savedGoalSwitches = await readDurable<GoalSwitchesSnapshot>(GOAL_SWITCHES_STATE);
   if (windowActivation.isDisabled()) return;
   restoreGoalSwitches(savedGoalSwitches);
+  const savedGoalOutcomes = await readDurable<GoalOutcomesSnapshot>(GOAL_OUTCOMES_STATE);
+  if (windowActivation.isDisabled()) return;
+  restoreGoalOutcomes(savedGoalOutcomes);
   const savedGoalReplies = await readDurable<GoalRepliesSnapshot>(GOAL_REPLIES_STATE);
   if (windowActivation.isDisabled()) return;
   restoreGoalReplies(savedGoalReplies);
