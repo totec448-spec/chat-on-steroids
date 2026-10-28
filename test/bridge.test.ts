@@ -16929,6 +16929,9 @@ describe('app requests to stop one exact active turn', () => {
       // Once asked, it is the turn being stopped, as any other ("Stop requested").
       expect(await stopSessionTurn(sessionId, 'held-turn')).toMatchObject({ stopPending: true, activeTurnId: 'held-turn', heldTurnId: null });
       expect((await request('GET', '/status')).body.stopTurns).toEqual([expect.objectContaining({ turnId: 'held-turn', conversationId })]);
+      // A second Stop for the same turn (a repeated click) keeps it a held-turn Stop (CodeRabbit).
+      await stopSessionTurn(sessionId, 'held-turn');
+      expect((await request('GET', '/status')).body.stopTurns).toHaveLength(1);
       // The page learns it is a held turn: only then may it end the turn itself (CodeRabbit).
       const command = (await request('GET', '/status')).body.stopTurns[0];
       const redeemed = await request('POST', '/commands/redeem', { body: { id: command.id, client: 'held-page', conversationId } });

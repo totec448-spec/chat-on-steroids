@@ -23439,16 +23439,33 @@ describe('app Stop command uses current native turn proof', () => {
     live.reply.set('stop_redeem', () => ({ ok: true, command: { type: 'stop', turnId, conversationId } }));
     expect(await live.runtimeMessage({ type: 'clf-stop-turn', id: '4444444444444444', turnId, conversationId })).toEqual({ ok: false });
     expect(acks).toEqual([]);
-    // A held-turn Stop, but the answer and ChatGPT's Stop come back meanwhile: this path does not
-    // end the turn; ChatGPT's own Stop is used instead.
+  });
+
+  it('uses ChatGPT\'s own Stop when a remounted answer and its Stop come back during a held-turn Stop (CodeRabbit)', async () => {
+    live = await harness(undefined, { stop_ack: () => ({ ok: true }) });
+    startGenerating(live.document);
+    const answer = assistantTurn(live.document, 'remounted-answer', []);
+    live.hook.observe(); await settle(); await live.hook.flush();
+    const turnId = emitted(live.sent, 'turn_start').at(-1)!.event.turnId;
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    // A remount: the answer and ChatGPT's Stop are gone for a moment.
+    answer.remove();
+    stopGenerating(live.document);
+    live.hook.observe(); await settle(); await live.hook.flush();
+    let clicks = 0, back = false;
     live.reply.set('stop_redeem', () => {
-      assistantTurn(live!.document, 'answer-back', []);
+      if (back) return { ok: true, command: { type: 'stop', turnId, conversationId, held: true } };
+      back = true;
+      // ...and back while the Stop is being redeemed.
+      live!.document.querySelector('#thread')!.append(answer);
       startGenerating(live!.document, { send: false });
       const button = live!.document.querySelector('[data-testid="stop-button"]') as HTMLButtonElement;
       Object.defineProperty(button, 'getClientRects', { value: () => [{ width: 10, height: 10 }] });
+      button.addEventListener('click', () => { clicks++; });
       return { ok: true, command: { type: 'stop', turnId, conversationId, held: true } };
     });
-    await live.runtimeMessage({ type: 'clf-stop-turn', id: '5555555555555555', turnId, conversationId });
+    expect(await live.runtimeMessage({ type: 'clf-stop-turn', id: '7777777777777777', turnId, conversationId })).toEqual({ ok: true });
+    expect(clicks).toBe(1);
     await live.hook.flush();
     expect(emitted(live.sent, 'turn_end').some(row => /Stopped here/.test(String(row.event.detail ?? '')))).toBe(false);
   });
