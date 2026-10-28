@@ -2970,7 +2970,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         typeof body.detail === 'string' && /^[a-z][a-z0-9 _-]{0,79}$/.test(body.detail) ? body.detail : undefined);
       // A rejected picker choice invalidates cached availability. Reobserve existing
       // browser documents through the catalog owner; failure grants no new-tab authority.
-      if (ok && body.error === 'Requested model or reasoning could not be confirmed') requestChatModels(false);
+      // The page words that reason in its own language; its code says it in any (2.1.47 round).
+      if (ok && (body.detail === 'model-unconfirmed' || body.error === 'Requested model or reasoning could not be confirmed')) requestChatModels(false);
       return json(res, 200, { ok }, origin);
     }
     if (route === '/input/progress') {

@@ -2762,6 +2762,8 @@ describe('desktop input delivery and helper ownership', () => {
     const failure = live.sent.find(message => message.type === 'desktop_input' && message.fail);
     expect(failure?.error).toContain('Too many requests');
     expect(failure?.error).toContain('few minutes');
+    // ChatGPT's own limit, not a model the picker rejected: no model code (2.1.47 round).
+    expect(failure?.detail).toBeUndefined();
     expect(live.sent.some(message => message.type === 'desktop_input' && (message.ack || message.authorize))).toBe(false);
   });
 
@@ -2779,6 +2781,7 @@ describe('desktop input delivery and helper ownership', () => {
     expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA })).toEqual({ ok: false });
     expect(live.sent.find(message => message.type === 'desktop_input' && message.fail)?.error)
       .toBe('This chat was deleted in ChatGPT. Start a new chat to continue.');
+    expect(live.sent.find(message => message.type === 'desktop_input' && message.fail)?.detail).toBeUndefined();
     expect(live.sent).toContainEqual(expect.objectContaining({ type: 'conversation_deleted', conversationId: chatA }));
   });
 
@@ -2798,6 +2801,8 @@ describe('desktop input delivery and helper ownership', () => {
     expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: confirmed });
     expect(selectSettings).toHaveBeenCalledWith('gpt-5.6-sol', 'high', expect.any(Function));
     expect(sent).toHaveBeenCalledTimes(confirmed ? 1 : 0);
+    // A rejected choice carries a code the app reads in any page language (2.1.47 round).
+    if (!confirmed) expect(live.sent.find(message => message.type === 'desktop_input' && message.fail)?.detail).toBe('model-unconfirmed');
     expect(live.sent.filter(message => message.type === 'desktop_input' && message.ack)).toHaveLength(confirmed ? 1 : 0);
   });
 
