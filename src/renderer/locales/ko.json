@@ -3329,5 +3329,6 @@
   "and {0} more": "외 {0}개",
   "{0} more not listed": "{0}개는 목록에 없음",
   "Touched {0} files, no net change": "파일 {0}개를 건드렸지만 순 변경 없음",
-  "The request was not valid.": "요청이 올바르지 않습니다."
+  "The request was not valid.": "요청이 올바르지 않습니다.",
+  "Needs your answer in ChatGPT": "ChatGPT에서 응답이 필요합니다"
 }

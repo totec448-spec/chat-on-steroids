@@ -3459,5 +3459,6 @@
   "Touched {0} files, no net change": "{0} fichiers touchés, aucun changement net",
   "Touched {0} files, no net change|one": "{0} fichier touché, aucun changement net",
   "Touched {0} files, no net change|many": "{0} de fichiers touchés, aucun changement net",
-  "The request was not valid.": "La requête n'était pas valide."
+  "The request was not valid.": "La requête n'était pas valide.",
+  "Needs your answer in ChatGPT": "Attend votre réponse dans ChatGPT"
 }

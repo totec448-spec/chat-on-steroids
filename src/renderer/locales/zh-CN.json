@@ -3329,5 +3329,6 @@
   "and {0} more": "还有 {0} 个",
   "{0} more not listed": "另有 {0} 个未列出",
   "Touched {0} files, no net change": "改动了 {0} 个文件，没有净变化",
-  "The request was not valid.": "请求无效。"
+  "The request was not valid.": "请求无效。",
+  "Needs your answer in ChatGPT": "需要你在 ChatGPT 中回答"
 }
