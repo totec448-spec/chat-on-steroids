@@ -1,4 +1,5 @@
-import { continuationMarkerOf, workSequence, type SessionEvent, type StoredText } from './session.js';
+import { chronological } from './chronology.js';
+import { continuationMarkerOf, type SessionEvent, type StoredText } from './session.js';
 
 /* Copy and Markdown export of what was said in a chat. Selection is pure so the renderer (which
    decides where the actions appear) and main (which reads full texts and writes files) agree on
@@ -22,8 +23,11 @@ function spoken(event: Said): StoredText {
  * message, without partial answers and without the prompts Compact & Resume types itself.
  */
 export function transcriptEntries(events: readonly SessionEvent[]): TranscriptEntry[] {
-  // A revision replaces a message's text but not its place: order by where the message first
-  // appeared (the store's origin when it kept one), read the text from its latest revision.
+  // A revision replaces a message's text but not its place: messages come in the order the chat
+  // shows them (the shared reading order), the text from each one's latest revision. A later work
+  // stamp on a revision, such as a delivery confirmed after the answer, does not move it.
+  const place = new Map<SessionEvent, number>();
+  chronological(events).forEach((event, index) => place.set(event, index));
   const messages = new Map<string, { latest: Said; place: number }>();
   let anonymous = 0;
   for (const event of events) {
@@ -31,8 +35,8 @@ export function transcriptEntries(events: readonly SessionEvent[]): TranscriptEn
     if (event.kind === 'assistant_message' && !event.final) continue;
     const id = event.messageId ? `${event.kind}\u0000${event.messageId}` : `anonymous\u0000${anonymous++}`;
     const previous = messages.get(id);
-    const place = Math.min(previous?.place ?? Number.POSITIVE_INFINITY, workSequence(event));
-    messages.set(id, { latest: !previous || event.seq > previous.latest.seq ? event : previous.latest, place });
+    const at = Math.min(previous?.place ?? Number.POSITIVE_INFINITY, place.get(event)!);
+    messages.set(id, { latest: !previous || event.seq > previous.latest.seq ? event : previous.latest, place: at });
   }
   return [...messages.values()]
     .filter(({ latest }) => !continuationMarkerOf(latest.message.text) && spoken(latest).text.trim())
