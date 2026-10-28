@@ -18,16 +18,20 @@ let server, win;
 const fixture = `(() => {
  const old=window.api,f=composerFixture,ok=data=>Promise.resolve({ok:true,data:structuredClone(data)});
  const ages=${JSON.stringify(AGES)};
+ // src/shared/appearance.ts defaultAppearance(): a whole appearance, as Settings saves one.
+ const defaultAppearance={light:{background:'#f4f4f5',sidebar:'#e9edf2',accent:'#486f9d',contrast:45},dark:{background:'#181818',sidebar:'#1a2129',accent:'#b0cbed',contrast:60},
+  font:'system',fontSize:14,lineSpacing:100,translucentSidebar:true,sidebarLayout:'projects',highContrast:false};
  f.summary.title='The open chat'; f.summary.updatedAt=Date.now(); f.summary.lastToolCallAt=null; f.summary.activityExpiresAt=null;
  const others=ages.map((age,n)=>({...f.summary,id:'aged-chat-'+n,conversationId:'aged-conversation-'+n,chatIds:['aged-conversation-'+n],
   title:'Aged chat '+n+': '+'a long generated title that keeps going with tool names and paths '.repeat(n%3+1),
   startedAt:Date.now()-age-1000,updatedAt:Date.now()-age,lastAssistantFinalAt:Date.now()-age,lastTurnEndAt:Date.now()-age}));
- window.fixtureLanguage='en';
+ window.fixtureLanguage='en'; window.fixtureLayout='projects';
  const methods={
-  getState:async()=>{const r=await old.getState();r.data.config=fixtureMerge(fixtureDefaults,r.data.config);r.data.config.ui={...r.data.config.ui,language:window.fixtureLanguage,theme:'dark'};return r;},
+  getState:async()=>{const r=await old.getState();r.data.config=fixtureMerge(fixtureDefaults,r.data.config);r.data.config.ui={...r.data.config.ui,language:window.fixtureLanguage,theme:'dark',
+   appearance:{...defaultAppearance,...(r.data.config.ui.appearance||{}),sidebarLayout:window.fixtureLayout}};return r;},
   listSessions:()=>ok({sessions:[{...f.summary,events:f.events.length},...others],activeId:null,pressure:[],blocked:[],trusted:[]})
  };
- window.setLanguage=async language=>{window.fixtureLanguage=language;const r=await methods.getState();f.emit('onStateChanged',r.data);f.emit('onSessionChanged',{allTranscripts:true});};
+ window.pushState=async()=>{const r=await methods.getState();f.emit('onStateChanged',r.data);f.emit('onSessionChanged',{allTranscripts:true});};
  window.api=new Proxy(methods,{get:(target,key)=>key in target?target[key]:old[key]});
 })();`;
 // Text a person or a screen reader meets: what is shown, and every tooltip, title and label.
@@ -55,18 +59,31 @@ app.whenReady().then(async () => {
   const errors=[];
   win.webContents.on('console-message',e=>{if(e.level==='error'&&!BENIGN_RENDERER_ERRORS.includes(e.message))errors.push(e.message);});
   const js=code=>win.webContents.executeJavaScript(code);
-  const until=async expression=>{for(const deadline=Date.now()+15000;Date.now()<deadline;){if(await js(expression))return;await pause(40);}throw new Error('Timed out: '+expression);};
+  const until=async expression=>{for(const deadline=Date.now()+15000;Date.now()<deadline;){if(await js(expression))return;await pause(40);}
+    const seen=await js(`({rows:document.querySelectorAll('#sessionList .sess[data-id]').length,lang:document.documentElement.lang,list:(document.getElementById('sessionList')?.innerText||'').slice(0,200)})`).catch(()=>null);
+    throw new Error('Timed out: '+expression+' — saw '+JSON.stringify(seen)+' errors '+JSON.stringify(errors.slice(0,3)));};
   await win.loadURL(server.resolvedUrls.local[0]);
   await until(`document.querySelectorAll('#sessionList .sess[data-id^="aged-chat-"]').length===${AGES.length}`);
   const found=[];
+  // Both sidebars: the project tree (ages in each row's tooltip) and the inbox (an age beside each title).
+  for (const layout of ['projects','inbox']) {
+  await js(`window.fixtureLayout=${JSON.stringify(layout)};window.pushState()`);
   for (const language of LANGUAGES) {
     // As Settings → Language does it (the fixture's saved state follows).
     await js(`(()=>{window.fixtureLanguage=${JSON.stringify(language)};const s=document.getElementById('uiLanguage');s.value=${JSON.stringify(language)};s.dispatchEvent(new Event('change',{bubbles:true}));})()`);
     await until(`document.documentElement.lang===${JSON.stringify(language)}`);
+    await js(`window.pushState()`);
     await pause(250);
     const text=await js(READ);
     for (const line of text.split('\n')) for (const [pattern,why] of RUNAWAY) if (pattern.test(line)) found.push(`${language}: ${why}: ${line.trim().slice(0,160)}`);
-    if (language==='en'||language==='de') { fs.mkdirSync(output,{recursive:true}); fs.writeFileSync(path.join(output,`aged-${language}.png`),(await win.webContents.capturePage()).toPNG()); }
+    if (language==='en'||language==='de') { fs.mkdirSync(output,{recursive:true}); fs.writeFileSync(path.join(output,`aged-${layout}-${language}.png`),(await win.webContents.capturePage()).toPNG()); }
+  }
+  if (layout==='inbox') {
+    // The inbox draws an age beside every quiet chat: the check must have read them.
+    const ages=await js(`[...document.querySelectorAll('#sessionList .sess[data-id^="aged-chat-"] .sess-age')].map(n=>n.textContent)`);
+    const seen=await js(`({layout:document.getElementById('sessionList')?.dataset.layout||document.querySelector('.app')?.dataset.sidebarLayout||'',rows:[...document.querySelectorAll('#sessionList .sess[data-id]')].map(r=>r.dataset.id+':'+r.className+':'+r.innerText.replace(/\\s+/g,' ').slice(0,40)).slice(0,6)})`);
+    assert.equal(ages.length,AGES.length,'Every aged chat shows its age in the inbox: '+JSON.stringify(ages)+' saw '+JSON.stringify(seen));
+  }
   }
   // The 16-day chat's tooltip, where "389h ago" was (kept for the PR's before/after pictures).
   await js(`(()=>{window.fixtureLanguage='en';const s=document.getElementById('uiLanguage');s.value='en';s.dispatchEvent(new Event('change',{bubbles:true}));})()`);
@@ -82,6 +99,6 @@ app.whenReady().then(async () => {
   assert.ok(titles.every(title=>/ago|vor|前|назад|전|önce|trước|il y a|hace|há/.test(title)),'Every row tooltip carries an age: '+JSON.stringify(titles.slice(0,2)));
   assert.deepEqual(found,[],'Aged data reads naturally in every language:\n'+found.join('\n'));
   assert.deepEqual(errors,[],'No renderer errors');
-  console.log(`PASS verify-aged-data: ${AGES.length} ages × ${LANGUAGES.length} languages, no runaway units or broken values`);
+  console.log(`PASS verify-aged-data: ${AGES.length} ages × ${LANGUAGES.length} languages × 2 sidebars, no runaway units or broken values`);
   win.destroy(); await server.close(); app.exit(0);
 }).catch(async error=>{console.error(error.stack||error);try{win?.destroy();await server?.close();}catch{}app.exit(1);});

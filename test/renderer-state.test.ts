@@ -1155,18 +1155,15 @@ it('writes a card and a settled line age in the app language', async () => {
   await waitFor(() => expect(inboxCardIds(doc)).toEqual(['recent']));
   const cardAge = () => inboxCardState(doc, 'recent').state.querySelector('.sess-age')!.textContent;
   const settledAge = () => doc.querySelector('.inbox-settled > .sess[data-id="quiet"] .sess-age')!.textContent;
-  // The narrow form the platform has for each language: the exact words differ between ICU versions.
-  const narrow = (language: string, value: number, unit: string) =>
-    new Intl.NumberFormat(language, { style: 'unit', unit, unitDisplay: 'narrow' }).format(value);
   expect([cardAge(), settledAge()]).toEqual(['5h', '2d']);
   const { setLanguage } = await import('../src/renderer/i18n.js');
   try {
+    // The catalogs' compact tokens (2.1.47 round): the platform's narrow units wrote four months as
+    // "4m" beside four minutes in English, Spanish and Japanese, and Latin letters in Japanese.
     setLanguage('ru');
-    expect(cardAge()).toBe(narrow('ru', 5, 'hour'));
-    expect(cardAge()).not.toBe('5h');
+    expect(cardAge()).toBe('5 ч');
     setLanguage('de');
-    expect(settledAge()).toBe(narrow('de', 2, 'day'));
-    expect(settledAge()).not.toBe('2d');
+    expect(settledAge()).toBe('2 T.');
   } finally {
     setLanguage('en');
   }
