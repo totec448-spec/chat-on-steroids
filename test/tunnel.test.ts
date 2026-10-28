@@ -240,6 +240,11 @@ describe('ago', () => {
     expect(ago(now - 800 * day, now)).toBe('2y ago');
   });
 
+  it('says "never" for a time that is not a number', () => {
+    expect(ago(Number.NaN, now)).toBe('never');
+    expect(ago(undefined as never, now)).toBe('never');
+  });
+
   it('never reports a negative age from a clock skew', () => {
     expect(ago(now + 60_000, now)).toBe('just now');
   });
