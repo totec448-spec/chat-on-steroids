@@ -2117,6 +2117,7 @@
   "Link copied": "Ссылка скопирована",
   "ChatGPT is waiting for your approval": "ChatGPT ждёт вашего разрешения",
   "The tool approval ChatGPT asked for in this chat was answered.": "На запрос ChatGPT о разрешении инструмента в этом чате дан ответ.",
+  "Reload was deferred because ChatGPT showed a tool approval card.": "Перезагрузка была отложена, поскольку ChatGPT показал карточку подтверждения использования инструмента.",
   "What's new": "Что нового",
   "Full release notes": "Полные примечания к выпуску",
   "Version {0}": "Версия {0}",
@@ -3433,6 +3434,5 @@
   "Keys stay with you": "Ключи остаются у вас",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "API-ключи и токены в том, что возвращают инструменты, скрываются до того, как их увидит ChatGPT.",
   "Easier to read": "Легче читать",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Высокая контрастность, восемь акцентных цветов, межстрочный интервал и более разборчивый шрифт.",
-  "Reload was deferred because ChatGPT showed a tool approval card.": "Перезагрузка была отложена, поскольку ChatGPT показал карточку подтверждения использования инструмента."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Высокая контрастность, восемь акцентных цветов, межстрочный интервал и более разборчивый шрифт."
 }

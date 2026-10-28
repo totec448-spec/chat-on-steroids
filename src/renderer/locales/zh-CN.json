@@ -2010,6 +2010,7 @@
   "Link copied": "链接已复制",
   "ChatGPT is waiting for your approval": "ChatGPT 正在等待你的批准",
   "The tool approval ChatGPT asked for in this chat was answered.": "ChatGPT 在此聊天中请求的工具批准已得到回应。",
+  "Reload was deferred because ChatGPT showed a tool approval card.": "由于 ChatGPT 显示了工具审批卡片，已推迟重新加载。",
   "What's new": "新功能",
   "Full release notes": "完整版本说明",
   "Version {0}": "版本 {0}",
@@ -3253,6 +3254,5 @@
   "Keys stay with you": "密钥留在你这里",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "工具返回内容中的 API 密钥和令牌会在 ChatGPT 看到之前被隐藏。",
   "Easier to read": "更易阅读",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "高对比度、八种强调色、行距和更易读的字体。",
-  "Reload was deferred because ChatGPT showed a tool approval card.": "由于 ChatGPT 显示了工具审批卡片，已推迟重新加载。"
+  "High contrast, eight accent colors, line spacing and a more legible font.": "高对比度、八种强调色、行距和更易读的字体。"
 }

@@ -2045,6 +2045,7 @@
   "Link copied": "Bağlantı kopyalandı",
   "ChatGPT is waiting for your approval": "ChatGPT onayını bekliyor",
   "The tool approval ChatGPT asked for in this chat was answered.": "ChatGPT'nin bu sohbette istediği araç onayı yanıtlandı.",
+  "Reload was deferred because ChatGPT showed a tool approval card.": "ChatGPT bir araç onay kartı gösterdiği için yeniden yükleme ertelendi.",
   "What's new": "Yenilikler",
   "Full release notes": "Tüm sürüm notları",
   "Version {0}": "Sürüm {0}",
@@ -3313,6 +3314,5 @@
   "Keys stay with you": "Anahtarlar sizde kalır",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Araçların döndürdüğü içerikteki API anahtarları ve tokenlar, ChatGPT görmeden önce gizlenir.",
   "Easier to read": "Okuması daha kolay",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Yüksek kontrast, sekiz vurgu rengi, satır aralığı ve daha okunaklı bir yazı tipi.",
-  "Reload was deferred because ChatGPT showed a tool approval card.": "ChatGPT bir araç onay kartı gösterdiği için yeniden yükleme ertelendi."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Yüksek kontrast, sekiz vurgu rengi, satır aralığı ve daha okunaklı bir yazı tipi."
 }
