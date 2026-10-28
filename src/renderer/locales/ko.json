@@ -3341,5 +3341,14 @@
   "This panel holds Review, with every change ChatGPT made to your files.": "이 패널의 리뷰에서 ChatGPT가 파일에 한 모든 변경 사항을 볼 수 있습니다.",
   "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "여기에 작업을 쓰고, ChatGPT가 일하는 방식을 일반, 플랜, Goal 중에서 고르세요.",
   "Tour": "둘러보기",
-  "The tour choice couldn't be saved, so it may be offered again.": "둘러보기 선택을 저장하지 못해 다시 제안될 수 있습니다."
+  "The tour choice couldn't be saved, so it may be offered again.": "둘러보기 선택을 저장하지 못해 다시 제안될 수 있습니다.",
+  "Scheduled runs, changed files under each answer, commit and pull request from Review, and your own chat style.": "예약 실행, 각 답변 아래의 변경된 파일, 리뷰에서 커밋과 풀 리퀘스트, 그리고 나만의 채팅 스타일.",
+  "Scheduled runs": "예약 실행",
+  "A chat can send itself a message every few hours, daily or weekly.": "채팅이 몇 시간마다, 매일 또는 매주 스스로 메시지를 보낼 수 있습니다.",
+  "Changed files": "변경된 파일",
+  "Each answer that edited files shows what it changed.": "파일을 편집한 답변마다 무엇을 바꿨는지 보여 줍니다.",
+  "Commit from Review": "리뷰에서 커밋",
+  "Commit the chosen files, then push and open a pull request.": "고른 파일을 커밋한 다음 푸시하고 풀 리퀘스트를 열 수 있습니다.",
+  "Your own chat style": "나만의 채팅 스타일",
+  "Rewrite how ChatGPT talks and writes in new chats.": "새 채팅에서 ChatGPT가 말하고 쓰는 방식을 바꿀 수 있습니다."
 }
