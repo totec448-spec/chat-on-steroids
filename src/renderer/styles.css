@@ -4041,6 +4041,8 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 /* Match the canonical user row's padding and footer before receipt arrives. */
 #inputQueue > .pending-message { margin-top: 11px; margin-bottom: 33px; }
 .pending-message-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(15px * var(--text-scale, 1)); line-height: calc(1.75 * var(--line-spacing, 1)); }
+/* #1826: where a scheduled run came from, one quiet line above its text, on the text's edge. */
+.pending-message-origin, .said.is-user > .said-origin { margin: 0 4px -4px; font-size: calc(11.5px * var(--text-scale, 1)); line-height: 1.45; color: var(--soft); }
 .pending-message-status { position: absolute; right: 30px; top: calc(100% + 1px); height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: calc(12px * var(--text-scale, 1)); line-height: 1.45; color: var(--soft); }
 .pending-message.is-delivery-error .pending-message-status, .pending-message.is-route-held .pending-message-status, .pending-message.is-waiting .pending-message-status { position: static; display: block; width: auto; max-width: 100%; height: auto; margin-top: 4px; font-size: calc(11px * var(--text-scale, 1)); font-weight: 400; white-space: normal; overflow-wrap: anywhere; }
 .pending-message.is-delivery-error .pending-message-status { color: var(--red); }
@@ -5414,6 +5416,26 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 ::highlight(chat-find) { background-color: var(--accent-wash); color: inherit; }
 ::highlight(chat-find-current) { background-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--ink); }
 
+/* #1826 scheduled runs: one quiet line above the chat's queue (Haz: no clock beside Send, none in the sidebar). */
+.schedule-line { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 10px; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); }
+.schedule-line[hidden] { display: none; }
+.schedule-line > .ico { flex: 0 0 auto; }
+.schedule-line > span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.schedule-line .btn-quiet { flex: 0 0 auto; border: 0; background: transparent; box-shadow: none; color: var(--soft); padding: 2px 8px; min-height: 0; }
+.schedule-line .btn-quiet:hover:not(:disabled) { color: var(--ink); background: var(--hover); }
+.schedule-dialog textarea { min-height: 0; field-sizing: content; max-height: 40vh; }
+.schedule-when { display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0 0; }
+/* The body's padding is the space above the first field; its own margin would double it. */
+.schedule-dialog #scheduleFields > .plugin-field:first-child { margin-top: 0; }
+#scheduleFields[hidden] { display: none; }
+/* Unreadable: only the reason stays, above Retry. */
+.schedule-dialog #scheduleFields[hidden] + .plugin-error { margin-top: 0; }
+.schedule-when > .plugin-field { flex: 1 1 160px; margin: 0; }
+.schedule-when > .plugin-field[hidden] { display: none; }
+.schedule-dialog .plugin-field[hidden] { display: none; }
+.schedule-note { display: block; margin: 8px 0 0; color: var(--faint); font-size: calc(11.5px * var(--text-scale, 1)); line-height: 1.5; }
+.schedule-catch-up { margin-top: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.schedule-delete { margin-right: auto; color: var(--red); }
 /* #1833 first-run tour: the offer is one quiet line above the composer; a step is a ring around the
    real control (the rest of the window dimmed a little, still visible) and a card in the menus' style. */
 .tour-offer { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 6px; padding: 4px 4px 4px 12px; color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); }

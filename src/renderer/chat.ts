@@ -117,6 +117,8 @@ import { firstTurnStart, renderTurnChanges, turnEditCount, turnFinished, turnFro
 import { initSharePage } from './share-page.js';
 import { initFeedbackDialog } from './feedback-dialog.js';
 import { createChatgptProjectPicker } from './chatgpt-project-picker.js';
+import { initScheduleDialog } from './schedule-dialog.js';
+import { nextRunAfter, type ScheduleRepeat } from '../shared/schedule.js';
 
 const api = window.api;
 let chatSearch: ChatSearch | null = null;
@@ -173,6 +175,8 @@ let loadedOlderSessions = false;
 const projectHistory = new Map<string, { cursor: { updatedAt: number; id: string } | null; asked: boolean; loading: boolean; failed?: boolean }>();
 let activeId: string | null = null;
 let selectedId: string | null = null;
+/** #1826: the chat's schedule dialog, opened from its ⋯ menu and its schedule line. */
+let scheduleDialog: { open(sessionId: string, draft: string): Promise<void> } | null = null;
 let newChatSelected = true;
 let selectedProjectId: string | null = null;
 /** Branch in new chat (#482): the reply the new chat being written will branch from, if any. */
@@ -1245,6 +1249,11 @@ function sessionRow(summary: SessionSummary): HTMLElement {
       { action: 'share', icon: 'i-globe', label: () => t('Share as web page'),
         title: () => t('Save this chat as one web page file to send to anyone. You see the page before it is saved.'), run: () => openSharePage(summary.id) }
     );
+    // #1826: a chat sends its own message at set times; workers are started by their prime, never on a clock.
+    if (summary.origin?.kind !== 'worker') {
+      items.push({ action: 'schedule', icon: 'i-clock', label: () => t('Schedule…'), title: () => t('Send a message into this chat at set times'),
+        run: () => void scheduleDialog?.open(summary.id, summary.id === selectedId ? $<HTMLTextAreaElement>('chatInput').value : '') });
+    }
     items.push(...chatGroupMenuItems(summary));
     // The stop this app can actually make. It does not touch the running ChatGPT turn — nothing
     // here can — it takes this chat's tools away, and a model whose every call is refused with
@@ -5431,6 +5440,8 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
         attachments.append(slot);
         return slot;
       });
+      // #1826: a scheduled run keeps saying so once sent, as its queue row did.
+      if (event.scheduled) box.append(el('span', 'said-origin', () => scheduledLabel(event)));
       if (event.attachments?.length || assets.length || retained.length) box.append(attachments);
       if (!assets.length) for (const image of retained) preview(image.dataUrl, true);
       // Native ChatGPT can prepend a blank paragraph. Ignore it only when a
@@ -8466,6 +8477,15 @@ function historicalAutomaticInput(entry: InputEntry): boolean {
     entry.state === 'cancelled' && !!entry.error;
 }
 
+/** #1826: a run of the chat's schedule says so, and, when it went out late, when it was due. */
+function scheduledLabel(entry: { scheduled?: { dueAt: number; late: boolean } }): string {
+  const scheduled = entry.scheduled;
+  if (!scheduled) return '';
+  return scheduled.late
+    ? t('Scheduled · late, was due {0}', [new Date(scheduled.dueAt).toLocaleTimeString(currentLanguage(), { hour: '2-digit', minute: '2-digit' })])
+    : t('Scheduled');
+}
+
 function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   const row = el('div', 'pending-message');
   row.classList.toggle('is-delivered', !entry.error && ['sent', 'tool'].includes(entry.state));
@@ -8486,6 +8506,7 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   if (files.childElementCount) row.append(files);
   // What the person wrote: a plan's first message shows their request, as it will once recorded.
   const authored = authoredTextOf(entry);
+  if (entry.scheduled) row.append(el('div', 'pending-message-origin', () => scheduledLabel(entry)));
   if (authored) {
     const text = el('div', 'pending-message-text', authored);
     text.setAttribute('dir', 'auto');
@@ -8603,7 +8624,7 @@ function paintPendingInputs(): void {
   const host = $('inputQueue');
   const previous = new Map([...host.querySelectorAll<HTMLElement>(':scope > .pending-message')].map(row => [row.dataset.inputId, row]));
   const next = rows.filter(entry => !historicalAutomaticInput(entry)).map(entry => {
-    const sig = JSON.stringify([entry.text, entry.state, entry.error, entry.dueAt, notice(entry), routeHeld(entry), queuedWaitReason(entry), entry.sendCheck, entry.stagesApplied,
+    const sig = JSON.stringify([entry.text, entry.state, entry.error, entry.dueAt, entry.scheduled, notice(entry), routeHeld(entry), queuedWaitReason(entry), entry.sendCheck, entry.stagesApplied,
       entry.stages, entry.attachments?.map(file => file.id), entry.images?.map(image => [image.name, image.dataUrl.length]),
       hasLaterModelActivity(entry.deliveredAt ?? entry.offeredAt ?? entry.createdAt)]);
     const old = previous.get(entry.id);
@@ -8614,7 +8635,48 @@ function paintPendingInputs(): void {
   reconcileChildren(host, [...next, ...host.querySelectorAll<HTMLElement>(':scope > .queued-input')]);
   holdSentMessage();
 }
+/** How a schedule repeats, in the chosen language: "every weekday at 09:00". */
+function repeatText(repeat: ScheduleRepeat): string {
+  if (repeat.kind === 'hours') return repeat.every === 1 ? t('every hour') : tn('every {0} hour', 'every {0} hours', repeat.every);
+  // The stored wall-clock time, written the way the next time beside it is (09:00 or 9:00 AM).
+  const [hour, minute] = repeat.at.split(':').map(Number) as [number, number];
+  const at = new Date(2024, 0, 1, hour, minute).toLocaleTimeString(currentLanguage(), { hour: '2-digit', minute: '2-digit' });
+  if (repeat.kind === 'daily') return t('every day at {0}', [at]);
+  if (repeat.kind === 'weekdays') return t('every weekday at {0}', [at]);
+  const day = new Intl.DateTimeFormat(currentLanguage(), { weekday: 'long' }).format(new Date(2024, 0, 7 + repeat.day));
+  return t('every {0} at {1}', [day, at]);
+}
+
+let scheduleLineGeneration = 0;
+/** #1826: the selected chat's schedule as one quiet line above its queue, with Pause and Edit. */
+async function paintScheduleLine(): Promise<void> {
+  const request = ++scheduleLineGeneration;
+  const sessionId = selectedId;
+  const line = $('scheduleLine');
+  const reply = sessionId ? await api.getSchedule(sessionId) : null;
+  if (request !== scheduleLineGeneration || sessionId !== selectedId) return;
+  const schedule = reply?.ok ? reply.data : null;
+  line.hidden = !schedule;
+  if (!schedule) return;
+  const clock = (instant: number, weekday: boolean) => new Date(instant).toLocaleString(currentLanguage(),
+    weekday ? { weekday: 'short', hour: '2-digit', minute: '2-digit' } : { hour: '2-digit', minute: '2-digit' });
+  const next = nextRunAfter(schedule, Math.max(Date.now(), schedule.lastDueAt ?? 0));
+  const parts = [schedule.paused ? t('Paused') : t('Scheduled'), repeatText(schedule.repeat)];
+  if (schedule.missedDueAt !== undefined) parts.push(t('missed {0}', [clock(schedule.missedDueAt, false)]));
+  if (!schedule.paused) parts.push(next === null ? t('ended') : t('next {0}', [clock(next, true)]));
+  ui($('scheduleLineText'), 'textContent', () => parts.join(' · '));
+  const pause = $<HTMLButtonElement>('scheduleLinePause');
+  ui(pause, 'textContent', () => schedule.paused ? t('Resume') : t('Pause'));
+  pause.onclick = async () => {
+    pause.disabled = true;
+    try { await run(api.pauseSchedule(schedule.sessionId, !schedule.paused)); } finally { pause.disabled = false; }
+    void paintScheduleLine();
+  };
+  $<HTMLButtonElement>('scheduleLineEdit').onclick = () => void scheduleDialog?.open(schedule.sessionId, '');
+}
+
 async function refreshInputQueue(): Promise<void> {
+  void paintScheduleLine();
   const request = ++inputQueueGeneration;
   const selection = selectionGeneration;
   const [all, pausedHelpers] = await Promise.all([run(api.listInputs()), run(api.listPausedHelpers())]);
@@ -8660,7 +8722,8 @@ async function refreshInputQueue(): Promise<void> {
     if (projectedIds.has(entry.id)) ui(card, 'aria-label', () => t("Plan stage · waiting for the first message to be sent"));
     if (entry.recovery) ui(card, 'aria-label', () => t('Automatic Continue'));
     // Held by the send check: the card says so in place of the text, which stays in the tooltip.
-    const label = el('span', 'queue-label', entry.recovery ? () => `${t('Automatic Continue')} · ${sendCheckHold(entry) ?? entry.text}` : entry.text);
+    const label = el('span', 'queue-label', entry.recovery ? () => `${t('Automatic Continue')} · ${sendCheckHold(entry) ?? entry.text}`
+      : entry.scheduled ? () => `${scheduledLabel(entry)} · ${sendCheckHold(entry) ?? entry.text}` : entry.text);
     card.classList.toggle('is-held', !!sendCheckHold(entry));
     ui(label, 'title', () => `${entry.recovery
       ? t('Resumes without a final answer. If ChatGPT is still generating, the silent turn is stopped before Continue is sent.')
@@ -9487,6 +9550,7 @@ export function initChat(next: Deps): void {
   };
   // The composer's Share a folder means a folder on this computer: straight to the picker.
   $('composerFolder').addEventListener('click', () => void addLocalProject());
+  scheduleDialog = initScheduleDialog(api, () => void paintScheduleLine());
   let sshDialogGeneration = 0;
   const sshProjectDialog = initSshProjectDialog(api, (project, known, asked) => {
     showAddedProject(project, sshDialogGeneration);
