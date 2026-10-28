@@ -13277,10 +13277,15 @@
       const limitation = CLF_DOM.errors().find(error => error.blocking === true)?.text;
       if (limitation) return fail(limitation);
       // An edit is answered by the model chosen for the chat's next turn, as ChatGPT does it.
-      if (!(await CLF_DOM.selectModelSettings(input.model, input.reasoningEffort, idle))) return fail(t(
-        'content_delivery_model_unconfirmed',
-        'Requested model or reasoning could not be confirmed'
-      ), 'model-unconfirmed');
+      const choosing = Date.now();
+      if (!(await CLF_DOM.selectModelSettings(input.model, input.reasoningEffort, idle))) {
+        // A limit shown meanwhile is the reason, even when its dialog was already closed.
+        const limited = CLF_DOM.errors().find(error => error.blocking === true)?.text || CLF_DOM.accessNoticeSince?.(choosing);
+        return fail(limited || t(
+          'content_delivery_model_unconfirmed',
+          'Requested model or reasoning could not be confirmed'
+        ), limited ? undefined : 'model-unconfirmed');
+      }
       editor = await CLF_DOM.openQuestionEdit(replaced, idle);
       if (editor.failure) { const failure = editor.failure; editor = null; return fail(EDIT_FAILURES[failure]()); }
       let insertionFailure = '';
@@ -13542,8 +13547,10 @@
       const providerLimitation = () => CLF_DOM.errors().find(error => error.blocking === true)?.text;
       const limitation = providerLimitation();
       if (limitation) return fail(limitation);
+      const choosing = Date.now();
       if (!intoRunningTurn() && !(await CLF_DOM.selectModelSettings(input.model, input.reasoningEffort, onTarget))) {
-        const limited = providerLimitation();
+        // A limit shown meanwhile is the reason, even when its dialog was already closed.
+        const limited = providerLimitation() || CLF_DOM.accessNoticeSince?.(choosing);
         return fail(limited || t(
           'content_delivery_model_unconfirmed',
           'Requested model or reasoning could not be confirmed'
