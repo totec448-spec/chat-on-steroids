@@ -39,6 +39,7 @@ const { createSession, getSession, rebindSession, initSessionStore, resetSession
 const { registerIpc } = await import('../src/main/ipc.js');
 const { bridgePort, startBridge, stopBridge, stopRecoverySweepTimerForTests } = await import('../src/main/bridge.js');
 const input = await import('../src/main/session/input.js');
+const logger = await import('../src/main/logger.js');
 const goal = await import('../src/main/goal.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
 let directory: string;
@@ -252,7 +253,12 @@ it('refuses the extension update while a message is being sent, and new claims w
     expect((await post('/extension/update', {})).body).toMatchObject({ ready: true, build: 'bbbbbbbbbbbb' });
     // The extension reloads now: it takes no new message until it is back.
     const second = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'After the update' });
+    const logged = vi.spyOn(logger, 'logInfo');
     expect((await post('/input/claim', { id: second.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input).toBeNull();
+    expect((await post('/input/claim', { id: second.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input).toBeNull();
+    // Says once why the message waits, not on every poll.
+    expect(logged.mock.calls.filter(([line]) => String(line).includes('extension is reloading'))).toHaveLength(1);
+    logged.mockRestore();
     now += 30_000;
     expect((await post('/input/claim', { id: second.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input).toMatchObject({ id: second.id });
     await input.cancelInput(second.id);

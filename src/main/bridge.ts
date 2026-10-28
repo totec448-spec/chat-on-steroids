@@ -732,7 +732,10 @@ let claimsInProgress = 0;
 function extensionReloading(req: http.IncomingMessage): boolean {
   const until = extensionReloads.get(browserOf(req) ?? '');
   if (until === undefined) return false;
-  if (Date.now() < until) return true;
+  if (Date.now() < until) {
+    noticeRefusal(`extension-reload:${browserOf(req) ?? ''}`, 'bridge: a claim waits: the browser extension is reloading into a new build');
+    return true;
+  }
   extensionReloads.delete(browserOf(req) ?? '');
   return false;
 }
