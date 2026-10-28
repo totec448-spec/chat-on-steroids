@@ -1,3 +1,4 @@
+import { DEFAULT_CHAT_PERSONALITY, DEFAULT_CHAT_WRITING_STYLE, MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
 import { hasProviderDirective, resolvedCapture, withoutProviderDirectives } from '../shared/content-reference.js';
 import { completedDilText } from '../shared/dil-tables.js';
 import { markdownVisibleText } from '../shared/markdown-text.js';
@@ -112,6 +113,7 @@ import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMe
 import { createSearchPopup } from './search-popup.js';
 import { holdToTalkShortcut, holdToTalkSupported, primaryShortcut } from './shortcuts.js';
 import { initSshProjectDialog } from './ssh-project-dialog.js';
+import { firstTurnStart, renderTurnChanges, turnEditCount, turnFinished, turnFrom } from './turn-changes.js';
 import { initSharePage } from './share-page.js';
 import { initFeedbackDialog } from './feedback-dialog.js';
 import { createChatgptProjectPicker } from './chatgpt-project-picker.js';
@@ -150,7 +152,7 @@ let filterFor: string | null = null;
 
 interface Deps {
   /** The renderer's single save path — reads every control, including ours. */
-  save: () => Promise<void>;
+  save: () => Promise<boolean>;
   state: () => AppState | null;
 }
 
@@ -6673,6 +6675,12 @@ function paintDetail(followBottom = historyBefore === null): void {
     // A final answer recorded outside any turn (copied branch history, an adopted chat) has the same actions.
     const looseAnswer = !answerTurn && item.kind === 'event' && item.event.kind === 'assistant_message' && !item.event.turnId &&
       !!item.event.messageId && looseAnchors.get(item.event.messageId) === item.event.seq;
+    // #1827: what a finished answer changed, once its turn is over, so the card never changes under the reader.
+    // A long turn's early edits can be outside the loaded page: an answer whose turn start is not
+    // loaded asks too, and its card stays hidden when the turn edited nothing. A new edit refreshes it.
+    const loadedEdits = answerTurn ? turnEditCount(events, answerTurn) : 0;
+    const changedFiles = !!answerTurn && item.kind === 'event' && turnFinished(events, answerTurn, item.event.seq) &&
+      (loadedEdits > 0 || !firstTurnStart(events, answerTurn));
     const held = item.kind === 'event' && item.event.kind === 'assistant_message' && writing && item.event.seq === writing.seq
       ? { ...item.event, message: { ...item.event.message, text: writing.shown, chars: writing.shown.length } } : null;
     // A held message is drawn again only when a block finishes or its sources change: each chunk
@@ -6681,7 +6689,7 @@ function paintDetail(followBottom = historyBefore === null): void {
     // Its final text is not held. The shown text itself is compared: a revision can rewrite it to the same length.
     const sig = (held ? `${itemSignature({ kind: 'event', event: { ...held, seq: 0, time: 0, renderedHtml: undefined } })}\u0000held${JSON.stringify(held.references ?? [])}\u0000${held.message.text}`
       : itemSignature(item)) + (item.kind === 'event' && item.event.kind === 'chat_error'
-      ? JSON.stringify(chatErrorPresentation(item.event, events)) : '') + (answerTurn || looseAnswer ? '\u0000answer' : '') +
+      ? JSON.stringify(chatErrorPresentation(item.event, events)) : '') + (answerTurn || looseAnswer ? '\u0000answer' : '') + (changedFiles ? `\u0000changes:${loadedEdits}` : '') +
       (item.kind === 'event' && stoppedTurnEnd(item.event, events) ? '\u0000stopped' : '') +
       (item.kind === 'compaction' && item !== latestCompaction ? '\u0000superseded' : '') +
       (item.kind === 'event' && editableQuestion(item.event, events) ? `\u0000edit:${laterMessages.get(item.event.seq) ?? 0}` : '');
@@ -6704,6 +6712,11 @@ function paintDetail(followBottom = historyBefore === null): void {
     if (answerTurn || looseAnswer) built.querySelector('.said')?.append(answerActions(answerTurn,
       item.kind === 'event' && item.event.kind === 'assistant_message' ? item.event.messageId : undefined,
       item.kind === 'event' && item.event.kind === 'assistant_message' ? { text: item.event.message.text, time: item.event.time } : undefined));
+    if (changedFiles && answerTurn && selectedId) {
+      const sessionId = selectedId;
+      built.querySelector('.said')?.append(renderTurnChanges({ sessionId, turnId: answerTurn, from: turnFrom(events, answerTurn),
+        current: () => selectedId === sessionId, openReview: selectedLocalProject() ? () => void reviewPanel?.show() : null }));
+    }
     if (item.kind === 'event' && editableQuestion(item.event, events)) {
       built.querySelector('.ev-body')?.append(questionActions(item.event, laterMessages.get(item.event.seq) ?? 0));
       built.dataset.questionId = item.event.messageId;
@@ -8022,7 +8035,7 @@ function applyGoal(state: AppState, previous?: Config): void {
   if (goalModels.length > 0) paintGoalModels();
 }
 
-function wireGoal(save: () => Promise<void>): void {
+function wireGoal(save: () => Promise<boolean>): void {
   $<HTMLTextAreaElement>('handoffPrompt').maxLength = MAX_HANDOFF_PROMPT_CHARS;
   $('handoffPromptEdit').addEventListener('click', () => {
     const panel = $('handoffPromptPanel');
@@ -8045,9 +8058,39 @@ function wireGoal(save: () => Promise<void>): void {
   });
   $('customContinueReset').addEventListener('click', async () => {
     $<HTMLTextAreaElement>('customContinue').value = '';
-    await save();
-    toast(t('Continue prompt restored to default'));
+    if (await save()) toast(t('Continue prompt restored to default'));
   });
+  // #1856: Personality and Writing style of new chats; main.ts owns the ui fields they save into.
+  for (const [id, fallback, restored] of [
+    ['chatPersonality', DEFAULT_CHAT_PERSONALITY, () => t('Personality restored to default')],
+    ['chatWritingStyle', DEFAULT_CHAT_WRITING_STYLE, () => t('Writing style restored to default')]
+  ] as const) {
+    $<HTMLTextAreaElement>(id).maxLength = MAX_CHAT_STYLE_CHARS;
+    $(`${id}Edit`).addEventListener('click', async () => {
+      const panel = $(`${id}Panel`), box = $<HTMLTextAreaElement>(id);
+      if (!panel.hidden) {
+        // Closing with text not yet stored: it closes only once that text is saved. A refused save
+        // keeps the editor open with what was typed, instead of hiding it behind the stored value.
+        const draft = box.value, typed = draft.trim();
+        const wanted = typed === fallback.trim() ? undefined : typed;
+        // A failed save reloads the settings; a text stored before a later step of that save failed
+        // counts as saved, so only a text that really isn't stored keeps the editor open.
+        if (wanted !== deps.state()?.config.ui[id] && !(await save()) && wanted !== deps.state()?.config.ui[id]) {
+          box.value = draft;
+          box.focus();
+          return;
+        }
+      }
+      panel.hidden = !panel.hidden;
+      ui($(`${id}Edit`), 'textContent', () => panel.hidden ? t('Edit prompt') : t('Close prompt'));
+      if (!panel.hidden) box.focus();
+    });
+    $(`${id}Reset`).addEventListener('click', async () => {
+      $<HTMLTextAreaElement>(id).value = fallback;
+      // Said only when the save went through; a refused one keeps the person's text stored.
+      if (await save()) toast(restored());
+    });
+  }
   $<HTMLTextAreaElement>('goalPrompt').maxLength = MAX_GOAL_SYSTEM_PROMPT_CHARS;
   $('goalPromptEdit').addEventListener('click', () => {
     const panel = $('goalPromptPanel');
@@ -8214,7 +8257,9 @@ const CHAT_INPUTS = [
   'recordingStorageLimit',
   'goalPrompt',
   'goalObjectivePrompt',
-  'goalLoopPrompt'
+  'goalLoopPrompt',
+  'chatPersonality',
+  'chatWritingStyle'
 ];
 
 /** Writes app state into this panel's controls. Called from the renderer's apply(). */
