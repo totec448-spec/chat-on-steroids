@@ -3394,5 +3394,6 @@
   "{0} more not listed|one": "{0} tane daha listelenmedi",
   "Touched {0} files, no net change": "{0} dosyaya dokunuldu, net değişiklik yok",
   "Touched {0} files, no net change|one": "{0} dosyaya dokunuldu, net değişiklik yok",
-  "The request was not valid.": "İstek geçerli değildi."
+  "The request was not valid.": "İstek geçerli değildi.",
+  "Needs your answer in ChatGPT": "ChatGPT'de yanıtınızı bekliyor"
 }

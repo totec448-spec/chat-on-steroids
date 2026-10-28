@@ -3524,5 +3524,6 @@
   "Touched {0} files, no net change|one": "Затронут {0} файл, итоговых изменений нет",
   "Touched {0} files, no net change|few": "Затронуто {0} файла, итоговых изменений нет",
   "Touched {0} files, no net change|many": "Затронуто {0} файлов, итоговых изменений нет",
-  "The request was not valid.": "Запрос недействителен."
+  "The request was not valid.": "Запрос недействителен.",
+  "Needs your answer in ChatGPT": "Ждёт вашего ответа в ChatGPT"
 }

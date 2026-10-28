@@ -3459,5 +3459,6 @@
   "Touched {0} files, no net change": "{0} ficheiros mexidos, nenhuma alteração líquida",
   "Touched {0} files, no net change|one": "{0} ficheiro mexido, nenhuma alteração líquida",
   "Touched {0} files, no net change|many": "{0} de ficheiros mexidos, nenhuma alteração líquida",
-  "The request was not valid.": "O pedido não era válido."
+  "The request was not valid.": "O pedido não era válido.",
+  "Needs your answer in ChatGPT": "Precisa da sua resposta no ChatGPT"
 }
