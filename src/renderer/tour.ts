@@ -45,9 +45,14 @@ export function initTour(deps: { markDone(): Promise<boolean> }): { offer(): voi
     // 4 px around the control, but never past the window's edge (a control in its corner).
     const left = Math.max(2, box.left - 4), top = Math.max(2, box.top - 4);
     const right = Math.min(window.innerWidth - 2, box.right + 4), bottom = Math.min(window.innerHeight - 2, box.bottom + 4);
-    // The ring's corners run parallel to the control's: its own radius, plus the 4 px between them.
-    const radius = parseFloat(window.getComputedStyle(target).borderTopLeftRadius) || 0;
-    Object.assign(ring.style, { left: `${left}px`, top: `${top}px`, width: `${right - left}px`, height: `${bottom - top}px`, borderRadius: `${radius + 4}px` });
+    // The ring's corners run parallel to the control's: each corner its own radius, plus the 4 px
+    // between them (the composer under a dock row has 12 px top and 22 px bottom corners).
+    const computed = window.getComputedStyle(target);
+    const corner = (name: 'borderTopLeftRadius' | 'borderTopRightRadius' | 'borderBottomRightRadius' | 'borderBottomLeftRadius') =>
+      `${(parseFloat(computed[name]) || 0) + 4}px`;
+    Object.assign(ring.style, { left: `${left}px`, top: `${top}px`, width: `${right - left}px`, height: `${bottom - top}px`,
+      borderTopLeftRadius: corner('borderTopLeftRadius'), borderTopRightRadius: corner('borderTopRightRadius'),
+      borderBottomRightRadius: corner('borderBottomRightRadius'), borderBottomLeftRadius: corner('borderBottomLeftRadius') });
     // Beside the control: below it when there is room, else above; kept inside the window.
     // The width first: the text wraps by it, and the height (measured next) follows.
     const width = Math.min(320, window.innerWidth - 2 * GAP);
