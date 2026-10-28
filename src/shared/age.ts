@@ -24,3 +24,42 @@ export function ageOf(atMs: number, nowMs: number): { unit: AgeUnit; value: numb
 
 /** The compact English token for an age: "8s", "2m", "5h", "3d", "2w", "4mo", "1y". */
 export const AGE_SUFFIX: Record<AgeUnit, string> = { second: 's', minute: 'm', hour: 'h', day: 'd', week: 'w', month: 'mo', year: 'y' };
+
+/**
+ * A duration in the largest units that fit, at most `parts` of them, with the compact English
+ * letters the app shows beside a clock: "45s", "4m 5s", "6h 12m", "3d 4h" (two parts) or "2d"
+ * (one). Hours stop at a day, so a long run never reads "50h". A bad clock reads "0s".
+ */
+export function elapsedText(totalSeconds: number, parts: 1 | 2): string {
+  const seconds = Number.isFinite(totalSeconds) ? Math.max(0, Math.floor(totalSeconds)) : 0;
+  const units: Array<[number, string]> = [[Math.floor(seconds / 86_400), 'd'], [Math.floor(seconds / 3600) % 24, 'h'],
+    [Math.floor(seconds / 60) % 60, 'm'], [seconds % 60, 's']];
+  const first = units.findIndex(([value]) => value > 0);
+  if (first === -1) return '0s';
+  return units.slice(first, first + parts).map(([value, unit]) => `${value}${unit}`).join(' ');
+}
+
+/** A countdown as a clock: "2:05", and from an hour on "2:05:30" (never "125:30"). */
+export function countdownClock(totalSeconds: number): string {
+  const seconds = Number.isFinite(totalSeconds) ? Math.max(0, Math.ceil(totalSeconds)) : 0;
+  const hours = Math.floor(seconds / 3600), minutes = Math.floor((seconds % 3600) / 60), rest = String(seconds % 60).padStart(2, '0');
+  return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${rest}` : `${minutes}:${rest}`;
+}
+
+const SPOKEN: Record<AgeUnit, string> = { second: 's', minute: 'min', hour: 'h', day: 'd', week: 'wk', month: 'mo', year: 'yr' };
+
+/**
+ * An age in plain English with spaced units, for Diagnostics and the texts the model reads:
+ * "just now", "1 min ago", "7 min ago", "3 h ago", "2 d ago", "3 wk ago", "4 mo ago", "2 yr ago".
+ */
+export function spokenAge(atMs: number, nowMs: number): string {
+  const age = ageOf(atMs, nowMs);
+  if (!age || (age.unit === 'second' && age.value < 30)) return 'just now';
+  return age.unit === 'second' ? '1 min ago' : `${age.value} ${SPOKEN[age.unit]} ago`;
+}
+
+/** A duration in plain English with spaced units, at most two: "45 s", "3 h 2 min", "2 d 3 h". */
+export function spokenDuration(totalSeconds: number): string {
+  return elapsedText(totalSeconds, 2).replace(/(\d+)([dhms])\b/g, (_, value: string, unit: string) =>
+    `${value} ${({ d: 'd', h: 'h', m: 'min', s: 's' } as Record<string, string>)[unit]}`);
+}

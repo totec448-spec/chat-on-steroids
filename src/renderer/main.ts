@@ -1,3 +1,4 @@
+import { elapsedText } from '../shared/age.js';
 import { DEFAULT_CHAT_PERSONALITY, DEFAULT_CHAT_WRITING_STYLE } from '../shared/chat-style.js';
 import { sendCheckUrl } from '../shared/send-check.js';
 import { applyPhonePush, initPhonePushSettings, readPhonePush } from './phone-push-settings.js';
@@ -912,11 +913,9 @@ const METHOD_HINT: Record<string, string> = {
   manual: "This app only listens on localhost. You are responsible for exposing it."
 };
 
+/** Tunnel uptime: "45s", "4m 5s", "6h 12m", "3d 4h", never hundreds of hours. */
 function duration(seconds: number | null): string {
-  if (seconds === null) return '—';
-  if (seconds < 90) return `${Math.round(seconds)}s`;
-  const minutes = Math.round(seconds / 60);
-  return minutes < 90 ? `${minutes}m` : `${Math.round(minutes / 60)}h`;
+  return seconds === null ? '—' : elapsedText(seconds, 2);
 }
 
 /**
