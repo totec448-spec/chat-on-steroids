@@ -24433,10 +24433,19 @@ describe('creating a native ChatGPT Project', () => {
   const request = { id: 'aaaaaaaa-1111-4222-8333-444444444444', name: 'my-app' };
   const nativeId = `g-p-${'f'.repeat(32)}`;
   const shown = (node: Element) => { (node as HTMLElement).getClientRects = () => [{ width: 100, height: 20 }] as unknown as DOMRectList; };
-  function nativeDialog(document: Document, dom: JSDOM, created = true, landsOn = nativeId) {
+  function nativeDialog(document: Document, dom: JSDOM, created = true, landsOn = nativeId, surface: 'sidebar' | 'index' = 'sidebar') {
     const button = document.createElement('button');
-    button.setAttribute('data-app-action-sidebar-project-create', ''); button.setAttribute('aria-label', 'Adicionar novo projeto');
-    shown(button); document.body.append(button);
+    if (surface === 'index') {
+      const search = document.createElement('input'); search.id = 'projects-index-search';
+      const wrapper = document.createElement('div'); wrapper.setAttribute('data-chatgpt-project-conversation-drop-target', '');
+      button.type = 'button'; button.setAttribute('data-color', 'primary'); button.setAttribute('data-variant', 'solid');
+      button.textContent = 'Criar';
+      wrapper.append(button); document.body.append(search, wrapper);
+    } else {
+      button.setAttribute('data-app-action-sidebar-project-create', ''); button.setAttribute('aria-label', 'Adicionar novo projeto');
+      document.body.append(button);
+    }
+    shown(button);
     button.addEventListener('click', () => {
       const dialog = document.createElement('div');
       dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true');
@@ -24462,6 +24471,40 @@ describe('creating a native ChatGPT Project', () => {
     expect(reports.map(row => row.action)).toEqual(['claim', 'arm', 'done']);
     expect(reports[2]).toMatchObject({ id: request.id, chatgptId: nativeId });
     expect(await live.runtimeMessage({ type: 'clf-project-create-state', id: request.id })).toMatchObject({ safe: true });
+  });
+
+  it('creates from the current Projects index without depending on the translated Create label', async () => {
+    const reports: Array<Record<string, any>> = [];
+    live = await harness(`https://chatgpt.com/projects?cos-project-create=${request.id}`, {
+      project_create: message => { reports.push(message); return { ok: true, data: { ok: true } }; }
+    }, (document, dom) => nativeDialog(document, dom, true, nativeId, 'index'));
+    expect(await live.runtimeMessage({ type: 'clf-project-create', request })).toEqual({ ok: true });
+    expect(reports.map(row => row.action)).toEqual(['claim', 'arm', 'done']);
+    expect(reports[2]).toMatchObject({ id: request.id, chatgptId: nativeId });
+  });
+
+  it('can safely close a failed Projects-index helper without affecting the project list', async () => {
+    live = await harness(`https://chatgpt.com/projects?cos-project-create=${request.id}`);
+    expect(await live.runtimeMessage({ type: 'clf-project-create-state', id: request.id })).toEqual({ safe: true });
+  });
+
+  it('will not click an unrelated primary button without the Projects-index marker', async () => {
+    const reports: Array<Record<string, any>> = [];
+    let clicks = 0;
+    live = await harness(`https://chatgpt.com/projects?cos-project-create=${request.id}`, {
+      project_create: message => { reports.push(message); return { ok: true, data: { ok: true } }; }
+    }, document => {
+      const wrapper = document.createElement('div'); wrapper.setAttribute('data-chatgpt-project-conversation-drop-target', '');
+      const unrelated = document.createElement('button');
+      unrelated.type = 'button'; unrelated.setAttribute('data-color', 'primary'); unrelated.setAttribute('data-variant', 'solid');
+      shown(unrelated); unrelated.addEventListener('click', () => { clicks++; });
+      wrapper.append(unrelated); document.body.append(wrapper);
+    });
+    const created = live.runtimeMessage({ type: 'clf-project-create', request });
+    await settle(21_000);
+    expect(await created).toEqual({ ok: false });
+    expect(clicks).toBe(0);
+    expect(reports.map(row => row.action)).toEqual(['claim', 'fail']);
   });
 
   it('fails the claimed request, before anything is armed, when ChatGPT shows no New project control', async () => {

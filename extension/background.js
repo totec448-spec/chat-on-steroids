@@ -2626,7 +2626,7 @@ function inspectProjectCreates(requests) {
       // A helper the person closed comes back, at most every two minutes: never a tab on every
       // status pass, and never a request left waiting for good.
       if (mine && Date.now() - (mine.openedAt ?? 0) < PROJECT_CREATE_REOPEN_MS) return;
-      const created = await createChatTab(`https://chatgpt.com/?cos-project-create=${request.id}`, false);
+      const created = await createChatTab(`https://chatgpt.com/projects?cos-project-create=${request.id}`, false);
       await chrome.storage.session.set({ projectCreateOwner: { id: request.id, tab: created.id, openedAt: Date.now() } });
       return;
     }

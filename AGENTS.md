@@ -1126,10 +1126,11 @@ are never retried on their own: only the project's "Retry ChatGPT Project" menu 
 and for `uncertain` it warns that a second Project may result.
 
 The browser does it (`inspectProjectCreates` in background.js): one request at a time in one
-foreground helper tab `https://chatgpt.com/?cos-project-create=<request>` (the dialog needs a
+foreground helper tab `https://chatgpt.com/projects?cos-project-create=<request>` (the dialog needs a
 laid-out page; the person just added the project, so it also runs under `browserOnly`). The page
 (`createChatgptProject`) claims first, opens a collapsed sidebar once, clicks ChatGPT's own control
-(`button[data-app-action-sidebar-project-create]`, labelled in the account's language), types the
+(`data-chatgpt-project-conversation-drop-target` on the Projects index, with the earlier sidebar
+`data-app-action-sidebar-project-create` still supported), types the
 folder name into `input#chatgpt-project-name`, arms, submits, and takes the id only from the
 Project page ChatGPT opens by itself, and only one the sidebar did not list before the click. The
 helper is closed once its request is no longer pending and it proves it holds nothing; a closed

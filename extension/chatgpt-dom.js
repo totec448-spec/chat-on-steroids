@@ -3673,15 +3673,16 @@ var CLF_DOM = (() => {
   }
 
   /**
-   * ChatGPT's own "new Project" control in its sidebar, or null.
-   *
-   * Located by the attribute ChatGPT's sidebar action carries, not by its label, which is in the
-   * account's language (measured 2026-10-10: `data-app-action-sidebar-project-create`, labelled
-   * "Adicionar novo projeto" on a pt-BR account). Exactly one shown control, or nothing.
+   * ChatGPT's native Project creation control, independent of the account's language.
+   * The Projects index now owns Create (2026-10-19). Older layouts put the action in the sidebar.
+   * Only an unambiguous visible control in the matching surface is eligible.
    */
   function projectCreateControl() {
     return safe(() => {
-      const shown = [...document.querySelectorAll('button[data-app-action-sidebar-project-create]')]
+      const selector = location.pathname === '/projects' && document.querySelector('#projects-index-search')
+        ? '[data-chatgpt-project-conversation-drop-target] > button[type="button"][data-color="primary"][data-variant="solid"]'
+        : 'button[data-app-action-sidebar-project-create]';
+      const shown = [...document.querySelectorAll(selector)]
         .filter(node => !node.closest(`${OWN_SURFACES},[hidden],[aria-hidden="true"],[inert]`) && node.getClientRects().length > 0 && !node.disabled);
       return shown.length === 1 ? shown[0] : null;
     }, null);
