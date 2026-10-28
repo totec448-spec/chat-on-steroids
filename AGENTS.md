@@ -3499,7 +3499,7 @@ this computer (`http://127.0.0.1|localhost|[::1]:<port>/…`, see `src/shared/se
 off. When it is set, every send the app makes by itself is asked about first with one `POST`:
 `{ version: 1, kind, id, chat: { session, project, worker }, text, attempt }`. The kinds are
 `goal-step`, `loop-step`, `continue` (automatic Continue), `fresh-turn` (rotation and its after-Stop
-continue), `worker-start` and `worker-message`. A message a person sends is never asked about, and
+continue), `scheduled` (a chat's scheduled run), `worker-start` and `worker-message`. A message a person sends is never asked about, and
 neither are Stop or anything clicked in ChatGPT.
 
 - **Veto-only.** `200 {allow:true}` lets the send go; `200 {allow:false, reason?}` holds it. Anything
@@ -3508,7 +3508,7 @@ neither are Stop or anything clicked in ChatGPT.
   holds. The answer can never change the text, model or target.
 - **One log line per decision**, never with the message: `send check: <kind> <id> attempt N allowed|held (why)`.
 - **Where it is asked**, each before anything is typed or filed:
-  - Outbox rows (`continue`, `fresh-turn`): in `/input/claim` before `claimBrowserInput`, outside the
+  - Outbox rows (`continue`, `fresh-turn`, `scheduled`): in `/input/claim` before `claimBrowserInput`, outside the
     queue's lock. A hold stores `sendCheck {attempt, nextAt, reason, answered}` on the row;
     `pendingBrowserInputs` and `pendingQueuedPickups` skip it until `nextAt` (30 s), so a held row is
     neither offered nor taken for a failed pickup. Clearing the address releases it at once. The row

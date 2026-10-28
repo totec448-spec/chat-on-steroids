@@ -158,9 +158,10 @@ export type InputEntry = z.infer<typeof entrySchema>;
  * which is never asked about. Finish replies are asked before they are filed, as they can also
  * reach ChatGPT in a tool result.
  */
-export function automaticSendKind(row: Pick<InputEntry, 'recovery' | 'purpose' | 'afterStop'>): SendCheckKind | null {
+export function automaticSendKind(row: Pick<InputEntry, 'recovery' | 'purpose' | 'afterStop' | 'scheduled'>): SendCheckKind | null {
   if (row.recovery) return 'continue';
   if (row.purpose === 'rotation' || row.afterStop) return 'fresh-turn';
+  if (row.scheduled) return 'scheduled';
   return null;
 }
 
