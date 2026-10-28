@@ -9710,22 +9710,40 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it('keeps an unattributed repair queued if approval appears while its handout is being prepared', async () => {
+  it('shows approval waiting on the queued repair row and restores reloading when the handout resumes', async () => {
     vi.useFakeTimers();
     const recorder = await import('../src/main/session/recorder.js');
+    const { APPROVAL_WAITING_TEXT } = await import('../src/shared/approval-wait.js');
     const writeProgress = recorder.recordProgress;
     let progress: ReturnType<typeof vi.spyOn> | undefined;
     try {
       await pair(); await events(PRIME, [openTurn('approval-during-handout')]);
       await unattributed(); await vi.advanceTimersByTimeAsync(15_000);
+      const session = (await findSessionByConversation(PRIME, { requireUnique: true }))!;
+      const snapshots = async () => (await readEvents(session.id, { kinds: ['progress'] })).filter(
+        (event): event is Extract<SessionEvent, { kind: 'progress' }> =>
+          event.kind === 'progress' && !!event.progressId?.startsWith('browser-repair:')
+      );
       progress = vi.spyOn(recorder, 'recordProgress').mockImplementationOnce(async (...args) => {
         await request('GET', `/activity?conversationId=${PRIME}&approval=1`);
         return writeProgress(...args);
       });
       expect(await maintenance()).toBeNull();
       expect(progress).toHaveBeenCalled();
+      const heldSnapshots = await snapshots();
+      const held = foldProgress(heldSnapshots);
+      expect(held.map(event => event.kind === 'progress' ? event.message.text : '')).toEqual([APPROVAL_WAITING_TEXT]);
+      expect(held[0]!.turnId).toBe('approval-during-handout');
+      expect(await maintenance()).toBeNull();
+      expect(await snapshots()).toHaveLength(heldSnapshots.length);
       await request('GET', `/activity?conversationId=${PRIME}&approval=0`);
       expect(await maintenance()).toMatchObject({ conversationId: PRIME, reason: 'unattributed' });
+      const resumed = foldProgress(await snapshots());
+      expect(resumed.map(event => event.kind === 'progress' ? event.message.text : '')).toEqual([
+        'Trying to reload chat to recover missing connector attribution…'
+      ]);
+      expect(resumed[0]).toMatchObject({ progressId: heldSnapshots[0]!.progressId });
+      expect(resumed[0]!.turnId).toBe('approval-during-handout');
     } finally { progress?.mockRestore(); vi.useRealTimers(); }
   });
 
