@@ -32,7 +32,7 @@ async function boot() {
   }, { get: (target, prop) => prop in target ? (target as any)[prop] : () => ok(null) });
   Object.defineProperty(w, 'api', { value: api, configurable: true });
   const { initChat } = await import('../src/renderer/chat.js');
-  initChat({ save: async () => undefined, state: () => ({ config: { sessions: { record: true, limitTokens: 533000 }, compaction: { auto: true, autoTokens: 400000 }, ui: { developerMode: true } } }) as any });
+  initChat({ save: async () => true, state: () => ({ config: { sessions: { record: true, limitTokens: 533000 }, compaction: { auto: true, autoTokens: 400000 }, ui: { developerMode: true } } }) as any });
 
   return w;
 }

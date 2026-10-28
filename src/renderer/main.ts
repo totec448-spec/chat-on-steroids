@@ -1,3 +1,4 @@
+import { DEFAULT_CHAT_PERSONALITY, DEFAULT_CHAT_WRITING_STYLE } from '../shared/chat-style.js';
 import { sendCheckUrl } from '../shared/send-check.js';
 import { applyPhonePush, initPhonePushSettings, readPhonePush } from './phone-push-settings.js';
 import { initBrowserSetup } from './setup-browser.js';
@@ -30,6 +31,7 @@ import { initPet } from './pet.js';
 import { initPets } from './pets.js';
 import { initSkillsLibrary } from './skills-library.js';
 import { initWhatsNew } from './whats-new.js';
+import { initTour } from './tour.js';
 import { playSoundCue } from './sound-cues.js';
 import { inQuietHours } from '../shared/phone-push.js';
 import { initSettingsSearch } from './settings-search.js';
@@ -253,7 +255,10 @@ function placePermissions(tab: string): void {
   if (permissionSurface.parentElement !== target) target.append(permissionSurface);
 }
 
+/** Set once the tour exists (below); leaving the chat screen ends a running tour quietly. */
+let stopTour: () => void = () => undefined;
 function showTab(name: string): void {
+  if (name !== 'chat') stopTour();
   if (name === 'skills') openSkillsLibrary();
   placePermissions(name);
   const library = name === 'plugins' || name === 'skills' || name === 'pets';
@@ -787,6 +792,8 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       playfulContinue: $<HTMLInputElement>('playfulContinue').checked,
       announceTurns: $<HTMLInputElement>('announceTurns').checked,
       customContinue: $<HTMLTextAreaElement>('customContinue').value.trim() || undefined,
+      chatPersonality: chatStyleDraft('chatPersonality', DEFAULT_CHAT_PERSONALITY),
+      chatWritingStyle: chatStyleDraft('chatWritingStyle', DEFAULT_CHAT_WRITING_STYLE),
       sendCheckUrl: sendCheckDraft(previous),
       followOutput: $<HTMLInputElement>('followOutput').checked,
       mentionCore: $<HTMLInputElement>('mentionCore').checked,
@@ -1056,6 +1063,11 @@ function connectorSuffixValid(): string | null {
   input.setAttribute('aria-invalid', String(!valid));
   $('connectorSuffixError').hidden = valid;
   return valid ? value : null;
+}
+/** #1856: the built-in text is saved as absent, so a later release's wording reaches it; empty leaves the part out. */
+function chatStyleDraft(id: 'chatPersonality' | 'chatWritingStyle', fallback: string): string | undefined {
+  const value = $<HTMLTextAreaElement>(id).value.trim();
+  return value === fallback.trim() ? undefined : value;
 }
 /** #1794: the send check's address as typed, '' when empty (off), or null when not on this computer. */
 function sendCheckValid(): string | null {
@@ -1761,6 +1773,13 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('playfulContinue'), config.ui.playfulContinue === true, previousState?.config.ui.playfulContinue);
   applyChecked($<HTMLInputElement>('announceTurns'), config.ui.announceTurns === true, previousState?.config.ui.announceTurns);
   applyValue($<HTMLTextAreaElement>('customContinue'), config.ui.customContinue ?? '', previousState ? previousState.config.ui.customContinue ?? '' : undefined);
+  applyValue($<HTMLTextAreaElement>('chatPersonality'), config.ui.chatPersonality ?? DEFAULT_CHAT_PERSONALITY, previousState ? previousState.config.ui.chatPersonality ?? DEFAULT_CHAT_PERSONALITY : undefined);
+  applyValue($<HTMLTextAreaElement>('chatWritingStyle'), config.ui.chatWritingStyle ?? DEFAULT_CHAT_WRITING_STYLE, previousState ? previousState.config.ui.chatWritingStyle ?? DEFAULT_CHAT_WRITING_STYLE : undefined);
+  // What new chats get, as saved: the built-in text, the person's own, or nothing (Haz on #1859).
+  for (const [id, saved] of [['chatPersonality', config.ui.chatPersonality], ['chatWritingStyle', config.ui.chatWritingStyle]] as const) {
+    ui($(`${id}State`), 'textContent', () => saved === undefined ? t('New chats use the built-in text.')
+      : saved === '' ? t('Saved. New chats leave this part out.') : t('Saved. New chats use your text.'));
+  }
   // An address that is not on this computer is never saved, so it stays in the field with its
   // error until the person fixes it; the error always matches what the field holds.
   const sendCheckField = $<HTMLInputElement>('sendCheckUrl');
@@ -2765,7 +2784,29 @@ $('updateInstall').addEventListener('click', installUpdate);
 $('installUpdate').addEventListener('click', installUpdate);
 $('connectionPopoverToggle').addEventListener('click', () => void toggleConnection());
 $('wizConnect').addEventListener('click', () => void toggleConnection());
-$('readyStart').addEventListener('click', () => showTab('chat'));
+// #1833: Setup's last step offers the first-run tour once; Settings replays it.
+// The answer counts in this window at once, before the saved setting comes back in a state push.
+let tourAnswered = false;
+const tour = initTour({ markDone: async () => {
+  tourAnswered = true;
+  const reply = await api.markTourDone().catch(() => null);
+  if (reply?.ok) return true;
+  toast(t("The tour choice couldn't be saved, so it may be offered again."));
+  return false;
+} });
+// A replay from Settings starts on the next frame; leaving chat before it cancels it too (CodeRabbit).
+let tourFrame = 0;
+stopTour = () => { if (tourFrame) cancelAnimationFrame(tourFrame); tourFrame = 0; tour.stop(); };
+$('readyStart').addEventListener('click', () => {
+  showTab('chat');
+  if (state && state.config.ui.tourDone !== true && !tourAnswered) tour.offer();
+});
+$('takeTour').addEventListener('click', () => {
+  showTab('chat');
+  // After the chat view has laid out, so each step finds its control on screen.
+  if (tourFrame) cancelAnimationFrame(tourFrame);
+  tourFrame = requestAnimationFrame(() => { tourFrame = 0; tour.start(); });
+});
 $('showCosBrowser').addEventListener('click', event => void run(
   (event.currentTarget as HTMLElement).dataset.signedIn === 'true' ? api.signOutChatGpt() : api.showCosBrowser()));
 /** Setup's browser choice is the same save as choosing it in Settings, so both share one rule. */
@@ -2965,7 +3006,7 @@ initPlugins(apply);
 initPets(api, pet);
 openSkillsLibrary = initSkillsLibrary(api);
 initBrowserPreferences();
-initChat({ save: async () => { await save(); }, state: () => state });
+initChat({ save: () => save(), state: () => state });
 
 void (async () => {
   await refresh();

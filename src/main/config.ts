@@ -1,3 +1,4 @@
+import { MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
 import { DEFAULT_PHONE_PUSH } from '../shared/phone-push.js';
 import { DEFAULT_HELPER_CHAT_MODEL, SUPERSEDED_HELPER_CHAT_MODELS } from '../shared/chat-models.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
@@ -303,6 +304,14 @@ const commandAllowlistRuleSchema = z.string().max(MAX_COMMAND_ALLOWLIST_RULE_CHA
 });
 
 /** The damaged phone server is said once per start: the schema runs on every config read. */
+/** #1856: a damaged saved chat style falls back to the built-in text, said once per load and never with its content. */
+function chatStyleField(field: 'chatPersonality' | 'chatWritingStyle') {
+  return z.string().max(MAX_CHAT_STYLE_CHARS).optional().catch(({ input }) => {
+    logWarn(`config: the saved ui.${field} was damaged (${typeof input === 'string' ? 'too long' : 'not text'}); new chats use the built-in text`);
+    return undefined;
+  });
+}
+
 let damagedPhoneServerLogged = false;
 
 const configSchema = z.object({
@@ -353,6 +362,9 @@ const configSchema = z.object({
     announceTurns: z.boolean().optional(),
     // Empty, too long or damaged falls back to the built-in Continue phrases.
     customContinue: z.string().trim().min(1).max(CUSTOM_CONTINUE_MAX_CHARS).optional().catch(undefined),
+    /** #1856: the person's Personality and Writing style for new chats; absent = default, '' = left out. */
+    chatPersonality: chatStyleField('chatPersonality'),
+    chatWritingStyle: chatStyleField('chatWritingStyle'),
     /**
      * #1794: the local program asked before each send the app makes by itself; absent or empty is off.
      * A damaged value stays set as one that is not on this computer, so the gate holds instead of opening.
@@ -367,6 +379,8 @@ const configSchema = z.object({
     language: z.enum(UI_LANGUAGES).optional(),
     // The version this install last started as; What's New shows once per real update (#1172).
     lastSeenVersion: z.string().trim().min(1).max(40).optional().catch(undefined),
+    /** #1833: the first-run tour was taken, skipped or declined; it is not offered again. */
+    tourDone: z.boolean().optional().catch(undefined),
     browserPreferences: z.object({ overwrite: z.boolean(), durations: z.boolean() }).strict().optional(),
     cosBrowserTrayHint: z.boolean().optional(),
     finishTool: z.boolean().optional(),
