@@ -113,6 +113,7 @@ import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMe
 import { createSearchPopup } from './search-popup.js';
 import { holdToTalkShortcut, holdToTalkSupported, primaryShortcut } from './shortcuts.js';
 import { initSshProjectDialog } from './ssh-project-dialog.js';
+import { keyBelongsElsewhere, pickOwnMessage } from './message-jumps.js';
 import { firstTurnStart, renderTurnChanges, turnEditCount, turnFinished, turnFrom } from './turn-changes.js';
 import { initSharePage } from './share-page.js';
 import { initFeedbackDialog } from './feedback-dialog.js';
@@ -5074,6 +5075,25 @@ function readTimeline(): void {
   readerAtEnd = false; sendAnchor = null; readingAfterSend = true;
 }
 
+/** #1884: Alt+↑ / Alt+↓ goes to your previous / next message, marked as a search result is (message-jumps.ts). */
+function jumpOwnMessage(direction: -1 | 1): void {
+  const rows = [...$('timeline').querySelectorAll<HTMLElement>('[data-timeline-key]')].filter(row => row.querySelector('.said.is-user'));
+  const pane = $('chatBody');
+  const at = pickOwnMessage(rows.map(row => row.getBoundingClientRect().top), pane.getBoundingClientRect().top, direction);
+  if (at < 0) {
+    // None earlier on the loaded page: going to its top loads the page before it, as reading up does.
+    if (direction < 0) { readTimeline(); pane.scrollTop = 0; }
+    return;
+  }
+  readTimeline();
+  const row = rows[at]!;
+  row.scrollIntoView({ block: 'start' });
+  row.classList.remove('is-search-hit');
+  void row.offsetWidth;
+  row.classList.add('is-search-hit');
+  window.setTimeout(() => row.classList.remove('is-search-hit'), 2600);
+}
+
 function roundWorkers(ids: string[], button = el('button', 'activity-workers') as HTMLButtonElement): HTMLButtonElement {
   button.type = 'button';
   button.hidden = ids.length === 0;
@@ -9511,6 +9531,14 @@ export function initChat(next: Deps): void {
     for (const menu of composerMenus) if (!menu.contains(event.target as Node) || ((event.target as HTMLElement).closest('button') && !(event.target as HTMLElement).closest('[data-keep-menu]'))) menu.open = false;
   });
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape') for (const menu of composerMenus) menu.open = false; });
+  // After every other handler: a focused queued task moves with the same keys, and text fields keep theirs.
+  document.addEventListener('keydown', event => {
+    if (event.defaultPrevented || event.isComposing || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    if (!visible || document.querySelector<HTMLElement>('.app')?.dataset.screen !== 'chat' || keyBelongsElsewhere(event.target)) return;
+    event.preventDefault();
+    jumpOwnMessage(event.key === 'ArrowUp' ? -1 : 1);
+  });
   $('chatInput').addEventListener('input', () => {
     recall = null;
     // The same message recalled again later must change the live region to be read again.

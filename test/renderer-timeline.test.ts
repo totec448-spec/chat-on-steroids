@@ -8734,3 +8734,36 @@ it('shows no Changed files card for a turn whose only edits were a worker\'s, or
   expect(w.document.querySelector('.turn-changes')).toBeNull();
   expect(api.turnChanges).not.toHaveBeenCalled();
 });
+
+it('jumps between your own messages with Alt+↑ / Alt+↓, marked like a search result, and leaves the message box alone (#1884)', async () => {
+  const at = Date.now() - 60_000;
+  const { w } = await boot([
+    { kind: 'user_message', seq: 1, origin: 1, time: at, source: 'extension', messageId: 'q-1', message: text('First question') },
+    { kind: 'assistant_message', seq: 2, time: at + 1, source: 'extension', messageId: 'a-1', message: text('First answer'), final: true, state: 'final' } as SessionEvent,
+    { kind: 'user_message', seq: 3, origin: 3, time: at + 2, source: 'extension', messageId: 'q-2', message: text('Second question') },
+    { kind: 'assistant_message', seq: 4, time: at + 3, source: 'extension', messageId: 'a-2', message: text('Second answer'), final: true, state: 'final' } as SessionEvent,
+    { kind: 'user_message', seq: 5, origin: 5, time: at + 4, source: 'extension', messageId: 'q-3', message: text('Third question') }
+  ]);
+  const doc = w.document;
+  doc.querySelector<HTMLElement>('.app')!.dataset.screen = 'chat';
+  const own = [...doc.querySelectorAll<HTMLElement>('#timeline [data-timeline-key]')].filter(row => row.querySelector('.said.is-user'));
+  expect(own.map(row => row.textContent?.match(/(First|Second|Third) question/)?.[1])).toEqual(['First', 'Second', 'Third']);
+  // The view starts at the third question; the first two are above it.
+  const tops = [-800, -200, 0];
+  own.forEach((row, index) => { row.getBoundingClientRect = () => ({ top: tops[index]!, bottom: tops[index]! + 40, left: 0, right: 600, width: 600, height: 40, x: 0, y: tops[index]!, toJSON: () => ({}) }) as DOMRect; });
+  doc.getElementById('chatBody')!.getBoundingClientRect = () => ({ top: 0, bottom: 700, left: 0, right: 800, width: 800, height: 700, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+  const scrolled: string[] = [];
+  own.forEach(row => { row.scrollIntoView = () => { scrolled.push(row.textContent!.match(/(First|Second|Third)/)![1]!); }; });
+  const press = (key: string, target: Element = doc.body) => target.dispatchEvent(new w.KeyboardEvent('keydown', { key, altKey: true, bubbles: true, cancelable: true }));
+  press('ArrowUp');
+  expect(scrolled).toEqual(['Second']);
+  expect(own[1]!.classList.contains('is-search-hit')).toBe(true);
+  press('ArrowDown');
+  expect(scrolled).toEqual(['Second']);
+  // In the message box the keys stay the box's own.
+  press('ArrowUp', doc.getElementById('chatInput')!);
+  expect(scrolled).toEqual(['Second']);
+  // Other modifiers are not this shortcut.
+  doc.body.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, shiftKey: true, bubbles: true }));
+  expect(scrolled).toEqual(['Second']);
+});

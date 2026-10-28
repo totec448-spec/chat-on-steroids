@@ -3330,5 +3330,6 @@
   "{0} more not listed": "ほか {0} 件は一覧外",
   "Touched {0} files, no net change": "{0} 個のファイルに触れたが、正味の変更なし",
   "The request was not valid.": "リクエストが無効でした。",
-  "Needs your answer in ChatGPT": "ChatGPT であなたの回答を待っています"
+  "Needs your answer in ChatGPT": "ChatGPT であなたの回答を待っています",
+  "Your previous or next message": "自分の前または次のメッセージ"
 }

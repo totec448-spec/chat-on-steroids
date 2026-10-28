@@ -3330,5 +3330,6 @@
   "{0} more not listed": "còn {0} tệp không liệt kê",
   "Touched {0} files, no net change": "Đã chạm {0} tệp, không có thay đổi thực",
   "The request was not valid.": "Yêu cầu không hợp lệ.",
-  "Needs your answer in ChatGPT": "Cần bạn trả lời trong ChatGPT"
+  "Needs your answer in ChatGPT": "Cần bạn trả lời trong ChatGPT",
+  "Your previous or next message": "Tin nhắn trước hoặc sau của bạn"
 }
