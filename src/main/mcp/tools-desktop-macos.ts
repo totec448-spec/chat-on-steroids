@@ -550,10 +550,15 @@ export function registerMacOSDesktopTools(reg: SurfaceRegistrar): void {
             const refusal = await askBeforeDesktopStep(step.words, step.app);
             if (refusal) return fail(refusal);
           }
+          // The step is over once its actions ran: input during the verify poll (up to 10 s) is the
+          // person's and must end a grant. The finally is the fallback when the actions fail.
+          let stepOpen = !!step;
+          const endStep = () => { if (stepOpen) { stepOpen = false; desktopStepEnded(); } };
           // One lock, one operation: the picture that verifies these actions must be taken
           // before anyone else can touch the desktop.
           const result = await actAndCapture(parsed, {
             frameId,
+            actionsDone: endStep,
             verify: parsedVerify,
             capture:
               wantsCapture
@@ -565,7 +570,7 @@ export function registerMacOSDesktopTools(reg: SurfaceRegistrar): void {
                     preferActiveWindow: ctx.privacyScreenshots
                   }
                 : undefined
-          }).finally(() => { if (step) desktopStepEnded(); });
+          }).finally(endStep);
           const cursor = result.cursor;
           const pointer = cursor
             ? cursor.image

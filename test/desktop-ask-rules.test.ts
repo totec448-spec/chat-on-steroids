@@ -72,3 +72,16 @@ it('takes the question\'s colors from the app\'s own palette, so its text is rea
   const high = desktopAskColors({ ...defaultAppearance(), highContrast: true }, 'dark');
   expect(contrastRatio(high.ink, high.background)).toBeGreaterThanOrEqual(7);
 });
+
+it('keeps the buttons readable on hover, on a background where the app\'s hover shade would not be (CodeRabbit on #1864)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { desktopAskColors } = await import('../src/shared/desktop-ask.js');
+  const { contrastRatio, defaultAppearance } = await import('../src/shared/appearance.js');
+  for (const background of ['#767676', '#8a8a8a', '#f4f4f5', '#181818']) for (const contrast of [0, 45, 100]) {
+    const colors = desktopAskColors({ ...defaultAppearance(), light: { ...defaultAppearance().light, background, contrast } }, 'light');
+    expect(contrastRatio(colors.ink, colors.hover), `${background} at ${contrast}`).toBeGreaterThanOrEqual(4.5);
+  }
+  // Go ahead keeps its colors on hover (no fading); the hover shows as a ring.
+  const css = readFileSync('src/renderer/desktop-ask.css', 'utf8');
+  expect(css.match(/\.btn-solid:hover \{[^}]*\}/)?.[0]).not.toMatch(/opacity|background/);
+});

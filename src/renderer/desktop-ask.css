@@ -19,10 +19,10 @@ h1 { margin: 0; font-size: 13px; font-weight: 650; line-height: 1.35; }
 .desktop-ask-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .btn { min-height: 30px; padding: 5px 12px; border: 1px solid var(--edge); border-radius: 8px; background: transparent; color: var(--ink);
   font: inherit; font-size: 12.5px; font-weight: 550; cursor: pointer; }
-.btn:hover { background: var(--hover); }
+.btn:hover { border-color: var(--soft); background: var(--hover); }
 .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .btn-solid { border-color: var(--ink); background: var(--ink); color: var(--page); }
-.btn-solid:hover { background: var(--ink); opacity: .88; }
+.btn-solid:hover { border-color: var(--ink); box-shadow: 0 0 0 2px var(--edge); }
 html:lang(ja) body, html:lang(zh-CN) body, html:lang(zh-TW) body, html:lang(ko) body { letter-spacing: 0; }
 /* The system's high contrast colors (Windows contrast themes): the frame and both buttons stay visible,
    and Go ahead keeps the system's highlight so it stays the clear primary choice. */
