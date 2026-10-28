@@ -2117,6 +2117,7 @@
   "Link copied": "Ссылка скопирована",
   "ChatGPT is waiting for your approval": "ChatGPT ждёт вашего разрешения",
   "The tool approval ChatGPT asked for in this chat was answered.": "На запрос ChatGPT о разрешении инструмента в этом чате дан ответ.",
+  "Reload was deferred because ChatGPT showed a tool approval card.": "Перезагрузка была отложена, поскольку ChatGPT показал карточку подтверждения использования инструмента.",
   "What's new": "Что нового",
   "Full release notes": "Полные примечания к выпуску",
   "Version {0}": "Версия {0}",
