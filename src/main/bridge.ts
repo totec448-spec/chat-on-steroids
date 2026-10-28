@@ -448,7 +448,9 @@ type CommandSpec =
    * brief got newer — not two fresh chats, which is what keying on the handoff produced.
    */
   | { type: 'resume'; sessionId: string; token: string }
-  | { type: 'stop'; sessionId: string; conversationId: string; turnId: string; userMessageId?: string };
+  | { type: 'stop'; sessionId: string; conversationId: string; turnId: string; userMessageId?: string;
+    /** Asked for a turn the page holds after the app stopped counting it as work (`heldTurnId`). */
+    held?: true };
 
 interface Command {
   id: string;
@@ -2176,6 +2178,10 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
         await conversationWasSuperseded(id) || await stoppableTurn(sessionId) !== expectedTurnId) throw new Error('active_turn_changed');
   };
   await assertCurrent();
+  // Only a Stop for a held turn may let the page end that turn itself when it shows nothing of it;
+  // a running turn always goes through ChatGPT's own Stop (CodeRabbit).
+  const before = await sessionControlsFor(sessionId);
+  const held = !before.activeTurnId && before.heldTurnId === expectedTurnId;
   if (!options.rotation) {
     await setSessionAutomation(sessionId, 'off');
     await assertCurrent();
@@ -2184,7 +2190,7 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
   const userMessageId = await stopUserAnchor(sessionId, expectedTurnId);
   await assertCurrent();
   const alreadyQueued = commands.some(entry => entry.spec.type === 'stop' && entry.spec.sessionId === sessionId && entry.spec.turnId === expectedTurnId);
-  const command = queue({ type: 'stop', sessionId, conversationId: id, turnId: expectedTurnId, ...(userMessageId ? { userMessageId } : {}) });
+  const command = queue({ type: 'stop', sessionId, conversationId: id, turnId: expectedTurnId, ...(userMessageId ? { userMessageId } : {}), ...(held ? { held: true as const } : {}) });
   try {
     // Reuse the command lease barrier: status must not hand out an unsaved request.
     const pendingLease = commandWrites.get(command.id);
@@ -11054,7 +11060,7 @@ function describe(command: Command, client: string | null, claimedSummary?: stri
   // Only what this ChatGPT account offers: a Free plan has no picker to confirm a model with (#1766).
   const selection = spec.type === 'resume' ? resumeModelSelection(continuationByToken(spec.token)?.requestedModel, spec.token) : null;
   const expiresAt = Date.now() + Math.max(1, commandDeadlineDelay(command));
-  if (spec.type === 'stop') return { id: command.id, expiresAt, kind: 'stop-turn', type: 'stop', text: '', agent: null, model: null, reasoningEffort: null, conversationId: spec.conversationId, turnId: spec.turnId, ...(spec.userMessageId ? { userMessageId: spec.userMessageId } : {}) };
+  if (spec.type === 'stop') return { id: command.id, expiresAt, kind: 'stop-turn', type: 'stop', text: '', agent: null, model: null, reasoningEffort: null, conversationId: spec.conversationId, turnId: spec.turnId, ...(spec.userMessageId ? { userMessageId: spec.userMessageId } : {}), ...(spec.held ? { held: true } : {}) };
   // A resume's claim is persisted by /commands/redeem before this renderer is called. A
   // command shown to app/UI code without a browser document still carries no brief at all.
   const text = spec.type === 'resume'
@@ -11431,7 +11437,7 @@ function restoredCommandSpec(version: number, raw: Partial<CommandSpec>): Comman
         typeof stop.conversationId !== 'string' || !conversationId(stop.conversationId) ||
         typeof stop.turnId !== 'string' || !stop.turnId || stop.turnId.length > 256) return null;
     if (stop.userMessageId !== undefined && (typeof stop.userMessageId !== 'string' || !stop.userMessageId || stop.userMessageId.length > 256)) return null;
-    return { type: 'stop', sessionId: stop.sessionId, conversationId: stop.conversationId, turnId: stop.turnId, ...(stop.userMessageId ? { userMessageId: stop.userMessageId } : {}) };
+    return { type: 'stop', sessionId: stop.sessionId, conversationId: stop.conversationId, turnId: stop.turnId, ...(stop.userMessageId ? { userMessageId: stop.userMessageId } : {}), ...(stop.held === true ? { held: true as const } : {}) };
   }
   if (
     version >= 3 &&

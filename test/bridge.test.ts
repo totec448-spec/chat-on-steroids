@@ -16885,6 +16885,8 @@ describe('app requests to stop one exact active turn', () => {
     expect(wrong.status).toBe(409);
     const valid = await request('POST', '/commands/redeem', { body: { id: command.id, client: 'stop-page', conversationId } });
     expect(valid.body.command).toMatchObject({ kind: 'stop-turn', turnId: 'stop-turn-one', conversationId, text: '' });
+    // A running turn's Stop goes through ChatGPT's own Stop only.
+    expect(valid.body.command.held).toBeUndefined();
     await stopSessionTurn(sessionId, 'stop-turn-one');
     const otherDocument = await request('POST', '/commands/redeem', { body: { id: command.id, client: 'different-page', conversationId } });
     expect(otherDocument.status).toBe(409);
@@ -16927,6 +16929,10 @@ describe('app requests to stop one exact active turn', () => {
       // Once asked, it is the turn being stopped, as any other ("Stop requested").
       expect(await stopSessionTurn(sessionId, 'held-turn')).toMatchObject({ stopPending: true, activeTurnId: 'held-turn', heldTurnId: null });
       expect((await request('GET', '/status')).body.stopTurns).toEqual([expect.objectContaining({ turnId: 'held-turn', conversationId })]);
+      // The page learns it is a held turn: only then may it end the turn itself (CodeRabbit).
+      const command = (await request('GET', '/status')).body.stopTurns[0];
+      const redeemed = await request('POST', '/commands/redeem', { body: { id: command.id, client: 'held-page', conversationId } });
+      expect(redeemed.body.command).toMatchObject({ kind: 'stop-turn', turnId: 'held-turn', held: true });
       // Once the page reports the turn's end, nothing is held any more.
       await request('POST', '/events', { body: { conversationId, events: [
         { kind: 'turn_end', time: Date.now(), turnId: 'held-turn', outcome: 'stopped' }

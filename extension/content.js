@@ -2226,7 +2226,11 @@
       observe();
       const command = reply?.command;
       if (!reply?.ok || command?.type !== 'stop' || command.turnId !== expected || command.conversationId !== target) return false;
-      const stopped = unseenHeld();
+      // Only for a turn the app itself no longer counts as running, and only if nothing of it shows
+      // up for a few seconds: a remount can hide both the answer and ChatGPT's Stop for a moment
+      // while the answer still runs (CodeRabbit).
+      const stopped = command.held === true && unseenHeld() &&
+        !(await waitUntil(() => { observe(); return !unseenHeld(); }, UNSEEN_STOP_SETTLE_MS)) && unseenHeld();
       if (stopped) {
         stopRequestedAt = Date.now();
         finishGeneration(generationTurn(), { outcome: 'stopped', detail: t('content_turn_stop_unseen',
@@ -12492,6 +12496,9 @@
   }
 
   // ----------------------------------------------------------------- start
+
+  /** How long a held turn must keep showing nothing before the app's Stop ends it here. */
+  const UNSEEN_STOP_SETTLE_MS = 3_000;
 
   const noteStopClick = (event) => {
     const stop = CLF_DOM.stopButton();

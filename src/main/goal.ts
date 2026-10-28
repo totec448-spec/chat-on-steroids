@@ -1010,6 +1010,8 @@ export function restoreGoalOutcomes(snapshot: GoalOutcomesSnapshot | null): void
 }
 
 function noteGoalMet(draft: GoalDraft): void {
+  // A draft for an objective changed while it ran did not decide about the new one (CodeRabbit).
+  if ((draft.objective ?? '') !== goalObjectiveFor(draft.conversationId)) return;
   goalOutcomes.delete(draft.conversationId);
   goalOutcomes.set(draft.conversationId, { turnId: draft.turnId, model: draft.model, backend: draft.backend, at: Date.now() });
   // Oldest first in insertion order.
@@ -1201,7 +1203,8 @@ export async function setGoalSwitchNow(
       if (!before && [...goalSwitches.values()].filter(row => row.role === 'decision').length >= MAX_GOAL_SWITCHES) {
         throw new Error('goal_switch_capacity');
       }
-      const next = applyGoalSwitch(goalSwitchFor(targetConversationId), which, on);
+      const was = goalSwitchFor(targetConversationId);
+      const next = applyGoalSwitch(was, which, on);
       const staged = new Map(goalSwitches);
       staged.set(targetConversationId, { enabled: next.enabled, mode: next.mode,
         afterTurn: afterTurn ?? before?.afterTurn ?? false, at: Date.now() });
@@ -1210,8 +1213,8 @@ export async function setGoalSwitchNow(
         snapshot: goalSwitchesSnapshot(staged),
         publish: () => {
           publishGoalSwitches(staged);
-          // Only an accepted change ends the kept "goal is met" (CodeRabbit).
-          forgetGoalOutcome(targetConversationId);
+          // Only an accepted change ends the kept "goal is met"; saving it as it was does not (CodeRabbit).
+          if (was.enabled !== next.enabled || was.mode !== next.mode) forgetGoalOutcome(targetConversationId);
           notifyGoalChange();
           return { enabled: next.enabled, mode: next.mode };
         }
