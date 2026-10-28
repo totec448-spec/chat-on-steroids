@@ -259,6 +259,45 @@ it('refuses the extension update while a message is being sent, and new claims w
   } finally { clock.mockRestore(); extensionPath.prepare = () => null; }
 });
 
+// CodeRabbit on #1901: a claim could pass the reload check, wait for the send check, and take the
+// message after the update was allowed. Claims in progress hold the update; the claim checks again.
+it('holds the extension update while a claim waits for the send check, and lets that claim finish', async () => {
+  const http = await import('node:http');
+  let release: () => void = () => undefined;
+  const answered = new Promise<void>(resolve => { release = resolve; });
+  const server = http.createServer((req, res) => {
+    req.resume();
+    req.on('end', () => { void answered.then(() => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ allow: true })); }); });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as { port: number }).port;
+  const prepare = vi.fn(() => ({ build: 'bbbbbbbbbbbb', ready: true }));
+  extensionPath.prepare = prepare;
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      ui: { ...defaultConfig().ui, sendCheckUrl: `http://127.0.0.1:${port}/check` } });
+    const { conversationId, row } = await silentTurnContinue('Claim waits for the send check', ms => now += ms);
+    const claiming = post('/input/claim', { id: row.id, owner: 'a-document', conversationId, requiresAuthorization: true });
+    // The send check has the claim waiting: the row still reads queued, but the update must not go ahead.
+    for (let i = 0; i < 50 && !(await input.listInputs()).find(item => item.id === row.id)?.sendCheck; i++) await new Promise(r => setTimeout(r, 10));
+    expect((await post('/extension/update', {})).body).toMatchObject({ ready: false, hold: 'sending' });
+    expect(prepare).not.toHaveBeenCalled();
+    release();
+    expect((await claiming).body.input).toMatchObject({ id: row.id });
+  } finally {
+    clock.mockRestore(); extensionPath.prepare = () => null;
+    await new Promise(resolve => server.close(resolve));
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  }
+});
+
+it('counts only messages a browser is sending, not one handed to a tool caller (CodeRabbit on #1901)', async () => {
+  const { inBrowserDelivery } = await import('../src/main/session/input.js');
+  expect((['queued', 'browser', 'decision', 'tool', 'sent', 'failed', 'cancelled'] as const)
+    .filter(state => inBrowserDelivery({ state } as never))).toEqual(['browser', 'decision']);
+});
+
 it('says why a page withdrew a Continue and ends it after three minutes of withdrawals (#820)', async () => {
   // Measured in #820: a page released the same automatic Continue about once a second for many
   // minutes, its text left in the composer, and the log never said why after the first time.
