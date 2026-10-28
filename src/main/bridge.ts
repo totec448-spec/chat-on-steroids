@@ -2744,7 +2744,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (repaired) {
       await confirmRepair(repaired.slice(0, 64), action);
     } else if (repairFailed) {
-      await failRepairAttempt(repairFailed.slice(0, 64), action, url.searchParams.get('why'), url.searchParams.get('detail')?.slice(0, 80) ?? null);
+      await failRepairAttempt(repairFailed.slice(0, 64), action, url.searchParams.get('why'), url.searchParams.get('detail')?.slice(0, 80) ?? null, url.searchParams.get('approval') === '1');
     }
     const repairHeld = url.searchParams.get('repairHeld');
     if (repairHeld) noteRepairHeld(repairHeld.slice(0, 64), url.searchParams.get('why'));
@@ -10412,14 +10412,21 @@ async function failRepairAttempt(
   token: string,
   action: 'reloaded' | 'reopened' | 'resumed' | 'preserved' | 'present' | null,
   why: string | null = null,
-  changeDetail: string | null = null
+  changeDetail: string | null = null,
+  approval = false
 ): Promise<void> {
   for (const [conversationId, repair] of repairsInFlight) {
     if (repair.state !== 'handed' || repair.token !== token) continue;
     // ChatGPT recovered by itself and is answering: the page keeps the reload for after the answer
     // instead of ending it. Nothing failed, so it is neither a warning nor a "Reload failed" row.
     const streaming = why === 'streaming';
-    if (streaming) {
+    const heldByApproval = repair.reason === 'unattributed' && streaming && approval;
+    if (heldByApproval) {
+      // The pre-navigation page check can see the card before the next activity poll.
+      await noteApprovalCard(conversationId, true, repair.sessionId, approvalWaitDeps);
+      if (repairsInFlight.get(conversationId) !== repair) return;
+      logInfo(`bridge: holding the unattributed refresh for ${conversationId}: ChatGPT's tool approval card is waiting for the user`);
+    } else if (streaming) {
       if (!repair.awaitingStream)
         logInfo(`bridge: ChatGPT is answering again in ${conversationId}; the ${repair.reason} repair waits until it finishes`);
     } else {
@@ -10427,11 +10434,11 @@ async function failRepairAttempt(
       const detail = why && Object.hasOwn(REPAIR_FAIL_REASONS, why) ? `: ${REPAIR_FAIL_REASONS[why]}${exact ? ` — ${exact}` : ''}` : '';
       logWarn(`bridge: the browser reported failed ${repair.reason} recovery for ${conversationId} (${action ?? 'action unspecified'}${detail})`);
     }
-    repair.awaitingStream = streaming;
+    repair.awaitingStream = streaming && !heldByApproval;
     await updateRepairProgress(
       conversationId,
       repair,
-      streaming
+      heldByApproval ? APPROVAL_WAITING_TEXT : streaming
         ? repair.attribution ? 'Not reloaded: ChatGPT is answering.' : 'ChatGPT is answering again; recovery waits until it finishes.'
         : `${action === 'reopened' ? 'Reopen' : action === 'resumed' ? 'Resume' : 'Reload'} failed while ${repairPurpose(repair).during}${repair.attribution ? '.' : '; will retry.'}`
     );
@@ -10443,7 +10450,7 @@ async function failRepairAttempt(
       // Navigation is transient; keep the same repair episode and retry after the short navigation cooldown.
       repair.notBefore = Math.max(repair.notBefore, Date.now() + NAVIGATION_RECOVERY_COOLDOWN_MS);
     }
-    if (repair.reason === 'unattributed') repair.state = 'done';
+    if (repair.reason === 'unattributed' && !heldByApproval) repair.state = 'done';
     else {
       repair.state = 'queued';
       repair.claimed = false;

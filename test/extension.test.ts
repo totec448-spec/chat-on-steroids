@@ -6057,6 +6057,7 @@ it.each([
  */
 it.each([
   ['unattributed', { ok: true, draft: false, streaming: true }, 0],
+  ['unattributed', { ok: true, draft: false, streaming: true, approval: true }, 0],
   ['unattributed', { ok: true, draft: false, streaming: false }, 1],
   ['unattributed', null, 1],
   ['blind', { ok: true, draft: false, streaming: true }, 0],
@@ -6098,7 +6099,13 @@ it.each([
   } else {
     expect(reported.filter((url) => url.includes('repairFailed='))).toHaveLength(1 - reloads);
     // A stream that is running again is a reason to wait, and the app is told so (not "Reload failed").
-    if (reloads === 0) expect(reported.find((url) => url.includes('repairFailed='))).toContain('&why=streaming');
+    if (reloads === 0) {
+      const failure = reported.find((url) => url.includes('repairFailed='))!;
+      expect(failure).toContain('&why=streaming');
+      expect(new URL(failure, 'http://localhost').searchParams.get('approval')).toBe(
+        status && 'approval' in status && status.approval === true ? '1' : null
+      );
+    }
   }
 });
 

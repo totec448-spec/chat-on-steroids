@@ -19606,10 +19606,10 @@ describe('one live isolated-world recorder per document', () => {
     live.document.body.append(card);
     expect((live.window as any).CLF_DOM.generating()).toBe(false);
     expect((live.window as any).CLF_DOM.approvalWaiting()).toBe(true);
-    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({ streaming: true });
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({ streaming: true, approval: true });
     expect(await live.runtimeMessage({ type: 'clf-recorder-ping' })).toMatchObject({ busy: true });
     card.remove();
-    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({ streaming: false });
+    expect(await live.runtimeMessage({ type: 'clf-page-status' })).toMatchObject({ streaming: false, approval: false });
     expect(await live.runtimeMessage({ type: 'clf-recorder-ping' })).toMatchObject({ busy: false });
   });
 
