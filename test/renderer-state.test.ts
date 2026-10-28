@@ -4927,6 +4927,25 @@ it('offers the tour after Setup only while it was never taken, and replays it fr
   expect(w.document.getElementById('takeTour')!.textContent).toBe('Take the tour again');
 });
 
+// CodeRabbit on #1867: Settings' replay starts on the next frame; leaving chat before it must cancel it.
+it('cancels a tour replay that has not started yet when the person leaves the chat screen', async () => {
+  const done = vi.fn(async () => ({ ok: true, data: undefined }));
+  const mounted = await mountChat({}, [], { markTourDone: done });
+  const w = mounted.window;
+  const frames: FrameRequestCallback[] = [];
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.push(callback); return frames.length; });
+  vi.stubGlobal('cancelAnimationFrame', (id: number) => { frames[id - 1] = () => undefined; });
+  try {
+    (w.document.getElementById('takeTour') as HTMLButtonElement).click();
+    expect(frames).toHaveLength(1);
+    (w.document.querySelector('button[data-tab="general"]') as HTMLButtonElement).click();
+    for (const frame of frames.splice(0)) frame(0);
+    await settle();
+    expect(done).not.toHaveBeenCalled();
+    expect(w.document.getElementById('tourCard')!.hidden).toBe(true);
+  } finally { vi.unstubAllGlobals(); }
+});
+
 // CodeRabbit on #1867: an answer in this window counts at once; a write that failed says so.
 it('offers the tour no second time in this window once answered, and says when that answer could not be saved', async () => {
   const done = vi.fn(async () => ({ ok: true, data: undefined }));

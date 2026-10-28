@@ -2794,7 +2794,9 @@ const tour = initTour({ markDone: async () => {
   toast(t("The tour choice couldn't be saved, so it may be offered again."));
   return false;
 } });
-stopTour = () => tour.stop();
+// A replay from Settings starts on the next frame; leaving chat before it cancels it too (CodeRabbit).
+let tourFrame = 0;
+stopTour = () => { if (tourFrame) cancelAnimationFrame(tourFrame); tourFrame = 0; tour.stop(); };
 $('readyStart').addEventListener('click', () => {
   showTab('chat');
   if (state && state.config.ui.tourDone !== true && !tourAnswered) tour.offer();
@@ -2802,7 +2804,8 @@ $('readyStart').addEventListener('click', () => {
 $('takeTour').addEventListener('click', () => {
   showTab('chat');
   // After the chat view has laid out, so each step finds its control on screen.
-  requestAnimationFrame(() => tour.start());
+  if (tourFrame) cancelAnimationFrame(tourFrame);
+  tourFrame = requestAnimationFrame(() => { tourFrame = 0; tour.start(); });
 });
 $('showCosBrowser').addEventListener('click', event => void run(
   (event.currentTarget as HTMLElement).dataset.signedIn === 'true' ? api.signOutChatGpt() : api.showCosBrowser()));
