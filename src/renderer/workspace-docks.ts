@@ -123,9 +123,11 @@ export function createWorkspaceDocks(host: HTMLElement) {
     if (id) { rightTerminal?.selectTab(id); rightTerminal?.show(body, false); }
     else views.get(key as AdoptableView)?.show(body);
   };
+  /** Whether this dock can open now: what the menu and the ⌘K actions offer (#1884). */
+  const canActivate = (kind: DockView): boolean => kind === 'terminal' ? rightTerminal?.canCreate() ?? false : views.get(kind)?.available() ?? false;
   const refreshControls = (): void => {
     for (const kind of ['review', 'terminal', 'files', 'agents'] as DockView[]) {
-      const enabled = kind === 'terminal' ? rightTerminal?.canCreate() ?? false : views.get(kind)?.available() ?? false;
+      const enabled = canActivate(kind);
       // A greyed-out entry says why, instead of leaving the user to guess.
       for (const button of [menu, launch].map(root => root.querySelector<HTMLButtonElement>(`[data-view="${kind}"]`))) {
         if (!button) continue;
@@ -328,6 +330,6 @@ export function createWorkspaceDocks(host: HTMLElement) {
     event.preventDefault(); activate((['review', 'terminal', 'files', 'agents'] as DockView[])[Number(digit) - 1]!);
   });
   paint();
-  return { body, bottomBody, rightToggle, bottomToggle, register, registerTerminal, activate, adopt,
+  return { body, bottomBody, rightToggle, bottomToggle, register, registerTerminal, activate, canActivate, adopt,
     setOpen: setRightOpen, setBottomOpen, toggleBottomTerminal: () => setBottomOpen(!bottomOpen), sync: paint };
 }

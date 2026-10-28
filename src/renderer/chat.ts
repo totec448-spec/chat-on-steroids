@@ -9709,7 +9709,7 @@ export function initChat(next: Deps): void {
         keyed(() => t('Find in chat'), () => chatFind?.open(), () => selectedId !== null),
         ...(['review', 'terminal', 'files', 'agents'] as const).map(view => keyed(
           () => t(view === 'review' ? 'Review' : view === 'terminal' ? 'Terminal' : view === 'files' ? 'Files' : 'Sub-agents'),
-          () => docks.activate(view))),
+          () => docks.activate(view), () => docks.canActivate(view))),
         ...(deps.palette?.actions() ?? [])
       ];
     },
