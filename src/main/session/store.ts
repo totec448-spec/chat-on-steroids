@@ -41,6 +41,7 @@ import type {
   ToolEditReview
 } from '../../shared/session.js';
 import type { WorkerAssignmentSummary } from '../../shared/session.js';
+import { APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT } from '../../shared/approval-wait.js';
 import { continuationMarkerOf, DEFAULT_RECORDING_STORAGE_GIB, eventTokens, MAX_TOOL_RESULT_TOKENS, normalizedToolOutcome, RECORDING_STORAGE_LIMITS_GIB, storedTextTokens, workSequence, UNATTRIBUTED_SESSION_TITLE } from '../../shared/session.js';
 import { applyTurnIdentity, authoredTimeOf, chronological, injectedUserMessage, positionOf, projectTimeline, residenceOf,
   recordedRequestTurn, responseTurnId, type Chronological, type TimelineTurns } from '../../shared/chronology.js';
@@ -355,6 +356,8 @@ interface MetaCheckpoint {
   outcomeCountersMissing: boolean;
   /** Derived final-message activity boundary was added after the original summaries. */
   activityBoundaryMissing: boolean;
+  /** A worker's dock line (#1831: last answer's first line, approval wait) was added later still. */
+  workerLineMissing: boolean;
 }
 
 function messageKey(event: SessionEvent | Omit<MessageEvent, 'seq'> | NewNativeImageEvent): string | null {
@@ -397,6 +400,8 @@ function emptySummary(id: string, title: string, conversationId: string | null):
     lastToolCallAt: null,
     lastToolActivity: null,
     lastAssistantFinalAt: null,
+    lastAnswerLine: null,
+    approvalWaitingAt: null,
     lastTurnEndAt: null,
     lastFinishReportAt: null,
     processExitNonzero: 0,
@@ -930,6 +935,8 @@ async function rebuildSummaryFromHistory(
         lastToolCallAt: rebuilt.lastToolCallAt,
         lastToolActivity: rebuilt.lastToolActivity,
         lastAssistantFinalAt: rebuilt.lastAssistantFinalAt,
+        lastAnswerLine: rebuilt.lastAnswerLine,
+        approvalWaitingAt: rebuilt.approvalWaitingAt,
         lastTurnEndAt: rebuilt.lastTurnEndAt,
         lastFinishReportAt: rebuilt.lastFinishReportAt,
         processExitNonzero: rebuilt.processExitNonzero,
@@ -984,6 +991,7 @@ async function readDurableSnapshot(id: string): Promise<DurableSessionSnapshot |
       (!aliasesCollapsed || checkpoint.canonicalProjectionCurrent) &&
       !checkpoint.outcomeCountersMissing &&
       !checkpoint.activityBoundaryMissing &&
+      !checkpoint.workerLineMissing &&
       checkpoint.summary.timelineTurns !== undefined &&
       checkpoint.summary.requestTurns !== undefined &&
       checkpoint.summary.nativeQuestion !== undefined &&
@@ -1096,6 +1104,22 @@ function noteFinishWork(summary: SessionSummary, event: SessionEvent): void {
     workSequence(event)) };
 }
 
+/** The first line of an answer with its Markdown marks taken off, at most 200 characters, or null. */
+export function answerLine(text: string): string | null {
+  for (const raw of text.split('\n')) {
+    // A code fence's marker, on the raw line: stripping inline marks first would turn ``` into `.
+    if (/^\s*(?:```|~~~)/.test(raw)) continue;
+    const line = raw
+      .replace(/^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)/, '')
+      .replace(/(\*\*|__|\*|_|`)(.+?)\1/g, '$2')
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (line && !/^(?:---+|\*\*\*+)$/.test(line)) return line.length > 200 ? `${line.slice(0, 199)}…` : line;
+  }
+  return null;
+}
+
 function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
   applyTurnIdentity(summary, event);
   summary.events += 1;
@@ -1116,10 +1140,16 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
     // Attribution repair can append an older call after newer activity. Keep the projection
     // aligned with lastToolCallAt rather than letting append order make an old action look latest.
     if (event.time >= priorToolAt) {
+      const tone = event.call.summary.tone;
       summary.lastToolActivity = {
         kind: event.call.summary.kind,
-        title: event.call.summary.title.slice(0, 200)
+        title: event.call.summary.title.slice(0, 200),
+        // A failed or doubtful step keeps its tool row's color in the worker's dock line (#1831).
+        ...(tone === 'bad' || tone === 'warn' ? { tone } : {})
       };
+      // A new step means ChatGPT's approval card, if one held the turn, was answered. By time, not by
+      // the order events are applied in: a rebuild applies canonical answers after the journal.
+      if ((summary.approvalWaitingAt ?? 0) <= event.time) summary.approvalWaitingAt = null;
     }
     if (event.call.endsActivity === true) {
       summary.lastFinishReportAt = Math.max(summary.lastFinishReportAt ?? 0, event.time);
@@ -1133,7 +1163,14 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
     }
   }
   if (event.kind === 'assistant_message' && (event.final === true || event.state === 'final')) {
+    if (event.time >= (summary.lastAssistantFinalAt ?? 0)) {
+      summary.lastAnswerLine = answerLine(event.message.text);
+      if ((summary.approvalWaitingAt ?? 0) <= event.time) summary.approvalWaitingAt = null;
+    }
     summary.lastAssistantFinalAt = Math.max(summary.lastAssistantFinalAt ?? 0, event.time);
+  }
+  if (event.kind === 'progress' && event.progressId?.startsWith(APPROVAL_PROGRESS_PREFIX)) {
+    summary.approvalWaitingAt = event.message.text === APPROVAL_WAITING_TEXT ? event.time : null;
   }
   if (event.kind === 'chat_error') summary.errors += 1;
   if (event.kind === 'turn_end') {
@@ -2376,7 +2413,30 @@ export async function readHydratedActivityCall(
   });
 }
 
+/** Recorded edits already said to be unreadable, so a card drawn again does not say it again. */
+const unreadableEdits = new Set<string>();
+function noteUnreadableEdit(assetId: string, why: string): void {
+  if (unreadableEdits.has(assetId)) return;
+  if (unreadableEdits.size >= 256) unreadableEdits.delete(unreadableEdits.values().next().value!);
+  unreadableEdits.add(assetId);
+  logWarn(`turn changes: recorded edit ${assetId.slice(0, 12)} ${why}; its file shows approximate counts`);
+}
+
+/** One recorded edit's before and after by its stored asset (#1827); null when gone, too large or damaged. */
+export async function readEditReviewAsset(sessionId: string, assetId: string): Promise<{ before: string; after: string } | null> {
+  assertSessionId(sessionId);
+  const data = await readAsset(sessionId, assetId, 512 * 1024);
+  if (!data) { noteUnreadableEdit(assetId, 'is missing or too large'); return null; }
+  try {
+    const parsed = JSON.parse(data.toString('utf8')) as { before?: unknown; after?: unknown };
+    if (typeof parsed.before === 'string' && typeof parsed.after === 'string') return { before: parsed.before, after: parsed.after };
+  } catch { /* said below */ }
+  noteUnreadableEdit(assetId, 'is damaged');
+  return null;
+}
+
 /** Retrieves one immutable, bounded edit artifact by its durable session/call/index identity. */
+
 export async function readToolEditReview(sessionId: string, callId: string, changeIndex: number): Promise<ToolEditReview | null> {
   assertSessionId(sessionId);
   if (!/^[0-9a-f-]{36}$/i.test(callId) || !Number.isSafeInteger(changeIndex) || changeIndex < 0 || changeIndex >= 64) return null;
@@ -2481,6 +2541,8 @@ export async function rewriteUnattributedToolCalls(
       lastToolCallAt: null,
       lastToolActivity: null,
       lastAssistantFinalAt: null,
+      lastAnswerLine: null,
+      approvalWaitingAt: null,
       lastTurnEndAt: null,
       lastFinishReportAt: null,
       processExitNonzero: 0,
@@ -2552,6 +2614,12 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
       lastToolActivity.title.length > 200 ||
       !/^(?:edit|create|delete|move|read|search|browse|run|process|screen|input|clipboard|session|agent|other)$/.test(lastToolActivity.kind)
     )) delete publicSummary.lastToolActivity;
+    if (publicSummary.lastToolActivity?.tone !== undefined && publicSummary.lastToolActivity.tone !== 'bad' &&
+        publicSummary.lastToolActivity.tone !== 'warn') delete publicSummary.lastToolActivity.tone;
+    if (publicSummary.lastAnswerLine !== undefined && publicSummary.lastAnswerLine !== null &&
+        (typeof publicSummary.lastAnswerLine !== 'string' || publicSummary.lastAnswerLine.length > 200)) delete publicSummary.lastAnswerLine;
+    if (publicSummary.approvalWaitingAt !== undefined && publicSummary.approvalWaitingAt !== null &&
+        !Number.isFinite(publicSummary.approvalWaitingAt)) delete publicSummary.approvalWaitingAt;
     const assignment = publicSummary.workerAssignment;
     if (assignment !== undefined && (!assignment || typeof assignment.conversationId !== 'string' ||
         typeof assignment.agentId !== 'string' || typeof assignment.label !== 'string' || assignment.label.length > 60 ||
@@ -2576,12 +2644,16 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
       typeof publicSummary.toolRejected !== 'number' ||
       typeof publicSummary.toolInternalErrors !== 'number';
     const activityBoundaryMissing = !Object.prototype.hasOwnProperty.call(publicSummary, 'lastAssistantFinalAt');
+    // Saved before #1831 when either key is absent (current summaries always write both, null included): rebuilt once.
+    const workerLineMissing = !Object.prototype.hasOwnProperty.call(publicSummary, 'lastAnswerLine') ||
+      !Object.prototype.hasOwnProperty.call(publicSummary, 'approvalWaitingAt');
     return {
       historySeq,
       canonicalProjectionCurrent: canonicalProjection === 1,
       tokenEstimateCurrent: tokenEstimate === 1,
       outcomeCountersMissing,
       activityBoundaryMissing,
+      workerLineMissing,
       summary: {
         ...publicSummary,
         // Keep in-place increments numeric until the forced rebuild supplies the real values.
@@ -2723,7 +2795,8 @@ async function readCatalogSummary(id: string): Promise<SessionSummary | null> {
     const metadata = await fs.stat(path.join(dir, 'meta.json'));
     const checkpoint = normalizeSummary(id, await fs.readFile(path.join(dir, 'meta.json'), 'utf8'));
     if (checkpoint && checkpoint.historySeq !== null && checkpoint.canonicalProjectionCurrent && checkpoint.tokenEstimateCurrent &&
-        !checkpoint.outcomeCountersMissing && !checkpoint.activityBoundaryMissing && checkpoint.summary.finishTurn !== undefined && !legacyContextTitle(checkpoint.summary) &&
+        !checkpoint.outcomeCountersMissing && !checkpoint.activityBoundaryMissing && !checkpoint.workerLineMissing &&
+        checkpoint.summary.finishTurn !== undefined && !legacyContextTitle(checkpoint.summary) &&
         // Old Plan helpers and project page titles are repaired by the full read below, once.
         !legacyLabelPending(checkpoint.summary)) {
       const mutations = await Promise.all(['events.jsonl', 'messages.json', 'messages'].map(async name => {

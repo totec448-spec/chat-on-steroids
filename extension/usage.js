@@ -13,7 +13,7 @@
  */
 (() => {
   'use strict';
-  const OBSERVER_VERSION = 7;
+  const OBSERVER_VERSION = 8;
   const prior = window.__cosUsageObserver;
   // An extension update re-executes this file in pages that stay open, and the same protocol
   // version used to keep the *old* code running until the tab was reloaded — measured
@@ -364,7 +364,14 @@
     try { url = new URL(response.url); } catch { return; }
     if (url.origin !== location.origin || !/^\/backend-api\/(?:conversation|f\/conversation(?:\/resume)?)$/.test(url.pathname)) return;
     if (!response.ok || !response.headers.get('content-type')?.includes('text/event-stream')) return;
-    if (originReaders.size >= 2) return;
+    // At most two responses are read at once. The newest is the live turn: an older one a
+    // background page keeps open (#1752) is let go rather than blinding the reader to it.
+    if (originReaders.size >= 2) {
+      const oldest = originReaders.values().next().value;
+      originReaders.delete(oldest);
+      readers.delete(oldest);
+      void oldest.cancel().catch(() => {});
+    }
     const copy = response.clone(), reader = copy.body?.getReader();
     if (!reader) return;
     originReaders.add(reader);

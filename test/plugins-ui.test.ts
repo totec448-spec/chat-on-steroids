@@ -211,6 +211,38 @@ it('keeps plugin connection setup local, preserves a draft and saves through the
   expect(document.querySelector('#pluginDialog .plugin-tools')).toBeNull();
 });
 
+// #1872: a saved Plugins tunnel ID that OpenAI doesn't know kept a failing Plugins connection with no way to remove it.
+it('turns off a saved Plugins connection by clearing only its tunnel ID, and offers it only while one is saved', async () => {
+  const next = { hasApiKey: true, config: { tunnel: { kind: 'openai', tunnelId: 'core-original', desktopTunnelId: 'desktop-original', pluginsTunnelId: 'plugins-original' }, ui: { theme: 'dark' } }, status: { surfaces: [{ id: 'plugins', state: 'error', detail: 'OpenAI refused the tunnel (HTTP 404)', tools: [], connectorName: 'Chat On Steroids Plugins', description: 'External tools' }] } } as unknown as AppState;
+  initPlugins(); applyPluginsState(next); await tick();
+  document.getElementById('pluginsSetupLink')!.click();
+  const off = () => [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog button')].find(node => node.textContent === 'Turn off Plugins connection');
+  expect(off()).toBeDefined();
+  const cleared = structuredClone(next); cleared.config.tunnel.pluginsTunnelId = '';
+  api.saveSettings!.mockResolvedValue({ ok: true, data: cleared });
+  off()!.click(); await tick();
+  expect(api.saveSettings).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ tunnel: expect.objectContaining({ tunnelId: 'core-original', desktopTunnelId: 'desktop-original', pluginsTunnelId: '' }) }),
+    expect.objectContaining({ tunnel: expect.objectContaining({ pluginsTunnelId: 'plugins-original' }) }));
+  expect(api.connect).not.toHaveBeenCalled();
+  expect(api.pluginsUninstall).not.toHaveBeenCalled();
+  expect(document.getElementById('pluginDialog')).toBeNull();
+  expect(document.querySelector('.toast')!.textContent).toContain('Plugins connection turned off');
+  // Nothing saved: nothing to turn off.
+  document.getElementById('pluginsSetupLink')!.click();
+  expect(off()).toBeUndefined();
+});
+
+it('keeps the Plugins connection when turning it off fails', async () => {
+  const next = { hasApiKey: true, config: { tunnel: { kind: 'openai', tunnelId: 'core-original', pluginsTunnelId: 'plugins-original' }, ui: { theme: 'dark' } }, status: { surfaces: [{ id: 'plugins', state: 'error', detail: 'OpenAI refused the tunnel (HTTP 404)', tools: [] }] } } as unknown as AppState;
+  initPlugins(); applyPluginsState(next); await tick();
+  document.getElementById('pluginsSetupLink')!.click();
+  api.saveSettings!.mockResolvedValue({ ok: false, error: 'Settings changed elsewhere.' });
+  [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog button')].find(node => node.textContent === 'Turn off Plugins connection')!.click(); await tick();
+  expect(document.getElementById('pluginDialog')).not.toBeNull();
+  expect(document.body.textContent).not.toContain('Plugins connection turned off');
+});
+
 it('explains starting enabled runtimes and tool publication conflicts', async () => {
   state.plugins[0]!.status = 'connecting';
   state.plugins[0]!.tools = [{ name: 'get_scene_info', exposedName: 'get_scene_info', enabled: true, published: false, exposureError: 'Another installed plugin declares get_scene_info.' }];

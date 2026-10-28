@@ -12,6 +12,8 @@ The [responsible-use notice](../README.md#responsible-use-and-provider-rules) ap
    With OpenAI Secure Tunnels, create a separate Plugins tunnel, enter its ID in
    the dialog, and choose **Save & connect**. The existing API key and tunnel executable are reused.
    Cloudflare/manual transports publish the Plugins endpoint at its separate path.
+   Plugins is optional: **Turn off Plugins connection** in the same dialog clears the saved Plugins tunnel ID
+   again. Core, Desktop and your installed plugins stay as they are.
 2. Create the **Chat On Steroids Plugins** connector in ChatGPT under **Plugins → Add → Add custom MCP server**,
    using the displayed name and description and the Plugins tunnel (or MCP URL). Keep the CoS connection running.
 3. On the app's **Plugins** page, click **+**. Choose a reviewed catalog recipe or a custom server. Review
