@@ -2010,6 +2010,7 @@
   "Link copied": "Đã sao chép liên kết",
   "ChatGPT is waiting for your approval": "ChatGPT đang chờ bạn phê duyệt",
   "The tool approval ChatGPT asked for in this chat was answered.": "Yêu cầu phê duyệt công cụ mà ChatGPT đưa ra trong cuộc trò chuyện này đã được trả lời.",
+  "Reload was deferred because ChatGPT showed a tool approval card.": "Đã hoãn tải lại vì ChatGPT hiển thị thẻ phê duyệt công cụ.",
   "What's new": "Có gì mới",
   "Full release notes": "Ghi chú phát hành đầy đủ",
   "Version {0}": "Phiên bản {0}",
@@ -3253,6 +3254,5 @@
   "Keys stay with you": "Khóa ở lại với bạn",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Khóa API và token trong kết quả công cụ trả về được ẩn trước khi ChatGPT thấy.",
   "Easier to read": "Dễ đọc hơn",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Độ tương phản cao, tám màu nhấn, giãn dòng và phông chữ dễ đọc hơn.",
-  "Reload was deferred because ChatGPT showed a tool approval card.": "Đã hoãn tải lại vì ChatGPT hiển thị thẻ phê duyệt công cụ."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Độ tương phản cao, tám màu nhấn, giãn dòng và phông chữ dễ đọc hơn."
 }

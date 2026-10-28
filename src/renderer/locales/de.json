@@ -2045,6 +2045,7 @@
   "Link copied": "Link kopiert",
   "ChatGPT is waiting for your approval": "ChatGPT wartet auf deine Freigabe",
   "The tool approval ChatGPT asked for in this chat was answered.": "Die Tool-Freigabe, um die ChatGPT in diesem Chat gebeten hat, wurde beantwortet.",
+  "Reload was deferred because ChatGPT showed a tool approval card.": "Das Neuladen wurde verschoben, weil ChatGPT eine Karte zur Werkzeugfreigabe angezeigt hat.",
   "What's new": "Neuigkeiten",
   "Full release notes": "Vollständige Versionshinweise",
   "Version {0}": "Version {0}",
@@ -3313,6 +3314,5 @@
   "Keys stay with you": "Schlüssel bleiben bei dir",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "API-Schlüssel und Tokens in dem, was Tools zurückgeben, werden verborgen, bevor ChatGPT sie sieht.",
   "Easier to read": "Leichter zu lesen",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Hoher Kontrast, acht Akzentfarben, Zeilenabstand und eine besser lesbare Schrift.",
-  "Reload was deferred because ChatGPT showed a tool approval card.": "Das Neuladen wurde verschoben, weil ChatGPT eine Karte zur Werkzeugfreigabe angezeigt hat."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Hoher Kontrast, acht Akzentfarben, Zeilenabstand und eine besser lesbare Schrift."
 }
