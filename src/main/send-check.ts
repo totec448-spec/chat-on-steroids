@@ -1,7 +1,7 @@
 /**
  * #1794 phase 1: before a message the app sends by itself (a Goal or Loop step, an automatic
- * Continue or recovery, the fresh turn after a long one, a worker's start or a message to a
- * worker), an optional local program is asked whether it may go. A message a person sends is never
+ * Continue or recovery, the fresh turn after a long one, a scheduled run, a worker's start or a
+ * message to a worker), an optional local program is asked whether it may go. A message a person sends is never
  * asked about.
  *
  * Veto-only: the answer can hold the send back, never change its text, model or target. Off while no
@@ -16,7 +16,7 @@ import { sendCheckUrl } from '../shared/send-check.js';
 
 export { sendCheckUrl };
 
-export type SendCheckKind = 'goal-step' | 'loop-step' | 'continue' | 'recovery' | 'fresh-turn' | 'worker-start' | 'worker-message';
+export type SendCheckKind = 'goal-step' | 'loop-step' | 'continue' | 'recovery' | 'fresh-turn' | 'scheduled' | 'worker-start' | 'worker-message';
 
 export interface SendCheckRequest {
   kind: SendCheckKind;
