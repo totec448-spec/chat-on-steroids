@@ -3460,5 +3460,6 @@
   "Touched {0} files, no net change|one": "{0} ficheiro mexido, nenhuma alteração líquida",
   "Touched {0} files, no net change|many": "{0} de ficheiros mexidos, nenhuma alteração líquida",
   "The request was not valid.": "O pedido não era válido.",
-  "Needs your answer in ChatGPT": "Precisa da sua resposta no ChatGPT"
+  "Needs your answer in ChatGPT": "Precisa da sua resposta no ChatGPT",
+  "Drop to attach, up to 20 files": "Largue para anexar, até 20 ficheiros"
 }
