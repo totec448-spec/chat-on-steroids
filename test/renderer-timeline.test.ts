@@ -4109,6 +4109,28 @@ it('stops directly from the empty composer without a second Stop menu action', a
   expect(input.value).toBe('');
 });
 
+it('offers Stop for a turn the page still holds after the app stopped counting it as work, without saying Working (2.1.47 round)', async () => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  const stop = vi.fn(async () => ({ ok: true, data: {} }));
+  api.stopSessionTurn = stop;
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { sessionId: id, conversationId: 'chat-a', automation: 'off', objective: '',
+    activeTurnId: null, heldTurnId: 'page-held-turn', finishHeld: false, blocked: '', job: null } });
+  await append([]); await append([]);
+  const send = w.document.getElementById('chatSend') as HTMLButtonElement;
+  expect(send.dataset.action).toBe('stop');
+  expect(send.getAttribute('aria-label')).toBe('Stop turn');
+  expect(w.document.getElementById('chatState')!.classList.contains('is-working')).toBe(false);
+  send.click();
+  await settle();
+  expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'page-held-turn');
+  // Nothing held: the ordinary Send.
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { sessionId: id, conversationId: 'chat-a', automation: 'off', objective: '',
+    activeTurnId: null, heldTurnId: null, finishHeld: false, blocked: '', job: null } });
+  await append([]); await append([]);
+  expect(send.dataset.action).toBe('send');
+});
+
 describe('Esc in the empty composer during a turn', () => {
   const esc = (w: JSDOM['window'], init: KeyboardEventInit = {}) => {
     const event = new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...init });

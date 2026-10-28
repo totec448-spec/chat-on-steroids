@@ -16897,6 +16897,29 @@ describe('app requests to stop one exact active turn', () => {
     expect((await getSession(sessionId))?.activeTurnId).toBe('stop-turn-two');
     expect((await getSession(sessionId))?.finishTurn?.released).toBe(false);
   });
+  it('offers Stop for a turn the page still holds after the app stopped counting it as work (2.1.47 round)', async () => {
+    // Seen 2026-10-28: ChatGPT stopped loading a chat's history, the page kept its turn open, so it
+    // took no message, while the app treated the turn as over and offered no Stop at all.
+    const { stopSessionTurn, sessionControlsFor } = await import('../src/main/bridge.js');
+    const conversationId = 'e9999999-aaaa-4bbb-8ccc-111111111111';
+    vi.useFakeTimers();
+    try {
+      const sessionId = await active(conversationId, 'held-turn');
+      expect(await sessionControlsFor(sessionId)).toMatchObject({ activeTurnId: 'held-turn', heldTurnId: null });
+      // Long past any activity window, with nothing from the page but its open turn.
+      await vi.advanceTimersByTimeAsync(3 * 60 * 60_000);
+      expect(await sessionControlsFor(sessionId)).toMatchObject({ activeTurnId: null, heldTurnId: 'held-turn' });
+      await expect(stopSessionTurn(sessionId, 'other-turn')).rejects.toThrow('active_turn_changed');
+      // Once asked, it is the turn being stopped, as any other ("Stop requested").
+      expect(await stopSessionTurn(sessionId, 'held-turn')).toMatchObject({ stopPending: true, activeTurnId: 'held-turn', heldTurnId: null });
+      expect((await request('GET', '/status')).body.stopTurns).toEqual([expect.objectContaining({ turnId: 'held-turn', conversationId })]);
+      // Once the page reports the turn's end, nothing is held any more.
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'turn_end', time: Date.now(), turnId: 'held-turn', outcome: 'stopped' }
+      ] } });
+      expect(await sessionControlsFor(sessionId)).toMatchObject({ activeTurnId: null, heldTurnId: null });
+    } finally { vi.useRealTimers(); }
+  });
 });
 
 it('retires an already armed ordinary Goal repair when its conversation is now finish-only Astra', async () => {
