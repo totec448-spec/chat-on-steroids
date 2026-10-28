@@ -3471,5 +3471,14 @@
   "This panel holds Review, with every change ChatGPT made to your files.": "Este painel tem a Revisão, com cada alteração que o ChatGPT fez aos seus ficheiros.",
   "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "Escreva aqui a sua tarefa e escolha Normal, Plano ou Goal para a forma como o ChatGPT trabalha nela.",
   "Tour": "Visita",
-  "The tour choice couldn't be saved, so it may be offered again.": "Não foi possível guardar a sua escolha sobre a visita, por isso pode ser oferecida de novo."
+  "The tour choice couldn't be saved, so it may be offered again.": "Não foi possível guardar a sua escolha sobre a visita, por isso pode ser oferecida de novo.",
+  "Scheduled runs, changed files under each answer, commit and pull request from Review, and your own chat style.": "Execuções agendadas, ficheiros alterados sob cada resposta, commit e pull request a partir da Revisão, e o seu próprio estilo de chat.",
+  "Scheduled runs": "Execuções agendadas",
+  "A chat can send itself a message every few hours, daily or weekly.": "Um chat pode enviar a si próprio uma mensagem de poucas em poucas horas, todos os dias ou todas as semanas.",
+  "Changed files": "Ficheiros alterados",
+  "Each answer that edited files shows what it changed.": "Cada resposta que editou ficheiros mostra o que mudou.",
+  "Commit from Review": "Commit a partir da Revisão",
+  "Commit the chosen files, then push and open a pull request.": "Faça commit dos ficheiros escolhidos, depois push e abra um pull request.",
+  "Your own chat style": "O seu próprio estilo de chat",
+  "Rewrite how ChatGPT talks and writes in new chats.": "Reescreva como o ChatGPT fala e escreve nos chats novos."
 }

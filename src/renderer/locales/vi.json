@@ -3341,5 +3341,14 @@
   "This panel holds Review, with every change ChatGPT made to your files.": "Bảng này có Xem lại, với mọi thay đổi ChatGPT đã làm với tệp của bạn.",
   "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "Viết nhiệm vụ của bạn ở đây và chọn Bình thường, Plan hoặc Goal cho cách ChatGPT làm việc.",
   "Tour": "Hướng dẫn",
-  "The tour choice couldn't be saved, so it may be offered again.": "Không lưu được lựa chọn về phần hướng dẫn, nên nó có thể được đề xuất lại."
+  "The tour choice couldn't be saved, so it may be offered again.": "Không lưu được lựa chọn về phần hướng dẫn, nên nó có thể được đề xuất lại.",
+  "Scheduled runs, changed files under each answer, commit and pull request from Review, and your own chat style.": "Chạy theo lịch, các tệp đã thay đổi dưới mỗi câu trả lời, commit và pull request từ Xem lại, và phong cách trò chuyện của riêng bạn.",
+  "Scheduled runs": "Chạy theo lịch",
+  "A chat can send itself a message every few hours, daily or weekly.": "Một cuộc trò chuyện có thể tự gửi tin nhắn mỗi vài giờ, hằng ngày hoặc hằng tuần.",
+  "Changed files": "Tệp đã thay đổi",
+  "Each answer that edited files shows what it changed.": "Mỗi câu trả lời đã sửa tệp sẽ cho thấy nó đã thay đổi những gì.",
+  "Commit from Review": "Commit từ Xem lại",
+  "Commit the chosen files, then push and open a pull request.": "Commit các tệp đã chọn, rồi push và mở pull request.",
+  "Your own chat style": "Phong cách trò chuyện của bạn",
+  "Rewrite how ChatGPT talks and writes in new chats.": "Viết lại cách ChatGPT nói và viết trong các cuộc trò chuyện mới."
 }

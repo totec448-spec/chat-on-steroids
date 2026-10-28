@@ -3341,5 +3341,14 @@
   "This panel holds Review, with every change ChatGPT made to your files.": "このパネルにはレビューがあり、ChatGPT がファイルに加えたすべての変更を確認できます。",
   "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "ここにタスクを書き、ChatGPT の進め方を通常、計画、ゴールから選びます。",
   "Tour": "ツアー",
-  "The tour choice couldn't be saved, so it may be offered again.": "ツアーの選択を保存できなかったため、もう一度表示されることがあります。"
+  "The tour choice couldn't be saved, so it may be offered again.": "ツアーの選択を保存できなかったため、もう一度表示されることがあります。",
+  "Scheduled runs, changed files under each answer, commit and pull request from Review, and your own chat style.": "スケジュール実行、各回答の下に変更ファイル、レビューからのコミットとプルリクエスト、そして自分のチャットスタイル。",
+  "Scheduled runs": "スケジュール実行",
+  "A chat can send itself a message every few hours, daily or weekly.": "チャットが数時間ごと、毎日、または毎週、自分でメッセージを送れます。",
+  "Changed files": "変更されたファイル",
+  "Each answer that edited files shows what it changed.": "ファイルを編集した回答には、何を変更したかが表示されます。",
+  "Commit from Review": "レビューからコミット",
+  "Commit the chosen files, then push and open a pull request.": "選んだファイルをコミットし、プッシュしてプルリクエストを開けます。",
+  "Your own chat style": "自分のチャットスタイル",
+  "Rewrite how ChatGPT talks and writes in new chats.": "新しいチャットで ChatGPT がどう話し、どう書くかを書き換えられます。"
 }
