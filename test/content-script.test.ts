@@ -23432,15 +23432,37 @@ describe('app Stop command uses current native turn proof', () => {
     // A remount: ChatGPT's Stop and the answer are gone for a moment, while the turn still runs.
     stopGenerating(live.document);
     live.hook.observe(); await settle(); await live.hook.flush();
-    // The app asked to stop a running turn (no `held`): only ChatGPT's own Stop may end it.
+    // The app asked to stop a running turn (no `held`): only ChatGPT's own Stop may end it, and the
+    // command stays pending (no failed acknowledgement) for when that Stop shows again (CodeRabbit).
+    const acks: unknown[] = [];
+    live.reply.set('stop_ack', (message: unknown) => { acks.push(message); return { ok: true }; });
     live.reply.set('stop_redeem', () => ({ ok: true, command: { type: 'stop', turnId, conversationId } }));
     expect(await live.runtimeMessage({ type: 'clf-stop-turn', id: '4444444444444444', turnId, conversationId })).toEqual({ ok: false });
-    // A held-turn Stop, but the answer comes back meanwhile: not ended either.
+    expect(acks).toEqual([]);
+    // A held-turn Stop, but the answer and ChatGPT's Stop come back meanwhile: this path does not
+    // end the turn; ChatGPT's own Stop is used instead.
     live.reply.set('stop_redeem', () => {
       assistantTurn(live!.document, 'answer-back', []);
+      startGenerating(live!.document, { send: false });
+      const button = live!.document.querySelector('[data-testid="stop-button"]') as HTMLButtonElement;
+      Object.defineProperty(button, 'getClientRects', { value: () => [{ width: 10, height: 10 }] });
       return { ok: true, command: { type: 'stop', turnId, conversationId, held: true } };
     });
-    expect(await live.runtimeMessage({ type: 'clf-stop-turn', id: '5555555555555555', turnId, conversationId })).toEqual({ ok: false });
+    await live.runtimeMessage({ type: 'clf-stop-turn', id: '5555555555555555', turnId, conversationId });
+    await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end').some(row => /Stopped here/.test(String(row.event.detail ?? '')))).toBe(false);
+  });
+
+  it('does not end a held turn after its Stop command expired during the wait (CodeRabbit)', async () => {
+    live = await harness(undefined, { stop_ack: () => ({ ok: true }) });
+    startGenerating(live.document);
+    live.hook.observe(); await settle(); await live.hook.flush();
+    const turnId = emitted(live.sent, 'turn_start').at(-1)!.event.turnId;
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    stopGenerating(live.document);
+    live.hook.observe(); await settle(); await live.hook.flush();
+    live.reply.set('stop_redeem', () => ({ ok: true, command: { type: 'stop', turnId, conversationId, held: true, expiresAt: live!.window.Date.now() + 1_000 } }));
+    expect(await live.runtimeMessage({ type: 'clf-stop-turn', id: '6666666666666666', turnId, conversationId })).toEqual({ ok: false });
     await live.hook.flush();
     expect(emitted(live.sent, 'turn_end')).toEqual([]);
   });

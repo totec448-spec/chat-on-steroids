@@ -2178,10 +2178,6 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
         await conversationWasSuperseded(id) || await stoppableTurn(sessionId) !== expectedTurnId) throw new Error('active_turn_changed');
   };
   await assertCurrent();
-  // Only a Stop for a held turn may let the page end that turn itself when it shows nothing of it;
-  // a running turn always goes through ChatGPT's own Stop (CodeRabbit).
-  const before = await sessionControlsFor(sessionId);
-  const held = !before.activeTurnId && before.heldTurnId === expectedTurnId;
   if (!options.rotation) {
     await setSessionAutomation(sessionId, 'off');
     await assertCurrent();
@@ -2189,6 +2185,11 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
   }
   const userMessageId = await stopUserAnchor(sessionId, expectedTurnId);
   await assertCurrent();
+  // Only a Stop for a held turn may let the page end that turn itself when it shows nothing of it;
+  // a running turn always goes through ChatGPT's own Stop. Read right before queuing: activity can
+  // end while automation and the anchor are settled above (CodeRabbit).
+  const atQueue = await sessionControlsFor(sessionId);
+  const held = !atQueue.activeTurnId && atQueue.heldTurnId === expectedTurnId;
   const alreadyQueued = commands.some(entry => entry.spec.type === 'stop' && entry.spec.sessionId === sessionId && entry.spec.turnId === expectedTurnId);
   const command = queue({ type: 'stop', sessionId, conversationId: id, turnId: expectedTurnId, ...(userMessageId ? { userMessageId } : {}), ...(held ? { held: true as const } : {}) });
   try {
