@@ -2793,6 +2793,8 @@
     if (!effort) return null;
     return model ? { id: model, effort } : null;
   }
+  /** How many versions and choices a picker may list: every model of an account, with room (#1905). */
+  const PICKER_MAX_VERSIONS = 48, PICKER_MAX_CHOICES = 48;
   function readPickerSnapshot(node) {
     let fiber = node && fiberOf(node);
     for (let up = 0; fiber && up < MAX_CLIMB; up++, fiber = fiber.return) {
@@ -2802,10 +2804,10 @@
       const props = owner?.composerIntelligencePickerState ? owner : owner?.dropdownContent?.props;
       const state = props?.composerIntelligencePickerState, data = props?.modelsData;
       if (!state || !Array.isArray(data?.versions)) continue;
-      if (data.versions.length > 20 || !Array.isArray(state.bucketSelections) || state.bucketSelections.length > 12) return null;
+      if (data.versions.length > PICKER_MAX_VERSIONS || !Array.isArray(state.bucketSelections) || state.bucketSelections.length > PICKER_MAX_CHOICES) return null;
       const id = value => typeof value === 'string' && /^[a-zA-Z0-9._-]{1,80}$/.test(value) ? value : null;
       // Native version groups may have spaces; execution slugs retain their strict contract.
-      const groupId = value => typeof value === 'string' && value.length <= 80 && /^[\p{L}\p{N}._ -]+$/u.test(value) && value.trim() === value && value.trim() ? value : null;
+      const groupId = value => typeof value === 'string' && value.length <= 80 && /^[\p{L}\p{N}._: -]+$/u.test(value) && value.trim() === value && value.trim() ? value : null;
       const label = value => typeof value === 'string' && value.trim().length > 0 && value.length <= 80 ? value.trim() : null;
       const effortOf = choice => choice.category?.modelLane === 'pro' ? 'pro'
         : ['auto', 'instant'].includes(choice.category?.modelLane) ? 'none'
@@ -2822,8 +2824,11 @@
           familyId, familyLabel: label(family?.displayTextForIntelligence) || label(choice.modelConfig?.title) || (name && (/^\d/.test(name) ? `GPT-${name}` : name)),
           available: choice.availability?.status === 'available' && !props.modelSwitcherDenialsBySlug?.[choice.modelSlug] };
       });
-      const versions = data.versions.filter(version => version.enabled === true).map(version => ({ id: groupId(version.id), label: label(version.displayTextForIntelligence) }));
-      if (!versions.length || versions.some(v => !v.id || !v.label) || choices.some(c => !Number.isInteger(c.bucket) || !c.id || !c.label || !c.effort) ||
+      const versions = data.versions.filter(version => version.enabled === true).map(version => ({ id: groupId(version.id), label: label(version.displayTextForIntelligence) }))
+        .filter(v => v.id && v.label);
+      const readable = choices.filter(c => Number.isInteger(c.bucket) && c.id && c.label && c.effort);
+      choices.splice(0, choices.length, ...readable);
+      if (!versions.length || !choices.length ||
           new Set(versions.map(v => v.id)).size !== versions.length || new Set(choices.map(c => c.bucket)).size !== choices.length) return null;
       const version = groupId(state.selectedVersionEntry?.id), currentBucket = state.currentBucket;
       if (!versions.some(v => v.id === version) || !choices.some(c => c.bucket === currentBucket)) return null;
@@ -2842,9 +2847,11 @@
       const p = fiber.memoizedProps;
       if (!Array.isArray(p?.powerSelections)) continue;
       const selected = p.selectedPowerSelection ?? p.selectedLabelCandidate, options = p.modelListConfig?.options;
-      if (!selected || !Array.isArray(options) || options.length > 20 || p.powerSelections.length > 12) return null;
+      // ChatGPT's unified Chat/Work picker lists every model of the account in an existing chat (#1905).
+      if (!selected || !Array.isArray(options) || options.length > PICKER_MAX_VERSIONS || p.powerSelections.length > PICKER_MAX_CHOICES) return null;
       const id = value => typeof value === 'string' && /^[a-zA-Z0-9._-]{1,80}$/.test(value) ? value : null;
-      const group = value => typeof value === 'string' && /^[\p{L}\p{N}._ -]{1,80}$/u.test(value) && value.trim() === value ? value : null;
+      // Option ids now carry a colon too ("gpt-6-pro:", #1905); they are identities here, never execution slugs.
+      const group = value => typeof value === 'string' && /^[\p{L}\p{N}._: -]{1,80}$/u.test(value) && value.trim() === value ? value : null;
       const label = value => typeof value === 'string' && value.trim() && value.length <= 80 ? value.trim() : null;
       const effort = value => ({ none:'none', instant:'none', minimal:'minimal', min:'low', low:'low', standard:'medium', medium:'medium', extended:'high', high:'high', xhigh:'xhigh', 'extra high':'xhigh', max:'max', ultra:'ultra', pro:'pro' })[value] || null;
       // The machine reasoningEffort is a lane's transport setting, not its identity: the
@@ -2857,16 +2864,19 @@
       const current = options.filter(o => o?.selected === true);
       if (current.length !== 1) return null;
       const version = group(current[0].id);
-      const versions = options.filter(o => o && o.disabled !== true).map(o => ({ id: group(o.id), label: label(o.label) }));
+      // An option or lane it cannot read is left out, not a reason to drop the whole picker (#1905):
+      // the selected one must still read, below, and nothing is ever guessed.
+      const versions = options.filter(o => o && o.disabled !== true).map(o => ({ id: group(o.id), label: label(o.label) }))
+        .filter(v => v.id && v.label);
       // The shell names older models by number alone ("5.6"); the September picker's own rule
       // names them in full, so the list reads GPT-6, GPT-5.6, GPT-5.5 alike.
       const modelName = value => { const name = label(value); return name && /^\d/.test(name) ? `GPT-${name}` : name; };
       const choices = p.powerSelections.map(c => ({ bucket: c?.powerSettingIndex, id: id(c?.model),
         label: modelName(c?.modelLabel), familyId: id(c?.model), familyLabel: modelName(c?.modelLabel), effort: laneEffort(c),
         available: p.modelSelectionDisabled !== true && c?.disabled !== true &&
-          (!c?.availability || c.availability.status === 'available') && !p.modelSwitcherDenialsBySlug?.[c?.model] }));
-      if (!version || !versions.length || versions.some(v => !v.id || !v.label) || !choices.length ||
-          choices.some(c => !Number.isInteger(c.bucket) || !c.id || !c.label || !c.effort) ||
+          (!c?.availability || c.availability.status === 'available') && !p.modelSwitcherDenialsBySlug?.[c?.model] }))
+        .filter(c => Number.isInteger(c.bucket) && c.id && c.label && c.effort);
+      if (!version || !versions.length || !choices.length ||
           new Set(versions.map(v => v.id)).size !== versions.length || new Set(choices.map(c => c.bucket)).size !== choices.length || !versions.some(v => v.id === version)) return null;
       // One model's Instant and thinking lanes are separate slugs under one name (gpt-6 and
       // gpt-6-thinking, both "GPT-6"; observed 2026-10-07). They are one family, as the September
