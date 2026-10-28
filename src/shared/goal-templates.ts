@@ -204,23 +204,14 @@ export const GOAL_CONTINUATIONS: readonly string[] = [
 ];
 /**
  * The note the app adds to an answer that made tool calls, for the Goal helper: it sees answers, not
- * tool results. One builder, so the marker check below can tell this note from the answer (#1894).
+ * tool results. The marker check is given the answer without it (goal.ts templateDecisionText, #1894).
  */
 export function toolCallFootnote(count: number, beforeFreshTurn: number): string {
   const continued = beforeFreshTurn ? `, ${beforeFreshTurn} of them before Chat On Steroids continued it in a fresh turn` : '';
   return `[Chat On Steroids: ${count} tool call${count === 1 ? '' : 's'} ran in this turn${continued}. Arguments and results are not shown.]`;
 }
-const TOOL_CALL_FOOTNOTE = /^\[Chat On Steroids: \d+ tool calls? ran in this turn(?:, \d+ of them before Chat On Steroids continued it in a fresh turn)?\. Arguments and results are not shown\.\]$/;
-
 export function templateGoalDecision(final: string, slot: number, secondSlot = slot + 1): { action: 'stop' } | { action: 'continue'; reply: string } | { action: 'invalid'; error: string } {
-  // The marker is the answer's own last line: the app's tool-call note after it is not part of the
-  // answer (#1894). Only that exact note is set aside; anything else after the marker still counts.
-  const lines = final.trim().split(/\r?\n/);
-  if (TOOL_CALL_FOOTNOTE.test(lines.at(-1)?.trim() ?? '')) {
-    lines.pop();
-    while (lines.length && !lines.at(-1)!.trim()) lines.pop();
-  }
-  const last = lines.at(-1)?.trim();
+  const last = final.trim().split(/\r?\n/).at(-1)?.trim();
   if (last === '[[COS_GOAL:COMPLETE]]') return { action: 'stop' };
   if (last !== '[[COS_GOAL:CONTINUE]]') return { action: 'invalid', error: 'goal_marker_missing' };
   const first = Math.abs(Math.trunc(slot)) % GOAL_CONTINUATIONS.length;

@@ -598,18 +598,10 @@ describe('Goal decision backends', () => {
       expect(templateGoalDecision(text, 0).action).toBe('invalid');
     }
   });
-  it('reads the marker above the app\'s own tool-call note, and only that note (#1894)', () => {
-    // Offline Goal saw the note the app adds to an answer that made tool calls as the last line, so
-    // every valid marker read as missing.
-    for (const note of [toolCallFootnote(125, 0), toolCallFootnote(1, 0), toolCallFootnote(40, 12)]) {
-      expect(templateGoalDecision(`Done with step 3.\n[[COS_GOAL:CONTINUE]]\n\n${note}`, 0).action).toBe('continue');
-      expect(templateGoalDecision(`All done.\n[[COS_GOAL:COMPLETE]]\n\n${note}`, 0)).toEqual({ action: 'stop' });
-      // The note is not a marker, and a marker still has to be the answer's own last line.
-      expect(templateGoalDecision(`Working.\n\n${note}`, 0)).toEqual({ action: 'invalid', error: 'goal_marker_missing' });
-      expect(templateGoalDecision(`[[COS_GOAL:COMPLETE]]\nMore work\n\n${note}`, 0).action).toBe('invalid');
-    }
-    // Anything else after the marker still makes it missing.
-    expect(templateGoalDecision('[[COS_GOAL:COMPLETE]]\n[Chat On Steroids: some other note]', 0).action).toBe('invalid');
+  it('keeps the tool-call note builder and the marker check apart: the note text alone is not set aside (#1894, CodeRabbit)', () => {
+    // A model can write that text itself; only the app knows when it added the note.
+    expect(templateGoalDecision(`All done.\n[[COS_GOAL:COMPLETE]]\n\n${toolCallFootnote(1, 0)}`, 0).action).toBe('invalid');
+    expect(toolCallFootnote(2, 0)).toBe('[Chat On Steroids: 2 tool calls ran in this turn. Arguments and results are not shown.]');
   });
   it('uses browser JSON decisions without an API key and refuses prose', async () => {
     await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, backend: 'chatgpt' } });
