@@ -3253,5 +3253,6 @@
   "Keys stay with you": "密钥留在你这里",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "工具返回内容中的 API 密钥和令牌会在 ChatGPT 看到之前被隐藏。",
   "Easier to read": "更易阅读",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "高对比度、八种强调色、行距和更易读的字体。"
+  "High contrast, eight accent colors, line spacing and a more legible font.": "高对比度、八种强调色、行距和更易读的字体。",
+  "Reload was deferred because ChatGPT showed a tool approval card.": "由于 ChatGPT 显示了工具审批卡片，已推迟重新加载。"
 }

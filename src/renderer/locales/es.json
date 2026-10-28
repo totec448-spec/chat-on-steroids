@@ -3373,5 +3373,6 @@
   "Keys stay with you": "Tus claves se quedan contigo",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "Las claves de API y los tokens en lo que devuelven las herramientas se ocultan antes de que ChatGPT los vea.",
   "Easier to read": "Más fácil de leer",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "Alto contraste, ocho colores de acento, interlineado y una fuente más legible."
+  "High contrast, eight accent colors, line spacing and a more legible font.": "Alto contraste, ocho colores de acento, interlineado y una fuente más legible.",
+  "Reload was deferred because ChatGPT showed a tool approval card.": "Se pospuso la recarga porque ChatGPT mostró una tarjeta de aprobación de herramientas."
 }

@@ -9710,10 +9710,9 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it('shows approval waiting on the queued repair row and restores reloading when the handout resumes', async () => {
+  it('records the approval deferral on the repair row and restores reloading when the handout resumes', async () => {
     vi.useFakeTimers();
     const recorder = await import('../src/main/session/recorder.js');
-    const { APPROVAL_WAITING_TEXT } = await import('../src/shared/approval-wait.js');
     const writeProgress = recorder.recordProgress;
     let progress: ReturnType<typeof vi.spyOn> | undefined;
     try {
@@ -9732,7 +9731,9 @@ describe('unattributed activity recovery', () => {
       expect(progress).toHaveBeenCalled();
       const heldSnapshots = await snapshots();
       const held = foldProgress(heldSnapshots);
-      expect(held.map(event => event.kind === 'progress' ? event.message.text : '')).toEqual([APPROVAL_WAITING_TEXT]);
+      expect(held.map(event => event.kind === 'progress' ? event.message.text : '')).toEqual([
+        'Reload was deferred because ChatGPT showed a tool approval card.'
+      ]);
       expect(held[0]!.turnId).toBe('approval-during-handout');
       expect(await maintenance()).toBeNull();
       expect(await snapshots()).toHaveLength(heldSnapshots.length);
@@ -9750,7 +9751,6 @@ describe('unattributed activity recovery', () => {
   it.each([true, false])('handles approval=%s reported after the unattributed repair handout', async approval => {
     vi.useFakeTimers();
     try {
-      const { APPROVAL_WAITING_TEXT } = await import('../src/shared/approval-wait.js');
       await pair(); await events(PRIME, [openTurn('approval-after-handout')]);
       await unattributed(); await vi.advanceTimersByTimeAsync(15_000);
       const session = (await findSessionByConversation(PRIME, { requireUnique: true }))!;
@@ -9766,7 +9766,7 @@ describe('unattributed activity recovery', () => {
       const held = await rows();
       expect(held).toHaveLength(1);
       expect(held[0]).toMatchObject({ ...original, message: expect.objectContaining({
-        text: approval ? APPROVAL_WAITING_TEXT : 'Not reloaded: ChatGPT is answering.'
+        text: approval ? 'Reload was deferred because ChatGPT showed a tool approval card.' : 'Not reloaded: ChatGPT is answering.'
       }) });
       for (let poll = 0; poll < 3; poll++) expect(await maintenance()).toBeNull();
       await request('GET', `/activity?conversationId=${PRIME}&approval=0`);
@@ -9779,10 +9779,50 @@ describe('unattributed activity recovery', () => {
         }) });
         // A duplicate receipt for the old offer cannot retire the new one.
         await request('GET', `/status?repairFailed=${handout!.token}&repairAction=reloaded&why=streaming&approval=1`);
+        expect((await rows())[0]).toMatchObject({ ...original, message: expect.objectContaining({
+          text: 'Trying to reload chat to recover missing connector attribution…'
+        }) });
         await maintenance(resumed!.token, 'reloaded');
+        expect((await rows())[0]).toMatchObject({ ...original, message: expect.objectContaining({
+          text: 'Reloaded chat to recover missing connector attribution.'
+        }) });
         expect(await maintenance()).toBeNull();
       } else expect(resumed).toBeNull();
     } finally { vi.useRealTimers(); }
+  });
+
+  it.each(['preparation', 'browser-check'])('keeps one live approval row when attribution retires a repair held during %s', async phase => {
+    vi.useFakeTimers();
+    const recorder = await import('../src/main/session/recorder.js');
+    const { APPROVAL_WAITING_TEXT, APPROVAL_ANSWERED_TEXT } = await import('../src/shared/approval-wait.js');
+    const writeProgress = recorder.recordProgress;
+    let progress: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      await pair(); await events(PRIME, [openTurn('approval-retired-after-deferral')]);
+      await unattributed(); await vi.advanceTimersByTimeAsync(15_000);
+      const session = (await findSessionByConversation(PRIME, { requireUnique: true }))!;
+      const rows = async () => foldProgress(await readEvents(session.id, { kinds: ['progress'] }));
+      if (phase === 'preparation') {
+        progress = vi.spyOn(recorder, 'recordProgress').mockImplementationOnce(async (...args) => {
+          await request('GET', `/activity?conversationId=${PRIME}&approval=1`);
+          return writeProgress(...args);
+        });
+        expect(await maintenance()).toBeNull();
+      } else {
+        const handout = await maintenance();
+        expect(handout?.reason).toBe('unattributed');
+        await request('GET', `/status?repairFailed=${handout!.token}&repairAction=reloaded&why=streaming&approval=1`);
+      }
+      const texts = async () => (await rows()).map(event => event.kind === 'progress' ? event.message.text : '');
+      expect((await texts()).filter(text => text === APPROVAL_WAITING_TEXT)).toHaveLength(1);
+      expect(await texts()).toContain('Reload was deferred because ChatGPT showed a tool approval card.');
+      await attributed(PRIME, false, Date.now());
+      await request('GET', `/activity?conversationId=${PRIME}&approval=0`);
+      expect(await maintenance()).toBeNull();
+      expect(await texts()).not.toContain(APPROVAL_WAITING_TEXT);
+      expect(await texts()).toContain(APPROVAL_ANSWERED_TEXT);
+      expect(await texts()).toContain('Reload was deferred because ChatGPT showed a tool approval card.');
+    } finally { progress?.mockRestore(); vi.useRealTimers(); }
   });
 
   it('holds only the approval-waiting suspect and still repairs the other chat', async () => {

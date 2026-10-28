@@ -130,7 +130,7 @@ import {
 } from './session/recorder.js';
 import { noticeApprovalWaiting, noticeChatStopped } from './stuck-notice.js';
 import { approvalAnswerFor, approvalCardWaiting, noteApprovalCard, parseApprovalCard, parseApprovalResult, resetApprovalWaits, settleApprovalAnswer, type ApprovalWaitDeps } from './approval-wait.js';
-import { APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT } from '../shared/approval-wait.js';
+import { APPROVAL_PROGRESS_PREFIX, APPROVAL_REPAIR_DEFERRED_TEXT, APPROVAL_WAITING_TEXT } from '../shared/approval-wait.js';
 import {
   autoCompactionReady,
   automaticCompactionAllowed,
@@ -10204,7 +10204,7 @@ async function takePendingRepairs(
     // The card can appear during the asynchronous progress/authority reads above.
     const heldByApproval = repair.reason === 'unattributed' && approvalCardWaiting(conversationId);
     if (heldByApproval && repairsInFlight.get(conversationId) === repair && !repair.claimed) {
-      await updateRepairProgress(conversationId, repair, APPROVAL_WAITING_TEXT);
+      await updateRepairProgress(conversationId, repair, APPROVAL_REPAIR_DEFERRED_TEXT);
       repair.state = 'queued';
       logInfo(`bridge: holding the unattributed refresh for ${conversationId}: ChatGPT's tool approval card is waiting for the user`);
     }
@@ -10438,7 +10438,7 @@ async function failRepairAttempt(
     await updateRepairProgress(
       conversationId,
       repair,
-      heldByApproval ? APPROVAL_WAITING_TEXT : streaming
+      heldByApproval ? APPROVAL_REPAIR_DEFERRED_TEXT : streaming
         ? repair.attribution ? 'Not reloaded: ChatGPT is answering.' : 'ChatGPT is answering again; recovery waits until it finishes.'
         : `${action === 'reopened' ? 'Reopen' : action === 'resumed' ? 'Resume' : 'Reload'} failed while ${repairPurpose(repair).during}${repair.attribution ? '.' : '; will retry.'}`
     );
