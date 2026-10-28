@@ -1152,6 +1152,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (turnOn) wakeBrowserWork();
     return buildState();
   });
+  handle('ui:tourDone', async () => {
+    // #1833: only ever set; Settings replays the tour without asking main to offer it again.
+    if (getConfig().ui.tourDone !== true) await updateConfig(config => ({ ...config, ui: { ...config.ui, tourDone: true } }));
+  });
   handle('ui:whatsNewSeen', async () => {
     // Only this version can be recorded; the renderer cannot write another one (#1172).
     if (getConfig().ui.lastSeenVersion !== APP_VERSION) await updateConfig(config => ({ ...config, ui: { ...config.ui, lastSeenVersion: APP_VERSION } }));

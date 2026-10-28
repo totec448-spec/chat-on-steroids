@@ -174,6 +174,8 @@ const api = {
   testPhonePush: () => call<void>('phonePush:test', undefined),
   setPhonePushToken: (token: string) => call<AppState>('phonePush:token', { token }),
   markWhatsNewSeen: () => call<void>('ui:whatsNewSeen'),
+  /** #1833: the first-run tour was taken, skipped or declined. */
+  markTourDone: () => call<void>('ui:tourDone'),
   /** The one-time automatic plugin refresh offer: true turns it on; either answer is kept. */
   answerPluginRefreshOffer: (turnOn: boolean) => call<AppState>('pluginRefresh:offer', { turnOn }),
   petsImport: () => call<PetLibraryState | null>('pets:import'),

@@ -3330,5 +3330,16 @@
   "{0} more not listed": "{0}개는 목록에 없음",
   "Touched {0} files, no net change": "파일 {0}개를 건드렸지만 순 변경 없음",
   "The request was not valid.": "요청이 올바르지 않습니다.",
-  "Needs your answer in ChatGPT": "ChatGPT에서 응답이 필요합니다"
+  "Needs your answer in ChatGPT": "ChatGPT에서 응답이 필요합니다",
+  "A one-minute look at the composer, projects and Review.": "입력창, 프로젝트, 검토를 1분 동안 살펴봅니다.",
+  "New here? Take a 1-minute tour.": "처음이신가요? 1분 둘러보기를 해 보세요.",
+  "No thanks": "괜찮습니다",
+  "Show me": "보여 주세요",
+  "Skip tour": "둘러보기 건너뛰기",
+  "Take the tour again": "둘러보기 다시 하기",
+  "A project is a folder you approve, and its chats start there.": "프로젝트는 허용한 폴더이며, 그 채팅은 거기서 시작됩니다.",
+  "This panel holds Review, with every change ChatGPT made to your files.": "이 패널의 리뷰에서 ChatGPT가 파일에 한 모든 변경 사항을 볼 수 있습니다.",
+  "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "여기에 작업을 쓰고, ChatGPT가 일하는 방식을 일반, 플랜, Goal 중에서 고르세요.",
+  "Tour": "둘러보기",
+  "The tour choice couldn't be saved, so it may be offered again.": "둘러보기 선택을 저장하지 못해 다시 제안될 수 있습니다."
 }

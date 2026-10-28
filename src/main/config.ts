@@ -379,6 +379,8 @@ const configSchema = z.object({
     language: z.enum(UI_LANGUAGES).optional(),
     // The version this install last started as; What's New shows once per real update (#1172).
     lastSeenVersion: z.string().trim().min(1).max(40).optional().catch(undefined),
+    /** #1833: the first-run tour was taken, skipped or declined; it is not offered again. */
+    tourDone: z.boolean().optional().catch(undefined),
     browserPreferences: z.object({ overwrite: z.boolean(), durations: z.boolean() }).strict().optional(),
     cosBrowserTrayHint: z.boolean().optional(),
     finishTool: z.boolean().optional(),

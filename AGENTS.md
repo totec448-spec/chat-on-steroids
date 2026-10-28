@@ -5820,6 +5820,13 @@ newer version (or no recorded one) with an entry: show, then record; anything el
 included: record. Each release PR adds its version's entry to `src/renderer/whats-new.ts`, with
 literal `t()` keys translated into every catalog. `verify-whats-new.cjs` checks it on real pixels.
 
+The first-run tour (#1833, `src/renderer/tour.ts`) is offered once, from Setup's last card, and never
+starts by itself. `ui.tourDone` records that the offer was answered: only the main process writes it,
+through `ui:tourDone`, which can only set it to `true` (never back). No thanks, Skip and Done set it;
+leaving the chat screen mid-tour (`tour.stop()` from `showTab`) only hides it and records nothing.
+Settings → Take the tour replays it whatever `tourDone` says. A step whose control is not on screen is
+left out, and the tour only points: it never clicks, sends or changes anything.
+
 `verify:notices` checks installed production dependencies against the lockfile and rejects
 missing license material or mismatched reviewed catalog hashes. Custom package updates cannot
 inherit an older license review. Notice completeness and native source/replacement obligations

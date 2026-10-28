@@ -3330,5 +3330,16 @@
   "{0} more not listed": "另有 {0} 個未列出",
   "Touched {0} files, no net change": "變動了 {0} 個檔案，沒有淨變化",
   "The request was not valid.": "請求無效。",
-  "Needs your answer in ChatGPT": "需要你在 ChatGPT 中回答"
+  "Needs your answer in ChatGPT": "需要你在 ChatGPT 中回答",
+  "A one-minute look at the composer, projects and Review.": "用一分鐘認識輸入框、專案和檢閱。",
+  "New here? Take a 1-minute tour.": "第一次使用？看看 1 分鐘導覽。",
+  "No thanks": "不用了",
+  "Show me": "帶我看看",
+  "Skip tour": "略過導覽",
+  "Take the tour again": "再看一次導覽",
+  "A project is a folder you approve, and its chats start there.": "專案是你核准的資料夾，它的聊天從那裡開始。",
+  "This panel holds Review, with every change ChatGPT made to your files.": "這個面板裡有檢閱，列出 ChatGPT 對你的檔案所做的每一處變更。",
+  "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "在這裡寫下任務，並選擇一般、計畫或目標來決定 ChatGPT 的工作方式。",
+  "Tour": "導覽",
+  "The tour choice couldn't be saved, so it may be offered again.": "無法儲存你對導覽的選擇，所以可能會再次提示。"
 }
