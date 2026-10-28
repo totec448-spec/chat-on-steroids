@@ -4886,7 +4886,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .composer-dock[hidden], .app[data-screen='settings'] .composer-dock { display: none; }
 .composer-dock-body { display: flow-root; }
 @media (prefers-reduced-motion: reduce) { .composer-dock { transition: none; animation: none !important; } }
-.composer-dock .queued-input, #activeGoalRow, .recovery-notice, .background-exec-status, .branch-draft, .edit-draft { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 7px 12px; margin: 0; border: 0; border-bottom: 1px solid var(--edge); font-size: calc(13px * var(--text-scale, 1)); color: var(--soft); }
+.composer-dock .queued-input, #activeGoalRow, .recovery-notice, .background-exec-status, .branch-draft, .edit-draft, .schedule-line, .tour-offer { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 7px 12px; margin: 0; border: 0; border-bottom: 1px solid var(--edge); font-size: calc(13px * var(--text-scale, 1)); color: var(--soft); }
 .background-exec-status[hidden] { display: none; }
 .background-exec-status .ico { color: var(--ink); }
 .background-exec-status.is-expandable { cursor: pointer; }
@@ -5417,13 +5417,17 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 ::highlight(chat-find-current) { background-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--ink); }
 
 /* #1826 scheduled runs: one quiet line above the chat's queue (Haz: no clock beside Send, none in the sidebar). */
-.schedule-line { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 10px; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); }
+/* A row of the composer dock like the Goal row: same height, inset and divider, icon actions at the end. */
+.schedule-line { min-width: 0; }
 .schedule-line[hidden] { display: none; }
 .schedule-line > .ico { flex: 0 0 auto; }
 .schedule-line > span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.schedule-line .btn-quiet { flex: 0 0 auto; border: 0; background: transparent; box-shadow: none; color: var(--soft); padding: 2px 8px; min-height: 0; }
-.schedule-line .btn-quiet:hover:not(:disabled) { color: var(--ink); background: var(--hover); }
-.schedule-dialog textarea { min-height: 0; field-sizing: content; max-height: 40vh; }
+.schedule-line > .dock-action { flex: 0 0 auto; }
+/* Fields drawn like the Feedback dialog's: regular weight on the sunk well, the accent ring on focus. */
+.schedule-dialog .plugin-field :is(textarea, select, input:not([type='checkbox'])) { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--edge); border-radius: var(--r-sm); background: var(--sunk); color: var(--ink); font: inherit; font-weight: 400; line-height: 1.5; }
+.schedule-dialog .plugin-field :is(textarea, select, input):focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Grows with the message up to about a third of the window, so Save stays in view; longer text scrolls inside. */
+.schedule-dialog textarea { min-height: calc(2lh + 22px); field-sizing: content; max-height: 30vh; resize: none; }
 .schedule-when { display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0 0; }
 /* The body's padding is the space above the first field; its own margin would double it. */
 .schedule-dialog #scheduleFields > .plugin-field:first-child { margin-top: 0; }
@@ -5438,7 +5442,8 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .schedule-delete { margin-right: auto; color: var(--red); }
 /* #1833 first-run tour: the offer is one quiet line above the composer; a step is a ring around the
    real control (the rest of the window dimmed a little, still visible) and a card in the menus' style. */
-.tour-offer { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 6px; padding: 4px 4px 4px 12px; color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); }
+/* A dock row too; its two answers stay words, and wrap below the question in a narrow window. */
+.tour-offer { flex-wrap: wrap; padding-right: 6px; }
 .tour-offer[hidden] { display: none; }
 .tour-offer > span { flex: 1 1 auto; min-width: 0; }
 .tour-offer .btn-quiet { border: 0; background: transparent; box-shadow: none; color: var(--soft); padding: 3px 10px; min-height: 0; }
@@ -5465,11 +5470,12 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .turn-changes[open] > summary .turn-changes-chevron { transform: rotate(90deg); }
 .turn-changes-list { display: grid; gap: 6px; margin-top: 6px; }
 .turn-change { min-width: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--page); }
-.turn-change-head { display: flex; align-items: baseline; gap: 8px; padding: 7px 10px; cursor: pointer; list-style: none; font: calc(11px * var(--text-scale, 1)) var(--mono); }
+/* Code font for the path and counts only; the state word is the app's own font, in every language. */
+.turn-change-head { display: flex; align-items: baseline; gap: 8px; padding: 7px 10px; cursor: pointer; list-style: none; font-size: calc(11px * var(--text-scale, 1)); }
 .turn-change-head::-webkit-details-marker { display: none; }
-.turn-change-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.turn-change-count { flex: none; color: var(--soft); font-variant-numeric: tabular-nums; }
-.turn-change-state { flex: none; color: var(--faint); font-family: var(--sans, inherit); }
+.turn-change-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.turn-change-count { flex: none; color: var(--soft); font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.turn-change-state { flex: none; color: var(--faint); }
 .turn-change[data-state='unchanged'] .turn-change-path { color: var(--faint); }
 .turn-change > .unified-diff { border-top: 1px solid var(--line); }
 .turn-change > .unified-diff > .meta { margin: 0; padding: 8px 10px; }
