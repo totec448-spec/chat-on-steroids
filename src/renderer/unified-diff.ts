@@ -34,7 +34,9 @@ export function unifiedDiffLines(base: string, current: string, limit = 600): { 
     for (; next < endB; next++) if (current) add({ kind: 'added', old: null, next, text: b.line(next).text });
     if (truncated) break;
   }
-  if (!truncated) context(a.lines + (base.endsWith('\n') ? 0 : 1));
+  // A file's last real line: the empty one after a final newline is not a line, and an empty
+  // (created) file has none at all.
+  if (!truncated) context(base === '' ? 1 : a.lines + (base.endsWith('\n') ? 0 : 1));
   return { lines, truncated };
 }
 
