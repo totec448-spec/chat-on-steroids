@@ -1195,36 +1195,48 @@ describe("a new chat's first message held for its project's ChatGPT Project", ()
 });
 
 it("shows the chat's schedule as one quiet line, with Pause and Edit, and a missed run (#1826)", async () => {
-  const asked = Date.now() - 12_000;
-  const { w, live, append } = await boot([
-    { kind: 'user_message', seq: 1, origin: 1, time: asked, source: 'extension', messageId: 'q-sched', message: text('Check the issues') }
-  ]);
-  const api = (w as any).api;
-  const sessionId = summary(live.events).id;
-  const line = () => w.document.getElementById('scheduleLine')!;
-  // No schedule: no line.
-  api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: null }));
-  await append([]); await append([]);
-  expect(line().hidden).toBe(true);
-  const schedule = { id: '0b6c4e1c-1f1e-4a4f-9d39-3c2f0e1a2b3c', sessionId, text: 'Check the issues', repeat: { kind: 'weekdays', at: '09:00' },
-    until: null, paused: false, createdAt: Date.now() - 86_400_000, lastDueAt: null };
-  api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: schedule }));
-  api.pauseSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, paused: true } }));
-  await append([]); await append([]);
-  expect(line().hidden).toBe(false);
-  expect(line().textContent).toMatch(/^Scheduled · every weekday at 09:00( AM)? · next .+09:00/);
-  (w.document.getElementById('scheduleLinePause') as HTMLButtonElement).click();
-  await append([]);
-  expect(api.pauseSchedule).toHaveBeenCalledWith(sessionId, true);
-  api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, paused: true } }));
-  await append([]); await append([]);
-  expect(line().textContent).toMatch(/^Paused · every weekday at 09:00/);
-  expect(w.document.getElementById('scheduleLinePause')!.textContent).toBe('Resume');
-  // A run missed while the app was closed says so, beside the next time.
-  const missed = new Date(); missed.setHours(9, 0, 0, 0);
-  api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, missedDueAt: missed.getTime() } }));
-  await append([]); await append([]);
-  expect(line().textContent).toContain('missed 09:00');
+  // A Wednesday at 08:00, so the weekday run at 09:00 is later today: the time alone (2.1.47 round).
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(2026, 9, 28, 8, 0));
+  try {
+    const asked = Date.now() - 12_000;
+    const { w, live, append } = await boot([
+      { kind: 'user_message', seq: 1, origin: 1, time: asked, source: 'extension', messageId: 'q-sched', message: text('Check the issues') }
+    ]);
+    const api = (w as any).api;
+    const sessionId = summary(live.events).id;
+    const line = () => w.document.getElementById('scheduleLine')!;
+    // No schedule: no line.
+    api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: null }));
+    await append([]); await append([]);
+    expect(line().hidden).toBe(true);
+    const schedule = { id: '0b6c4e1c-1f1e-4a4f-9d39-3c2f0e1a2b3c', sessionId, text: 'Check the issues', repeat: { kind: 'weekdays', at: '09:00' },
+      until: null, paused: false, createdAt: Date.now() - 86_400_000, lastDueAt: null };
+    api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: schedule }));
+    api.pauseSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, paused: true } }));
+    await append([]); await append([]);
+    expect(line().hidden).toBe(false);
+    expect(line().textContent).toMatch(/^Scheduled · every weekday at 09:00( AM)? · next (\S+ )?09:00/);
+    // A next run later today is its time alone; on another day it names the day (2.1.47 round).
+    const next = w.document.getElementById('scheduleLineText')!.textContent!.match(/· next (.+)$/)![1]!;
+    expect(next).toMatch(/^09:00( AM)?$/);
+    // Friday 10:00: the next weekday run is Monday's, so the day is named (CodeRabbit).
+    vi.setSystemTime(new Date(2026, 9, 30, 10, 0));
+    await append([]); await append([]);
+    expect(w.document.getElementById('scheduleLineText')!.textContent).toMatch(/· next Mon,? 09:00( AM)?$/);
+    (w.document.getElementById('scheduleLinePause') as HTMLButtonElement).click();
+    await append([]);
+    expect(api.pauseSchedule).toHaveBeenCalledWith(sessionId, true);
+    api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, paused: true } }));
+    await append([]); await append([]);
+    expect(line().textContent).toMatch(/^Paused · every weekday at 09:00/);
+    expect(w.document.getElementById('scheduleLinePause')!.textContent).toBe('Resume');
+    // A run missed while the app was closed says so, beside the next time.
+    const missed = new Date(); missed.setHours(9, 0, 0, 0);
+    api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, missedDueAt: missed.getTime() } }));
+    await append([]); await append([]);
+    expect(line().textContent).toContain('missed 09:00');
+  } finally { vi.useRealTimers(); }
 });
 
 it('says when the send check holds an automatic message, with its reason', async () => {
