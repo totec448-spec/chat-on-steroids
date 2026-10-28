@@ -53,3 +53,11 @@ it('says ages and durations in plain English for Diagnostics and the model, up t
   expect([spokenDuration(45), spokenDuration(3 * hour + 2 * minute), spokenDuration(2 * day + 3 * hour + 40 * minute)])
     .toEqual(['45 s', '3 h 2 min', '2 d 3 h']);
 });
+
+it('writes counts and sizes at every size, never "1000k", "2000.0M", "NaN" or "2048 MB" (2.1.47 audit)', async () => {
+  const { compactCount, byteSize } = await import('../src/shared/age.js');
+  expect([0, 999, 1_000, 9_949, 9_960, 12_400, 999_499, 999_950, 1_250_000, 999_960_000, 2e9, -5, Number.NaN, Number.POSITIVE_INFINITY].map(compactCount))
+    .toEqual(['0', '999', '1.0k', '9.9k', '10k', '12k', '999k', '1.0M', '1.3M', '1.0B', '2.0B', '0', '0', '0']);
+  expect([0, 1023, 1024, 10_239, 1_048_575, 1_048_576, 2 * 1024 ** 3, 3 * 1024 ** 4, -1, Number.NaN].map(byteSize))
+    .toEqual(['0 B', '1023 B', '1.0 KB', '10 KB', '1.0 MB', '1.0 MB', '2.0 GB', '3.0 TB', '0 B', '0 B']);
+});

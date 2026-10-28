@@ -63,3 +63,27 @@ export function spokenDuration(totalSeconds: number): string {
   return elapsedText(totalSeconds, 2).replace(/(\d+)([dhms])\b/g, (_, value: string, unit: string) =>
     `${value} ${({ d: 'd', h: 'h', m: 'min', s: 's' } as Record<string, string>)[unit]}`);
 }
+
+/** One decimal under ten, whole numbers up to the next unit, then that unit: never "1000k". */
+function scaled(value: number, base: number, units: readonly string[], separator: string): string {
+  let index = 0, scaledValue = value;
+  for (;;) {
+    const shown = scaledValue < 9.95 ? scaledValue.toFixed(1) : String(Math.round(scaledValue));
+    if (Number(shown) < base || index === units.length - 1) return `${shown}${separator}${units[index]}`;
+    scaledValue /= base; index++;
+  }
+}
+
+/** A count in a few characters: "999", "1.0k", "12k", "1.3M", "2.0B"; anything not a count reads "0". */
+export function compactCount(value: number): string {
+  if (!Number.isFinite(value) || value < 0) return '0';
+  if (value < 1000) return String(Math.round(value));
+  return scaled(value / 1000, 1000, ['k', 'M', 'B', 'T'], '');
+}
+
+/** A file size: "1023 B", "1.0 KB", "10 KB", "1.0 MB", "2.0 GB", "3.0 TB"; anything not a size reads "0 B". */
+export function byteSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '0 B';
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  return scaled(bytes / 1024, 1024, ['KB', 'MB', 'GB', 'TB'], ' ');
+}

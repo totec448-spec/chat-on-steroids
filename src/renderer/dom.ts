@@ -1,4 +1,4 @@
-import { ageOf, type AgeUnit } from '../shared/age.js';
+import { ageOf, compactCount, type AgeUnit } from '../shared/age.js';
 import { currentLanguage, t, ui } from './i18n.js';
 /**
  * The handful of DOM helpers both panels need.
@@ -227,10 +227,9 @@ export function clockTime(atMs: number): string {
 }
 
 /** "1.2k", "3.4M" — for token and character counts that get large. */
+/** A count in a few characters: "999", "1.0k", "12k", "1.3M", "2.0B" (never "1000k" or "2000.0M"). */
 export function compactNumber(value: number): string {
-  if (value < 1000) return String(value);
-  if (value < 1_000_000) return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)}k`;
-  return `${(value / 1_000_000).toFixed(1)}M`;
+  return compactCount(value);
 }
 
 const cardMenuDocuments = new WeakSet<Document>();
