@@ -3,7 +3,9 @@ import { hasProviderDirective, resolvedCapture, withoutProviderDirectives } from
 import { completedDilText } from '../shared/dil-tables.js';
 import { markdownVisibleText } from '../shared/markdown-text.js';
 import { providerEntitiesAsMarkdown } from '../shared/content-reference.js';
-import { initChatSearch, type ChatSearch } from './chat-search.js';
+import { initChatSearch, type PaletteSetting, type ChatSearch } from './chat-search.js';
+import { type PaletteAction } from './palette.js';
+import { shortcutGroups } from './shortcuts-dialog.js';
 import { initChatFind } from './chat-find.js';
 import { initQuoteSelection, type QuoteSelection } from './quote-selection.js';
 import { initChatCycle } from './chat-cycle.js';
@@ -154,6 +156,8 @@ interface Deps {
   /** The renderer's single save path — reads every control, including ours. */
   save: () => Promise<boolean>;
   state: () => AppState | null;
+  /** #1884: what ⌘K offers besides chats that main.ts owns (Settings, Keyboard shortcuts, settings search). */
+  palette?: { actions(): PaletteAction[]; settings(query: string): PaletteSetting[] };
 }
 
 let deps: Deps;
@@ -9694,7 +9698,22 @@ export function initChat(next: Deps): void {
     recent: () => sessions
       .filter(entry => entry.origin?.kind !== 'worker' && entry.origin?.kind !== 'helper' && !isUnattributedSession(entry))
       .sort((a, b) => b.updatedAt - a.updatedAt)
-      .map(entry => ({ id: entry.id, title: entry.title }))
+      .map(entry => ({ id: entry.id, title: entry.title })),
+    // #1884 (Haz): a curated few, named and keyed as the menus and the shortcuts dialog name them.
+    actions: () => {
+      const rows = shortcutGroups(() => deps.state()?.config.ui.enterSends !== false).flatMap(group => group.rows);
+      const keyed = (label: () => string, run: () => void, available?: () => boolean): PaletteAction =>
+        ({ label, run, available, keys: () => rows.find(row => row.label() === label())?.keys() ?? [] });
+      return [
+        keyed(() => t('New chat'), () => $('newChat').click()),
+        keyed(() => t('Find in chat'), () => chatFind?.open(), () => selectedId !== null),
+        ...(['review', 'terminal', 'files', 'agents'] as const).map(view => keyed(
+          () => t(view === 'review' ? 'Review' : view === 'terminal' ? 'Terminal' : view === 'files' ? 'Files' : 'Sub-agents'),
+          () => docks.activate(view))),
+        ...(deps.palette?.actions() ?? [])
+      ];
+    },
+    settings: query => deps.palette?.settings(query) ?? []
   });
   $('sessionList').addEventListener('click', (event) => {
     const row = (event.target as HTMLElement).closest<HTMLElement>('[data-id]');

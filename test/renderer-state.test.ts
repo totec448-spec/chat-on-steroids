@@ -1705,6 +1705,53 @@ it('names a chat in place: Enter saves, Escape keeps the old name, empty restore
   await waitFor(() => expect(renameSession).toHaveBeenLastCalledWith(session.id, null));
 });
 
+it('adds a few matching actions and settings under the chats while typing in ⌘K, and none before (#1884, Haz)', async () => {
+  const searchSessions = vi.fn(async (query: string) => ({ ok: true, data: { results: query === 'review' ? [{ id: 'search-review-0001', title: 'Review notes', projectId: null }] : [], indexed: 1, total: 1 } }));
+  const mounted = await mountChat({}, [], { searchSessions });
+  const doc = mounted.window.document;
+  const field = doc.getElementById('chatSearch') as HTMLInputElement;
+  const results = doc.getElementById('searchResults')!;
+  const dialog = doc.getElementById('searchDialog') as HTMLDialogElement;
+  const type = async (text: string) => { field.value = text; field.dispatchEvent(new mounted.window.Event('input', { bubbles: true })); await waitFor(() => expect(searchSessions).toHaveBeenLastCalledWith(text)); await settle(); };
+  (doc.getElementById('searchChatsButton') as HTMLButtonElement).click();
+  await settle();
+  // Nothing typed: as before, no actions and no settings.
+  expect(results.querySelector('.is-action, .is-setting')).toBeNull();
+  await type('review');
+  const headings = () => [...results.querySelectorAll('.search-heading')].map(node => node.textContent);
+  // The chat comes first; the action after it, with the shortcut the shortcuts dialog shows.
+  const rows = [...results.querySelectorAll<HTMLElement>('.search-result')];
+  expect(rows[0]!.dataset.searchId).toBe('search-review-0001');
+  expect(headings()).toContain('Actions');
+  const action = results.querySelector<HTMLElement>('.is-action')!;
+  expect(action.querySelector('b')!.textContent).toBe('Review');
+  // As the shortcuts dialog prints it on this system (⌃⇧1 on macOS, Ctrl+Shift+1 elsewhere).
+  expect([...action.querySelectorAll('kbd')].map(key => key.textContent)).toEqual([expect.stringMatching(/^(⌃⇧|Ctrl\+Shift\+)1$/)]);
+  // A word matching no chat: no "No chats match" when an action or a setting matches.
+  await type('keyboard shortcuts');
+  expect(results.querySelector('.empty.search-status')).toBeNull();
+  (results.querySelector('.is-action') as HTMLButtonElement).click();
+  await waitFor(() => expect(dialog.open).toBe(false));
+  expect((doc.getElementById('shortcutsDialog') as HTMLDialogElement).open).toBe(true);
+  (doc.getElementById('shortcutsDialog') as HTMLDialogElement).close();
+  // A setting by its name opens its page and marks it, as Settings' own search does.
+  (doc.getElementById('searchChatsButton') as HTMLButtonElement).click();
+  await type('writing style');
+  expect(headings()).toContain('Settings');
+  const setting = results.querySelector<HTMLElement>('.is-setting')!;
+  expect(setting.querySelector('b')!.textContent).toBe('Writing style');
+  setting.click();
+  await waitFor(() => expect(dialog.open).toBe(false));
+  await waitFor(() => expect(doc.querySelector('.is-found')).not.toBeNull());
+  // Typing something nothing matches still says so.
+  (doc.getElementById('searchChatsButton') as HTMLButtonElement).click();
+  await type('zzqx');
+  expect(results.querySelector('.empty.search-status')?.textContent).toBe('No chats match');  // A chat search that fails still leaves the actions to pick from.
+  searchSessions.mockImplementationOnce(async () => ({ ok: false, error: 'busy' }) as never);
+  await type('terminal');
+  expect(results.querySelector('.is-action b')?.textContent).toBe('Terminal');
+});
+
 it('searches chats in a dialog opened beside the app name: recent chats first, then marked matches (#1117)', async () => {
   const base = { conversationId: null, chatIds: [], startedAt: 1, updatedAt: 2, endedAt: null, events: 0, userMessages: 0, toolCalls: 0,
     lastToolCallAt: null, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
