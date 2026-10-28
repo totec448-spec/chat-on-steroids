@@ -8754,6 +8754,10 @@ it("sums up what a finished answer changed, collapsed, counting only real change
     'src/app.ts+30 −5edited', 'src/new-page.ts+12created', 'old/helper.tsno net change', 'big.json+400 −2 (approx.)edited'
   ]);
   expect(rows[0]!.querySelector('summary')!.title).toBe('/repo/src/app.ts');
+  // Two approved roots with the same file: the shortened names would be equal, so both keep their root (CodeRabbit).
+  const { turnChangeLabels } = await import('../src/renderer/turn-changes.js');
+  expect(turnChangeLabels(['/repo-a/src/app.ts', '/repo-b/src/app.ts', '/repo-a/README.md', 'notes.md']))
+    .toEqual(['/repo-a/src/app.ts', '/repo-b/src/app.ts', 'README.md', 'notes.md']);
   // A file's net diff loads when its row opens; one the recording did not keep says so.
   rows[0]!.open = true; rows[0]!.dispatchEvent(new w.Event('toggle'));
   await settle();

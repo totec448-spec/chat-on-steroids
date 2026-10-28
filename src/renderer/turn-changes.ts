@@ -90,7 +90,8 @@ export function renderTurnChanges(options: {
     if (!reply || !reply.changes.length || !options.current() || !card.isConnected) return;
     const { changes, total } = reply;
     head.replaceChildren(el('span', 'turn-changes-title', () => headline(changes, total)), disclosureChevron('turn-changes-chevron'));
-    for (const change of changes) list.append(fileRow(change, options));
+    const labels = turnChangeLabels(changes.map(change => change.path));
+    changes.forEach((change, index) => list.append(fileRow(change, labels[index]!, options)));
     if (total > changes.length) list.append(el('p', 'meta', () => tn('and {0} more', 'and {0} more', total - changes.length)));
     if (options.openReview) {
       const review = el('button', 'btn btn-quiet turn-changes-review', () => t('Open in Review')) as HTMLButtonElement;
@@ -103,13 +104,22 @@ export function renderTurnChanges(options: {
   return card;
 }
 
-function fileRow(change: TurnFileChange, options: { sessionId: string; turnId: string; from: number; current: () => boolean }): HTMLElement {
+/**
+ * Each file named the way the answer's tool rows name it, without the approved root's virtual
+ * name; two files that would then read the same keep their roots, so the rows stay apart.
+ */
+export function turnChangeLabels(paths: readonly string[]): string[] {
+  const short = paths.map(path => path.startsWith('/') ? shortPath(path) : path);
+  return short.map((label, index) => short.filter(other => other === label).length > 1 ? paths[index]! : label);
+}
+
+function fileRow(change: TurnFileChange, label: string, options: { sessionId: string; turnId: string; from: number; current: () => boolean }): HTMLElement {
   const row = document.createElement('details');
   row.className = 'turn-change';
   row.dataset.state = change.state;
   const head = el('summary', 'turn-change-head');
-  // Named the way the answer's tool rows name it; the full path stays in the tooltip.
-  const path = el('span', 'turn-change-path', change.path.startsWith('/') ? shortPath(change.path) : change.path);
+  // The full path stays in the tooltip.
+  const path = el('span', 'turn-change-path', label);
   head.append(path);
   const shown = counts(change);
   if (shown && change.state !== 'unchanged') head.append(el('span', 'turn-change-count', () => counts(change)));
