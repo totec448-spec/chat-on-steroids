@@ -2974,10 +2974,14 @@ own close entry never reached (a changed ChatGPT browser, an app restart); an ap
 same way once `commandIds` no longer lists its command, as a worker that failed before its first
 message left one behind; the page check then compares the `clf` marker.
 `/status` also sends `inputSendingIds`: the open messages already handed to a browser (every state but
-`queued`, `sent`, `failed`, `cancelled`). Only these, or an id whose tab this browser is still preparing
-(`inputOpenings`), hold the extension's self-update as `sending`; a message that only waits in the
-queue does not (a blocked chat kept one for hours on 2026-10-28). An app that sends no
-`inputSendingIds` keeps the old rule: any id in `inputOpeningIds` holds it.
+`queued`, `sent`, `failed`, `cancelled`). Only these, or an id whose tab this browser is still opening
+or preparing (`inputOpenings` stage `opening`/`preparing`; a `ready` tab only kept for it does not
+count), hold the extension's self-update as `sending`; a message that only waits in the queue does
+not (a blocked chat kept one for hours on 2026-10-28). An app that sends no `inputSendingIds` keeps
+the old rule: any id in `inputOpeningIds` holds it. `/extension/update` re-checks at the last moment
+and answers `{ ready: false, hold: 'sending' }` while any message is in delivery; once it answers
+ready, `/input/claim` from that browser (`x-extension-browser`) hands out nothing for 20 s, and the
+extension's `deliverDesktopInputs` starts nothing while its reload is pending.
 Managed idle/retired/duplicate pruning records a successful removal against the exact tab,
 document, navigation epoch and conversation in the existing session-storage snapshot. Its
 lifecycle event carries a non-manual departure through the close outbox; it does not create
