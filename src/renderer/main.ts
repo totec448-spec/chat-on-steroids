@@ -255,7 +255,10 @@ function placePermissions(tab: string): void {
   if (permissionSurface.parentElement !== target) target.append(permissionSurface);
 }
 
+/** Set once the tour exists (below); leaving the chat screen ends a running tour quietly. */
+let stopTour: () => void = () => undefined;
 function showTab(name: string): void {
+  if (name !== 'chat') stopTour();
   if (name === 'skills') openSkillsLibrary();
   placePermissions(name);
   const library = name === 'plugins' || name === 'skills' || name === 'pets';
@@ -2791,6 +2794,7 @@ const tour = initTour({ markDone: async () => {
   toast(t("The tour choice couldn't be saved, so it may be offered again."));
   return false;
 } });
+stopTour = () => tour.stop();
 $('readyStart').addEventListener('click', () => {
   showTab('chat');
   if (state && state.config.ui.tourDone !== true && !tourAnswered) tour.offer();

@@ -3533,7 +3533,7 @@
   "Skip tour": "Пропустить тур",
   "Take the tour again": "Пройти тур снова",
   "A project is a folder you approve, and its chats start there.": "Проект — это папка, к которой вы дали доступ; её чаты начинаются там.",
-  "Review shows every change ChatGPT made to your files.": "В «Проверке» видно каждое изменение, которое ChatGPT внёс в ваши файлы.",
+  "This panel holds Review, with every change ChatGPT made to your files.": "В этой панели есть «Проверка» — каждое изменение, которое ChatGPT внёс в ваши файлы.",
   "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "Напишите здесь задачу и выберите «Обычный», «План» или «Цель» — как ChatGPT будет над ней работать.",
   "Tour": "Тур",
   "The tour choice couldn't be saved, so it may be offered again.": "Не удалось сохранить ваш выбор насчёт тура, поэтому он может быть предложен снова."
