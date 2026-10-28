@@ -2836,6 +2836,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         browserPreferenceRequest: pendingBrowserPreferenceRequest(),
         projectCreateRequests: otherBrowser ? [] : await pendingProjectCreates(),
         inputOpeningIds: inputRows.filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).map(row => row.id),
+        // The ones being sent right now (handed to a browser), not those that only wait in the queue:
+        // only these hold the extension's self-update (a blocked chat can keep a queued one for hours).
+        inputSendingIds: inputRows.filter(row => !['queued', 'sent', 'failed', 'cancelled'].includes(row.state)).map(row => row.id),
         // A message for the running turn goes in while a call runs: ChatGPT keeps that call's result (#1231).
         // An existing chat waits out a new tunnel-client's takeover, or its next call waits ~2 min (#1220).
         inputs: [...pendingInputs.filter(input => !refusedAsStale && (!input.conversationId || input.directTurn || runningToolCalls(input.conversationId) === 0) &&

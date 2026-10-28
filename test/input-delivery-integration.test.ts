@@ -217,6 +217,21 @@ it('logs why the browser could not send a message, and refreshes the models on a
   expect(pendingChatModelRequest(), 'a rejected model choice did not ask for the model list again').not.toBeNull();
 });
 
+// 2.1.47 round: the extension held its self-update for hours behind a message that only waited in the queue.
+it('lists a queued message as open but not as being sent until a browser claims it', async () => {
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Queued, not sending', conversationId });
+  const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Waits its turn' });
+  const status = async () => (await post('/status', { openConversations: [] })).body;
+  expect((await status()).inputOpeningIds).toContain(row.id);
+  expect((await status()).inputSendingIds).not.toContain(row.id);
+  expect((await post('/input/claim', { id: row.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input).toMatchObject({ id: row.id });
+  expect((await status()).inputSendingIds).toContain(row.id);
+  await input.cancelInput(row.id);
+  expect((await status()).inputSendingIds).not.toContain(row.id);
+  expect((await status()).inputOpeningIds).not.toContain(row.id);
+});
+
 it('says why a page withdrew a Continue and ends it after three minutes of withdrawals (#820)', async () => {
   // Measured in #820: a page released the same automatic Continue about once a second for many
   // minutes, its text left in the composer, and the log never said why after the first time.

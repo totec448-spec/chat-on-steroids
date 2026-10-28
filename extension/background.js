@@ -3244,7 +3244,7 @@ function updatedByBrowser() {
   return typeof chrome.runtime.getBrowserInfo === 'function';
 }
 
-async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands) {
+async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands, liveSending = null) {
   if (extensionReloadPending) return;
   if (updatedByBrowser()) { extensionUpdateHold = offer ? 'browser-updates-itself' : null; return; }
   if (!offer || typeof offer.build !== 'string' || !/^[0-9a-f]{12}$/.test(offer.build)) { extensionUpdateHold = null; return; }
@@ -3252,7 +3252,13 @@ async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands) {
   if (!workerStampValue || workerStampValue === offer.build) { extensionUpdateHold = null; return; }
   // A chat with an agent or an active Goal is usually just waiting; only running work counts.
   if (offer.busy !== false) { extensionUpdateHold = 'app-busy'; return; }
-  if (liveOpenings.size) { extensionUpdateHold = 'sending'; return; }
+  // Only a message being sent holds the update: one the browser claimed, or one whose tab this browser is
+  // still preparing. A message that only waits in the queue (a blocked chat can keep one for hours) is
+  // offered again after the reload. An app that does not list the ones being sent keeps the old rule.
+  const sending = liveSending
+    ? liveSending.size > 0 || [...liveOpenings].some(id => Object.prototype.hasOwnProperty.call(inputOpenings, id))
+    : liveOpenings.size > 0;
+  if (sending) { extensionUpdateHold = 'sending'; return; }
   if (liveCommands.size) { extensionUpdateHold = 'commands'; return; }
   const attempt = `${workerStampValue}>${offer.build}`;
   if ((await chrome.storage.local.get('extensionReloadAttempt')).extensionReloadAttempt === attempt) { extensionUpdateHold = 'already-tried'; return; }
@@ -3319,7 +3325,8 @@ async function maintainOnce() {
   const liveChats = new Set(Array.isArray(reply.data.nonDiscardableConversations) ? reply.data.nonDiscardableConversations : []);
   const liveOpenings = new Set(Array.isArray(reply.data.inputOpeningIds) ? reply.data.inputOpeningIds : []);
   const liveCommands = new Set(Array.isArray(reply.data.commandIds) ? reply.data.commandIds : []);
-  void reloadForExtensionUpdate(reply.data.extensionUpdate, liveOpenings, liveCommands).catch(() => undefined);
+  const liveSending = Array.isArray(reply.data.inputSendingIds) ? new Set(reply.data.inputSendingIds) : null;
+  void reloadForExtensionUpdate(reply.data.extensionUpdate, liveOpenings, liveCommands, liveSending).catch(() => undefined);
   void followApp(reply.data).catch(() => undefined);
   void revealChats(reply.data.reveals).catch(() => undefined);
   void followChat(reply.data.follow).catch(() => undefined);
