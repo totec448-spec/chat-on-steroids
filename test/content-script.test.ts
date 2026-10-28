@@ -2762,7 +2762,31 @@ describe('desktop input delivery and helper ownership', () => {
     const failure = live.sent.find(message => message.type === 'desktop_input' && message.fail);
     expect(failure?.error).toContain('Too many requests');
     expect(failure?.error).toContain('few minutes');
+    // ChatGPT's own limit, not a model the picker rejected: no model code (2.1.47 round).
+    expect(failure?.detail).toBeUndefined();
     expect(live.sent.some(message => message.type === 'desktop_input' && (message.ack || message.authorize))).toBe(false);
+  });
+
+  // CodeRabbit on #1900: errors() acknowledges a limit dialog the first time it reads it, so a dialog
+  // read and closed while the picker ran is gone by the time the failure is classified.
+  it('reports a provider limit that was read and closed during picker confirmation, not a model failure', async () => {
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => ({ ok: true, data: message.fail ? { ok: true } : { input: claimed({ model: 'gpt-5.6-sol', reasoningEffort: 'high' }) } })
+    });
+    const notice = live.document.createElement('div');
+    notice.setAttribute('role', 'dialog');
+    Object.defineProperty(notice, 'getClientRects', { value: () => [{ width: 400, height: 200 }] });
+    notice.innerHTML = '<h2>Too many requests</h2><p>We have temporarily limited access to conversations to protect your data. Please wait a few minutes.</p>';
+    (live.window as any).CLF_DOM.selectModelSettings = async () => {
+      live!.document.body.append(notice);
+      expect((live!.window as any).CLF_DOM.errors().some((error: any) => error.blocking)).toBe(true);
+      notice.remove();
+      return false;
+    };
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA })).toEqual({ ok: false });
+    const failure = live.sent.find(message => message.type === 'desktop_input' && message.fail);
+    expect(failure?.error).toContain('Too many requests');
+    expect(failure?.detail).toBeUndefined();
   });
 
   it('says a claimed message failed because ChatGPT deleted its chat, not because of the model', async () => {
@@ -2779,6 +2803,7 @@ describe('desktop input delivery and helper ownership', () => {
     expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA })).toEqual({ ok: false });
     expect(live.sent.find(message => message.type === 'desktop_input' && message.fail)?.error)
       .toBe('This chat was deleted in ChatGPT. Start a new chat to continue.');
+    expect(live.sent.find(message => message.type === 'desktop_input' && message.fail)?.detail).toBeUndefined();
     expect(live.sent).toContainEqual(expect.objectContaining({ type: 'conversation_deleted', conversationId: chatA }));
   });
 
@@ -2798,6 +2823,8 @@ describe('desktop input delivery and helper ownership', () => {
     expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: null })).toEqual({ ok: confirmed });
     expect(selectSettings).toHaveBeenCalledWith('gpt-5.6-sol', 'high', expect.any(Function));
     expect(sent).toHaveBeenCalledTimes(confirmed ? 1 : 0);
+    // A rejected choice carries a code the app reads in any page language (2.1.47 round).
+    if (!confirmed) expect(live.sent.find(message => message.type === 'desktop_input' && message.fail)?.detail).toBe('model-unconfirmed');
     expect(live.sent.filter(message => message.type === 'desktop_input' && message.ack)).toHaveLength(confirmed ? 1 : 0);
   });
 
@@ -24754,6 +24781,25 @@ describe('edit and resubmit (#365)', () => {
     expect(claims.filter(message => message.ack)).toEqual([expect.objectContaining({ messageId: edited, conversationId: chat })]);
     // The composer is never touched by an edit.
     expect(live!.document.querySelector('#prompt-textarea')!.textContent).toBe('');
+  });
+
+  it('reports a provider limit seen while the edit\'s model was being chosen, not a model failure (CodeRabbit)', async () => {
+    const { claims } = await editPage();
+    const notice = live!.document.createElement('div');
+    notice.setAttribute('role', 'dialog');
+    Object.defineProperty(notice, 'getClientRects', { value: () => [{ width: 400, height: 200 }] });
+    notice.innerHTML = '<h2>Too many requests</h2><p>We have temporarily limited access to conversations to protect your data. Please wait a few minutes.</p>';
+    live!.window.CLF_DOM.selectModelSettings = async () => {
+      live!.document.body.append(notice);
+      expect(live!.window.CLF_DOM.errors().some((error: any) => error.blocking)).toBe(true);
+      notice.remove();
+      return false;
+    };
+    expect(await live!.runtimeMessage(offer())).toEqual({ ok: false });
+    const failure = claims.find(message => message.fail);
+    expect(failure?.error).toContain('Too many requests');
+    expect(failure?.detail).toBeUndefined();
+    expect(claims.some(message => message.authorize)).toBe(false);
   });
 
   it('says the question is gone when the page no longer shows it, and sends nothing', async () => {
