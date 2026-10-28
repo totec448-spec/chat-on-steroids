@@ -1,7 +1,8 @@
 /**
  * Alt+↑ / Alt+↓ (⌥ on macOS) moves the chat to your previous / next message (#1884, Haz's review):
  * keyboard only, no new chrome, the search results' own highlight. It never takes keys from a text
- * field, the terminal, an editor, an open dialog or a focused queued task (where Alt+↑/↓ moves it).
+ * field, the terminal, an editor, an open dialog, a focused queued task or the sidebar (where Alt+↑/↓
+ * moves a queued task or a chat).
  */
 
 /** A few pixels of rounding after a scroll still count as the message the view starts with. */
@@ -23,5 +24,5 @@ export function pickOwnMessage(tops: readonly number[], viewTop: number, directi
 export function keyBelongsElsewhere(target: EventTarget | null): boolean {
   const element = target instanceof Element ? target : null;
   if (!element) return false;
-  return !!element.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], .xterm, .cm-editor, dialog[open], .queued-input, .pending-message');
+  return !!element.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], .xterm, .cm-editor, dialog[open], .queued-input, .pending-message, .sidebar');
 }
