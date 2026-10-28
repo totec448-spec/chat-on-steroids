@@ -33,6 +33,7 @@ import { BROWSER_PICKUP_MAX_ATTEMPTS, recoveryMessage, recoveryBusyMs, rotationM
 import { invokedSkills } from '../../shared/skill-invocation.js';
 import { SKILL_ID_PATTERN } from '../../shared/skills.js';
 import { autoSelectManagedSkills } from '../skill-routing.js';
+import { SEND_CHECK_RETRY_MS, type SendCheckKind } from '../send-check.js';
 import { asksForImage } from './image-request.js';
 import { readyForWake } from '../worker-archive.js';
 
@@ -144,9 +145,27 @@ const entrySchema = inputArgs.extend({
   /** Store origin proving the canonical row was committed; never a wall-clock guess. */
   historySeq: z.number().int().positive().optional(),
   completedTurnId: z.string().max(256).optional(),
-  queueOrder: z.number().int().nonnegative().optional()
+  queueOrder: z.number().int().nonnegative().optional(),
+  /** #1794: the send check held this automatic send; it is asked again from `nextAt`. */
+  sendCheck: z.object({ attempt: z.number().int().positive(), nextAt: z.number(), reason: z.string().max(200), answered: z.boolean() }).optional()
 });
 export type InputEntry = z.infer<typeof entrySchema>;
+
+/**
+ * Which kind of automatic send a row is for the send check (#1794), or null for one a person sent,
+ * which is never asked about. Finish replies are asked before they are filed, as they can also
+ * reach ChatGPT in a tool result.
+ */
+export function automaticSendKind(row: Pick<InputEntry, 'recovery' | 'purpose' | 'afterStop'>): SendCheckKind | null {
+  if (row.recovery) return 'continue';
+  if (row.purpose === 'rotation' || row.afterStop) return 'fresh-turn';
+  return null;
+}
+
+/** Held by the send check until its next ask; clearing the check's address releases it at once. */
+export function heldBySendCheck(row: InputEntry, now = Date.now()): boolean {
+  return !!row.sendCheck && !!getConfig().ui.sendCheckUrl && row.sendCheck.nextAt > now;
+}
 const STATE = 'session-input';
 const TOOL_INPUT_TEXT_BYTES = 128000;
 /** A confirmed send receipt lands in seconds. This only bounds one that is never reported. */
@@ -563,7 +582,8 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
     if (row.state === 'queued' && row.mode === 'auto' && !row.opening && !row.finishOwner && !row.silenceBoundary &&
         (row.transportIntent === 'browser' || (!row.transportIntent && !row.sessionId)) &&
         !row.error?.startsWith('Message queued. ') &&
-        Date.now() - Math.max(row.createdAt, row.dueAt) >= 60_000)
+        // Time the person's send check held it is not the browser's: its minute starts when the hold ends (#1794).
+        Date.now() - Math.max(row.createdAt, row.dueAt, row.sendCheck?.nextAt ?? 0) >= 60_000)
       return { ...row, state: 'failed', pickupFailedAt: Date.now(), error: 'Not sent: the browser did not pick up this message within 60 seconds.' };
     // Preparation can expire before Send. Once authorized, this exact claim owns
     // the uncertain outcome until receipt or explicit cancellation, regardless of
@@ -1423,6 +1443,8 @@ export function pendingQueuedPickups(): Promise<Array<{ inputId: string; convers
       const row = candidates.find(row => manualInput(row) && row.silenceBoundary) ?? candidates[0]!;
       if (!row.sessionId) continue;
       if (row.state !== 'queued' || (!queuedFollowup(row) && !manualInput(row)) || row.dueAt > Date.now()) continue;
+      // A held send is waiting for the send check, not for a page that failed to pick it up.
+      if (heldBySendCheck(row)) continue;
       const session = await getSession(row.sessionId);
       if (!session?.conversationId || !queuedAfterTurn(row, session)) continue;
       const probe = row.silenceBoundary ? { ...row, silenceBoundary: { ...row.silenceBoundary, listenUntil: undefined } } : row;
@@ -1716,7 +1738,7 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
     const current = await load();
     for (const entry of ordered(current)) {
       if (companionOf(current, entry)) continue;
-      if (!preparable(entry) || entry.dueAt > Date.now()) continue;
+      if (!preparable(entry) || entry.dueAt > Date.now() || heldBySendCheck(entry)) continue;
       if (queuedFollowup(entry) && !(entry.state === 'browser' && entry.completedTurnId) && !(await completedStageBoundary(entry, current))) continue;
       if (!(await browserInputAllowed(entry))) continue;
       try {
@@ -1748,6 +1770,18 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
     return result;
   });
 }
+/** Holds a queued automatic send the send check refused, until its next ask in 30 s (#1794). */
+export function holdInputForSendCheck(id: string, attempt: number, reason: string, answered: boolean): Promise<boolean> {
+  return serial(async () => {
+    const current = await load();
+    const row = current.find(entry => entry.id === id);
+    if (!row || row.state !== 'queued' || !automaticSendKind(row)) return false;
+    await commit(current.map(entry => entry === row
+      ? { ...entry, sendCheck: { attempt, nextAt: Date.now() + SEND_CHECK_RETRY_MS, reason, answered } } : entry));
+    return true;
+  });
+}
+
 export function claimBrowserInput(id: string, owner: string, conversationId: string | null, requiresAuthorization = false): Promise<InputEntry | null> {
   return serial(async () => {
     const current = await load();
@@ -1765,7 +1799,9 @@ export function claimBrowserInput(id: string, owner: string, conversationId: str
     if (entry.projectId) await projectWorkspace(entry.projectId);
     if (entry.sessionId) {
       if (current.some((row) => !sameDelivery(entry, row) && row.sessionId === entry.sessionId && ['browser', 'tool'].includes(row.state))) return null;
-      const first = ordered(current).find((row) => row.sessionId === entry.sessionId && row.state === 'queued' && queuedFollowup(row) === queuedFollowup(entry) && row.dueAt <= Date.now());
+      // A row the send check holds waits apart: it never holds back a later message (#1794).
+      const first = ordered(current).find((row) => row.sessionId === entry.sessionId && row.state === 'queued' && queuedFollowup(row) === queuedFollowup(entry) &&
+        row.dueAt <= Date.now() && !heldBySendCheck(row));
       // Follow-ups were already elected by completedStageBoundary with live
       // transport eligibility. Direct messages retain their separate FIFO.
       if (entry.state === 'queued' && !queuedFollowup(entry) && first !== entry) return null;

@@ -174,6 +174,31 @@ it('saves the Continue prompt from Settings, keeps it through a stale save, and 
   expect(getConfig().ui.customContinue).toBeUndefined();
 });
 
+it('saves Personality and Writing style from Settings: own text, emptied, and back to default (#1856)', async () => {
+  const base = getConfig();
+  expect(await save({ ...base, ui: { ...base.ui, chatPersonality: '  Be brief.  ', chatWritingStyle: '' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui).toMatchObject({ chatPersonality: 'Be brief.', chatWritingStyle: '' });
+  expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui).toMatchObject({ chatPersonality: 'Be brief.', chatWritingStyle: '' });
+  const saved = getConfig();
+  expect(await save({ ...saved, ui: { ...saved.ui, chatPersonality: 'x'.repeat(8001) } }, saved)).toMatchObject({ ok: false });
+  expect(await save({ ...saved, ui: { ...saved.ui, chatPersonality: undefined, chatWritingStyle: undefined } }, saved)).toMatchObject({ ok: true });
+  expect(getConfig().ui.chatPersonality).toBeUndefined();
+  expect(getConfig().ui.chatWritingStyle).toBeUndefined();
+});
+
+it('saves the send check address from Settings, keeps it through a stale save, and clears it when emptied (#1794)', async () => {
+  const base = getConfig();
+  expect(await save({ ...base, ui: { ...base.ui, sendCheckUrl: ' http://127.0.0.1:8091/check ' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.sendCheckUrl).toBe('http://127.0.0.1:8091/check');
+  expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.sendCheckUrl).toBe('http://127.0.0.1:8091/check');
+  const saved = getConfig();
+  expect(await save({ ...saved, ui: { ...saved.ui, sendCheckUrl: 'x'.repeat(301) } }, saved)).toMatchObject({ ok: false });
+  expect(await save({ ...saved, ui: { ...saved.ui, sendCheckUrl: undefined } }, saved)).toMatchObject({ ok: true });
+  expect(getConfig().ui.sendCheckUrl).toBeUndefined();
+});
+
 it('names a chat with one clean line, and clears the name for an empty one (#1107)', async () => {
   expect(cleanSessionName('  Release\nprep\t\u0000now  ')).toBe('Release prep now');
   expect(cleanSessionName('x'.repeat(300))).toHaveLength(120);
@@ -187,6 +212,41 @@ it('names a chat with one clean line, and clears the name for an empty one (#110
   expect((await getSession(session.id))?.title).toBe('From ChatGPT');
   expect(await rename(42)).toMatchObject({ ok: false });
   expect(await handlers.get('sessions:rename')!(null, { id: 'missing-session-0001', title: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('Session not found') });
+});
+
+it('answers a turn\'s changed files and refuses a malformed request (#1827)', async () => {
+  const session = await createSession({ conversationId: 'ipc-turn-changes', title: 'Changes' });
+  const call = (name: string, payload: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  expect(await call('sessions:turnChanges', { sessionId: session.id, turnId: 'no-edits', from: 0 })).toEqual({ ok: true, data: { changes: [], total: 0 } });
+  expect(await call('sessions:turnFileDiff', { sessionId: session.id, turnId: 'no-edits', from: 0, path: 'a.ts' })).toEqual({ ok: true, data: null });
+  expect(await call('sessions:turnChanges', { sessionId: '../escape', turnId: 'x', from: 0 })).toMatchObject({ ok: false });
+  expect(await call('sessions:turnChanges', { sessionId: session.id, turnId: 'x', from: -1 })).toMatchObject({ ok: false });
+});
+
+it('reads a turn\'s edits once for its card and its files, again after the chat changes, and logs a refused request (CodeRabbit)', async () => {
+  const session = await createSession({ conversationId: 'ipc-turn-changes-reuse', title: 'Changes' });
+  const call = (name: string, payload: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  const store = await import('../src/main/session/store.js');
+  const logger = await import('../src/main/logger.js');
+  const reads = vi.spyOn(store, 'readEvents');
+  const warn = vi.spyOn(logger, 'logWarn');
+  try {
+    const request = { sessionId: session.id, turnId: 'reused', from: 0 };
+    await call('sessions:turnChanges', request);
+    await call('sessions:turnFileDiff', { ...request, path: 'a.ts' });
+    await call('sessions:turnFileDiff', { ...request, path: 'b.ts' });
+    expect(reads.mock.calls.filter(([id]) => id === session.id)).toHaveLength(1);
+    const { notifyChanged } = await import('../src/main/session/recorder.js');
+    notifyChanged(session.id);
+    // Change notices are batched for 400 ms.
+    await new Promise(resolve => setTimeout(resolve, 600));
+    await call('sessions:turnChanges', request);
+    expect(reads.mock.calls.filter(([id]) => id === session.id)).toHaveLength(2);
+    expect(await call('sessions:turnChanges', { sessionId: session.id, turnId: 'x', from: -1 })).toMatchObject({ ok: false });
+    expect(warn).toHaveBeenCalledWith('ipc: sessions:turnChanges refused: invalid_payload');
+    expect(await call('sessions:turnFileDiff', { sessionId: session.id, turnId: 'x', from: 0 })).toMatchObject({ ok: false });
+    expect(warn).toHaveBeenCalledWith('ipc: sessions:turnFileDiff refused: invalid_payload');
+  } finally { reads.mockRestore(); warn.mockRestore(); }
 });
 
 it('enabling strict chat allowlisting keeps existing chats untrusted', async () => {
