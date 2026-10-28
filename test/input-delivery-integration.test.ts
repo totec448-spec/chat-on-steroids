@@ -197,6 +197,26 @@ it('keeps the reason a recovery claim was released, and says it once', async () 
   } finally { clock.mockRestore(); }
 });
 
+// 2.1.47 round (VM, tab offline while sending): a typed message failed with "the requested model or
+// reasoning could not be confirmed" — shown in the chat, but not one line in the log. And the page
+// words that reason in its own language, so matching the English text never refreshed the models.
+it('logs why the browser could not send a message, and refreshes the models on a rejected choice in any language', async () => {
+  const { getLog } = await import('../src/main/logger.js');
+  const { pendingChatModelRequest } = await import('../src/main/chat-models.js');
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Model not confirmed', conversationId });
+  const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Check the issues' });
+  expect((await post('/input/claim', { id: row.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input).toMatchObject({ id: row.id });
+  const said = 'Das gewünschte Modell oder die Denkstufe ließ sich nicht bestätigen';
+  expect((await post('/input/fail', { id: row.id, owner: 'a-document', error: said, detail: 'model-unconfirmed' })).body.ok).toBe(true);
+  expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ state: 'failed', error: said });
+  const lines = getLog().filter(entry => entry.message.includes(row.id) && entry.message.includes('could not send'));
+  expect(lines, 'the failure was not logged').toHaveLength(1);
+  expect(lines[0]!.message).toContain(said);
+  expect(lines[0]!.message).toContain('model-unconfirmed');
+  expect(pendingChatModelRequest(), 'a rejected model choice did not ask for the model list again').not.toBeNull();
+});
+
 it('says why a page withdrew a Continue and ends it after three minutes of withdrawals (#820)', async () => {
   // Measured in #820: a page released the same automatic Continue about once a second for many
   // minutes, its text left in the composer, and the log never said why after the first time.

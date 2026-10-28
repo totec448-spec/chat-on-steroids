@@ -2250,6 +2250,12 @@ export function failBrowserInput(id: string, owner: string, error: string, detai
     await commit(current.map((row) => sameDelivery(entry, row) ? pickupCancelled
       ? withoutSilenceClaim(row, row === entry && preserveBoundary)
       : { ...row, state: entry.companionInputId ? 'cancelled' : 'failed', error: error.slice(0, 200) } : row));
+    // Every other failure is said once here, after it is recorded, with the page's reason and code:
+    // the chat showed it, the log did not (2.1.47 round).
+    if (error !== 'After-turn pickup was withdrawn before Send.') {
+      logWarn(`input ${entry.id}: the browser could not send it — ${error.slice(0, 200)}${detail ? ` (${detail.slice(0, 80)})` : ''}; ` +
+        (entry.companionInputId ? 'cancelled with its companion' : 'reported as not sent'));
+    }
     decisionWaiters.get(id)?.reject(new Error('goal_browser_send_failed: ' + error.slice(0, 200)));
     decisionWaiters.delete(id);
     return true;
