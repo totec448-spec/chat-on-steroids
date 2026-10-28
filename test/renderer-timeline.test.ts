@@ -4131,6 +4131,30 @@ it('offers Stop for a turn the page still holds after the app stopped counting i
   expect(send.dataset.action).toBe('send');
 });
 
+it('stops a held turn from the button with Plan armed, and stops nothing else when that turn changed meanwhile (CodeRabbit)', async () => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  const stop = vi.fn(async () => ({ ok: true, data: {} }));
+  const plan = vi.fn(async () => ({ ok: true, data: null }));
+  api.stopSessionTurn = stop; api.draftTaskPlan = plan;
+  const controls = (turns: { activeTurnId: string | null; heldTurnId: string | null }) => async (id: string) => ({ ok: true,
+    data: { sessionId: id, conversationId: 'chat-a', automation: 'off', objective: '', finishHeld: false, blocked: '', job: null, ...turns } });
+  api.getSessionControls = controls({ activeTurnId: null, heldTurnId: 'page-held-turn' });
+  await append([]); await append([]);
+  (w.document.getElementById('createPlan') as HTMLButtonElement).click();
+  await settle();
+  const send = w.document.getElementById('chatSend') as HTMLButtonElement;
+  expect(send.dataset.action).toBe('stop');
+  send.click(); await settle();
+  expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'page-held-turn');
+  expect(plan).not.toHaveBeenCalled();
+  // Shown for the held turn, but by the time it is read again a different turn runs: that one is not stopped.
+  stop.mockClear();
+  api.getSessionControls = controls({ activeTurnId: 'replacement-turn', heldTurnId: null });
+  send.click(); await settle();
+  expect(stop).not.toHaveBeenCalled();
+});
+
 describe('Esc in the empty composer during a turn', () => {
   const esc = (w: JSDOM['window'], init: KeyboardEventInit = {}) => {
     const event = new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...init });

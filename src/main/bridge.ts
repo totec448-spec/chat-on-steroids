@@ -2115,7 +2115,8 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
   const activeTurnId = session.browserRecoveryDismissedAt === undefined && session.activeTurnId &&
     (stopping || runningToolCalls(id) > 0 || (activityExpiry !== undefined ? activityExpiry !== null && activityExpiry > Date.now() :
       live?.activeTurnId === session.activeTurnId)) ? session.activeTurnId : null;
-  const heldTurnId = !activeTurnId && !blocked && session.activeTurnId && session.browserRecoveryDismissedAt === undefined &&
+  // A worker chat may still be stopped (CodeRabbit); only the person's own Block refuses it.
+  const heldTurnId = !activeTurnId && !isChatBlocked(id) && session.activeTurnId && session.browserRecoveryDismissedAt === undefined &&
     live?.activeTurnId === session.activeTurnId ? session.activeTurnId : null;
   const finishHeld = !blocked && await sessionFinishHeld(sessionId, activeTurnId, id);
   const draft = goalViewFor(id) ?? goalOutcomeFor(id);

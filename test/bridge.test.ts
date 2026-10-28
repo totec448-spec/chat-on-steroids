@@ -16854,6 +16854,20 @@ describe('app requests to stop one exact active turn', () => {
     ] } });
     expect((await request('GET', '/status')).body.repairs).not.toEqual(expect.arrayContaining([expect.objectContaining({ conversationId })]));
   });
+  it('offers Stop for a worker chat\'s held turn too (CodeRabbit)', async () => {
+    const { stopSessionTurn, sessionControlsFor } = await import('../src/main/bridge.js');
+    const conversationId = 'e5555555-aaaa-4bbb-8ccc-111111111111';
+    vi.useFakeTimers();
+    try {
+      spawn({ workers: [{ task: 'work until the user stops this turn' }], caller: { conversationId: PRIME_CHAT } });
+      expect(bindConversation('worker-1', conversationId)).toBe(true);
+      const sessionId = await active(conversationId, 'worker-held-turn');
+      await vi.advanceTimersByTimeAsync(3 * 60 * 60_000);
+      const controls = await sessionControlsFor(sessionId);
+      expect(controls).toMatchObject({ activeTurnId: null, blocked: 'worker', heldTurnId: 'worker-held-turn' });
+      expect(await stopSessionTurn(sessionId, 'worker-held-turn')).toMatchObject({ stopPending: true });
+    } finally { vi.useRealTimers(); }
+  });
   it('persists one request, disables automation and releases finish without declaring the turn ended', async () => {
     const { stopSessionTurn, setSessionAutomation } = await import('../src/main/bridge.js');
     const conversationId = 'e1111111-aaaa-4bbb-8ccc-111111111111';
