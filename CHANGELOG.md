@@ -55,6 +55,7 @@ A chat can send itself a message on a schedule. Each answer that edited files sh
 - **A finished Goal** still says "Goal reached" after the app restarts, instead of "Pursuing goal".
 - **A chat whose answer ChatGPT stopped showing** (for example while ChatGPT limits loading its history) now offers Stop, so your next message can go out.
 - **A new file in Review and in the edit cards** no longer shows an empty extra line under its content.
+- **With Goal response source set to Offline,** Goal again recognizes its continue or complete marker in answers that used tools.
 
 ## [2.1.46] — Phone notifications, a settings backup, keys kept from ChatGPT, and high contrast
 
