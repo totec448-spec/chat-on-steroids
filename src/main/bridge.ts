@@ -10204,6 +10204,7 @@ async function takePendingRepairs(
     // The card can appear during the asynchronous progress/authority reads above.
     const heldByApproval = repair.reason === 'unattributed' && approvalCardWaiting(conversationId);
     if (heldByApproval && repairsInFlight.get(conversationId) === repair && !repair.claimed) {
+      await updateRepairProgress(conversationId, repair, APPROVAL_WAITING_TEXT);
       repair.state = 'queued';
       logInfo(`bridge: holding the unattributed refresh for ${conversationId}: ChatGPT's tool approval card is waiting for the user`);
     }
