@@ -3459,5 +3459,17 @@
   "Touched {0} files, no net change": "{0} arquivos mexidos, nenhuma mudança líquida",
   "Touched {0} files, no net change|one": "{0} arquivo mexido, nenhuma mudança líquida",
   "Touched {0} files, no net change|many": "{0} de arquivos mexidos, nenhuma mudança líquida",
-  "The request was not valid.": "A solicitação não era válida."
+  "The request was not valid.": "A solicitação não era válida.",
+  "Needs your answer in ChatGPT": "Precisa da sua resposta no ChatGPT",
+  "A one-minute look at the composer, projects and Review.": "Uma olhada de um minuto no editor, nos projetos e na Revisão.",
+  "New here? Take a 1-minute tour.": "Novo por aqui? Faça o tour de 1 minuto.",
+  "No thanks": "Não, obrigado",
+  "Show me": "Mostre-me",
+  "Skip tour": "Pular tour",
+  "Take the tour again": "Fazer o tour de novo",
+  "A project is a folder you approve, and its chats start there.": "Um projeto é uma pasta que você aprova, e as conversas dele começam lá.",
+  "This panel holds Review, with every change ChatGPT made to your files.": "Este painel tem a Revisão, com cada alteração que o ChatGPT fez nos seus arquivos.",
+  "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "Escreva sua tarefa aqui e escolha Normal, Plano ou Goal para o jeito como o ChatGPT trabalha nela.",
+  "Tour": "Tour",
+  "The tour choice couldn't be saved, so it may be offered again.": "Não foi possível salvar sua escolha sobre o tour, então ele pode ser oferecido de novo."
 }

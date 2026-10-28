@@ -3329,5 +3329,17 @@
   "and {0} more": "và {0} tệp khác",
   "{0} more not listed": "còn {0} tệp không liệt kê",
   "Touched {0} files, no net change": "Đã chạm {0} tệp, không có thay đổi thực",
-  "The request was not valid.": "Yêu cầu không hợp lệ."
+  "The request was not valid.": "Yêu cầu không hợp lệ.",
+  "Needs your answer in ChatGPT": "Cần bạn trả lời trong ChatGPT",
+  "A one-minute look at the composer, projects and Review.": "Xem nhanh một phút về ô soạn thảo, dự án và Xem lại.",
+  "New here? Take a 1-minute tour.": "Bạn mới dùng? Hãy xem hướng dẫn 1 phút.",
+  "No thanks": "Không, cảm ơn",
+  "Show me": "Cho tôi xem",
+  "Skip tour": "Bỏ qua hướng dẫn",
+  "Take the tour again": "Xem lại hướng dẫn",
+  "A project is a folder you approve, and its chats start there.": "Dự án là một thư mục bạn cho phép, và các cuộc trò chuyện của nó bắt đầu ở đó.",
+  "This panel holds Review, with every change ChatGPT made to your files.": "Bảng này có Xem lại, với mọi thay đổi ChatGPT đã làm với tệp của bạn.",
+  "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "Viết nhiệm vụ của bạn ở đây và chọn Bình thường, Plan hoặc Goal cho cách ChatGPT làm việc.",
+  "Tour": "Hướng dẫn",
+  "The tour choice couldn't be saved, so it may be offered again.": "Không lưu được lựa chọn về phần hướng dẫn, nên nó có thể được đề xuất lại."
 }

@@ -3524,5 +3524,17 @@
   "Touched {0} files, no net change|one": "Затронут {0} файл, итоговых изменений нет",
   "Touched {0} files, no net change|few": "Затронуто {0} файла, итоговых изменений нет",
   "Touched {0} files, no net change|many": "Затронуто {0} файлов, итоговых изменений нет",
-  "The request was not valid.": "Запрос недействителен."
+  "The request was not valid.": "Запрос недействителен.",
+  "Needs your answer in ChatGPT": "Ждёт вашего ответа в ChatGPT",
+  "A one-minute look at the composer, projects and Review.": "Минутный обзор поля ввода, проектов и проверки.",
+  "New here? Take a 1-minute tour.": "Впервые здесь? Пройдите тур за 1 минуту.",
+  "No thanks": "Нет, спасибо",
+  "Show me": "Показать",
+  "Skip tour": "Пропустить тур",
+  "Take the tour again": "Пройти тур снова",
+  "A project is a folder you approve, and its chats start there.": "Проект — это папка, к которой вы дали доступ; её чаты начинаются там.",
+  "This panel holds Review, with every change ChatGPT made to your files.": "В этой панели есть «Проверка» — каждое изменение, которое ChatGPT внёс в ваши файлы.",
+  "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "Напишите здесь задачу и выберите «Обычный», «План» или «Цель» — как ChatGPT будет над ней работать.",
+  "Tour": "Тур",
+  "The tour choice couldn't be saved, so it may be offered again.": "Не удалось сохранить ваш выбор насчёт тура, поэтому он может быть предложен снова."
 }

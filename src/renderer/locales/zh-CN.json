@@ -3329,5 +3329,17 @@
   "and {0} more": "还有 {0} 个",
   "{0} more not listed": "另有 {0} 个未列出",
   "Touched {0} files, no net change": "改动了 {0} 个文件，没有净变化",
-  "The request was not valid.": "请求无效。"
+  "The request was not valid.": "请求无效。",
+  "Needs your answer in ChatGPT": "需要你在 ChatGPT 中回答",
+  "A one-minute look at the composer, projects and Review.": "用一分钟了解输入框、项目和审阅。",
+  "New here? Take a 1-minute tour.": "初次使用？看看 1 分钟导览。",
+  "No thanks": "不用了",
+  "Show me": "带我看看",
+  "Skip tour": "跳过导览",
+  "Take the tour again": "再看一次导览",
+  "A project is a folder you approve, and its chats start there.": "项目是你批准的文件夹，它的聊天从那里开始。",
+  "This panel holds Review, with every change ChatGPT made to your files.": "这个面板里有审阅，列出 ChatGPT 对你的文件做过的每一处更改。",
+  "Write your task here, and pick Normal, Plan or Goal for how ChatGPT works on it.": "在这里写下任务，并选择普通、计划或目标来决定 ChatGPT 的工作方式。",
+  "Tour": "导览",
+  "The tour choice couldn't be saved, so it may be offered again.": "无法保存你对导览的选择，所以可能会再次提示。"
 }
