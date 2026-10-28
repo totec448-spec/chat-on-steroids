@@ -713,6 +713,9 @@
   "content_turn_stop_requested": {
     "message": "Durdurma istendi; yerel sayfa artık üretim yapıldığını göstermiyor."
   },
+  "content_turn_stop_unseen": {
+    "message": "Burada durduruldu: ChatGPT bu yanıtı artık devam ediyor olarak göstermiyordu."
+  },
   "content_unknown_error": {
     "message": "bilinmeyen hata"
   },

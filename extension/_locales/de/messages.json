@@ -713,6 +713,9 @@
   "content_turn_stop_requested": {
     "message": "Stopp wurde angefordert; die Seite zeigt keine laufende Antwort mehr."
   },
+  "content_turn_stop_unseen": {
+    "message": "Hier gestoppt: ChatGPT zeigte diese Antwort nicht mehr als laufend."
+  },
   "content_unknown_error": {
     "message": "unbekannter Fehler"
   },

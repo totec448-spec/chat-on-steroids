@@ -713,6 +713,9 @@
   "content_turn_stop_requested": {
     "message": "Stop was requested; the native page no longer shows generation."
   },
+  "content_turn_stop_unseen": {
+    "message": "Stopped here: ChatGPT no longer showed this answer running."
+  },
   "content_unknown_error": {
     "message": "unknown error"
   },
