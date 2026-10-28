@@ -4905,6 +4905,70 @@ it('offers where the built-in browser minimizes to, only while it is the chosen 
   expect(mounted.calls.at(-1)?.ui.cosBrowserMinimize).toBe('tray');
 });
 
+// #1833: Setup's last step offers the first-run tour once; Settings replays it, never offering it again.
+it('offers the tour after Setup only while it was never taken, and replays it from Settings', async () => {
+  const done = vi.fn(async () => ({ ok: true, data: undefined }));
+  const mounted = await mountChat({}, [], { markTourDone: done });
+  const w = mounted.window;
+  const offer = w.document.getElementById('tourOffer')!;
+  w.document.getElementById('readyStart')!.click();
+  await settle();
+  expect(offer.hidden).toBe(false);
+  (w.document.getElementById('tourOfferNo') as HTMLButtonElement).click();
+  await settle();
+  expect(offer.hidden).toBe(true);
+  expect(done).toHaveBeenCalledTimes(1);
+  // Once taken, Start a chat offers nothing.
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, tourDone: true } } });
+  await settle();
+  w.document.getElementById('readyStart')!.click();
+  await settle();
+  expect(offer.hidden).toBe(true);
+  expect(w.document.getElementById('takeTour')!.textContent).toBe('Take the tour again');
+});
+
+// CodeRabbit on #1867: Settings' replay starts on the next frame; leaving chat before it must cancel it.
+it('cancels a tour replay that has not started yet when the person leaves the chat screen', async () => {
+  const done = vi.fn(async () => ({ ok: true, data: undefined }));
+  const mounted = await mountChat({}, [], { markTourDone: done });
+  const w = mounted.window;
+  const frames: FrameRequestCallback[] = [];
+  vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.push(callback); return frames.length; });
+  vi.stubGlobal('cancelAnimationFrame', (id: number) => { frames[id - 1] = () => undefined; });
+  try {
+    (w.document.getElementById('takeTour') as HTMLButtonElement).click();
+    expect(frames).toHaveLength(1);
+    (w.document.querySelector('button[data-tab="general"]') as HTMLButtonElement).click();
+    for (const frame of frames.splice(0)) frame(0);
+    await settle();
+    expect(done).not.toHaveBeenCalled();
+    expect(w.document.getElementById('tourCard')!.hidden).toBe(true);
+  } finally { vi.unstubAllGlobals(); }
+});
+
+// CodeRabbit on #1867: an answer in this window counts at once; a write that failed says so.
+it('offers the tour no second time in this window once answered, and says when that answer could not be saved', async () => {
+  const done = vi.fn(async () => ({ ok: true, data: undefined }));
+  const mounted = await mountChat({}, [], { markTourDone: done });
+  const w = mounted.window;
+  const offer = w.document.getElementById('tourOffer')!;
+  w.document.getElementById('readyStart')!.click();
+  await settle();
+  (w.document.getElementById('tourOfferNo') as HTMLButtonElement).click();
+  await settle();
+  // No state push since: Start again offers nothing.
+  w.document.getElementById('readyStart')!.click();
+  await settle();
+  expect(offer.hidden).toBe(true);
+  vi.resetModules();
+  const failing = await mountChat({}, [], { markTourDone: vi.fn(async () => ({ ok: false, error: 'disk full' })) });
+  failing.window.document.getElementById('readyStart')!.click();
+  await settle();
+  (failing.window.document.getElementById('tourOfferNo') as HTMLButtonElement).click();
+  await settle();
+  expect([...failing.window.document.querySelectorAll('.toast')].map(node => node.textContent)).toContain("The tour choice couldn't be saved, so it may be offered again.");
+});
+
 // Codex's "Enter key behavior", in General.
 it('offers which key sends, starting at Enter, and saves Cmd/Ctrl+Enter', async () => {
   const mounted = await mountChat({});
