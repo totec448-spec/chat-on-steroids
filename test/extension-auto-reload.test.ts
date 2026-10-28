@@ -112,15 +112,28 @@ it('updates past a message that only waits in the queue, but not past one being 
   expect(claimed.reload).not.toHaveBeenCalled();
   expect(claimed.hold()).toBe('sending');
 
-  // A tab this browser is opening for the queued message counts: reloading would drop it mid-way.
-  const preparing = worker({ openings: { q: { tab: 7, stage: 'preparing' } } });
-  await preparing.run(undefined, { inputs: ['q'], sending: [] });
-  expect(preparing.reload).not.toHaveBeenCalled();
-  expect(preparing.hold()).toBe('sending');
+  // A tab this browser is opening or preparing for the queued message counts: reloading would drop it mid-way.
+  for (const stage of ['opening', 'preparing']) {
+    const preparing = worker({ openings: { q: { tab: 7, stage } } });
+    await preparing.run(undefined, { inputs: ['q'], sending: [] });
+    expect(preparing.reload).not.toHaveBeenCalled();
+    expect(preparing.hold()).toBe('sending');
+  }
+  // A tab only kept for it (ready, the send check holding the message) prepares nothing (CodeRabbit).
+  const kept = worker({ openings: { q: { tab: 7, stage: 'ready' } } });
+  await kept.run(undefined, { inputs: ['q'], sending: [] });
+  expect(kept.reload).toHaveBeenCalledTimes(1);
 
   // An app that does not list the messages being sent keeps the old, careful rule.
   const older = worker();
   await older.run(undefined, { inputs: ['q'] });
   expect(older.reload).not.toHaveBeenCalled();
   expect(older.hold()).toBe('sending');
+});
+
+it('waits when the app says a message went out since its last status (CodeRabbit on #1901)', async () => {
+  const h = worker({ prepared: { ready: false, hold: 'sending' } });
+  await h.run(undefined, { inputs: [], sending: [] });
+  expect(h.reload).not.toHaveBeenCalled();
+  expect(h.hold()).toBe('sending');
 });

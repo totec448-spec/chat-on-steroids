@@ -2258,6 +2258,9 @@ function offerDesktopInput(tabId, message) {
 
 async function deliverDesktopInputs(inputs, background, reusableConversations = [], activeIds, refreshRendering = async () => {}) {
   if (!Array.isArray(inputs)) return;
+  // A reload into a new build is under way: no tab is elected or message started now; the app offers
+  // them again to the reloaded extension (and refuses claims meanwhile).
+  if (extensionReloadPending) return;
   // Only the app's complete outbox projection retires spent opening authority.
   if (Array.isArray(activeIds)) {
     const active = new Set(activeIds);
@@ -3255,8 +3258,9 @@ async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands, liveS
   // Only a message being sent holds the update: one the browser claimed, or one whose tab this browser is
   // still preparing. A message that only waits in the queue (a blocked chat can keep one for hours) is
   // offered again after the reload. An app that does not list the ones being sent keeps the old rule.
+  // A tab only kept for a message (`ready`, the send check holding it) prepares nothing (CodeRabbit).
   const sending = liveSending
-    ? liveSending.size > 0 || [...liveOpenings].some(id => Object.prototype.hasOwnProperty.call(inputOpenings, id))
+    ? liveSending.size > 0 || [...liveOpenings].some(id => ['opening', 'preparing'].includes(inputOpenings[id]?.stage))
     : liveOpenings.size > 0;
   if (sending) { extensionUpdateHold = 'sending'; return; }
   if (liveCommands.size) { extensionUpdateHold = 'commands'; return; }
@@ -3272,6 +3276,8 @@ async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands, liveS
   extensionReloadPending = true;
   try {
     const prepared = await call('/extension/update', { method: 'POST', body: '{}' });
+    // The app saw a message go out since the last status: that holds the update, as one listed would.
+    if (prepared.ok && prepared.data?.hold === 'sending') { extensionUpdateHold = 'sending'; return; }
     if (!prepared.ok || prepared.data?.ready !== true || prepared.data.build !== offer.build) { extensionUpdateHold = 'folder-not-ready'; return; }
     extensionUpdateHold = null;
     await chrome.storage.local.set({ extensionReloadAttempt: attempt });

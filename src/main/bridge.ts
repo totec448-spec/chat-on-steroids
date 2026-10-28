@@ -724,6 +724,16 @@ function browserOf(req: http.IncomingMessage): string | null {
   return typeof id === 'string' && /^[a-z0-9]{16,64}$/.test(id) ? id : null;
 }
 const browserSeenAt = new Map<string, number>();
+/** Until when a browser's extension reloads into a new build; it takes no new message meanwhile. */
+const extensionReloads = new Map<string, number>();
+const EXTENSION_RELOAD_PAUSE_MS = 20_000;
+function extensionReloading(req: http.IncomingMessage): boolean {
+  const until = extensionReloads.get(browserOf(req) ?? '');
+  if (until === undefined) return false;
+  if (Date.now() < until) return true;
+  extensionReloads.delete(browserOf(req) ?? '');
+  return false;
+}
 /** How long a browser keeps a new chat it was handed after it stops polling. */
 const OPENING_CUSTODY_MS = 60_000;
 /** New-chat inputs and the one browser each was first handed to. */
@@ -2738,7 +2748,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   // The extension is idle and about to reload into the build this app ships: bring the folder
   // Chrome loads from up to date first, and say whether it now holds that build.
   if (route === '/extension/update' && req.method === 'POST') {
+    // A message claimed since the extension's last /status is being sent: its folder is not replaced
+    // under it. The extension reads `hold` and asks again on a later pass (CodeRabbit on #1901).
+    if ((await listInputs()).some(row => !['queued', 'sent', 'failed', 'cancelled'].includes(row.state))) {
+      logInfo('bridge: the extension update waits: a message is being sent');
+      return json(res, 200, { ready: false, hold: 'sending' }, origin);
+    }
     const prepared = prepareExtensionUpdate(extensionBuildOf(req));
+    // The extension reloads now: that browser takes no new message until it is back.
+    if (prepared?.ready) extensionReloads.set(browserOf(req) ?? '', Date.now() + EXTENSION_RELOAD_PAUSE_MS);
     if (prepared?.ready) logInfo(`bridge: extension folder updated to build ${prepared.build}; the extension reloads itself now`);
     else if (prepared) logWarn(`bridge: could not update the extension folder to build ${prepared.build}`);
     return json(res, 200, prepared ?? { ready: false }, origin);
@@ -3041,6 +3059,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // As /status: an existing chat waits until a new tunnel-client has taken over its route (#1220).
     if (target && tunnelRouteSettling()) return json(res, 200, { input: null }, origin);
     if (staleCompanion(req) || notChosenBrowser(req)) return json(res, 200, { input: null }, origin);
+    if (extensionReloading(req)) return json(res, 200, { input: null }, origin);
     if (!target && !chosenBuiltInBrowser(req) && openingHeldElsewhere(body.id, browserOf(req))) return json(res, 200, { input: null }, origin);
     // A new chat of a project with a native ChatGPT Project is claimed only from that Project's
     // own page, which the page names; the root or another Project is never its destination.

@@ -24,7 +24,9 @@ vi.mock('electron', () => ({
     decryptStringAsync: async (data: Buffer) => ({ result: data.toString(), shouldReEncrypt: false })
   }
 }));
-vi.mock('../src/main/extension-path.js', () => ({ extensionDir: () => process.cwd(), shippedExtensionBuild: () => null, extensionUpdateOffer: () => null, prepareExtensionUpdate: () => null }));
+const extensionPath = vi.hoisted(() => ({ prepare: (() => null) as (running: string | null) => { build: string; ready: boolean } | null }));
+vi.mock('../src/main/extension-path.js', () => ({ extensionDir: () => process.cwd(), shippedExtensionBuild: () => null, extensionUpdateOffer: () => null,
+  prepareExtensionUpdate: (running: string | null) => extensionPath.prepare(running) }));
 vi.mock('../src/main/connection.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/main/connection.js')>();
   return { ...actual, connect: async () => {}, getStatus: () => ({ ...actual.getStatus(), state: 'connected' }) };
@@ -230,6 +232,31 @@ it('lists a queued message as open but not as being sent until a browser claims 
   await input.cancelInput(row.id);
   expect((await status()).inputSendingIds).not.toContain(row.id);
   expect((await status()).inputOpeningIds).not.toContain(row.id);
+});
+
+// CodeRabbit on #1901: the extension's update decision and its delivery ran side by side, so a claim
+// could start while the folder was being replaced. The app, which holds every claim, closes that gap.
+it('refuses the extension update while a message is being sent, and new claims while the extension reloads', async () => {
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const prepare = vi.fn(() => ({ build: 'bbbbbbbbbbbb', ready: true }));
+  extensionPath.prepare = prepare;
+  try {
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'Update during a send', conversationId });
+    const first = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Being sent' });
+    expect((await post('/input/claim', { id: first.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input).toMatchObject({ id: first.id });
+    // Claimed since the extension's last /status: the folder is not replaced under it.
+    expect((await post('/extension/update', {})).body).toMatchObject({ ready: false, hold: 'sending' });
+    expect(prepare).not.toHaveBeenCalled();
+    await input.cancelInput(first.id);
+    expect((await post('/extension/update', {})).body).toMatchObject({ ready: true, build: 'bbbbbbbbbbbb' });
+    // The extension reloads now: it takes no new message until it is back.
+    const second = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'After the update' });
+    expect((await post('/input/claim', { id: second.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input).toBeNull();
+    now += 30_000;
+    expect((await post('/input/claim', { id: second.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input).toMatchObject({ id: second.id });
+    await input.cancelInput(second.id);
+  } finally { clock.mockRestore(); extensionPath.prepare = () => null; }
 });
 
 it('says why a page withdrew a Continue and ends it after three minutes of withdrawals (#820)', async () => {
