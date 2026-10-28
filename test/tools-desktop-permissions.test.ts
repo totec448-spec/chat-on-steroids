@@ -81,6 +81,26 @@ describe('macOS Desktop computer permission normalization', () => {
     ask.refusal = null;
   });
 
+  it('ends the step once its actions ran, before the verify poll, and only once when verification fails (#1804, CodeRabbit)', async () => {
+    // Input during the poll (up to 10 s) is the person's, not the step's: the step must be over by then.
+    const liveCaps = caps({ control: true, screen: true });
+    let computerHandler: ((input: any) => Promise<any>) | null = null;
+    registerDesktopTools({ ctx: { privacyScreenshots: false }, caps: liveCaps, exposedCaps: liveCaps, sessionToolsLive: false, sessionToolsExposed: false,
+      agentToolsLive: false, agentToolsExposed: false, findExposed: false,
+      register(name: string, _config: unknown, handler: (input: any) => Promise<any>) { if (name === 'computer') computerHandler = handler; },
+      guarded: vi.fn() } as never);
+    ask.asked.length = 0; ask.ended = 0;
+    let endedWhenVerifying = -1;
+    computer.actAndCapture.mockImplementationOnce((async (_actions: unknown, opts: { actionsDone?: () => void }) => {
+      opts.actionsDone?.();
+      endedWhenVerifying = ask.ended;
+      throw new Error('POSTCONDITION_FAILED: completed_count=1. VERIFY_TIMEOUT');
+    }) as never);
+    await computerHandler!({ actions: [{ type: 'click', x: 1, y: 2 }], verify: { until: 'window_exists', match: 'Saved', timeout_ms: 10_000 } }).catch(() => null);
+    expect(endedWhenVerifying).toBe(1);
+    expect(ask.ended).toBe(1);
+  });
+
   it('allows wait in a clipboard-only batch without demanding mouse/keyboard control', async () => {
     const liveCaps = caps({ clipboardRead: true });
     let computerHandler: ((input: any) => Promise<any>) | null = null;

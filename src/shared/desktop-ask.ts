@@ -8,7 +8,7 @@
  * app's last step ended. A system that cannot say when it was last used asks: someone who turned
  * this on is better asked once too often than taken over.
  */
-import { effectivePalette, paletteTokens, type AppearanceSettings, type AppearanceTheme } from './appearance.js';
+import { contrastRatio, effectivePalette, paletteTokens, type AppearanceSettings, type AppearanceTheme } from './appearance.js';
 
 export type DesktopAskMode = 'off' | 'active' | 'always';
 export const DESKTOP_ASK_MODES: readonly DesktopAskMode[] = ['off', 'active', 'always'];
@@ -62,6 +62,9 @@ export function desktopAskColors(appearance: AppearanceSettings, theme: Appearan
 } {
   const palette = effectivePalette(appearance, theme);
   const tokens = paletteTokens(palette.background, palette.accent, palette.contrast, appearance.highContrast === true);
-  return { background: tokens['--page'] ?? palette.background, accent: tokens['--blue'] ?? palette.accent, ink: tokens['--ink']!,
-    soft: tokens['--soft']!, edge: tokens['--edge']!, hover: tokens['--hover']! };
+  const background = tokens['--page'] ?? palette.background, ink = tokens['--ink']!;
+  // A hover shade that would make the ink hard to read (a mid-grey background) is left out: the
+  // button's border shows the hover instead (CodeRabbit on #1864).
+  const hover = contrastRatio(ink, tokens['--hover']!) >= 4.5 ? tokens['--hover']! : background;
+  return { background, accent: tokens['--blue'] ?? palette.accent, ink, soft: tokens['--soft']!, edge: tokens['--edge']!, hover };
 }

@@ -1459,6 +1459,8 @@ export async function actAndCapture(
       preferActiveWindow?: boolean;
     };
     verify?: VerificationSpec;
+    /** Runs once the actions are done, before the verify poll and the capture. */
+    actionsDone?: () => void;
   } = {}
 ): Promise<ActionResult & { screenshot: Screenshot | null; verification: VerificationResult | null }> {
   return exclusive(async () => {
@@ -1480,6 +1482,7 @@ export async function actAndCapture(
       }
     }
     const result = await actLocked(actions, opts);
+    opts.actionsDone?.();
     let verification: VerificationResult | null = null;
     if (opts.verify) {
       try {
