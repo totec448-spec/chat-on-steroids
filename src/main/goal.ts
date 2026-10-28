@@ -47,7 +47,7 @@ import { goalErrorKey, goalErrorMessage } from '../shared/goal-errors.js';
 import { userPromptText } from '../shared/user-prompt.js';
 import { planProgressText, type TaskProgressUpdate } from '../shared/task-progress.js';
 import { TaskRequestError } from './task-request.js';
-import { GOAL_MARKER_INSTRUCTION, templateGoalDecision } from '../shared/goal-templates.js';
+import { GOAL_MARKER_INSTRUCTION, templateGoalDecision, toolCallFootnote } from '../shared/goal-templates.js';
 import type { GoalBackend } from '../shared/types.js';
 import { defaultConfig, getConfig } from './config.js';
 import { getChatModels, refreshForUnoffered } from './chat-models.js';
@@ -903,6 +903,7 @@ export function goalObjectiveFor(conversationId: string): string {
 export function setGoalObjective(conversationId: string, text: string): string {
   invalidateGoalControlWrites(pendingGoalObjectives, [conversationId]);
   const goal = text.trim();
+  if (goal !== (goalObjectives.get(conversationId) ?? '')) forgetGoalOutcome(conversationId);
   goalObjectives.delete(conversationId);
   if (goal) goalObjectives.set(conversationId, goal);
   persistGoalObjectives();
@@ -927,6 +928,7 @@ export async function setGoalObjectiveNow(conversationId: string, text: string):
     return {
       snapshot: goalObjectivesSnapshot(next),
       publish: () => {
+        if (goal !== (goalObjectives.get(targetConversationId) ?? '')) forgetGoalOutcome(targetConversationId);
         goalObjectives.delete(targetConversationId);
         if (goal) goalObjectives.set(targetConversationId, goal);
         persistGoalObjectives();
@@ -974,6 +976,51 @@ export function applyGoalSwitch<T extends { enabled: boolean; mode: GoalMode }>(
   if (which === null || on === null) return goal;
   if (on) return { ...goal, enabled: true, mode: which };
   return goal.enabled && goal.mode === which ? { ...goal, enabled: false } : goal;
+}
+
+/**
+ * "The goal is met", per chat, kept across a restart (2.1.47 round): the in-memory draft that
+ * says so dies with the process, and the window then said "Pursuing goal" for a run that had
+ * ended (since 2.1.27). Only the met decision is kept, and only until that chat gets a newer
+ * draft, a switch change or a new objective. It never drives anything; it is what the window shows.
+ */
+export const GOAL_OUTCOMES_STATE = 'goal-outcomes';
+type GoalOutcomeRow = { turnId: string; model: string; backend: GoalBackend; at: number };
+export interface GoalOutcomesSnapshot {
+  version: 1;
+  savedAt: number;
+  outcomes: Array<{ conversationId: string } & GoalOutcomeRow>;
+}
+const goalOutcomes = new Map<string, GoalOutcomeRow>();
+const MAX_GOAL_OUTCOMES = 400;
+
+export function snapshotGoalOutcomes(): GoalOutcomesSnapshot {
+  return { version: 1, savedAt: Date.now(), outcomes: [...goalOutcomes.entries()].map(([conversationId, row]) => ({ conversationId, ...row })) };
+}
+
+export function restoreGoalOutcomes(snapshot: GoalOutcomesSnapshot | null): void {
+  goalOutcomes.clear();
+  if (!snapshot || snapshot.version !== 1 || !Array.isArray(snapshot.outcomes)) return;
+  for (const raw of snapshot.outcomes.slice(-MAX_GOAL_OUTCOMES)) {
+    if (!raw || typeof raw.conversationId !== 'string' || !/^[0-9a-z-]{8,256}$/i.test(raw.conversationId)) continue;
+    if (typeof raw.turnId !== 'string' || !raw.turnId || raw.turnId.length > 200 || typeof raw.model !== 'string' || raw.model.length > 200) continue;
+    if (raw.backend !== 'api' && raw.backend !== 'chatgpt' && raw.backend !== 'templates') continue;
+    goalOutcomes.set(raw.conversationId, { turnId: raw.turnId, model: raw.model, backend: raw.backend, at: Number.isSafeInteger(raw.at) ? raw.at : Date.now() });
+  }
+}
+
+function noteGoalMet(draft: GoalDraft): void {
+  // A draft for an objective changed while it ran did not decide about the new one (CodeRabbit).
+  if ((draft.objective ?? '') !== goalObjectiveFor(draft.conversationId)) return;
+  goalOutcomes.delete(draft.conversationId);
+  goalOutcomes.set(draft.conversationId, { turnId: draft.turnId, model: draft.model, backend: draft.backend, at: Date.now() });
+  // Oldest first in insertion order.
+  while (goalOutcomes.size > MAX_GOAL_OUTCOMES) goalOutcomes.delete(goalOutcomes.keys().next().value!);
+  writeDurableSoon(GOAL_OUTCOMES_STATE, snapshotGoalOutcomes());
+}
+
+function forgetGoalOutcome(conversationId: string): void {
+  if (goalOutcomes.delete(conversationId)) writeDurableSoon(GOAL_OUTCOMES_STATE, snapshotGoalOutcomes());
 }
 
 /** Durable state file for per-chat Goal/Loop switches. */
@@ -1156,7 +1203,8 @@ export async function setGoalSwitchNow(
       if (!before && [...goalSwitches.values()].filter(row => row.role === 'decision').length >= MAX_GOAL_SWITCHES) {
         throw new Error('goal_switch_capacity');
       }
-      const next = applyGoalSwitch(goalSwitchFor(targetConversationId), which, on);
+      const was = goalSwitchFor(targetConversationId);
+      const next = applyGoalSwitch(was, which, on);
       const staged = new Map(goalSwitches);
       staged.set(targetConversationId, { enabled: next.enabled, mode: next.mode,
         afterTurn: afterTurn ?? before?.afterTurn ?? false, at: Date.now() });
@@ -1165,6 +1213,8 @@ export async function setGoalSwitchNow(
         snapshot: goalSwitchesSnapshot(staged),
         publish: () => {
           publishGoalSwitches(staged);
+          // Only an accepted change ends the kept "goal is met"; saving it as it was does not (CodeRabbit).
+          if (was.enabled !== next.enabled || was.mode !== next.mode) forgetGoalOutcome(targetConversationId);
           notifyGoalChange();
           return { enabled: next.enabled, mode: next.mode };
         }
@@ -1301,7 +1351,11 @@ export function goalViewFor(conversationId: string, clientId?: string): GoalDraf
  */
 export function goalOutcomeFor(conversationId: string): GoalDraftView | null {
   const draft = drafts.get(conversationId);
-  return draft?.acknowledged && draft.stage === 'no-reply' ? view(draft) : null;
+  if (draft) return draft.acknowledged && draft.stage === 'no-reply' ? view(draft) : null;
+  // After a restart: the kept decision, with nothing to type and nothing to retry.
+  const kept = goalOutcomes.get(conversationId);
+  return kept ? { token: '', conversationId, turnId: kept.turnId, stage: 'no-reply', backend: kept.backend, model: kept.model,
+    text: '', reply: '', error: null, retryable: false } : null;
 }
 
 export async function retryGoalBrowserHelper(sourceSessionId: string, inputId: string): Promise<boolean> {
@@ -1539,6 +1593,7 @@ export async function claimGoalRecoveryStopNow(conversationId: string, replyId: 
 
 export function resetGoalStateForTests(): void {
   for (const draft of drafts.values()) draft.abort?.abort();
+  goalOutcomes.clear();
   resetGoalHelperSizeForTests();
   invalidateGoalControlWrites(pendingGoalObjectives);
   invalidateGoalControlWrites(pendingGoalSwitches);
@@ -1629,6 +1684,7 @@ export function startGoalDraft(input: StartGoalDraftInput): GoalDraftView {
     abort: null
   };
   drafts.set(input.conversationId, draft);
+  forgetGoalOutcome(input.conversationId);
   notifyGoalChange();
   if (!input.deferStart) beginGoalDraft(input.conversationId, draft.token);
   return view(draft);
@@ -1982,7 +2038,7 @@ async function run(draft: GoalDraft): Promise<void> {
   draft.abort = abort;
   const timer = setTimeout(() => abort.abort(new DOMException('Goal request timed out', 'TimeoutError')), REQUEST_TIMEOUT_MS);
   try {
-    const decision = draft.backend === 'templates' ? templateGoalDecision(messages.filter((message) => message.role === 'assistant').at(-1)?.content ?? '', Math.floor(Math.random() * 200), Math.floor(Math.random() * 200)) : await requestDrivingDecision({
+    const decision = draft.backend === 'templates' ? templateGoalDecision(templateDecisionText(messages), Math.floor(Math.random() * 200), Math.floor(Math.random() * 200)) : await requestDrivingDecision({
       backend: draft.backend,
       endpoint,
       reasoning,
@@ -2045,6 +2101,7 @@ async function run(draft: GoalDraft): Promise<void> {
         return settle(draft, 'failed', 'goal_helper_stop_unverified');
       }
       logInfo(`goal: ${draft.model} says the goal is met in ${draft.conversationId}; nothing was sent`);
+      if (drafts.get(draft.conversationId) === draft) noteGoalMet(draft);
       // Reaching the goal ends this Goal run, not the user's saved objective. Keeping the text
       // lets a reopened chat show what it was pursuing and lets a later manual correction such
       // as "that did not work" continue against the same objective. Nothing auto-restarts here:
@@ -2126,7 +2183,7 @@ export async function draftFastFollowup(sessionId: string, signal: AbortSignal =
   if (!objective && !messages.some(message => message.role === 'user')) throw new Error('No recorded user request is available for Goal');
   const prompt = mode === 'loop' ? settings.loopPrompt : objective ? settings.objectivePrompt : settings.prompt;
   const decision = backend === 'templates'
-    ? templateGoalDecision(messages.filter(message => message.role === 'assistant').at(-1)?.content ?? '', Math.floor(Math.random() * 200), Math.floor(Math.random() * 200))
+    ? templateGoalDecision(templateDecisionText(messages), Math.floor(Math.random() * 200), Math.floor(Math.random() * 200))
     : await requestDrivingDecision({ sourceSessionId: sessionId, backend, endpoint, reasoning: settings.reasoning, key: key ?? '', model: settings.model, mode,
     system: objective ? [prompt, goalObjectiveMessage(objective)] : [prompt],
     messages,
@@ -2576,6 +2633,18 @@ async function pauseRepeatingGoal(draft: GoalDraft, answer: string): Promise<voi
   settle(draft, 'no-reply');
 }
 
+/**
+ * An answer as the model wrote it, for messages the app added its tool-call note to (#1894). Kept
+ * beside the message, not in it: messages are serialized whole into the helper's prompt.
+ */
+const answerBeforeNote = new WeakMap<ChatMessage, string>();
+
+/** What the Offline marker check reads: the newest answer as written, without the app's own note. */
+export function templateDecisionText(messages: readonly ChatMessage[]): string {
+  const last = messages.filter(message => message.role === 'assistant').at(-1);
+  return last ? answerBeforeNote.get(last) ?? last.content : '';
+}
+
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
@@ -2776,8 +2845,10 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
   for (const [turn, at] of lastAnswerOfTurn) {
     const before = carried.get(turn) ?? 0;
     const count = (callsByTurn.get(turn) ?? 0) + before;
-    const continued = before ? `, ${before} of them before Chat On Steroids continued it in a fresh turn` : '';
-    ordered[at] = { ...ordered[at]!, content: `${ordered[at]!.content}\n\n[Chat On Steroids: ${count} tool call${count === 1 ? '' : 's'} ran in this turn${continued}. Arguments and results are not shown.]` };
+    const answer = ordered[at]!;
+    const noted = { ...answer, content: `${answer.content}\n\n${toolCallFootnote(count, before)}` };
+    answerBeforeNote.set(noted, answerBeforeNote.get(answer) ?? answer.content);
+    ordered[at] = noted;
   }
   for (const text of deliveredInput.slice(-5)) {
     const content = clip(userPromptText(text) ?? text, MAX_USER_MESSAGE_CHARS);

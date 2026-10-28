@@ -728,6 +728,9 @@
   "content_turn_stop_requested": {
     "message": "A interrupção foi solicitada; a página não mostra mais geração."
   },
+  "content_turn_stop_unseen": {
+    "message": "Interrompido aqui: o ChatGPT não mostrava mais esta resposta em andamento."
+  },
   "content_unknown_error": {
     "message": "erro desconhecido"
   },

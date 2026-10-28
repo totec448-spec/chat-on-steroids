@@ -107,7 +107,7 @@ import {
 import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS, type HandoffLength } from '../shared/handoff.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
 import { $, ago, clockTime, compactNumber, disclosureChevron, el, icon, run, setIcon, toast } from './dom.js';
-import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
+import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_REPAIR_DEFERRED_TEXT, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
 import { STRICT_REFUSAL_PROGRESS_PREFIX, UNPROVEN_WORKER_NOTICE, UNTRUSTED_NOTICE, UNTRUSTED_WORKER_NOTICE } from '../shared/trust-notices.js';
 import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
 import { createSearchPopup } from './search-popup.js';
@@ -118,7 +118,7 @@ import { initSharePage } from './share-page.js';
 import { initFeedbackDialog } from './feedback-dialog.js';
 import { createChatgptProjectPicker } from './chatgpt-project-picker.js';
 import { initScheduleDialog } from './schedule-dialog.js';
-import { nextRunAfter, type ScheduleRepeat } from '../shared/schedule.js';
+import { nextRunAfter, sameLocalDay, type ScheduleRepeat } from '../shared/schedule.js';
 
 const api = window.api;
 let chatSearch: ChatSearch | null = null;
@@ -2973,6 +2973,8 @@ function mergeDetailDelta(delta: SessionEvent[]): void {
 let controlsGeneration = 0;
 let controlledSessionId: string | null = null;
 let controlledTurnId: string | null = null;
+/** A turn the page still holds after the app stopped counting it as work: Stop only, no Working (2.1.47 round). */
+let controlledHeldTurnId: string | null = null;
 let controlledSelection = -1;
 let controlledStopPending = false;
 let controlledFinishWaiting = false;
@@ -3115,7 +3117,8 @@ function paintDeliveryControls(): void {
   if (canInject && explicitInjection && $<HTMLSelectElement>('sendMode').value === 'auto') $<HTMLSelectElement>('sendMode').value = 'tool';
   if (!canInject && !canSendDirectly && !queueAtFinish) $<HTMLSelectElement>('sendMode').value = 'auto';
   const pending = pendingComposerInput();
-  const stop = (working || !!pending) && !currentPreparedPlan() && !authoredComposerText().trim() && !(imageDrafts.get(draftKey())?.length);
+  const held = selectedId !== null && controlledSessionId === selectedId && controlledSelection === selectionGeneration && controlledHeldTurnId !== null;
+  const stop = (working || held || !!pending) && !currentPreparedPlan() && !authoredComposerText().trim() && !(imageDrafts.get(draftKey())?.length);
   // Hover selects delivery for the next message. Clicking the empty-composer
   // Stop still acts immediately; there is no second Stop action in the menu.
   $('sendOptions').hidden = !canInject && !canSendDirectly && !queueAtFinish;
@@ -3124,12 +3127,12 @@ function paintDeliveryControls(): void {
   send.disabled = !!preparedPlan && (preparedPlan.sending || preparedPlan.stages.some(stage => !stage.trim()));
   send.dataset.action = stop ? 'stop' : 'send';
   ui(send, 'aria-label', () => stop ? (controlledStopPending ? t("Stop requested") : t("Stop turn")) : t("Send message"));
-  if (stop && !working && pending) ui(send, 'aria-label', () => t("Cancel delivery"));
+  if (stop && !working && !held && pending) ui(send, 'aria-label', () => t("Cancel delivery"));
   const planAction = selectedId && !chatKnownIdle(selectedId) ? t("Queue plan at Session finish") : t("Start full plan");
   if (preparedPlan && !stop) send.setAttribute('aria-label', planAction);
   else if (planMode && !stop) ui(send, 'aria-label', () => t("Generate plan"));
   send.classList.toggle('is-plan-ready', !!preparedPlan && !stop);
-  ui(send, 'title', () => stop && !working && pending ? t("Cancel delivery") : preparedPlan && !stop ? planAction : planMode && !stop ? t("Click to generate plan") : '');
+  ui(send, 'title', () => stop && !working && !held && pending ? t("Cancel delivery") : preparedPlan && !stop ? planAction : planMode && !stop ? t("Click to generate plan") : '');
   send.classList.toggle('is-stop', stop);
   for (const button of $('sendOptions').querySelectorAll<HTMLElement>('[data-delivery]')) {
     button.setAttribute('aria-checked', String(button.dataset.delivery === (nativeFiles && working && $<HTMLSelectElement>('sendMode').value !== 'tool' ? 'after-turn' : $<HTMLSelectElement>('sendMode').value)));
@@ -3441,14 +3444,14 @@ async function refreshSessionControls(): Promise<void> {
     for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
   }
   paintAutomationSwitch();
-  if (!id) { controlledSessionId = null; controlledTurnId = null; controlledPageless = false; paintDeliveryControls(); menu.hidden = false;
+  if (!id) { controlledSessionId = null; controlledTurnId = null; controlledHeldTurnId = null; controlledPageless = false; paintDeliveryControls(); menu.hidden = false;
     $<HTMLTextAreaElement>('sessionObjective').disabled = false;
     paintTaskActions();
     for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
     return; }
   const opening = pendingComposerInputs.find(row => row.opening && row.sessionId === id && ['queued', 'browser'].includes(row.state));
   if (!sessions.find(row => row.id === id)?.conversationId) {
-    controlledSessionId = id; controlledSelection = selectionGeneration; controlledTurnId = null;
+    controlledSessionId = id; controlledSelection = selectionGeneration; controlledTurnId = null; controlledHeldTurnId = null;
     controlledCanInject = false; controlledCanSendDirectly = false; controlledQueueAtFinish = false;
     controlledStopPending = false; controlledFinishWaiting = false; controlledPageless = false;
     menu.hidden = false;
@@ -3469,6 +3472,7 @@ async function refreshSessionControls(): Promise<void> {
   controlledSessionId = id;
   controlledSelection = selectionGeneration;
   controlledTurnId = controls?.activeTurnId ?? null;
+  controlledHeldTurnId = controls?.heldTurnId ?? null;
   goalDraftView = controls?.goalDraft ?? null;
   goalWaitView = controls?.goalWait ?? null;
   finishGoalDraftView = controls?.finishGoalDraft ?? null;
@@ -5400,6 +5404,11 @@ function approvalRowText(text: string): string {
   return text;
 }
 
+function repairRowText(text: string): string {
+  return text === APPROVAL_REPAIR_DEFERRED_TEXT
+    ? t('Reload was deferred because ChatGPT showed a tool approval card.') : text;
+}
+
 /** A strict-trust notice in the interface language; older wordings stay as recorded. Literal keys for the catalog audit. */
 function trustNoticeText(text: string): string {
   if (text === UNTRUSTED_NOTICE) return t("A tool call from an untrusted chat was refused. To allow it, open this chat's ⋯ menu in the sidebar (or right-click its row) and choose Trust chat.");
@@ -5529,6 +5538,7 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
         return el('p', 'meta is-progress', () => t(goalErrorMessage('goal_helper_stop_unverified')));
       }
       if (event.progressId?.startsWith(STRICT_REFUSAL_PROGRESS_PREFIX)) return el('p', 'meta is-progress', () => trustNoticeText(event.message.text));
+      if (event.source === 'app' && event.progressId?.startsWith('browser-repair:')) return el('p', 'meta is-progress', () => repairRowText(event.message.text));
       if (!event.progressId?.startsWith(APPROVAL_PROGRESS_PREFIX)) return el('p', 'meta is-progress', event.message.text);
       // ChatGPT's own tool approval card stands in this chat's page (approval-wait.ts). The app
       // writes the English source; only the user can answer the card, so the row opens the page.
@@ -6844,7 +6854,7 @@ function paintRecoveryStatus(): boolean {
   if (host.hidden) return paintRecoveryVerdict(host, sessionId);
   if (!host.hidden && recovery?.kind === 'progress') {
     const row = el('div', 'recovery-notice');
-    row.append(icon('i-pulse'), el('span', 'queue-label', recovery.message.text),
+    row.append(icon('i-pulse'), el('span', 'queue-label', () => repairRowText(recovery.message.text)),
       dockAction(() => t('Dismiss recovery notice'), 'i-x', () => {
         if (sessionId) dismissedRecoveryNotices.set(sessionId, revision);
         host.hidden = true; host.replaceChildren();
@@ -8658,21 +8668,28 @@ async function paintScheduleLine(): Promise<void> {
   const schedule = reply?.ok ? reply.data : null;
   line.hidden = !schedule;
   if (!schedule) return;
-  const clock = (instant: number, weekday: boolean) => new Date(instant).toLocaleString(currentLanguage(),
-    weekday ? { weekday: 'short', hour: '2-digit', minute: '2-digit' } : { hour: '2-digit', minute: '2-digit' });
+  // A time today is its time alone; another day's names the day ("Wed 07:17" today read as next week).
+  const clock = (instant: number) => new Date(instant).toLocaleString(currentLanguage(), sameLocalDay(instant, Date.now())
+    ? { hour: '2-digit', minute: '2-digit' } : { weekday: 'short', hour: '2-digit', minute: '2-digit' });
   const next = nextRunAfter(schedule, Math.max(Date.now(), schedule.lastDueAt ?? 0));
   const parts = [schedule.paused ? t('Paused') : t('Scheduled'), repeatText(schedule.repeat)];
-  if (schedule.missedDueAt !== undefined) parts.push(t('missed {0}', [clock(schedule.missedDueAt, false)]));
-  if (!schedule.paused) parts.push(next === null ? t('ended') : t('next {0}', [clock(next, true)]));
+  if (schedule.missedDueAt !== undefined) parts.push(t('missed {0}', [clock(schedule.missedDueAt)]));
+  if (!schedule.paused) parts.push(next === null ? t('ended') : t('next {0}', [clock(next)]));
   ui($('scheduleLineText'), 'textContent', () => parts.join(' · '));
+  // Pause and Edit drawn like the Goal row's: the dock's own icon actions, named by tooltip.
   const pause = $<HTMLButtonElement>('scheduleLinePause');
-  ui(pause, 'textContent', () => schedule.paused ? t('Resume') : t('Pause'));
+  const pauseLabel = () => schedule.paused ? t('Resume schedule') : t('Pause schedule');
+  pause.replaceChildren(icon(schedule.paused ? 'i-play' : 'i-power'));
+  ui(pause, 'title', pauseLabel); ui(pause, 'aria-label', pauseLabel);
   pause.onclick = async () => {
     pause.disabled = true;
     try { await run(api.pauseSchedule(schedule.sessionId, !schedule.paused)); } finally { pause.disabled = false; }
     void paintScheduleLine();
   };
-  $<HTMLButtonElement>('scheduleLineEdit').onclick = () => void scheduleDialog?.open(schedule.sessionId, '');
+  const edit = $<HTMLButtonElement>('scheduleLineEdit');
+  if (!edit.firstChild) edit.append(icon('i-pencil'));
+  ui(edit, 'title', () => t('Edit schedule')); ui(edit, 'aria-label', () => t('Edit schedule'));
+  edit.onclick = () => void scheduleDialog?.open(schedule.sessionId, '');
 }
 
 async function refreshInputQueue(): Promise<void> {
@@ -8923,7 +8940,7 @@ function showAutoSkillReceipt(entry: Pick<InputEntry, 'autoSkills'>): void {
   if (entry.autoSkills?.length) toast(t('Auto-selected Skill: /{0}', [entry.autoSkills[0]!.id]));
 }
 async function stopCurrentTurn(): Promise<void> {
-  const id = selectedId, turnId = controlledTurnId, generation = selectionGeneration;
+  const id = selectedId, turnId = controlledTurnId ?? controlledHeldTurnId, generation = selectionGeneration;
   if (!id || controlledSessionId !== id || controlledSelection !== generation || !turnId || controlledStopPending) return;
   controlledStopPending = true; paintDeliveryControls();
   try { await run(api.stopSessionTurn(id, turnId)); }
@@ -8946,13 +8963,19 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
     if (!controlAction) return;
     const target = selectedId, selection = selectionGeneration;
     const sameSelection = () => selectedId === target && selectionGeneration === selection;
+    // The turn the button showed Stop for, before the refresh can change it (CodeRabbit).
+    const shownTurn = controlledSessionId === target && controlledSelection === selection ? controlledTurnId ?? controlledHeldTurnId : null;
     await refreshSessionControls();
     if (!sameSelection()) return;
     // An actual turn takes precedence over queued follow-ups. Stop never silently
     // becomes cancellation of a different pending input in that same chat.
-    if (target && controlledSessionId === target && controlledSelection === selection && controlledTurnId) {
+    const nowTurn = target && controlledSessionId === target && controlledSelection === selection ? controlledTurnId ?? controlledHeldTurnId : null;
+    if (nowTurn && (!shownTurn || nowTurn === shownTurn)) {
       await stopCurrentTurn(); return;
     }
+    // The turn it showed Stop for ended or changed meanwhile (or the read failed): stop nothing
+    // else, and cancel nothing either.
+    if (shownTurn) return;
     const pending = pendingComposerInput();
     if (pending && ['queued', 'browser'].includes(pending.state)) {
       const wasStarting = startingInputs.has(pending.id);
@@ -9732,6 +9755,8 @@ export function initChat(next: Deps): void {
     const controlAction = event.submitter === $('chatSend') && $('chatSend').dataset.action === 'stop';
     if (currentPreparedPlan()) void sendPreparedPlan();
     else if (!controlAction && /^\s*\/[a-z]/i.test($<HTMLTextAreaElement>('chatInput').value)) void sendTypedCommand(controlAction);
+    // The button showed Stop (or Cancel): that is what it does, also with Plan armed (CodeRabbit).
+    else if (controlAction) void sendComposer(undefined, undefined, undefined, true);
     else if (taskPlans.has(draftKey())) {
       if (!$('createPlan').dataset.busy) void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt');
     } else void sendComposer(undefined, undefined, undefined, controlAction);
