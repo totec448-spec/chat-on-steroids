@@ -3386,5 +3386,14 @@
   "Weekdays": "平日",
   "{0} hours": "{0} 時間",
   "every {0} hours": "{0} 時間ごと",
-  "Choose the end date.": "終了日を選んでください。"
+  "Choose the end date.": "終了日を選んでください。",
+  "Scheduled runs, changed files under each answer, commit and pull request from Review, and your own chat style.": "スケジュール実行、各回答の下に変更ファイル、レビューからのコミットとプルリクエスト、そして自分のチャットスタイル。",
+  "Scheduled runs": "スケジュール実行",
+  "A chat can send itself a message every few hours, daily or weekly.": "チャットが数時間ごと、毎日、または毎週、自分でメッセージを送れます。",
+  "Changed files": "変更されたファイル",
+  "Each answer that edited files shows what it changed.": "ファイルを編集した回答には、何を変更したかが表示されます。",
+  "Commit from Review": "レビューからコミット",
+  "Commit the chosen files, then push and open a pull request.": "選んだファイルをコミットし、プッシュしてプルリクエストを開けます。",
+  "Your own chat style": "自分のチャットスタイル",
+  "Rewrite how ChatGPT talks and writes in new chats.": "新しいチャットで ChatGPT がどう話し、どう書くかを書き換えられます。"
 }

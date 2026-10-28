@@ -3453,5 +3453,14 @@
   "{0} hours|one": "{0} Stunde",
   "every {0} hours": "alle {0} Stunden",
   "every {0} hours|one": "alle {0} Stunde",
-  "Choose the end date.": "Wähle das Enddatum."
+  "Choose the end date.": "Wähle das Enddatum.",
+  "Scheduled runs, changed files under each answer, commit and pull request from Review, and your own chat style.": "Geplante Läufe, geänderte Dateien unter jeder Antwort, Commit und Pull Request aus Review und dein eigener Chat-Stil.",
+  "Scheduled runs": "Geplante Läufe",
+  "A chat can send itself a message every few hours, daily or weekly.": "Ein Chat kann sich selbst alle paar Stunden, täglich oder wöchentlich eine Nachricht schicken.",
+  "Changed files": "Geänderte Dateien",
+  "Each answer that edited files shows what it changed.": "Jede Antwort, die Dateien bearbeitet hat, zeigt, was sie geändert hat.",
+  "Commit from Review": "Commit aus Review",
+  "Commit the chosen files, then push and open a pull request.": "Die gewählten Dateien committen, dann pushen und einen Pull Request öffnen.",
+  "Your own chat style": "Dein eigener Chat-Stil",
+  "Rewrite how ChatGPT talks and writes in new chats.": "Lege fest, wie ChatGPT in neuen Chats spricht und schreibt."
 }
