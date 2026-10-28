@@ -547,6 +547,8 @@ describe('the chat panel cards', () => {
     expect(document.getElementById('backgroundExecLiveStatus')!.nextElementSibling?.id).toBe('backgroundExecList');
     expect(document.getElementById('backgroundExecList')!.nextElementSibling?.id).toBe('agentPlan');
     expect(document.getElementById('finishQueue')!.previousElementSibling?.id).toBe('taskPlanPreview');
+    // A chat's schedule (#1826) is one quiet line right under its queue.
+    expect(document.getElementById('finishQueue')!.nextElementSibling?.id).toBe('scheduleLine');
   });
 
   /**
