@@ -1750,7 +1750,25 @@ async function targetSession(target: Target): Promise<string | null> {
 async function storeImage(sessionId: string, base64: string, mimeType: string): Promise<AssetRef> {
   const data = Buffer.from(base64, 'base64');
   if (data.length === 0 || data.length > MAX_ASSET_BYTES) throw new Error('Session image exceeds the recording limit');
-  return writeAsset(sessionId, data, mimeType);
+  const smaller = mimeType === 'image/png' ? await losslessWebp(data) : null;
+  return smaller ? writeAsset(sessionId, smaller, 'image/webp') : writeAsset(sessionId, data, mimeType);
+}
+
+/** Below this a conversion saves too little to be worth it, and the PNG is kept as it came. */
+const WEBP_MIN_SAVING_BYTES = 1024;
+/**
+ * A recorded screenshot as lossless WebP (the maintainer, 2026-10-27: screenshots were most of the
+ * recording storage): the same pixels in usually far fewer bytes. Kept only when it saves at least
+ * 1 KB and a tenth; anything it can't read stays the PNG it was. Only the recording changes: what
+ * ChatGPT received is the tool's own result.
+ */
+async function losslessWebp(png: Buffer): Promise<Buffer | null> {
+  try {
+    const webp = await sharp(png, { limitInputPixels: 40_000_000, animated: false }).webp({ lossless: true, effort: 4 }).toBuffer();
+    return webp.length + WEBP_MIN_SAVING_BYTES <= png.length && webp.length <= png.length * 0.9 ? webp : null;
+  } catch {
+    return null;
+  }
 }
 
 // ------------------------------------------------------- extension events

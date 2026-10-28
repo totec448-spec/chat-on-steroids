@@ -289,3 +289,33 @@ it('never takes a question with the same parent for an edit without ChatGPT\'s v
   const questions = await readEvents(id!, { kinds: ['user_message'] });
   expect(questions.every(event => event.kind === 'user_message' && event.replaces === undefined)).toBe(true);
 });
+
+it('stores a recorded screenshot as lossless WebP when that saves space, with exactly the same pixels, and keeps a tiny PNG as it is', async () => {
+  const sharp = (await import('sharp')).default;
+  const id = await sessionForConversation('conv-webp-screenshot');
+  // A screenshot-like picture: flat panels, text-like stripes and a gradient, as a PNG.
+  const width = 480, height = 300, raw = Buffer.alloc(width * height * 3);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const at = (y * width + x) * 3, panel = x < 120 ? 32 : 245, stripe = y % 18 < 3 && x > 140 && x < 440 ? 60 : panel;
+    raw[at] = stripe; raw[at + 1] = y < 40 ? Math.floor(x / 2) : stripe; raw[at + 2] = stripe;
+  }
+  const png = await sharp(raw, { raw: { width, height, channels: 3 } }).png().toBuffer();
+  await recordToolCall({ ...call('webp-shot', 'conv-webp-screenshot'), tool: 'screenshot',
+    content: [{ type: 'image', data: png.toString('base64'), mimeType: 'image/png' }] });
+  const event = (await readEvents(id!, { kinds: ['tool_call'] }))[0]!;
+  if (event.kind !== 'tool_call') throw new Error('missing recorded call');
+  const asset = event.call.assets![0]!;
+  expect(asset.mimeType).toBe('image/webp');
+  const stored = (await readAsset(id!, asset.id))!;
+  expect(stored.length).toBeLessThan(png.length);
+  expect(asset.bytes).toBe(stored.length);
+  const pixels = async (data: Buffer) => sharp(data).removeAlpha().raw().toBuffer();
+  expect((await pixels(stored)).equals(await pixels(png))).toBe(true);
+  // A tiny image saves nothing worth a conversion: kept byte for byte.
+  const tiny = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=';
+  await recordToolCall({ ...call('webp-tiny', 'conv-webp-screenshot'), tool: 'screenshot', content: [{ type: 'image', data: tiny, mimeType: 'image/png' }] });
+  const second = (await readEvents(id!, { kinds: ['tool_call'] }))[1]!;
+  if (second.kind !== 'tool_call') throw new Error('missing recorded call');
+  expect(second.call.assets![0]!.mimeType).toBe('image/png');
+  expect(await readAsset(id!, second.call.assets![0]!.id)).toEqual(Buffer.from(tiny, 'base64'));
+});
