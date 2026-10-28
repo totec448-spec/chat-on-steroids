@@ -1,3 +1,4 @@
+import { AGE_SUFFIX, ageOf } from '../shared/age.js';
 import { currentLanguage, t, ui } from './i18n.js';
 /**
  * The handful of DOM helpers both panels need.
@@ -190,21 +191,24 @@ export async function run<T>(
 /** "12s ago" for a timestamp the main process vouched for, "never" for null. */
 export function ago(atMs: number | null): string {
   if (atMs === null) return t("never");
-  const seconds = Math.max(0, Math.round((Date.now() - atMs) / 1000));
-  if (seconds < 3) return t("just now");
-  if (seconds < 90) return t("{0}s ago", [seconds]);
-  const minutes = Math.round(seconds / 60);
-  return minutes < 90 ? t("{0}m ago", [minutes]) : t("{0}h ago", [Math.round(minutes / 60)]);
+  const age = ageOf(atMs, Date.now());
+  if (!age) return t("just now");
+  if (age.unit === 'second') return t("{0}s ago", [age.value]);
+  if (age.unit === 'minute') return t("{0}m ago", [age.value]);
+  if (age.unit === 'hour') return t("{0}h ago", [age.value]);
+  // Days and longer in the person's language (2.1.47 round: the chat list said "389h ago"). English
+  // reads "2d ago" beside "3h ago"; elsewhere the narrow style can drop the word "ago" for a minus
+  // sign ("-16 j"), so those use the short one ("il y a 16 j", "vor 16 Tagen").
+  const language = currentLanguage();
+  return new Intl.RelativeTimeFormat(language, { numeric: 'always', style: /^en\b/i.test(language) ? 'narrow' : 'short' })
+    .format(-age.value, age.unit);
 }
 
-/** The same age as one glanceable token: "8s", "2m", "—" when there is nothing. */
+/** The same age as one glanceable token: "8s", "2m", "3d", "—" when there is nothing. */
 export function shortAgo(atMs: number | null): string {
   if (atMs === null) return '—';
-  const seconds = Math.max(0, Math.round((Date.now() - atMs) / 1000));
-  if (seconds < 3) return t("now");
-  if (seconds < 90) return `${seconds}s`;
-  const minutes = Math.round(seconds / 60);
-  return minutes < 90 ? `${minutes}m` : `${Math.round(minutes / 60)}h`;
+  const age = ageOf(atMs, Date.now());
+  return age ? `${age.value}${AGE_SUFFIX[age.unit]}` : t("now");
 }
 
 /** A clock time for one event in a timeline. */

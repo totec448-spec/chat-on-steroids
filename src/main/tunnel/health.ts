@@ -17,6 +17,8 @@
  */
 
 /** Poll timeout is 30s, so successes arrive at most that far apart; allow three. */
+import { AGE_SUFFIX, ageOf } from '../../shared/age.js';
+
 export const POLL_FRESH_MS = 95_000;
 
 export interface PollHealth {
@@ -133,10 +135,6 @@ export async function readClientStatus(base: string, timeoutMs = 3000): Promise<
 /** "just now", "12s ago", "4m ago" — for a timestamp that may be null or in the future. */
 export function ago(atMs: number | null, nowMs = Date.now()): string {
   if (atMs === null) return 'never';
-  const seconds = Math.max(0, Math.round((nowMs - atMs) / 1000));
-  if (seconds < 3) return 'just now';
-  if (seconds < 90) return `${seconds}s ago`;
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 90) return `${minutes}m ago`;
-  return `${Math.round(minutes / 60)}h ago`;
+  const age = ageOf(atMs, nowMs);
+  return age ? `${age.value}${AGE_SUFFIX[age.unit]} ago` : 'just now';
 }
