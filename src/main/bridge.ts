@@ -2189,7 +2189,10 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
   // a running turn always goes through ChatGPT's own Stop. Read right before queuing: activity can
   // end while automation and the anchor are settled above (CodeRabbit).
   const atQueue = await sessionControlsFor(sessionId);
-  const held = !atQueue.activeTurnId && atQueue.heldTurnId === expectedTurnId;
+  // A pending Stop makes the turn read as active, so a repeated Stop keeps the first one's marker.
+  const pendingHeld = commands.some(entry => entry.spec.type === 'stop' && entry.spec.sessionId === sessionId &&
+    entry.spec.turnId === expectedTurnId && entry.spec.held === true);
+  const held = pendingHeld || (!atQueue.activeTurnId && atQueue.heldTurnId === expectedTurnId);
   const alreadyQueued = commands.some(entry => entry.spec.type === 'stop' && entry.spec.sessionId === sessionId && entry.spec.turnId === expectedTurnId);
   const command = queue({ type: 'stop', sessionId, conversationId: id, turnId: expectedTurnId, ...(userMessageId ? { userMessageId } : {}), ...(held ? { held: true as const } : {}) });
   try {
