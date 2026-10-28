@@ -2213,6 +2213,39 @@
         status: stopped ? 'sent' : 'failed', error: stopped ? undefined : 'native_stop_unavailable_or_turn_changed' });
       return stopped;
     }
+    // A turn this page still holds although ChatGPT shows neither Stop nor any answer of it, for
+    // example when ChatGPT stopped loading the chat's history (2026-10-28): there is nothing to
+    // click, and the page takes no message while it holds the turn. The person asked to stop it,
+    // so this page ends it as stopped. Exact work that arrives later reopens it as usual.
+    // An approval card also hides Stop; that turn waits for a person, it is not unseen. "Nothing of
+    // it" is this generation's section as the page stands now, with or without an id, not an id
+    // seen earlier: an answer can leave the page when its history stops loading (CodeRabbit).
+    const unseenHeld = () => current() && generating && !CLF_DOM.generating() && !CLF_DOM.approvalWaiting() && !generationTurn();
+    if (unseenHeld()) {
+      const reply = await ask({ type: 'stop_redeem', id: commandId, client: RUN_ID, conversationId: target });
+      observe();
+      const command = reply?.command;
+      if (!reply?.ok || command?.type !== 'stop' || command.turnId !== expected || command.conversationId !== target) return false;
+      // Only for a turn the app itself no longer counts as running, and only if nothing of it shows
+      // up for a few seconds: a remount can hide both the answer and ChatGPT's Stop for a moment
+      // while the answer still runs (CodeRabbit).
+      const expired = () => Number.isFinite(command.expiresAt) && Date.now() >= command.expiresAt;
+      const stopped = command.held === true && unseenHeld() &&
+        !(await waitUntil(() => { observe(); return !unseenHeld(); }, UNSEEN_STOP_SETTLE_MS)) && unseenHeld() && !expired();
+      if (stopped) {
+        stopRequestedAt = Date.now();
+        finishGeneration(generationTurn(), { outcome: 'stopped', detail: t('content_turn_stop_unseen',
+          'Stopped here: ChatGPT no longer showed this answer running.') });
+        void flush();
+        stoppedAppCommands.add(commandId);
+        if (stoppedAppCommands.size > 100) stoppedAppCommands.delete(stoppedAppCommands.values().next().value);
+        await ask({ type: 'stop_ack', id: commandId, client: RUN_ID, conversationId: target, turnId: expected, status: 'sent' });
+        return true;
+      }
+      // Not for this path (a running turn, the answer or ChatGPT's Stop came back, or the command
+      // expired): report no failure here. The command stays pending for ChatGPT's own Stop below or
+      // a later delivery, as it did before this path existed (CodeRabbit).
+    }
     const native = currentAssistantTurn();
     const nativeId = pageTurnIds.get(expected);
     const latestNative = () => CLF_DOM.turns().at(-1);
@@ -12467,6 +12500,9 @@
 
   // ----------------------------------------------------------------- start
 
+  /** How long a held turn must keep showing nothing before the app's Stop ends it here. */
+  const UNSEEN_STOP_SETTLE_MS = 3_000;
+
   const noteStopClick = (event) => {
     const stop = CLF_DOM.stopButton();
     if (!event.isTrusted || !stop || !(event.target instanceof Node) || !stop.contains(event.target) || stopRequestedAt) return;
@@ -14232,7 +14268,7 @@
       if (message.type === 'clf-recorder-ping') {
         // `busy`: this page is mid-turn or mid-handoff, so the extension must not reload under it.
         sendResponse({ ok: true, recorderVersion: RECORDER_VERSION,
-          busy: Boolean(generating || CLF_DOM.generating() || desktopInputBusy || pluginRefreshBusy || modelCatalogBusy || pendingTools > 0) });
+          busy: Boolean(generating || CLF_DOM.generating() || CLF_DOM.approvalWaiting() || desktopInputBusy || pluginRefreshBusy || modelCatalogBusy || pendingTools > 0) });
         return false;
       }
       if (message.type === 'clf-repair-check') {
@@ -14266,11 +14302,14 @@
       // Popup diagnostics. Ids and counters only — no prose, no transcript, no page text.
       if (message.type === 'clf-page-status') {
         const assistantError = currentAssistantError();
+        const approval = CLF_DOM.approvalWaiting();
         sendResponse({
           ok: true,
           // ChatGPT's own account that a response is streaming right now, as opposed to the
           // recorder's `generating`, which also holds while a turn waits on a local tool.
-          streaming: CLF_DOM.generating(),
+          // An active tool approval card also holds an open turn stream while hiding Stop.
+          streaming: CLF_DOM.generating() || approval,
+          approval,
           // Only the current recorder generation's still-visible recoverable transport error.
           // Historical failed turns can remain mounted in the DOM and must not authorize a
           // reload of a newer response.

@@ -188,6 +188,134 @@ describe('captured ChatGPT rendered HTML', () => {
     expect(renderedMarkdown(':::canvas{title="Plan"}\nStep one\n:::').textContent).not.toContain(':::');
   });
 
+  it('keeps a canonical chart when another provider directive has a resolved recording', () => {
+    const chart = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }],
+      data: [{ group: 'Current sample', value: 7 }]
+    } } })}\uE201`;
+    const source = `Today's results.\n\n${chart}\n\n::chatgpt-entity{type="place" id="42"}`;
+    const capture = whole('<p>Previous provider-only rendering.</p>');
+    const rendered = renderedMarkdown(source, capture);
+    expect(rendered.querySelector('.markdown-dil-chart')).not.toBeNull();
+    expect(rendered.textContent).toContain('Current sample');
+    expect(rendered.textContent).toContain("Today's results.");
+    expect(rendered.textContent).not.toContain('Previous provider-only rendering.');
+    expect(rendered.textContent).not.toContain('::chatgpt-entity');
+    expect(renderedMarkdown(source).querySelector('.markdown-dil-chart')).not.toBeNull();
+  });
+
+  it('keeps current canonical prose rather than a stale resolved capture beside an unknown directive', () => {
+    const source = '**Current revision.**\n\n::chatgpt-entity{type="place" id="42"}';
+    const rendered = renderedMarkdown(source, whole('<p>Previous revision.</p>'));
+    expect(rendered.querySelector('strong')?.textContent).toBe('Current revision.');
+    expect(rendered.textContent).not.toContain('Previous revision.');
+    expect(rendered.textContent).not.toContain('::chatgpt-entity');
+  });
+
+  it.each([
+    { name: 'blockquote ends at a blank line', nested: '> ```json\n> example\n\nPlain text.' },
+    { name: 'blockquote ends at an unquoted line', nested: '> ```json\n> example\nPlain text.' },
+    { name: 'list item ends at a shallower line', nested: '- ```json\n  example\nPlain text.' },
+    { name: 'list continuation fence ends with its item', nested: '- Example\n  ```json\n  example\nPlain text.' }
+  ])('renders a canonical chart after a nested unclosed fence when $name', ({ nested }) => {
+    const chart = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Valid later chart', value: 7 }]
+    } } })}\uE201`;
+    const rendered = renderedMarkdown(`${nested}\n\n${chart}\n\nAfter the chart.`);
+    expect(rendered.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(rendered.querySelector('.markdown-dil-chart')?.getAttribute('aria-label')).toContain('Valid later chart 7');
+    expect(rendered.textContent).toContain('After the chart.');
+  });
+
+  it('recognizes a new top-level fence on the line that ends a blockquote fence', () => {
+    const chart = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Outside', value: 9 }]
+    } } })}\uE201`;
+    const rendered = renderedMarkdown(`> \`\`\`text\n> quoted code\n\`\`\`text\n${chart}\n\`\`\`\n\n${chart}`);
+    expect(rendered.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(rendered.querySelector('pre code')?.textContent).toContain('quoted code');
+    expect([...rendered.querySelectorAll('pre code')].some(code => code.textContent?.includes(chart))).toBe(true);
+  });
+
+  it('keeps tab-indented list fence content literal and renders the chart after it', () => {
+    const chart = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Sample', value: 7 }]
+    } } })}\uE201`;
+    const rendered = renderedMarkdown(`- \`\`\`json\n\tstill in the list fence\n  ${chart}\n  \`\`\`\n\n${chart}`);
+    expect(rendered.querySelector('pre code')?.textContent).toContain(chart);
+    expect(rendered.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(rendered.textContent).not.toContain('\uE030');
+  });
+
+  it('ends indented list code when indentation drops below the list code column', () => {
+    const chart = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Visible value', value: 3 }]
+    } } })}\uE201`;
+    const rendered = renderedMarkdown(`- Item\n\n      Code example\n    ${chart}\n\n${chart}`);
+    expect(rendered.querySelector('pre code')?.textContent).toContain('Code example');
+    expect(rendered.querySelectorAll('.markdown-dil-chart')).toHaveLength(2);
+    expect(rendered.textContent).not.toContain('\uE030');
+  });
+
+  it('renders a canonical chart inside a nested list instead of swallowing it as indented code', () => {
+    const chart = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Nested sample', value: 4 }]
+    } } })}\uE201`;
+    const rendered = renderedMarkdown(`- Item\n\n    - sub item\n\n        ${chart}\n\n${chart}`);
+    expect(rendered.querySelectorAll('.markdown-dil-chart')).toHaveLength(2);
+    expect(rendered.textContent).toContain('Nested sample');
+    expect(rendered.textContent).not.toContain('\uE030');
+  });
+
+  it.each([
+    { name: 'code block start', before: '' },
+    { name: 'code block continuation', before: '      Earlier code line\n' }
+  ])('keeps a deeply indented list-looking code example literal at $name', ({ before }) => {
+    const chart = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Outside code', value: 6 }]
+    } } })}\uE201`;
+    const rendered = renderedMarkdown(`- Item\n\n${before}      - example\n        ${chart}\n\n${chart}`);
+    expect(rendered.querySelector('pre code')?.textContent).toContain('- example');
+    expect(rendered.querySelector('pre code')?.textContent).toContain(chart);
+    expect(rendered.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(rendered.textContent).not.toContain('\uE030');
+  });
+
+  it.each([' \t', '  \t', '   \t'])('keeps a chart in mixed-space tab indented code literal (%j)', indent => {
+    const chart = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Outside code', value: 3 }]
+    } } })}\uE201`;
+    const rendered = renderedMarkdown(`Example:\n\n${indent}${chart}\n\n${chart}`);
+    expect(rendered.querySelector('pre code')?.textContent).toContain(chart);
+    expect(rendered.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(rendered.textContent).not.toContain('\uE030');
+  });
+
+  it('does not rescan the same paragraph text for every recorded-layout match start', () => {
+    const source = Array.from({ length: 40 }, () => 'Repeated').join('\n\n');
+    const html = '<div data-d-component="box" data-d-has-border="">' +
+      Array.from({ length: 35 }, () => '<p>Repeated</p>').join('') + '<p>Missing</p></div>';
+    const descriptor = Object.getOwnPropertyDescriptor(dom.window.Node.prototype, 'textContent')!;
+    let repeatedReads = 0;
+    Object.defineProperty(dom.window.Node.prototype, 'textContent', {
+      ...descriptor,
+      get(this: Node) {
+        const value = descriptor.get!.call(this) as string | null;
+        if (this.nodeType === 3 && value === 'Repeated') repeatedReads++;
+        return value;
+      }
+    });
+    try {
+      const rendered = renderedMarkdown(source, whole(html));
+      expect(rendered.querySelector('.markdown-dil-panel')).toBeNull();
+      expect(rendered.querySelectorAll('p')).toHaveLength(40);
+      // One word extraction per canonical paragraph, not 40 per start position.
+      expect(repeatedReads).toBeLessThan(160);
+    } finally {
+      Object.defineProperty(dom.window.Node.prototype, 'textContent', descriptor);
+    }
+  });
+
   it('renders the recorded native URL token as its authored label and opens it through validated IPC', () => {
     const openLink = vi.fn(async () => ({ ok: true, data: true }));
     (dom.window as any).api.openLink = openLink;

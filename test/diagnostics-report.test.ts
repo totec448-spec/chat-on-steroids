@@ -77,6 +77,16 @@ describe('the diagnostics report', () => {
     for (const value of personal) expect(report.toLowerCase(), value).not.toContain(value.toLowerCase());
   });
 
+  it('says how long this start took, beside the earlier starts, after the crashes', () => {
+    const report = renderDiagnosticsReport({ ...sources, facts: {
+      install: [], system: [], crashes: ['Crash reports in the last 30 days: 0'], errors: [], tools: [], chats: [],
+      startup: ['This start: usable after 2.41 s (Electron ready 0.31 s, app window ready 2.41 s)',
+        'Earlier starts (9): usable after 1.60 s typically, 1.20 s at the fastest, 2.00 s at the slowest']
+    } });
+    expect(report).toContain('## Startup\n\nThis start: usable after 2.41 s (Electron ready 0.31 s, app window ready 2.41 s)\nEarlier starts (9)');
+    expect(report.indexOf('## Startup')).toBeGreaterThan(report.indexOf('## Crashes and restarts'));
+  });
+
   it('says which browser runs ChatGPT, its tabs by state and which page controls were found', () => {
     const report = renderDiagnosticsReport({ ...sources, extension: { status: {}, environment: {
       browser: { name: 'Google Chrome', version: '154.0.7400.12' },

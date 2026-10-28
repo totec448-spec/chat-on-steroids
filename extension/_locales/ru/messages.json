@@ -743,6 +743,9 @@
   "content_turn_stop_requested": {
     "message": "Запрошен Stop; встроенная страница больше не показывает генерацию."
   },
+  "content_turn_stop_unseen": {
+    "message": "Остановлено здесь: ChatGPT больше не показывал этот ответ как выполняющийся."
+  },
   "content_unknown_error": {
     "message": "неизвестная ошибка"
   },
