@@ -51,6 +51,10 @@ A chat can send itself a message on a schedule. Each answer that edited files sh
 - **A switch you change in Settings** no longer flips back while it is being saved.
 - **Chats in the sidebar** show one tooltip, not two.
 - **On a ChatGPT page that isn't a chat** (such as a Dot), the extension popup says so instead of waiting.
+- **While ChatGPT waits for you to approve a tool,** the app no longer reloads that chat under the approval card; the chat says it waits for the card instead.
+- **A finished Goal** still says "Goal reached" after the app restarts, instead of "Pursuing goal".
+- **A chat whose answer ChatGPT stopped showing** (for example while ChatGPT limits loading its history) now offers Stop, so your next message can go out.
+- **A new file in Review and in the edit cards** no longer shows an empty extra line under its content.
 
 ## [2.1.46] — Phone notifications, a settings backup, keys kept from ChatGPT, and high contrast
 
