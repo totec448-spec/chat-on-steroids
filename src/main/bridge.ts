@@ -3063,51 +3063,55 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (target && tunnelRouteSettling()) return json(res, 200, { input: null }, origin);
     if (staleCompanion(req) || notChosenBrowser(req)) return json(res, 200, { input: null }, origin);
     if (extensionReloading(req)) return json(res, 200, { input: null }, origin);
-    // From here this claim may take a message: the extension update waits until it has answered.
+    // From here this claim may take a message: the extension update waits until it has answered,
+    // however it ends (an early answer, a thrown error, a page that went away) (CodeRabbit on #1901).
     claimsInProgress++;
-    res.once('close', () => { claimsInProgress--; });
-    if (!target && !chosenBuiltInBrowser(req) && openingHeldElsewhere(body.id, browserOf(req))) return json(res, 200, { input: null }, origin);
-    // A new chat of a project with a native ChatGPT Project is claimed only from that Project's
-    // own page, which the page names; the root or another Project is never its destination.
-    if (!target) {
-      const entry = (await listInputs()).find(row => row.id === body.id);
-      // A branch (#482) is made where its source chat lives in ChatGPT, never on a Project's page.
-      const link = entry?.projectId && entry.purpose !== 'decision' && !entry.lifetime && !entry.branch ? (await getProject(entry.projectId))?.chatgpt : undefined;
-      if (link && (link.state !== 'linked' || body.project !== link.id)) return json(res, 200, { input: null }, origin);
-    }
-    // #1794: an automatic send is first checked with the person's send check, outside the queue's lock.
-    const automatic = (await listInputs()).find(row => row.id === body.id && row.state === 'queued');
-    const kind = automatic ? automaticSendKind(automatic) : null;
-    if (automatic && kind && getConfig().ui.sendCheckUrl) {
-      // A held row is not asked about again before its next ask, however often a page claims it.
-      if (heldBySendCheck(automatic)) {
-        // Pages ask every few seconds: said once per hold.
-        const hold = automatic.sendCheck!;
-        if (heldClaimsLogged.get(automatic.id) !== hold.attempt) {
-          heldClaimsLogged.set(automatic.id, hold.attempt);
-          if (heldClaimsLogged.size > 256) heldClaimsLogged.delete(heldClaimsLogged.keys().next().value!);
-          logInfo(`send check: ${kind} ${automatic.id} attempt ${hold.attempt} still held until ${new Date(hold.nextAt).toISOString()} (${hold.reason}); a page asked to send it`);
+    try {
+      if (!target && !chosenBuiltInBrowser(req) && openingHeldElsewhere(body.id, browserOf(req))) return json(res, 200, { input: null }, origin);
+      // A new chat of a project with a native ChatGPT Project is claimed only from that Project's
+      // own page, which the page names; the root or another Project is never its destination.
+      if (!target) {
+        const entry = (await listInputs()).find(row => row.id === body.id);
+        // A branch (#482) is made where its source chat lives in ChatGPT, never on a Project's page.
+        const link = entry?.projectId && entry.purpose !== 'decision' && !entry.lifetime && !entry.branch ? (await getProject(entry.projectId))?.chatgpt : undefined;
+        if (link && (link.state !== 'linked' || body.project !== link.id)) return json(res, 200, { input: null }, origin);
+      }
+      // #1794: an automatic send is first checked with the person's send check, outside the queue's lock.
+      const automatic = (await listInputs()).find(row => row.id === body.id && row.state === 'queued');
+      const kind = automatic ? automaticSendKind(automatic) : null;
+      if (automatic && kind && getConfig().ui.sendCheckUrl) {
+        // A held row is not asked about again before its next ask, however often a page claims it.
+        if (heldBySendCheck(automatic)) {
+          // Pages ask every few seconds: said once per hold.
+          const hold = automatic.sendCheck!;
+          if (heldClaimsLogged.get(automatic.id) !== hold.attempt) {
+            heldClaimsLogged.set(automatic.id, hold.attempt);
+            if (heldClaimsLogged.size > 256) heldClaimsLogged.delete(heldClaimsLogged.keys().next().value!);
+            logInfo(`send check: ${kind} ${automatic.id} attempt ${hold.attempt} still held until ${new Date(hold.nextAt).toISOString()} (${hold.reason}); a page asked to send it`);
+          }
+          return json(res, 200, { input: null }, origin);
         }
-        return json(res, 200, { input: null }, origin);
+        const attempt = (automatic.sendCheck?.attempt ?? 0) + 1;
+        const project = automatic.projectId ?? (automatic.sessionId ? (await getSession(automatic.sessionId))?.projectId : undefined) ?? null;
+        const verdict = await checkAutomaticSend({ kind, id: automatic.id, attempt, text: automatic.text,
+          chat: { session: automatic.sessionId ?? null, project, worker: target ? agentForOwnedConversation(target) : null } });
+        if (!verdict.allowed) {
+          if (await holdInputForSendCheck(automatic.id, attempt, verdict.reason, verdict.answered)) changed();
+          return json(res, 200, { input: null }, origin);
+        }
+        // What was allowed is what goes: a row edited or withdrawn meanwhile is asked about again.
+        const now = (await listInputs()).find(row => row.id === body.id);
+        if (now?.state !== 'queued' || now.text !== automatic.text) return json(res, 200, { input: null }, origin);
       }
-      const attempt = (automatic.sendCheck?.attempt ?? 0) + 1;
-      const project = automatic.projectId ?? (automatic.sessionId ? (await getSession(automatic.sessionId))?.projectId : undefined) ?? null;
-      const verdict = await checkAutomaticSend({ kind, id: automatic.id, attempt, text: automatic.text,
-        chat: { session: automatic.sessionId ?? null, project, worker: target ? agentForOwnedConversation(target) : null } });
-      if (!verdict.allowed) {
-        if (await holdInputForSendCheck(automatic.id, attempt, verdict.reason, verdict.answered)) changed();
-        return json(res, 200, { input: null }, origin);
-      }
-      // What was allowed is what goes: a row edited or withdrawn meanwhile is asked about again.
-      const now = (await listInputs()).find(row => row.id === body.id);
-      if (now?.state !== 'queued' || now.text !== automatic.text) return json(res, 200, { input: null }, origin);
+      // The send check can take seconds: an update allowed meanwhile closed the door behind it.
+      if (extensionReloading(req)) return json(res, 200, { input: null }, origin);
+      const input = await claimBrowserInput(body.id, body.owner, target, body.requiresAuthorization === true);
+      // The first message for an existing chat after a new tunnel-client is what the hold learns from.
+      if (input && target) noteRouteExistingChatSend(target);
+      return json(res, 200, { input }, origin);
+    } finally {
+      claimsInProgress--;
     }
-    // The send check can take seconds: an update allowed meanwhile closed the door behind it.
-    if (extensionReloading(req)) return json(res, 200, { input: null }, origin);
-    const input = await claimBrowserInput(body.id, body.owner, target, body.requiresAuthorization === true);
-    // The first message for an existing chat after a new tunnel-client is what the hold learns from.
-    if (input && target) noteRouteExistingChatSend(target);
-    return json(res, 200, { input }, origin);
   }
 
   if (route === '/repairs/claim' && req.method === 'POST') {

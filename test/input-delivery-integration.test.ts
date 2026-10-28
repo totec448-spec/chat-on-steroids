@@ -265,9 +265,11 @@ it('holds the extension update while a claim waits for the send check, and lets 
   const http = await import('node:http');
   let release: () => void = () => undefined;
   const answered = new Promise<void>(resolve => { release = resolve; });
+  let asked: () => void = () => undefined;
+  const reached = new Promise<void>(resolve => { asked = resolve; });
   const server = http.createServer((req, res) => {
     req.resume();
-    req.on('end', () => { void answered.then(() => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ allow: true })); }); });
+    req.on('end', () => { asked(); void answered.then(() => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ allow: true })); }); });
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   const port = (server.address() as { port: number }).port;
@@ -280,12 +282,13 @@ it('holds the extension update while a claim waits for the send check, and lets 
     const { conversationId, row } = await silentTurnContinue('Claim waits for the send check', ms => now += ms);
     const claiming = post('/input/claim', { id: row.id, owner: 'a-document', conversationId, requiresAuthorization: true });
     // The send check has the claim waiting: the row still reads queued, but the update must not go ahead.
-    for (let i = 0; i < 50 && !(await input.listInputs()).find(item => item.id === row.id)?.sendCheck; i++) await new Promise(r => setTimeout(r, 10));
+    await reached;
     expect((await post('/extension/update', {})).body).toMatchObject({ ready: false, hold: 'sending' });
     expect(prepare).not.toHaveBeenCalled();
     release();
     expect((await claiming).body.input).toMatchObject({ id: row.id });
   } finally {
+    release();
     clock.mockRestore(); extensionPath.prepare = () => null;
     await new Promise(resolve => server.close(resolve));
     await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
