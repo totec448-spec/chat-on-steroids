@@ -1706,7 +1706,7 @@ it('names a chat in place: Enter saves, Escape keeps the old name, empty restore
 });
 
 it('adds a few matching actions and settings under the chats while typing in ⌘K, and none before (#1884, Haz)', async () => {
-  const searchSessions = vi.fn(async (query: string) => ({ ok: true, data: { results: query === 'review' ? [{ id: 'search-review-0001', title: 'Review notes', projectId: null }] : [], indexed: 1, total: 1 } }));
+  const searchSessions = vi.fn(async (query: string) => ({ ok: true, data: { results: query === 'new' ? [{ id: 'search-new-0001', title: 'New notes', projectId: null }] : [], indexed: 1, total: 1 } }));
   const mounted = await mountChat({}, [], { searchSessions });
   const doc = mounted.window.document;
   const field = doc.getElementById('chatSearch') as HTMLInputElement;
@@ -1717,16 +1717,16 @@ it('adds a few matching actions and settings under the chats while typing in ⌘
   await settle();
   // Nothing typed: as before, no actions and no settings.
   expect(results.querySelector('.is-action, .is-setting')).toBeNull();
-  await type('review');
+  await type('new');
   const headings = () => [...results.querySelectorAll('.search-heading')].map(node => node.textContent);
   // The chat comes first; the action after it, with the shortcut the shortcuts dialog shows.
   const rows = [...results.querySelectorAll<HTMLElement>('.search-result')];
-  expect(rows[0]!.dataset.searchId).toBe('search-review-0001');
+  expect(rows[0]!.dataset.searchId).toBe('search-new-0001');
   expect(headings()).toContain('Actions');
   const action = results.querySelector<HTMLElement>('.is-action')!;
-  expect(action.querySelector('b')!.textContent).toBe('Review');
-  // As the shortcuts dialog prints it on this system (⌃⇧1 on macOS, Ctrl+Shift+1 elsewhere).
-  expect([...action.querySelectorAll('kbd')].map(key => key.textContent)).toEqual([expect.stringMatching(/^(⌃⇧|Ctrl\+Shift\+)1$/)]);
+  expect(action.querySelector('b')!.textContent).toBe('New chat');
+  // As the shortcuts dialog prints it on this system (⌘N on macOS, Ctrl+N elsewhere).
+  expect([...action.querySelectorAll('kbd')].map(key => key.textContent)).toEqual([expect.stringMatching(/^(⌘|Ctrl\+)N$/)]);
   // A word matching no chat: no "No chats match" when an action or a setting matches.
   await type('keyboard shortcuts');
   expect(results.querySelector('.empty.search-status')).toBeNull();
