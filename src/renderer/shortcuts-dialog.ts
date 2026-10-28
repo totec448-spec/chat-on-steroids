@@ -117,8 +117,8 @@ export function initShortcutsDialog(options: { enterSends(): boolean }): { open(
   const list = $('shortcutsList');
   const groups = shortcutGroups(options.enterSends);
   ui($('shortcutsTitle'), 'textContent', () => t('Keyboard shortcuts'));
-  ui($('shortcutsClose'), 'title', () => t('Close'));
-  ui($('shortcutsClose'), 'aria-label', () => t('Close'));
+  // Worded like every other dialog's Close.
+  ui($('shortcutsClose'), 'textContent', () => t('Close'));
 
   // Where the keyboard was when the dialog opened (the message box, the View button): focus goes
   // back there on close, never to the page body.

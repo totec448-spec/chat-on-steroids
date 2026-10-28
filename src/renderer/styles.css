@@ -681,10 +681,9 @@ code {
 /* Keyboard shortcuts (Ctrl/⌘+/): the search window's card, as tall as its rows, scrolling inside on a short window.
    Where two columns fit, each group sits in its own (`column` in shortcuts-dialog.ts). */
 .shortcuts-dialog { width: min(760px, calc(100vw - 40px)); height: fit-content; max-height: min(700px, calc(100dvh - 80px)); margin: 8vh auto auto; }
-.shortcuts-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: none; min-height: 0; padding: 12px 10px 10px 20px; border-bottom: 1px solid var(--line); }
+.shortcuts-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: none; min-height: 0; padding: 10px 12px 10px 20px; border-bottom: 1px solid var(--line); }
 .shortcuts-head h2 { margin: 0; font-size: calc(14px * var(--text-scale, 1)); font-weight: 600; line-height: calc(20px * var(--text-scale, 1)); }
-.shortcuts-close { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border-radius: 8px; color: var(--faint); }
-.shortcuts-close:hover { color: var(--ink); }
+.shortcuts-head .btn { color: var(--soft); }
 .shortcuts-list { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; align-content: start; column-gap: 36px; flex: 1; min-height: 0; overflow-y: auto; padding: 6px 20px 16px; }
 @media (min-width: 720px) { .shortcuts-list { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); } }
 .shortcuts-group { padding-top: 12px; }
