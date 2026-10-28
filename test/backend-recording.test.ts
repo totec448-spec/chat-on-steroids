@@ -294,12 +294,16 @@ it('stores a recorded screenshot as lossless WebP when that saves space, with ex
   const sharp = (await import('sharp')).default;
   const id = await sessionForConversation('conv-webp-screenshot');
   // A screenshot-like picture: flat panels, text-like stripes and a gradient, as a PNG.
-  const width = 480, height = 300, raw = Buffer.alloc(width * height * 3);
+  // With a transparent corner whose hidden colors are not black, and a Display P3 profile, as macOS screenshots have:
+  // a lossless conversion that dropped either would show different colors.
+  const width = 480, height = 300, raw = Buffer.alloc(width * height * 4);
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-    const at = (y * width + x) * 3, panel = x < 120 ? 32 : 245, stripe = y % 18 < 3 && x > 140 && x < 440 ? 60 : panel;
+    const at = (y * width + x) * 4, panel = x < 120 ? 32 : 245, stripe = y % 18 < 3 && x > 140 && x < 440 ? 60 : panel;
     raw[at] = stripe; raw[at + 1] = y < 40 ? Math.floor(x / 2) : stripe; raw[at + 2] = stripe;
+    raw[at + 3] = x < 20 && y < 20 ? 0 : 255;
   }
-  const png = await sharp(raw, { raw: { width, height, channels: 3 } }).png().toBuffer();
+  const png = await sharp(raw, { raw: { width, height, channels: 4 } }).withIccProfile('p3').png().toBuffer();
+  expect((await sharp(png).metadata()).icc).toBeDefined();
   await recordToolCall({ ...call('webp-shot', 'conv-webp-screenshot'), tool: 'screenshot',
     content: [{ type: 'image', data: png.toString('base64'), mimeType: 'image/png' }] });
   const event = (await readEvents(id!, { kinds: ['tool_call'] }))[0]!;
@@ -309,8 +313,9 @@ it('stores a recorded screenshot as lossless WebP when that saves space, with ex
   const stored = (await readAsset(id!, asset.id))!;
   expect(stored.length).toBeLessThan(png.length);
   expect(asset.bytes).toBe(stored.length);
-  const pixels = async (data: Buffer) => sharp(data).removeAlpha().raw().toBuffer();
+  const pixels = async (data: Buffer) => sharp(data).ensureAlpha().raw().toBuffer();
   expect((await pixels(stored)).equals(await pixels(png))).toBe(true);
+  expect((await sharp(stored).metadata()).icc).toEqual((await sharp(png).metadata()).icc);
   // A tiny image saves nothing worth a conversion: kept byte for byte.
   const tiny = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=';
   await recordToolCall({ ...call('webp-tiny', 'conv-webp-screenshot'), tool: 'screenshot', content: [{ type: 'image', data: tiny, mimeType: 'image/png' }] });
