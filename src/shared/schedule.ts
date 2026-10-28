@@ -31,6 +31,12 @@ export const SCHEDULE_ON_TIME_MS = 2 * 60_000;
 const HOUR_MS = 3600_000;
 const TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
 
+/** Whether two instants fall on the same day of this computer's calendar. */
+export function sameLocalDay(a: number, b: number): boolean {
+  const x = new Date(a), y = new Date(b);
+  return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
+}
+
 export function validSchedule(repeat: ScheduleRepeat): boolean {
   if (repeat.kind === 'hours') return Number.isInteger(repeat.every) && repeat.every >= 1 && repeat.every <= 24;
   if (!TIME.test(repeat.at)) return false;
