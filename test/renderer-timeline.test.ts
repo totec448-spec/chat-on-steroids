@@ -8738,11 +8738,11 @@ it('shows no Changed files card for a turn whose only edits were a worker\'s, or
 it('jumps between your own messages with Alt+↑ / Alt+↓, marked like a search result, and leaves the message box alone (#1884)', async () => {
   const at = Date.now() - 60_000;
   const { w } = await boot([
-    { kind: 'user_message', seq: 1, origin: 1, time: at, source: 'extension', messageId: 'q-1', message: text('First question') },
-    { kind: 'assistant_message', seq: 2, time: at + 1, source: 'extension', messageId: 'a-1', message: text('First answer'), final: true, state: 'final' } as SessionEvent,
-    { kind: 'user_message', seq: 3, origin: 3, time: at + 2, source: 'extension', messageId: 'q-2', message: text('Second question') },
-    { kind: 'assistant_message', seq: 4, time: at + 3, source: 'extension', messageId: 'a-2', message: text('Second answer'), final: true, state: 'final' } as SessionEvent,
-    { kind: 'user_message', seq: 5, origin: 5, time: at + 4, source: 'extension', messageId: 'q-3', message: text('Third question') }
+    { kind: 'user_message', seq: 11, origin: 11, time: at, source: 'extension', messageId: 'q-1', message: text('First question') },
+    { kind: 'assistant_message', seq: 12, time: at + 1, source: 'extension', messageId: 'a-1', message: text('First answer'), final: true, state: 'final' } as SessionEvent,
+    { kind: 'user_message', seq: 13, origin: 13, time: at + 2, source: 'extension', messageId: 'q-2', message: text('Second question') },
+    { kind: 'assistant_message', seq: 14, time: at + 3, source: 'extension', messageId: 'a-2', message: text('Second answer'), final: true, state: 'final' } as SessionEvent,
+    { kind: 'user_message', seq: 15, origin: 15, time: at + 4, source: 'extension', messageId: 'q-3', message: text('Third question') }
   ]);
   const doc = w.document;
   doc.querySelector<HTMLElement>('.app')!.dataset.screen = 'chat';
@@ -8767,4 +8767,24 @@ it('jumps between your own messages with Alt+↑ / Alt+↓, marked like a search
   // Other modifiers are not this shortcut.
   doc.body.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, shiftKey: true, bubbles: true }));
   expect(scrolled).toEqual(['Second']);
+  // With the chat's settings (or another view of the pane) shown, the keys don't act on the hidden chat.
+  const content = doc.getElementById('timelineContent')!;
+  content.hidden = true;
+  const hidden = new w.KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, bubbles: true, cancelable: true });
+  doc.body.dispatchEvent(hidden);
+  expect(hidden.defaultPrevented).toBe(false);
+  expect(scrolled).toEqual(['Second']);
+  content.hidden = false;
+  // No earlier message on the loaded page, with the pane already at its top: the page before it is
+  // asked for, as reading up would, although no scroll event happens (CodeRabbit).
+  const api = (w as any).api, original = api.getSession;
+  const read = vi.fn((id: string, options: unknown) => original(id, options));
+  api.getSession = read;
+  own.forEach(row => { row.getBoundingClientRect = () => ({ top: 100, bottom: 140, left: 0, right: 600, width: 600, height: 40, x: 0, y: 100, toJSON: () => ({}) }) as DOMRect; });
+  const pane = doc.getElementById('chatBody')!;
+  Object.defineProperties(pane, { clientHeight: { value: 700 }, scrollHeight: { value: 700 } });
+  pane.scrollTop = 0;
+  press('ArrowUp', doc.getElementById('chatTitle') ?? doc.body);
+  await settle();
+  expect(read).toHaveBeenCalledWith(expect.any(String), { before: 11, limit: 30 });
 });

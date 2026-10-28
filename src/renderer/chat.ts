@@ -5081,8 +5081,9 @@ function jumpOwnMessage(direction: -1 | 1): void {
   const pane = $('chatBody');
   const at = pickOwnMessage(rows.map(row => row.getBoundingClientRect().top), pane.getBoundingClientRect().top, direction);
   if (at < 0) {
-    // None earlier on the loaded page: going to its top loads the page before it, as reading up does.
-    if (direction < 0) { readTimeline(); pane.scrollTop = 0; }
+    // None earlier on the loaded page: its top, and the page before it, as reading up loads it. A pane
+    // already at its top fires no scroll event, so the older page is asked for here.
+    if (direction < 0) { readTimeline(); pane.scrollTop = 0; requestHistory(-1); }
     return;
   }
   readTimeline();
@@ -9536,6 +9537,9 @@ export function initChat(next: Deps): void {
     if (event.defaultPrevented || event.isComposing || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
     if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
     if (!visible || document.querySelector<HTMLElement>('.app')?.dataset.screen !== 'chat' || keyBelongsElsewhere(event.target)) return;
+    // Only the selected chat's own loaded timeline: not while the chat's settings or another view of
+    // the pane is shown, nor while a switch still shows the previous chat's rows.
+    if (!selectedId || detailFor !== selectedId || !timelineShown()) return;
     event.preventDefault();
     jumpOwnMessage(event.key === 'ArrowUp' ? -1 : 1);
   });
