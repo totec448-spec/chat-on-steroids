@@ -3386,5 +3386,14 @@
   "Weekdays": "工作日",
   "{0} hours": "{0} 小时",
   "every {0} hours": "每 {0} 小时",
-  "Choose the end date.": "请选择结束日期。"
+  "Choose the end date.": "请选择结束日期。",
+  "Scheduled runs, changed files under each answer, commit and pull request from Review, and your own chat style.": "定时运行、每个回答下的已更改文件、从审阅提交并创建拉取请求，以及你自己的聊天风格。",
+  "Scheduled runs": "定时运行",
+  "A chat can send itself a message every few hours, daily or weekly.": "聊天可以每隔几小时、每天或每周给自己发送一条消息。",
+  "Changed files": "已更改的文件",
+  "Each answer that edited files shows what it changed.": "每个编辑过文件的回答都会显示它改了什么。",
+  "Commit from Review": "从审阅提交",
+  "Commit the chosen files, then push and open a pull request.": "提交所选文件，然后推送并创建拉取请求。",
+  "Your own chat style": "你自己的聊天风格",
+  "Rewrite how ChatGPT talks and writes in new chats.": "改写 ChatGPT 在新聊天中说话和写作的方式。"
 }

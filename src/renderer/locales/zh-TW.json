@@ -3386,5 +3386,14 @@
   "Weekdays": "平日",
   "{0} hours": "{0} 小時",
   "every {0} hours": "每 {0} 小時",
-  "Choose the end date.": "請選擇結束日期。"
+  "Choose the end date.": "請選擇結束日期。",
+  "Scheduled runs, changed files under each answer, commit and pull request from Review, and your own chat style.": "排程執行、每個回答下的已變更檔案、從檢閱提交並建立拉取要求，以及你自己的聊天風格。",
+  "Scheduled runs": "排程執行",
+  "A chat can send itself a message every few hours, daily or weekly.": "聊天可以每隔幾小時、每天或每週給自己傳送一則訊息。",
+  "Changed files": "已變更的檔案",
+  "Each answer that edited files shows what it changed.": "每個編輯過檔案的回答都會顯示它改了什麼。",
+  "Commit from Review": "從檢閱提交",
+  "Commit the chosen files, then push and open a pull request.": "提交所選檔案，然後推送並建立拉取要求。",
+  "Your own chat style": "你自己的聊天風格",
+  "Rewrite how ChatGPT talks and writes in new chats.": "改寫 ChatGPT 在新聊天中說話和寫作的方式。"
 }

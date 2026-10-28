@@ -3453,5 +3453,14 @@
   "{0} hours|one": "{0} saat",
   "every {0} hours": "her {0} saatte",
   "every {0} hours|one": "her {0} saatte",
-  "Choose the end date.": "Bitiş tarihini seçin."
+  "Choose the end date.": "Bitiş tarihini seçin.",
+  "Scheduled runs, changed files under each answer, commit and pull request from Review, and your own chat style.": "Zamanlanmış çalıştırmalar, her yanıtın altında değişen dosyalar, İnceleme'den commit ve pull request, ve kendi sohbet tarzınız.",
+  "Scheduled runs": "Zamanlanmış çalıştırmalar",
+  "A chat can send itself a message every few hours, daily or weekly.": "Bir sohbet kendine birkaç saatte bir, her gün veya her hafta mesaj gönderebilir.",
+  "Changed files": "Değişen dosyalar",
+  "Each answer that edited files shows what it changed.": "Dosya düzenleyen her yanıt neyi değiştirdiğini gösterir.",
+  "Commit from Review": "İnceleme'den commit",
+  "Commit the chosen files, then push and open a pull request.": "Seçtiğiniz dosyaları commit edin, ardından push edip bir pull request açın.",
+  "Your own chat style": "Kendi sohbet tarzınız",
+  "Rewrite how ChatGPT talks and writes in new chats.": "ChatGPT'nin yeni sohbetlerde nasıl konuşup yazdığını yeniden yazın."
 }

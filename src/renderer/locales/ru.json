@@ -3587,5 +3587,14 @@
   "every {0} hours|one": "каждый {0} час",
   "every {0} hours|few": "каждые {0} часа",
   "every {0} hours|many": "каждые {0} часов",
-  "Choose the end date.": "Выберите дату окончания."
+  "Choose the end date.": "Выберите дату окончания.",
+  "Scheduled runs, changed files under each answer, commit and pull request from Review, and your own chat style.": "Запуски по расписанию, изменённые файлы под каждым ответом, коммит и pull request из «Проверки» и ваш собственный стиль чата.",
+  "Scheduled runs": "Запуски по расписанию",
+  "A chat can send itself a message every few hours, daily or weekly.": "Чат может сам отправлять себе сообщение каждые несколько часов, ежедневно или еженедельно.",
+  "Changed files": "Изменённые файлы",
+  "Each answer that edited files shows what it changed.": "Каждый ответ, который правил файлы, показывает, что он изменил.",
+  "Commit from Review": "Коммит из «Проверки»",
+  "Commit the chosen files, then push and open a pull request.": "Закоммитьте выбранные файлы, затем отправьте их и откройте pull request.",
+  "Your own chat style": "Ваш стиль чата",
+  "Rewrite how ChatGPT talks and writes in new chats.": "Задайте, как ChatGPT говорит и пишет в новых чатах."
 }
