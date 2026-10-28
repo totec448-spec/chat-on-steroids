@@ -4432,6 +4432,20 @@ it('docks recent app repair progress without hiding authored lookalikes', async 
   expect(w.document.getElementById('recoveryStatus')!.hidden).toBe(true);
 });
 
+it('translates the historical approval deferral in the timeline and recovery notice', async () => {
+  const { w } = await boot([{ seq: 1, time: Date.now(), source: 'app', kind: 'progress',
+    progressId: 'browser-repair:approval-deferred',
+    message: text('Reload was deferred because ChatGPT showed a tool approval card.') }], true, [], [], { developerMode: true });
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  try {
+    setLanguage('es');
+    const translated = 'Se pospuso la recarga porque ChatGPT mostró una tarjeta de aprobación de herramientas.';
+    expect(w.document.querySelector('.ev-progress')!.textContent).toContain(translated);
+    expect(w.document.getElementById('recoveryStatus')!.textContent).toContain(translated);
+    expect(w.document.querySelector('.approval-wait')).toBeNull();
+  } finally { setLanguage('en'); }
+});
+
 it('keeps historical repair details in developer mode without reviving a status', async () => {
   const { w } = await boot([{ seq: 1, time: T0, source: 'app', kind: 'progress', progressId: 'browser-repair:old', message: text('Historical repair') }], true, [], [], { developerMode: true });
   expect(w.document.getElementById('recoveryStatus')!.hidden).toBe(true);

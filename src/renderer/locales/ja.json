@@ -3253,5 +3253,6 @@
   "Keys stay with you": "キーは手元に",
   "API keys and tokens in what tools return are hidden before ChatGPT sees them.": "ツールが返す内容に含まれる API キーやトークンは、ChatGPT が見る前に隠されます。",
   "Easier to read": "読みやすく",
-  "High contrast, eight accent colors, line spacing and a more legible font.": "ハイコントラスト、8 つのアクセントカラー、行間、より読みやすいフォント。"
+  "High contrast, eight accent colors, line spacing and a more legible font.": "ハイコントラスト、8 つのアクセントカラー、行間、より読みやすいフォント。",
+  "Reload was deferred because ChatGPT showed a tool approval card.": "ChatGPT がツールの承認カードを表示したため、再読み込みを延期しました。"
 }
