@@ -1,3 +1,4 @@
+import { ageOf, countdownClock, elapsedText } from '../shared/age.js';
 import { DEFAULT_CHAT_PERSONALITY, DEFAULT_CHAT_WRITING_STYLE, MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
 import { hasProviderDirective, resolvedCapture, withoutProviderDirectives } from '../shared/content-reference.js';
 import { completedDilText } from '../shared/dil-tables.js';
@@ -1716,7 +1717,7 @@ function sidebarLayout(): 'projects' | 'inbox' {
 /** The layout the sidebar was last drawn in; the page's own markup is the project tree's. */
 let paintedLayout: 'projects' | 'inbox' = 'projects';
 
-type AgeUnit = 'minute' | 'hour' | 'day' | 'week';
+type AgeUnit = 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year';
 const ageFormats = new Map<string, Intl.NumberFormat>();
 /** A count in the app language's own narrow unit, as the platform writes it ("5h" in English). */
 function ageIn(value: number, unit: AgeUnit): string {
@@ -1726,15 +1727,12 @@ function ageIn(value: number, unit: AgeUnit): string {
   return format.format(value);
 }
 
-/** "now", "4m", "5h", "2d", "3w" in English: one short token that fits beside a title. */
+/** "now", "4m", "5h", "2d", "3w", "4mo", "2y" in English: one short token that fits beside a title. */
 function compactAge(at: number): string {
-  const minutes = Math.max(0, Math.round((Date.now() - at) / 60_000));
-  if (minutes < 1) return t('now');
-  if (minutes < 60) return ageIn(minutes, 'minute');
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return ageIn(hours, 'hour');
-  const days = Math.round(hours / 24);
-  return days < 7 ? ageIn(days, 'day') : ageIn(Math.round(days / 7), 'week');
+  const age = ageOf(at, Date.now());
+  if (!age || (age.unit === 'second' && age.value < 30)) return t('now');
+  // Under a minute rounds up to one; past weeks it goes on to months and years, never "104w" (2.1.47 round).
+  return age.unit === 'second' ? ageIn(1, 'minute') : ageIn(age.value, age.unit);
 }
 
 /** A chat quiet this long, not needing the person, running, unread or pinned, settles into the compact list below. */
@@ -3058,7 +3056,7 @@ function paintGoalProgress(): void {
   }
   if (phase === 'settling' && wait?.until) {
     const seconds = Math.max(0, Math.ceil((wait.until - Date.now()) / 1000));
-    const timer = el('span', 'recovery-countdown', seconds ? t('Check in {0}', [`${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`]) : t('Checking for activity…'));
+    const timer = el('span', 'recovery-countdown', seconds ? t('Check in {0}', [countdownClock(seconds)]) : t('Checking for activity…'));
     timer.setAttribute('role', 'timer'); timer.setAttribute('aria-live', 'off'); row.append(timer);
   }
 }
@@ -6958,13 +6956,9 @@ function backgroundCommand(command: string): string {
   return compact.length > 120 ? compact.slice(0, 117) + '…' : compact;
 }
 
+/** "45s", "4m 5s", "6h 12m", then "3d 4h": a process left running for days never reads "72h 4m". */
 function backgroundElapsed(startedAt: number): string {
-  const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h ${minutes % 60}m`;
+  return elapsedText((Date.now() - startedAt) / 1000, 2);
 }
 
 function syncBackgroundProcessClock(visible: boolean): void {
