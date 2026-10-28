@@ -2433,8 +2433,10 @@ while leaving ChatGPT's messages, model execution and account permissions with t
 A claimed message whose model or reasoning the native picker could not confirm fails as `desktop_input`
 `fail` with `error` in the page's language (`content_delivery_model_unconfirmed`) and `detail:
 'model-unconfirmed'`; `/input/fail` reads the code, not the words, to ask for the model list again
-(`requestChatModels(false)`). A ChatGPT limit shown instead, or a deleted chat, carries no code.
-`failBrowserInput` logs every failure it records once, with the page's reason and code.
+(`requestChatModels(false)`). A ChatGPT limit shown instead, or a deleted chat, carries no code;
+that includes a limit dialog `CLF_DOM.errors()` read and acknowledged while the picker ran
+(`CLF_DOM.accessNoticeSince(choosingStartedAt)`), in both the ordinary and the edit path.
+`failBrowserInput` logs every failure it records once, after the record, with the page's reason and code.
 
 Setup's first step installs and version-checks the companion in the person's Chrome, Edge, Brave or Firefox,
 then offers two equally weighted places for ChatGPT to run: the built-in CoS browser (opt-in, never
