@@ -118,7 +118,7 @@ import { initSharePage } from './share-page.js';
 import { initFeedbackDialog } from './feedback-dialog.js';
 import { createChatgptProjectPicker } from './chatgpt-project-picker.js';
 import { initScheduleDialog } from './schedule-dialog.js';
-import { nextRunAfter, type ScheduleRepeat } from '../shared/schedule.js';
+import { nextRunAfter, sameLocalDay, type ScheduleRepeat } from '../shared/schedule.js';
 
 const api = window.api;
 let chatSearch: ChatSearch | null = null;
@@ -8658,12 +8658,13 @@ async function paintScheduleLine(): Promise<void> {
   const schedule = reply?.ok ? reply.data : null;
   line.hidden = !schedule;
   if (!schedule) return;
-  const clock = (instant: number, weekday: boolean) => new Date(instant).toLocaleString(currentLanguage(),
-    weekday ? { weekday: 'short', hour: '2-digit', minute: '2-digit' } : { hour: '2-digit', minute: '2-digit' });
+  // A time today is its time alone; another day's names the day ("Wed 07:17" today read as next week).
+  const clock = (instant: number) => new Date(instant).toLocaleString(currentLanguage(), sameLocalDay(instant, Date.now())
+    ? { hour: '2-digit', minute: '2-digit' } : { weekday: 'short', hour: '2-digit', minute: '2-digit' });
   const next = nextRunAfter(schedule, Math.max(Date.now(), schedule.lastDueAt ?? 0));
   const parts = [schedule.paused ? t('Paused') : t('Scheduled'), repeatText(schedule.repeat)];
-  if (schedule.missedDueAt !== undefined) parts.push(t('missed {0}', [clock(schedule.missedDueAt, false)]));
-  if (!schedule.paused) parts.push(next === null ? t('ended') : t('next {0}', [clock(next, true)]));
+  if (schedule.missedDueAt !== undefined) parts.push(t('missed {0}', [clock(schedule.missedDueAt)]));
+  if (!schedule.paused) parts.push(next === null ? t('ended') : t('next {0}', [clock(next)]));
   ui($('scheduleLineText'), 'textContent', () => parts.join(' · '));
   const pause = $<HTMLButtonElement>('scheduleLinePause');
   ui(pause, 'textContent', () => schedule.paused ? t('Resume') : t('Pause'));

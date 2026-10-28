@@ -1212,7 +1212,12 @@ it("shows the chat's schedule as one quiet line, with Pause and Edit, and a miss
   api.pauseSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, paused: true } }));
   await append([]); await append([]);
   expect(line().hidden).toBe(false);
-  expect(line().textContent).toMatch(/^Scheduled · every weekday at 09:00( AM)? · next .+09:00/);
+  expect(line().textContent).toMatch(/^Scheduled · every weekday at 09:00( AM)? · next (\S+ )?09:00/);
+  // A next run later today is its time alone; on another day it names the day (2.1.47 round).
+  const next = w.document.getElementById('scheduleLineText')!.textContent!.match(/· next (.+)$/)![1]!;
+  const today = new Date(); today.setHours(9, 0, 0, 0);
+  if (today.getTime() > Date.now() && today.getDay() >= 1 && today.getDay() <= 5) expect(next).toMatch(/^09:00( AM)?$/);
+  else expect(next).not.toMatch(/^09:00/);
   (w.document.getElementById('scheduleLinePause') as HTMLButtonElement).click();
   await append([]);
   expect(api.pauseSchedule).toHaveBeenCalledWith(sessionId, true);
