@@ -903,6 +903,40 @@ it('identifies automatic Continue without user-task editing or reordering and ke
   expect(w.document.querySelectorAll('#finishQueue [aria-label="Edit queued task"]')).toHaveLength(2);
 });
 
+// #1826: a run of the chat's schedule says so in its queue row, and when it went out late.
+it('labels a scheduled run in the queue, with when it was due when it is late', async () => {
+  const { w, live, append } = await boot([]);
+  const dueAt = new Date(2026, 9, 24, 9, 0).getTime();
+  const run: InputEntry = { id: 'scheduled-run', sessionId: summary([]).id, text: 'Check the open issues', mode: 'auto',
+    dueAt: 0, model: null, reasoningEffort: null, state: 'queued', owner: null, createdAt: 0, conversationId: 'chat-b',
+    scheduled: { scheduleId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', dueAt, late: false } };
+  live.inputs.push(run);
+  await append([]);
+  const label = () => w.document.querySelector('#inputQueue [data-input-id="scheduled-run"] .pending-message-origin')?.textContent;
+  expect(label()).toBe('Scheduled');
+  expect(w.document.querySelector('#inputQueue [data-input-id="scheduled-run"] .pending-message-text')?.textContent).toBe('Check the open issues');
+  live.inputs[0] = { ...run, scheduled: { ...run.scheduled!, late: true } };
+  await append([]);
+  expect(label()).toBe(`Scheduled · late, was due ${new Date(dueAt).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })}`);
+  // Waiting for a running turn, the run is a task card that carries the same label.
+  live.inputs[0] = { ...run, mode: 'after-turn' };
+  await append([]);
+  expect(w.document.querySelector('#finishQueue [data-input-id="scheduled-run"] .queue-label')?.textContent).toBe('Scheduled · Check the open issues');
+});
+
+// #1826: a sent run keeps its label in the chat, on time or late, and a typed message has none.
+it('keeps the scheduled label on the sent message in the chat', async () => {
+  const dueAt = new Date(2026, 9, 24, 9, 0).getTime();
+  const sent: SessionEvent = { kind: 'user_message', seq: 1, origin: 1, time: T0, source: 'app', messageId: 'scheduled-sent', inputId: 'scheduled-run',
+    message: text('Check the open issues'), scheduled: { dueAt, late: false } };
+  const typed: SessionEvent = { kind: 'user_message', seq: 2, origin: 2, time: T0 + 1, source: 'app', messageId: 'typed', message: text('And this one?') };
+  const { w, append } = await boot([sent, typed]);
+  const labels = () => [...w.document.querySelectorAll('.said.is-user')].map(bubble => bubble.querySelector('.said-origin')?.textContent ?? null);
+  expect(labels()).toEqual(['Scheduled', null]);
+  await append([{ ...sent, seq: 3, origin: 1, scheduled: { dueAt, late: true } }]);
+  expect(labels()).toEqual([`Scheduled · late, was due ${new Date(dueAt).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })}`, null]);
+});
+
 // #1402: the app's own fresh-turn continue is no one's typed message. Waiting, it shows as the
 // message it is; dropped, it raises no delivery notice, because the app tries again by itself.
 it('shows a fresh-turn continue while it waits and raises no notice when it is dropped', async () => {
@@ -1158,6 +1192,39 @@ describe("a new chat's first message held for its project's ChatGPT Project", ()
     await append([]);
     await vi.waitFor(() => expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').toContain(expected), { timeout: 5000 });
   });
+});
+
+it("shows the chat's schedule as one quiet line, with Pause and Edit, and a missed run (#1826)", async () => {
+  const asked = Date.now() - 12_000;
+  const { w, live, append } = await boot([
+    { kind: 'user_message', seq: 1, origin: 1, time: asked, source: 'extension', messageId: 'q-sched', message: text('Check the issues') }
+  ]);
+  const api = (w as any).api;
+  const sessionId = summary(live.events).id;
+  const line = () => w.document.getElementById('scheduleLine')!;
+  // No schedule: no line.
+  api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: null }));
+  await append([]); await append([]);
+  expect(line().hidden).toBe(true);
+  const schedule = { id: '0b6c4e1c-1f1e-4a4f-9d39-3c2f0e1a2b3c', sessionId, text: 'Check the issues', repeat: { kind: 'weekdays', at: '09:00' },
+    until: null, paused: false, createdAt: Date.now() - 86_400_000, lastDueAt: null };
+  api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: schedule }));
+  api.pauseSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, paused: true } }));
+  await append([]); await append([]);
+  expect(line().hidden).toBe(false);
+  expect(line().textContent).toMatch(/^Scheduled · every weekday at 09:00( AM)? · next .+09:00/);
+  (w.document.getElementById('scheduleLinePause') as HTMLButtonElement).click();
+  await append([]);
+  expect(api.pauseSchedule).toHaveBeenCalledWith(sessionId, true);
+  api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, paused: true } }));
+  await append([]); await append([]);
+  expect(line().textContent).toMatch(/^Paused · every weekday at 09:00/);
+  expect(w.document.getElementById('scheduleLinePause')!.textContent).toBe('Resume');
+  // A run missed while the app was closed says so, beside the next time.
+  const missed = new Date(); missed.setHours(9, 0, 0, 0);
+  api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, missedDueAt: missed.getTime() } }));
+  await append([]); await append([]);
+  expect(line().textContent).toContain('missed 09:00');
 });
 
 it('says when the send check holds an automatic message, with its reason', async () => {

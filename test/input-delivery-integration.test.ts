@@ -354,6 +354,35 @@ it('lets a message the person types go while an automatic send before it is held
   } finally { clock.mockRestore(); }
 });
 
+it('asks the send check before a scheduled run goes, and holds it on a refusal (#1826 with #1794)', async () => {
+  // A scheduled run is sent by the app at a set time, not by the person at that moment.
+  const http = await import('node:http');
+  const asked: Array<Record<string, any>> = [];
+  const server = http.createServer((req, res) => {
+    let raw = ''; req.on('data', chunk => { raw += chunk; });
+    req.on('end', () => {
+      asked.push(JSON.parse(raw));
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ allow: false, reason: 'quiet hours' }));
+    });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as { port: number }).port;
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      ui: { ...defaultConfig().ui, sendCheckUrl: `http://127.0.0.1:${port}/check` } });
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'Scheduled run held', conversationId });
+    const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Check the issues',
+      scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+    expect((await post('/input/claim', { id: row.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input).toBeNull();
+    expect(asked).toEqual([{ version: 1, kind: 'scheduled', id: row.id, chat: { session: session.id, project: null, worker: null }, text: 'Check the issues', attempt: 1 }]);
+    expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ state: 'queued', sendCheck: { attempt: 1, reason: 'quiet hours' } });
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
 it('releases a held automatic send at once when the send check address is cleared', async () => {
   let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
   try {
