@@ -2229,8 +2229,9 @@
       // Only for a turn the app itself no longer counts as running, and only if nothing of it shows
       // up for a few seconds: a remount can hide both the answer and ChatGPT's Stop for a moment
       // while the answer still runs (CodeRabbit).
+      const expired = () => Number.isFinite(command.expiresAt) && Date.now() >= command.expiresAt;
       const stopped = command.held === true && unseenHeld() &&
-        !(await waitUntil(() => { observe(); return !unseenHeld(); }, UNSEEN_STOP_SETTLE_MS)) && unseenHeld();
+        !(await waitUntil(() => { observe(); return !unseenHeld(); }, UNSEEN_STOP_SETTLE_MS)) && unseenHeld() && !expired();
       if (stopped) {
         stopRequestedAt = Date.now();
         finishGeneration(generationTurn(), { outcome: 'stopped', detail: t('content_turn_stop_unseen',
@@ -2238,10 +2239,12 @@
         void flush();
         stoppedAppCommands.add(commandId);
         if (stoppedAppCommands.size > 100) stoppedAppCommands.delete(stoppedAppCommands.values().next().value);
+        await ask({ type: 'stop_ack', id: commandId, client: RUN_ID, conversationId: target, turnId: expected, status: 'sent' });
+        return true;
       }
-      await ask({ type: 'stop_ack', id: commandId, client: RUN_ID, conversationId: target, turnId: expected,
-        status: stopped ? 'sent' : 'failed', error: stopped ? undefined : 'native_stop_unavailable_or_turn_changed' });
-      return stopped;
+      // Not for this path (a running turn, the answer or ChatGPT's Stop came back, or the command
+      // expired): report no failure here. The command stays pending for ChatGPT's own Stop below or
+      // a later delivery, as it did before this path existed (CodeRabbit).
     }
     const native = currentAssistantTurn();
     const nativeId = pageTurnIds.get(expected);
