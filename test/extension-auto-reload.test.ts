@@ -5,20 +5,21 @@ import { expect, it, vi } from 'vitest';
 const background = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
 const code = background.slice(background.indexOf('let extensionReloadPending = false;'), background.indexOf('async function maintainOnce() {'));
 
-function worker(options: { running?: string; pings?: Array<object | null>; prepared?: object; attempt?: string; firefox?: boolean } = {}) {
+function worker(options: { running?: string; pings?: Array<object | null>; prepared?: object; attempt?: string; firefox?: boolean; openings?: Record<string, object> } = {}) {
   const store: Record<string, unknown> = options.attempt ? { extensionReloadAttempt: options.attempt } : {};
   const reload = vi.fn();
   const call = vi.fn(async () => ({ ok: true, data: options.prepared ?? { build: 'bbbbbbbbbbbb', ready: true } }));
   const pings = options.pings ?? [{ ok: true, busy: false }];
   const context = vm.createContext({
     CHATGPT_TAB_URLS: ['https://chatgpt.com/*'], workerStampReady: Promise.resolve(), workerStampValue: options.running ?? 'aaaaaaaaaaaa', call,
+    inputOpenings: options.openings ?? {},
     tabReply: async (id: number) => pings[id - 1] ?? null,
     chrome: { runtime: { reload, ...(options.firefox ? { getBrowserInfo: async () => ({ name: 'Firefox' }) } : {}) }, tabs: { query: async () => pings.map((_, index) => ({ id: index + 1 })) },
       storage: { local: { get: async (key: string) => ({ [key]: store[key] }), set: async (value: Record<string, unknown>) => Object.assign(store, value) } } }
   });
   vm.runInContext(`${code}\nglobalThis.run = reloadForExtensionUpdate; globalThis.hold = () => extensionUpdateHold;`, context);
-  const run = (offer: unknown = { build: 'bbbbbbbbbbbb', busy: false }, busy: { inputs?: string[]; commands?: string[] } = {}) =>
-    (context.run as Function)(offer, new Set(busy.inputs ?? []), new Set(busy.commands ?? []));
+  const run = (offer: unknown = { build: 'bbbbbbbbbbbb', busy: false }, busy: { inputs?: string[]; commands?: string[]; sending?: string[] } = {}) =>
+    (context.run as Function)(offer, new Set(busy.inputs ?? []), new Set(busy.commands ?? []), busy.sending ? new Set(busy.sending) : null);
   return { run, reload, call, store, hold: () => (context.hold as Function)() as string | null };
 }
 
@@ -97,4 +98,29 @@ it('leaves updating to Firefox itself', async () => {
   expect(h.call).not.toHaveBeenCalled();
   expect(h.reload).not.toHaveBeenCalled();
   expect(h.hold()).toBe('browser-updates-itself');
+});
+
+// 2.1.47 round (the user's Mac): an automatic Continue queued in a chat ChatGPT had blocked waited
+// for hours, and the update waited with it: every open message counted as "being sent".
+it('updates past a message that only waits in the queue, but not past one being sent or prepared', async () => {
+  const queued = worker();
+  await queued.run(undefined, { inputs: ['q'], sending: [] });
+  expect(queued.reload).toHaveBeenCalledTimes(1);
+
+  const claimed = worker();
+  await claimed.run(undefined, { inputs: ['s'], sending: ['s'] });
+  expect(claimed.reload).not.toHaveBeenCalled();
+  expect(claimed.hold()).toBe('sending');
+
+  // A tab this browser is opening for the queued message counts: reloading would drop it mid-way.
+  const preparing = worker({ openings: { q: { tab: 7, stage: 'preparing' } } });
+  await preparing.run(undefined, { inputs: ['q'], sending: [] });
+  expect(preparing.reload).not.toHaveBeenCalled();
+  expect(preparing.hold()).toBe('sending');
+
+  // An app that does not list the messages being sent keeps the old, careful rule.
+  const older = worker();
+  await older.run(undefined, { inputs: ['q'] });
+  expect(older.reload).not.toHaveBeenCalled();
+  expect(older.hold()).toBe('sending');
 });

@@ -2973,6 +2973,11 @@ own close entry never reached (a changed ChatGPT browser, an app restart); an ap
 `inputOpeningIds` closes nothing this way. A worker or handoff start page (`clf` marker) closes the
 same way once `commandIds` no longer lists its command, as a worker that failed before its first
 message left one behind; the page check then compares the `clf` marker.
+`/status` also sends `inputSendingIds`: the open messages already handed to a browser (every state but
+`queued`, `sent`, `failed`, `cancelled`). Only these, or an id whose tab this browser is still preparing
+(`inputOpenings`), hold the extension's self-update as `sending`; a message that only waits in the
+queue does not (a blocked chat kept one for hours on 2026-10-28). An app that sends no
+`inputSendingIds` keeps the old rule: any id in `inputOpeningIds` holds it.
 Managed idle/retired/duplicate pruning records a successful removal against the exact tab,
 document, navigation epoch and conversation in the existing session-storage snapshot. Its
 lifecycle event carries a non-manual departure through the close outbox; it does not create
