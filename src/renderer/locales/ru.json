@@ -3448,7 +3448,7 @@
   "{0} in {1}": "{0} в {1}",
   "Go ahead": "Разрешить",
   "Ask before using the mouse and keyboard": "Спрашивать перед использованием мыши и клавиатуры",
-  "A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for 2 minutes, until you use the mouse or keyboard again. Browser steps never ask.": "Небольшой вопрос в углу экрана с кнопками «Разрешить» и «Не сейчас». «Разрешить» даёт этому чату 2 минуты — пока вы снова не воспользуетесь мышью или клавиатурой. Шаги в браузере никогда не спрашивают.",
+  "A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for up to 2 minutes, until you use the mouse or keyboard again; a step the app can't match to a chat asks again. Browser steps never ask.": "Небольшой вопрос в углу экрана с кнопками «Разрешить» и «Не сейчас». «Разрешить» даёт этому чату до 2 минут — пока вы снова не воспользуетесь мышью или клавиатурой; шаг, который приложение не может связать с чатом, спросит снова. Шаги в браузере никогда не спрашивают.",
   "Ask while I'm using the computer": "Спрашивать, пока я пользуюсь компьютером",
   "Always ask": "Всегда спрашивать"
 }

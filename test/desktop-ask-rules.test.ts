@@ -57,3 +57,18 @@ it("runs within a chat's 2-minute grant, until it ends or the person uses the co
   // Without idle information a grant cannot see the person return, so it is not trusted.
   expect(desktopAskDecision(input({ grant, lastPersonInputAt: null })).ask).toBe(true);
 });
+
+it('takes the question\'s colors from the app\'s own palette, so its text is readable on any background and in high contrast (Haz on #1864)', async () => {
+  const { desktopAskColors } = await import('../src/shared/desktop-ask.js');
+  const { contrastRatio, defaultAppearance } = await import('../src/shared/appearance.js');
+  // A mid-grey custom background: fixed dark or light ink would be hard to read on it.
+  const grey = { ...defaultAppearance(), light: { ...defaultAppearance().light, background: '#8a8a8a' } };
+  const colors = desktopAskColors(grey, 'light');
+  expect(colors.background).toBe('#8a8a8a');
+  expect(contrastRatio(colors.ink, colors.background)).toBeGreaterThanOrEqual(4.5);
+  expect(contrastRatio(colors.soft, colors.background)).toBeGreaterThanOrEqual(4.5);
+  for (const value of Object.values(colors)) expect(value).toMatch(/^#[0-9a-f]{6}$/i);
+  // The app's high-contrast setting carries over.
+  const high = desktopAskColors({ ...defaultAppearance(), highContrast: true }, 'dark');
+  expect(contrastRatio(high.ink, high.background)).toBeGreaterThanOrEqual(7);
+});

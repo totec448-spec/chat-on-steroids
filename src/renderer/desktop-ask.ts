@@ -9,6 +9,11 @@ root.dataset.theme = query.get('theme') === 'dark' ? 'dark' : 'light';
 root.lang = /^[a-z]{2}(-[A-Z]{2})?$/.test(query.get('lang') ?? '') ? query.get('lang')! : 'en';
 root.style.setProperty('--page', hex(query.get('background'), root.dataset.theme === 'dark' ? '#181818' : '#f4f4f5'));
 root.style.setProperty('--accent', hex(query.get('accent'), root.dataset.theme === 'dark' ? '#b0cbed' : '#486f9d'));
+// The app's readable ink for this background, high contrast included; the stylesheet's own as the fallback.
+for (const name of ['ink', 'soft', 'edge', 'hover']) {
+  const value = query.get(name);
+  if (value && /^#[0-9a-f]{6}$/i.test(value)) root.style.setProperty(`--${name}`, value);
+}
 const text = (id: string, value: string | null): void => { document.getElementById(id)!.textContent = (value ?? '').slice(0, 200); };
 for (const id of ['title', 'step', 'chat', 'go', 'notNow']) text(id, query.get(id));
 document.getElementById('chat')!.hidden = !query.get('chat');

@@ -8,6 +8,7 @@
  * app's last step ended. A system that cannot say when it was last used asks: someone who turned
  * this on is better asked once too often than taken over.
  */
+import { effectivePalette, paletteTokens, type AppearanceSettings, type AppearanceTheme } from './appearance.js';
 
 export type DesktopAskMode = 'off' | 'active' | 'always';
 export const DESKTOP_ASK_MODES: readonly DesktopAskMode[] = ['off', 'active', 'always'];
@@ -49,4 +50,18 @@ export function desktopAskDecision(input: DesktopAskInput): { ask: boolean; why:
   if (input.locked) return { ask: false, why: 'locked' };
   if (input.lastPersonInputAt === null) return { ask: true, why: 'unknown' };
   return personInputAt !== null && input.now - personInputAt < ASK_ACTIVE_MS ? { ask: true, why: 'active' } : { ask: false, why: 'away' };
+}
+
+/**
+ * The question's colors, from the app's own palette (Haz on #1864): its ink is the app's readable ink
+ * for that background, and the app's high-contrast setting carries over, so the small window reads
+ * as well as the app does on any background.
+ */
+export function desktopAskColors(appearance: AppearanceSettings, theme: AppearanceTheme): {
+  background: string; accent: string; ink: string; soft: string; edge: string; hover: string;
+} {
+  const palette = effectivePalette(appearance, theme);
+  const tokens = paletteTokens(palette.background, palette.accent, palette.contrast, appearance.highContrast === true);
+  return { background: tokens['--page'] ?? palette.background, accent: tokens['--blue'] ?? palette.accent, ink: tokens['--ink']!,
+    soft: tokens['--soft']!, edge: tokens['--edge']!, hover: tokens['--hover']! };
 }
