@@ -190,7 +190,8 @@ export async function run<T>(
 
 /** "12s ago" for a timestamp the main process vouched for, "never" for null. */
 export function ago(atMs: number | null): string {
-  if (atMs === null) return t("never");
+  // No time, or one that is not a number (a record without it), is "never", never a thrown error.
+  if (atMs === null || !Number.isFinite(atMs)) return t("never");
   const age = ageOf(atMs, Date.now());
   if (!age) return t("just now");
   if (age.unit === 'second') return t("{0}s ago", [age.value]);
@@ -210,7 +211,7 @@ export function ago(atMs: number | null): string {
  * four months as "4m" beside four minutes in English, Spanish and Japanese (CodeRabbit on #1902).
  */
 export function shortAgo(atMs: number | null): string {
-  if (atMs === null) return '—';
+  if (atMs === null || !Number.isFinite(atMs)) return '—';
   const age = ageOf(atMs, Date.now());
   return age ? compactAgeText(age.value, age.unit) : t("now");
 }

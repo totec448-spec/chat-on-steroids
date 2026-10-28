@@ -53,3 +53,13 @@ it('writes the compact tokens from the catalogs, so months never read like minut
   const de = await inLanguage('de');
   expect([de.shortAgo(Date.now() - 2 * day), de.shortAgo(Date.now() - 800 * day)]).toEqual(['2 T.', '2 J.']);
 });
+
+it('says "never" for a time that is missing or not a number, and never throws (2.1.47: UI checks)', async () => {
+  // Fixtures without an updatedAt made RelativeTimeFormat throw and the whole chat list stayed empty.
+  const { ago, shortAgo } = await inLanguage('de');
+  for (const missing of [undefined, Number.NaN, Number.POSITIVE_INFINITY] as never[]) {
+    expect(() => ago(missing)).not.toThrow();
+    expect(ago(missing)).toBe('nie');
+    expect(shortAgo(missing)).toBe('—');
+  }
+});
