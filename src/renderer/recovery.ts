@@ -1,3 +1,4 @@
+import { countdownClock } from '../shared/age.js';
 import type { RecoveryCountdown } from '../shared/recovery.js';
 import { el, icon } from './dom.js';
 import { t, ui } from './i18n.js';
@@ -66,7 +67,8 @@ export function renderRecoveryCountdowns(host: HTMLElement, countdowns: readonly
     const countdown = countdowns[index]!;
     timer.closest<HTMLElement>('.recovery-notice')!.hidden = (countdown.visibleAt ?? 0) > now;
     const seconds = Math.max(0, Math.ceil((countdown.deadline - now) / 1000));
-    const time = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    // From an hour on "2:05:30", never "125:30": a usage limit can last hours.
+    const time = countdownClock(seconds);
     // Compact & Resume's checks are internal pacing, not something to wait for: no clock.
     const text = countdown.kind === 'compaction' ? ''
       : countdown.kind === 'provider-limit'

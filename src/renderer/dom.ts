@@ -1,3 +1,4 @@
+import { ageOf, compactCount, elapsedParts, type AgeUnit } from '../shared/age.js';
 import { currentLanguage, t, ui } from './i18n.js';
 /**
  * The handful of DOM helpers both panels need.
@@ -189,22 +190,41 @@ export async function run<T>(
 
 /** "12s ago" for a timestamp the main process vouched for, "never" for null. */
 export function ago(atMs: number | null): string {
-  if (atMs === null) return t("never");
-  const seconds = Math.max(0, Math.round((Date.now() - atMs) / 1000));
-  if (seconds < 3) return t("just now");
-  if (seconds < 90) return t("{0}s ago", [seconds]);
-  const minutes = Math.round(seconds / 60);
-  return minutes < 90 ? t("{0}m ago", [minutes]) : t("{0}h ago", [Math.round(minutes / 60)]);
+  // No time, or one that is not a number (a record without it), is "never", never a thrown error.
+  if (atMs === null || !Number.isFinite(atMs)) return t("never");
+  const age = ageOf(atMs, Date.now());
+  if (!age) return t("just now");
+  if (age.unit === 'second') return t("{0}s ago", [age.value]);
+  if (age.unit === 'minute') return t("{0}m ago", [age.value]);
+  if (age.unit === 'hour') return t("{0}h ago", [age.value]);
+  // Days and longer in the person's language (2.1.47 round: the chat list said "389h ago"). English
+  // reads "2d ago" beside "3h ago"; elsewhere the narrow style can drop the word "ago" for a minus
+  // sign ("-16 j"), so those use the short one ("il y a 16 j", "vor 16 Tagen").
+  const language = currentLanguage();
+  return new Intl.RelativeTimeFormat(language, { numeric: 'always', style: /^en\b/i.test(language) ? 'narrow' : 'short' })
+    .format(-age.value, age.unit);
 }
 
-/** The same age as one glanceable token: "8s", "2m", "—" when there is nothing. */
+/**
+ * The same age as one glanceable token in the person's language: "8s", "2m", "3d", "2w", "4mo" in
+ * English, "—" when there is nothing. The catalogs, not the platform's narrow units: those write
+ * four months as "4m" beside four minutes in English, Spanish and Japanese (CodeRabbit on #1902).
+ */
 export function shortAgo(atMs: number | null): string {
-  if (atMs === null) return '—';
-  const seconds = Math.max(0, Math.round((Date.now() - atMs) / 1000));
-  if (seconds < 3) return t("now");
-  if (seconds < 90) return `${seconds}s`;
-  const minutes = Math.round(seconds / 60);
-  return minutes < 90 ? `${minutes}m` : `${Math.round(minutes / 60)}h`;
+  if (atMs === null || !Number.isFinite(atMs)) return '—';
+  const age = ageOf(atMs, Date.now());
+  return age ? compactAgeText(age.value, age.unit) : t("now");
+}
+
+/** One age as a compact token from the catalogs: "45s", "4m", "5h", "3d", "2w", "4mo", "2y" in English. */
+export function compactAgeText(value: number, unit: AgeUnit): string {
+  const key = { second: "{0}s", minute: "{0}m", hour: "{0}h", day: "{0}d", week: "{0}w", month: "{0}mo", year: "{0}y" }[unit];
+  return t(key, [value]);
+}
+
+/** An elapsed time in the person's language, with the same tokens as ages: "3d 4h", German "3 T. 4 h". */
+export function elapsedDurationText(seconds: number, parts: 1 | 2): string {
+  return elapsedParts(seconds, parts).map(([value, unit]) => compactAgeText(value, unit)).join(' ');
 }
 
 /** A clock time for one event in a timeline. */
@@ -213,10 +233,9 @@ export function clockTime(atMs: number): string {
 }
 
 /** "1.2k", "3.4M" — for token and character counts that get large. */
+/** A count in a few characters: "999", "1.0k", "12k", "1.3M", "2.0B" (never "1000k" or "2000.0M"). */
 export function compactNumber(value: number): string {
-  if (value < 1000) return String(value);
-  if (value < 1_000_000) return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)}k`;
-  return `${(value / 1_000_000).toFixed(1)}M`;
+  return compactCount(value);
 }
 
 const cardMenuDocuments = new WeakSet<Document>();

@@ -200,6 +200,7 @@
                 <label class="setting"><span class="setting-text"><b>Messages during a running turn</b><em id="followUpHint" translate="no"></em></span><select id="followUp"><option value="steer">Join the running turn</option><option value="queue">Wait until the turn ends</option></select></label>
                 <label class="setting"><span class="setting-text"><b>Send messages with</b><em id="enterSendsHint" translate="no"></em></span><select id="enterSends"><option value="enter">Enter</option><option value="modifier" id="enterSendsModifier" translate="no"></option></select></label>
                 <label class="setting"><span class="setting-text"><b>Keep awake while a chat works</b><em>Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose “The computer and screen”.</em></span><select id="keepAwake"><option value="off">Off</option><option value="computer">The computer</option><option value="screen">The computer and screen</option></select></label>
+                <div class="setting"><span class="setting-text"><b>Tour</b><em>A one-minute look at the composer, projects and Review.</em></span><button class="btn" id="takeTour" type="button">Take the tour again</button></div>
                 <label class="setting"><span class="setting-text"><b>Playful status words</b><em>Show rotating gym jokes instead of “Working”.</em></span><input id="playfulStatus" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Playful asides in automatic Continue</b><em>Add a random fun fact or meme joke to each automatic Continue, marked for the model to ignore.</em></span><input id="playfulContinue" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Mention Chat On Steroids Core</b><em>Makes sure ChatGPT can use this app in every chat. Turn it off if ChatGPT starts plain questions with an unneeded tool call. Workers, Goal, Loop and Continue always keep the mention.</em></span><input id="mentionCore" type="checkbox" /></label>
@@ -1084,6 +1085,8 @@
                   </div>
                   <div class="setting"><span class="setting-text"><b id="rotateTurnMinutesTitle">Start a fresh turn after</b><em>Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.</em></span><select id="rotateTurnMinutes" aria-labelledby="rotateTurnMinutesTitle"><option value="0">Off</option><option value="20">20 minutes</option><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option></select></div>
                   <label class="setting"><span class="setting-text"><b>Review Goal completion</b><em>When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you. Off by default.</em></span><input id="finishHoldOnStop" type="checkbox" /></label>
+                  <div class="setting"><label class="setting-text" for="goalReviewer"><b>Review each Goal step's changes</b><em>A reviewer worker checks each Goal step's edits; its findings go into the next step. Uses more of your ChatGPT usage and covers only edits made with the edit tools.</em></label><select id="goalReviewer"></select></div>
+                  <div class="setting" id="goalReviewerWorkersRow" hidden><span class="setting-text"><b>Sub-agents are off</b><em>The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.</em></span><button class="btn" id="goalReviewerWorkers" type="button">Turn on Sub-agents</button></div>
                   <label class="setting"><span class="setting-text"><b>Stop and continue when ChatGPT offers no Send</b><em>Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run. Experimental.</em></span><input id="rotateStopFallback" type="checkbox" /></label>
                   <div class="setting"><span class="setting-text"><b id="goalBackendTitle">Goal response source</b><em>Where Goal's next message comes from: a separate ChatGPT chat in your account, your API key (most reliable), or Offline (prepared messages, no API cost).</em></span><select id="goalBackend" aria-labelledby="goalBackendTitle"><option value="chatgpt">Separate ChatGPT chat</option><option value="api">API key · Most reliable</option><option value="templates">Offline · No API cost</option></select></div>
                   <div class="setting"><span class="setting-text"><b id="loopBackendTitle">Loop response source</b><em>Where Loop's next message comes from: your API key (most reliable) or a separate ChatGPT chat in your account. Loop keeps going until you turn it off.</em></span><select id="loopBackend" aria-labelledby="loopBackendTitle"><option value="api">API key · Most reliable</option><option value="chatgpt">Separate ChatGPT chat</option></select></div>
@@ -1449,7 +1452,7 @@
 
               </div>
             </div>
-            <div class="composer-dock" id="composerDock"><div class="composer-dock-body"><div class="background-exec-status" id="backgroundExecStatus" role="status" hidden><i class="ico ph ph-terminal-window" aria-hidden="true"></i><span class="queue-label"></span><span class="background-exec-time"></span><svg class="disclosure-chevron background-exec-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false" hidden><path d="M6 3.5 10.5 8 6 12.5"></path></svg><button class="background-exec-stop" type="button"><i class="ico ph ph-power" aria-hidden="true"></i><span></span></button></div><div class="sr-only" id="backgroundExecLiveStatus" role="status" aria-live="polite" hidden></div><div class="background-exec-list" id="backgroundExecList" role="list" hidden></div><section class="agent-plan" id="agentPlan" aria-label="Agent task plan" hidden></section><div id="branchDraft" class="branch-draft" role="status" hidden></div><div id="editDraft" class="edit-draft" role="status" hidden></div><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="activeGoalRow" hidden></div></div></div>
+            <div class="composer-dock" id="composerDock"><div class="composer-dock-body"><div class="background-exec-status" id="backgroundExecStatus" role="status" hidden><i class="ico ph ph-terminal-window" aria-hidden="true"></i><span class="queue-label"></span><span class="background-exec-time"></span><svg class="disclosure-chevron background-exec-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false" hidden><path d="M6 3.5 10.5 8 6 12.5"></path></svg><button class="background-exec-stop" type="button"><i class="ico ph ph-power" aria-hidden="true"></i><span></span></button></div><div class="sr-only" id="backgroundExecLiveStatus" role="status" aria-live="polite" hidden></div><div class="background-exec-list" id="backgroundExecList" role="list" hidden></div><section class="agent-plan" id="agentPlan" aria-label="Agent task plan" hidden></section><div id="branchDraft" class="branch-draft" role="status" hidden></div><div id="editDraft" class="edit-draft" role="status" hidden></div><div id="recoveryStatus" role="status" hidden></div><div id="taskPlanPreview" aria-label="Plan stages" hidden></div><div id="finishQueue" aria-label="Queued tasks" hidden></div><div id="scheduleLine" class="schedule-line" role="status" hidden><i class="ico ph ph-clock" aria-hidden="true"></i><span id="scheduleLineText"></span><button class="dock-action" id="scheduleLinePause" type="button"></button><button class="dock-action" id="scheduleLineEdit" type="button"></button></div><div id="activeGoalRow" hidden></div><div class="tour-offer" id="tourOffer" role="status" hidden><span>New here? Take a 1-minute tour.</span><button class="btn btn-quiet" id="tourOfferYes" type="button">Show me</button><button class="btn btn-quiet" id="tourOfferNo" type="button">No thanks</button></div></div></div>
             <form class="composer" id="composer">
               <div id="skillPicker" class="skill-autocomplete" aria-label="Skills" hidden></div>
               <div id="composerSelectedSkills" class="composer-selected-skills" aria-label="Selected skills" hidden></div>
@@ -1629,6 +1632,32 @@
         <div class="pet-delete-actions"><button class="btn" id="sshProjectCancel" type="button">Cancel</button><button class="btn btn-solid" id="sshProjectSubmit" type="submit">Test and add</button></div>
       </form>
     </dialog>
+    <!-- #1826 (Haz's review): one schedule per chat, set from its ⋯ menu. Missed runs are skipped unless caught up. -->
+    <dialog class="plugin-dialog schedule-dialog" id="scheduleDialog" aria-labelledby="scheduleTitle">
+      <div class="plugin-dialog-head"><h2 id="scheduleTitle">Schedule</h2><button class="btn" id="scheduleClose" type="button">Close</button></div>
+      <form id="scheduleForm" class="plugin-dialog-body">
+        <div id="scheduleFields">
+        <label class="plugin-field" for="scheduleText"><span>Message</span><textarea id="scheduleText" rows="3" dir="auto" spellcheck="true"></textarea></label>
+        <div class="schedule-when">
+          <label class="plugin-field" for="scheduleRepeat"><span>Repeat</span><select id="scheduleRepeat">
+            <option value="hours">Every few hours</option><option value="daily">Every day</option><option value="weekdays">Weekdays</option><option value="weekly">Every week</option>
+          </select></label>
+          <label class="plugin-field" id="scheduleEveryField" for="scheduleEvery" hidden><span>Every</span><select id="scheduleEvery"></select></label>
+          <label class="plugin-field" id="scheduleDayField" for="scheduleDay" hidden><span>On</span><select id="scheduleDay"></select></label>
+          <label class="plugin-field" id="scheduleAtField" for="scheduleAt"><span>At</span><input id="scheduleAt" type="time" required /></label>
+        </div>
+        <small class="schedule-note" id="scheduleZone"></small>
+        <div class="schedule-when">
+          <label class="plugin-field" for="scheduleUntilKind"><span>Until</span><select id="scheduleUntilKind"><option value="forever">Forever</option><option value="date">A date</option></select></label>
+          <label class="plugin-field" id="scheduleUntilField" for="scheduleUntil" hidden><span>Last day</span><input id="scheduleUntil" type="date" /></label>
+        </div>
+        <label class="setting schedule-catch-up"><span class="setting-text"><b>Catch up missed runs</b><em>Off: skip missed runs. On: send one late run.</em></span><input id="scheduleCatchUp" type="checkbox" /></label>
+        <small class="schedule-note">Runs on this computer; does not wake it.</small>
+        </div>
+        <p id="scheduleError" class="plugin-error" role="alert" hidden></p>
+        <div class="pet-delete-actions"><button class="btn btn-quiet schedule-delete" id="scheduleDelete" type="button" hidden>Delete schedule</button><button class="btn" id="scheduleCancel" type="button">Cancel</button><button class="btn btn-solid" id="scheduleRetry" type="button" hidden>Retry</button><button class="btn btn-solid" id="scheduleSubmit" type="submit">Save schedule</button></div>
+      </form>
+    </dialog>
     <dialog class="plugin-dialog commit-dialog" id="commitDialog" aria-labelledby="commitTitle">
       <div class="plugin-dialog-head"><h2 id="commitTitle">Commit changes</h2><button class="btn" id="commitClose" type="button">Close</button></div>
       <form id="commitForm" class="commit-form" novalidate>
@@ -1726,7 +1755,7 @@
     <dialog class="search-dialog shortcuts-dialog" id="shortcutsDialog" aria-labelledby="shortcutsTitle">
       <header class="shortcuts-head">
         <h2 id="shortcutsTitle">Keyboard shortcuts</h2>
-        <button class="btn shortcuts-close" id="shortcutsClose" type="button" title="Close" aria-label="Close"><i class="ico ph ph-x" aria-hidden="true"></i></button>
+        <button class="btn" id="shortcutsClose" type="button">Close</button>
       </header>
       <div class="shortcuts-list" id="shortcutsList"></div>
     </dialog>
@@ -1765,5 +1794,11 @@
       </form>
     </dialog>
     <script type="module" src="./main.ts"></script>
-  </body>
+      <!-- #1833: the first-run tour. A ring around the real control and one card beside it. -->
+    <div class="tour-ring" id="tourRing" aria-hidden="true" hidden></div>
+    <div class="tour-card" id="tourCard" role="dialog" aria-labelledby="tourText" aria-describedby="tourStep" hidden tabindex="-1">
+      <p class="tour-text" id="tourText"></p>
+      <div class="tour-actions"><span class="tour-step" id="tourStep"></span><button class="btn btn-quiet" id="tourSkip" type="button">Skip tour</button><button class="btn btn-solid" id="tourNext" type="button">Next</button></div>
+    </div>
+</body>
 </html>

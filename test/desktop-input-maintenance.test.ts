@@ -257,7 +257,8 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
   const localSaved: Record<string, unknown> = { port: 8765, token: 'test-pairing', ...priorLocal };
   const local = { get: async () => ({ ...localSaved }), set: vi.fn(async (value: object) => { Object.assign(localSaved, value); }), remove: async () => {} };
   const saved: Record<string, unknown> = { ...priorSession };
-  const session = { get: async () => ({ ...saved }), set: async (value: object) => { Object.assign(saved, value); }, remove: async (key: string) => { delete saved[key]; } };
+  // A key listed in `__unreadable` fails to read, as session storage can.
+  const session = { get: async (key?: string) => { if (typeof key === 'string' && (saved.__unreadable as string[] | undefined)?.includes(key)) throw new Error('storage unavailable'); return { ...saved }; }, set: async (value: object) => { Object.assign(saved, value); }, remove: async (key: string) => { delete saved[key]; } };
   const create = vi.fn(async ({ url, windowId }: { url: string; windowId?: number }): Promise<Tab> => {
     const tab = { id: tabs.length + 1, pendingUrl: url, windowId }; tabs.push(tab); return tab;
   });
@@ -294,7 +295,14 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
     return func && target.documentIds?.includes(documentId)
       ? [{ documentId, frameId: 0, result: tabs.find(tab => tab.id === target.tabId)?.url }] : [];
   }), insertCSS: async () => {} };
+  const browserNavigator = { onLine: true };
+  // The worker's clock, which `advance` moves on: its once-a-minute checks run again only after it.
+  let clockOffset = 0;
+  const WorkerDate = class extends Date { static override now() { return Date.now() + clockOffset; } };
+  const advance = (ms: number) => { clockOffset += ms; };
   const context = vm.createContext({
+    Date: WorkerDate,
+    navigator: browserNavigator,
     chrome: {
       ...(rendered ? { debugger: debuggerApi } : {}),
       storage: { local, session },
@@ -314,8 +322,128 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
   Object.assign(api, { query });
   const updated = (id: number, change: object) => tabUpdated.addListener.mock.calls[0]![0](id, change, tabs.find(tab => tab.id === id));
   vm.runInContext('Object.assign(testMaintenance, { offerStopTurns, noteTabConversation, ackCommand })', context);
-  return { ...api, scripting, updated, update, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, bind: (context.testMaintenance as any).bind as (message: any, sender: any, source: any) => Promise<any>, correlate: (context.testMaintenance as any).correlate as (message: any, sender: any, source: any) => Promise<any>, closed: (context.testMaintenance as any).closed as (message: any, sender: any, source: any) => Promise<any>, loadFailure: (context.testMaintenance as any).loadFailure as (message: any, sender: any, source: any) => Promise<any>, create, sendMessage, tabs, fetch, windows, remove, reload, local, localSaved, saved };
+  return { ...api, scripting, updated, update, advance, navigator: browserNavigator, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, bind: (context.testMaintenance as any).bind as (message: any, sender: any, source: any) => Promise<any>, correlate: (context.testMaintenance as any).correlate as (message: any, sender: any, source: any) => Promise<any>, closed: (context.testMaintenance as any).closed as (message: any, sender: any, source: any) => Promise<any>, loadFailure: (context.testMaintenance as any).loadFailure as (message: any, sender: any, source: any) => Promise<any>, create, sendMessage, tabs, fetch, windows, remove, reload, local, localSaved, saved };
 }
+
+// 2.1.47 round: a chat tab that loaded offline in the app's background window stayed on Chrome's
+// error page (Chrome reloads those only in a visible tab), no recorder could be injected, and every
+// send to that chat expired. Online again, the maintenance pass reloads it, backing off.
+describe('a chat tab left on Chrome\'s error page', () => {
+  const errorPage = async (online: boolean, prior: Record<string, unknown> = {}, failure = 'Frame with ID 0 is showing error page', healthy = false) => {
+    const h = await worker([], undefined, {}, prior);
+    h.navigator.onLine = online;
+    h.tabs.push({ id: 8, url: `https://chatgpt.com/c/${secondId}`, status: 'complete' } as Tab);
+    h.sendMessage.mockImplementation(async (_tabId: number, message: any) => {
+      if (message.type === 'clf-recorder-ping') {
+        if (healthy) return { ok: true, recorderVersion: 22 };
+        throw new Error('Could not establish connection. Receiving end does not exist.');
+      }
+      return { ok: true };
+    });
+    h.scripting.executeScript.mockImplementation(async () => { throw new Error(failure); });
+    await h.maintain();
+    return h;
+  };
+  const backoff = (tries: number, nextAt: number, count = tries, lastAt = Date.now() - 1_000) =>
+    ({ errorPageReloads: { tabs: [[8, { tries, nextAt }]], count, lastAt } });
+  it('is reloaded once the browser is online', async () => {
+    const h = await errorPage(true);
+    expect(h.reload).toHaveBeenCalledExactlyOnceWith(8);
+    // The app's log learns of it through the next diagnostics report.
+    await vi.waitFor(() => expect(h.fetch.mock.calls.some(([url, init]: any) => new URL(url).pathname === '/diagnostics' &&
+      JSON.parse(init.body).errorPageReloads?.count === 1)).toBe(true), { timeout: 5_000 });
+  });
+  const reported = (h: Awaited<ReturnType<typeof errorPage>>) => h.fetch.mock.calls
+    .filter(([url]: any) => new URL(url).pathname === '/diagnostics').map(([, init]: any) => JSON.parse(init.body).errorPageReloads?.skipped).filter(Boolean);
+  // CodeRabbit on #1911: a skipped reload says why in the app's log, once per reason.
+  const pings = (h: Awaited<ReturnType<typeof errorPage>>) => h.sendMessage.mock.calls.filter(([, message]: any) => message.type === 'clf-recorder-ping').length;
+  // The next recorder check, a minute later on the worker's clock.
+  const nextCheck = async (h: Awaited<ReturnType<typeof errorPage>>, ms = 61_000) => {
+    const before = pings(h);
+    h.advance(ms);
+    await h.maintain();
+    await vi.waitFor(() => expect(pings(h)).toBeGreaterThan(before), { timeout: 5_000 });
+    await new Promise(resolve => setTimeout(resolve, 50));
+  };
+  it('is left alone while the browser is offline, says so once, and is reloaded once online', async () => {
+    const h = await errorPage(false);
+    expect(h.reload).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(reported(h)).toEqual([expect.objectContaining({ reason: 'offline' })]), { timeout: 5_000 });
+    // Still offline at the next check: the same skip, reported once (later reports carry it; the app logs it by when it happened).
+    await nextCheck(h);
+    expect(h.reload).not.toHaveBeenCalled();
+    expect(new Set(reported(h).map((skip: any) => skip.at)).size).toBe(1);
+    h.navigator.onLine = true;
+    await nextCheck(h);
+    expect(h.reload).toHaveBeenCalledExactlyOnceWith(8);
+  });
+  it('says when a reload waits out its backoff', async () => {
+    const nextAt = Date.now() + 60_000;
+    const h = await errorPage(true, backoff(1, nextAt));
+    await vi.waitFor(() => expect(reported(h)).toEqual([expect.objectContaining({ reason: 'backoff', nextAt })]), { timeout: 5_000 });
+  });
+  // CodeRabbit on #1911: an unreadable saved backoff is not "no backoff". Nothing is reloaded or
+  // overwritten, and a later check reads it again and keeps to it.
+  it('neither reloads nor overwrites its saved backoff while that cannot be read, and keeps to it once read', async () => {
+    const nextAt = Date.now() + 3 * 60_000;
+    const h = await errorPage(true, { ...backoff(1, nextAt), __unreadable: ['errorPageReloads'] });
+    expect(h.reload).not.toHaveBeenCalled();
+    expect((h.saved as any).errorPageReloads.tabs).toEqual([[8, { tries: 1, nextAt }]]);
+    await vi.waitFor(() => expect(reported(h)).toEqual([expect.objectContaining({ reason: 'unreadable' })]), { timeout: 5_000 });
+    // Still unreadable a minute later: still nothing reloaded or saved.
+    await nextCheck(h);
+    expect(h.reload).not.toHaveBeenCalled();
+    expect((h.saved as any).errorPageReloads.tabs).toEqual([[8, { tries: 1, nextAt }]]);
+    // Readable again within the saved backoff: it is kept to.
+    (h.saved as any).__unreadable = [];
+    await nextCheck(h);
+    expect(h.reload).not.toHaveBeenCalled();
+    expect(reported(h).at(-1)).toMatchObject({ reason: 'backoff', nextAt });
+    // Past it: reloaded, and the backoff goes on from the saved tries.
+    await nextCheck(h, 2 * 60_000);
+    expect(h.reload).toHaveBeenCalledExactlyOnceWith(8);
+    expect((h.saved as any).errorPageReloads.tabs[0]).toEqual([8, expect.objectContaining({ tries: 2 })]);
+  });
+  // CodeRabbit on #1911: the backoff and the counter outlive a stopped worker.
+  it('waits out its backoff, also after the worker restarted', async () => {
+    const h = await errorPage(true, backoff(1, Date.now() + 60_000));
+    expect(h.reload).not.toHaveBeenCalled();
+  });
+  it('is reloaded once its backoff ran out, which then doubles, and the count goes on', async () => {
+    const before = Date.now();
+    const h = await errorPage(true, backoff(2, before - 1, 2));
+    expect(h.reload).toHaveBeenCalledExactlyOnceWith(8);
+    const saved = (h.saved as any).errorPageReloads;
+    expect(saved.count).toBe(3);
+    const [[id, state]] = saved.tabs;
+    expect([id, state.tries]).toEqual([8, 3]);
+    expect(state.nextAt - before).toBeGreaterThanOrEqual(4 * 60_000);
+    expect(state.nextAt - Date.now()).toBeLessThanOrEqual(4 * 60_000);
+  });
+  it('waits at most 15 minutes between reloads', async () => {
+    const h = await errorPage(true, backoff(9, Date.now() - 1));
+    expect(h.reload).toHaveBeenCalledOnce();
+    expect((h.saved as any).errorPageReloads.tabs[0][1].nextAt - Date.now()).toBeLessThanOrEqual(15 * 60_000);
+  });
+  it('is not reloaded for any other injection failure', async () => {
+    const h = await errorPage(true, {}, 'Cannot access contents of the page.');
+    expect(h.reload).not.toHaveBeenCalled();
+  });
+  // Saved data: nothing older than this version stored it; a damaged value is read as nothing.
+  it.each([['not an object', 'garbage'], ['broken entries', { tabs: [['8', { tries: 'x' }], [8], null], count: 'many', lastAt: -1 }]])(
+    'reads a damaged saved backoff (%s) as none', async (_name, value) => {
+      const h = await errorPage(true, { errorPageReloads: value });
+      expect(h.reload).toHaveBeenCalledExactlyOnceWith(8);
+      const saved = (h.saved as any).errorPageReloads;
+      expect(saved.tabs.map(([id, state]: any) => [id, state.tries])).toEqual([[8, 1]]);
+      expect(saved.count).toBe(1);
+    });
+  it('forgets its backoff once its recorder answers', async () => {
+    const h = await errorPage(true, backoff(3, Date.now() + 60_000), undefined, true);
+    expect(h.reload).not.toHaveBeenCalled();
+    expect((h.saved as any).errorPageReloads.tabs).toEqual([]);
+  });
+});
 
 describe('one browser maintenance flight per desktop outbox publication', () => {
   it.each(['same', 'missing', 'wrong-document', 'wrong-url', 'wrong-frame', 'replaced-during-proof'])('uses exact Chrome document proof for loading+URL events (%s)', async scenario => {
@@ -387,7 +515,7 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     });
     await h.maintain();
     for (let i = 0; i < 10; i++) await new Promise(resolve => setTimeout(resolve, 0));
-    expect(h.create).toHaveBeenCalledWith(expect.objectContaining({ url: `https://chatgpt.com/?cos-project-create=${secondId}`, active: true }));
+    expect(h.create).toHaveBeenCalledWith(expect.objectContaining({ url: `https://chatgpt.com/projects?cos-project-create=${secondId}`, active: true }));
     expect(h.create.mock.calls.some(([options]) => String(options.url).includes(firstId))).toBe(false);
   });
 

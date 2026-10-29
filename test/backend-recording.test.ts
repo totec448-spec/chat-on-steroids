@@ -289,3 +289,58 @@ it('never takes a question with the same parent for an edit without ChatGPT\'s v
   const questions = await readEvents(id!, { kinds: ['user_message'] });
   expect(questions.every(event => event.kind === 'user_message' && event.replaces === undefined)).toBe(true);
 });
+
+it('stores a recorded screenshot as lossless WebP when that saves space, with exactly the same pixels, and keeps a tiny PNG as it is', async () => {
+  const sharp = (await import('sharp')).default;
+  const id = await sessionForConversation('conv-webp-screenshot');
+  // A screenshot-like picture: flat panels, text-like stripes and a gradient, as a PNG.
+  // With a transparent corner whose hidden colors are not black, and a Display P3 profile, as macOS screenshots have:
+  // a lossless conversion that dropped either would show different colors.
+  const width = 480, height = 300, raw = Buffer.alloc(width * height * 4);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const at = (y * width + x) * 4, panel = x < 120 ? 32 : 245, stripe = y % 18 < 3 && x > 140 && x < 440 ? 60 : panel;
+    raw[at] = stripe; raw[at + 1] = y < 40 ? Math.floor(x / 2) : stripe; raw[at + 2] = stripe;
+    raw[at + 3] = x < 20 && y < 20 ? 0 : 255;
+  }
+  const png = await sharp(raw, { raw: { width, height, channels: 4 } }).withIccProfile('p3').png().toBuffer();
+  expect((await sharp(png).metadata()).icc).toBeDefined();
+  await recordToolCall({ ...call('webp-shot', 'conv-webp-screenshot'), tool: 'screenshot',
+    content: [{ type: 'image', data: png.toString('base64'), mimeType: 'image/png' }] });
+  const event = (await readEvents(id!, { kinds: ['tool_call'] }))[0]!;
+  if (event.kind !== 'tool_call') throw new Error('missing recorded call');
+  const asset = event.call.assets![0]!;
+  expect(asset.mimeType).toBe('image/webp');
+  const stored = (await readAsset(id!, asset.id))!;
+  expect(stored.length).toBeLessThan(png.length);
+  expect(asset.bytes).toBe(stored.length);
+  const pixels = async (data: Buffer) => sharp(data).ensureAlpha().raw().toBuffer();
+  expect((await pixels(stored)).equals(await pixels(png))).toBe(true);
+  expect((await sharp(stored).metadata()).icc).toEqual((await sharp(png).metadata()).icc);
+  // A tiny image saves nothing worth a conversion: kept byte for byte.
+  const tiny = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=';
+  await recordToolCall({ ...call('webp-tiny', 'conv-webp-screenshot'), tool: 'screenshot', content: [{ type: 'image', data: tiny, mimeType: 'image/png' }] });
+  const second = (await readEvents(id!, { kinds: ['tool_call'] }))[1]!;
+  if (second.kind !== 'tool_call') throw new Error('missing recorded call');
+  expect(second.call.assets![0]!.mimeType).toBe('image/png');
+  expect(await readAsset(id!, second.call.assets![0]!.id)).toEqual(Buffer.from(tiny, 'base64'));
+});
+
+it('keeps a 16-bit PNG as it came, since WebP holds 8 bits a channel, and logs why a screenshot stayed PNG (CodeRabbit)', async () => {
+  const sharp = (await import('sharp')).default;
+  const { onLog } = await import('../src/main/logger.js');
+  const lines: string[] = [];
+  const stop = onLog(entry => { lines.push(entry.message); });
+  try {
+    const id = await sessionForConversation('conv-webp-16bit');
+    const width = 400, height = 240, raw = Buffer.alloc(width * height * 3);
+    for (let at = 0; at < raw.length; at += 3) { const x = (at / 3) % width; raw[at] = x < 200 ? 30 : 230; raw[at + 1] = 120; raw[at + 2] = x % 40 < 3 ? 0 : 200; }
+    const deep = await sharp(raw, { raw: { width, height, channels: 3 } }).toColourspace('rgb16').png().toBuffer();
+    expect((await sharp(deep).metadata()).depth).toBe('ushort');
+    await recordToolCall({ ...call('webp-16bit', 'conv-webp-16bit'), tool: 'screenshot', content: [{ type: 'image', data: deep.toString('base64'), mimeType: 'image/png' }] });
+    const event = (await readEvents(id!, { kinds: ['tool_call'] }))[0]!;
+    if (event.kind !== 'tool_call') throw new Error('missing recorded call');
+    expect(event.call.assets![0]!.mimeType).toBe('image/png');
+    expect(await readAsset(id!, event.call.assets![0]!.id)).toEqual(deep);
+    expect(lines.some(line => line.includes('kept a screenshot as PNG') && line.includes('16-bit'))).toBe(true);
+  } finally { stop(); }
+});
