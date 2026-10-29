@@ -3506,6 +3506,7 @@
   "Waiting for the reviewer": "Gözden geçiren bekleniyor",
   "Continues without the review in {0}": "{0} sonra gözden geçirme olmadan devam eder",
   "Continuing without the review…": "Gözden geçirme olmadan devam ediliyor…",
+  "Same as system": "Sistemle aynı",
   "Read {0}": "{0} okundu",
   "Reading {0}": "{0} okunuyor",
   "Could not read {0}": "{0} okunamadı",

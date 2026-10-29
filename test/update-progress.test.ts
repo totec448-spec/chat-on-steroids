@@ -8,6 +8,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 const windows = vi.hoisted(() => [] as Array<{ options: Record<string, any>; loaded: { file: string; query: Record<string, string> } | null;
   scripts: string[]; shown: boolean; top?: boolean; onTop?: boolean; handlers: Record<string, () => void> }>);
 vi.mock('electron', () => ({
+  nativeTheme: { shouldUseDarkColors: false },
   BrowserWindow: class {
     record: (typeof windows)[number];
     webContents: Record<string, unknown>;

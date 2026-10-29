@@ -1319,6 +1319,21 @@ describe('settings writes from more than one UI', () => {
     expect((await save({ ...current, ui: { ...current.ui, planBackend: 'unsupported' } }, current)).ok).toBe(false);
     expect(getConfig().ui.planBackend).toBe('chatgpt');
   });
+  // #1914: System is saved as the choice; the window shows the theme the system has now.
+  it('saves System and paints the window in the system\'s theme', async () => {
+    currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send: vi.fn() } };
+    const base = { ...defaultConfig(), ui: { ...defaultConfig().ui, theme: 'light' as const } };
+    await saveConfig(base);
+    (nativeTheme as any).shouldUseDarkColors = true;
+    try {
+      const reply = await save({ ...base, ui: { ...base.ui, theme: 'system' as const } }, base);
+      expect(reply.ok, reply.error).toBe(true);
+      expect(getConfig().ui.theme).toBe('system');
+      expect(nativeTheme.themeSource).toBe('system');
+      expect(currentWindow.setBackgroundColor).toHaveBeenLastCalledWith('#181818');
+      expect((await save({ ...getConfig(), ui: { ...getConfig().ui, theme: 'sepia' as never } }, getConfig())).ok).toBe(false);
+    } finally { delete (nativeTheme as any).shouldUseDarkColors; }
+  });
   it('does not let a stale renderer snapshot undo a newer extension setting', async () => {
     currentWindow = {
       setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(),

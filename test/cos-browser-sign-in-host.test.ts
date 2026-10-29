@@ -18,7 +18,7 @@ const native = vi.hoisted(() => {
     icon: vi.fn(async () => ({ isEmpty: () => false, toDataURL: () => 'data:image/png;base64,AA==' })),
     thumbnail: vi.fn(async () => ({ isEmpty: () => false, toDataURL: () => 'data:image/png;base64,AA==' })) };
 });
-vi.mock('electron', () => ({ BaseWindow: class {}, BrowserWindow: class {}, WebContentsView: native.WebContentsView,
+vi.mock('electron', () => ({ BaseWindow: class {}, BrowserWindow: class {}, WebContentsView: native.WebContentsView, nativeTheme: { shouldUseDarkColors: false },
   app: { getFileIcon: native.icon }, nativeImage: { createThumbnailFromPath: native.thumbnail }, session: {}, shell: {} }));
 vi.mock('../src/main/config.js', () => ({ getConfig: () => ({ ui: { chatBrowser: 'cos', language: 'pt-BR' } }) }));
 vi.mock('../src/main/browser.js', () => ({
