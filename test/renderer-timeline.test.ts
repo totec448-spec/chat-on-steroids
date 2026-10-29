@@ -8937,6 +8937,10 @@ it('jumps between your own messages with Alt+↑ / Alt+↓, marked like a search
   const scrolled: string[] = [];
   own.forEach(row => { row.scrollIntoView = () => { scrolled.push(row.textContent!.match(/(First|Second|Third)/)![1]!); }; });
   const press = (key: string, target: Element = doc.body) => target.dispatchEvent(new w.KeyboardEvent('keydown', { key, altKey: true, bubbles: true, cancelable: true }));
+  // Attachment names come before the text in the box; only the message is read (CodeRabbit).
+  const attachments = doc.createElement('div'); attachments.className = 'message-attachments';
+  attachments.textContent = 'quarterly-report-final-version.pdf '.repeat(20);
+  own[1]!.querySelector('.said.is-user')!.insertBefore(attachments, own[1]!.querySelector('.user-message-text'));
   press('ArrowUp');
   expect(scrolled).toEqual(['Second']);
   expect(own[1]!.classList.contains('is-search-hit')).toBe(true);

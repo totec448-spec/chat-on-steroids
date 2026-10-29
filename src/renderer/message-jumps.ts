@@ -42,7 +42,9 @@ export function nextOwnMessage(tops: readonly number[], viewTop: number, viewBot
 export function keyBelongsElsewhere(target: EventTarget | null): boolean {
   const element = target instanceof Element ? target : null;
   if (!element) return false;
+  // Any editable area, whatever its contenteditable value (plaintext-only too) and inherited ones.
+  if ((element as HTMLElement).isContentEditable || element.closest('[contenteditable]:not([contenteditable="false"])')) return true;
   // An open panel, menu or list (the context meter's, a row menu) keeps its keys too.
-  return !!element.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], .xterm, .cm-editor, dialog[open], ' +
+  return !!element.closest('input, textarea, select, .xterm, .cm-editor, dialog[open], ' +
     '[role="dialog"], [role="menu"], [role="listbox"], [aria-expanded="true"], .queued-input, .pending-message, .sidebar');
 }

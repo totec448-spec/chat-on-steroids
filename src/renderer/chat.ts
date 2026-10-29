@@ -5120,10 +5120,9 @@ function jumpOwnMessage(direction: -1 | 1): void {
   // A screen reader hears the message gone to; the focus stays where it is (CodeRabbit on #1889).
   const announce = $('recallAnnounce');
   announce.textContent = '';
-  // The message without its leading "You" label, which comes first in the box.
-  const said = row.querySelector<HTMLElement>('.said.is-user');
-  const label = said?.querySelector(':scope > b')?.textContent ?? '';
-  announce.textContent = (said?.textContent ?? '').slice(label.length).replace(/\s+/g, ' ').trim().slice(0, 300);
+  // The message's own text, without its label or attachment names; a message of attachments only says so.
+  const said = (row.querySelector('.said.is-user .user-message-text')?.textContent ?? '').replace(/\s+/g, ' ').trim();
+  announce.textContent = said ? said.slice(0, 300) : t('User attachment');
   row.scrollIntoView({ block: 'start' });
   row.classList.remove('is-search-hit');
   void row.offsetWidth;

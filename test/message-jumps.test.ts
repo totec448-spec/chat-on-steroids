@@ -53,10 +53,14 @@ it('goes first to the newest message in view when none is above it', () => {
 
 // CodeRabbit on #1889: a panel that is open (the context meter's) keeps its keys.
 it('leaves the keys to an open panel, menu or list', () => {
-  const dom = new JSDOM('<button id="meter" aria-expanded="true"></button><div role="dialog"><button id="inside"></button></div><button id="plain"></button>');
+  const dom = new JSDOM('<button id="meter" aria-expanded="true"></button><div role="dialog"><button id="inside"></button></div><button id="plain"></button>' +
+    '<div contenteditable="plaintext-only"><span id="typing"></span></div><div contenteditable="false"><span id="locked"></span></div>');
   Object.assign(globalThis, { Element: dom.window.Element });
   const byId = (id: string) => dom.window.document.getElementById(id);
   expect(keyBelongsElsewhere(byId('meter'))).toBe(true);
   expect(keyBelongsElsewhere(byId('inside'))).toBe(true);
   expect(keyBelongsElsewhere(byId('plain'))).toBe(false);
+  // CodeRabbit: any editable area keeps its keys, plaintext-only and inherited ones too; contenteditable=false is not one.
+  expect(keyBelongsElsewhere(byId('typing'))).toBe(true);
+  expect(keyBelongsElsewhere(byId('locked'))).toBe(false);
 });
