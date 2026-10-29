@@ -5160,6 +5160,89 @@ it('offers where the built-in browser minimizes to, only while it is the chosen 
   expect(mounted.calls.at(-1)?.ui.cosBrowserMinimize).toBe('tray');
 });
 
+// #1804 (Haz's review): the choice sits right under the permission to control the mouse and keyboard.
+it('offers to ask before using the mouse and keyboard, off by default, under the control permission, and saves it', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const choice = w.document.getElementById('desktopAsk') as HTMLSelectElement;
+  const row = choice.closest<HTMLElement>('.desktop-ask-row')!;
+  expect(row.previousElementSibling!.querySelector('[data-cap="control"]')).not.toBeNull();
+  expect([...choice.options].map(option => option.value)).toEqual(['off', 'active', 'always']);
+  expect([...choice.options].map(option => option.textContent)).toEqual(['Off', "Ask while I'm using the computer", 'Always ask']);
+  expect(choice.value).toBe('off');
+  expect(row.textContent).toContain('Browser steps never ask');
+  choice.value = 'active';
+  choice.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.ui.desktopAsk).toBe('active');
+  // A saved choice is shown; where the app cannot tell when the computer was last used, the row is hidden.
+  const state = structuredClone(mounted.state);
+  state.config.ui = { ...state.config.ui, desktopAsk: 'always' };
+  mounted.push(state);
+  await settle();
+  expect(choice.value).toBe('always');
+  expect(row.hidden).toBe(false);
+  const linux = structuredClone(state);
+  linux.platform = { ...(linux.platform ?? {}), family: 'linux', name: 'Linux', desktopAutomation: false };
+  mounted.push(linux);
+  await settle();
+  expect(row.hidden).toBe(true);
+});
+
+// CodeRabbit on #1864 (Haz's keyboard condition): the question waits in the app's window too, reachable by keyboard.
+it('shows a waiting desktop question in the app without taking the focus, and answers it from there', async () => {
+  let listener: ((pending: unknown) => void) | null = null;
+  const answer = vi.fn(async () => ({ ok: true, data: true }));
+  const pending = { id: 'ask-1', title: 'Chat On Steroids wants to use your mouse and keyboard', step: 'Open notepad.exe', chat: 'Release notes' };
+  const mounted = await mountChat({}, [], {
+    desktopAskPending: async () => ({ ok: true, data: pending }),
+    onDesktopAskPending: (fn: (pending: unknown) => void) => { listener = fn; return () => {}; },
+    answerDesktopAsk: answer
+  });
+  const doc = mounted.window.document;
+  const notice = doc.getElementById('desktopAskNotice')!;
+  // Already waiting when the window opened: shown at once.
+  await waitFor(() => expect(notice.hidden).toBe(false));
+  expect(notice.textContent).toContain('Chat On Steroids wants to use your mouse and keyboard');
+  expect(notice.textContent).toContain('Open notepad.exe · Release notes');
+  // It never takes the focus by itself: the message box keeps it.
+  const box = doc.getElementById('chatInput') as HTMLTextAreaElement;
+  box.focus();
+  listener!({ ...pending, id: 'ask-2', step: 'Click', chat: '' });
+  expect(doc.activeElement).toBe(box);
+  expect(notice.textContent).toContain('Click');
+  expect(notice.textContent).not.toContain('·');
+  // Reachable by keyboard: plain buttons, answered from here.
+  const go = doc.getElementById('desktopAskGo') as HTMLButtonElement;
+  go.focus();
+  expect(doc.activeElement).toBe(go);
+  go.click();
+  expect(answer).toHaveBeenCalledWith('ask-2', 'go');
+  (doc.getElementById('desktopAskNotNow') as HTMLButtonElement).click();
+  expect(answer).toHaveBeenLastCalledWith('ask-2', 'not-now');
+  // Answered here or in the corner panel: main ends the question and the notice goes.
+  listener!(null);
+  expect(notice.hidden).toBe(true);
+  answer.mockClear();
+  go.click();
+  expect(answer).not.toHaveBeenCalled();
+});
+
+// CodeRabbit on #1864: a refused save (an invalid command rule) must not leave the choice showing what was not saved.
+it('shows the saved desktop ask choice again when the save is refused', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const choice = w.document.getElementById('desktopAsk') as HTMLSelectElement;
+  (w.document.getElementById('commandAllowlistRules') as HTMLTextAreaElement).value = 'git status; whoami';
+  const saves = mounted.calls.length;
+  choice.focus();
+  choice.value = 'always';
+  choice.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls).toHaveLength(saves);
+  expect(choice.value).toBe('off');
+});
+
 // #1833: Setup's last step offers the first-run tour once; Settings replays it, never offering it again.
 it('offers the tour after Setup only while it was never taken, and replays it from Settings', async () => {
   const done = vi.fn(async () => ({ ok: true, data: undefined }));

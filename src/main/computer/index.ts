@@ -1459,6 +1459,9 @@ export async function actAndCapture(
       preferActiveWindow?: boolean;
     };
     verify?: VerificationSpec;
+    /** Runs once, when the last action that takes the mouse or keyboard is done: before any
+     *  trailing wait or clipboard action, the verify poll and the capture. */
+    actionsDone?: () => void;
   } = {}
 ): Promise<ActionResult & { screenshot: Screenshot | null; verification: VerificationResult | null }> {
   return exclusive(async () => {
@@ -1479,7 +1482,11 @@ export async function actAndCapture(
         );
       }
     }
-    const result = await actLocked(actions, opts);
+    // The input step ends once its last native action ran, before trailing waits or clipboard work.
+    let done = false;
+    const actionsDone = () => { if (!done) { done = true; opts.actionsDone?.(); } };
+    const result = await actLocked(actions, { ...opts, inputDone: actionsDone });
+    actionsDone();
     let verification: VerificationResult | null = null;
     if (opts.verify) {
       try {
@@ -1587,7 +1594,7 @@ async function verifyDesktopLocked(spec: VerificationSpec): Promise<Verification
 
 async function actLocked(
   actions: Action[],
-  opts: { frameId?: number; window?: number; ownerWindow?: number; app?: string; ownerApp?: string }
+  opts: { frameId?: number; window?: number; ownerWindow?: number; app?: string; ownerApp?: string; inputDone?: () => void }
 ): Promise<ActionResult> {
   if (process.platform !== 'win32' && actions.some(action => action.type === 'paste' || action.type === 'launch_app' || action.type === 'ui_action')) {
     throw new ComputerError('ACTION_UNSUPPORTED: paste, launch_app and ui_action are currently Windows only.');
@@ -1845,7 +1852,13 @@ async function actLocked(
       );
     }
   };
+  const local = new Set<Action['type']>(['wait', 'read_clipboard', 'write_clipboard']);
+  const lastInput = actions.reduce((last, action, index) => local.has(action.type) ? last : index, -1);
   for (const [index, action] of actions.entries()) {
+    if (local.has(action.type)) {
+      await flush();
+      if (index > lastInput) opts.inputDone?.();
+    }
     if (action.type === 'paste') {
       await flush();
       try {

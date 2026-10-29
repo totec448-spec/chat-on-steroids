@@ -281,6 +281,28 @@ try {
     });
   });
 
+  it('says the actions are done before the verify poll starts, once, also when it times out (#1804, CodeRabbit)', async () => {
+    let calls = 0, doneAt = 0;
+    await expect(actAndCapture([{ type: 'wait', ms: 0 }], {
+      verify: { until: 'window_exists', match: 'clf-window-that-cannot-exist-5f2dc5', timeoutMs: 300 },
+      actionsDone: () => { calls++; doneAt = Date.now(); }
+    })).rejects.toThrow(/POSTCONDITION_FAILED/);
+    expect(calls).toBe(1);
+    // The whole poll ran after it.
+    expect(Date.now() - doneAt).toBeGreaterThanOrEqual(250);
+  });
+
+  it('ends the input step before trailing waits and clipboard actions, once (#1804, CodeRabbit)', async () => {
+    // Input the person makes during a trailing wait is theirs, not the app's: the step has ended.
+    let calls = 0, doneAt = 0;
+    const started = Date.now();
+    await actAndCapture([{ type: 'wait', ms: 300 }], {
+      actionsDone: () => { calls++; doneAt = Date.now(); }
+    });
+    expect(calls).toBe(1);
+    expect(doneAt - started).toBeLessThan(250);
+  });
+
   it('resolves a captureAfter crop against the frame that was current before the actions', async () => {
     const base = await screenshot({ maxWidth: 320 });
     const width = Math.min(64, base.width);
