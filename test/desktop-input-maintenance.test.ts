@@ -257,7 +257,8 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
   const localSaved: Record<string, unknown> = { port: 8765, token: 'test-pairing', ...priorLocal };
   const local = { get: async () => ({ ...localSaved }), set: vi.fn(async (value: object) => { Object.assign(localSaved, value); }), remove: async () => {} };
   const saved: Record<string, unknown> = { ...priorSession };
-  const session = { get: async () => ({ ...saved }), set: async (value: object) => { Object.assign(saved, value); }, remove: async (key: string) => { delete saved[key]; } };
+  // A key listed in `__unreadable` fails to read, as session storage can.
+  const session = { get: async (key?: string) => { if (typeof key === 'string' && (saved.__unreadable as string[] | undefined)?.includes(key)) throw new Error('storage unavailable'); return { ...saved }; }, set: async (value: object) => { Object.assign(saved, value); }, remove: async (key: string) => { delete saved[key]; } };
   const create = vi.fn(async ({ url, windowId }: { url: string; windowId?: number }): Promise<Tab> => {
     const tab = { id: tabs.length + 1, pendingUrl: url, windowId }; tabs.push(tab); return tab;
   });
@@ -347,9 +348,35 @@ describe('a chat tab left on Chrome\'s error page', () => {
     await vi.waitFor(() => expect(h.fetch.mock.calls.some(([url, init]: any) => new URL(url).pathname === '/diagnostics' &&
       JSON.parse(init.body).errorPageReloads?.count === 1)).toBe(true), { timeout: 5_000 });
   });
-  it('is left alone while the browser is offline', async () => {
+  const reported = (h: Awaited<ReturnType<typeof errorPage>>) => h.fetch.mock.calls
+    .filter(([url]: any) => new URL(url).pathname === '/diagnostics').map(([, init]: any) => JSON.parse(init.body).errorPageReloads?.skipped).filter(Boolean);
+  // CodeRabbit on #1911: a skipped reload says why in the app's log, once per reason.
+  it('is left alone while the browser is offline, and says so once', async () => {
     const h = await errorPage(false);
     expect(h.reload).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(reported(h)).toEqual([expect.objectContaining({ reason: 'offline' })]), { timeout: 5_000 });
+    // Later reports carry the same skip; the app logs each skip once, by when it happened.
+    await h.maintain();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(new Set(reported(h).map((skip: any) => skip.at)).size).toBe(1);
+  });
+  it('says when a reload waits out its backoff', async () => {
+    const nextAt = Date.now() + 60_000;
+    const h = await errorPage(true, backoff(1, nextAt));
+    await vi.waitFor(() => expect(reported(h)).toEqual([expect.objectContaining({ reason: 'backoff', nextAt })]), { timeout: 5_000 });
+  });
+  // CodeRabbit on #1911: an unreadable saved backoff is not "no backoff". Nothing is reloaded or
+  // overwritten, and the next pass reads it again.
+  it('neither reloads nor overwrites its saved backoff while that cannot be read', async () => {
+    const nextAt = Date.now() + 60_000;
+    const h = await errorPage(true, { ...backoff(1, nextAt), __unreadable: ['errorPageReloads'] });
+    expect(h.reload).not.toHaveBeenCalled();
+    expect((h.saved as any).errorPageReloads.tabs).toEqual([[8, { tries: 1, nextAt }]]);
+    await vi.waitFor(() => expect(reported(h)).toEqual([expect.objectContaining({ reason: 'unreadable' })]), { timeout: 5_000 });
+    (h.saved as any).__unreadable = [];
+    await h.maintain();
+    expect(h.reload).not.toHaveBeenCalled();
+    expect((h.saved as any).errorPageReloads.tabs).toEqual([[8, { tries: 1, nextAt }]]);
   });
   // CodeRabbit on #1911: the backoff and the counter outlive a stopped worker.
   it('waits out its backoff, also after the worker restarted', async () => {

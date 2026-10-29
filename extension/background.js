@@ -4998,7 +4998,8 @@ async function companionDiagnosticSnapshot(found) {
     preferencesStored: RENDER_STREAM_KEY in preferences || SHOW_TIMES_KEY in preferences,
     tab: await HANDLERS.tabStatus(),
     environment: await cachedEnvironmentDiagnostics(),
-    errorPageReloads: await loadErrorPageReloads().then(() => ({ count: errorPageReloadCount, lastAt: lastErrorPageReloadAt }))
+    errorPageReloads: await loadErrorPageReloads().then(() => ({ count: errorPageReloadCount, lastAt: lastErrorPageReloadAt,
+      ...(errorPageSkip ? { skipped: errorPageSkip } : {}) }))
   };
 }
 
@@ -5628,6 +5629,9 @@ const ERROR_PAGE_RELOADS_KEY = 'errorPageReloads';
 const errorPageReloads = new Map();
 // For the app's log (via the diagnostics snapshot): how many, and when the last one was.
 let errorPageReloadCount = 0, lastErrorPageReloadAt = 0, errorPageReloadsLoaded = null;
+// The last reload skipped, and why, for the app's log; a new key reports once more.
+let errorPageSkip = null, errorPageSkipKey = '';
+/** True once the saved backoff is read. A failed read is retried by the next call, never taken for none. */
 function loadErrorPageReloads() {
   errorPageReloadsLoaded ??= chrome.storage.session.get(ERROR_PAGE_RELOADS_KEY).then(stored => {
     const saved = stored?.[ERROR_PAGE_RELOADS_KEY];
@@ -5639,22 +5643,30 @@ function loadErrorPageReloads() {
     }
     if (Number.isFinite(saved.count)) errorPageReloadCount = Math.max(errorPageReloadCount, saved.count);
     if (Number.isFinite(saved.lastAt)) lastErrorPageReloadAt = Math.max(lastErrorPageReloadAt, saved.lastAt);
-  }).catch(() => undefined);
+  }).then(() => true, () => { errorPageReloadsLoaded = null; return false; });
   return errorPageReloadsLoaded;
+}
+function noteErrorPageSkip(id, reason, nextAt = 0) {
+  const key = `${id}:${reason}:${nextAt}`;
+  if (key === errorPageSkipKey) return;
+  errorPageSkipKey = key;
+  errorPageSkip = { reason, at: Date.now(), ...(nextAt ? { nextAt } : {}) };
+  void publishCompanionDiagnostics(true);
 }
 function saveErrorPageReloads() {
   return chrome.storage.session.set({ [ERROR_PAGE_RELOADS_KEY]: { tabs: [...errorPageReloads], count: errorPageReloadCount, lastAt: lastErrorPageReloadAt } })
     .catch(() => undefined);
 }
 async function forgetErrorPage(id) {
-  await loadErrorPageReloads();
+  if (!await loadErrorPageReloads()) return;
   if (errorPageReloads.delete(id)) await saveErrorPageReloads();
 }
 async function reloadErrorPage(id) {
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
-  await loadErrorPageReloads();
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return noteErrorPageSkip(id, 'offline');
+  // Unread is not "never reloaded": reloading now could skip the backoff, and saving would overwrite it.
+  if (!await loadErrorPageReloads()) return noteErrorPageSkip(id, 'unreadable');
   const now = Date.now(), prior = errorPageReloads.get(id);
-  if (prior && now < prior.nextAt) return;
+  if (prior && now < prior.nextAt) return noteErrorPageSkip(id, 'backoff', prior.nextAt);
   const tries = (prior?.tries ?? 0) + 1;
   errorPageReloads.delete(id);
   errorPageReloads.set(id, { tries, nextAt: now + Math.min(15 * 60_000, 60_000 * 2 ** (tries - 1)) });
