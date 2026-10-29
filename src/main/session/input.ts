@@ -278,6 +278,8 @@ export async function sessionInputPolicy(sessionId: string, observedActivity?: I
     // comparison would leave the composer unsettled after the activity clock stopped.
     settled: settled && !executing && (!!completed || (session.lastToolCallAt ?? 0) <= (end?.time ?? 0)) };
 }
+/** How late a page may report a deliberate tab close after the person closed it. */
+const CLOSE_REPORT_GRACE_MS = 5_000;
 async function browserInputAllowed(entry: InputEntry): Promise<boolean> {
   if (entry.error?.startsWith('Local chat setup failed:')) return false;
   // Authored Inject-now custody never changes transports. Its exact turn either
@@ -296,9 +298,14 @@ async function browserInputAllowed(entry: InputEntry): Promise<boolean> {
   if (!entry.sessionId) return entry.transportIntent !== 'tool';
   const session = await getSession(entry.sessionId);
   // Departure suspends already accepted delivery through the final Send check.
-  // A new explicit immediate message remains a user action that may open the chat.
-  if (session?.browserRecoveryDismissedAt !== undefined &&
-      (!manualInput(entry) || entry.createdAt <= session.browserRecoveryDismissedAt)) return false;
+  // A new explicit immediate message remains a user action that may open the chat. The page
+  // reports a close a moment after it happens, so a message typed within that moment counts as new
+  // too (2.1.47 round: it expired unclaimed), unless it was already offered to the closing tab. A
+  // scheduled run is not typed, and gets no such grace (CodeRabbit on #1910).
+  const dismissedAt = session?.browserRecoveryDismissedAt;
+  if (dismissedAt !== undefined && (!manualInput(entry) || (entry.createdAt <= dismissedAt && (
+      entry.scheduled !== undefined || entry.createdAt <= dismissedAt - CLOSE_REPORT_GRACE_MS ||
+      (entry.offeredAt !== undefined && entry.offeredAt <= dismissedAt))))) return false;
   // Silence can leave the recorder's original turn open. Its durable ticket
   // proves the exact unchanged work; the native page must still be idle for Send.
   if (entry.silenceBoundary) return await eligibleStageEnd(entry) === entry.silenceBoundary.turnId;
