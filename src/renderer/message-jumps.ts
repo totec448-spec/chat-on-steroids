@@ -20,6 +20,18 @@ export function pickOwnMessage(tops: readonly number[], viewTop: number, directi
   return tops.findIndex(top => top > viewTop + SLACK);
 }
 
+/**
+ * The message to go to, going on from the one the last jump went to (`last`, or -1) while that one is
+ * still in view (viewTop..viewBottom): when several fit, the scroll cannot bring the next to the top,
+ * so the top of the view would keep naming the same one. Out of view, the top of the view decides.
+ */
+export function nextOwnMessage(tops: readonly number[], viewTop: number, viewBottom: number, direction: -1 | 1, last: number): number {
+  const top = last >= 0 ? tops[last] : undefined;
+  if (top === undefined || top < viewTop - SLACK || top > viewBottom) return pickOwnMessage(tops, viewTop, direction);
+  const next = last + direction;
+  return next >= 0 && next < tops.length ? next : -1;
+}
+
 /** Whether a key on this element belongs to it rather than to the chat. */
 export function keyBelongsElsewhere(target: EventTarget | null): boolean {
   const element = target instanceof Element ? target : null;

@@ -114,7 +114,7 @@ import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMe
 import { createSearchPopup } from './search-popup.js';
 import { holdToTalkShortcut, holdToTalkSupported, primaryShortcut } from './shortcuts.js';
 import { initSshProjectDialog } from './ssh-project-dialog.js';
-import { keyBelongsElsewhere, pickOwnMessage } from './message-jumps.js';
+import { keyBelongsElsewhere, nextOwnMessage } from './message-jumps.js';
 import { firstTurnStart, renderTurnChanges, turnEditCount, turnFinished, turnFrom } from './turn-changes.js';
 import { initSharePage } from './share-page.js';
 import { initFeedbackDialog } from './feedback-dialog.js';
@@ -5085,11 +5085,16 @@ function readTimeline(): void {
   readerAtEnd = false; sendAnchor = null; readingAfterSend = true;
 }
 
+/** The message the last Alt+↑/↓ went to, in the chat it was in; the next jump goes on from it while it is in view. */
+let lastOwnJump: { key: string; selection: number } | null = null;
+
 /** #1884: Alt+↑ / Alt+↓ goes to your previous / next message, marked as a search result is (message-jumps.ts). */
 function jumpOwnMessage(direction: -1 | 1): void {
   const rows = [...$('timeline').querySelectorAll<HTMLElement>('[data-timeline-key]')].filter(row => row.querySelector('.said.is-user'));
   const pane = $('chatBody');
-  const at = pickOwnMessage(rows.map(row => row.getBoundingClientRect().top), pane.getBoundingClientRect().top, direction);
+  const view = pane.getBoundingClientRect();
+  const last = lastOwnJump?.selection === selectionGeneration ? rows.findIndex(row => row.dataset.timelineKey === lastOwnJump!.key) : -1;
+  const at = nextOwnMessage(rows.map(row => row.getBoundingClientRect().top), view.top, view.bottom, direction, last);
   if (at < 0) {
     // None earlier on the loaded page: its top, and the page before it, as reading up loads it. A pane
     // already at its top fires no scroll event, so the older page is asked for here.
@@ -5098,6 +5103,7 @@ function jumpOwnMessage(direction: -1 | 1): void {
   }
   readTimeline();
   const row = rows[at]!;
+  lastOwnJump = { key: row.dataset.timelineKey ?? '', selection: selectionGeneration };
   row.scrollIntoView({ block: 'start' });
   row.classList.remove('is-search-hit');
   void row.offsetWidth;
