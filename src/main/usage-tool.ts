@@ -1,3 +1,4 @@
+import { spokenAge } from '../shared/age.js';
 import type { ModelUsage } from '../shared/usage.js';
 import type { ProviderUsage } from '../shared/provider-usage.js';
 
@@ -5,10 +6,8 @@ import type { ProviderUsage } from '../shared/provider-usage.js';
  * The Core `usage` tool's answer (#482): what each provider reported, with its source and age,
  * kept apart from tokens counted from logs on this computer. Anything missing says so.
  */
-const ago = (time: number, now: number): string => {
-  const minutes = Math.max(0, Math.round((now - time) / 60_000));
-  return minutes < 1 ? 'just now' : minutes < 120 ? `${minutes} min ago` : `${Math.round(minutes / 60)} h ago`;
-};
+// Days, weeks, months and years too: a provider report from last month never reads "720 h ago".
+const ago = (time: number, now: number): string => spokenAge(time, now);
 const iso = (time: number) => new Date(time).toISOString().replace(/\.\d{3}Z$/, 'Z');
 const tokens = (value: number) => Math.round(value).toLocaleString('en-US');
 const windowName = (seconds: number | null) => seconds === 604800 ? 'weekly' : seconds ? `${Math.round(seconds / 3600)}-hour` : '';

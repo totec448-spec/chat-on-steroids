@@ -67,7 +67,7 @@ import {
   WRITE_CAPABILITIES
 } from '../shared/types.js';
 import type { SwarmState } from '../shared/session.js';
-import { $, ago, disclosureChevron, el, icon, run, shortAgo, toast } from './dom.js';
+import { $, ago, disclosureChevron, el, elapsedDurationText, icon, run, shortAgo, toast } from './dom.js';
 import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatSearch, openChatView, openFeedback } from './chat.js';
 import { publishStopNoticeTexts } from './stop-notices.js';
 import { publishMainTexts } from './main-texts.js';
@@ -912,11 +912,9 @@ const METHOD_HINT: Record<string, string> = {
   manual: "This app only listens on localhost. You are responsible for exposing it."
 };
 
+/** Tunnel uptime: "45s", "4m 5s", "6h 12m", "3d 4h", never hundreds of hours. */
 function duration(seconds: number | null): string {
-  if (seconds === null) return '—';
-  if (seconds < 90) return `${Math.round(seconds)}s`;
-  const minutes = Math.round(seconds / 60);
-  return minutes < 90 ? `${minutes}m` : `${Math.round(minutes / 60)}h`;
+  return seconds === null ? '—' : elapsedDurationText(seconds, 2);
 }
 
 /**
