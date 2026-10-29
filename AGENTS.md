@@ -5602,8 +5602,14 @@ conversation, else transport key; none means no grant) 2 minutes, ended early by
 input. `main/desktop-ask.ts` asks one question at a time in arrival order and re-checks a step that
 waited. `main/desktop-ask-window.ts` shows the non-activating top-right panel (preload
 `desktop-ask` → `desktop-ask:answer`, sender-checked); no answer in 60 s, closing or a crashed
-page is a refusal. A refusal is the tool error `DECLINED_BY_USER: …` and nothing runs; nothing
-retries by itself. One `desktop ask:` log line per decision, never the step's text.
+page is a refusal. The panel never takes the focus, so while it waits the main window shows the
+same question as the `#desktopAskNotice` notice (`renderer/desktop-ask-notice.ts`; push
+`desktopAsk:pending` with `DesktopAskPending | null`, read `desktopAsk:pending`, answer
+`desktopAsk:answer` `{ id, choice }`, true only while that id waits): a keyboard or screen-reader
+user switches to the app and answers there, and either answer ends both. A damaged saved
+`ui.desktopAsk` loads as `always` with one log line; a missing one is `off`, and the settings merge
+treats missing and `off` as the same value. A refusal is the tool error `DECLINED_BY_USER: …` and
+nothing runs; nothing retries by itself. One `desktop ask:` log line per decision, never the step's text.
 
 `computer/index.ts` owns native actions, capture frames/accessibility refs, batching and
 postconditions. Registrars own live capability checks. Windows `windows-api.ts` implements the
