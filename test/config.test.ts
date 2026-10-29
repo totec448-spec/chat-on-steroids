@@ -139,6 +139,18 @@ describe('settings migration', () => {
       expect(loaded.readOnly).toBe(true);
     }
   });
+  // #1914: Same as system is saved as 'system'; Light and Dark from older versions load as they were,
+  // and a damaged theme loads as the default (Dark) without touching the other saved choices.
+  it('loads the System theme, older Light and Dark as saved, and a damaged theme as Dark', async () => {
+    const config = defaultConfig();
+    for (const [saved, loadedAs] of [['system', 'system'], ['light', 'light'], ['dark', 'dark'], ['sepia', 'dark'], [7, 'dark'], [null, 'dark']] as const) {
+      await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...config, readOnly: true, ui: { ...config.ui, theme: saved, sounds: true } }), 'utf8');
+      const loaded = await loadConfig();
+      expect(loaded.ui.theme).toBe(loadedAs);
+      expect(loaded.ui.sounds).toBe(true);
+      expect(loaded.readOnly).toBe(true);
+    }
+  });
   it('drops removed file-saving settings without changing other saved choices', async () => {
     const config = defaultConfig();
     config.readOnly = true;
