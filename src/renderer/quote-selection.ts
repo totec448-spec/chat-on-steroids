@@ -144,23 +144,21 @@ export function initQuoteSelection({ timeline, input, blocked }: QuoteSelectionD
     button.hidden = false;
     const width = button.offsetWidth, height = button.offsetHeight;
     const centered = Math.max(view.left + 4, Math.min(end.right - width / 2, view.right - width - 4));
-    const below = end.bottom + 6, above = start.top - height - 6;
-    // Under a short answer sit its own buttons (Copy, Download): never cover one. Slide past them
-    // on the same line first, then try above the selection, and only then accept below.
+    const below = end.bottom + 6, aboveStart = start.top - height - 6, aboveEnd = end.top - height - 6;
+    // Under a short answer sit its own buttons (Copy, Download): never cover one. Each spot is tried
+    // centred under the selection's end, then slid past what is in the way; below first, then above.
     const controls = [...timeline.querySelectorAll('button, a[href], [role="button"], summary')]
       .filter(control => !control.closest('[hidden]')).map(control => control.getBoundingClientRect()).filter(box => box.width > 0 && box.height > 0);
     const covered = (left: number, top: number): DOMRect[] =>
       controls.filter(box => box.left < left + width && box.right > left && box.top < top + height && box.bottom > top);
-    const fits = (top: number): boolean => top >= view.top && top + height <= view.bottom;
-    const options: Array<[number, number]> = [[centered, below]];
-    const under = covered(centered, below);
-    if (under.length) {
-      const past = Math.max(...under.map(box => box.right)) + 6;
-      if (past + width <= view.right - 4) options.push([past, below]);
-      options.push([centered, above]);
-    }
-    options.push([centered, Math.max(view.top, above)]);
-    const [left, top] = options.find(([x, y]) => fits(y) && !covered(x, y).length) ?? (fits(below) ? [centered, below] : options.at(-1)!);
+    const fits = (left: number, top: number): boolean => top >= view.top && top + height <= view.bottom && left + width <= view.right - 4;
+    const slid = (top: number): number => { const hits = covered(centered, top); return hits.length ? Math.max(...hits.map(box => box.right)) + 6 : centered; };
+    // Without room below, the spot above the last line, as before; the one above the whole selection after it.
+    const rows = below + height <= view.bottom ? [below, aboveStart] : [Math.max(view.top, aboveEnd), Math.max(view.top, aboveStart)];
+    const spot = rows.flatMap(top => [[centered, top], [slid(top), top]] as Array<[number, number]>).find(([x, y]) => fits(x, y) && !covered(x, y).length);
+    // Nowhere clear: no button rather than one over a control.
+    if (!spot) { button.hidden = true; return; }
+    const [left, top] = spot;
     button.style.top = `${Math.round(top)}px`;
     button.style.left = `${Math.round(left)}px`;
   };
