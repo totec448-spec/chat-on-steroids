@@ -241,11 +241,13 @@ export function createWorkspaceDocks(host: HTMLElement) {
     const id = rightTerminal.newTab(); if (!id) return;
     activateKey(terminalKey(id));
   };
-  const activate = (kind: DockView): void => {
+  /** `focus`: the keyboard goes to the opened tab (⌘K, so the person is not left on the page they came from). */
+  const activate = (kind: DockView, options: { focus?: boolean } = {}): void => {
     if (kind === 'terminal') {
       const previous = [...opened].reverse().find(key => terminalId(key) !== null);
       if (previous) activateKey(previous); else newRightTerminal();
     } else activateKey(kind);
+    if (options.focus) tabs.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus();
   };
   const adopt = (kind: AdoptableView): void => {
     if (active && active !== kind) hideView(active);
