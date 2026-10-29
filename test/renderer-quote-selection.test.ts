@@ -244,3 +244,27 @@ it('leaves the composer alone and says to start or cancel the plan first while a
   expect(input.value).toBe('Look at this:\n\n> loader\n\n');
   expect(document.querySelector('.toast')).toBeNull();
 });
+
+// 2.1.47 round: under the last line of a short answer sit its Copy and Download buttons; the
+// button went over them. It slides past them on that line, else goes above the selection, and
+// stays where it was where nothing is in the way.
+it('never covers the buttons under a short answer', async () => {
+  const { initQuoteSelection } = await import('../src/renderer/quote-selection.js');
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetWidth', { configurable: true, get: () => 80 });
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetHeight', { configurable: true, get: () => 28 });
+  const actions = document.createElement('button');
+  const at = (left: number, right: number, top = 128) => { actions.getBoundingClientRect = () => ({ top, bottom: top + 24, left, right, width: right - left, height: 24 }) as DOMRect; };
+  document.querySelector('.said')!.append(actions);
+  initQuoteSelection({ timeline: document.getElementById('timeline')!, input: document.getElementById('chatInput') as HTMLTextAreaElement });
+  const [first] = document.querySelectorAll('.msg p');
+  const place = async (end: number) => { select(first!.firstChild!, 4, first!.firstChild!, end); await frame(); return [button().style.left, button().style.top]; };
+  // The selected line is 100–120 and ends at 300: centred under its end the button would be 260–340.
+  at(240, 270);
+  expect(await place(10)).toEqual(['276px', '126px']);
+  // No room to the right: above the selection, with the same 6px gap.
+  at(240, 790);
+  expect(await place(11)).toEqual(['260px', '66px']);
+  // Nothing in the way: under the selection's end, as before.
+  at(240, 270, 300);
+  expect(await place(12)).toEqual(['260px', '126px']);
+});
