@@ -3789,6 +3789,28 @@ it('closes a stopped turn with a line saying it stopped, after any late work, an
   expect(lines().filter(line => line.includes(request))).toHaveLength(1);
 });
 
+// CodeRabbit on #1918: the fold reads the recorded title, not the shown one, so it folds in every language.
+it('folds status polls in another language too, and names the fold in it', async () => {
+  const status = (seq: number): SessionEvent => {
+    const event = toolCall(seq, `status-de-${seq}`) as Extract<SessionEvent, { kind: 'tool_call' }>;
+    return { ...event, call: { ...event.call, tool: 'agents', summary: { kind: 'agent', tone: 'neutral', title: 'Checked agent status' } } };
+  };
+  const { w, append } = await boot([status(1), status(2), status(3), status(4)]);
+  const { setLanguage, t } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  try {
+    // Painted in German: the rows show German titles, and they still fold.
+    await append([status(5)]);
+    const fold = w.document.getElementById('timeline')!.querySelector<HTMLDetailsElement>('.routine-activity');
+    expect(fold).not.toBeNull();
+    expect(fold!.querySelector('.routine-count')!.textContent).toBe('×5');
+    expect(fold!.querySelector('.activity-title')!.textContent).toBe(t('Checked agent status'));
+    expect(fold!.querySelector('.activity-title')!.textContent).not.toBe('Checked agent status');
+    setLanguage('en');
+    expect(fold!.querySelector('.activity-title')!.textContent).toBe('Checked agent status');
+  } finally { setLanguage('en'); }
+});
+
 it('folds five consecutive status polls while retaining each exact tool row', async () => {
   const status = (seq: number): SessionEvent => {
     const event = toolCall(seq, `status-${seq}`) as Extract<SessionEvent, { kind: 'tool_call' }>;

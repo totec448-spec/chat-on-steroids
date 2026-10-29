@@ -5162,6 +5162,8 @@ function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>, context?:
   if (call.tool === 'exec_command' || call.tool === 'write_stdin') head.append(el('span', 'tool-tag is-shell', 'shell'));
   else if (call.changes?.length || call.tool === 'apply_patch') head.append(el('span', 'tool-tag is-diff', 'diff'));
   head.append(el('b', '', () => localToolTitle(call.summary.title)));
+  // The recorded title, for logic that compares it (routine folding); the shown one is translated.
+  head.dataset.recordedTitle = call.summary.title;
   const detail = call.summary.detail;
   if (detail) head.append(el('em', '', () => localToolDetail(detail)));
   if (call.changes?.length) {
@@ -6313,7 +6315,7 @@ function reconcileChildren(parent: Element, children: HTMLElement[]): void {
 function foldRoutineActivity(rows: HTMLElement[]): HTMLElement[] {
   const result: HTMLElement[] = [];
   const retained = new Set<HTMLDetailsElement>();
-  const routineTitle = (row: HTMLElement) => row.querySelector('.tool[data-outcome="ok"] > summary b')?.textContent ?? '';
+  const routineTitle = (row: HTMLElement) => row.querySelector<HTMLElement>('.tool[data-outcome="ok"] > summary')?.dataset.recordedTitle ?? '';
   for (let i = 0; i < rows.length;) {
     const title = routineTitle(rows[i]!);
     if (title !== 'Checked agent status' && !title.startsWith('Waited on session ')) {
@@ -6339,7 +6341,7 @@ function foldRoutineActivity(rows: HTMLElement[]): HTMLElement[] {
     fold.dataset.firstKey = members[0]!.dataset.timelineKey;
     fold.querySelector('summary')!.replaceChildren(
       el('span', 'routine-symbol', '↺'),
-      el('span', 'activity-title', title),
+      el('span', 'activity-title', () => localToolTitle(title)),
       el('span', 'routine-count', `×${members.length}`)
     );
     reconcileChildren(fold.lastElementChild!, members);
