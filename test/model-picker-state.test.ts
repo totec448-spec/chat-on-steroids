@@ -624,3 +624,17 @@ it('confirms the selected pair when the picker also lists models it cannot read 
     ...Array.from({ length: 10 }, (_, i) => extra(20 + i, `other-model-${i}`, 'standard'))] as never;
   expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(true);
 });
+
+// CodeRabbit on #1907: a lane the reader skips still sits on ChatGPT's slider. Between two lanes it
+// can read, one arrow key lands on it, so the steps follow the slider's own order, both ways.
+it('steps over a lane it cannot read on the way to the chosen one (#1905)', async () => {
+  const f = fixture();
+  const lanes = f.selections[0] as any[];
+  const skipped = { bucket: 5, modelSlug: 'gpt-5-6-thinking', thinkingEffort: 'auto', availability: { status: 'available' }, category: { modelLane: 'thinking', shortLabel: '5.6 Sol' } };
+  lanes.splice(1, 0, skipped);
+  Object.assign(f.state, { currentBucket: 1, currentSelection: lanes[0] });
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high')).toBe(true);
+  expect(f.state.currentBucket).toBe(2);
+  expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'medium')).toBe(true);
+  expect(f.state.currentBucket).toBe(1);
+});
