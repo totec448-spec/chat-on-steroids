@@ -24546,17 +24546,19 @@ describe('creating a native ChatGPT Project', () => {
     expect(await live.runtimeMessage({ type: 'clf-project-create-state', id: request.id })).toEqual({ safe: true });
   });
 
-  it('will not click an unrelated primary button without the Projects-index marker', async () => {
+  it('will not click a primary button outside the Projects index\'s Create spot', async () => {
     const reports: Array<Record<string, any>> = [];
     let clicks = 0;
     live = await harness(`https://chatgpt.com/projects?cos-project-create=${request.id}`, {
       project_create: message => { reports.push(message); return { ok: true, data: { ok: true } }; }
     }, document => {
+      // The Projects index itself (its marker and drop target), with a primary button elsewhere on the page.
+      const search = document.createElement('input'); search.id = 'projects-index-search';
       const wrapper = document.createElement('div'); wrapper.setAttribute('data-chatgpt-project-conversation-drop-target', '');
       const unrelated = document.createElement('button');
       unrelated.type = 'button'; unrelated.setAttribute('data-color', 'primary'); unrelated.setAttribute('data-variant', 'solid');
       shown(unrelated); unrelated.addEventListener('click', () => { clicks++; });
-      wrapper.append(unrelated); document.body.append(wrapper);
+      document.body.append(search, wrapper, unrelated);
     });
     const created = live.runtimeMessage({ type: 'clf-project-create', request });
     await settle(21_000);
