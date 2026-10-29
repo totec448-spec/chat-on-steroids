@@ -117,6 +117,23 @@ it.each(['playfulStatus', 'playfulContinue', 'followOutput', 'announceTurns'] as
   expect(getConfig().ui[key]).toBe(wanted);
 });
 
+it('saves the ask-before-mouse-and-keyboard choice (#1804), keeps it through a stale save, and refuses an unknown one', async () => {
+  const base = getConfig();
+  expect(await save({ ...base, ui: { ...base.ui, desktopAsk: 'always' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.desktopAsk).toBe('always');
+  expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.desktopAsk).toBe('always');
+  const now = getConfig();
+  expect(await save({ ...now, ui: { ...now.ui, desktopAsk: 'sometimes' } }, now)).toMatchObject({ ok: false });
+  expect(getConfig().ui.desktopAsk).toBe('always');
+  // CodeRabbit: a stale snapshot from before the choice existed (none saved) and the form's default
+  // (off) are the same choice, not an edit: the live Always ask stays.
+  const { desktopAsk: _, ...older } = now.ui;
+  const stale = { ...now, ui: older };
+  expect(await save({ ...stale, ui: { ...older, desktopAsk: 'off' } }, stale)).toMatchObject({ ok: true });
+  expect(getConfig().ui.desktopAsk).toBe('always');
+});
+
 it('remembers that the first-run tour was taken or declined, through any later settings save (#1833)', async () => {
   expect(getConfig().ui.tourDone).toBeUndefined();
   await handlers.get('ui:tourDone')!(null, undefined);
