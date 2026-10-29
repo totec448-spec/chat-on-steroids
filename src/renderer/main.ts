@@ -37,7 +37,7 @@ import { playSoundCue } from './sound-cues.js';
 import { inQuietHours } from '../shared/phone-push.js';
 import { collectSettings, initSettingsSearch, searchSettings } from './settings-search.js';
 import { matchesWords } from './palette.js';
-import type { AppearanceSettings } from '../shared/appearance.js';
+import type { AppearanceSettings, ThemeChoice } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
 import { parseCommandAllowlistText } from '../shared/command-allowlist.js';
 /**
@@ -755,7 +755,7 @@ let settingsSaveQueue: Promise<void> = Promise.resolve();
 let requestedSettings: SettingsPatch | null = null;
 
 /** Resolves true once main saved the form, false when nothing was saved (an invalid field, a refusal). */
-function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?: AppearanceSettings } = {}): Promise<boolean> {
+function save(over: { readOnly?: boolean; theme?: ThemeChoice; appearance?: AppearanceSettings } = {}): Promise<boolean> {
   if (applying || !state) return Promise.resolve(false);
 
   const previous: AppState['config'] = requestedSettings

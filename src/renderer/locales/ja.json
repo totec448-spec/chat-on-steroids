@@ -3430,6 +3430,7 @@
   "Waiting for the reviewer": "レビュー担当を待っています",
   "Continues without the review in {0}": "{0} 後にレビューなしで続行",
   "Continuing without the review…": "レビューなしで続行しています…",
+  "Same as system": "システムに合わせる",
   "Read {0}": "{0} を読み取りました",
   "Reading {0}": "{0} を読み取り中",
   "Could not read {0}": "{0} を読み取れませんでした",

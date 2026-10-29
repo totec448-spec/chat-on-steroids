@@ -1,4 +1,4 @@
-import { ACCENT_PRESETS, defaultAppearance, effectivePalette, mixColor, paletteTokens, type AppearanceSettings, type AppearanceTheme } from '../shared/appearance.js';
+import { ACCENT_PRESETS, defaultAppearance, effectivePalette, mixColor, paletteTokens, resolveTheme, type AppearanceSettings, type AppearanceTheme, type ThemeChoice } from '../shared/appearance.js';
 import type { UiPrefs } from '../shared/types.js';
 import { $ } from './dom.js';
 import { currentLanguage, onLanguageChange, t, ui } from './i18n.js';
@@ -55,9 +55,20 @@ export function applyAppearance(theme: AppearanceTheme, settings?: AppearanceSet
 }
 
 /** Only the in-progress form edit is local; the existing Settings queue owns persistence. */
-export function initAppearance(save: (patch: { theme?: AppearanceTheme; appearance?: AppearanceSettings }) => void): { apply(ui: UiPrefs): void } {
+export function initAppearance(save: (patch: { theme?: ThemeChoice; appearance?: AppearanceSettings }) => void): { apply(ui: UiPrefs): void } {
   const panel = $('appearancePanel');
+  /** The saved choice, and the theme shown for it: System (#1914) shows the operating system's. */
+  let choice: ThemeChoice = 'dark';
   let theme: AppearanceTheme = 'dark';
+  const systemScheme = (): MediaQueryList | null => window.matchMedia?.('(prefers-color-scheme: dark)') ?? null;
+  // Watched from the first time System is shown; a switch of the system then repaints at once.
+  let watchingSystem = false;
+  function watchSystem(): void {
+    const scheme = systemScheme();
+    if (watchingSystem || !scheme) return;
+    watchingSystem = true;
+    scheme.addEventListener('change', () => { if (choice === 'system' && !editing) paint(); });
+  }
   let current = defaultAppearance();
   let editing = false;
   const colorKeys = ['accent', 'background', 'sidebar'] as const;
@@ -96,8 +107,10 @@ export function initAppearance(save: (patch: { theme?: AppearanceTheme; appearan
     $('appearanceLineSpacing').setAttribute('aria-valuetext', spacing);
   }
   function paint(): void {
+    if (choice === 'system') watchSystem();
+    theme = resolveTheme(choice, systemScheme()?.matches === true);
     applyAppearance(theme, current);
-    $<HTMLSelectElement>('appearanceTheme').value = theme;
+    $<HTMLSelectElement>('appearanceTheme').value = choice;
     $<HTMLSelectElement>('appearanceFont').value = current.font;
     for (const option of panel.querySelectorAll<HTMLInputElement>('input[name="appearanceSidebarLayout"]')) option.checked = option.value === current.sidebarLayout;
     $<HTMLInputElement>('appearanceSize').value = String(current.fontSize);
@@ -160,12 +173,15 @@ export function initAppearance(save: (patch: { theme?: AppearanceTheme; appearan
     if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement) || !control.id.startsWith('appearance')) return;
     editing = false;
     if (control.id === 'appearanceTheme') {
-      theme = control.value as AppearanceTheme;
-      paint(); save({ theme });
+      choice = control.value as ThemeChoice;
+      paint(); save({ theme: choice });
     } else if (update(control)) save({ appearance: current });
     else {
       // Incomplete hex input never becomes CSS or durable config. Restore the last valid value.
       control.removeAttribute('aria-invalid');
+      // A system switch that waited for this edit shows now (CodeRabbit on #1917), so the field below
+      // gets the color of the theme that is shown.
+      if (choice === 'system') paint();
       if (control.dataset.hex) control.value = current[theme][control.dataset.hex as typeof colorKeys[number]].toUpperCase();
     }
   });
@@ -176,6 +192,6 @@ export function initAppearance(save: (patch: { theme?: AppearanceTheme; appearan
   });
   return { apply(ui) {
     if (editing) return;
-    theme = ui.theme; current = ui.appearance ?? defaultAppearance(); paint();
+    choice = ui.theme; current = ui.appearance ?? defaultAppearance(); paint();
   } };
 }

@@ -21,6 +21,7 @@ import { cosSignInTransfer, SignInTransferError, type SignInCookie } from './sig
 import { EXTERNAL_BROWSER_LABELS, installedSignInBrowsers, openBrowserSignIn, type ExternalChatBrowser } from '../browser.js';
 import { opensInCosBrowser } from '../../shared/cos-browser-sites.js';
 import { TabModel, WINDOW_ID_NONE, type ModelEvent, type WindowState } from './tab-model.js';
+import { shownTheme } from '../theme.js';
 
 const PARTITION = 'persist:cos-browser';
 /**
@@ -81,7 +82,7 @@ export interface CosBrowserToolbarState {
 /** The app's own palette: the sidebar color for the bar, the page color behind pages and panels. */
 function themeTokens(surface: 'sidebar' | 'background'): Record<string, string> {
   const ui = getConfig().ui;
-  const palette = (ui.appearance ?? defaultAppearance())[ui.theme === 'light' ? 'light' : 'dark'];
+  const palette = (ui.appearance ?? defaultAppearance())[shownTheme(ui.theme)];
   return paletteTokens(palette[surface], palette.accent, palette.contrast);
 }
 const barTokens = () => themeTokens('sidebar');

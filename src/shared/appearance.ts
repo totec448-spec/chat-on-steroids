@@ -4,6 +4,13 @@ export const APPEARANCE_FONTS = ['system', 'sans', 'serif', 'mono', 'legible'] a
 /** 'projects' is the project tree; 'inbox' is one list of chats, active ones first. */
 export const SIDEBAR_LAYOUTS = ['projects', 'inbox'] as const;
 export type AppearanceTheme = 'light' | 'dark';
+/** The saved choice: a theme, or "system" to follow the operating system's light or dark mode (#1914). */
+export type ThemeChoice = AppearanceTheme | 'system';
+
+/** The theme shown for a choice. Anything unknown (an older or damaged config) is the default, dark. */
+export function resolveTheme(choice: ThemeChoice | undefined, systemDark: boolean): AppearanceTheme {
+  return choice === 'system' ? (systemDark ? 'dark' : 'light') : choice === 'light' ? 'light' : 'dark';
+}
 export interface AppearancePalette {
   background: string;
   sidebar: string;
