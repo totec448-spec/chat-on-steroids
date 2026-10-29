@@ -11,6 +11,7 @@
  * "Called tool".
  */
 
+import { elapsedText } from '../../shared/age.js';
 import type { ActivitySummary, FileChange, ToolOutcome } from '../../shared/session.js';
 import { formatDelta } from '../diffstat.js';
 import type { CallEvidence } from '../mcp/call-context.js';
@@ -21,7 +22,8 @@ export { shortPath };
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.round(ms / 60_000)}m`;
+  // "4m 5s", "3h 0m", "2d 1h": a command that ran for hours never reads "180m".
+  return elapsedText(ms / 1000, 2);
 }
 
 function plural(count: number, one: string, many = `${one}s`): string {
