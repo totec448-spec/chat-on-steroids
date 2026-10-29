@@ -135,6 +135,13 @@ export async function startStepReview(input: { conversationId: string; sessionId
         } else {
           row.workerId = await deps.spawn(caller, brief, model);
         }
+        // Goal stopped while the reviewer was being started: the stop could not cancel it yet, so this does.
+        if (reviews.get(conversationId) !== row) {
+          const info = deps.reviewer(conversationId);
+          if (info && info.id === row.workerId && occupiesSlot(info.state)) await deps.cancel(info);
+          logInfo(`goal review: Goal stopped in ${conversationId} while ${row.workerId} was being asked; its review was cancelled, its chat stays`);
+          return 'failed';
+        }
         row.askedAt = deps.now();
         const count = facts.files.length + facts.more;
         logInfo(`goal review: asked ${row.workerId} to review step ${turnId} in ${conversationId} (${count} file${count === 1 ? '' : 's'})`);
