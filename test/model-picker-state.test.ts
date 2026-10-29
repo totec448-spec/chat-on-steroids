@@ -638,3 +638,17 @@ it('steps over a lane it cannot read on the way to the chosen one (#1905)', asyn
   expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'medium')).toBe(true);
   expect(f.state.currentBucket).toBe(1);
 });
+
+// CodeRabbit on #1907: the September reader and the content side share the same limit.
+it('confirms a picker of exactly 48 versions or lanes and refuses one of 49 (#1905)', async () => {
+  for (const [count, readable] of [[48, true], [49, false]] as const) {
+    for (const part of ['versions', 'lanes'] as const) {
+      const f = fixture();
+      const lanes = f.selections[0] as any[];
+      while (part === 'versions' && f.versions.length < count) f.versions.push({ id: `extra-${f.versions.length}`, displayTextForIntelligence: `Extra ${f.versions.length}`, enabled: true });
+      while (part === 'lanes' && lanes.length < count) lanes.push({ bucket: 100 + lanes.length, modelSlug: `other-${lanes.length}`, thinkingEffort: 'standard',
+        availability: { status: 'available' }, category: { modelLane: 'thinking', shortLabel: `Other ${lanes.length}` } });
+      expect(await f.api.selectModelSettings('gpt-5-6-thinking', 'high'), `${count} ${part}`).toBe(readable);
+    }
+  }
+});

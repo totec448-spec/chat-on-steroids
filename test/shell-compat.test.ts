@@ -1859,3 +1859,21 @@ it('still refuses when the selected model itself cannot be read (#1905)', async 
   f.props.powerSelections = lanes; f.props.selectedLabelCandidate = lanes[0]; f.props.selectedPowerSelection = lanes[0];
   expect((await f.ask('clf-picker-ask')).picker).toBeNull();
 });
+
+// CodeRabbit on #1907: the readers and the content side share one limit; 48 reads, 49 does not.
+it('reads a picker of exactly 48 models or lanes and refuses one of 49 (#1905)', async () => {
+  for (const [count, readable] of [[48, true], [49, false]] as const) {
+    for (const part of ['versions', 'lanes'] as const) {
+      const f = fixture();
+      const versions: any[] = [{ id: 'latest', label: 'GPT-6', selected: true }];
+      const lanes: any[] = [{ model: 'gpt-6-thinking', modelLabel: 'GPT-6', reasoningEffort: 'high', powerSettingIndex: 0, labels: { effort: 'High' } }];
+      while (part === 'versions' && versions.length < count) versions.push({ id: `extra-${versions.length}`, label: `Extra ${versions.length}`, selected: false });
+      while (part === 'lanes' && lanes.length < count) lanes.push({ model: `other-${lanes.length}`, modelLabel: `Other ${lanes.length}`, reasoningEffort: 'high', powerSettingIndex: lanes.length, labels: { effort: 'High' } });
+      f.versions.splice(0, f.versions.length, ...versions);
+      f.props.powerSelections = lanes; f.props.selectedLabelCandidate = lanes[0]; f.props.selectedPowerSelection = lanes[0];
+      const { picker } = await f.ask('clf-picker-ask');
+      expect(picker === null, `${count} ${part}`).toBe(!readable);
+      if (readable) expect(await f.api.selectModelSettings('gpt-6-thinking', 'high'), `${count} ${part}`).toBe(true);
+    }
+  }
+});
