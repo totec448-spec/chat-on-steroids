@@ -560,9 +560,11 @@ function repoKey(commonDir: string): string {
   return createHash('sha256').update(commonDir).digest('hex').slice(0, 16);
 }
 
+// The checkout's own approved root stores the worker worktree. Its Git metadata may sit under another
+// approved root (a linked checkout, #1925): repositoryContext already requires every part to be approved.
 function managedRootFor(repo: RepoContext, roots: readonly ResolvedRoot[]): ResolvedRoot {
   const candidates = roots.filter(entry =>
-    isContained(entry.real, repo.root) && isContained(entry.real, repo.commonDir) &&
+    isContained(entry.real, repo.root) &&
     !isContained(repo.root, path.join(entry.real, MANAGED_FOLDER))
   ).sort((left, right) => right.real.length - left.real.length);
   const chosen = candidates[0];
@@ -1108,8 +1110,10 @@ export async function restoreManagedWorktrees(
         if (!sameApprovedRoot(approved, marker.approvedRoot)) {
           throw new WorkerWorktreeError('WORKTREE_ROOT_CHANGED', 'the owning approved root has changed since allocation');
         }
-        if (![marker.sourceRepoRoot, marker.commonDir, marker.worktreePath, marker.workspace.real]
-          .every(value => isContained(approved.real, path.resolve(value)))) {
+        // The worker checkout stays under its owning root; the source repository and its metadata need
+        // any current approval, as at allocation (#1925).
+        if (![marker.worktreePath, marker.workspace.real].every(value => isContained(approved.real, path.resolve(value))) ||
+            ![marker.sourceRepoRoot, marker.commonDir].every(value => containedByAny(roots, path.resolve(value)))) {
           throw new WorkerWorktreeError('WORKTREE_OUTSIDE_ROOT', 'restored worktree or repository metadata is outside current approved roots');
         }
         const source = await repositoryContext(marker.sourceRepoRoot, roots);
