@@ -8963,3 +8963,69 @@ it('shows no Changed files card for a turn whose only edits were a worker\'s, or
   expect(w.document.querySelector('.turn-changes')).toBeNull();
   expect(api.turnChanges).not.toHaveBeenCalled();
 });
+
+it('jumps between your own messages with Alt+↑ / Alt+↓, marked like a search result, and leaves the message box alone (#1884)', async () => {
+  const at = Date.now() - 60_000;
+  const { w } = await boot([
+    { kind: 'user_message', seq: 11, origin: 11, time: at, source: 'extension', messageId: 'q-1', message: text('First question') },
+    { kind: 'assistant_message', seq: 12, time: at + 1, source: 'extension', messageId: 'a-1', message: text('First answer'), final: true, state: 'final' } as SessionEvent,
+    { kind: 'user_message', seq: 13, origin: 13, time: at + 2, source: 'extension', messageId: 'q-2', message: text('Second question') },
+    { kind: 'assistant_message', seq: 14, time: at + 3, source: 'extension', messageId: 'a-2', message: text('Second answer'), final: true, state: 'final' } as SessionEvent,
+    { kind: 'user_message', seq: 15, origin: 15, time: at + 4, source: 'extension', messageId: 'q-3', message: text('Third question') }
+  ]);
+  const doc = w.document;
+  doc.querySelector<HTMLElement>('.app')!.dataset.screen = 'chat';
+  const own = [...doc.querySelectorAll<HTMLElement>('#timeline [data-timeline-key]')].filter(row => row.querySelector('.said.is-user'));
+  expect(own.map(row => row.textContent?.match(/(First|Second|Third) question/)?.[1])).toEqual(['First', 'Second', 'Third']);
+  // The view starts at the third question; the first two are above it.
+  const tops = [-800, -200, 0];
+  own.forEach((row, index) => { row.getBoundingClientRect = () => ({ top: tops[index]!, bottom: tops[index]! + 40, left: 0, right: 600, width: 600, height: 40, x: 0, y: tops[index]!, toJSON: () => ({}) }) as DOMRect; });
+  doc.getElementById('chatBody')!.getBoundingClientRect = () => ({ top: 0, bottom: 700, left: 0, right: 800, width: 800, height: 700, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+  const scrolled: string[] = [];
+  own.forEach(row => { row.scrollIntoView = () => { scrolled.push(row.textContent!.match(/(First|Second|Third)/)![1]!); }; });
+  const press = (key: string, target: Element = doc.body) => target.dispatchEvent(new w.KeyboardEvent('keydown', { key, altKey: true, bubbles: true, cancelable: true }));
+  // Attachment names come before the text in the box; only the message is read (CodeRabbit).
+  const attachments = doc.createElement('div'); attachments.className = 'message-attachments';
+  attachments.textContent = 'quarterly-report-final-version.pdf '.repeat(20);
+  own[1]!.querySelector('.said.is-user')!.insertBefore(attachments, own[1]!.querySelector('.user-message-text'));
+  press('ArrowUp');
+  expect(scrolled).toEqual(['Second']);
+  expect(own[1]!.classList.contains('is-search-hit')).toBe(true);
+  // A screen reader hears which message it went to; the focus did not move (CodeRabbit).
+  expect(doc.getElementById('recallAnnounce')!.textContent).toBe('Second question');
+  expect(doc.activeElement).toBe(doc.body);
+  press('ArrowDown');
+  expect(scrolled).toEqual(['Second']);
+  // In the message box the keys stay the box's own, and in the sidebar they move a chat or project.
+  press('ArrowUp', doc.getElementById('chatInput')!);
+  press('ArrowUp', doc.querySelector('.sidebar') ?? doc.body);
+  expect(scrolled).toEqual(['Second']);
+  // Other modifiers are not this shortcut.
+  doc.body.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, shiftKey: true, bubbles: true }));
+  expect(scrolled).toEqual(['Second']);
+  // With the chat's settings (or another view of the pane) shown, the keys don't act on the hidden chat.
+  const content = doc.getElementById('timelineContent')!;
+  content.hidden = true;
+  const hidden = new w.KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, bubbles: true, cancelable: true });
+  doc.body.dispatchEvent(hidden);
+  expect(hidden.defaultPrevented).toBe(false);
+  expect(scrolled).toEqual(['Second']);
+  content.hidden = false;
+  // No earlier message on the loaded page, with the pane already at its top: the page before it is
+  // asked for, as reading up would, although no scroll event happens (CodeRabbit).
+  const api = (w as any).api, original = api.getSession;
+  const read = vi.fn((id: string, options: unknown) => original(id, options));
+  api.getSession = read;
+  own.forEach(row => { row.getBoundingClientRect = () => ({ top: 100, bottom: 140, left: 0, right: 600, width: 600, height: 40, x: 0, y: 100, toJSON: () => ({}) }) as DOMRect; });
+  const pane = doc.getElementById('chatBody')!;
+  Object.defineProperties(pane, { clientHeight: { value: 700 }, scrollHeight: { value: 700 } });
+  pane.scrollTop = 0;
+  // All three are in view now: the jump goes on from Second to First (CodeRabbit), and only then
+  // is there none earlier.
+  press('ArrowUp', doc.getElementById('chatTitle') ?? doc.body);
+  expect(scrolled).toEqual(['Second', 'First']);
+  expect(read).not.toHaveBeenCalled();
+  press('ArrowUp', doc.getElementById('chatTitle') ?? doc.body);
+  await settle();
+  expect(read).toHaveBeenCalledWith(expect.any(String), { before: 11, limit: 30 });
+});
