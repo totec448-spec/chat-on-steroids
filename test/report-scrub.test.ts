@@ -60,6 +60,20 @@ describe('scrubbing a diagnostics report', () => {
     expect(scrubText('Cats and Cat', { home: '/Users/jane', known: ['Cat'] })).toMatch(/^Cats and <x:[0-9a-f]{4}>$/);
   });
 
+  // CodeRabbit on #1923: the longest known value wins wherever it fits, whatever characters it starts or ends with.
+  it('replaces the longest overlapping known value whole', () => {
+    const out = scrubText('owner Alice!Smith, Alice! and Alice Smithy', { home: '/Users/jane', known: ['Very Long Private Name!', 'Alice!Smith', 'Alice!', 'Alice Smith', 'Alice'] });
+    expect(out).toMatch(/^owner (<x:[0-9a-f]{4}>), (<x:[0-9a-f]{4}>) and (<x:[0-9a-f]{4}>) Smithy$/);
+    const [, first, second, third] = /^owner (\S+), (\S+) and (\S+)/.exec(out)!;
+    expect(new Set([first, second, third]).size).toBe(3);
+  });
+
+  // CodeRabbit on #1923: a letter outside the Basic Multilingual Plane is one character, not two halves.
+  it('checks word edges by whole characters outside the Basic Multilingual Plane', () => {
+    expect(scrubText('Pre𐐀Test and 𐐀Test, Test𐐀 and Test𐐀Post', { home: '/Users/jane', known: ['𐐀Test', 'Test𐐀'] }))
+      .toMatch(/^Pre𐐀Test and <x:[0-9a-f]{4}>, <x:[0-9a-f]{4}> and Test𐐀Post$/);
+  });
+
   // A lookbehind on each of hundreds of known values made a 3 MB log take over 30 s (the report looked
   // stuck); grouped, it takes well under a second. Generous bound for slow runners.
   it('scrubs a large log with hundreds of known values quickly', () => {
