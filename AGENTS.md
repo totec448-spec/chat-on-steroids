@@ -1133,8 +1133,8 @@ laid-out page; the person just added the project, so it also runs under `browser
 `data-app-action-sidebar-project-create` still supported), types the
 folder name into `input#chatgpt-project-name`, arms, submits, and takes the id only from the
 Project page ChatGPT opens by itself, and only one the sidebar did not list before the click. The
-helper is closed once its request is no longer pending and it proves it holds nothing; a closed
-helper is reopened at most every 2 minutes.
+helper is closed once its request is no longer pending and it proves it holds no chat, draft,
+work or open native Create project dialog. A closed helper is reopened at most every 2 minutes.
 
 A new chat of a linked project (`pendingBrowserInputs` adds `project`) opens on
 `/g/<id>/project?cos-input=…#cos-input=…`, never by borrowing a tab (ChatGPT's New chat is the
