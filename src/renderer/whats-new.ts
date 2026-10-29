@@ -15,11 +15,11 @@ interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
   '2.1.48': {
-    lead: () => t("A reviewer for Goal steps, ages in days and months, and sending that recovers by itself."),
+    lead: () => t("A reviewer for Goal steps, a theme that follows your system, and a question before the mouse and keyboard."),
     highlights: [
       { icon: 'i-check-circle', title: () => t("Goal step reviewer"), text: () => t("A second chat checks each Goal step's file changes before the next one.") },
-      { icon: 'i-clock', title: () => t("Ages that read naturally"), text: () => t("Days, weeks, months and years instead of hundreds of hours.") },
-      { icon: 'i-retry', title: () => t("Back online, back to work"), text: () => t("A chat tab that opened while you were offline recovers by itself.") },
+      { icon: 'i-sun', title: () => t("Follows your system"), text: () => t("Light or dark as your computer is set, also when it switches.") },
+      { icon: 'i-monitor', title: () => t("Asks before taking over"), text: () => t("A small question asks before a chat uses your mouse and keyboard.") },
       { icon: 'i-chat', title: () => t("Messages that get through"), text: () => t("Also when you close the chat's tab while sending, or ChatGPT changes its model menu.") }
     ]
   },

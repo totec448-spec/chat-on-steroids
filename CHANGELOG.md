@@ -9,9 +9,9 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
-## [2.1.48] — A reviewer for Goal steps, ages in days and months, and sending that recovers by itself
+## [2.1.48] — A reviewer for Goal steps, a theme that follows your system, and a question before the mouse and keyboard
 
-Goal can have a second chat check each step's file changes. Ages, durations and countdowns read in days, weeks, months and years, in your language. And sending recovers by itself in more situations.
+Goal can have a second chat check each step's file changes. The theme can follow your computer's light or dark mode, and the app can ask before a chat uses your mouse and keyboard. Ages read in days, weeks, months and years, tool rows speak your language, and sending recovers by itself in more situations.
 
 ### 👉 After updating
 
@@ -20,11 +20,17 @@ Goal can have a second chat check each step's file changes. Ages, durations and 
 ### ✨ New
 
 - **Goal step reviewer.** Settings → Agents & automation → Review each Goal step's changes. While Goal runs, a reviewer worker reads what each step changed with the edit tools, and its findings go into the next step's message. A finding that starts with "BLOCKING:" pauses Goal and tells you why. It needs Sub-agents turned on, uses more of your ChatGPT usage, and is off by default.
+- **Same as system theme.** Settings → Appearance → Theme → Same as system follows your Mac's or Windows' light or dark mode, also when it switches while the app is open.
+- **Ask before using the mouse and keyboard.** On Home, under the permission to control the mouse and keyboard: Off (the default), Ask while I'm using the computer, or Always ask. A small question in the screen's corner asks before a step takes your mouse or keyboard, and never takes the focus; Go ahead lets that chat go on for up to 2 minutes, until you use the mouse or keyboard yourself. The same question also waits in the app's window, so you can answer it by keyboard.
+- **⌘K finds actions and settings.** While you type in ⌘K / Ctrl+K, a few matching actions (New chat, Find in chat, Terminal, Review …) and settings show under the chats.
+- **Jump between your messages.** Alt+↑ and Alt+↓ (⌥ on Mac) go to your previous and next message in a chat.
 
 ### 💪 Better
 
 - **Ages read naturally.** The chat list says "2w", "3mo" or "1y" instead of "389h ago", in your language. Worker run times, background processes, tunnel uptime and countdowns follow the same rule: "3d 4h" or "2:05:30", never hundreds of hours or minutes.
 - **Diagnostics reports** say more about "Activity not attributed": where ChatGPT's page showed a request the app could not match.
+- **Tool rows in your language.** "Read", "Edited", "Ran", counts and times in a chat's tool rows are shown in your language, also in older chats.
+- **Dropping files** outlines the message box while you drag, and says the files will be attached.
 
 ### 🛠 Fixed
 
@@ -34,6 +40,10 @@ Goal can have a second chat check each step's file changes. Ages, durations and 
 - **A message you send just as you close the chat's tab** is sent instead of expiring.
 - **A chat tab that opened while you were offline** recovers by itself once you're back online, instead of every message to that chat expiring.
 - **The Quote button** no longer covers the Copy and Download buttons under a short answer.
+- **Goal and Loop with providers that don't support JSON schemas** (such as DeepSeek) work: the app falls back to a format the provider accepts instead of retrying the same refused request.
+- **A chat that recovered by itself** is no longer reloaded again by a late report about its old, failed turn.
+- **Diagnostics reports** no longer garble ordinary words such as "worker" when a project or chat has a short name like "Work".
+
 
 ## [2.1.47] — Scheduled runs, changed files under each answer, commit and pull request from Review, and your own chat style
 
