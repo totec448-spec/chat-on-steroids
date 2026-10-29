@@ -1,4 +1,3 @@
-import { elapsedText } from '../shared/age.js';
 import type { TurnTrace } from '../shared/turn-trace.js';
 import { ui, t, tn } from './i18n.js';
 import type { AgentInfo, SessionSummary, SessionEvent } from '../shared/session.js';
@@ -6,7 +5,7 @@ import type { MultiAgentSettings } from '../shared/types.js';
 import { workerReportedFinish } from '../shared/session-activity.js';
 import { evaluateWorkerOverviewHealth } from '../shared/agent-health.js';
 import { workerOwnTask } from '../shared/worker-brief.js';
-import { compactNumber, el, icon } from './dom.js';
+import { compactNumber, el, elapsedDurationText, icon } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
 import { workerAvatar } from './agent-communication.js';
 import { renderWorkerActivity } from './agent-activity.js';
@@ -166,7 +165,7 @@ export function createAgentPanel(options: {
           ? worker.selectedModel : null;
         const elapsedMs = Math.max(0, (active ? Date.now() : worker.endedAt ?? worker.updatedAt) - worker.startedAt);
         // One unit, up to days: a worker running since yesterday reads "1d", not "26h".
-        const elapsed = elapsedText(elapsedMs / 1000, 1);
+        const elapsed = elapsedDurationText(elapsedMs / 1000, 1);
         const working = state === 'working' || state === 'active';
         // The avatar carries the state: a dot of presence, and while working the app's traveling
         // light around it (the connection capsule's). Its phase follows the clock, so the many

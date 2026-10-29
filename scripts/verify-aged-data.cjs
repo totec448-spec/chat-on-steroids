@@ -17,7 +17,7 @@ const LANGUAGES = ['en', 'de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', '
 let server, win;
 const fixture = `(() => {
  const old=window.api,f=composerFixture,ok=data=>Promise.resolve({ok:true,data:structuredClone(data)});
- const ages=${JSON.stringify(AGES)};
+ const ages=[${AGES.map(Number).join(',')}];
  // src/shared/appearance.ts defaultAppearance(): a whole appearance, as Settings saves one.
  const defaultAppearance={light:{background:'#f4f4f5',sidebar:'#e9edf2',accent:'#486f9d',contrast:45},dark:{background:'#181818',sidebar:'#1a2129',accent:'#b0cbed',contrast:60},
   font:'system',fontSize:14,lineSpacing:100,translucentSidebar:true,sidebarLayout:'projects',highContrast:false};
@@ -66,12 +66,15 @@ app.whenReady().then(async () => {
   await until(`document.querySelectorAll('#sessionList .sess[data-id^="aged-chat-"]').length===${AGES.length}`);
   const found=[];
   // Both sidebars: the project tree (ages in each row's tooltip) and the inbox (an age beside each title).
-  for (const layout of ['projects','inbox']) {
-  await js(`window.fixtureLayout=${JSON.stringify(layout)};window.pushState()`);
-  for (const language of LANGUAGES) {
+  // Only numbers go into page code (CodeQL js/bad-code-sanitization): the page names its own
+  // layouts and languages, and this side reads the name back.
+  for (const [layoutIndex, layout] of ['projects','inbox'].entries()) {
+  await js(`window.fixtureLayout=['projects','inbox'][${Number(layoutIndex)}];window.pushState()`);
+  assert.deepEqual([...await js(`[...document.getElementById('uiLanguage').options].map(option=>option.value)`)].sort(), [...LANGUAGES].sort(), 'The language menu offers every app language');
+  for (let index = 0; index < LANGUAGES.length; index++) {
     // As Settings → Language does it (the fixture's saved state follows).
-    await js(`(()=>{window.fixtureLanguage=${JSON.stringify(language)};const s=document.getElementById('uiLanguage');s.value=${JSON.stringify(language)};s.dispatchEvent(new Event('change',{bubbles:true}));})()`);
-    await until(`document.documentElement.lang===${JSON.stringify(language)}`);
+    const language = await js(`(()=>{const s=document.getElementById('uiLanguage'),value=s.options[${Number(index)}].value;window.fixtureLanguage=value;s.value=value;s.dispatchEvent(new Event('change',{bubbles:true}));return value;})()`);
+    await until(`document.documentElement.lang===document.getElementById('uiLanguage').options[${Number(index)}].value`);
     await js(`window.pushState()`);
     await pause(250);
     const text=await js(READ);

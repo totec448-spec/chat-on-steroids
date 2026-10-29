@@ -1,4 +1,4 @@
-import { ageOf, compactCount, type AgeUnit } from '../shared/age.js';
+import { ageOf, compactCount, elapsedParts, type AgeUnit } from '../shared/age.js';
 import { currentLanguage, t, ui } from './i18n.js';
 /**
  * The handful of DOM helpers both panels need.
@@ -220,6 +220,11 @@ export function shortAgo(atMs: number | null): string {
 export function compactAgeText(value: number, unit: AgeUnit): string {
   const key = { second: "{0}s", minute: "{0}m", hour: "{0}h", day: "{0}d", week: "{0}w", month: "{0}mo", year: "{0}y" }[unit];
   return t(key, [value]);
+}
+
+/** An elapsed time in the person's language, with the same tokens as ages: "3d 4h", German "3 T. 4 h". */
+export function elapsedDurationText(seconds: number, parts: 1 | 2): string {
+  return elapsedParts(seconds, parts).map(([value, unit]) => compactAgeText(value, unit)).join(' ');
 }
 
 /** A clock time for one event in a timeline. */
