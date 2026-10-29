@@ -8940,6 +8940,9 @@ it('jumps between your own messages with Alt+↑ / Alt+↓, marked like a search
   press('ArrowUp');
   expect(scrolled).toEqual(['Second']);
   expect(own[1]!.classList.contains('is-search-hit')).toBe(true);
+  // A screen reader hears which message it went to; the focus did not move (CodeRabbit).
+  expect(doc.getElementById('recallAnnounce')!.textContent).toBe('Second question');
+  expect(doc.activeElement).toBe(doc.body);
   press('ArrowDown');
   expect(scrolled).toEqual(['Second']);
   // In the message box the keys stay the box's own, and in the sidebar they move a chat or project.

@@ -27,7 +27,13 @@ export function pickOwnMessage(tops: readonly number[], viewTop: number, directi
  */
 export function nextOwnMessage(tops: readonly number[], viewTop: number, viewBottom: number, direction: -1 | 1, last: number): number {
   const top = last >= 0 ? tops[last] : undefined;
-  if (top === undefined || top < viewTop - SLACK || top > viewBottom) return pickOwnMessage(tops, viewTop, direction);
+  if (top === undefined || top < viewTop - SLACK || top > viewBottom) {
+    const picked = pickOwnMessage(tops, viewTop, direction);
+    // Nothing above the view on a first Alt+↑: the newest message in view, before any older page.
+    if (picked >= 0 || direction > 0 || top !== undefined) return picked;
+    for (let at = tops.length - 1; at >= 0; at--) if (tops[at]! >= viewTop - SLACK && tops[at]! <= viewBottom) return at;
+    return -1;
+  }
   const next = last + direction;
   return next >= 0 && next < tops.length ? next : -1;
 }
@@ -36,5 +42,7 @@ export function nextOwnMessage(tops: readonly number[], viewTop: number, viewBot
 export function keyBelongsElsewhere(target: EventTarget | null): boolean {
   const element = target instanceof Element ? target : null;
   if (!element) return false;
-  return !!element.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], .xterm, .cm-editor, dialog[open], .queued-input, .pending-message, .sidebar');
+  // An open panel, menu or list (the context meter's, a row menu) keeps its keys too.
+  return !!element.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], .xterm, .cm-editor, dialog[open], ' +
+    '[role="dialog"], [role="menu"], [role="listbox"], [aria-expanded="true"], .queued-input, .pending-message, .sidebar');
 }
