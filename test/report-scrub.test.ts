@@ -87,6 +87,13 @@ describe('scrubbing a diagnostics report', () => {
     expect(out).not.toMatch(/\bWork went/);
   });
 
+  // CodeRabbit on #1923: digits are not part of a name, so a name run together with a number is still replaced.
+  it('replaces a known value run together with digits on either side', () => {
+    expect(scrubText('saved Alice2026, 2026Alice and v2Alice3; Alices stays', { home: '/Users/jane', known: ['Alice'] }))
+      .toMatch(/^saved <x:[0-9a-f]{4}>2026, 2026<x:[0-9a-f]{4}> and v2<x:[0-9a-f]{4}>3; Alices stays$/);
+    expect(scrubText('Plan2 and Plan25', { home: '/Users/jane', known: ['Plan2'] })).toMatch(/^<x:[0-9a-f]{4}> and <x:[0-9a-f]{4}>5$/);
+  });
+
   // CodeRabbit on #1923: an underscore joins names in identifiers; the known value inside goes either way.
   it('replaces a known value joined to an identifier by an underscore', () => {
     expect(scrubText('profile Acme Budget_2026 and laptop_username', { home: '/Users/jane', known: ['Acme Budget', 'username'] }))
