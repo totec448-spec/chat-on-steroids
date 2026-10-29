@@ -1258,6 +1258,27 @@ describe('a settings file the app cannot read as is', () => {
   });
 });
 
+// CodeRabbit on #1864: a damaged ask-before-mouse-and-keyboard choice keeps asking (always) and says so;
+// a missing one is the default, off; a saved one loads as it was.
+it('loads a damaged desktop ask choice as always, a missing one as off, and says so once', async () => {
+  const logger = await import('../src/main/logger.js');
+  const warn = vi.spyOn(logger, 'logWarn');
+  const lines = () => warn.mock.calls.map(call => String(call[0])).filter(line => line.includes('desktopAsk'));
+  for (const [saved, loadedAs] of [['active', 'active'], ['off', 'off'], ['always', 'always'], [undefined, undefined]] as const) {
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...defaultConfig(), ui: { ...defaultConfig().ui, desktopAsk: saved } }), 'utf8');
+    warn.mockClear();
+    expect((await loadConfig()).ui.desktopAsk).toBe(loadedAs);
+    expect(lines()).toEqual([]);
+  }
+  for (const damaged of ['sometimes', 3, null, { off: true }]) {
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...defaultConfig(), ui: { ...defaultConfig().ui, desktopAsk: damaged } }), 'utf8');
+    warn.mockClear();
+    expect((await loadConfig()).ui.desktopAsk).toBe('always');
+    expect(lines()).toEqual(['config: the saved ui.desktopAsk was damaged; the app asks before every desktop step until it is chosen again']);
+  }
+  warn.mockRestore();
+});
+
 // #1856 (CodeRabbit): a damaged saved chat style falls back to the built-in text and says so once, never its content.
 it('logs a damaged saved chat style without its text, and nothing for an absent one', async () => {
   const logger = await import('../src/main/logger.js');
