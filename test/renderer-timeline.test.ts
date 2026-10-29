@@ -618,6 +618,31 @@ it('localizes only the exact app-authored Goal helper stop note at draw time', a
   expect(notes.map(note => note.textContent)).toEqual(rows.map(row => row.value));
 });
 
+// 2.1.47 release round: tool rows were recorded in English and shown that way in every language.
+it('shows a recorded tool row in the person\'s language, its path as recorded, and in English again when switched back', async () => {
+  const read = toolCall(1, 'read-de') as Extract<SessionEvent, { kind: 'tool_call' }>;
+  read.call.summary = { kind: 'read', title: 'Read src/app.ts', detail: 'lines 1–40', metric: '40 lines', tone: 'neutral' };
+  const run = toolCall(2, 'run-de') as Extract<SessionEvent, { kind: 'tool_call' }>;
+  run.call.tool = 'exec_command';
+  run.call.summary = { kind: 'run', title: 'Could not run npm test', metric: '✕ exit 2', tone: 'bad' };
+  const { w } = await boot([read, run]);
+  const { setLanguage, t, tn } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  const heads = () => [...w.document.querySelectorAll('.ev-tool_call summary')].map(head => ({
+    title: head.querySelector('b')?.textContent, detail: head.querySelector('em')?.textContent, metric: head.querySelector('.metric')?.textContent }));
+  expect(heads()).toEqual([
+    { title: t('Read {0}', ['src/app.ts']), detail: t('lines {0}–{1}', ['1', '40']), metric: tn('{0} line', '{0} lines', 40) },
+    { title: t('Could not run {0}', ['npm test']), detail: undefined, metric: t('✕ exit {0}', ['2']) }
+  ]);
+  expect(heads()[0]!.title).toContain('src/app.ts');
+  expect(heads()[0]!.title).not.toBe('Read src/app.ts');
+  setLanguage('en');
+  expect(heads()).toEqual([
+    { title: 'Read src/app.ts', detail: 'lines 1–40', metric: '40 lines' },
+    { title: 'Could not run npm test', detail: undefined, metric: '✕ exit 2' }
+  ]);
+});
+
 it('asks for the selected chat\'s background tab once per switch (#1249)', async () => {
   const first = summary([]), second = { ...summary([]), id: '2026-09-02-test0002', title: 'Other session' };
   const { w } = await boot([], true, [], [], { sessions: [first, second] });
@@ -3762,6 +3787,28 @@ it('closes a stopped turn with a line saying it stopped, after any late work, an
   expect(lines().filter(line => line.includes(stoppedLine))).toHaveLength(1);
   expect(last()).toContain(stoppedLine);
   expect(lines().filter(line => line.includes(request))).toHaveLength(1);
+});
+
+// CodeRabbit on #1918: the fold reads the recorded title, not the shown one, so it folds in every language.
+it('folds status polls in another language too, and names the fold in it', async () => {
+  const status = (seq: number): SessionEvent => {
+    const event = toolCall(seq, `status-de-${seq}`) as Extract<SessionEvent, { kind: 'tool_call' }>;
+    return { ...event, call: { ...event.call, tool: 'agents', summary: { kind: 'agent', tone: 'neutral', title: 'Checked agent status' } } };
+  };
+  const { w, append } = await boot([status(1), status(2), status(3), status(4)]);
+  const { setLanguage, t } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  try {
+    // Painted in German: the rows show German titles, and they still fold.
+    await append([status(5)]);
+    const fold = w.document.getElementById('timeline')!.querySelector<HTMLDetailsElement>('.routine-activity');
+    expect(fold).not.toBeNull();
+    expect(fold!.querySelector('.routine-count')!.textContent).toBe('×5');
+    expect(fold!.querySelector('.activity-title')!.textContent).toBe(t('Checked agent status'));
+    expect(fold!.querySelector('.activity-title')!.textContent).not.toBe('Checked agent status');
+    setLanguage('en');
+    expect(fold!.querySelector('.activity-title')!.textContent).toBe('Checked agent status');
+  } finally { setLanguage('en'); }
 });
 
 it('folds five consecutive status polls while retaining each exact tool row', async () => {
@@ -8915,4 +8962,70 @@ it('shows no Changed files card for a turn whose only edits were a worker\'s, or
   await append([]);
   expect(w.document.querySelector('.turn-changes')).toBeNull();
   expect(api.turnChanges).not.toHaveBeenCalled();
+});
+
+it('jumps between your own messages with Alt+↑ / Alt+↓, marked like a search result, and leaves the message box alone (#1884)', async () => {
+  const at = Date.now() - 60_000;
+  const { w } = await boot([
+    { kind: 'user_message', seq: 11, origin: 11, time: at, source: 'extension', messageId: 'q-1', message: text('First question') },
+    { kind: 'assistant_message', seq: 12, time: at + 1, source: 'extension', messageId: 'a-1', message: text('First answer'), final: true, state: 'final' } as SessionEvent,
+    { kind: 'user_message', seq: 13, origin: 13, time: at + 2, source: 'extension', messageId: 'q-2', message: text('Second question') },
+    { kind: 'assistant_message', seq: 14, time: at + 3, source: 'extension', messageId: 'a-2', message: text('Second answer'), final: true, state: 'final' } as SessionEvent,
+    { kind: 'user_message', seq: 15, origin: 15, time: at + 4, source: 'extension', messageId: 'q-3', message: text('Third question') }
+  ]);
+  const doc = w.document;
+  doc.querySelector<HTMLElement>('.app')!.dataset.screen = 'chat';
+  const own = [...doc.querySelectorAll<HTMLElement>('#timeline [data-timeline-key]')].filter(row => row.querySelector('.said.is-user'));
+  expect(own.map(row => row.textContent?.match(/(First|Second|Third) question/)?.[1])).toEqual(['First', 'Second', 'Third']);
+  // The view starts at the third question; the first two are above it.
+  const tops = [-800, -200, 0];
+  own.forEach((row, index) => { row.getBoundingClientRect = () => ({ top: tops[index]!, bottom: tops[index]! + 40, left: 0, right: 600, width: 600, height: 40, x: 0, y: tops[index]!, toJSON: () => ({}) }) as DOMRect; });
+  doc.getElementById('chatBody')!.getBoundingClientRect = () => ({ top: 0, bottom: 700, left: 0, right: 800, width: 800, height: 700, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+  const scrolled: string[] = [];
+  own.forEach(row => { row.scrollIntoView = () => { scrolled.push(row.textContent!.match(/(First|Second|Third)/)![1]!); }; });
+  const press = (key: string, target: Element = doc.body) => target.dispatchEvent(new w.KeyboardEvent('keydown', { key, altKey: true, bubbles: true, cancelable: true }));
+  // Attachment names come before the text in the box; only the message is read (CodeRabbit).
+  const attachments = doc.createElement('div'); attachments.className = 'message-attachments';
+  attachments.textContent = 'quarterly-report-final-version.pdf '.repeat(20);
+  own[1]!.querySelector('.said.is-user')!.insertBefore(attachments, own[1]!.querySelector('.user-message-text'));
+  press('ArrowUp');
+  expect(scrolled).toEqual(['Second']);
+  expect(own[1]!.classList.contains('is-search-hit')).toBe(true);
+  // A screen reader hears which message it went to; the focus did not move (CodeRabbit).
+  expect(doc.getElementById('recallAnnounce')!.textContent).toBe('Second question');
+  expect(doc.activeElement).toBe(doc.body);
+  press('ArrowDown');
+  expect(scrolled).toEqual(['Second']);
+  // In the message box the keys stay the box's own, and in the sidebar they move a chat or project.
+  press('ArrowUp', doc.getElementById('chatInput')!);
+  press('ArrowUp', doc.querySelector('.sidebar') ?? doc.body);
+  expect(scrolled).toEqual(['Second']);
+  // Other modifiers are not this shortcut.
+  doc.body.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, shiftKey: true, bubbles: true }));
+  expect(scrolled).toEqual(['Second']);
+  // With the chat's settings (or another view of the pane) shown, the keys don't act on the hidden chat.
+  const content = doc.getElementById('timelineContent')!;
+  content.hidden = true;
+  const hidden = new w.KeyboardEvent('keydown', { key: 'ArrowUp', altKey: true, bubbles: true, cancelable: true });
+  doc.body.dispatchEvent(hidden);
+  expect(hidden.defaultPrevented).toBe(false);
+  expect(scrolled).toEqual(['Second']);
+  content.hidden = false;
+  // No earlier message on the loaded page, with the pane already at its top: the page before it is
+  // asked for, as reading up would, although no scroll event happens (CodeRabbit).
+  const api = (w as any).api, original = api.getSession;
+  const read = vi.fn((id: string, options: unknown) => original(id, options));
+  api.getSession = read;
+  own.forEach(row => { row.getBoundingClientRect = () => ({ top: 100, bottom: 140, left: 0, right: 600, width: 600, height: 40, x: 0, y: 100, toJSON: () => ({}) }) as DOMRect; });
+  const pane = doc.getElementById('chatBody')!;
+  Object.defineProperties(pane, { clientHeight: { value: 700 }, scrollHeight: { value: 700 } });
+  pane.scrollTop = 0;
+  // All three are in view now: the jump goes on from Second to First (CodeRabbit), and only then
+  // is there none earlier.
+  press('ArrowUp', doc.getElementById('chatTitle') ?? doc.body);
+  expect(scrolled).toEqual(['Second', 'First']);
+  expect(read).not.toHaveBeenCalled();
+  press('ArrowUp', doc.getElementById('chatTitle') ?? doc.body);
+  await settle();
+  expect(read).toHaveBeenCalledWith(expect.any(String), { before: 11, limit: 30 });
 });

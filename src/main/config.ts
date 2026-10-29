@@ -357,6 +357,14 @@ const configSchema = z.object({
     chatBrowser: z.enum(CHAT_BROWSERS).optional().default('chrome'),
     /** Where a minimized built-in browser window goes. */
     cosBrowserMinimize: z.enum(['taskbar', 'tray']).optional().default('taskbar'),
+    /**
+     * #1804: ask before a desktop step takes the real mouse or keyboard. Off unless chosen. A damaged
+     * value keeps asking (always), so a hand edit or a downgrade never turns the question off silently.
+     */
+    desktopAsk: z.enum(['off', 'active', 'always']).optional().catch(() => {
+      logWarn('config: the saved ui.desktopAsk was damaged; the app asks before every desktop step until it is chosen again');
+      return 'always' as const;
+    }),
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
     playfulContinue: z.boolean().optional(),
@@ -442,7 +450,7 @@ const configSchema = z.object({
     // Dark is the design the app is drawn for, and a config written before the theme
     // existed has no stored answer to override — so it is the default rather than the
     // fallback. An explicit `light` is somebody's own choice and is never touched.
-    theme: z.enum(['light', 'dark']).optional().default('dark')
+    theme: z.enum(['light', 'dark', 'system']).optional().default('dark')
   }),
   // Whole sections are optional, so a config written by an older build keeps working
   // and simply gains the new features switched off. The default object is spelled out

@@ -4,7 +4,9 @@ import { hasProviderDirective, resolvedCapture, withoutProviderDirectives } from
 import { completedDilText } from '../shared/dil-tables.js';
 import { markdownVisibleText } from '../shared/markdown-text.js';
 import { providerEntitiesAsMarkdown } from '../shared/content-reference.js';
-import { initChatSearch, type ChatSearch } from './chat-search.js';
+import { initChatSearch, type PaletteSetting, type ChatSearch } from './chat-search.js';
+import { type PaletteAction } from './palette.js';
+import { shortcutGroups } from './shortcuts-dialog.js';
 import { initChatFind } from './chat-find.js';
 import { initQuoteSelection, type QuoteSelection } from './quote-selection.js';
 import { initChatCycle } from './chat-cycle.js';
@@ -114,12 +116,14 @@ import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMe
 import { createSearchPopup } from './search-popup.js';
 import { holdToTalkShortcut, holdToTalkSupported, primaryShortcut } from './shortcuts.js';
 import { initSshProjectDialog } from './ssh-project-dialog.js';
+import { keyBelongsElsewhere, nextOwnMessage } from './message-jumps.js';
 import { firstTurnStart, renderTurnChanges, turnEditCount, turnFinished, turnFrom } from './turn-changes.js';
 import { initSharePage } from './share-page.js';
 import { initFeedbackDialog } from './feedback-dialog.js';
 import { createChatgptProjectPicker } from './chatgpt-project-picker.js';
 import { initScheduleDialog } from './schedule-dialog.js';
 import { nextRunAfter, sameLocalDay, type ScheduleRepeat } from '../shared/schedule.js';
+import { localToolDetail, localToolMetric, localToolTitle } from './tool-titles.js';
 
 const api = window.api;
 let chatSearch: ChatSearch | null = null;
@@ -157,6 +161,8 @@ interface Deps {
   /** The renderer's single save path — reads every control, including ours. */
   save: () => Promise<boolean>;
   state: () => AppState | null;
+  /** #1884: what ⌘K offers besides chats that main.ts owns (Settings, Keyboard shortcuts, settings search). */
+  palette?: { actions(): PaletteAction[]; settings(query: string): PaletteSetting[]; showChat?(): void };
 }
 
 let deps: Deps;
@@ -5095,6 +5101,40 @@ function readTimeline(): void {
   readerAtEnd = false; sendAnchor = null; readingAfterSend = true;
 }
 
+/** The message the last Alt+↑/↓ went to, in the chat it was in; the next jump goes on from it while it is in view. */
+let lastOwnJump: { key: string; selection: number } | null = null;
+
+/** #1884: Alt+↑ / Alt+↓ goes to your previous / next message, marked as a search result is (message-jumps.ts). */
+function jumpOwnMessage(direction: -1 | 1): void {
+  const rows = [...$('timeline').querySelectorAll<HTMLElement>('[data-timeline-key]')].filter(row => row.querySelector('.said.is-user'));
+  const pane = $('chatBody');
+  const view = pane.getBoundingClientRect();
+  const last = lastOwnJump?.selection === selectionGeneration ? rows.findIndex(row => row.dataset.timelineKey === lastOwnJump!.key) : -1;
+  const at = nextOwnMessage(rows.map(row => row.getBoundingClientRect().top), view.top, view.bottom, direction, last);
+  if (at < 0) {
+    // None earlier on the loaded page: its top, and the page before it, as reading up loads it. A pane
+    // already at its top fires no scroll event, so the older page is asked for here.
+    if (direction < 0) { readTimeline(); pane.scrollTop = 0; requestHistory(-1); }
+    // None later on a page of history: its end, and the page after it, as reading down loads it.
+    else if (historyBefore !== null) { readTimeline(); pane.scrollTop = pane.scrollHeight; requestHistory(1); }
+    return;
+  }
+  readTimeline();
+  const row = rows[at]!;
+  lastOwnJump = { key: row.dataset.timelineKey ?? '', selection: selectionGeneration };
+  // A screen reader hears the message gone to; the focus stays where it is (CodeRabbit on #1889).
+  const announce = $('recallAnnounce');
+  announce.textContent = '';
+  // The message's own text, without its label or attachment names; a message of attachments only says so.
+  const said = (row.querySelector('.said.is-user .user-message-text')?.textContent ?? '').replace(/\s+/g, ' ').trim();
+  announce.textContent = said ? said.slice(0, 300) : t('User attachment');
+  row.scrollIntoView({ block: 'start' });
+  row.classList.remove('is-search-hit');
+  void row.offsetWidth;
+  row.classList.add('is-search-hit');
+  window.setTimeout(() => row.classList.remove('is-search-hit'), 2600);
+}
+
 function roundWorkers(ids: string[], button = el('button', 'activity-workers') as HTMLButtonElement): HTMLButtonElement {
   button.type = 'button';
   button.hidden = ids.length === 0;
@@ -5130,7 +5170,8 @@ function toolMetric(value: string, className = 'metric'): HTMLElement {
   const metric = el('span', className);
   const delta = /^(~?)(\+\d+)?(?:\s+)?([−-]\d+)?$/.exec(value);
   if (!delta || (!delta[2] && !delta[3])) {
-    metric.textContent = value;
+    // Recorded in English ("✓ 2.1s", "✕ exit 1"); shown in the person's language (tool-titles.ts).
+    ui(metric, 'textContent', () => localToolMetric(value));
     return metric;
   }
   if (delta[1]) metric.append(delta[1]);
@@ -5159,8 +5200,11 @@ function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>, context?:
   head.append(icon(KIND_ICON[call.summary.kind] ?? 'i-bolt', 'ico tool-ico'));
   if (call.tool === 'exec_command' || call.tool === 'write_stdin') head.append(el('span', 'tool-tag is-shell', 'shell'));
   else if (call.changes?.length || call.tool === 'apply_patch') head.append(el('span', 'tool-tag is-diff', 'diff'));
-  head.append(el('b', '', call.summary.title));
-  if (call.summary.detail) head.append(el('em', '', call.summary.detail));
+  head.append(el('b', '', () => localToolTitle(call.summary.title)));
+  // The recorded title, for logic that compares it (routine folding); the shown one is translated.
+  head.dataset.recordedTitle = call.summary.title;
+  const detail = call.summary.detail;
+  if (detail) head.append(el('em', '', () => localToolDetail(detail)));
   if (call.changes?.length) {
     const added = call.changes.reduce((total, change) => total + change.added, 0);
     const removed = call.changes.reduce((total, change) => total + change.removed, 0);
@@ -6310,7 +6354,7 @@ function reconcileChildren(parent: Element, children: HTMLElement[]): void {
 function foldRoutineActivity(rows: HTMLElement[]): HTMLElement[] {
   const result: HTMLElement[] = [];
   const retained = new Set<HTMLDetailsElement>();
-  const routineTitle = (row: HTMLElement) => row.querySelector('.tool[data-outcome="ok"] > summary b')?.textContent ?? '';
+  const routineTitle = (row: HTMLElement) => row.querySelector<HTMLElement>('.tool[data-outcome="ok"] > summary')?.dataset.recordedTitle ?? '';
   for (let i = 0; i < rows.length;) {
     const title = routineTitle(rows[i]!);
     if (title !== 'Checked agent status' && !title.startsWith('Waited on session ')) {
@@ -6336,7 +6380,7 @@ function foldRoutineActivity(rows: HTMLElement[]): HTMLElement[] {
     fold.dataset.firstKey = members[0]!.dataset.timelineKey;
     fold.querySelector('summary')!.replaceChildren(
       el('span', 'routine-symbol', '↺'),
-      el('span', 'activity-title', title),
+      el('span', 'activity-title', () => localToolTitle(title)),
       el('span', 'routine-count', `×${members.length}`)
     );
     reconcileChildren(fold.lastElementChild!, members);
@@ -7207,7 +7251,7 @@ function liveActivity(): { text: string; icon: string; working: boolean; since?:
     return call ? { text: said.text, icon: KIND_ICON[call.kind] ?? KIND_ICON.other, working: true, since: call.since }
       : { text: said.text, icon: '', working: false };
   }
-  if (call) return { text: call.title, icon: KIND_ICON[call.kind] ?? KIND_ICON.other, working: true, since: call.since };
+  if (call) return { text: localToolTitle(call.title), icon: KIND_ICON[call.kind] ?? KIND_ICON.other, working: true, since: call.since };
   const thinking = { text: t('Thinking'), icon: '', working: false };
   // A message not yet recorded opens a turn that has done nothing visible so far.
   if (messageOnItsWay()) return thinking;
@@ -9624,6 +9668,17 @@ export function initChat(next: Deps): void {
     for (const menu of composerMenus) if (!menu.contains(event.target as Node) || ((event.target as HTMLElement).closest('button') && !(event.target as HTMLElement).closest('[data-keep-menu]'))) menu.open = false;
   });
   document.addEventListener('keydown', (event) => { if (event.key === 'Escape') for (const menu of composerMenus) menu.open = false; });
+  // After every other handler: a focused queued task moves with the same keys, and text fields keep theirs.
+  document.addEventListener('keydown', event => {
+    if (event.defaultPrevented || event.isComposing || !event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    if (!visible || document.querySelector<HTMLElement>('.app')?.dataset.screen !== 'chat' || keyBelongsElsewhere(event.target)) return;
+    // Only the selected chat's own loaded timeline: not while the chat's settings or another view of
+    // the pane is shown, nor while a switch still shows the previous chat's rows.
+    if (!selectedId || detailFor !== selectedId || !timelineShown()) return;
+    event.preventDefault();
+    jumpOwnMessage(event.key === 'ArrowUp' ? -1 : 1);
+  });
   $('chatInput').addEventListener('input', () => {
     recall = null;
     // The same message recalled again later must change the live region to be read again.
@@ -9809,7 +9864,27 @@ export function initChat(next: Deps): void {
     recent: () => sessions
       .filter(entry => entry.origin?.kind !== 'worker' && entry.origin?.kind !== 'helper' && !isUnattributedSession(entry))
       .sort((a, b) => b.updatedAt - a.updatedAt)
-      .map(entry => ({ id: entry.id, title: entry.title }))
+      .map(entry => ({ id: entry.id, title: entry.title })),
+    // #1884 (Haz): a curated few, named and keyed as the menus and the shortcuts dialog name them.
+    actions: () => {
+      const rows = shortcutGroups(() => deps.state()?.config.ui.enterSends !== false).flatMap(group => group.rows);
+      const keyed = (label: () => string, run: () => void, available?: () => boolean): PaletteAction =>
+        ({ label, run, available, keys: () => rows.find(row => row.label() === label())?.keys() ?? [] });
+      // An action on the chat's view goes back to the chat first, so it is not done out of sight (CodeRabbit on #1890).
+      const inChat = (run: () => void) => (): void => { deps.palette?.showChat?.(); run(); };
+      return [
+        keyed(() => t('New chat'), () => $('newChat').click()),
+        keyed(() => t('Find in chat'), inChat(() => chatFind?.open()), () => selectedId !== null),
+        ...(['review', 'terminal', 'files', 'agents'] as const).map(view => keyed(
+          () => t(view === 'review' ? 'Review' : view === 'terminal' ? 'Terminal' : view === 'files' ? 'Files' : 'Sub-agents'),
+          // A terminal takes the keyboard itself; the other views put it on their tab.
+          inChat(() => docks.activate(view, { focus: view !== 'terminal' })), () => docks.canActivate(view))),
+        ...(deps.palette?.actions() ?? [])
+      ];
+    },
+    settings: query => deps.palette?.settings(query) ?? [],
+    // An action chosen for one chat never runs for the next one (CodeRabbit on #1890).
+    epoch: () => `${selectionGeneration}:${selectedId ?? ''}:${selectedProjectId ?? ''}`
   });
   $('sessionList').addEventListener('click', (event) => {
     const row = (event.target as HTMLElement).closest<HTMLElement>('[data-id]');
