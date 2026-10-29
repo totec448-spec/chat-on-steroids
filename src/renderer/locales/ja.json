@@ -3336,6 +3336,7 @@
   "Touched {0} files, no net change": "{0} 個のファイルに触れたが、正味の変更なし",
   "The request was not valid.": "リクエストが無効でした。",
   "Needs your answer in ChatGPT": "ChatGPT であなたの回答を待っています",
+  "Your previous or next message": "自分の前または次のメッセージ",
   "Actions": "操作",
   "Drop to attach, up to 20 files": "ドロップして添付 (最大 20 ファイル)",
   "A one-minute look at the composer, projects and Review.": "入力欄、プロジェクト、レビューを 1 分で紹介します。",

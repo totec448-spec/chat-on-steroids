@@ -3336,6 +3336,7 @@
   "Touched {0} files, no net change": "變動了 {0} 個檔案，沒有淨變化",
   "The request was not valid.": "請求無效。",
   "Needs your answer in ChatGPT": "需要你在 ChatGPT 中回答",
+  "Your previous or next message": "你的上一則或下一則訊息",
   "Actions": "操作",
   "Drop to attach, up to 20 files": "放開即可附加，最多 20 個檔案",
   "A one-minute look at the composer, projects and Review.": "用一分鐘認識輸入框、專案和檢閱。",

@@ -3401,6 +3401,7 @@
   "Touched {0} files, no net change|one": "{0} Datei angefasst, keine Änderung unterm Strich",
   "The request was not valid.": "Die Anfrage war ungültig.",
   "Needs your answer in ChatGPT": "Wartet auf deine Antwort in ChatGPT",
+  "Your previous or next message": "Deine vorige oder nächste Nachricht",
   "Actions": "Aktionen",
   "Drop to attach, up to 20 files": "Zum Anhängen loslassen, bis zu 20 Dateien",
   "A one-minute look at the composer, projects and Review.": "Ein kurzer Blick auf den Eingabebereich, Projekte und Review.",

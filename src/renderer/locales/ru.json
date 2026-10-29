@@ -3531,6 +3531,7 @@
   "Touched {0} files, no net change|many": "Затронуто {0} файлов, итоговых изменений нет",
   "The request was not valid.": "Запрос недействителен.",
   "Needs your answer in ChatGPT": "Ждёт вашего ответа в ChatGPT",
+  "Your previous or next message": "Ваше предыдущее или следующее сообщение",
   "Actions": "Действия",
   "Drop to attach, up to 20 files": "Отпустите, чтобы прикрепить (до 20 файлов)",
   "A one-minute look at the composer, projects and Review.": "Минутный обзор поля ввода, проектов и проверки.",

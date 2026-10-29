@@ -3466,6 +3466,7 @@
   "Touched {0} files, no net change|many": "{0} de archivos tocados, sin cambio neto",
   "The request was not valid.": "La solicitud no era válida.",
   "Needs your answer in ChatGPT": "Necesita tu respuesta en ChatGPT",
+  "Your previous or next message": "Tu mensaje anterior o siguiente",
   "Actions": "Acciones",
   "Drop to attach, up to 20 files": "Suelta para adjuntar, hasta 20 archivos",
   "A one-minute look at the composer, projects and Review.": "Un vistazo de un minuto al editor, los proyectos y Revisión.",
