@@ -7,6 +7,8 @@ export type AgeUnit = 'second' | 'minute' | 'hour' | 'day' | 'week' | 'month' | 
  * `null` means just now (under 3 s); a clock skew into the future also reads as just now.
  */
 export function ageOf(atMs: number, nowMs: number): { unit: AgeUnit; value: number } | null {
+  // A time that is missing or not a number has no age; callers say "never" (it used to read "NaNh ago").
+  if (!Number.isFinite(atMs) || !Number.isFinite(nowMs)) return null;
   const seconds = Math.max(0, Math.round((nowMs - atMs) / 1000));
   if (seconds < 3) return null;
   if (seconds < 90) return { unit: 'second', value: seconds };

@@ -134,7 +134,7 @@ export async function readClientStatus(base: string, timeoutMs = 3000): Promise<
 
 /** "just now", "12s ago", "4m ago" — for a timestamp that may be null or in the future. */
 export function ago(atMs: number | null, nowMs = Date.now()): string {
-  if (atMs === null) return 'never';
+  if (atMs === null || !Number.isFinite(atMs)) return 'never';
   const age = ageOf(atMs, nowMs);
   return age ? `${age.value}${AGE_SUFFIX[age.unit]} ago` : 'just now';
 }
