@@ -12924,7 +12924,7 @@
     const traces = [];
     for (const entry of (Array.isArray(event.data.traces) ? event.data.traces : []).slice(0, 16)) {
       const requestId = cap(entry?.requestId, 100), path = cap(entry?.path, 200);
-      if (!requestId || !path || requestTracesReported.has(requestId) || !/^[A-Za-z0-9_./:\[\]-]{1,200}$/.test(path) ||
+      if (!requestId || !path || requestTracesReported.has(requestId) || !/^[A-Za-z0-9_./:>*\[\]-]{1,200}$/.test(path) ||
           !/^(?:wfr_[a-zA-Z0-9_-]{1,96}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i.test(requestId)) continue;
       traces.push({ requestId, path });
     }
