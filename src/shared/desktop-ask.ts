@@ -11,6 +11,9 @@
 import { contrastRatio, effectivePalette, paletteTokens, type AppearanceSettings, type AppearanceTheme } from './appearance.js';
 
 export type DesktopAskMode = 'off' | 'active' | 'always';
+
+/** The question while it waits, as the app's own window shows it too (keyboard and screen readers). */
+export interface DesktopAskPending { id: string; title: string; step: string; chat: string }
 export const DESKTOP_ASK_MODES: readonly DesktopAskMode[] = ['off', 'active', 'always'];
 
 /** Input this recent means the person is at the computer. */

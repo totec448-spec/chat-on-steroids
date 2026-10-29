@@ -357,8 +357,14 @@ const configSchema = z.object({
     chatBrowser: z.enum(CHAT_BROWSERS).optional().default('chrome'),
     /** Where a minimized built-in browser window goes. */
     cosBrowserMinimize: z.enum(['taskbar', 'tray']).optional().default('taskbar'),
-    /** #1804: ask before a desktop step takes the real mouse or keyboard. Off unless chosen. */
-    desktopAsk: z.enum(['off', 'active', 'always']).optional().catch(undefined),
+    /**
+     * #1804: ask before a desktop step takes the real mouse or keyboard. Off unless chosen. A damaged
+     * value keeps asking (always), so a hand edit or a downgrade never turns the question off silently.
+     */
+    desktopAsk: z.enum(['off', 'active', 'always']).optional().catch(() => {
+      logWarn('config: the saved ui.desktopAsk was damaged; the app asks before every desktop step until it is chosen again');
+      return 'always' as const;
+    }),
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
     playfulContinue: z.boolean().optional(),

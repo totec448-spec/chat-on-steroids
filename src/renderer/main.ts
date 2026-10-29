@@ -27,6 +27,7 @@ import { initBrowserPreferences } from './browser-preferences.js';
 import { initSetupGuide } from './setup-guide.js';
 import { initAppearance } from './appearance.js';
 import { initKeychainNotice } from './keychain-notice.js';
+import { initDesktopAskNotice } from './desktop-ask-notice.js';
 import { initPet } from './pet.js';
 import { initPets } from './pets.js';
 import { initSkillsLibrary } from './skills-library.js';
@@ -82,6 +83,7 @@ declare global {
 const api = window.api;
 // First: main announces a Keychain read before it starts and may not get through again until it ends.
 initKeychainNotice(api);
+initDesktopAskNotice(api);
 initLanguage();
 initLayoutPreviews();
 // Composer key hints name this computer's keys only: a Windows user never reads ⌘ first.
@@ -553,7 +555,12 @@ function desktopAskRow(): HTMLElement {
     ui(option, 'textContent', label);
     select.append(option);
   }
-  select.addEventListener('change', () => void save());
+  select.addEventListener('change', async () => {
+    const chosen = select.value;
+    if (await save()) return;
+    // Refused (an invalid field elsewhere): show what is saved, unless a newer choice is already on its way.
+    if (select.value === chosen) select.value = requestedSettings?.ui.desktopAsk ?? state?.config.ui.desktopAsk ?? 'off';
+  });
   row.append(body, select);
   return row;
 }

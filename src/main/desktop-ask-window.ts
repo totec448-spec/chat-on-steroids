@@ -6,6 +6,7 @@
  *
  * Also the gate's real inputs: the setting, the system's idle time, and the asking chat's name.
  */
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { BrowserWindow, ipcMain, powerMonitor, screen } from 'electron';
 import { getConfig } from './config.js';
@@ -13,13 +14,34 @@ import { mainText } from './main-texts.js';
 import { currentCaller } from './mcp/call-context.js';
 import { findSessionByConversation, getSession } from './session/store.js';
 import { createDesktopAsk, stepLine, type DesktopAskCaller, type DesktopAskPrompt, type DesktopStepWords } from './desktop-ask.js';
-import { ASK_ANSWER_MS, desktopAskColors, type DesktopAskMode } from '../shared/desktop-ask.js';
+import { ASK_ANSWER_MS, desktopAskColors, type DesktopAskMode, type DesktopAskPending } from '../shared/desktop-ask.js';
 import { defaultAppearance } from '../shared/appearance.js';
 
 const WIDTH = 360;
 const HEIGHT = 118;
 const MAX_HEIGHT = 240;
 const MARGIN = 16;
+
+/**
+ * The panel never takes the focus, so Tab cannot reach it. While it waits, the app's own window shows
+ * the same question (Haz's keyboard condition): a keyboard or screen-reader user switches to the app
+ * and answers there. One question at a time (the gate queues them); an answer in either place ends it.
+ */
+let mirror: (pending: DesktopAskPending | null) => void = () => {};
+let waiting: { pending: DesktopAskPending; answer(choice: 'go' | 'not-now'): void } | null = null;
+
+/** Where the app's window learns of the waiting question, and of its end (null). */
+export function mirrorDesktopAsk(show: (pending: DesktopAskPending | null) => void): void { mirror = show; }
+
+/** The question waiting now, for a window that opens or reloads while it waits. */
+export function currentDesktopAsk(): DesktopAskPending | null { return waiting?.pending ?? null; }
+
+/** The app window's answer to the waiting question; false when that question is no longer waiting. */
+export function answerDesktopAsk(id: string, choice: 'go' | 'not-now'): boolean {
+  if (!waiting || waiting.pending.id !== id) return false;
+  waiting.answer(choice);
+  return true;
+}
 
 export function showDesktopAskPrompt(prompt: DesktopAskPrompt): Promise<'go' | 'not-now' | 'timeout'> {
   const ui = getConfig().ui;
@@ -45,6 +67,7 @@ export function showDesktopAskPrompt(prompt: DesktopAskPrompt): Promise<'go' | '
       settled = true;
       clearTimeout(timer);
       ipcMain.removeListener('desktop-ask:answer', onAnswer);
+      if (waiting?.pending.id === pending.id) { waiting = null; mirror(null); }
       if (!win.isDestroyed()) win.destroy();
       resolve(answer);
     };
@@ -67,8 +90,12 @@ export function showDesktopAskPrompt(prompt: DesktopAskPrompt): Promise<'go' | '
           win.showInactive();
         });
     });
+    const pending: DesktopAskPending = { id: randomUUID(), title: mainText('Chat On Steroids wants to use your mouse and keyboard'),
+      step: stepLine(prompt, mainText), chat: (prompt.chat ?? '').slice(0, 120) };
+    waiting = { pending, answer: finish };
+    mirror(pending);
     const query = {
-      title: mainText('Chat On Steroids wants to use your mouse and keyboard'), step: stepLine(prompt, mainText), chat: (prompt.chat ?? '').slice(0, 120),
+      title: pending.title, step: pending.step, chat: pending.chat,
       go: mainText('Go ahead'), notNow: mainText('Not now'),
       theme, background: palette.background, accent: palette.accent, ink: palette.ink, soft: palette.soft, edge: palette.edge,
       hover: palette.hover, lang: ui.language ?? 'en'

@@ -64,6 +64,7 @@ import { confirmedPluginSchemas, pluginRefreshPublications, pluginRefreshStatuse
  * key but can never read it back.
  */
 
+import { answerDesktopAsk, currentDesktopAsk, mirrorDesktopAsk } from './desktop-ask-window.js';
 import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, nativeTheme, shell } from 'electron';
 import { repairMacOSPermissions, resetMacOSPermissions } from './computer/macos-grants.js';
 import { z } from 'zod';
@@ -475,7 +476,8 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       defaultChatReasoning: pick(current.ui.defaultChatReasoning, base.ui.defaultChatReasoning, wanted.ui.defaultChatReasoning),
       chatBrowser: pick(current.ui.chatBrowser, base.ui.chatBrowser, wanted.ui.chatBrowser),
       cosBrowserMinimize: pick(current.ui.cosBrowserMinimize, base.ui.cosBrowserMinimize, wanted.ui.cosBrowserMinimize),
-      desktopAsk: pick(current.ui.desktopAsk, base.ui.desktopAsk, wanted.ui.desktopAsk),
+      // None saved is the default, off: a stale snapshot without the field and the form's Off are the same choice.
+      desktopAsk: pick(current.ui.desktopAsk ?? 'off', base.ui.desktopAsk ?? 'off', wanted.ui.desktopAsk ?? 'off'),
       developerMode: pick(current.ui.developerMode, base.ui.developerMode, wanted.ui.developerMode),
       playfulStatus: pick(current.ui.playfulStatus, base.ui.playfulStatus, wanted.ui.playfulStatus),
       playfulContinue: pick(current.ui.playfulContinue, base.ui.playfulContinue, wanted.ui.playfulContinue),
@@ -1158,6 +1160,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     await updateConfig(config => ({ ...config, ui: { ...config.ui, autoRefreshPluginsAsked: true, ...(turnOn ? { autoRefreshPlugins: true } : {}) } }));
     if (turnOn) wakeBrowserWork();
     return buildState();
+  });
+  // #1864 (Haz's keyboard condition): the desktop question also waits in the app's window, answered there.
+  handle('desktopAsk:pending', async () => currentDesktopAsk());
+  handle('desktopAsk:answer', async (payload) => {
+    const { id, choice } = z.object({ id: z.string().min(1).max(64), choice: z.enum(['go', 'not-now']) }).parse(payload);
+    return answerDesktopAsk(id, choice);
   });
   handle('ui:tourDone', async () => {
     // #1833: only ever set; Settings replays the tour without asking main to offer it again.
@@ -2618,4 +2626,5 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   onSessionChange(change => push('session:changed', change));
   onBackgroundExecChange(() => push('sessions:backgroundExecChanged'));
   onSwarmChange(() => push('swarm:changed', swarmState()));
+  mirrorDesktopAsk(pending => push('desktopAsk:pending', pending));
 }
