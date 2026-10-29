@@ -23,7 +23,7 @@ const fixture = (demo, sidebar) => `
     { kind: 'user_message', seq: 2, origin: 2, time: T0 + 1000, turnId: 'turn-1', source: 'extension', messageId: 'ask', inputDelivery: 'confirmed',
       message: text('Add dark mode to the settings page and keep the existing tests green.') },
     call(3, 'read', { path: 'src/settings/theme.ts' }, { title: 'Read src/settings/theme.ts', detail: 'lines 1–120', tone: 'neutral', kind: 'read' }),
-    call(4, 'search', { query: 'prefers-color-scheme' }, { title: 'Searched for prefers-color-scheme', metric: '6 matches', tone: 'neutral', kind: 'search' }),
+    call(4, 'find', { query: 'prefers-color-scheme', mode: 'content' }, { title: 'Searched "prefers-color-scheme"', detail: '6 matches in file contents', tone: 'neutral', kind: 'search' }),
     call(5, 'apply_patch', { path: 'src/settings/theme.ts' }, { title: 'Edited src/settings/theme.ts', metric: '+42 −7', tone: 'good', kind: 'edit' },
       { changes: [{ path: 'src/settings/theme.ts', added: 42, removed: 7, approximate: false }] }),
     call(6, 'apply_patch', { path: 'src/settings/SettingsPage.tsx' }, { title: 'Edited src/settings/SettingsPage.tsx', metric: '+18 −3', tone: 'good', kind: 'edit' },

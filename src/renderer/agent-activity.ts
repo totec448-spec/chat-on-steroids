@@ -1,7 +1,8 @@
 import type { ActivitySummary, SessionEvent, ToolCallRecord } from '../shared/session.js';
 import { normalizedToolOutcome, toolCallSummary, workSequence } from '../shared/session.js';
 import { clockTime, el, icon } from './dom.js';
-import { t } from './i18n.js';
+import { t, ui, uiText } from './i18n.js';
+import { localToolDetail, localToolMetric, localToolTitle } from './tool-titles.js';
 
 /** Sprite id per tool-call family. Deliberately reuses the existing icon set. */
 export const KIND_ICON: Record<ActivitySummary['kind'], string> = {
@@ -97,11 +98,18 @@ export function renderWorkerActivity(events: readonly SessionEvent[], task: stri
       row.dataset.kind = action.summary.kind; row.dataset.tone = action.failed ? 'bad' : action.summary.tone;
       const time = el('time', 'agent-activity-time', clockTime(action.time));
       time.setAttribute('datetime', new Date(action.time).toISOString());
-      const what = el('span', 'agent-activity-title', action.summary.title);
-      if (action.summary.detail) what.append(el('em', '', action.summary.detail));
+      // Each part follows a change of language on its own (the title in its own text node, so the detail
+      // beside it does not unbind it); the recorded English stays the source.
+      const { title: recorded, detail: recordedDetail, metric: recordedMetric } = action.summary;
+      const title = () => localToolTitle(recorded);
+      const detail = () => recordedDetail ? localToolDetail(recordedDetail) : '';
+      const metric = () => recordedMetric ? localToolMetric(recordedMetric) : '';
+      const what = el('span', 'agent-activity-title');
+      what.append(uiText(title));
+      if (recordedDetail) what.append(el('em', '', detail));
       row.append(time, icon(KIND_ICON[action.summary.kind] ?? 'i-bolt', 'ico agent-activity-icon'), what);
-      if (action.summary.metric) row.append(el('span', 'agent-activity-metric', action.summary.metric));
-      row.title = [action.summary.title, action.summary.detail, action.summary.metric].filter(Boolean).join(' · ');
+      if (recordedMetric) row.append(el('span', 'agent-activity-metric', metric));
+      ui(row, 'title', () => [title(), detail(), metric()].filter(Boolean).join(' · '));
       list.append(row);
     }
     nodes.push(list);
