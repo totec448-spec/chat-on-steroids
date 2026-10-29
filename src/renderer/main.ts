@@ -3010,6 +3010,7 @@ initPets(api, pet);
 openSkillsLibrary = initSkillsLibrary(api);
 initBrowserPreferences();
 initChat({ save: () => save(), state: () => state, palette: {
+  showChat: () => showTab('chat'),
   actions: () => [
     { label: () => t('Keyboard shortcuts'), keys: () => paletteKeys('Keyboard shortcuts'), run: () => shortcutsDialog.open() },
     { label: () => t('Settings'), keys: () => paletteKeys('Settings'), run: () => $('workspaceSettings').click() }

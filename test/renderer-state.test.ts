@@ -1759,6 +1759,18 @@ it('adds a few matching actions and settings under the chats while typing in ⌘
   searchSessions.mockImplementationOnce(async () => ({ ok: false, error: 'busy' }) as never);
   await type('terminal');
   expect(results.querySelector('.is-action b')?.textContent).toBe('Terminal');
+  // CodeRabbit on #1890: an action and a setting are buttons to screen readers, not list items.
+  expect(results.querySelector('.is-action')!.getAttribute('role')).toBeNull();
+  expect(results.querySelector('.is-action')!.closest('[role="list"]')).toBeNull();
+  // From Plugins, an action for the chat goes back to the chat first, so it is not done out of sight.
+  (doc.getElementById('searchChatsButton') as HTMLButtonElement).click();
+  (doc.getElementById('sidebarPlugins') as HTMLButtonElement).click();
+  expect(doc.querySelector<HTMLElement>('.app')!.dataset.screen).toBe('library');
+  (doc.getElementById('searchChatsButton') as HTMLButtonElement).click();
+  await type('terminal');
+  (results.querySelector('.is-action') as HTMLButtonElement).click();
+  await waitFor(() => expect(dialog.open).toBe(false));
+  await waitFor(() => expect(doc.querySelector<HTMLElement>('.app')!.dataset.screen).toBe('chat'));
 });
 
 it('offers in ⌘K only actions that can run now, walks every group by keyboard, and focuses a setting once the dialog has closed (CodeRabbit)', async () => {
