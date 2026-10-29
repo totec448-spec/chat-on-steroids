@@ -1,5 +1,7 @@
 /** Codex Window2 vocabulary backed by this app's existing native Desktop owner. */
 import { z } from 'zod';
+import { askBeforeDesktopStep, desktopStepEnded } from '../desktop-ask-window.js';
+import { windowsStep } from '../desktop-ask.js';
 import { act, getWindowState, ComputerError } from '../computer/index.js';
 import { createWindowsComputerApi, parseWindowsKeyChord, WINDOWS_API_METHODS, WINDOWS_API_SCHEMAS, type WindowsComputerApi } from '../computer/windows-api.js';
 import { browserTabChord, isBrowserProcess } from '../computer/browser-chords.js';
@@ -182,6 +184,12 @@ export function registerWindowsDesktopTools(reg: SurfaceRegistrar): void {
           throw error;
         }
       }
+      // #1804: a step that takes the real mouse or keyboard may first ask the person at the computer.
+      const step = read ? null : windowsStep(method, input as Record<string, unknown>);
+      if (step) {
+        const refusal = await askBeforeDesktopStep(step.words, step.app);
+        if (refusal) return fail(refusal);
+      }
       const api = apiForCaller(method);
       const invoke = api[method] as (args: unknown) => Promise<unknown>;
       let value: unknown;
@@ -190,6 +198,8 @@ export function registerWindowsDesktopTools(reg: SurfaceRegistrar): void {
         const failure = nativeFailure(error);
         if (failure) return failure;
         throw error;
+      } finally {
+        if (step) desktopStepEnded();
       }
       if (Array.isArray(value)) noteCount(value.length);
       return desktopResult(method, value);

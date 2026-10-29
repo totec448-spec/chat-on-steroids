@@ -251,7 +251,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Code checkpoints | `src/main/checkpoints/`: per-turn Git tree snapshots taken before a turn's first patch, their ledger, and confirmed per-file restore. `project-git.ts` projects the comparison. |
 | Projects/cwd | `src/main/projects.ts`, `workspace.ts`, `src/shared/projects.ts`: explicit local folder catalog, session binding, inherited/learned workspaces. |
 | Project Files UI | `src/main/project-files.ts`, `project-file-watcher.ts`, `src/shared/project-files.ts`, `src/renderer/{file-panel,file-code-editor,file-pdf-viewer,work-panel-resize}.ts`: bounded project views, revision-checked saves and renderer-owned drafts. |
-| Durable history | `src/main/session/{store,recorder,correlation,summarize,progress}.ts`, `src/shared/{session,chronology}.ts`: canonical messages, tool truth, chronology and indexes. |
+| Durable history | `src/main/session/{store,recorder,correlation,summarize,progress}.ts`, `src/shared/{session,chronology}.ts`: canonical messages, tool truth, chronology and indexes. A tool call's `summary` (title, detail, metric) is recorded in English from a fixed set of phrases; `src/renderer/tool-titles.ts` translates them where they are shown (tool cards, the live activity line, sub-agent activity and cards), saved chats included, and leaves anything else (paths, commands, errors) as recorded. A new phrase in `summarize.ts` needs its row there and its catalog entries (`test/tool-titles.test.ts` runs every phrase through it). |
 | Input | `src/main/session/{input,start-input,input-history,input-attachments,input-images,prompt}.ts`, `src/shared/{input,user-prompt}.ts`: outbox, native files, prompt frame and receipts. |
 | Finish/planning | `src/main/session/finish.ts`, `task-request.ts`, `goal.ts`, `src/shared/{finish,task-progress}.ts`: held turn, decision/plan invocation and cancellation. |
 | Continuation | `src/main/session/{continuation,resume-gate,handoff,handoff-prompt}.ts`: A→B transaction, send ambiguity and exact brief. |
@@ -5213,11 +5213,17 @@ Plugins catalog limit use proven ids first.
 Request-id traces (#1752, diagnostics only): usage.js also walks every frame of a chat's response
 stream (HTTP and socket) for id-named fields holding a request-id-shaped value that is neither the
 chat's id nor an origin it already published, and posts `cos-request-trace` with each id's field
-path (`<delta p>:<key path>`, never content; 8 per frame, 64 per response). content.js forwards them
+path (`<delta p>:<key path>`, never content; 16 per frame, 64 per response). content.js forwards them
 once per id as `request_trace` (`traces: [{ requestId, path }]`), only for the chat the tab shows.
 The bridge never stores them as transcript content; `session/request-trace.ts` keeps 256 and adds
 "the stream of <chat> named it at <path>" to the "no page evidence" warning, or logs one line when
-the trace arrives after a call ran out of time. Attribution never uses them. Traces are expendable: content.js takes
+the trace arrives after a call ran out of time. Attribution never uses them. Since the first report with traces found nothing,
+the page also traces whole request-id-shaped tokens inside arrays and longer strings (path `…text`, no content;
+an array keeps its path only under an id-named key such as `request_ids`),
+event streams from any other same-origin `/backend-api/` route (prefix `<route with ids as *>>`, other characters
+as `_`; at most two readers, 4 MB and 64 traces each, cancelled on page hide and dispose, chat from the frame or the page's `/c/<id>` route), and every socket message
+(prefix `socket>`, 256 ids per socket, then again). The app logs once per chat and run that the page's tracing
+works; with these limits a missing trace makes "the page never saw it" likely, not certain. Traces are expendable: content.js takes
 none while its page queue holds 300 or more entries, and drops queued traces first, without a gap marker, when it
 must evict. A response keeps tracing after its 16 published origins until its own 64.
 
@@ -5540,6 +5546,13 @@ The snapshot's optional `environment` (`CompanionEnvironment`) feeds the diagnos
 the browser's name and version, ChatGPT tabs counted by state, and `clf-page-checks` booleans plus
 the page language from the most recently used awake ChatGPT tab, read at most once a minute.
 `sanitiseCompanionDiagnostics` keeps names, versions, counts and booleans and drops everything else.
+Its `errorPageReloads` (`{ count, lastAt }`, the extension's counter since its worker started) reports
+chat tabs reloaded off Chrome's error page: a chat tab that loaded while offline, where injection fails
+with "showing error page". The extension reloads such a tab only while `navigator.onLine`, backing off
+1, 2, 4 … 15 minutes per tab (state in `chrome.storage.session` key `errorPageReloads`, 64 tabs, so a
+restarted worker keeps the backoff and the count; a tab whose recorder answers or takes injection is
+forgotten), and publishes a snapshot after each reload, one more if a report was already under way.
+The bridge logs one line per new `lastAt` per browser (`x-extension-browser`) and stores nothing else.
 
 `tunnel/*` owns pinned-client discovery, child lifetime, health metrics and confirmed outages;
 development discovery uses Electron's app root for `resources/tunnel`, independent of source
@@ -5577,6 +5590,26 @@ shown in Settings and as the chat notice `#desktopAccessNotice` with Repair perm
 (preload `repairDesktopAccess` → IPC `desktop:repairPermissions`): `tccutil reset` of this app's
 own missing entries (`MACOS_BUNDLE_ID`, electron-builder's `appId`), a screen-source request for
 Screen Recording and Electron's Accessibility prompt, so macOS asks again for the running build.
+
+**Ask before the mouse and keyboard (#1804).** `ui.desktopAsk` (`off` default, `active`, `always`;
+macOS and Windows only, Settings row `#desktopAsk` under the control permission) gates every step
+that takes the real pointer or keyboard: the Windows input methods (`windowsStep`) and the macOS
+`computer` tool's pointer/keyboard actions (`macosStep`; waits and clipboard steps never ask).
+Browser tools never ask. The rule is `shared/desktop-ask.ts`: the person's input counts only after
+the app's own last step ended plus the idle clock's 1 s resolution; under 30 s is "active"; a
+locked screen is away; missing idle information asks; Go ahead grants that chat (session, else
+conversation, else transport key; none means no grant) 2 minutes, ended early by the person's next
+input. `main/desktop-ask.ts` asks one question at a time in arrival order and re-checks a step that
+waited. `main/desktop-ask-window.ts` shows the non-activating top-right panel (preload
+`desktop-ask` → `desktop-ask:answer`, sender-checked); no answer in 60 s, closing or a crashed
+page is a refusal. The panel never takes the focus, so while it waits the main window shows the
+same question as the `#desktopAskNotice` notice (`renderer/desktop-ask-notice.ts`; push
+`desktopAsk:pending` with `DesktopAskPending | null`, read `desktopAsk:pending`, answer
+`desktopAsk:answer` `{ id, choice }`, true only while that id waits): a keyboard or screen-reader
+user switches to the app and answers there, and either answer ends both. A damaged saved
+`ui.desktopAsk` loads as `always` with one log line; a missing one is `off`, and the settings merge
+treats missing and `off` as the same value. A refusal is the tool error `DECLINED_BY_USER: …` and
+nothing runs; nothing retries by itself. One `desktop ask:` log line per decision, never the step's text.
 
 `computer/index.ts` owns native actions, capture frames/accessibility refs, batching and
 postconditions. Registrars own live capability checks. Windows `windows-api.ts` implements the
