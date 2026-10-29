@@ -8861,6 +8861,15 @@ async function noteRecoveryObservations(
       continue;
     }
     if (item.recoverable !== true) continue;
+    // A page can keep a turn's clock after that turn ended and a newer one ran (a recovered page
+    // kept instead of reloaded): its report about the ended turn is stale, and recovering a chat
+    // that already moved on only interrupts it (#1922, 16:03 after a turn that ended at 15:54).
+    const reportedTurn = item.turnId ? recorded?.timelineTurns?.[item.turnId] : undefined;
+    if (reportedTurn?.endTime !== undefined && recorded?.activeTurnId !== item.turnId &&
+        Object.values(recorded?.timelineTurns ?? {}).some(turn => turn.time > reportedTurn.time)) {
+      logInfo(`bridge: ignored an error report for ${conversationId}: its turn ${item.turnId} ended before a newer turn`);
+      continue;
+    }
     // Resume can legitimately return 404 on an idle page. The recorder's exact current
     // generation (not a stale tab's turn or the newest question chosen below) must own H2.
     if (item.reason === 'stream_gone' && (!sessionId || recorded?.conversationId !== conversationId ||
