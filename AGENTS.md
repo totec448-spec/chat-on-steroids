@@ -1126,14 +1126,15 @@ are never retried on their own: only the project's "Retry ChatGPT Project" menu 
 and for `uncertain` it warns that a second Project may result.
 
 The browser does it (`inspectProjectCreates` in background.js): one request at a time in one
-foreground helper tab `https://chatgpt.com/?cos-project-create=<request>` (the dialog needs a
+foreground helper tab `https://chatgpt.com/projects?cos-project-create=<request>` (the dialog needs a
 laid-out page; the person just added the project, so it also runs under `browserOnly`). The page
 (`createChatgptProject`) claims first, opens a collapsed sidebar once, clicks ChatGPT's own control
-(`button[data-app-action-sidebar-project-create]`, labelled in the account's language), types the
+(`data-chatgpt-project-conversation-drop-target` on the Projects index, with the earlier sidebar
+`data-app-action-sidebar-project-create` still supported), types the
 folder name into `input#chatgpt-project-name`, arms, submits, and takes the id only from the
 Project page ChatGPT opens by itself, and only one the sidebar did not list before the click. The
-helper is closed once its request is no longer pending and it proves it holds nothing; a closed
-helper is reopened at most every 2 minutes.
+helper is closed once its request is no longer pending and it proves it holds no chat, draft,
+work or open native Create project dialog. A closed helper is reopened at most every 2 minutes.
 
 A new chat of a linked project (`pendingBrowserInputs` adds `project`) opens on
 `/g/<id>/project?cos-input=…#cos-input=…`, never by borrowing a tab (ChatGPT's New chat is the
@@ -2430,6 +2431,14 @@ each with its source and age; `src/main/usage-tool.ts` writes that text. Its ans
 **Intent:** make native ChatGPT observable and controllable for an exact authorized operation,
 while leaving ChatGPT's messages, model execution and account permissions with the provider.
 
+A claimed message whose model or reasoning the native picker could not confirm fails as `desktop_input`
+`fail` with `error` in the page's language (`content_delivery_model_unconfirmed`) and `detail:
+'model-unconfirmed'`; `/input/fail` reads the code, not the words, to ask for the model list again
+(`requestChatModels(false)`). A ChatGPT limit shown instead, or a deleted chat, carries no code;
+that includes a limit dialog `CLF_DOM.errors()` read and acknowledged while the picker ran
+(`CLF_DOM.accessNoticeSince(choosingStartedAt)`), in both the ordinary and the edit path.
+`failBrowserInput` logs every failure it records once, after the record, with the page's reason and code.
+
 Setup's first step installs and version-checks the companion in the person's Chrome, Edge, Brave or Firefox,
 then offers two equally weighted places for ChatGPT to run: the built-in CoS browser (opt-in, never
 preselected) or that browser, preserving the saved setting, and waits for ChatGPT to be signed in
@@ -2965,6 +2974,17 @@ own close entry never reached (a changed ChatGPT browser, an app restart); an ap
 `inputOpeningIds` closes nothing this way. A worker or handoff start page (`clf` marker) closes the
 same way once `commandIds` no longer lists its command, as a worker that failed before its first
 message left one behind; the page check then compares the `clf` marker.
+`/status` also sends `inputSendingIds`: the messages a browser is sending right now (`input.ts`
+`inBrowserDelivery`: state `browser`, or a Goal helper's `decision`; never `tool`, which an MCP caller holds). Only these, or an id whose tab this browser is still opening
+or preparing (`inputOpenings` stage `opening`/`preparing`; a `ready` tab only kept for it does not
+count), hold the extension's self-update as `sending`; a message that only waits in the queue does
+not (a blocked chat kept one for hours on 2026-10-28). An app that sends no `inputSendingIds` keeps
+the old rule: any id in `inputOpeningIds` holds it. `/extension/update` re-checks at the last moment
+and answers `{ ready: false, hold: 'sending' }` while any message is in browser delivery or any claim
+is still deciding (past the reload check, e.g. waiting for the send check); once it answers
+ready, `/input/claim` from that browser (`x-extension-browser`) hands out nothing for 20 s (checked
+again right before the claim takes its message), and the
+extension's `deliverDesktopInputs` starts nothing while its reload is pending.
 Managed idle/retired/duplicate pruning records a successful removal against the exact tab,
 document, navigation epoch and conversation in the existing session-storage snapshot. Its
 lifecycle event carries a non-manual departure through the close outbox; it does not create
@@ -4244,6 +4264,56 @@ and do not trigger source reloads while awaiting intervention. Normal and restor
 resumes share one projection: move objective/switch, retire A's debt, and let B earn its own.
 Current persistence/publication exceptions are in §21.
 
+### Goal step reviewer (#1832)
+
+Off by default (`goal.reviewerModel`: `''` off, `'same'` the Goal chat's own model, or a model id
+the account offers; an unoffered id falls back to the chat's model with one log line). Settings →
+Agents & automation → Goal says the cost (a second model pass per reviewed step) and the coverage:
+only edits made with the edit tools are reviewed, not files changed by commands, and never in Loop.
+Chosen while Sub-agents are off, the row offers **Turn on Sub-agents** (Home's own switch, only on
+the person's press).
+
+When `acceptGoalReplyNow` records a **pending** Goal reply in `goal` mode, `goal-reviewer.ts`
+`startStepReview` (never awaited) reads the step's own edits (`session/turn-changes.ts`, the
+"Changed files" records) and, when there are any, writes the brief (`goal-review.ts`): the Goal,
+the step's instruction, every changed file with its state, counts and number of edits, then the net
+unified diffs (`text-diff.ts`) in first-changed order, whole, as many as fit `REVIEW_BRIEF_CHARS`;
+the rest are named for the reviewer to read through Core. The reviewer is a worker in the Goal
+chat's **own family** (so the Sub-agents dock and the chat's inbox show it like any worker), marked
+`reviewer` in the broker: label "Reviewer", a brief budget of `REVIEW_TEXT_CHARS` (app-written,
+never the agents tool's 4,000-character task), never an isolated Git worktree (it must see the
+uncommitted step), one per chat, reused (a sleeping one is woken with the next brief through
+`stageMessages(..., { review: true })`), replaced when it cannot be woken or the chosen model
+changed. No free worker slot: retried every 15 s up to `REVIEW_MAX_MS`, then not reviewed.
+
+It reviews, it doesn't author: in a reviewer's own chat the kernel refuses every tool not marked
+read-only before it runs (`reviewerRefusal`, Core, Desktop and plugin tools alike), except
+`exec_command`/`write_stdin` (diffs and tests) and the `agents` actions `status` and `finish`; spawning
+or messaging a worker is refused, so no other chat can write for it. Commands are not read-only: a test
+run can write files, so nothing calls the reviewer read-only, and its brief asks it not to change files. A working reviewer holds its
+chat's next Goal step through `waitingForSubAgents`, whatever `waitForSubAgents` says, for at most
+`REVIEW_MAX_MS` from when it was asked; `goalWaitFor` names it `reviewer` with that deadline (the
+app's Goal row and the page's composer status both say "Waiting for the reviewer").
+
+The draft (`goal.ts run()`) starts when the step ends, before the review is in, so it **waits**
+for it (`awaitStepReview`, polling `reviewForDraft` every second): while the review still looks for
+a worker slot or runs, up to `REVIEW_MAX_MS` from when it was asked, and no longer once the draft is
+replaced. Meanwhile the Goal row shows the `reviewer` wait ("Continues without the review in m:ss"),
+not "Preparing a continuation". (VM 141, 2026-10-26: without the wait the helper decided 8 s before
+the reviewer answered.) Workers finish under RESULT / CHANGES / VALIDATION / BLOCKERS, so the review
+is that RESULT (`reviewAnswer`; the brief says so), else the whole answer. It goes after the helper's
+message as `Reviewer: …` (and the helper is told it is there); "No problems found" adds nothing, an
+overdue review adds "Reviewer did not answer in time.", and a reviewer that stopped without
+answering (failed, cleared) ends the wait at once with "Reviewer could not review this step." An
+answer starting `BLOCKING:` pauses Goal (switch off, a timeline note with the finding, the
+stopped-chat notice) instead of typing anything; ordinary findings never raise a notice. When the
+helper ends the Goal with findings still unsent, they become a note in the chat. Switching the chat's Goal off or to Loop
+cancels a review in progress (as the person's own Clear on the worker's row); its chat stays.
+Tests: `goal-review.test.ts`, `text-diff.test.ts`, `goal-reviewer.test.ts`, `goal-review-flow.test.ts`,
+`kernel-reviewer-readonly.test.ts`, the reviewer cases in `agents.test.ts`, `mcp-worktree-spawn.test.ts`,
+`bridge.test.ts`, `renderer-chat-models.test.ts`, `renderer-state.test.ts`, `renderer-timeline.test.ts`
+and `content-script.test.ts`.
+
 ## 18. Desktop workspace, plugins, connection and native control
 
 Dark is the default theme. Theme selection belongs in Appearance settings; the main header
@@ -5140,6 +5210,22 @@ surface with a proven app but a different id is foreign. Rows carry `own`; conte
 Turns carry `sightings` for every connector's result rows, emitted once per request id as
 `app_sightings`. The Core @-mention, plugin refresh (`ownSnapshot`, native installed-link IDs) and the
 Plugins catalog limit use proven ids first.
+Request-id traces (#1752, diagnostics only): usage.js also walks every frame of a chat's response
+stream (HTTP and socket) for id-named fields holding a request-id-shaped value that is neither the
+chat's id nor an origin it already published, and posts `cos-request-trace` with each id's field
+path (`<delta p>:<key path>`, never content; 16 per frame, 64 per response). content.js forwards them
+once per id as `request_trace` (`traces: [{ requestId, path }]`), only for the chat the tab shows.
+The bridge never stores them as transcript content; `session/request-trace.ts` keeps 256 and adds
+"the stream of <chat> named it at <path>" to the "no page evidence" warning, or logs one line when
+the trace arrives after a call ran out of time. Attribution never uses them. Since the first report with traces found nothing,
+the page also traces whole request-id-shaped tokens inside arrays and longer strings (path `…text`, no content;
+an array keeps its path only under an id-named key such as `request_ids`),
+event streams from any other same-origin `/backend-api/` route (prefix `<route with ids as *>>`, other characters
+as `_`; at most two readers, 4 MB and 64 traces each, cancelled on page hide and dispose, chat from the frame or the page's `/c/<id>` route), and every socket message
+(prefix `socket>`, 256 ids per socket, then again). The app logs once per chat and run that the page's tracing
+works; with these limits a missing trace makes "the page never saw it" likely, not certain. Traces are expendable: content.js takes
+none while its page queue holds 300 or more entries, and drops queued traces first, without a gap marker, when it
+must evict. A response keeps tracing after its 16 published origins until its own 64.
 
 **Installed discovery.** `/settings/plugins-settings` accepts visible native buttons
 and same-origin links to exact `plugin_asdk_app_*` management routes inside the page's `main`.
@@ -5460,6 +5546,13 @@ The snapshot's optional `environment` (`CompanionEnvironment`) feeds the diagnos
 the browser's name and version, ChatGPT tabs counted by state, and `clf-page-checks` booleans plus
 the page language from the most recently used awake ChatGPT tab, read at most once a minute.
 `sanitiseCompanionDiagnostics` keeps names, versions, counts and booleans and drops everything else.
+Its `errorPageReloads` (`{ count, lastAt }`, the extension's counter since its worker started) reports
+chat tabs reloaded off Chrome's error page: a chat tab that loaded while offline, where injection fails
+with "showing error page". The extension reloads such a tab only while `navigator.onLine`, backing off
+1, 2, 4 … 15 minutes per tab (state in `chrome.storage.session` key `errorPageReloads`, 64 tabs, so a
+restarted worker keeps the backoff and the count; a tab whose recorder answers or takes injection is
+forgotten), and publishes a snapshot after each reload, one more if a report was already under way.
+The bridge logs one line per new `lastAt` per browser (`x-extension-browser`) and stores nothing else.
 
 `tunnel/*` owns pinned-client discovery, child lifetime, health metrics and confirmed outages;
 development discovery uses Electron's app root for `resources/tunnel`, independent of source

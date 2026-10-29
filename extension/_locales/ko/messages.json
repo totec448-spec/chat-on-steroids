@@ -503,6 +503,12 @@
   "content_goal_wait_tool_inactivity": {
     "message": "도구 활동 종료 대기 중"
   },
+  "content_goal_reviewer_deadline": {
+    "message": "$1 후 검토 없이 계속"
+  },
+  "content_goal_wait_reviewer": {
+    "message": "검토자 대기 중"
+  },
   "content_goal_wait_workers": {
     "message": "이 채팅의 서브에이전트 대기 중"
   },

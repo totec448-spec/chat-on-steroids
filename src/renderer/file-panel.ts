@@ -1,3 +1,4 @@
+import { byteSize } from '../shared/age.js';
 import type { InputAttachment } from '../shared/input.js';
 import type { LocalProject } from '../shared/projects.js';
 import type { ToolEditReview } from '../shared/session.js';
@@ -73,10 +74,9 @@ function samePreview(a: ProjectFilePreview | null, b: ProjectFilePreview | null)
   return keys.length === Object.keys(b).length && keys.every(key => a[key] === b[key]);
 }
 
+/** "1023 B", "1.0 KB", "10 KB", "2.0 GB": a large file never reads "2048 MB". */
 function humanBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+  return byteSize(bytes);
 }
 
 function markdownPreview(source: string): HTMLElement {
