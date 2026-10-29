@@ -40,6 +40,11 @@ export interface ChatSearchOptions {
   actions?(): PaletteAction[];
   /** #1884: the settings that match what is typed, as Settings' own search finds them. */
   settings?(query: string): PaletteSetting[];
+  /**
+   * The chat and project an action acts on, as a value that changes when another is chosen. An action
+   * runs once the dialog has faded out, and only if this is still what it was when it was chosen.
+   */
+  epoch?(): unknown;
 }
 
 /** A setting ⌘K can open: its name, where it lives (page › section), and how to open it there. */
@@ -142,7 +147,10 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
       box.append(...keys.map(key => el('kbd', '', key)));
       button.append(box);
     }
-    button.addEventListener('click', () => close(() => action.run()));
+    button.addEventListener('click', () => {
+      const chosenFor = options.epoch?.();
+      close(() => { if (options.epoch?.() === chosenFor) action.run(); });
+    });
     return button;
   };
   const settingRow = (setting: PaletteSetting): HTMLButtonElement => {
