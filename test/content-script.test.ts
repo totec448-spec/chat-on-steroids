@@ -24488,6 +24488,21 @@ describe('creating a native ChatGPT Project', () => {
     expect(await live.runtimeMessage({ type: 'clf-project-create-state', id: request.id })).toEqual({ safe: true });
   });
 
+  it.each(['/', '/projects'])('keeps the %s helper open while the native Create project dialog holds a draft', async path => {
+    live = await harness(`https://chatgpt.com${path}?cos-project-create=${request.id}`, {}, document => {
+      const dialog = document.createElement('div');
+      dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true');
+      dialog.innerHTML = '<form><input id="chatgpt-project-name" type="text"><button type="submit">Create</button></form>';
+      shown(dialog); document.body.append(dialog);
+    });
+    const dialog = live.document.querySelector('[role="dialog"]')!;
+    expect(await live.runtimeMessage({ type: 'clf-project-create-state', id: request.id })).toEqual({ safe: false });
+    (dialog.querySelector('input') as HTMLInputElement).value = 'unfinished draft';
+    expect(await live.runtimeMessage({ type: 'clf-project-create-state', id: request.id })).toEqual({ safe: false });
+    dialog.remove();
+    expect(await live.runtimeMessage({ type: 'clf-project-create-state', id: request.id })).toEqual({ safe: true });
+  });
+
   it('will not click an unrelated primary button without the Projects-index marker', async () => {
     const reports: Array<Record<string, any>> = [];
     let clicks = 0;

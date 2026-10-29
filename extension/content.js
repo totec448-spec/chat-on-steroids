@@ -14238,6 +14238,7 @@
         const box = CLF_DOM.composer();
         sendResponse({ safe: !projectCreateBusy && !CLF_DOM.conversationId() && !CLF_DOM.generating() &&
           !(box && CLF_DOM.composerText(box).trim()) && !CLF_DOM.hasComposerAttachments() &&
+          !CLF_DOM.projectCreateForm() &&
           (location.pathname === '/' || location.pathname === '/projects' || !!CLF_DOM.projectHomeId()) });
         return false;
       }
