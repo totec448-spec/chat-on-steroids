@@ -43,6 +43,7 @@ Goal can have a second chat check each step's file changes. The theme can follow
 - **Goal and Loop with providers that don't support JSON schemas** (such as DeepSeek) work: the app falls back to a format the provider accepts instead of retrying the same refused request.
 - **A chat that recovered by itself** is no longer reloaded again by a late report about its old, failed turn.
 - **Diagnostics reports** no longer garble ordinary words such as "worker" when a project or chat has a short name like "Work".
+- **Workers in their own Git worktrees** start from a linked checkout whose repository is in another approved folder, and come back after a restart.
 
 
 ## [2.1.47] — Scheduled runs, changed files under each answer, commit and pull request from Review, and your own chat style
