@@ -903,6 +903,40 @@ it('identifies automatic Continue without user-task editing or reordering and ke
   expect(w.document.querySelectorAll('#finishQueue [aria-label="Edit queued task"]')).toHaveLength(2);
 });
 
+// #1826: a run of the chat's schedule says so in its queue row, and when it went out late.
+it('labels a scheduled run in the queue, with when it was due when it is late', async () => {
+  const { w, live, append } = await boot([]);
+  const dueAt = new Date(2026, 9, 24, 9, 0).getTime();
+  const run: InputEntry = { id: 'scheduled-run', sessionId: summary([]).id, text: 'Check the open issues', mode: 'auto',
+    dueAt: 0, model: null, reasoningEffort: null, state: 'queued', owner: null, createdAt: 0, conversationId: 'chat-b',
+    scheduled: { scheduleId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', dueAt, late: false } };
+  live.inputs.push(run);
+  await append([]);
+  const label = () => w.document.querySelector('#inputQueue [data-input-id="scheduled-run"] .pending-message-origin')?.textContent;
+  expect(label()).toBe('Scheduled');
+  expect(w.document.querySelector('#inputQueue [data-input-id="scheduled-run"] .pending-message-text')?.textContent).toBe('Check the open issues');
+  live.inputs[0] = { ...run, scheduled: { ...run.scheduled!, late: true } };
+  await append([]);
+  expect(label()).toBe(`Scheduled · late, was due ${new Date(dueAt).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })}`);
+  // Waiting for a running turn, the run is a task card that carries the same label.
+  live.inputs[0] = { ...run, mode: 'after-turn' };
+  await append([]);
+  expect(w.document.querySelector('#finishQueue [data-input-id="scheduled-run"] .queue-label')?.textContent).toBe('Scheduled · Check the open issues');
+});
+
+// #1826: a sent run keeps its label in the chat, on time or late, and a typed message has none.
+it('keeps the scheduled label on the sent message in the chat', async () => {
+  const dueAt = new Date(2026, 9, 24, 9, 0).getTime();
+  const sent: SessionEvent = { kind: 'user_message', seq: 1, origin: 1, time: T0, source: 'app', messageId: 'scheduled-sent', inputId: 'scheduled-run',
+    message: text('Check the open issues'), scheduled: { dueAt, late: false } };
+  const typed: SessionEvent = { kind: 'user_message', seq: 2, origin: 2, time: T0 + 1, source: 'app', messageId: 'typed', message: text('And this one?') };
+  const { w, append } = await boot([sent, typed]);
+  const labels = () => [...w.document.querySelectorAll('.said.is-user')].map(bubble => bubble.querySelector('.said-origin')?.textContent ?? null);
+  expect(labels()).toEqual(['Scheduled', null]);
+  await append([{ ...sent, seq: 3, origin: 1, scheduled: { dueAt, late: true } }]);
+  expect(labels()).toEqual([`Scheduled · late, was due ${new Date(dueAt).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })}`, null]);
+});
+
 // #1402: the app's own fresh-turn continue is no one's typed message. Waiting, it shows as the
 // message it is; dropped, it raises no delivery notice, because the app tries again by itself.
 it('shows a fresh-turn continue while it waits and raises no notice when it is dropped', async () => {
@@ -1158,6 +1192,104 @@ describe("a new chat's first message held for its project's ChatGPT Project", ()
     await append([]);
     await vi.waitFor(() => expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').toContain(expected), { timeout: 5000 });
   });
+});
+
+it("shows the chat's schedule as one quiet line, with Pause and Edit, and a missed run (#1826)", async () => {
+  // A Wednesday at 08:00, so the weekday run at 09:00 is later today: the time alone (2.1.47 round).
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(2026, 9, 28, 8, 0));
+  try {
+    const asked = Date.now() - 12_000;
+    const { w, live, append } = await boot([
+      { kind: 'user_message', seq: 1, origin: 1, time: asked, source: 'extension', messageId: 'q-sched', message: text('Check the issues') }
+    ]);
+    const api = (w as any).api;
+    const sessionId = summary(live.events).id;
+    const line = () => w.document.getElementById('scheduleLine')!;
+    // No schedule: no line.
+    api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: null }));
+    await append([]); await append([]);
+    expect(line().hidden).toBe(true);
+    const schedule = { id: '0b6c4e1c-1f1e-4a4f-9d39-3c2f0e1a2b3c', sessionId, text: 'Check the issues', repeat: { kind: 'weekdays', at: '09:00' },
+      until: null, paused: false, createdAt: Date.now() - 86_400_000, lastDueAt: null };
+    api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: schedule }));
+    api.pauseSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, paused: true } }));
+    await append([]); await append([]);
+    expect(line().hidden).toBe(false);
+    expect(line().textContent).toMatch(/^Scheduled · every weekday at 09:00( AM)? · next (\S+ )?09:00/);
+    // A next run later today is its time alone; on another day it names the day (2.1.47 round).
+    const next = w.document.getElementById('scheduleLineText')!.textContent!.match(/· next (.+)$/)![1]!;
+    expect(next).toMatch(/^09:00( AM)?$/);
+    // Friday 10:00: the next weekday run is Monday's, so the day is named (CodeRabbit).
+    vi.setSystemTime(new Date(2026, 9, 30, 10, 0));
+    await append([]); await append([]);
+    expect(w.document.getElementById('scheduleLineText')!.textContent).toMatch(/· next Mon,? 09:00( AM)?$/);
+    // Pause and Edit are the dock's own icon actions, like the Goal row's, named for screen readers.
+    const pause = () => w.document.getElementById('scheduleLinePause')!;
+    const edit = w.document.getElementById('scheduleLineEdit')!;
+    expect(pause().classList.contains('dock-action')).toBe(true);
+    expect(edit.classList.contains('dock-action')).toBe(true);
+    expect(pause().getAttribute('aria-label')).toBe('Pause schedule');
+    expect(pause().title).toBe('Pause schedule');
+    expect(pause().querySelector('.ico')).not.toBeNull();
+    expect(edit.getAttribute('aria-label')).toBe('Edit schedule');
+    expect(edit.querySelector('.ico')).not.toBeNull();
+    pause().click();
+    await append([]);
+    expect(api.pauseSchedule).toHaveBeenCalledWith(sessionId, true);
+    api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, paused: true } }));
+    await append([]); await append([]);
+    expect(line().textContent).toMatch(/^Paused · every weekday at 09:00/);
+    expect(pause().getAttribute('aria-label')).toBe('Resume schedule');
+    expect(pause().title).toBe('Resume schedule');
+    // A run missed while the app was closed says so, beside the next time.
+    const missed = new Date(); missed.setHours(9, 0, 0, 0);
+    api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, missedDueAt: missed.getTime() } }));
+    await append([]); await append([]);
+    expect(line().textContent).toContain('missed 09:00');
+  } finally { vi.useRealTimers(); }
+});
+
+it('says when the send check holds an automatic message, with its reason', async () => {
+  // #1794: a held Continue or fresh turn shows why it waits, so the person can cancel it or fix the program.
+  const asked = Date.now() - 12_000;
+  const { w, live, append } = await boot([
+    { kind: 'user_message', seq: 1, origin: 1, time: asked, source: 'extension', messageId: 'q-held', message: text('Build it') }
+  ]);
+  const api = (w as any).api;
+  const chat = await import('../src/renderer/chat.js');
+  const state = (await api.getState()).data;
+  const checked = (url: string | undefined) => chat.chatApply({ ...state, bridge: { ...state.bridge, present: true },
+    config: { ...state.config, ui: { ...state.config.ui, sendCheckUrl: url } } });
+  checked('http://127.0.0.1:8123/check');
+  const hold = (attempt: number, reason: string, answered: boolean) => ({ attempt, nextAt: Date.now() + 30_000, reason, answered });
+  const held: InputEntry = { id: 'held-one', sessionId: summary(live.events).id, state: 'queued', owner: null, text: 'Continue',
+    mode: 'after-turn', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: 'chat-a',
+    recovery: { questionId: 'q-held', pro: false, busyUntil: 0, phase: 'ready' }, sendCheck: hold(2, 'quiet hours', true) };
+  const card = () => w.document.querySelector('#finishQueue .queued-input')!.textContent ?? '';
+  live.inputs.push(held);
+  await append([]); await append([]);
+  expect(card()).toContain('Held by your send check: quiet hours');
+  live.inputs[0] = { ...held, sendCheck: hold(3, '', false) };
+  await append([]); await append([]);
+  expect(card()).toContain('Held: your send check did not answer');
+  live.inputs[0] = { ...held, sendCheck: hold(4, '', true) };
+  await append([]); await append([]);
+  expect(card()).toContain('Held by your send check');
+  // The fresh turn after a long one waits in the message queue, and says the same there.
+  live.inputs[0] = { id: 'rotation-one', sessionId: summary(live.events).id, state: 'queued', owner: null, text: 'Continue in a fresh turn',
+    mode: 'auto', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: 'chat-a', purpose: 'rotation',
+    authoredSource: 'none', sendCheck: hold(1, 'budget', true) };
+  await append([]); await append([]);
+  expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').toContain('Held by your send check: budget');
+  // The person clears the check's address: the app releases the message at once, and the queue stops saying it is held (CodeRabbit).
+  checked(undefined); await append([]); await append([]);
+  expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').not.toContain('Held');
+  // A hold whose next ask has come is no longer a hold either.
+  checked('http://127.0.0.1:8123/check');
+  live.inputs[0] = { ...live.inputs[0]!, sendCheck: { attempt: 2, nextAt: Date.now() - 1, reason: 'budget', answered: true } };
+  await append([]); await append([]);
+  expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').not.toContain('Held');
 });
 
 it('says why a queued message waits: no extension, or a running tool call', async () => {
@@ -4000,6 +4132,52 @@ it('stops directly from the empty composer without a second Stop menu action', a
   expect(input.value).toBe('');
 });
 
+it('offers Stop for a turn the page still holds after the app stopped counting it as work, without saying Working (2.1.47 round)', async () => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  const stop = vi.fn(async () => ({ ok: true, data: {} }));
+  api.stopSessionTurn = stop;
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { sessionId: id, conversationId: 'chat-a', automation: 'off', objective: '',
+    activeTurnId: null, heldTurnId: 'page-held-turn', finishHeld: false, blocked: '', job: null } });
+  await append([]); await append([]);
+  const send = w.document.getElementById('chatSend') as HTMLButtonElement;
+  expect(send.dataset.action).toBe('stop');
+  expect(send.getAttribute('aria-label')).toBe('Stop turn');
+  expect(w.document.getElementById('chatState')!.classList.contains('is-working')).toBe(false);
+  send.click();
+  await settle();
+  expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'page-held-turn');
+  // Nothing held: the ordinary Send.
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { sessionId: id, conversationId: 'chat-a', automation: 'off', objective: '',
+    activeTurnId: null, heldTurnId: null, finishHeld: false, blocked: '', job: null } });
+  await append([]); await append([]);
+  expect(send.dataset.action).toBe('send');
+});
+
+it('stops a held turn from the button with Plan armed, and stops nothing else when that turn changed meanwhile (CodeRabbit)', async () => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  const stop = vi.fn(async () => ({ ok: true, data: {} }));
+  const plan = vi.fn(async () => ({ ok: true, data: null }));
+  api.stopSessionTurn = stop; api.draftTaskPlan = plan;
+  const controls = (turns: { activeTurnId: string | null; heldTurnId: string | null }) => async (id: string) => ({ ok: true,
+    data: { sessionId: id, conversationId: 'chat-a', automation: 'off', objective: '', finishHeld: false, blocked: '', job: null, ...turns } });
+  api.getSessionControls = controls({ activeTurnId: null, heldTurnId: 'page-held-turn' });
+  await append([]); await append([]);
+  (w.document.getElementById('createPlan') as HTMLButtonElement).click();
+  await settle();
+  const send = w.document.getElementById('chatSend') as HTMLButtonElement;
+  expect(send.dataset.action).toBe('stop');
+  send.click(); await settle();
+  expect(stop).toHaveBeenCalledWith('2026-09-02-test0001', 'page-held-turn');
+  expect(plan).not.toHaveBeenCalled();
+  // Shown for the held turn, but by the time it is read again a different turn runs: that one is not stopped.
+  stop.mockClear();
+  api.getSessionControls = controls({ activeTurnId: 'replacement-turn', heldTurnId: null });
+  send.click(); await settle();
+  expect(stop).not.toHaveBeenCalled();
+});
+
 describe('Esc in the empty composer during a turn', () => {
   const esc = (w: JSDOM['window'], init: KeyboardEventInit = {}) => {
     const event = new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...init });
@@ -4430,6 +4608,20 @@ it('docks recent app repair progress without hiding authored lookalikes', async 
   expect(w.document.querySelector('.ev-assistant_message')!.textContent).toContain('Reopened chat');
   w.document.getElementById('newChat')!.click();
   expect(w.document.getElementById('recoveryStatus')!.hidden).toBe(true);
+});
+
+it('translates the historical approval deferral in the timeline and recovery notice', async () => {
+  const { w } = await boot([{ seq: 1, time: Date.now(), source: 'app', kind: 'progress',
+    progressId: 'browser-repair:approval-deferred',
+    message: text('Reload was deferred because ChatGPT showed a tool approval card.') }], true, [], [], { developerMode: true });
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  try {
+    setLanguage('es');
+    const translated = 'Se pospuso la recarga porque ChatGPT mostró una tarjeta de aprobación de herramientas.';
+    expect(w.document.querySelector('.ev-progress')!.textContent).toContain(translated);
+    expect(w.document.getElementById('recoveryStatus')!.textContent).toContain(translated);
+    expect(w.document.querySelector('.approval-wait')).toBeNull();
+  } finally { setLanguage('en'); }
 });
 
 it('keeps historical repair details in developer mode without reviving a status', async () => {
@@ -4898,26 +5090,31 @@ it.each(['navigate', 'objective edit', 'mode change', 'automation change'] as co
 });
 
 it('shows Loop settling, its real waiting deadline, and generated text in the same row', async () => {
-  const { w, append } = await boot([]);
-  const api = (w as any).api;
-  const controls = { automation: 'loop', objective: 'Continue the task', blocked: '', job: null,
-    goalWait: { reason: 'quiet', until: Date.now() + 125_000 }, goalDraft: null as unknown };
-  api.getSessionControls = async () => ({ ok: true, data: controls });
-  await append([]);
-  const row = w.document.getElementById('goalLifecycle')!;
-  expect(row.hidden).toBe(false);
-  expect(row.textContent).toContain('Loop · Waiting for tool inactivity');
-  expect(row.querySelector('[role="timer"]')?.textContent).toContain('2:05');
-  expect(row.getAttribute('aria-busy')).toBe('true');
-  controls.goalDraft = { stage: 'answering', model: 'fixture', text: 'Continue with the remaining checks', error: null };
-  await append([]);
-  expect(w.document.getElementById('goalLifecycle')).toBe(row);
-  expect(row.textContent).toContain('Generating a continuation');
-  expect(row.textContent).toContain('Continue with the remaining checks');
-  expect(row.querySelector('[role="timer"]')).toBeNull();
-  controls.automation = 'off'; await append([]);
-  expect(row.hidden).toBe(true);
-  expect(row.textContent).toBe('');
+  // The clock stands still, so a slow run cannot tick the countdown from 2:05 to 2:04 (2.1.47 round).
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(2026, 9, 28, 12, 0));
+  try {
+    const { w, append } = await boot([]);
+    const api = (w as any).api;
+    const controls = { automation: 'loop', objective: 'Continue the task', blocked: '', job: null,
+      goalWait: { reason: 'quiet', until: Date.now() + 125_000 }, goalDraft: null as unknown };
+    api.getSessionControls = async () => ({ ok: true, data: controls });
+    await append([]);
+    const row = w.document.getElementById('goalLifecycle')!;
+    expect(row.hidden).toBe(false);
+    expect(row.textContent).toContain('Loop · Waiting for tool inactivity');
+    expect(row.querySelector('[role="timer"]')?.textContent).toContain('2:05');
+    expect(row.getAttribute('aria-busy')).toBe('true');
+    controls.goalDraft = { stage: 'answering', model: 'fixture', text: 'Continue with the remaining checks', error: null };
+    await append([]);
+    expect(w.document.getElementById('goalLifecycle')).toBe(row);
+    expect(row.textContent).toContain('Generating a continuation');
+    expect(row.textContent).toContain('Continue with the remaining checks');
+    expect(row.querySelector('[role="timer"]')).toBeNull();
+    controls.automation = 'off'; await append([]);
+    expect(row.hidden).toBe(true);
+    expect(row.textContent).toBe('');
+  } finally { vi.useRealTimers(); }
 });
 
 it('names the wait for this chat’s own sub-agents without inventing a countdown', async () => {
@@ -8040,6 +8237,506 @@ describe('bookmarked answers', () => {
   });
 });
 
+describe('recorded DIL cards inside a Markdown answer', () => {
+  const source = [
+    'Introduction remains ordinary Markdown.', '',
+    '**Sample archive verification** (Passed)', '',
+    'Documents indexed', '', '# 1,234', '',
+    'Collections checked', '', '# 28', '',
+    'Records verified', '', '# 45,678', '',
+    'Index witnesses', '', '# 11', '', '---', '',
+    'Integrity and consistency checks passed', '',
+    'Original examples were not modified', '',
+    'The explanation after the card stays in the reply.'
+  ].join('\n');
+  const metric = (label: string, value: string): string =>
+    `<div data-d-component="grid-item"><p data-d-component="text" data-d-size="xs">${label}</p>` +
+    `<h1 data-d-component="title" data-d-size="xl">${value}</h1></div>`;
+  const card = '<div data-d-component="card" onclick="alert(1)" style="background: hotpink">' +
+    '<div data-d-component="row" data-d-justify="between"><p data-d-component="text">' +
+    '<span data-d-component="text" data-d-default-strong="">Sample archive verification</span></p>' +
+    '<div data-d-component="badge" data-color="success">Passed</div></div>' +
+    '<div data-d-component="grid" style="grid-template-columns: repeat(2,1fr)">' +
+    metric('Documents indexed', '1,234') + metric('Collections checked', '28') +
+    metric('Records verified', '45,678') + metric('Index witnesses', '11') +
+    '</div><div data-d-component="divider"></div>' +
+    '<div data-d-component="row"><svg data-d-component="icon" style="color: var(--color-text-success)"><path d="M0 0"/></svg>' +
+    '<p data-d-component="text">Integrity and consistency checks passed</p></div>' +
+    '<div data-d-component="row"><svg data-d-component="icon" style="color: var(--color-text-success)"></svg>' +
+    '<p data-d-component="text">Original examples were not modified</p></div></div>';
+  const captured = (markup = card): string =>
+    `<div><p>Introduction remains ordinary Markdown.</p>${markup}` +
+    '<p>The explanation after the card stays in the reply.</p></div>';
+  const answer = (body: string, markup = captured()): SessionEvent => ({
+    seq: 1, origin: 1, time: T0, source: 'extension', kind: 'assistant_message', messageId: 'dil-card',
+    message: text(body), renderedHtml: text(markup), state: 'final', final: true
+  });
+
+  it('restores the compact grid, success badge and static icons without replacing surrounding prose', async () => {
+    const { w } = await boot([answer(source)]);
+    const message = w.document.querySelector('.ev-assistant_message .msg.rich')!;
+    const panel = message.querySelector('.markdown-dil-card')!;
+    expect(panel).not.toBeNull();
+    expect(panel.querySelectorAll('.markdown-dil-grid-item')).toHaveLength(4);
+    expect([...panel.querySelectorAll('.markdown-dil-title')].map(node => node.textContent)).toEqual(['1,234', '28', '45,678', '11']);
+    expect(panel.querySelector('.markdown-dil-badge.markdown-dil-success')?.textContent).toBe('Passed');
+    expect(panel.querySelectorAll('.markdown-dil-success-icon')).toHaveLength(2);
+    expect(message.firstElementChild?.textContent).toBe('Introduction remains ordinary Markdown.');
+    expect(message.lastElementChild?.textContent).toBe('The explanation after the card stays in the reply.');
+    expect([...message.querySelectorAll('h1')]).toHaveLength(4);
+    expect(message.querySelector('[onclick], [style], svg, script')).toBeNull();
+  });
+
+  it('rejects an out-of-date card whose metric no longer matches the canonical answer', async () => {
+    const changed = source.replace('45,678', '45,679');
+    const { w } = await boot([answer(changed)]);
+    const message = w.document.querySelector('.ev-assistant_message .msg.rich')!;
+    expect(message.querySelector('.markdown-dil-card')).toBeNull();
+    expect(message.textContent).toContain('45,679');
+    expect(message.textContent).not.toContain('45,678');
+  });
+
+  it.each([
+    { recorded: '+12%', current: '-12%' },
+    { recorded: '45,678', current: '45.678' },
+    { recorded: '45,678', current: '-45,678' },
+    { recorded: '12%', current: '12' },
+    { recorded: '$100', current: '€100' }
+  ])('refuses a recorded metric $recorded when the current reply says $current', async ({ recorded, current }) => {
+    const { w } = await boot([answer(source.replace('45,678', current), captured(card.replace('45,678', recorded)))]);
+    const root = w.document.querySelector('.ev-assistant_message .msg.rich')!;
+    expect(root.querySelector('.markdown-dil-card')).toBeNull();
+    expect(root.textContent).toContain(current);
+  });
+
+  it.each([
+    { recorded: '✅ Tests', current: '❌ Tests' },
+    { recorded: '🟢 Online', current: '🔴 Online' },
+    { recorded: '⚠️ Warning', current: '✅ Warning' },
+    { recorded: '✓ Checks', current: '✗ Checks' },
+    { recorded: '↑ 12%', current: '↓ 12%' },
+    { recorded: '< 5 ms', current: '> 5 ms' },
+    { recorded: '≤ 5 ms', current: '≥ 5 ms' },
+    { recorded: '± 3', current: '~ 3' }
+  ])('refuses a stale recorded card when only the status or comparison symbol changed ($recorded to $current)', async ({ recorded, current }) => {
+    const { w } = await boot([answer(source.replace('45,678', current), captured(card.replace('45,678', recorded)))]);
+    const root = w.document.querySelector('.ev-assistant_message .msg.rich')!;
+    expect(root.querySelector('.markdown-dil-card')).toBeNull();
+    expect(root.textContent).toContain(current);
+  });
+
+  it('restores a recorded card whose status emoji still matches the current answer', async () => {
+    const updated = '✅ Tests';
+    const { w } = await boot([answer(source.replace('45,678', updated), captured(card.replace('45,678', updated)))]);
+    expect(w.document.querySelector('.ev-assistant_message .msg.rich .markdown-dil-card')).not.toBeNull();
+  });
+
+  it('keeps a recorded card with the app-replaced decorative down-arrow icon', async () => {
+    const withArrow = card.replace(
+      '<svg data-d-component="icon" style="color: var(--color-text-success)"></svg>',
+      '<svg data-d-component="icon"><path d="M12.707 18.707L1 1"/></svg>'
+    );
+    const { w } = await boot([answer(source, captured(withArrow))]);
+    const panel = w.document.querySelector('.ev-assistant_message .msg.rich .markdown-dil-card');
+    expect(panel).not.toBeNull();
+    expect(panel!.querySelectorAll('.markdown-dil-down-icon')).toHaveLength(1);
+  });
+
+  it('does not restore captured cards that contain active controls or links', async () => {
+    const { w } = await boot([answer(source, captured(card.replace('</div></div>', '<button>Click</button></div></div>')))]);
+    const message = w.document.querySelector('.ev-assistant_message .msg.rich')!;
+    expect(message.querySelector('.markdown-dil-card')).toBeNull();
+    expect(message.querySelector('button')).toBeNull();
+    expect(message.textContent).toContain('Documents indexed');
+  });
+
+  it('does not reveal hidden captured text when sanitized layout would remove its visibility attributes', async () => {
+    const hidden = card.replace('<div data-d-component="divider"></div>',
+      '<div data-d-component="divider" aria-hidden="true">Unrecorded hidden text</div>');
+    const { w } = await boot([answer(source, captured(hidden))]);
+    const message = w.document.querySelector('.ev-assistant_message .msg.rich')!;
+    expect(message.querySelector('.markdown-dil-card')).toBeNull();
+    expect(message.textContent).not.toContain('Unrecorded hidden text');
+  });
+
+  it('does not guess which identical canonical span to replace', async () => {
+    const cardSource = source.split('Introduction remains ordinary Markdown.\n\n')[1]!
+      .split('\n\nThe explanation after the card stays in the reply.')[0]!;
+    const { w } = await boot([answer(`${cardSource}\n\n${cardSource}`)]);
+    expect(w.document.querySelector('.markdown-dil-card')).toBeNull();
+  });
+
+  it.each(['missing', 'truncated'] as const)('keeps the canonical Markdown when a recorded layout is %s', async kind => {
+    const capture = kind === 'missing' ? undefined : { ...text(captured()), truncated: true };
+    const event = { ...answer(source), renderedHtml: capture };
+    const { w } = await boot([event]);
+    const root = w.document.querySelector('.ev-assistant_message .msg.rich')!;
+    expect(root.querySelector('.markdown-dil-card')).toBeNull();
+    expect(root.textContent).toContain('Introduction remains ordinary Markdown.');
+    expect(root.textContent).toContain('Documents indexed');
+    expect(root.textContent).toContain('The explanation after the card stays in the reply.');
+  });
+});
+
+describe('charts, diagrams and illustrated Markdown from recorded DIL', () => {
+  const observation = (body: string, html = '<p>Unrelated provider drawing.</p>'): SessionEvent => ({
+    seq: 1, origin: 1, time: T0, source: 'extension', kind: 'assistant_message', messageId: 'rich-layout',
+    message: text(body), renderedHtml: text(html), state: 'final', final: true
+  });
+  const message = (w: { document: Document }): Element => w.document.querySelector('.ev-assistant_message .msg.rich')!;
+
+  it('renders bounded chart data from the canonical widget rather than trusting a captured plot', async () => {
+    const directive = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value', label: 'Sample values', valueSuffix: '%' }],
+      data: [{ group: 'A', value: 4 }, { group: 'B', value: 9 }, { group: 'C', value: 15 }],
+      meta: { footer: 'Illustrative values only' }
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Intro.\n\n${directive}\n\nAfter the chart.`)]);
+    const root = message(w);
+    expect(root.querySelector('.markdown-dil-chart')).not.toBeNull();
+    expect([...root.querySelectorAll('.markdown-dil-chart-x')].map(item => item.textContent)).toEqual(['A', 'B', 'C']);
+    expect([...root.querySelectorAll<HTMLElement>('.markdown-dil-chart-bar')].map(item => item.style.height)).toEqual(['26.666666666666668%', '60%', '100%']);
+    expect(root.querySelector('.markdown-dil-chart')?.getAttribute('aria-label')).toContain('C 15%');
+    expect(root.querySelectorAll('.markdown-dil-chart-column')).toHaveLength(3);
+    expect(root.lastElementChild?.textContent).toBe('After the chart.');
+  });
+
+  it('restores chart placeholders whose zero-based index has three digits', async () => {
+    const directive = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(Array.from({ length: 101 }, (_, i) => `Chart ${i + 1}.\n\n${directive}`).join('\n\n'))]);
+    const root = message(w);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(101);
+    expect(root.textContent).not.toContain('\uE030100\uE031');
+  });
+
+  it.each([
+    { opening: '```json', closing: '```' },
+    { opening: '~~~~example', closing: '~~~~' }
+  ])('keeps a chart example literal inside $opening but draws one outside the fence', async ({ opening, closing }) => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Example code:\n\n${opening}\n${widget}\n${closing}\n\n${widget}\n\nAfter.`)]);
+    const root = message(w);
+    expect(root.querySelector('pre code')?.textContent).toContain(widget);
+    expect(root.querySelector('pre code')?.textContent).not.toContain('\uE030');
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(root.lastElementChild?.textContent).toBe('After.');
+  });
+
+  it('keeps a chart example literal in an unclosed Markdown fence', async () => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Example:\n\n\`\`\`json\n${widget}`)]);
+    const root = message(w);
+    expect(root.querySelector('pre code')?.textContent).toContain(widget);
+    expect(root.querySelector('.markdown-dil-chart')).toBeNull();
+  });
+
+  it.each(['- ```', '> ```'])('does not close a top-level chart code fence at %s', async misleadingCloser => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation('Example:\n\n```json\n' + misleadingCloser + '\n' + widget + '\n```\n\n' + widget + '\n\nAfter.')]);
+    const root = message(w);
+    expect(root.querySelector('pre code')?.textContent).toContain(widget);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(root.lastElementChild?.textContent).toBe('After.');
+  });
+
+  it.each([
+    { name: 'content line', markdown: (widget: string) => 'Example:\n\n```json\n    ```\n' + widget + '\n```\n\n' + widget },
+    { name: 'indented opener', markdown: (widget: string) => 'Example:\n\n    ```\n\n' + widget }
+  ])('respects Marked top-level fence indentation for $name', async ({ markdown, name }) => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(markdown(widget))]);
+    const root = message(w);
+    if (name === 'content line') {
+      expect(root.querySelector('pre code')?.textContent).toContain(widget);
+      expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    } else {
+      expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+      expect(root.textContent).not.toContain('\uE030');
+    }
+  });
+
+  it.each([
+    { spaces: '    ', charts: 2 },
+    { spaces: '      ', charts: 1 }
+  ])('distinguishes list-continuation charts from nested indented code at $spaces spaces', async ({ spaces, charts }) => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation('- Revenue\n\n' + spaces + widget + '\n\n' + widget)]);
+    const root = message(w);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(charts);
+    if (charts === 1) expect(root.querySelector('li pre code')?.textContent).toContain(widget);
+    expect(root.textContent).not.toContain('\uE030');
+  });
+
+  it('protects four-space code after a top-level fence ends a list', async () => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation('- List item\n\n```txt\nStandalone example\n```\n    ' + widget + '\n\n' + widget)]);
+    const root = message(w);
+    expect([...root.querySelectorAll('pre code')].map(node => node.textContent).join('\n')).toContain(widget);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(root.textContent).not.toContain('\uE030');
+  });
+
+  it('does not hide a valid chart between unrelated backticks in separate paragraphs', async () => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation('Unmatched ` before.\n\n' + widget + '\n\nUnmatched ` after.')]);
+    const root = message(w);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(root.textContent).toContain('Unmatched');
+  });
+
+  it.each([
+    { name: 'four spaces', indent: '    ' },
+    { name: 'a tab', indent: '\t' }
+  ])('keeps a chart directive literal inside code indented by $name', async ({ indent }) => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Example:\n\n${indent}${widget}\n\n${widget}\n\nAfter.`)]);
+    const root = message(w);
+    expect(root.querySelector('pre code')?.textContent).toContain(widget);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(root.lastElementChild?.textContent).toBe('After.');
+  });
+
+  it.each(['    ', '\t'])('keeps %s indented chart code immediately after a closed fence', async indent => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation('```txt\nExisting example\n```\n' + indent + widget + '\n\n' + widget + '\n\nAfter.')]);
+    const root = message(w);
+    expect([...root.querySelectorAll('pre code')].map(node => node.textContent).join('\n')).toContain(widget);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(root.lastElementChild?.textContent).toBe('After.');
+  });
+
+  it.each([
+    { name: 'blockquote fence', example: (widget: string) => `> \`\`\`json\n> ${widget}\n> \`\`\``, code: 'blockquote pre code' },
+    { name: 'list-item fence', example: (widget: string) => `- \`\`\`json\n  ${widget}\n  \`\`\``, code: 'li pre code' },
+    { name: 'inline backticks', example: (widget: string) => `Example: \`${widget}\``, code: 'p code' },
+    { name: 'double inline backticks', example: (widget: string) => `Example: \`\`${widget}\`\``, code: 'p code' }
+  ])('keeps a chart example literal in $name and renders the following chart', async ({ example, code }) => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], data: [{ group: 'Example', value: 3 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Example code:\n\n${example(widget)}\n\n${widget}\n\nAfter.`)]);
+    const root = message(w);
+    expect(root.querySelector(code)?.textContent).toContain(widget);
+    expect(root.querySelectorAll('.markdown-dil-chart')).toHaveLength(1);
+    expect(root.lastElementChild?.textContent).toBe('After.');
+  });
+
+  it('formats chart values, axis guides, tooltips and accessibility text in the chosen app language', async () => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value', label: 'Vergleich' }],
+      data: [{ group: 'Erste', value: 45678 }, { group: 'Zweite', value: 7.5 }], yAxisMax: 45678
+    } } })}\uE201`;
+    await boot([observation('Initial message.')]);
+    const { setLanguage } = await import('../src/renderer/i18n.js');
+    const { renderedMarkdown } = await import('../src/renderer/chat.js');
+    setLanguage('de');
+    try {
+      const figure = renderedMarkdown(widget).querySelector('.markdown-dil-chart')!;
+      expect(figure.getAttribute('aria-label')).toBe('Vergleich: Erste 45.678, Zweite 7,5');
+      expect([...figure.querySelectorAll('.markdown-dil-chart-guide span')].map(node => node.textContent))
+        .toEqual(['45.678', '22.839', '0']);
+      expect([...figure.querySelectorAll<HTMLElement>('.markdown-dil-chart-bar')].map(bar => bar.title))
+        .toEqual(['Erste: 45.678', 'Zweite: 7,5']);
+    } finally { setLanguage('en'); }
+  });
+
+  it.each([
+    { label: 'negative', data: [{ group: 'A', value: -1 }] },
+    { label: 'non-numeric', data: [{ group: 'A', value: 'many' }] },
+    { label: 'non-finite', data: [{ group: 'A', value: Number.POSITIVE_INFINITY }] },
+    { label: 'oversized', data: [{ group: 'A', value: 1e13 }] },
+    { label: 'invalid minimum', data: [{ group: 'A', value: 1 }], yAxisMin: -2 },
+    { label: 'invalid maximum', data: [{ group: 'A', value: 5 }], yAxisMax: 4 },
+    { label: 'non-numeric maximum', data: [{ group: 'A', value: 5 }], yAxisMax: '100' }
+  ])('rejects $label chart values without changing the canonical surrounding text', async content => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }], ...content
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Before.\n\n${widget}\n\nAfter.`)]);
+    const root = message(w);
+    expect(root.querySelector('.markdown-dil-chart')).toBeNull();
+    expect(root.textContent).toContain('Before.');
+    expect(root.textContent).toContain('After.');
+  });
+
+  it('ignores malformed chart payloads without crashing the timeline', async () => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [null], data: [{ group: 'A', value: 1 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Start.\n\n${widget}\n\nEnd.`)]);
+    const root = message(w);
+    expect(root.querySelector('.markdown-dil-chart')).toBeNull();
+    expect(root.textContent).toContain('Start.');
+    expect(root.textContent).toContain('End.');
+  });
+
+  it('uses the original chart data as its accessible label without adding English text', async () => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value' }],
+      data: [{ group: 'Échantillon A', value: 2 }, { group: 'Échantillon B', value: 5 }]
+    } } })}\uE201`;
+    const { w } = await boot([observation(`Before.\n\n${widget}\n\nAfter.`)]);
+    expect(message(w).querySelector('.markdown-dil-chart')?.getAttribute('aria-label'))
+      .toBe('Échantillon A 2, Échantillon B 5');
+  });
+
+  it('retains full 36-character chart labels and long guide values for tooltips and accessibility', async () => {
+    const label = 'Fictional group with a long label 12';
+    expect(label).toHaveLength(36);
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value', label: 'Example chart' }],
+      data: [{ group: label, value: 4 }, { group: 'Other', value: 12 }], yAxisMax: 1e12
+    } } })}\uE201`;
+    const { w } = await boot([observation(`A fictional chart.\n\n${widget}`)]);
+    const figure = message(w).querySelector('.markdown-dil-chart')!;
+    expect(figure.getAttribute('aria-label')).toContain(`${label} 4`);
+    const first = figure.querySelector<HTMLElement>('.markdown-dil-chart-x')!;
+    expect(first.textContent).toBe(label);
+    expect(first.title).toBe(label);
+    const guide = figure.querySelector<HTMLElement>('.markdown-dil-chart-guide span')!;
+    expect(guide.textContent).toBe('1T');
+    expect(guide.title).toBe('1,000,000,000,000');
+    expect(guide.getAttribute('aria-label')).toBe('1,000,000,000,000');
+    expect([...figure.querySelectorAll('.markdown-dil-chart-guide span')].map(node => node.textContent))
+      .toEqual(['1T', '500B', '0']);
+    expect([...figure.querySelectorAll('.markdown-dil-chart-guide span')].every(node => !node.textContent?.includes('…')))
+      .toBe(true);
+    const lines = [...figure.querySelectorAll('.markdown-dil-chart-bars > .markdown-dil-chart-gridline')];
+    expect(lines.map(node => node.classList.item(1))).toEqual([
+      'markdown-dil-chart-gridline-top',
+      'markdown-dil-chart-gridline-middle',
+      'markdown-dil-chart-gridline-baseline'
+    ]);
+    expect(lines.map(node => node.getAttribute('aria-hidden'))).toEqual(['true', 'true', 'true']);
+  });
+
+  it('uses compact y-axis guides in German without losing the exact localized tooltip or aria value', async () => {
+    const widget = `\uE200genui\uE202${JSON.stringify({ charts_widget_v2: { content: {
+      chartType: 'bar', xKey: 'group', series: [{ dataKey: 'value', label: 'Beispiel' }],
+      data: [{ group: 'Erste', value: 1e12 }, { group: 'Zweite', value: 5e11 }], yAxisMax: 1e12
+    } } })}\uE201`;
+    await boot([observation('Initial message.')]);
+    const { setLanguage } = await import('../src/renderer/i18n.js');
+    const { renderedMarkdown } = await import('../src/renderer/chat.js');
+    setLanguage('de');
+    try {
+      const figure = renderedMarkdown(widget).querySelector('.markdown-dil-chart')!;
+      const guides = [...figure.querySelectorAll<HTMLElement>('.markdown-dil-chart-guide span')];
+      expect(guides.map(label => label.textContent)).toEqual(['1 Bio.', '500 Mrd.', '0']);
+      expect(guides.map(label => label.title)).toEqual(['1.000.000.000.000', '500.000.000.000', '0']);
+      expect(guides.map(label => label.getAttribute('aria-label')))
+        .toEqual(['1.000.000.000.000', '500.000.000.000', '0']);
+      expect(figure.getAttribute('aria-label')).toContain('Erste 1.000.000.000.000');
+      expect(guides.every(label => !label.textContent?.includes('…'))).toBe(true);
+    } finally { setLanguage('en'); }
+  });
+
+  it('recovers the side-by-side table workflow only when its entire text matches', async () => {
+    const body = [
+      'Before.', '', '**Genetics**', '', 'Variants', '', '| ID | SNP |', '| --- | --- |', '| P1 | 0 |', '| P2 | 1 |', '',
+      '**Microbiome**', '', 'Species', '', '| ID | Bacteria |', '| --- | --- |', '| P1 | 4% |', '| P2 | 9% |', '',
+      'Match by ID', '', '**Association test**', '', 'Test each SNP.', '', 'After.'
+    ].join('\n');
+    const table = (title: string, subtitle: string, last: string, a: string, b: string) =>
+      `<div data-d-component="grid-item"><p><strong>${title}</strong></p><p>${subtitle}</p>` +
+      `<table><tr><th>ID</th><th>${last}</th></tr><tr><td>P1</td><td>${a}</td></tr><tr><td>P2</td><td>${b}</td></tr></table></div>`;
+    const workflow = `<div data-d-component="box" data-d-has-border=""><div data-d-component="grid">` +
+      table('Genetics', 'Variants', 'SNP', '0', '1') + table('Microbiome', 'Species', 'Bacteria', '4%', '9%') +
+      `</div><p>Match by ID</p><div data-d-component="box" data-d-has-border=""><p><strong>Association test</strong></p>` +
+      `<p>Test each SNP.</p></div></div>`;
+    const { w } = await boot([observation(body, `<p>Before.</p>${workflow}<p>After.</p>`)]);
+    const root = message(w);
+    expect(root.querySelector('.markdown-dil-panel .markdown-dil-grid')).not.toBeNull();
+    expect(root.querySelectorAll('.markdown-dil-panel .markdown-dil-grid-item')).toHaveLength(2);
+    expect(root.querySelector('.markdown-dil-panel .markdown-dil-bordered')).not.toBeNull();
+    expect(root.firstElementChild?.textContent).toBe('Before.');
+    expect(root.lastElementChild?.textContent).toBe('After.');
+  });
+
+  it('rebuilds an ordered two-step panel without turning step numbers into oversized headings', async () => {
+    const body = '1\n\n**Step one**\n\nStart here.\n\n2\n\n**Step two**\n\nFinish here.';
+    const step = (number: number, heading: string, text: string) => `<div data-d-component="row"><div data-d-component="box">` +
+      `<h2 data-d-component="title">${number}</h2></div><div data-d-component="box"><p><strong>${heading}</strong></p><p>${text}</p></div></div>`;
+    const { w } = await boot([observation(body, `<div data-d-component="box">${step(1, 'Step one', 'Start here.')}${step(2, 'Step two', 'Finish here.')}</div>`)]);
+    expect(message(w).querySelectorAll('.markdown-dil-steps > .markdown-dil-row')).toHaveLength(2);
+  });
+
+  it('restores a local vector figure after excluding all external SVG capabilities', async () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50" width="100" height="50"><line x1="0" y1="0" x2="100" y2="50" stroke="currentColor"/><circle cx="60" cy="25" r="4" fill="blue"/></svg>';
+    const captured = (image: string): string => `<div data-d-component="box" data-d-has-border=""><p>Illustrative plot</p>` +
+      `<img data-d-component="svg" src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(image)}">` +
+      `<p>Schematic only.</p></div>`;
+    const body = 'Illustrative plot\n\nSchematic only.';
+    const { w } = await boot([observation(body, captured(svg))]);
+    const restored = message(w).querySelector<HTMLImageElement>('.markdown-dil-panel img.markdown-dil-svg');
+    expect(restored?.src).toContain('data:image/svg+xml;charset=utf-8,');
+    expect(decodeURIComponent(restored!.src)).toContain('<circle');
+    const poisoned = svg.replace('</svg>', '<script>alert(1)</script></svg>');
+    dom?.window.close(); dom = null; vi.resetModules();
+    const { w: other } = await boot([observation(body, captured(poisoned))]);
+    expect(message(other).querySelector('.markdown-dil-panel')).toBeNull();
+    expect(message(other).querySelector('script, img')).toBeNull();
+  });
+
+  it.each(['text', 'tspan'])('refuses a recorded SVG containing %s labels that cannot be revision-matched', async tag => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><g><${tag}>Old value 12</${tag}></g></svg>`;
+    const captured = `<div data-d-component="box" data-d-has-border=""><p>Illustrative plot</p>` +
+      `<img data-d-component="svg" src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}">` +
+      `<p>Schematic only.</p></div>`;
+    const { w } = await boot([observation('Illustrative plot\n\nSchematic only.', captured)]);
+    const root = message(w);
+    expect(root.querySelector('.markdown-dil-panel, .markdown-dil-svg')).toBeNull();
+    expect(root.textContent).toContain('Illustrative plot');
+    expect(root.textContent).not.toContain('Old value 12');
+  });
+
+  it('allows only static first-party search illustrations, not arbitrary recorded image requests', async () => {
+    const html = (url: string): string => `<div data-d-component="row"><div data-d-component="box">` +
+      `<div data-d-component="image"><img src="${url}" alt=""></div></div>` +
+      `<div data-d-component="box"><p><strong>Example item</strong></p><p>Short explanation.</p></div></div>`;
+    const body = '**Example item**\n\nShort explanation.';
+    const { w } = await boot([observation(body, html('https://images.openai.com/static-rsc-4/Example01234'))]);
+    expect(message(w).querySelector('.markdown-dil-photo-row img.markdown-dil-photo')).not.toBeNull();
+    dom?.window.close(); dom = null; vi.resetModules();
+    const { w: other } = await boot([observation(body, html('https://untrusted.invalid/track'))]);
+    expect(message(other).querySelector('.markdown-dil-photo-row')).toBeNull();
+  });
+
+  it('keeps the canonical answer readable if a recorded illustration cannot load', async () => {
+    const captured = '<div data-d-component="row"><div data-d-component="box">' +
+      '<div data-d-component="image"><img src="https://images.openai.com/static-rsc-4/Example01234"></div></div>' +
+      '<div data-d-component="box"><p><strong>Example item</strong></p><p>Short explanation.</p></div></div>';
+    const { w } = await boot([observation('**Example item**\n\nShort explanation.', captured)]);
+    const row = message(w).querySelector('.markdown-dil-photo-row')!;
+    const image = row.querySelector<HTMLImageElement>('img.markdown-dil-photo')!;
+    expect(image.referrerPolicy).toBe('no-referrer');
+    image.dispatchEvent(new w.Event('error'));
+    expect(row.querySelector('.markdown-dil-photo, .markdown-dil-box:first-child:empty')).toBeNull();
+    expect(row.textContent).toContain('Example item');
+    expect(row.textContent).toContain('Short explanation.');
+  });
+});
+
 describe('a formula in an answer', () => {
   const answer = (seq: number, body: string): SessionEvent => ({
     seq, origin: 1, time: T0, source: 'extension', kind: 'assistant_message', messageId: 'math-answer', message: text(body),
@@ -8092,10 +8789,11 @@ it("sums up what a finished answer changed, collapsed, counting only real change
   const { w, append } = await boot([], true, [], [project]);
   const api = (w as any).api;
   const changes = [
-    { path: 'src/app.ts', state: 'edited', added: 30, removed: 5, approximate: false, diff: 'kept', edits: 3 },
-    { path: 'src/new-page.ts', state: 'created', added: 12, removed: 0, approximate: false, diff: 'kept', edits: 1 },
-    { path: 'old/helper.ts', state: 'unchanged', added: 0, removed: 0, approximate: false, diff: 'kept', edits: 2 },
-    { path: 'big.json', state: 'edited', added: 400, removed: 2, approximate: true, diff: 'too-large', edits: 1 }
+    // Recorded as the tools saw them: under the approved root's virtual name.
+    { path: '/repo/src/app.ts', state: 'edited', added: 30, removed: 5, approximate: false, diff: 'kept', edits: 3 },
+    { path: '/repo/src/new-page.ts', state: 'created', added: 12, removed: 0, approximate: false, diff: 'kept', edits: 1 },
+    { path: '/repo/old/helper.ts', state: 'unchanged', added: 0, removed: 0, approximate: false, diff: 'kept', edits: 2 },
+    { path: '/repo/big.json', state: 'edited', added: 400, removed: 2, approximate: true, diff: 'too-large', edits: 1 }
   ];
   api.turnChanges = vi.fn(async () => ({ ok: true, data: { changes, total: 4 } }));
   api.turnFileDiff = vi.fn(async () => ({ ok: true, data: { before: 'a\n', after: 'a\nb\n' } }));
@@ -8122,13 +8820,19 @@ it("sums up what a finished answer changed, collapsed, counting only real change
   expect(card.querySelector('summary')!.textContent).toBe('Changed 3 files · +442 −7 (approx.) · 1 put back');
   card.open = true; card.dispatchEvent(new w.Event('toggle'));
   const rows = [...card.querySelectorAll<HTMLDetailsElement>('.turn-change')];
+  // Each file named the way its tool row names it, without the root's virtual name; the full path in the tooltip.
   expect(rows.map(row => row.querySelector('summary')!.textContent)).toEqual([
     'src/app.ts+30 −5edited', 'src/new-page.ts+12created', 'old/helper.tsno net change', 'big.json+400 −2 (approx.)edited'
   ]);
+  expect(rows[0]!.querySelector('summary')!.title).toBe('/repo/src/app.ts');
+  // Two approved roots with the same file: the shortened names would be equal, so both keep their root (CodeRabbit).
+  const { turnChangeLabels } = await import('../src/renderer/turn-changes.js');
+  expect(turnChangeLabels(['/repo-a/src/app.ts', '/repo-b/src/app.ts', '/repo-a/README.md', 'notes.md']))
+    .toEqual(['/repo-a/src/app.ts', '/repo-b/src/app.ts', 'README.md', 'notes.md']);
   // A file's net diff loads when its row opens; one the recording did not keep says so.
   rows[0]!.open = true; rows[0]!.dispatchEvent(new w.Event('toggle'));
   await settle();
-  expect(api.turnFileDiff).toHaveBeenCalledWith(expect.any(String), 't-edit', 10, 'src/app.ts');
+  expect(api.turnFileDiff).toHaveBeenCalledWith(expect.any(String), 't-edit', 10, '/repo/src/app.ts');
   rows[3]!.open = true; rows[3]!.dispatchEvent(new w.Event('toggle'));
   await settle();
   expect(rows[3]!.textContent).toContain('Diff unavailable: this edit was too large to keep');
@@ -8148,6 +8852,22 @@ it('asks for the card of an answer whose turn start is not loaded, and shows non
   ]);
   await append([]);
   expect(api.turnChanges).toHaveBeenCalledWith(expect.any(String), 't-long', 0);
+  expect(w.document.querySelector('.turn-changes')?.textContent).toContain('Changed 1 file');
+});
+
+it('reads a reopened turn from its first start when only the reopening is loaded (CodeRabbit)', async () => {
+  // The first turn_start and its edits left the loaded page; the app-authored reopening (with \`detail\`) is still there.
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  api.turnChanges = vi.fn(async () => ({ ok: true, data: { changes: [{ path: 'early.ts', state: 'edited', added: 2, removed: 1, approximate: false, diff: 'kept', edits: 1 }], total: 1 } }));
+  await append([
+    { seq: 700, time: T0 + 700_000, source: 'app', kind: 'turn_start', turnId: 't-reopened', detail: 'a tool call proved the turn was still running' } as SessionEvent,
+    { seq: 701, time: T0 + 701_000, source: 'extension', kind: 'assistant_message', turnId: 't-reopened', messageId: 'a-reopened', message: text('All done.'), final: true, state: 'final' } as SessionEvent,
+    { seq: 702, time: T0 + 702_000, source: 'extension', kind: 'turn_end', turnId: 't-reopened', outcome: 'completed' } as SessionEvent
+  ]);
+  await append([]);
+  // Not from 700: that would leave out every edit made before the reopening.
+  expect(api.turnChanges).toHaveBeenCalledWith(expect.any(String), 't-reopened', 0);
   expect(w.document.querySelector('.turn-changes')?.textContent).toContain('Changed 1 file');
 });
 

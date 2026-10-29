@@ -20,6 +20,7 @@ import { getConfig } from './config.js';
 import { flushLogFile, logFilePath } from './logger.js';
 import { dialogLabel, mainText } from './main-texts.js';
 import { scrubText, type ScrubContext } from './report-scrub.js';
+import { startupLines } from './startup-timing.js';
 
 /** Enough log for a long run, small enough to attach anywhere. */
 export const REPORT_LOG_BYTES = 3 * 1024 * 1024;
@@ -40,7 +41,7 @@ export interface DiagnosticsReportSources {
   /** Every process of the app with what it is for; numbers only. */
   memory?: ProcessMemory[];
   /** Lines from `diagnostics-facts.ts`: numbers, states and option names; error samples are scrubbed here. */
-  facts?: { install: string[]; system: string[]; crashes: string[]; errors: string[]; tools: string[]; chats: string[] };
+  facts?: { install: string[]; system: string[]; crashes: string[]; errors: string[]; tools: string[]; chats: string[]; startup?: string[] };
   now: number;
 }
 
@@ -145,7 +146,8 @@ export async function collectReportFacts(sources: { update: UpdateStatus; sessio
     errors: errorSummaryLines(),
     tools: toolCallLines(sources.now),
     // Finished inputs say nothing about a stuck chat; only waiting and moving ones are counted.
-    chats: chatLines(sources.sessions, sources.inputs.filter(input => !['sent', 'failed', 'cancelled'].includes(input.state)), sources.now)
+    chats: chatLines(sources.sessions, sources.inputs.filter(input => !['sent', 'failed', 'cancelled'].includes(input.state)), sources.now),
+    startup: startupLines()
   };
 }
 
@@ -200,7 +202,8 @@ export function renderDiagnosticsReport(sources: DiagnosticsReportSources): stri
     ...(sources.facts ? [
       section('Install and updates', sources.facts.install.map(scrub)),
       section('System', sources.facts.system.map(scrub)),
-      section('Crashes and restarts', sources.facts.crashes)
+      section('Crashes and restarts', sources.facts.crashes),
+      ...(sources.facts.startup?.length ? [section('Startup', sources.facts.startup)] : [])
     ] : []),
     ...(environmentLines(sources.extension).length ? [section('Browser and ChatGPT page', environmentLines(sources.extension))] : []),
     section('Browser connection', [...json(scrubValue(sources.bridge)), ...json(scrubValue(sources.extension))]),

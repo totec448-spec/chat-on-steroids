@@ -10,7 +10,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ago, parseClientStatus, parsePollHealth, readMetric } from '../src/main/tunnel/health.js';
 import { describeNetworkError, isBenignHarpoonChannelEvent, isUnreachableError, NO_OUTAGE, outageConfirmed, outageRecovered, routeObservation, tunnelEventText } from '../src/main/tunnel/index.js';
-import { describeRoute, describeSeparateTunnels, metadataErrorIsCurrent } from '../src/main/diagnostics.js';
+import { describeConnectorTunnels, describeRoute, describeSeparateTunnels, metadataErrorIsCurrent } from '../src/main/diagnostics.js';
 import { commonBinaryDirsForPlatform, locateBinary, tunnelExecutableName } from '../src/main/tunnel/locate.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
@@ -229,6 +229,22 @@ describe('ago', () => {
     expect(ago(now - 3 * 3_600_000, now)).toBe('3h ago');
   });
 
+  it('goes on to days, weeks, months and years instead of hundreds of hours (2.1.47 round)', () => {
+    const hour = 3_600_000, day = 24 * hour;
+    expect(ago(now - 23 * hour, now)).toBe('23h ago');
+    expect(ago(now - 24 * hour, now)).toBe('1d ago');
+    expect(ago(now - 6 * day, now)).toBe('6d ago');
+    expect(ago(now - 16 * day, now)).toBe('2w ago');
+    expect(ago(now - 45 * day, now)).toBe('1mo ago');
+    expect(ago(now - 300 * day, now)).toBe('10mo ago');
+    expect(ago(now - 800 * day, now)).toBe('2y ago');
+  });
+
+  it('says "never" for a time that is not a number', () => {
+    expect(ago(Number.NaN, now)).toBe('never');
+    expect(ago(undefined as never, now)).toBe('never');
+  });
+
   it('never reports a negative age from a clock skew', () => {
     expect(ago(now + 60_000, now)).toBe('just now');
   });
@@ -375,6 +391,17 @@ describe('text of a tunnel-client log field', () => {
     expect(tunnelEventText(503)).toBe('503');
     expect(tunnelEventText(undefined)).toBe('');
     expect(tunnelEventText(null)).toBe('');
+  });
+});
+
+// #1872: the Plugins tunnel was refused by OpenAI while the self-test said "Every required check passed".
+describe('self-test: the other connectors\' tunnels', () => {
+  const surface = (id: 'core' | 'desktop' | 'plugins', state: string, detail = '') => ({ id, state, detail }) as never;
+  it('fails for each other connector whose tunnel is in error, with its own reason, and says nothing otherwise', () => {
+    expect(describeConnectorTunnels([surface('core', 'error', 'Core down'), surface('desktop', 'off'), surface('plugins', 'live')])).toEqual([]);
+    expect(describeConnectorTunnels([surface('core', 'live'), surface('plugins', 'error', 'OpenAI refused access to this tunnel.')])).toEqual([
+      { name: 'Plugins tunnel', status: 'fail', ok: false, detail: 'OpenAI refused access to this tunnel.' }
+    ]);
   });
 });
 

@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { recordLoopMcpProof } from './goal-mcp-proof.js';
-import { GOAL_CONTINUATIONS, GOAL_MARKER_INSTRUCTION, templateGoalDecision } from '../src/shared/goal-templates.js';
+import { GOAL_CONTINUATIONS, GOAL_MARKER_INSTRUCTION, templateGoalDecision, toolCallFootnote } from '../src/shared/goal-templates.js';
 import { promises as fs } from 'node:fs';
 const browser = vi.hoisted(() => ({ request: vi.fn(), authorize: vi.fn(), inputs: [] as Array<{ id: string; sessionId: string; finishOwner?: { turnId: string; periodic: boolean } }> }));
 vi.mock('../src/main/session/input.js', () => ({ requestBrowserDecision: browser.request, authorizeBrowserHelperRetry: browser.authorize, listInputs: async () => browser.inputs }));
@@ -134,6 +134,64 @@ async function settled(id: string) {
   await vi.waitFor(() => expect(goal.goalViewFor(id)?.stage).not.toMatch(/^(sending|answering)$/), { timeout: 10_000, interval: 25 });
   return goal.goalViewFor(id)!;
 }
+describe('send check (#1794)', () => {
+  // The provider drafts a step; the send check at 127.0.0.1 answers with `verdicts`, in order.
+  async function checked(id: string, verdicts: Array<{ allow: boolean; reason?: string }>) {
+    await setSecret('openRouterApiKey', 'test-key');
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, backend: 'api' },
+      ui: { ...defaultConfig().ui, sendCheckUrl: 'http://127.0.0.1:8123/check' } });
+    const asked: Array<Record<string, any>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
+      if (!String(url).startsWith('http://127.0.0.1:8123/')) return Response.json({ choices: [{ message: { content: '{"action":"continue","reply":"Run the next check"}' } }] });
+      asked.push(JSON.parse(String(init.body)));
+      return Response.json(verdicts[Math.min(asked.length, verdicts.length) - 1]);
+    }));
+    const sessionId = await recording(id, 'Step one is done');
+    await goal.setGoalSwitchNow(id, 'goal', true);
+    return { asked, sessionId };
+  }
+  it('asks before a Goal step can be typed, holds it on a refusal and asks again, without writing a new step', async () => {
+    const { setSendCheckRetryForTests } = await import('../src/main/send-check.js');
+    setSendCheckRetryForTests(30);
+    try {
+      const id = 'send-check-goal';
+      const { asked, sessionId } = await checked(id, [{ allow: false, reason: 'not now' }, { allow: true }]);
+      goal.startGoalDraft({ conversationId: id, sessionId, turnId: 'checked-turn' });
+      await vi.waitFor(() => expect(goal.goalViewFor(id)?.stage).toBe('ready'), { timeout: 5_000, interval: 10 });
+      // Asked twice about the same step: the same id and text, the attempt counting up.
+      expect(asked.map(body => [body.kind, body.attempt])).toEqual([['goal-step', 1], ['goal-step', 2]]);
+      expect(asked[0]!.id).toBe(asked[1]!.id);
+      expect(asked[0]!.text).toBe(goal.goalViewFor(id)!.reply);
+      expect(asked[0]!.chat).toEqual({ session: sessionId, project: null, worker: null });
+    } finally { setSendCheckRetryForTests(); }
+  });
+  it('checks a step of a chat whose own switch is on while the app-wide Goal is off (CodeRabbit)', async () => {
+    const id = 'send-check-chat-switch';
+    const { asked, sessionId } = await checked(id, [{ allow: true }]);
+    const config = (await import('../src/main/config.js')).getConfig();
+    await saveConfig({ ...config, goal: { ...config.goal, enabled: false } });
+    expect(goal.goalArmedFor(id)).toBe(true);
+    goal.startGoalDraft({ conversationId: id, sessionId, turnId: 'chat-switch-turn' });
+    await vi.waitFor(() => expect(goal.goalViewFor(id)?.stage).toBe('ready'), { timeout: 5_000, interval: 10 });
+    expect(asked.map(body => body.kind)).toEqual(['goal-step']);
+  });
+  it('stops asking about a held step once Goal is turned off for the chat', async () => {
+    const { setSendCheckRetryForTests } = await import('../src/main/send-check.js');
+    setSendCheckRetryForTests(30);
+    try {
+      const id = 'send-check-goal-off';
+      const { asked, sessionId } = await checked(id, [{ allow: false }]);
+      goal.startGoalDraft({ conversationId: id, sessionId, turnId: 'held-turn' });
+      await vi.waitFor(() => expect(asked.length).toBeGreaterThan(0), { timeout: 5_000, interval: 10 });
+      expect(goal.goalViewFor(id)?.stage).not.toBe('ready');
+      await goal.setGoalSwitchNow(id, 'goal', false);
+      const before = asked.length;
+      await new Promise(resolve => setTimeout(resolve, 200));
+      expect(asked.length - before).toBeLessThanOrEqual(1);
+      expect(goal.goalViewFor(id)?.stage ?? 'none').not.toBe('ready');
+    } finally { setSendCheckRetryForTests(); }
+  });
+});
 describe('Goal decision backends', () => {
   it.each(['api', 'chatgpt'] as const)('sends canonical interim and corrections to the %s Loop without a final answer', async backend => {
     await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, loopBackend: backend } });
@@ -539,6 +597,11 @@ describe('Goal decision backends', () => {
     for (const text of ['prefix [[COS_GOAL:COMPLETE]]', '[[COS_GOAL:COMPLETE]]\nMore work', '[[COS_GOAL:complete]]']) {
       expect(templateGoalDecision(text, 0).action).toBe('invalid');
     }
+  });
+  it('keeps the tool-call note builder and the marker check apart: the note text alone is not set aside (#1894, CodeRabbit)', () => {
+    // A model can write that text itself; only the app knows when it added the note.
+    expect(templateGoalDecision(`All done.\n[[COS_GOAL:COMPLETE]]\n\n${toolCallFootnote(1, 0)}`, 0).action).toBe('invalid');
+    expect(toolCallFootnote(2, 0)).toBe('[Chat On Steroids: 2 tool calls ran in this turn. Arguments and results are not shown.]');
   });
   it('uses browser JSON decisions without an API key and refuses prose', async () => {
     await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, backend: 'chatgpt' } });
