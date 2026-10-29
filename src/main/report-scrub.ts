@@ -102,14 +102,15 @@ export function scrubText(text: string, context: ScrubContext): string {
   // Whole words only, in any script: a project named "Work" must not turn every "worker" into "<x:…>er" (#1922).
   // A combining mark belongs to its word ("कामों"); an underscore joins names in identifiers, so the known
   // value next to one is still replaced ("Budget_2026", "laptop_username").
-  // A known value never starts or ends between two word characters, so the edge matters only on a side
-  // where the value itself starts or ends with one: "C++" in "C++17" and "(draft)" in "v2(draft)final"
-  // are still replaced. One alternation, longest first: where a longer value fails its edge, the regex
-  // falls back to the next one at the same place ("Alice" in "Alice Smithy" beside "Alice Smith"), and
-  // a value never loses its tail to a shorter one. The flag `u` reads letters outside the Basic
-  // Multilingual Plane as one character. Only the two edge checks, not one per value: a lookbehind on
-  // every value of hundreds took a 3 MB log from 60 ms to over 30 s.
-  const edge = '(?!(?<=[\\p{L}\\p{M}\\p{N}])[\\p{L}\\p{M}\\p{N}])';
+  // A known value never starts or ends between two letters (a mark counts as a letter), so the edge
+  // matters only on a side where the value itself starts or ends with one: "C++" in "C++17" and "(draft)"
+  // in "v2(draft)final" are still replaced. Digits separate like punctuation, so a name run together with
+  // a number ("Alice2026") is still replaced (CodeRabbit on #1923). One alternation, longest first: where
+  // a longer value fails its edge, the regex falls back to the next one at the same place ("Alice" in
+  // "Alice Smithy" beside "Alice Smith"), and a value never loses its tail to a shorter one. The flag `u`
+  // reads letters outside the Basic Multilingual Plane as one character. Only the two edge checks, not
+  // one per value: a lookbehind on every value of hundreds took a 3 MB log from 60 ms to over 30 s.
+  const edge = '(?!(?<=[\\p{L}\\p{M}])[\\p{L}\\p{M}])';
   const pattern = `${edge}(?:${known.map(escapeRegExp).join('|')})${edge}`;
   return known.length ? out.replace(new RegExp(pattern, 'giu'), match => tag('x', match.toLowerCase())) : out;
 }
