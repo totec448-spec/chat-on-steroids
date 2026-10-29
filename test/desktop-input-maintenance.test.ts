@@ -294,7 +294,9 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
     return func && target.documentIds?.includes(documentId)
       ? [{ documentId, frameId: 0, result: tabs.find(tab => tab.id === target.tabId)?.url }] : [];
   }), insertCSS: async () => {} };
+  const browserNavigator = { onLine: true };
   const context = vm.createContext({
+    navigator: browserNavigator,
     chrome: {
       ...(rendered ? { debugger: debuggerApi } : {}),
       storage: { local, session },
@@ -314,8 +316,34 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
   Object.assign(api, { query });
   const updated = (id: number, change: object) => tabUpdated.addListener.mock.calls[0]![0](id, change, tabs.find(tab => tab.id === id));
   vm.runInContext('Object.assign(testMaintenance, { offerStopTurns, noteTabConversation, ackCommand })', context);
-  return { ...api, scripting, updated, update, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, bind: (context.testMaintenance as any).bind as (message: any, sender: any, source: any) => Promise<any>, correlate: (context.testMaintenance as any).correlate as (message: any, sender: any, source: any) => Promise<any>, closed: (context.testMaintenance as any).closed as (message: any, sender: any, source: any) => Promise<any>, loadFailure: (context.testMaintenance as any).loadFailure as (message: any, sender: any, source: any) => Promise<any>, create, sendMessage, tabs, fetch, windows, remove, reload, local, localSaved, saved };
+  return { ...api, scripting, updated, update, navigator: browserNavigator, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, bind: (context.testMaintenance as any).bind as (message: any, sender: any, source: any) => Promise<any>, correlate: (context.testMaintenance as any).correlate as (message: any, sender: any, source: any) => Promise<any>, closed: (context.testMaintenance as any).closed as (message: any, sender: any, source: any) => Promise<any>, loadFailure: (context.testMaintenance as any).loadFailure as (message: any, sender: any, source: any) => Promise<any>, create, sendMessage, tabs, fetch, windows, remove, reload, local, localSaved, saved };
 }
+
+// 2.1.47 round: a chat tab that loaded offline in the app's background window stayed on Chrome's
+// error page (Chrome reloads those only in a visible tab), no recorder could be injected, and every
+// send to that chat expired. Online again, the maintenance pass reloads it, backing off.
+describe('a chat tab left on Chrome\'s error page', () => {
+  const errorPage = async (online: boolean) => {
+    const h = await worker([]);
+    h.navigator.onLine = online;
+    h.tabs.push({ id: 8, url: `https://chatgpt.com/c/${secondId}`, status: 'complete' } as Tab);
+    h.sendMessage.mockImplementation(async (_tabId: number, message: any) => {
+      if (message.type === 'clf-recorder-ping') throw new Error('Could not establish connection. Receiving end does not exist.');
+      return { ok: true };
+    });
+    h.scripting.executeScript.mockImplementation(async () => { throw new Error('Frame with ID 0 is showing error page'); });
+    await h.maintain();
+    return h;
+  };
+  it('is reloaded once the browser is online', async () => {
+    const h = await errorPage(true);
+    expect(h.reload).toHaveBeenCalledExactlyOnceWith(8);
+  });
+  it('is left alone while the browser is offline', async () => {
+    const h = await errorPage(false);
+    expect(h.reload).not.toHaveBeenCalled();
+  });
+});
 
 describe('one browser maintenance flight per desktop outbox publication', () => {
   it.each(['same', 'missing', 'wrong-document', 'wrong-url', 'wrong-frame', 'replaced-during-proof'])('uses exact Chrome document proof for loading+URL events (%s)', async scenario => {

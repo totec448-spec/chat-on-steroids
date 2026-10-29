@@ -5612,6 +5612,22 @@ function recoverDeferredRevivals() {
   return tracked;
 }
 
+// A chat tab that loaded while offline shows Chrome's own error page, where nothing can be injected.
+// Chrome reloads such a page by itself only in a visible tab, and the app's chat tabs usually are not
+// (2.1.47 round: every send to that chat expired). It holds no draft and no answer, so once the
+// browser is online again it is reloaded, at most every 1, 2, 4 … 15 minutes per tab.
+const errorPageReloads = new Map();
+async function reloadErrorPage(id) {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  const now = Date.now(), prior = errorPageReloads.get(id);
+  if (prior && now < prior.nextAt) return;
+  const tries = (prior?.tries ?? 0) + 1;
+  errorPageReloads.delete(id);
+  errorPageReloads.set(id, { tries, nextAt: now + Math.min(15 * 60_000, 60_000 * 2 ** (tries - 1)) });
+  if (errorPageReloads.size > 64) errorPageReloads.delete(errorPageReloads.keys().next().value);
+  try { await chrome.tabs.reload(id); } catch { /* The tab went away; nothing to reload. */ }
+}
+
 async function restoreChatgptTab(id, current = () => true, documentId = null) {
   if (!current()) return false;
   const target = { tabId: id, ...(documentId ? { documentIds: [documentId] } : {}) };
@@ -5653,10 +5669,12 @@ async function restoreChatgptTab(id, current = () => true, documentId = null) {
     await chrome.scripting.executeScript({ target, files: ['content.js'] });
     if (!current()) return false;
     await chrome.scripting.insertCSS({ target, files: ['overlay.css'] });
+    errorPageReloads.delete(id);
     // Successful injection means this exact tab is recovering. Its document registration will
     // re-run revival routing; opening a second tab during that handoff recreates the race.
     return current();
-  } catch {
+  } catch (error) {
+    if (/showing error page/i.test(String(error?.message ?? ''))) await reloadErrorPage(id);
     // Injection failure does not transfer ownership to a replacement tab.
     return false;
   }
