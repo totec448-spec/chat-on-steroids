@@ -1714,6 +1714,105 @@ it('names a chat in place: Enter saves, Escape keeps the old name, empty restore
   await waitFor(() => expect(renameSession).toHaveBeenLastCalledWith(session.id, null));
 });
 
+it('adds a few matching actions and settings under the chats while typing in ⌘K, and none before (#1884, Haz)', async () => {
+  const searchSessions = vi.fn(async (query: string) => ({ ok: true, data: { results: query === 'new' ? [{ id: 'search-new-0001', title: 'New notes', projectId: null }] : [], indexed: 1, total: 1 } }));
+  const mounted = await mountChat({}, [], { searchSessions });
+  const doc = mounted.window.document;
+  const field = doc.getElementById('chatSearch') as HTMLInputElement;
+  const results = doc.getElementById('searchResults')!;
+  const dialog = doc.getElementById('searchDialog') as HTMLDialogElement;
+  const type = async (text: string) => { field.value = text; field.dispatchEvent(new mounted.window.Event('input', { bubbles: true })); await waitFor(() => expect(searchSessions).toHaveBeenLastCalledWith(text)); await settle(); };
+  (doc.getElementById('searchChatsButton') as HTMLButtonElement).click();
+  await settle();
+  // Nothing typed: as before, no actions and no settings.
+  expect(results.querySelector('.is-action, .is-setting')).toBeNull();
+  await type('new');
+  const headings = () => [...results.querySelectorAll('.search-heading')].map(node => node.textContent);
+  // The chat comes first; the action after it, with the shortcut the shortcuts dialog shows.
+  const rows = [...results.querySelectorAll<HTMLElement>('.search-result')];
+  expect(rows[0]!.dataset.searchId).toBe('search-new-0001');
+  expect(headings()).toContain('Actions');
+  const action = results.querySelector<HTMLElement>('.is-action')!;
+  expect(action.querySelector('b')!.textContent).toBe('New chat');
+  // As the shortcuts dialog prints it on this system (⌘N on macOS, Ctrl+N elsewhere).
+  expect([...action.querySelectorAll('kbd')].map(key => key.textContent)).toEqual([expect.stringMatching(/^(⌘|Ctrl\+)N$/)]);
+  // A word matching no chat: no "No chats match" when an action or a setting matches.
+  await type('keyboard shortcuts');
+  expect(results.querySelector('.empty.search-status')).toBeNull();
+  (results.querySelector('.is-action') as HTMLButtonElement).click();
+  await waitFor(() => expect(dialog.open).toBe(false));
+  expect((doc.getElementById('shortcutsDialog') as HTMLDialogElement).open).toBe(true);
+  (doc.getElementById('shortcutsDialog') as HTMLDialogElement).close();
+  // A setting by its name opens its page and marks it, as Settings' own search does.
+  (doc.getElementById('searchChatsButton') as HTMLButtonElement).click();
+  await type('writing style');
+  expect(headings()).toContain('Settings');
+  const setting = results.querySelector<HTMLElement>('.is-setting')!;
+  expect(setting.querySelector('b')!.textContent).toBe('Writing style');
+  setting.click();
+  await waitFor(() => expect(dialog.open).toBe(false));
+  await waitFor(() => expect(doc.querySelector('.is-found')).not.toBeNull());
+  // Typing something nothing matches still says so.
+  (doc.getElementById('searchChatsButton') as HTMLButtonElement).click();
+  await type('zzqx');
+  expect(results.querySelector('.empty.search-status')?.textContent).toBe('No chats match');  // A chat search that fails still leaves the actions to pick from.
+  searchSessions.mockImplementationOnce(async () => ({ ok: false, error: 'busy' }) as never);
+  await type('terminal');
+  expect(results.querySelector('.is-action b')?.textContent).toBe('Terminal');
+  // CodeRabbit on #1890: an action and a setting are buttons to screen readers, not list items.
+  expect(results.querySelector('.is-action')!.getAttribute('role')).toBeNull();
+  expect(results.querySelector('.is-action')!.closest('[role="list"]')).toBeNull();
+  // From Plugins, an action for the chat goes back to the chat first, so it is not done out of sight.
+  (doc.getElementById('searchChatsButton') as HTMLButtonElement).click();
+  (doc.getElementById('sidebarPlugins') as HTMLButtonElement).click();
+  expect(doc.querySelector<HTMLElement>('.app')!.dataset.screen).toBe('library');
+  (doc.getElementById('searchChatsButton') as HTMLButtonElement).click();
+  await type('terminal');
+  (results.querySelector('.is-action') as HTMLButtonElement).click();
+  await waitFor(() => expect(dialog.open).toBe(false));
+  await waitFor(() => expect(doc.querySelector<HTMLElement>('.app')!.dataset.screen).toBe('chat'));
+});
+
+it('offers in ⌘K only actions that can run now, walks every group by keyboard, and focuses a setting once the dialog has closed (CodeRabbit)', async () => {
+  const searchSessions = vi.fn(async (query: string) => ({ ok: true, data: { results: query === 'style' ? [{ id: 'search-style-0001', title: 'Style notes', projectId: null }] : [], indexed: 1, total: 1 } }));
+  const mounted = await mountChat({}, [], { searchSessions });
+  const w = mounted.window, doc = w.document;
+  const field = doc.getElementById('chatSearch') as HTMLInputElement;
+  const results = doc.getElementById('searchResults')!;
+  const dialog = doc.getElementById('searchDialog') as HTMLDialogElement;
+  const type = async (text: string) => { field.value = text; field.dispatchEvent(new w.Event('input', { bubbles: true })); await waitFor(() => expect(searchSessions).toHaveBeenLastCalledWith(text)); await settle(); };
+  const actions = () => [...results.querySelectorAll('.is-action b')].map(node => node.textContent);
+  (doc.getElementById('searchChatsButton') as HTMLButtonElement).click();
+  await settle();
+  // No chat and no project chosen: Find in chat, Review, Files and Sub-agents could not open, so they aren't offered.
+  for (const [typed, name] of [['find', 'Find in chat'], ['review', 'Review'], ['files', 'Files'], ['sub', 'Sub-agents']] as const) {
+    await type(typed);
+    expect(actions()).not.toContain(name);
+  }
+  // Arrow keys walk the chats, then the actions, then the settings, and back up to the field.
+  await type('style');
+  const rows = [...results.querySelectorAll<HTMLElement>('.search-result')];
+  expect(rows.map(row => row.classList.contains('is-setting') ? 'setting' : row.classList.contains('is-action') ? 'action' : 'chat')[0]).toBe('chat');
+  expect(rows.some(row => row.classList.contains('is-setting'))).toBe(true);
+  const key = (target: Element, name: string) => target.dispatchEvent(new w.KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true }));
+  key(field, 'ArrowDown');
+  for (const row of rows.slice(1)) { key(doc.activeElement!, 'ArrowDown'); expect(doc.activeElement).toBe(row); }
+  for (let at = rows.length - 1; at > 0; at--) key(doc.activeElement!, 'ArrowUp');
+  expect(doc.activeElement).toBe(rows[0]);
+  key(doc.activeElement!, 'ArrowUp');
+  expect(doc.activeElement).toBe(field);
+  // The dialog fades out while it is still modal: the setting's control takes focus only after it has closed.
+  const style = w.getComputedStyle.bind(w);
+  w.getComputedStyle = ((node: Element, pseudo?: string | null) => node === dialog
+    ? ({ ...style(node, pseudo), animationName: 'search-out' }) as CSSStyleDeclaration : style(node, pseudo)) as typeof w.getComputedStyle;
+  const focusedWhileOpen: boolean[] = [];
+  doc.addEventListener('focusin', event => { if (!dialog.contains(event.target as Node)) focusedWhileOpen.push(dialog.open); });
+  (results.querySelector('.is-setting') as HTMLButtonElement).click();
+  await waitFor(() => expect(doc.querySelector('.is-found')).not.toBeNull());
+  await waitFor(() => expect(focusedWhileOpen.length).toBeGreaterThan(0));
+  expect(focusedWhileOpen).not.toContain(true);
+});
+
 it('searches chats in a dialog opened beside the app name: recent chats first, then marked matches (#1117)', async () => {
   const base = { conversationId: null, chatIds: [], startedAt: 1, updatedAt: 2, endedAt: null, events: 0, userMessages: 0, toolCalls: 0,
     lastToolCallAt: null, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
@@ -2192,6 +2291,72 @@ it('searches every settings page from the sidebar and opens the setting it finds
   (doc.getElementById('backToChat') as HTMLButtonElement).click();
   expect(box.hidden).toBe(true);
   expect(find()).toBe(false);
+});
+
+it('highlights the composer while files are dragged over the window, with a one-line hint, and nowhere else (#1884, Haz)', async () => {
+  const dropFiles = vi.fn(async () => ({ ok: true, data: [] }));
+  const mounted = await mountChat({}, [], { dropFiles });
+  const w = mounted.window, doc = w.document, composer = doc.getElementById('composer')!;
+  const drag = (type: string, target: Element, kinds: string[]) => {
+    const event = new w.MouseEvent(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'dataTransfer', { value: { types: kinds, files: [], dropEffect: '', getData: () => '' } });
+    target.dispatchEvent(event);
+    return event;
+  };
+  const input = doc.getElementById('chatInput') as HTMLTextAreaElement, placeholder = input.placeholder;
+  expect(composer.classList.contains('is-file-drop')).toBe(false);
+  drag('dragover', doc.querySelector('.timeline') ?? doc.body, ['Files']);
+  expect(composer.classList.contains('is-file-drop')).toBe(true);
+  expect(input.placeholder).toBe('Drop to attach, up to 20 files');
+  // A folder dropped on the Folders card stays the card's: the composer doesn't claim it.
+  drag('dragover', doc.getElementById('foldersCard')!, ['Files']);
+  expect(composer.classList.contains('is-file-drop')).toBe(false);
+  // Text dragged around (a selection, a link) changes nothing.
+  drag('dragover', doc.body, ['text/plain']);
+  expect(composer.classList.contains('is-file-drop')).toBe(false);
+  // The drag leaves the window or ends: the highlight goes at once.
+  drag('dragover', doc.body, ['Files']);
+  expect(composer.classList.contains('is-file-drop')).toBe(true);
+  drag('drop', doc.body, ['Files']);
+  expect(composer.classList.contains('is-file-drop')).toBe(false);
+  expect(input.placeholder).toBe(placeholder);
+  drag('dragover', doc.body, ['Files']);
+  const leave = new w.MouseEvent('dragleave', { bubbles: true, relatedTarget: null });
+  doc.documentElement.dispatchEvent(leave);
+  expect(composer.classList.contains('is-file-drop')).toBe(false);
+  expect(input.placeholder).toBe(placeholder);
+});
+
+it('keeps the drop hint through a slow drag and a repaint, ends with the current placeholder, and refuses more than 20 files (CodeRabbit)', async () => {
+  const dropFiles = vi.fn(async () => ({ ok: true, data: [] }));
+  const mounted = await mountChat({}, [], { dropFiles });
+  const w = mounted.window, doc = w.document, composer = doc.getElementById('composer')!;
+  const drag = (type: string, files: unknown[] = []) => {
+    const event = new w.MouseEvent(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'dataTransfer', { value: { types: ['Files'], files, dropEffect: '', getData: () => '' } });
+    doc.body.dispatchEvent(event);
+  };
+  const input = doc.getElementById('chatInput') as HTMLTextAreaElement;
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  try {
+    drag('dragover');
+    // Chromium repeats dragover about every 350 ms (±200) while the pointer rests: no flicker in between.
+    await new Promise(resolve => setTimeout(resolve, 600));
+    expect(composer.classList.contains('is-file-drop')).toBe(true);
+    // The placeholder's owner repaints during the drag (here: the language changes). The hint stays,
+    // and the drop leaves the owner's current text, not the one from before the drag.
+    setLanguage('de');
+    expect(input.placeholder).toBe('Zum Anhängen loslassen, bis zu 20 Dateien');
+    drag('drop');
+    expect(input.placeholder).toBe('Frag irgendetwas …');
+  } finally { setLanguage('en'); }
+  // More than 20 files: nothing is attached, and the person is told the limit.
+  drag('dragover');
+  drag('drop', Array.from({ length: 21 }, (_, index) => ({ name: `file-${index}.txt`, size: 1, type: 'text/plain' })));
+  await settle();
+  expect(dropFiles).not.toHaveBeenCalled();
+  expect(doc.body.textContent).toContain('Attach up to 20 files per message');
+  expect(composer.classList.contains('is-file-drop')).toBe(false);
 });
 
 it('attaches pasted screenshot files with previews while preserving ordinary text paste', async () => {
@@ -4993,6 +5158,89 @@ it('offers where the built-in browser minimizes to, only while it is the chosen 
   choice.dispatchEvent(new w.Event('change', { bubbles: true }));
   await settle();
   expect(mounted.calls.at(-1)?.ui.cosBrowserMinimize).toBe('tray');
+});
+
+// #1804 (Haz's review): the choice sits right under the permission to control the mouse and keyboard.
+it('offers to ask before using the mouse and keyboard, off by default, under the control permission, and saves it', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const choice = w.document.getElementById('desktopAsk') as HTMLSelectElement;
+  const row = choice.closest<HTMLElement>('.desktop-ask-row')!;
+  expect(row.previousElementSibling!.querySelector('[data-cap="control"]')).not.toBeNull();
+  expect([...choice.options].map(option => option.value)).toEqual(['off', 'active', 'always']);
+  expect([...choice.options].map(option => option.textContent)).toEqual(['Off', "Ask while I'm using the computer", 'Always ask']);
+  expect(choice.value).toBe('off');
+  expect(row.textContent).toContain('Browser steps never ask');
+  choice.value = 'active';
+  choice.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.ui.desktopAsk).toBe('active');
+  // A saved choice is shown; where the app cannot tell when the computer was last used, the row is hidden.
+  const state = structuredClone(mounted.state);
+  state.config.ui = { ...state.config.ui, desktopAsk: 'always' };
+  mounted.push(state);
+  await settle();
+  expect(choice.value).toBe('always');
+  expect(row.hidden).toBe(false);
+  const linux = structuredClone(state);
+  linux.platform = { ...(linux.platform ?? {}), family: 'linux', name: 'Linux', desktopAutomation: false };
+  mounted.push(linux);
+  await settle();
+  expect(row.hidden).toBe(true);
+});
+
+// CodeRabbit on #1864 (Haz's keyboard condition): the question waits in the app's window too, reachable by keyboard.
+it('shows a waiting desktop question in the app without taking the focus, and answers it from there', async () => {
+  let listener: ((pending: unknown) => void) | null = null;
+  const answer = vi.fn(async () => ({ ok: true, data: true }));
+  const pending = { id: 'ask-1', title: 'Chat On Steroids wants to use your mouse and keyboard', step: 'Open notepad.exe', chat: 'Release notes' };
+  const mounted = await mountChat({}, [], {
+    desktopAskPending: async () => ({ ok: true, data: pending }),
+    onDesktopAskPending: (fn: (pending: unknown) => void) => { listener = fn; return () => {}; },
+    answerDesktopAsk: answer
+  });
+  const doc = mounted.window.document;
+  const notice = doc.getElementById('desktopAskNotice')!;
+  // Already waiting when the window opened: shown at once.
+  await waitFor(() => expect(notice.hidden).toBe(false));
+  expect(notice.textContent).toContain('Chat On Steroids wants to use your mouse and keyboard');
+  expect(notice.textContent).toContain('Open notepad.exe · Release notes');
+  // It never takes the focus by itself: the message box keeps it.
+  const box = doc.getElementById('chatInput') as HTMLTextAreaElement;
+  box.focus();
+  listener!({ ...pending, id: 'ask-2', step: 'Click', chat: '' });
+  expect(doc.activeElement).toBe(box);
+  expect(notice.textContent).toContain('Click');
+  expect(notice.textContent).not.toContain('·');
+  // Reachable by keyboard: plain buttons, answered from here.
+  const go = doc.getElementById('desktopAskGo') as HTMLButtonElement;
+  go.focus();
+  expect(doc.activeElement).toBe(go);
+  go.click();
+  expect(answer).toHaveBeenCalledWith('ask-2', 'go');
+  (doc.getElementById('desktopAskNotNow') as HTMLButtonElement).click();
+  expect(answer).toHaveBeenLastCalledWith('ask-2', 'not-now');
+  // Answered here or in the corner panel: main ends the question and the notice goes.
+  listener!(null);
+  expect(notice.hidden).toBe(true);
+  answer.mockClear();
+  go.click();
+  expect(answer).not.toHaveBeenCalled();
+});
+
+// CodeRabbit on #1864: a refused save (an invalid command rule) must not leave the choice showing what was not saved.
+it('shows the saved desktop ask choice again when the save is refused', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const choice = w.document.getElementById('desktopAsk') as HTMLSelectElement;
+  (w.document.getElementById('commandAllowlistRules') as HTMLTextAreaElement).value = 'git status; whoami';
+  const saves = mounted.calls.length;
+  choice.focus();
+  choice.value = 'always';
+  choice.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls).toHaveLength(saves);
+  expect(choice.value).toBe('off');
 });
 
 // #1833: Setup's last step offers the first-run tour once; Settings replays it, never offering it again.

@@ -12,9 +12,17 @@ export interface RequestTrace { requestId: string; path: string }
 const MAX = 256;
 const traces = new Map<string, { conversationId: string; path: string }>();
 const unplaced = new Set<string>();
+/** Chats whose page has reported traces in this run: one line each, so a report shows tracing works. */
+const tracing = new Set<string>();
 
 /** Stream traces from one chat's page; an id already filed without evidence is logged once. */
 export function noteRequestTraces(conversationId: string, reported: readonly RequestTrace[]): void {
+  if (reported.length && !tracing.has(conversationId) && tracing.size < 64) {
+    tracing.add(conversationId);
+    // Tracing has limits (16 new ids per message, 64 per stream), so a missing trace makes it likely, not
+    // certain, that the page never saw an id.
+    logInfo(`request attribution: the page of ${conversationId} reports the ids in its streams (tracing works, up to 16 new ids per message)`);
+  }
   for (const { requestId, path } of reported) {
     if (traces.has(requestId)) continue;
     traces.set(requestId, { conversationId, path });
@@ -38,4 +46,5 @@ export function requestTraceNote(requestId: string): string {
 export function resetRequestTracesForTests(): void {
   traces.clear();
   unplaced.clear();
+  tracing.clear();
 }
