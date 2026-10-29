@@ -443,7 +443,8 @@
           if (split < 0) break;
           const width = buffer.startsWith('\r\n\r\n', split) ? 4 : 2;
           scanAndTrace(buffer.slice(0, split));
-          if (emitted.size >= 16) return;
+          // Origins stop at 16; traces have their own bound and keep reading until it.
+          if (emitted.size >= 16 && traced.size >= 64) return;
           buffer = buffer.slice(split + width);
         }
         if (buffer.length > 512 * 1024) return;

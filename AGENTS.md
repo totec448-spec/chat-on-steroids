@@ -5166,7 +5166,9 @@ path (`<delta p>:<key path>`, never content; 8 per frame, 64 per response). cont
 once per id as `request_trace` (`traces: [{ requestId, path }]`), only for the chat the tab shows.
 The bridge never stores them as transcript content; `session/request-trace.ts` keeps 256 and adds
 "the stream of <chat> named it at <path>" to the "no page evidence" warning, or logs one line when
-the trace arrives after a call was filed. Attribution never uses them.
+the trace arrives after a call ran out of time. Attribution never uses them. Traces are expendable: content.js takes
+none while its page queue holds 300 or more entries, and drops queued traces first, without a gap marker, when it
+must evict. A response keeps tracing after its 16 published origins until its own 64.
 
 **Installed discovery.** `/settings/plugins-settings` accepts visible native buttons
 and same-origin links to exact `plugin_asdk_app_*` management routes inside the page's `main`.

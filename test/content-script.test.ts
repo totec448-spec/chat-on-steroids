@@ -14132,6 +14132,23 @@ describe('the activity feed', () => {
     expect(progress.at(-1)).toBe('queued-400');
   });
 
+  // CodeRabbit on #1908: a diagnostic trace is expendable. It never takes the place of a
+  // transcript observation in a full queue, and dropping one is not a gap in the history.
+  it('drops request traces first, without a gap, and takes none while the queue is filling', async () => {
+    const delivered: Array<Record<string, any>> = [];
+    live = await harness(undefined, { events: (message) => { delivered.push(...message.entries); return { ok: true, pending: 0, durable: true }; } });
+    delivered.length = 0;
+    live.hook.emit({ kind: 'request_trace', traces: [{ requestId: '11111111-2222-4333-8444-555555555555', path: 'v.request_id' }] });
+    for (let index = 0; index < 400; index++) live.hook.emit({ kind: 'progress', text: `queued-${index}` });
+    // A full queue takes no new trace either.
+    live.window.dispatchEvent(new live.window.MessageEvent('message', { source: live.window as unknown as Window, origin: 'https://chatgpt.com',
+      data: { type: 'cos-request-trace', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', traces: [{ requestId: '22222222-2222-4333-8444-555555555555', path: 'v.request_id' }] } }));
+    await live.hook.flush(); await live.hook.flush(); await live.hook.flush();
+    expect(delivered.filter(entry => entry.event?.kind === 'request_trace')).toEqual([]);
+    expect(delivered.filter(entry => entry.event?.kind === 'chat_error')).toEqual([]);
+    expect(delivered.filter(entry => entry.event?.kind === 'progress')).toHaveLength(400);
+  });
+
   it('does not erase new overflow losses added while an older gap marker is in flight', async () => {
     const delivered: Array<Record<string, any>> = [];
     let blocked = false;

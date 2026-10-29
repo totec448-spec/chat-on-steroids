@@ -17529,7 +17529,7 @@ describe('connector identity through the bridge', () => {
       { requestId: placed, path: '/message:v.metadata.request_id' }, { requestId: 'not an id', path: 'x' }, { requestId: '11111111-2222-4333-8444-555555555555', path: 'bad path!' }
     ] }] } });
     expect(info.mock.calls.filter(([line]) => String(line).includes(placed))).toEqual([[
-      `request attribution: ${placed} (filed under Unattributed activity) appears in the stream of ${conversationId} at /message:v.metadata.request_id`]]);
+      `request attribution: ${placed} had no page evidence in time; the stream of ${conversationId} names it at /message:v.metadata.request_id`]]);
     expect(requestTraceNote(placed)).toBe(`; the stream of ${conversationId} named it at /message:v.metadata.request_id`);
     expect(requestTraceNote('11111111-2222-4333-8444-555555555555')).toBe('');
     expect(await findSessionByConversation(conversationId)).toBeNull();

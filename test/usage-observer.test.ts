@@ -431,6 +431,16 @@ describe('MAIN-world usage projection', () => {
     socket.receive(envelope(value).concat(Array(33).fill({})));
     expect(h.posts).toHaveLength(0);
   });
+  // CodeRabbit on #1908: a response that reached its 16 published origins still traces later frames.
+  it('keeps tracing after a response published its sixteen origins', async () => {
+    const h = harness(), conversation_id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const id = (n: number) => `${String(n).padStart(8, '0')}-2222-4333-8444-555555555555`;
+    const frames = Array.from({ length: 16 }, (_, n) => `data: ${JSON.stringify({ p: '', o: 'add', v: { conversation_id, message: { metadata: { request_id: id(n + 1) } } } })}\n\n`);
+    frames.push(`data: ${JSON.stringify({ p: '/message', o: 'add', v: { conversation_id, metadata: { request_id: id(99) } } })}\n\n`);
+    await h.feedSse([frames.join('')]);
+    expect(h.posts.flatMap(post => post.requestIds)).toHaveLength(16);
+    expect(h.traces.flatMap(trace => trace.traces.map((entry: any) => entry.requestId))).toEqual([id(99)]);
+  });
   it('listens beyond five minutes, deduplicates and replays bounded ID evidence, then cancels at fifteen minutes', async () => {
     const h = harness();
     const stream = await h.openSse();
