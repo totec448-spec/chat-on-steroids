@@ -541,6 +541,46 @@ describe('direct browser control over the paired bridge', () => {
 });
 
 describe('who is allowed to talk to it', () => {
+  // A chat tab the extension reloaded off Chrome's error page says so in the app's log, once (2.1.47 round).
+  it('logs the extension\'s error-page reloads once each', async () => {
+    await pair();
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
+    const report = (count: number, lastAt: number) => request('POST', '/diagnostics', { body: { capturedAt: Date.now(), status: { connected: true, paired: true },
+      preferences: { overwrite: true, durations: false }, errorPageReloads: { count, lastAt } } });
+    const lines = () => info.mock.calls.map(([line]) => String(line)).filter(line => line.includes("Chrome's error page"));
+    await report(0, 0);
+    await report(1, 5_000);
+    await report(1, 5_000);
+    await report(3, 9_000);
+    expect(lines()).toEqual([
+      "browser: reloaded 1 ChatGPT tab(s) left on Chrome's error page (loaded while offline; the browser is online again)",
+      "browser: reloaded 2 ChatGPT tab(s) left on Chrome's error page (loaded while offline; the browser is online again)"]);
+    // Each browser counts on its own (CodeRabbit on #1911): A at 8, B at 1, then A at 9 is one more.
+    const browser = (id: string, count: number, lastAt: number) => request('POST', '/diagnostics', { browser: id, body: { capturedAt: Date.now(),
+      status: { connected: true, paired: true }, preferences: { overwrite: true, durations: false }, errorPageReloads: { count, lastAt } } });
+    info.mockClear();
+    await browser('aaaaaaaaaaaaaaaa', 8, 20_000);
+    await browser('bbbbbbbbbbbbbbbb', 1, 21_000);
+    await browser('aaaaaaaaaaaaaaaa', 9, 22_000);
+    expect(lines().map(line => line.match(/reloaded (\d+)/)![1])).toEqual(['8', '1', '1']);
+    // A reload the extension skipped says why, once each (CodeRabbit on #1911).
+    const skipped = (value: Record<string, unknown>) => request('POST', '/diagnostics', { browser: 'aaaaaaaaaaaaaaaa', body: { capturedAt: Date.now(),
+      status: { connected: true, paired: true }, preferences: { overwrite: true, durations: false }, errorPageReloads: { count: 9, lastAt: 22_000, skipped: value } } });
+    info.mockClear();
+    await skipped({ reason: 'offline', at: 30_000 });
+    await skipped({ reason: 'offline', at: 30_000 });
+    await skipped({ reason: 'backoff', at: 31_000, nextAt: 151_000 });
+    await skipped({ reason: 'unreadable', at: 32_000 });
+    await skipped({ reason: 'whatever', at: 33_000 });
+    await skipped({ reason: 'constructor', at: 34_000 });
+    expect(lines()).toEqual([
+      "browser: a ChatGPT tab is on Chrome's error page; not reloaded while the browser is offline",
+      "browser: a ChatGPT tab is on Chrome's error page; the next reload is in 120 s (it backs off after each reload)",
+      "browser: a ChatGPT tab is on Chrome's error page; not reloaded, because the extension could not read when it last reloaded it"]);
+    info.mockRestore();
+  });
+
   it('bounds authenticated companion diagnostics and clears them with the bridge lifecycle', async () => {
     const body = { capturedAt: Date.now(), status: { connected: true, paired: true, appVersion: 'v'.repeat(200) },
       preferences: { overwrite: true, durations: false }, transcript: 'must not be forwarded',

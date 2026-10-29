@@ -1033,9 +1033,38 @@ function diagnosticEnvironment(value: unknown): CompanionEnvironment | null {
   };
 }
 
-function recordCompanionDiagnostics(value: unknown): void {
+/** Per browser: the last error-page reload the app has logged (the extension's clock) and its count. */
+const errorPageReloadsLogged = new Map<string, { at: number; count: number; skippedAt?: number }>();
+const ERROR_PAGE_SKIPS: Record<string, (nextIn: number) => string> = {
+  offline: () => 'not reloaded while the browser is offline',
+  backoff: nextIn => `the next reload is in ${nextIn} s (it backs off after each reload)`,
+  unreadable: () => 'not reloaded, because the extension could not read when it last reloaded it'
+};
+function recordCompanionDiagnostics(value: unknown, browser = ''): void {
   const next = sanitiseCompanionDiagnostics(value);
   if (!next) return;
+  // A chat tab that loaded offline and sat on Chrome's error page was reloaded by the extension.
+  const reloads = diagnosticObject(diagnosticObject(value)?.errorPageReloads);
+  const reloadedAt = diagnosticNumber(reloads?.lastAt), reloadCount = Math.round(diagnosticNumber(reloads?.count, 100_000));
+  const logged = errorPageReloadsLogged.get(browser) ?? { at: 0, count: 0 };
+  if (reloadedAt > logged.at && reloadCount > 0) {
+    // A browser restart clears the extension's session storage, and its count starts again.
+    const fresh = reloadCount >= logged.count ? reloadCount - logged.count : reloadCount;
+    logInfo(`browser: reloaded ${Math.max(1, fresh)} ChatGPT tab(s) left on Chrome's error page (loaded while offline; the browser is online again)`);
+    errorPageReloadsLogged.set(browser, { ...logged, at: reloadedAt, count: reloadCount });
+    if (errorPageReloadsLogged.size > 16) errorPageReloadsLogged.delete(errorPageReloadsLogged.keys().next().value!);
+  }
+  // A reload the extension skipped, and why: once per skip it reports (CodeRabbit on #1911).
+  const skipped = diagnosticObject(reloads?.skipped);
+  const skippedAt = diagnosticNumber(skipped?.at), reason = String(skipped?.reason ?? '');
+  const skipLine = Object.hasOwn(ERROR_PAGE_SKIPS, reason) ? ERROR_PAGE_SKIPS[reason] : undefined;
+  const current = errorPageReloadsLogged.get(browser) ?? { at: 0, count: 0 };
+  if (skipLine && skippedAt > (current.skippedAt ?? 0)) {
+    const nextIn = Math.max(0, Math.ceil((diagnosticNumber(skipped?.nextAt) - skippedAt) / 1000));
+    logInfo(`browser: a ChatGPT tab is on Chrome's error page; ${skipLine(nextIn)}`);
+    errorPageReloadsLogged.set(browser, { ...current, skippedAt });
+    if (errorPageReloadsLogged.size > 16) errorPageReloadsLogged.delete(errorPageReloadsLogged.keys().next().value!);
+  }
   // Remember what the extension holds, but only values it actually stored: a fresh install
   // reports its defaults, and those must not overwrite the choices it is about to get back.
   if (diagnosticObject(value)?.preferencesStored === true) rememberBrowserPreferences(next.preferences);
@@ -2756,7 +2785,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   }
 
   if (route === '/diagnostics' && req.method === 'POST') {
-    recordCompanionDiagnostics(await readBody(req));
+    recordCompanionDiagnostics(await readBody(req), browserOf(req) ?? '');
     return json(res, 200, { ok: true }, origin);
   }
 
