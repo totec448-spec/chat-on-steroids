@@ -7522,6 +7522,17 @@ function draftReviewWait(conversationId: string, stage: string): import('../shar
   return until === null ? null : { reason: 'reviewer', until };
 }
 
+/**
+ * Whether `turnId` is a turn of this chat that has ended while a newer one has started since (#1922).
+ * Ordered by when the recorder saw each turn (`origin`), never by its clock: two turns can share a
+ * millisecond, and a clock adjustment can put a newer turn earlier.
+ */
+function supersededTurn(summary: SessionSummary | null | undefined, turnId: string | undefined): boolean {
+  const reported = turnId ? summary?.timelineTurns?.[turnId] : undefined;
+  return !!reported && reported.endTime !== undefined && summary?.activeTurnId !== turnId &&
+    Object.values(summary?.timelineTurns ?? {}).some(turn => turn.origin > reported.origin);
+}
+
 /** Both UIs describe the same existing reply and work deadlines, without another clock owner. */
 async function goalWaitFor(conversationId: string, sessionId: string, now = Date.now(), closed = false): Promise<import('../shared/goal.js').GoalWait | null> {
   const pending = goalPendingReplyFor(conversationId);
@@ -8861,6 +8872,15 @@ async function noteRecoveryObservations(
       continue;
     }
     if (item.recoverable !== true) continue;
+    // A page can keep a turn's clock after that turn ended and a newer one ran (a recovered page
+    // kept instead of reloaded): its report about the ended turn is stale, and recovering a chat
+    // that already moved on only interrupts it (#1922, 16:03 after a turn that ended at 15:54).
+    const staleReport = (summary: SessionSummary | null | undefined): boolean => {
+      if (!supersededTurn(summary, item.turnId)) return false;
+      logInfo(`bridge: ignored an error report for ${conversationId}: its turn ${item.turnId} ended before a newer turn`);
+      return true;
+    };
+    if (staleReport(recorded)) continue;
     // Resume can legitimately return 404 on an idle page. The recorder's exact current
     // generation (not a stale tab's turn or the newest question chosen below) must own H2.
     if (item.reason === 'stream_gone' && (!sessionId || recorded?.conversationId !== conversationId ||
@@ -8880,6 +8900,9 @@ async function noteRecoveryObservations(
       break;
     }
     const source = sessionId ? await assistantRepairSource(sessionId) : null;
+    // The reads above yield: the chat may have moved on since, so the report is checked again
+    // against the session as it is now, before any recovery is queued (CodeRabbit on #1927).
+    if (sessionId && item.turnId && staleReport(await getSession(sessionId))) continue;
     if (item.reason === 'stream_gone') {
       // Source reads yield. A newer question/turn can arrive after the admission check;
       // never attach the old 404 to that newly read question or reserve its budget.
