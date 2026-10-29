@@ -131,7 +131,21 @@ app.whenReady().then(async () => {
     const small = await Promise.all(frames.map(entry => sharp(entry.png).resize(960, 540).png().toBuffer()));
     await sharp(small, { join: { animated: true } }).gif({ delay: frames.map(entry => entry.ms), loop: 0, effort: 10, colours: 128, dither: 0.4, interFrameMaxError: 6 })
       .toFile(path.join(output, 'demo.gif'));
-    fs.writeFileSync(path.join(output, 'demo.mp4'), await recordVideo(frames));
+    // Chromium's recorder writes a fragmented MP4 without a seek index: browsers showed this
+    // 18-second demo as 3 seconds long. macOS's avconvert writes a regular one. The recording
+    // stays in a temporary file until it is converted, so a failed conversion keeps demo.mp4.
+    const recorded = path.join(output, 'demo.recorded.mp4');
+    fs.writeFileSync(recorded, await recordVideo(frames));
+    if (process.platform === 'darwin') {
+      const remuxed = path.join(output, 'demo.remuxed.mp4');
+      const run = require('node:child_process').spawnSync('avconvert', ['-s', recorded, '-p', 'PresetHighestQuality', '-o', remuxed, '--replace'], { encoding: 'utf8' });
+      fs.rmSync(recorded, { force: true });
+      if (run.status !== 0) { fs.rmSync(remuxed, { force: true }); throw new Error('avconvert failed, demo.mp4 left as it was: ' + (run.stderr || run.error?.message)); }
+      fs.renameSync(remuxed, path.join(output, 'demo.mp4'));
+    } else {
+      fs.renameSync(recorded, path.join(output, 'demo.mp4'));
+      console.warn('demo.mp4 has no seek index: re-mux it on macOS (avconvert) before committing');
+    }
     const seconds = frames.reduce((total, entry) => total + entry.ms, 0) / 1000;
     console.log(`wrote demo.gif (${Math.round(fs.statSync(path.join(output, 'demo.gif')).size / 1024)} KB) and demo.mp4 (${Math.round(fs.statSync(path.join(output, 'demo.mp4')).size / 1024)} KB): ${frames.length} frames, ${seconds.toFixed(1)} s`);
   } finally { win?.destroy(); await server.close(); app.quit(); }
