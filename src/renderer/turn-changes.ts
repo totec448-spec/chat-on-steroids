@@ -1,5 +1,6 @@
 import type { SessionEvent } from '../shared/session.js';
 import type { TurnFileChange } from '../main/session/turn-changes.js';
+import { shortPath } from '../shared/virtual-path.js';
 import { disclosureChevron, el, run } from './dom.js';
 import { t, tn, ui } from './i18n.js';
 
@@ -26,21 +27,30 @@ export function turnEdited(events: readonly SessionEvent[], turnId: string): boo
 }
 
 /**
- * Whether the turn is over: its latest boundary is its end, or a later turn began. A turn that
- * started again after it ended is running again.
+ * Whether the turn is over: its latest boundary is its end, or another turn began after both its
+ * answer and that boundary. A turn that started again after its answer runs until one does.
  */
 export function turnFinished(events: readonly SessionEvent[], turnId: string, anchorSeq: number): boolean {
   let latest: SessionEvent | null = null;
   for (const event of events)
     if ((event.kind === 'turn_start' || event.kind === 'turn_end') && event.turnId === turnId && (!latest || event.seq > latest.seq)) latest = event;
   if (latest?.kind === 'turn_end') return true;
-  if (latest && latest.seq > anchorSeq) return false;
-  return events.some(event => event.seq > anchorSeq && event.kind === 'turn_start' && event.turnId !== turnId);
+  const after = Math.max(anchorSeq, latest?.seq ?? anchorSeq);
+  return events.some(event => event.seq > after && event.kind === 'turn_start' && event.turnId !== turnId);
 }
 
 /** Where the store's read of the turn starts: its first recorded row, or the top when that is not loaded. */
+/**
+ * Where a turn's edits are read from: its first start when that is loaded, else the chat's start.
+ * An app-authored reopening (a turn_start with \`detail\`) is not the first start: the turn's earlier
+ * edits lie before it, possibly outside the loaded page (CodeRabbit on #1836).
+ */
 export function turnFrom(events: readonly SessionEvent[], turnId: string): number {
-  return events.find(event => event.kind === 'turn_start' && event.turnId === turnId)?.seq ?? 0;
+  return firstTurnStart(events, turnId)?.seq ?? 0;
+}
+/** The turn's own first start, if loaded; a reopening never stands in for it. */
+export function firstTurnStart(events: readonly SessionEvent[], turnId: string): SessionEvent | undefined {
+  return events.find(event => event.kind === 'turn_start' && event.turnId === turnId && !event.detail);
 }
 
 const MAX_DIFF_CHARS = 512 * 1024;
@@ -80,7 +90,8 @@ export function renderTurnChanges(options: {
     if (!reply || !reply.changes.length || !options.current() || !card.isConnected) return;
     const { changes, total } = reply;
     head.replaceChildren(el('span', 'turn-changes-title', () => headline(changes, total)), disclosureChevron('turn-changes-chevron'));
-    for (const change of changes) list.append(fileRow(change, options));
+    const labels = turnChangeLabels(changes.map(change => change.path));
+    changes.forEach((change, index) => list.append(fileRow(change, labels[index]!, options)));
     if (total > changes.length) list.append(el('p', 'meta', () => tn('and {0} more', 'and {0} more', total - changes.length)));
     if (options.openReview) {
       const review = el('button', 'btn btn-quiet turn-changes-review', () => t('Open in Review')) as HTMLButtonElement;
@@ -93,12 +104,22 @@ export function renderTurnChanges(options: {
   return card;
 }
 
-function fileRow(change: TurnFileChange, options: { sessionId: string; turnId: string; from: number; current: () => boolean }): HTMLElement {
+/**
+ * Each file named the way the answer's tool rows name it, without the approved root's virtual
+ * name; two files that would then read the same keep their roots, so the rows stay apart.
+ */
+export function turnChangeLabels(paths: readonly string[]): string[] {
+  const short = paths.map(path => path.startsWith('/') ? shortPath(path) : path);
+  return short.map((label, index) => short.filter(other => other === label).length > 1 ? paths[index]! : label);
+}
+
+function fileRow(change: TurnFileChange, label: string, options: { sessionId: string; turnId: string; from: number; current: () => boolean }): HTMLElement {
   const row = document.createElement('details');
   row.className = 'turn-change';
   row.dataset.state = change.state;
   const head = el('summary', 'turn-change-head');
-  const path = el('span', 'turn-change-path', change.path);
+  // The full path stays in the tooltip.
+  const path = el('span', 'turn-change-path', label);
   head.append(path);
   const shown = counts(change);
   if (shown && change.state !== 'unchanged') head.append(el('span', 'turn-change-count', () => counts(change)));

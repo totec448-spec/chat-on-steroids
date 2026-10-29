@@ -1,3 +1,4 @@
+import { MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
 import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
 import { forgetSurfaceTokens } from './mcp/persistent-paths.js';
 import { firefoxAddonUrl } from '../shared/firefox-addon.js';
@@ -8,6 +9,7 @@ import { setStopNoticeTranslations } from './stuck-notice.js';
 import { dialogLabel, mainText, setMainTextTranslations } from './main-texts.js';
 import { MAIN_TEXTS } from '../shared/main-texts.js';
 import { MAX_TASK_REQUEST_CHARS } from '../shared/task-progress.js';
+import { restoreCheckpoint } from './checkpoints/index.js';
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
 import { startControlApi, stopControlApi } from './control-api.js';
 import { appearanceSchema } from './appearance-schema.js';
@@ -93,7 +95,9 @@ import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
 import { collectReportFacts, readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts, memoryFacts } from './diagnostics-report.js';
 import { listSessions, readTurnTraces } from './session/store.js';
+import { deleteSchedule, listSchedules, saveSchedule, scheduleRepeatSchema, setSchedulePaused } from './scheduled-runs.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, logWarn, onLog } from './logger.js';
+import { markStartup } from './startup-timing.js';
 import { managedWorktreeCleanupOffers, acknowledgeManagedWorktreeCleanupOffer } from './agents.js';
 import { listOfferedWorkerWorktrees, disposeOfferedWorkerWorktree, WorkerWorktreeError } from './worktrees/index.js';
 import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
@@ -126,7 +130,8 @@ import {
   stopBridge,
   sweepStaleSwarm,
   unpair,
-  followChatInBackground
+  followChatInBackground,
+  browserPickupContext
 } from './bridge.js';
 import { extensionDir } from './extension-path.js';
 import { APP_VERSION, extensionDownloadUrl } from './version.js';
@@ -252,6 +257,11 @@ const settingsPatch = z.object({
     playfulContinue: z.boolean().optional(),
     announceTurns: z.boolean().optional(),
     customContinue: z.string().trim().max(CUSTOM_CONTINUE_MAX_CHARS).optional(),
+    // #1856: absent is the built-in text; '' leaves that part out.
+    chatPersonality: z.string().trim().max(MAX_CHAT_STYLE_CHARS).optional(),
+    chatWritingStyle: z.string().trim().max(MAX_CHAT_STYLE_CHARS).optional(),
+    // #1794: the renderer saves only an address on this computer; main checks it again before use.
+    sendCheckUrl: z.string().trim().max(300).optional(),
     followOutput: z.boolean().optional(),
     mentionCore: z.boolean().optional(),
     mentionPlugins: z.boolean().optional(),
@@ -327,6 +337,7 @@ const settingsPatch = z.object({
   }),
   mcp: z.object({ instructions: z.string().trim().max(MAX_MCP_INSTRUCTIONS_CHARS), persistentUrls: z.boolean().optional() }).strict().optional(),
   controlApi: z.object({ enabled: z.boolean(), allowActions: z.boolean().optional() }).strict().optional(),
+  projects: z.object({ codeCheckpoints: z.boolean() }).strict().optional(),
   goal: z.object({
     impulseMinutes: z.number().int().min(0).max(60).optional(),
     includeToolCalls: z.boolean().optional(),
@@ -383,7 +394,7 @@ type SettingsSnapshot = z.infer<typeof settingsPatch>;
  * unchanged between `base` and `wanted` was not edited by this renderer save and therefore keeps
  * the current main-process value. A field that differs was deliberately edited here and wins.
  */
-function mergeSettings(current: Config, base: SettingsSnapshot, wanted: SettingsSnapshot): Omit<SettingsSnapshot, 'controlApi'> & { controlApi: Config['controlApi'] } {
+function mergeSettings(current: Config, base: SettingsSnapshot, wanted: SettingsSnapshot): Omit<SettingsSnapshot, 'controlApi' | 'projects'> & { controlApi: Config['controlApi']; projects: Config['projects'] } {
   const tunnelEdited = (['tunnelId', 'desktopTunnelId', 'pluginsTunnelId'] as const)
     .some(key => (base.tunnel[key] ?? '') !== (wanted.tunnel[key] ?? ''));
   if (tunnelEdited && ((base.tunnel.profileId ?? 'default') !== (current.tunnel.profileId ?? 'default') ||
@@ -421,6 +432,10 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       : pick(current.controlApi.allowActions, base.controlApi?.allowActions ?? false, wanted.controlApi.allowActions);
     controlApi = { enabled, allowActions: enabled && allowActions === true };
   }
+  // A form that omits the section leaves the live value alone.
+  const projects: Config['projects'] = wanted.projects
+    ? { codeCheckpoints: pick(current.projects.codeCheckpoints, base.projects?.codeCheckpoints ?? false, wanted.projects.codeCheckpoints) }
+    : current.projects;
   return {
     ...(wanted.connectorSuffix === undefined ? {} : {
       connectorSuffix: pick(current.connectorSuffix ?? '', base.connectorSuffix ?? '', wanted.connectorSuffix)
@@ -428,6 +443,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     mcp: wanted.mcp ? { instructions: pick(current.mcp.instructions, base.mcp?.instructions ?? '', wanted.mcp.instructions),
       persistentUrls: pick(current.mcp.persistentUrls === true, base.mcp?.persistentUrls === true, wanted.mcp.persistentUrls ?? current.mcp.persistentUrls === true) } : current.mcp,
     controlApi,
+    projects,
     capabilities,
     readOnly: pick(current.readOnly, base.readOnly, wanted.readOnly),
     commandAllowlist: {
@@ -464,6 +480,11 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       announceTurns: pick(current.ui.announceTurns, base.ui.announceTurns, wanted.ui.announceTurns),
       // An emptied field means the built-in phrases again.
       customContinue: pick(current.ui.customContinue, base.ui.customContinue, wanted.ui.customContinue || undefined),
+      // Unlike the Continue prompt, an emptied part is kept as '': it means "leave this part out".
+      chatPersonality: pick(current.ui.chatPersonality, base.ui.chatPersonality, wanted.ui.chatPersonality),
+      chatWritingStyle: pick(current.ui.chatWritingStyle, base.ui.chatWritingStyle, wanted.ui.chatWritingStyle),
+      // An emptied address turns the send check off.
+      sendCheckUrl: pick(current.ui.sendCheckUrl, base.ui.sendCheckUrl, wanted.ui.sendCheckUrl || undefined),
       followOutput: pick(current.ui.followOutput, base.ui.followOutput, wanted.ui.followOutput),
       mentionCore: pick(current.ui.mentionCore, base.ui.mentionCore, wanted.ui.mentionCore),
       mentionPlugins: pick(current.ui.mentionPlugins, base.ui.mentionPlugins, wanted.ui.mentionPlugins),
@@ -764,6 +785,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // `did-finish-load`, it can only happen after the renderer's first IPC request has completed
     // secure-storage availability/decryption probes and the rest of the initial state snapshot.
     logInfo('renderer state ready');
+    markStartup('renderer');
     return state;
   });
 
@@ -931,6 +953,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // The listener reads this switch on every request, so a flip needs no restart; it is logged.
     if (before.controlApi.allowActions !== next.controlApi.allowActions) {
       logInfo('control API: actions ' + (next.controlApi.allowActions ? 'allowed' : 'refused'));
+    }
+    if (before.projects.codeCheckpoints !== next.projects.codeCheckpoints) {
+      logInfo('code checkpoints: ' + (next.projects.codeCheckpoints ? 'on' : 'off'));
     }
     // Each of these came after the settings were written; the caller decides how to report it.
     const lateError = authorityPersistError ?? runtimeError ?? loginStartupError ?? controlApiError ?? null;
@@ -1132,6 +1157,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (turnOn) wakeBrowserWork();
     return buildState();
   });
+  handle('ui:tourDone', async () => {
+    // #1833: only ever set; Settings replays the tour without asking main to offer it again.
+    if (getConfig().ui.tourDone !== true) await updateConfig(config => ({ ...config, ui: { ...config.ui, tourDone: true } }));
+  });
   handle('ui:whatsNewSeen', async () => {
     // Only this version can be recorded; the renderer cannot write another one (#1172).
     if (getConfig().ui.lastSeenVersion !== APP_VERSION) await updateConfig(config => ({ ...config, ui: { ...config.ui, lastSeenVersion: APP_VERSION } }));
@@ -1292,6 +1321,36 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (project) wakeBrowserWork();
     push('session:changed');
     return project;
+  });
+  // #1826: a chat's schedule. Its rules and checks live in scheduled-runs.ts; errors are sentences the renderer translates.
+  const scheduleSession = z.string().min(8).max(64);
+  handle('schedules:get', async payload => {
+    const { sessionId } = z.object({ sessionId: scheduleSession }).strict().parse(payload);
+    return (await listSchedules()).find(row => row.sessionId === sessionId) ?? null;
+  });
+  handle('schedules:save', async payload => {
+    const request = z.object({ sessionId: scheduleSession, text: z.string().max(200_000), repeat: z.unknown(), until: z.number().int().nonnegative().nullable(),
+      catchUp: z.boolean().optional() }).strict().parse(payload);
+    const repeat = scheduleRepeatSchema.parse(request.repeat);
+    if (!(await getSession(request.sessionId))) throw new Error('This chat no longer exists.');
+    const saved = await saveSchedule({ sessionId: request.sessionId, text: request.text, repeat, until: request.until, catchUp: request.catchUp === true });
+    logInfo(`scheduled run: schedule saved (${repeat.kind}) for ${request.sessionId}`);
+    push('session:changed');
+    return saved;
+  });
+  handle('schedules:pause', async payload => {
+    const { sessionId, paused } = z.object({ sessionId: scheduleSession, paused: z.boolean() }).strict().parse(payload);
+    const updated = await setSchedulePaused(sessionId, paused);
+    if (updated) logInfo(`scheduled run: ${paused ? 'paused' : 'resumed'} for ${sessionId}`);
+    push('session:changed');
+    return updated;
+  });
+  handle('schedules:delete', async payload => {
+    const { sessionId } = z.object({ sessionId: scheduleSession }).strict().parse(payload);
+    const removed = await deleteSchedule(sessionId);
+    if (removed) logInfo(`scheduled run: schedule removed for ${sessionId}`);
+    push('session:changed');
+    return removed;
   });
   // Linking a project to a ChatGPT Project the account already has (#1756).
   handle('projects:chatgpt-choices', async () => chatgptProjectChoices());
@@ -1477,6 +1536,29 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('sessions:turnFileDiff', async payload => {
     const request = turnRequest('sessions:turnFileDiff', turnChangesRequest.extend({ path: z.string().min(1).max(4096) }).strict(), payload);
     return netTurnFileDiff(await turnEdits(request), request.path, reviewOf(request.sessionId));
+  });
+  handle('checkpoints:restore', async payload => {
+    const { projectId, checkpointId, paths, expectedRevision } = z.object({ projectId: projectFileId,
+      checkpointId: z.string().regex(/^[0-9a-f]{32}$/), paths: z.array(projectRelativePath.min(1)).min(1).max(256).nullable(),
+      expectedRevision: z.string().length(64).regex(/^[0-9a-f]+$/) }).strict().parse(payload);
+    // Approval comes from this trusted dialog, never from a renderer boolean; the default keeps the files.
+    return restoreCheckpoint(projectId, checkpointId, paths, expectedRevision, async selected => {
+      const shown = selected.slice(0, 25).map(name => `  - ${name.replace(/[\x00-\x1f\x7f]/g, '?').slice(0, 180)}`);
+      const { response } = await dialog.showMessageBox({
+        type: 'warning',
+        title: mainText('Restore files from this checkpoint?'),
+        message: mainText('Restore files from this checkpoint?'),
+        detail: [
+          mainText('Files return to their checkpoint version; files added since are removed. Current files are saved first, so you can undo this in Review.'),
+          '', ...shown, ...(selected.length > shown.length ? [mainText('More files are not shown.')] : [])
+        ].join('\n'),
+        buttons: [mainText('Keep current files'), mainText('Restore files')],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true
+      });
+      return response === 1;
+    });
   });
   handle('sessions:toolEditReview', async payload => {
     const { sessionId, callId, changeIndex } = z.object({
@@ -2421,6 +2503,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     target.webContents.send(channel, ...args);
   };
   configureInputDelivery({
+    pickupContext: () => browserPickupContext(),
     recoveryAllowed: recoveryInputAllowed,
     callsHoldRecovery: recoveryHeldByCalls,
     activity: sessionInputActivity,

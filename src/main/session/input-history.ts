@@ -32,6 +32,8 @@ export async function recordDeliveredInput(entry: Readonly<InputEntry>, anchorCo
     messageId, inputId: entry.id, inputDelivery: offered ? 'offered' as const : 'confirmed' as const, authoredText: authoredTextOf(entry),
     wireTokenEstimate: estimateTokens(text),
     ...(messageId.startsWith('input:') && entry.toolTurnId ? { turnId: entry.toolTurnId } : {}),
+    // The chat keeps saying the message was a scheduled run after the outbox row is gone.
+    ...(entry.scheduled ? { scheduled: { dueAt: entry.scheduled.dueAt, late: entry.scheduled.late } } : {}),
     ...(entry.attachments?.length && entry.transportIntent !== 'tool' ? { attachments: entry.attachments } : {}),
     // Injection does not change the running model. Only the native send path verifies
     // picker selection before delivery; a later sparse browser echo keeps this evidence.

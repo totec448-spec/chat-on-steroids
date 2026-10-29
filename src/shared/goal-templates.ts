@@ -202,6 +202,14 @@ export const GOAL_CONTINUATIONS: readonly string[] = [
   "Finish the remaining work instead of just promising it. Keep the update brief and get back to the work.",
   "Finish the remaining work instead of just promising it. Stop when the requested goal is fully complete."
 ];
+/**
+ * The note the app adds to an answer that made tool calls, for the Goal helper: it sees answers, not
+ * tool results. The marker check is given the answer without it (goal.ts templateDecisionText, #1894).
+ */
+export function toolCallFootnote(count: number, beforeFreshTurn: number): string {
+  const continued = beforeFreshTurn ? `, ${beforeFreshTurn} of them before Chat On Steroids continued it in a fresh turn` : '';
+  return `[Chat On Steroids: ${count} tool call${count === 1 ? '' : 's'} ran in this turn${continued}. Arguments and results are not shown.]`;
+}
 export function templateGoalDecision(final: string, slot: number, secondSlot = slot + 1): { action: 'stop' } | { action: 'continue'; reply: string } | { action: 'invalid'; error: string } {
   const last = final.trim().split(/\r?\n/).at(-1)?.trim();
   if (last === '[[COS_GOAL:COMPLETE]]') return { action: 'stop' };
