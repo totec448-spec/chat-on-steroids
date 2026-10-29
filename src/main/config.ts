@@ -158,6 +158,7 @@ const DEFAULT_GOAL: GoalSettings = {
   includeToolCalls: false,
   helperModel: DEFAULT_HELPER_CHAT_MODEL,
   helperReasoning: 'high',
+  reviewerModel: '',
   enabled: false,
   // The mode a fresh install runs the moment somebody flips the switch. Goal, because it is
   // the one that can end by itself: a loop that never stops is a deliberate choice, not a
@@ -379,6 +380,8 @@ const configSchema = z.object({
     language: z.enum(UI_LANGUAGES).optional(),
     // The version this install last started as; What's New shows once per real update (#1172).
     lastSeenVersion: z.string().trim().min(1).max(40).optional().catch(undefined),
+    /** #1833: the first-run tour was taken, skipped or declined; it is not offered again. */
+    tourDone: z.boolean().optional().catch(undefined),
     browserPreferences: z.object({ overwrite: z.boolean(), durations: z.boolean() }).strict().optional(),
     cosBrowserTrayHint: z.boolean().optional(),
     finishTool: z.boolean().optional(),
@@ -530,6 +533,8 @@ const configSchema = z.object({
       loopBackend: z.enum(['api', 'chatgpt']).optional().default('chatgpt'),
       helperModel: z.string().trim().min(1).max(80).optional().default(DEFAULT_HELPER_CHAT_MODEL).catch(DEFAULT_HELPER_CHAT_MODEL),
       helperReasoning: z.enum(REASONING_EFFORTS).optional().default('high').catch('high'),
+      // Off when damaged: a reviewer costs a second model pass per step, so nothing turns it on by guess.
+      reviewerModel: z.string().trim().max(80).optional().default('').catch(''),
       // Repaired rather than rejected for the same reason `reasoning` below is: a config
       // written by a version that knows one more mode than this one must not send every root
       // and permission in the file through conservative recovery over a single word.
@@ -595,7 +600,7 @@ const configSchema = z.object({
         .catch(DEFAULT_GOAL.loopPrompt)
     })
     .optional()
-    .default({ ...DEFAULT_GOAL, backend: 'chatgpt', loopBackend: 'chatgpt', impulseMinutes: 0, includeToolCalls: false, helperModel: DEFAULT_HELPER_CHAT_MODEL, helperReasoning: 'high' }),
+    .default({ ...DEFAULT_GOAL, backend: 'chatgpt', loopBackend: 'chatgpt', impulseMinutes: 0, includeToolCalls: false, helperModel: DEFAULT_HELPER_CHAT_MODEL, helperReasoning: 'high', reviewerModel: '' }),
   mcp: z
     .object({
       // Repaired rather than rejected, like the Goal prompts above: this is free text a person

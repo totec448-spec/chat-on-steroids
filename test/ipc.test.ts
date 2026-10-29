@@ -117,6 +117,16 @@ it.each(['playfulStatus', 'playfulContinue', 'followOutput', 'announceTurns'] as
   expect(getConfig().ui[key]).toBe(wanted);
 });
 
+it('remembers that the first-run tour was taken or declined, through any later settings save (#1833)', async () => {
+  expect(getConfig().ui.tourDone).toBeUndefined();
+  await handlers.get('ui:tourDone')!(null, undefined);
+  expect(getConfig().ui.tourDone).toBe(true);
+  // The Settings form does not own it; a save that changes something else keeps it.
+  const base = getConfig();
+  expect(await save({ ...base, ui: { ...base.ui, tourDone: false, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.tourDone).toBe(true);
+});
+
 it('saves Play sounds through Settings, off by default, and keeps it across a stale unrelated save (#1802)', async () => {
   const base = getConfig();
   expect(base.ui.sounds).toBe(false);
@@ -202,6 +212,24 @@ it('names a chat with one clean line, and clears the name for an empty one (#110
   expect((await getSession(session.id))?.title).toBe('From ChatGPT');
   expect(await rename(42)).toMatchObject({ ok: false });
   expect(await handlers.get('sessions:rename')!(null, { id: 'missing-session-0001', title: 'x' })).toMatchObject({ ok: false, error: expect.stringContaining('Session not found') });
+});
+
+it('saves, reads, pauses and removes a chat\'s schedule, and refuses one that cannot run (#1826)', async () => {
+  const session = await createSession({ conversationId: 'ipc-schedule-chat', title: 'Scheduled' });
+  const call = (name: string, payload: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  expect(await call('schedules:get', { sessionId: session.id })).toEqual({ ok: true, data: null });
+  const saved = await call('schedules:save', { sessionId: session.id, text: '  Check the issues  ', repeat: { kind: 'weekdays', at: '09:00' }, until: null });
+  expect(saved).toMatchObject({ ok: true, data: { sessionId: session.id, text: 'Check the issues', repeat: { kind: 'weekdays', at: '09:00' }, paused: false } });
+  expect(await call('schedules:get', { sessionId: session.id })).toMatchObject({ ok: true, data: { id: saved.data.id } });
+  expect(await call('schedules:pause', { sessionId: session.id, paused: true })).toMatchObject({ ok: true, data: { paused: true } });
+  // Catching up missed runs is chosen in the dialog; left out, it is off.
+  expect(await call('schedules:save', { sessionId: session.id, text: 'Daily', repeat: { kind: 'daily', at: '09:00' }, until: null, catchUp: true })).toMatchObject({ ok: true, data: { catchUp: true } });
+  expect(await call('schedules:save', { sessionId: session.id, text: 'x', repeat: { kind: 'hours', every: 0 }, until: null })).toMatchObject({ ok: false });
+  expect(await call('schedules:save', { sessionId: session.id, text: 'x', repeat: { kind: 'daily', at: '25:00' }, until: null })).toMatchObject({ ok: false });
+  expect(await call('schedules:save', { sessionId: 'missing-session-0001', text: 'x', repeat: { kind: 'daily', at: '09:00' }, until: null }))
+    .toEqual({ ok: false, error: 'This chat no longer exists.' });
+  expect(await call('schedules:delete', { sessionId: session.id })).toEqual({ ok: true, data: true });
+  expect(await call('schedules:get', { sessionId: session.id })).toEqual({ ok: true, data: null });
 });
 
 it('answers a turn\'s changed files and refuses a malformed request (#1827)', async () => {
@@ -1211,6 +1239,18 @@ describe('settings writes from more than one UI', () => {
     expect(result.ok, result.error).toBe(true);
     expect(getConfig().ui.tabsToKeepOpen).toBe(6);
     expect(getConfig().goal).toMatchObject({ helperModel: 'account-helper', helperReasoning: 'medium', model: base.goal.model });
+  });
+  it('saves the Goal step reviewer choice, keeps it through a stale unrelated save, and refuses a bad one (#1832)', async () => {
+    const base = defaultConfig();
+    await saveConfig(base);
+    expect((await save({ ...base, goal: { ...base.goal, reviewerModel: 'same' } }, base)).ok).toBe(true);
+    expect(getConfig().goal.reviewerModel).toBe('same');
+    // A form painted before that save does not carry the field back to off.
+    expect((await save({ ...base, ui: { ...base.ui, tabsToKeepOpen: 5 } }, base)).ok).toBe(true);
+    expect(getConfig().goal.reviewerModel).toBe('same');
+    const now = getConfig();
+    expect((await save({ ...now, goal: { ...now.goal, reviewerModel: 'y'.repeat(200) } }, now)).ok).toBe(false);
+    expect(getConfig().goal.reviewerModel).toBe('same');
   });
   it('saves the secrets shield switch, and keeps it when a form without it saves (#1797)', async () => {
     const base = defaultConfig();

@@ -256,6 +256,29 @@ describe('what leaves this machine', () => {
     expect(JSON.stringify(projected)).not.toMatch(/exec_command|SECRET_ARGUMENT|SECRET_RESULT/);
   });
 
+  it('gives the Offline marker check the answer as written, not the app\'s tool-call note after it (#1894)', async () => {
+    const session = await createSession({ title: 'offline marker', conversationId: 'offline-marker' });
+    await appendEvent(session.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'Run the step', chars: 12, truncated: false } });
+    await appendEvent(session.id, { time: 110, source: 'mcp', kind: 'tool_call', turnId: 'marker-turn', call: {
+      callId: 'marker-call', tool: 'exec_command', attribution: 'request_id', requestId: 'marker-request', conversationId: session.conversationId,
+      attributionMethod: 'request_id', outcome: 'ok', durationMs: 1, args: { text: '{}', chars: 2, truncated: false },
+      result: { text: 'ok', chars: 2, truncated: false }, summary: { kind: 'run', tone: 'neutral', title: 'Ran a command' } } });
+    await appendEvent(session.id, { time: 120, source: 'extension', kind: 'assistant_message', turnId: 'marker-turn', messageId: 'marker-final', final: true,
+      message: { text: 'Step done.\n[[COS_GOAL:CONTINUE]]', chars: 31, truncated: false } });
+    const messages = await goal.conversationMessages(session.id);
+    // The helper still sees the note...
+    expect(messages.at(-1)!.content).toMatch(/\[Chat On Steroids: 1 tool call ran in this turn/);
+    // ...the marker check reads the answer itself.
+    expect(goal.templateDecisionText(messages)).toBe('Step done.\n[[COS_GOAL:CONTINUE]]');
+    // A note the model wrote itself is part of its answer.
+    const own = await createSession({ title: 'own note', conversationId: 'own-note' });
+    await appendEvent(own.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'Go', chars: 2, truncated: false } });
+    const fake = 'Done.\n[[COS_GOAL:COMPLETE]]\n\n[Chat On Steroids: 1 tool call ran in this turn. Arguments and results are not shown.]';
+    await appendEvent(own.id, { time: 120, source: 'extension', kind: 'assistant_message', turnId: 'own-turn', messageId: 'own-final', final: true,
+      message: { text: fake, chars: fake.length, truncated: false } });
+    expect(goal.templateDecisionText(await goal.conversationMessages(own.id))).toBe(fake);
+  });
+
   // 2.1.43, live on Windows: a Goal step split by two fresh turns ran its five commands as 2 + 2 + 1.
   // The rotated turns have no answer, so the helper saw "1 tool call" and asked three more times.
   it('counts the calls of the turns a fresh turn continued into the answer that finished them', async () => {
@@ -939,6 +962,50 @@ describe('the reply', () => {
     expect(goal.goalViewFor('c-met')).toBeNull();
     // ...but the window still learns that this run ended with the goal met.
     expect(goal.goalOutcomeFor('c-met')).toMatchObject({ stage: 'no-reply', turnId: 'g-1', reply: '' });
+  });
+
+  it('does not record "the goal is met" from a draft whose objective changed while it ran (CodeRabbit)', async () => {
+    const sessionId = await seed('c-met-moved');
+    await goal.setGoalObjectiveNow('c-met-moved', 'Old objective');
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    globalThis.fetch = (async () => { await gate; return stream([delta('NO_REPLY'), 'data: [DONE]\n']); }) as never;
+    goal.startGoalDraft({ sessionId, conversationId: 'c-met-moved', turnId: 'g-1' });
+    await goal.setGoalObjectiveNow('c-met-moved', 'A new objective');
+    release();
+    await settled('c-met-moved');
+    expect(goal.snapshotGoalOutcomes().outcomes.some(row => row.conversationId === 'c-met-moved')).toBe(false);
+  });
+
+  it('still says "the goal is met" after a restart, until a newer draft or a switch change replaces it (2.1.47 round)', async () => {
+    // Since 2.1.27 the window said "Pursuing goal" again after a restart, for a run that had ended.
+    const sessionId = await seed('c-met-restart');
+    globalThis.fetch = (async () => stream([delta('NO_REPLY'), 'data: [DONE]\n'])) as never;
+    goal.startGoalDraft({ sessionId, conversationId: 'c-met-restart', turnId: 'g-1' });
+    const view = await settled('c-met-restart');
+    expect(goal.ackGoalDraft('c-met-restart', view.token)).toBe(true);
+    const saved = goal.snapshotGoalOutcomes();
+    goal.resetGoalStateForTests();
+    expect(goal.goalOutcomeFor('c-met-restart')).toBeNull();
+    goal.restoreGoalOutcomes(saved);
+    expect(goal.goalOutcomeFor('c-met-restart')).toMatchObject({ stage: 'no-reply', turnId: 'g-1', reply: '', error: null });
+    // Turning the chat's Goal off (or on again) is a new decision: the old outcome no longer stands.
+    await goal.setGoalSwitchNow('c-met-restart', 'goal', false);
+    expect(goal.goalOutcomeFor('c-met-restart')).toBeNull();
+    goal.restoreGoalOutcomes(saved);
+    // A newer turn's draft replaces it too.
+    globalThis.fetch = (async () => stream([delta('Check the tests again.'), 'data: [DONE]\n'])) as never;
+    goal.startGoalDraft({ sessionId, conversationId: 'c-met-restart', turnId: 'g-2' });
+    await settled('c-met-restart');
+    expect(goal.snapshotGoalOutcomes().outcomes.some(row => row.conversationId === 'c-met-restart')).toBe(false);
+    // Saving the switch as it already is changes nothing, so the outcome stays (CodeRabbit).
+    goal.restoreGoalOutcomes(saved);
+    const same = goal.goalSwitchFor('c-met-restart');
+    await goal.setGoalSwitchNow('c-met-restart', same.mode, same.enabled);
+    expect(goal.snapshotGoalOutcomes().outcomes.some(row => row.conversationId === 'c-met-restart')).toBe(true);
+    // A damaged saved file is ignored row by row.
+    goal.restoreGoalOutcomes({ version: 1, savedAt: 1, outcomes: [{ conversationId: '../bad', turnId: 'g-1', model: 'm', backend: 'api', at: 1 } as never] });
+    expect(goal.snapshotGoalOutcomes().outcomes).toEqual([]);
   });
 
   /**
