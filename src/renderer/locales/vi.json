@@ -3399,5 +3399,14 @@
   "Commit from Review": "Commit từ Xem lại",
   "Commit the chosen files, then push and open a pull request.": "Commit các tệp đã chọn, rồi push và mở pull request.",
   "Your own chat style": "Phong cách trò chuyện của bạn",
-  "Rewrite how ChatGPT talks and writes in new chats.": "Viết lại cách ChatGPT nói và viết trong các cuộc trò chuyện mới."
+  "Rewrite how ChatGPT talks and writes in new chats.": "Viết lại cách ChatGPT nói và viết trong các cuộc trò chuyện mới.",
+  "A reviewer for Goal steps, ages in days and months, and sending that recovers by itself.": "Trình đánh giá cho các bước Goal, thời gian tính bằng ngày và tháng, và việc gửi tự phục hồi.",
+  "Goal step reviewer": "Đánh giá từng bước Goal",
+  "A second chat checks each Goal step's file changes before the next one.": "Một cuộc trò chuyện thứ hai kiểm tra thay đổi tệp của từng bước Goal trước bước tiếp theo.",
+  "Ages that read naturally": "Thời gian dễ đọc",
+  "Days, weeks, months and years instead of hundreds of hours.": "Ngày, tuần, tháng và năm thay vì hàng trăm giờ.",
+  "Back online, back to work": "Có mạng lại, làm việc tiếp",
+  "A chat tab that opened while you were offline recovers by itself.": "Thẻ trò chuyện được mở khi mất mạng sẽ tự phục hồi.",
+  "Messages that get through": "Tin nhắn vẫn được gửi",
+  "Also when you close the chat's tab while sending, or ChatGPT changes its model menu.": "Kể cả khi bạn đóng thẻ trò chuyện lúc đang gửi hoặc ChatGPT đổi menu mô hình."
 }

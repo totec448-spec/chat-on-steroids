@@ -3466,5 +3466,14 @@
   "Commit from Review": "İnceleme'den commit",
   "Commit the chosen files, then push and open a pull request.": "Seçtiğiniz dosyaları commit edin, ardından push edip bir pull request açın.",
   "Your own chat style": "Kendi sohbet tarzınız",
-  "Rewrite how ChatGPT talks and writes in new chats.": "ChatGPT'nin yeni sohbetlerde nasıl konuşup yazdığını yeniden yazın."
+  "Rewrite how ChatGPT talks and writes in new chats.": "ChatGPT'nin yeni sohbetlerde nasıl konuşup yazdığını yeniden yazın.",
+  "A reviewer for Goal steps, ages in days and months, and sending that recovers by itself.": "Hedef adımları için bir inceleyici, gün ve ay olarak süreler ve kendiliğinden toparlanan gönderim.",
+  "Goal step reviewer": "Hedef adımı inceleyicisi",
+  "A second chat checks each Goal step's file changes before the next one.": "İkinci bir sohbet, her Hedef adımının dosya değişikliklerini bir sonrakinden önce kontrol eder.",
+  "Ages that read naturally": "Kolay okunan süreler",
+  "Days, weeks, months and years instead of hundreds of hours.": "Yüzlerce saat yerine günler, haftalar, aylar ve yıllar.",
+  "Back online, back to work": "Yeniden çevrimiçi, yeniden işte",
+  "A chat tab that opened while you were offline recovers by itself.": "Çevrimdışıyken açılan bir sohbet sekmesi kendiliğinden toparlanır.",
+  "Messages that get through": "Ulaşan mesajlar",
+  "Also when you close the chat's tab while sending, or ChatGPT changes its model menu.": "Gönderirken sohbet sekmesini kapatsanız ya da ChatGPT model menüsünü değiştirse bile."
 }

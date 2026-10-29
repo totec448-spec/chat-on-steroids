@@ -3600,5 +3600,14 @@
   "Commit from Review": "Коммит из «Проверки»",
   "Commit the chosen files, then push and open a pull request.": "Закоммитьте выбранные файлы, затем отправьте их и откройте pull request.",
   "Your own chat style": "Ваш стиль чата",
-  "Rewrite how ChatGPT talks and writes in new chats.": "Задайте, как ChatGPT говорит и пишет в новых чатах."
+  "Rewrite how ChatGPT talks and writes in new chats.": "Задайте, как ChatGPT говорит и пишет в новых чатах.",
+  "A reviewer for Goal steps, ages in days and months, and sending that recovers by itself.": "Рецензент для шагов «Цели», время в днях и месяцах и отправка, которая восстанавливается сама.",
+  "Goal step reviewer": "Рецензент шагов «Цели»",
+  "A second chat checks each Goal step's file changes before the next one.": "Второй чат проверяет изменения файлов на каждом шаге «Цели» перед следующим.",
+  "Ages that read naturally": "Понятное время",
+  "Days, weeks, months and years instead of hundreds of hours.": "Дни, недели, месяцы и годы вместо сотен часов.",
+  "Back online, back to work": "Снова в сети — снова в работе",
+  "A chat tab that opened while you were offline recovers by itself.": "Вкладка чата, открытая без сети, восстанавливается сама.",
+  "Messages that get through": "Сообщения доходят",
+  "Also when you close the chat's tab while sending, or ChatGPT changes its model menu.": "Даже если закрыть вкладку чата во время отправки или ChatGPT изменит меню моделей."
 }

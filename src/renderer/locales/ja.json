@@ -3399,5 +3399,14 @@
   "Commit from Review": "レビューからコミット",
   "Commit the chosen files, then push and open a pull request.": "選んだファイルをコミットし、プッシュしてプルリクエストを開けます。",
   "Your own chat style": "自分のチャットスタイル",
-  "Rewrite how ChatGPT talks and writes in new chats.": "新しいチャットで ChatGPT がどう話し、どう書くかを書き換えられます。"
+  "Rewrite how ChatGPT talks and writes in new chats.": "新しいチャットで ChatGPT がどう話し、どう書くかを書き換えられます。",
+  "A reviewer for Goal steps, ages in days and months, and sending that recovers by itself.": "ゴールの各ステップのレビュー、日・月単位の時間表示、そして自動で回復する送信。",
+  "Goal step reviewer": "ゴールのステップレビュー",
+  "A second chat checks each Goal step's file changes before the next one.": "次のステップの前に、別のチャットが各ゴールステップのファイル変更を確認します。",
+  "Ages that read naturally": "読みやすい時間表示",
+  "Days, weeks, months and years instead of hundreds of hours.": "何百時間ではなく、日・週・月・年で表示します。",
+  "Back online, back to work": "オンラインに戻れば再開",
+  "A chat tab that opened while you were offline recovers by itself.": "オフライン中に開いたチャットタブが自動で回復します。",
+  "Messages that get through": "メッセージが確実に届く",
+  "Also when you close the chat's tab while sending, or ChatGPT changes its model menu.": "送信中にチャットのタブを閉じても、ChatGPT がモデルメニューを変えても届きます。"
 }
