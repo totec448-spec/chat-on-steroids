@@ -3016,6 +3016,8 @@ function paintGoalProgress(): void {
   if (entry) { phase = entry.state; error = entry.error ?? undefined; }
   if (draft && (!off || finishDraft) && (finishDraft || !['saving', 'failed'].includes(phase))) { phase = draft.stage; text = draft.text; error = draft.error ?? undefined; }
   else if (wait && !['saving', 'failed'].includes(phase)) { phase = 'settling'; text = ''; error = undefined; }
+  // The next step's draft waits for the Goal step reviewer before it asks the helper (#1832).
+  if (phase === 'sending' && wait?.reason === 'reviewer') { phase = 'settling'; text = ''; error = undefined; }
   const labels: Record<string, string> = { saving: t("Saving task…"), saved: t("Task saved · waiting for the next completed answer"),
     preparing: t("Preparing the opening message…"), generating: t("Generating the opening message…"), ready: t("Message ready · awaiting ChatGPT delivery"),
     sending: t("Preparing a continuation…"), answering: t("Generating a continuation…"), queued: t("Opening message queued"),
@@ -3025,7 +3027,7 @@ function paintGoalProgress(): void {
   labels.retrying = t("Provider busy · retry {0}{1}", [progress?.attempt ?? '', progress?.retryAt ? t(' at {0}', [new Date(progress.retryAt).toLocaleTimeString(currentLanguage())]) : '']);
   const mode = $<HTMLSelectElement>('chatAutomation').value === 'loop' ? t('Loop') : t('Goal');
   labels.settling = `${mode} · ${wait?.reason === 'native-busy' ? t('ChatGPT resumed work · waiting before retry') : wait?.reason === 'silence' ? t('Waiting before recovery reload') : wait?.reason === 'quiet' ? t('Waiting for tool inactivity') :
-    wait?.reason === 'workers' ? t('Waiting for this chat’s sub-agents') : wait?.reason === 'tools' ? t('Waiting for running tools') : wait?.reason === 'listening' ? t('Waiting for activity after recovery') : wait?.reason === 'closed' ? t('Paused until this chat is open in the browser') : t('Answer settling')}`;
+    wait?.reason === 'reviewer' ? t('Waiting for the reviewer') : wait?.reason === 'workers' ? t('Waiting for this chat’s sub-agents') : wait?.reason === 'tools' ? t('Waiting for running tools') : wait?.reason === 'listening' ? t('Waiting for activity after recovery') : wait?.reason === 'closed' ? t('Paused until this chat is open in the browser') : t('Answer settling')}`;
   // The dock already describes this same silence/listening deadline. Keep the
   // Loop/Goal task controls, but do not present its shared wait as another action.
   const sharedRecoveryWait = phase === 'settling' && wait?.until !== undefined &&
@@ -3049,7 +3051,11 @@ function paintGoalProgress(): void {
   }
   if (phase === 'settling' && wait?.until) {
     const seconds = Math.max(0, Math.ceil((wait.until - Date.now()) / 1000));
-    const timer = el('span', 'recovery-countdown', seconds ? t('Check in {0}', [countdownClock(seconds)]) : t('Checking for activity…'));
+    const left = countdownClock(seconds);
+    // The reviewer's deadline is when Goal goes on without the review (#1832), not another check.
+    const timer = el('span', 'recovery-countdown', wait.reason === 'reviewer'
+      ? (seconds ? t('Continues without the review in {0}', [left]) : t('Continuing without the review…'))
+      : seconds ? t('Check in {0}', [left]) : t('Checking for activity…'));
     timer.setAttribute('role', 'timer'); timer.setAttribute('aria-live', 'off'); row.append(timer);
   }
 }
@@ -7813,6 +7819,7 @@ export function chatSettingsPatch(current: Config): {
       loopBackend: $<HTMLSelectElement>('loopBackend').value as Config['goal']['loopBackend'],
       helperModel: $<HTMLSelectElement>('helperModel').value || current.goal.helperModel || DEFAULT_HELPER_CHAT_MODEL,
       helperReasoning: ($<HTMLSelectElement>('helperReasoning').value || current.goal.helperReasoning || 'high') as Config['goal']['helperReasoning'],
+      reviewerModel: $<HTMLSelectElement>('goalReviewer').value,
       provider: {
         kind: ($<HTMLSelectElement>('goalProvider').value || current.goal.provider?.kind || 'openrouter') as Config['goal']['provider']['kind'],
         baseUrl: $<HTMLInputElement>('goalBaseUrl').value
@@ -8244,6 +8251,7 @@ const CHAT_INPUTS = [
   'goalBackend',
   'loopBackend',
   'helperModel', 'helperReasoning',
+  'goalReviewer',
   'autoCompact',
   'autoCompactTokens',
   'maWorkers', 'globalMaWorkers',
@@ -8402,6 +8410,8 @@ export function chatApply(state: AppState, previous?: Config): void {
   // again matched no option and showed those settings blank (2.1.31 release check).
   applyChatValue($<HTMLSelectElement>('goalBackend'), config.goal.backend ?? 'chatgpt', previous?.goal.backend);
   applyChatValue($<HTMLSelectElement>('loopBackend'), config.goal.loopBackend ?? 'chatgpt', previous?.goal.loopBackend);
+  // The step reviewer is a worker chat (#1832): chosen while Sub-agents are off, it says so and offers them.
+  $('goalReviewerWorkersRow').hidden = !config.goal.reviewerModel || config.multiAgent.enabled;
   applyGoal(state, previous);
 
   // Extension bridge. Connecting is automatic, so this reports rather than asks.
@@ -9957,6 +9967,19 @@ export function initChat(next: Deps): void {
   }
 
   wireGoal(() => deps.save());
+  // Only the person's press turns Sub-agents on for the reviewer, through Home's own switch and save.
+  $('goalReviewerWorkers').addEventListener('click', async () => {
+    const workers = $<HTMLInputElement>('homeMaEnabled');
+    if (workers.checked) return;
+    workers.checked = true;
+    // The saved state hides this row with the focused button in it; the reviewer's choice keeps the keyboard's place.
+    const button = $<HTMLButtonElement>('goalReviewerWorkers');
+    if (document.activeElement === button) $<HTMLSelectElement>('goalReviewer').focus();
+    if (await deps.save()) return;
+    // Refused (an invalid field elsewhere): Sub-agents stay off, and the switch must not say otherwise.
+    workers.checked = false;
+    if (document.activeElement === $('goalReviewer') && !$('goalReviewerWorkersRow').hidden) button.focus();
+  });
 
   $('bridgeUnpair').addEventListener('click', async () => {
     const state = await run(api.unpairExtension());

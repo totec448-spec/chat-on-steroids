@@ -3533,5 +3533,15 @@
   "Commit from Review": "Commit depuis Révision",
   "Commit the chosen files, then push and open a pull request.": "Committez les fichiers choisis, puis poussez et ouvrez une pull request.",
   "Your own chat style": "Votre propre style de chat",
-  "Rewrite how ChatGPT talks and writes in new chats.": "Réécrivez la façon dont ChatGPT parle et écrit dans les nouveaux chats."
+  "Rewrite how ChatGPT talks and writes in new chats.": "Réécrivez la façon dont ChatGPT parle et écrit dans les nouveaux chats.",
+  "Review each Goal step's changes": "Vérifier les modifications de chaque étape de Goal",
+  "A reviewer worker checks each Goal step's edits; its findings go into the next step. Uses more of your ChatGPT usage and covers only edits made with the edit tools.": "Un worker relecteur vérifie les modifications de chaque étape de Goal ; ses constats vont dans l’étape suivante. Consomme davantage de votre usage ChatGPT et ne couvre que les modifications faites avec les outils d’édition.",
+  "Same model as the Goal chat": "Le même modèle que le chat Goal",
+  "Sub-agents are off": "Les sous-agents sont désactivés",
+  "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "Le relecteur fonctionne comme un chat worker, il a donc besoin des sous-agents. Rien n'est vérifié tant qu'ils ne sont pas activés.",
+  "Turn on Sub-agents": "Activer les sous-agents",
+  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "Le relecteur a trouvé un problème que Goal ne peut pas dépasser sans risque. Ouvrez le chat pour le vérifier.",
+  "Waiting for the reviewer": "En attente du relecteur",
+  "Continues without the review in {0}": "Continue sans la relecture dans {0}",
+  "Continuing without the review…": "Poursuite sans la relecture…"
 }

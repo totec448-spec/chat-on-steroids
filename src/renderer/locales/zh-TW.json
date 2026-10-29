@@ -3399,5 +3399,15 @@
   "Commit from Review": "從檢閱提交",
   "Commit the chosen files, then push and open a pull request.": "提交所選檔案，然後推送並建立拉取要求。",
   "Your own chat style": "你自己的聊天風格",
-  "Rewrite how ChatGPT talks and writes in new chats.": "改寫 ChatGPT 在新聊天中說話和寫作的方式。"
+  "Rewrite how ChatGPT talks and writes in new chats.": "改寫 ChatGPT 在新聊天中說話和寫作的方式。",
+  "Review each Goal step's changes": "檢查每個目標步驟的變更",
+  "A reviewer worker checks each Goal step's edits; its findings go into the next step. Uses more of your ChatGPT usage and covers only edits made with the edit tools.": "一個審查子代理會檢查每個目標步驟的變更，發現的問題會寫進下一步。會消耗更多 ChatGPT 用量，且只審查透過編輯工具做的變更。",
+  "Same model as the Goal chat": "與目標聊天相同的模型",
+  "Sub-agents are off": "子代理已關閉",
+  "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "審查者以子代理聊天執行，因此需要子代理。開啟之前不會審查任何內容。",
+  "Turn on Sub-agents": "開啟子代理",
+  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "審查者發現了一個目標無法安全略過的問題。打開聊天查看。",
+  "Waiting for the reviewer": "正在等待審查者",
+  "Continues without the review in {0}": "{0} 後不等審查繼續",
+  "Continuing without the review…": "正在不等審查繼續…"
 }

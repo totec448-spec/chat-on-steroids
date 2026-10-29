@@ -4857,6 +4857,66 @@ it('saves and restores Review Goal completion, off by default', async () => {
   expect((third.window.document.getElementById('finishHoldOnStop') as HTMLInputElement).checked).toBe(false);
 });
 
+// #1832: the Goal step reviewer is chosen in Settings, off by default, and needs Sub-agents.
+it('saves the Goal step reviewer choice and offers to turn on Sub-agents, never by itself', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const reviewer = w.document.getElementById('goalReviewer') as HTMLSelectElement;
+  const workersRow = w.document.getElementById('goalReviewerWorkersRow') as HTMLElement;
+  const workers = w.document.getElementById('homeMaEnabled') as HTMLInputElement;
+  expect(reviewer.value).toBe('');
+  // Off asks for nothing; with workers off the row stays hidden.
+  expect(workersRow.hidden).toBe(true);
+  reviewer.value = 'same';
+  reviewer.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.goal.reviewerModel).toBe('same');
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, goal: { ...mounted.state.config.goal, reviewerModel: 'same' } } });
+  await settle();
+  expect(workersRow.hidden).toBe(false);
+  expect(workers.checked).toBe(false);
+  // Workers go on only from the person's own press.
+  const saves = mounted.calls.length;
+  (w.document.getElementById('goalReviewerWorkers') as HTMLButtonElement).click();
+  await settle();
+  expect(mounted.calls).toHaveLength(saves + 1);
+  expect(mounted.calls.at(-1)?.multiAgent.enabled).toBe(true);
+  expect(mounted.calls.at(-1)?.goal.reviewerModel).toBe('same');
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, multiAgent: { ...mounted.state.config.multiAgent, enabled: true }, goal: { ...mounted.state.config.goal, reviewerModel: 'same' } } });
+  await settle();
+  expect(workersRow.hidden).toBe(true);
+});
+
+// CodeRabbit on #1879: the press hides its own row, and a refused save must not leave Sub-agents shown on.
+it('keeps the keyboard on the reviewer choice when its Sub-agents row hides, and unticks Sub-agents when the save is refused', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const reviewer = w.document.getElementById('goalReviewer') as HTMLSelectElement;
+  const button = w.document.getElementById('goalReviewerWorkers') as HTMLButtonElement;
+  const workers = w.document.getElementById('homeMaEnabled') as HTMLInputElement;
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, goal: { ...mounted.state.config.goal, reviewerModel: 'same' } } });
+  await settle();
+  // An invalid command rule refuses every save until it is fixed.
+  const rules = w.document.getElementById('commandAllowlistRules') as HTMLTextAreaElement;
+  rules.value = 'git status; whoami';
+  const saves = mounted.calls.length;
+  button.focus();
+  button.click();
+  await settle();
+  expect(mounted.calls).toHaveLength(saves);
+  expect(workers.checked).toBe(false);
+  expect(w.document.activeElement).toBe(button);
+  rules.value = '';
+  button.click();
+  await settle();
+  expect(mounted.calls.at(-1)?.multiAgent.enabled).toBe(true);
+  expect(w.document.activeElement).toBe(reviewer);
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, multiAgent: { ...mounted.state.config.multiAgent, enabled: true }, goal: { ...mounted.state.config.goal, reviewerModel: 'same' } } });
+  await settle();
+  expect((w.document.getElementById('goalReviewerWorkersRow') as HTMLElement).hidden).toBe(true);
+  expect(w.document.activeElement).toBe(reviewer);
+});
+
 // #1402: long turns continue in a fresh one, every 30 minutes unless changed or off.
 it('starts a fresh turn after 30 minutes unless changed, and saves Off', async () => {
   const mounted = await mountChat({});
