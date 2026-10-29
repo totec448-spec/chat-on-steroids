@@ -267,4 +267,24 @@ it('never covers the buttons under a short answer', async () => {
   // Nothing in the way: under the selection's end, as before.
   at(240, 270, 300);
   expect(await place(12)).toEqual(['260px', '126px']);
+  // Blocked below and above: no button rather than one over a control (CodeRabbit on #1909).
+  const above = document.createElement('button');
+  above.getBoundingClientRect = () => ({ top: 60, bottom: 98, left: 40, right: 790, width: 750, height: 38 }) as DOMRect;
+  document.querySelector('.said')!.append(above);
+  at(240, 790);
+  await place(13);
+  expect(button().hidden).toBe(true);
+});
+
+it('keeps the spot above the last line when there is no room below and nothing in the way', async () => {
+  const { initQuoteSelection } = await import('../src/renderer/quote-selection.js');
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetWidth', { configurable: true, get: () => 80 });
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetHeight', { configurable: true, get: () => 28 });
+  dom.window.Range.prototype.getClientRects = () => [{ top: 100, bottom: 120, left: 40, right: 300, width: 260, height: 20 },
+    { top: 560, bottom: 580, left: 40, right: 300, width: 260, height: 20 }] as unknown as DOMRectList;
+  initQuoteSelection({ timeline: document.getElementById('timeline')!, input: document.getElementById('chatInput') as HTMLTextAreaElement });
+  const [first] = document.querySelectorAll('.msg p');
+  select(first!.firstChild!, 4, first!.firstChild!, 10);
+  await frame();
+  expect([button().hidden, button().style.top]).toEqual([false, '526px']);
 });
