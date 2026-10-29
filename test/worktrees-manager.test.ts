@@ -135,6 +135,50 @@ describe('automatic worker Git worktrees', () => {
     expect(await fs.readFile(path.join(repo, 'file.txt'), 'utf8')).toBe('user source edit\n');
   });
 
+  // #1925: a linked checkout under one approved root whose Git common dir sits under another approved root.
+  it('allocates and restores from a linked checkout whose repository metadata is under another approved root', async () => {
+    const checkoutRoot = path.join(temp, 'checkouts');
+    const linked = path.join(checkoutRoot, 'linked');
+    await fs.mkdir(checkoutRoot, { recursive: true });
+    git(repo, ['worktree', 'add', '-q', '-b', 'linked', linked]);
+    roots = [{ name: 'checkouts', path: checkoutRoot }, { name: 'approved', path: approved }];
+    const allocateLinked = () => allocWorkerWorkspace({
+      runId: RUN_ID,
+      agentId: 'worker-1',
+      primeWorkspace: { real: linked, virtual: '/checkouts/linked' },
+      approvedRoots: roots
+    });
+
+    const lease = await allocateLinked();
+    expect(lease.approvedRoot).toEqual({ name: 'checkouts', path: checkoutRoot });
+    expect(lease.workspace.virtual).toContain('/checkouts/.chat-on-steroids-worktrees/');
+    expect(await fs.readFile(path.join(lease.workspace.real, 'file.txt'), 'utf8')).toBe('base\n');
+    await expect(validateWorkerWorkspaceLease(lease, roots)).resolves.toMatchObject({ ownershipToken: lease.ownershipToken });
+
+    resetWorkerWorktreeRegistryForTests();
+    const restored = await restoreManagedWorktrees(roots, ACCEPTED);
+    expect(restored.rejected).toEqual([]);
+    expect(restored.restored.map(row => row.ownershipToken)).toEqual([lease.ownershipToken]);
+
+    // Without the metadata root's approval, restart and new allocations still fail closed.
+    const checkoutOnly = [roots[0]!];
+    resetWorkerWorktreeRegistryForTests();
+    const refused = await restoreManagedWorktrees(checkoutOnly, ACCEPTED);
+    expect(refused.restored).toEqual([]);
+    expect(refused.rejected).toHaveLength(1);
+    await expect(allocWorkerWorkspace({
+      runId: RUN_ID,
+      agentId: 'worker-2',
+      primeWorkspace: { real: linked, virtual: '/checkouts/linked' },
+      approvedRoots: checkoutOnly
+    })).rejects.toMatchObject({ code: 'WORKTREE_METADATA_OUTSIDE_ROOT' });
+
+    resetWorkerWorktreeRegistryForTests();
+    const back = await restoreManagedWorktrees(roots, ACCEPTED);
+    expect(back.restored).toHaveLength(1);
+    await finalizeWorkerWorkspace({ lease: back.restored[0]!, reason: 'cancelled', discardChanges: true, branch: { mode: 'discard' } });
+  });
+
   it('accepts the originally approved filesystem alias across validation, restart and cleanup', async () => {
     // macOS tmpdirs may be spelled /var/... but have /private/var/... as their
     // realpath. Use an explicit symlink/junction to exercise that distinction

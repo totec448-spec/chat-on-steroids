@@ -41,6 +41,68 @@ describe('scrubbing a diagnostics report', () => {
     expect(out).toMatch(/approved folder \/<x:[0-9a-f]{4}>; chat "<x:[0-9a-f]{4}>" opened/);
   });
 
+  // #1922: a project named "Work" turned every "worker" and "worktree" in the log into "<x:…>er", 9,524 times.
+  it('replaces a known value only as a whole word, never inside another word', () => {
+    const out = scrubText('worker-2 started in Work; worktree for work ready; Homework and work-items stay', { home: '/Users/jane', known: ['Work'] });
+    expect(out).toMatch(/^worker-2 started in <x:[0-9a-f]{4}>; worktree for <x:[0-9a-f]{4}> ready; Homework and <x:[0-9a-f]{4}>-items stay$/);
+    // Names of other scripts and with punctuation inside still match whole.
+    expect(scrubText('chat "Q3 – Plan" and Q3 – Plans', { home: '/Users/jane', known: ['Q3 – Plan'] })).toMatch(/^chat "<x:[0-9a-f]{4}>" and Q3 – Plans$/);
+    expect(scrubText('Проект готов, Проекты нет', { home: '/Users/jane', known: ['Проект'] })).toMatch(/^<x:[0-9a-f]{4}> готов, Проекты нет$/);
+    // A vowel sign (a Unicode mark) belongs to the word: "कामों" is not "काम" (CodeRabbit on #1923).
+    expect(scrubText('काम पूरा, कामों बाकी', { home: '/Users/jane', known: ['काम'] })).toMatch(/^<x:[0-9a-f]{4}> पूरा, कामों बाकी$/);
+  });
+
+  // CodeRabbit on #1923: a value that starts or ends with punctuation needs no word edge on that side.
+  it('replaces a known value that starts or ends with punctuation, also next to letters', () => {
+    expect(scrubText('built C++17 and v2(draft)final', { home: '/Users/jane', known: ['C++', '(draft)'] }))
+      .toMatch(/^built <x:[0-9a-f]{4}>17 and v2<x:[0-9a-f]{4}>final$/);
+    // A letter edge still protects other words: "Cats" is not "Cat".
+    expect(scrubText('Cats and Cat', { home: '/Users/jane', known: ['Cat'] })).toMatch(/^Cats and <x:[0-9a-f]{4}>$/);
+  });
+
+  // CodeRabbit on #1923: the longest known value wins wherever it fits, whatever characters it starts or ends with.
+  it('replaces the longest overlapping known value whole', () => {
+    const out = scrubText('owner Alice!Smith, Alice! and Alice Smithy', { home: '/Users/jane', known: ['Very Long Private Name!', 'Alice!Smith', 'Alice!', 'Alice Smith', 'Alice'] });
+    expect(out).toMatch(/^owner (<x:[0-9a-f]{4}>), (<x:[0-9a-f]{4}>) and (<x:[0-9a-f]{4}>) Smithy$/);
+    const [, first, second, third] = /^owner (\S+), (\S+) and (\S+)/.exec(out)!;
+    expect(new Set([first, second, third]).size).toBe(3);
+  });
+
+  // CodeRabbit on #1923: a letter outside the Basic Multilingual Plane is one character, not two halves.
+  it('checks word edges by whole characters outside the Basic Multilingual Plane', () => {
+    expect(scrubText('Pre𐐀Test and 𐐀Test, Test𐐀 and Test𐐀Post', { home: '/Users/jane', known: ['𐐀Test', 'Test𐐀'] }))
+      .toMatch(/^Pre𐐀Test and <x:[0-9a-f]{4}>, <x:[0-9a-f]{4}> and Test𐐀Post$/);
+  });
+
+  // A lookbehind on each of hundreds of known values made a 3 MB log take over 30 s (the report looked
+  // stuck); grouped, it takes well under a second. Generous bound for slow runners.
+  it('scrubs a large log with hundreds of known values quickly', () => {
+    const known = Array.from({ length: 300 }, (_, i) => `Chat title number ${i} about a project`).concat(['Work', 'C++', '(draft)']);
+    const line = 'info  [worker-3] tool exec_command ok in 12 ms; read src/app.ts lines 1–40; Work went on\n';
+    const log = line.repeat(Math.ceil(1_000_000 / line.length));
+    const start = performance.now();
+    const out = scrubText(log, { home: '/Users/jane', known });
+    expect(performance.now() - start).toBeLessThan(5_000);
+    expect(out).toContain('[worker-3]');
+    expect(out).not.toMatch(/\bWork went/);
+  });
+
+  // CodeRabbit on #1923: digits are not part of a name, so a name run together with a number is still replaced.
+  it('replaces a known value run together with digits on either side', () => {
+    expect(scrubText('saved Alice2026, 2026Alice and v2Alice3; Alices stays', { home: '/Users/jane', known: ['Alice'] }))
+      .toMatch(/^saved <x:[0-9a-f]{4}>2026, 2026<x:[0-9a-f]{4}> and v2<x:[0-9a-f]{4}>3; Alices stays$/);
+    // A number never matches inside a longer number: "Plan2" is not in "Plan25", "500" not in "15000ms".
+    expect(scrubText('Plan2 and Plan25', { home: '/Users/jane', known: ['Plan2'] })).toMatch(/^<x:[0-9a-f]{4}> and Plan25$/);
+    expect(scrubText('took 15000ms, room 500 and 500ms', { home: '/Users/jane', known: ['500'] }))
+      .toMatch(/^took 15000ms, room <x:[0-9a-f]{4}> and <x:[0-9a-f]{4}>ms$/);
+  });
+
+  // CodeRabbit on #1923: an underscore joins names in identifiers; the known value inside goes either way.
+  it('replaces a known value joined to an identifier by an underscore', () => {
+    expect(scrubText('profile Acme Budget_2026 and laptop_username', { home: '/Users/jane', known: ['Acme Budget', 'username'] }))
+      .toMatch(/^profile <x:[0-9a-f]{4}>_2026 and laptop_<x:[0-9a-f]{4}>$/);
+  });
+
   it('removes emails, secrets, private hosts and addresses', () => {
     const out = scrubText('user jane.doe@example.com sent Bearer abc.def.ghi with OPENROUTER_API_KEY=sk-or-123456789 to https://homelab.lan:8080/api from 192.168.1.20', mac);
     expect(out).not.toMatch(/jane|example\.com|abc\.def|sk-or|homelab|192\.168/);

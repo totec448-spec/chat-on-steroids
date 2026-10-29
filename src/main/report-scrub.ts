@@ -99,5 +99,19 @@ export function scrubText(text: string, context: ScrubContext): string {
   // and titles. Longest first, in one pass: megabytes of log and hundreds of titles stay quick.
   const known = [...new Set(context.known.map(value => value.trim()).filter(value => value.length >= 3))]
     .sort((a, b) => b.length - a.length);
-  return known.length ? out.replace(new RegExp(known.map(escapeRegExp).join('|'), 'gi'), match => tag('x', match.toLowerCase())) : out;
+  // Whole words only, in any script: a project named "Work" must not turn every "worker" into "<x:…>er" (#1922).
+  // A combining mark belongs to its word ("कामों"); an underscore joins names in identifiers, so the known
+  // value next to one is still replaced ("Budget_2026", "laptop_username").
+  // A known value never starts or ends between two letters (a mark counts as a letter) or between two
+  // digits, so the edge matters only on a side where the value itself starts or ends with one: "C++" in
+  // "C++17" and "(draft)" in "v2(draft)final" are still replaced. A letter and a digit separate, so a name
+  // run together with a number ("Alice2026") is still replaced, while "500" stays inside "15000ms"
+  // (CodeRabbit on #1923). One alternation, longest first: where
+  // a longer value fails its edge, the regex falls back to the next one at the same place ("Alice" in
+  // "Alice Smithy" beside "Alice Smith"), and a value never loses its tail to a shorter one. The flag `u`
+  // reads letters outside the Basic Multilingual Plane as one character. Only the two edge checks, not
+  // one per value: a lookbehind on every value of hundreds took a 3 MB log from 60 ms to over 30 s.
+  const edge = '(?!(?<=[\\p{L}\\p{M}])[\\p{L}\\p{M}]|(?<=\\p{N})\\p{N})';
+  const pattern = `${edge}(?:${known.map(escapeRegExp).join('|')})${edge}`;
+  return known.length ? out.replace(new RegExp(pattern, 'giu'), match => tag('x', match.toLowerCase())) : out;
 }
