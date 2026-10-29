@@ -454,7 +454,7 @@ async function removeProjectFromSidebar(id: string): Promise<void> {
         if (images) imageDrafts.set(draftKey(), images);
         else imageDrafts.delete(draftKey());
         imageDrafts.delete(oldKey);
-        ui($<HTMLTextAreaElement>('chatInput'), 'placeholder', () => t('Ask anything…'));
+        setComposerPlaceholder(() => t('Ask anything…'));
       } else selectedProjectId = null;
     }
     paintSessions(); void refreshInputQueue();
@@ -490,6 +490,17 @@ const pinnable = (entry: SessionSummary): boolean => !!entry.conversationId && e
 const pinnedChat = (entry: SessionSummary): boolean => pinnable(entry) && sidebarPins?.has(entry.id) === true;
 let sidebarCompletion: ReturnType<typeof createSidebarCompletionState> | undefined;
 function draftKey(): string { return selectedId ?? (selectedProjectId ? `project:${selectedProjectId}` : 'new'); }
+/**
+ * The composer's placeholder has several owners (a project's new chat, Plan mode, a chat). Each sets
+ * it here; while files are dragged over the window the drop hint stands in for it, and the drag's
+ * end shows the current owner's text again, never one saved before the drag (#1884, CodeRabbit).
+ */
+let fileDragOver = false;
+let composerPlaceholder: () => string = () => t('Ask anything…');
+function setComposerPlaceholder(read: () => string): void {
+  composerPlaceholder = read;
+  ui($<HTMLTextAreaElement>('chatInput'), 'placeholder', () => fileDragOver ? t('Drop to attach, up to 20 files') : read());
+}
 let selectionGeneration = 0;
 // Async file import belongs to one visible composer draft, not just to a session key.
 // Replacing that draft retires in-flight imports even when navigation returns to the
@@ -3224,7 +3235,7 @@ function paintTaskPlan(): void {
   const plan = taskPlans.get(draftKey());
   const preview = $('taskPlanPreview'); preview.replaceChildren();
   preview.hidden = !plan || (!plan.requestId && !plan.stages && !plan.error);
-  ui($<HTMLTextAreaElement>('chatInput'), 'placeholder', () => plan && !plan.text ? t("Describe the task to turn into a plan…") : t("Ask anything…"));
+  setComposerPlaceholder(() => plan && !plan.text ? t("Describe the task to turn into a plan…") : t("Ask anything…"));
   if (plan?.stages) paintPreparedPlan();
   else if (plan?.error) {
     const failure = plan.error;
@@ -9178,7 +9189,7 @@ function selectSession(id: string): void {
   if (parent) expandedWorkers.add(parent);
   selectedProjectId = projectGroup(parent ? sessions.find(row => row.id === parent)?.projectId : selected?.projectId);
   if (selectedProjectId) expandedProjects.add(selectedProjectId);
-  ui($<HTMLTextAreaElement>('chatInput'), 'placeholder', () => t("Ask anything…"));
+  setComposerPlaceholder(() => t("Ask anything…"));
   restoreDraft();
   if (ownerChanged) {
     // Retire the prior owner now; retain only its inert painted transcript until the
@@ -9227,7 +9238,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
   if (!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
     $('composer').animate?.([{ opacity: 0.45 }, { opacity: 1 }], { duration: 150, easing: 'ease-out' });
   }
-  ui($<HTMLTextAreaElement>('chatInput'), 'placeholder', () => projectId ? t("Message in {0}…", [projects.find(project => project.id === projectId)?.name ?? 'project']) : t("Ask anything…"));
+  setComposerPlaceholder(() => projectId ? t("Message in {0}…", [projects.find(project => project.id === projectId)?.name ?? 'project']) : t("Ask anything…"));
   paintBranchNotices();
   $<HTMLTextAreaElement>('chatInput').focus();
 }
@@ -9557,11 +9568,29 @@ export function initChat(next: Deps): void {
     if (files.length + (imageDrafts.get(owner.key)?.length ?? 0) > 20) { toast(t('Attach up to 20 files per message')); return; }
     appendImages(owner, await run(api.dropFiles(files)));
   });
+  // #1884 (Haz): files dragged over the window go to the message being written, so the composer says
+  // so while they are over it: the existing composer outlined, and its own placeholder as the one-line
+  // hint (no overlay, nothing to collide with the Plan row above). The Folders card keeps its own drops.
+  // Leaving the window, dropping and ending the drag end it. dragover repeats about every 350 ms
+  // (±200) while the drag rests, so only a much longer silence ends a drag whose leave was missed.
+  let dropGlow: ReturnType<typeof setTimeout> | undefined;
+  const fileDrop = (on: boolean) => {
+    clearTimeout(dropGlow);
+    if (on) dropGlow = setTimeout(() => fileDrop(false), 1500);
+    $('composer').classList.toggle('is-file-drop', on);
+    if (on === fileDragOver) return;
+    fileDragOver = on;
+    setComposerPlaceholder(composerPlaceholder);
+  };
   window.addEventListener('dragover', event => {
-    if ((event.target as Element | null)?.closest?.('#foldersCard') || !event.dataTransfer?.types?.includes?.('Files')) return;
+    if ((event.target as Element | null)?.closest?.('#foldersCard') || !event.dataTransfer?.types?.includes?.('Files')) { fileDrop(false); return; }
     event.preventDefault(); event.dataTransfer.dropEffect = 'copy';
+    fileDrop(true);
   });
+  window.addEventListener('dragleave', event => { if (!event.relatedTarget) fileDrop(false); });
+  window.addEventListener('dragend', () => fileDrop(false));
   window.addEventListener('drop', async event => {
+    fileDrop(false);
     if ((event.target as Element | null)?.closest?.('#foldersCard') || !event.dataTransfer?.types?.includes?.('Files')) return;
     event.preventDefault();
     const files = Array.from(event.dataTransfer.files), owner = composerDraftOwner();
