@@ -1823,3 +1823,57 @@ it('places each question in ChatGPT\'s message tree, with the versions control a
   thread.memoizedProps.entries = [f.entry];
   expect((await questions()).find(([id]: any) => id === second.userId)?.[1]).toBeUndefined();
 });
+
+// #1905 (2.1.47, Plus with ChatGPT's unified Chat/Work picker): in an existing chat the picker lists every
+// model. One option the reader did not accept ("gpt-6-pro:" with its colon, a lane with an effort it does
+// not know) made the whole picker unreadable, so every send into an existing chat failed "model unconfirmed".
+it('reads the models it understands when ChatGPT lists every model, and skips the ones it does not (#1905)', async () => {
+  const f = fixture();
+  f.versions.splice(0, f.versions.length,
+    { id: 'latest', label: 'GPT-6', selected: true }, { id: '5.6', label: 'GPT-5.6 Sol', selected: false },
+    { id: 'gpt-6-pro:', label: 'Pro', selected: false } as any, { id: 'work:agent', label: 'Agent', selected: false } as any);
+  const lanes: any[] = [
+    { model: 'gpt-6', modelLabel: 'GPT-6', reasoningEffort: 'none', powerSettingIndex: 0, labels: { effort: 'Instant' } },
+    { model: 'gpt-6-thinking', modelLabel: 'GPT-6', reasoningEffort: 'medium', powerSettingIndex: 1, labels: { effort: 'Medium' } },
+    { model: 'gpt-6-thinking', modelLabel: 'GPT-6', reasoningEffort: 'high', powerSettingIndex: 2, labels: { effort: 'High' } },
+    // A lane of a kind the reader has no word for yet.
+    { model: 'gpt-6-work', modelLabel: 'GPT-6 Work', reasoningEffort: 'auto', powerSettingIndex: 3, labels: { effort: 'Auto' } },
+    // More lanes than the old limit of twelve: the account's other models.
+    ...Array.from({ length: 10 }, (_, i) => ({ model: `other-model-${i}`, modelLabel: `Other ${i}`, reasoningEffort: 'high', powerSettingIndex: 4 + i, labels: { effort: 'High' } }))
+  ];
+  f.props.powerSelections = lanes; f.props.selectedLabelCandidate = lanes[2]; f.props.selectedPowerSelection = lanes[2];
+  const { picker } = await f.ask('clf-picker-ask');
+  expect(picker).not.toBeNull();
+  expect(picker.versions.map((v: any) => v.id)).toEqual(['latest', '5.6', 'gpt-6-pro:', 'work:agent']);
+  expect(picker.currentBucket).toBe(2);
+  expect(picker.choices.find((c: any) => c.bucket === 2)).toMatchObject({ id: 'gpt-6-thinking', effort: 'high', available: true });
+  // The lane it cannot name is left out, not guessed.
+  expect(picker.choices.some((c: any) => c.bucket === 3)).toBe(false);
+  // The content side accepts this picker too, so the send can confirm GPT-6 High.
+  expect(await f.api.selectModelSettings('gpt-6-thinking', 'high')).toBe(true);
+});
+
+it('still refuses when the selected model itself cannot be read (#1905)', async () => {
+  const f = fixture();
+  const lanes: any[] = [{ model: 'gpt-6-work', modelLabel: 'GPT-6 Work', reasoningEffort: 'auto', powerSettingIndex: 0, labels: { effort: 'Auto' } }];
+  f.props.powerSelections = lanes; f.props.selectedLabelCandidate = lanes[0]; f.props.selectedPowerSelection = lanes[0];
+  expect((await f.ask('clf-picker-ask')).picker).toBeNull();
+});
+
+// CodeRabbit on #1907: the readers and the content side share one limit; 48 reads, 49 does not.
+it('reads a picker of exactly 48 models or lanes and refuses one of 49 (#1905)', async () => {
+  for (const [count, readable] of [[48, true], [49, false]] as const) {
+    for (const part of ['versions', 'lanes'] as const) {
+      const f = fixture();
+      const versions: any[] = [{ id: 'latest', label: 'GPT-6', selected: true }];
+      const lanes: any[] = [{ model: 'gpt-6-thinking', modelLabel: 'GPT-6', reasoningEffort: 'high', powerSettingIndex: 0, labels: { effort: 'High' } }];
+      while (part === 'versions' && versions.length < count) versions.push({ id: `extra-${versions.length}`, label: `Extra ${versions.length}`, selected: false });
+      while (part === 'lanes' && lanes.length < count) lanes.push({ model: `other-${lanes.length}`, modelLabel: `Other ${lanes.length}`, reasoningEffort: 'high', powerSettingIndex: lanes.length, labels: { effort: 'High' } });
+      f.versions.splice(0, f.versions.length, ...versions);
+      f.props.powerSelections = lanes; f.props.selectedLabelCandidate = lanes[0]; f.props.selectedPowerSelection = lanes[0];
+      const { picker } = await f.ask('clf-picker-ask');
+      expect(picker === null, `${count} ${part}`).toBe(!readable);
+      if (readable) expect(await f.api.selectModelSettings('gpt-6-thinking', 'high'), `${count} ${part}`).toBe(true);
+    }
+  }
+});
