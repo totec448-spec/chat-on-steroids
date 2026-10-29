@@ -162,14 +162,17 @@ it('cancels a review in progress when the Goal stops, and leaves a sleeping revi
 // reviewer to cancel yet; the spawn then went on and left a reviewer working for a stopped Goal.
 it('cancels a reviewer that a stopped Goal started while the stop was being handled', async () => {
   const cancelled: string[] = [];
-  let release!: () => void;
+  let release!: () => void, entered!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
+  const spawning = new Promise<void>(resolve => { entered = resolve; });
   const d = deps({
     cancel: async info => { cancelled.push(info.id); },
-    spawn: async () => { await gate; reviewer = { id: 'worker-3', state: 'invited', result: null, revivable: true, model: null } as unknown as AgentInfo; return 'worker-3'; }
+    spawn: async () => { entered(); await gate; reviewer = { id: 'worker-3', state: 'invited', result: null, revivable: true, model: null } as unknown as AgentInfo; return 'worker-3'; }
   });
   const started = startStepReview(step, d);
-  await vi.waitFor(() => expect(reviewer).toBeNull());
+  // Goal stops while the spawn is under way, before any reviewer exists to cancel.
+  await spawning;
+  expect(reviewer).toBeNull();
   expect(await cancelStepReview('c-goal', d)).toBe(false);
   release();
   expect(await started).toBe('failed');
