@@ -163,6 +163,16 @@ describe('durable user input ownership', () => {
     expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed' });
     expect((await listInputs()).find(entry => entry.id === row.id)).not.toHaveProperty('pickupRetryCount');
   });
+  // 2.1.47 round: a message sent as the person closed the chat's tab expired unclaimed. The page
+  // reports the close a moment late, so the message counted as accepted before the departure.
+  it.each([[1_500, true], [9_000, false]] as const)('a typed message %i ms before the reported close is offered: %s', async (gap, offered) => {
+    binding.model = 'gpt-5.6-sol'; binding.finishEnabled = false;
+    const typed = await enqueueInput(input());
+    openings.set(sessionId, Object.assign({ id: sessionId, conversationId: binding.conversationId, origin: { kind: binding.origin } },
+      { browserRecoveryDismissedAt: now + gap }));
+    now += gap + 500;
+    expect((await pendingBrowserInputs()).some(row => row.id === typed.id)).toBe(offered);
+  });
   it('does not requeue a never-claimed input after Automatic Continue is turned off', async () => {
     binding.model = 'gpt-5.6-sol'; binding.finishEnabled = false;
     const row = await enqueueInput(input());
