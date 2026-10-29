@@ -9799,7 +9799,9 @@ export function initChat(next: Deps): void {
         ...(deps.palette?.actions() ?? [])
       ];
     },
-    settings: query => deps.palette?.settings(query) ?? []
+    settings: query => deps.palette?.settings(query) ?? [],
+    // An action chosen for one chat never runs for the next one (CodeRabbit on #1890).
+    epoch: () => `${selectionGeneration}:${selectedId ?? ''}:${selectedProjectId ?? ''}`
   });
   $('sessionList').addEventListener('click', (event) => {
     const row = (event.target as HTMLElement).closest<HTMLElement>('[data-id]');
