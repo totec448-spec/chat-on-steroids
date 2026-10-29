@@ -352,6 +352,11 @@ export interface GoalSettings {
   includeToolCalls?: boolean;
   helperModel?: string;
   helperReasoning?: ReasoningEffort;
+  /**
+   * Who reviews each Goal step that edited files (#1832): '' is off (the default), 'same' is a
+   * reviewer worker on the Goal chat's own model, anything else a ChatGPT model id for it.
+   */
+  reviewerModel?: string;
   backend?: GoalBackend;
   loopBackend?: 'api' | 'chatgpt';
   enabled: boolean;

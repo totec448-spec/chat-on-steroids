@@ -9396,22 +9396,25 @@
         ...bar(2, true)
       };
     }
-    if (goal.phase === 'settling' || (!draft && goal.wait)) {
+    // A next step's draft that waits for the Goal step reviewer (#1832) says so, with its deadline.
+    if (goal.phase === 'settling' || (!draft && goal.wait) || (draft?.stage === 'sending' && goal.wait?.reason === 'reviewer')) {
       const wait = goal.wait;
       const seconds = wait?.until ? Math.max(0, Math.ceil((wait.until - Date.now()) / 1000)) : 0;
-      const detail = seconds
-        ? t(
-          'content_goal_checking_again',
-          'Checking again in $1',
-          `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
-        )
-        : '';
+      const left = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+      // The reviewer's deadline is when Goal goes on without the review (#1832), not another check.
+      const detail = !seconds
+        ? ''
+        : wait?.reason === 'reviewer'
+          ? t('content_goal_reviewer_deadline', 'Continues without the review in $1', left)
+          : t('content_goal_checking_again', 'Checking again in $1', left);
       const stage = wait?.reason === 'native-busy'
         ? t('content_goal_wait_resumed', 'ChatGPT resumed work · waiting before retry')
         : wait?.reason === 'silence'
           ? t('content_goal_wait_recovery_reload', 'Waiting before recovery reload')
           : wait?.reason === 'quiet'
             ? t('content_goal_wait_tool_inactivity', 'Waiting for tool inactivity')
+            : wait?.reason === 'reviewer'
+              ? t('content_goal_wait_reviewer', 'Waiting for the reviewer')
             : wait?.reason === 'workers'
               ? t('content_goal_wait_workers', 'Waiting for this chat’s sub-agents')
               : wait?.reason === 'tools'

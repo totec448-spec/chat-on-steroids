@@ -3600,5 +3600,15 @@
   "Commit from Review": "Коммит из «Проверки»",
   "Commit the chosen files, then push and open a pull request.": "Закоммитьте выбранные файлы, затем отправьте их и откройте pull request.",
   "Your own chat style": "Ваш стиль чата",
-  "Rewrite how ChatGPT talks and writes in new chats.": "Задайте, как ChatGPT говорит и пишет в новых чатах."
+  "Rewrite how ChatGPT talks and writes in new chats.": "Задайте, как ChatGPT говорит и пишет в новых чатах.",
+  "Review each Goal step's changes": "Проверять изменения каждого шага «Цели»",
+  "A reviewer worker checks each Goal step's edits; its findings go into the next step. Uses more of your ChatGPT usage and covers only edits made with the edit tools.": "Воркер-рецензент проверяет изменения каждого шага Цели; его замечания попадают в следующий шаг. Расходует больше лимита ChatGPT и проверяет только правки, сделанные инструментами редактирования.",
+  "Same model as the Goal chat": "Та же модель, что и в чате «Цели»",
+  "Sub-agents are off": "Субагенты выключены",
+  "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "Рецензент работает как чат воркера, поэтому ему нужны субагенты. Пока они не включены, ничего не проверяется.",
+  "Turn on Sub-agents": "Включить субагентов",
+  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "Рецензент нашёл проблему, мимо которой «Цель» не может безопасно пройти. Откройте чат, чтобы проверить её.",
+  "Waiting for the reviewer": "Ожидание рецензента",
+  "Continues without the review in {0}": "Продолжит без проверки через {0}",
+  "Continuing without the review…": "Продолжение без проверки…"
 }

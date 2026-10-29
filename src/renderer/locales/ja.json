@@ -3399,5 +3399,15 @@
   "Commit from Review": "レビューからコミット",
   "Commit the chosen files, then push and open a pull request.": "選んだファイルをコミットし、プッシュしてプルリクエストを開けます。",
   "Your own chat style": "自分のチャットスタイル",
-  "Rewrite how ChatGPT talks and writes in new chats.": "新しいチャットで ChatGPT がどう話し、どう書くかを書き換えられます。"
+  "Rewrite how ChatGPT talks and writes in new chats.": "新しいチャットで ChatGPT がどう話し、どう書くかを書き換えられます。",
+  "Review each Goal step's changes": "ゴールの各ステップの変更をレビュー",
+  "A reviewer worker checks each Goal step's edits; its findings go into the next step. Uses more of your ChatGPT usage and covers only edits made with the edit tools.": "レビュー担当のワーカーがゴールの各ステップの変更を確認し、指摘は次のステップに含まれます。ChatGPTの使用量が増え、対象は編集ツールによる変更だけです。",
+  "Same model as the Goal chat": "ゴールのチャットと同じモデル",
+  "Sub-agents are off": "サブエージェントがオフです",
+  "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "レビュー担当はワーカーのチャットとして動くため、サブエージェントが必要です。オンになるまで何もレビューされません。",
+  "Turn on Sub-agents": "サブエージェントをオンにする",
+  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "レビュー担当が、ゴールが安全に先へ進めない問題を見つけました。チャットを開いて確認してください。",
+  "Waiting for the reviewer": "レビュー担当を待っています",
+  "Continues without the review in {0}": "{0} 後にレビューなしで続行",
+  "Continuing without the review…": "レビューなしで続行しています…"
 }
