@@ -130,6 +130,7 @@ import {
   type ChatObservation,
   type PageCallEvidence
 } from './session/recorder.js';
+import { noteRequestTraces, type RequestTrace } from './session/request-trace.js';
 import { noticeApprovalWaiting, noticeChatStopped } from './stuck-notice.js';
 import { approvalAnswerFor, approvalCardWaiting, noteApprovalCard, parseApprovalCard, parseApprovalResult, resetApprovalWaits, settleApprovalAnswer, type ApprovalWaitDeps } from './approval-wait.js';
 import { APPROVAL_PROGRESS_PREFIX, APPROVAL_REPAIR_DEFERRED_TEXT, APPROVAL_WAITING_TEXT } from '../shared/approval-wait.js';
@@ -1549,7 +1550,9 @@ const OBSERVATION_KINDS = new Set([
   // requestId -> conversationId correlation registry.
   'tool_evidence',
   // Connector identity proof (connector-identity.ts); never transcript content.
-  'app_sightings'
+  'app_sightings',
+  // Where a chat's stream named request ids (session/request-trace.ts); diagnostics only.
+  'request_trace'
 ]);
 const OUTCOMES = new Set(['completed', 'failed', 'stopped', 'interrupted', 'stalled', 'unknown']);
 const MAX_OBSERVATIONS = 200;
@@ -1669,6 +1672,18 @@ function parseObservations(input: unknown): ChatObservation[] {
           appName: typeof app?.['appName'] === 'string' ? app['appName'].slice(0, 200) : null });
       }
       observation.apps = apps;
+      out.push(observation);
+      continue;
+    }
+    if (kind === 'request_trace') {
+      const traces: RequestTrace[] = [];
+      for (const rawTrace of Array.isArray(item['traces']) ? item['traces'].slice(0, 16) : []) {
+        const trace = rawTrace && typeof rawTrace === 'object' ? rawTrace as Record<string, unknown> : null;
+        const requestId = typeof trace?.['requestId'] === 'string' ? trace['requestId'] : '';
+        const path = typeof trace?.['path'] === 'string' ? trace['path'] : '';
+        if (/^(?:wfr_[a-zA-Z0-9_-]{1,96}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i.test(requestId) && /^[A-Za-z0-9_./:[\]-]{1,200}$/.test(path)) traces.push({ requestId, path });
+      }
+      observation.traces = traces;
       out.push(observation);
       continue;
     }
@@ -3242,7 +3257,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       logInfo(`connector identity learned: ${(['core', 'desktop', 'plugins'] as const).map(s => `${s}=${apps[s][0]?.appId ?? '-'}`).join(' ')}`);
       changed();
     }
-    const observations = parsed.filter(item => item.kind !== 'app_sightings');
+    const traces = parsed.flatMap(item => item.kind === 'request_trace' ? item.traces ?? [] : []);
+    if (traces.length) noteRequestTraces(id, traces);
+    const observations = parsed.filter(item => item.kind !== 'app_sightings' && item.kind !== 'request_trace');
     if (!observations.length && parsed.length) return json(res, 200, { ok: true, stored: 0 }, origin);
     observationWritesInFlight += 1;
     let committed: { sessionId: string | null; stored: number; wake: boolean } | undefined;

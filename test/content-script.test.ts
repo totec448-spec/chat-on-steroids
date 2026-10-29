@@ -19624,6 +19624,23 @@ describe('one live isolated-world recorder per document', () => {
     expect(emitted(live.sent, 'app_sightings').map(row => row.event.apps)).toEqual([[sighting]]);
   });
 
+  it('passes on where this chat\'s stream named a request id, once per id and only well formed (#1752)', async () => {
+    live = await harness();
+    await settle();
+    const chat = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+    const trace = { requestId: '11111111-2222-4333-8444-555555555555', path: '/message:v.metadata.request_id' };
+    const publish = (conversationId: string, traces: unknown[], origin = 'https://chatgpt.com') => live!.window.dispatchEvent(new live!.window.MessageEvent('message', {
+      source: live!.window as unknown as Window, origin, data: { type: 'cos-request-trace', conversationId, traces }
+    }));
+    publish(chat, [trace]); await settle();
+    publish(chat, [trace]); await settle();
+    publish('bbbbbbbb-cccc-4ddd-8eee-ffffffffffff', [{ ...trace, requestId: '22222222-2222-4333-8444-555555555555' }]); await settle();
+    publish(chat, [{ requestId: '33333333-2222-4333-8444-555555555555', path: 'a path with spaces' }, { requestId: 'not-an-id', path: 'v.request_id' }]); await settle();
+    publish(chat, [{ ...trace, requestId: '44444444-2222-4333-8444-555555555555' }], 'https://evil.example'); await settle();
+    await settle(); await live.hook.flush(); await settle();
+    expect(emitted(live.sent, 'request_trace').map(row => row.event.traces)).toEqual([[trace]]);
+  });
+
   it('reports streaming and recorder busy while an approval card hides Stop', async () => {
     live = await harness();
     const card = live.document.createElement('div');

@@ -12910,6 +12910,26 @@
     for (const sighting of fresh) sightingsReported.add(sighting.requestId);
     emit({ kind: 'app_sightings', apps: fresh });
   });
+  // #1752 diagnostics: request ids this chat's stream named in fields attribution does not trust,
+  // with the field's path, so the app's log says where an id it could not place did appear.
+  const requestTracesReported = new Set();
+  window.addEventListener('message', (event) => {
+    if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-request-trace') return;
+    if (temporaryPlannerPage()) return;
+    const claimed = typeof event.data.conversationId === 'string' ? event.data.conversationId : '';
+    if (!claimed || CLF_DOM.conversationId() !== claimed) return;
+    const traces = [];
+    for (const entry of (Array.isArray(event.data.traces) ? event.data.traces : []).slice(0, 16)) {
+      const requestId = cap(entry?.requestId, 100), path = cap(entry?.path, 200);
+      if (!requestId || !path || requestTracesReported.has(requestId) || !/^[A-Za-z0-9_./:\[\]-]{1,200}$/.test(path) ||
+          !/^(?:wfr_[a-zA-Z0-9_-]{1,96}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i.test(requestId)) continue;
+      traces.push({ requestId, path });
+    }
+    if (!traces.length) return;
+    if (requestTracesReported.size > 2000) requestTracesReported.clear();
+    for (const trace of traces) requestTracesReported.add(trace.requestId);
+    emit({ kind: 'request_trace', traces });
+  });
   window.addEventListener('message', (event) => {
     if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-request-origin') return;
     // A Goal/Loop helper page records nothing (see emit/flush). Its request origins would

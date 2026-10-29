@@ -5159,6 +5159,14 @@ surface with a proven app but a different id is foreign. Rows carry `own`; conte
 Turns carry `sightings` for every connector's result rows, emitted once per request id as
 `app_sightings`. The Core @-mention, plugin refresh (`ownSnapshot`, native installed-link IDs) and the
 Plugins catalog limit use proven ids first.
+Request-id traces (#1752, diagnostics only): usage.js also walks every frame of a chat's response
+stream (HTTP and socket) for id-named fields holding a request-id-shaped value that is neither the
+chat's id nor an origin it already published, and posts `cos-request-trace` with each id's field
+path (`<delta p>:<key path>`, never content; 8 per frame, 64 per response). content.js forwards them
+once per id as `request_trace` (`traces: [{ requestId, path }]`), only for the chat the tab shows.
+The bridge never stores them as transcript content; `session/request-trace.ts` keeps 256 and adds
+"the stream of <chat> named it at <path>" to the "no page evidence" warning, or logs one line when
+the trace arrives after a call was filed. Attribution never uses them.
 
 **Installed discovery.** `/settings/plugins-settings` accepts visible native buttons
 and same-origin links to exact `plugin_asdk_app_*` management routes inside the page's `main`.
