@@ -323,18 +323,23 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
 // error page (Chrome reloads those only in a visible tab), no recorder could be injected, and every
 // send to that chat expired. Online again, the maintenance pass reloads it, backing off.
 describe('a chat tab left on Chrome\'s error page', () => {
-  const errorPage = async (online: boolean) => {
-    const h = await worker([]);
+  const errorPage = async (online: boolean, prior: Record<string, unknown> = {}, failure = 'Frame with ID 0 is showing error page', healthy = false) => {
+    const h = await worker([], undefined, {}, prior);
     h.navigator.onLine = online;
     h.tabs.push({ id: 8, url: `https://chatgpt.com/c/${secondId}`, status: 'complete' } as Tab);
     h.sendMessage.mockImplementation(async (_tabId: number, message: any) => {
-      if (message.type === 'clf-recorder-ping') throw new Error('Could not establish connection. Receiving end does not exist.');
+      if (message.type === 'clf-recorder-ping') {
+        if (healthy) return { ok: true, recorderVersion: 22 };
+        throw new Error('Could not establish connection. Receiving end does not exist.');
+      }
       return { ok: true };
     });
-    h.scripting.executeScript.mockImplementation(async () => { throw new Error('Frame with ID 0 is showing error page'); });
+    h.scripting.executeScript.mockImplementation(async () => { throw new Error(failure); });
     await h.maintain();
     return h;
   };
+  const backoff = (tries: number, nextAt: number, count = tries, lastAt = Date.now() - 1_000) =>
+    ({ errorPageReloads: { tabs: [[8, { tries, nextAt }]], count, lastAt } });
   it('is reloaded once the browser is online', async () => {
     const h = await errorPage(true);
     expect(h.reload).toHaveBeenCalledExactlyOnceWith(8);
@@ -345,6 +350,36 @@ describe('a chat tab left on Chrome\'s error page', () => {
   it('is left alone while the browser is offline', async () => {
     const h = await errorPage(false);
     expect(h.reload).not.toHaveBeenCalled();
+  });
+  // CodeRabbit on #1911: the backoff and the counter outlive a stopped worker.
+  it('waits out its backoff, also after the worker restarted', async () => {
+    const h = await errorPage(true, backoff(1, Date.now() + 60_000));
+    expect(h.reload).not.toHaveBeenCalled();
+  });
+  it('is reloaded once its backoff ran out, which then doubles, and the count goes on', async () => {
+    const before = Date.now();
+    const h = await errorPage(true, backoff(2, before - 1, 2));
+    expect(h.reload).toHaveBeenCalledExactlyOnceWith(8);
+    const saved = (h.saved as any).errorPageReloads;
+    expect(saved.count).toBe(3);
+    const [[id, state]] = saved.tabs;
+    expect([id, state.tries]).toEqual([8, 3]);
+    expect(state.nextAt - before).toBeGreaterThanOrEqual(4 * 60_000);
+    expect(state.nextAt - Date.now()).toBeLessThanOrEqual(4 * 60_000);
+  });
+  it('waits at most 15 minutes between reloads', async () => {
+    const h = await errorPage(true, backoff(9, Date.now() - 1));
+    expect(h.reload).toHaveBeenCalledOnce();
+    expect((h.saved as any).errorPageReloads.tabs[0][1].nextAt - Date.now()).toBeLessThanOrEqual(15 * 60_000);
+  });
+  it('is not reloaded for any other injection failure', async () => {
+    const h = await errorPage(true, {}, 'Cannot access contents of the page.');
+    expect(h.reload).not.toHaveBeenCalled();
+  });
+  it('forgets its backoff once its recorder answers', async () => {
+    const h = await errorPage(true, backoff(3, Date.now() + 60_000), undefined, true);
+    expect(h.reload).not.toHaveBeenCalled();
+    expect((h.saved as any).errorPageReloads.tabs).toEqual([]);
   });
 });
 

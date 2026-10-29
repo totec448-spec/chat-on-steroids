@@ -554,6 +554,14 @@ describe('who is allowed to talk to it', () => {
     expect(lines()).toEqual([
       "browser: reloaded 1 ChatGPT tab(s) left on Chrome's error page (loaded while offline; the browser is online again)",
       "browser: reloaded 2 ChatGPT tab(s) left on Chrome's error page (loaded while offline; the browser is online again)"]);
+    // Each browser counts on its own (CodeRabbit on #1911): A at 8, B at 1, then A at 9 is one more.
+    const browser = (id: string, count: number, lastAt: number) => request('POST', '/diagnostics', { browser: id, body: { capturedAt: Date.now(),
+      status: { connected: true, paired: true }, preferences: { overwrite: true, durations: false }, errorPageReloads: { count, lastAt } } });
+    info.mockClear();
+    await browser('aaaaaaaaaaaaaaaa', 8, 20_000);
+    await browser('bbbbbbbbbbbbbbbb', 1, 21_000);
+    await browser('aaaaaaaaaaaaaaaa', 9, 22_000);
+    expect(lines().map(line => line.match(/reloaded (\d+)/)![1])).toEqual(['8', '1', '1']);
     info.mockRestore();
   });
 

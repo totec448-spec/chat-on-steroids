@@ -1030,18 +1030,21 @@ function diagnosticEnvironment(value: unknown): CompanionEnvironment | null {
   };
 }
 
-/** The last error-page reload the app has logged (the extension's own clock). */
-let errorPageReloadLoggedAt = 0, errorPageReloadLoggedCount = 0;
-function recordCompanionDiagnostics(value: unknown): void {
+/** Per browser: the last error-page reload the app has logged (the extension's clock) and its count. */
+const errorPageReloadsLogged = new Map<string, { at: number; count: number }>();
+function recordCompanionDiagnostics(value: unknown, browser = ''): void {
   const next = sanitiseCompanionDiagnostics(value);
   if (!next) return;
   // A chat tab that loaded offline and sat on Chrome's error page was reloaded by the extension.
   const reloads = diagnosticObject(diagnosticObject(value)?.errorPageReloads);
   const reloadedAt = diagnosticNumber(reloads?.lastAt), reloadCount = Math.round(diagnosticNumber(reloads?.count, 100_000));
-  if (reloadedAt > errorPageReloadLoggedAt && reloadCount > 0) {
-    const fresh = reloadCount >= errorPageReloadLoggedCount ? reloadCount - errorPageReloadLoggedCount : reloadCount;
+  const logged = errorPageReloadsLogged.get(browser) ?? { at: 0, count: 0 };
+  if (reloadedAt > logged.at && reloadCount > 0) {
+    // A browser restart clears the extension's session storage, and its count starts again.
+    const fresh = reloadCount >= logged.count ? reloadCount - logged.count : reloadCount;
     logInfo(`browser: reloaded ${Math.max(1, fresh)} ChatGPT tab(s) left on Chrome's error page (loaded while offline; the browser is online again)`);
-    errorPageReloadLoggedAt = reloadedAt; errorPageReloadLoggedCount = reloadCount;
+    errorPageReloadsLogged.set(browser, { at: reloadedAt, count: reloadCount });
+    if (errorPageReloadsLogged.size > 16) errorPageReloadsLogged.delete(errorPageReloadsLogged.keys().next().value!);
   }
   // Remember what the extension holds, but only values it actually stored: a fresh install
   // reports its defaults, and those must not overwrite the choices it is about to get back.
@@ -2749,7 +2752,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   }
 
   if (route === '/diagnostics' && req.method === 'POST') {
-    recordCompanionDiagnostics(await readBody(req));
+    recordCompanionDiagnostics(await readBody(req), browserOf(req) ?? '');
     return json(res, 200, { ok: true }, origin);
   }
 
