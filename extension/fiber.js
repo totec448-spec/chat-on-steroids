@@ -2795,6 +2795,8 @@
   }
   /** How many versions and choices a picker may list: every model of an account, with room (#1905). */
   const PICKER_MAX_VERSIONS = 48, PICKER_MAX_CHOICES = 48;
+  /** The slider's own lane order, unreadable lanes included (#1905): each one still takes an arrow key. */
+  const nativeLanes = lanes => lanes.length <= PICKER_MAX_CHOICES && lanes.every(Number.isInteger) && new Set(lanes).size === lanes.length ? { lanes } : {};
   function readPickerSnapshot(node) {
     let fiber = node && fiberOf(node);
     for (let up = 0; fiber && up < MAX_CLIMB; up++, fiber = fiber.return) {
@@ -2813,6 +2815,7 @@
         : ['auto', 'instant'].includes(choice.category?.modelLane) ? 'none'
         : choice.thinkingEffort === 'max' && choice.modelConfig?.isWorkModeModel === true ? 'max'
         : ({ min: 'low', standard: 'medium', extended: 'high', max: 'xhigh', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', ultra: 'ultra' })[choice.thinkingEffort] || null;
+      const lanes = nativeLanes(state.bucketSelections.map(choice => choice?.bucket));
       const choices = state.bucketSelections.map(choice => {
         const name = label(choice.category?.shortLabel);
         // Native navigation groups may contain spaces or localized names. Those
@@ -2835,7 +2838,7 @@
       const selected = state.currentSelection;
       const chosen = choices.find(c => c.bucket === currentBucket);
       if (selected?.modelSlug !== chosen.id || effortOf(selected) !== chosen.effort) return null;
-      return { version, currentBucket, versions, choices };
+      return { version, currentBucket, versions, choices, ...lanes };
     }
     return null;
   }
@@ -2894,7 +2897,7 @@
       }
       const matches = choices.filter(c => c.id === id(selected.model) && c.effort === laneEffort(selected));
       if (matches.length !== 1 || (selected.powerSettingIndex !== undefined && selected.powerSettingIndex !== matches[0].bucket)) return null;
-      return { version, currentBucket: matches[0].bucket, versions, choices };
+      return { version, currentBucket: matches[0].bucket, versions, choices, ...nativeLanes(p.powerSelections.map(c => c?.powerSettingIndex)) };
     }
     return null;
   }

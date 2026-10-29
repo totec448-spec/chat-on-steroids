@@ -3193,6 +3193,9 @@ var CLF_DOM = (() => {
             ['none','minimal','low','medium','high','xhigh','max','ultra','pro'].includes(c.effort) && typeof c.available === 'boolean') &&
           new Set(state.versions.map(v => v.id)).size === state.versions.length && new Set(state.choices.map(c => c.bucket)).size === state.choices.length &&
           state.versions.some(v => v.id === state.version) && state.choices.some(c => c.bucket === state.currentBucket);
+        // The slider's order is only a navigation aid: one that does not hold every readable lane is dropped, not trusted.
+        if (valid && state.lanes !== undefined && !(Array.isArray(state.lanes) && state.lanes.length <= 48 && state.lanes.every(Number.isInteger) &&
+          new Set(state.lanes).size === state.lanes.length && state.choices.every(c => state.lanes.includes(c.bucket)))) delete state.lanes;
         finish(valid ? state : null);
       };
       const timer = setTimeout(() => finish(null), 1500);
@@ -3334,14 +3337,26 @@ var CLF_DOM = (() => {
       },
       async bucket(bucket) {
         let current = await state();
-        for (let count = 0; current && count < 12; count++) {
+        const press = direction => {
+          const controls = [...(picker()?.querySelectorAll('[role="menuitem"][aria-keyshortcuts]') || [])].filter(node => shown(node) && node.getAttribute('aria-keyshortcuts').includes('ArrowRight'));
+          return controls.length === 1 && key(controls[0], direction);
+        };
+        for (let count = 0; current && count < 48; count++) {
           if (current.currentBucket === bucket) return current;
-          const from = current.choices.findIndex(c => c.bucket === current.currentBucket), to = current.choices.findIndex(c => c.bucket === bucket);
+          // The slider moves through every native lane, also those the reader skipped (#1905).
+          const order = current.lanes ?? current.choices.map(c => c.bucket);
+          const from = order.indexOf(current.currentBucket), to = order.indexOf(bucket);
           if (from < 0 || to < 0) return null;
-          const expected = current.choices[from + (to > from ? 1 : -1)].bucket;
-          const controls = [...picker().querySelectorAll('[role="menuitem"][aria-keyshortcuts]')].filter(node => shown(node) && node.getAttribute('aria-keyshortcuts').includes('ArrowRight'));
-          if (controls.length !== 1 || !key(controls[0], to > from ? 'ArrowRight' : 'ArrowLeft')) return null;
-          const version = current.version;
+          const step = to > from ? 1 : -1, direction = step > 0 ? 'ArrowRight' : 'ArrowLeft';
+          let at = from + step;
+          if (!press(direction)) return null;
+          // On a lane it cannot read the picker reads as nothing: that proves the move, and the
+          // next key goes on toward a lane it can read. Nothing is selected on the way.
+          while (at !== to && !current.choices.some(c => c.bucket === order[at])) {
+            if (!await wait(async () => !await readPickerState()) || !press(direction)) return null;
+            at += step;
+          }
+          const version = current.version, expected = order[at];
           current = await state(next => next.version === version && next.currentBucket === expected);
         }
         return null;
