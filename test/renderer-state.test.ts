@@ -424,6 +424,46 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
   await new Promise((resolve) => setTimeout(resolve, 0));
 });
 
+// #1914: Settings → Appearance → Theme offers System, which follows the operating system live.
+it('offers a System theme that follows the operating system, also when it changes', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  let dark = true;
+  const changes: Array<() => void> = [];
+  (w as any).matchMedia = (query: string) => ({ media: query, get matches() { return query.includes('dark') && dark; },
+    addEventListener: (_type: string, listener: () => void) => changes.push(listener), removeEventListener: () => {} });
+  const theme = w.document.getElementById('appearanceTheme') as HTMLSelectElement;
+  expect([...theme.options].map(option => option.value)).toEqual(['light', 'dark', 'system']);
+  theme.value = 'system'; theme.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.ui.theme).toBe('system');
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, theme: 'system' } } });
+  await settle();
+  expect(w.document.documentElement.dataset.theme).toBe('dark');
+  expect(theme.value).toBe('system');
+  dark = false;
+  for (const change of changes) change();
+  expect(w.document.documentElement.dataset.theme).toBe('light');
+  // CodeRabbit on #1917: a switch while a color is being typed waits for the edit, and an edit that
+  // ends invalid (restored, not saved) still shows the system's theme afterwards.
+  const hex = w.document.getElementById('appearance-accent-hex') as HTMLInputElement;
+  hex.focus();
+  hex.value = '#12';
+  hex.dispatchEvent(new w.Event('input', { bubbles: true }));
+  dark = true;
+  for (const change of changes) change();
+  expect(w.document.documentElement.dataset.theme).toBe('light');
+  hex.dispatchEvent(new w.Event('change', { bubbles: true }));
+  expect(w.document.documentElement.dataset.theme).toBe('dark');
+  // The field shows the dark theme's accent, the one now in use.
+  expect(hex.value).toBe(mounted.state.config.ui.appearance?.dark.accent?.toUpperCase() ?? (await import('../src/shared/appearance.js')).defaultAppearance().dark.accent.toUpperCase());
+  // A fixed choice no longer follows the system.
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, theme: 'dark' } } });
+  await settle();
+  for (const change of changes) change();
+  expect(w.document.documentElement.dataset.theme).toBe('dark');
+});
+
 /**
  * The goal loop's settings panel.
  *
