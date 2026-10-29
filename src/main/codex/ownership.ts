@@ -251,7 +251,8 @@ function unattended(running: readonly number[]): Array<{ processId: number; idle
 function describeIdle(idleMs: number): string {
   const minutes = Math.floor(idleMs / 60_000);
   if (minutes < 60) return `${minutes}m`;
-  return `${Math.floor(minutes / 60)}h${minutes % 60}m`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24 ? `${hours}h${minutes % 60}m` : `${Math.floor(hours / 24)}d${hours % 24}h`;
 }
 
 /** Running terminals are never auto-drained. A failed transport may reoffer their reminder. */

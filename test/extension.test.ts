@@ -1081,14 +1081,36 @@ it.each(['still-frozen', 'woke', 'navigated', 'new-document'] as const)(
   });
 
 describe('accepted helper tab cleanup', () => {
+  // CodeRabbit on #1911: a change while a report is under way gets one more report after it.
+  it('sends one more report when something changed while a report was under way', async () => {
+    const source = backgroundSource.slice(backgroundSource.indexOf('function publishCompanionDiagnostics('),
+      backgroundSource.indexOf('\nchrome.runtime.onMessage.addListener', backgroundSource.indexOf('function publishCompanionDiagnostics(')));
+    const releases: Array<() => void> = [];
+    const snapshot = vi.fn(() => new Promise(resolve => { releases.push(() => resolve({ capturedAt: releases.length })); }));
+    const call = vi.fn(async () => ({ ok: true }));
+    const context = vm.createContext({ token: 'fixture-token', disconnected: false, connectionEpoch: 1, port: 8765,
+      companionDiagnosticsFlight: null, companionDiagnosticsDirty: false, discover: async () => ({ port: 8765 }), companionDiagnosticSnapshot: snapshot, call });
+    const publish = vm.runInContext(`${source}\npublishCompanionDiagnostics`, context);
+    const first = publish();
+    await vi.waitFor(() => expect(snapshot).toHaveBeenCalledTimes(1), { timeout: 5_000 });
+    publish(true);
+    publish(true);
+    releases[0]!();
+    await first;
+    await vi.waitFor(() => expect(snapshot).toHaveBeenCalledTimes(2), { timeout: 5_000 });
+    releases[1]!();
+    await vi.waitFor(() => expect(call).toHaveBeenCalledTimes(2), { timeout: 5_000 });
+    expect(snapshot).toHaveBeenCalledTimes(2);
+  });
+
   it('shares pending diagnostic reads and discards a result after disconnect', async () => {
-    const source = backgroundSource.slice(backgroundSource.indexOf('function publishCompanionDiagnostics()'),
-      backgroundSource.indexOf('\nchrome.runtime.onMessage.addListener', backgroundSource.indexOf('function publishCompanionDiagnostics()')));
+    const source = backgroundSource.slice(backgroundSource.indexOf('function publishCompanionDiagnostics('),
+      backgroundSource.indexOf('\nchrome.runtime.onMessage.addListener', backgroundSource.indexOf('function publishCompanionDiagnostics(')));
     let complete!: (value: unknown) => void;
     const snapshot = vi.fn(() => new Promise(resolve => { complete = resolve; }));
     const call = vi.fn(async () => ({ ok: true }));
     const context = vm.createContext({ token: 'fixture-token', disconnected: false, connectionEpoch: 1, port: 8765,
-      companionDiagnosticsFlight: null, discover: async () => ({ port: 8765 }), companionDiagnosticSnapshot: snapshot, call });
+      companionDiagnosticsFlight: null, companionDiagnosticsDirty: false, discover: async () => ({ port: 8765 }), companionDiagnosticSnapshot: snapshot, call });
     const publish = vm.runInContext(`${source}\npublishCompanionDiagnostics`, context);
     const first = publish();
     const second = publish();
@@ -1509,7 +1531,8 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
         tabsGet: async () => ({ id: 21, url: `https://chatgpt.com/c/${navigated ? OTHER : CHAT}` }),
         tabsSendMessage: async (_id, message) => message.type === 'clf-repair-check'
           ? { safe: true, revision: 1, turnId: 'source', questionId: 'question' }
-          : message.type === 'clf-resume-compaction' ? { accepted: true } : { ok: true },
+          : message.type === 'clf-resume-compaction' ? { accepted: true }
+          : message.type === 'clf-page-status' ? { ok: true, conversationId: CHAT } : { ok: true },
         tabsQuery: async () => {
           if (handed) {
             trace.push('scan');
@@ -6057,6 +6080,7 @@ it.each([
  */
 it.each([
   ['unattributed', { ok: true, draft: false, streaming: true }, 0],
+  ['unattributed', { ok: true, draft: false, streaming: true, approval: true }, 0],
   ['unattributed', { ok: true, draft: false, streaming: false }, 1],
   ['unattributed', null, 1],
   ['blind', { ok: true, draft: false, streaming: true }, 0],
@@ -6083,7 +6107,7 @@ it.each([
   const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
     tabConversations: { '76': conversationId }, tabDocuments: { '76': 'live-document' },
     conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1] ?? null,
-    createChatTab: vi.fn(), call, tabReply: async () => status,
+    createChatTab: vi.fn(), call, tabReply: async () => status && { ...status, conversationId },
     chrome: { tabs: { query: async () => [tab], reload, get: async () => tab, update: vi.fn() } },
     CHATGPT_TAB_URLS: ['https://chatgpt.com/*']
   });
@@ -6098,8 +6122,39 @@ it.each([
   } else {
     expect(reported.filter((url) => url.includes('repairFailed='))).toHaveLength(1 - reloads);
     // A stream that is running again is a reason to wait, and the app is told so (not "Reload failed").
-    if (reloads === 0) expect(reported.find((url) => url.includes('repairFailed='))).toContain('&why=streaming');
+    if (reloads === 0) {
+      const failure = reported.find((url) => url.includes('repairFailed='))!;
+      expect(failure).toContain('&why=streaming');
+      expect(new URL(failure, 'http://localhost').searchParams.get('approval')).toBe(
+        status && 'approval' in status && status.approval === true ? '1' : null
+      );
+    }
   }
+});
+
+it.each([true, false])('rejects another chat from the repair page check (streaming=%s)', async streaming => {
+  const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const otherChat = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
+  const tab = { id: 76, url: `https://chatgpt.com/c/${conversationId}` };
+  const reload = vi.fn();
+  const call = vi.fn(async () => ({ ok: true }));
+  const source = backgroundSource.slice(backgroundSource.indexOf('async function performBrowserRepairs('),
+    backgroundSource.indexOf('\nfunction conversationStillOpen('));
+  const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
+    tabConversations: { '76': conversationId }, tabDocuments: { '76': 'live-document' },
+    conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1] ?? null,
+    createChatTab: vi.fn(), call,
+    tabReply: async () => {
+      // The selected tab changes chat while the page-status request is in flight.
+      tab.url = `https://chatgpt.com/c/${otherChat}`;
+      return { ok: true, conversationId: otherChat, streaming, approval: true };
+    },
+    chrome: { tabs: { query: async () => [tab], reload, get: async () => tab, update: vi.fn() } },
+    CHATGPT_TAB_URLS: ['https://chatgpt.com/*']
+  });
+  await repair([{ conversationId, token: 'switched-chat', reason: 'unattributed' }], {});
+  expect(reload).not.toHaveBeenCalled();
+  expect(call).toHaveBeenCalledExactlyOnceWith('/status?repairFailed=switched-chat&repairAction=reloaded&why=changed&detail=other-chat');
 });
 
 /**

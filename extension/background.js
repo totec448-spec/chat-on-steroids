@@ -2258,6 +2258,9 @@ function offerDesktopInput(tabId, message) {
 
 async function deliverDesktopInputs(inputs, background, reusableConversations = [], activeIds, refreshRendering = async () => {}) {
   if (!Array.isArray(inputs)) return;
+  // A reload into a new build is under way: no tab is elected or message started now; the app offers
+  // them again to the reloaded extension (and refuses claims meanwhile).
+  if (extensionReloadPending) return;
   // Only the app's complete outbox projection retires spent opening authority.
   if (Array.isArray(activeIds)) {
     const active = new Set(activeIds);
@@ -2626,7 +2629,7 @@ function inspectProjectCreates(requests) {
       // A helper the person closed comes back, at most every two minutes: never a tab on every
       // status pass, and never a request left waiting for good.
       if (mine && Date.now() - (mine.openedAt ?? 0) < PROJECT_CREATE_REOPEN_MS) return;
-      const created = await createChatTab(`https://chatgpt.com/?cos-project-create=${request.id}`, false);
+      const created = await createChatTab(`https://chatgpt.com/projects?cos-project-create=${request.id}`, false);
       await chrome.storage.session.set({ projectCreateOwner: { id: request.id, tab: created.id, openedAt: Date.now() } });
       return;
     }
@@ -3244,7 +3247,7 @@ function updatedByBrowser() {
   return typeof chrome.runtime.getBrowserInfo === 'function';
 }
 
-async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands) {
+async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands, liveSending = null) {
   if (extensionReloadPending) return;
   if (updatedByBrowser()) { extensionUpdateHold = offer ? 'browser-updates-itself' : null; return; }
   if (!offer || typeof offer.build !== 'string' || !/^[0-9a-f]{12}$/.test(offer.build)) { extensionUpdateHold = null; return; }
@@ -3252,7 +3255,14 @@ async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands) {
   if (!workerStampValue || workerStampValue === offer.build) { extensionUpdateHold = null; return; }
   // A chat with an agent or an active Goal is usually just waiting; only running work counts.
   if (offer.busy !== false) { extensionUpdateHold = 'app-busy'; return; }
-  if (liveOpenings.size) { extensionUpdateHold = 'sending'; return; }
+  // Only a message being sent holds the update: one the browser claimed, or one whose tab this browser is
+  // still preparing. A message that only waits in the queue (a blocked chat can keep one for hours) is
+  // offered again after the reload. An app that does not list the ones being sent keeps the old rule.
+  // A tab only kept for a message (`ready`, the send check holding it) prepares nothing (CodeRabbit).
+  const sending = liveSending
+    ? liveSending.size > 0 || [...liveOpenings].some(id => ['opening', 'preparing'].includes(inputOpenings[id]?.stage))
+    : liveOpenings.size > 0;
+  if (sending) { extensionUpdateHold = 'sending'; return; }
   if (liveCommands.size) { extensionUpdateHold = 'commands'; return; }
   const attempt = `${workerStampValue}>${offer.build}`;
   if ((await chrome.storage.local.get('extensionReloadAttempt')).extensionReloadAttempt === attempt) { extensionUpdateHold = 'already-tried'; return; }
@@ -3266,6 +3276,8 @@ async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands) {
   extensionReloadPending = true;
   try {
     const prepared = await call('/extension/update', { method: 'POST', body: '{}' });
+    // The app saw a message go out since the last status: that holds the update, as one listed would.
+    if (prepared.ok && prepared.data?.hold === 'sending') { extensionUpdateHold = 'sending'; return; }
     if (!prepared.ok || prepared.data?.ready !== true || prepared.data.build !== offer.build) { extensionUpdateHold = 'folder-not-ready'; return; }
     extensionUpdateHold = null;
     await chrome.storage.local.set({ extensionReloadAttempt: attempt });
@@ -3319,7 +3331,8 @@ async function maintainOnce() {
   const liveChats = new Set(Array.isArray(reply.data.nonDiscardableConversations) ? reply.data.nonDiscardableConversations : []);
   const liveOpenings = new Set(Array.isArray(reply.data.inputOpeningIds) ? reply.data.inputOpeningIds : []);
   const liveCommands = new Set(Array.isArray(reply.data.commandIds) ? reply.data.commandIds : []);
-  void reloadForExtensionUpdate(reply.data.extensionUpdate, liveOpenings, liveCommands).catch(() => undefined);
+  const liveSending = Array.isArray(reply.data.inputSendingIds) ? new Set(reply.data.inputSendingIds) : null;
+  void reloadForExtensionUpdate(reply.data.extensionUpdate, liveOpenings, liveCommands, liveSending).catch(() => undefined);
   void followApp(reply.data).catch(() => undefined);
   void revealChats(reply.data.reveals).catch(() => undefined);
   void followChat(reply.data.follow).catch(() => undefined);
@@ -3623,10 +3636,14 @@ async function performBrowserRepairs(repairs, policy) {
         // transport error has disappeared. A still-visible error keeps the existing reload path.
         const status = await tabReply(target.id, { type: 'clf-page-status' },
           documentId ? { documentId } : undefined);
+        if (status?.ok === true && status.conversationId !== conversationId) {
+          await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}&why=changed&detail=other-chat`);
+          continue;
+        }
         if (status?.ok === true && status.streaming === true &&
             (reason !== 'assistant-error' || status.assistantError === false)) {
           // Not a failure: ChatGPT is answering, and the app says so instead of "Reload failed".
-          await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}&why=streaming`);
+          await call(`/status?repairFailed=${encodeURIComponent(token)}&repairAction=${repairAction}&why=streaming${status.approval === true ? '&approval=1' : ''}`);
           continue;
         }
         if (reason === 'assistant-error' && status?.ok === true && status.assistantError === false) {
@@ -4980,11 +4997,17 @@ async function companionDiagnosticSnapshot(found) {
     // Defaults on a fresh install are not choices; the app keeps only values someone stored.
     preferencesStored: RENDER_STREAM_KEY in preferences || SHOW_TIMES_KEY in preferences,
     tab: await HANDLERS.tabStatus(),
-    environment: await cachedEnvironmentDiagnostics()
+    environment: await cachedEnvironmentDiagnostics(),
+    errorPageReloads: await loadErrorPageReloads().then(() => ({ count: errorPageReloadCount, lastAt: lastErrorPageReloadAt,
+      ...(errorPageSkip ? { skipped: errorPageSkip } : {}) }))
   };
 }
 
-function publishCompanionDiagnostics() {
+// A change that must reach the app (an error-page reload) while a report is already under way:
+// that report may have taken its snapshot before the change, so one more follows it.
+let companionDiagnosticsDirty = false;
+function publishCompanionDiagnostics(changed = false) {
+  if (companionDiagnosticsFlight && changed) companionDiagnosticsDirty = true;
   if (companionDiagnosticsFlight || !token || disconnected) return companionDiagnosticsFlight;
   const intent = connectionEpoch, credential = token, endpoint = port;
   const work = (async () => {
@@ -4995,6 +5018,7 @@ function publishCompanionDiagnostics() {
     await call('/diagnostics', { method: 'POST', body: JSON.stringify(snapshot) });
   })().catch(() => undefined).finally(() => {
     if (companionDiagnosticsFlight === work) companionDiagnosticsFlight = null;
+    if (companionDiagnosticsDirty) { companionDiagnosticsDirty = false; void publishCompanionDiagnostics(); }
   });
   companionDiagnosticsFlight = work;
   return work;
@@ -5595,6 +5619,66 @@ function recoverDeferredRevivals() {
   return tracked;
 }
 
+// A chat tab that loaded while offline shows Chrome's own error page, where nothing can be injected.
+// Chrome reloads such a page by itself only in a visible tab, and the app's chat tabs usually are not
+// (2.1.47 round: every send to that chat expired). It holds no draft and no answer, so once the
+// browser is online again it is reloaded, at most every 1, 2, 4 … 15 minutes per tab.
+// The backoff and the counter live in session storage: Chrome stops the worker between passes, and a
+// fresh worker must neither reload at once again nor report old reloads as new (CodeRabbit on #1911).
+const ERROR_PAGE_RELOADS_KEY = 'errorPageReloads';
+const errorPageReloads = new Map();
+// For the app's log (via the diagnostics snapshot): how many, and when the last one was.
+let errorPageReloadCount = 0, lastErrorPageReloadAt = 0, errorPageReloadsLoaded = null;
+// The last reload skipped, and why, for the app's log; a new key reports once more.
+let errorPageSkip = null, errorPageSkipKey = '';
+/** True once the saved backoff is read. A failed read is retried by the next call, never taken for none. */
+function loadErrorPageReloads() {
+  errorPageReloadsLoaded ??= chrome.storage.session.get(ERROR_PAGE_RELOADS_KEY).then(stored => {
+    const saved = stored?.[ERROR_PAGE_RELOADS_KEY];
+    if (!saved || typeof saved !== 'object') return;
+    for (const entry of Array.isArray(saved.tabs) ? saved.tabs.slice(-64) : []) {
+      const [id, state] = Array.isArray(entry) ? entry : [];
+      if (Number.isInteger(id) && Number.isFinite(state?.tries) && Number.isFinite(state?.nextAt) && !errorPageReloads.has(id))
+        errorPageReloads.set(id, { tries: state.tries, nextAt: state.nextAt });
+    }
+    if (Number.isFinite(saved.count)) errorPageReloadCount = Math.max(errorPageReloadCount, saved.count);
+    if (Number.isFinite(saved.lastAt)) lastErrorPageReloadAt = Math.max(lastErrorPageReloadAt, saved.lastAt);
+  }).then(() => true, () => { errorPageReloadsLoaded = null; return false; });
+  return errorPageReloadsLoaded;
+}
+function noteErrorPageSkip(id, reason, nextAt = 0) {
+  const key = `${id}:${reason}:${nextAt}`;
+  if (key === errorPageSkipKey) return;
+  errorPageSkipKey = key;
+  errorPageSkip = { reason, at: Date.now(), ...(nextAt ? { nextAt } : {}) };
+  void publishCompanionDiagnostics(true);
+}
+function saveErrorPageReloads() {
+  return chrome.storage.session.set({ [ERROR_PAGE_RELOADS_KEY]: { tabs: [...errorPageReloads], count: errorPageReloadCount, lastAt: lastErrorPageReloadAt } })
+    .catch(() => undefined);
+}
+async function forgetErrorPage(id) {
+  if (!await loadErrorPageReloads()) return;
+  if (errorPageReloads.delete(id)) await saveErrorPageReloads();
+}
+async function reloadErrorPage(id) {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return noteErrorPageSkip(id, 'offline');
+  // Unread is not "never reloaded": reloading now could skip the backoff, and saving would overwrite it.
+  if (!await loadErrorPageReloads()) return noteErrorPageSkip(id, 'unreadable');
+  const now = Date.now(), prior = errorPageReloads.get(id);
+  if (prior && now < prior.nextAt) return noteErrorPageSkip(id, 'backoff', prior.nextAt);
+  const tries = (prior?.tries ?? 0) + 1;
+  errorPageReloads.delete(id);
+  errorPageReloads.set(id, { tries, nextAt: now + Math.min(15 * 60_000, 60_000 * 2 ** (tries - 1)) });
+  if (errorPageReloads.size > 64) errorPageReloads.delete(errorPageReloads.keys().next().value);
+  try {
+    await chrome.tabs.reload(id);
+    errorPageReloadCount += 1; lastErrorPageReloadAt = now;
+    await saveErrorPageReloads();
+    void publishCompanionDiagnostics(true);
+  } catch { await saveErrorPageReloads(); /* The tab went away; nothing to reload. */ }
+}
+
 async function restoreChatgptTab(id, current = () => true, documentId = null) {
   if (!current()) return false;
   const target = { tabId: id, ...(documentId ? { documentIds: [documentId] } : {}) };
@@ -5612,6 +5696,7 @@ async function restoreChatgptTab(id, current = () => true, documentId = null) {
       } catch {
         // The tab can navigate between the ping and repair. Static injection covers it.
       }
+      await forgetErrorPage(id);
       return true;
     }
   } catch {
@@ -5636,10 +5721,12 @@ async function restoreChatgptTab(id, current = () => true, documentId = null) {
     await chrome.scripting.executeScript({ target, files: ['content.js'] });
     if (!current()) return false;
     await chrome.scripting.insertCSS({ target, files: ['overlay.css'] });
+    await forgetErrorPage(id);
     // Successful injection means this exact tab is recovering. Its document registration will
     // re-run revival routing; opening a second tab during that handoff recreates the race.
     return current();
-  } catch {
+  } catch (error) {
+    if (/showing error page/i.test(String(error?.message ?? ''))) await reloadErrorPage(id);
     // Injection failure does not transfer ownership to a replacement tab.
     return false;
   }
