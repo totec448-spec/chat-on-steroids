@@ -3409,5 +3409,6 @@
   "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "审查者发现了一个目标无法安全跳过的问题。打开聊天查看。",
   "Waiting for the reviewer": "正在等待审查者",
   "Continues without the review in {0}": "{0} 后不等审查继续",
-  "Continuing without the review…": "正在不等审查继续…"
+  "Continuing without the review…": "正在不等审查继续…",
+  "Same as system": "跟随系统"
 }

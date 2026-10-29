@@ -424,6 +424,33 @@ it('serializes settings intent so rapid toggles and later UI changes cannot undo
   await new Promise((resolve) => setTimeout(resolve, 0));
 });
 
+// #1914: Settings → Appearance → Theme offers System, which follows the operating system live.
+it('offers a System theme that follows the operating system, also when it changes', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  let dark = true;
+  const changes: Array<() => void> = [];
+  (w as any).matchMedia = (query: string) => ({ media: query, get matches() { return query.includes('dark') && dark; },
+    addEventListener: (_type: string, listener: () => void) => changes.push(listener), removeEventListener: () => {} });
+  const theme = w.document.getElementById('appearanceTheme') as HTMLSelectElement;
+  expect([...theme.options].map(option => option.value)).toEqual(['light', 'dark', 'system']);
+  theme.value = 'system'; theme.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.ui.theme).toBe('system');
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, theme: 'system' } } });
+  await settle();
+  expect(w.document.documentElement.dataset.theme).toBe('dark');
+  expect(theme.value).toBe('system');
+  dark = false;
+  for (const change of changes) change();
+  expect(w.document.documentElement.dataset.theme).toBe('light');
+  // A fixed choice no longer follows the system.
+  mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, theme: 'dark' } } });
+  await settle();
+  for (const change of changes) change();
+  expect(w.document.documentElement.dataset.theme).toBe('dark');
+});
+
 /**
  * The goal loop's settings panel.
  *

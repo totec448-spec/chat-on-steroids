@@ -442,7 +442,7 @@ const configSchema = z.object({
     // Dark is the design the app is drawn for, and a config written before the theme
     // existed has no stored answer to override — so it is the default rather than the
     // fallback. An explicit `light` is somebody's own choice and is never touched.
-    theme: z.enum(['light', 'dark']).optional().default('dark')
+    theme: z.enum(['light', 'dark', 'system']).optional().default('dark')
   }),
   // Whole sections are optional, so a config written by an older build keeps working
   // and simply gains the new features switched off. The default object is spelled out

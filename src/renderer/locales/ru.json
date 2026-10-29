@@ -3610,5 +3610,6 @@
   "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "Рецензент нашёл проблему, мимо которой «Цель» не может безопасно пройти. Откройте чат, чтобы проверить её.",
   "Waiting for the reviewer": "Ожидание рецензента",
   "Continues without the review in {0}": "Продолжит без проверки через {0}",
-  "Continuing without the review…": "Продолжение без проверки…"
+  "Continuing without the review…": "Продолжение без проверки…",
+  "Same as system": "Как в системе"
 }

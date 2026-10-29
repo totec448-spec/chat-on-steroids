@@ -4317,7 +4317,11 @@ and `content-script.test.ts`.
 ## 18. Desktop workspace, plugins, connection and native control
 
 Dark is the default theme. Theme selection belongs in Appearance settings; the main header
-has no light/dark shortcut. Files and worker-panel controls attach to the header independently
+has no light/dark shortcut. `ui.theme` is `light`, `dark` or `system` (#1914, "Same as system"):
+`nativeTheme.themeSource` takes the same value, `src/main/theme.ts` resolves the shown theme for
+Electron-drawn parts (window background, Windows title bar, pets, built-in browser, update window)
+and repaints them on `nativeTheme` `updated`; the renderer resolves it through
+`prefers-color-scheme` and repaints on its change. Palette edits apply to the theme shown now. Files and worker-panel controls attach to the header independently
 of appearance controls.
 
 ### Renderer and IPC
