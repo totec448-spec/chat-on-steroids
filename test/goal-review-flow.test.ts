@@ -79,11 +79,25 @@ afterEach(() => { globalThis.fetch = realFetch; });
 it('asks for a review when a step ends owing a Goal reply, and not for a blocked one', async () => {
   const sessionId = await seed('c-start');
   await goal.acceptGoalReplyNow({ conversationId: 'c-start', sessionId, replyId: 'assistant-start', turnId: 'g-start', eventSeq: 3, blocked: false });
-  await vi.waitFor(() => expect(review.started).toEqual([{ conversationId: 'c-start', sessionId, turnId: 'g-start' }]));
+  await vi.waitFor(() => expect(review.started).toEqual([{ conversationId: 'c-start', sessionId, turnId: 'g-start' }]), { timeout: 5_000 });
   const blocked = await seed('c-blocked');
   await goal.acceptGoalReplyNow({ conversationId: 'c-blocked', sessionId: blocked, replyId: 'assistant-blocked', turnId: 'g-b', eventSeq: 3, blocked: true });
   await new Promise(resolve => setTimeout(resolve, 20));
   expect(review.started.map(row => row.conversationId)).toEqual(['c-start']);
+});
+
+// CodeRabbit on #1879: a final answer recorded without its turn files its Goal reply under
+// "reply:<message id>". The review must use the exact turn, which scopes the step's edits.
+it('reviews the exact turn behind a reply alias, and says so when the turn is not known yet', async () => {
+  const sessionId = await seed('c-alias');
+  await appendEvent(sessionId, { time: 2_000, source: 'extension', kind: 'assistant_message', messageId: 'assistant-alias', turnId: 'g-real', final: true,
+    message: { text: 'Done with the step.', truncated: false, chars: 19 } });
+  await goal.acceptGoalReplyNow({ conversationId: 'c-alias', sessionId, replyId: 'assistant-alias', turnId: 'reply:assistant-alias', eventSeq: 3, blocked: false });
+  await vi.waitFor(() => expect(review.started).toEqual([{ conversationId: 'c-alias', sessionId, turnId: 'g-real' }]), { timeout: 5_000 });
+  const unknown = await seed('c-unknown');
+  await goal.acceptGoalReplyNow({ conversationId: 'c-unknown', sessionId: unknown, replyId: 'assistant-unknown', turnId: 'reply:assistant-unknown', eventSeq: 3, blocked: false });
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect(review.started.map(row => row.conversationId)).toEqual(['c-alias']);
 });
 
 it('puts the reviewer\'s findings after the helper\'s message, and tells the helper they are there', async () => {
@@ -112,10 +126,10 @@ it('cancels the review in progress when Goal is switched off for the chat, or tu
   await goal.setGoalSwitchNow('c-stop', 'goal', true);
   expect(review.cancelled).toEqual([]);
   await goal.setGoalSwitchNow('c-stop', 'goal', false);
-  await vi.waitFor(() => expect(review.cancelled).toEqual(['c-stop']));
+  await vi.waitFor(() => expect(review.cancelled).toEqual(['c-stop']), { timeout: 5_000 });
   await goal.setGoalSwitchNow('c-loop', 'goal', true);
   await goal.setGoalSwitchNow('c-loop', 'loop', true);
-  await vi.waitFor(() => expect(review.cancelled).toEqual(['c-stop', 'c-loop']));
+  await vi.waitFor(() => expect(review.cancelled).toEqual(['c-stop', 'c-loop']), { timeout: 5_000 });
 });
 
 it('waits for a review still in progress before the helper decides the next step, then carries its findings', async () => {

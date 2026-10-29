@@ -726,9 +726,16 @@ export async function acceptGoalReplyNow(input: {
   }
   // A Goal step that owes its reply is reviewed if the person asked for that (#1832); never awaited.
   if (goalReplies.get(input.conversationId)?.replyId === input.replyId.slice(0, 200) && goalReplies.get(input.conversationId)?.state === 'pending') {
-    void import('./goal-reviewer.js')
-      .then(({ startStepReview }) => startStepReview({ conversationId: input.conversationId, sessionId: input.sessionId, turnId: input.turnId }))
-      .catch(() => undefined);
+    void (async () => {
+      // The review scopes the step's edits by its exact turn; a reply alias is resolved, never guessed.
+      const turnId = await goalReplySourceTurn(input.sessionId, input.turnId);
+      if (!turnId) {
+        logInfo(`goal review: step ${input.turnId} in ${input.conversationId} is not tied to a turn yet; not reviewed`);
+        return;
+      }
+      const { startStepReview } = await import('./goal-reviewer.js');
+      await startStepReview({ conversationId: input.conversationId, sessionId: input.sessionId, turnId });
+    })().catch(() => undefined);
   }
 }
 
@@ -2047,8 +2054,9 @@ async function run(draft: GoalDraft): Promise<void> {
   // after the message, and the helper is told it is there.
   // A review still in progress is waited for (the helper must not decide without it): VM 141, 2026-10-26.
   const { awaitStepReview, reviewNote, reviewBlocks } = await import('./goal-reviewer.js');
+  const reviewTurn = draft.mode === 'goal' ? await goalReplySourceTurn(draft.sessionId, draft.turnId) ?? draft.turnId : draft.turnId;
   const stepReview = draft.mode === 'goal'
-    ? await awaitStepReview(draft.conversationId, draft.turnId, () => !draft.acknowledged && drafts.get(draft.conversationId) === draft)
+    ? await awaitStepReview(draft.conversationId, reviewTurn, () => !draft.acknowledged && drafts.get(draft.conversationId) === draft)
     : null;
   if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return;
   if (stepReview && 'text' in stepReview && reviewBlocks(stepReview)) return pauseForReview(draft, stepReview.text);

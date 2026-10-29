@@ -158,6 +158,25 @@ it('cancels a review in progress when the Goal stops, and leaves a sleeping revi
   expect(cancelled).toHaveLength(1);
 });
 
+// CodeRabbit on #1879: Goal stopped while the reviewer was still being started. The stop found no
+// reviewer to cancel yet; the spawn then went on and left a reviewer working for a stopped Goal.
+it('cancels a reviewer that a stopped Goal started while the stop was being handled', async () => {
+  const cancelled: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const d = deps({
+    cancel: async info => { cancelled.push(info.id); },
+    spawn: async () => { await gate; reviewer = { id: 'worker-3', state: 'invited', result: null, revivable: true, model: null } as unknown as AgentInfo; return 'worker-3'; }
+  });
+  const started = startStepReview(step, d);
+  await vi.waitFor(() => expect(reviewer).toBeNull());
+  expect(await cancelStepReview('c-goal', d)).toBe(false);
+  release();
+  expect(await started).toBe('failed');
+  expect(cancelled).toEqual(['worker-3']);
+  expect(reviewForDraft('c-goal', 't-1', d)).toBeNull();
+});
+
 // VM 141 live test, 2026-10-26: the Goal helper decided the next step 8 s before the reviewer answered,
 // because the draft took the review as it stood then ("pending" wrote nothing).
 it('counts a review that is still finding a worker slot as pending, and a reviewer that stopped without answering as unavailable', async () => {
