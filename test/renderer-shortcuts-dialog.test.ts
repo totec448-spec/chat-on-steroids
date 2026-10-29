@@ -64,7 +64,8 @@ it('opens with Ctrl+/, lists only the keys the app handles as this keyboard prin
       ['Stop the turn, twice in an empty message box', ['Esc', 'Esc']],
       // Hold-to-talk is Windows only.
       ['Hold to dictate', ['Ctrl+Shift+Space']],
-      ['Move a queued task', ['Alt+↑', 'Alt+↓']]
+      ['Move a queued task', ['Alt+↑', 'Alt+↓']],
+      ['Your previous or next message', ['Alt+↑', 'Alt+↓']]
     ]],
     ['Workspace panels', [
       ['Toggle bottom panel', ['Ctrl+`']],
@@ -105,6 +106,7 @@ it('uses ⌘ on a Mac, where Ctrl+/ is not the shortcut', async () => {
   expect(keys.get('Send the other way while ChatGPT works')).toEqual(['⌘⇧Enter']);
   expect(keys.get('Move the focused chat or project')).toEqual(['⌥↑', '⌥↓']);
   expect(keys.get('Move a queued task')).toEqual(['⌥↑', '⌥↓']);
+  expect(keys.get('Your previous or next message')).toEqual(['⌥↑', '⌥↓']);
   // The workspace panels' keys are Control on every system, printed as the empty side panel does.
   expect(keys.get('Review')).toEqual(['⌃⇧1']);
 });

@@ -68,7 +68,8 @@ export function shortcutGroups(enterSends: () => boolean): ShortcutGroup[] {
         { label: () => t('Stop the turn, twice in an empty message box'), keys: () => ['Esc', 'Esc'], source: 'renderer/chat.ts' },
         // Windows only: see holdToTalkSupported.
         { label: () => t('Hold to dictate'), keys: () => [holdToTalkShortcut()], source: 'renderer/chat.ts', shown: holdToTalkSupported },
-        { label: () => t('Move a queued task'), keys: () => [alt('↑'), alt('↓')], source: 'renderer/chat.ts' }
+        { label: () => t('Move a queued task'), keys: () => [alt('↑'), alt('↓')], source: 'renderer/chat.ts' },
+        { label: () => t('Your previous or next message'), keys: () => [alt('↑'), alt('↓')], source: 'renderer/chat.ts' }
       ]
     },
     {
