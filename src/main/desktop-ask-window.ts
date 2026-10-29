@@ -57,7 +57,8 @@ export function showDesktopAskPrompt(prompt: DesktopAskPrompt): Promise<'go' | '
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, preload: path.join(__dirname, '../preload/desktop-ask.js') }
   });
   win.setAlwaysOnTop(true, 'floating');
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  // No setVisibleOnAllWorkspaces: a macOS panel is on every space already, and the call changes the
+  // process type, which made the Dock flicker each time (CodeRabbit). Windows has no workspaces to join.
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', event => event.preventDefault());
   return new Promise(resolve => {
