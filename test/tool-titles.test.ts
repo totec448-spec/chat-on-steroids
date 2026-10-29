@@ -157,4 +157,25 @@ describe('tool rows in the person\'s language', () => {
     for (const metric of recorded().metrics) expect(titles.localToolMetric(metric)).toBe(metric);
     for (const detail of recorded().details) expect(titles.localToolDetail(detail)).toBe(detail);
   });
+
+  // CodeRabbit on #1918: the open Activity view of a sub-agent follows a change of language too.
+  it('repaints a sub-agent\'s Activity rows when the language changes', async () => {
+    i18n.setLanguage('en');
+    const { renderWorkerActivity } = await import('../src/renderer/agent-activity.js');
+    const call = { seq: 1, time: 1_000, source: 'mcp', kind: 'tool_call', call: { callId: 'c-1', tool: 'read', attribution: 'request_id', outcome: 'ok', durationMs: 5,
+      args: { text: '{}', truncated: false, chars: 2 }, result: { text: '', truncated: false, chars: 0 },
+      summary: { kind: 'read', tone: 'neutral', title: 'Read src/a.ts', detail: 'lines 1–40', metric: '40 lines' } } };
+    const nodes = renderWorkerActivity([call as never], 'Check the file');
+    document.body.replaceChildren(...nodes);
+    const row = document.querySelector<HTMLElement>('.agent-activity-row')!;
+    const shown = () => ({ title: row.querySelector('.agent-activity-title')!.firstChild!.textContent, detail: row.querySelector('em')!.textContent,
+      metric: row.querySelector('.agent-activity-metric')!.textContent, tooltip: row.title });
+    expect(shown()).toEqual({ title: 'Read src/a.ts', detail: 'lines 1–40', metric: '40 lines', tooltip: 'Read src/a.ts · lines 1–40 · 40 lines' });
+    i18n.setLanguage('de');
+    expect(shown().title).toBe(i18n.t('Read {0}', ['src/a.ts']));
+    expect(shown().detail).toBe(i18n.t('lines {0}–{1}', ['1', '40']));
+    expect(shown().metric).toBe(i18n.tn('{0} line', '{0} lines', 40));
+    expect(shown().tooltip).toContain(i18n.t('Read {0}', ['src/a.ts']));
+    i18n.setLanguage('en');
+  });
 });
