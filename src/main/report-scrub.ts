@@ -100,7 +100,9 @@ export function scrubText(text: string, context: ScrubContext): string {
   const known = [...new Set(context.known.map(value => value.trim()).filter(value => value.length >= 3))]
     .sort((a, b) => b.length - a.length);
   // Whole words only, in any script: a project named "Work" must not turn every "worker" into "<x:…>er" (#1922).
+  // A combining mark belongs to its word ("कामों"); an underscore joins names in identifiers, so the known
+  // value next to one is still replaced ("Budget_2026", "laptop_username").
   return known.length
-    ? out.replace(new RegExp(`(?<![\\p{L}\\p{N}_])(?:${known.map(escapeRegExp).join('|')})(?![\\p{L}\\p{N}_])`, 'giu'), match => tag('x', match.toLowerCase()))
+    ? out.replace(new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])(?:${known.map(escapeRegExp).join('|')})(?![\\p{L}\\p{M}\\p{N}])`, 'giu'), match => tag('x', match.toLowerCase()))
     : out;
 }
