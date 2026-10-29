@@ -276,6 +276,33 @@ it('never covers the buttons under a short answer', async () => {
   expect(button().hidden).toBe(true);
 });
 
+// CodeRabbit on #1909: controls side by side are all slid past; an off-screen start falls back to above the last line.
+it('slides past a row of controls, and goes above the last line when the selection starts out of view', async () => {
+  const { initQuoteSelection } = await import('../src/renderer/quote-selection.js');
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetWidth', { configurable: true, get: () => 80 });
+  Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetHeight', { configurable: true, get: () => 28 });
+  const control = (left: number, right: number, top = 128) => {
+    const node = document.createElement('button');
+    node.getBoundingClientRect = () => ({ top, bottom: top + 24, left, right, width: right - left, height: 24 }) as DOMRect;
+    document.querySelector('.said')!.append(node);
+    return node;
+  };
+  const row = [control(240, 300), control(304, 330), control(334, 360)];
+  initQuoteSelection({ timeline: document.getElementById('timeline')!, input: document.getElementById('chatInput') as HTMLTextAreaElement });
+  const [first] = document.querySelectorAll('.msg p');
+  select(first!.firstChild!, 4, first!.firstChild!, 10);
+  await frame();
+  expect([button().style.left, button().style.top]).toEqual(['366px', '126px']);
+  // The selection starts above the view (its first line at -200), and the row reaches the right edge.
+  for (const node of row) node.remove();
+  control(40, 790);
+  dom.window.Range.prototype.getClientRects = () => [{ top: -200, bottom: -180, left: 40, right: 300, width: 260, height: 20 },
+    { top: 100, bottom: 120, left: 40, right: 300, width: 260, height: 20 }] as unknown as DOMRectList;
+  select(first!.firstChild!, 4, first!.firstChild!, 11);
+  await frame();
+  expect([button().hidden, button().style.top]).toEqual([false, '66px']);
+});
+
 it('keeps the spot above the last line when there is no room below and nothing in the way', async () => {
   const { initQuoteSelection } = await import('../src/renderer/quote-selection.js');
   Object.defineProperty(dom.window.HTMLElement.prototype, 'offsetWidth', { configurable: true, get: () => 80 });
