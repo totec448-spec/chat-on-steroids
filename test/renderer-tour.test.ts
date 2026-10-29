@@ -183,3 +183,16 @@ it('ends quietly when the person leaves the chat screen, without counting that a
   expect($('tourCard').hidden).toBe(false);
   expect($('tourStep').textContent).toBe('1 of 3');
 });
+
+it('rounds the ring around each control like the control itself, so the corners stay parallel (2.1.47 round)', async () => {
+  // The composer's 22 px corners got a 12 px ring 4 px outside them; the ring follows the control now.
+  // With a dock row above it, the composer's top corners are 12 px and its bottom ones 22 px: each ring corner follows its own (CodeRabbit).
+  Object.assign($('composer').style, { borderTopLeftRadius: '12px', borderTopRightRadius: '12px', borderBottomRightRadius: '22px', borderBottomLeftRadius: '22px' });
+  Object.assign($('addProject').style, { borderTopLeftRadius: '8px', borderTopRightRadius: '8px', borderBottomRightRadius: '8px', borderBottomLeftRadius: '8px' });
+  const { tour: t } = await tour();
+  t.start();
+  const corners = () => { const ring = $('tourRing').style; return [ring.borderTopLeftRadius, ring.borderTopRightRadius, ring.borderBottomRightRadius, ring.borderBottomLeftRadius]; };
+  expect(corners()).toEqual(['16px', '16px', '26px', '26px']);
+  ($('tourNext') as HTMLButtonElement).click();
+  expect(corners()).toEqual(['12px', '12px', '12px', '12px']);
+});

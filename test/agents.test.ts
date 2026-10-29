@@ -112,6 +112,10 @@ const {
   swarmStateForCaller,
   statusForCaller,
   waitingForSubAgents,
+  REVIEW_MAX_MS,
+  REVIEW_TEXT_CHARS,
+  isReviewerConversation,
+  reviewerFor,
   workerPrimeOwner,
   workerConversationGone,
   workerRevivalClaimed
@@ -5686,5 +5690,71 @@ describe('retired worker chats', () => {
     startWorker('worker-1');
     clearAgent(PRIME_ID);
     expect(retired).toEqual([['c-worker-1']]);
+  });
+});
+
+/**
+ * #1832: the Goal step reviewer is a worker the app puts into the Goal chat's own family. It takes a
+ * brief with diffs, longer than a model-written task may be; it holds that chat's next Goal step
+ * while it works, whether or not the person asked automatic steps to wait for workers, but never
+ * longer than REVIEW_MAX_MS; the next step's brief wakes the same reviewer.
+ */
+describe('the Goal step reviewer', () => {
+  const brief = (length: number) => 'Review this Goal step. '.padEnd(length, 'x');
+  afterEach(async () => { vi.useRealTimers(); await setEnabled(true); });
+
+  it('takes a brief longer than a task the model may write, and only as the reviewer', () => {
+    expect(() => spawn({ caller: prime, workers: [{ label: 'Worker', task: brief(6000) }] })).toThrow(/too long/);
+    expect(() => spawn({ caller: prime, workers: [{ task: brief(REVIEW_TEXT_CHARS + 1), reviewer: true }] })).toThrow(/too long/);
+    const made = spawn({ caller: prime, workers: [{ task: brief(20_000), reviewer: true }] });
+    expect(made.created).toHaveLength(1);
+    expect(made.created[0]).toMatchObject({ label: 'Reviewer', reviewer: true });
+    expect(reviewerFor(PRIME_CHAT)?.id).toBe(made.created[0]!.id);
+    expect(reviewerFor('c-other-chat')).toBeNull();
+  });
+
+  it('holds the Goal chat while it works, with or without the workers wait, for at most REVIEW_MAX_MS', async () => {
+    vi.useFakeTimers({ now: 1_000_000, toFake: ['Date'] });
+    const base = defaultConfig();
+    await saveConfig({ ...base, multiAgent: { ...base.multiAgent, enabled: true, maxWorkers: 3, waitForSubAgents: false } });
+    spawn({ caller: prime, workers: [{ task: brief(500), reviewer: true }] });
+    expect(waitingForSubAgents(PRIME_CHAT)).toBe(true);
+    vi.setSystemTime(1_000_000 + REVIEW_MAX_MS - 1);
+    expect(waitingForSubAgents(PRIME_CHAT)).toBe(true);
+    vi.setSystemTime(1_000_000 + REVIEW_MAX_MS);
+    expect(waitingForSubAgents(PRIME_CHAT)).toBe(false);
+    // With the workers wait on, an overdue reviewer still holds nothing: its limit is its own.
+    await saveConfig({ ...base, multiAgent: { ...base.multiAgent, enabled: true, maxWorkers: 3, waitForSubAgents: true } });
+    expect(waitingForSubAgents(PRIME_CHAT)).toBe(false);
+  });
+
+  it('releases the hold when it reports, and the next brief wakes the same reviewer with a fresh limit', () => {
+    vi.useFakeTimers({ now: 2_000_000, toFake: ['Date'] });
+    const made = spawn({ caller: prime, workers: [{ task: brief(500), reviewer: true }] });
+    const id = made.created[0]!.id;
+    const reviewer = startWorker(id, 'c-reviewer');
+    expect(isReviewerConversation('c-reviewer')).toBe(true);
+    finishAgent(reviewer.caller, 'No problems found.');
+    expect(waitingForSubAgents(PRIME_CHAT)).toBe(false);
+    expect(reviewerFor(PRIME_CHAT)).toMatchObject({ id, state: 'sleeping', result: 'No problems found.' });
+    vi.setSystemTime(2_000_000 + REVIEW_MAX_MS * 3);
+    // A model's own message to it keeps the ordinary limit; the app's next brief may be long.
+    expect(() => stageMessages(prime, [{ to: id, text: brief(6000) }])).toThrow(/too long/);
+    const staged = stageMessages(prime, [{ to: id, text: brief(15_000) }], { review: true });
+    staged.commit();
+    expect(reviewerFor(PRIME_CHAT)?.reviewAskedAt).toBe(2_000_000 + REVIEW_MAX_MS * 3);
+    expect(waitingForSubAgents(PRIME_CHAT)).toBe(true);
+  });
+
+  it('is an ordinary worker in every other respect, and its mark survives a restart', () => {
+    const made = spawn({ caller: prime, workers: [{ task: brief(500), reviewer: true }, { label: 'Helper', task: 'help' }] });
+    expect(made.created.map(worker => worker.reviewer === true)).toEqual([true, false]);
+    startWorker(made.created[0]!.id, 'c-reviewer-restart');
+    expect(isReviewerConversation('c-worker-x')).toBe(false);
+    const saved = JSON.parse(JSON.stringify(snapshotSwarm()));
+    resetAgentsForTests();
+    restoreSwarm(saved);
+    expect(isReviewerConversation('c-reviewer-restart')).toBe(true);
+    expect(reviewerFor(PRIME_CHAT)).toMatchObject({ label: 'Reviewer', reviewer: true });
   });
 });

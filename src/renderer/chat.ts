@@ -1,3 +1,4 @@
+import { ageOf, countdownClock } from '../shared/age.js';
 import { DEFAULT_CHAT_PERSONALITY, DEFAULT_CHAT_WRITING_STYLE, MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
 import { hasProviderDirective, resolvedCapture, withoutProviderDirectives } from '../shared/content-reference.js';
 import { completedDilText } from '../shared/dil-tables.js';
@@ -106,7 +107,7 @@ import {
 } from '../shared/goal.js';
 import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS, type HandoffLength } from '../shared/handoff.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
-import { $, ago, clockTime, compactNumber, disclosureChevron, el, icon, run, setIcon, toast } from './dom.js';
+import { $, ago, clockTime, compactAgeText, compactNumber, disclosureChevron, el, elapsedDurationText, icon, run, setIcon, toast } from './dom.js';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_REPAIR_DEFERRED_TEXT, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
 import { STRICT_REFUSAL_PROGRESS_PREFIX, UNPROVEN_WORKER_NOTICE, UNTRUSTED_NOTICE, UNTRUSTED_WORKER_NOTICE } from '../shared/trust-notices.js';
 import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
@@ -1716,25 +1717,15 @@ function sidebarLayout(): 'projects' | 'inbox' {
 /** The layout the sidebar was last drawn in; the page's own markup is the project tree's. */
 let paintedLayout: 'projects' | 'inbox' = 'projects';
 
-type AgeUnit = 'minute' | 'hour' | 'day' | 'week';
-const ageFormats = new Map<string, Intl.NumberFormat>();
-/** A count in the app language's own narrow unit, as the platform writes it ("5h" in English). */
-function ageIn(value: number, unit: AgeUnit): string {
-  const key = `${currentLanguage()}|${unit}`;
-  let format = ageFormats.get(key);
-  if (!format) ageFormats.set(key, format = new Intl.NumberFormat(currentLanguage(), { style: 'unit', unit, unitDisplay: 'narrow' }));
-  return format.format(value);
-}
-
-/** "now", "4m", "5h", "2d", "3w" in English: one short token that fits beside a title. */
+/** "now", "4m", "5h", "2d", "3w", "4mo", "2y" in English: one short token that fits beside a title. */
 function compactAge(at: number): string {
-  const minutes = Math.max(0, Math.round((Date.now() - at) / 60_000));
-  if (minutes < 1) return t('now');
-  if (minutes < 60) return ageIn(minutes, 'minute');
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return ageIn(hours, 'hour');
-  const days = Math.round(hours / 24);
-  return days < 7 ? ageIn(days, 'day') : ageIn(Math.round(days / 7), 'week');
+  // A time that is not a number has no age to show; "now" would claim recent activity (CodeRabbit on #1904).
+  if (!Number.isFinite(at)) return '';
+  const age = ageOf(at, Date.now());
+  if (!age || (age.unit === 'second' && age.value < 30)) return t('now');
+  // Under a minute rounds up to one; past weeks it goes on to months and years, never "104w", and
+  // from the catalogs, where four months never reads like four minutes (2.1.47 round).
+  return age.unit === 'second' ? compactAgeText(1, 'minute') : compactAgeText(age.value, age.unit);
 }
 
 /** A chat quiet this long, not needing the person, running, unread or pinned, settles into the compact list below. */
@@ -3025,6 +3016,8 @@ function paintGoalProgress(): void {
   if (entry) { phase = entry.state; error = entry.error ?? undefined; }
   if (draft && (!off || finishDraft) && (finishDraft || !['saving', 'failed'].includes(phase))) { phase = draft.stage; text = draft.text; error = draft.error ?? undefined; }
   else if (wait && !['saving', 'failed'].includes(phase)) { phase = 'settling'; text = ''; error = undefined; }
+  // The next step's draft waits for the Goal step reviewer before it asks the helper (#1832).
+  if (phase === 'sending' && wait?.reason === 'reviewer') { phase = 'settling'; text = ''; error = undefined; }
   const labels: Record<string, string> = { saving: t("Saving task…"), saved: t("Task saved · waiting for the next completed answer"),
     preparing: t("Preparing the opening message…"), generating: t("Generating the opening message…"), ready: t("Message ready · awaiting ChatGPT delivery"),
     sending: t("Preparing a continuation…"), answering: t("Generating a continuation…"), queued: t("Opening message queued"),
@@ -3034,7 +3027,7 @@ function paintGoalProgress(): void {
   labels.retrying = t("Provider busy · retry {0}{1}", [progress?.attempt ?? '', progress?.retryAt ? t(' at {0}', [new Date(progress.retryAt).toLocaleTimeString(currentLanguage())]) : '']);
   const mode = $<HTMLSelectElement>('chatAutomation').value === 'loop' ? t('Loop') : t('Goal');
   labels.settling = `${mode} · ${wait?.reason === 'native-busy' ? t('ChatGPT resumed work · waiting before retry') : wait?.reason === 'silence' ? t('Waiting before recovery reload') : wait?.reason === 'quiet' ? t('Waiting for tool inactivity') :
-    wait?.reason === 'workers' ? t('Waiting for this chat’s sub-agents') : wait?.reason === 'tools' ? t('Waiting for running tools') : wait?.reason === 'listening' ? t('Waiting for activity after recovery') : wait?.reason === 'closed' ? t('Paused until this chat is open in the browser') : t('Answer settling')}`;
+    wait?.reason === 'reviewer' ? t('Waiting for the reviewer') : wait?.reason === 'workers' ? t('Waiting for this chat’s sub-agents') : wait?.reason === 'tools' ? t('Waiting for running tools') : wait?.reason === 'listening' ? t('Waiting for activity after recovery') : wait?.reason === 'closed' ? t('Paused until this chat is open in the browser') : t('Answer settling')}`;
   // The dock already describes this same silence/listening deadline. Keep the
   // Loop/Goal task controls, but do not present its shared wait as another action.
   const sharedRecoveryWait = phase === 'settling' && wait?.until !== undefined &&
@@ -3058,7 +3051,11 @@ function paintGoalProgress(): void {
   }
   if (phase === 'settling' && wait?.until) {
     const seconds = Math.max(0, Math.ceil((wait.until - Date.now()) / 1000));
-    const timer = el('span', 'recovery-countdown', seconds ? t('Check in {0}', [`${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`]) : t('Checking for activity…'));
+    const left = countdownClock(seconds);
+    // The reviewer's deadline is when Goal goes on without the review (#1832), not another check.
+    const timer = el('span', 'recovery-countdown', wait.reason === 'reviewer'
+      ? (seconds ? t('Continues without the review in {0}', [left]) : t('Continuing without the review…'))
+      : seconds ? t('Check in {0}', [left]) : t('Checking for activity…'));
     timer.setAttribute('role', 'timer'); timer.setAttribute('aria-live', 'off'); row.append(timer);
   }
 }
@@ -6958,13 +6955,9 @@ function backgroundCommand(command: string): string {
   return compact.length > 120 ? compact.slice(0, 117) + '…' : compact;
 }
 
+/** "45s", "4m 5s", "6h 12m", then "3d 4h": a process left running for days never reads "72h 4m". */
 function backgroundElapsed(startedAt: number): string {
-  const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h ${minutes % 60}m`;
+  return elapsedDurationText((Date.now() - startedAt) / 1000, 2);
 }
 
 function syncBackgroundProcessClock(visible: boolean): void {
@@ -7826,6 +7819,7 @@ export function chatSettingsPatch(current: Config): {
       loopBackend: $<HTMLSelectElement>('loopBackend').value as Config['goal']['loopBackend'],
       helperModel: $<HTMLSelectElement>('helperModel').value || current.goal.helperModel || DEFAULT_HELPER_CHAT_MODEL,
       helperReasoning: ($<HTMLSelectElement>('helperReasoning').value || current.goal.helperReasoning || 'high') as Config['goal']['helperReasoning'],
+      reviewerModel: $<HTMLSelectElement>('goalReviewer').value,
       provider: {
         kind: ($<HTMLSelectElement>('goalProvider').value || current.goal.provider?.kind || 'openrouter') as Config['goal']['provider']['kind'],
         baseUrl: $<HTMLInputElement>('goalBaseUrl').value
@@ -8257,6 +8251,7 @@ const CHAT_INPUTS = [
   'goalBackend',
   'loopBackend',
   'helperModel', 'helperReasoning',
+  'goalReviewer',
   'autoCompact',
   'autoCompactTokens',
   'maWorkers', 'globalMaWorkers',
@@ -8415,6 +8410,8 @@ export function chatApply(state: AppState, previous?: Config): void {
   // again matched no option and showed those settings blank (2.1.31 release check).
   applyChatValue($<HTMLSelectElement>('goalBackend'), config.goal.backend ?? 'chatgpt', previous?.goal.backend);
   applyChatValue($<HTMLSelectElement>('loopBackend'), config.goal.loopBackend ?? 'chatgpt', previous?.goal.loopBackend);
+  // The step reviewer is a worker chat (#1832): chosen while Sub-agents are off, it says so and offers them.
+  $('goalReviewerWorkersRow').hidden = !config.goal.reviewerModel || config.multiAgent.enabled;
   applyGoal(state, previous);
 
   // Extension bridge. Connecting is automatic, so this reports rather than asks.
@@ -8676,14 +8673,20 @@ async function paintScheduleLine(): Promise<void> {
   if (schedule.missedDueAt !== undefined) parts.push(t('missed {0}', [clock(schedule.missedDueAt)]));
   if (!schedule.paused) parts.push(next === null ? t('ended') : t('next {0}', [clock(next)]));
   ui($('scheduleLineText'), 'textContent', () => parts.join(' · '));
+  // Pause and Edit drawn like the Goal row's: the dock's own icon actions, named by tooltip.
   const pause = $<HTMLButtonElement>('scheduleLinePause');
-  ui(pause, 'textContent', () => schedule.paused ? t('Resume') : t('Pause'));
+  const pauseLabel = () => schedule.paused ? t('Resume schedule') : t('Pause schedule');
+  pause.replaceChildren(icon(schedule.paused ? 'i-play' : 'i-power'));
+  ui(pause, 'title', pauseLabel); ui(pause, 'aria-label', pauseLabel);
   pause.onclick = async () => {
     pause.disabled = true;
     try { await run(api.pauseSchedule(schedule.sessionId, !schedule.paused)); } finally { pause.disabled = false; }
     void paintScheduleLine();
   };
-  $<HTMLButtonElement>('scheduleLineEdit').onclick = () => void scheduleDialog?.open(schedule.sessionId, '');
+  const edit = $<HTMLButtonElement>('scheduleLineEdit');
+  if (!edit.firstChild) edit.append(icon('i-pencil'));
+  ui(edit, 'title', () => t('Edit schedule')); ui(edit, 'aria-label', () => t('Edit schedule'));
+  edit.onclick = () => void scheduleDialog?.open(schedule.sessionId, '');
 }
 
 async function refreshInputQueue(): Promise<void> {
@@ -9964,6 +9967,19 @@ export function initChat(next: Deps): void {
   }
 
   wireGoal(() => deps.save());
+  // Only the person's press turns Sub-agents on for the reviewer, through Home's own switch and save.
+  $('goalReviewerWorkers').addEventListener('click', async () => {
+    const workers = $<HTMLInputElement>('homeMaEnabled');
+    if (workers.checked) return;
+    workers.checked = true;
+    // The saved state hides this row with the focused button in it; the reviewer's choice keeps the keyboard's place.
+    const button = $<HTMLButtonElement>('goalReviewerWorkers');
+    if (document.activeElement === button) $<HTMLSelectElement>('goalReviewer').focus();
+    if (await deps.save()) return;
+    // Refused (an invalid field elsewhere): Sub-agents stay off, and the switch must not say otherwise.
+    workers.checked = false;
+    if (document.activeElement === $('goalReviewer') && !$('goalReviewerWorkersRow').hidden) button.focus();
+  });
 
   $('bridgeUnpair').addEventListener('click', async () => {
     const state = await run(api.unpairExtension());

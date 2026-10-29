@@ -24,7 +24,9 @@ vi.mock('electron', () => ({
     decryptStringAsync: async (data: Buffer) => ({ result: data.toString(), shouldReEncrypt: false })
   }
 }));
-vi.mock('../src/main/extension-path.js', () => ({ extensionDir: () => process.cwd(), shippedExtensionBuild: () => null, extensionUpdateOffer: () => null, prepareExtensionUpdate: () => null }));
+const extensionPath = vi.hoisted(() => ({ prepare: (() => null) as (running: string | null) => { build: string; ready: boolean } | null }));
+vi.mock('../src/main/extension-path.js', () => ({ extensionDir: () => process.cwd(), shippedExtensionBuild: () => null, extensionUpdateOffer: () => null,
+  prepareExtensionUpdate: (running: string | null) => extensionPath.prepare(running) }));
 vi.mock('../src/main/connection.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/main/connection.js')>();
   return { ...actual, connect: async () => {}, getStatus: () => ({ ...actual.getStatus(), state: 'connected' }) };
@@ -37,6 +39,7 @@ const { createSession, getSession, rebindSession, initSessionStore, resetSession
 const { registerIpc } = await import('../src/main/ipc.js');
 const { bridgePort, startBridge, stopBridge, stopRecoverySweepTimerForTests } = await import('../src/main/bridge.js');
 const input = await import('../src/main/session/input.js');
+const logger = await import('../src/main/logger.js');
 const goal = await import('../src/main/goal.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
 let directory: string;
@@ -195,6 +198,113 @@ it('keeps the reason a recovery claim was released, and says it once', async () 
     expect(await input.failBrowserInput(row.id, 'a-document', 'The tab moved to another chat.')).toBe(true);
     expect(getLog().filter(entry => entry.message.includes('could not send this recovery message'))).toHaveLength(2);
   } finally { clock.mockRestore(); }
+});
+
+// 2.1.47 round (VM, tab offline while sending): a typed message failed with "the requested model or
+// reasoning could not be confirmed" — shown in the chat, but not one line in the log. And the page
+// words that reason in its own language, so matching the English text never refreshed the models.
+it('logs why the browser could not send a message, and refreshes the models on a rejected choice in any language', async () => {
+  const { getLog } = await import('../src/main/logger.js');
+  const { pendingChatModelRequest } = await import('../src/main/chat-models.js');
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Model not confirmed', conversationId });
+  const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Check the issues' });
+  expect((await post('/input/claim', { id: row.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input).toMatchObject({ id: row.id });
+  const said = 'Das gewünschte Modell oder die Denkstufe ließ sich nicht bestätigen';
+  expect((await post('/input/fail', { id: row.id, owner: 'a-document', error: said, detail: 'model-unconfirmed' })).body.ok).toBe(true);
+  expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ state: 'failed', error: said });
+  const lines = getLog().filter(entry => entry.message.includes(row.id) && entry.message.includes('could not send'));
+  expect(lines, 'the failure was not logged').toHaveLength(1);
+  expect(lines[0]!.message).toContain(said);
+  expect(lines[0]!.message).toContain('model-unconfirmed');
+  expect(pendingChatModelRequest(), 'a rejected model choice did not ask for the model list again').not.toBeNull();
+});
+
+// 2.1.47 round: the extension held its self-update for hours behind a message that only waited in the queue.
+it('lists a queued message as open but not as being sent until a browser claims it', async () => {
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Queued, not sending', conversationId });
+  const row = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Waits its turn' });
+  const status = async () => (await post('/status', { openConversations: [] })).body;
+  expect((await status()).inputOpeningIds).toContain(row.id);
+  expect((await status()).inputSendingIds).not.toContain(row.id);
+  expect((await post('/input/claim', { id: row.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input).toMatchObject({ id: row.id });
+  expect((await status()).inputSendingIds).toContain(row.id);
+  await input.cancelInput(row.id);
+  expect((await status()).inputSendingIds).not.toContain(row.id);
+  expect((await status()).inputOpeningIds).not.toContain(row.id);
+});
+
+// CodeRabbit on #1901: the extension's update decision and its delivery ran side by side, so a claim
+// could start while the folder was being replaced. The app, which holds every claim, closes that gap.
+it('refuses the extension update while a message is being sent, and new claims while the extension reloads', async () => {
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const prepare = vi.fn(() => ({ build: 'bbbbbbbbbbbb', ready: true }));
+  extensionPath.prepare = prepare;
+  try {
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'Update during a send', conversationId });
+    const first = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Being sent' });
+    expect((await post('/input/claim', { id: first.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input).toMatchObject({ id: first.id });
+    // Claimed since the extension's last /status: the folder is not replaced under it.
+    expect((await post('/extension/update', {})).body).toMatchObject({ ready: false, hold: 'sending' });
+    expect(prepare).not.toHaveBeenCalled();
+    await input.cancelInput(first.id);
+    expect((await post('/extension/update', {})).body).toMatchObject({ ready: true, build: 'bbbbbbbbbbbb' });
+    // The extension reloads now: it takes no new message until it is back.
+    const second = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'After the update' });
+    const logged = vi.spyOn(logger, 'logInfo');
+    expect((await post('/input/claim', { id: second.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input).toBeNull();
+    expect((await post('/input/claim', { id: second.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input).toBeNull();
+    // Says once why the message waits, not on every poll.
+    expect(logged.mock.calls.filter(([line]) => String(line).includes('extension is reloading'))).toHaveLength(1);
+    logged.mockRestore();
+    now += 30_000;
+    expect((await post('/input/claim', { id: second.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input).toMatchObject({ id: second.id });
+    await input.cancelInput(second.id);
+  } finally { clock.mockRestore(); extensionPath.prepare = () => null; }
+});
+
+// CodeRabbit on #1901: a claim could pass the reload check, wait for the send check, and take the
+// message after the update was allowed. Claims in progress hold the update; the claim checks again.
+it('holds the extension update while a claim waits for the send check, and lets that claim finish', async () => {
+  const http = await import('node:http');
+  let release: () => void = () => undefined;
+  const answered = new Promise<void>(resolve => { release = resolve; });
+  let asked: () => void = () => undefined;
+  const reached = new Promise<void>(resolve => { asked = resolve; });
+  const server = http.createServer((req, res) => {
+    req.resume();
+    req.on('end', () => { asked(); void answered.then(() => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ allow: true })); }); });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as { port: number }).port;
+  const prepare = vi.fn(() => ({ build: 'bbbbbbbbbbbb', ready: true }));
+  extensionPath.prepare = prepare;
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      ui: { ...defaultConfig().ui, sendCheckUrl: `http://127.0.0.1:${port}/check` } });
+    const { conversationId, row } = await silentTurnContinue('Claim waits for the send check', ms => now += ms);
+    const claiming = post('/input/claim', { id: row.id, owner: 'a-document', conversationId, requiresAuthorization: true });
+    // The send check has the claim waiting: the row still reads queued, but the update must not go ahead.
+    await reached;
+    expect((await post('/extension/update', {})).body).toMatchObject({ ready: false, hold: 'sending' });
+    expect(prepare).not.toHaveBeenCalled();
+    release();
+    expect((await claiming).body.input).toMatchObject({ id: row.id });
+  } finally {
+    release();
+    clock.mockRestore(); extensionPath.prepare = () => null;
+    await new Promise(resolve => server.close(resolve));
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  }
+});
+
+it('counts only messages a browser is sending, not one handed to a tool caller (CodeRabbit on #1901)', async () => {
+  const { inBrowserDelivery } = await import('../src/main/session/input.js');
+  expect((['queued', 'browser', 'decision', 'tool', 'sent', 'failed', 'cancelled'] as const)
+    .filter(state => inBrowserDelivery({ state } as never))).toEqual(['browser', 'decision']);
 });
 
 it('says why a page withdrew a Continue and ends it after three minutes of withdrawals (#820)', async () => {

@@ -1224,13 +1224,24 @@ it("shows the chat's schedule as one quiet line, with Pause and Edit, and a miss
     vi.setSystemTime(new Date(2026, 9, 30, 10, 0));
     await append([]); await append([]);
     expect(w.document.getElementById('scheduleLineText')!.textContent).toMatch(/· next Mon,? 09:00( AM)?$/);
-    (w.document.getElementById('scheduleLinePause') as HTMLButtonElement).click();
+    // Pause and Edit are the dock's own icon actions, like the Goal row's, named for screen readers.
+    const pause = () => w.document.getElementById('scheduleLinePause')!;
+    const edit = w.document.getElementById('scheduleLineEdit')!;
+    expect(pause().classList.contains('dock-action')).toBe(true);
+    expect(edit.classList.contains('dock-action')).toBe(true);
+    expect(pause().getAttribute('aria-label')).toBe('Pause schedule');
+    expect(pause().title).toBe('Pause schedule');
+    expect(pause().querySelector('.ico')).not.toBeNull();
+    expect(edit.getAttribute('aria-label')).toBe('Edit schedule');
+    expect(edit.querySelector('.ico')).not.toBeNull();
+    pause().click();
     await append([]);
     expect(api.pauseSchedule).toHaveBeenCalledWith(sessionId, true);
     api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, paused: true } }));
     await append([]); await append([]);
     expect(line().textContent).toMatch(/^Paused · every weekday at 09:00/);
-    expect(w.document.getElementById('scheduleLinePause')!.textContent).toBe('Resume');
+    expect(pause().getAttribute('aria-label')).toBe('Resume schedule');
+    expect(pause().title).toBe('Resume schedule');
     // A run missed while the app was closed says so, beside the next time.
     const missed = new Date(); missed.setHours(9, 0, 0, 0);
     api.getSchedule = vi.fn(() => Promise.resolve({ ok: true, data: { ...schedule, missedDueAt: missed.getTime() } }));
@@ -5079,26 +5090,31 @@ it.each(['navigate', 'objective edit', 'mode change', 'automation change'] as co
 });
 
 it('shows Loop settling, its real waiting deadline, and generated text in the same row', async () => {
-  const { w, append } = await boot([]);
-  const api = (w as any).api;
-  const controls = { automation: 'loop', objective: 'Continue the task', blocked: '', job: null,
-    goalWait: { reason: 'quiet', until: Date.now() + 125_000 }, goalDraft: null as unknown };
-  api.getSessionControls = async () => ({ ok: true, data: controls });
-  await append([]);
-  const row = w.document.getElementById('goalLifecycle')!;
-  expect(row.hidden).toBe(false);
-  expect(row.textContent).toContain('Loop · Waiting for tool inactivity');
-  expect(row.querySelector('[role="timer"]')?.textContent).toContain('2:05');
-  expect(row.getAttribute('aria-busy')).toBe('true');
-  controls.goalDraft = { stage: 'answering', model: 'fixture', text: 'Continue with the remaining checks', error: null };
-  await append([]);
-  expect(w.document.getElementById('goalLifecycle')).toBe(row);
-  expect(row.textContent).toContain('Generating a continuation');
-  expect(row.textContent).toContain('Continue with the remaining checks');
-  expect(row.querySelector('[role="timer"]')).toBeNull();
-  controls.automation = 'off'; await append([]);
-  expect(row.hidden).toBe(true);
-  expect(row.textContent).toBe('');
+  // The clock stands still, so a slow run cannot tick the countdown from 2:05 to 2:04 (2.1.47 round).
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(2026, 9, 28, 12, 0));
+  try {
+    const { w, append } = await boot([]);
+    const api = (w as any).api;
+    const controls = { automation: 'loop', objective: 'Continue the task', blocked: '', job: null,
+      goalWait: { reason: 'quiet', until: Date.now() + 125_000 }, goalDraft: null as unknown };
+    api.getSessionControls = async () => ({ ok: true, data: controls });
+    await append([]);
+    const row = w.document.getElementById('goalLifecycle')!;
+    expect(row.hidden).toBe(false);
+    expect(row.textContent).toContain('Loop · Waiting for tool inactivity');
+    expect(row.querySelector('[role="timer"]')?.textContent).toContain('2:05');
+    expect(row.getAttribute('aria-busy')).toBe('true');
+    controls.goalDraft = { stage: 'answering', model: 'fixture', text: 'Continue with the remaining checks', error: null };
+    await append([]);
+    expect(w.document.getElementById('goalLifecycle')).toBe(row);
+    expect(row.textContent).toContain('Generating a continuation');
+    expect(row.textContent).toContain('Continue with the remaining checks');
+    expect(row.querySelector('[role="timer"]')).toBeNull();
+    controls.automation = 'off'; await append([]);
+    expect(row.hidden).toBe(true);
+    expect(row.textContent).toBe('');
+  } finally { vi.useRealTimers(); }
 });
 
 it('names the wait for this chat’s own sub-agents without inventing a countdown', async () => {
@@ -5118,6 +5134,26 @@ it('names the wait for this chat’s own sub-agents without inventing a countdow
   api.getSessionControls = async () => ({ ok: true, data: { ...controls, goalWait: null } });
   await append([]);
   expect(row.hidden).toBe(true);
+});
+
+it('names the wait for the Goal step reviewer (#1832)', async () => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  api.getSessionControls = async () => ({ ok: true, data: { automation: 'goal', objective: 'Ship it', blocked: '', job: null,
+    goalWait: { reason: 'reviewer', until: Date.now() + 300_000 }, goalDraft: null as unknown } });
+  await append([]);
+  const row = w.document.getElementById('goalLifecycle')!;
+  expect(row.hidden).toBe(false);
+  expect(row.textContent).toContain('Goal · Waiting for the reviewer');
+  expect(row.getAttribute('aria-busy')).toBe('true');
+  // At the deadline Goal goes on without the review, so the countdown says that, not "Check in".
+  expect(row.querySelector('[role="timer"]')?.textContent).toMatch(/^Continues without the review in [45]:\d\d$/);
+  // The next step's draft waits for the review before asking the helper: it says so, not "Preparing".
+  api.getSessionControls = async () => ({ ok: true, data: { automation: 'goal', objective: 'Ship it', blocked: '', job: null,
+    goalWait: { reason: 'reviewer', until: Date.now() + 300_000 }, goalDraft: { stage: 'sending', model: 'fixture', text: '', error: null } } });
+  await append([]);
+  expect(row.textContent).toContain('Goal · Waiting for the reviewer');
+  expect(row.textContent).not.toContain('Preparing a continuation');
 });
 
 it('says a Goal waits for its closed chat, without a spinner or a countdown', async () => {
@@ -8753,10 +8789,11 @@ it("sums up what a finished answer changed, collapsed, counting only real change
   const { w, append } = await boot([], true, [], [project]);
   const api = (w as any).api;
   const changes = [
-    { path: 'src/app.ts', state: 'edited', added: 30, removed: 5, approximate: false, diff: 'kept', edits: 3 },
-    { path: 'src/new-page.ts', state: 'created', added: 12, removed: 0, approximate: false, diff: 'kept', edits: 1 },
-    { path: 'old/helper.ts', state: 'unchanged', added: 0, removed: 0, approximate: false, diff: 'kept', edits: 2 },
-    { path: 'big.json', state: 'edited', added: 400, removed: 2, approximate: true, diff: 'too-large', edits: 1 }
+    // Recorded as the tools saw them: under the approved root's virtual name.
+    { path: '/repo/src/app.ts', state: 'edited', added: 30, removed: 5, approximate: false, diff: 'kept', edits: 3 },
+    { path: '/repo/src/new-page.ts', state: 'created', added: 12, removed: 0, approximate: false, diff: 'kept', edits: 1 },
+    { path: '/repo/old/helper.ts', state: 'unchanged', added: 0, removed: 0, approximate: false, diff: 'kept', edits: 2 },
+    { path: '/repo/big.json', state: 'edited', added: 400, removed: 2, approximate: true, diff: 'too-large', edits: 1 }
   ];
   api.turnChanges = vi.fn(async () => ({ ok: true, data: { changes, total: 4 } }));
   api.turnFileDiff = vi.fn(async () => ({ ok: true, data: { before: 'a\n', after: 'a\nb\n' } }));
@@ -8783,13 +8820,19 @@ it("sums up what a finished answer changed, collapsed, counting only real change
   expect(card.querySelector('summary')!.textContent).toBe('Changed 3 files · +442 −7 (approx.) · 1 put back');
   card.open = true; card.dispatchEvent(new w.Event('toggle'));
   const rows = [...card.querySelectorAll<HTMLDetailsElement>('.turn-change')];
+  // Each file named the way its tool row names it, without the root's virtual name; the full path in the tooltip.
   expect(rows.map(row => row.querySelector('summary')!.textContent)).toEqual([
     'src/app.ts+30 −5edited', 'src/new-page.ts+12created', 'old/helper.tsno net change', 'big.json+400 −2 (approx.)edited'
   ]);
+  expect(rows[0]!.querySelector('summary')!.title).toBe('/repo/src/app.ts');
+  // Two approved roots with the same file: the shortened names would be equal, so both keep their root (CodeRabbit).
+  const { turnChangeLabels } = await import('../src/renderer/turn-changes.js');
+  expect(turnChangeLabels(['/repo-a/src/app.ts', '/repo-b/src/app.ts', '/repo-a/README.md', 'notes.md']))
+    .toEqual(['/repo-a/src/app.ts', '/repo-b/src/app.ts', 'README.md', 'notes.md']);
   // A file's net diff loads when its row opens; one the recording did not keep says so.
   rows[0]!.open = true; rows[0]!.dispatchEvent(new w.Event('toggle'));
   await settle();
-  expect(api.turnFileDiff).toHaveBeenCalledWith(expect.any(String), 't-edit', 10, 'src/app.ts');
+  expect(api.turnFileDiff).toHaveBeenCalledWith(expect.any(String), 't-edit', 10, '/repo/src/app.ts');
   rows[3]!.open = true; rows[3]!.dispatchEvent(new w.Event('toggle'));
   await settle();
   expect(rows[3]!.textContent).toContain('Diff unavailable: this edit was too large to keep');

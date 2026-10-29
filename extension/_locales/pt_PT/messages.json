@@ -509,6 +509,12 @@
   "content_goal_wait_tool_inactivity": {
     "message": "À espera de inatividade das ferramentas"
   },
+  "content_goal_reviewer_deadline": {
+    "message": "Continua sem a revisão dentro de $1"
+  },
+  "content_goal_wait_reviewer": {
+    "message": "A aguardar o revisor"
+  },
   "content_goal_wait_workers": {
     "message": "A aguardar os subagentes deste chat"
   },
