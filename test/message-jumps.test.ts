@@ -1,5 +1,6 @@
+import { JSDOM } from 'jsdom';
 import { expect, it } from 'vitest';
-import { nextOwnMessage, pickOwnMessage } from '../src/renderer/message-jumps.js';
+import { keyBelongsElsewhere, nextOwnMessage, pickOwnMessage } from '../src/renderer/message-jumps.js';
 
 /**
  * #1884 (Haz): Alt+↑ / Alt+↓ moves the chat to your previous / next message. The rows' tops are in
@@ -38,4 +39,24 @@ it('goes on from the message it jumped to while that one is still in view', () =
   // The reader scrolled it out of view: the top of the view decides again.
   expect(nextOwnMessage([-900, -300, 900], 40, 800, 1, 0)).toBe(2);
   expect(nextOwnMessage([-900, -300, 900], 40, 800, -1, 2)).toBe(1);
+});
+
+// CodeRabbit on #1889: the first Alt+↑ in a short chat, with no message above the view, goes to the newest
+// message in view instead of loading older history with nothing marked.
+it('goes first to the newest message in view when none is above it', () => {
+  expect(nextOwnMessage([100, 220, 340], 40, 800, -1, -1)).toBe(2);
+  // One above the view: that one, as before.
+  expect(nextOwnMessage([-300, 100, 220], 40, 800, -1, -1)).toBe(0);
+  // None in view either: nothing on this page.
+  expect(nextOwnMessage([900, 1200], 40, 800, -1, -1)).toBe(-1);
+});
+
+// CodeRabbit on #1889: a panel that is open (the context meter's) keeps its keys.
+it('leaves the keys to an open panel, menu or list', () => {
+  const dom = new JSDOM('<button id="meter" aria-expanded="true"></button><div role="dialog"><button id="inside"></button></div><button id="plain"></button>');
+  Object.assign(globalThis, { Element: dom.window.Element });
+  const byId = (id: string) => dom.window.document.getElementById(id);
+  expect(keyBelongsElsewhere(byId('meter'))).toBe(true);
+  expect(keyBelongsElsewhere(byId('inside'))).toBe(true);
+  expect(keyBelongsElsewhere(byId('plain'))).toBe(false);
 });

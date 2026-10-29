@@ -5110,11 +5110,20 @@ function jumpOwnMessage(direction: -1 | 1): void {
     // None earlier on the loaded page: its top, and the page before it, as reading up loads it. A pane
     // already at its top fires no scroll event, so the older page is asked for here.
     if (direction < 0) { readTimeline(); pane.scrollTop = 0; requestHistory(-1); }
+    // None later on a page of history: its end, and the page after it, as reading down loads it.
+    else if (historyBefore !== null) { readTimeline(); pane.scrollTop = pane.scrollHeight; requestHistory(1); }
     return;
   }
   readTimeline();
   const row = rows[at]!;
   lastOwnJump = { key: row.dataset.timelineKey ?? '', selection: selectionGeneration };
+  // A screen reader hears the message gone to; the focus stays where it is (CodeRabbit on #1889).
+  const announce = $('recallAnnounce');
+  announce.textContent = '';
+  // The message without its leading "You" label, which comes first in the box.
+  const said = row.querySelector<HTMLElement>('.said.is-user');
+  const label = said?.querySelector(':scope > b')?.textContent ?? '';
+  announce.textContent = (said?.textContent ?? '').slice(label.length).replace(/\s+/g, ' ').trim().slice(0, 300);
   row.scrollIntoView({ block: 'start' });
   row.classList.remove('is-search-hit');
   void row.offsetWidth;
