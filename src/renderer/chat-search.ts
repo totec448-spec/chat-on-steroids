@@ -11,6 +11,7 @@ import type { SessionSearchReply } from '../shared/session.js';
 import { $, el, icon, run } from './dom.js';
 import { t, tn, ui } from './i18n.js';
 import { closeRowMenu } from './row-menu.js';
+import { matchActions, type PaletteAction } from './palette.js';
 import { isMac, primaryShortcut } from './shortcuts.js';
 
 const api = window.api;
@@ -35,7 +36,22 @@ export interface ChatSearchOptions {
   selectedId(): string | null;
   /** The newest chats, newest first, offered before anything is typed. */
   recent(): Array<{ id: string; title: string }>;
+  /** #1884: the actions ⌘K can run; while typing, the few that match follow the chats. */
+  actions?(): PaletteAction[];
+  /** #1884: the settings that match what is typed, as Settings' own search finds them. */
+  settings?(query: string): PaletteSetting[];
+  /**
+   * The chat and project an action acts on, as a value that changes when another is chosen. An action
+   * runs once the dialog has faded out, and only if this is still what it was when it was chosen.
+   */
+  epoch?(): unknown;
 }
+
+/** A setting ⌘K can open: its name, where it lives (page › section), and how to open it there. */
+export interface PaletteSetting { title: string; place: string; open(): void }
+
+/** Settings rows under the chats and actions: enough to find one, not a second settings page. */
+const MAX_SETTINGS = 3;
 
 export function initChatSearch(options: ChatSearchOptions): ChatSearch {
   const dialog = $<HTMLDialogElement>('searchDialog');
@@ -51,17 +67,24 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
 
   const query = (): string => field.value.trim();
 
+  // What a chosen action or setting does, once the dialog has closed: while it fades out it is still
+  // modal and the rest of the window inert, so a setting's control could not take focus (CodeRabbit).
+  let afterClose: (() => void) | null = null;
   /**
    * Closes after the exit animation, so the box fades out instead of vanishing. With no animation
-   * (reduced motion, or no stylesheet) it closes at once.
+   * (reduced motion, or no stylesheet) it closes at once. `after` runs once it is closed.
    */
-  const close = (): void => {
-    if (!dialog.open || dialog.classList.contains('is-closing')) return;
+  const close = (after?: () => void): void => {
+    if (!dialog.open) { after?.(); return; }
+    if (after) afterClose = after;
+    if (dialog.classList.contains('is-closing')) return;
     dialog.classList.add('is-closing');
     const finish = (): void => {
       if (!dialog.classList.contains('is-closing')) return;
       dialog.classList.remove('is-closing');
       dialog.close();
+      const then = afterClose; afterClose = null;
+      then?.();
     };
     const animation = window.getComputedStyle(dialog).animationName;
     if (!animation || animation === 'none') { finish(); return; }
@@ -105,11 +128,39 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
     return button;
   };
 
-  const list = (rows: HTMLElement[]): HTMLElement => {
+  /** Chats are a list; actions and settings are buttons in a group, so screen readers name them as such. */
+  const list = (rows: HTMLElement[], role: 'list' | 'group' = 'list'): HTMLElement => {
     const box = el('div', 'search-list');
-    box.setAttribute('role', 'list');
+    box.setAttribute('role', role);
     box.append(...rows);
     return box;
+  };
+
+  const labelled = (box: HTMLElement, name: () => string): HTMLElement => ui(box, 'aria-label', name);
+
+  /** A row that runs an action: its name, and its shortcut as the shortcuts dialog prints it. */
+  const actionRow = (action: PaletteAction): HTMLButtonElement => {
+    const button = el('button', 'search-result is-action') as HTMLButtonElement;
+    button.type = 'button';
+    button.append(marked('b', '', action.label()));
+    const keys = action.keys?.() ?? [];
+    if (keys.length) {
+      const box = el('span', 'search-keys');
+      box.append(...keys.map(key => el('kbd', '', key)));
+      button.append(box);
+    }
+    button.addEventListener('click', () => {
+      const chosenFor = options.epoch?.();
+      close(() => { if (options.epoch?.() === chosenFor) action.run(); });
+    });
+    return button;
+  };
+  const settingRow = (setting: PaletteSetting): HTMLButtonElement => {
+    const button = el('button', 'search-result is-setting') as HTMLButtonElement;
+    button.type = 'button';
+    button.append(marked('b', '', setting.title), marked('span', 'search-snippet', setting.place));
+    button.addEventListener('click', () => close(() => setting.open()));
+    return button;
   };
 
   const paint = (): void => {
@@ -121,19 +172,28 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
         list(recent.map(chat => row(chat.id, marked('b', '', chat.title || t("Untitled session"))))));
       return;
     }
+    // Chats first, as before; the few actions and settings that match come after them (#1884, Haz).
+    const actions = matchActions(options.actions?.() ?? [], query());
+    const settings = (options.settings?.(query()) ?? []).slice(0, MAX_SETTINGS);
+    const extras = (): void => {
+      if (actions.length) results.append(el('p', 'search-heading', () => t("Actions")), labelled(list(actions.map(actionRow), 'group'), () => t("Actions")));
+      if (settings.length) results.append(el('p', 'search-heading', () => t("Settings")), labelled(list(settings.map(settingRow), 'group'), () => t("Settings")));
+    };
     const reply = last;
-    if (!reply) return;
+    // A chat search that failed or hasn't answered still leaves the actions and settings to pick from.
+    if (!reply) { extras(); return; }
     results.append(list(reply.results.map(result => row(result.id,
       result.title ? marked('b', '', result.title, result.titleMatches) : marked('b', '', t("Untitled session")),
       result.snippet ? marked('span', 'search-snippet', result.snippet.text, result.snippet.matches) : undefined,
       result.snippet ? query() : undefined))));
     if (reply.indexed < reply.total) {
       results.append(el('p', 'search-status', () => tn("Searching message text… {0} of {1} chat", "Searching message text… {0} of {1} chats", reply.total, [reply.indexed, reply.total])));
-    } else if (!reply.results.length) {
+    } else if (!reply.results.length && !actions.length && !settings.length) {
       results.append(el('p', 'empty search-status', () => t("No chats match")));
     } else if (reply.limited) {
       results.append(el('p', 'search-status', () => tn("Showing the first {0} match. Add a word to narrow it down.", "Showing the first {0} matches. Add a word to narrow them down.", reply.results.length)));
     }
+    extras();
   };
 
   const search = async (): Promise<void> => {
@@ -144,7 +204,8 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
     if (!text) { last = null; paint(); return; }
     searchedAt = Date.now();
     const reply = await run(api.searchSessions(text));
-    if (mine !== generation || !reply || !dialog.open) return;
+    if (mine !== generation || !dialog.open) return;
+    if (!reply) { last = null; paint(); return; }
     last = reply;
     paint();
     // Words of chats not indexed yet can still match: ask again until indexing is done.
@@ -157,6 +218,8 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
   };
 
   const open = (): void => {
+    // Opened again while fading out: what was chosen before is not done after all.
+    afterClose = null;
     dialog.classList.remove('is-closing');
     // A chat's row menu is not part of the dialog: left open, it stayed over the dialog and after it.
     closeRowMenu();
