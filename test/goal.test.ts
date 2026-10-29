@@ -25,7 +25,7 @@ vi.mock('electron', () => ({
   }
 }));
 
-const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
+const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSecretsPath, setSecret } = await import('../src/main/secrets.js');
 const { initDurableStore } = await import('../src/main/durable.js');
 const { takeAutomaticReply } = await import('../src/main/session/automatic-replies.js');
@@ -2737,6 +2737,27 @@ describe('the loop that never stops', () => {
     expect(body.response_format.json_schema.schema.properties.action.enum).toEqual(['continue']);
   });
 
+  // CodeRabbit on #1924: without a schema, Loop's JSON is asked for in words that never offer "stop".
+  it('asks a custom endpoint without a schema for a continue-only answer in Loop', async () => {
+    await loopMode();
+    const loop = getConfig().goal;
+    await saveConfig({ ...getConfig(), goal: { ...loop, provider: { kind: 'custom', baseUrl: 'https://format-loop.example/v1' } } });
+    const sessionId = await seed('c-loop-format');
+    const sent: any[] = [];
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      sent.push(body);
+      if (body.response_format?.type === 'json_schema') return Response.json({ error: { message: 'This response_format type is unavailable now' } }, { status: 400 });
+      return decision('continue', 'go over it again');
+    }) as never;
+    await recordLoopMcpProof(sessionId, 'g-loop-format');
+    goal.startGoalDraft({ sessionId, conversationId: 'c-loop-format', turnId: 'g-loop-format' });
+    expect((await settled('c-loop-format')).stage).toBe('ready');
+    const words = sent[1].messages.at(-1).content as string;
+    expect(words).toContain('"action": "continue"');
+    expect(words).not.toContain('stop');
+  });
+
   it('keeps a chat’s own goal in front of the loop', async () => {
     await loopMode();
     const sessionId = await seed('c-loop-goal');
@@ -2982,6 +3003,26 @@ describe('a custom OpenAI-compatible provider', () => {
     goal.startGoalDraft({ sessionId: (await userSession('c-format-2')).id, conversationId: 'c-format-2', turnId: 'g-1' });
     expect((await settled('c-format-2')).stage).toBe('ready');
     expect(sent.map(body => body.response_format?.type)).toEqual(['json_schema', 'json_object', 'json_object']);
+  });
+
+  // CodeRabbit on #1924: refusals are worded in many ways, and what one model accepts says nothing about another.
+  it('recognizes a refusal in plain words, and learns the format per model', async () => {
+    await useCustom({ provider: { kind: 'custom', baseUrl: 'https://format-d.example/v1' }, model: 'model-a' });
+    const sent: any[] = [];
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      sent.push(body);
+      if (body.response_format?.type === 'json_schema') return Response.json({ error: { message: 'Response format is not supported for this model' } }, { status: 400 });
+      return decision('continue', 'go on');
+    }) as never;
+    goal.startGoalDraft({ sessionId: (await userSession('c-format-5')).id, conversationId: 'c-format-5', turnId: 'g-1' });
+    expect((await settled('c-format-5')).stage).toBe('ready');
+    expect(sent.map(body => `${body.model}:${body.response_format?.type}`)).toEqual(['model-a:json_schema', 'model-a:json_object']);
+    await useCustom({ provider: { kind: 'custom', baseUrl: 'https://format-d.example/v1' }, model: 'model-b' });
+    goal.startGoalDraft({ sessionId: (await userSession('c-format-6')).id, conversationId: 'c-format-6', turnId: 'g-1' });
+    expect((await settled('c-format-6')).stage).toBe('ready');
+    // Model B starts from the schema again.
+    expect(sent.slice(2).map(body => `${body.model}:${body.response_format?.type}`)).toEqual(['model-b:json_schema', 'model-b:json_object']);
   });
 
   it('sends no response_format when a custom endpoint refuses json_object too', async () => {
