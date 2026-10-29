@@ -173,6 +173,23 @@ describe('durable user input ownership', () => {
     now += gap + 500;
     expect((await pendingBrowserInputs()).some(row => row.id === typed.id)).toBe(offered);
   });
+  // CodeRabbit on #1910: the grace is for what the person typed, and it carries through the claim.
+  it('gives no close grace to a scheduled run', async () => {
+    binding.model = 'gpt-5.6-sol'; binding.finishEnabled = false;
+    const run = await enqueueInput(input({ scheduled: { scheduleId: randomUUID(), dueAt: now, late: false } } as Partial<InputArgs>));
+    openings.set(sessionId, Object.assign({ id: sessionId, conversationId: binding.conversationId, origin: { kind: binding.origin } }, { browserRecoveryDismissedAt: now + 1_500 }));
+    now += 2_000;
+    expect((await pendingBrowserInputs()).some(row => row.id === run.id)).toBe(false);
+  });
+  it('lets a message typed just before the reported close through its claim and its final send check', async () => {
+    binding.model = 'gpt-5.6-sol'; binding.finishEnabled = false;
+    const typed = await enqueueInput(input());
+    openings.set(sessionId, Object.assign({ id: sessionId, conversationId: binding.conversationId, origin: { kind: binding.origin } }, { browserRecoveryDismissedAt: now + 1_500 }));
+    now += 2_000;
+    expect(await claimBrowserInput(typed.id, 'reopened-page', binding.conversationId, true)).not.toBeNull();
+    now += 1_000;
+    expect(await authorizeBrowserInput(typed.id, 'reopened-page', binding.conversationId)).toBe(true);
+  });
   it('does not requeue a never-claimed input after Automatic Continue is turned off', async () => {
     binding.model = 'gpt-5.6-sol'; binding.finishEnabled = false;
     const row = await enqueueInput(input());
