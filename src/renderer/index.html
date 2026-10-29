@@ -66,6 +66,7 @@
         <g id="i-chat">
           <path d="M4 5.5h16a1 1 0 0 1 1 1v8.5a1 1 0 0 1-1 1h-8.5L7 19.5V16H4a1 1 0 0 1-1-1V6.5a1 1 0 0 1 1-1Z" />
         </g>
+        <g id="i-inbox"><path d="M4.5 4.5h15l2 11v4h-19v-4Z" /><path d="M2.5 15.5h6l1.5 2h4l1.5-2h6" /></g>
         <g id="i-search"><circle cx="11" cy="11" r="6" /><path d="M15.4 15.4 20 20" /></g>
         <g id="i-gear">
           <circle cx="12" cy="12" r="3" />
@@ -91,6 +92,10 @@
         <div class="sidebar-brand"><span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span><strong>Chat On Steroids</strong></div>
         <div class="sidebar-primary" id="sidebarPrimary">
           <button class="btn new-chat" id="newChat" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-pencil" /></svg>New chat</button>
+          <div class="sidebar-mode-tabs" role="tablist" aria-label="Conversations and projects">
+            <button class="btn sidebar-mode-tab is-sel" id="sidebarInboxTab" type="button" role="tab" aria-selected="true" aria-controls="inboxPane"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-inbox" /></svg>Inbox<span class="sidebar-mode-count" id="inboxCount"></span></button>
+            <button class="btn sidebar-mode-tab" id="sidebarProjectsTab" type="button" role="tab" aria-selected="false" aria-controls="projectsPane"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-folder" /></svg>Projects<span class="sidebar-mode-count" id="projectsCount"></span></button>
+          </div>
           <button class="btn sidebar-primary-link" id="sidebarPlugins" data-sidebar-page="plugins" type="button"><svg class="ico" viewBox="0 0 24 24"><use href="#i-plus" /></svg>Plugins</button>
         </div>
       <nav id="tabs" aria-label="Settings navigation" hidden>
@@ -113,6 +118,18 @@
         <section class="sidebar-sessions">
           <div class="scroll">
             <div id="sessionList">
+              <div class="sidebar-view" id="inboxPane" role="tabpanel" aria-labelledby="sidebarInboxTab">
+              <details class="sidebar-session-section" id="chatsSection" open>
+                <summary class="sidebar-session-heading">
+                  <span class="sidebar-session-label"><svg class="ico sidebar-section-chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev" /></svg>Inbox</span>
+                  <span class="acts"><button class="btn" id="chatRefresh" type="button" title="Refresh conversations" aria-label="Refresh conversations"><svg class="ico" viewBox="0 0 24 24"><use href="#i-retry" /></svg>Refresh</button></span>
+                </summary>
+                <label class="sidebar-inbox-search"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-search" /></svg><input id="inboxSearch" type="search" placeholder="Filter conversations" aria-label="Filter loaded conversations" autocomplete="off" spellcheck="false" /></label>
+                <div id="chatList"><p class="empty" role="status">Loading conversations…</p></div>
+                <p class="empty sidebar-section-empty" id="sessionsEmpty" hidden>No matching conversations.</p>
+              </details>
+              </div>
+              <div class="sidebar-view" id="projectsPane" role="tabpanel" aria-labelledby="sidebarProjectsTab" hidden>
               <details class="sidebar-session-section" id="projectsSection" open>
                 <summary class="sidebar-session-heading">
                   <span class="sidebar-session-label"><svg class="ico sidebar-section-chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev" /></svg>Projects</span>
@@ -121,14 +138,7 @@
                 <div id="projectList"><p class="empty" role="status">Loading projects…</p></div>
                 <p class="empty sidebar-section-empty" id="projectsEmpty" hidden>No projects yet.</p>
               </details>
-              <details class="sidebar-session-section" id="chatsSection" open>
-                <summary class="sidebar-session-heading">
-                  <span class="sidebar-session-label"><svg class="ico sidebar-section-chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev" /></svg>Chats</span>
-                  <span class="acts"><button class="btn" id="chatRefresh" type="button" title="Refresh chats" aria-label="Refresh chats"><svg class="ico" viewBox="0 0 24 24"><use href="#i-pulse" /></svg>Refresh</button></span>
-                </summary>
-                <div id="chatList"><p class="empty" role="status">Loading chats…</p></div>
-                <p class="empty sidebar-section-empty" id="sessionsEmpty" hidden>No chats outside projects yet.</p>
-              </details>
+              </div>
             </div>
           </div>
         </section>

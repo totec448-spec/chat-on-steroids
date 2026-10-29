@@ -1593,18 +1593,28 @@ it('uses slash Skills completion and delivers the selected directive once with t
   expect(w.document.querySelectorAll('.composer-selected-skill')).toHaveLength(0);
 });
 
-it('keeps Projects and Chats separate while preserving disclosure state through activity refresh', async () => {
+it('switches between cross-project Inbox and Projects without losing project disclosure state', async () => {
   const project: LocalProject = { id: '33333333-3333-4333-8333-333333333333', name: 'Workspace', path: '/workspace', createdAt: T0 };
-  const linked = { ...summary([]), id: 'linked-chat', projectId: project.id };
-  const standalone = { ...summary([]), id: 'standalone-chat', projectId: undefined };
+  const linked = { ...summary([]), id: 'linked-chat', title: 'Project-linked task', projectId: project.id };
+  const standalone = { ...summary([]), id: 'standalone-chat', title: 'Standalone task', projectId: undefined };
   const app = await boot([], false, [], [project], { sessions: [linked, standalone] });
   expect(app.w.document.querySelector('#projectList [data-id="linked-chat"]')).not.toBeNull();
   expect(app.w.document.querySelector('#chatList [data-id="standalone-chat"]')).not.toBeNull();
-  expect(app.w.document.querySelector('#chatList [data-id="linked-chat"]')).toBeNull();
+  expect(app.w.document.querySelector('#chatList [data-id="linked-chat"]')).not.toBeNull();
+  expect((app.w.document.getElementById('projectsPane') as HTMLElement).hidden).toBe(true);
+  (app.w.document.getElementById('sidebarProjectsTab') as HTMLButtonElement).click();
+  expect((app.w.document.getElementById('inboxPane') as HTMLElement).hidden).toBe(true);
+  expect((app.w.document.getElementById('projectsPane') as HTMLElement).hidden).toBe(false);
   const projects = app.w.document.getElementById('projectsSection') as HTMLDetailsElement;
   projects.open = false; await app.append([]);
   expect(app.w.document.getElementById('projectsSection')).toBe(projects);
   expect(projects.open).toBe(false);
+  (app.w.document.getElementById('sidebarInboxTab') as HTMLButtonElement).click();
+  expect((app.w.document.getElementById('inboxPane') as HTMLElement).hidden).toBe(false);
+  const search = app.w.document.getElementById('inboxSearch') as HTMLInputElement;
+  search.value = 'standalone'; search.dispatchEvent(new app.w.Event('input', { bubbles: true }));
+  expect(app.w.document.querySelector('#chatList [data-id="linked-chat"]')).toBeNull();
+  expect(app.w.document.querySelector('#chatList [data-id="standalone-chat"]')).not.toBeNull();
 });
 
 it('starts in New Chat despite active history and selects only the exact acknowledged send', async () => {

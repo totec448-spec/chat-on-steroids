@@ -15,6 +15,7 @@ import type { GoalModel } from '../shared/goal-reasoning.js';
 import { renderGoalReasoning } from './goal-reasoning.js';
 import { preserveTimelineViewport } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
+import { initSidebarNavigation } from './sidebar-navigation.js';
 import { toolResultText } from './tool-result.js';
 import { chatErrorPresentation, duplicateChatErrors } from './chat-error.js';
 import { renderRecoveryCountdowns } from './recovery.js';
@@ -384,8 +385,8 @@ function sessionBadges(summary: SessionSummary): Badge[] {
   return badges;
 }
 
-function sessionRow(summary: SessionSummary): HTMLElement {
-  const row = el('div', 'sess');
+function sessionRow(summary: SessionSummary, inbox = false): HTMLElement {
+  const row = el('div', inbox ? 'sess inbox-thread' : 'sess');
   row.dataset.id = summary.id;
   if (summary.id === selectedId) row.classList.add('is-sel');
   if (summary.id === activeId && summary.endedAt === null) row.classList.add('is-live');
@@ -415,6 +416,14 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     top.append(indicator);
   }
   const actionBar = el('div', 'sess-actions');
+  const meta = inbox ? el('div', 'inbox-thread-meta') : null;
+  if (meta) {
+    const project = projects.find(entry => entry.id === projectGroup(summary.projectId));
+    const source = el('span', 'inbox-thread-source', project?.name ?? t('Unfiled'));
+    source.prepend(icon(project ? 'i-folder' : 'i-chat'));
+    const age = el('span', 'inbox-thread-time', ago(summary.updatedAt));
+    meta.append(source, age);
+  }
 
   const remove = document.createElement('button');
   remove.className = 'btn sess-action sess-del';
@@ -446,7 +455,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     actions.push(block);
 
     actionBar.append(...actions, remove);
-    row.append(top, actionBar);
+    row.append(...(meta ? [meta] : []), top, actionBar);
     return row;
   }
   if (summary.conversationId) {
@@ -480,7 +489,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   }
 
   actionBar.append(...actions, remove);
-  row.append(top, actionBar);
+  row.append(...(meta ? [meta] : []), top, actionBar);
   return row;
 }
 
@@ -651,7 +660,7 @@ function paintSessions(): void {
     button.setAttribute('type', 'button'); button.setAttribute('aria-expanded', String(expandedWorkers.has(key)));
     button.addEventListener('click', (event) => { event.stopPropagation(); expandedWorkers.has(key) ? expandedWorkers.delete(key) : expandedWorkers.add(key); paintSessions(); });
     if (parentRow) { parentRow.append(button); parentRow.title += ` · ${button.title}`; } else target.push(button);
-    if (expandedWorkers.has(key)) { const box = el('div', 'worker-group'); box.append(...workers.map(sessionRow)); target.push(box); }
+    if (expandedWorkers.has(key)) { const box = el('div', 'worker-group'); box.append(...workers.map(worker => sessionRow(worker))); target.push(box); }
   };
   const orderedSessions = sidebarOrder
     ? [...new Set(sessions.map(entry => projectGroup(entry.projectId) ?? ''))].flatMap(scope =>
@@ -661,7 +670,8 @@ function paintSessions(): void {
     if (entry.origin?.kind === 'worker') continue;
     if (!entry.conversationId && entry.origin?.kind !== 'desktop') { diagnostics.push(entry); continue; }
     const projectId = projectGroup(entry.projectId);
-    const target: HTMLElement[] = projectId ? [] : rows;
+    if (!projectId) continue;
+    const target: HTMLElement[] = [];
     const row = sessionRow(entry); target.push(row);
     row.dataset.sortScope = projectId ?? ''; row.tabIndex = 0;
     const workers = children.get(entry.id); if (workers) group(entry.id, workers, row, target);
@@ -676,7 +686,7 @@ function paintSessions(): void {
     const history = document.createElement('details'); history.className = 'session-diagnostics';
     history.open = expandedWorkers.has('other-workers');
     history.append(el('summary', '', () => t("Sub-agent history · {0}", [otherWorkers.length])));
-    history.append(...otherWorkers.map(sessionRow));
+    history.append(...otherWorkers.map(worker => sessionRow(worker)));
     history.addEventListener('toggle', () => { if (history.isConnected) history.open ? expandedWorkers.add('other-workers') : expandedWorkers.delete('other-workers'); });
     rows.push(history);
   }
@@ -760,13 +770,38 @@ function paintSessions(): void {
     disclosure.className = 'session-diagnostics';
     disclosure.open = diagnosticsExpanded;
     disclosure.append(el('summary', '', () => t("Unattributed activity · {0}", [diagnostics.length])));
-    disclosure.append(...diagnostics.map(sessionRow));
+    disclosure.append(...diagnostics.map(entry => sessionRow(entry)));
     disclosure.addEventListener('toggle', () => { diagnosticsExpanded = disclosure.open; });
     rows.push(disclosure);
   }
-  // Both scopes keep the existing sessionList drag/order owner and durable project binding.
+  // Inbox is a single activity feed across projects. Project rows remain in their own
+  // navigable pane with the existing drag order and project-folder ownership intact.
+  const query = $<HTMLInputElement>('inboxSearch').value.trim().toLocaleLowerCase();
+  const workingRows: HTMLElement[] = [], recentRows: HTMLElement[] = [];
+  let visibleInboxCount = 0;
+  const inboxSessions = sidebarOrder?.ordered(':inbox', [...sessions].sort((a, b) => b.updatedAt - a.updatedAt))
+    ?? [...sessions].sort((a, b) => b.updatedAt - a.updatedAt);
+  for (const entry of inboxSessions) {
+    if (entry.origin?.kind === 'worker' || (!entry.conversationId && entry.origin?.kind !== 'desktop')) continue;
+    const projectName = projects.find(project => project.id === projectGroup(entry.projectId))?.name ?? '';
+    const workers = children.get(entry.id);
+    if (query && ![entry.title, projectName, ...((workers ?? []).map(worker => worker.title))]
+      .some(value => value?.toLocaleLowerCase().includes(query))) continue;
+    visibleInboxCount++;
+    const target = sessionWorking(entry) ? workingRows : recentRows;
+    const row = sessionRow(entry, true); row.tabIndex = 0;
+    row.dataset.sortScope = ':inbox';
+    target.push(row);
+    if (workers) group(entry.id, workers, row, target);
+  }
+  if (rows.length && !query) recentRows.push(...rows);
+  const inboxSections: HTMLElement[] = [];
+  for (const [label, entries] of [[t('Working'), workingRows], [t('Recent'), recentRows]] as const) {
+    if (!entries.length) continue;
+    inboxSections.push(el('div', 'inbox-shelf-heading', label), ...entries);
+  }
   projectList.replaceChildren(...projectSections);
-  chatList.replaceChildren(...rows);
+  chatList.replaceChildren(...inboxSections);
   if (focusedProject) projectSections.find(section => section.dataset.projectId === focusedProject)
     ?.querySelector<HTMLElement>('.project-heading')?.focus({ preventScroll: true });
   agentPanel?.update(selectedId, sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null));
@@ -774,7 +809,9 @@ function paintSessions(): void {
   workspaceTerminal?.update(selectedLocalProject());
   badgeKey = badgeSignature();
   $('projectsEmpty').hidden = projectSections.length > 0;
-  $('sessionsEmpty').hidden = rows.length > 0;
+  $('sessionsEmpty').hidden = inboxSections.length > 0;
+  $('inboxCount').textContent = String(visibleInboxCount);
+  $('projectsCount').textContent = String(projectSections.length);
 
   scheduleToolActivityExpiry();
 }
@@ -3928,8 +3965,11 @@ function selectNewChat(projectId: string | null = null): void {
 }
 
 export function initChat(next: Deps): void {
+  initSidebarNavigation();
   sidebarOrder = createSidebarOrder($('sessionList'), () => [
     ...projectSortEntries(),
+    ...sessions.filter(entry => (entry.conversationId || entry.origin?.kind === 'desktop') && entry.origin?.kind !== 'worker')
+      .map(entry => ({ id: entry.id, scope: ':inbox' })),
     ...sessions.filter(entry => (entry.conversationId || entry.origin?.kind === 'desktop') && entry.origin?.kind !== 'worker')
       .map(entry => ({ id: entry.id, scope: projectGroup(entry.projectId) ?? '' }))
   ], paintSessions);
@@ -4245,7 +4285,15 @@ export function initChat(next: Deps): void {
     pendingNewInput = null;
     selectSession(row.dataset.id);
   });
+  $('sessionList').addEventListener('keydown', event => {
+    if (!['Enter', ' '].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey) return;
+    const target = event.target as HTMLElement;
+    if (!target.matches('.sess[data-id]')) return;
+    event.preventDefault();
+    target.click();
+  });
   $('sessionList').closest<HTMLElement>('.scroll')?.addEventListener('scroll', maybePageSessions);
+  $<HTMLInputElement>('inboxSearch').addEventListener('input', paintSessions);
   // Prefetch the visible edge, retaining direction across collapsed batches.
   // Layout restoration alone never starts another history read.
   const historyPane = $('chatBody');
