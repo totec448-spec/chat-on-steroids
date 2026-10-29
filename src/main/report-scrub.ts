@@ -99,5 +99,8 @@ export function scrubText(text: string, context: ScrubContext): string {
   // and titles. Longest first, in one pass: megabytes of log and hundreds of titles stay quick.
   const known = [...new Set(context.known.map(value => value.trim()).filter(value => value.length >= 3))]
     .sort((a, b) => b.length - a.length);
-  return known.length ? out.replace(new RegExp(known.map(escapeRegExp).join('|'), 'gi'), match => tag('x', match.toLowerCase())) : out;
+  // Whole words only, in any script: a project named "Work" must not turn every "worker" into "<x:…>er" (#1922).
+  return known.length
+    ? out.replace(new RegExp(`(?<![\\p{L}\\p{N}_])(?:${known.map(escapeRegExp).join('|')})(?![\\p{L}\\p{N}_])`, 'giu'), match => tag('x', match.toLowerCase()))
+    : out;
 }
