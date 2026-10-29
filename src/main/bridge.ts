@@ -194,6 +194,7 @@ import { ownCoreHint,
   releaseQuiescentRun,
   retiredWorkerForConversation,
   waitingForSubAgents,
+  reviewerHoldUntil,
   sleepSilentWorkers,
   notePageGenerating,
   occupiesSlot,
@@ -210,6 +211,7 @@ import { ownCoreHint,
   workerRevivalDeliveredSince,
   type WorkerRevival
 } from './agents.js';
+import { reviewWaitUntil } from './goal-reviewer.js';
 import { lookupWorkerWorkspace, validateWorkerWorkspaceLease } from './worktrees/index.js';
 import {
   abortContinuation,
@@ -2163,8 +2165,8 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
     finishGoalDraft: getSessionFinishDraft(sessionId, activeTurnId),
     finishWaiting,
     goalDraft: draft ? { stage: draft.stage, model: draft.model, text: draft.text.slice(-8000), error: draft.error } : null,
-    goalWait: !blocked && !draft && goalActiveFor(id)
-      ? await goalWaitFor(id, sessionId, Date.now(), session.browserRecoveryDismissedAt !== undefined) : null,
+    goalWait: blocked || !goalActiveFor(id) ? null : draft ? draftReviewWait(id, draft.stage)
+      : await goalWaitFor(id, sessionId, Date.now(), session.browserRecoveryDismissedAt !== undefined),
     stopPending: commands.some(c => c.spec.type === 'stop' && c.spec.sessionId === sessionId && c.spec.turnId === activeTurnId),
     objective: goalObjectiveFor(id),
     loopAfterTurn: control.afterTurn,
@@ -3551,8 +3553,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       }
       const queuePending = !!astraSession && !!await goalInputPriority(id, astraSession.id, pending?.turnId ?? draft?.turnId);
       if (queuePending) draft = null;
-      const wait = !superseded && !silenceSuppressed && !queuePending && !draft && astraSession && goalActiveFor(id)
-        ? await goalWaitFor(id, astraSession.id) : null;
+      const wait = superseded || silenceSuppressed || queuePending || !astraSession || !goalActiveFor(id) ? null
+        : draft ? draftReviewWait(id, draft.stage) : await goalWaitFor(id, astraSession.id);
       // Authority/history reads yield. Revoked or replaced work must not survive
       // as an earlier captured ready view in the final native-send authorization.
       const currentDraft = goalViewFor(id, goalClient);
@@ -7481,6 +7483,16 @@ async function goalInputPriority(conversationId: string, sessionId: string, turn
   return priority;
 }
 
+/**
+ * The wait of a next step's draft that is waiting for the Goal step reviewer (#1832): from reading the
+ * step and finding a worker slot to the answer. Any other draft describes itself.
+ */
+function draftReviewWait(conversationId: string, stage: string): import('../shared/goal.js').GoalWait | null {
+  if (stage !== 'sending') return null;
+  const until = reviewWaitUntil(conversationId);
+  return until === null ? null : { reason: 'reviewer', until };
+}
+
 /** Both UIs describe the same existing reply and work deadlines, without another clock owner. */
 async function goalWaitFor(conversationId: string, sessionId: string, now = Date.now(), closed = false): Promise<import('../shared/goal.js').GoalWait | null> {
   const pending = goalPendingReplyFor(conversationId);
@@ -7490,6 +7502,9 @@ async function goalWaitFor(conversationId: string, sessionId: string, now = Date
     return visible ? { reason: 'silence', until: visible.deadline } : null;
   }
   if (runningToolCalls(conversationId) > 0) return { reason: 'tools' };
+  // The Goal step reviewer's hold has a known end (#1832), so its wait shows a countdown.
+  const reviewUntil = reviewerHoldUntil(conversationId) ?? reviewWaitUntil(conversationId);
+  if (reviewUntil !== null) return { reason: 'reviewer', until: reviewUntil };
   // A run's own workers report back into this chat, so the next instruction waits for them
   // rather than deciding from a context that is about to change. No deadline: the wait ends
   // when the last worker stops, and a countdown would only be a second, guessed clock.

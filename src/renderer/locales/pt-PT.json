@@ -3533,5 +3533,15 @@
   "Commit from Review": "Commit a partir da Revisão",
   "Commit the chosen files, then push and open a pull request.": "Faça commit dos ficheiros escolhidos, depois push e abra um pull request.",
   "Your own chat style": "O seu próprio estilo de chat",
-  "Rewrite how ChatGPT talks and writes in new chats.": "Reescreva como o ChatGPT fala e escreve nos chats novos."
+  "Rewrite how ChatGPT talks and writes in new chats.": "Reescreva como o ChatGPT fala e escreve nos chats novos.",
+  "Review each Goal step's changes": "Rever as alterações de cada passo do Goal",
+  "A reviewer worker checks each Goal step's edits; its findings go into the next step. Uses more of your ChatGPT usage and covers only edits made with the edit tools.": "Um worker revisor verifica as alterações de cada passo do Goal; o que encontra passa para o passo seguinte. Gasta mais da sua utilização do ChatGPT e cobre só alterações feitas com as ferramentas de edição.",
+  "Same model as the Goal chat": "O mesmo modelo do chat do Goal",
+  "Sub-agents are off": "Os subagentes estão desligados",
+  "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "O revisor funciona como um chat de worker, por isso precisa dos Subagentes. Nada é revisto até estarem ligados.",
+  "Turn on Sub-agents": "Ligar os Subagentes",
+  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "O revisor encontrou um problema que o Goal não pode ultrapassar com segurança. Abra o chat para o verificar.",
+  "Waiting for the reviewer": "A aguardar o revisor",
+  "Continues without the review in {0}": "Continua sem a revisão dentro de {0}",
+  "Continuing without the review…": "A continuar sem a revisão…"
 }

@@ -3466,5 +3466,15 @@
   "Commit from Review": "İnceleme'den commit",
   "Commit the chosen files, then push and open a pull request.": "Seçtiğiniz dosyaları commit edin, ardından push edip bir pull request açın.",
   "Your own chat style": "Kendi sohbet tarzınız",
-  "Rewrite how ChatGPT talks and writes in new chats.": "ChatGPT'nin yeni sohbetlerde nasıl konuşup yazdığını yeniden yazın."
+  "Rewrite how ChatGPT talks and writes in new chats.": "ChatGPT'nin yeni sohbetlerde nasıl konuşup yazdığını yeniden yazın.",
+  "Review each Goal step's changes": "Her Hedef adımının değişikliklerini gözden geçir",
+  "A reviewer worker checks each Goal step's edits; its findings go into the next step. Uses more of your ChatGPT usage and covers only edits made with the edit tools.": "Bir inceleyici worker her Hedef adımının değişikliklerini kontrol eder; bulguları sonraki adıma eklenir. ChatGPT kullanımınızdan daha fazla harcar ve yalnızca düzenleme araçlarıyla yapılan değişiklikleri kapsar.",
+  "Same model as the Goal chat": "Hedef sohbetiyle aynı model",
+  "Sub-agents are off": "Yardımcı ajanlar kapalı",
+  "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "Gözden geçiren, bir yardımcı ajan sohbeti olarak çalışır, bu yüzden Yardımcı ajanlar gerekir. Açılana kadar hiçbir şey gözden geçirilmez.",
+  "Turn on Sub-agents": "Yardımcı ajanları aç",
+  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "Gözden geçiren, Hedef'in güvenle geçemeyeceği bir sorun buldu. Kontrol etmek için sohbeti açın.",
+  "Waiting for the reviewer": "Gözden geçiren bekleniyor",
+  "Continues without the review in {0}": "{0} sonra gözden geçirme olmadan devam eder",
+  "Continuing without the review…": "Gözden geçirme olmadan devam ediliyor…"
 }
