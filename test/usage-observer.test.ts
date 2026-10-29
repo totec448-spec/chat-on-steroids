@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 const script = readFileSync(new URL('../extension/usage.js', import.meta.url), 'utf8');
 function harness() {
@@ -431,6 +431,23 @@ describe('MAIN-world usage projection', () => {
     socket.receive(envelope(value).concat(Array(33).fill({})));
     expect(h.posts).toHaveLength(0);
   });
+  // #1752 follow-up: a report with the trace in place still found nothing, so the trace looks further.
+  it('traces ids inside arrays and longer strings, in other backend streams and in every socket message', async () => {
+    const h = harness(), conversation_id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const id = (n: number) => `${String(n).padStart(8, '0')}-2222-4333-8444-555555555555`;
+    await h.feedSse([`data: ${JSON.stringify({ p: '', o: 'add', v: { conversation_id, message: { metadata: { request_ids: [id(1)], note: `ran under ${id(2)} PRIVATE_TEST_TEXT` } } } })}\n\n`]);
+    await h.feedSse([`data: ${JSON.stringify({ conversation_id, step: { run: id(3) } })}\n\n`], { method: 'GET' }, `https://chatgpt.com/backend-api/conversation/${conversation_id}/stream_status`);
+    h.socket().receive([{ type: 'message', payload: { type: 'tool-call-update', payload: { conversation_id, request_id: id(4) } } }]);
+    await vi.waitFor(() => expect(h.traces.flatMap(post => post.traces.map((entry: any) => entry.requestId))).toEqual(expect.arrayContaining([id(1), id(2), id(3), id(4)])));
+    const at = (n: number) => h.traces.flatMap(post => post.traces).find((entry: any) => entry.requestId === id(n))!.path;
+    expect(at(1)).toBe('/:v.message.metadata.request_ids[0]');
+    expect(at(2)).toBe('/:text');
+    expect(at(3)).toBe('/backend-api/conversation/*/stream_status>text');
+    expect(at(4)).toBe('socket>[0].payload.payload.request_id');
+    expect(h.traces.every(post => post.conversationId === conversation_id)).toBe(true);
+    expect(JSON.stringify(h.traces)).not.toContain('PRIVATE_TEST_TEXT');
+  });
+
   // CodeRabbit on #1908: a response that reached its 16 published origins still traces later frames.
   it('keeps tracing after a response published its sixteen origins', async () => {
     const h = harness(), conversation_id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';

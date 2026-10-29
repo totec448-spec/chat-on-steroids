@@ -1681,7 +1681,7 @@ function parseObservations(input: unknown): ChatObservation[] {
         const trace = rawTrace && typeof rawTrace === 'object' ? rawTrace as Record<string, unknown> : null;
         const requestId = typeof trace?.['requestId'] === 'string' ? trace['requestId'] : '';
         const path = typeof trace?.['path'] === 'string' ? trace['path'] : '';
-        if (/^(?:wfr_[a-zA-Z0-9_-]{1,96}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i.test(requestId) && /^[A-Za-z0-9_./:[\]-]{1,200}$/.test(path)) traces.push({ requestId, path });
+        if (/^(?:wfr_[a-zA-Z0-9_-]{1,96}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i.test(requestId) && /^[A-Za-z0-9_./:>*[\]-]{1,200}$/.test(path)) traces.push({ requestId, path });
       }
       observation.traces = traces;
       out.push(observation);
