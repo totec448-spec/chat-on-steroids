@@ -1030,9 +1030,19 @@ function diagnosticEnvironment(value: unknown): CompanionEnvironment | null {
   };
 }
 
+/** The last error-page reload the app has logged (the extension's own clock). */
+let errorPageReloadLoggedAt = 0, errorPageReloadLoggedCount = 0;
 function recordCompanionDiagnostics(value: unknown): void {
   const next = sanitiseCompanionDiagnostics(value);
   if (!next) return;
+  // A chat tab that loaded offline and sat on Chrome's error page was reloaded by the extension.
+  const reloads = diagnosticObject(diagnosticObject(value)?.errorPageReloads);
+  const reloadedAt = diagnosticNumber(reloads?.lastAt), reloadCount = Math.round(diagnosticNumber(reloads?.count, 100_000));
+  if (reloadedAt > errorPageReloadLoggedAt && reloadCount > 0) {
+    const fresh = reloadCount >= errorPageReloadLoggedCount ? reloadCount - errorPageReloadLoggedCount : reloadCount;
+    logInfo(`browser: reloaded ${Math.max(1, fresh)} ChatGPT tab(s) left on Chrome's error page (loaded while offline; the browser is online again)`);
+    errorPageReloadLoggedAt = reloadedAt; errorPageReloadLoggedCount = reloadCount;
+  }
   // Remember what the extension holds, but only values it actually stored: a fresh install
   // reports its defaults, and those must not overwrite the choices it is about to get back.
   if (diagnosticObject(value)?.preferencesStored === true) rememberBrowserPreferences(next.preferences);

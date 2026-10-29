@@ -338,6 +338,9 @@ describe('a chat tab left on Chrome\'s error page', () => {
   it('is reloaded once the browser is online', async () => {
     const h = await errorPage(true);
     expect(h.reload).toHaveBeenCalledExactlyOnceWith(8);
+    // The app's log learns of it through the next diagnostics report.
+    await vi.waitFor(() => expect(h.fetch.mock.calls.some(([url, init]: any) => new URL(url).pathname === '/diagnostics' &&
+      JSON.parse(init.body).errorPageReloads?.count === 1)).toBe(true), { timeout: 5_000 });
   });
   it('is left alone while the browser is offline', async () => {
     const h = await errorPage(false);
