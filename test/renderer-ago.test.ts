@@ -63,3 +63,17 @@ it('says "never" for a time that is missing or not a number, and never throws (2
     expect(shortAgo(missing)).toBe('—');
   }
 });
+
+// CodeRabbit on #1904: the worker panel, background processes and tunnel uptime showed the
+// English unit letters ("3d 4h") in every language. They take the catalogs' tokens too.
+it('writes elapsed durations with the chosen language\'s unit tokens', async () => {
+  const en = await inLanguage('en');
+  expect(en.elapsedDurationText(3 * 86_400 + 4 * 3600 + 59, 2)).toBe('3d 4h');
+  expect(en.elapsedDurationText(86_400, 1)).toBe('1d');
+  expect(en.elapsedDurationText(0, 2)).toBe('0s');
+  vi.resetModules();
+  const de = await inLanguage('de');
+  expect(de.elapsedDurationText(3 * 86_400 + 4 * 3600, 2)).toBe('3 T. 4 h');
+  expect(de.elapsedDurationText(86_400, 1)).toBe('1 T.');
+  expect(de.elapsedDurationText(Number.NaN, 2)).toBe('0 s');
+});

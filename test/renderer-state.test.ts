@@ -1169,6 +1169,17 @@ it('writes a card and a settled line age in the app language', async () => {
   }
 });
 
+// CodeRabbit on #1904: a time that is not a number said "now", as if the chat had just been active.
+it('shows no age for a chat whose time is not a number, rather than "now"', async () => {
+  const now = Date.now();
+  const mounted = await mountInbox({ listSessions: async () => listed([inboxChat('broken', { updatedAt: Number.NaN }), inboxChat('fresh', { updatedAt: now })]) });
+  const doc = mounted.window.document;
+  const ageOf = (id: string) => doc.querySelector(`.sess[data-id="${id}"] .sess-age`)?.textContent;
+  // The fresh chat's age is drawn by now, so the broken one's is too.
+  await waitFor(() => expect(ageOf('fresh')).toBe('now'));
+  expect([ageOf('broken'), ageOf('fresh')]).toEqual(['', 'now']);
+});
+
 it('says No project on the card of a chat outside every project', async () => {
   const now = Date.now();
   const mounted = await mountInbox({ listSessions: async () => listed([inboxChat('loose', { updatedAt: now })]) });

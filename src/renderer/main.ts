@@ -1,4 +1,3 @@
-import { elapsedText } from '../shared/age.js';
 import { DEFAULT_CHAT_PERSONALITY, DEFAULT_CHAT_WRITING_STYLE } from '../shared/chat-style.js';
 import { sendCheckUrl } from '../shared/send-check.js';
 import { applyPhonePush, initPhonePushSettings, readPhonePush } from './phone-push-settings.js';
@@ -68,7 +67,7 @@ import {
   WRITE_CAPABILITIES
 } from '../shared/types.js';
 import type { SwarmState } from '../shared/session.js';
-import { $, ago, disclosureChevron, el, icon, run, shortAgo, toast } from './dom.js';
+import { $, ago, disclosureChevron, el, elapsedDurationText, icon, run, shortAgo, toast } from './dom.js';
 import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatSearch, openChatView, openFeedback } from './chat.js';
 import { publishStopNoticeTexts } from './stop-notices.js';
 import { publishMainTexts } from './main-texts.js';
@@ -915,7 +914,7 @@ const METHOD_HINT: Record<string, string> = {
 
 /** Tunnel uptime: "45s", "4m 5s", "6h 12m", "3d 4h", never hundreds of hours. */
 function duration(seconds: number | null): string {
-  return seconds === null ? '—' : elapsedText(seconds, 2);
+  return seconds === null ? '—' : elapsedDurationText(seconds, 2);
 }
 
 /**

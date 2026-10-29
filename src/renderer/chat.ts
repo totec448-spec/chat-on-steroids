@@ -1,4 +1,4 @@
-import { ageOf, countdownClock, elapsedText } from '../shared/age.js';
+import { ageOf, countdownClock } from '../shared/age.js';
 import { DEFAULT_CHAT_PERSONALITY, DEFAULT_CHAT_WRITING_STYLE, MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
 import { hasProviderDirective, resolvedCapture, withoutProviderDirectives } from '../shared/content-reference.js';
 import { completedDilText } from '../shared/dil-tables.js';
@@ -107,7 +107,7 @@ import {
 } from '../shared/goal.js';
 import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS, type HandoffLength } from '../shared/handoff.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
-import { $, ago, clockTime, compactAgeText, compactNumber, disclosureChevron, el, icon, run, setIcon, toast } from './dom.js';
+import { $, ago, clockTime, compactAgeText, compactNumber, disclosureChevron, el, elapsedDurationText, icon, run, setIcon, toast } from './dom.js';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_REPAIR_DEFERRED_TEXT, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
 import { STRICT_REFUSAL_PROGRESS_PREFIX, UNPROVEN_WORKER_NOTICE, UNTRUSTED_NOTICE, UNTRUSTED_WORKER_NOTICE } from '../shared/trust-notices.js';
 import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
@@ -1719,6 +1719,8 @@ let paintedLayout: 'projects' | 'inbox' = 'projects';
 
 /** "now", "4m", "5h", "2d", "3w", "4mo", "2y" in English: one short token that fits beside a title. */
 function compactAge(at: number): string {
+  // A time that is not a number has no age to show; "now" would claim recent activity (CodeRabbit on #1904).
+  if (!Number.isFinite(at)) return '';
   const age = ageOf(at, Date.now());
   if (!age || (age.unit === 'second' && age.value < 30)) return t('now');
   // Under a minute rounds up to one; past weeks it goes on to months and years, never "104w", and
@@ -6949,7 +6951,7 @@ function backgroundCommand(command: string): string {
 
 /** "45s", "4m 5s", "6h 12m", then "3d 4h": a process left running for days never reads "72h 4m". */
 function backgroundElapsed(startedAt: number): string {
-  return elapsedText((Date.now() - startedAt) / 1000, 2);
+  return elapsedDurationText((Date.now() - startedAt) / 1000, 2);
 }
 
 function syncBackgroundProcessClock(visible: boolean): void {

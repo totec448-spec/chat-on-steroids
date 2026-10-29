@@ -33,12 +33,17 @@ export const AGE_SUFFIX: Record<AgeUnit, string> = { second: 's', minute: 'm', h
  * (one). Hours stop at a day, so a long run never reads "50h". A bad clock reads "0s".
  */
 export function elapsedText(totalSeconds: number, parts: 1 | 2): string {
+  const TOKEN: Record<AgeUnit, string> = { second: 's', minute: 'm', hour: 'h', day: 'd', week: 'w', month: 'mo', year: 'y' };
+  return elapsedParts(totalSeconds, parts).map(([value, unit]) => `${value}${TOKEN[unit]}`).join(' ');
+}
+
+/** The units of an elapsed time, largest first ("3d 4h" is [[3, 'day'], [4, 'hour']]); the renderer words them. */
+export function elapsedParts(totalSeconds: number, parts: 1 | 2): Array<[number, AgeUnit]> {
   const seconds = Number.isFinite(totalSeconds) ? Math.max(0, Math.floor(totalSeconds)) : 0;
-  const units: Array<[number, string]> = [[Math.floor(seconds / 86_400), 'd'], [Math.floor(seconds / 3600) % 24, 'h'],
-    [Math.floor(seconds / 60) % 60, 'm'], [seconds % 60, 's']];
+  const units: Array<[number, AgeUnit]> = [[Math.floor(seconds / 86_400), 'day'], [Math.floor(seconds / 3600) % 24, 'hour'],
+    [Math.floor(seconds / 60) % 60, 'minute'], [seconds % 60, 'second']];
   const first = units.findIndex(([value]) => value > 0);
-  if (first === -1) return '0s';
-  return units.slice(first, first + parts).map(([value, unit]) => `${value}${unit}`).join(' ');
+  return first === -1 ? [[0, 'second']] : units.slice(first, first + parts);
 }
 
 /** A countdown as a clock: "2:05", and from an hour on "2:05:30" (never "125:30"). */
