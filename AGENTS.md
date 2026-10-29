@@ -5482,8 +5482,10 @@ the page language from the most recently used awake ChatGPT tab, read at most on
 Its `errorPageReloads` (`{ count, lastAt }`, the extension's counter since its worker started) reports
 chat tabs reloaded off Chrome's error page: a chat tab that loaded while offline, where injection fails
 with "showing error page". The extension reloads such a tab only while `navigator.onLine`, backing off
-1, 2, 4 … 15 minutes per tab, and publishes a snapshot after each reload; the bridge logs one line per
-new `lastAt` and stores nothing else of it.
+1, 2, 4 … 15 minutes per tab (state in `chrome.storage.session` key `errorPageReloads`, 64 tabs, so a
+restarted worker keeps the backoff and the count; a tab whose recorder answers or takes injection is
+forgotten), and publishes a snapshot after each reload, one more if a report was already under way.
+The bridge logs one line per new `lastAt` per browser (`x-extension-browser`) and stores nothing else.
 
 `tunnel/*` owns pinned-client discovery, child lifetime, health metrics and confirmed outages;
 development discovery uses Electron's app root for `resources/tunnel`, independent of source

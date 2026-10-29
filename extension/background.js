@@ -4998,11 +4998,15 @@ async function companionDiagnosticSnapshot(found) {
     preferencesStored: RENDER_STREAM_KEY in preferences || SHOW_TIMES_KEY in preferences,
     tab: await HANDLERS.tabStatus(),
     environment: await cachedEnvironmentDiagnostics(),
-    errorPageReloads: { count: errorPageReloadCount, lastAt: lastErrorPageReloadAt }
+    errorPageReloads: await loadErrorPageReloads().then(() => ({ count: errorPageReloadCount, lastAt: lastErrorPageReloadAt }))
   };
 }
 
-function publishCompanionDiagnostics() {
+// A change that must reach the app (an error-page reload) while a report is already under way:
+// that report may have taken its snapshot before the change, so one more follows it.
+let companionDiagnosticsDirty = false;
+function publishCompanionDiagnostics(changed = false) {
+  if (companionDiagnosticsFlight && changed) companionDiagnosticsDirty = true;
   if (companionDiagnosticsFlight || !token || disconnected) return companionDiagnosticsFlight;
   const intent = connectionEpoch, credential = token, endpoint = port;
   const work = (async () => {
@@ -5013,6 +5017,7 @@ function publishCompanionDiagnostics() {
     await call('/diagnostics', { method: 'POST', body: JSON.stringify(snapshot) });
   })().catch(() => undefined).finally(() => {
     if (companionDiagnosticsFlight === work) companionDiagnosticsFlight = null;
+    if (companionDiagnosticsDirty) { companionDiagnosticsDirty = false; void publishCompanionDiagnostics(); }
   });
   companionDiagnosticsFlight = work;
   return work;
@@ -5617,11 +5622,37 @@ function recoverDeferredRevivals() {
 // Chrome reloads such a page by itself only in a visible tab, and the app's chat tabs usually are not
 // (2.1.47 round: every send to that chat expired). It holds no draft and no answer, so once the
 // browser is online again it is reloaded, at most every 1, 2, 4 … 15 minutes per tab.
+// The backoff and the counter live in session storage: Chrome stops the worker between passes, and a
+// fresh worker must neither reload at once again nor report old reloads as new (CodeRabbit on #1911).
+const ERROR_PAGE_RELOADS_KEY = 'errorPageReloads';
 const errorPageReloads = new Map();
 // For the app's log (via the diagnostics snapshot): how many, and when the last one was.
-let errorPageReloadCount = 0, lastErrorPageReloadAt = 0;
+let errorPageReloadCount = 0, lastErrorPageReloadAt = 0, errorPageReloadsLoaded = null;
+function loadErrorPageReloads() {
+  errorPageReloadsLoaded ??= chrome.storage.session.get(ERROR_PAGE_RELOADS_KEY).then(stored => {
+    const saved = stored?.[ERROR_PAGE_RELOADS_KEY];
+    if (!saved || typeof saved !== 'object') return;
+    for (const entry of Array.isArray(saved.tabs) ? saved.tabs.slice(-64) : []) {
+      const [id, state] = Array.isArray(entry) ? entry : [];
+      if (Number.isInteger(id) && Number.isFinite(state?.tries) && Number.isFinite(state?.nextAt) && !errorPageReloads.has(id))
+        errorPageReloads.set(id, { tries: state.tries, nextAt: state.nextAt });
+    }
+    if (Number.isFinite(saved.count)) errorPageReloadCount = Math.max(errorPageReloadCount, saved.count);
+    if (Number.isFinite(saved.lastAt)) lastErrorPageReloadAt = Math.max(lastErrorPageReloadAt, saved.lastAt);
+  }).catch(() => undefined);
+  return errorPageReloadsLoaded;
+}
+function saveErrorPageReloads() {
+  return chrome.storage.session.set({ [ERROR_PAGE_RELOADS_KEY]: { tabs: [...errorPageReloads], count: errorPageReloadCount, lastAt: lastErrorPageReloadAt } })
+    .catch(() => undefined);
+}
+async function forgetErrorPage(id) {
+  await loadErrorPageReloads();
+  if (errorPageReloads.delete(id)) await saveErrorPageReloads();
+}
 async function reloadErrorPage(id) {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  await loadErrorPageReloads();
   const now = Date.now(), prior = errorPageReloads.get(id);
   if (prior && now < prior.nextAt) return;
   const tries = (prior?.tries ?? 0) + 1;
@@ -5631,8 +5662,9 @@ async function reloadErrorPage(id) {
   try {
     await chrome.tabs.reload(id);
     errorPageReloadCount += 1; lastErrorPageReloadAt = now;
-    void publishCompanionDiagnostics();
-  } catch { /* The tab went away; nothing to reload. */ }
+    await saveErrorPageReloads();
+    void publishCompanionDiagnostics(true);
+  } catch { await saveErrorPageReloads(); /* The tab went away; nothing to reload. */ }
 }
 
 async function restoreChatgptTab(id, current = () => true, documentId = null) {
@@ -5652,6 +5684,7 @@ async function restoreChatgptTab(id, current = () => true, documentId = null) {
       } catch {
         // The tab can navigate between the ping and repair. Static injection covers it.
       }
+      await forgetErrorPage(id);
       return true;
     }
   } catch {
@@ -5676,7 +5709,7 @@ async function restoreChatgptTab(id, current = () => true, documentId = null) {
     await chrome.scripting.executeScript({ target, files: ['content.js'] });
     if (!current()) return false;
     await chrome.scripting.insertCSS({ target, files: ['overlay.css'] });
-    errorPageReloads.delete(id);
+    await forgetErrorPage(id);
     // Successful injection means this exact tab is recovering. Its document registration will
     // re-run revival routing; opening a second tab during that handoff recreates the race.
     return current();
