@@ -2221,6 +2221,72 @@ it('searches every settings page from the sidebar and opens the setting it finds
   expect(find()).toBe(false);
 });
 
+it('highlights the composer while files are dragged over the window, with a one-line hint, and nowhere else (#1884, Haz)', async () => {
+  const dropFiles = vi.fn(async () => ({ ok: true, data: [] }));
+  const mounted = await mountChat({}, [], { dropFiles });
+  const w = mounted.window, doc = w.document, composer = doc.getElementById('composer')!;
+  const drag = (type: string, target: Element, kinds: string[]) => {
+    const event = new w.MouseEvent(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'dataTransfer', { value: { types: kinds, files: [], dropEffect: '', getData: () => '' } });
+    target.dispatchEvent(event);
+    return event;
+  };
+  const input = doc.getElementById('chatInput') as HTMLTextAreaElement, placeholder = input.placeholder;
+  expect(composer.classList.contains('is-file-drop')).toBe(false);
+  drag('dragover', doc.querySelector('.timeline') ?? doc.body, ['Files']);
+  expect(composer.classList.contains('is-file-drop')).toBe(true);
+  expect(input.placeholder).toBe('Drop to attach, up to 20 files');
+  // A folder dropped on the Folders card stays the card's: the composer doesn't claim it.
+  drag('dragover', doc.getElementById('foldersCard')!, ['Files']);
+  expect(composer.classList.contains('is-file-drop')).toBe(false);
+  // Text dragged around (a selection, a link) changes nothing.
+  drag('dragover', doc.body, ['text/plain']);
+  expect(composer.classList.contains('is-file-drop')).toBe(false);
+  // The drag leaves the window or ends: the highlight goes at once.
+  drag('dragover', doc.body, ['Files']);
+  expect(composer.classList.contains('is-file-drop')).toBe(true);
+  drag('drop', doc.body, ['Files']);
+  expect(composer.classList.contains('is-file-drop')).toBe(false);
+  expect(input.placeholder).toBe(placeholder);
+  drag('dragover', doc.body, ['Files']);
+  const leave = new w.MouseEvent('dragleave', { bubbles: true, relatedTarget: null });
+  doc.documentElement.dispatchEvent(leave);
+  expect(composer.classList.contains('is-file-drop')).toBe(false);
+  expect(input.placeholder).toBe(placeholder);
+});
+
+it('keeps the drop hint through a slow drag and a repaint, ends with the current placeholder, and refuses more than 20 files (CodeRabbit)', async () => {
+  const dropFiles = vi.fn(async () => ({ ok: true, data: [] }));
+  const mounted = await mountChat({}, [], { dropFiles });
+  const w = mounted.window, doc = w.document, composer = doc.getElementById('composer')!;
+  const drag = (type: string, files: unknown[] = []) => {
+    const event = new w.MouseEvent(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'dataTransfer', { value: { types: ['Files'], files, dropEffect: '', getData: () => '' } });
+    doc.body.dispatchEvent(event);
+  };
+  const input = doc.getElementById('chatInput') as HTMLTextAreaElement;
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  try {
+    drag('dragover');
+    // Chromium repeats dragover about every 350 ms (±200) while the pointer rests: no flicker in between.
+    await new Promise(resolve => setTimeout(resolve, 600));
+    expect(composer.classList.contains('is-file-drop')).toBe(true);
+    // The placeholder's owner repaints during the drag (here: the language changes). The hint stays,
+    // and the drop leaves the owner's current text, not the one from before the drag.
+    setLanguage('de');
+    expect(input.placeholder).toBe('Zum Anhängen loslassen, bis zu 20 Dateien');
+    drag('drop');
+    expect(input.placeholder).toBe('Frag irgendetwas …');
+  } finally { setLanguage('en'); }
+  // More than 20 files: nothing is attached, and the person is told the limit.
+  drag('dragover');
+  drag('drop', Array.from({ length: 21 }, (_, index) => ({ name: `file-${index}.txt`, size: 1, type: 'text/plain' })));
+  await settle();
+  expect(dropFiles).not.toHaveBeenCalled();
+  expect(doc.body.textContent).toContain('Attach up to 20 files per message');
+  expect(composer.classList.contains('is-file-drop')).toBe(false);
+});
+
 it('attaches pasted screenshot files with previews while preserving ordinary text paste', async () => {
   const dropFiles = vi.fn(async () => ({ ok: true, data: [{ id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'screenshot.png', size: 4, mimeType: 'image/png', preview: 'data:image/webp;base64,AAAA' }] }));
   const mounted = await mountChat({}, [], { dropFiles });
