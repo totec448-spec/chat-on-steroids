@@ -14,6 +14,15 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.48': {
+    lead: () => t("A reviewer for Goal steps, ages in days and months, and sending that recovers by itself."),
+    highlights: [
+      { icon: 'i-check-circle', title: () => t("Goal step reviewer"), text: () => t("A second chat checks each Goal step's file changes before the next one.") },
+      { icon: 'i-clock', title: () => t("Ages that read naturally"), text: () => t("Days, weeks, months and years instead of hundreds of hours.") },
+      { icon: 'i-retry', title: () => t("Back online, back to work"), text: () => t("A chat tab that opened while you were offline recovers by itself.") },
+      { icon: 'i-chat', title: () => t("Messages that get through"), text: () => t("Also when you close the chat's tab while sending, or ChatGPT changes its model menu.") }
+    ]
+  },
   '2.1.47': {
     lead: () => t("Scheduled runs, changed files under each answer, commit and pull request from Review, and your own chat style."),
     highlights: [

@@ -3533,5 +3533,14 @@
   "Commit from Review": "Commit pela Revisão",
   "Commit the chosen files, then push and open a pull request.": "Faça commit dos arquivos escolhidos, depois push e abra um pull request.",
   "Your own chat style": "Seu próprio estilo de chat",
-  "Rewrite how ChatGPT talks and writes in new chats.": "Reescreva como o ChatGPT fala e escreve nos chats novos."
+  "Rewrite how ChatGPT talks and writes in new chats.": "Reescreva como o ChatGPT fala e escreve nos chats novos.",
+  "A reviewer for Goal steps, ages in days and months, and sending that recovers by itself.": "Um revisor para as etapas do Goal, tempos em dias e meses e envios que se recuperam sozinhos.",
+  "Goal step reviewer": "Revisor das etapas do Goal",
+  "A second chat checks each Goal step's file changes before the next one.": "Um segundo chat confere as alterações de arquivos de cada etapa do Goal antes da próxima.",
+  "Ages that read naturally": "Tempos fáceis de ler",
+  "Days, weeks, months and years instead of hundreds of hours.": "Dias, semanas, meses e anos em vez de centenas de horas.",
+  "Back online, back to work": "De volta online, de volta ao trabalho",
+  "A chat tab that opened while you were offline recovers by itself.": "Uma aba de chat aberta sem conexão se recupera sozinha.",
+  "Messages that get through": "Mensagens que chegam",
+  "Also when you close the chat's tab while sending, or ChatGPT changes its model menu.": "Também se você fechar a aba do chat ao enviar ou se o ChatGPT mudar o menu de modelos."
 }
