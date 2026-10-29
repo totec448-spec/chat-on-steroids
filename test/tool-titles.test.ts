@@ -142,8 +142,10 @@ describe('tool rows in the person\'s language', () => {
     expect(titles.localToolTitle('Could not read the clipboard')).toBe(i18n.t('Could not read the clipboard'));
     expect(titles.localToolTitle('Failed: Updated the task plan')).toBe(i18n.t('Failed: {0}', [i18n.t('Updated the task plan')]));
     expect(titles.localToolTitle('Clicked and 2 more')).toContain(i18n.t('Clicked'));
-    // Anything else, such as a title from a later version, is shown as it came.
+    // Anything else, such as a title from a later version, is shown as it came; a search names its query in quotes.
     expect(titles.localToolTitle('Summoned a dragon')).toBe('Summoned a dragon');
+    expect(titles.localToolTitle('Searched for prefers-color-scheme')).toBe('Searched for prefers-color-scheme');
+    expect(titles.localToolTitle('Could not search "x"')).toBe(i18n.t('Could not search {0}', ['"x"']));
     expect(titles.localToolDetail('ENOENT: no such file')).toBe('ENOENT: no such file');
     expect(titles.localToolMetric('+18 −4')).toBe('+18 −4');
     // Times in the person's units.

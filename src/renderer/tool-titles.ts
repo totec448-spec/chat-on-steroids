@@ -85,6 +85,9 @@ export const TOOL_DETAIL_WORDS: readonly string[] = ['in file contents', 'by nam
   '✕ exit {0}', '{0}ms', 'a command'];
 
 const FIXED = new Set(TOOL_TITLE_TEMPLATES.filter(template => !template.includes('{0}')));
+/** Searches name their query in quotes; a title that does not is not this phrase ("Searched for x"). */
+const QUOTED = new Set(PHRASES.filter(([done]) => ['Searched {0}', 'Looked for {0}', 'Searched recordings {0}'].includes(done))
+  .flatMap(([done, running, infinitive]) => [done, running, `Could not ${infinitive}`, `Refused to ${infinitive}`]));
 const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // With a subject: the longest fixed start first, so "Searched recordings …" is not read as "Searched …".
 const OPEN = TOOL_TITLE_TEMPLATES.filter(template => template.includes('{0}'))
@@ -120,7 +123,7 @@ export function localToolTitle(title: string): string {
   if (tool) return t('Tool {0} failed', [tool[1]]);
   for (const [template, pattern] of OPEN) {
     const match = pattern.exec(title);
-    if (match) return t(template, [subject(match[1]!)]);
+    if (match && (!QUOTED.has(template) || /^".*"$/s.test(match[1]!))) return t(template, [subject(match[1]!)]);
   }
   return title;
 }
