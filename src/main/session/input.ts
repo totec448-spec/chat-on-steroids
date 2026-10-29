@@ -2156,6 +2156,14 @@ export function failBranchInput(id: string, conversationId: string, reason: keyo
   });
 }
 
+/**
+ * A message a browser is sending right now: handed to a page (`browser`), or a Goal helper's question
+ * waiting there (`decision`). One handed to a tool caller (`tool`) or still queued is not (#1901).
+ */
+export function inBrowserDelivery(row: Pick<InputEntry, 'state'>): boolean {
+  return row.state === 'browser' || row.state === 'decision';
+}
+
 export function failBrowserInput(id: string, owner: string, error: string, detail?: string): Promise<boolean> {
   return serial(async () => {
     const current = await load();
