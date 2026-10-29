@@ -49,6 +49,7 @@ vi.mock('electron', () => ({
 const { safeStorage } = await import('electron');
 
 const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
+const { cancelStepReview, startStepReview } = await import('../src/main/goal-reviewer.js');
 const { queueWorkerArchives, resetWorkerArchiveForTests } = await import('../src/main/worker-archive.js');
 const { initSecretsPath, resetSecretsCacheForTests, setSecret } = await import('../src/main/secrets.js');
 const {
@@ -161,6 +162,7 @@ const {
   requestWorkerBootstraps,
   requestWorkerRevivals,
   spawn,
+  REVIEW_MAX_MS,
   stageSpawn,
   stageMessages,
   pendingWorkerSpawns,
@@ -14855,6 +14857,82 @@ describe('the goal loop over the bridge', () => {
       expect((await request('GET', '/status')).body.repairs ?? [])
         .toEqual(expect.arrayContaining([expect.objectContaining({ conversationId: chat, reason: 'goal' })]));
     } finally { vi.useRealTimers(); }
+  });
+
+  // #1832: the Goal step reviewer holds its chat by itself, with its own deadline to show.
+  it('waits for the Goal step reviewer with its deadline, whatever the workers setting', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = 'cafe0097-0000-4000-8000-000000000097';
+      const previous = getConfig();
+      await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'goal' },
+        multiAgent: { ...previous.multiAgent, enabled: true, waitForSubAgents: false, recoverAgentTabs: false } });
+      const recorded = await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'keep going', messageId: 'm-review-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'g-review' },
+        { kind: 'turn_end', time: Date.now(), turnId: 'g-review', outcome: 'completed' },
+        { kind: 'assistant_message', time: Date.now(), turnId: 'g-review', messageId: 'a-review', text: 'Edited the file.',
+          state: 'final', final: true, goalEligible: true, activeNow: true }
+      ] } });
+      const sessionId = recorded.body.sessionId as string;
+      const asked = Date.now();
+      spawn({ workers: [{ task: 'Review this Goal step.', reviewer: true }], caller: { conversationId: chat } });
+      const held = { reason: 'reviewer', until: asked + REVIEW_MAX_MS };
+      expect((await sessionControlsFor(sessionId)).goalWait).toEqual(held);
+      expect((await request('GET', `/activity?conversationId=${chat}`)).body.goal.wait).toEqual(held);
+      await vi.advanceTimersByTimeAsync(REVIEW_MAX_MS);
+      expect((await sessionControlsFor(sessionId)).goalWait).toEqual({ reason: 'settling' });
+    } finally { vi.useRealTimers(); }
+  });
+
+  // CodeRabbit on #1879: the next step's draft waits for the review, but both callers skip the wait
+  // while a draft exists, and a review still finding a worker slot has no reviewer hold to show.
+  it('shows the reviewer wait while the next step\'s draft waits for a review still finding a worker slot', async () => {
+    await pair();
+    const chat = 'cafe0098-0000-4000-8000-000000000098';
+    const turnId = 'g-review-slot';
+    const previous = getConfig();
+    await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'goal' },
+      multiAgent: { ...previous.multiAgent, enabled: true, recoverAgentTabs: false } });
+    const recorded = await request('POST', '/events', { body: { conversationId: chat, events: [
+      { kind: 'user_message', time: Date.now(), text: 'keep going', messageId: 'm-review-slot' }
+    ] } });
+    const sessionId = recorded.body.sessionId as string;
+    await recordFinalForTest(chat, turnId);
+    let release!: () => void;
+    const slot = new Promise<void>(resolve => { release = resolve; });
+    const before = Date.now();
+    const reviewing = startStepReview({ conversationId: chat, sessionId, turnId }, {
+      settings: () => ({ reviewerModel: 'same', workersOn: true, profileId: 'default' }),
+      mode: () => 'goal', objective: () => '', offered: () => [], reviewer: () => null,
+      facts: async () => ({ files: [{ path: 'src/a.ts', state: 'edited', added: 1, removed: 1, approximate: false, edits: 1, diff: '' }],
+        more: 0, step: 'keep going', firstRequest: 'keep going', chatModel: null }),
+      spawn: async () => { throw new Error('NO_FREE_SLOT'); },
+      wake: async () => undefined, cancel: async () => undefined, now: () => Date.now(), wait: () => slot
+    });
+    let calls = 0;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => { calls++; return Response.json({ choices: [{ message: { content: JSON.stringify({ action: 'continue', reply: 'Go on.' }) } }] }); }) as never;
+    try {
+      expect((await request('POST', '/goal/draft', { body: { conversationId: chat, turnId, clientId: 'tab-review' } })).status).toBe(200);
+      const held = { reason: 'reviewer', until: expect.any(Number) };
+      await vi.waitFor(async () => {
+        const controls = await sessionControlsFor(sessionId);
+        expect(controls.goalDraft).toMatchObject({ stage: 'sending' });
+        expect(controls.goalWait).toEqual(held);
+        expect((await request('GET', `/activity?conversationId=${chat}&goalClient=tab-review`)).body.goal.wait).toEqual(held);
+      });
+      const until = (await sessionControlsFor(sessionId)).goalWait!.until!;
+      expect(until).toBeGreaterThanOrEqual(before + REVIEW_MAX_MS);
+      expect(until).toBeLessThanOrEqual(Date.now() + REVIEW_MAX_MS);
+      expect(calls).toBe(0);
+    } finally {
+      await cancelStepReview(chat, { reviewer: () => null, cancel: async () => undefined });
+      release();
+      await reviewing;
+      globalThis.fetch = realFetch;
+    }
   });
 
   it('never lets another chat’s sub-agents hold this one', async () => {
