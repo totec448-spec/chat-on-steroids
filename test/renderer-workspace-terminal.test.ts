@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 
 vi.mock('@xterm/xterm', () => ({ Terminal: class {
   cols = 80; rows = 24; options: Record<string, unknown> = {};
+  constructor(options: Record<string, unknown> = {}) { Object.assign(this.options, options); (globalThis as { __xtermMade?: unknown[] }).__xtermMade?.push(this); }
   loadAddon(): void {}
   open(node: HTMLElement): void { const screen = node.ownerDocument.createElement('div'); screen.className = 'xterm'; node.append(screen); }
   onData(): void {}
@@ -45,6 +46,28 @@ function setup(saved?: unknown) {
 const saved = () => JSON.parse(dom.window.localStorage.getItem(KEY) ?? 'null') as unknown;
 const project = { id: '7b0c6f2e-1d1a-4c55-9a39-2d1f4f0e8a11', name: 'project' } as Parameters<ReturnType<typeof createWorkspaceTerminal>['update']>[0];
 const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+
+it('re-themes an open terminal only when its colors change, so an unchanged appearance costs it nothing', async () => {
+  // Every state push re-applies the appearance. Setting the same theme again made xterm clear its
+  // width cache and measure every character again, which in a hidden terminal never caches (idle CPU).
+  const made: Array<{ options: Record<string, unknown> }> = [];
+  (globalThis as { __xtermMade?: unknown[] }).__xtermMade = made;
+  try {
+    const { terminal } = setup();
+    terminal.update(project); terminal.newTab();
+    await settle();
+    expect(made).toHaveLength(1);
+    const { applyAppearance } = await import('../src/renderer/appearance.js');
+    const { defaultAppearance } = await import('../src/shared/appearance.js');
+    applyAppearance('dark', defaultAppearance());
+    const theme = made[0]!.options.theme;
+    expect(theme).toMatchObject({ background: expect.any(String), foreground: expect.any(String) });
+    // A change that leaves the terminal's colors as they were (a larger text size) does not re-theme it.
+    applyAppearance('dark', { ...defaultAppearance(), fontSize: 16 });
+    applyAppearance('dark', { ...defaultAppearance(), fontSize: 16 });
+    expect(made[0]!.options.theme).toBe(theme);
+  } finally { delete (globalThis as { __xtermMade?: unknown[] }).__xtermMade; }
+});
 
 it('remembers open terminal tabs and brings them back after a restart as inert previous-session tabs', async () => {
   const first = setup();

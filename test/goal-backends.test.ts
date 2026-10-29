@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { recordLoopMcpProof } from './goal-mcp-proof.js';
-import { GOAL_CONTINUATIONS, GOAL_MARKER_INSTRUCTION, templateGoalDecision } from '../src/shared/goal-templates.js';
+import { GOAL_CONTINUATIONS, GOAL_MARKER_INSTRUCTION, templateGoalDecision, toolCallFootnote } from '../src/shared/goal-templates.js';
 import { promises as fs } from 'node:fs';
 const browser = vi.hoisted(() => ({ request: vi.fn(), authorize: vi.fn(), inputs: [] as Array<{ id: string; sessionId: string; finishOwner?: { turnId: string; periodic: boolean } }> }));
 vi.mock('../src/main/session/input.js', () => ({ requestBrowserDecision: browser.request, authorizeBrowserHelperRetry: browser.authorize, listInputs: async () => browser.inputs }));
@@ -597,6 +597,11 @@ describe('Goal decision backends', () => {
     for (const text of ['prefix [[COS_GOAL:COMPLETE]]', '[[COS_GOAL:COMPLETE]]\nMore work', '[[COS_GOAL:complete]]']) {
       expect(templateGoalDecision(text, 0).action).toBe('invalid');
     }
+  });
+  it('keeps the tool-call note builder and the marker check apart: the note text alone is not set aside (#1894, CodeRabbit)', () => {
+    // A model can write that text itself; only the app knows when it added the note.
+    expect(templateGoalDecision(`All done.\n[[COS_GOAL:COMPLETE]]\n\n${toolCallFootnote(1, 0)}`, 0).action).toBe('invalid');
+    expect(toolCallFootnote(2, 0)).toBe('[Chat On Steroids: 2 tool calls ran in this turn. Arguments and results are not shown.]');
   });
   it('uses browser JSON decisions without an API key and refuses prose', async () => {
     await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, backend: 'chatgpt' } });
