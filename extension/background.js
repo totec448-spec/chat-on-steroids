@@ -4997,7 +4997,8 @@ async function companionDiagnosticSnapshot(found) {
     // Defaults on a fresh install are not choices; the app keeps only values someone stored.
     preferencesStored: RENDER_STREAM_KEY in preferences || SHOW_TIMES_KEY in preferences,
     tab: await HANDLERS.tabStatus(),
-    environment: await cachedEnvironmentDiagnostics()
+    environment: await cachedEnvironmentDiagnostics(),
+    errorPageReloads: { count: errorPageReloadCount, lastAt: lastErrorPageReloadAt }
   };
 }
 
@@ -5617,6 +5618,8 @@ function recoverDeferredRevivals() {
 // (2.1.47 round: every send to that chat expired). It holds no draft and no answer, so once the
 // browser is online again it is reloaded, at most every 1, 2, 4 … 15 minutes per tab.
 const errorPageReloads = new Map();
+// For the app's log (via the diagnostics snapshot): how many, and when the last one was.
+let errorPageReloadCount = 0, lastErrorPageReloadAt = 0;
 async function reloadErrorPage(id) {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
   const now = Date.now(), prior = errorPageReloads.get(id);
@@ -5625,7 +5628,11 @@ async function reloadErrorPage(id) {
   errorPageReloads.delete(id);
   errorPageReloads.set(id, { tries, nextAt: now + Math.min(15 * 60_000, 60_000 * 2 ** (tries - 1)) });
   if (errorPageReloads.size > 64) errorPageReloads.delete(errorPageReloads.keys().next().value);
-  try { await chrome.tabs.reload(id); } catch { /* The tab went away; nothing to reload. */ }
+  try {
+    await chrome.tabs.reload(id);
+    errorPageReloadCount += 1; lastErrorPageReloadAt = now;
+    void publishCompanionDiagnostics();
+  } catch { /* The tab went away; nothing to reload. */ }
 }
 
 async function restoreChatgptTab(id, current = () => true, documentId = null) {
