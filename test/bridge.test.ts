@@ -17532,9 +17532,10 @@ describe('connector identity through the bridge', () => {
       `request attribution: ${placed} had no page evidence in time; the stream of ${conversationId} names it at /message:v.metadata.request_id`]]);
     expect(requestTraceNote(placed)).toBe(`; the stream of ${conversationId} named it at /message:v.metadata.request_id`);
     expect(requestTraceNote('11111111-2222-4333-8444-555555555555')).toBe('');
-    // Each chat says once per run that its page's tracing works, so a quiet report means "not found".
+    // Each chat says once per run that its page's tracing works, and its limit: a quiet report then
+    // makes "the page never saw it" likely, not certain.
     expect(info.mock.calls.filter(([line]) => String(line).includes('tracing works')).map(([line]) => line))
-      .toEqual([`request attribution: the page of ${conversationId} reports the ids in its streams (tracing works)`]);
+      .toEqual([`request attribution: the page of ${conversationId} reports the ids in its streams (tracing works, up to 16 new ids per message)`]);
     expect(await findSessionByConversation(conversationId)).toBeNull();
     info.mockRestore();
   });

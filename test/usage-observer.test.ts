@@ -111,17 +111,17 @@ function harness() {
       window.removeEventListener('message', listener);
       return { starts, synchronousStarts };
     },
-    openSse: async () => {
+    openSse: async (url = 'https://chatgpt.com/backend-api/f/conversation', method = 'POST') => {
       let resolve: (value: unknown) => void = () => {};
       let cancelled = false, clones = 0;
       const reader = {
         read: () => new Promise(done => { resolve = done; }),
         cancel: async () => { cancelled = true; resolve({ done: true }); }
       };
-      response = { url: 'https://chatgpt.com/backend-api/f/conversation', ok: true,
+      response = { url, ok: true,
         headers: { get: () => 'text/event-stream' },
         clone: () => { clones++; return { body: { getReader: () => reader } }; } };
-      await window.fetch('/backend-api/f/conversation', { method: 'POST' });
+      await window.fetch(new URL(url).pathname, { method });
       return { push: (data: unknown) => resolve({ done: false, value: new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`) }),
         get cancelled() { return cancelled; }, get clones() { return clones; } };
     },
@@ -438,7 +438,7 @@ describe('MAIN-world usage projection', () => {
     await h.feedSse([`data: ${JSON.stringify({ p: '', o: 'add', v: { conversation_id, message: { metadata: { request_ids: [id(1)], note: `ran under ${id(2)} PRIVATE_TEST_TEXT` } } } })}\n\n`]);
     await h.feedSse([`data: ${JSON.stringify({ conversation_id, step: { run: id(3) } })}\n\n`], { method: 'GET' }, `https://chatgpt.com/backend-api/conversation/${conversation_id}/stream_status`);
     h.socket().receive([{ type: 'message', payload: { type: 'tool-call-update', payload: { conversation_id, request_id: id(4) } } }]);
-    await vi.waitFor(() => expect(h.traces.flatMap(post => post.traces.map((entry: any) => entry.requestId))).toEqual(expect.arrayContaining([id(1), id(2), id(3), id(4)])));
+    await vi.waitFor(() => expect(h.traces.flatMap(post => post.traces.map((entry: any) => entry.requestId))).toEqual(expect.arrayContaining([id(1), id(2), id(3), id(4)])), { timeout: 5_000 });
     const at = (n: number) => h.traces.flatMap(post => post.traces).find((entry: any) => entry.requestId === id(n))!.path;
     expect(at(1)).toBe('/:v.message.metadata.request_ids[0]');
     expect(at(2)).toBe('/:text');
@@ -446,6 +446,52 @@ describe('MAIN-world usage projection', () => {
     expect(at(4)).toBe('socket>[0].payload.payload.request_id');
     expect(h.traces.every(post => post.conversationId === conversation_id)).toBe(true);
     expect(JSON.stringify(h.traces)).not.toContain('PRIVATE_TEST_TEXT');
+  });
+
+  // CodeRabbit on #1913: the trace's limits, reach and clean-up.
+  describe('request-id traces (CodeRabbit on #1913)', () => {
+    const conversation_id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+    const id = (n: number) => `${String(n).padStart(8, '0')}-2222-4333-8444-555555555555`;
+    const traced = (h: ReturnType<typeof harness>) => h.traces.flatMap(post => post.traces) as Array<{ requestId: string; path: string }>;
+    it('names an array by its path only under an id-named key, and any other array string as text', async () => {
+      const h = harness();
+      await h.feedSse([`data: ${JSON.stringify({ p: '', o: 'add', v: { conversation_id, message: { metadata: { request_ids: [id(1)], Private_Title: [id(2)] } } } })}\n\n`]);
+      const at = (n: number) => traced(h).find(entry => entry.requestId === id(n))?.path;
+      expect(at(1)).toBe('/:v.message.metadata.request_ids[0]');
+      expect(at(2)).toBe('/:text');
+    });
+    it('takes only whole ids from text, never the start of a longer token', async () => {
+      const h = harness();
+      const text = `wfr_${'a'.repeat(120)} ${id(3)}abc x${id(4)} ${id(5)}`;
+      await h.feedSse([`data: ${JSON.stringify({ p: '', o: 'add', v: { conversation_id, message: { content: text } } })}\n\n`]);
+      expect(traced(h).map(entry => entry.requestId)).toEqual([id(5)]);
+    });
+    it('reports up to sixteen new ids of one message', async () => {
+      const h = harness();
+      const ids = Array.from({ length: 16 }, (_, n) => id(n + 10));
+      await h.feedSse([`data: ${JSON.stringify({ p: '', o: 'add', v: { conversation_id, message: { content: ids.join(' ') } } })}\n\n`]);
+      expect(traced(h).map(entry => entry.requestId)).toEqual(ids);
+    });
+    it.each(['hide', 'dispose'])('stops reading another route\'s stream on %s', async how => {
+      const h = harness();
+      const stream = await h.openSse(`https://chatgpt.com/backend-api/conversation/${conversation_id}/stream_status`, 'GET');
+      expect(stream.clones).toBe(1);
+      if (how === 'hide') h.hide(); else h.observer().dispose();
+      await vi.waitFor(() => expect(stream.cancelled).toBe(true), { timeout: 5_000 });
+    });
+    it('names another route only with characters the app accepts', async () => {
+      const h = harness();
+      await h.feedSse([`data: ${JSON.stringify({ conversation_id, run: id(6) })}\n\n`], { method: 'GET' }, 'https://chatgpt.com/backend-api/foo/a%2Fb~c');
+      await vi.waitFor(() => expect(traced(h).map(entry => entry.requestId)).toEqual([id(6)]), { timeout: 5_000 });
+      const path = traced(h)[0]!.path;
+      expect(path).toBe('/backend-api/foo/a_2Fb_c>text');
+      expect(path).toMatch(/^[A-Za-z0-9_./:>*[\]-]{1,200}$/);
+    });
+    it('keeps tracing a long-lived socket past its first 64 ids', () => {
+      const h = harness(), socket = h.socket();
+      for (let n = 1; n <= 300; n++) socket.receive([{ type: 'message', payload: { conversation_id, request_id: id(1000 + n) } }]);
+      expect(traced(h)).toHaveLength(300);
+    });
   });
 
   // CodeRabbit on #1908: a response that reached its 16 published origins still traces later frames.

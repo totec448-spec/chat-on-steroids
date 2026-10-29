@@ -19,7 +19,9 @@ const tracing = new Set<string>();
 export function noteRequestTraces(conversationId: string, reported: readonly RequestTrace[]): void {
   if (reported.length && !tracing.has(conversationId) && tracing.size < 64) {
     tracing.add(conversationId);
-    logInfo(`request attribution: the page of ${conversationId} reports the ids in its streams (tracing works)`);
+    // Tracing has limits (16 new ids per message, 64 per stream), so a missing trace makes it likely, not
+    // certain, that the page never saw an id.
+    logInfo(`request attribution: the page of ${conversationId} reports the ids in its streams (tracing works, up to 16 new ids per message)`);
   }
   for (const { requestId, path } of reported) {
     if (traces.has(requestId)) continue;
