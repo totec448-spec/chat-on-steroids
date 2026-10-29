@@ -35,6 +35,7 @@ import { chatErrorMessageKey } from '../../shared/chat-error.js';
 import { continuedRequestTurn, overlappingRequestTurns, recordedRequestTurn, responseTurnId, turnOpenAt } from '../../shared/chronology.js';
 import { getConfig } from '../config.js';
 import { logInfo, logWarn } from '../logger.js';
+import { requestTraceNote } from './request-trace.js';
 import { redactCredentialText } from '../redaction.js';
 import { currentCall, emptyEvidence, runningToolCalls, type CallEvidence } from '../mcp/call-context.js';
 import {
@@ -1268,7 +1269,7 @@ export function recordToolCall(input: ToolCallInput): Promise<ToolCallRecord | n
           if (!conversationId) {
             logWarn(
               `request attribution: no page evidence for ${input.requestId} within ` +
-                `${REQUEST_ID_GRACE_MS}ms; filing ${input.tool} under Unattributed activity`
+                `${REQUEST_ID_GRACE_MS}ms; filing ${input.tool} under Unattributed activity${requestTraceNote(input.requestId!)}`
             );
           }
           if (input.bind && conversationId) bindAgentConversation(input.bind, conversationId);
@@ -1807,10 +1808,13 @@ export interface ChatObservation {
     | 'turn_end'
     | 'chat_error'
     | 'tool_evidence'
-    | 'app_sightings';
+    | 'app_sightings'
+    | 'request_trace';
   time: number;
   /** app_sightings only: connector result rows as the page saw them (connector-identity.ts). */
   apps?: import('../connector-identity.js').AppSighting[];
+  /** request_trace only: where the page's stream named request ids (request-trace.ts, #1752). */
+  traces?: import('./request-trace.js').RequestTrace[];
   /** Current native selection evidence, not a historical message or requested worker model. */
   model?: string;
   reasoningEffort?: import('../../shared/session.js').ReasoningEffort;

@@ -65,6 +65,38 @@
     }
     post({ type: 'cos-request-origin', conversationId, requestIds: fresh, observedAt }, location.origin);
   }
+  // #1752 diagnostics: the tool calls of a turn can carry a request id the page never reported.
+  // Every id-named field of this chat's stream is traced by its path, never its content, so the
+  // app can log where the page did see an id it could not place. Evidence for a log line only:
+  // attribution still trusts the exact fields readOrigin reads.
+  const ID_KEY = /^[A-Za-z0-9_-]{0,40}id$/i;
+  function namedConversation(frame, fallback) {
+    const named = new Set();
+    CONVERSATION_FIELD.lastIndex = 0;
+    for (let match; (match = CONVERSATION_FIELD.exec(frame));) if (CONVERSATION.test(match[1])) named.add(match[1]);
+    return named.size === 1 ? named.values().next().value : named.size ? null : fallback || null;
+  }
+  function traceIds(frame, conversationId, traced) {
+    if (!active || !conversationId || traced.size >= 64 || !frame || frame.length > 512 * 1024) return;
+    let event;
+    try { event = JSON.parse(frame.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n')); } catch { return; }
+    const traces = [];
+    const walk = (value, path, depth) => {
+      if (traces.length >= 8 || depth > 8 || path.length > 160) return;
+      if (Array.isArray(value)) { value.slice(0, 16).forEach((item, index) => walk(item, `${path}[${index}]`, depth + 1)); return; }
+      if (!value || typeof value !== 'object') return;
+      for (const [key, item] of Object.entries(value).slice(0, 64)) {
+        if (!/^[A-Za-z0-9_-]{1,40}$/.test(key)) continue;
+        const at = path.endsWith(':') || !path ? path + key : `${path}.${key}`;
+        if (typeof item !== 'string') { walk(item, at, depth + 1); continue; }
+        if (!ID_KEY.test(key) || !REQUEST.test(item) || item === conversationId || traced.has(item) || origins.has(`${conversationId}:${item}`)) continue;
+        traced.add(item);
+        traces.push({ requestId: item, path: at });
+      }
+    };
+    walk(event, typeof event?.p === 'string' && /^[A-Za-z0-9_/-]{0,120}$/.test(event.p) ? `${event.p || '/'}:` : '', 0);
+    if (traces.length) post({ type: 'cos-request-trace', conversationId, traces }, location.origin);
+  }
   const project = (data, observedAt, order) => {
     if (!data || typeof data !== 'object') return;
     const rows = [];
@@ -377,7 +409,7 @@
     originReaders.add(reader);
     readers.add(reader);
     const timer = setTimeout(() => void reader.cancel().catch(() => {}), ORIGIN_LISTEN_MS);
-    const decoder = new TextDecoder(), emitted = new Set(), stream = {};
+    const decoder = new TextDecoder(), emitted = new Set(), stream = {}, traced = new Set();
     let bytes = 0, buffer = '';
     const sighted = new Set();
     const scan = (frame) => {
@@ -393,6 +425,10 @@
       for (const id of fresh) emitted.add(id);
       publishOrigin(origin.conversationId, fresh, observedAt);
     };
+    const scanAndTrace = (frame) => {
+      scan(frame);
+      traceIds(frame, namedConversation(frame, stream.conversationId), traced);
+    };
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -406,14 +442,14 @@
           const split = lf < 0 ? crlf : crlf < 0 ? lf : Math.min(lf, crlf);
           if (split < 0) break;
           const width = buffer.startsWith('\r\n\r\n', split) ? 4 : 2;
-          scan(buffer.slice(0, split));
+          scanAndTrace(buffer.slice(0, split));
           if (emitted.size >= 16) return;
           buffer = buffer.slice(split + width);
         }
         if (buffer.length > 512 * 1024) return;
       }
       buffer += decoder.decode();
-      scan(buffer);
+      scanAndTrace(buffer);
     } catch { /* A missing stream observation leaves the existing Fiber path in charge. */ }
     finally { clearTimeout(timer); originReaders.delete(reader); readers.delete(reader); void reader.cancel().catch(() => {}); }
   }
@@ -460,6 +496,7 @@
         const origin = readOrigin(frame, stream);
         if (origin?.conversationId === payload.conversation_id)
           publishOrigin(origin.conversationId, origin.requestIds, Date.now());
+        if (namedConversation(frame, payload.conversation_id) === payload.conversation_id) traceIds(frame, payload.conversation_id, stream.traced ??= new Set());
       }
     }
   }
