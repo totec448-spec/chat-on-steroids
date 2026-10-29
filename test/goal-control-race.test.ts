@@ -437,3 +437,25 @@ it('leaves only accepted objective state retryable when the corrective write als
   expect((await storedControls()).objectives).toEqual([{ conversationId: SOURCE, objective: 'Accepted objective' }]);
   expect(proposed).toEqual(['Rejected replacement', 'Accepted objective', 'Accepted objective']);
 });
+
+it('keeps "the goal is met" when the switch or objective change it would replace is not saved (CodeRabbit)', async () => {
+  const kept = { version: 1 as const, savedAt: 1, outcomes: [{ conversationId: SOURCE, turnId: 'g-1', model: 'm', backend: 'templates' as const, at: 1 }] };
+  goal.restoreGoalOutcomes(kept);
+  const switchGate = delayedWrite(goal.GOAL_SWITCHES_STATE, true);
+  const toggled = observe(goal.setGoalSwitchNow(SOURCE, 'goal', true));
+  await switchGate.entered;
+  switchGate.release();
+  expect((await toggled).error).toBeInstanceOf(Error);
+  expect(goal.goalOutcomeFor(SOURCE)).toMatchObject({ stage: 'no-reply', turnId: 'g-1' });
+  vi.restoreAllMocks();
+  const objectiveGate = delayedWrite(goal.GOAL_OBJECTIVES_STATE, true);
+  const retitled = observe(goal.setGoalObjectiveNow(SOURCE, 'A different objective'));
+  await objectiveGate.entered;
+  objectiveGate.release();
+  expect((await retitled).error).toBeInstanceOf(Error);
+  expect(goal.goalOutcomeFor(SOURCE)).toMatchObject({ stage: 'no-reply', turnId: 'g-1' });
+  // Saved, it is replaced.
+  vi.restoreAllMocks();
+  await goal.setGoalObjectiveNow(SOURCE, 'A different objective');
+  expect(goal.goalOutcomeFor(SOURCE)).toBeNull();
+});

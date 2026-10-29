@@ -75,7 +75,9 @@ export const inputArgs = z.object({
    * Edit & resubmit (#365): this message replaces the chat's question `messageId` through ChatGPT's
    * own edit, which keeps the old version beside it and continues the chat from the new one.
    */
-  edit: z.object({ messageId: z.string().regex(NATIVE_ID) }).strict().optional()
+  edit: z.object({ messageId: z.string().regex(NATIVE_ID) }).strict().optional(),
+  /** Scheduled runs (#1826): this message is a run of the chat's schedule, due at `dueAt`; `late` when it went out after a missed time. */
+  scheduled: z.object({ scheduleId: z.string().uuid(), dueAt: z.number().int().nonnegative(), late: z.boolean() }).strict().optional()
 });
 export type InputArgs = z.infer<typeof inputArgs>;
 const entrySchema = inputArgs.extend({
@@ -156,9 +158,10 @@ export type InputEntry = z.infer<typeof entrySchema>;
  * which is never asked about. Finish replies are asked before they are filed, as they can also
  * reach ChatGPT in a tool result.
  */
-export function automaticSendKind(row: Pick<InputEntry, 'recovery' | 'purpose' | 'afterStop'>): SendCheckKind | null {
+export function automaticSendKind(row: Pick<InputEntry, 'recovery' | 'purpose' | 'afterStop' | 'scheduled'>): SendCheckKind | null {
   if (row.recovery) return 'continue';
   if (row.purpose === 'rotation' || row.afterStop) return 'fresh-turn';
+  if (row.scheduled) return 'scheduled';
   return null;
 }
 
@@ -275,6 +278,8 @@ export async function sessionInputPolicy(sessionId: string, observedActivity?: I
     // comparison would leave the composer unsettled after the activity clock stopped.
     settled: settled && !executing && (!!completed || (session.lastToolCallAt ?? 0) <= (end?.time ?? 0)) };
 }
+/** How late a page may report a deliberate tab close after the person closed it. */
+const CLOSE_REPORT_GRACE_MS = 5_000;
 async function browserInputAllowed(entry: InputEntry): Promise<boolean> {
   if (entry.error?.startsWith('Local chat setup failed:')) return false;
   // Authored Inject-now custody never changes transports. Its exact turn either
@@ -293,9 +298,14 @@ async function browserInputAllowed(entry: InputEntry): Promise<boolean> {
   if (!entry.sessionId) return entry.transportIntent !== 'tool';
   const session = await getSession(entry.sessionId);
   // Departure suspends already accepted delivery through the final Send check.
-  // A new explicit immediate message remains a user action that may open the chat.
-  if (session?.browserRecoveryDismissedAt !== undefined &&
-      (!manualInput(entry) || entry.createdAt <= session.browserRecoveryDismissedAt)) return false;
+  // A new explicit immediate message remains a user action that may open the chat. The page
+  // reports a close a moment after it happens, so a message typed within that moment counts as new
+  // too (2.1.47 round: it expired unclaimed), unless it was already offered to the closing tab. A
+  // scheduled run is not typed, and gets no such grace (CodeRabbit on #1910).
+  const dismissedAt = session?.browserRecoveryDismissedAt;
+  if (dismissedAt !== undefined && (!manualInput(entry) || (entry.createdAt <= dismissedAt && (
+      entry.scheduled !== undefined || entry.createdAt <= dismissedAt - CLOSE_REPORT_GRACE_MS ||
+      (entry.offeredAt !== undefined && entry.offeredAt <= dismissedAt))))) return false;
   // Silence can leave the recorder's original turn open. Its durable ticket
   // proves the exact unchanged work; the native page must still be idle for Send.
   if (entry.silenceBoundary) return await eligibleStageEnd(entry) === entry.silenceBoundary.turnId;
@@ -2153,6 +2163,14 @@ export function failBranchInput(id: string, conversationId: string, reason: keyo
   });
 }
 
+/**
+ * A message a browser is sending right now: handed to a page (`browser`), or a Goal helper's question
+ * waiting there (`decision`). One handed to a tool caller (`tool`) or still queued is not (#1901).
+ */
+export function inBrowserDelivery(row: Pick<InputEntry, 'state'>): boolean {
+  return row.state === 'browser' || row.state === 'decision';
+}
+
 export function failBrowserInput(id: string, owner: string, error: string, detail?: string): Promise<boolean> {
   return serial(async () => {
     const current = await load();
@@ -2247,6 +2265,12 @@ export function failBrowserInput(id: string, owner: string, error: string, detai
     await commit(current.map((row) => sameDelivery(entry, row) ? pickupCancelled
       ? withoutSilenceClaim(row, row === entry && preserveBoundary)
       : { ...row, state: entry.companionInputId ? 'cancelled' : 'failed', error: error.slice(0, 200) } : row));
+    // Every other failure is said once here, after it is recorded, with the page's reason and code:
+    // the chat showed it, the log did not (2.1.47 round).
+    if (error !== 'After-turn pickup was withdrawn before Send.') {
+      logWarn(`input ${entry.id}: the browser could not send it — ${error.slice(0, 200)}${detail ? ` (${detail.slice(0, 80)})` : ''}; ` +
+        (entry.companionInputId ? 'cancelled with its companion' : 'reported as not sent'));
+    }
     decisionWaiters.get(id)?.reject(new Error('goal_browser_send_failed: ' + error.slice(0, 200)));
     decisionWaiters.delete(id);
     return true;

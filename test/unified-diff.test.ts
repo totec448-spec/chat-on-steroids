@@ -12,6 +12,14 @@ it('shows creation and deletion from exact snapshots including a missing final n
   expect(unifiedDiffLines('', 'hello').lines.filter(line => line.kind === 'added').map(line => line.text)).toEqual(['hello']);
   expect(unifiedDiffLines('hello', '').lines.filter(line => line.kind === 'removed').map(line => line.text)).toEqual(['hello']);
 });
+it('shows a created or deleted file as its lines only, with no empty row for the missing other side', () => {
+  const rows = (base: string, current: string) => unifiedDiffLines(base, current).lines.map(({ kind, old, next, text }) => [kind, old, next, text]);
+  expect(rows('', 'release round ok\n')).toEqual([['added', null, 1, 'release round ok']]);
+  expect(rows('', 'one\ntwo')).toEqual([['added', null, 1, 'one'], ['added', null, 2, 'two']]);
+  expect(rows('one\ntwo\n', '')).toEqual([['removed', 1, null, 'one'], ['removed', 2, null, 'two']]);
+  // An edit still ends at the file's last real line.
+  expect(rows('one\n', 'one\ntwo\n')).toEqual([['context', 1, 1, 'one'], ['added', null, 2, 'two']]);
+});
 it('bounds rendered lines and folds long unchanged context without changing line identities', () => {
   const source = Array.from({ length: 100 }, (_, i) => `line ${i}`).join('\n');
   const result = unifiedDiffLines(source, source.replace('line 50', 'edited 50'));

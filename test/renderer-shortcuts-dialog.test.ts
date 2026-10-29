@@ -218,6 +218,18 @@ it('names Ctrl and Shift in the interface language, in every row that has them',
   expect(new Map(view.groups().flatMap(([, rows]) => rows as [string, string[]][])).get('Next chat')).toEqual(['Ctrl+Tab']);
 });
 
+it('closes with a Close button worded like every other dialog’s, in the chosen language', async () => {
+  const view = await mount({ platform: 'Win32' });
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  view.shortcuts.open();
+  const close = view.doc.getElementById('shortcutsClose') as HTMLButtonElement;
+  expect(close.textContent!.trim()).toBe('Close');
+  expect(close.querySelector('.ico')).toBeNull();
+  setLanguage('de');
+  expect(close.textContent!.trim()).toBe('Schließen');
+  setLanguage('en');
+});
+
 it('shows the focus ring on the close button when the keys opened the dialog, not when the View menu did', async () => {
   const view = await mount({ platform: 'Win32' });
   const close = view.doc.getElementById('shortcutsClose') as HTMLButtonElement;

@@ -16,6 +16,8 @@ const PRESET_NAMES: Record<typeof ACCENT_PRESETS[number]['id'], () => string> = 
 /** Controls that only shape the chosen palette; high contrast draws its own page, so they wait. */
 const PALETTE_ONLY = ['appearance-background', 'appearance-background-hex', 'appearance-sidebar', 'appearance-sidebar-hex', 'appearanceContrast', 'appearanceTranslucent'];
 const appearanceListeners = new Set<() => void>();
+/** The theme and settings the listeners were last told about. */
+let toldAppearance = '';
 /** Canvas/terminal renderers must refresh after the CSS palette has been applied. */
 export function onAppearanceChanged(listener: () => void): () => void {
   appearanceListeners.add(listener);
@@ -44,6 +46,11 @@ export function applyAppearance(theme: AppearanceTheme, settings?: AppearanceSet
   for (const element of document.querySelectorAll<HTMLElement>('.sidebar, .app-topbar, .appearance-preview-sidebar, .connection-popover')) {
     tokens(element, paletteTokens(sidebarBackground, palette.accent, palette.contrast, high));
   }
+  // Every state push applies the appearance again. The listeners re-theme terminals, which makes
+  // xterm measure every character again, so they hear only of a real change (idle CPU, 2026-10-27).
+  const told = JSON.stringify([theme, value]);
+  if (told === toldAppearance) return;
+  toldAppearance = told;
   for (const listener of appearanceListeners) listener();
 }
 

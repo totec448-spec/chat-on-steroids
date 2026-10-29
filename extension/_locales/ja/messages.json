@@ -503,6 +503,12 @@
   "content_goal_wait_tool_inactivity": {
     "message": "ツールの活動が止まるのを待っています"
   },
+  "content_goal_reviewer_deadline": {
+    "message": "$1 後にレビューなしで続行"
+  },
+  "content_goal_wait_reviewer": {
+    "message": "レビュー担当を待っています"
+  },
   "content_goal_wait_workers": {
     "message": "このチャットのワーカーを待っています"
   },
@@ -697,6 +703,9 @@
   },
   "content_turn_stop_requested": {
     "message": "停止を要求しました。ネイティブページでは生成中の表示がなくなりました。"
+  },
+  "content_turn_stop_unseen": {
+    "message": "ここで停止しました。ChatGPT にはこの回答が実行中と表示されなくなっていました。"
   },
   "content_unknown_error": {
     "message": "不明なエラー"
