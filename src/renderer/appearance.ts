@@ -179,6 +179,9 @@ export function initAppearance(save: (patch: { theme?: ThemeChoice; appearance?:
     else {
       // Incomplete hex input never becomes CSS or durable config. Restore the last valid value.
       control.removeAttribute('aria-invalid');
+      // A system switch that waited for this edit shows now (CodeRabbit on #1917), so the field below
+      // gets the color of the theme that is shown.
+      if (choice === 'system') paint();
       if (control.dataset.hex) control.value = current[theme][control.dataset.hex as typeof colorKeys[number]].toUpperCase();
     }
   });
