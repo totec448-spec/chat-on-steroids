@@ -132,6 +132,14 @@ app.whenReady().then(async () => {
     await sharp(small, { join: { animated: true } }).gif({ delay: frames.map(entry => entry.ms), loop: 0, effort: 10, colours: 128, dither: 0.4, interFrameMaxError: 6 })
       .toFile(path.join(output, 'demo.gif'));
     fs.writeFileSync(path.join(output, 'demo.mp4'), await recordVideo(frames));
+    // Chromium's recorder writes a fragmented MP4 without a seek index: browsers showed this
+    // 18-second demo as 3 seconds long. macOS's avconvert writes a regular one.
+    if (process.platform === 'darwin') {
+      const remuxed = path.join(output, 'demo.remuxed.mp4');
+      const run = require('node:child_process').spawnSync('avconvert', ['-s', path.join(output, 'demo.mp4'), '-p', 'PresetHighestQuality', '-o', remuxed, '--replace'], { encoding: 'utf8' });
+      if (run.status !== 0) throw new Error('avconvert failed: ' + run.stderr);
+      fs.renameSync(remuxed, path.join(output, 'demo.mp4'));
+    } else console.warn('demo.mp4 has no seek index: re-mux it on macOS (avconvert) before committing');
     const seconds = frames.reduce((total, entry) => total + entry.ms, 0) / 1000;
     console.log(`wrote demo.gif (${Math.round(fs.statSync(path.join(output, 'demo.gif')).size / 1024)} KB) and demo.mp4 (${Math.round(fs.statSync(path.join(output, 'demo.mp4')).size / 1024)} KB): ${frames.length} frames, ${seconds.toFixed(1)} s`);
   } finally { win?.destroy(); await server.close(); app.quit(); }
