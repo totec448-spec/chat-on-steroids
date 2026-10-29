@@ -16,6 +16,7 @@ import { findSessionByConversation, getSession } from './session/store.js';
 import { createDesktopAsk, stepLine, type DesktopAskCaller, type DesktopAskPrompt, type DesktopStepWords } from './desktop-ask.js';
 import { ASK_ANSWER_MS, desktopAskColors, type DesktopAskMode, type DesktopAskPending } from '../shared/desktop-ask.js';
 import { defaultAppearance } from '../shared/appearance.js';
+import { shownTheme } from './theme.js';
 
 const WIDTH = 360;
 const HEIGHT = 118;
@@ -45,7 +46,8 @@ export function answerDesktopAsk(id: string, choice: 'go' | 'not-now'): boolean 
 
 export function showDesktopAskPrompt(prompt: DesktopAskPrompt): Promise<'go' | 'not-now' | 'timeout'> {
   const ui = getConfig().ui;
-  const theme = ui.theme === 'dark' ? 'dark' : 'light';
+  // Same as system (#1914) is the theme the system shows now.
+  const theme = shownTheme(ui.theme);
   const palette = desktopAskColors(ui.appearance ?? defaultAppearance(), theme);
   const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
   const win = new BrowserWindow({

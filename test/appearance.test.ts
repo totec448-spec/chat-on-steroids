@@ -1,7 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { appearanceSchema } from '../src/main/appearance-schema.js';
-import { ACCENT_PRESETS, defaultAppearance, effectivePalette, mergeAppearance, paletteTokens, contrastRatio, readableInk } from '../src/shared/appearance.js';
+import { ACCENT_PRESETS, defaultAppearance, effectivePalette, mergeAppearance, paletteTokens, contrastRatio, readableInk, resolveTheme } from '../src/shared/appearance.js';
 import { titleBarOverlayForTheme, windowBackgroundForTheme } from '../src/main/window-layout.js';
+
+// #1914: "System" follows the operating system's light or dark mode; Light and Dark stay fixed.
+it('shows the system\'s theme for System, and the chosen one otherwise', () => {
+  expect(resolveTheme('system', true)).toBe('dark');
+  expect(resolveTheme('system', false)).toBe('light');
+  expect(resolveTheme('light', true)).toBe('light');
+  expect(resolveTheme('dark', false)).toBe('dark');
+  // A value from an older or damaged config is the long-standing default.
+  expect(resolveTheme(undefined, false)).toBe('dark');
+});
 
 describe('custom appearance', () => {
   it('accepts arbitrary RGB colors, including identical accent and background, and bounds other preferences', () => {

@@ -3430,6 +3430,7 @@
   "Waiting for the reviewer": "검토자 대기 중",
   "Continues without the review in {0}": "{0} 후 검토 없이 계속",
   "Continuing without the review…": "검토 없이 계속하는 중…",
+  "Same as system": "시스템 설정에 맞춤",
   "Read {0}": "{0} 읽음",
   "Reading {0}": "{0} 읽는 중",
   "Could not read {0}": "{0} 읽기 실패",
