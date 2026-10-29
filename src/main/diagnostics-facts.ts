@@ -5,6 +5,7 @@
  * question. Everything here is a number, a state or a short option name; free text (the error
  * summary's sample lines) goes through the report's scrubber like the log does.
  */
+import { spokenAge, spokenDuration } from '../shared/age.js';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -158,7 +159,7 @@ const yesNo = (value: boolean) => value ? 'yes' : 'no';
 
 export function installLines(facts: InstallFacts): string[] {
   const { update } = facts;
-  const checked = update.checkedAt === null ? 'not checked yet' : `checked ${Math.round((facts.now - update.checkedAt) / 60_000)} min ago`;
+  const checked = update.checkedAt === null ? 'not checked yet' : `checked ${spokenAge(update.checkedAt, facts.now)}`;
   return [
     `Installed as: ${facts.kind} (${facts.packaged ? 'packaged' : 'development build'})`,
     `App folder writable by the app: ${facts.folderWritable === null ? 'unknown' : yesNo(facts.folderWritable)}`,
@@ -185,7 +186,7 @@ export function systemLines(facts: SystemFacts): string[] {
     `Memory: ${gb(facts.totalBytes)} total, ${gb(facts.freeBytes)} free`,
     `CPU: ${facts.cpuModel.replace(/\s+/g, ' ').trim().slice(0, 80) || 'unknown'}, ${facts.cpuCount} cores`,
     `Free disk space where the app keeps its data: ${facts.diskFreeBytes === null ? 'unknown' : gb(facts.diskFreeBytes)}`,
-    `App running for ${Math.floor(minutes / 60)} h ${minutes % 60} min`,
+    `App running for ${spokenDuration(minutes * 60)}`,
     `Display scale: ${facts.scaleFactors.length ? facts.scaleFactors.join(', ') : 'unknown'}`
   ];
 }
@@ -211,7 +212,7 @@ export function chatLines(sessions: ChatFactsSession[], inputs: Array<{ sessionI
     const mine = inputs.filter(input => input.sessionId === session.id);
     const states = [...new Set(mine.map(input => input.state))].map(state => `${state} ${mine.filter(input => input.state === state).length}`);
     const model = session.selectedModel?.model && /^[A-Za-z0-9._:-]{1,40}$/.test(session.selectedModel.model) ? `, model ${session.selectedModel.model}` : '';
-    return `#${index + 1} ${session.workerAssignment ? 'worker' : 'main'} chat${model}: active ${Math.round((now - session.updatedAt) / 60_000)} min ago, ` +
+    return `#${index + 1} ${session.workerAssignment ? 'worker' : 'main'} chat${model}: active ${spokenAge(session.updatedAt, now)}, ` +
       `${session.toolCalls} tool call(s), ${session.processExitNonzero ?? 0} failed command(s), ${session.toolRejected ?? 0} refused, ` +
       `inputs: ${states.length ? states.join(', ') : 'none'}`;
   });
