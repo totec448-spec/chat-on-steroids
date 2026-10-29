@@ -1,7 +1,7 @@
 /** Native desktop host for Pets. Package state stays in pet-library; the overlay renderer owns animation. */
 import path from 'node:path';
-import { BrowserWindow, ipcMain, screen } from 'electron';
-import { defaultAppearance } from '../shared/appearance.js';
+import { BrowserWindow, ipcMain, nativeTheme, screen } from 'electron';
+import { defaultAppearance, resolveTheme } from '../shared/appearance.js';
 import type { PetActivity, PetLibraryState, PetOverlayBounds, PetOverlayControlState, PetOverlayHitRegion, PetOverlayPointer, PetOverlaySnapshot } from '../shared/pets.js';
 import { highestPetActivityLevel, petActivityForAgent, petActivityForSession, petTaskSessionId } from '../shared/pet-activity.js';
 import { getConfig } from './config.js';
@@ -70,7 +70,8 @@ function snapshot(): PetOverlaySnapshot {
     dismissedPetIds: [...dismissedPetIds],
     level: highestPetActivityLevel(activities),
     activities,
-    theme: config.ui.theme,
+    // The theme shown now: System (#1914) is resolved here, the overlay only paints.
+    theme: resolveTheme(config.ui.theme, nativeTheme.shouldUseDarkColors === true),
     appearance: config.ui.appearance ?? defaultAppearance()
   };
 }

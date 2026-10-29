@@ -161,6 +161,15 @@
         <span>The tools of a Chat On Steroids plugin changed. Refresh that plugin in ChatGPT; this is separate from the browser extension.</span>
         <button class="btn btn-icon" id="dismissPluginRefreshReminder" type="button" title="Dismiss reminder" aria-label="Dismiss reminder"><i class="ico ph ph-x" aria-hidden="true"></i></button>
       </div>
+      <!-- #1864: the ask-before-mouse-and-keyboard question, while it waits in the screen's corner too.
+           That panel never takes the focus; this one is reachable by keyboard and screen readers.
+           See src/renderer/desktop-ask-notice.ts. -->
+      <div class="notice" id="desktopAskNotice" role="group" aria-labelledby="desktopAskNoticeTitle" hidden>
+        <i class="ico ph ph-keyboard" aria-hidden="true"></i>
+        <span role="alert"><b id="desktopAskNoticeTitle"></b> <span id="desktopAskNoticeStep"></span></span>
+        <button class="btn btn-quiet" id="desktopAskNotNow" type="button">Not now</button>
+        <button class="btn btn-quiet" id="desktopAskGo" type="button">Go ahead</button>
+      </div>
       <div class="notice" id="desktopAccessNotice" role="status" hidden>
         <i class="ico ph ph-warning" aria-hidden="true"></i>
         <span id="desktopAccessNoticeText"></span>
@@ -276,7 +285,7 @@
             <section class="appearance-section">
               <header class="settings-section-head"><div><h2>Colors</h2><p>Fine-tune background and accent colors for the selected theme.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
-              <label class="setting"><span class="setting-text"><b>Theme</b><em>Light and dark keep their own colors.</em></span><select id="appearanceTheme"><option value="light">Light</option><option value="dark">Dark</option></select></label>
+              <label class="setting"><span class="setting-text"><b>Theme</b><em>Light and dark keep their own colors.</em></span><select id="appearanceTheme"><option value="light">Light</option><option value="dark">Dark</option><option value="system">Same as system</option></select></label>
               <label class="setting"><span class="setting-text"><b>High contrast</b><em>Black or white background with stronger text and lines. Your colors stay saved for when you turn it off.</em></span><input id="appearanceHighContrast" type="checkbox" /></label>
               <div class="setting"><span class="setting-text"><b id="appearanceAccentPresetsLabel">Accent presets</b><em>Each is easy to read in light and dark.</em></span><div class="appearance-swatches" id="appearanceAccentPresets" role="radiogroup" aria-labelledby="appearanceAccentPresetsLabel"></div></div>
 

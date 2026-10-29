@@ -12,6 +12,7 @@ import { getConfig } from './config.js';
 import { mainText } from './main-texts.js';
 import { defaultAppearance } from '../shared/appearance.js';
 import type { UpdateHandoffStep } from './update.js';
+import { shownTheme } from './theme.js';
 
 let progress: BrowserWindow | null = null;
 
@@ -22,7 +23,7 @@ const stepText = (step: UpdateHandoffStep): string => step === 'permission'
 export function showUpdateProgress(version: string): void {
   if (progress && !progress.isDestroyed()) return;
   const ui = getConfig().ui;
-  const theme = ui.theme === 'dark' ? 'dark' : 'light';
+  const theme = shownTheme(ui.theme);
   const palette = (ui.appearance ?? defaultAppearance())[theme];
   const win = new BrowserWindow({
     // On top: the main window is already gone, and on Windows another app has the foreground by

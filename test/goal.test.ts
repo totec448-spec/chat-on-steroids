@@ -25,7 +25,7 @@ vi.mock('electron', () => ({
   }
 }));
 
-const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
+const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSecretsPath, setSecret } = await import('../src/main/secrets.js');
 const { initDurableStore } = await import('../src/main/durable.js');
 const { takeAutomaticReply } = await import('../src/main/session/automatic-replies.js');
@@ -2737,6 +2737,27 @@ describe('the loop that never stops', () => {
     expect(body.response_format.json_schema.schema.properties.action.enum).toEqual(['continue']);
   });
 
+  // CodeRabbit on #1924: without a schema, Loop's JSON is asked for in words that never offer "stop".
+  it('asks a custom endpoint without a schema for a continue-only answer in Loop', async () => {
+    await loopMode();
+    const loop = getConfig().goal;
+    await saveConfig({ ...getConfig(), goal: { ...loop, provider: { kind: 'custom', baseUrl: 'https://format-loop.example/v1' } } });
+    const sessionId = await seed('c-loop-format');
+    const sent: any[] = [];
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      sent.push(body);
+      if (body.response_format?.type === 'json_schema') return Response.json({ error: { message: 'This response_format type is unavailable now' } }, { status: 400 });
+      return decision('continue', 'go over it again');
+    }) as never;
+    await recordLoopMcpProof(sessionId, 'g-loop-format');
+    goal.startGoalDraft({ sessionId, conversationId: 'c-loop-format', turnId: 'g-loop-format' });
+    expect((await settled('c-loop-format')).stage).toBe('ready');
+    const words = sent[1].messages.at(-1).content as string;
+    expect(words).toContain('"action": "continue"');
+    expect(words).not.toContain('stop');
+  });
+
   it('keeps a chat’s own goal in front of the loop', async () => {
     await loopMode();
     const sessionId = await seed('c-loop-goal');
@@ -2953,6 +2974,76 @@ describe('a custom OpenAI-compatible provider', () => {
     });
     return session;
   }
+
+  // #1921: DeepSeek answers HTTP 400 "This response_format type is unavailable now" to json_schema,
+  // and Goal retried the same request forever. A custom endpoint that refuses the format gets
+  // json_object, then no format, with the JSON asked for in words; the answer is validated as before.
+  const refuses = (types: string[]) => {
+    const sent: any[] = [];
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      sent.push(body);
+      if (types.includes(body.response_format?.type ?? 'none')) {
+        return Response.json({ error: { message: 'This response_format type is unavailable now' } }, { status: 400 });
+      }
+      return decision('continue', 'check the tokenizer first');
+    }) as never;
+    return sent;
+  };
+  it('falls back to json_object when a custom endpoint refuses json_schema, and remembers it', async () => {
+    await useCustom({ provider: { kind: 'custom', baseUrl: 'https://format-a.example/v1' } });
+    const sent = refuses(['json_schema']);
+    goal.startGoalDraft({ sessionId: (await userSession('c-format-1')).id, conversationId: 'c-format-1', turnId: 'g-1' });
+    expect((await settled('c-format-1')).stage).toBe('ready');
+    expect(sent.map(body => body.response_format?.type)).toEqual(['json_schema', 'json_object']);
+    // The JSON is asked for in words too: json_object carries no schema.
+    expect(sent[1].messages.at(-1)).toEqual({ role: 'system', content: expect.stringContaining('{"action": "stop" or "continue"') });
+    expect(sent[0].messages.some((message: any) => message.content.includes('{"action": "stop" or "continue"'))).toBe(false);
+    // The next decision for this endpoint goes straight to what it accepts.
+    goal.startGoalDraft({ sessionId: (await userSession('c-format-2')).id, conversationId: 'c-format-2', turnId: 'g-1' });
+    expect((await settled('c-format-2')).stage).toBe('ready');
+    expect(sent.map(body => body.response_format?.type)).toEqual(['json_schema', 'json_object', 'json_object']);
+  });
+
+  // CodeRabbit on #1924: refusals are worded in many ways, and what one model accepts says nothing about another.
+  it('recognizes a refusal in plain words, and learns the format per model', async () => {
+    await useCustom({ provider: { kind: 'custom', baseUrl: 'https://format-d.example/v1' }, model: 'model-a' });
+    const sent: any[] = [];
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body));
+      sent.push(body);
+      if (body.response_format?.type === 'json_schema') return Response.json({ error: { message: 'Response format is not supported for this model' } }, { status: 400 });
+      return decision('continue', 'go on');
+    }) as never;
+    goal.startGoalDraft({ sessionId: (await userSession('c-format-5')).id, conversationId: 'c-format-5', turnId: 'g-1' });
+    expect((await settled('c-format-5')).stage).toBe('ready');
+    expect(sent.map(body => `${body.model}:${body.response_format?.type}`)).toEqual(['model-a:json_schema', 'model-a:json_object']);
+    await useCustom({ provider: { kind: 'custom', baseUrl: 'https://format-d.example/v1' }, model: 'model-b' });
+    goal.startGoalDraft({ sessionId: (await userSession('c-format-6')).id, conversationId: 'c-format-6', turnId: 'g-1' });
+    expect((await settled('c-format-6')).stage).toBe('ready');
+    // Model B starts from the schema again.
+    expect(sent.slice(2).map(body => `${body.model}:${body.response_format?.type}`)).toEqual(['model-b:json_schema', 'model-b:json_object']);
+  });
+
+  it('sends no response_format when a custom endpoint refuses json_object too', async () => {
+    await useCustom({ provider: { kind: 'custom', baseUrl: 'https://format-b.example/v1' } });
+    const sent = refuses(['json_schema', 'json_object']);
+    goal.startGoalDraft({ sessionId: (await userSession('c-format-3')).id, conversationId: 'c-format-3', turnId: 'g-1' });
+    expect((await settled('c-format-3')).stage).toBe('ready');
+    expect(sent.map(body => body.response_format?.type ?? 'none')).toEqual(['json_schema', 'json_object', 'none']);
+  });
+
+  it('keeps any other HTTP 400 from a custom endpoint a plain failure, asked once', async () => {
+    await useCustom({ provider: { kind: 'custom', baseUrl: 'https://format-c.example/v1' } });
+    const sent: any[] = [];
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      sent.push(JSON.parse(String(init.body)));
+      return Response.json({ error: { message: 'Model llama9 does not exist' } }, { status: 400 });
+    }) as never;
+    goal.startGoalDraft({ sessionId: (await userSession('c-format-4')).id, conversationId: 'c-format-4', turnId: 'g-1' });
+    expect((await settled('c-format-4')).stage).toBe('failed');
+    expect(sent).toHaveLength(1);
+  });
 
   it('posts plain chat completions with no vendor fields and no key when keyless', async () => {
     await useCustom();
