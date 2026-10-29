@@ -1599,6 +1599,9 @@
     // here made a long service-worker outage look like a complete transcript even though item
     // 401 had already erased item 1 before the durable journal ever saw it.
     while (queue.length > 400 || queueBytes > MAX_PAGE_QUEUE_BYTES) {
+      // Diagnostic request traces (#1752) go first and leave no gap: they are not history.
+      const trace = queue.findIndex((entry) => entry.event?.kind === 'request_trace' && !queueGapKeys.has(entry));
+      if (trace >= 0) { removeQueueEntry(trace); continue; }
       const index = queue.findIndex((entry) => !queueGapKeys.has(entry));
       if (index < 0) break;
       const dropped = removeQueueEntry(index);
@@ -12909,6 +12912,27 @@
     if (sightingsReported.size > 2000) sightingsReported.clear();
     for (const sighting of fresh) sightingsReported.add(sighting.requestId);
     emit({ kind: 'app_sightings', apps: fresh });
+  });
+  // #1752 diagnostics: request ids this chat's stream named in fields attribution does not trust,
+  // with the field's path, so the app's log says where an id it could not place did appear.
+  const requestTracesReported = new Set();
+  window.addEventListener('message', (event) => {
+    if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-request-trace') return;
+    if (temporaryPlannerPage()) return;
+    const claimed = typeof event.data.conversationId === 'string' ? event.data.conversationId : '';
+    if (!claimed || CLF_DOM.conversationId() !== claimed) return;
+    const traces = [];
+    for (const entry of (Array.isArray(event.data.traces) ? event.data.traces : []).slice(0, 16)) {
+      const requestId = cap(entry?.requestId, 100), path = cap(entry?.path, 200);
+      if (!requestId || !path || requestTracesReported.has(requestId) || !/^[A-Za-z0-9_./:\[\]-]{1,200}$/.test(path) ||
+          !/^(?:wfr_[a-zA-Z0-9_-]{1,96}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i.test(requestId)) continue;
+      traces.push({ requestId, path });
+    }
+    // Expendable: while the queue fills (the extension's worker away), history comes first.
+    if (!traces.length || queue.length >= 300) return;
+    if (requestTracesReported.size > 2000) requestTracesReported.clear();
+    for (const trace of traces) requestTracesReported.add(trace.requestId);
+    emit({ kind: 'request_trace', traces });
   });
   window.addEventListener('message', (event) => {
     if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-request-origin') return;
