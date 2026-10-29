@@ -193,6 +193,18 @@ export function reviewForDraft(conversationId: string, turnId: string, deps: Pic
 }
 
 /**
+ * Until when the next step waits for this chat's review in progress, or null when none is: from
+ * reading the step and finding a worker slot to the reviewer's answer. The reviewer's own hold
+ * (`reviewerHoldUntil`) shows only a reviewer that already has its slot.
+ */
+export function reviewWaitUntil(conversationId: string, deps: Pick<StepReviewDeps, 'reviewer' | 'now'> = defaultDeps()): number | null {
+  const row = reviews.get(conversationId);
+  if (!row) return null;
+  const review = reviewForDraft(conversationId, row.turnId, deps);
+  return review && 'pending' in review ? row.askedAt + REVIEW_MAX_MS : null;
+}
+
+/**
  * The review of this step once it is in, for the draft of the next step: the draft waits for a review
  * still in progress (at most until REVIEW_MAX_MS from when it was asked), and stops waiting, with no
  * review, as soon as `wanted` says the draft is no longer needed.

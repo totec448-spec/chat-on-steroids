@@ -21923,6 +21923,11 @@ describe('the goal loop', () => {
     expect(view({ phase: 'settling', wait: { reason: 'reviewer', until: live.window.Date.now() + 125_000 } })).toMatchObject({
       stage: 'Waiting for the reviewer', detail: 'Continues without the review in 2:05'
     });
+    // CodeRabbit on #1879: the next step's draft waits for the review before it asks the helper.
+    expect(view({ phase: 'requesting', model: MODEL, draft: { stage: 'sending', model: MODEL, text: '', reply: '' },
+      wait: { reason: 'reviewer', until: live.window.Date.now() + 125_000 } })).toMatchObject({
+      stage: 'Waiting for the reviewer', detail: 'Continues without the review in 2:05'
+    });
     expect(view({ phase: 'settling', wait: { reason: 'listening', until: live.window.Date.now() + 60_000 } })).toMatchObject({
       stage: 'Waiting for activity after recovery', detail: 'Checking again in 1:00'
     });

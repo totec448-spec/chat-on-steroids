@@ -9968,11 +9968,17 @@ export function initChat(next: Deps): void {
 
   wireGoal(() => deps.save());
   // Only the person's press turns Sub-agents on for the reviewer, through Home's own switch and save.
-  $('goalReviewerWorkers').addEventListener('click', () => {
+  $('goalReviewerWorkers').addEventListener('click', async () => {
     const workers = $<HTMLInputElement>('homeMaEnabled');
     if (workers.checked) return;
     workers.checked = true;
-    workers.dispatchEvent(new Event('change', { bubbles: true }));
+    // The saved state hides this row with the focused button in it; the reviewer's choice keeps the keyboard's place.
+    const button = $<HTMLButtonElement>('goalReviewerWorkers');
+    if (document.activeElement === button) $<HTMLSelectElement>('goalReviewer').focus();
+    if (await deps.save()) return;
+    // Refused (an invalid field elsewhere): Sub-agents stay off, and the switch must not say otherwise.
+    workers.checked = false;
+    if (document.activeElement === $('goalReviewer') && !$('goalReviewerWorkersRow').hidden) button.focus();
   });
 
   $('bridgeUnpair').addEventListener('click', async () => {
