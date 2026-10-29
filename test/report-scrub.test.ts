@@ -48,6 +48,14 @@ describe('scrubbing a diagnostics report', () => {
     // Names of other scripts and with punctuation inside still match whole.
     expect(scrubText('chat "Q3 – Plan" and Q3 – Plans', { home: '/Users/jane', known: ['Q3 – Plan'] })).toMatch(/^chat "<x:[0-9a-f]{4}>" and Q3 – Plans$/);
     expect(scrubText('Проект готов, Проекты нет', { home: '/Users/jane', known: ['Проект'] })).toMatch(/^<x:[0-9a-f]{4}> готов, Проекты нет$/);
+    // A vowel sign (a Unicode mark) belongs to the word: "कामों" is not "काम" (CodeRabbit on #1923).
+    expect(scrubText('काम पूरा, कामों बाकी', { home: '/Users/jane', known: ['काम'] })).toMatch(/^<x:[0-9a-f]{4}> पूरा, कामों बाकी$/);
+  });
+
+  // CodeRabbit on #1923: an underscore joins names in identifiers; the known value inside goes either way.
+  it('replaces a known value joined to an identifier by an underscore', () => {
+    expect(scrubText('profile Acme Budget_2026 and laptop_username', { home: '/Users/jane', known: ['Acme Budget', 'username'] }))
+      .toMatch(/^profile <x:[0-9a-f]{4}>_2026 and laptop_<x:[0-9a-f]{4}>$/);
   });
 
   it('removes emails, secrets, private hosts and addresses', () => {
