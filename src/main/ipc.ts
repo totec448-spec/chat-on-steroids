@@ -32,7 +32,8 @@ import { GOAL_MARKER_INSTRUCTION } from '../shared/goal-templates.js';
 import { validateInputImages } from './session/input-images.js';
 import { stageInputAttachment, stageInputAttachments, type AttachmentSource } from './session/input-attachments.js';
 import { recordDeliveredInput, recordedInputImage } from './session/input-history.js';
-import { UI_BASE_ZOOM, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
+import { UI_BASE_ZOOM } from './window-layout.js';
+import { paintWindowTheme } from './theme.js';
 import { usageOverview } from './session/usage.js';
 import { exportUsageCsv } from './session/usage-export.js';
 import { readProviderUsage } from './provider-usage.js';
@@ -303,7 +304,7 @@ const settingsPatch = z.object({
     secretsShield: z.boolean().optional(),
     // Set from the Commit dialog (projectCommit:flow); a settings save carries it through.
     commitFlow: z.enum(['commit', 'ask-push', 'pr']).optional(),
-    theme: z.enum(['light', 'dark'])
+    theme: z.enum(['light', 'dark', 'system'])
   }),
   sessions: z.object({
     record: z.boolean(),
@@ -846,13 +847,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     void refreshAppProxy();
     setRecordingStorageLimit(next.sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB);
     if ((before.ui.keepAwake !== false) !== (next.ui.keepAwake !== false) || (before.ui.keepScreenAwake === true) !== (next.ui.keepScreenAwake === true)) refreshKeepAwake();
+    // Electron's own `system` source is what System (#1914) means; set first, so the shown theme is current.
     nativeTheme.themeSource = next.ui.theme;
-    if (process.platform === 'win32') getWindow()?.setTitleBarOverlay(titleBarOverlayForTheme(next.ui.theme, next.ui.appearance));
-    // BrowserWindow's native backing color is fixed at construction unless updated explicitly.
-    // Keep it in lock-step too: the default macOS application menu exposes Reload, and after a
-    // live theme switch an old opposite background otherwise flashes behind the renderer while it
-    // paints again. This is also the color Electron shows during any later renderer reload/failure.
-    getWindow()?.setBackgroundColor(windowBackgroundForTheme(next.ui.theme, next.ui.appearance));
+    // The default macOS application menu exposes Reload, and after a live theme switch an old
+    // opposite background otherwise flashes behind the renderer while it paints again. This is
+    // also the color Electron shows during any later renderer reload/failure.
+    paintWindowTheme(next.ui, getWindow());
     refreshPetOverlayAppearance();
     if (
       before.goal.enabled !== next.goal.enabled ||

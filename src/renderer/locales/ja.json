@@ -3409,5 +3409,6 @@
   "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "レビュー担当が、ゴールが安全に先へ進めない問題を見つけました。チャットを開いて確認してください。",
   "Waiting for the reviewer": "レビュー担当を待っています",
   "Continues without the review in {0}": "{0} 後にレビューなしで続行",
-  "Continuing without the review…": "レビューなしで続行しています…"
+  "Continuing without the review…": "レビューなしで続行しています…",
+  "Same as system": "システムに合わせる"
 }

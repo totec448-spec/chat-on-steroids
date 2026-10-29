@@ -3543,5 +3543,6 @@
   "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "El revisor encontró un problema que Objetivo no puede pasar por alto con seguridad. Abre el chat para revisarlo.",
   "Waiting for the reviewer": "Esperando al revisor",
   "Continues without the review in {0}": "Continúa sin la revisión en {0}",
-  "Continuing without the review…": "Continuando sin la revisión…"
+  "Continuing without the review…": "Continuando sin la revisión…",
+  "Same as system": "Igual que el sistema"
 }
