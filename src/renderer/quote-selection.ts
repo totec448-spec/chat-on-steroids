@@ -136,15 +136,31 @@ export function initQuoteSelection({ timeline, input, blocked }: QuoteSelectionD
     if (!range || pressed || input.closest('[hidden]') || !messageOf(selection!.anchorNode) || messageOf(selection!.anchorNode) !== messageOf(selection!.focusNode)) { hide(); return; }
     if (stale) { quote = markdownQuote(selectedText(range)); stale = false; }
     // The button sits under the selection's last line, while that line is in view.
-    const end = quote && typeof range.getClientRects === 'function' ? [...range.getClientRects()].filter(rect => rect.width || rect.height).at(-1) : undefined;
-    if (!end) { hide(); return; }
+    const lines = quote && typeof range.getClientRects === 'function' ? [...range.getClientRects()].filter(rect => rect.width || rect.height) : [];
+    const end = lines.at(-1), start = lines[0];
+    if (!end || !start) { hide(); return; }
     const view = (timeline.closest('.scroll') ?? timeline).getBoundingClientRect();
     if (end.bottom < view.top || end.top > view.bottom) { hide(); return; }
     button.hidden = false;
     const width = button.offsetWidth, height = button.offsetHeight;
-    const below = end.bottom + 6;
-    const top = below + height <= view.bottom ? below : Math.max(view.top, end.top - height - 6);
-    const left = Math.max(view.left + 4, Math.min(end.right - width / 2, view.right - width - 4));
+    const centered = Math.max(view.left + 4, Math.min(end.right - width / 2, view.right - width - 4));
+    const below = end.bottom + 6, above = start.top - height - 6;
+    // Under a short answer sit its own buttons (Copy, Download): never cover one. Slide past them
+    // on the same line first, then try above the selection, and only then accept below.
+    const controls = [...timeline.querySelectorAll('button, a[href], [role="button"], summary')]
+      .filter(control => !control.closest('[hidden]')).map(control => control.getBoundingClientRect()).filter(box => box.width > 0 && box.height > 0);
+    const covered = (left: number, top: number): DOMRect[] =>
+      controls.filter(box => box.left < left + width && box.right > left && box.top < top + height && box.bottom > top);
+    const fits = (top: number): boolean => top >= view.top && top + height <= view.bottom;
+    const options: Array<[number, number]> = [[centered, below]];
+    const under = covered(centered, below);
+    if (under.length) {
+      const past = Math.max(...under.map(box => box.right)) + 6;
+      if (past + width <= view.right - 4) options.push([past, below]);
+      options.push([centered, above]);
+    }
+    options.push([centered, Math.max(view.top, above)]);
+    const [left, top] = options.find(([x, y]) => fits(y) && !covered(x, y).length) ?? (fits(below) ? [centered, below] : options.at(-1)!);
     button.style.top = `${Math.round(top)}px`;
     button.style.left = `${Math.round(left)}px`;
   };
