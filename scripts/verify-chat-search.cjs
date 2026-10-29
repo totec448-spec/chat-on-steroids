@@ -97,12 +97,12 @@ app.whenReady().then(async () => {
     const fieldRow=await js(`(()=>{const f=document.querySelector('.search-dialog-field').getBoundingClientRect(),r=document.querySelector('#searchResults .search-result').getBoundingClientRect();return [Math.round(f.height),Math.round(f.bottom),Math.round(r.left),Math.round(r.width)]})()`);
     const steady=await js(`(()=>{const d=document.getElementById('searchDialog').getBoundingClientRect();return [Math.round(d.width),Math.round(d.height),Math.round(d.top)]})()`);
     win.webContents.insertText('bridge');
-    await until(`document.querySelectorAll('#searchResults .search-result').length===3&&!document.querySelector('#searchResults .search-heading')`);
+    await until(`document.querySelectorAll('#searchResults .search-result[data-search-id]').length===3&&!document.querySelector('#searchResults > .search-heading:first-child')`);
     assert.equal(await js(`document.getElementById('sessionList').hidden`),false,'The sidebar lists stay where they are');
     assert.equal(await js(`JSON.stringify(document.getElementById('sessionList').getBoundingClientRect())`),listsBefore,'The sidebar lists do not move');
     assert.equal(await js(`document.getElementById('chatSearchClear').hidden`),false,'The clear button shows');
     // A long title stays on one line; a snippet takes at most two.
-    const rows=await js(`[...document.querySelectorAll('#searchResults .search-result')].map(r=>{const b=r.querySelector('b'),s=r.querySelector('.search-snippet');return {title:b.getBoundingClientRect().height,titleClipped:b.scrollWidth>b.clientWidth,snippet:s?s.getBoundingClientRect().height:0,titleMarks:[...b.querySelectorAll('mark')].map(m=>m.textContent),marks:[...(s?s.querySelectorAll('mark'):[])].map(m=>m.textContent),overflow:r.scrollWidth>r.clientWidth+1}})`);
+    const rows=await js(`[...document.querySelectorAll('#searchResults .search-result[data-search-id]')].map(r=>{const b=r.querySelector('b'),s=r.querySelector('.search-snippet');return {title:b.getBoundingClientRect().height,titleClipped:b.scrollWidth>b.clientWidth,snippet:s?s.getBoundingClientRect().height:0,titleMarks:[...b.querySelectorAll('mark')].map(m=>m.textContent),marks:[...(s?s.querySelectorAll('mark'):[])].map(m=>m.textContent),overflow:r.scrollWidth>r.clientWidth+1}})`);
     assert.ok(rows.every(r=>r.title<=24),'Titles stay on one line: '+JSON.stringify(rows));
     assert.equal(rows[1].titleClipped,true,'A long title is cut with an ellipsis');
     assert.ok(rows.every(r=>r.snippet<=36),'Snippets take at most two lines: '+JSON.stringify(rows));
@@ -117,7 +117,7 @@ app.whenReady().then(async () => {
     assert.ok(marks.every(m=>m.background!=='rgb(255, 255, 0)'&&m.color!==m.background),'Marks use the theme, readably: '+JSON.stringify(marks));
     await capture(`${theme}-results.png`);
     // One size whatever the results: the box never grows or shrinks while typing.
-    assert.deepEqual(await js(`(()=>{const f=document.querySelector('.search-dialog-field').getBoundingClientRect(),r=document.querySelector('#searchResults .search-result').getBoundingClientRect();return [Math.round(f.height),Math.round(f.bottom),Math.round(r.left),Math.round(r.width)]})()`),fieldRow,'Typing moves neither the line under the field nor the rows sideways');
+    assert.deepEqual(await js(`(()=>{const f=document.querySelector('.search-dialog-field').getBoundingClientRect(),r=document.querySelector('#searchResults .search-result[data-search-id]').getBoundingClientRect();return [Math.round(f.height),Math.round(f.bottom),Math.round(r.left),Math.round(r.width)]})()`),fieldRow,'Typing moves neither the line under the field nor the rows sideways');
     assert.deepEqual(await js(`(()=>{const d=document.getElementById('searchDialog').getBoundingClientRect();return [Math.round(d.width),Math.round(d.height),Math.round(d.top)]})()`),steady,'The dialog keeps its size with results');
     await key('Escape');
     // It fades out first, then closes completely: nothing is left half drawn.
@@ -147,7 +147,7 @@ app.whenReady().then(async () => {
   // Keyboard: Down enters the results, Up returns to the field, Enter opens the first match.
   await js(`document.getElementById('chatSearch').select()`);
   win.webContents.insertText('bridge');
-  await until(`document.querySelectorAll('#searchResults .search-result').length===3`);
+  await until(`document.querySelectorAll('#searchResults .search-result[data-search-id]').length===3`);
   // The same query typed again repaints after the typing pause; wait it out before moving focus.
   await pause(400);
   await key('Down');
@@ -159,7 +159,7 @@ app.whenReady().then(async () => {
   // Words in any order, and nothing found says so.
   await js(`document.getElementById('chatSearch').select()`);
   win.webContents.insertText('windows macos');
-  await until(`document.querySelectorAll('#searchResults .search-result').length===1`);
+  await until(`document.querySelectorAll('#searchResults .search-result[data-search-id]').length===1`);
   await js(`document.getElementById('chatSearch').select()`);
   win.webContents.insertText('zebra');
   await until(`document.getElementById('searchResults').textContent.includes('No chats match')`);
@@ -168,7 +168,7 @@ app.whenReady().then(async () => {
   // Enter opens the first match: the dialog closes and the chat opens.
   await js(`document.getElementById('chatSearch').select()`);
   win.webContents.insertText('dashboard');
-  await until(`document.querySelectorAll('#searchResults .search-result').length===1`);
+  await until(`document.querySelectorAll('#searchResults .search-result[data-search-id]').length===1`);
   await key('Return');
   await until(`!document.getElementById('searchDialog').open`);
   await until(`document.querySelector('#sessionList [data-id="search-chat-2"]')?.classList.contains('is-sel')`);
@@ -177,7 +177,7 @@ app.whenReady().then(async () => {
   await until(`document.getElementById('searchDialog').open`);
   await js(`document.getElementById('chatSearch').select()`);
   win.webContents.insertText('installer');
-  await until(`document.querySelectorAll('#searchResults .search-result').length===1&&document.querySelector('#searchResults .search-result').dataset.searchId==='search-chat-1'`);
+  await until(`document.querySelectorAll('#searchResults .search-result[data-search-id]').length===1&&document.querySelector('#searchResults .search-result[data-search-id]').dataset.searchId==='search-chat-1'`);
   await pause(300);
   await key('Return');
   await until(`!!document.querySelector('#timeline .is-search-hit')`);

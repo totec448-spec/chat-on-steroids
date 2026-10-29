@@ -102,6 +102,8 @@ export function searchSettings(entries: SettingEntry[], query: string, language 
 export interface SettingsSearch {
   /** Empties the field and brings the page list back. */
   reset(): void;
+  /** Opens a setting's page and marks it, as picking it from this search does (⌘K uses it too, #1884). */
+  reveal(entry: SettingEntry): void;
 }
 
 export function initSettingsSearch(options: { open(tab: string): void; shown(): boolean }): SettingsSearch {
@@ -215,5 +217,5 @@ export function initSettingsSearch(options: { open(tab: string): void; shown(): 
     field.select();
   });
   show(false);
-  return { reset };
+  return { reset, reveal: open };
 }
