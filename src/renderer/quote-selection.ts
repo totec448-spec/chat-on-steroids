@@ -152,9 +152,15 @@ export function initQuoteSelection({ timeline, input, blocked }: QuoteSelectionD
     const covered = (left: number, top: number): DOMRect[] =>
       controls.filter(box => box.left < left + width && box.right > left && box.top < top + height && box.bottom > top);
     const fits = (left: number, top: number): boolean => top >= view.top && top + height <= view.bottom && left + width <= view.right - 4;
-    const slid = (top: number): number => { const hits = covered(centered, top); return hits.length ? Math.max(...hits.map(box => box.right)) + 6 : centered; };
+    // Past every control in the way, also the ones beside it (Copy, Download and More sit in a row).
+    const slid = (top: number): number => {
+      let left = centered;
+      for (let hits = covered(left, top); hits.length && left + width <= view.right - 4; hits = covered(left, top)) left = Math.max(...hits.map(box => box.right)) + 6;
+      return left;
+    };
     // Without room below, the spot above the last line, as before; the one above the whole selection after it.
-    const rows = below + height <= view.bottom ? [below, aboveStart] : [Math.max(view.top, aboveEnd), Math.max(view.top, aboveStart)];
+    // A long selection's start can be out of view: then the spot above its last line is next.
+    const rows = below + height <= view.bottom ? [below, aboveStart, aboveEnd] : [Math.max(view.top, aboveEnd), Math.max(view.top, aboveStart)];
     const spot = rows.flatMap(top => [[centered, top], [slid(top), top]] as Array<[number, number]>).find(([x, y]) => fits(x, y) && !covered(x, y).length);
     // Nowhere clear: no button rather than one over a control.
     if (!spot) { button.hidden = true; return; }
