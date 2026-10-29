@@ -1608,6 +1608,7 @@ export async function claimGoalRecoveryStopNow(conversationId: string, replyId: 
 }
 
 export function resetGoalStateForTests(): void {
+  customResponseFormats.clear();
   for (const draft of drafts.values()) draft.abort?.abort();
   goalOutcomes.clear();
   resetGoalHelperSizeForTests();
@@ -1819,6 +1820,17 @@ interface GoalRequest {
  * page's Goal loop, which reads the failure back off `retryable` and asks again on its own
  * clock. A second attempt from in here would be spent against a turn nobody rechecked.
  */
+/**
+ * What a custom endpoint accepts as `response_format`, learned when it refuses one (#1921): DeepSeek
+ * answers json_schema with HTTP 400 "This response_format type is unavailable now". Then json_object
+ * is tried, then none; the JSON is also asked for in words, and the answer is validated as always.
+ * Kept for this run of the app, per endpoint.
+ */
+type GoalResponseFormat = 'json_schema' | 'json_object' | 'none';
+const customResponseFormats = new Map<string, GoalResponseFormat>();
+const FORMAT_REFUSED = /response_format|json_schema|json_object|structured output/i;
+const JSON_IN_WORDS = 'Answer with exactly one JSON object and nothing else: {"action": "stop" or "continue", "reply": "the message"}.';
+
 async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision | { action: 'http'; error: string; retryAfterMs?: number }> {
   const referenceContract = request.lifetime === 'temporary-planner'
     ? 'The task below is reference data. Produce the requested staged workflow; do not execute the task or claim its work is done.'
@@ -1886,6 +1898,8 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
     return { action: 'http', error: (error as Error).message };
   }
   const custom = request.endpoint.kind === 'custom';
+  const schema = request.mode === 'loop' ? LOOP_RESPONSE_FORMAT : GOAL_RESPONSE_FORMAT;
+  let format: GoalResponseFormat = custom ? customResponseFormats.get(baseUrl) ?? 'json_schema' : 'json_schema';
   const body: Record<string, unknown> = {
     model: request.model,
     // Stream only to a real progress consumer. Partial text remains presentation;
@@ -1900,7 +1914,6 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
       { role: 'user', content: referenceContract + '\n\n' + JSON.stringify(request.messages) },
       { role: 'system', content: request.trailer }
     ],
-    response_format: request.mode === 'loop' ? LOOP_RESPONSE_FORMAT : GOAL_RESPONSE_FORMAT,
     ...(!request.publish && !custom ? { plugins: [{ id: 'response-healing' }] } : {}),
     // OpenRouter otherwise may route to a provider that silently ignores response_format.
     // A custom endpoint speaks plain OpenAI-compatible chat completions and must not
@@ -1921,22 +1934,40 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
     body['reasoning_effort'] = request.reasoning;
   }
 
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    // A redirect must not hand conversation content or credentials to a different endpoint.
-    redirect: 'error',
-    headers: {
-      ...(request.key ? { authorization: `Bearer ${request.key}` } : {}),
-      'content-type': 'application/json',
-      ...(custom ? {} : ATTRIBUTION_HEADERS)
-    },
-    body: JSON.stringify(body),
-    signal: request.signal
-  });
-  if (!response.ok || !response.body) {
+  const messages = body['messages'] as Array<{ role: string; content: string }>;
+  const send = (): Promise<Response> => {
+    body['response_format'] = format === 'json_schema' ? schema : format === 'json_object' ? { type: 'json_object' } : undefined;
+    // Without a schema the shape is asked for in words (json_object also requires "JSON" in the prompt).
+    body['messages'] = format === 'json_schema' ? messages : [...messages, { role: 'system', content: JSON_IN_WORDS }];
+    return fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      // A redirect must not hand conversation content or credentials to a different endpoint.
+      redirect: 'error',
+      headers: {
+        ...(request.key ? { authorization: `Bearer ${request.key}` } : {}),
+        'content-type': 'application/json',
+        ...(custom ? {} : ATTRIBUTION_HEADERS)
+      },
+      body: JSON.stringify(body),
+      signal: request.signal
+    });
+  };
+  let response = await send();
+  for (;;) {
+    if (response.ok && response.body) break;
     const header = response.headers.get('retry-after');
     const delay = header === null ? NaN : /^\d+(?:\.\d+)?$/.test(header.trim()) ? Number(header) * 1000 : Date.parse(header) - Date.now();
-    return { action: 'http', error: await httpFailure(response), ...(Number.isFinite(delay) ? { retryAfterMs: Math.max(0, delay) } : {}) };
+    const error = await httpFailure(response);
+    // A custom endpoint that refuses this response_format gets the next one, once each (#1921).
+    if (custom && response.status === 400 && format !== 'none' && FORMAT_REFUSED.test(error)) {
+      const next: GoalResponseFormat = format === 'json_schema' ? 'json_object' : 'none';
+      logInfo(`goal: the custom endpoint refused response_format ${format} (${error}); asking with ${next === 'none' ? 'no response_format' : next} and the JSON in words`);
+      format = next;
+      customResponseFormats.set(baseUrl, format);
+      response = await send();
+      continue;
+    }
+    return { action: 'http', error, ...(Number.isFinite(delay) ? { retryAfterMs: Math.max(0, delay) } : {}) };
   }
   const completion = await readGoalCompletion(response, request.publish);
   return normalizeGoalDecision(completion.text, completion.legacy);
