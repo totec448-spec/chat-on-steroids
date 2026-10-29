@@ -282,3 +282,16 @@ it('labels the empty panel keys as this keyboard prints them, in the language', 
     vi.unstubAllGlobals();
   }
 });
+
+// CodeRabbit on #1890: opened from ⌘K, a view puts the keyboard on its tab, so the person is not left on a hidden page.
+it('puts the focus on the opened tab when asked', () => {
+  const { docks } = setup();
+  docks.register('files', 'Files', 'i-folder', vi.fn(), vi.fn(), () => true);
+  docks.register('review', 'Review', 'i-git-diff', vi.fn(), vi.fn(), () => true);
+  docks.activate('files');
+  expect(document.activeElement).toBe(document.body);
+  docks.activate('review', { focus: true });
+  const selected = document.querySelector<HTMLButtonElement>('#workDockRight [role=tab][aria-selected="true"]')!;
+  expect(selected.textContent).toContain('Review');
+  expect(document.activeElement).toBe(selected);
+});

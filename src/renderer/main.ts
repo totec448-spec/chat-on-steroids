@@ -21,7 +21,7 @@ import { initUsage, refreshOtherApps, refreshUsage } from './usage.js';
 import { initSidebarResize } from './sidebar-resize.js';
 import { initAppShortcuts } from './app-shortcuts.js';
 import { initViewMenu } from './view-menu.js';
-import { initShortcutsDialog } from './shortcuts-dialog.js';
+import { initShortcutsDialog, shortcutGroups } from './shortcuts-dialog.js';
 import { initPlugins, applyPluginsState } from './plugins.js';
 import { initBrowserPreferences } from './browser-preferences.js';
 import { initSetupGuide } from './setup-guide.js';
@@ -34,7 +34,8 @@ import { initWhatsNew } from './whats-new.js';
 import { initTour } from './tour.js';
 import { playSoundCue } from './sound-cues.js';
 import { inQuietHours } from '../shared/phone-push.js';
-import { initSettingsSearch } from './settings-search.js';
+import { collectSettings, initSettingsSearch, searchSettings } from './settings-search.js';
+import { matchesWords } from './palette.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
 import { parseCommandAllowlistText } from '../shared/command-allowlist.js';
@@ -3008,7 +3009,22 @@ initPlugins(apply);
 initPets(api, pet);
 openSkillsLibrary = initSkillsLibrary(api);
 initBrowserPreferences();
-initChat({ save: () => save(), state: () => state });
+initChat({ save: () => save(), state: () => state, palette: {
+  showChat: () => showTab('chat'),
+  actions: () => [
+    { label: () => t('Keyboard shortcuts'), keys: () => paletteKeys('Keyboard shortcuts'), run: () => shortcutsDialog.open() },
+    { label: () => t('Settings'), keys: () => paletteKeys('Settings'), run: () => $('workspaceSettings').click() }
+  ],
+  // By the setting's own name only, word by word: a match in a description or a page name, or an
+  // explanatory sentence the page shows in a setting's place, reads as noise next to chats.
+  settings: query => searchSettings(collectSettings(document), query)
+    .filter(entry => !/[.!?…]$/.test(entry.title) && matchesWords(entry.title, query))
+    .map(entry => ({ title: entry.title, place: [entry.page, entry.section].filter(Boolean).join(' › '), open: () => settingsSearch.reveal(entry) }))
+} });
+/** The keys the shortcuts dialog prints for one of its rows, by its English name. */
+function paletteKeys(name: string): string[] {
+  return shortcutGroups(() => state?.config.ui.enterSends !== false).flatMap(group => group.rows).find(row => row.label() === t(name))?.keys() ?? [];
+}
 
 void (async () => {
   await refresh();

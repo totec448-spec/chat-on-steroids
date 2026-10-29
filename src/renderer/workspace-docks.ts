@@ -123,9 +123,11 @@ export function createWorkspaceDocks(host: HTMLElement) {
     if (id) { rightTerminal?.selectTab(id); rightTerminal?.show(body, false); }
     else views.get(key as AdoptableView)?.show(body);
   };
+  /** Whether this dock can open now: what the menu and the ⌘K actions offer (#1884). */
+  const canActivate = (kind: DockView): boolean => kind === 'terminal' ? rightTerminal?.canCreate() ?? false : views.get(kind)?.available() ?? false;
   const refreshControls = (): void => {
     for (const kind of ['review', 'terminal', 'files', 'agents'] as DockView[]) {
-      const enabled = kind === 'terminal' ? rightTerminal?.canCreate() ?? false : views.get(kind)?.available() ?? false;
+      const enabled = canActivate(kind);
       // A greyed-out entry says why, instead of leaving the user to guess.
       for (const button of [menu, launch].map(root => root.querySelector<HTMLButtonElement>(`[data-view="${kind}"]`))) {
         if (!button) continue;
@@ -239,11 +241,13 @@ export function createWorkspaceDocks(host: HTMLElement) {
     const id = rightTerminal.newTab(); if (!id) return;
     activateKey(terminalKey(id));
   };
-  const activate = (kind: DockView): void => {
+  /** `focus`: the keyboard goes to the opened tab (⌘K, so the person is not left on the page they came from). */
+  const activate = (kind: DockView, options: { focus?: boolean } = {}): void => {
     if (kind === 'terminal') {
       const previous = [...opened].reverse().find(key => terminalId(key) !== null);
       if (previous) activateKey(previous); else newRightTerminal();
     } else activateKey(kind);
+    if (options.focus) tabs.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus();
   };
   const adopt = (kind: AdoptableView): void => {
     if (active && active !== kind) hideView(active);
@@ -328,6 +332,6 @@ export function createWorkspaceDocks(host: HTMLElement) {
     event.preventDefault(); activate((['review', 'terminal', 'files', 'agents'] as DockView[])[Number(digit) - 1]!);
   });
   paint();
-  return { body, bottomBody, rightToggle, bottomToggle, register, registerTerminal, activate, adopt,
+  return { body, bottomBody, rightToggle, bottomToggle, register, registerTerminal, activate, canActivate, adopt,
     setOpen: setRightOpen, setBottomOpen, toggleBottomTerminal: () => setBottomOpen(!bottomOpen), sync: paint };
 }
