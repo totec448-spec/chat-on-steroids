@@ -41,6 +41,15 @@ describe('scrubbing a diagnostics report', () => {
     expect(out).toMatch(/approved folder \/<x:[0-9a-f]{4}>; chat "<x:[0-9a-f]{4}>" opened/);
   });
 
+  // #1922: a project named "Work" turned every "worker" and "worktree" in the log into "<x:…>er", 9,524 times.
+  it('replaces a known value only as a whole word, never inside another word', () => {
+    const out = scrubText('worker-2 started in Work; worktree for work ready; Homework and work-items stay', { home: '/Users/jane', known: ['Work'] });
+    expect(out).toMatch(/^worker-2 started in <x:[0-9a-f]{4}>; worktree for <x:[0-9a-f]{4}> ready; Homework and <x:[0-9a-f]{4}>-items stay$/);
+    // Names of other scripts and with punctuation inside still match whole.
+    expect(scrubText('chat "Q3 – Plan" and Q3 – Plans', { home: '/Users/jane', known: ['Q3 – Plan'] })).toMatch(/^chat "<x:[0-9a-f]{4}>" and Q3 – Plans$/);
+    expect(scrubText('Проект готов, Проекты нет', { home: '/Users/jane', known: ['Проект'] })).toMatch(/^<x:[0-9a-f]{4}> готов, Проекты нет$/);
+  });
+
   it('removes emails, secrets, private hosts and addresses', () => {
     const out = scrubText('user jane.doe@example.com sent Bearer abc.def.ghi with OPENROUTER_API_KEY=sk-or-123456789 to https://homelab.lan:8080/api from 192.168.1.20', mac);
     expect(out).not.toMatch(/jane|example\.com|abc\.def|sk-or|homelab|192\.168/);
