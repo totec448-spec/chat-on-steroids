@@ -2673,6 +2673,47 @@ describe('automatic compaction', () => {
     info.mockRestore();
   });
 
+  // CodeRabbit on #1927: turns are ordered by when the recorder saw them, not by their clock.
+  it('treats a report about an ended turn as stale when the newer turn has the same time, also when it comes in the same batch', async () => {
+    await pair();
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
+    const t0 = Date.now();
+    const sameTime = randomUUID();
+    await request('POST', '/events', { body: { conversationId: sameTime, events: [
+      { kind: 'user_message', time: t0, text: 'Continue the long job', messageId: 'same-q-1' },
+      { kind: 'turn_start', time: t0, turnId: 'same-old' },
+      { kind: 'turn_end', time: t0, turnId: 'same-old', outcome: 'stalled' },
+      { kind: 'user_message', time: t0, text: 'Continue', messageId: 'same-q-2' },
+      { kind: 'turn_start', time: t0, turnId: 'same-new' },
+      { kind: 'turn_end', time: t0, turnId: 'same-new', outcome: 'completed' }
+    ] } });
+    await settled();
+    await request('POST', '/events', { body: { conversationId: sameTime, events: [
+      { kind: 'chat_error', time: t0, turnId: 'same-old', recoverable: true, text: 'No visible progress for ten minutes.' }
+    ] } });
+    const together = randomUUID();
+    await request('POST', '/events', { body: { conversationId: together, events: [
+      { kind: 'user_message', time: t0, text: 'Continue the long job', messageId: 'tog-q-1' },
+      { kind: 'turn_start', time: t0 + 1, turnId: 'tog-old' }
+    ] } });
+    await settled();
+    await request('POST', '/events', { body: { conversationId: together, events: [
+      { kind: 'turn_end', time: t0 + 2, turnId: 'tog-old', outcome: 'stalled' },
+      { kind: 'user_message', time: t0 + 3, text: 'Continue', messageId: 'tog-q-2' },
+      { kind: 'turn_start', time: t0 + 4, turnId: 'tog-new' },
+      { kind: 'chat_error', time: t0 + 5, turnId: 'tog-old', recoverable: true, text: 'No visible progress for ten minutes.' }
+    ] } });
+    await settled();
+    const repairs = ((await request('GET', '/status')).body.repairs as Array<{ conversationId: string }>).map(row => row.conversationId);
+    expect(repairs).not.toContain(sameTime);
+    expect(repairs).not.toContain(together);
+    const lines = info.mock.calls.map(([line]) => String(line));
+    expect(lines).toContain(`bridge: ignored an error report for ${sameTime}: its turn same-old ended before a newer turn`);
+    expect(lines).toContain(`bridge: ignored an error report for ${together}: its turn tog-old ended before a newer turn`);
+    info.mockRestore();
+  });
+
   it('stops offering a repair the browser never claims, and says the chat has no page', async () => {
     await pair();
     const conversationId = randomUUID();
