@@ -76,7 +76,8 @@ app.whenReady().then(async () => {
     await pause(250);
     const text=await js(READ);
     for (const line of text.split('\n')) for (const [pattern,why] of RUNAWAY) if (pattern.test(line)) found.push(`${language}: ${why}: ${line.trim().slice(0,160)}`);
-    if (language==='en'||language==='de') { fs.mkdirSync(output,{recursive:true}); fs.writeFileSync(path.join(output,`aged-${layout}-${language}.png`),(await win.webContents.capturePage()).toPNG()); }
+    // The picture shows the oldest chats, which sit at the end of the list.
+    if (language==='en'||language==='de') { await js(`[...document.querySelectorAll('#sessionList .sess[data-id]')].pop()?.scrollIntoView({block:'end'})`); await pause(150); fs.mkdirSync(output,{recursive:true}); fs.writeFileSync(path.join(output,`aged-${layout}-${language}.png`),(await win.webContents.capturePage()).toPNG()); }
   }
   if (layout==='inbox') {
     // The inbox draws an age beside every quiet chat: the check must have read them.
