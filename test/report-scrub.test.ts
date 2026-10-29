@@ -91,7 +91,10 @@ describe('scrubbing a diagnostics report', () => {
   it('replaces a known value run together with digits on either side', () => {
     expect(scrubText('saved Alice2026, 2026Alice and v2Alice3; Alices stays', { home: '/Users/jane', known: ['Alice'] }))
       .toMatch(/^saved <x:[0-9a-f]{4}>2026, 2026<x:[0-9a-f]{4}> and v2<x:[0-9a-f]{4}>3; Alices stays$/);
-    expect(scrubText('Plan2 and Plan25', { home: '/Users/jane', known: ['Plan2'] })).toMatch(/^<x:[0-9a-f]{4}> and <x:[0-9a-f]{4}>5$/);
+    // A number never matches inside a longer number: "Plan2" is not in "Plan25", "500" not in "15000ms".
+    expect(scrubText('Plan2 and Plan25', { home: '/Users/jane', known: ['Plan2'] })).toMatch(/^<x:[0-9a-f]{4}> and Plan25$/);
+    expect(scrubText('took 15000ms, room 500 and 500ms', { home: '/Users/jane', known: ['500'] }))
+      .toMatch(/^took 15000ms, room <x:[0-9a-f]{4}> and <x:[0-9a-f]{4}>ms$/);
   });
 
   // CodeRabbit on #1923: an underscore joins names in identifiers; the known value inside goes either way.
