@@ -5162,15 +5162,17 @@ Plugins catalog limit use proven ids first.
 Request-id traces (#1752, diagnostics only): usage.js also walks every frame of a chat's response
 stream (HTTP and socket) for id-named fields holding a request-id-shaped value that is neither the
 chat's id nor an origin it already published, and posts `cos-request-trace` with each id's field
-path (`<delta p>:<key path>`, never content; 8 per frame, 64 per response). content.js forwards them
+path (`<delta p>:<key path>`, never content; 16 per frame, 64 per response). content.js forwards them
 once per id as `request_trace` (`traces: [{ requestId, path }]`), only for the chat the tab shows.
 The bridge never stores them as transcript content; `session/request-trace.ts` keeps 256 and adds
 "the stream of <chat> named it at <path>" to the "no page evidence" warning, or logs one line when
 the trace arrives after a call ran out of time. Attribution never uses them. Since the first report with traces found nothing,
-the page also traces request-id-shaped values inside arrays and longer strings (path `…text`, no content),
-event streams from any other same-origin `/backend-api/` route (prefix `<route with ids as *>>`, at most two
-readers, 4 MB and 64 traces each, chat from the frame or the page's `/c/<id>` route), and every socket message
-(prefix `socket>`). The app logs once per chat and run that the page's tracing works. Traces are expendable: content.js takes
+the page also traces whole request-id-shaped tokens inside arrays and longer strings (path `…text`, no content;
+an array keeps its path only under an id-named key such as `request_ids`),
+event streams from any other same-origin `/backend-api/` route (prefix `<route with ids as *>>`, other characters
+as `_`; at most two readers, 4 MB and 64 traces each, cancelled on page hide and dispose, chat from the frame or the page's `/c/<id>` route), and every socket message
+(prefix `socket>`, 256 ids per socket, then again). The app logs once per chat and run that the page's tracing
+works; with these limits a missing trace makes "the page never saw it" likely, not certain. Traces are expendable: content.js takes
 none while its page queue holds 300 or more entries, and drops queued traces first, without a gap marker, when it
 must evict. A response keeps tracing after its 16 published origins until its own 64.
 
