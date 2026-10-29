@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 vi.mock('../src/main/logger.js', () => ({ logInfo: (line: string) => logs.push(line), logWarn: (line: string) => logs.push(line) }));
 const logs: string[] = [];
 import { REVIEW_MAX_MS } from '../src/main/agents.js';
-import { awaitStepReview, cancelStepReview, reviewAnswer, resetStepReviewsForTests, reviewForDraft, reviewNote, startStepReview, stepFacts, type StepReviewDeps } from '../src/main/goal-reviewer.js';
+import { awaitStepReview, cancelStepReview, reviewAnswer, resetStepReviewsForTests, reviewForDraft, reviewNote, reviewWaitUntil, startStepReview, stepFacts, type StepReviewDeps } from '../src/main/goal-reviewer.js';
 import type { AgentInfo, SessionEvent, ToolCallRecord } from '../src/shared/session.js';
 
 /**
@@ -194,6 +194,26 @@ it('counts a review that is still finding a worker slot as pending, and a review
   expect(reviewForDraft('c-goal', 't-1', d)).toEqual({ unavailable: true });
   reviewer = null;
   expect(reviewForDraft('c-goal', 't-1', d)).toEqual({ unavailable: true });
+});
+
+// CodeRabbit on #1879: the next step's draft waits for the review, but only a reviewer that already
+// had a worker slot showed that wait; one still reading the step or finding a slot showed none.
+it('says until when the next step waits for a review, from reading the step and finding a slot to the answer', async () => {
+  let release!: () => void, waiting!: () => void;
+  const slot = new Promise<void>(resolve => { release = resolve; });
+  const inWait = new Promise<void>(resolve => { waiting = resolve; });
+  spawnError = new Error('NO_FREE_SLOT');
+  const d = deps({ wait: async ms => { waiting(); await slot; clock += ms; } });
+  expect(reviewWaitUntil('c-goal', d)).toBeNull();
+  const started = startStepReview(step, d);
+  await inWait;
+  expect(reviewWaitUntil('c-goal', d)).toBe(1_000_000 + REVIEW_MAX_MS);
+  release();
+  expect(await started).toBe('asked');
+  // The limit counts from when the reviewer was asked, as the draft's own wait does.
+  expect(reviewWaitUntil('c-goal', d)).toBe(clock + REVIEW_MAX_MS);
+  reviewer = { ...reviewer!, state: 'sleeping', result: 'No problems found.', sleptAt: clock };
+  expect(reviewWaitUntil('c-goal', d)).toBeNull();
 });
 
 it('waits for the review of the step before the next step is decided, and stops waiting when the draft is no longer wanted', async () => {
