@@ -387,7 +387,7 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     });
     await h.maintain();
     for (let i = 0; i < 10; i++) await new Promise(resolve => setTimeout(resolve, 0));
-    expect(h.create).toHaveBeenCalledWith(expect.objectContaining({ url: `https://chatgpt.com/?cos-project-create=${secondId}`, active: true }));
+    expect(h.create).toHaveBeenCalledWith(expect.objectContaining({ url: `https://chatgpt.com/projects?cos-project-create=${secondId}`, active: true }));
     expect(h.create.mock.calls.some(([options]) => String(options.url).includes(firstId))).toBe(false);
   });
 

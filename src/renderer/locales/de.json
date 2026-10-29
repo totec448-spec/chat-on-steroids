@@ -3475,5 +3475,15 @@
   "Back online, back to work": "Wieder online, weiter geht's",
   "A chat tab that opened while you were offline recovers by itself.": "Ein Chat-Tab, der offline geöffnet wurde, erholt sich von selbst.",
   "Messages that get through": "Nachrichten kommen an",
-  "Also when you close the chat's tab while sending, or ChatGPT changes its model menu.": "Auch wenn du den Tab beim Senden schließt oder ChatGPT sein Modellmenü ändert."
+  "Also when you close the chat's tab while sending, or ChatGPT changes its model menu.": "Auch wenn du den Tab beim Senden schließt oder ChatGPT sein Modellmenü ändert.",
+  "Review each Goal step's changes": "Änderungen jedes Goal-Schritts prüfen",
+  "A reviewer worker checks each Goal step's edits; its findings go into the next step. Uses more of your ChatGPT usage and covers only edits made with the edit tools.": "Ein Reviewer-Worker prüft die Änderungen jedes Goal-Schritts; seine Befunde gehen in den nächsten Schritt. Verbraucht mehr von deiner ChatGPT-Nutzung und prüft nur Änderungen mit den Bearbeitungswerkzeugen.",
+  "Same model as the Goal chat": "Dasselbe Modell wie der Goal-Chat",
+  "Sub-agents are off": "Unteragenten sind aus",
+  "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "Der Reviewer läuft als Worker-Chat und braucht deshalb Unteragenten. Bis sie an sind, wird nichts geprüft.",
+  "Turn on Sub-agents": "Unteragenten einschalten",
+  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "Der Reviewer hat ein Problem gefunden, an dem Goal nicht sicher vorbeikommt. Öffne den Chat, um es zu prüfen.",
+  "Waiting for the reviewer": "Warte auf den Reviewer",
+  "Continues without the review in {0}": "Weiter ohne Review in {0}",
+  "Continuing without the review…": "Weiter ohne Review …"
 }

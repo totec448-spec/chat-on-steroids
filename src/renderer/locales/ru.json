@@ -3609,5 +3609,15 @@
   "Back online, back to work": "Снова в сети — снова в работе",
   "A chat tab that opened while you were offline recovers by itself.": "Вкладка чата, открытая без сети, восстанавливается сама.",
   "Messages that get through": "Сообщения доходят",
-  "Also when you close the chat's tab while sending, or ChatGPT changes its model menu.": "Даже если закрыть вкладку чата во время отправки или ChatGPT изменит меню моделей."
+  "Also when you close the chat's tab while sending, or ChatGPT changes its model menu.": "Даже если закрыть вкладку чата во время отправки или ChatGPT изменит меню моделей.",
+  "Review each Goal step's changes": "Проверять изменения каждого шага «Цели»",
+  "A reviewer worker checks each Goal step's edits; its findings go into the next step. Uses more of your ChatGPT usage and covers only edits made with the edit tools.": "Воркер-рецензент проверяет изменения каждого шага Цели; его замечания попадают в следующий шаг. Расходует больше лимита ChatGPT и проверяет только правки, сделанные инструментами редактирования.",
+  "Same model as the Goal chat": "Та же модель, что и в чате «Цели»",
+  "Sub-agents are off": "Субагенты выключены",
+  "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "Рецензент работает как чат воркера, поэтому ему нужны субагенты. Пока они не включены, ничего не проверяется.",
+  "Turn on Sub-agents": "Включить субагентов",
+  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "Рецензент нашёл проблему, мимо которой «Цель» не может безопасно пройти. Откройте чат, чтобы проверить её.",
+  "Waiting for the reviewer": "Ожидание рецензента",
+  "Continues without the review in {0}": "Продолжит без проверки через {0}",
+  "Continuing without the review…": "Продолжение без проверки…"
 }
