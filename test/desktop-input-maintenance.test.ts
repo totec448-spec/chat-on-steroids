@@ -376,6 +376,15 @@ describe('a chat tab left on Chrome\'s error page', () => {
     const h = await errorPage(true, {}, 'Cannot access contents of the page.');
     expect(h.reload).not.toHaveBeenCalled();
   });
+  // Saved data: nothing older than this version stored it; a damaged value is read as nothing.
+  it.each([['not an object', 'garbage'], ['broken entries', { tabs: [['8', { tries: 'x' }], [8], null], count: 'many', lastAt: -1 }]])(
+    'reads a damaged saved backoff (%s) as none', async (_name, value) => {
+      const h = await errorPage(true, { errorPageReloads: value });
+      expect(h.reload).toHaveBeenCalledExactlyOnceWith(8);
+      const saved = (h.saved as any).errorPageReloads;
+      expect(saved.tabs.map(([id, state]: any) => [id, state.tries])).toEqual([[8, 1]]);
+      expect(saved.count).toBe(1);
+    });
   it('forgets its backoff once its recorder answers', async () => {
     const h = await errorPage(true, backoff(3, Date.now() + 60_000), undefined, true);
     expect(h.reload).not.toHaveBeenCalled();
