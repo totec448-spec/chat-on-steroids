@@ -296,7 +296,12 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
       ? [{ documentId, frameId: 0, result: tabs.find(tab => tab.id === target.tabId)?.url }] : [];
   }), insertCSS: async () => {} };
   const browserNavigator = { onLine: true };
+  // The worker's clock, which `advance` moves on: its once-a-minute checks run again only after it.
+  let clockOffset = 0;
+  const WorkerDate = class extends Date { static override now() { return Date.now() + clockOffset; } };
+  const advance = (ms: number) => { clockOffset += ms; };
   const context = vm.createContext({
+    Date: WorkerDate,
     navigator: browserNavigator,
     chrome: {
       ...(rendered ? { debugger: debuggerApi } : {}),
@@ -317,7 +322,7 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
   Object.assign(api, { query });
   const updated = (id: number, change: object) => tabUpdated.addListener.mock.calls[0]![0](id, change, tabs.find(tab => tab.id === id));
   vm.runInContext('Object.assign(testMaintenance, { offerStopTurns, noteTabConversation, ackCommand })', context);
-  return { ...api, scripting, updated, update, navigator: browserNavigator, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, bind: (context.testMaintenance as any).bind as (message: any, sender: any, source: any) => Promise<any>, correlate: (context.testMaintenance as any).correlate as (message: any, sender: any, source: any) => Promise<any>, closed: (context.testMaintenance as any).closed as (message: any, sender: any, source: any) => Promise<any>, loadFailure: (context.testMaintenance as any).loadFailure as (message: any, sender: any, source: any) => Promise<any>, create, sendMessage, tabs, fetch, windows, remove, reload, local, localSaved, saved };
+  return { ...api, scripting, updated, update, advance, navigator: browserNavigator, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, bind: (context.testMaintenance as any).bind as (message: any, sender: any, source: any) => Promise<any>, correlate: (context.testMaintenance as any).correlate as (message: any, sender: any, source: any) => Promise<any>, closed: (context.testMaintenance as any).closed as (message: any, sender: any, source: any) => Promise<any>, loadFailure: (context.testMaintenance as any).loadFailure as (message: any, sender: any, source: any) => Promise<any>, create, sendMessage, tabs, fetch, windows, remove, reload, local, localSaved, saved };
 }
 
 // 2.1.47 round: a chat tab that loaded offline in the app's background window stayed on Chrome's
@@ -351,14 +356,26 @@ describe('a chat tab left on Chrome\'s error page', () => {
   const reported = (h: Awaited<ReturnType<typeof errorPage>>) => h.fetch.mock.calls
     .filter(([url]: any) => new URL(url).pathname === '/diagnostics').map(([, init]: any) => JSON.parse(init.body).errorPageReloads?.skipped).filter(Boolean);
   // CodeRabbit on #1911: a skipped reload says why in the app's log, once per reason.
-  it('is left alone while the browser is offline, and says so once', async () => {
+  const pings = (h: Awaited<ReturnType<typeof errorPage>>) => h.sendMessage.mock.calls.filter(([, message]: any) => message.type === 'clf-recorder-ping').length;
+  // The next recorder check, a minute later on the worker's clock.
+  const nextCheck = async (h: Awaited<ReturnType<typeof errorPage>>, ms = 61_000) => {
+    const before = pings(h);
+    h.advance(ms);
+    await h.maintain();
+    await vi.waitFor(() => expect(pings(h)).toBeGreaterThan(before), { timeout: 5_000 });
+    await new Promise(resolve => setTimeout(resolve, 50));
+  };
+  it('is left alone while the browser is offline, says so once, and is reloaded once online', async () => {
     const h = await errorPage(false);
     expect(h.reload).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(reported(h)).toEqual([expect.objectContaining({ reason: 'offline' })]), { timeout: 5_000 });
-    // Later reports carry the same skip; the app logs each skip once, by when it happened.
-    await h.maintain();
-    await new Promise(resolve => setTimeout(resolve, 50));
+    // Still offline at the next check: the same skip, reported once (later reports carry it; the app logs it by when it happened).
+    await nextCheck(h);
+    expect(h.reload).not.toHaveBeenCalled();
     expect(new Set(reported(h).map((skip: any) => skip.at)).size).toBe(1);
+    h.navigator.onLine = true;
+    await nextCheck(h);
+    expect(h.reload).toHaveBeenCalledExactlyOnceWith(8);
   });
   it('says when a reload waits out its backoff', async () => {
     const nextAt = Date.now() + 60_000;
@@ -366,17 +383,26 @@ describe('a chat tab left on Chrome\'s error page', () => {
     await vi.waitFor(() => expect(reported(h)).toEqual([expect.objectContaining({ reason: 'backoff', nextAt })]), { timeout: 5_000 });
   });
   // CodeRabbit on #1911: an unreadable saved backoff is not "no backoff". Nothing is reloaded or
-  // overwritten, and the next pass reads it again.
-  it('neither reloads nor overwrites its saved backoff while that cannot be read', async () => {
-    const nextAt = Date.now() + 60_000;
+  // overwritten, and a later check reads it again and keeps to it.
+  it('neither reloads nor overwrites its saved backoff while that cannot be read, and keeps to it once read', async () => {
+    const nextAt = Date.now() + 3 * 60_000;
     const h = await errorPage(true, { ...backoff(1, nextAt), __unreadable: ['errorPageReloads'] });
     expect(h.reload).not.toHaveBeenCalled();
     expect((h.saved as any).errorPageReloads.tabs).toEqual([[8, { tries: 1, nextAt }]]);
     await vi.waitFor(() => expect(reported(h)).toEqual([expect.objectContaining({ reason: 'unreadable' })]), { timeout: 5_000 });
-    (h.saved as any).__unreadable = [];
-    await h.maintain();
+    // Still unreadable a minute later: still nothing reloaded or saved.
+    await nextCheck(h);
     expect(h.reload).not.toHaveBeenCalled();
     expect((h.saved as any).errorPageReloads.tabs).toEqual([[8, { tries: 1, nextAt }]]);
+    // Readable again within the saved backoff: it is kept to.
+    (h.saved as any).__unreadable = [];
+    await nextCheck(h);
+    expect(h.reload).not.toHaveBeenCalled();
+    expect(reported(h).at(-1)).toMatchObject({ reason: 'backoff', nextAt });
+    // Past it: reloaded, and the backoff goes on from the saved tries.
+    await nextCheck(h, 2 * 60_000);
+    expect(h.reload).toHaveBeenCalledExactlyOnceWith(8);
+    expect((h.saved as any).errorPageReloads.tabs[0]).toEqual([8, expect.objectContaining({ tries: 2 })]);
   });
   // CodeRabbit on #1911: the backoff and the counter outlive a stopped worker.
   it('waits out its backoff, also after the worker restarted', async () => {
