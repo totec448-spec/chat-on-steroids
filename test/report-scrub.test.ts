@@ -52,6 +52,27 @@ describe('scrubbing a diagnostics report', () => {
     expect(scrubText('काम पूरा, कामों बाकी', { home: '/Users/jane', known: ['काम'] })).toMatch(/^<x:[0-9a-f]{4}> पूरा, कामों बाकी$/);
   });
 
+  // CodeRabbit on #1923: a value that starts or ends with punctuation needs no word edge on that side.
+  it('replaces a known value that starts or ends with punctuation, also next to letters', () => {
+    expect(scrubText('built C++17 and v2(draft)final', { home: '/Users/jane', known: ['C++', '(draft)'] }))
+      .toMatch(/^built <x:[0-9a-f]{4}>17 and v2<x:[0-9a-f]{4}>final$/);
+    // A letter edge still protects other words: "Cats" is not "Cat".
+    expect(scrubText('Cats and Cat', { home: '/Users/jane', known: ['Cat'] })).toMatch(/^Cats and <x:[0-9a-f]{4}>$/);
+  });
+
+  // A lookbehind on each of hundreds of known values made a 3 MB log take over 30 s (the report looked
+  // stuck); grouped, it takes well under a second. Generous bound for slow runners.
+  it('scrubs a large log with hundreds of known values quickly', () => {
+    const known = Array.from({ length: 300 }, (_, i) => `Chat title number ${i} about a project`).concat(['Work', 'C++', '(draft)']);
+    const line = 'info  [worker-3] tool exec_command ok in 12 ms; read src/app.ts lines 1–40; Work went on\n';
+    const log = line.repeat(Math.ceil(1_000_000 / line.length));
+    const start = performance.now();
+    const out = scrubText(log, { home: '/Users/jane', known });
+    expect(performance.now() - start).toBeLessThan(5_000);
+    expect(out).toContain('[worker-3]');
+    expect(out).not.toMatch(/\bWork went/);
+  });
+
   // CodeRabbit on #1923: an underscore joins names in identifiers; the known value inside goes either way.
   it('replaces a known value joined to an identifier by an underscore', () => {
     expect(scrubText('profile Acme Budget_2026 and laptop_username', { home: '/Users/jane', known: ['Acme Budget', 'username'] }))
