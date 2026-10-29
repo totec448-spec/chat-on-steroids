@@ -618,6 +618,31 @@ it('localizes only the exact app-authored Goal helper stop note at draw time', a
   expect(notes.map(note => note.textContent)).toEqual(rows.map(row => row.value));
 });
 
+// 2.1.47 release round: tool rows were recorded in English and shown that way in every language.
+it('shows a recorded tool row in the person\'s language, its path as recorded, and in English again when switched back', async () => {
+  const read = toolCall(1, 'read-de') as Extract<SessionEvent, { kind: 'tool_call' }>;
+  read.call.summary = { kind: 'read', title: 'Read src/app.ts', detail: 'lines 1–40', metric: '40 lines', tone: 'neutral' };
+  const run = toolCall(2, 'run-de') as Extract<SessionEvent, { kind: 'tool_call' }>;
+  run.call.tool = 'exec_command';
+  run.call.summary = { kind: 'run', title: 'Could not run npm test', metric: '✕ exit 2', tone: 'bad' };
+  const { w } = await boot([read, run]);
+  const { setLanguage, t, tn } = await import('../src/renderer/i18n.js');
+  setLanguage('de');
+  const heads = () => [...w.document.querySelectorAll('.ev-tool_call summary')].map(head => ({
+    title: head.querySelector('b')?.textContent, detail: head.querySelector('em')?.textContent, metric: head.querySelector('.metric')?.textContent }));
+  expect(heads()).toEqual([
+    { title: t('Read {0}', ['src/app.ts']), detail: t('lines {0}–{1}', ['1', '40']), metric: tn('{0} line', '{0} lines', 40) },
+    { title: t('Could not run {0}', ['npm test']), detail: undefined, metric: t('✕ exit {0}', ['2']) }
+  ]);
+  expect(heads()[0]!.title).toContain('src/app.ts');
+  expect(heads()[0]!.title).not.toBe('Read src/app.ts');
+  setLanguage('en');
+  expect(heads()).toEqual([
+    { title: 'Read src/app.ts', detail: 'lines 1–40', metric: '40 lines' },
+    { title: 'Could not run npm test', detail: undefined, metric: '✕ exit 2' }
+  ]);
+});
+
 it('asks for the selected chat\'s background tab once per switch (#1249)', async () => {
   const first = summary([]), second = { ...summary([]), id: '2026-09-02-test0002', title: 'Other session' };
   const { w } = await boot([], true, [], [], { sessions: [first, second] });

@@ -2,6 +2,7 @@ import type { ActivitySummary, SessionEvent, ToolCallRecord } from '../shared/se
 import { normalizedToolOutcome, toolCallSummary, workSequence } from '../shared/session.js';
 import { clockTime, el, icon } from './dom.js';
 import { t } from './i18n.js';
+import { localToolDetail, localToolMetric, localToolTitle } from './tool-titles.js';
 
 /** Sprite id per tool-call family. Deliberately reuses the existing icon set. */
 export const KIND_ICON: Record<ActivitySummary['kind'], string> = {
@@ -97,11 +98,13 @@ export function renderWorkerActivity(events: readonly SessionEvent[], task: stri
       row.dataset.kind = action.summary.kind; row.dataset.tone = action.failed ? 'bad' : action.summary.tone;
       const time = el('time', 'agent-activity-time', clockTime(action.time));
       time.setAttribute('datetime', new Date(action.time).toISOString());
-      const what = el('span', 'agent-activity-title', action.summary.title);
-      if (action.summary.detail) what.append(el('em', '', action.summary.detail));
+      const title = localToolTitle(action.summary.title), detail = action.summary.detail ? localToolDetail(action.summary.detail) : '';
+      const metric = action.summary.metric ? localToolMetric(action.summary.metric) : '';
+      const what = el('span', 'agent-activity-title', title);
+      if (detail) what.append(el('em', '', detail));
       row.append(time, icon(KIND_ICON[action.summary.kind] ?? 'i-bolt', 'ico agent-activity-icon'), what);
-      if (action.summary.metric) row.append(el('span', 'agent-activity-metric', action.summary.metric));
-      row.title = [action.summary.title, action.summary.detail, action.summary.metric].filter(Boolean).join(' · ');
+      if (metric) row.append(el('span', 'agent-activity-metric', metric));
+      row.title = [title, detail, metric].filter(Boolean).join(' · ');
       list.append(row);
     }
     nodes.push(list);

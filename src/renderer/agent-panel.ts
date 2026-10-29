@@ -9,6 +9,7 @@ import { compactNumber, el, elapsedDurationText, icon } from './dom.js';
 import { attachWorkPanelResize } from './work-panel-resize.js';
 import { workerAvatar } from './agent-communication.js';
 import { renderWorkerActivity } from './agent-activity.js';
+import { localToolTitle } from './tool-titles.js';
 
 /**
  * What to call a worker: the name the prime gave it for this job ("Security review"), else
@@ -205,9 +206,10 @@ export function createAgentPanel(options: {
           line = el('span', 'agent-card-line agent-card-approval', () => t('Needs your answer in ChatGPT'));
           line.dataset.tone = 'warn';
         } else if (state === 'failed' && worker.lastToolActivity) {
-          line = el('span', 'agent-card-line agent-card-last', () => t('Last action: {0}', [worker.lastToolActivity!.title]));
+          line = el('span', 'agent-card-line agent-card-last', () => t('Last action: {0}', [localToolTitle(worker.lastToolActivity!.title)]));
         } else if (working && currentActivity && worker.lastToolActivity && !answered) {
-          line = el('span', 'agent-card-line agent-card-activity', worker.lastToolActivity.title);
+          const activity = worker.lastToolActivity.title;
+          line = el('span', 'agent-card-line agent-card-activity', () => localToolTitle(activity));
           line.dataset.kind = worker.lastToolActivity.kind;
           if (worker.lastToolActivity.tone) line.dataset.tone = worker.lastToolActivity.tone;
           line.style.setProperty('--phase', `${-(Date.now() % 1800)}ms`);

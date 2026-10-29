@@ -120,6 +120,7 @@ import { initFeedbackDialog } from './feedback-dialog.js';
 import { createChatgptProjectPicker } from './chatgpt-project-picker.js';
 import { initScheduleDialog } from './schedule-dialog.js';
 import { nextRunAfter, sameLocalDay, type ScheduleRepeat } from '../shared/schedule.js';
+import { localToolDetail, localToolMetric, localToolTitle } from './tool-titles.js';
 
 const api = window.api;
 let chatSearch: ChatSearch | null = null;
@@ -5119,7 +5120,8 @@ function toolMetric(value: string, className = 'metric'): HTMLElement {
   const metric = el('span', className);
   const delta = /^(~?)(\+\d+)?(?:\s+)?([−-]\d+)?$/.exec(value);
   if (!delta || (!delta[2] && !delta[3])) {
-    metric.textContent = value;
+    // Recorded in English ("✓ 2.1s", "✕ exit 1"); shown in the person's language (tool-titles.ts).
+    ui(metric, 'textContent', () => localToolMetric(value));
     return metric;
   }
   if (delta[1]) metric.append(delta[1]);
@@ -5148,8 +5150,9 @@ function toolBody(event: Extract<SessionEvent, { kind: 'tool_call' }>, context?:
   head.append(icon(KIND_ICON[call.summary.kind] ?? 'i-bolt', 'ico tool-ico'));
   if (call.tool === 'exec_command' || call.tool === 'write_stdin') head.append(el('span', 'tool-tag is-shell', 'shell'));
   else if (call.changes?.length || call.tool === 'apply_patch') head.append(el('span', 'tool-tag is-diff', 'diff'));
-  head.append(el('b', '', call.summary.title));
-  if (call.summary.detail) head.append(el('em', '', call.summary.detail));
+  head.append(el('b', '', () => localToolTitle(call.summary.title)));
+  const detail = call.summary.detail;
+  if (detail) head.append(el('em', '', () => localToolDetail(detail)));
   if (call.changes?.length) {
     const added = call.changes.reduce((total, change) => total + change.added, 0);
     const removed = call.changes.reduce((total, change) => total + change.removed, 0);
@@ -7196,7 +7199,7 @@ function liveActivity(): { text: string; icon: string; working: boolean; since?:
     return call ? { text: said.text, icon: KIND_ICON[call.kind] ?? KIND_ICON.other, working: true, since: call.since }
       : { text: said.text, icon: '', working: false };
   }
-  if (call) return { text: call.title, icon: KIND_ICON[call.kind] ?? KIND_ICON.other, working: true, since: call.since };
+  if (call) return { text: localToolTitle(call.title), icon: KIND_ICON[call.kind] ?? KIND_ICON.other, working: true, since: call.since };
   const thinking = { text: t('Thinking'), icon: '', working: false };
   // A message not yet recorded opens a turn that has done nothing visible so far.
   if (messageOnItsWay()) return thinking;
