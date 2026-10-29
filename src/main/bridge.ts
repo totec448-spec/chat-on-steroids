@@ -38,7 +38,7 @@ export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
-import { automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation } from './session/input.js';
+import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation } from './session/input.js';
 /**
  * The local bridge between the Chrome extension and this app.
  *
@@ -130,6 +130,7 @@ import {
   type ChatObservation,
   type PageCallEvidence
 } from './session/recorder.js';
+import { noteRequestTraces, type RequestTrace } from './session/request-trace.js';
 import { noticeApprovalWaiting, noticeChatStopped } from './stuck-notice.js';
 import { approvalAnswerFor, approvalCardWaiting, noteApprovalCard, parseApprovalCard, parseApprovalResult, resetApprovalWaits, settleApprovalAnswer, type ApprovalWaitDeps } from './approval-wait.js';
 import { APPROVAL_PROGRESS_PREFIX, APPROVAL_REPAIR_DEFERRED_TEXT, APPROVAL_WAITING_TEXT } from '../shared/approval-wait.js';
@@ -724,6 +725,21 @@ function browserOf(req: http.IncomingMessage): string | null {
   return typeof id === 'string' && /^[a-z0-9]{16,64}$/.test(id) ? id : null;
 }
 const browserSeenAt = new Map<string, number>();
+/** Until when a browser's extension reloads into a new build; it takes no new message meanwhile. */
+const extensionReloads = new Map<string, number>();
+const EXTENSION_RELOAD_PAUSE_MS = 20_000;
+/** Claims past the reload check that have not answered yet; each one holds the extension update. */
+let claimsInProgress = 0;
+function extensionReloading(req: http.IncomingMessage): boolean {
+  const until = extensionReloads.get(browserOf(req) ?? '');
+  if (until === undefined) return false;
+  if (Date.now() < until) {
+    noticeRefusal(`extension-reload:${browserOf(req) ?? ''}`, 'bridge: a claim waits: the browser extension is reloading into a new build');
+    return true;
+  }
+  extensionReloads.delete(browserOf(req) ?? '');
+  return false;
+}
 /** How long a browser keeps a new chat it was handed after it stops polling. */
 const OPENING_CUSTODY_MS = 60_000;
 /** New-chat inputs and the one browser each was first handed to. */
@@ -1534,7 +1550,9 @@ const OBSERVATION_KINDS = new Set([
   // requestId -> conversationId correlation registry.
   'tool_evidence',
   // Connector identity proof (connector-identity.ts); never transcript content.
-  'app_sightings'
+  'app_sightings',
+  // Where a chat's stream named request ids (session/request-trace.ts); diagnostics only.
+  'request_trace'
 ]);
 const OUTCOMES = new Set(['completed', 'failed', 'stopped', 'interrupted', 'stalled', 'unknown']);
 const MAX_OBSERVATIONS = 200;
@@ -1654,6 +1672,18 @@ function parseObservations(input: unknown): ChatObservation[] {
           appName: typeof app?.['appName'] === 'string' ? app['appName'].slice(0, 200) : null });
       }
       observation.apps = apps;
+      out.push(observation);
+      continue;
+    }
+    if (kind === 'request_trace') {
+      const traces: RequestTrace[] = [];
+      for (const rawTrace of Array.isArray(item['traces']) ? item['traces'].slice(0, 16) : []) {
+        const trace = rawTrace && typeof rawTrace === 'object' ? rawTrace as Record<string, unknown> : null;
+        const requestId = typeof trace?.['requestId'] === 'string' ? trace['requestId'] : '';
+        const path = typeof trace?.['path'] === 'string' ? trace['path'] : '';
+        if (/^(?:wfr_[a-zA-Z0-9_-]{1,96}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i.test(requestId) && /^[A-Za-z0-9_./:[\]-]{1,200}$/.test(path)) traces.push({ requestId, path });
+      }
+      observation.traces = traces;
       out.push(observation);
       continue;
     }
@@ -2738,7 +2768,16 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   // The extension is idle and about to reload into the build this app ships: bring the folder
   // Chrome loads from up to date first, and say whether it now holds that build.
   if (route === '/extension/update' && req.method === 'POST') {
+    // A message claimed since the extension's last /status is being sent: its folder is not replaced
+    // under it. The extension reads `hold` and asks again on a later pass (CodeRabbit on #1901).
+    // A claim still deciding (the send check can take seconds) counts too: it may take its message next.
+    if (claimsInProgress > 0 || (await listInputs()).some(inBrowserDelivery)) {
+      logInfo('bridge: the extension update waits: a message is being sent');
+      return json(res, 200, { ready: false, hold: 'sending' }, origin);
+    }
     const prepared = prepareExtensionUpdate(extensionBuildOf(req));
+    // The extension reloads now: that browser takes no new message until it is back.
+    if (prepared?.ready) extensionReloads.set(browserOf(req) ?? '', Date.now() + EXTENSION_RELOAD_PAUSE_MS);
     if (prepared?.ready) logInfo(`bridge: extension folder updated to build ${prepared.build}; the extension reloads itself now`);
     else if (prepared) logWarn(`bridge: could not update the extension folder to build ${prepared.build}`);
     return json(res, 200, prepared ?? { ready: false }, origin);
@@ -2836,6 +2875,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         browserPreferenceRequest: pendingBrowserPreferenceRequest(),
         projectCreateRequests: otherBrowser ? [] : await pendingProjectCreates(),
         inputOpeningIds: inputRows.filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).map(row => row.id),
+        // The ones being sent right now (handed to a browser), not those that only wait in the queue:
+        // only these hold the extension's self-update (a blocked chat can keep a queued one for hours).
+        inputSendingIds: inputRows.filter(inBrowserDelivery).map(row => row.id),
         // A message for the running turn goes in while a call runs: ChatGPT keeps that call's result (#1231).
         // An existing chat waits out a new tunnel-client's takeover, or its next call waits ~2 min (#1220).
         inputs: [...pendingInputs.filter(input => !refusedAsStale && (!input.conversationId || input.directTurn || runningToolCalls(input.conversationId) === 0) &&
@@ -3038,46 +3080,56 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // As /status: an existing chat waits until a new tunnel-client has taken over its route (#1220).
     if (target && tunnelRouteSettling()) return json(res, 200, { input: null }, origin);
     if (staleCompanion(req) || notChosenBrowser(req)) return json(res, 200, { input: null }, origin);
-    if (!target && !chosenBuiltInBrowser(req) && openingHeldElsewhere(body.id, browserOf(req))) return json(res, 200, { input: null }, origin);
-    // A new chat of a project with a native ChatGPT Project is claimed only from that Project's
-    // own page, which the page names; the root or another Project is never its destination.
-    if (!target) {
-      const entry = (await listInputs()).find(row => row.id === body.id);
-      // A branch (#482) is made where its source chat lives in ChatGPT, never on a Project's page.
-      const link = entry?.projectId && entry.purpose !== 'decision' && !entry.lifetime && !entry.branch ? (await getProject(entry.projectId))?.chatgpt : undefined;
-      if (link && (link.state !== 'linked' || body.project !== link.id)) return json(res, 200, { input: null }, origin);
-    }
-    // #1794: an automatic send is first checked with the person's send check, outside the queue's lock.
-    const automatic = (await listInputs()).find(row => row.id === body.id && row.state === 'queued');
-    const kind = automatic ? automaticSendKind(automatic) : null;
-    if (automatic && kind && getConfig().ui.sendCheckUrl) {
-      // A held row is not asked about again before its next ask, however often a page claims it.
-      if (heldBySendCheck(automatic)) {
-        // Pages ask every few seconds: said once per hold.
-        const hold = automatic.sendCheck!;
-        if (heldClaimsLogged.get(automatic.id) !== hold.attempt) {
-          heldClaimsLogged.set(automatic.id, hold.attempt);
-          if (heldClaimsLogged.size > 256) heldClaimsLogged.delete(heldClaimsLogged.keys().next().value!);
-          logInfo(`send check: ${kind} ${automatic.id} attempt ${hold.attempt} still held until ${new Date(hold.nextAt).toISOString()} (${hold.reason}); a page asked to send it`);
+    if (extensionReloading(req)) return json(res, 200, { input: null }, origin);
+    // From here this claim may take a message: the extension update waits until it has answered,
+    // however it ends (an early answer, a thrown error, a page that went away) (CodeRabbit on #1901).
+    claimsInProgress++;
+    try {
+      if (!target && !chosenBuiltInBrowser(req) && openingHeldElsewhere(body.id, browserOf(req))) return json(res, 200, { input: null }, origin);
+      // A new chat of a project with a native ChatGPT Project is claimed only from that Project's
+      // own page, which the page names; the root or another Project is never its destination.
+      if (!target) {
+        const entry = (await listInputs()).find(row => row.id === body.id);
+        // A branch (#482) is made where its source chat lives in ChatGPT, never on a Project's page.
+        const link = entry?.projectId && entry.purpose !== 'decision' && !entry.lifetime && !entry.branch ? (await getProject(entry.projectId))?.chatgpt : undefined;
+        if (link && (link.state !== 'linked' || body.project !== link.id)) return json(res, 200, { input: null }, origin);
+      }
+      // #1794: an automatic send is first checked with the person's send check, outside the queue's lock.
+      const automatic = (await listInputs()).find(row => row.id === body.id && row.state === 'queued');
+      const kind = automatic ? automaticSendKind(automatic) : null;
+      if (automatic && kind && getConfig().ui.sendCheckUrl) {
+        // A held row is not asked about again before its next ask, however often a page claims it.
+        if (heldBySendCheck(automatic)) {
+          // Pages ask every few seconds: said once per hold.
+          const hold = automatic.sendCheck!;
+          if (heldClaimsLogged.get(automatic.id) !== hold.attempt) {
+            heldClaimsLogged.set(automatic.id, hold.attempt);
+            if (heldClaimsLogged.size > 256) heldClaimsLogged.delete(heldClaimsLogged.keys().next().value!);
+            logInfo(`send check: ${kind} ${automatic.id} attempt ${hold.attempt} still held until ${new Date(hold.nextAt).toISOString()} (${hold.reason}); a page asked to send it`);
+          }
+          return json(res, 200, { input: null }, origin);
         }
-        return json(res, 200, { input: null }, origin);
+        const attempt = (automatic.sendCheck?.attempt ?? 0) + 1;
+        const project = automatic.projectId ?? (automatic.sessionId ? (await getSession(automatic.sessionId))?.projectId : undefined) ?? null;
+        const verdict = await checkAutomaticSend({ kind, id: automatic.id, attempt, text: automatic.text,
+          chat: { session: automatic.sessionId ?? null, project, worker: target ? agentForOwnedConversation(target) : null } });
+        if (!verdict.allowed) {
+          if (await holdInputForSendCheck(automatic.id, attempt, verdict.reason, verdict.answered)) changed();
+          return json(res, 200, { input: null }, origin);
+        }
+        // What was allowed is what goes: a row edited or withdrawn meanwhile is asked about again.
+        const now = (await listInputs()).find(row => row.id === body.id);
+        if (now?.state !== 'queued' || now.text !== automatic.text) return json(res, 200, { input: null }, origin);
       }
-      const attempt = (automatic.sendCheck?.attempt ?? 0) + 1;
-      const project = automatic.projectId ?? (automatic.sessionId ? (await getSession(automatic.sessionId))?.projectId : undefined) ?? null;
-      const verdict = await checkAutomaticSend({ kind, id: automatic.id, attempt, text: automatic.text,
-        chat: { session: automatic.sessionId ?? null, project, worker: target ? agentForOwnedConversation(target) : null } });
-      if (!verdict.allowed) {
-        if (await holdInputForSendCheck(automatic.id, attempt, verdict.reason, verdict.answered)) changed();
-        return json(res, 200, { input: null }, origin);
-      }
-      // What was allowed is what goes: a row edited or withdrawn meanwhile is asked about again.
-      const now = (await listInputs()).find(row => row.id === body.id);
-      if (now?.state !== 'queued' || now.text !== automatic.text) return json(res, 200, { input: null }, origin);
+      // The send check can take seconds: an update allowed meanwhile closed the door behind it.
+      if (extensionReloading(req)) return json(res, 200, { input: null }, origin);
+      const input = await claimBrowserInput(body.id, body.owner, target, body.requiresAuthorization === true);
+      // The first message for an existing chat after a new tunnel-client is what the hold learns from.
+      if (input && target) noteRouteExistingChatSend(target);
+      return json(res, 200, { input }, origin);
+    } finally {
+      claimsInProgress--;
     }
-    const input = await claimBrowserInput(body.id, body.owner, target, body.requiresAuthorization === true);
-    // The first message for an existing chat after a new tunnel-client is what the hold learns from.
-    if (input && target) noteRouteExistingChatSend(target);
-    return json(res, 200, { input }, origin);
   }
 
   if (route === '/repairs/claim' && req.method === 'POST') {
@@ -3205,7 +3257,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       logInfo(`connector identity learned: ${(['core', 'desktop', 'plugins'] as const).map(s => `${s}=${apps[s][0]?.appId ?? '-'}`).join(' ')}`);
       changed();
     }
-    const observations = parsed.filter(item => item.kind !== 'app_sightings');
+    const traces = parsed.flatMap(item => item.kind === 'request_trace' ? item.traces ?? [] : []);
+    if (traces.length) noteRequestTraces(id, traces);
+    const observations = parsed.filter(item => item.kind !== 'app_sightings' && item.kind !== 'request_trace');
     if (!observations.length && parsed.length) return json(res, 200, { ok: true, stored: 0 }, origin);
     observationWritesInFlight += 1;
     let committed: { sessionId: string | null; stored: number; wake: boolean } | undefined;
