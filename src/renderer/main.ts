@@ -27,6 +27,7 @@ import { initBrowserPreferences } from './browser-preferences.js';
 import { initSetupGuide } from './setup-guide.js';
 import { initAppearance } from './appearance.js';
 import { initKeychainNotice } from './keychain-notice.js';
+import { initDesktopAskNotice } from './desktop-ask-notice.js';
 import { initPet } from './pet.js';
 import { initPets } from './pets.js';
 import { initSkillsLibrary } from './skills-library.js';
@@ -83,6 +84,7 @@ declare global {
 const api = window.api;
 // First: main announces a Keychain read before it starts and may not get through again until it ends.
 initKeychainNotice(api);
+initDesktopAskNotice(api);
 initLanguage();
 initLayoutPreviews();
 // Composer key hints name this computer's keys only: a Windows user never reads ⌘ first.
@@ -536,6 +538,34 @@ function readCommandAllowlist(): SettingsPatch['commandAllowlist'] | null {
   };
 }
 
+/**
+ * #1804 (Haz's review): whether a desktop step asks before it takes the real mouse or keyboard,
+ * right under the permission to control them. Off by default; the app's browser steps never ask.
+ */
+function desktopAskRow(): HTMLElement {
+  const row = el('label', 'tool desktop-ask-row');
+  const body = el('span');
+  body.append(el('strong', '', () => t('Ask before using the mouse and keyboard')),
+    el('em', '', () => t("A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for up to 2 minutes, until you use the mouse or keyboard again; a step the app can't match to a chat asks again. Browser steps never ask.")));
+  const select = document.createElement('select');
+  select.id = 'desktopAsk';
+  const choices: Array<[string, () => string]> = [['off', () => t('Off')], ['active', () => t("Ask while I'm using the computer")], ['always', () => t('Always ask')]];
+  for (const [value, label] of choices) {
+    const option = document.createElement('option');
+    option.value = value;
+    ui(option, 'textContent', label);
+    select.append(option);
+  }
+  select.addEventListener('change', async () => {
+    const chosen = select.value;
+    if (await save()) return;
+    // Refused (an invalid field elsewhere): show what is saved, unless a newer choice is already on its way.
+    if (select.value === chosen) select.value = requestedSettings?.ui.desktopAsk ?? state?.config.ui.desktopAsk ?? 'off';
+  });
+  row.append(body, select);
+  return row;
+}
+
 function buildGroups(): void {
   const permissionGroups = GROUPS.map((group) => {
     const box = document.createElement('input');
@@ -562,6 +592,7 @@ function buildGroups(): void {
       body.append(el('strong', '', () => t(CAPABILITY_LABELS[cap])), el('em', '', () => t(CAPABILITY_DETAILS[cap])));
       label.append(input, body);
       tools.append(label);
+      if (cap === 'control') tools.append(desktopAskRow());
     }
     tools.append(toolNames([]));
     if (group.id === 'run') tools.append(buildCommandAllowlist());
@@ -765,6 +796,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       defaultChatReasoning: ($<HTMLSelectElement>('defaultChatReasoning').value || undefined) as Config['ui']['defaultChatReasoning'],
       chatBrowser: $<HTMLSelectElement>('chatBrowser').value as ChatBrowser,
       cosBrowserMinimize: $<HTMLSelectElement>('cosBrowserMinimize').value === 'tray' ? 'tray' : 'taskbar',
+      desktopAsk: ($<HTMLSelectElement>('desktopAsk').value || 'off') as NonNullable<Config['ui']['desktopAsk']>,
       finishTool: $<HTMLInputElement>('finishTool').checked,
       finishHoldOnStop: $<HTMLInputElement>('finishHoldOnStop').checked,
       planBackend: $<HTMLSelectElement>('planBackend').value as 'chatgpt' | 'api',
@@ -1722,6 +1754,9 @@ function apply(next: AppState): void {
   applyValue($<HTMLInputElement>('binaryPath'), config.tunnel.binaryPath, previousState?.config.tunnel.binaryPath);
   applyValue($<HTMLSelectElement>('chatBrowser'), config.ui.chatBrowser ?? 'chrome', previousState?.config.ui.chatBrowser ?? 'chrome');
   applyValue($<HTMLSelectElement>('cosBrowserMinimize'), config.ui.cosBrowserMinimize ?? 'taskbar', previousState?.config.ui.cosBrowserMinimize ?? 'taskbar');
+  applyValue($<HTMLSelectElement>('desktopAsk'), config.ui.desktopAsk ?? 'off', previousState?.config.ui.desktopAsk ?? 'off');
+  // The system says when it was last used only on macOS and Windows; elsewhere nothing would ask.
+  ($('desktopAsk').closest('.desktop-ask-row') as HTMLElement).hidden = !['macos', 'windows'].includes(next.platform?.family ?? 'macos');
   // Only the built-in browser has a window of the app's own to minimize.
   $('cosBrowserMinimizeRow').hidden = (config.ui.chatBrowser ?? 'chrome') !== 'cos';
   $<HTMLSelectElement>('planBackend').value = config.ui.planBackend ?? 'chatgpt';
