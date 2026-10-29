@@ -3408,5 +3408,15 @@
   "Back online, back to work": "恢復連線，繼續工作",
   "A chat tab that opened while you were offline recovers by itself.": "離線時開啟的聊天分頁會自行恢復。",
   "Messages that get through": "訊息照樣送達",
-  "Also when you close the chat's tab while sending, or ChatGPT changes its model menu.": "即使傳送時關閉了聊天分頁，或 ChatGPT 改了模型選單。"
+  "Also when you close the chat's tab while sending, or ChatGPT changes its model menu.": "即使傳送時關閉了聊天分頁，或 ChatGPT 改了模型選單。",
+  "Review each Goal step's changes": "檢查每個目標步驟的變更",
+  "A reviewer worker checks each Goal step's edits; its findings go into the next step. Uses more of your ChatGPT usage and covers only edits made with the edit tools.": "一個審查子代理會檢查每個目標步驟的變更，發現的問題會寫進下一步。會消耗更多 ChatGPT 用量，且只審查透過編輯工具做的變更。",
+  "Same model as the Goal chat": "與目標聊天相同的模型",
+  "Sub-agents are off": "子代理已關閉",
+  "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "審查者以子代理聊天執行，因此需要子代理。開啟之前不會審查任何內容。",
+  "Turn on Sub-agents": "開啟子代理",
+  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "審查者發現了一個目標無法安全略過的問題。打開聊天查看。",
+  "Waiting for the reviewer": "正在等待審查者",
+  "Continues without the review in {0}": "{0} 後不等審查繼續",
+  "Continuing without the review…": "正在不等審查繼續…"
 }

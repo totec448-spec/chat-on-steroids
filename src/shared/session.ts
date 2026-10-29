@@ -970,6 +970,13 @@ export interface AgentInfo {
   finishedAt: number | null;
   /** Current completion report; cleared when work resumes. Prior reports remain in history/inbox. */
   result: string | null;
+  /**
+   * The Goal step reviewer (#1832): a worker the app puts into a Goal chat's family to read each
+   * step's changes. It only reads, and it holds that chat's next Goal step while it works.
+   */
+  reviewer?: boolean;
+  /** When the app last asked the reviewer for a review; the hold lasts at most REVIEW_MAX_MS from it. */
+  reviewAskedAt?: number | null;
   /** Messages waiting for this agent, including offered-but-unacknowledged ones. */
   pending: number;
   /** Of those, how many have gone out at least once and are awaiting proof of receipt. */

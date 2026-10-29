@@ -747,3 +747,29 @@ it('glides the effort thumb, picks the nearest effort, settles on release and st
   expect(confirmedComposerModel()).toEqual({ model: 'think', reasoningEffort: 'medium' });
   expect(slider.getAttribute('aria-valuetext')).toBe('Medium');
 });
+
+it('offers Off, the Goal chat\'s own model and this account\'s models for the step reviewer, and keeps an unoffered choice visible (#1832)', async () => {
+  dom = new JSDOM('<span id="composerModelLabel"></span><p id="chatModelStatus"></p>' +
+    ['composerModel', 'composerReasoning', 'workerModel', 'workerReasoning', 'helperModel', 'helperReasoning', 'goalReviewer'].map(id => `<select id="${id}"></select>`).join(''));
+  const observed = { state: 'ready', requestedAt: 1, observedAt: Date.now(), models: [
+    { id: 'first', label: 'GPT-5.6 Sol', efforts: ['high'] }, { id: 'gpt-6-thinking', label: 'GPT-6', efforts: ['medium'] }
+  ] };
+  Object.assign(dom.window, { api: { getChatModels: async () => ({ ok: true, data: observed }) } });
+  vi.stubGlobal('window', dom.window); vi.stubGlobal('document', dom.window.document);
+  const { initChatModels, applyChatModels } = await import('../src/renderer/chat-models.js');
+  initChatModels();
+  const reviewer = dom.window.document.getElementById('goalReviewer') as HTMLSelectElement;
+  applyChatModels({ multiAgent: {}, goal: {} } as Config);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect([...reviewer.options].map(row => [row.value, row.textContent])).toEqual([
+    ['', 'Off'], ['same', 'Same model as the Goal chat'], ['first', 'GPT-5.6 Sol'], ['gpt-6-thinking', 'GPT-6']
+  ]);
+  expect(reviewer.value).toBe('');
+  applyChatModels({ multiAgent: {}, goal: { reviewerModel: 'same' } } as Config);
+  expect(reviewer.value).toBe('same');
+  // A model this account no longer offers stays chosen and visible, marked: the review then uses the chat's model.
+  applyChatModels({ multiAgent: {}, goal: { reviewerModel: 'retired-model' } } as Config);
+  expect(reviewer.value).toBe('retired-model');
+  expect(reviewer.selectedOptions[0]!.disabled).toBe(true);
+  expect(reviewer.selectedOptions[0]!.textContent).toBe('retired-model · not verified');
+});

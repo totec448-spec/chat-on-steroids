@@ -503,6 +503,12 @@
   "content_goal_wait_tool_inactivity": {
     "message": "ツールの活動が止まるのを待っています"
   },
+  "content_goal_reviewer_deadline": {
+    "message": "$1 後にレビューなしで続行"
+  },
+  "content_goal_wait_reviewer": {
+    "message": "レビュー担当を待っています"
+  },
   "content_goal_wait_workers": {
     "message": "このチャットのワーカーを待っています"
   },

@@ -503,6 +503,12 @@
   "content_goal_wait_tool_inactivity": {
     "message": "Đang chờ công cụ ngừng hoạt động"
   },
+  "content_goal_reviewer_deadline": {
+    "message": "Tiếp tục mà không cần xem lại sau $1"
+  },
+  "content_goal_wait_reviewer": {
+    "message": "Đang chờ người xem lại"
+  },
   "content_goal_wait_workers": {
     "message": "Đang chờ các tác nhân phụ của cuộc trò chuyện này"
   },

@@ -3408,5 +3408,15 @@
   "Back online, back to work": "オンラインに戻れば再開",
   "A chat tab that opened while you were offline recovers by itself.": "オフライン中に開いたチャットタブが自動で回復します。",
   "Messages that get through": "メッセージが確実に届く",
-  "Also when you close the chat's tab while sending, or ChatGPT changes its model menu.": "送信中にチャットのタブを閉じても、ChatGPT がモデルメニューを変えても届きます。"
+  "Also when you close the chat's tab while sending, or ChatGPT changes its model menu.": "送信中にチャットのタブを閉じても、ChatGPT がモデルメニューを変えても届きます。",
+  "Review each Goal step's changes": "ゴールの各ステップの変更をレビュー",
+  "A reviewer worker checks each Goal step's edits; its findings go into the next step. Uses more of your ChatGPT usage and covers only edits made with the edit tools.": "レビュー担当のワーカーがゴールの各ステップの変更を確認し、指摘は次のステップに含まれます。ChatGPTの使用量が増え、対象は編集ツールによる変更だけです。",
+  "Same model as the Goal chat": "ゴールのチャットと同じモデル",
+  "Sub-agents are off": "サブエージェントがオフです",
+  "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "レビュー担当はワーカーのチャットとして動くため、サブエージェントが必要です。オンになるまで何もレビューされません。",
+  "Turn on Sub-agents": "サブエージェントをオンにする",
+  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "レビュー担当が、ゴールが安全に先へ進めない問題を見つけました。チャットを開いて確認してください。",
+  "Waiting for the reviewer": "レビュー担当を待っています",
+  "Continues without the review in {0}": "{0} 後にレビューなしで続行",
+  "Continuing without the review…": "レビューなしで続行しています…"
 }

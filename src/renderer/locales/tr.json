@@ -3475,5 +3475,15 @@
   "Back online, back to work": "Yeniden çevrimiçi, yeniden işte",
   "A chat tab that opened while you were offline recovers by itself.": "Çevrimdışıyken açılan bir sohbet sekmesi kendiliğinden toparlanır.",
   "Messages that get through": "Ulaşan mesajlar",
-  "Also when you close the chat's tab while sending, or ChatGPT changes its model menu.": "Gönderirken sohbet sekmesini kapatsanız ya da ChatGPT model menüsünü değiştirse bile."
+  "Also when you close the chat's tab while sending, or ChatGPT changes its model menu.": "Gönderirken sohbet sekmesini kapatsanız ya da ChatGPT model menüsünü değiştirse bile.",
+  "Review each Goal step's changes": "Her Hedef adımının değişikliklerini gözden geçir",
+  "A reviewer worker checks each Goal step's edits; its findings go into the next step. Uses more of your ChatGPT usage and covers only edits made with the edit tools.": "Bir inceleyici worker her Hedef adımının değişikliklerini kontrol eder; bulguları sonraki adıma eklenir. ChatGPT kullanımınızdan daha fazla harcar ve yalnızca düzenleme araçlarıyla yapılan değişiklikleri kapsar.",
+  "Same model as the Goal chat": "Hedef sohbetiyle aynı model",
+  "Sub-agents are off": "Yardımcı ajanlar kapalı",
+  "The reviewer runs as a worker chat, so it needs Sub-agents. Nothing is reviewed until they are on.": "Gözden geçiren, bir yardımcı ajan sohbeti olarak çalışır, bu yüzden Yardımcı ajanlar gerekir. Açılana kadar hiçbir şey gözden geçirilmez.",
+  "Turn on Sub-agents": "Yardımcı ajanları aç",
+  "The reviewer found a problem Goal cannot safely go past. Open the chat to check it.": "Gözden geçiren, Hedef'in güvenle geçemeyeceği bir sorun buldu. Kontrol etmek için sohbeti açın.",
+  "Waiting for the reviewer": "Gözden geçiren bekleniyor",
+  "Continues without the review in {0}": "{0} sonra gözden geçirme olmadan devam eder",
+  "Continuing without the review…": "Gözden geçirme olmadan devam ediliyor…"
 }

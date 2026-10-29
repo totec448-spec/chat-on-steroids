@@ -122,6 +122,20 @@ describe('MCP worker spawn with automatic Git isolation', () => {
     expect(allocation).not.toHaveBeenCalled();
   });
 
+  // #1832: the Goal step reviewer reads the step's uncommitted changes, so it shares the Goal chat's checkout.
+  it('never isolates the Goal step reviewer: it shares the Goal chat\'s own checkout', async () => {
+    selectedGitSource();
+    const allocation = vi.spyOn(worktrees, 'allocWorkerWorkspace');
+    const { spawnAgentWorkers } = await import('../src/main/agent-admission.js');
+    const result = await spawnAgentWorkers(
+      { caller: { conversationId: primeConversation }, workers: [{ task: 'Review this Goal step.', reviewer: true }] },
+      async () => ({ real: repository, virtual: '/approved/project' }), () => true);
+    expect(allocation).not.toHaveBeenCalled();
+    expect(result.created[0]).toMatchObject({ reviewer: true });
+    expect(result.isolationNotes).toEqual(['The reviewer works in the Goal chat\'s own folder, so it sees the step\'s uncommitted changes.']);
+    expect(snapshotSwarm()?.agents.find(row => row.info.id === result.created[0]!.id)?.info.managedWorktree).not.toBe(true);
+  });
+
   it('refuses to promote an orphaned managed worker to a new prime after broker eviction', async () => {
     // The exact session-origin/tombstone fence is resolved asynchronously at MCP admission.
     vi.spyOn(agents, 'managedWorkerIsolationRequired').mockResolvedValueOnce(true);
