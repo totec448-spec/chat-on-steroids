@@ -32,6 +32,7 @@ vi.mock('electron', async () => {
     async loadFile() { this.webContents.emit('did-finish-load'); }
   }
   return {
+    nativeTheme: { shouldUseDarkColors: false },
     BrowserWindow: Window,
     ipcMain: { on: (name: string, listener: (...args: any[]) => void) => mocks.ipc.set(name, listener) },
     screen: Object.assign(new EventEmitter(), {
