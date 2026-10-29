@@ -476,8 +476,9 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       defaultChatReasoning: pick(current.ui.defaultChatReasoning, base.ui.defaultChatReasoning, wanted.ui.defaultChatReasoning),
       chatBrowser: pick(current.ui.chatBrowser, base.ui.chatBrowser, wanted.ui.chatBrowser),
       cosBrowserMinimize: pick(current.ui.cosBrowserMinimize, base.ui.cosBrowserMinimize, wanted.ui.cosBrowserMinimize),
-      // None saved is the default, off: a stale snapshot without the field and the form's Off are the same choice.
-      desktopAsk: pick(current.ui.desktopAsk ?? 'off', base.ui.desktopAsk ?? 'off', wanted.ui.desktopAsk ?? 'off'),
+      // None saved is the default, off: a stale snapshot without the field and the form's Off are the same
+      // choice, so the live value stays (also when none is saved, so nothing reads as changed).
+      desktopAsk: (base.ui.desktopAsk ?? 'off') === (wanted.ui.desktopAsk ?? 'off') ? current.ui.desktopAsk : wanted.ui.desktopAsk,
       developerMode: pick(current.ui.developerMode, base.ui.developerMode, wanted.ui.developerMode),
       playfulStatus: pick(current.ui.playfulStatus, base.ui.playfulStatus, wanted.ui.playfulStatus),
       playfulContinue: pick(current.ui.playfulContinue, base.ui.playfulContinue, wanted.ui.playfulContinue),
