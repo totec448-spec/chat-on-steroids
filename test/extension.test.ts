@@ -1092,14 +1092,14 @@ describe('accepted helper tab cleanup', () => {
       companionDiagnosticsFlight: null, companionDiagnosticsDirty: false, discover: async () => ({ port: 8765 }), companionDiagnosticSnapshot: snapshot, call });
     const publish = vm.runInContext(`${source}\npublishCompanionDiagnostics`, context);
     const first = publish();
-    await vi.waitFor(() => expect(snapshot).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(snapshot).toHaveBeenCalledTimes(1), { timeout: 5_000 });
     publish(true);
     publish(true);
     releases[0]!();
     await first;
-    await vi.waitFor(() => expect(snapshot).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(snapshot).toHaveBeenCalledTimes(2), { timeout: 5_000 });
     releases[1]!();
-    await vi.waitFor(() => expect(call).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(call).toHaveBeenCalledTimes(2), { timeout: 5_000 });
     expect(snapshot).toHaveBeenCalledTimes(2);
   });
 

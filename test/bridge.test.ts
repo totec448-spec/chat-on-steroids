@@ -562,6 +562,20 @@ describe('who is allowed to talk to it', () => {
     await browser('bbbbbbbbbbbbbbbb', 1, 21_000);
     await browser('aaaaaaaaaaaaaaaa', 9, 22_000);
     expect(lines().map(line => line.match(/reloaded (\d+)/)![1])).toEqual(['8', '1', '1']);
+    // A reload the extension skipped says why, once each (CodeRabbit on #1911).
+    const skipped = (value: Record<string, unknown>) => request('POST', '/diagnostics', { browser: 'aaaaaaaaaaaaaaaa', body: { capturedAt: Date.now(),
+      status: { connected: true, paired: true }, preferences: { overwrite: true, durations: false }, errorPageReloads: { count: 9, lastAt: 22_000, skipped: value } } });
+    info.mockClear();
+    await skipped({ reason: 'offline', at: 30_000 });
+    await skipped({ reason: 'offline', at: 30_000 });
+    await skipped({ reason: 'backoff', at: 31_000, nextAt: 151_000 });
+    await skipped({ reason: 'unreadable', at: 32_000 });
+    await skipped({ reason: 'whatever', at: 33_000 });
+    await skipped({ reason: 'constructor', at: 34_000 });
+    expect(lines()).toEqual([
+      "browser: a ChatGPT tab is on Chrome's error page; not reloaded while the browser is offline",
+      "browser: a ChatGPT tab is on Chrome's error page; the next reload is in 120 s (it backs off after each reload)",
+      "browser: a ChatGPT tab is on Chrome's error page; not reloaded, because the extension could not read when it last reloaded it"]);
     info.mockRestore();
   });
 
