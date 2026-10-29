@@ -20,7 +20,7 @@ export function noteRequestTraces(conversationId: string, reported: readonly Req
     traces.set(requestId, { conversationId, path });
     if (traces.size > MAX) traces.delete(traces.keys().next().value!);
     if (unplaced.has(requestId)) {
-      logInfo(`request attribution: ${requestId} (filed under Unattributed activity) appears in the stream of ${conversationId} at ${path}`);
+      logInfo(`request attribution: ${requestId} had no page evidence in time; the stream of ${conversationId} names it at ${path}`);
     }
   }
 }

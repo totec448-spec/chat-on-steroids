@@ -1599,6 +1599,9 @@
     // here made a long service-worker outage look like a complete transcript even though item
     // 401 had already erased item 1 before the durable journal ever saw it.
     while (queue.length > 400 || queueBytes > MAX_PAGE_QUEUE_BYTES) {
+      // Diagnostic request traces (#1752) go first and leave no gap: they are not history.
+      const trace = queue.findIndex((entry) => entry.event?.kind === 'request_trace' && !queueGapKeys.has(entry));
+      if (trace >= 0) { removeQueueEntry(trace); continue; }
       const index = queue.findIndex((entry) => !queueGapKeys.has(entry));
       if (index < 0) break;
       const dropped = removeQueueEntry(index);
@@ -12925,7 +12928,8 @@
           !/^(?:wfr_[a-zA-Z0-9_-]{1,96}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i.test(requestId)) continue;
       traces.push({ requestId, path });
     }
-    if (!traces.length) return;
+    // Expendable: while the queue fills (the extension's worker away), history comes first.
+    if (!traces.length || queue.length >= 300) return;
     if (requestTracesReported.size > 2000) requestTracesReported.clear();
     for (const trace of traces) requestTracesReported.add(trace.requestId);
     emit({ kind: 'request_trace', traces });
