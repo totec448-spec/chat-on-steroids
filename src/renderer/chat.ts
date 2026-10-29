@@ -160,7 +160,7 @@ interface Deps {
   save: () => Promise<boolean>;
   state: () => AppState | null;
   /** #1884: what ⌘K offers besides chats that main.ts owns (Settings, Keyboard shortcuts, settings search). */
-  palette?: { actions(): PaletteAction[]; settings(query: string): PaletteSetting[] };
+  palette?: { actions(): PaletteAction[]; settings(query: string): PaletteSetting[]; showChat?(): void };
 }
 
 let deps: Deps;
@@ -9819,12 +9819,14 @@ export function initChat(next: Deps): void {
       const rows = shortcutGroups(() => deps.state()?.config.ui.enterSends !== false).flatMap(group => group.rows);
       const keyed = (label: () => string, run: () => void, available?: () => boolean): PaletteAction =>
         ({ label, run, available, keys: () => rows.find(row => row.label() === label())?.keys() ?? [] });
+      // An action on the chat's view goes back to the chat first, so it is not done out of sight (CodeRabbit on #1890).
+      const inChat = (run: () => void) => (): void => { deps.palette?.showChat?.(); run(); };
       return [
         keyed(() => t('New chat'), () => $('newChat').click()),
-        keyed(() => t('Find in chat'), () => chatFind?.open(), () => selectedId !== null),
+        keyed(() => t('Find in chat'), inChat(() => chatFind?.open()), () => selectedId !== null),
         ...(['review', 'terminal', 'files', 'agents'] as const).map(view => keyed(
           () => t(view === 'review' ? 'Review' : view === 'terminal' ? 'Terminal' : view === 'files' ? 'Files' : 'Sub-agents'),
-          () => docks.activate(view), () => docks.canActivate(view))),
+          inChat(() => docks.activate(view)), () => docks.canActivate(view))),
         ...(deps.palette?.actions() ?? [])
       ];
     },

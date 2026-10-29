@@ -128,18 +128,20 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
     return button;
   };
 
-  const list = (rows: HTMLElement[]): HTMLElement => {
+  /** Chats are a list; actions and settings are buttons in a group, so screen readers name them as such. */
+  const list = (rows: HTMLElement[], role: 'list' | 'group' = 'list'): HTMLElement => {
     const box = el('div', 'search-list');
-    box.setAttribute('role', 'list');
+    box.setAttribute('role', role);
     box.append(...rows);
     return box;
   };
+
+  const labelled = (box: HTMLElement, name: () => string): HTMLElement => ui(box, 'aria-label', name);
 
   /** A row that runs an action: its name, and its shortcut as the shortcuts dialog prints it. */
   const actionRow = (action: PaletteAction): HTMLButtonElement => {
     const button = el('button', 'search-result is-action') as HTMLButtonElement;
     button.type = 'button';
-    button.setAttribute('role', 'listitem');
     button.append(marked('b', '', action.label()));
     const keys = action.keys?.() ?? [];
     if (keys.length) {
@@ -156,7 +158,6 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
   const settingRow = (setting: PaletteSetting): HTMLButtonElement => {
     const button = el('button', 'search-result is-setting') as HTMLButtonElement;
     button.type = 'button';
-    button.setAttribute('role', 'listitem');
     button.append(marked('b', '', setting.title), marked('span', 'search-snippet', setting.place));
     button.addEventListener('click', () => close(() => setting.open()));
     return button;
@@ -175,8 +176,8 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
     const actions = matchActions(options.actions?.() ?? [], query());
     const settings = (options.settings?.(query()) ?? []).slice(0, MAX_SETTINGS);
     const extras = (): void => {
-      if (actions.length) results.append(el('p', 'search-heading', () => t("Actions")), list(actions.map(actionRow)));
-      if (settings.length) results.append(el('p', 'search-heading', () => t("Settings")), list(settings.map(settingRow)));
+      if (actions.length) results.append(el('p', 'search-heading', () => t("Actions")), labelled(list(actions.map(actionRow), 'group'), () => t("Actions")));
+      if (settings.length) results.append(el('p', 'search-heading', () => t("Settings")), labelled(list(settings.map(settingRow), 'group'), () => t("Settings")));
     };
     const reply = last;
     // A chat search that failed or hasn't answered still leaves the actions and settings to pick from.
