@@ -1,3 +1,4 @@
+import { ageOf, countdownClock } from '../shared/age.js';
 import { DEFAULT_CHAT_PERSONALITY, DEFAULT_CHAT_WRITING_STYLE, MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
 import { hasProviderDirective, resolvedCapture, withoutProviderDirectives } from '../shared/content-reference.js';
 import { completedDilText } from '../shared/dil-tables.js';
@@ -108,8 +109,8 @@ import {
 } from '../shared/goal.js';
 import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS, type HandoffLength } from '../shared/handoff.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
-import { $, ago, clockTime, compactNumber, disclosureChevron, el, icon, run, setIcon, toast } from './dom.js';
-import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
+import { $, ago, clockTime, compactAgeText, compactNumber, disclosureChevron, el, elapsedDurationText, icon, run, setIcon, toast } from './dom.js';
+import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_REPAIR_DEFERRED_TEXT, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
 import { STRICT_REFUSAL_PROGRESS_PREFIX, UNPROVEN_WORKER_NOTICE, UNTRUSTED_NOTICE, UNTRUSTED_WORKER_NOTICE } from '../shared/trust-notices.js';
 import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
 import { createSearchPopup } from './search-popup.js';
@@ -119,6 +120,8 @@ import { firstTurnStart, renderTurnChanges, turnEditCount, turnFinished, turnFro
 import { initSharePage } from './share-page.js';
 import { initFeedbackDialog } from './feedback-dialog.js';
 import { createChatgptProjectPicker } from './chatgpt-project-picker.js';
+import { initScheduleDialog } from './schedule-dialog.js';
+import { nextRunAfter, sameLocalDay, type ScheduleRepeat } from '../shared/schedule.js';
 
 const api = window.api;
 let chatSearch: ChatSearch | null = null;
@@ -177,6 +180,8 @@ let loadedOlderSessions = false;
 const projectHistory = new Map<string, { cursor: { updatedAt: number; id: string } | null; asked: boolean; loading: boolean; failed?: boolean }>();
 let activeId: string | null = null;
 let selectedId: string | null = null;
+/** #1826: the chat's schedule dialog, opened from its ⋯ menu and its schedule line. */
+let scheduleDialog: { open(sessionId: string, draft: string): Promise<void> } | null = null;
 let newChatSelected = true;
 let selectedProjectId: string | null = null;
 /** Branch in new chat (#482): the reply the new chat being written will branch from, if any. */
@@ -1249,6 +1254,11 @@ function sessionRow(summary: SessionSummary): HTMLElement {
       { action: 'share', icon: 'i-globe', label: () => t('Share as web page'),
         title: () => t('Save this chat as one web page file to send to anyone. You see the page before it is saved.'), run: () => openSharePage(summary.id) }
     );
+    // #1826: a chat sends its own message at set times; workers are started by their prime, never on a clock.
+    if (summary.origin?.kind !== 'worker') {
+      items.push({ action: 'schedule', icon: 'i-clock', label: () => t('Schedule…'), title: () => t('Send a message into this chat at set times'),
+        run: () => void scheduleDialog?.open(summary.id, summary.id === selectedId ? $<HTMLTextAreaElement>('chatInput').value : '') });
+    }
     items.push(...chatGroupMenuItems(summary));
     // The stop this app can actually make. It does not touch the running ChatGPT turn — nothing
     // here can — it takes this chat's tools away, and a model whose every call is refused with
@@ -1711,25 +1721,15 @@ function sidebarLayout(): 'projects' | 'inbox' {
 /** The layout the sidebar was last drawn in; the page's own markup is the project tree's. */
 let paintedLayout: 'projects' | 'inbox' = 'projects';
 
-type AgeUnit = 'minute' | 'hour' | 'day' | 'week';
-const ageFormats = new Map<string, Intl.NumberFormat>();
-/** A count in the app language's own narrow unit, as the platform writes it ("5h" in English). */
-function ageIn(value: number, unit: AgeUnit): string {
-  const key = `${currentLanguage()}|${unit}`;
-  let format = ageFormats.get(key);
-  if (!format) ageFormats.set(key, format = new Intl.NumberFormat(currentLanguage(), { style: 'unit', unit, unitDisplay: 'narrow' }));
-  return format.format(value);
-}
-
-/** "now", "4m", "5h", "2d", "3w" in English: one short token that fits beside a title. */
+/** "now", "4m", "5h", "2d", "3w", "4mo", "2y" in English: one short token that fits beside a title. */
 function compactAge(at: number): string {
-  const minutes = Math.max(0, Math.round((Date.now() - at) / 60_000));
-  if (minutes < 1) return t('now');
-  if (minutes < 60) return ageIn(minutes, 'minute');
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return ageIn(hours, 'hour');
-  const days = Math.round(hours / 24);
-  return days < 7 ? ageIn(days, 'day') : ageIn(Math.round(days / 7), 'week');
+  // A time that is not a number has no age to show; "now" would claim recent activity (CodeRabbit on #1904).
+  if (!Number.isFinite(at)) return '';
+  const age = ageOf(at, Date.now());
+  if (!age || (age.unit === 'second' && age.value < 30)) return t('now');
+  // Under a minute rounds up to one; past weeks it goes on to months and years, never "104w", and
+  // from the catalogs, where four months never reads like four minutes (2.1.47 round).
+  return age.unit === 'second' ? compactAgeText(1, 'minute') : compactAgeText(age.value, age.unit);
 }
 
 /** A chat quiet this long, not needing the person, running, unread or pinned, settles into the compact list below. */
@@ -2968,6 +2968,8 @@ function mergeDetailDelta(delta: SessionEvent[]): void {
 let controlsGeneration = 0;
 let controlledSessionId: string | null = null;
 let controlledTurnId: string | null = null;
+/** A turn the page still holds after the app stopped counting it as work: Stop only, no Working (2.1.47 round). */
+let controlledHeldTurnId: string | null = null;
 let controlledSelection = -1;
 let controlledStopPending = false;
 let controlledFinishWaiting = false;
@@ -3018,6 +3020,8 @@ function paintGoalProgress(): void {
   if (entry) { phase = entry.state; error = entry.error ?? undefined; }
   if (draft && (!off || finishDraft) && (finishDraft || !['saving', 'failed'].includes(phase))) { phase = draft.stage; text = draft.text; error = draft.error ?? undefined; }
   else if (wait && !['saving', 'failed'].includes(phase)) { phase = 'settling'; text = ''; error = undefined; }
+  // The next step's draft waits for the Goal step reviewer before it asks the helper (#1832).
+  if (phase === 'sending' && wait?.reason === 'reviewer') { phase = 'settling'; text = ''; error = undefined; }
   const labels: Record<string, string> = { saving: t("Saving task…"), saved: t("Task saved · waiting for the next completed answer"),
     preparing: t("Preparing the opening message…"), generating: t("Generating the opening message…"), ready: t("Message ready · awaiting ChatGPT delivery"),
     sending: t("Preparing a continuation…"), answering: t("Generating a continuation…"), queued: t("Opening message queued"),
@@ -3027,7 +3031,7 @@ function paintGoalProgress(): void {
   labels.retrying = t("Provider busy · retry {0}{1}", [progress?.attempt ?? '', progress?.retryAt ? t(' at {0}', [new Date(progress.retryAt).toLocaleTimeString(currentLanguage())]) : '']);
   const mode = $<HTMLSelectElement>('chatAutomation').value === 'loop' ? t('Loop') : t('Goal');
   labels.settling = `${mode} · ${wait?.reason === 'native-busy' ? t('ChatGPT resumed work · waiting before retry') : wait?.reason === 'silence' ? t('Waiting before recovery reload') : wait?.reason === 'quiet' ? t('Waiting for tool inactivity') :
-    wait?.reason === 'workers' ? t('Waiting for this chat’s sub-agents') : wait?.reason === 'tools' ? t('Waiting for running tools') : wait?.reason === 'listening' ? t('Waiting for activity after recovery') : wait?.reason === 'closed' ? t('Paused until this chat is open in the browser') : t('Answer settling')}`;
+    wait?.reason === 'reviewer' ? t('Waiting for the reviewer') : wait?.reason === 'workers' ? t('Waiting for this chat’s sub-agents') : wait?.reason === 'tools' ? t('Waiting for running tools') : wait?.reason === 'listening' ? t('Waiting for activity after recovery') : wait?.reason === 'closed' ? t('Paused until this chat is open in the browser') : t('Answer settling')}`;
   // The dock already describes this same silence/listening deadline. Keep the
   // Loop/Goal task controls, but do not present its shared wait as another action.
   const sharedRecoveryWait = phase === 'settling' && wait?.until !== undefined &&
@@ -3051,7 +3055,11 @@ function paintGoalProgress(): void {
   }
   if (phase === 'settling' && wait?.until) {
     const seconds = Math.max(0, Math.ceil((wait.until - Date.now()) / 1000));
-    const timer = el('span', 'recovery-countdown', seconds ? t('Check in {0}', [`${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`]) : t('Checking for activity…'));
+    const left = countdownClock(seconds);
+    // The reviewer's deadline is when Goal goes on without the review (#1832), not another check.
+    const timer = el('span', 'recovery-countdown', wait.reason === 'reviewer'
+      ? (seconds ? t('Continues without the review in {0}', [left]) : t('Continuing without the review…'))
+      : seconds ? t('Check in {0}', [left]) : t('Checking for activity…'));
     timer.setAttribute('role', 'timer'); timer.setAttribute('aria-live', 'off'); row.append(timer);
   }
 }
@@ -3110,7 +3118,8 @@ function paintDeliveryControls(): void {
   if (canInject && explicitInjection && $<HTMLSelectElement>('sendMode').value === 'auto') $<HTMLSelectElement>('sendMode').value = 'tool';
   if (!canInject && !canSendDirectly && !queueAtFinish) $<HTMLSelectElement>('sendMode').value = 'auto';
   const pending = pendingComposerInput();
-  const stop = (working || !!pending) && !currentPreparedPlan() && !authoredComposerText().trim() && !(imageDrafts.get(draftKey())?.length);
+  const held = selectedId !== null && controlledSessionId === selectedId && controlledSelection === selectionGeneration && controlledHeldTurnId !== null;
+  const stop = (working || held || !!pending) && !currentPreparedPlan() && !authoredComposerText().trim() && !(imageDrafts.get(draftKey())?.length);
   // Hover selects delivery for the next message. Clicking the empty-composer
   // Stop still acts immediately; there is no second Stop action in the menu.
   $('sendOptions').hidden = !canInject && !canSendDirectly && !queueAtFinish;
@@ -3119,12 +3128,12 @@ function paintDeliveryControls(): void {
   send.disabled = !!preparedPlan && (preparedPlan.sending || preparedPlan.stages.some(stage => !stage.trim()));
   send.dataset.action = stop ? 'stop' : 'send';
   ui(send, 'aria-label', () => stop ? (controlledStopPending ? t("Stop requested") : t("Stop turn")) : t("Send message"));
-  if (stop && !working && pending) ui(send, 'aria-label', () => t("Cancel delivery"));
+  if (stop && !working && !held && pending) ui(send, 'aria-label', () => t("Cancel delivery"));
   const planAction = selectedId && !chatKnownIdle(selectedId) ? t("Queue plan at Session finish") : t("Start full plan");
   if (preparedPlan && !stop) send.setAttribute('aria-label', planAction);
   else if (planMode && !stop) ui(send, 'aria-label', () => t("Generate plan"));
   send.classList.toggle('is-plan-ready', !!preparedPlan && !stop);
-  ui(send, 'title', () => stop && !working && pending ? t("Cancel delivery") : preparedPlan && !stop ? planAction : planMode && !stop ? t("Click to generate plan") : '');
+  ui(send, 'title', () => stop && !working && !held && pending ? t("Cancel delivery") : preparedPlan && !stop ? planAction : planMode && !stop ? t("Click to generate plan") : '');
   send.classList.toggle('is-stop', stop);
   for (const button of $('sendOptions').querySelectorAll<HTMLElement>('[data-delivery]')) {
     button.setAttribute('aria-checked', String(button.dataset.delivery === (nativeFiles && working && $<HTMLSelectElement>('sendMode').value !== 'tool' ? 'after-turn' : $<HTMLSelectElement>('sendMode').value)));
@@ -3436,14 +3445,14 @@ async function refreshSessionControls(): Promise<void> {
     for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
   }
   paintAutomationSwitch();
-  if (!id) { controlledSessionId = null; controlledTurnId = null; controlledPageless = false; paintDeliveryControls(); menu.hidden = false;
+  if (!id) { controlledSessionId = null; controlledTurnId = null; controlledHeldTurnId = null; controlledPageless = false; paintDeliveryControls(); menu.hidden = false;
     $<HTMLTextAreaElement>('sessionObjective').disabled = false;
     paintTaskActions();
     for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
     return; }
   const opening = pendingComposerInputs.find(row => row.opening && row.sessionId === id && ['queued', 'browser'].includes(row.state));
   if (!sessions.find(row => row.id === id)?.conversationId) {
-    controlledSessionId = id; controlledSelection = selectionGeneration; controlledTurnId = null;
+    controlledSessionId = id; controlledSelection = selectionGeneration; controlledTurnId = null; controlledHeldTurnId = null;
     controlledCanInject = false; controlledCanSendDirectly = false; controlledQueueAtFinish = false;
     controlledStopPending = false; controlledFinishWaiting = false; controlledPageless = false;
     menu.hidden = false;
@@ -3464,6 +3473,7 @@ async function refreshSessionControls(): Promise<void> {
   controlledSessionId = id;
   controlledSelection = selectionGeneration;
   controlledTurnId = controls?.activeTurnId ?? null;
+  controlledHeldTurnId = controls?.heldTurnId ?? null;
   goalDraftView = controls?.goalDraft ?? null;
   goalWaitView = controls?.goalWait ?? null;
   finishGoalDraftView = controls?.finishGoalDraft ?? null;
@@ -5395,6 +5405,11 @@ function approvalRowText(text: string): string {
   return text;
 }
 
+function repairRowText(text: string): string {
+  return text === APPROVAL_REPAIR_DEFERRED_TEXT
+    ? t('Reload was deferred because ChatGPT showed a tool approval card.') : text;
+}
+
 /** A strict-trust notice in the interface language; older wordings stay as recorded. Literal keys for the catalog audit. */
 function trustNoticeText(text: string): string {
   if (text === UNTRUSTED_NOTICE) return t("A tool call from an untrusted chat was refused. To allow it, open this chat's ⋯ menu in the sidebar (or right-click its row) and choose Trust chat.");
@@ -5435,6 +5450,8 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
         attachments.append(slot);
         return slot;
       });
+      // #1826: a scheduled run keeps saying so once sent, as its queue row did.
+      if (event.scheduled) box.append(el('span', 'said-origin', () => scheduledLabel(event)));
       if (event.attachments?.length || assets.length || retained.length) box.append(attachments);
       if (!assets.length) for (const image of retained) preview(image.dataUrl, true);
       // Native ChatGPT can prepend a blank paragraph. Ignore it only when a
@@ -5522,6 +5539,7 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
         return el('p', 'meta is-progress', () => t(goalErrorMessage('goal_helper_stop_unverified')));
       }
       if (event.progressId?.startsWith(STRICT_REFUSAL_PROGRESS_PREFIX)) return el('p', 'meta is-progress', () => trustNoticeText(event.message.text));
+      if (event.source === 'app' && event.progressId?.startsWith('browser-repair:')) return el('p', 'meta is-progress', () => repairRowText(event.message.text));
       if (!event.progressId?.startsWith(APPROVAL_PROGRESS_PREFIX)) return el('p', 'meta is-progress', event.message.text);
       // ChatGPT's own tool approval card stands in this chat's page (approval-wait.ts). The app
       // writes the English source; only the user can answer the card, so the row opens the page.
@@ -6837,7 +6855,7 @@ function paintRecoveryStatus(): boolean {
   if (host.hidden) return paintRecoveryVerdict(host, sessionId);
   if (!host.hidden && recovery?.kind === 'progress') {
     const row = el('div', 'recovery-notice');
-    row.append(icon('i-pulse'), el('span', 'queue-label', recovery.message.text),
+    row.append(icon('i-pulse'), el('span', 'queue-label', () => repairRowText(recovery.message.text)),
       dockAction(() => t('Dismiss recovery notice'), 'i-x', () => {
         if (sessionId) dismissedRecoveryNotices.set(sessionId, revision);
         host.hidden = true; host.replaceChildren();
@@ -6941,13 +6959,9 @@ function backgroundCommand(command: string): string {
   return compact.length > 120 ? compact.slice(0, 117) + '…' : compact;
 }
 
+/** "45s", "4m 5s", "6h 12m", then "3d 4h": a process left running for days never reads "72h 4m". */
 function backgroundElapsed(startedAt: number): string {
-  const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
-  const hours = Math.floor(minutes / 60);
-  return `${hours}h ${minutes % 60}m`;
+  return elapsedDurationText((Date.now() - startedAt) / 1000, 2);
 }
 
 function syncBackgroundProcessClock(visible: boolean): void {
@@ -7809,6 +7823,7 @@ export function chatSettingsPatch(current: Config): {
       loopBackend: $<HTMLSelectElement>('loopBackend').value as Config['goal']['loopBackend'],
       helperModel: $<HTMLSelectElement>('helperModel').value || current.goal.helperModel || DEFAULT_HELPER_CHAT_MODEL,
       helperReasoning: ($<HTMLSelectElement>('helperReasoning').value || current.goal.helperReasoning || 'high') as Config['goal']['helperReasoning'],
+      reviewerModel: $<HTMLSelectElement>('goalReviewer').value,
       provider: {
         kind: ($<HTMLSelectElement>('goalProvider').value || current.goal.provider?.kind || 'openrouter') as Config['goal']['provider']['kind'],
         baseUrl: $<HTMLInputElement>('goalBaseUrl').value
@@ -8240,6 +8255,7 @@ const CHAT_INPUTS = [
   'goalBackend',
   'loopBackend',
   'helperModel', 'helperReasoning',
+  'goalReviewer',
   'autoCompact',
   'autoCompactTokens',
   'maWorkers', 'globalMaWorkers',
@@ -8398,6 +8414,8 @@ export function chatApply(state: AppState, previous?: Config): void {
   // again matched no option and showed those settings blank (2.1.31 release check).
   applyChatValue($<HTMLSelectElement>('goalBackend'), config.goal.backend ?? 'chatgpt', previous?.goal.backend);
   applyChatValue($<HTMLSelectElement>('loopBackend'), config.goal.loopBackend ?? 'chatgpt', previous?.goal.loopBackend);
+  // The step reviewer is a worker chat (#1832): chosen while Sub-agents are off, it says so and offers them.
+  $('goalReviewerWorkersRow').hidden = !config.goal.reviewerModel || config.multiAgent.enabled;
   applyGoal(state, previous);
 
   // Extension bridge. Connecting is automatic, so this reports rather than asks.
@@ -8470,6 +8488,15 @@ function historicalAutomaticInput(entry: InputEntry): boolean {
     entry.state === 'cancelled' && !!entry.error;
 }
 
+/** #1826: a run of the chat's schedule says so, and, when it went out late, when it was due. */
+function scheduledLabel(entry: { scheduled?: { dueAt: number; late: boolean } }): string {
+  const scheduled = entry.scheduled;
+  if (!scheduled) return '';
+  return scheduled.late
+    ? t('Scheduled · late, was due {0}', [new Date(scheduled.dueAt).toLocaleTimeString(currentLanguage(), { hour: '2-digit', minute: '2-digit' })])
+    : t('Scheduled');
+}
+
 function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   const row = el('div', 'pending-message');
   row.classList.toggle('is-delivered', !entry.error && ['sent', 'tool'].includes(entry.state));
@@ -8490,6 +8517,7 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   if (files.childElementCount) row.append(files);
   // What the person wrote: a plan's first message shows their request, as it will once recorded.
   const authored = authoredTextOf(entry);
+  if (entry.scheduled) row.append(el('div', 'pending-message-origin', () => scheduledLabel(entry)));
   if (authored) {
     const text = el('div', 'pending-message-text', authored);
     text.setAttribute('dir', 'auto');
@@ -8607,7 +8635,7 @@ function paintPendingInputs(): void {
   const host = $('inputQueue');
   const previous = new Map([...host.querySelectorAll<HTMLElement>(':scope > .pending-message')].map(row => [row.dataset.inputId, row]));
   const next = rows.filter(entry => !historicalAutomaticInput(entry)).map(entry => {
-    const sig = JSON.stringify([entry.text, entry.state, entry.error, entry.dueAt, notice(entry), routeHeld(entry), queuedWaitReason(entry), entry.sendCheck, entry.stagesApplied,
+    const sig = JSON.stringify([entry.text, entry.state, entry.error, entry.dueAt, entry.scheduled, notice(entry), routeHeld(entry), queuedWaitReason(entry), entry.sendCheck, entry.stagesApplied,
       entry.stages, entry.attachments?.map(file => file.id), entry.images?.map(image => [image.name, image.dataUrl.length]),
       hasLaterModelActivity(entry.deliveredAt ?? entry.offeredAt ?? entry.createdAt)]);
     const old = previous.get(entry.id);
@@ -8618,7 +8646,55 @@ function paintPendingInputs(): void {
   reconcileChildren(host, [...next, ...host.querySelectorAll<HTMLElement>(':scope > .queued-input')]);
   holdSentMessage();
 }
+/** How a schedule repeats, in the chosen language: "every weekday at 09:00". */
+function repeatText(repeat: ScheduleRepeat): string {
+  if (repeat.kind === 'hours') return repeat.every === 1 ? t('every hour') : tn('every {0} hour', 'every {0} hours', repeat.every);
+  // The stored wall-clock time, written the way the next time beside it is (09:00 or 9:00 AM).
+  const [hour, minute] = repeat.at.split(':').map(Number) as [number, number];
+  const at = new Date(2024, 0, 1, hour, minute).toLocaleTimeString(currentLanguage(), { hour: '2-digit', minute: '2-digit' });
+  if (repeat.kind === 'daily') return t('every day at {0}', [at]);
+  if (repeat.kind === 'weekdays') return t('every weekday at {0}', [at]);
+  const day = new Intl.DateTimeFormat(currentLanguage(), { weekday: 'long' }).format(new Date(2024, 0, 7 + repeat.day));
+  return t('every {0} at {1}', [day, at]);
+}
+
+let scheduleLineGeneration = 0;
+/** #1826: the selected chat's schedule as one quiet line above its queue, with Pause and Edit. */
+async function paintScheduleLine(): Promise<void> {
+  const request = ++scheduleLineGeneration;
+  const sessionId = selectedId;
+  const line = $('scheduleLine');
+  const reply = sessionId ? await api.getSchedule(sessionId) : null;
+  if (request !== scheduleLineGeneration || sessionId !== selectedId) return;
+  const schedule = reply?.ok ? reply.data : null;
+  line.hidden = !schedule;
+  if (!schedule) return;
+  // A time today is its time alone; another day's names the day ("Wed 07:17" today read as next week).
+  const clock = (instant: number) => new Date(instant).toLocaleString(currentLanguage(), sameLocalDay(instant, Date.now())
+    ? { hour: '2-digit', minute: '2-digit' } : { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  const next = nextRunAfter(schedule, Math.max(Date.now(), schedule.lastDueAt ?? 0));
+  const parts = [schedule.paused ? t('Paused') : t('Scheduled'), repeatText(schedule.repeat)];
+  if (schedule.missedDueAt !== undefined) parts.push(t('missed {0}', [clock(schedule.missedDueAt)]));
+  if (!schedule.paused) parts.push(next === null ? t('ended') : t('next {0}', [clock(next)]));
+  ui($('scheduleLineText'), 'textContent', () => parts.join(' · '));
+  // Pause and Edit drawn like the Goal row's: the dock's own icon actions, named by tooltip.
+  const pause = $<HTMLButtonElement>('scheduleLinePause');
+  const pauseLabel = () => schedule.paused ? t('Resume schedule') : t('Pause schedule');
+  pause.replaceChildren(icon(schedule.paused ? 'i-play' : 'i-power'));
+  ui(pause, 'title', pauseLabel); ui(pause, 'aria-label', pauseLabel);
+  pause.onclick = async () => {
+    pause.disabled = true;
+    try { await run(api.pauseSchedule(schedule.sessionId, !schedule.paused)); } finally { pause.disabled = false; }
+    void paintScheduleLine();
+  };
+  const edit = $<HTMLButtonElement>('scheduleLineEdit');
+  if (!edit.firstChild) edit.append(icon('i-pencil'));
+  ui(edit, 'title', () => t('Edit schedule')); ui(edit, 'aria-label', () => t('Edit schedule'));
+  edit.onclick = () => void scheduleDialog?.open(schedule.sessionId, '');
+}
+
 async function refreshInputQueue(): Promise<void> {
+  void paintScheduleLine();
   const request = ++inputQueueGeneration;
   const selection = selectionGeneration;
   const [all, pausedHelpers] = await Promise.all([run(api.listInputs()), run(api.listPausedHelpers())]);
@@ -8664,7 +8740,8 @@ async function refreshInputQueue(): Promise<void> {
     if (projectedIds.has(entry.id)) ui(card, 'aria-label', () => t("Plan stage · waiting for the first message to be sent"));
     if (entry.recovery) ui(card, 'aria-label', () => t('Automatic Continue'));
     // Held by the send check: the card says so in place of the text, which stays in the tooltip.
-    const label = el('span', 'queue-label', entry.recovery ? () => `${t('Automatic Continue')} · ${sendCheckHold(entry) ?? entry.text}` : entry.text);
+    const label = el('span', 'queue-label', entry.recovery ? () => `${t('Automatic Continue')} · ${sendCheckHold(entry) ?? entry.text}`
+      : entry.scheduled ? () => `${scheduledLabel(entry)} · ${sendCheckHold(entry) ?? entry.text}` : entry.text);
     card.classList.toggle('is-held', !!sendCheckHold(entry));
     ui(label, 'title', () => `${entry.recovery
       ? t('Resumes without a final answer. If ChatGPT is still generating, the silent turn is stopped before Continue is sent.')
@@ -8864,7 +8941,7 @@ function showAutoSkillReceipt(entry: Pick<InputEntry, 'autoSkills'>): void {
   if (entry.autoSkills?.length) toast(t('Auto-selected Skill: /{0}', [entry.autoSkills[0]!.id]));
 }
 async function stopCurrentTurn(): Promise<void> {
-  const id = selectedId, turnId = controlledTurnId, generation = selectionGeneration;
+  const id = selectedId, turnId = controlledTurnId ?? controlledHeldTurnId, generation = selectionGeneration;
   if (!id || controlledSessionId !== id || controlledSelection !== generation || !turnId || controlledStopPending) return;
   controlledStopPending = true; paintDeliveryControls();
   try { await run(api.stopSessionTurn(id, turnId)); }
@@ -8887,13 +8964,19 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
     if (!controlAction) return;
     const target = selectedId, selection = selectionGeneration;
     const sameSelection = () => selectedId === target && selectionGeneration === selection;
+    // The turn the button showed Stop for, before the refresh can change it (CodeRabbit).
+    const shownTurn = controlledSessionId === target && controlledSelection === selection ? controlledTurnId ?? controlledHeldTurnId : null;
     await refreshSessionControls();
     if (!sameSelection()) return;
     // An actual turn takes precedence over queued follow-ups. Stop never silently
     // becomes cancellation of a different pending input in that same chat.
-    if (target && controlledSessionId === target && controlledSelection === selection && controlledTurnId) {
+    const nowTurn = target && controlledSessionId === target && controlledSelection === selection ? controlledTurnId ?? controlledHeldTurnId : null;
+    if (nowTurn && (!shownTurn || nowTurn === shownTurn)) {
       await stopCurrentTurn(); return;
     }
+    // The turn it showed Stop for ended or changed meanwhile (or the read failed): stop nothing
+    // else, and cancel nothing either.
+    if (shownTurn) return;
     const pending = pendingComposerInput();
     if (pending && ['queued', 'browser'].includes(pending.state)) {
       const wasStarting = startingInputs.has(pending.id);
@@ -9491,6 +9574,7 @@ export function initChat(next: Deps): void {
   };
   // The composer's Share a folder means a folder on this computer: straight to the picker.
   $('composerFolder').addEventListener('click', () => void addLocalProject());
+  scheduleDialog = initScheduleDialog(api, () => void paintScheduleLine());
   let sshDialogGeneration = 0;
   const sshProjectDialog = initSshProjectDialog(api, (project, known, asked) => {
     showAddedProject(project, sshDialogGeneration);
@@ -9672,6 +9756,8 @@ export function initChat(next: Deps): void {
     const controlAction = event.submitter === $('chatSend') && $('chatSend').dataset.action === 'stop';
     if (currentPreparedPlan()) void sendPreparedPlan();
     else if (!controlAction && /^\s*\/[a-z]/i.test($<HTMLTextAreaElement>('chatInput').value)) void sendTypedCommand(controlAction);
+    // The button showed Stop (or Cancel): that is what it does, also with Plan armed (CodeRabbit).
+    else if (controlAction) void sendComposer(undefined, undefined, undefined, true);
     else if (taskPlans.has(draftKey())) {
       if (!$('createPlan').dataset.busy) void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt');
     } else void sendComposer(undefined, undefined, undefined, controlAction);
@@ -9900,6 +9986,19 @@ export function initChat(next: Deps): void {
   }
 
   wireGoal(() => deps.save());
+  // Only the person's press turns Sub-agents on for the reviewer, through Home's own switch and save.
+  $('goalReviewerWorkers').addEventListener('click', async () => {
+    const workers = $<HTMLInputElement>('homeMaEnabled');
+    if (workers.checked) return;
+    workers.checked = true;
+    // The saved state hides this row with the focused button in it; the reviewer's choice keeps the keyboard's place.
+    const button = $<HTMLButtonElement>('goalReviewerWorkers');
+    if (document.activeElement === button) $<HTMLSelectElement>('goalReviewer').focus();
+    if (await deps.save()) return;
+    // Refused (an invalid field elsewhere): Sub-agents stay off, and the switch must not say otherwise.
+    workers.checked = false;
+    if (document.activeElement === $('goalReviewer') && !$('goalReviewerWorkersRow').hidden) button.focus();
+  });
 
   $('bridgeUnpair').addEventListener('click', async () => {
     const state = await run(api.unpairExtension());

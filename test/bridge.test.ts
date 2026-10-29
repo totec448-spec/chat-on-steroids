@@ -49,6 +49,7 @@ vi.mock('electron', () => ({
 const { safeStorage } = await import('electron');
 
 const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
+const { cancelStepReview, startStepReview } = await import('../src/main/goal-reviewer.js');
 const { queueWorkerArchives, resetWorkerArchiveForTests } = await import('../src/main/worker-archive.js');
 const { initSecretsPath, resetSecretsCacheForTests, setSecret } = await import('../src/main/secrets.js');
 const {
@@ -161,6 +162,7 @@ const {
   requestWorkerBootstraps,
   requestWorkerRevivals,
   spawn,
+  REVIEW_MAX_MS,
   stageSpawn,
   stageMessages,
   pendingWorkerSpawns,
@@ -539,6 +541,46 @@ describe('direct browser control over the paired bridge', () => {
 });
 
 describe('who is allowed to talk to it', () => {
+  // A chat tab the extension reloaded off Chrome's error page says so in the app's log, once (2.1.47 round).
+  it('logs the extension\'s error-page reloads once each', async () => {
+    await pair();
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
+    const report = (count: number, lastAt: number) => request('POST', '/diagnostics', { body: { capturedAt: Date.now(), status: { connected: true, paired: true },
+      preferences: { overwrite: true, durations: false }, errorPageReloads: { count, lastAt } } });
+    const lines = () => info.mock.calls.map(([line]) => String(line)).filter(line => line.includes("Chrome's error page"));
+    await report(0, 0);
+    await report(1, 5_000);
+    await report(1, 5_000);
+    await report(3, 9_000);
+    expect(lines()).toEqual([
+      "browser: reloaded 1 ChatGPT tab(s) left on Chrome's error page (loaded while offline; the browser is online again)",
+      "browser: reloaded 2 ChatGPT tab(s) left on Chrome's error page (loaded while offline; the browser is online again)"]);
+    // Each browser counts on its own (CodeRabbit on #1911): A at 8, B at 1, then A at 9 is one more.
+    const browser = (id: string, count: number, lastAt: number) => request('POST', '/diagnostics', { browser: id, body: { capturedAt: Date.now(),
+      status: { connected: true, paired: true }, preferences: { overwrite: true, durations: false }, errorPageReloads: { count, lastAt } } });
+    info.mockClear();
+    await browser('aaaaaaaaaaaaaaaa', 8, 20_000);
+    await browser('bbbbbbbbbbbbbbbb', 1, 21_000);
+    await browser('aaaaaaaaaaaaaaaa', 9, 22_000);
+    expect(lines().map(line => line.match(/reloaded (\d+)/)![1])).toEqual(['8', '1', '1']);
+    // A reload the extension skipped says why, once each (CodeRabbit on #1911).
+    const skipped = (value: Record<string, unknown>) => request('POST', '/diagnostics', { browser: 'aaaaaaaaaaaaaaaa', body: { capturedAt: Date.now(),
+      status: { connected: true, paired: true }, preferences: { overwrite: true, durations: false }, errorPageReloads: { count: 9, lastAt: 22_000, skipped: value } } });
+    info.mockClear();
+    await skipped({ reason: 'offline', at: 30_000 });
+    await skipped({ reason: 'offline', at: 30_000 });
+    await skipped({ reason: 'backoff', at: 31_000, nextAt: 151_000 });
+    await skipped({ reason: 'unreadable', at: 32_000 });
+    await skipped({ reason: 'whatever', at: 33_000 });
+    await skipped({ reason: 'constructor', at: 34_000 });
+    expect(lines()).toEqual([
+      "browser: a ChatGPT tab is on Chrome's error page; not reloaded while the browser is offline",
+      "browser: a ChatGPT tab is on Chrome's error page; the next reload is in 120 s (it backs off after each reload)",
+      "browser: a ChatGPT tab is on Chrome's error page; not reloaded, because the extension could not read when it last reloaded it"]);
+    info.mockRestore();
+  });
+
   it('bounds authenticated companion diagnostics and clears them with the bridge lifecycle', async () => {
     const body = { capturedAt: Date.now(), status: { connected: true, paired: true, appVersion: 'v'.repeat(200) },
       preferences: { overwrite: true, durations: false }, transcript: 'must not be forwarded',
@@ -9740,6 +9782,199 @@ describe('unattributed activity recovery', () => {
     }
   });
 
+  it.each(['answered', 'disappeared', 'redrawn', 'stale'] as const)(
+    'holds unattributed recovery at its first deadline and resumes after approval ends: %s', async ending => {
+      vi.useFakeTimers();
+      try {
+        await pair();
+        await events(PRIME, [openTurn(`approval-${ending}`)]);
+        const card = encodeURIComponent(JSON.stringify({ id: 'approval-card-1234', lines: ['Allow this tool?'], allow: true }));
+        const waiting = () => request('GET', `/activity?conversationId=${PRIME}&approval=1&approvalCard=${card}`);
+        await waiting();
+        await unattributed();
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(await maintenance(), 'a waiting card must not be reloaded').toBeNull();
+        expect(await maintenance(), 'polling must preserve the pending repair').toBeNull();
+
+        if (ending === 'redrawn') {
+          await request('GET', `/activity?conversationId=${PRIME}&approval=0`);
+          await vi.advanceTimersByTimeAsync(1_000);
+          await waiting();
+          await vi.advanceTimersByTimeAsync(4_000);
+          expect(await maintenance(), 'the redrawn card still holds recovery').toBeNull();
+        }
+        if (ending === 'stale') {
+          const { APPROVAL_FRESH_MS } = await import('../src/main/approval-wait.js');
+          await vi.advanceTimersByTimeAsync(APPROVAL_FRESH_MS);
+        } else {
+          // The page reports approval=0 both after an answer and when the card disappears.
+          await request('GET', `/activity?conversationId=${PRIME}&approval=0`);
+        }
+        const repair = await maintenance();
+        expect(repair).toMatchObject({ conversationId: PRIME, reason: 'unattributed' });
+        expect((await request('POST', '/repairs/claim', { body: { token: repair!.token } })).body.allowed).toBe(true);
+        expect(await maintenance(repair!.token)).toBeNull();
+      } finally { vi.useRealTimers(); }
+    }
+  );
+
+  it('holds an already queued unattributed repair without losing its later handout', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair(); await events(PRIME, [openTurn('approval-after-queue')]);
+      await unattributed(); await vi.advanceTimersByTimeAsync(15_000);
+      await request('GET', `/activity?conversationId=${PRIME}&approval=1`);
+      for (let poll = 0; poll < 12; poll++) expect(await maintenance()).toBeNull();
+      await request('GET', `/activity?conversationId=${PRIME}&approval=0`);
+      expect(await maintenance()).toMatchObject({ conversationId: PRIME, reason: 'unattributed' });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('records the approval deferral on the repair row and restores reloading when the handout resumes', async () => {
+    vi.useFakeTimers();
+    const recorder = await import('../src/main/session/recorder.js');
+    const writeProgress = recorder.recordProgress;
+    let progress: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      await pair(); await events(PRIME, [openTurn('approval-during-handout')]);
+      await unattributed(); await vi.advanceTimersByTimeAsync(15_000);
+      const session = (await findSessionByConversation(PRIME, { requireUnique: true }))!;
+      const snapshots = async () => (await readEvents(session.id, { kinds: ['progress'] })).filter(
+        (event): event is Extract<SessionEvent, { kind: 'progress' }> =>
+          event.kind === 'progress' && !!event.progressId?.startsWith('browser-repair:')
+      );
+      progress = vi.spyOn(recorder, 'recordProgress').mockImplementationOnce(async (...args) => {
+        await request('GET', `/activity?conversationId=${PRIME}&approval=1`);
+        return writeProgress(...args);
+      });
+      expect(await maintenance()).toBeNull();
+      expect(progress).toHaveBeenCalled();
+      const heldSnapshots = await snapshots();
+      const held = foldProgress(heldSnapshots);
+      expect(held.map(event => event.kind === 'progress' ? event.message.text : '')).toEqual([
+        'Reload was deferred because ChatGPT showed a tool approval card.'
+      ]);
+      expect(held[0]!.turnId).toBe('approval-during-handout');
+      expect(await maintenance()).toBeNull();
+      expect(await snapshots()).toHaveLength(heldSnapshots.length);
+      await request('GET', `/activity?conversationId=${PRIME}&approval=0`);
+      expect(await maintenance()).toMatchObject({ conversationId: PRIME, reason: 'unattributed' });
+      const resumed = foldProgress(await snapshots());
+      expect(resumed.map(event => event.kind === 'progress' ? event.message.text : '')).toEqual([
+        'Trying to reload chat to recover missing connector attribution…'
+      ]);
+      expect(resumed[0]).toMatchObject({ progressId: heldSnapshots[0]!.progressId });
+      expect(resumed[0]!.turnId).toBe('approval-during-handout');
+    } finally { progress?.mockRestore(); vi.useRealTimers(); }
+  });
+
+  it.each([true, false])('handles approval=%s reported after the unattributed repair handout', async approval => {
+    vi.useFakeTimers();
+    try {
+      await pair(); await events(PRIME, [openTurn('approval-after-handout')]);
+      await unattributed(); await vi.advanceTimersByTimeAsync(15_000);
+      const session = (await findSessionByConversation(PRIME, { requireUnique: true }))!;
+      const rows = async () => foldProgress((await readEvents(session.id, { kinds: ['progress'] })).filter(
+        event => event.kind === 'progress' && !!event.progressId?.startsWith('browser-repair:')
+      ));
+      const handout = await maintenance();
+      expect(handout).toMatchObject({ conversationId: PRIME, reason: 'unattributed' });
+      const original = (await rows())[0];
+      // No activity poll has reported the card: the pre-navigation page check sees it first.
+      const failed = await request('GET', `/status?repairFailed=${handout!.token}&repairAction=reloaded&why=streaming${approval ? '&approval=1' : ''}`);
+      expect(failed.body.repairs).toEqual([]);
+      const held = await rows();
+      expect(held).toHaveLength(1);
+      expect(held[0]).toMatchObject({ ...original, message: expect.objectContaining({
+        text: approval ? 'Reload was deferred because ChatGPT showed a tool approval card.' : 'Not reloaded: ChatGPT is answering.'
+      }) });
+      for (let poll = 0; poll < 3; poll++) expect(await maintenance()).toBeNull();
+      await request('GET', `/activity?conversationId=${PRIME}&approval=0`);
+      const resumed = await maintenance();
+      if (approval) {
+        expect(resumed).toMatchObject({ conversationId: PRIME, reason: 'unattributed' });
+        expect(resumed!.token).not.toBe(handout!.token);
+        expect((await rows())[0]).toMatchObject({ ...original, message: expect.objectContaining({
+          text: 'Trying to reload chat to recover missing connector attribution…'
+        }) });
+        // A duplicate receipt for the old offer cannot retire the new one.
+        await request('GET', `/status?repairFailed=${handout!.token}&repairAction=reloaded&why=streaming&approval=1`);
+        expect((await rows())[0]).toMatchObject({ ...original, message: expect.objectContaining({
+          text: 'Trying to reload chat to recover missing connector attribution…'
+        }) });
+        await maintenance(resumed!.token, 'reloaded');
+        expect((await rows())[0]).toMatchObject({ ...original, message: expect.objectContaining({
+          text: 'Reloaded chat to recover missing connector attribution.'
+        }) });
+        expect(await maintenance()).toBeNull();
+      } else expect(resumed).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(['preparation', 'browser-check'])('keeps one live approval row when attribution retires a repair held during %s', async phase => {
+    vi.useFakeTimers();
+    const recorder = await import('../src/main/session/recorder.js');
+    const { APPROVAL_WAITING_TEXT, APPROVAL_ANSWERED_TEXT } = await import('../src/shared/approval-wait.js');
+    const writeProgress = recorder.recordProgress;
+    let progress: ReturnType<typeof vi.spyOn> | undefined;
+    try {
+      await pair(); await events(PRIME, [openTurn('approval-retired-after-deferral')]);
+      await unattributed(); await vi.advanceTimersByTimeAsync(15_000);
+      const session = (await findSessionByConversation(PRIME, { requireUnique: true }))!;
+      const rows = async () => foldProgress(await readEvents(session.id, { kinds: ['progress'] }));
+      if (phase === 'preparation') {
+        progress = vi.spyOn(recorder, 'recordProgress').mockImplementationOnce(async (...args) => {
+          await request('GET', `/activity?conversationId=${PRIME}&approval=1`);
+          return writeProgress(...args);
+        });
+        expect(await maintenance()).toBeNull();
+      } else {
+        const handout = await maintenance();
+        expect(handout?.reason).toBe('unattributed');
+        await request('GET', `/status?repairFailed=${handout!.token}&repairAction=reloaded&why=streaming&approval=1`);
+      }
+      const texts = async () => (await rows()).map(event => event.kind === 'progress' ? event.message.text : '');
+      expect((await texts()).filter(text => text === APPROVAL_WAITING_TEXT)).toHaveLength(1);
+      expect(await texts()).toContain('Reload was deferred because ChatGPT showed a tool approval card.');
+      await attributed(PRIME, false, Date.now());
+      await request('GET', `/activity?conversationId=${PRIME}&approval=0`);
+      expect(await maintenance()).toBeNull();
+      expect(await texts()).not.toContain(APPROVAL_WAITING_TEXT);
+      expect(await texts()).toContain(APPROVAL_ANSWERED_TEXT);
+      expect(await texts()).toContain('Reload was deferred because ChatGPT showed a tool approval card.');
+    } finally { progress?.mockRestore(); vi.useRealTimers(); }
+  });
+
+  it('holds only the approval-waiting suspect and still repairs the other chat', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(PRIME, [openTurn('approval-cohort-prime')]);
+      await events(OTHER, [openTurn('approval-cohort-other')]);
+      await request('GET', `/activity?conversationId=${PRIME}&approval=1`);
+      await unattributed(); await vi.advanceTimersByTimeAsync(60_000);
+      const other = await maintenance();
+      expect(other).toMatchObject({ conversationId: OTHER, reason: 'unattributed' });
+      await maintenance(other!.token);
+      await request('GET', `/activity?conversationId=${PRIME}&approval=0`);
+      expect(await maintenance()).toMatchObject({ conversationId: PRIME, reason: 'unattributed' });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(['attributed', 'blocked'] as const)('retires an approval-held unattributed repair when the chat is %s', async ending => {
+    vi.useFakeTimers();
+    try {
+      await pair(); await events(PRIME, [openTurn(`approval-retired-${ending}`)]);
+      await request('GET', `/activity?conversationId=${PRIME}&approval=1`);
+      await unattributed(); await vi.advanceTimersByTimeAsync(15_000);
+      expect(await maintenance()).toBeNull();
+      if (ending === 'attributed') await attributed(PRIME, false, Date.now());
+      else await setChatBlocked(PRIME, true);
+      await request('GET', `/activity?conversationId=${PRIME}&approval=0`);
+      expect(await maintenance()).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
   /**
    * A browser worker can disappear after collecting a handout but before reporting an action.
    * Its next plain maintenance pass is the negative acknowledgement: success would have been
@@ -14664,6 +14899,82 @@ describe('the goal loop over the bridge', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  // #1832: the Goal step reviewer holds its chat by itself, with its own deadline to show.
+  it('waits for the Goal step reviewer with its deadline, whatever the workers setting', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = 'cafe0097-0000-4000-8000-000000000097';
+      const previous = getConfig();
+      await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'goal' },
+        multiAgent: { ...previous.multiAgent, enabled: true, waitForSubAgents: false, recoverAgentTabs: false } });
+      const recorded = await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'keep going', messageId: 'm-review-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'g-review' },
+        { kind: 'turn_end', time: Date.now(), turnId: 'g-review', outcome: 'completed' },
+        { kind: 'assistant_message', time: Date.now(), turnId: 'g-review', messageId: 'a-review', text: 'Edited the file.',
+          state: 'final', final: true, goalEligible: true, activeNow: true }
+      ] } });
+      const sessionId = recorded.body.sessionId as string;
+      const asked = Date.now();
+      spawn({ workers: [{ task: 'Review this Goal step.', reviewer: true }], caller: { conversationId: chat } });
+      const held = { reason: 'reviewer', until: asked + REVIEW_MAX_MS };
+      expect((await sessionControlsFor(sessionId)).goalWait).toEqual(held);
+      expect((await request('GET', `/activity?conversationId=${chat}`)).body.goal.wait).toEqual(held);
+      await vi.advanceTimersByTimeAsync(REVIEW_MAX_MS);
+      expect((await sessionControlsFor(sessionId)).goalWait).toEqual({ reason: 'settling' });
+    } finally { vi.useRealTimers(); }
+  });
+
+  // CodeRabbit on #1879: the next step's draft waits for the review, but both callers skip the wait
+  // while a draft exists, and a review still finding a worker slot has no reviewer hold to show.
+  it('shows the reviewer wait while the next step\'s draft waits for a review still finding a worker slot', async () => {
+    await pair();
+    const chat = 'cafe0098-0000-4000-8000-000000000098';
+    const turnId = 'g-review-slot';
+    const previous = getConfig();
+    await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'goal' },
+      multiAgent: { ...previous.multiAgent, enabled: true, recoverAgentTabs: false } });
+    const recorded = await request('POST', '/events', { body: { conversationId: chat, events: [
+      { kind: 'user_message', time: Date.now(), text: 'keep going', messageId: 'm-review-slot' }
+    ] } });
+    const sessionId = recorded.body.sessionId as string;
+    await recordFinalForTest(chat, turnId);
+    let release!: () => void;
+    const slot = new Promise<void>(resolve => { release = resolve; });
+    const before = Date.now();
+    const reviewing = startStepReview({ conversationId: chat, sessionId, turnId }, {
+      settings: () => ({ reviewerModel: 'same', workersOn: true, profileId: 'default' }),
+      mode: () => 'goal', objective: () => '', offered: () => [], reviewer: () => null,
+      facts: async () => ({ files: [{ path: 'src/a.ts', state: 'edited', added: 1, removed: 1, approximate: false, edits: 1, diff: '' }],
+        more: 0, step: 'keep going', firstRequest: 'keep going', chatModel: null }),
+      spawn: async () => { throw new Error('NO_FREE_SLOT'); },
+      wake: async () => undefined, cancel: async () => undefined, now: () => Date.now(), wait: () => slot
+    });
+    let calls = 0;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => { calls++; return Response.json({ choices: [{ message: { content: JSON.stringify({ action: 'continue', reply: 'Go on.' }) } }] }); }) as never;
+    try {
+      expect((await request('POST', '/goal/draft', { body: { conversationId: chat, turnId, clientId: 'tab-review' } })).status).toBe(200);
+      const held = { reason: 'reviewer', until: expect.any(Number) };
+      await vi.waitFor(async () => {
+        const controls = await sessionControlsFor(sessionId);
+        expect(controls.goalDraft).toMatchObject({ stage: 'sending' });
+        expect(controls.goalWait).toEqual(held);
+        expect((await request('GET', `/activity?conversationId=${chat}&goalClient=tab-review`)).body.goal.wait).toEqual(held);
+      });
+      const until = (await sessionControlsFor(sessionId)).goalWait!.until!;
+      expect(until).toBeGreaterThanOrEqual(before + REVIEW_MAX_MS);
+      expect(until).toBeLessThanOrEqual(Date.now() + REVIEW_MAX_MS);
+      expect(calls).toBe(0);
+    } finally {
+      await cancelStepReview(chat, { reviewer: () => null, cancel: async () => undefined });
+      release();
+      await reviewing;
+      globalThis.fetch = realFetch;
+    }
+  });
+
   it('never lets another chat’s sub-agents hold this one', async () => {
     vi.useFakeTimers();
     try {
@@ -16854,6 +17165,20 @@ describe('app requests to stop one exact active turn', () => {
     ] } });
     expect((await request('GET', '/status')).body.repairs).not.toEqual(expect.arrayContaining([expect.objectContaining({ conversationId })]));
   });
+  it('offers Stop for a worker chat\'s held turn too (CodeRabbit)', async () => {
+    const { stopSessionTurn, sessionControlsFor } = await import('../src/main/bridge.js');
+    const conversationId = 'e5555555-aaaa-4bbb-8ccc-111111111111';
+    vi.useFakeTimers();
+    try {
+      spawn({ workers: [{ task: 'work until the user stops this turn' }], caller: { conversationId: PRIME_CHAT } });
+      expect(bindConversation('worker-1', conversationId)).toBe(true);
+      const sessionId = await active(conversationId, 'worker-held-turn');
+      await vi.advanceTimersByTimeAsync(3 * 60 * 60_000);
+      const controls = await sessionControlsFor(sessionId);
+      expect(controls).toMatchObject({ activeTurnId: null, blocked: 'worker', heldTurnId: 'worker-held-turn' });
+      expect(await stopSessionTurn(sessionId, 'worker-held-turn')).toMatchObject({ stopPending: true });
+    } finally { vi.useRealTimers(); }
+  });
   it('persists one request, disables automation and releases finish without declaring the turn ended', async () => {
     const { stopSessionTurn, setSessionAutomation } = await import('../src/main/bridge.js');
     const conversationId = 'e1111111-aaaa-4bbb-8ccc-111111111111';
@@ -16871,6 +17196,8 @@ describe('app requests to stop one exact active turn', () => {
     expect(wrong.status).toBe(409);
     const valid = await request('POST', '/commands/redeem', { body: { id: command.id, client: 'stop-page', conversationId } });
     expect(valid.body.command).toMatchObject({ kind: 'stop-turn', turnId: 'stop-turn-one', conversationId, text: '' });
+    // A running turn's Stop goes through ChatGPT's own Stop only.
+    expect(valid.body.command.held).toBeUndefined();
     await stopSessionTurn(sessionId, 'stop-turn-one');
     const otherDocument = await request('POST', '/commands/redeem', { body: { id: command.id, client: 'different-page', conversationId } });
     expect(otherDocument.status).toBe(409);
@@ -16896,6 +17223,36 @@ describe('app requests to stop one exact active turn', () => {
     expect((await request('GET', '/status')).body.stopTurns).toEqual([]);
     expect((await getSession(sessionId))?.activeTurnId).toBe('stop-turn-two');
     expect((await getSession(sessionId))?.finishTurn?.released).toBe(false);
+  });
+  it('offers Stop for a turn the page still holds after the app stopped counting it as work (2.1.47 round)', async () => {
+    // Seen 2026-10-28: ChatGPT stopped loading a chat's history, the page kept its turn open, so it
+    // took no message, while the app treated the turn as over and offered no Stop at all.
+    const { stopSessionTurn, sessionControlsFor } = await import('../src/main/bridge.js');
+    const conversationId = 'e9999999-aaaa-4bbb-8ccc-111111111111';
+    vi.useFakeTimers();
+    try {
+      const sessionId = await active(conversationId, 'held-turn');
+      expect(await sessionControlsFor(sessionId)).toMatchObject({ activeTurnId: 'held-turn', heldTurnId: null });
+      // Long past any activity window, with nothing from the page but its open turn.
+      await vi.advanceTimersByTimeAsync(3 * 60 * 60_000);
+      expect(await sessionControlsFor(sessionId)).toMatchObject({ activeTurnId: null, heldTurnId: 'held-turn' });
+      await expect(stopSessionTurn(sessionId, 'other-turn')).rejects.toThrow('active_turn_changed');
+      // Once asked, it is the turn being stopped, as any other ("Stop requested").
+      expect(await stopSessionTurn(sessionId, 'held-turn')).toMatchObject({ stopPending: true, activeTurnId: 'held-turn', heldTurnId: null });
+      expect((await request('GET', '/status')).body.stopTurns).toEqual([expect.objectContaining({ turnId: 'held-turn', conversationId })]);
+      // A second Stop for the same turn (a repeated click) keeps it a held-turn Stop (CodeRabbit).
+      await stopSessionTurn(sessionId, 'held-turn');
+      expect((await request('GET', '/status')).body.stopTurns).toHaveLength(1);
+      // The page learns it is a held turn: only then may it end the turn itself (CodeRabbit).
+      const command = (await request('GET', '/status')).body.stopTurns[0];
+      const redeemed = await request('POST', '/commands/redeem', { body: { id: command.id, client: 'held-page', conversationId } });
+      expect(redeemed.body.command).toMatchObject({ kind: 'stop-turn', turnId: 'held-turn', held: true });
+      // Once the page reports the turn's end, nothing is held any more.
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'turn_end', time: Date.now(), turnId: 'held-turn', outcome: 'stopped' }
+      ] } });
+      expect(await sessionControlsFor(sessionId)).toMatchObject({ activeTurnId: null, heldTurnId: null });
+    } finally { vi.useRealTimers(); }
   });
 });
 
@@ -17275,6 +17632,30 @@ describe('connector identity through the bridge', () => {
     await request('POST', '/events', { body: { conversationId: '6acb3e79-2cd4-83eb-b54b-f9d66653cf07', events: [{ kind: 'app_sightings', time: Date.now(),
       apps: [{ requestId: 'req-older-chat', ...app, appName: 'Original' }] }] } });
     expect((await request('GET', '/status')).body.connectorApps.core[0].name).toBe('Renamed');
+  });
+
+  // #1752 diagnostics: where a chat's stream named an id, for a call filed without page evidence.
+  it('logs where the page saw a request id it could not place, and stores no transcript for it', async () => {
+    await pair();
+    const { requestTraceNote, resetRequestTracesForTests } = await import('../src/main/session/request-trace.js');
+    resetRequestTracesForTests();
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000c1d3', placed = '7482f9cb-689d-4ad0-aa6a-b7196a699840';
+    expect(requestTraceNote(placed)).toBe('');
+    await request('POST', '/events', { body: { conversationId, events: [{ kind: 'request_trace', time: Date.now(), traces: [
+      { requestId: placed, path: '/message:v.metadata.request_id' }, { requestId: 'not an id', path: 'x' }, { requestId: '11111111-2222-4333-8444-555555555555', path: 'bad path!' }
+    ] }] } });
+    expect(info.mock.calls.filter(([line]) => String(line).includes(placed))).toEqual([[
+      `request attribution: ${placed} had no page evidence in time; the stream of ${conversationId} names it at /message:v.metadata.request_id`]]);
+    expect(requestTraceNote(placed)).toBe(`; the stream of ${conversationId} named it at /message:v.metadata.request_id`);
+    expect(requestTraceNote('11111111-2222-4333-8444-555555555555')).toBe('');
+    // Each chat says once per run that its page's tracing works, and its limit: a quiet report then
+    // makes "the page never saw it" likely, not certain.
+    expect(info.mock.calls.filter(([line]) => String(line).includes('tracing works')).map(([line]) => line))
+      .toEqual([`request attribution: the page of ${conversationId} reports the ids in its streams (tracing works, up to 16 new ids per message)`]);
+    expect(await findSessionByConversation(conversationId)).toBeNull();
+    info.mockRestore();
   });
 
   it('does not store app_sightings as transcript content', async () => {

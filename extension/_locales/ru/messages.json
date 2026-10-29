@@ -512,6 +512,12 @@
   "content_goal_wait_tool_inactivity": {
     "message": "Ожидание паузы в работе инструментов"
   },
+  "content_goal_reviewer_deadline": {
+    "message": "Продолжит без проверки через $1"
+  },
+  "content_goal_wait_reviewer": {
+    "message": "Ожидание рецензента"
+  },
   "content_goal_wait_workers": {
     "message": "Ожидание субагентов этого чата"
   },
@@ -742,6 +748,9 @@
   },
   "content_turn_stop_requested": {
     "message": "Запрошен Stop; встроенная страница больше не показывает генерацию."
+  },
+  "content_turn_stop_unseen": {
+    "message": "Остановлено здесь: ChatGPT больше не показывал этот ответ как выполняющийся."
   },
   "content_unknown_error": {
     "message": "неизвестная ошибка"

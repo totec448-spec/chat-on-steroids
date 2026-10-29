@@ -95,7 +95,9 @@ import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
 import { collectReportFacts, readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts, memoryFacts } from './diagnostics-report.js';
 import { listSessions, readTurnTraces } from './session/store.js';
+import { deleteSchedule, listSchedules, saveSchedule, scheduleRepeatSchema, setSchedulePaused } from './scheduled-runs.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, logWarn, onLog } from './logger.js';
+import { markStartup } from './startup-timing.js';
 import { managedWorktreeCleanupOffers, acknowledgeManagedWorktreeCleanupOffer } from './agents.js';
 import { listOfferedWorkerWorktrees, disposeOfferedWorkerWorktree, WorkerWorktreeError } from './worktrees/index.js';
 import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
@@ -343,6 +345,7 @@ const settingsPatch = z.object({
       loopBackend: z.enum(['api', 'chatgpt']).optional(),
       helperModel: z.string().trim().min(1).max(80).optional(),
       helperReasoning: z.enum(REASONING_EFFORTS).optional(),
+      reviewerModel: z.string().trim().max(80).optional(),
     enabled: z.boolean(),
     // Which of the two standing modes the switch runs. One field, so the renderer has no way
     // to describe a state where Goal and Loop are both on.
@@ -605,6 +608,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       loopBackend: pick(current.goal.loopBackend, base.goal.loopBackend, wanted.goal.loopBackend),
       helperModel: pick(current.goal.helperModel, base.goal.helperModel, wanted.goal.helperModel),
       helperReasoning: pick(current.goal.helperReasoning, base.goal.helperReasoning, wanted.goal.helperReasoning),
+      reviewerModel: pick(current.goal.reviewerModel, base.goal.reviewerModel, wanted.goal.reviewerModel),
       enabled: pick(current.goal.enabled, base.goal.enabled, wanted.goal.enabled),
       mode: pick(current.goal.mode, base.goal.mode, wanted.goal.mode),
       provider: {
@@ -781,6 +785,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // `did-finish-load`, it can only happen after the renderer's first IPC request has completed
     // secure-storage availability/decryption probes and the rest of the initial state snapshot.
     logInfo('renderer state ready');
+    markStartup('renderer');
     return state;
   });
 
@@ -1152,6 +1157,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (turnOn) wakeBrowserWork();
     return buildState();
   });
+  handle('ui:tourDone', async () => {
+    // #1833: only ever set; Settings replays the tour without asking main to offer it again.
+    if (getConfig().ui.tourDone !== true) await updateConfig(config => ({ ...config, ui: { ...config.ui, tourDone: true } }));
+  });
   handle('ui:whatsNewSeen', async () => {
     // Only this version can be recorded; the renderer cannot write another one (#1172).
     if (getConfig().ui.lastSeenVersion !== APP_VERSION) await updateConfig(config => ({ ...config, ui: { ...config.ui, lastSeenVersion: APP_VERSION } }));
@@ -1312,6 +1321,36 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (project) wakeBrowserWork();
     push('session:changed');
     return project;
+  });
+  // #1826: a chat's schedule. Its rules and checks live in scheduled-runs.ts; errors are sentences the renderer translates.
+  const scheduleSession = z.string().min(8).max(64);
+  handle('schedules:get', async payload => {
+    const { sessionId } = z.object({ sessionId: scheduleSession }).strict().parse(payload);
+    return (await listSchedules()).find(row => row.sessionId === sessionId) ?? null;
+  });
+  handle('schedules:save', async payload => {
+    const request = z.object({ sessionId: scheduleSession, text: z.string().max(200_000), repeat: z.unknown(), until: z.number().int().nonnegative().nullable(),
+      catchUp: z.boolean().optional() }).strict().parse(payload);
+    const repeat = scheduleRepeatSchema.parse(request.repeat);
+    if (!(await getSession(request.sessionId))) throw new Error('This chat no longer exists.');
+    const saved = await saveSchedule({ sessionId: request.sessionId, text: request.text, repeat, until: request.until, catchUp: request.catchUp === true });
+    logInfo(`scheduled run: schedule saved (${repeat.kind}) for ${request.sessionId}`);
+    push('session:changed');
+    return saved;
+  });
+  handle('schedules:pause', async payload => {
+    const { sessionId, paused } = z.object({ sessionId: scheduleSession, paused: z.boolean() }).strict().parse(payload);
+    const updated = await setSchedulePaused(sessionId, paused);
+    if (updated) logInfo(`scheduled run: ${paused ? 'paused' : 'resumed'} for ${sessionId}`);
+    push('session:changed');
+    return updated;
+  });
+  handle('schedules:delete', async payload => {
+    const { sessionId } = z.object({ sessionId: scheduleSession }).strict().parse(payload);
+    const removed = await deleteSchedule(sessionId);
+    if (removed) logInfo(`scheduled run: schedule removed for ${sessionId}`);
+    push('session:changed');
+    return removed;
   });
   // Linking a project to a ChatGPT Project the account already has (#1756).
   handle('projects:chatgpt-choices', async () => chatgptProjectChoices());

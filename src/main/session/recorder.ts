@@ -35,6 +35,7 @@ import { chatErrorMessageKey } from '../../shared/chat-error.js';
 import { continuedRequestTurn, overlappingRequestTurns, recordedRequestTurn, responseTurnId, turnOpenAt } from '../../shared/chronology.js';
 import { getConfig } from '../config.js';
 import { logInfo, logWarn } from '../logger.js';
+import { requestTraceNote } from './request-trace.js';
 import { redactCredentialText } from '../redaction.js';
 import { currentCall, emptyEvidence, runningToolCalls, type CallEvidence } from '../mcp/call-context.js';
 import {
@@ -1268,7 +1269,7 @@ export function recordToolCall(input: ToolCallInput): Promise<ToolCallRecord | n
           if (!conversationId) {
             logWarn(
               `request attribution: no page evidence for ${input.requestId} within ` +
-                `${REQUEST_ID_GRACE_MS}ms; filing ${input.tool} under Unattributed activity`
+                `${REQUEST_ID_GRACE_MS}ms; filing ${input.tool} under Unattributed activity${requestTraceNote(input.requestId!)}`
             );
           }
           if (input.bind && conversationId) bindAgentConversation(input.bind, conversationId);
@@ -1750,7 +1751,45 @@ async function targetSession(target: Target): Promise<string | null> {
 async function storeImage(sessionId: string, base64: string, mimeType: string): Promise<AssetRef> {
   const data = Buffer.from(base64, 'base64');
   if (data.length === 0 || data.length > MAX_ASSET_BYTES) throw new Error('Session image exceeds the recording limit');
-  return writeAsset(sessionId, data, mimeType);
+  const smaller = mimeType === 'image/png' ? await losslessWebp(data) : null;
+  return smaller ? writeAsset(sessionId, smaller, 'image/webp') : writeAsset(sessionId, data, mimeType);
+}
+
+/** Below this a conversion saves too little to be worth it, and the PNG is kept as it came. */
+const WEBP_MIN_SAVING_BYTES = 1024;
+/**
+ * A recorded screenshot as lossless WebP (the maintainer, 2026-10-27: screenshots were most of the
+ * recording storage): the same pixels in usually far fewer bytes. Kept only when it saves at least
+ * 1 KB and a tenth; anything it can't read stays the PNG it was. Measured on 40 real screenshots:
+ * 54 % smaller, every pixel and color profile the same, about 0.1 s each off the main thread.
+ * Only the recording changes: what ChatGPT received is the tool's own result.
+ */
+async function losslessWebp(png: Buffer): Promise<Buffer | null> {
+  try {
+    const image = sharp(png, { limitInputPixels: 40_000_000, animated: false });
+    // WebP holds 8 bits a channel: a deeper PNG would lose precision, so it stays as it came (CodeRabbit).
+    const { depth } = await image.metadata();
+    if (depth && depth !== 'uchar' && depth !== 'char') return keptPng(`it has ${depth === 'ushort' ? 16 : 'more than 8'}-bit channels`);
+    // `exact` keeps the colors under transparent pixels and the color profile is kept: otherwise
+    // a "lossless" copy can still show different colors (measured on real screenshots).
+    const webp = await image.keepIccProfile().webp({ lossless: true, effort: 4, exact: true }).toBuffer();
+    if (webp.length + WEBP_MIN_SAVING_BYTES <= png.length && webp.length <= png.length * 0.9) return webp;
+    return keptPng('WebP would save too little');
+  } catch (error) {
+    return keptPng(`it could not be converted: ${(error instanceof Error ? error.message : String(error)).slice(0, 120)}`);
+  }
+}
+
+/** Each reason a screenshot stays PNG is logged, at most once a minute, so many screenshots don't flood the log. */
+const keptPngLogged = new Map<string, number>();
+function keptPng(reason: string): null {
+  const now = Date.now();
+  if (now - (keptPngLogged.get(reason) ?? 0) >= 60_000) {
+    keptPngLogged.set(reason, now);
+    if (keptPngLogged.size > 32) keptPngLogged.delete(keptPngLogged.keys().next().value!);
+    logInfo(`recording: kept a screenshot as PNG because ${reason}`);
+  }
+  return null;
 }
 
 // ------------------------------------------------------- extension events
@@ -1769,10 +1808,13 @@ export interface ChatObservation {
     | 'turn_end'
     | 'chat_error'
     | 'tool_evidence'
-    | 'app_sightings';
+    | 'app_sightings'
+    | 'request_trace';
   time: number;
   /** app_sightings only: connector result rows as the page saw them (connector-identity.ts). */
   apps?: import('../connector-identity.js').AppSighting[];
+  /** request_trace only: where the page's stream named request ids (request-trace.ts, #1752). */
+  traces?: import('./request-trace.js').RequestTrace[];
   /** Current native selection evidence, not a historical message or requested worker model. */
   model?: string;
   reasoningEffort?: import('../../shared/session.js').ReasoningEffort;

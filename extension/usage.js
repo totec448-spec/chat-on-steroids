@@ -65,6 +65,94 @@
     }
     post({ type: 'cos-request-origin', conversationId, requestIds: fresh, observedAt }, location.origin);
   }
+  // #1752 diagnostics: the tool calls of a turn can carry a request id the page never reported.
+  // Every id-named field of this chat's stream is traced by its path, never its content, so the
+  // app can log where the page did see an id it could not place. Evidence for a log line only:
+  // attribution still trusts the exact fields readOrigin reads.
+  const ID_KEY = /^[A-Za-z0-9_-]{0,40}ids?$/i;
+  function namedConversation(frame, fallback) {
+    const named = new Set();
+    CONVERSATION_FIELD.lastIndex = 0;
+    for (let match; (match = CONVERSATION_FIELD.exec(frame));) if (CONVERSATION.test(match[1])) named.add(match[1]);
+    return named.size === 1 ? named.values().next().value : named.size ? null : fallback || null;
+  }
+  // Anywhere in a frame, also inside arrays and longer strings ("text" then names no field, and no content).
+  // Whole tokens only: the start of a longer token is not an id the page saw.
+  const ID_ANYWHERE = /(?<![A-Za-z0-9_-])(?:wfr_[A-Za-z0-9_-]{1,96}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})(?![A-Za-z0-9_-])/gi;
+  // New ids one message reports at most: the content script takes as many per message.
+  const TRACES_PER_FRAME = 16;
+  function traceIds(frame, conversationId, traced, prefix = '', limit = 64) {
+    if (!active || !conversationId || traced.size >= limit || !frame || frame.length > 512 * 1024) return;
+    const data = frame.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n') || frame;
+    let event = null;
+    try { event = JSON.parse(data); } catch { /* Not JSON: only the text scan below applies. */ }
+    const traces = [];
+    const root = typeof event?.p === 'string' && /^[A-Za-z0-9_/-]{0,120}$/.test(event.p) ? `${event.p || '/'}:` : '';
+    const text = `${prefix}${root}text`;
+    const take = (id, path) => {
+      if (traces.length >= TRACES_PER_FRAME || !REQUEST.test(id) || id === conversationId || traced.has(id) || origins.has(`${conversationId}:${id}`)) return;
+      traced.add(id);
+      traces.push({ requestId: id, path: path.slice(0, 160) });
+    };
+    // An array's strings are named by their path only under an id-named key, as a field is.
+    const walk = (value, path, depth, idNamed = false) => {
+      if (traces.length >= TRACES_PER_FRAME || depth > 8 || path.length > 160) return;
+      if (Array.isArray(value)) {
+        value.slice(0, 16).forEach((item, index) => typeof item === 'string' ? take(item, idNamed ? `${path}[${index}]` : text) : walk(item, `${path}[${index}]`, depth + 1));
+        return;
+      }
+      if (!value || typeof value !== 'object') return;
+      for (const [key, item] of Object.entries(value).slice(0, 64)) {
+        if (!/^[A-Za-z0-9_-]{1,40}$/.test(key)) continue;
+        const at = path.endsWith(':') || !path ? path + key : `${path}.${key}`;
+        if (typeof item !== 'string') { walk(item, at, depth + 1, ID_KEY.test(key)); continue; }
+        if (ID_KEY.test(key)) take(item, at);
+      }
+    };
+    if (event && typeof event === 'object') walk(event, prefix + root, 0);
+    for (const match of data.matchAll(ID_ANYWHERE)) { if (traces.length >= TRACES_PER_FRAME) break; take(match[0], text); }
+    if (traces.length) post({ type: 'cos-request-trace', conversationId, traces }, location.origin);
+  }
+  /** The chat this page shows, for traces from streams that name no chat themselves. */
+  function routeConversation() {
+    const match = /\/c\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i.exec(location.pathname);
+    return match ? match[1] : null;
+  }
+  // Event streams from other ChatGPT backend routes, read for traces only (never for attribution).
+  const otherTraceReaders = new Set();
+  async function inspectOtherStreams(response) {
+    if (!active || otherTraceReaders.size >= 2) return;
+    let url;
+    try { url = new URL(response.url); } catch { return; }
+    if (url.origin !== location.origin || !url.pathname.startsWith('/backend-api/') ||
+        /^\/backend-api\/(?:conversation|f\/conversation(?:\/resume)?)$/.test(url.pathname)) return;
+    if (!response.ok || !response.headers.get('content-type')?.includes('text/event-stream')) return;
+    const reader = response.clone().body?.getReader();
+    if (!reader) return;
+    // Cancelled with the observer (dispose) and on page hide, as the chat's own readers are.
+    otherTraceReaders.add(reader); readers.add(reader);
+    const timer = setTimeout(() => void reader.cancel().catch(() => {}), ORIGIN_LISTEN_MS);
+    // The route in characters the app's path check accepts: ids as *, anything else as _.
+    const route = url.pathname.replace(/[0-9a-f-]{36}/gi, '*').replace(/[^A-Za-z0-9_./*-]/g, '_').slice(0, 60);
+    const decoder = new TextDecoder(), traced = new Set(), prefix = `${route}>`;
+    let bytes = 0, buffer = '';
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done || !active) break;
+        bytes += value.byteLength;
+        if (bytes > 4 * 1024 * 1024 || traced.size >= 64) break;
+        buffer += decoder.decode(value, { stream: true });
+        for (let split; (split = buffer.search(/\r?\n\r?\n/)) >= 0;) {
+          const frame = buffer.slice(0, split);
+          buffer = buffer.slice(split).replace(/^\r?\n\r?\n/, '');
+          traceIds(frame, namedConversation(frame, routeConversation()), traced, prefix);
+        }
+        if (buffer.length > 512 * 1024) break;
+      }
+    } catch { /* A trace is only ever a diagnostic. */ }
+    finally { clearTimeout(timer); otherTraceReaders.delete(reader); readers.delete(reader); void reader.cancel().catch(() => {}); }
+  }
   const project = (data, observedAt, order) => {
     if (!data || typeof data !== 'object') return;
     const rows = [];
@@ -377,7 +465,7 @@
     originReaders.add(reader);
     readers.add(reader);
     const timer = setTimeout(() => void reader.cancel().catch(() => {}), ORIGIN_LISTEN_MS);
-    const decoder = new TextDecoder(), emitted = new Set(), stream = {};
+    const decoder = new TextDecoder(), emitted = new Set(), stream = {}, traced = new Set();
     let bytes = 0, buffer = '';
     const sighted = new Set();
     const scan = (frame) => {
@@ -393,6 +481,10 @@
       for (const id of fresh) emitted.add(id);
       publishOrigin(origin.conversationId, fresh, observedAt);
     };
+    const scanAndTrace = (frame) => {
+      scan(frame);
+      traceIds(frame, namedConversation(frame, stream.conversationId), traced);
+    };
     try {
       while (true) {
         const { done, value } = await reader.read();
@@ -406,14 +498,15 @@
           const split = lf < 0 ? crlf : crlf < 0 ? lf : Math.min(lf, crlf);
           if (split < 0) break;
           const width = buffer.startsWith('\r\n\r\n', split) ? 4 : 2;
-          scan(buffer.slice(0, split));
-          if (emitted.size >= 16) return;
+          scanAndTrace(buffer.slice(0, split));
+          // Origins stop at 16; traces have their own bound and keep reading until it.
+          if (emitted.size >= 16 && traced.size >= 64) return;
           buffer = buffer.slice(split + width);
         }
         if (buffer.length > 512 * 1024) return;
       }
       buffer += decoder.decode();
-      scan(buffer);
+      scanAndTrace(buffer);
     } catch { /* A missing stream observation leaves the existing Fiber path in charge. */ }
     finally { clearTimeout(timer); originReaders.delete(reader); readers.delete(reader); void reader.cancel().catch(() => {}); }
   }
@@ -422,6 +515,12 @@
   const observedSockets = new WeakSet();
   function inspectSocketMessage(event, streams) {
     if (!active) { streams.clear(); return; }
+    // Every socket message is read for traces (#1752): the ids of a turn may travel outside its stream items.
+    if (typeof event.data === 'string' && event.data.length <= 512 * 1024) {
+      const traced = streams.traced ??= new Set();
+      if (traced.size >= 256) traced.clear();
+      traceIds(event.data, namedConversation(event.data, routeConversation()), traced, 'socket>', 256);
+    }
     // Pro hands its HTTP stream to the native conversation-turn-stream socket.
     // Header-only events matter too. No subscriptions or message reconstruction.
     if (typeof event.data !== 'string' || event.data.length > 2 * 1024 * 1024) { streams.clear(); return; }
@@ -460,6 +559,7 @@
         const origin = readOrigin(frame, stream);
         if (origin?.conversationId === payload.conversation_id)
           publishOrigin(origin.conversationId, origin.requestIds, Date.now());
+        if (namedConversation(frame, payload.conversation_id) === payload.conversation_id) traceIds(frame, payload.conversation_id, stream.traced ??= new Set());
       }
     }
   }
@@ -568,6 +668,7 @@
         void inspect(response, observedAt, order).catch(() => {});
         void inspectSystemHints(response).catch(() => {});
         if (method === 'POST') void inspectRequestOrigins(response, observedAt).catch(() => {});
+        void inspectOtherStreams(response).catch(() => {});
       }).catch(() => {
         // Network rejection only retires custody; it cannot prove that the stream is gone.
         if (resume) post({ type: 'cos-resume-response', ...resume, status: null }, location.origin);
@@ -597,7 +698,7 @@
       post({ type: 'cos-request-origin', conversationId, requestIds: [requestId], observedAt }, location.origin);
   };
   const hide = () => {
-    for (const reader of originReaders) void reader.cancel().catch(() => {});
+    for (const reader of [...originReaders, ...otherTraceReaders]) void reader.cancel().catch(() => {});
     origins.clear(); latestHistoryLimit = null; latestDeleted = null;
   };
   window.addEventListener('message', request);
