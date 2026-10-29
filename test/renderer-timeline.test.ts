@@ -8966,6 +8966,11 @@ it('jumps between your own messages with Alt+↑ / Alt+↓, marked like a search
   const pane = doc.getElementById('chatBody')!;
   Object.defineProperties(pane, { clientHeight: { value: 700 }, scrollHeight: { value: 700 } });
   pane.scrollTop = 0;
+  // All three are in view now: the jump goes on from Second to First (CodeRabbit), and only then
+  // is there none earlier.
+  press('ArrowUp', doc.getElementById('chatTitle') ?? doc.body);
+  expect(scrolled).toEqual(['Second', 'First']);
+  expect(read).not.toHaveBeenCalled();
   press('ArrowUp', doc.getElementById('chatTitle') ?? doc.body);
   await settle();
   expect(read).toHaveBeenCalledWith(expect.any(String), { before: 11, limit: 30 });
