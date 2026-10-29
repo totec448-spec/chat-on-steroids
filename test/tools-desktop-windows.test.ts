@@ -15,6 +15,11 @@ vi.mock('../src/main/computer/index.js', () => ({
   ComputerError: class extends Error {}, act: native.act, getWindowState: native.getWindowState
 }));
 vi.mock('../src/main/mcp/call-context.js', () => ({ currentCall: () => native.call, noteCount: vi.fn() }));
+const ask = vi.hoisted(() => ({ refusal: null as string | null, asked: [] as unknown[], ended: 0 }));
+vi.mock('../src/main/desktop-ask-window.js', () => ({
+  askBeforeDesktopStep: async (...step: unknown[]) => { ask.asked.push(step); return ask.refusal; },
+  desktopStepEnded: () => { ask.ended++; }
+}));
 vi.mock('../src/main/computer/windows-api.js', async importOriginal => {
   const original = await importOriginal<typeof import('../src/main/computer/windows-api.js')>();
   return { ...original, createWindowsComputerApi: () => {
@@ -43,6 +48,24 @@ beforeEach(() => {
 });
 
 describe('Windows Desktop public registrar', () => {
+  it('asks before a step that takes the mouse or keyboard (#1804), runs nothing when refused, and never asks to look', async () => {
+    ask.refusal = null; ask.asked.length = 0; ask.ended = 0;
+    const { call } = surface();
+    await call('click', { window, click_count: 2 });
+    expect(ask.asked).toEqual([['double-click', 'fixture.exe']]);
+    expect(native.apis.at(-1)!.click).toHaveBeenCalledTimes(1);
+    expect(ask.ended).toBe(1);
+    await call('get_window_state', { window });
+    expect(ask.asked).toHaveLength(1);
+    ask.refusal = 'DECLINED_BY_USER: The person is using the computer and declined this step. No input ran.';
+    const refused = await call('type_text', { window, text: 'hello' });
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0].text).toContain('DECLINED_BY_USER');
+    expect(native.apis.at(-1)!.type_text).not.toHaveBeenCalled();
+    expect(ask.ended).toBe(1);
+    ask.refusal = null;
+  });
+
   it('matches the settings tool names to registration for each Desktop permission', () => {
     for (const capability of DESKTOP_CAPABILITIES) {
       const caps = { screen: false, control: false, clipboardRead: false, clipboardWrite: false, [capability]: true };
