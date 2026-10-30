@@ -27,7 +27,13 @@ export async function desktopCallerRefusal(tool: string, waitMs = DESKTOP_CALLER
   const caller = currentCaller();
   if (caller.sessionId || caller.conversationId) return null;
   if (getConfig().ui.desktopUnattributed === true) return null;
-  if ((await awaitRequestCorrelation(caller.requestId, waitMs))?.conversationId) return null;
+  const startedAt = Date.now();
+  if ((await awaitRequestCorrelation(caller.requestId, waitMs))?.conversationId) {
+    const waited = Date.now() - startedAt;
+    // A call proved at once needs no line; one that waited says so (CodeRabbit on #1938).
+    if (waited >= 100) logInfo(`desktop: ${tool} waited ${waited} ms for its request ${caller.requestId} to be tied to a chat, then ran`);
+    return null;
+  }
   logInfo(`desktop: refused ${tool} — the call could not be tied to a chat${caller.requestId ? ` (request ${caller.requestId})` : ''}; ` +
     'the screen, mouse and keyboard were not touched');
   return failIdentity(`DESKTOP_IDENTITY_REQUIRED: ${liveConnectorName('desktop')} could not tell which chat this ${tool} call came from, ` +
