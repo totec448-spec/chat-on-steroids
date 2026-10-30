@@ -319,13 +319,43 @@ function shareOut(parts: RoundPart[], runOf: ReadonlyMap<string, number>, count:
   return out;
 }
 
+/** Whether two outline items describe the same thing: the same call, sentence or recap. */
+function sameItem(a: TurnTrace[number], b: TurnTrace[number]): boolean {
+  // ChatGPT's message id decides when both have one: two turns can open with the same words.
+  if (a.kind === 'say' && b.kind === 'say') return a.id && b.id ? a.id === b.id : sameSaying(a.text, b.text);
+  if ((a.kind === 'call' || a.kind === 'exec' || a.kind === 'answer') && b.kind === a.kind) return a.id === b.id;
+  if ((a.kind === 'recap' || a.kind === 'now') && b.kind === a.kind) return plain(a.text) === plain(b.text);
+  return false;
+}
+
+/**
+ * Each turn's own part of its outline. After an automatic "Continue" ChatGPT keeps the continued
+ * turns in one response, so a later turn's outline starts with the outlines of the turns before it
+ * (2.1.48 release round); drawn again, their sentences stood in every later turn. The longest other
+ * outline that this one begins with, without its live "now" line, is dropped from its start.
+ */
+function ownOutlines(traces: Readonly<Record<string, TurnTrace>>): Record<string, TurnTrace> {
+  const settled = (trace: TurnTrace) => trace.filter(item => item.kind !== 'now');
+  const entries = Object.entries(traces);
+  return Object.fromEntries(entries.map(([turnId, trace]) => {
+    let skip = 0;
+    for (const [otherId, other] of entries) {
+      const prefix = settled(other);
+      if (otherId === turnId || !prefix.length || prefix.length >= trace.length || prefix.length <= skip) continue;
+      if (prefix.every((item, index) => sameItem(item, trace[index]!))) skip = prefix.length;
+    }
+    return [turnId, skip ? trace.slice(skip) : trace];
+  }));
+}
+
 /**
  * The timeline as rounds. `working` says the newest turn is still running: its last round is the
  * live one, unless a recap already closed it. `liveTurnId` names that turn, so its outline shows
  * even before any of its work is recorded (a new chat's first sentences come before its first call).
  */
-export function structureTimeline(rows: readonly FlowRow[], traces: Readonly<Record<string, TurnTrace>>, working: boolean,
+export function structureTimeline(rows: readonly FlowRow[], allTraces: Readonly<Record<string, TurnTrace>>, working: boolean,
   liveTurnId?: string | null): RoundPart[] {
+  const traces = ownOutlines(allTraces);
   const out: RoundPart[] = [];
   const runs: Array<{ start: number; rows: FlowRow[] }> = [];
   let current: FlowRow[] | null = null;

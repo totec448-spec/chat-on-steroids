@@ -239,3 +239,72 @@ describe('timeline rounds without an outline', () => {
     expect(shape(structureTimeline(rows, {}, true))).toEqual([`row ${rows[0]!.key}`, `work[${rows[1]!.key},${rows[2]!.key}] live`]);
   });
 });
+
+/**
+ * 2.1.48 release round (Windows VM): after an automatic "Continue" (a fresh turn), ChatGPT keeps the
+ * continued turns in one response, so each new turn's outline starts with the outlines of the turns
+ * before it. Those sentences were drawn again in every later turn.
+ */
+describe('continued turns', () => {
+  const FIRST = 'g-cont-0-1', SECOND = 'g-cont-0-2';
+  const sayIn = (turnId: string, value: string, id: string): FlowRow => {
+    const event = { ...base(turnId), kind: 'assistant_message', message: text(value), final: false, state: 'streaming', providerMessageId: id } as SessionEvent;
+    return { key: `m${event.seq}`, event };
+  };
+  const callIn = (turnId: string, id: string): FlowRow => {
+    const event = { ...base(turnId), kind: 'tool_call', call: { callId: id, tool: 'exec_command', summary: { kind: 'run', title: 'Ran a check' } } } as unknown as SessionEvent;
+    return { key: `c${event.seq}`, event };
+  };
+  const OPENING = 'I’ll run the three timing checks one after the other.';
+  const first: TurnTrace = [
+    { kind: 'say', id: 's-1', text: OPENING, done: true },
+    { kind: 'call', id: 'k-1', tool: 'exec_command', done: true }
+  ];
+  const second: TurnTrace = [
+    ...first,
+    { kind: 'recap', text: 'Waited for several processes' },
+    { kind: 'say', id: 's-2', text: 'Continuing from the second timing check now.', done: true },
+    { kind: 'call', id: 'k-2', tool: 'exec_command', done: true },
+    { kind: 'now', text: 'Continuing the second wait' }
+  ];
+  const third: TurnTrace = [
+    ...second.filter(item => item.kind !== 'now'),
+    { kind: 'recap', text: 'Watched the commands finish' },
+    { kind: 'say', id: 's-3', text: 'The third check has emitted its tick.', done: true }
+  ];
+
+  it('draws each sentence once, in the turn that said it', () => {
+    const rows = [user(), sayIn(FIRST, OPENING, 's-1'), callIn(FIRST, 'k-1'), user(),
+      step('Waited for several processes', SECOND), sayIn(SECOND, 'Continuing from the second timing check now.', 's-2'), callIn(SECOND, 'k-2')];
+    const parts = structureTimeline(rows, { [FIRST]: first, [SECOND]: second }, false);
+    const sayings = parts.filter(part => part.kind === 'say');
+    expect(sayings.map(part => part.rowKey ?? part.text)).toEqual([rows[1]!.key, rows[5]!.key]);
+    expect(shape(parts).filter(line => line.startsWith('say "'))).toEqual([]);
+  });
+
+  it('drops the longest earlier outline a turn repeats, ignoring what an earlier turn was doing right now', () => {
+    const THIRD = 'g-cont-0-3';
+    const rows = [user(), sayIn(FIRST, OPENING, 's-1'), callIn(FIRST, 'k-1'), user(),
+      sayIn(SECOND, 'Continuing from the second timing check now.', 's-2'), callIn(SECOND, 'k-2'), user(),
+      sayIn(THIRD, 'The third check has emitted its tick.', 's-3')];
+    const parts = structureTimeline(rows, { [FIRST]: first, [SECOND]: second, [THIRD]: third }, false);
+    expect(parts.filter(part => part.kind === 'say').map(part => part.rowKey ?? part.text)).toEqual([rows[1]!.key, rows[4]!.key, rows[7]!.key]);
+    // The third turn keeps its own recap.
+    expect(parts.some(part => part.kind === 'work' && part.recap === 'Watched the commands finish')).toBe(true);
+  });
+
+  it('keeps a later turn’s own sentence that only reads like an earlier turn’s whole outline', () => {
+    const rows = [user(), sayIn(FIRST, 'Let me look at the file first.', 's-1'), user(),
+      sayIn(SECOND, 'Let me look at the file first.', 's-9'), callIn(SECOND, 'k-9')];
+    const parts = structureTimeline(rows, {
+      [FIRST]: [{ kind: 'say', id: 's-1', text: 'Let me look at the file first.', done: true }],
+      [SECOND]: [{ kind: 'say', id: 's-9', text: 'Let me look at the file first.', done: true }, { kind: 'call', id: 'k-9', tool: 'exec_command', done: true }]
+    }, false);
+    expect(parts.filter(part => part.kind === 'say').map(part => part.rowKey ?? part.text)).toEqual([rows[1]!.key, rows[3]!.key]);
+  });
+
+  it('keeps an outline whole when no other turn’s outline begins it', () => {
+    const rows = [user(), sayIn(FIRST, OPENING, 's-1'), callIn(FIRST, 'k-1')];
+    expect(structureTimeline(rows, { [FIRST]: first, [SECOND]: second }, false).filter(part => part.kind === 'say')).toHaveLength(1);
+  });
+});
