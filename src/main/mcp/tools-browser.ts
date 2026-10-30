@@ -1,6 +1,7 @@
 /** Compact browser tools, carried by Desktop and the same invocation/recording kernel. */
 import { z } from 'zod';
 import { browserControl } from '../browser-control.js';
+import { logInfo } from '../logger.js';
 import { browserToolWrites, BROWSER_LIMITS, type BrowserTool } from '../../shared/browser-control.js';
 import { effectiveCapabilities, getConfig } from '../config.js';
 import { currentCall } from './call-context.js';
@@ -108,6 +109,24 @@ export function registerBrowserTools(reg: SurfaceRegistrar): void {
         };
         const result = await browserControl.execute(tool, args, owner, exact?.conversationId ?? caller?.conversationId ?? null, allowed);
         if (result.error) return fail(result.error);
+        if (tool === 'browser_network' && result.value && typeof result.value === 'object') {
+          const value = result.value as Record<string, unknown>;
+          const stream = value.stream;
+          if (stream && typeof stream === 'object') {
+            const status = stream as Record<string, unknown>;
+            // Log the decision once per invocation, never response bytes, identifiers,
+            // URLs or the browser's arbitrary error text.
+            const reason = status.overflow === true ? 'retention_limit_exceeded'
+              : status.invalidBytes === true ? 'invalid_stream_bytes'
+              : status.pending === true ? 'awaiting_buffered_prefix'
+              : value.failed ? 'network_request_failed'
+              : status.error ? 'capture_error'
+              : status.complete === true ? 'all_response_bytes_retained'
+              : status.terminal === true ? 'terminal_capture_incomplete'
+              : 'response_still_in_flight';
+            logInfo(`browser_network stream reason=${reason} complete=${status.complete === true}`);
+          }
+        }
         // No duplicate image in structured/text results. Reuse the existing full pixel validator.
         const response: ToolResult = { content: [{ type: 'text', text: JSON.stringify(result.value ?? null) }], structuredContent: { value: result.value ?? null } };
         if (result.image) {
