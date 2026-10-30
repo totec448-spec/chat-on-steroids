@@ -498,6 +498,8 @@ interface Command {
   progress?: { opened?: 'browser' | 'os'; step?: CommandStep; stepAt?: number };
 }
 
+/** When each page-note was last logged, by chat and heading (see `/page-note`). */
+const pageNotesLogged = new Map<string, number>();
 /** Bootstrap stages a page reports after redeeming, in order. See `commandProgress`. */
 const COMMAND_STEPS = ['revival-waiting', 'revival-busy', 'revival-draft', 'revival-editor', 'composer', 'model', 'composer-after-model', 'inserting', 'sending'] as const;
 /** Steps a wake reports while it waits, before redeeming. `revival-waiting` is what older pages send. */
@@ -5128,6 +5130,29 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   // A page that redeemed a command saying how far it got. Step names only; see `commandProgress`.
   // Advisory: it changes no lease or outcome, and a stale or foreign report is ignored. The one
   // deadline it moves is an automatic handoff's, which ends sooner at a step that stalls before typing.
+  // A ChatGPT announcement a page closed before it could use its message box (2026-10-30). Only the
+  // dialog's heading, ChatGPT's own words, is logged; once a minute per chat and heading.
+  if (route === '/page-note' && req.method === 'POST') {
+    let body: Record<string, unknown>;
+    try {
+      body = (await readBody(req)) as Record<string, unknown>;
+    } catch (err) {
+      if ((err as Error).message === 'body_too_large') return tooLarge(res, origin);
+      return json(res, 400, { error: 'bad_request' }, origin);
+    }
+    if (body?.['note'] !== 'announcement-closed') return json(res, 400, { error: 'bad_request' }, origin);
+    const heading = typeof body['heading'] === 'string' ? body['heading'].replace(/[\u0000-\u001f\u007f"]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+    const chat = conversationId(body['conversationId']);
+    const key = `${chat ?? ''}|${heading}`;
+    const now = Date.now();
+    if (now - (pageNotesLogged.get(key) ?? 0) >= 60_000) {
+      pageNotesLogged.set(key, now);
+      if (pageNotesLogged.size > 200) pageNotesLogged.delete(pageNotesLogged.keys().next().value!);
+      logInfo(`bridge: ${chat ? `the page of ${chat}` : 'a ChatGPT page'} closed ChatGPT's announcement` +
+        `${heading ? ` "${heading}"` : ''} that covered it, by Escape`);
+    }
+    return json(res, 200, { ok: true }, origin);
+  }
   if (route === '/commands/step' && req.method === 'POST') {
     let body: Record<string, unknown>;
     try {
@@ -11972,6 +11997,7 @@ export function resetBridgeForTests(): void {
   bridgeError = null;
   clearUnattributedIncident();
   providerHistoryBackoffUntil.clear();
+  pageNotesLogged.clear();
   providerHistoryStreaks.clear();
   pickupHeldLogged.clear();
   providerDeferredColdStarts.clear();

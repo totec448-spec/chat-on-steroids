@@ -1291,6 +1291,27 @@ it('loads a damaged desktop ask choice as always, a missing one as off, and says
   warn.mockRestore();
 });
 
+// 2026-10-30: desktop control for calls without a known chat. A config from before the setting, or a
+// damaged value, loads as off (the safe side), and only the damaged one is logged.
+it('loads desktop control for calls without a known chat as off when missing or damaged, and logs only the damaged one', async () => {
+  const logger = await import('../src/main/logger.js');
+  const warn = vi.spyOn(logger, 'logWarn');
+  const lines = () => warn.mock.calls.map(call => String(call[0])).filter(line => line.includes('desktopUnattributed'));
+  for (const [saved, loadedAs] of [[true, true], [false, false], [undefined, undefined]] as const) {
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...defaultConfig(), ui: { ...defaultConfig().ui, desktopUnattributed: saved } }), 'utf8');
+    warn.mockClear();
+    expect((await loadConfig()).ui.desktopUnattributed).toBe(loadedAs);
+    expect(lines()).toEqual([]);
+  }
+  for (const damaged of ['yes', 1, null, { on: true }]) {
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...defaultConfig(), ui: { ...defaultConfig().ui, desktopUnattributed: damaged } }), 'utf8');
+    warn.mockClear();
+    expect((await loadConfig()).ui.desktopUnattributed).toBeUndefined();
+    expect(lines()).toEqual(['config: the saved ui.desktopUnattributed was damaged; desktop control is used only for chats the app can name until it is chosen again']);
+  }
+  warn.mockRestore();
+});
+
 // #1856 (CodeRabbit): a damaged saved chat style falls back to the built-in text and says so once, never its content.
 it('logs a damaged saved chat style without its text, and nothing for an absent one', async () => {
   const logger = await import('../src/main/logger.js');
