@@ -103,9 +103,9 @@ function follower(store: Record<string, unknown>, storage: { get?: (keys: string
       set: storage.set ?? (async (value: Record<string, unknown>) => { writes.push(value); Object.assign(store, value); })
     } } }
   });
-  vm.runInContext(`${followCode}\nglobalThis.follow = followApp; globalThis.state = appLanguageState;`, context);
+  vm.runInContext(`${followCode}\nglobalThis.follow = followApp; globalThis.state = appLanguageState; globalThis.settled = followSettled;`, context);
   const follow = (data: unknown) => (context.follow as (data: unknown) => Promise<void>)(data);
-  return Object.assign(follow, { writes, state: () => (context.state as () => unknown)() });
+  return Object.assign(follow, { writes, state: () => (context.state as () => unknown)(), settled: () => (context.settled as () => Promise<void>)() });
 }
 
 it('takes the app language and gives a reinstalled extension its kept preferences back', async () => {
@@ -186,6 +186,30 @@ it('keeps only the newest waiting status while one is applied', async () => {
   await Promise.all(runs);
   expect(reads).toBe(2);
   expect(store.appLanguage).toBe('de');
+});
+
+// CodeRabbit on #1940: a write that never answers is bounded like the read, so it neither blocks the
+// statuses after it nor stays silent in diagnostics; and a snapshot can wait for an in-flight write.
+it('gives up on a write that never answers, says so, and still applies the next status', async () => {
+  vi.useFakeTimers();
+  try {
+    const store: Record<string, unknown> = {};
+    let hang = true;
+    const follow = follower(store, { set: value => hang ? new Promise(() => undefined) : (Object.assign(store, value), Promise.resolve()) });
+    const first = follow({ language: 'en' });
+    let settled = false;
+    void (follow as any).settled().then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await first;
+    expect(settled).toBe(true);
+    expect(follow.state()).toEqual({ applied: null, error: 'storage write did not answer within 5 s' });
+    hang = false;
+    await follow({ language: 'en' });
+    expect(store).toEqual({ appLanguage: 'en' });
+    expect(follow.state()).toEqual({ applied: 'en', error: null });
+  } finally { vi.useRealTimers(); }
 });
 
 it('keeps a refused write for diagnostics and tries again on the next status', async () => {

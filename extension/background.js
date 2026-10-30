@@ -3093,15 +3093,18 @@ let appLanguageError = null;
 function appLanguageState() {
   return { applied: appLanguageApplied, error: appLanguageError };
 }
-/** A storage read that gives up after FOLLOW_READ_MS instead of waiting for good. */
-async function boundedStorageGet(keys) {
+/** A storage call that gives up after FOLLOW_READ_MS instead of waiting for good. */
+async function boundedStorage(call, what) {
   let timer = null;
   try {
     return await Promise.race([
-      chrome.storage.local.get(keys),
-      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`storage read did not answer within ${FOLLOW_READ_MS / 1000} s`)), FOLLOW_READ_MS); })
+      call,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`storage ${what} did not answer within ${FOLLOW_READ_MS / 1000} s`)), FOLLOW_READ_MS); })
     ]);
   } finally { clearTimeout(timer); }
+}
+function boundedStorageGet(keys) {
+  return boundedStorage(chrome.storage.local.get(keys), 'read');
 }
 // Statuses are applied one at a time, so a slow older read can never write its language after a
 // newer one. While one runs, only the newest waiting status is kept: a burst of statuses must not
@@ -3125,6 +3128,16 @@ function followApp(data) {
   })();
   return followRunning;
 }
+/**
+ * Settles once no status is being applied, at most after two bounded storage calls and a little: a
+ * diagnostics snapshot read just after a language change otherwise saw the old stored language,
+ * and the app logged a mismatch that was not one (CodeRabbit on #1940).
+ */
+function followSettled() {
+  let timer = null;
+  return Promise.race([followRunning ?? Promise.resolve(), new Promise(resolve => { timer = setTimeout(resolve, 2 * FOLLOW_READ_MS + 1_000); })])
+    .catch(() => undefined).finally(() => clearTimeout(timer));
+}
 async function followAppNow(data) {
   const language = APP_LANGUAGES.has(data?.language) ? data.language : null;
   const kept = data?.browserPreferences;
@@ -3142,7 +3155,8 @@ async function followAppNow(data) {
     patch[SHOW_TIMES_KEY] = kept.durations;
   }
   try {
-    if (Object.keys(patch).length) await chrome.storage.local.set(patch);
+    // A write that never answers is bounded too: it must not hold every later status (CodeRabbit on #1940).
+    if (Object.keys(patch).length) await boundedStorage(chrome.storage.local.set(patch), 'write');
     if (language) appLanguageApplied = language;
     appLanguageError = readFailed;
   } catch (error) {
@@ -5045,6 +5059,7 @@ async function cachedEnvironmentDiagnostics() {
 /** Snapshot sent only to the current paired bridge; it does not grant work or recovery. */
 async function companionDiagnosticSnapshot(found) {
   // Bounded like followApp's read: a storage that never answers must not hold every later report back.
+  await followSettled();
   let readFailed = null;
   const preferences = await boundedStorageGet([RENDER_STREAM_KEY, SHOW_TIMES_KEY, APP_LANGUAGE_KEY])
     .catch(error => { readFailed = String(error?.message || error).slice(0, 200); return {}; });
