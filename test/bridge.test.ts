@@ -11597,6 +11597,13 @@ describe('unattributed activity recovery', () => {
       expect(lines().slice(before)).toHaveLength(3);
       expect(lines().at(-1)).toBe('bridge: a ChatGPT page closed ChatGPT\'s announcement "A new feature" that covered it, by Escape');
       expect((await note({ note: 'something-else' })).status).toBe(400);
+      // Why a page held a queued message back, once a minute per chat and reason (2026-10-30).
+      const held = () => getLog().filter(entry => entry.message.includes('held queued message')).map(entry => entry.message);
+      const heldBefore = held().length;
+      await note({ note: 'input-held', reason: 'still-answering', inputId: 'abcdef01-2345-4678-9abc-def012345678', conversationId: PRIME });
+      await note({ note: 'input-held', reason: 'still-answering', inputId: 'abcdef01-2345-4678-9abc-def012345678', conversationId: PRIME });
+      expect(held().slice(heldBefore)).toEqual([`bridge: the page of ${PRIME} held queued message abcdef01-2345-4678-9abc-def012345678 back: ChatGPT still shows an answer running`]);
+      expect((await note({ note: 'input-held', reason: 'made-up', inputId: 'abcdef01-2345-4678-9abc-def012345678' })).status).toBe(400);
     } finally { vi.useRealTimers(); }
   });
 

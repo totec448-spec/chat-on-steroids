@@ -498,6 +498,17 @@ interface Command {
   progress?: { opened?: 'browser' | 'os'; step?: CommandStep; stepAt?: number };
 }
 
+/** Why a page held a queued message back, as the log says it (see `/page-note`, 2026-10-30). */
+const HELD_INPUT_REASONS: Record<string, string> = {
+  'page-moved': 'the tab moved on to another chat',
+  'still-answering': 'ChatGPT still shows an answer running',
+  'tool-running': 'a tool call of this chat is still running on the page',
+  'recovery-question-changed': 'its last question is not the one this automatic Continue answers',
+  'recovery-question-unreadable': 'its last question cannot be read on the page, so this automatic Continue cannot be matched to it',
+  'recovery-not-ready': 'the page could not yet prove the turn this automatic Continue answers is unfinished',
+  'no-composer': 'the page shows no message box',
+  'composer-hidden': 'its message box is covered or cannot be typed into'
+};
 /** When each page-note was last logged, by chat and heading (see `/page-note`). */
 const pageNotesLogged = new Map<string, number>();
 /** Bootstrap stages a page reports after redeeming, in order. See `commandProgress`. */
@@ -5117,6 +5128,20 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     } catch (err) {
       if ((err as Error).message === 'body_too_large') return tooLarge(res, origin);
       return json(res, 400, { error: 'bad_request' }, origin);
+    }
+    if (body?.['note'] === 'input-held') {
+      const reason = typeof body['reason'] === 'string' && Object.hasOwn(HELD_INPUT_REASONS, body['reason']) ? body['reason'] : null;
+      const inputId = typeof body['inputId'] === 'string' && /^[0-9a-f-]{8,64}$/i.test(body['inputId']) ? body['inputId'] : null;
+      if (!reason || !inputId) return json(res, 400, { error: 'bad_request' }, origin);
+      const chat = conversationId(body['conversationId']);
+      const key = `held|${chat ?? ''}|${reason}`;
+      const now = Date.now();
+      if (now - (pageNotesLogged.get(key) ?? 0) >= 60_000) {
+        pageNotesLogged.set(key, now);
+        if (pageNotesLogged.size > 200) pageNotesLogged.delete(pageNotesLogged.keys().next().value!);
+        logInfo(`bridge: ${chat ? `the page of ${chat}` : 'a ChatGPT page'} held queued message ${inputId} back: ${HELD_INPUT_REASONS[reason]}`);
+      }
+      return json(res, 200, { ok: true }, origin);
     }
     if (body?.['note'] !== 'announcement-closed') return json(res, 400, { error: 'bad_request' }, origin);
     const heading = typeof body['heading'] === 'string' ? body['heading'].replace(/[\u0000-\u001f\u007f"]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) : '';

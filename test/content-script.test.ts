@@ -2725,7 +2725,11 @@ describe('desktop input delivery and helper ownership', () => {
     expire();
     expect(await sending).toEqual({ ok: false });
     expect(dialog.isConnected).toBe(true);
-    expect(live.sent.some(message => message.type === 'page_note')).toBe(false);
+    // The page says why it held the message back (2026-10-30).
+    expect(live.sent.filter(message => message.type === 'page_note' && message.note === 'input-held')).toEqual([
+      expect.objectContaining({ reason: 'composer-hidden', inputId, conversationId: chatA })
+    ]);
+    expect(live.sent.some(message => message.type === 'page_note' && message.note === 'announcement-closed')).toBe(false);
   });
 
   it('closes no dialog while ChatGPT limits the page\'s history, whatever language its notice is in (CodeRabbit on #1939)', async () => {
@@ -2749,7 +2753,7 @@ describe('desktop input delivery and helper ownership', () => {
     expire();
     expect(await sending).toEqual({ ok: false });
     expect(notice.isConnected).toBe(true);
-    expect(live.sent.some(message => message.type === 'page_note')).toBe(false);
+    expect(live.sent.some(message => message.type === 'page_note' && message.note === 'announcement-closed')).toBe(false);
   });
 
   it('keeps the history-limit hold on the limited chat only (CodeRabbit on #1939)', async () => {
@@ -2783,7 +2787,20 @@ describe('desktop input delivery and helper ownership', () => {
     live.document.addEventListener('keydown', event => { if (event.key === 'Escape') { live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatB}` }); live!.hook.observe(); } });
     expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA })).toEqual({ ok: false });
     expect(dialog.isConnected).toBe(false);
-    expect(live.sent.some(message => message.type === 'page_note')).toBe(false);
+    expect(live.sent.some(message => message.type === 'page_note' && message.note === 'announcement-closed')).toBe(false);
+  });
+
+  it('says ChatGPT still shows an answer running when that holds a queued message back (2026-10-30)', async () => {
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.fail ? { ok: true } : { input: claimed() } }),
+      page_note: () => ({ ok: true })
+    });
+    startGenerating(live.document);
+    live.hook.observe(); await settle();
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA })).toEqual({ ok: false });
+    expect(live.sent.filter(message => message.type === 'page_note' && message.note === 'input-held')).toEqual([
+      expect.objectContaining({ reason: 'still-answering', inputId, conversationId: chatA })
+    ]);
   });
 
   it('closes an announcement over an existing chat so its queued message is sent, not held behind it', async () => {
@@ -24073,6 +24090,19 @@ describe('ordinary Continue native recovery', () => {
   const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
   const id = '11111111-2222-4333-8444-555555555555';
   const text = 'Continue until fully finished. Tur Tur Sahur.';
+  // 2026-10-30: a queued Continue sat unsent for 17 minutes on a page that looked healthy, and nothing
+  // said why. A page whose last question it cannot read now says so instead of declining in silence.
+  it.each([['no question on the page', null, 'recovery-question-unreadable'], ['another question', 'm-other', 'recovery-question-changed']] as const)(
+    'says why it holds an automatic Continue back: %s', async (_case, shown, reason) => {
+      live = await harness(`https://chatgpt.com/c/${chat}`, { page_note: () => ({ ok: true }) });
+      if (shown) userTurn(live.document, shown, 'A different question');
+      live.hook.observe(); await settle();
+      expect(await live.runtimeMessage({ type: 'clf-desktop-input', id, conversationId: chat, silenceTurnId: 'source-turn',
+        recovery: { questionId: 'm-source', stop: false } })).toEqual({ ok: false });
+      expect(live.sent.filter(message => message.type === 'page_note')).toEqual([
+        expect.objectContaining({ note: 'input-held', reason, inputId: id, conversationId: chat })
+      ]);
+    });
   it.each(['idle', 'busy'] as const)('repairs a %s Continue whose fresh page-model scan cannot map the latest assistant turn', async scenario => {
     live = await harness(`https://chatgpt.com/c/${chat}`, {
       desktop_input: message => ({ ok: true, data: message.recoveryAction || message.authorize || message.ack || message.fail
