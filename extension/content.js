@@ -13547,7 +13547,10 @@
         // minutes on a page that looked healthy, and nothing anywhere said why.
         // page-moved is said only while the tab is still on this chat (a reload or a new turn moved
         // it on); a tab now on another chat stays silent, as does a stopped automatic Continue.
-        const reason = !onTarget() ? 'page-moved' : stillAnswering ? (CLF_DOM.generating() ? 'still-answering' : 'turn-held')
+        // A new question or progress on this chat is not the tab leaving it (CodeRabbit on #1947).
+        const moved = !onTarget() ? offTarget() : null;
+        const reason = moved ? (['new-user-message', 'turn-changed'].includes(moved) || moved.startsWith('turn-progressed') ? 'chat-moved-on' : 'page-moved')
+          : stillAnswering ? (CLF_DOM.generating() ? 'still-answering' : 'turn-held')
           : pendingTools > 0 && !message.directTurn ? 'tool-running' : !CLF_DOM.composer() ? 'no-composer' : 'composer-hidden';
         return held(reason);
       }

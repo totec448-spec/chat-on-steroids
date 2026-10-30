@@ -3933,7 +3933,7 @@ reason, inputId, conversationId }` from `acceptDesktopInput` when ChatGPT still 
 runs (`tool-running`), an automatic Continue's question is not the
 page's last one (`recovery-question-changed`) or cannot be read (`recovery-question-unreadable`), its
 unfinished turn is not proved yet (`recovery-not-ready`), or the visible-composer wait ends without a
-usable box (`page-moved`, `no-composer`, `composer-hidden`). `/page-note` logs `bridge: the page of
+usable box (`page-moved` for a reload or navigation, `chat-moved-on` for a new message, turn or progress on the same chat, `no-composer`, `composer-hidden`). `/page-note` logs `bridge: the page of
 <chat> held queued message <id> back: <why>` once a minute per chat (a new chat: per message) and
 reason. The page says nothing once the tab shows another chat or the person stopped the automatic
 Continue, and `inputId` must be a UUID. Internal busy states

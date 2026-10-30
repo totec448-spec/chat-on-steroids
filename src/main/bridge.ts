@@ -500,7 +500,8 @@ interface Command {
 
 /** Why a page held a queued message back, as the log says it (see `/page-note`, 2026-10-30). */
 const HELD_INPUT_REASONS: Record<string, string> = {
-  'page-moved': 'the tab moved on to another chat',
+  'page-moved': 'the page reloaded or moved on while it waited',
+  'chat-moved-on': 'the chat moved on while the page waited (a new message, another turn or new progress)',
   'still-answering': 'ChatGPT still shows an answer running',
   'turn-held': 'the page still holds a turn that ChatGPT no longer shows running',
   'tool-running': 'a tool call of this chat is still running on the page',
