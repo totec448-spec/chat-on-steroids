@@ -46,6 +46,7 @@ Goal can have a second chat check each step's file changes. The theme can follow
 - **Workers in their own Git worktrees** start from a linked checkout whose repository is in another approved folder, and come back after a restart.
 - **Goal no longer waits for good** after a step whose progress note ChatGPT showed only once the step had finished.
 - **Ctrl+K / ⌘K** no longer opens chat search on top of another open window, such as What's New.
+- **A long task continued in fresh turns** no longer repeats the earlier turns' sentences in each later turn.
 
 
 ## [2.1.47] — Scheduled runs, changed files under each answer, commit and pull request from Review, and your own chat style
