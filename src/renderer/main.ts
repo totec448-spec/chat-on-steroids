@@ -847,6 +847,7 @@ function save(over: { readOnly?: boolean; theme?: ThemeChoice; appearance?: Appe
       chatWritingStyle: chatStyleDraft('chatWritingStyle', DEFAULT_CHAT_WRITING_STYLE),
       sendCheckUrl: sendCheckDraft(previous),
       followOutput: $<HTMLInputElement>('followOutput').checked,
+      showMessageTimes: $<HTMLInputElement>('showMessageTimes').checked,
       mentionCore: $<HTMLInputElement>('mentionCore').checked,
       mentionPlugins: $<HTMLInputElement>('mentionPlugins').checked,
       privacyScreenshots: $<HTMLInputElement>('privacyScreenshots').checked,
@@ -1847,6 +1848,9 @@ function apply(next: AppState): void {
     applyValue(sendCheckField, config.ui.sendCheckUrl ?? '', previousState ? previousState.config.ui.sendCheckUrl ?? '' : undefined);
   sendCheckValid();
   applyChecked($<HTMLInputElement>('followOutput'), config.ui.followOutput !== false, previousState?.config.ui.followOutput);
+  applyChecked($<HTMLInputElement>('showMessageTimes'), config.ui.showMessageTimes === true, previousState?.config.ui.showMessageTimes === true);
+  // Every chat row carries its time; the stylesheet shows it above each message only while this is on.
+  document.documentElement.classList.toggle('show-message-times', config.ui.showMessageTimes === true);
   applyChecked($<HTMLInputElement>('mentionCore'), config.ui.mentionCore !== false, previousState?.config.ui.mentionCore);
   applyChecked($<HTMLInputElement>('mentionPlugins'), config.ui.mentionPlugins === true, previousState?.config.ui.mentionPlugins);
   applyChecked($<HTMLInputElement>('controlApiEnabled'), config.controlApi?.enabled === true, previousState?.config.controlApi?.enabled);
@@ -2978,6 +2982,7 @@ for (const id of [
   'playfulContinue',
   'announceTurns',
   'followOutput',
+  'showMessageTimes',
   'followUp',
   'enterSends',
   'turnNotifications',
