@@ -2787,10 +2787,12 @@ var CLF_DOM = (() => {
       const actions = [...tileParent.querySelectorAll('button')];
       if (actions.length === 2 && actions[1] === button) {
         const open = actions[0], name = open.getAttribute('aria-label');
-        const removal = button.getAttribute('aria-label') || '';
+        const removal = (button.getAttribute('aria-label') || '').trim();
         const labelled = [...tileParent.querySelectorAll('span')].some(node =>
           !node.children.length && node.textContent === name);
-        if (name && removal !== name && removal.endsWith(` ${name}`) && labelled &&
+        // The tile's structure is the proof, not the remove label's wording: "Remove notes.zip" in
+        // English, "notes.zip entfernen" in German (#1942), and a label naming no file at all.
+        if (name && removal && removal !== name.trim() && labelled &&
             open.closest('[data-composer-attachments]') === attachmentHost) return name;
       }
     }
