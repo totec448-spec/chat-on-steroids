@@ -13379,7 +13379,15 @@
     if (message.branch && !message.conversationId && !await prepareBranchPage(message)) return false;
     const silencePickup = typeof message.silenceTurnId === 'string';
     let sourceQuiet = silencePickup;
-    if (desktopInputBusy || modelCatalogBusy || !alive || (generating && !message.directTurn && !silencePickup) || (pendingTools > 0 && !message.directTurn) || goalBusy || job?.busy) return false;
+    // Why this page holds the message back, for one app log line a minute (2026-10-30: a queued
+    // Continue sat unsent for 17 minutes on a page that looked healthy, and nothing said why).
+    const held = (reason) => {
+      void ask({ type: 'page_note', note: 'input-held', reason, inputId: message.id, conversationId: message.conversationId || CLF_DOM.conversationId() }).catch(() => undefined);
+      return false;
+    };
+    if (desktopInputBusy || modelCatalogBusy || !alive || goalBusy || job?.busy) return false;
+    if (generating && !message.directTurn && !silencePickup) return held('still-answering');
+    if (pendingTools > 0 && !message.directTurn) return held('tool-running');
     const target = message.conversationId || null;
     const forEpoch = epoch;
     const sourceTurn = turnId;
@@ -13410,14 +13418,17 @@
       return 'off-target';
     };
     if (!onTarget()) return false;
-    if (message.recovery && (!sourceUser || sourceUser !== message.recovery.questionId || stopRequestedAt)) return false;
+    if (message.recovery && !stopRequestedAt && (!sourceUser || sourceUser !== message.recovery.questionId)) {
+      return held(sourceUser ? 'recovery-question-changed' : 'recovery-question-unreadable');
+    }
+    if (message.recovery && stopRequestedAt) return false;
     if (message.recovery) {
       let veto = '';
       if (!await recoveryPageUnfinished(onTarget, why => { veto = why; })) {
         // Never claimed, so no release report follows. A visible native final will not go away,
         // and unsaid it kept the app reloading this chat for hours (2026-10-02): say it once here.
         if (veto === 'page-final' && onTarget()) await ask({ type: 'desktop_input', id: message.id, conversationId: target, recoveryVeto: 'page-final' });
-        return false;
+        return veto && veto !== 'page-final' ? held('recovery-not-ready') : false;
       }
     }
     if (silencePickup && CLF_DOM.generating() && !await confirmedProviderTerminal()) {
@@ -13524,7 +13535,14 @@
         await flush();
         return false; // No claim, insertion or Send: queued input survives recovery.
       }
-      if (!composer || !onTarget() || (!message.directTurn && ((!silencePickup && generating) || CLF_DOM.generating())) || !CLF_DOM.composerVisible()) return false;
+      const stillAnswering = !message.directTurn && ((!silencePickup && generating) || CLF_DOM.generating());
+      if (!composer || !onTarget() || stillAnswering || !CLF_DOM.composerVisible()) {
+        // Say why this page held the message back. On 2026-10-30 a queued Continue sat unsent for 17
+        // minutes on a page that looked healthy, and nothing anywhere said why.
+        const reason = !onTarget() ? 'page-moved' : stillAnswering ? 'still-answering' : !CLF_DOM.composer() ? 'no-composer' : 'composer-hidden';
+        void ask({ type: 'page_note', note: 'input-held', reason, inputId: message.id, conversationId: target }).catch(() => undefined);
+        return false;
+      }
       const reply = await ask({ type: 'desktop_input', id: message.id, conversationId: target, requiresAuthorization: true,
         ...(project ? { project: CLF_DOM.projectHomeId() } : {}) });
       const input = reply?.data?.input;

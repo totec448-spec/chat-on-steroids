@@ -3925,7 +3925,16 @@ limited (429; the access-limit notice is a dialog too, recognized by wording in 
 is reported, only if the page is still on the chat it was closed on, as the owned message `page_note`
 `{ note: 'announcement-closed', heading, conversationId }`; the worker answers at once and posts
 `POST /page-note` outside the tab's queue, which logs one line with ChatGPT's heading (≤ 80
-characters, no quotes or control characters), at most once a minute per chat and heading. A dialog with a field
+characters, no quotes or control characters), at most once a minute per chat and heading.
+The same message says why a page held a queued message back (2026-10-30: a queued Continue sat
+unsent for 17 minutes on a healthy-looking page with nothing in the log): `{ note: 'input-held',
+reason, inputId, conversationId }` from `acceptDesktopInput` when ChatGPT still shows an answer running
+(`still-answering`), a tool call runs (`tool-running`), an automatic Continue's question is not the
+page's last one (`recovery-question-changed`) or cannot be read (`recovery-question-unreadable`), its
+unfinished turn is not proved yet (`recovery-not-ready`), or the visible-composer wait ends without a
+usable box (`page-moved`, `no-composer`, `composer-hidden`). `/page-note` logs `bridge: the page of
+<chat> held queued message <id> back: <why>` once a minute per chat and reason. Internal busy states
+(another delivery, a model read, a Goal draft) stay unlogged. A dialog with a field
 (Settings, Rename, a form) is left alone and keeps holding input as before.
 A worker given up for time after a page claimed it (no page-reported failure) is a late-start
 candidate for `LATE_START_WINDOW_MS`, in memory only (#1086: on a memory-starved machine a page's
