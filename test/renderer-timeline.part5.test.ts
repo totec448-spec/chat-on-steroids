@@ -1659,3 +1659,16 @@ describe('prompt recall in the composer', () => {
     expect(composer(w).value).toBe('Second question');
   });
 });
+
+// "Show message times" (2026-10-30): a message's time reads as hours and minutes, the full date and
+// seconds on hover.
+it('labels each message with its hour and minute, and the full date in its title', async () => {
+  const at = T0 + 3_723_000;
+  const { w } = await boot([
+    { seq: 1, time: at, source: 'extension', kind: 'user_message', turnId: 't1', message: { text: 'Hello', chars: 5, truncated: false } } as any
+  ]);
+  const time = await waitFor(() => { const node = w.document.querySelector('.ev-user_message > time'); expect(node).toBeTruthy(); return node!; });
+  expect(time.textContent).toBe(new Date(at).toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' }));
+  expect(time.getAttribute('title')).toBe(new Date(at).toLocaleString('en'));
+  expect(time.getAttribute('datetime')).toBe(new Date(at).toISOString());
+});

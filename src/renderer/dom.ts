@@ -232,6 +232,19 @@ export function clockTime(atMs: number): string {
   return new Date(atMs).toLocaleTimeString(currentLanguage());
 }
 
+/**
+ * A chat row's time: hours and minutes ("3:52 PM", "15:52"), its full date in the title, and a
+ * machine-readable `datetime`. Shown only with "Show message times" on.
+ */
+export function rowTime(atMs: number): HTMLTimeElement {
+  const time = document.createElement('time');
+  const at = new Date(atMs);
+  time.textContent = at.toLocaleTimeString(currentLanguage(), { hour: 'numeric', minute: '2-digit' });
+  time.title = at.toLocaleString(currentLanguage());
+  if (Number.isFinite(atMs)) time.dateTime = at.toISOString();
+  return time;
+}
+
 /** "1.2k", "3.4M" — for token and character counts that get large. */
 /** A count in a few characters: "999", "1.0k", "12k", "1.3M", "2.0B" (never "1000k" or "2000.0M"). */
 export function compactNumber(value: number): string {

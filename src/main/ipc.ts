@@ -267,6 +267,7 @@ const settingsPatch = z.object({
     // #1794: the renderer saves only an address on this computer; main checks it again before use.
     sendCheckUrl: z.string().trim().max(300).optional(),
     followOutput: z.boolean().optional(),
+    showMessageTimes: z.boolean().optional(),
     mentionCore: z.boolean().optional(),
     mentionPlugins: z.boolean().optional(),
     language: z.enum(UI_LANGUAGES).optional(),
@@ -496,6 +497,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       // An emptied address turns the send check off.
       sendCheckUrl: pick(current.ui.sendCheckUrl, base.ui.sendCheckUrl, wanted.ui.sendCheckUrl || undefined),
       followOutput: pick(current.ui.followOutput, base.ui.followOutput, wanted.ui.followOutput),
+      showMessageTimes: pick(current.ui.showMessageTimes, base.ui.showMessageTimes, wanted.ui.showMessageTimes),
       mentionCore: pick(current.ui.mentionCore, base.ui.mentionCore, wanted.ui.mentionCore),
       mentionPlugins: pick(current.ui.mentionPlugins, base.ui.mentionPlugins, wanted.ui.mentionPlugins),
       // Not part of the settings form: reported by the window and the extension, carried through.

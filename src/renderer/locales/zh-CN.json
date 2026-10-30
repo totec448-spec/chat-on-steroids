@@ -1808,6 +1808,8 @@
   "How the app behaves day to day. Changes apply immediately.": "应用的日常行为。更改立即生效。",
   "What you see while ChatGPT answers, and what your messages carry.": "ChatGPT 回答时你看到的内容，以及你的消息附带的内容。",
   "Follow new output": "跟随新输出",
+  "Show message times": "显示消息时间",
+  "The time above each message. Point at a time for the full date.": "在每条消息上方显示时间。指向时间可查看完整日期。",
   "Stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "回答增长时停留在聊天末尾，包括这里和 ChatGPT。向上滚动会暂停。",
   "Playful status words": "趣味状态词",
   "Show rotating gym jokes instead of “Working”.": "以轮换的健身梗代替“工作中”。",
