@@ -3912,6 +3912,18 @@ changes a deadline: a worker's `sending` gives its receipt `WORKER_SENDING_GRACE
 report (bounded), because a page that pressed Send may already have delivered the task (#1086).
 Expiry names the last one, or whether the browser or the OS opened the chat and no
 page picked it up, so "did not report back in time" says where a start stopped (#882 worker-11).
+ChatGPT announcements over a page (2026-10-30: "Premium seats just got better" over a fresh chat
+stopped a Compact & Resume and a worker's model choice) are closed by `CLF_DOM.dismissAnnouncements`:
+a visible `[role="dialog"]` the extension did not open, that is not an access-limit notice `errors()`
+reads or the model picker, and has nothing to type into (no text input, textarea, select,
+contenteditable, textbox, combobox or searchbox), gets one synthetic Escape, as a person dismisses it;
+no button in it is pressed. Bootstrap runs it before waiting for the composer, again once if the
+composer never became usable, and once before retrying a refused model choice; queued input runs it
+before its visible-composer wait, so an announcement no longer holds a message behind it. Each closed
+dialog is reported as the owned message `page_note` `{ note: 'announcement-closed', heading,
+conversationId }` → `POST /page-note`, which logs one line with ChatGPT's heading (≤ 80 characters,
+no quotes or control characters), at most once a minute per chat and heading. A dialog with a field
+(Settings, Rename, a form) is left alone and keeps holding input as before.
 A worker given up for time after a page claimed it (no page-reported failure) is a late-start
 candidate for `LATE_START_WINDOW_MS`, in memory only (#1086: on a memory-starved machine a page's
 reports reached the app 20–90 s after it sent). A `sent` ACK with a conversation from the page

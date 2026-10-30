@@ -3747,6 +3747,37 @@ var CLF_DOM = (() => {
     }, []);
   }
 
+  /**
+   * ChatGPT's own announcements over a page. On 2026-10-30 one ("Premium seats just got better")
+   * covered a new chat: Compact & Resume found no message box and gave up, and a worker could not
+   * choose its model. Closed here: a modal dialog this extension did not open, that is not the
+   * access-limit notice `errors()` reads, and that has nothing to type into, so a Settings dialog,
+   * a form or the model picker is never touched. Closed only by Escape, the way a person dismisses
+   * it: no button in it is pressed, so nothing is chosen. Returns the headings it closed.
+   */
+  async function dismissAnnouncements(stillCurrent = () => true, waitMs = 1500) {
+    const notices = new Set(errors().map(error => error.node));
+    const open = () => safe(() => [...document.querySelectorAll('[role="dialog"]')].filter(node =>
+      !node.closest(OWN_SURFACES) && !node.closest('[hidden],[inert],[aria-hidden="true"]') && node.getClientRects().length > 0 &&
+      node.getAttribute('data-state') !== 'closed' && !notices.has(node) &&
+      !node.querySelector('[data-testid="composer-intelligence-picker-content"]') &&
+      !node.querySelector('input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), textarea, select, ' +
+        '[contenteditable="true"], [contenteditable=""], [role="textbox"], [role="combobox"], [role="searchbox"]')), []);
+    const closed = [];
+    for (const dialog of open()) {
+      if (!stillCurrent()) break;
+      const heading = ((dialog.querySelector('h1,h2,h3,[role="heading"]')?.textContent || dialog.getAttribute('aria-label') || '')
+        .replace(/\s+/g, ' ').trim()).slice(0, 80);
+      dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true, cancelable: true }));
+      const until = Date.now() + waitMs;
+      while (dialog.isConnected && dialog.getClientRects().length > 0 && Date.now() < until) {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      if (!dialog.isConnected || dialog.getClientRects().length === 0) closed.push(heading);
+    }
+    return closed;
+  }
+
   /** ChatGPT's open "Create project" dialog: its name field and its one submit button. */
   function projectCreateForm() {
     return safe(() => {
@@ -3905,6 +3936,7 @@ var CLF_DOM = (() => {
     thoughtActivityRows,
     toolLabel,
     errors,
+    dismissAnnouncements,
     accessNoticeSince,
     composer,
     composerSubmitReady,
