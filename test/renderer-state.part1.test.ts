@@ -2330,6 +2330,22 @@ it('restores a rejected focused port and prevents an unrelated queued save from 
   expect(select.value).toBe('auto'); expect(background.checked).toBe(true);
 });
 
+// CodeRabbit on #1938: a box shown off while the saved value is still on would misstate what the
+// desktop tools allow, and the next unrelated save would carry the unsaved value.
+it('restores desktop control without a known chat after its save fails, though the box kept the focus', async () => {
+  const mounted = await mountChat({}, [], { saveSettings: async () => ({ ok: false, error: 'Settings could not be saved.' }) });
+  const w = mounted.window;
+  // Saved on in the app; the failed save below reads this state back.
+  mounted.state.config.ui.desktopUnattributed = true;
+  mounted.push(mounted.state);
+  await settle();
+  const box = w.document.getElementById('desktopUnattributed') as HTMLInputElement;
+  expect(box.checked).toBe(true);
+  box.focus(); box.checked = false; box.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle(); await settle();
+  expect(box.checked).toBe(true);
+});
+
 it('saves the background placement from its settings control and restores it on state push', async () => {
   const mounted = await mountChat();
   const w = mounted.window;
