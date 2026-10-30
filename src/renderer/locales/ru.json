@@ -3609,6 +3609,8 @@
   "{0} in {1}": "{0} в {1}",
   "Go ahead": "Разрешить",
   "Ask before using the mouse and keyboard": "Спрашивать перед использованием мыши и клавиатуры",
+  "Allow desktop control from calls without a known chat": "Разрешить управление рабочим столом для вызовов без известного чата",
+  "Normally the screen, mouse and keyboard are used only for a chat the app can name. With one ChatGPT account on several computers, a call it can't name may come from another computer's chat.": "Обычно экран, мышь и клавиатура используются только для чата, который приложение может определить. Если одна учётная запись ChatGPT используется на нескольких компьютерах, такой вызов может прийти из чата на другом компьютере.",
   "A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for up to 2 minutes, until you use the mouse or keyboard again; a step the app can't match to a chat asks again. Browser steps never ask.": "Небольшой вопрос в углу экрана с кнопками «Разрешить» и «Не сейчас». «Разрешить» даёт этому чату до 2 минут — пока вы снова не воспользуетесь мышью или клавиатурой; шаг, который приложение не может связать с чатом, спросит снова. Шаги в браузере никогда не спрашивают.",
   "Ask while I'm using the computer": "Спрашивать, пока я пользуюсь компьютером",
   "Always ask": "Всегда спрашивать",

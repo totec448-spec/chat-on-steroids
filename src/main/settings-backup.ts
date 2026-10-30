@@ -169,7 +169,7 @@ export function widerAccess(before: Settings, after: Settings): string[] {
   if (at(before, 'readOnly') === true && at(after, 'readOnly') === false) wider.push('readOnly');
   const rulesBefore = at(before, 'commandAllowlist'), rulesAfter = at(after, 'commandAllowlist');
   if (isPlainObject(rulesBefore) && rulesBefore['enabled'] === true && JSON.stringify(rulesBefore) !== JSON.stringify(rulesAfter)) wider.push('commandAllowlist');
-  for (const path of ['controlApi.enabled', 'controlApi.allowActions', 'multiAgent.allowUnattributedCalls']) if (turnedOn(path)) wider.push(path);
+  for (const path of ['controlApi.enabled', 'controlApi.allowActions', 'multiAgent.allowUnattributedCalls', 'ui.desktopUnattributed']) if (turnedOn(path)) wider.push(path);
   if (turnedOff('multiAgent.strictChatAllowlist', false)) wider.push('multiAgent.strictChatAllowlist');
   // Missing means on, as in the saved settings.
   if (turnedOff('ui.secretsShield', true)) wider.push('ui.secretsShield');

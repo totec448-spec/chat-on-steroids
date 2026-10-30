@@ -134,6 +134,22 @@ it('saves the ask-before-mouse-and-keyboard choice (#1804), keeps it through a s
   expect(getConfig().ui.desktopAsk).toBe('always');
 });
 
+it('saves desktop control for calls without a known chat, off by default, and keeps it through a stale save (2026-10-30)', async () => {
+  const base = getConfig();
+  expect(base.ui.desktopUnattributed).toBeUndefined();
+  expect(await save({ ...base, ui: { ...base.ui, desktopUnattributed: true } }, base)).toMatchObject({ ok: true });
+  expect(getConfig().ui.desktopUnattributed).toBe(true);
+  // A stale form without the field, or with the form's default (off), is not an edit: it stays on.
+  const now = getConfig();
+  const { desktopUnattributed: _, ...older } = now.ui;
+  const stale = { ...now, ui: older };
+  expect(await save({ ...stale, ui: { ...older, desktopUnattributed: false, theme: now.ui.theme === 'light' ? 'dark' : 'light' } }, stale)).toMatchObject({ ok: true });
+  expect(getConfig().ui.desktopUnattributed).toBe(true);
+  const latest = getConfig();
+  expect(await save({ ...latest, ui: { ...latest.ui, desktopUnattributed: false } }, latest)).toMatchObject({ ok: true });
+  expect(getConfig().ui.desktopUnattributed).toBe(false);
+});
+
 it('remembers that the first-run tour was taken or declined, through any later settings save (#1833)', async () => {
   expect(getConfig().ui.tourDone).toBeUndefined();
   await handlers.get('ui:tourDone')!(null, undefined);

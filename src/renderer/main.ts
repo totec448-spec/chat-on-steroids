@@ -566,6 +566,23 @@ function desktopAskRow(): HTMLElement {
   return row;
 }
 
+/**
+ * Desktop control for a call the app can't tie to a chat (2026-10-30): off unless chosen, because
+ * with one ChatGPT account on several computers such a call can come from another computer's chat.
+ */
+function desktopUnattributedRow(): HTMLElement {
+  const row = el('label', 'tool desktop-unattributed-row');
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.id = 'desktopUnattributed';
+  input.addEventListener('change', () => void save());
+  const body = el('span');
+  body.append(el('strong', '', () => t('Allow desktop control from calls without a known chat')),
+    el('em', '', () => t("Normally the screen, mouse and keyboard are used only for a chat the app can name. With one ChatGPT account on several computers, a call it can't name may come from another computer's chat.")));
+  row.append(input, body);
+  return row;
+}
+
 function buildGroups(): void {
   const permissionGroups = GROUPS.map((group) => {
     const box = document.createElement('input');
@@ -592,7 +609,7 @@ function buildGroups(): void {
       body.append(el('strong', '', () => t(CAPABILITY_LABELS[cap])), el('em', '', () => t(CAPABILITY_DETAILS[cap])));
       label.append(input, body);
       tools.append(label);
-      if (cap === 'control') tools.append(desktopAskRow());
+      if (cap === 'control') tools.append(desktopAskRow(), desktopUnattributedRow());
     }
     tools.append(toolNames([]));
     if (group.id === 'run') tools.append(buildCommandAllowlist());
@@ -797,6 +814,7 @@ function save(over: { readOnly?: boolean; theme?: ThemeChoice; appearance?: Appe
       chatBrowser: $<HTMLSelectElement>('chatBrowser').value as ChatBrowser,
       cosBrowserMinimize: $<HTMLSelectElement>('cosBrowserMinimize').value === 'tray' ? 'tray' : 'taskbar',
       desktopAsk: ($<HTMLSelectElement>('desktopAsk').value || 'off') as NonNullable<Config['ui']['desktopAsk']>,
+      desktopUnattributed: $<HTMLInputElement>('desktopUnattributed').checked,
       finishTool: $<HTMLInputElement>('finishTool').checked,
       finishHoldOnStop: $<HTMLInputElement>('finishHoldOnStop').checked,
       planBackend: $<HTMLSelectElement>('planBackend').value as 'chatgpt' | 'api',
@@ -1755,8 +1773,10 @@ function apply(next: AppState): void {
   applyValue($<HTMLSelectElement>('chatBrowser'), config.ui.chatBrowser ?? 'chrome', previousState?.config.ui.chatBrowser ?? 'chrome');
   applyValue($<HTMLSelectElement>('cosBrowserMinimize'), config.ui.cosBrowserMinimize ?? 'taskbar', previousState?.config.ui.cosBrowserMinimize ?? 'taskbar');
   applyValue($<HTMLSelectElement>('desktopAsk'), config.ui.desktopAsk ?? 'off', previousState?.config.ui.desktopAsk ?? 'off');
+  applyChecked($<HTMLInputElement>('desktopUnattributed'), config.ui.desktopUnattributed === true, previousState?.config.ui.desktopUnattributed === true);
   // The system says when it was last used only on macOS and Windows; elsewhere nothing would ask.
   ($('desktopAsk').closest('.desktop-ask-row') as HTMLElement).hidden = !['macos', 'windows'].includes(next.platform?.family ?? 'macos');
+  ($('desktopUnattributed').closest('.desktop-unattributed-row') as HTMLElement).hidden = !['macos', 'windows'].includes(next.platform?.family ?? 'macos');
   // Only the built-in browser has a window of the app's own to minimize.
   $('cosBrowserMinimizeRow').hidden = (config.ui.chatBrowser ?? 'chrome') !== 'cos';
   $<HTMLSelectElement>('planBackend').value = config.ui.planBackend ?? 'chatgpt';

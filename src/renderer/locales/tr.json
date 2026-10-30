@@ -3475,6 +3475,8 @@
   "{0} in {1}": "{1} içinde {0}",
   "Go ahead": "Devam et",
   "Ask before using the mouse and keyboard": "Fare ve klavyeyi kullanmadan önce sor",
+  "Allow desktop control from calls without a known chat": "Bilinen bir sohbeti olmayan çağrılar için masaüstü denetimine izin ver",
+  "Normally the screen, mouse and keyboard are used only for a chat the app can name. With one ChatGPT account on several computers, a call it can't name may come from another computer's chat.": "Normalde ekran, fare ve klavye yalnızca uygulamanın tanıyabildiği bir sohbet için kullanılır. Tek bir ChatGPT hesabı birkaç bilgisayarda kullanılıyorsa, tanınamayan bir çağrı başka bir bilgisayardaki sohbetten gelmiş olabilir.",
   "A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for up to 2 minutes, until you use the mouse or keyboard again; a step the app can't match to a chat asks again. Browser steps never ask.": "Ekranın köşesinde Devam et ve Şimdi değil seçenekli küçük bir soru. Devam et, o sohbetin en fazla 2 dakika boyunca, sen fareyi veya klavyeyi yeniden kullanana kadar devam etmesine izin verir; uygulamanın bir sohbetle eşleştiremediği bir adım yeniden sorar. Tarayıcı adımları hiç sormaz.",
   "Ask while I'm using the computer": "Bilgisayarı kullanırken sor",
   "Always ask": "Her zaman sor",
