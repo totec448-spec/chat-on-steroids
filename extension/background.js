@@ -4841,9 +4841,10 @@ const HANDLERS = {
   async page_note(message) {
     if (message?.note !== 'announcement-closed') return { ok: false };
     const heading = typeof message.heading === 'string' ? message.heading.replace(/\s+/g, ' ').trim().slice(0, 80) : '';
-    const result = await call('/page-note', { method: 'POST',
-      body: JSON.stringify({ note: 'announcement-closed', heading, conversationId: cleanConversationId(message.conversationId) }) });
-    return { ok: result.ok === true };
+    // Best effort, and never in the tab's queue: a claim or receipt behind it must not wait on a log line.
+    void call('/page-note', { method: 'POST',
+      body: JSON.stringify({ note: 'announcement-closed', heading, conversationId: cleanConversationId(message.conversationId) }) }).catch(() => undefined);
+    return { ok: true };
   },
   async command_step(message) {
     const id = typeof message.id === 'string' ? message.id.slice(0, 128) : '';

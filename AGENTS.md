@@ -3919,10 +3919,13 @@ reads or the model picker, and has nothing to type into (no text input, textarea
 contenteditable, textbox, combobox or searchbox), gets one synthetic Escape, as a person dismisses it;
 no button in it is pressed. Bootstrap runs it before waiting for the composer, again once if the
 composer never became usable, and once before retrying a refused model choice; queued input runs it
-before its visible-composer wait, so an announcement no longer holds a message behind it. Each closed
-dialog is reported as the owned message `page_note` `{ note: 'announcement-closed', heading,
-conversationId }` → `POST /page-note`, which logs one line with ChatGPT's heading (≤ 80 characters,
-no quotes or control characters), at most once a minute per chat and heading. A dialog with a field
+before its visible-composer wait, so an announcement no longer holds a message behind it. None of
+this runs while the message box is usable, nor for 10 minutes after the page saw a history 429 (the
+access-limit notice is a dialog too, recognized by wording in only some languages). Each closed dialog
+is reported, only if the page is still on the chat it was closed on, as the owned message `page_note`
+`{ note: 'announcement-closed', heading, conversationId }`; the worker answers at once and posts
+`POST /page-note` outside the tab's queue, which logs one line with ChatGPT's heading (≤ 80
+characters, no quotes or control characters), at most once a minute per chat and heading. A dialog with a field
 (Settings, Rename, a form) is left alone and keeps holding input as before.
 A worker given up for time after a page claimed it (no page-reported failure) is a late-start
 candidate for `LATE_START_WINDOW_MS`, in memory only (#1086: on a memory-starved machine a page's
