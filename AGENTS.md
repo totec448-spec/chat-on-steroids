@@ -3920,8 +3920,8 @@ contenteditable, textbox, combobox or searchbox), gets one synthetic Escape, as 
 no button in it is pressed. Bootstrap runs it before waiting for the composer, again once if the
 composer never became usable, and once before retrying a refused model choice; queued input runs it
 before its visible-composer wait, so an announcement no longer holds a message behind it. None of
-this runs while the message box is usable, nor for 10 minutes after the page saw a history 429 (the
-access-limit notice is a dialog too, recognized by wording in only some languages). Each closed dialog
+this runs while the message box is usable, nor for 10 minutes on a chat whose history the page saw
+limited (429; the access-limit notice is a dialog too, recognized by wording in only some languages). Each closed dialog
 is reported, only if the page is still on the chat it was closed on, as the owned message `page_note`
 `{ note: 'announcement-closed', heading, conversationId }`; the worker answers at once and posts
 `POST /page-note` outside the tab's queue, which logs one line with ChatGPT's heading (≤ 80

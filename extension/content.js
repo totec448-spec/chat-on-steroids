@@ -11873,8 +11873,8 @@
    * recognized by wording in only some languages, and must stay for the person (CodeRabbit on #1939).
    */
   async function closeAnnouncements(stillCurrent = () => true) {
-    if (Date.now() - historyLimitSeenAt < 10 * 60_000) return [];
     const chat = CLF_DOM.conversationId();
+    if (historyLimitSeen && historyLimitSeen.conversationId === chat && Date.now() - historyLimitSeen.at < 10 * 60_000) return [];
     const closed = await CLF_DOM.dismissAnnouncements(stillCurrent).catch(() => []);
     // Reported for the chat it was closed on; a page that moved on meanwhile says nothing.
     if (stillCurrent() && CLF_DOM.conversationId() === chat) {
@@ -12828,8 +12828,8 @@
     endDeletedTurn();
   });
   let pendingHistoryRateLimit = null;
-  /** When this page last saw ChatGPT limit a history read; see closeAnnouncements. */
-  let historyLimitSeenAt = 0;
+  /** The chat whose history ChatGPT last limited on this page, and when; see closeAnnouncements. */
+  let historyLimitSeen = null;
   function publishHistoryRateLimit() {
     const limit = pendingHistoryRateLimit;
     if (!limit || limit.retryAt <= Date.now() || limit.published === limit.retryAt) return;
@@ -12846,13 +12846,13 @@
   }
   window.addEventListener('message', (event) => {
     if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-history-rate-limit') return;
-    historyLimitSeenAt = Date.now();
     const claimed = typeof event.data.conversationId === 'string' ? event.data.conversationId : '';
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(claimed) ||
         CLF_DOM.conversationId() !== claimed) return;
     const retryAt = Number(event.data.retryAt), observedAt = Number(event.data.observedAt);
     if (!Number.isFinite(retryAt) || !Number.isFinite(observedAt) || retryAt <= observedAt ||
         retryAt - observedAt > 24 * 60 * 60_000 || retryAt <= Date.now()) return;
+    historyLimitSeen = { conversationId: claimed, at: Date.now() };
     if (!pendingHistoryRateLimit || pendingHistoryRateLimit.conversationId !== claimed ||
         retryAt > pendingHistoryRateLimit.retryAt) {
       pendingHistoryRateLimit = { conversationId: claimed, retryAt, observedAt, published: 0 };

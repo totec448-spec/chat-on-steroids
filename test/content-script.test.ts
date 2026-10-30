@@ -2752,6 +2752,27 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.some(message => message.type === 'page_note')).toBe(false);
   });
 
+  it('keeps the history-limit hold on the limited chat only (CodeRabbit on #1939)', async () => {
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.fail ? { ok: true } : { input: claimed() } }),
+      page_note: () => ({ ok: true })
+    });
+    (live.window as any).CLF_DOM.selectModelSettings = vi.fn(async () => true);
+    const now = Date.now();
+    live.window.dispatchEvent(new live.window.MessageEvent('message', { source: live.window as unknown as Window, origin: 'https://chatgpt.com',
+      data: { type: 'cos-history-rate-limit', conversationId: chatA, observedAt: now, retryAt: now + 60_000 } }));
+    // The tab moves on to another chat; an announcement there is closed as usual.
+    live.dom.reconfigure({ url: `https://chatgpt.com/c/${chatB}` }); live.hook.observe(); await settle();
+    const dialog = announcement(live.document);
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      userTurn(live!.document, 'other-chat-user', text);
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+      live!.hook.observe();
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatB })).toEqual({ ok: true });
+    expect(dialog.isConnected).toBe(false);
+  });
+
   it('reports a closed announcement only for the chat it was closed on (CodeRabbit on #1939)', async () => {
     live = await harness(`https://chatgpt.com/c/${chatA}`, {
       desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.fail ? { ok: true } : { input: claimed() } }),
