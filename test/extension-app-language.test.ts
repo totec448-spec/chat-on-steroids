@@ -8,7 +8,7 @@ const source = readFileSync(path.join(root, 'i18n.js'), 'utf8');
 const catalog = (folder: string) => JSON.parse(readFileSync(path.join(root, '_locales', folder, 'messages.json'), 'utf8'));
 
 /** i18n.js in an extension page whose Chrome is German, paired with an app set to `appLanguage`. */
-async function load(appLanguage: string | undefined, protocol = 'chrome-extension:', missing: string[] = []) {
+async function load(appLanguage: string | undefined, protocol = 'chrome-extension:', missing: string[] = [], options: { workerLanguage?: string; storageHangs?: boolean } = {}) {
   const german = catalog('de');
   const listeners: Array<(changes: Record<string, { newValue: unknown }>, area: string) => void> = [];
   const stored: Record<string, unknown> = appLanguage ? { appLanguage } : {};
@@ -21,14 +21,17 @@ async function load(appLanguage: string | undefined, protocol = 'chrome-extensio
       getUILanguage: () => 'de'
     },
     storage: {
-      local: { get: async () => ({ ...stored }) },
+      local: { get: () => options.storageHangs ? new Promise(() => undefined) : Promise.resolve({ ...stored }) },
       onChanged: { addListener: (listener: (typeof listeners)[number]) => listeners.push(listener) }
     },
     runtime: {
       getURL: (file: string) => file,
-      sendMessage: async (message: { language: string }) => {
+      sendMessage: async (message: { language?: string; current?: boolean }) => {
         sent.push(message);
-        return { ok: true, messages: catalog(message.language === 'zh-CN' ? 'zh_CN' : message.language) };
+        // The worker names the language it applied from the app's last status, or none yet.
+        const language = message.current ? options.workerLanguage : message.language;
+        if (!language) return { ok: false };
+        return { ok: true, ...(message.current ? { language } : {}), messages: catalog(language === 'zh-CN' ? 'zh_CN' : language) };
       }
     }
   };
@@ -36,7 +39,7 @@ async function load(appLanguage: string | undefined, protocol = 'chrome-extensio
     if (missing.some(folder => file.includes(`_locales/${folder}/`))) return { ok: false, json: async () => null };
     try { return { ok: true, json: async () => JSON.parse(readFileSync(path.join(root, file), 'utf8')) }; } catch { return { ok: false, json: async () => null }; }
   };
-  const context: Record<string, unknown> = { chrome, fetch, location: { protocol }, CustomEvent: class { constructor(public type: string) {} } };
+  const context: Record<string, unknown> = { chrome, fetch, setTimeout, clearTimeout, location: { protocol }, CustomEvent: class { constructor(public type: string) {} } };
   context.globalThis = context;
   vm.runInNewContext(source, context);
   const api = context.CLF_I18N as { t: (key: string, fallback?: string, values?: unknown) => string; tn: (key: string, count: number, one: string, other: string, values?: unknown[]) => string; ready: Promise<void>; language: () => string | null };
@@ -50,7 +53,20 @@ it('shows the app language rather than Chrome\'s, in pages and in content script
   expect(page.api.t('content_app_did_not_answer', 'fallback')).toBe('The app did not answer.');
   const content = await load('en', 'https:');
   expect(content.api.t('content_app_did_not_answer', 'fallback')).toBe('The app did not answer.');
-  expect(content.sent).toEqual([{ type: 'i18n_catalog', language: 'en' }]);
+  expect(content.sent).toEqual([{ type: 'i18n_catalog', current: true }, { type: 'i18n_catalog', language: 'en' }]);
+});
+
+// CodeRabbit on #1940: a page whose storage read never answers still shows the app language, because
+// it asks the worker which language it applied. The stored copy stays the fallback for a worker that
+// has not heard from the app yet.
+it('takes the worker\'s applied language when the page\'s storage read never answers', async () => {
+  for (const protocol of ['chrome-extension:', 'https:']) {
+    const page = await load(undefined, protocol, [], { workerLanguage: 'en', storageHangs: true });
+    expect(page.api.language()).toBe('en');
+    expect(page.api.t('content_app_did_not_answer', 'fallback')).toBe('The app did not answer.');
+  }
+  const unknown = await load('en', 'https:', [], {});
+  expect(unknown.api.language()).toBe('en');
 });
 
 it('keeps Chrome\'s language until the app has named one, and follows a later change', async () => {
@@ -148,6 +164,28 @@ it('applies statuses in order, so a slow older read cannot write its language la
   await Promise.all([older, newer]);
   expect(store).toEqual({ appLanguage: 'de' });
   expect(follow.writes).toEqual([{ appLanguage: 'en' }, { appLanguage: 'de' }]);
+});
+
+// CodeRabbit on #1940: statuses arrive faster than a slow read finishes. Only the newest waiting one
+// runs next, so a burst cannot hold a newer language back behind a queue of reads.
+it('keeps only the newest waiting status while one is applied', async () => {
+  const store: Record<string, unknown> = {};
+  let releaseFirst!: () => void;
+  let reads = 0;
+  const follow = follower(store, { get: async (keys: string[]) => {
+    reads += 1;
+    if (reads === 1) await new Promise<void>(resolve => { releaseFirst = resolve; });
+    return Object.fromEntries(keys.filter(key => key in store).map(key => [key, store[key]]));
+  } });
+  const kept = { overwrite: false, durations: true };
+  const runs = [follow({ language: 'en', browserPreferences: kept })];
+  for (let i = 0; i < 20; i++) runs.push(follow({ language: 'en', browserPreferences: kept }));
+  runs.push(follow({ language: 'de', browserPreferences: kept }));
+  await new Promise(resolve => setTimeout(resolve, 10));
+  releaseFirst();
+  await Promise.all(runs);
+  expect(reads).toBe(2);
+  expect(store.appLanguage).toBe('de');
 });
 
 it('keeps a refused write for diagnostics and tries again on the next status', async () => {
