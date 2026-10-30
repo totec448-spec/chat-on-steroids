@@ -31,6 +31,9 @@ export function applyAppearance(theme: AppearanceTheme, settings?: AppearanceSet
   const value = settings ?? defaultAppearance(), palette = effectivePalette(value, theme), root = document.documentElement;
   const high = value.highContrast === true;
   root.dataset.theme = theme;
+  // The T3 visual baseline uses neutral surfaces only for the default palette.
+  // A chosen sidebar tint must remain the user's exact colour, not be overwritten by the reference styling.
+  root.dataset.t3DefaultSidebar = String(value[theme].sidebar.toLowerCase() === defaultAppearance()[theme].sidebar.toLowerCase());
   root.dataset.highContrast = String(high);
   // A translucent sidebar mixes two colors; high contrast keeps every surface on its own page.
   root.dataset.translucentSidebar = String(value.translucentSidebar && !high);

@@ -5,14 +5,19 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
 const output = path.join(root, '.tmp/sidebar-parity');
+const visualPreview = process.env.COS_T3_VISUAL === '1';
 const { fixtureConfigSource, BENIGN_RENDERER_ERRORS } = require('./fixtures/app-defaults.cjs');
 const { fixtureSidebarShelvesSource } = require('./fixtures/sidebar-shelves.cjs');
 app.setPath('userData', path.join(output, 'profile'));
 app.disableHardwareAcceleration();
+// A failed assertion may close the only fixture window before its rejection reaches .catch.
+// Prevent Electron's automatic last-window quit from hiding the actual test failure.
+app.on('window-all-closed', () => {});
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 let completed = false;
+let reportingFailure = false;
 app.on('before-quit', event => {
-  if (completed) return;
+  if (completed || reportingFailure) return;
   event.preventDefault();
   console.error('Unexpected Electron quit before sidebar assertions finished');
   app.exit(1);
@@ -20,19 +25,42 @@ app.on('before-quit', event => {
 let server, win;
 const fixture = `(() => {
   const old=window.api,f=composerFixture,ok=data=>Promise.resolve({ok:true,data:structuredClone(data)});
-  const rows=[0,1,2,3].map(n=>({...f.summary,id:'batch-chat-'+n,title:['Investigate navigation','Review sidebar styles','Add keyboard tests','Finish release notes'][n],
-    conversationId:'batch-conversation-'+n,chatIds:['batch-conversation-'+n],updatedAt:Date.now()-n*60000}));
+  const visual=${visualPreview ? 'true' : 'false'};
+  const projects=visual ? [
+    {id:'cos-app',name:'chat-on-steroids',path:'D:/chat/chat-on-steroids',color:'blue',ungrouped:false},
+    {id:'inkpad',name:'inkpad',path:'D:/chat/inkpad',color:'green',ungrouped:false},
+    {id:'price-compare',name:'price-compare',path:'D:/chat/price-compare',color:'purple',ungrouped:false},
+    {id:'tvdoctor',name:'TVDoctor',path:'D:/Tv Docter',color:'amber',ungrouped:false},
+    {id:'video-editor',name:'ai-video-editor',path:'D:/chat/ai-video-editor',color:'teal',ungrouped:false},
+    {id:'balloon',name:'balloon-dots',path:'D:/chat/balloon-dots',color:'rose',ungrouped:false},
+    {id:'kart',name:'kart-royale',path:'D:/chat/kart-royale',color:'blue',ungrouped:false}
+  ] : [];
+  const titles=visual ? [
+    'Rebuild sidebar with T3 layout','Fix release packaging','Review Electron startup',
+    'Improve drag and drop','Polish drawing tools','Fix image caption export',
+    'Implement persistent drafts','Improve product search','Connect retailer feeds',
+    'Profile Android decoder','Review Roku snapshot','Make video streaming faster',
+    'Add timeline keyboard shortcuts','Fix native MP4 export',
+    'Fix companion connection','Improve desktop window controls',
+    'Model kart bonnet geometry','Polish Roblox vehicle meshes',
+    'Unfiled support chat'
+  ] : ['Investigate navigation','Review sidebar styles','Add keyboard tests','Finish release notes'];
+  const visualProject=n=>n<4?'cos-app':n<7?'inkpad':n<9?'price-compare':n<12?'tvdoctor':n<14?'video-editor':n<16?'balloon':n<18?'kart':undefined;
+  const rows=Array.from({length:titles.length},(_,n)=>({...f.summary,id:'batch-chat-'+n,title:titles[n],
+    projectId:visual ? visualProject(n) : undefined,
+    conversationId:'batch-conversation-'+n,chatIds:['batch-conversation-'+n],updatedAt:Date.now()-n*3600000}));
   window.fixtureRows=rows;
   window.fileImports=[];
   const methods={
     ...window.sidebarShelfFixture.methods,
+    ...(visual ? {markWhatsNewSeen:()=>ok(undefined), chatGroups:()=>ok({version:1,groups:[],members:{}})} : {}),
     getState:async()=>{const r=await old.getState();r.data.config=fixtureMerge(fixtureDefaults,r.data.config);r.data.config.ui={...r.data.config.ui,language:'en',theme:window.fixtureTheme||'dark'};return r;},
     listSessions:()=>ok({sessions:rows,activeId:null,pressure:[],blocked:[],trusted:[]}),
     getSession:async(id)=>ok({summary:rows.find(r=>r.id===id)||rows[0],events:[],total:0,nextFrom:1}),
     getSessionControls:async id=>ok({...f.controls,sessionId:id,conversationId:'batch-conversation-'+id.slice(-1)}),
     dropFiles:async files=>{window.fileImports.push(files.map(file=>file.name));await new Promise(r=>setTimeout(r,40));
       return ok(files.map((file,n)=>({id:'fixture-attached-'+n,name:file.name,mimeType:file.type||'text/plain',size:file.size})));},
-    listProjects:()=>ok([])
+    listProjects:()=>ok(projects)
   };
   window.fixtureTheme='dark';
   window.setTheme=async theme=>{window.fixtureTheme=theme;f.emit('onStateChanged',(await methods.getState()).data);};
@@ -49,7 +77,9 @@ app.whenReady().then(async () => {
     plugins:[{name:'sidebar-parity-fixture',transformIndexHtml:html=>html.replace('</head>','<script src="/sidebar-fixture.js"></script></head>'),
       configureServer(vite){vite.middlewares.use((req,res,next)=>{if(req.url!=='/sidebar-fixture.js')return next();res.setHeader('Content-Type','text/javascript');res.end(fixtureConfigSource()+fs.readFileSync(path.join(root,'scripts/fixtures/composer-ui.js'),'utf8')+fixtureSidebarShelvesSource()+fixture);});}}] });
   await server.listen();
-  win = new BrowserWindow({ show:false, width:1280, height:850, webPreferences:{sandbox:true,offscreen:true,backgroundThrottling:false} });
+  // Use T3 Code's 1920x1080 reference viewport for visual parity captures only.
+  win = new BrowserWindow({ show:false, width:visualPreview ? 1920 : 1280, height:visualPreview ? 1080 : 850,
+    webPreferences:{sandbox:true,offscreen:true,backgroundThrottling:false} });
   const errors=[];
   win.webContents.on('console-message', e=>{if(e.level==='error'&&!BENIGN_RENDERER_ERRORS.includes(e.message))errors.push(e.message);});
   const js=code=>win.webContents.executeJavaScript(code);
@@ -62,7 +92,50 @@ app.whenReady().then(async () => {
     await win.loadURL(server.resolvedUrls.local[0]);
     await until(`!!${row(3)}?.querySelector('.sess-top')`);
     win.show();win.focus();win.webContents.focus();await pause(200);
-    assert.equal(await js(`document.querySelectorAll('#sessionList .sess[data-id]').length`),4);
+    assert.equal(await js(`document.querySelectorAll('#sessionList .sess[data-id]').length`),visualPreview ? 19 : 4);
+    if (visualPreview) {
+      await until(`document.querySelectorAll('#sessionList .project-group').length===7`);
+      await js(`window.sidebarShelfFixture.methods.setSidebarShelves([
+        {id:'batch-chat-2',shelf:'pinned'},
+        {id:'batch-chat-8',shelf:'settled'},
+        {id:'batch-chat-6',shelf:'snoozed',until:Date.now()+3600000,
+          attention:{userMessages:0,errors:0}}
+      ],window.sidebarShelfFixture.revision())`);
+      await until(`document.querySelector('#sidebarPinned .sess[data-id="batch-chat-2"]') &&
+        document.querySelector('#sidebarParking .sidebar-parking-shelf[data-sidebar-shelf-target="settled"]')`);
+      await js(`(()=>{for(const id of ['cos-app','inkpad','price-compare','tvdoctor','video-editor','balloon','kart']){
+        const row=document.querySelector('.project-group[data-project-id="'+id+'"]');
+        if(row&&!row.open)row.querySelector('.project-heading').click();
+      }})()`);
+      await until(`document.querySelectorAll('#sessionList .project-group[open]').length===7`);
+      await capture('t3-rebuild-dark-projects.png');
+      await js(`setTheme('light')`);
+      await until(`document.documentElement.dataset.theme==='light'`);
+      await capture('t3-rebuild-light-projects.png');
+      await js(`setTheme('dark')`);
+      await until(`document.documentElement.dataset.theme==='dark'`);
+      await js(`${row(1)}.querySelector('.sess-top').click()`);
+      await until(`!!${row(1)}?.classList.contains('is-sel')`);
+      await capture('t3-rebuild-dark-selected.png');
+      assert.equal(await js(`document.getElementById('t3SidebarProjects').getAttribute('aria-pressed')`),'true');
+      const filterChanges = await js(`(()=>{let count=0;
+        document.getElementById('appearanceLayoutInbox').addEventListener('change',()=>count++);
+        document.getElementById('t3SidebarInbox').click();
+        return {checked:document.getElementById('appearanceLayoutInbox').checked,count};})()`);
+      assert.deepEqual(filterChanges,{checked:true,count:1},'Inbox button delegates to the existing persisted Appearance choice');
+      await until(`document.getElementById('t3SidebarInbox').getAttribute('aria-pressed')==='true'`);
+      assert.equal(await js(`document.getElementById('sessionList').classList.contains('is-inbox')`),true);
+      assert.equal(await js(`Math.max(...[...document.querySelectorAll('#sessionList .sess-card')].map(row=>row.getBoundingClientRect().height)) <= 50`),true,
+        'Inbox thread rows remain compact in the T3-like layout');
+      await capture('t3-rebuild-dark-inbox.png');
+      await js(`document.getElementById('t3SidebarProjects').click()`);
+      await until(`document.getElementById('t3SidebarProjects').getAttribute('aria-pressed')==='true'`);
+      assert.deepEqual(errors,[]);
+      completed=true;
+      fs.writeFileSync(path.join(output,'completed.txt'),'T3 visual preview captured');
+      console.log('PASS: real Chromium dark/light visual previews with grouped projects');
+      return;
+    }
     // A normal row click navigates; modifier clicks select without changing the active conversation.
     await js(`${row(0)}.querySelector('.sess-top').click()`);
     await until(`!!${row(0)}?.classList.contains('is-sel')`);
@@ -164,7 +237,8 @@ app.whenReady().then(async () => {
     fs.writeFileSync(path.join(output, 'completed.txt'), 'All Chromium sidebar assertions passed');
     console.log('PASS: modifier/range selection, one batch revision, atomic Undo/Redo, keyboard focus, draft navigation/discard and persisted shelves in Chromium');
   } finally { win.destroy();await server.close(); }
-  app.exit(0);
-}).catch(async error=>{console.error(error);if(win&&!win.isDestroyed()){
-  fs.mkdirSync(output,{recursive:true});fs.writeFileSync(path.join(output,'failure.png'),(await win.webContents.capturePage()).toPNG());win.destroy();
-}await server?.close();app.exit(1);});
+}).then(()=>{if(completed)app.exit(0);}).catch(async error=>{reportingFailure=true;fs.mkdirSync(output,{recursive:true});
+  fs.writeFileSync(path.join(output,'failure.txt'),String(error?.stack||error));console.error(error);
+  if(win&&!win.isDestroyed()){
+    fs.writeFileSync(path.join(output,'failure.png'),(await win.webContents.capturePage()).toPNG());win.destroy();
+  }await server?.close();app.exit(1);});

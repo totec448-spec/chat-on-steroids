@@ -184,6 +184,7 @@ export async function boot(events: SessionEvent[], selectExisting = true, paused
     HTMLElement: w.HTMLElement,
     Element: w.Element,
     Node: w.Node,
+    NodeFilter: w.NodeFilter,
     DocumentFragment: w.DocumentFragment,
     HTMLInputElement: w.HTMLInputElement,
     HTMLSelectElement: w.HTMLSelectElement,

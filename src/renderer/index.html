@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./settings.css" />
     <link rel="stylesheet" href="./dictation.css" />
+    <link rel="stylesheet" href="./t3-sidebar.css" />
   </head>
   <body>
     <!-- Interface icons are Phosphor glyphs (icons.css, dom.ts icon()). Only the bespoke
@@ -30,15 +31,21 @@
         <button class="btn" id="sidebarToggle" type="button" aria-label="Toggle sidebar" aria-controls="sidebar" aria-expanded="true" title="Toggle sidebar"><i class="ico ph ph-sidebar-simple" aria-hidden="true"></i></button>
         <button class="btn" id="viewMenu" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="View" title="View"><i class="ico ph ph-list" aria-hidden="true"></i></button>
       </div>
-      <aside class="sidebar" id="sidebar">
+      <aside class="sidebar t3-sidebar" id="sidebar">
         <div class="sidebar-resize" id="sidebarResize" role="separator" tabindex="0" aria-label="Chat list width" aria-orientation="vertical" aria-controls="sidebar" title="Drag to resize · Double-click to reset"></div>
         <button class="btn" id="backToChat" type="button" hidden><i class="ico ph ph-arrow-left" aria-hidden="true"></i><span>Back to chat</span></button>
-        <div class="sidebar-brand"><span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span><strong>Chat On Steroids</strong><button class="btn sidebar-brand-seen" id="markAllSeen" type="button" title="Mark all as seen" aria-label="Mark all as seen" hidden><i class="ico ph ph-checks" aria-hidden="true"></i></button><button class="btn sidebar-brand-search" id="searchChatsButton" type="button" aria-haspopup="dialog" aria-controls="searchDialog" title="Search chats" aria-label="Search chats"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i></button></div>
-        <div class="sidebar-primary" id="sidebarPrimary">
-          <button class="btn new-chat" id="newChat" type="button"><i class="ico ph ph-pencil-simple" aria-hidden="true"></i>New chat</button>
-          <button class="btn sidebar-primary-link" id="sidebarPlugins" data-sidebar-page="plugins" type="button"><i class="ico ph ph-puzzle-piece" aria-hidden="true"></i>Plugins</button>
-          <button class="btn sidebar-primary-link" id="sidebarSkills" data-sidebar-page="skills" type="button"><i class="ico ph ph-cube" aria-hidden="true"></i>Skills</button>
-          <button class="btn sidebar-primary-link" id="sidebarPets" data-sidebar-page="pets" type="button"><i class="ico ph ph-paw-print" aria-hidden="true"></i>Pets</button>
+        <div class="sidebar-brand"><span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span><strong>Chat On Steroids</strong></div>
+        <div class="t3-sidebar-toolbar" role="group" aria-label="Find or start a chat">
+          <button class="btn sidebar-brand-search t3-search-action" id="searchChatsButton" type="button" aria-haspopup="dialog" aria-controls="searchDialog" title="Search chats (Ctrl+K)" aria-label="Search chats"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i><span>Search</span></button>
+          <button class="btn sidebar-brand-seen t3-toolbar-icon" id="markAllSeen" type="button" title="Mark all as seen" aria-label="Mark all as seen" hidden><i class="ico ph ph-checks" aria-hidden="true"></i></button>
+          <button class="btn t3-toolbar-icon" id="sidebarQuickView" type="button" title="View and sidebar options" aria-label="View and sidebar options"><i class="ico ph ph-sliders-horizontal" aria-hidden="true"></i></button>
+          <button class="btn t3-toolbar-icon" id="sidebarQuickAddProject" type="button" title="Add a project folder" aria-label="Add a project folder"><i class="ico ph ph-folder-simple" aria-hidden="true"></i><span class="t3-plus-badge" aria-hidden="true">+</span></button>
+          <button class="btn new-chat t3-toolbar-icon" id="newChat" type="button" title="New chat" aria-label="New chat"><i class="ico ph ph-pencil-simple" aria-hidden="true"></i></button>
+        </div>
+        <div class="t3-sidebar-filters" role="group" aria-label="Sidebar views">
+          <button type="button" id="t3SidebarProjects" aria-label="Show chats by project" title="Organise chats by project" aria-pressed="true"><i class="ico ph ph-folder-simple" aria-hidden="true"></i>Projects</button>
+          <button type="button" id="t3SidebarInbox" aria-label="Show attention inbox" title="Show active and settled chats in Inbox" aria-pressed="false"><i class="ico ph ph-list" aria-hidden="true"></i>Inbox</button>
+          <button type="button" id="t3SidebarActivity" title="Open activity" aria-label="Open activity"><i class="ico ph ph-activity" aria-hidden="true"></i>Activity</button>
         </div>
       <!-- Settings search: while it holds a query, its results take the page list's place. -->
       <div class="settings-find" id="settingsFindBox" hidden>
@@ -67,7 +74,15 @@
       </nav>
         <section class="sidebar-sessions">
           <div class="scroll">
+            <div class="sidebar-drafts">
+              <details id="sidebarDraftsShelf">
+                <summary>Drafts <span id="sidebarDraftsCount">0</span></summary>
+                <div id="sidebarDraftsList" role="tree" aria-label="Unsent drafts"></div>
+              </details>
+            </div>
             <div id="sessionList">
+              <div id="sidebarPinned" aria-label="Pinned chats"></div>
+              <div id="t3WorkspaceHeading" class="t3-workspace-heading" aria-label="Project folders"><span>PROJECT FOLDERS</span><span id="t3WorkspaceCount"></span></div>
               <details class="sidebar-session-section" id="projectsSection" open>
                 <summary class="sidebar-session-heading">
                   <span class="sidebar-session-label"><svg class="disclosure-chevron sidebar-section-chev" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Projects</span>
@@ -78,20 +93,13 @@
               </details>
               <details class="sidebar-session-section" id="chatsSection" open>
                 <summary class="sidebar-session-heading">
-                  <span class="sidebar-session-label"><svg class="disclosure-chevron sidebar-section-chev" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Chats</span>
+                  <span class="sidebar-session-label"><svg class="disclosure-chevron sidebar-section-chev" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>No project</span>
                   <span class="acts"><button class="btn" id="chatRefresh" type="button" title="Refresh chats" aria-label="Refresh chats"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i></button></span>
                 </summary>
                 <div id="chatList"><p class="empty" role="status">Loading chats…</p></div>
                 <p class="empty sidebar-section-empty" id="sessionsEmpty" hidden>No chats outside projects yet.</p>
               </details>
               <div id="sidebarParking"></div>
-            </div>
-            <div class="sidebar-drafts">
-              <details id="sidebarDraftsShelf">
-                <summary>Drafts <span id="sidebarDraftsCount">0</span></summary>
-                <div id="sidebarDraftsList" role="tree" aria-label="Unsent drafts"></div>
-              </details>
-              <button type="button" id="sidebarNewDraft" class="sidebar-new-draft" title="Create an independent new-chat draft" aria-label="Create an independent new-chat draft">New draft +</button>
             </div>
           </div>
           <div class="sidebar-drop-zones" id="sidebarDropZones" aria-label="Move selected chat to shelf" hidden>
@@ -114,6 +122,12 @@
           </div>
         </section>
 
+        <div class="sidebar-primary" id="sidebarPrimary" aria-label="Additional tools">
+          <button class="btn sidebar-primary-link" id="sidebarNewDraft" type="button" title="New independent draft" aria-label="New independent draft"><i class="ico ph ph-file-text" aria-hidden="true"></i><span>New independent draft</span></button>
+          <button class="btn sidebar-primary-link" id="sidebarPlugins" data-sidebar-page="plugins" type="button" title="Plugins" aria-label="Plugins"><i class="ico ph ph-puzzle-piece" aria-hidden="true"></i><span>Plugins</span></button>
+          <button class="btn sidebar-primary-link" id="sidebarSkills" data-sidebar-page="skills" type="button" title="Skills" aria-label="Skills"><i class="ico ph ph-cube" aria-hidden="true"></i><span>Skills</span></button>
+          <button class="btn sidebar-primary-link" id="sidebarPets" data-sidebar-page="pets" type="button" title="Pets" aria-label="Pets"><i class="ico ph ph-paw-print" aria-hidden="true"></i><span>Pets</span></button>
+        </div>
         <div class="sidebar-bottom">
           <button class="btn" id="workspaceSettings" type="button"><i class="ico ph ph-gear-six" aria-hidden="true"></i><span class="sidebar-bottom-label">Settings</span></button>
           <div class="connection-anchor">

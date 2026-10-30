@@ -507,7 +507,8 @@ let sidebarUndo: { snapshots: SidebarShelfRestore[]; revision: number; label: st
 let sidebarUndoTimer: ReturnType<typeof setTimeout> | undefined;
 let sidebarWakeTimer: ReturnType<typeof setTimeout> | undefined;
 const observedSnoozeAttention = new Map<string, string>();
-const expandedLocalShelves = new Set<ThreadShelf>(['settled', 'snoozed']);
+// T3's parked shelves start collapsed; their independent disclosure state is window-local.
+const expandedLocalShelves = new Set<ThreadShelf>();
 const sidebarEligible = (entry: SessionSummary): boolean => entry.origin?.kind !== 'worker' &&
   (!!entry.conversationId || entry.origin?.kind === 'desktop');
 function sidebarShelf(id: string): ThreadShelf {
@@ -812,6 +813,7 @@ function paintSidebarDrafts(): void {
   if (signature === lastSidebarDraftSignature) return;
   lastSidebarDraftSignature = signature;
   const wasHidden = shelf.hidden;
+  shelf.parentElement?.classList.toggle('is-empty', entries.length === 0);
   shelf.hidden = false;
   count.textContent = String(entries.length);
   if ((wasHidden || !list.childElementCount) && entries.length) shelf.open = true;
@@ -1445,6 +1447,15 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     // Double-click names the chat, like the pencil does (#1107).
     if (summary.conversationId) title.addEventListener('dblclick', (event) => { event.stopPropagation(); startRename(summary); });
     top.append(title);
+  }
+  if (sidebarLayout() !== 'inbox') {
+    if (pinnedChat(summary) && summary.origin?.kind !== 'worker') {
+      const context = el('span', 't3-row-context');
+      const owningProject = projects.find(project => project.id === projectGroup(summary.projectId));
+      context.append(icon('i-folder'), el('span', '', () => owningProject?.name ?? t('No project')));
+      top.append(context);
+    }
+    top.append(el('span', 'sess-age', () => compactAge(summary.updatedAt)));
   }
   const badges = sessionBadges(summary);
   const pinned = pinnedChat(summary);
@@ -2665,6 +2676,11 @@ function paintSessions(): void {
       ? '.sidebar-shelf-drag-handle' : '.sess-top';
   const layout = sidebarLayout();
   paintedLayout = layout;
+  $<HTMLButtonElement>('t3SidebarProjects').setAttribute('aria-pressed', String(layout === 'projects'));
+  $<HTMLButtonElement>('t3SidebarInbox').setAttribute('aria-pressed', String(layout === 'inbox'));
+  const availableProjects = projects.filter(project => !project.ungrouped).length;
+  $('t3WorkspaceHeading').hidden = availableProjects === 0 || layout === 'inbox';
+  $('t3WorkspaceCount').textContent = String(availableProjects);
   // The header's Mark all as seen shows only while a chat shows New response.
   const markAllSeenButton = $('markAllSeen'), markAllSeenFocused = document.activeElement === markAllSeenButton;
   markAllSeenButton.hidden = !sessions.some(newResponse);
@@ -2694,6 +2710,7 @@ function paintSessions(): void {
   const restoreGroupFocus = sidebarFocus(projectList, 'data-group-id', ['.chat-group-heading', '.chat-group-menu', '.chat-group-show-more']);
   const children = workerChildren();
   const rows: HTMLElement[] = [];
+  const pinnedRows: HTMLElement[] = [];
   const parked: Record<'settled' | 'snoozed', SessionSummary[]> = { settled: [], snoozed: [] };
   // A task and its expanded workers are one sidebar item for project pagination.
   // Store lightweight owners until the visible page is known. Creating DOM for
@@ -2729,6 +2746,14 @@ function paintSessions(): void {
     if (shelf === 'settled' || shelf === 'snoozed') { parked[shelf].push(entry); continue; }
     const projectId = groupOf(entry.projectId);
     const workers = children.get(entry.id);
+    if (pinnedChat(entry)) {
+      const row = sessionRow(entry);
+      row.classList.add('t3-pinned-thread');
+      row.dataset.sortScope = pinnedSortScope(projectId ?? '', true);
+      pinnedRows.push(row);
+      if (workers) workerGroup(entry.id, workers, row, pinnedRows);
+      continue;
+    }
     if (projectId) {
       const tasks = projectRows.get(projectId) ?? [];
       tasks.push({ entry, workers, selected: entry.id === selectedId || workers?.some(worker => worker.id === selectedId) === true });
@@ -2755,7 +2780,9 @@ function paintSessions(): void {
     heading.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
     const label = el('span', 'project-name', () => project?.name ?? t("Unavailable project"));
     ui(heading, 'title', () => project?.path ?? t("Unavailable project"));
-    heading.append(icon('i-folder'), label);
+    const avatar = el('span', 'project-avatar', () => (project?.name ?? '?').trim().slice(0, 2).toUpperCase() || '?');
+    avatar.setAttribute('aria-hidden', 'true');
+    heading.append(avatar, icon('i-folder'), label);
     if (project?.remote) {
       // A folder on a server (#1469): the address is the hover text, the badge says how it is reached.
       const badge = el('span', 'project-badge', () => 'SSH');
@@ -2805,6 +2832,9 @@ function paintSessions(): void {
       if (task.workers) workerGroup(task.entry.id, task.workers, row, shownRows);
     }
     section.append(...shownRows);
+    const countLabel = el('span', 'project-thread-count', String(projectRows.get(id)?.length ?? 0));
+    countLabel.setAttribute('aria-hidden', 'true');
+    heading.insertBefore(countLabel, heading.querySelector('.project-new'));
     // The project's own older chats count as "more" too, once it is known to have some (#1190).
     const older = !!projectHistory.get(id)?.cursor;
     if (shown.length < tasks.length || older) {
@@ -2831,9 +2861,11 @@ function paintSessions(): void {
   // Both scopes keep the existing sessionList drag/order owner and durable project binding.
   projectList.replaceChildren(...projectSections);
   chatList.replaceChildren(...rows);
+  $('sidebarPinned').replaceChildren(...pinnedRows);
+  $('chatsSection').classList.toggle('has-no-unfiled', rows.length === 0);
   const parking = $('sidebarParking');
   const parkingSections: HTMLElement[] = [];
-  for (const shelf of ['settled', 'snoozed'] as const) {
+  for (const shelf of ['snoozed', 'settled'] as const) {
     if (!parked[shelf].length) continue;
     const section = document.createElement('details'); section.className = 'sidebar-parking-shelf';
     section.dataset.sidebarShelfTarget = shelf;
@@ -9657,6 +9689,16 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
 }
 
 export function initChat(next: Deps): void {
+  $('sidebarQuickView').addEventListener('click', () => $('viewMenu').click());
+  $('sidebarQuickAddProject').addEventListener('click', () => $('addProject').click());
+  for (const [button, input] of [['t3SidebarProjects', 'appearanceLayoutProjects'], ['t3SidebarInbox', 'appearanceLayoutInbox']] as const) {
+    $(button).addEventListener('click', () => {
+      const radio = document.getElementById(input) as HTMLInputElement | null;
+      if (!radio) return;
+      if (!radio.checked) radio.click(); // Uses Appearance's existing persisted setting, not a second preference.
+    });
+  }
+  $('t3SidebarActivity').addEventListener('click', () => openSettingsTab('activity'));
   sidebarCompletion = createSidebarCompletionState();
   sidebarPins = createSidebarPins();
   try { sidebarShelves = createSidebarThreadState(window.localStorage); }

@@ -1,5 +1,5 @@
 // Production renderer and real Chromium layout/input; synthetic conversations only (#1117, #1120).
-// Searching chats in a dialog: one icon beside the app name opens it (as do ⌘K/Ctrl+K and the View
+// Searching chats in a dialog: the T3-style sidebar search action opens it (as do ⌘K/Ctrl+K and the View
 // menu), recent chats show before anything is typed, matches are marked inside two-line snippets, long
 // titles stay on one line, the keyboard moves through results, Enter opens one, and Escape or a click
 // outside closes the dialog while the sidebar lists never move.
@@ -70,14 +70,14 @@ app.whenReady().then(async () => {
   for (const theme of ['dark','light']) {
     await js(`setTheme(${JSON.stringify(theme)})`);
     await until(`document.documentElement.dataset.theme===${JSON.stringify(theme)}`);
-    // No field in the sidebar: one icon at the end of the app name's row.
-    const brand=await js(`(()=>{const b=document.getElementById('searchChatsButton').getBoundingClientRect(),r=document.querySelector('.sidebar-brand').getBoundingClientRect(),n=document.querySelector('.sidebar-brand strong').getBoundingClientRect();
-      return {inRow:b.top>=r.top-1&&b.bottom<=r.bottom+1,right:r.right-b.right,after:b.left>n.right,center:Math.abs((b.top+b.bottom)/2-(n.top+n.bottom)/2),width:b.width,
-        field:!!document.querySelector('.sidebar #chatSearch'),title:document.getElementById('searchChatsButton').title}})()`);
-    assert.ok(brand.inRow&&brand.after&&brand.right<=12&&brand.center<=3,'The icon sits at the end of the name row: '+JSON.stringify(brand));
-    assert.ok(brand.width<=32,'One small icon: '+JSON.stringify(brand));
-    assert.equal(brand.field,false,'No search field in the sidebar');
-    assert.equal(brand.title,`Search chats (${mac?'⌘K':'Ctrl+K'})`);
+    // T3 places a full-width search action on the row directly below the branded header.
+    const search=await js(`(()=>{const b=document.getElementById('searchChatsButton').getBoundingClientRect(),r=document.querySelector('.t3-sidebar-toolbar').getBoundingClientRect(),h=document.querySelector('.sidebar-brand').getBoundingClientRect();
+      return {inToolbar:b.top>=r.top-1&&b.bottom<=r.bottom+1,belowHeader:b.top>=h.bottom,width:b.width,
+        field:!!document.querySelector('.sidebar #chatSearch'),text:document.getElementById('searchChatsButton').textContent.trim(),title:document.getElementById('searchChatsButton').title}})()`);
+    assert.ok(search.inToolbar&&search.belowHeader&&search.width>=64,'Search is the first T3-style toolbar action: '+JSON.stringify(search));
+    assert.equal(search.text,'Search');
+    assert.equal(search.field,false,'Search still opens the indexed command dialog, not a duplicate input');
+    assert.equal(search.title,`Search chats (${mac?'⌘K':'Ctrl+K'})`);
     await capture(`${theme}-idle.png`);
     const listsBefore=await js(`JSON.stringify(document.getElementById('sessionList').getBoundingClientRect())`);
     await js(`document.getElementById('searchChatsButton').click()`);
