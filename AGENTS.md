@@ -2301,6 +2301,12 @@ Expanded tool arguments/results and Compact & Resume content use the chat pane's
 scrolling, without nested vertical text scrollers. Streaming compaction revisions retain the
 disclosure and unchanged sections; the timeline owner preserves the visible row or follows
 the bottom only when the reader was already there. Collapsed bodies leave layout entirely.
+Every chat row carries a `<time>` (hours and minutes, the full date in its title, `datetime`
+attribute, `rowTime` in `dom.ts`). It is hidden unless `ui.showMessageTimes` (Settings → General,
+"Show message times", off by default; saved through `settings:save` like `followOutput`) puts
+`show-message-times` on the document element; then messages, images, sub-agent messages, chat
+errors and compaction rows show it above themselves, on their own side. Tool and progress rows
+never do. A damaged saved value loads as off with one warning.
 With Follow new output enabled, only a reader gesture changes that following intent. Its
 pending scroll belongs to the selected-chat generation, not a wall-clock grace period:
 scroll delivery may wait for a slow rendering opportunity. Input with no movement expires
