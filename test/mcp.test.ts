@@ -20,7 +20,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as identity from '../src/main/connector-identity.js';
 import { connectorName } from '../src/shared/connector-names.js';
 import { effectiveCapabilities, defaultConfig, getConfig } from '../src/main/config.js';
@@ -1498,6 +1498,26 @@ describe('capability gating', () => {
 });
 
 describe('desktop capabilities', () => {
+  // These cases are about permissions, and their calls carry no chat: the person's opt-in for
+  // desktop control without a known chat lets them reach the permission checks.
+  beforeEach(() => { getConfig().ui.desktopUnattributed = true; });
+  afterEach(() => { delete getConfig().ui.desktopUnattributed; });
+
+  it.skipIf(!IS_WINDOWS && process.platform !== 'darwin')('refuses desktop control for a call without a known chat unless the person allowed it (2026-10-30)', async () => {
+    ctx.readOnly = false;
+    ctx.caps = withCaps({ screen: true, control: true });
+    await desktop('tools/list');
+    delete getConfig().ui.desktopUnattributed;
+    const refused = await desktop('tools/call', {
+      name: IS_WINDOWS ? 'click' : 'computer',
+      arguments: IS_WINDOWS ? { window: { app: 'fixture.exe', id: 1 }, x: 5, y: 5 } : { actions: [{ type: 'click', x: 5, y: 5 }] }
+    });
+    expect(refused.body.result?.isError).toBe(true);
+    expect(textOf(refused)).toContain('DESKTOP_IDENTITY_REQUIRED');
+    // The browser tools on the same connector keep their own rules.
+    expect(toolNames(await desktop('tools/list'))).toEqual(expect.arrayContaining([...BROWSER_READ_TOOLS]));
+  });
+
   it('advertises nothing until a desktop permission is turned on', async () => {
     ctx.readOnly = false;
     expect(toolNames(await desktop('tools/list'))).toEqual([]);

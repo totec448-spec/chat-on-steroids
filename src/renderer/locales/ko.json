@@ -3408,6 +3408,8 @@
   "{0} in {1}": "{1}에서 {0}",
   "Go ahead": "계속",
   "Ask before using the mouse and keyboard": "마우스와 키보드를 쓰기 전에 묻기",
+  "Allow desktop control from calls without a known chat": "채팅을 알 수 없는 호출에도 데스크톱 제어 허용",
+  "Normally the screen, mouse and keyboard are used only for a chat the app can name. With one ChatGPT account on several computers, a call it can't name may come from another computer's chat.": "보통 화면, 마우스, 키보드는 앱이 알아볼 수 있는 채팅에만 사용됩니다. 하나의 ChatGPT 계정을 여러 컴퓨터에서 쓰면, 알아볼 수 없는 호출은 다른 컴퓨터의 채팅에서 온 것일 수 있습니다.",
   "A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for up to 2 minutes, until you use the mouse or keyboard again; a step the app can't match to a chat asks again. Browser steps never ask.": "화면 모서리에 계속 / 나중에 버튼이 있는 작은 질문이 나타납니다. 계속을 누르면 그 채팅은 최대 2분 동안, 또는 마우스나 키보드를 다시 쓸 때까지 진행합니다. 앱이 어느 채팅인지 알 수 없는 단계는 다시 묻습니다. 브라우저 단계는 묻지 않습니다.",
   "Ask while I'm using the computer": "컴퓨터를 사용하는 동안 묻기",
   "Always ask": "항상 묻기",
