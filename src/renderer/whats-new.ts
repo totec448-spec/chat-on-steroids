@@ -19,7 +19,7 @@ const RELEASES: Readonly<Record<string, Release>> = {
     highlights: [
       { icon: 'i-check-circle', title: () => t("Goal step reviewer"), text: () => t("A second chat checks each Goal step's file changes before the next one.") },
       { icon: 'i-sun', title: () => t("Follows your system"), text: () => t("Light or dark as your computer is set, also when it switches.") },
-      { icon: 'i-monitor', title: () => t("Asks before taking over"), text: () => t("A small question asks before a chat uses your mouse and keyboard.") },
+      { icon: 'i-keyboard', title: () => t("Asks before taking over"), text: () => t("A small question asks before a chat uses your mouse and keyboard.") },
       { icon: 'i-chat', title: () => t("Messages that get through"), text: () => t("Also when you close the chat's tab while sending, or ChatGPT changes its model menu.") }
     ]
   },
