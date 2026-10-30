@@ -2695,7 +2695,15 @@ of trusted browser input or successful pointer lock; prefer native actions and o
 
 Traversal, result text, decoded image pixels/bytes, frame/session counts and console/network
 buffers are bounded. Console and network capture starts at attach; retained history is not a
-complete trace. Request bodies are fetched only on request with explicit truncation. Images use
+complete trace. Request bodies are fetched only on request with explicit truncation.
+`browser_network` stream retention is opt-in for an exact owned, in-flight SSE request.
+Keep the strict schema and extension handler aligned: 4 MiB retained per tab, byte pages
+of 64 KiB by default and at most 256 KiB, returned as base64. Raw retained bytes must
+never enter metadata listings. Clear, eviction and release dispose retained bytes;
+late CDP completion cannot restore disposed captures. Terminal does not imply complete:
+failure, overflow, invalid bytes or capture errors must keep completeness false.
+Test the real extension handler at the CDP boundary as well as the tool schema.
+Images use
 native MCP image blocks without duplicate base64 in text/structured output. Page data never
 becomes local-tool authority. Tests: `browser-control.test.ts`, `tools-browser.test.ts`, bridge
 HTTP tests and `scripts/verify-browser-control.mjs` (isolated real Chromium, no signed-in tabs).

@@ -38,6 +38,19 @@ beforeEach(()=>{
 });
 
 describe('Desktop browser invocation boundary',()=>{
+  it('admits stream capture and byte pages through the actual strict schema',async()=>{
+    const reg=registrar();state.caps.control=false;
+    await reg.call('browser_network',{tabId,requestId:'main:42',stream:true,body:true,bodyOffset:65536,bodyBytes:262144});
+    expect(state.execute.mock.calls[0]![1]).toMatchObject({requestId:'main:42',stream:true,body:true,bodyOffset:65536,bodyBytes:262144});
+    state.caps.screen=false;
+    expect((await reg.call('browser_network',{tabId,requestId:'main:42',stream:true})).isError).toBe(true);
+    expect(state.execute).toHaveBeenCalledTimes(1);
+  });
+  it('rejects invalid stream page inputs while preserving legacy network calls',()=>{
+    const schema=registrar().tools.get('browser_network')!.schema;
+    for(const args of [{stream:true},{bodyBytes:1},{requestId:'r',bodyBytes:1},{requestId:'r',body:true,bodyOffset:-1},{requestId:'r',body:true,bodyOffset:0.5},{requestId:'r',body:true,bodyBytes:0},{requestId:'r',body:true,bodyBytes:262145},{requestId:'r',stream:true,clear:true},{requestId:'r',body:true,unknown:true}]) expect(schema.safeParse({tabId,...args}).success).toBe(false);
+    for(const args of [{},{clear:true},{requestId:'r',body:true},{requestId:'r',stream:true},{requestId:'r',body:true,bodyOffset:0,bodyBytes:1}]) expect(schema.safeParse({tabId,...args}).success).toBe(true);
+  });
   it('admits bounded DOM detail inspection with screen permission alone',async()=>{
     const reg=registrar();state.caps.control=false;
     expect((await reg.call('browser_snapshot',{tabId,mode:'inspect',format:'dom',selector:'main',maxNodes:30,maxChars:4000})).isError).not.toBe(true);
