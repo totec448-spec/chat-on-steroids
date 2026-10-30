@@ -303,6 +303,30 @@ describe('continued turns', () => {
     expect(parts.filter(part => part.kind === 'say').map(part => part.rowKey ?? part.text)).toEqual([rows[1]!.key, rows[3]!.key]);
   });
 
+  // CodeRabbit on #1933: a live continued turn whose outline so far only repeats the turn before it.
+  it('draws nothing of an earlier turn while a continued turn has not added its own part yet', () => {
+    const rows = [user(), sayIn(FIRST, OPENING, 's-1'), callIn(FIRST, 'k-1'), user()];
+    const parts = structureTimeline(rows, { [FIRST]: first, [SECOND]: [...first] }, true, SECOND);
+    expect(parts.filter(part => part.kind === 'say').map(part => part.rowKey ?? part.text)).toEqual([rows[1]!.key]);
+  });
+
+  // CodeRabbit on #1933: only an earlier turn's outline is dropped, never a later or unrelated one's.
+  it('never trims an earlier turn by a later turn’s shorter outline', () => {
+    // The earlier turn's opening sentence is only in its outline, not recorded as a message.
+    const rows = [user(), callIn(FIRST, 'k-1'), callIn(FIRST, 'k-2'), user()];
+    const parts = structureTimeline(rows, { [FIRST]: second.filter(item => item.kind !== 'now'), [SECOND]: first }, false);
+    expect(parts.some(part => part.kind === 'say' && part.text === OPENING)).toBe(true);
+  });
+
+  it('needs an id to prove a continuation, not only the same opening words', () => {
+    const rows = [user(), sayIn(FIRST, 'Let me look at the file first.', 's-1'), user()];
+    const parts = structureTimeline(rows, {
+      [FIRST]: [{ kind: 'say', text: 'Let me look at the file first.', done: true }],
+      [SECOND]: [{ kind: 'say', text: 'Let me look at the file first.', done: true }, { kind: 'say', text: 'It has three sections.', done: true }]
+    }, true, SECOND);
+    expect(parts.filter(part => part.kind === 'say' && part.text === 'Let me look at the file first.')).toHaveLength(1);
+  });
+
   it('keeps an outline whole when no other turn’s outline begins it', () => {
     const rows = [user(), sayIn(FIRST, OPENING, 's-1'), callIn(FIRST, 'k-1')];
     expect(structureTimeline(rows, { [FIRST]: first, [SECOND]: second }, false).filter(part => part.kind === 'say')).toHaveLength(1);
