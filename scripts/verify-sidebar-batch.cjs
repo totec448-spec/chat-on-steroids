@@ -125,6 +125,17 @@ app.whenReady().then(async () => {
       assert.deepEqual(filterChanges,{checked:true,count:1},'Inbox button delegates to the existing persisted Appearance choice');
       await until(`document.getElementById('t3SidebarInbox').getAttribute('aria-pressed')==='true'`);
       assert.equal(await js(`document.getElementById('sessionList').classList.contains('is-inbox')`),true);
+      assert.equal(await js(`document.getElementById('sidebarPinned').childElementCount`),0,
+        'Inbox must not retain hidden Projects pinned rows in its selection order');
+      assert.equal(await js(`(()=>{
+        const row=document.querySelector('#chatList .sess-card[data-id="batch-chat-2"]');
+        const pin=row?.querySelector('.sess-pin-mark');
+        if(!row||!pin)return false;
+        const draft=document.createElement('span');draft.className='sess-draft-mark';draft.textContent='Draft';
+        row.querySelector('.sess-top').append(draft);
+        const a=pin.getBoundingClientRect(),b=draft.getBoundingClientRect();draft.remove();
+        return a.width>0&&b.width>0&&(a.right<=b.left||b.right<=a.left);
+      })()`),true,'Pin and draft badges cannot overlap on a pinned Inbox row');
       assert.equal(await js(`Math.max(...[...document.querySelectorAll('#sessionList .sess-card')].map(row=>row.getBoundingClientRect().height)) <= 50`),true,
         'Inbox thread rows remain compact in the T3-like layout');
       await capture('t3-rebuild-dark-inbox.png');
@@ -166,7 +177,7 @@ app.whenReady().then(async () => {
     assert.equal(await js(`document.activeElement.closest('.sess')?.dataset.id`),orderAfterPin[orderAfterPin.indexOf(id(0))+1],
       'Down follows the currently rendered order after the batch reordered pinned chats');
     await js(`${row(1)}.querySelector('.sess-top').dispatchEvent(new KeyboardEvent('keydown',{key:' ',ctrlKey:true,bubbles:true}))`);
-    assert.equal(await js(`document.getElementById('sidebarBatchCount').textContent`),'1 selected');
+    assert.equal(await js(`document.getElementById('sidebarBatchCount').textContent`),'1 chat selected');
     await js(`${row(1)}.querySelector('.sess-top').dispatchEvent(new KeyboardEvent('keydown',{key:'F10',shiftKey:true,bubbles:true}))`);
     assert.equal(await js(`!!document.querySelector('.row-menu')`),true);
     await js(`document.querySelector('.row-menu')?.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
@@ -229,13 +240,20 @@ app.whenReady().then(async () => {
     await js(`document.getElementById('sidebarUndoButton').click()`);
     await until(`window.sidebarShelfFixture.revision()===5`);
     assert.equal(await js(`window.sidebarShelfFixture.records()['batch-chat-0']`),undefined);
-    await win.webContents.reload();
-    await until(`!!${row(2)}?.classList.contains('is-pinned')`);
+    await js(`window.__sidebarBeforeReload = true`);
+    const finishedLoading = new Promise(resolve => win.webContents.once('did-finish-load', resolve));
+    win.webContents.reload();
+    await finishedLoading;
+    await until(`window.__sidebarBeforeReload === undefined && !!${row(2)}?.classList.contains('is-pinned')`);
     assert.equal(await js(`window.sidebarShelfFixture.revision()`),5,'Reload keeps the same persisted group revision');
     assert.deepEqual(errors,[]);
     completed = true;
     fs.writeFileSync(path.join(output, 'completed.txt'), 'All Chromium sidebar assertions passed');
     console.log('PASS: modifier/range selection, one batch revision, atomic Undo/Redo, keyboard focus, draft navigation/discard and persisted shelves in Chromium');
+  } catch (error) {
+    // The window must still exist when capturing a failed assertion's evidence.
+    try { fs.writeFileSync(path.join(output,'failure.png'),(await win.webContents.capturePage()).toPNG()); } catch { /* Preserve the original failure. */ }
+    throw error;
   } finally { win.destroy();await server.close(); }
 }).then(()=>{if(completed)app.exit(0);}).catch(async error=>{reportingFailure=true;fs.mkdirSync(output,{recursive:true});
   fs.writeFileSync(path.join(output,'failure.txt'),String(error?.stack||error));console.error(error);

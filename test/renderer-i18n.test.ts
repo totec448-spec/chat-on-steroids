@@ -188,8 +188,10 @@ describe('app interface localization', () => {
       expect(action.getAttribute('aria-label')).toBe(action.textContent);
       expect([...document.querySelectorAll('svg')]).toEqual(icons);
       expect(strong!.outerHTML).toBe(savedHTML);
-      const text = document.getElementById('newChat')!.textContent!.trim();
-      expect(text).toBe(catalogs[locale]?.['New chat'] ?? 'New chat');
+      const newChat = document.getElementById('newChat')!;
+      // The compact sidebar button is icon-only; its accessible label still translates.
+      expect(newChat.textContent!.trim()).toBe('');
+      expect(newChat.getAttribute('aria-label')).toBe(catalogs[locale]?.['New chat'] ?? 'New chat');
       const globalWorkerLabel = document.getElementById('globalMaWorkers')!.closest('.setting')!.querySelector('b')!.textContent!;
       expect(globalWorkerLabel).toBe(catalogs[locale]?.['Workers across all chats'] ?? 'Workers across all chats');
       const shell = document.querySelector('.plugin-refresh-guide')!.textContent!;

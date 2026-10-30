@@ -3,6 +3,7 @@
  * agent execution never depend on this file. One main-process queue owns all writes.
  */
 import { durableStoreReady, readDurable, writeDurableNow, writeDurableSoon } from './durable.js';
+import { logInfo, logWarn } from './logger.js';
 
 export type SidebarShelf = 'active' | 'pinned' | 'snoozed' | 'settled';
 export interface SidebarShelfAttention {
@@ -115,7 +116,7 @@ export class SidebarThreadStore {
 
   private async load(): Promise<void> {
     if (this.loaded) return;
-    if (!durableStoreReady()) throw new Error('Sidebar storage is not ready');
+    if (!durableStoreReady()) { logWarn('sidebar shelves: load refused, durable storage not ready'); throw new Error('Sidebar storage is not ready'); }
     const saved = await readDurable<unknown>(STORE_NAME);
     if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
       const value = saved as Partial<PersistedShelves>;
@@ -132,7 +133,7 @@ export class SidebarThreadStore {
           }
           this.revision = validCount(value.revision) ? value.revision : 0;
           this.migratedLegacy = value.migratedLegacy === true;
-        }
+        } else logWarn(`sidebar shelves: ignored oversized stored ledger (${entries.length} > ${MAX_SIDEBAR_SHELVES})`);
       }
     }
     this.loaded = true;
@@ -186,11 +187,11 @@ export class SidebarThreadStore {
     }
     return this.serial(async () => {
       await this.load();
-      if (this.revision !== expectedRevision) throw new Error('Sidebar changed in another window');
+      if (this.revision !== expectedRevision) { logWarn(`sidebar shelves: batch refused, stale revision ${expectedRevision} (current ${this.revision})`); throw new Error('Sidebar changed in another window'); }
       const next = new Map(this.records);
       const changes: SidebarShelfBatchChange['changes'] = [];
       for (const item of mutations) {
-        if (item.shelf === 'snoozed' && item.until! <= this.now()) throw new Error('Sidebar snooze deadline expired');
+        if (item.shelf === 'snoozed' && item.until! <= this.now()) { logWarn('sidebar shelves: batch refused, expired snooze deadline'); throw new Error('Sidebar snooze deadline expired'); }
         const before = visible(next.get(item.id));
         const current: SidebarShelfEntry = item.shelf === 'snoozed' && item.until! > this.now()
           ? { shelf: 'snoozed', until: item.until!, snoozedAt: this.now(),
@@ -200,7 +201,7 @@ export class SidebarThreadStore {
         else next.set(item.id, current);
         if (JSON.stringify(before) !== JSON.stringify(current)) changes.push({ id: item.id, before, current });
       }
-      if (next.size > MAX_SIDEBAR_SHELVES) throw new Error('Sidebar shelf limit reached');
+      if (next.size > MAX_SIDEBAR_SHELVES) { logWarn(`sidebar shelves: batch refused, shelf count ${next.size} exceeds ${MAX_SIDEBAR_SHELVES}`); throw new Error('Sidebar shelf limit reached'); }
       if (!changes.length) return { revision: this.revision, changes: [] };
       await this.commit(next);
       return this.publishBatch(changes);
@@ -216,20 +217,20 @@ export class SidebarThreadStore {
     }
     return this.serial(async () => {
       await this.load();
-      if (this.revision !== expectedRevision) throw new Error('Sidebar changed in another window');
+      if (this.revision !== expectedRevision) { logWarn(`sidebar shelves: undo refused, stale revision ${expectedRevision} (current ${this.revision})`); throw new Error('Sidebar changed in another window'); }
       const next = new Map(this.records);
       const changes: SidebarShelfBatchChange['changes'] = [];
       for (const item of snapshots) {
         const before = visible(next.get(item.id));
         const saved = readEntry(item.snapshot)!;
         // Undo cannot truthfully restore an expired snooze. Reject the whole transaction.
-        if (saved.shelf === 'snoozed' && saved.until <= this.now()) throw new Error('Sidebar snooze snapshot expired');
+        if (saved.shelf === 'snoozed' && saved.until <= this.now()) { logWarn('sidebar shelves: undo refused, expired snooze snapshot'); throw new Error('Sidebar snooze snapshot expired'); }
         const current: SidebarShelfEntry = saved;
         if (current.shelf === 'active') next.delete(item.id);
         else next.set(item.id, current);
         if (JSON.stringify(before) !== JSON.stringify(current)) changes.push({ id: item.id, before, current });
       }
-      if (next.size > MAX_SIDEBAR_SHELVES) throw new Error('Sidebar shelf limit reached');
+      if (next.size > MAX_SIDEBAR_SHELVES) { logWarn(`sidebar shelves: undo refused, shelf count ${next.size} exceeds ${MAX_SIDEBAR_SHELVES}`); throw new Error('Sidebar shelf limit reached'); }
       if (!changes.length) return { revision: this.revision, changes: [] };
       await this.commit(next);
       return this.publishBatch(changes);
@@ -240,6 +241,7 @@ export class SidebarThreadStore {
     const entry = this.records.get(id);
     if (!entry || entry.shelf !== 'snoozed') return;
     if (entry.until > this.now() && !attentionWakes(entry, attention)) return;
+    logInfo(`sidebar shelves: waking snoozed chat (${entry.until <= this.now() ? 'deadline reached' : 'attention changed'})`);
     const next = new Map(this.records);
     next.delete(id);
     await this.commit(next);
@@ -249,6 +251,7 @@ export class SidebarThreadStore {
   private async expire(): Promise<void> {
     const expired = [...this.records].filter(([, entry]) => entry.shelf === 'snoozed' && entry.until <= this.now());
     if (!expired.length) return;
+    logInfo(`sidebar shelves: waking ${expired.length} chat(s) after snooze deadlines`);
     const next = new Map(this.records);
     for (const [id] of expired) next.delete(id);
     await this.commit(next);
@@ -324,7 +327,7 @@ export class SidebarThreadStore {
       await this.load();
       if (!this.migratedLegacy) {
         const incoming = Object.entries(rows);
-        if (incoming.length > MAX_SIDEBAR_SHELVES) throw new Error('Legacy sidebar shelf limit exceeded');
+        if (incoming.length > MAX_SIDEBAR_SHELVES) { logWarn(`sidebar shelves: migration refused, ${incoming.length} items exceed ${MAX_SIDEBAR_SHELVES}`); throw new Error('Legacy sidebar shelf limit exceeded'); }
         const next = new Map(this.records);
         const added: Array<[string, Exclude<SidebarShelfEntry, { shelf: 'active' }>]> = [];
         for (const [id, input] of incoming) {
@@ -335,7 +338,7 @@ export class SidebarThreadStore {
             added.push([id, entry]);
           }
         }
-        if (next.size > MAX_SIDEBAR_SHELVES) throw new Error('Sidebar shelf limit reached');
+        if (next.size > MAX_SIDEBAR_SHELVES) { logWarn(`sidebar shelves: migration refused, shelf count ${next.size} exceeds ${MAX_SIDEBAR_SHELVES}`); throw new Error('Sidebar shelf limit reached'); }
         await this.commit(next, true);
         if (added.length) this.publishBatch(added.map(([id, current]) => ({ id, before: { shelf: 'active' }, current })));
       }

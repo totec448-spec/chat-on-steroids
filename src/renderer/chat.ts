@@ -559,7 +559,7 @@ function syncSidebarSelection(): void {
   if (!bar) return;
   bar.hidden = !ids.length;
   const count = document.getElementById('sidebarBatchCount');
-  if (count) count.textContent = `${ids.length} selected`;
+  if (count) ui(count, 'textContent', () => tn('{0} chat selected', '{0} selected', ids.length));
   const shelves = ids.map(sidebarShelf);
   for (const [action, allowed] of [
     ['Pin', shelves.every(shelf => shelf !== 'pinned')],
@@ -642,12 +642,12 @@ function changeSidebarShelves(rows: SessionSummary[], shelf: ThreadShelf, label:
   if (!rows.length || rows.some(row => !sidebarEligible(row))) return;
   sidebarMutationQueue = sidebarMutationQueue.then(async () => {
     await sidebarReady;
-    if (sidebarRevision === null) { toast('Sidebar storage unavailable'); return; }
+    if (sidebarRevision === null) { toast(t('Sidebar storage unavailable')); return; }
     const changes: SidebarShelfMutation[] = rows.map(row => ({ id: row.id, shelf, ...(until ? { until } : {}),
       ...(shelf === 'snoozed' ? { attention: sidebarAttention(row) } : {}) }));
     const response = await run(api.setSidebarShelves(changes, sidebarRevision));
     if (!response) {
-      sidebarUndo = null; toast('Could not save sidebar change; saved state reloaded');
+      sidebarUndo = null; toast(t('Could not save sidebar change; saved state reloaded'));
       await reloadSidebarShelves(); return;
     }
     applySidebarBatch(response);
@@ -655,16 +655,16 @@ function changeSidebarShelves(rows: SessionSummary[], shelf: ThreadShelf, label:
       sidebarUndo = { snapshots: response.changes.map(row => ({ id: row.id, snapshot: row.before })),
         revision: response.revision, label, redo: false };
       const undoButton = document.getElementById('sidebarUndoButton');
-      if (undoButton) undoButton.textContent = 'Undo';
+      if (undoButton) ui(undoButton, 'textContent', () => t('Undo'));
       const banner = document.getElementById('sidebarUndo');
       if (banner) banner.hidden = false;
       const message = document.getElementById('sidebarUndoMessage');
-      if (message) message.textContent = `${label} · Sidebar only`;
+      if (message) ui(message, 'textContent', () => t('{0} · Sidebar only', [t(label)]));
       if (sidebarUndoTimer) clearTimeout(sidebarUndoTimer);
       sidebarUndoTimer = setTimeout(() => { sidebarUndo = null; if (banner) banner.hidden = true; }, 8000);
     }
     sidebarSelection.clear(); syncSidebarSelection();
-  }).catch(() => { sidebarUndo = null; toast('Could not save sidebar change'); void reloadSidebarShelves(); });
+  }).catch(() => { sidebarUndo = null; toast(t('Could not save sidebar change')); void reloadSidebarShelves(); });
 }
 function undoSidebarShelves(): void {
   const record = sidebarUndo;
@@ -673,20 +673,20 @@ function undoSidebarShelves(): void {
   const banner = document.getElementById('sidebarUndo');
   if (banner) banner.hidden = true;
   sidebarMutationQueue = sidebarMutationQueue.then(async () => {
-    if (sidebarRevision !== record.revision) { toast('Sidebar changed; Undo is no longer available'); return; }
+    if (sidebarRevision !== record.revision) { toast(t('Sidebar changed; Undo is no longer available')); return; }
     const reply = await run(api.restoreSidebarShelves(record.snapshots, record.revision));
-    if (!reply) { toast('Undo could not be saved'); await reloadSidebarShelves(); return; }
+    if (!reply) { toast(t('Undo could not be saved')); await reloadSidebarShelves(); return; }
     applySidebarBatch(reply);
     if (reply.changes.length && sidebarRevision === reply.revision) {
       sidebarUndo = { snapshots: reply.changes.map(row => ({ id: row.id, snapshot: row.before })),
         revision: reply.revision, label: record.label, redo: !record.redo };
       if (banner) banner.hidden = false;
       const button = document.getElementById('sidebarUndoButton');
-      if (button) button.textContent = record.redo ? 'Undo' : 'Redo';
+      if (button) ui(button, 'textContent', () => t(record.redo ? 'Undo' : 'Redo'));
       if (sidebarUndoTimer) clearTimeout(sidebarUndoTimer);
       sidebarUndoTimer = setTimeout(() => { sidebarUndo = null; if (banner) banner.hidden = true; }, 8000);
     }
-  }).catch(() => { toast('Undo could not be saved'); void reloadSidebarShelves(); });
+  }).catch(() => { toast(t('Undo could not be saved')); void reloadSidebarShelves(); });
 }
 /** COS desktop chats also have local sidebar identities; workers and unattributed calls do not. */
 const pinnable = (entry: SessionSummary): boolean => sidebarEligible(entry);
@@ -825,13 +825,13 @@ function paintSidebarDrafts(): void {
     const row = el('div', 'sidebar-draft-row'); row.dataset.draftKey = key;
     const open = el('button', 'sidebar-draft-open') as HTMLButtonElement;
     open.type = 'button';
-    open.setAttribute('aria-label', t('Open draft for {0}', [title]));
+    ui(open, 'aria-label', () => t('Open draft for {0}', [title]));
     open.setAttribute('role', 'treeitem');
     open.setAttribute('aria-current', isCurrent ? 'page' : 'false');
-    open.title = 'Text saved locally; attached files and settings stay in this window only.';
+    ui(open, 'title', () => t('Text saved locally; attached files and settings stay in this window only.'));
     if (isCurrent) open.classList.add('is-current');
     open.append(el('span', 'sidebar-draft-title', title),
-      el('span', 'sidebar-draft-preview', [snippet, attachments ? `${attachments} ${attachments === 1 ? 'attachment' : 'attachments'} (this window)` : ''].filter(Boolean).join(' · ')));
+      el('span', 'sidebar-draft-preview', () => [snippet, attachments ? tn('{0} attachment (this window)', '{0} attachments (this window)', attachments) : ''].filter(Boolean).join(' · ')));
     open.addEventListener('click', () => {
       sidebarSelection.clear();
       const independent = parseIndependentDraftKey(key);
@@ -843,8 +843,8 @@ function paintSidebarDrafts(): void {
     });
     const discard = el('button', 'sidebar-draft-discard', '×') as HTMLButtonElement;
     discard.type = 'button';
-    discard.title = 'Discard this draft';
-    discard.setAttribute('aria-label', t('Discard draft for {0}', [title]));
+    ui(discard, 'title', () => t('Discard this draft'));
+    ui(discard, 'aria-label', () => t('Discard draft for {0}', [title]));
     discard.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); discardSidebarDraft(key); });
     row.append(open, discard);
     return row;
@@ -1636,15 +1636,15 @@ function sessionRow(summary: SessionSummary): HTMLElement {
       title: () => t('Organize this desktop chat in the local sidebar'),
       run: () => changeSidebarShelves([summary], pinned ? 'active' : 'pinned', pinned ? 'Unpinned' : 'Pinned')
     });
-    const local = () => 'Local sidebar organisation only; this does not stop agents or settle work on the server.';
-    const action = (verb: string, target: ThreadShelf, iconName: string, until?: number): RowMenuItem => ({
+    const local = () => t('Local sidebar organisation only; this does not stop agents or settle work on the server.');
+    const action = (verb: string, target: ThreadShelf, iconName: string, until?: () => number): RowMenuItem => ({
       action: `shelf-${verb.toLowerCase().replace(/[^a-z]+/g, '-')}`,
       icon: iconName, label: () => t(verb), title: local,
-      run: () => changeSidebarShelves([summary], target, verb, until)
+      run: () => changeSidebarShelves([summary], target, verb, until?.())
     });
     if (shelf === 'active') {
       items.push(action('Settle · Sidebar only', 'settled', 'i-check-circle'));
-      items.push(action('Snooze for 1 hour', 'snoozed', 'i-clock', Date.now() + 3600000));
+      items.push(action('Snooze for 1 hour', 'snoozed', 'i-clock', () => Date.now() + 3_600_000));
     } else if (shelf === 'pinned') items.push(action('Settle · Sidebar only', 'settled', 'i-check-circle'));
     else if (shelf === 'settled') items.push(action('Un-settle', 'active', 'i-play'));
     else items.push(action('Wake', 'active', 'i-play'));
@@ -1666,13 +1666,13 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     const preview = el('span', 'sidebar-row-drag-preview');
     preview.hidden = true;
     preview.setAttribute('role', 'status');
-    preview.title = 'This change affects only the local sidebar, not agent/server state.';
+    ui(preview, 'title', () => t('This change affects only the local sidebar, not agent/server state.'));
     top.append(preview);
     const handle = el('button', 'sidebar-shelf-drag-handle') as HTMLButtonElement;
     handle.type = 'button'; handle.draggable = true;
     handle.append(icon('i-more-vertical'));
-    handle.title = 'Drag to move between local sidebar shelves';
-    handle.setAttribute('aria-label', `Drag ${shownSessionTitle(summary)} to a sidebar shelf`);
+    ui(handle, 'title', () => t('Drag to move between local sidebar shelves'));
+    ui(handle, 'aria-label', () => t('Drag {0} to a sidebar shelf', [shownSessionTitle(summary)]));
     actionBar.append(handle);
   }
   actionBar.append(more);
@@ -2297,6 +2297,8 @@ function selectInboxProject(id: string | null): void {
 
 function paintInbox(): void {
   $('sidebarParking').replaceChildren();
+  // The hidden Projects shelf must never participate in Inbox range selection.
+  $('sidebarPinned').replaceChildren();
   if (inboxProject && !projects.some(project => project.id === inboxProject && !project.ungrouped)) inboxProject = null;
   const list = $('chatList');
   // A live update rebuilds the list: focus stays on the same chat's control, or on the same header control.
@@ -2871,7 +2873,7 @@ function paintSessions(): void {
     section.dataset.sidebarShelfTarget = shelf;
     section.open = expandedLocalShelves.has(shelf);
     const heading = el('summary', 'sidebar-parking-heading');
-    heading.append(el('span', '', shelf === 'settled' ? 'Settled · Sidebar only' : 'Snoozed'),
+    heading.append(el('span', '', () => shelf === 'settled' ? t('Settled · Sidebar only') : t('Snoozed')),
       el('span', 'sidebar-parking-count', String(parked[shelf].length)));
     section.append(heading);
     section.addEventListener('toggle', () => { if (!section.isConnected) return;
@@ -9715,6 +9717,7 @@ export function initChat(next: Deps): void {
   ], paintSessions, removeSessionTooltip);
   initSidebarShelfDrag({
     list: $('sessionList'), zones: $('sidebarDropZones'),
+    localizeLabel: label => t(label),
     shelfFor: id => {
       const entry = sessions.find(row => row.id === id);
       return entry && sidebarEligible(entry) ? sidebarShelf(id) : null;
@@ -10481,7 +10484,7 @@ export function initChat(next: Deps): void {
   for (const [name, shelf] of actions) {
     document.getElementById(`sidebarBatch${name}`)?.addEventListener('click', () => {
       const rows = sidebarSelection.ids().map(id => sessions.find(entry => entry.id === id)).filter((entry): entry is SessionSummary => !!entry);
-      changeSidebarShelves(rows, shelf, `${name} (${rows.length})`);
+      changeSidebarShelves(rows, shelf, name);
     });
   }
   $('sidebarDraftsList').addEventListener('keydown', event => {
@@ -10508,7 +10511,7 @@ export function initChat(next: Deps): void {
     event.preventDefault(); event.stopPropagation();
     try { selectNewChat(selectedId ? projectGroup(sessions.find(entry => entry.id === selectedId)?.projectId) : selectedProjectId,
       null, newIndependentDraftKey(selectedId ? projectGroup(sessions.find(entry => entry.id === selectedId)?.projectId) : selectedProjectId, crypto.randomUUID())); }
-    catch { toast('Could not create an independent draft'); }
+    catch { toast(t('Could not create an independent draft')); }
   });
   document.getElementById('sidebarBatchClear')?.addEventListener('click', () => {
     sidebarSelection.clear(); syncSidebarSelection();

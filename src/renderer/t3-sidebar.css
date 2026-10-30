@@ -254,6 +254,9 @@
 .t3-sidebar #sessionList.is-inbox .sess-card .sess-draft-mark {
   position: absolute; bottom: 4px; right: 7px; margin: 0; font-size: 11px;
 }
+.t3-sidebar #sessionList.is-inbox .sess-card:has(.sess-pin-mark) .sess-draft-mark {
+  right: 24px;
+}
 .t3-sidebar #sessionList.is-inbox .sess-card .sess-rename { grid-area: title; min-width: 0; }
 .t3-sidebar #sessionList.is-inbox .sess-card > .worker-toggle { margin: 0; align-self: center; }
 .t3-sidebar .sidebar-drafts { flex: none; margin: 0 3px 4px; border: 0; padding: 0; }

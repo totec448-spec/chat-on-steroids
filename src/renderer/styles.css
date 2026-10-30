@@ -699,7 +699,7 @@ code {
 .sidebar-parking-shelf .sess { opacity: .86; }
 .sidebar .sess.is-sidebar-row-dragging { outline: 1px dashed var(--accent); border-radius: 8px; }
 .sidebar .sess.is-file-drop-target { outline: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--sunk)); border-radius: 8px; }
-.sidebar .sidebar-row-drag-preview { flex: none; margin-left: auto; padding: 3px 6px; border-radius: 5px; background: var(--accent); color: white; font-size: 10px; white-space: nowrap; }
+.sidebar .sidebar-row-drag-preview { flex: none; margin-left: auto; padding: 3px 6px; border-radius: 5px; background: var(--accent); color: var(--page); font-size: 10px; white-space: nowrap; }
 .sidebar .sidebar-row-drag-preview[hidden] { display: none; }
 .sidebar .sidebar-shelf-drag-handle { border: 0; background: transparent; color: var(--faint); border-radius: 5px; cursor: grab; padding: 4px; display: grid; place-items: center; opacity: 0; }
 .sidebar .sess:hover .sidebar-shelf-drag-handle, .sidebar .sidebar-shelf-drag-handle:focus-visible, .sidebar .sess.is-sidebar-row-dragging .sidebar-shelf-drag-handle { opacity: 1; }

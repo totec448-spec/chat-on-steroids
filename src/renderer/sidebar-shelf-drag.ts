@@ -16,6 +16,7 @@ export function initSidebarShelfDrag(options: {
   zones: HTMLElement;
   shelfFor: (id: string) => SidebarDragShelf | null;
   change: (id: string, target: SidebarDragAction) => void;
+  localizeLabel?: (source: string) => string;
 }): void {
   const { list, zones, shelfFor, change } = options;
   type Drag = { pointerId: number | null; id: string; source: SidebarDragShelf; x: number; y: number;
@@ -48,7 +49,7 @@ export function initSidebarShelfDrag(options: {
     const preview = drag.row?.querySelector<HTMLElement>('.sidebar-row-drag-preview');
     if (preview) {
       preview.hidden = !action;
-      if (action) preview.textContent = action.label;
+      if (action) preview.textContent = options.localizeLabel?.(action.label) ?? action.label;
     }
     return action;
   }
