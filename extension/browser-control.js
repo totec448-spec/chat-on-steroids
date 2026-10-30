@@ -4,6 +4,7 @@ import { browserPage, boundedBrowserValue, browserFramePoint } from './browser-c
 export function createBrowserControl(chrome, transport, protectedTab = () => false) {
   const KEY = 'cosBrowserControl';
   const tabs = new Map();
+  const STREAM_BYTES = 4 * 1024 * 1024, STREAM_PAGE_BYTES = 256 * 1024;
   let browserId, epoch = null, receipt = null, loading, pumping, again = false, saving = Promise.resolve();
   let policy = { read: false, write: false };
   const id = () => crypto.randomUUID();
@@ -37,7 +38,18 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
   }
   function newState(tabId, owner, lease = id()) {
     return { tabId, owner, lease, pageId: id(), contexts: new Map(), frames: new Map(), sessions: new Set(),
-      console: [], network: new Map(), seq: 0, consoleDropped: 0, networkDropped: 0, screenshot: null, dialog: null, initialized: false };
+      console: [], network: new Map(), streams: new Map(), streamBytes: 0, seq: 0, consoleDropped: 0, networkDropped: 0, screenshot: null, dialog: null, initialized: false };
+  }
+  function dropStream(state, key) {
+    const capture = state.streams.get(key);
+    if (!capture) return;
+    state.streams.delete(key);
+    state.streamBytes -= capture.bytes;
+    capture.chunks = []; capture.queued = []; capture.bytes = 0; capture.decoder = null;
+  }
+  function clearNetwork(state) {
+    for (const key of state.streams.keys()) dropStream(state,key);
+    state.network.clear();
   }
   function invalidate(state) {
     state.pageId = id(); state.screenshot = null; state.refFrames?.clear();
@@ -76,6 +88,7 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
           // Retire admission before releasing a stuck debugger. A late result cannot
           // lend its target to another command; accepted effects are not replayed.
           if (tabs.get(state.tabId) === state) {
+            clearNetwork(state);
             tabs.delete(state.tabId);
             void cleanup(removeIndicator(state));
             if (method === 'Runtime.evaluate') void chrome.debugger.sendCommand({tabId:state.tabId,...(sessionId ? {sessionId}: {})},'Runtime.terminateExecution').catch(() => {});
@@ -240,6 +253,7 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
   async function release(state) {
     if (tabs.get(state.tabId) !== state) return;
     // Revoke first: no in-flight continuation can send more input while detach yields.
+    clearNetwork(state);
     tabs.delete(state.tabId);
     await Promise.all([cleanup(removeIndicator(state)),cleanup(chrome.debugger.detach({tabId:state.tabId}))]);
     await save();
@@ -451,21 +465,124 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
     const shot = {id:id(),pageId,width,height,scale,viewport,fullPage:args.fullPage === true}; state.screenshot = shot;
     return { value:{tabId:handle(state.tabId),pageId,screenshotId:shot.id,width,height,scale,fullPage:shot.fullPage},image:{mimeType:'image/jpeg',data:result.data} };
   }
-  async function diagnostics(state,tool,args) {
+  const streamCurrent = (state,row,capture) => tabs.get(state.tabId) === state &&
+    state.network.get(row.requestId) === row && state.streams.get(row.requestId) === capture;
+  function streamStatus(row,capture) {
+    const terminal = row.finished === true;
+    return {enabled:true,pending:capture.pending,retainedBytes:capture.bytes,limitBytes:STREAM_BYTES,
+      terminal,complete:terminal && !capture.pending && !row.failed && !capture.error && !capture.overflow && !capture.invalidBytes,
+      overflow:capture.overflow,invalidBytes:capture.invalidBytes,...(capture.error ? {error:capture.error}: capture.overflow ? {error:'Capture exceeded its per-tab byte budget or 4096-chunk safety limit; retained bytes are incomplete.'}: {})};
+  }
+  function decodeStreamChunk(state,capture,encoded) {
+    if (typeof encoded !== 'string') { capture.invalidBytes = true; capture.error = 'Invalid base64 stream bytes.'; return null; }
+    // Bound before decode/validation; empty events must not grow the chunk list.
+    if (!encoded.length) return null;
+    if (encoded.length > Math.ceil((STREAM_BYTES-state.streamBytes)/3)*4 || capture.parts >= 4096) { capture.overflow = true; return null; }
+    if (encoded.length % 4 || /[^A-Za-z0-9+/=]/.test(encoded) || !/^[^=]*(?:==|=)?$/.test(encoded)) {
+      capture.invalidBytes = true; capture.error = 'Invalid base64 stream bytes.'; return null;
+    }
+    const count = encoded.length / 4 * 3 - (encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0);
+    if (count > STREAM_BYTES - state.streamBytes) { capture.overflow = true; return null; }
+    try {
+      const raw = atob(encoded);
+      // Reject noncanonical padding bits rather than accepting ambiguous bytes.
+      if (btoa(raw) !== encoded) { capture.invalidBytes = true; capture.error = 'Invalid base64 stream bytes.'; return null; }
+      const bytes = Uint8Array.from(raw,c=>c.charCodeAt(0));
+      state.streamBytes += bytes.length; capture.bytes += bytes.length; capture.parts++;
+      return bytes;
+    } catch { capture.invalidBytes = true; capture.error = 'Invalid base64 stream bytes.'; return null; }
+  }
+  function validateStreamChunk(capture,bytes) {
+    if (capture.invalidBytes) return;
+    try { capture.decoder.decode(bytes,{stream:true}); }
+    catch { capture.invalidBytes = true; capture.error = 'Stream is not valid UTF-8.'; }
+  }
+  function finishStream(row,capture) {
+    if (!row.finished || capture.pending || capture.finalized) return;
+    capture.finalized = true;
+    if (row.failed) capture.error = row.failed;
+    if (!capture.invalidBytes && !capture.overflow) {
+      try { capture.decoder.decode(); }
+      catch { capture.invalidBytes = true; capture.error = 'Stream ended inside an invalid UTF-8 sequence.'; }
+    }
+  }
+  async function enableStream(state,row,command) {
+    let capture = state.streams.get(row.requestId);
+    if (capture) return capture;
+    if (row.finished || !/^text\/event-stream(?:\s*;|$)/i.test(row.mimeType || '')) error('BROWSER_STREAM_REQUIRES_IN_FLIGHT_SSE: select an in-flight text/event-stream request. No request was replayed.');
+    await authorize(command,false); alive(state,command);
+    if (state.network.get(row.requestId) !== row || row.finished) error('BROWSER_REQUEST_EXPIRED: request changed before stream capture.');
+    // Another read may have enabled it while permission was being checked.
+    capture = state.streams.get(row.requestId);
+    if (capture) return capture;
+    capture = {pending:true,chunks:[],queued:[],bytes:0,parts:0,overflow:false,invalidBytes:false,error:null,finalized:false,decoder:new TextDecoder('utf-8',{fatal:true})};
+    state.streams.set(row.requestId,capture);
+    try {
+      // CDP returns all bytes preceding its stream boundary. dataReceived.data contains
+      // only the suffix; queue that suffix until bufferedData can be prepended once.
+      const result = await send(state,'Network.streamResourceContent',{requestId:row.nativeId},row.sessionId,command);
+      if (!streamCurrent(state,row,capture)) error('BROWSER_STREAM_EXPIRED: capture was cleared or its request/attachment was replaced.');
+      await authorize(command,false); alive(state,command);
+      if (!streamCurrent(state,row,capture)) error('BROWSER_STREAM_EXPIRED: capture was cleared or its request/attachment was replaced.');
+      const buffered = decodeStreamChunk(state,capture,result.bufferedData);
+      if (!buffered && result.bufferedData !== '') {
+        // Without the prefix, a queued suffix must never masquerade as byte zero.
+        state.streamBytes -= capture.bytes; capture.bytes = 0;
+        capture.queued = []; capture.parts = 0;
+        capture.error ||= 'Buffered prefix was not retained; queued suffix was discarded. Capture is incomplete.';
+      }
+      if (buffered) { capture.chunks.push(buffered); validateStreamChunk(capture,buffered); }
+      for (const bytes of capture.queued) { capture.chunks.push(bytes); validateStreamChunk(capture,bytes); }
+      capture.queued = []; capture.pending = false;
+      finishStream(row,capture);
+      return capture;
+    } catch (cause) {
+      if (streamCurrent(state,row,capture)) dropStream(state,row.requestId);
+      throw cause;
+    }
+  }
+  function streamBody(row,capture,args) {
+    const offset = args.bodyOffset ?? 0, count = args.bodyBytes ?? 64 * 1024;
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(count) || count < 1 || count > STREAM_PAGE_BYTES) error('BROWSER_STREAM_PAGE_INVALID: use a nonnegative byte offset and bodyBytes from 1 to 262144.');
+    if (capture.pending) error('BROWSER_STREAM_PENDING: capture is still enabling; read the same request after it settles.');
+    if (offset > capture.bytes) error('BROWSER_STREAM_OFFSET_INVALID: offset exceeds retained bytes.');
+    const end = Math.min(capture.bytes,offset+count), bytes = new Uint8Array(end-offset);
+    let start = 0, written = 0;
+    for (const chunk of capture.chunks) {
+      const from = Math.max(0,offset-start), to = Math.min(chunk.length,end-start);
+      if (to > from) { bytes.set(chunk.subarray(from,to),written); written += to-from; }
+      start += chunk.length;
+      if (start >= end) break;
+    }
+    let raw = '';
+    for (let at=0;at<bytes.length;at+=8192) raw += String.fromCharCode(...bytes.subarray(at,at+8192));
+    const status = streamStatus(row,capture);
+    return {base64:btoa(raw),base64Encoded:true,offsetBytes:offset,returnedBytes:bytes.length,totalBytes:capture.bytes,
+      nextOffsetBytes:end<capture.bytes ? end : null,terminal:status.terminal,complete:status.complete,overflow:status.overflow,invalidBytes:status.invalidBytes,
+      ...(status.error ? {error:status.error}: {})};
+  }
+  async function diagnostics(state,tool,args,command) {
     const network = tool === 'browser_network';
     if (network && args.requestId) {
       const row = state.network.get(args.requestId);
       if (!row) error('BROWSER_REQUEST_EXPIRED: request is not in the retained buffer.');
+      const capture = args.stream ? await enableStream(state,row,command) : state.streams.get(row.requestId);
+      if (capture) {
+        await authorize(command,false); alive(state,command);
+        if (!streamCurrent(state,row,capture)) error('BROWSER_STREAM_EXPIRED: capture was cleared or its request/attachment was replaced.');
+      }
       let body;
       if (args.body) {
-        if (row.encodedBytes > 500000) body = { unavailable:'Response exceeds the 500 KB capture limit.' };
+        if (capture) body = streamBody(row,capture,args);
+        else if (args.bodyOffset !== undefined || args.bodyBytes !== undefined) error('BROWSER_STREAM_REQUIRED: byte pagination requires an explicitly retained stream.');
+        else if (row.encodedBytes > 500000) body = { unavailable:'Response exceeds the 500 KB capture limit.' };
         else try {
           const data = await send(state,'Network.getResponseBody',{requestId:row.nativeId},row.sessionId);
           body = { text:cut(data.body,20000),base64Encoded:data.base64Encoded === true,truncated:data.body.length > 20000 };
         } catch { body = { unavailable:'Chrome no longer retains this response body, or it has not completed.' }; }
       }
       const { nativeId:_native,sessionId:_session,...value } = row;
-      return { ...value,...(body ? {body}: {}) };
+      return { ...value,...(capture ? {stream:streamStatus(row,capture)}: {}),...(body ? {body}: {}) };
     }
     const rows = network ? [...state.network.values()] : state.console;
     const matching = rows.filter(row => row.seq > (args.after || 0) &&
@@ -480,7 +597,7 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
       if (size > 24000) break;
       values.push(value);
     }
-    if (args.clear) { if (network) state.network.clear(); else state.console = []; }
+    if (args.clear) { if (network) clearNetwork(state); else state.console = []; }
     return { entries:values,nextCursor:values.at(-1)?.seq || args.after || 0,truncated:values.length < matching.length,dropped:network ? state.networkDropped : state.consoleDropped,capture:'Since debugger attachment; older events are unavailable.' };
   }
   async function inspect(command) {
@@ -602,7 +719,7 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
       state.screenshot = null;
       return {value:{tabId:handle(state.tabId),pageId:state.pageId,...value}};
     }
-    if (tool === 'browser_console' || tool === 'browser_network') return {value:await diagnostics(state,tool,args)};
+    if (tool === 'browser_console' || tool === 'browser_network') return {value:await diagnostics(state,tool,args,command)};
     error('BROWSER_TOOL_UNKNOWN');
   }
   const headers = value => {
@@ -651,19 +768,37 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
       const key = `${source.sessionId || 'main'}:${params.requestId}`;
       let row = state.network.get(key);
       if (method === 'Network.requestWillBeSent') {
+        dropStream(state,key);
         row = {requestId:key,nativeId:params.requestId,sessionId:source.sessionId,pageId:state.pageId,url:cut(params.request?.url,2000),method:cut(params.request?.method,20),type:cut(params.type,30),requestHeaders:headers(params.request?.headers),postData:cut(params.request?.postData,4000),startedAt:params.timestamp,seq:++state.seq};
         state.network.set(key,row);
-        if (state.network.size > 200) {state.network.delete(state.network.keys().next().value);state.networkDropped++;}
+        if (state.network.size > 200) {const oldest=state.network.keys().next().value;dropStream(state,oldest);state.network.delete(oldest);state.networkDropped++;}
       } else if (row) {
         row.seq = ++state.seq;
         if (method === 'Network.responseReceived') Object.assign(row,{status:params.response?.status,mimeType:cut(params.response?.mimeType,100),responseHeaders:headers(params.response?.headers),fromCache:params.response?.fromDiskCache === true});
         if (method === 'Network.loadingFinished') Object.assign(row,{finished:true,encodedBytes:params.encodedDataLength,durationMs:Math.round((params.timestamp-row.startedAt)*1000)});
-        if (method === 'Network.loadingFailed') Object.assign(row,{failed:cut(params.errorText,1000),finished:true});
+        if (method === 'Network.loadingFailed') Object.assign(row,{failed:cut(params.errorText,1000) || 'Network request failed.',finished:true});
+        const capture = state.streams.get(key);
+        if (capture) {
+          if (method === 'Network.dataReceived' && !capture.finalized && !capture.overflow && !capture.invalidBytes) {
+            if (params.data !== undefined) {
+              const bytes = decodeStreamChunk(state,capture,params.data);
+              if (!capture.overflow && typeof params.dataLength === 'number' && params.dataLength !== (bytes?.length || 0)) {
+                capture.invalidBytes = true; capture.error = 'Stream event byte length does not match its dataLength.';
+              }
+              if (bytes) {
+                if (capture.pending) capture.queued.push(bytes);
+                else { capture.chunks.push(bytes); validateStreamChunk(capture,bytes); }
+              }
+            } else if (!capture.pending && params.dataLength > 0) { capture.invalidBytes = true; capture.error = 'Stream event omitted its response bytes.'; }
+          }
+          finishStream(row,capture);
+        }
       }
     }
   }
   async function detached(source) {
     await ready(); const state = tabs.get(source.tabId); if (!state) return;
+    clearNetwork(state);
     tabs.delete(source.tabId); await save();
     await cleanup(removeIndicator(state));
   }

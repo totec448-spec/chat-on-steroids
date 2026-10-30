@@ -170,6 +170,21 @@ attaching, including protected ChatGPT tabs. An attached tab also accepts `brows
 dialogs), `browser_evaluate`, `browser_console` and `browser_network`. Input works in the
 background without moving the OS cursor or bringing the browser to the front.
 
+### `browser_network` stream capture
+
+For Chromium network inspection, `browser_network` accepts `requestId` with `stream:true`
+to retain an in-flight `text/event-stream` response. Retention is bounded to 4 MiB per tab
+and 4096 nonempty chunks per request; exceeding either bound marks overflow.
+Read captured bytes with `body:true`, optional `bodyOffset` (byte offset) and `bodyBytes`
+(default 65536, maximum 262144). Decode each base64 page to bytes and concatenate before
+UTF-8 decoding; a page can split a character. Inspect `terminal` and `complete` separately:
+aborts, capture errors, invalid bytes and overflow never prove a complete response.
+`nextOffsetBytes:null` means the end of currently retained bytes, not the end of a live
+response. Poll again from `totalBytes` while `terminal:false`.
+Enable capture before the request finishes. Unsupported CDP capture is reported explicitly;
+ordinary finite response reads retain their existing behavior. Clear/release/eviction discard
+retained data. This operation uses the existing tab ownership and screen-read permission.
+
 ### Native desktop tools (Windows and macOS)
 
 Linux does not advertise or execute these schemas. Windows publishes one tool per operation:

@@ -69,8 +69,12 @@ const declarations: Record<BrowserTool, { description: string; inputSchema: z.Zo
     inputSchema: z.object({ tabId, after: z.number().int().min(0).default(0), limit: bounded.default(50), level: z.enum(['all','error','warning','info','debug']).default('all'), filter: z.string().max(200).optional(), clear: z.boolean().default(false) }).strict()
   },
   browser_network: {
-    description: 'Inspect captured requests, response status, timing and failures since attach. Pass requestId for bounded headers/body of that exact request; bodies may be unavailable/evicted. Cursor pagination and URL filter avoid dumping traffic. No request interception or replay.',
-    inputSchema: z.object({ tabId, after: z.number().int().min(0).default(0), limit: bounded.default(50), filter: z.string().max(200).optional(), requestId: z.string().max(160).optional(), body: z.boolean().default(false), clear: z.boolean().default(false) }).strict()
+    description: 'Inspect captured requests, response status, timing and failures since attach. Pass requestId for bounded headers/body of that exact request. stream:true enables bounded retention for an in-flight text/event-stream response (4 MiB total per tab); enable before completion. body:true reads captured stream bytes as base64 pages: bodyOffset is a byte offset, bodyBytes defaults to 65536 and is at most 262144. Join decoded byte pages before UTF-8 decoding. terminal is distinct from complete; failures, overflow or invalid bytes never prove completeness. Bodies may be unavailable/evicted. Cursor pagination and URL filter avoid dumping traffic. No request interception or replay.',
+    inputSchema: z.object({ tabId, after: z.number().int().min(0).default(0), limit: bounded.default(50), filter: z.string().max(200).optional(), requestId: z.string().max(160).optional(), body: z.boolean().default(false), clear: z.boolean().default(false), stream: z.boolean().optional(), bodyOffset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(), bodyBytes: z.number().int().min(1).max(262144).optional() }).strict().superRefine((v,ctx)=>{
+      if (v.stream && !v.requestId) ctx.addIssue({code:'custom',path:['requestId'],message:'stream requires requestId'});
+      if ((v.bodyOffset !== undefined || v.bodyBytes !== undefined) && (!v.body || !v.requestId)) ctx.addIssue({code:'custom',path:['body'],message:'Byte pagination requires body:true and requestId'});
+      if (v.clear && (v.stream || v.bodyOffset !== undefined || v.bodyBytes !== undefined)) ctx.addIssue({code:'custom',path:['clear'],message:'Clear cannot be combined with stream capture or byte pagination'});
+    })
   }
 };
 
