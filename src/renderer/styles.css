@@ -662,6 +662,53 @@ code {
    stays reserved, so rows and the Inbox toolbar keep their width when a filter or a collapsed
    section makes the list short enough to need no scrollbar. */
 .sidebar-sessions > .scroll { flex: 1; margin-right: -12px; padding-right: 4px; scrollbar-gutter: stable; }
+/* T3-like contextual selection and transactional Undo, scoped to the sidebar alone. */
+.sidebar .sess.is-multi-selected { background: color-mix(in srgb, var(--accent) 15%, transparent); border-radius: 8px; }
+.sidebar .sess.is-multi-selected > .sess-top { color: var(--ink); }
+.sidebar .sess.is-multi-selected > .sess-top:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sidebar-batch, .sidebar-undo { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; margin: 5px 2px; padding: 8px; border: 1px solid var(--line); background: var(--sunk); border-radius: 9px; }
+.sidebar-batch[hidden], .sidebar-undo[hidden] { display: none; }
+.sidebar-batch > span, .sidebar-undo > span { width: 100%; font-size: 11px; color: var(--soft); }
+.sidebar-batch > button, .sidebar-undo > button { border: 0; background: var(--hover); color: var(--ink); padding: 6px 8px; border-radius: 6px; font: inherit; font-size: 11px; cursor: pointer; }
+.sidebar-batch > button:hover:not(:disabled), .sidebar-undo > button:hover { background: var(--accent-edge); }
+.sidebar-batch > button:disabled { opacity: .35; cursor: default; }
+.sidebar-drafts { margin: 7px 4px 9px; border-top: 1px solid var(--line); padding-top: 7px; }
+.sidebar-drafts[hidden] { display: none; }
+.sidebar-drafts { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; }
+.sidebar-drafts > details { flex: 1 1 auto; min-width: 0; }
+.sidebar-drafts > details > summary { display: flex; justify-content: space-between; gap: 8px; align-items: center; list-style: none; cursor: pointer; padding: 8px; border-radius: 7px; color: var(--soft); font-size: 11px; font-weight: 600; }
+.sidebar-drafts > details > summary::-webkit-details-marker { display: none; }
+.sidebar-drafts > details > summary:hover { background: var(--hover); color: var(--ink); }
+.sidebar-drafts > details > summary span { color: var(--faint); font-variant-numeric: tabular-nums; }
+.sidebar-new-draft { flex: none; margin: 3px 0 3px auto; padding: 5px; border-radius: 6px; color: var(--soft); background: transparent; border: 0; font: inherit; font-size: 11px; cursor: pointer; }
+.sidebar-new-draft:hover, .sidebar-new-draft:focus-visible { background: var(--hover); color: var(--ink); }
+.sidebar-drafts #sidebarDraftsList { flex: 1 1 100%; width: 100%; }
+.sidebar-draft-row { display: flex; align-items: center; gap: 3px; min-width: 0; margin: 2px 0; border-radius: 8px; }
+.sidebar-draft-row:hover, .sidebar-draft-row:focus-within { background: var(--hover); }
+.sidebar-draft-open { display: flex; flex: 1; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; padding: 8px 9px; border: 0; background: transparent; color: var(--soft); cursor: pointer; text-align: left; }
+.sidebar-draft-open.is-current { color: var(--ink); }
+.sidebar-draft-title { width: 100%; color: var(--ink); font-size: 12px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-draft-preview { width: 100%; font-size: 11px; line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-draft-discard { flex: none; border: 0; border-radius: 5px; background: transparent; color: var(--faint); padding: 7px; cursor: pointer; }
+.sidebar-draft-discard:hover, .sidebar-draft-discard:focus-visible { background: var(--hover); color: var(--ink); }
+.sidebar-parking-shelf { padding: 0 4px 6px; margin-top: 8px; border-top: 1px solid var(--line); }
+.sidebar-parking-heading { display: flex; align-items: center; justify-content: space-between; min-height: 32px; padding: 8px; cursor: pointer; color: var(--soft); font-size: 11px; font-weight: 600; list-style: none; }
+.sidebar-parking-heading::-webkit-details-marker { display: none; }
+.sidebar-parking-heading:hover { color: var(--ink); background: var(--hover); border-radius: 6px; }
+.sidebar-parking-count { font-weight: 400; color: var(--faint); }
+.sidebar-parking-shelf .sess { opacity: .86; }
+.sidebar .sess.is-sidebar-row-dragging { outline: 1px dashed var(--accent); border-radius: 8px; }
+.sidebar .sess.is-file-drop-target { outline: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--sunk)); border-radius: 8px; }
+.sidebar .sidebar-row-drag-preview { flex: none; margin-left: auto; padding: 3px 6px; border-radius: 5px; background: var(--accent); color: white; font-size: 10px; white-space: nowrap; }
+.sidebar .sidebar-row-drag-preview[hidden] { display: none; }
+.sidebar .sidebar-shelf-drag-handle { border: 0; background: transparent; color: var(--faint); border-radius: 5px; cursor: grab; padding: 4px; display: grid; place-items: center; opacity: 0; }
+.sidebar .sess:hover .sidebar-shelf-drag-handle, .sidebar .sidebar-shelf-drag-handle:focus-visible, .sidebar .sess.is-sidebar-row-dragging .sidebar-shelf-drag-handle { opacity: 1; }
+.sidebar .sidebar-shelf-drag-handle:active { cursor: grabbing; }
+.sidebar-drop-zones { margin: 5px 5px 8px; padding: 7px; border: 1px solid var(--line); border-radius: 10px; background: var(--sunk); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+.sidebar-drop-zones[hidden] { display: none; }
+.sidebar-drop-zone { text-align: center; padding: 10px 4px; border-radius: 7px; border: 1px dashed var(--line); color: var(--soft); font-size: 10px; }
+.sidebar-drop-zone.is-shelf-drop-target, .sidebar-parking-shelf.is-shelf-drop-target, .inbox-settled.is-shelf-drop-target { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 20%, var(--sunk)); color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { .sidebar-row-drag-preview, .sidebar-drop-zone { transition: none; } }
 /* Chat search dialog (#1117): recent chats, then matches with the passage that matched. */
 /* One fixed size while typing: the results scroll inside it, the box never grows or shrinks. */
 .search-dialog { width: min(580px, calc(100vw - 40px)); height: min(460px, calc(100dvh - 140px)); max-height: none; margin: 12vh auto auto; padding: 0; overflow: hidden; color: var(--ink);

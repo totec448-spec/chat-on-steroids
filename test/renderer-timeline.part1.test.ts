@@ -29,7 +29,7 @@ it('makes parent and worker session selectors keyboard-focusable and activates t
     origin: { kind: 'worker', fromSessionId: parent.id, agentId: 'worker-1', task: 'Inspect' } };
   const { w } = await boot([], false, [], [], { sessions: [parent, worker] });
   const parentControl = w.document.querySelector<HTMLElement>(`[data-id="${parent.id}"] [data-session-select]`)!;
-  expect(parentControl.getAttribute('role')).toBe('button');
+  expect(parentControl.getAttribute('role')).toBe('treeitem');
   expect(parentControl.tabIndex).toBe(0);
   parentControl.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
   await settle();
@@ -38,6 +38,12 @@ it('makes parent and worker session selectors keyboard-focusable and activates t
   (w.document.querySelector(`[data-id="${parent.id}"] .worker-toggle`) as HTMLButtonElement).click();
   await settle();
   const workerControl = w.document.querySelector<HTMLElement>(`[data-id="${worker.id}"] [data-session-select]`)!;
+  expect(workerControl.getAttribute('role')).toBe('treeitem');
+  expect(workerControl.tabIndex).toBe(-1);
+  const parentAgain = w.document.querySelector<HTMLElement>(`[data-id="${parent.id}"] [data-session-select]`)!;
+  parentAgain.focus();
+  parentAgain.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+  expect(w.document.activeElement).toBe(workerControl);
   expect(workerControl.tabIndex).toBe(0);
   const activate = new w.KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true });
   workerControl.dispatchEvent(activate);

@@ -22,6 +22,8 @@ const WRITE_DELAY_MS = 300;
 const RETRY_MAX_MS = 5_000;
 
 let root = '';
+/** True only after the main process has chosen the durable state directory. */
+export function durableStoreReady(): boolean { return root.length > 0; }
 let revision = 0;
 const revisions = new Map<string, number>();
 /** Process-local invalidation for projections owned by a named ledger. */

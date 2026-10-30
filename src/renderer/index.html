@@ -84,7 +84,33 @@
                 <div id="chatList"><p class="empty" role="status">Loading chats…</p></div>
                 <p class="empty sidebar-section-empty" id="sessionsEmpty" hidden>No chats outside projects yet.</p>
               </details>
+              <div id="sidebarParking"></div>
             </div>
+            <div class="sidebar-drafts">
+              <details id="sidebarDraftsShelf">
+                <summary>Drafts <span id="sidebarDraftsCount">0</span></summary>
+                <div id="sidebarDraftsList" role="tree" aria-label="Unsent drafts"></div>
+              </details>
+              <button type="button" id="sidebarNewDraft" class="sidebar-new-draft" title="Create an independent new-chat draft" aria-label="Create an independent new-chat draft">New draft +</button>
+            </div>
+          </div>
+          <div class="sidebar-drop-zones" id="sidebarDropZones" aria-label="Move selected chat to shelf" hidden>
+            <div data-sidebar-shelf-target="pinned" class="sidebar-drop-zone">Pin</div>
+            <div data-sidebar-shelf-target="active" class="sidebar-drop-zone">Active</div>
+            <div data-sidebar-shelf-target="settled" class="sidebar-drop-zone">Settle · Sidebar only</div>
+          </div>
+          <div class="sidebar-batch" id="sidebarBatch" role="toolbar" aria-label="Selected chat actions" hidden>
+              <span id="sidebarBatchCount" aria-live="polite">0 selected</span>
+              <button type="button" id="sidebarBatchPin" title="Pin selected chats">Pin</button>
+              <button type="button" id="sidebarBatchUnpin" title="Unpin selected chats">Unpin</button>
+              <button type="button" id="sidebarBatchSettle" title="Local sidebar only; does not stop agents">Settle</button>
+              <button type="button" id="sidebarBatchUnsettle" title="Restore settled chats to Active">Un-settle</button>
+              <button type="button" id="sidebarBatchWake" title="Wake snoozed chats">Wake</button>
+              <button type="button" id="sidebarBatchClear" title="Clear selection" aria-label="Clear selected chats">Clear</button>
+            </div>
+            <div class="sidebar-undo" id="sidebarUndo" role="status" hidden>
+              <span id="sidebarUndoMessage"></span>
+              <button type="button" id="sidebarUndoButton">Undo</button>
           </div>
         </section>
 

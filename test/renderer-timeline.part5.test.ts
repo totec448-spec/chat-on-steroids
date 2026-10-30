@@ -720,7 +720,7 @@ it('renames the open chat with /rename', async () => {
 });
 
 it('pins the open chat with /pin', async () => {
-  const { w, row } = await slash('pin');
+  const { w, row } = await slash('pin', true, true);
   row!.click(); await settle();
   expect(w.document.body.textContent).toContain('Chat pinned');
 });

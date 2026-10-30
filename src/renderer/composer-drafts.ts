@@ -73,6 +73,8 @@ export function createComposerDrafts({ onDraftedChange = () => {}, savedText = (
   }
   return {
     get: (key: string): string | undefined => drafts.get(key),
+    /** Stable, bounded snapshot for the sidebar's navigable draft shelf. */
+    entries: (): Array<[string, string]> => [...drafts].filter(([, text]) => drafted(text)).slice(-MAX_SAVED),
     /** Whether the key holds text that is not only whitespace. */
     has: (key: string): boolean => drafted(drafts.get(key)),
     set(key: string, text: string): void {

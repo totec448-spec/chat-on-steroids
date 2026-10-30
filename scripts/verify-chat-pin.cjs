@@ -6,6 +6,7 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
 const root = process.env.COS_UI_ROOT || path.resolve(__dirname, '..');
 const output = path.resolve(process.env.COS_UI_OUTPUT || path.join(root, '.tmp', 'chat-pin'));
 const { fixtureConfigSource, BENIGN_RENDERER_ERRORS } = require(path.join(root, 'scripts/fixtures/app-defaults.cjs'));
+const { fixtureSidebarShelvesSource } = require(path.join(root, 'scripts/fixtures/sidebar-shelves.cjs'));
 // Pins are a saved preference: every run starts from an empty profile.
 fs.rmSync(path.join(output, 'profile'), { recursive: true, force: true });
 app.setPath('userData', path.join(output, 'profile')); app.disableHardwareAcceleration();
@@ -29,7 +30,7 @@ const fixture = `(() => {
    else if(row.autoTitle){row.title=row.autoTitle.title;delete row.autoTitle;row.titleSource='fallback';}}
    return ok(true);}
  };
- window.api=new Proxy(methods,{get:(target,key)=>key in target?target[key]:old[key]});
+ window.api=new Proxy({...window.sidebarShelfFixture.methods,...methods},{get:(target,key)=>key in target?target[key]:old[key]});
 })();`;
 app.whenReady().then(async () => {
   const { createServer } = await import('vite');
@@ -37,13 +38,13 @@ app.whenReady().then(async () => {
     resolve:{alias:{'@phosphor-icons/web':path.join(root,'node_modules/@phosphor-icons/web/src')}},
     server:{host:'127.0.0.1',port:0,fs:{allow:[root,fs.realpathSync(path.join(root,'node_modules/@phosphor-icons/web/src'))]}},
     plugins:[{name:'chat-pin-fixture',transformIndexHtml:html=>html.replace('</head>','<script src="/timeline-fixture.js"></script></head>'),
-      configureServer(vite){vite.middlewares.use((req,res,next)=>{if(req.url!=='/timeline-fixture.js')return next();res.setHeader('Content-Type','text/javascript');res.end(fixtureConfigSource()+fs.readFileSync(path.join(root,'scripts/fixtures/composer-ui.js'),'utf8')+fixture);});}}] });
+      configureServer(vite){vite.middlewares.use((req,res,next)=>{if(req.url!=='/timeline-fixture.js')return next();res.setHeader('Content-Type','text/javascript');res.end(fixtureConfigSource()+fs.readFileSync(path.join(root,'scripts/fixtures/composer-ui.js'),'utf8')+fixtureSidebarShelvesSource()+fixture);});}}] });
   await server.listen();
   win = new BrowserWindow({show:false,width:1280,height:800,webPreferences:{sandbox:true,offscreen:true,backgroundThrottling:false}});
   const errors=[];
   win.webContents.on('console-message',e=>{if(e.level==='error'&&!BENIGN_RENDERER_ERRORS.includes(e.message))errors.push(e.message);});
   const js=code=>win.webContents.executeJavaScript(code);
-  const until=async expression=>{for(const deadline=Date.now()+15000;Date.now()<deadline;){if(await js(expression))return;await pause(40);}throw new Error('Timed out: '+expression);};
+  const until=async expression=>{for(const deadline=Date.now()+15000;Date.now()<deadline;){if(await js(expression))return;await pause(40);}throw new Error('Timed out: '+expression+'; renderer errors: '+JSON.stringify(errors));};
   const settle=async()=>{await js(`document.getAnimations().forEach(a=>{if(a.effect.getTiming().iterations!==Infinity)a.finish()})`);await pause(180);};
   const capture=async name=>{await settle();fs.mkdirSync(output,{recursive:true});fs.writeFileSync(path.join(output,name),(await win.webContents.capturePage()).toPNG());};
   const order=()=>js(`[...document.querySelectorAll('#sessionList .sess[data-id]')].filter(r=>!r.closest('.worker-group')).map(r=>r.dataset.id)`);

@@ -41,6 +41,7 @@ import { inputArgs, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueu
 import { draftOpeningMessage, onGoalChange, nativeGoalFailure } from './goal.js';
 import { cancelTaskRequest, runTaskRequest } from './task-request.js';
 import { randomUUID } from 'node:crypto';
+import { sidebarThreadStore } from './sidebar-thread-store.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { isValidTopic, normalizeServer, testPhonePush } from './phone-push.js';
@@ -732,6 +733,62 @@ export async function openSessionChat(id: string): Promise<void> {
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
   registerWorkspaceTerminalIpc(getWindow);
+  // One main-owned shelf ledger and one broadcast per acknowledged batch revision.
+  const notifyShelves = (channel: string, change: unknown): void => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send(channel, change);
+    }
+  };
+  sidebarThreadStore.onChange(change => notifyShelves('sidebarShelves:changed', change));
+  sidebarThreadStore.onBatch(change => notifyShelves('sidebarShelves:batchChanged', change));
+  const shelfId = z.string().min(1).max(200).regex(/^[a-z0-9][a-z0-9._:-]*$/i);
+  const shelfDeadline = z.number().int().nonnegative().max(8_640_000_000_000_000);
+  const shelfAttention = z.object({
+    userMessages: z.number().int().nonnegative(), errors: z.number().int().nonnegative(),
+    lastTurnEndAt: shelfDeadline.nullable().optional(), lastTurnOutcome: z.string().max(80).nullable().optional()
+  }).strict();
+  const shelfEntry = z.discriminatedUnion('shelf', [
+    z.object({ shelf: z.literal('active') }).strict(),
+    z.object({ shelf: z.literal('pinned') }).strict(),
+    z.object({ shelf: z.literal('settled') }).strict(),
+    z.object({ shelf: z.literal('snoozed'), until: shelfDeadline, snoozedAt: shelfDeadline,
+      userMessages: z.number().int().nonnegative().optional(), errors: z.number().int().nonnegative().optional() }).strict()
+  ]);
+  const expected = z.number().int().nonnegative();
+  const batchLimit = <T extends z.ZodType>(entry: T) => z.array(entry).min(1).max(1500);
+  handle('sidebarShelves:list', () => sidebarThreadStore.list());
+  handle('sidebarShelves:get', payload => {
+    const { id, attention } = z.object({ id: shelfId, attention: shelfAttention.optional() }).strict().parse(payload);
+    return sidebarThreadStore.get(id, attention);
+  });
+  handle('sidebarShelves:migrateLegacy', payload => {
+    const rows = z.record(shelfId, shelfEntry).refine(value => Object.keys(value).length <= 1500).parse(payload);
+    return sidebarThreadStore.migrateLegacy(rows);
+  });
+  handle('sidebarShelves:set', payload => {
+    const { id, shelf, until, attention, expectedRevision } = z.object({
+      id: shelfId, shelf: z.enum(['active', 'pinned', 'snoozed', 'settled']),
+      until: shelfDeadline.optional(), attention: shelfAttention.optional(), expectedRevision: expected.optional()
+    }).strict().parse(payload);
+    return sidebarThreadStore.set(id, shelf, until, attention, expectedRevision);
+  });
+  handle('sidebarShelves:restore', payload => {
+    const { id, snapshot, expectedRevision } = z.object({ id: shelfId, snapshot: shelfEntry, expectedRevision: expected }).strict().parse(payload);
+    return sidebarThreadStore.restore(id, snapshot, expectedRevision);
+  });
+  handle('sidebarShelves:setMany', payload => {
+    const { changes, expectedRevision } = z.object({
+      changes: batchLimit(z.object({ id: shelfId, shelf: z.enum(['active', 'pinned', 'snoozed', 'settled']),
+        until: shelfDeadline.optional(), attention: shelfAttention.optional() }).strict()), expectedRevision: expected
+    }).strict().parse(payload);
+    return sidebarThreadStore.setMany(changes, expectedRevision);
+  });
+  handle('sidebarShelves:restoreMany', payload => {
+    const { snapshots, expectedRevision } = z.object({
+      snapshots: batchLimit(z.object({ id: shelfId, snapshot: shelfEntry }).strict()), expectedRevision: expected
+    }).strict().parse(payload);
+    return sidebarThreadStore.restoreMany(snapshots, expectedRevision);
+  });
   registerDictationIpc(getWindow);
   // A session row remains visible until its delete IPC resolves. Fence Trust while deletion is
   // in flight so a second click cannot recreate permission after the row's durable revoke.
