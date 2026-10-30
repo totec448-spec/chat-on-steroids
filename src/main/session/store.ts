@@ -2013,8 +2013,26 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
   const last = boundaries.at(-1), prior = boundaries.at(-2);
   const nativeReopen = !!final.providerMessageId && last?.kind === 'turn_start' && last.source === 'app' &&
     last.turnId === final.turnId && prior?.kind === 'turn_end' && prior.turnId === final.turnId && prior.outcome === 'completed';
+  // A progress note of a turn that had ended is not new work: ChatGPT draws a finished turn's steps
+  // as one collapsed group, and the note written before its tool calls can reach the page only then
+  // (2.1.48 release round). The recorder no longer stamps it as work; decided here too, from the stored
+  // owner and turn index, so notes saved before that, or of turns older than the recorder's memory,
+  // still let the final settle. A turn open again counts its notes.
+  const turns = entry.summary.timelineTurns;
+  const finalTurn = final.turnId && turns ? turns[responseTurnId(turns, final.turnId)] : undefined;
+  const lateNote = (event: SessionEvent): boolean => {
+    if (event.kind !== 'assistant_message' || event.final === true || event.state === 'final' || !event.turnId ||
+        sameTurn(entry.summary.activeTurnId, event.turnId)) return false;
+    if (!sameTurn(event.turnId, final.turnId)) {
+      const own = turns?.[responseTurnId(turns, event.turnId)];
+      return !!own && !!finalTurn && own !== finalTurn && own.endOrigin !== undefined && own.origin < finalTurn.origin;
+    }
+    return nativeFinal && recent.some(end => end.kind === 'turn_end' && end.outcome === 'completed' &&
+      sameTurn(end.turnId, final.turnId) && end.seq < event.seq &&
+      !recent.some(start => start.kind === 'turn_start' && sameTurn(start.turnId, final.turnId) && start.seq > end.seq && start.seq < event.seq));
+  };
   if (recent.some(event => {
-    if (event === final || workSequence(event) <= seq) return false;
+    if (event === final || workSequence(event) <= seq || lateNote(event)) return false;
     if (event.kind === 'tool_call') {
       if (event.time <= completedAt) return false;
       // A public native final settles its request even when Pro delivers another

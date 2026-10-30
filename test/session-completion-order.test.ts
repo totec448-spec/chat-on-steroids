@@ -295,6 +295,62 @@ describe('completed request ownership', () => {
     expect((await getSession(opened.sessionId!))?.activeTurnId).toBe(turn);
   });
 
+  // CodeRabbit on #1931: decided again when reading, from the stored records, so a note saved before
+  // this fix, a turn older than the recorder's memory, and a note re-reported without its turn id all settle.
+  const savedNote = (id: string, turnId: string, contentSeq: number) => appendEvent(id, {
+    source: 'extension', time: Date.now(), turnId, kind: 'assistant_message', messageId: `saved-note-${turnId}`,
+    message: { text: 'I’ll inspect the source first.', truncated: false, chars: 30 }, state: 'streaming', final: false,
+    providerMessageId: '66666666-7777-4888-8999-000000000001', contentSeq
+  } as never);
+
+  it('settles a final whose turn’s late note was saved as work before this fix', async () => {
+    const { id, began, clock } = await completed();
+    clock.mockReturnValue(began + 30);
+    await savedNote(id, turn, 999);
+    await flushSessions(); resetRecorderForTests(); resetSessionStoreForTests();
+    expect(await readCompletedFinal(id, chat, turn)).toMatchObject({ messageId: 'answer', turnId: turn });
+  });
+
+  it('settles a newer final when a late note of an older, ended turn is saved as work', async () => {
+    const { id, began, clock } = await completed();
+    clock.mockReturnValue(began + 40);
+    await recordChatObservations(chat, [
+      { kind: 'user_message', time: Date.now(), messageId: 'second-question', text: 'And the tests?' },
+      { kind: 'turn_start', time: Date.now() + 1, turnId: 'second-turn' }
+    ]);
+    clock.mockReturnValue(began + 50);
+    await recordChatObservations(chat, [
+      { kind: 'assistant_message', time: Date.now(), turnId: 'second-turn', messageId: 'second-answer',
+        providerMessageId: '22222222-2222-4333-8444-555555555555', text: 'The tests pass.', final: true, state: 'final', activeNow: true },
+      { kind: 'turn_end', time: Date.now(), turnId: 'second-turn', outcome: 'completed' }
+    ]);
+    clock.mockReturnValue(began + 60);
+    await savedNote(id, turn, 999);
+    expect(await readCompletedFinal(id, chat)).toMatchObject({ messageId: 'second-answer', turnId: 'second-turn' });
+  });
+
+  it('settles a final when its turn’s note is re-reported without a turn id after the turn ended', async () => {
+    const began = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(began);
+    const opened = await recordChatObservations(chat, [
+      { kind: 'user_message', time: began, messageId: 'question', text: 'Inspect the source.' },
+      { kind: 'turn_start', time: began + 1, turnId: turn }
+    ]);
+    clock.mockReturnValue(began + 5);
+    await recordChatObservations(chat, [{ kind: 'assistant_message', time: Date.now(), turnId: turn, messageId: 'progress-note',
+      providerMessageId: '66666666-7777-4888-8999-000000000000', text: 'I’ll inspect', state: 'streaming', activeNow: true }]);
+    clock.mockReturnValue(began + 20);
+    await recordChatObservations(chat, [
+      { kind: 'assistant_message', time: Date.now(), turnId: turn, messageId: 'answer',
+        providerMessageId: '11111111-2222-4333-8444-555555555555', text: 'The source is checked.', final: true, state: 'final', activeNow: true },
+      { kind: 'turn_end', time: Date.now(), turnId: turn, outcome: 'completed' }
+    ]);
+    clock.mockReturnValue(began + 30);
+    await recordChatObservations(chat, [{ kind: 'assistant_message', time: Date.now(), messageId: 'progress-note',
+      providerMessageId: '66666666-7777-4888-8999-000000000000', text: 'I’ll inspect the source first.', state: 'streaming', activeNow: true }]);
+    expect(await readCompletedFinal(opened.sessionId!, chat, turn)).toMatchObject({ messageId: 'answer', turnId: turn });
+  });
+
   it('still treats a message of another turn after the final as new work', async () => {
     const { id, began, clock } = await completed();
     clock.mockReturnValue(began + 30);
