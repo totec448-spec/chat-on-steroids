@@ -2456,7 +2456,8 @@ function goalActiveFor(id: string): boolean {
 /** Policy gate only: the live silence grant files the outbox's exact recovery claim. */
 export function recoveryInputAllowed(sessionId: string, id: string): boolean {
   return (goalActiveFor(id) || getConfig().ui.autoContinue !== false) && !goalFencedChat(id) &&
-    !isChatBlocked(id) && !stopRequestedFor(id) && !continuationForSession(sessionId);
+    !isChatBlocked(id) && !stopRequestedFor(id) && !continuationForSession(sessionId) &&
+    providerHistoryBackoff(id) === null;
 }
 
 // -------------------------------------------------------------------- routes
@@ -6107,6 +6108,21 @@ async function startBridgeOnce(epoch: number, prepared?: PreparedBridge): Promis
 }
 
 let unclaimedInputSweep: Promise<void> | null = null;
+/** A browser pickup retry must not reopen a history-throttled chat. The live
+ * backoff map knows the latest Retry-After; the recorder also preserves the
+ * original blocking deadline across a bridge/app restart. An unreadable
+ * journal is not permission to try another page.
+ */
+export async function providerHistoryHoldsPickup(sessionId: string, conversationId: string): Promise<boolean> {
+  if (providerHistoryBackoff(conversationId) !== null) return true;
+  try {
+    const events = await readRecentEvents(sessionId, 16, { kinds: ['chat_error'] });
+    return events.some(item => item.kind === 'chat_error' && item.blocking === true &&
+      Number.isFinite(item.retryAt) && item.retryAt! > Date.now());
+  } catch {
+    return true;
+  }
+}
 /** Recover only a fresh, confirmed pre-Send browser pickup timeout; never recreate a prompt. */
 function retryUnclaimedBrowserInputs(): Promise<void> {
   if (unclaimedInputSweep) return unclaimedInputSweep;
@@ -6114,12 +6130,14 @@ function retryUnclaimedBrowserInputs(): Promise<void> {
     const inputs = await listInputs();
     for (const row of inputs) {
       if (row.state !== 'failed' || row.error !== 'Not sent: the browser did not pick up this message within 60 seconds.' ||
-          !row.sessionId || !row.conversationId || !recoveryInputAllowed(row.sessionId, row.conversationId)) continue;
+          !row.sessionId || !row.conversationId || !recoveryInputAllowed(row.sessionId, row.conversationId) ||
+          await providerHistoryHoldsPickup(row.sessionId, row.conversationId)) continue;
       const retried = await retryUnclaimedInput(row.id);
       if (!retried) continue;
       logInfo(`recovery monitor: requeued the same never-authorized browser input ${row.id}`);
       const stillOwned = async (): Promise<boolean> => {
-        if (!bridgeDesiredRunning || !server || !recoveryInputAllowed(row.sessionId!, row.conversationId!)) return false;
+        if (!bridgeDesiredRunning || !server || !recoveryInputAllowed(row.sessionId!, row.conversationId!) ||
+            await providerHistoryHoldsPickup(row.sessionId!, row.conversationId!)) return false;
         const [latestRows, session] = await Promise.all([listInputs(), getSession(row.sessionId!)]);
         const latest = latestRows.find(entry => entry.id === row.id);
         return !!session && session.conversationId === row.conversationId && latest?.state === 'queued' &&

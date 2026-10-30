@@ -1882,8 +1882,236 @@ afterAll(async () => {
   await removeTempDir(directory);
 });
 const message = (sessionId: string | null, automation: 'off' | 'goal' | 'loop') => ({
-  id: randomUUID(), sessionId, automation, text: 'Complete this request', mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null
+  id: randomUUID(), sessionId, automation, text: 'Complete this request', mode: 'auto' as const, dueAt: Date.now(), model: null, reasoningEffort: null
 });
+
+it('recovers one never-authorized Goal browser pickup with the same outbox ID and exact live controls', async () => {
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'Goal pre-Send recovery', conversationId });
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoContinue: true } });
+    await goal.setGoalSwitchNow(conversationId, 'goal', true);
+    await goal.setGoalObjectiveNow(conversationId, 'Complete the remaining safe work');
+    await post('/events', { conversationId, events: [
+      { kind: 'model_selection', model: 'gpt-5.6-sol', time: now },
+      { kind: 'user_message', messageId: randomUUID(), text: 'Start the task', time: now + 1 },
+      { kind: 'turn_start', turnId: 'finished-source', time: now + 2 },
+      { kind: 'assistant_message', messageId: randomUUID(), turnId: 'finished-source', text: 'Next step', state: 'final', final: true, time: now + 3 },
+      { kind: 'turn_end', turnId: 'finished-source', outcome: 'completed', time: now + 4 }
+    ] });
+    now += 10;
+    const request = { ...message(session.id, 'goal'), objective: 'Complete the remaining safe work' };
+    const row = await input.enqueueInput(request);
+    expect(row).toMatchObject({ state: 'queued', transportIntent: 'browser', automation: 'goal', objective: request.objective });
+    now += 60_001;
+    input.resetInputForTests();
+    expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed' });
+    now += 120_000;
+    const restored = await input.retryUnclaimedInput(row.id);
+    expect(restored).toMatchObject({ id: row.id, state: 'queued', pickupRetryCount: 1, objective: request.objective });
+    expect(await input.retryUnclaimedInput(row.id)).toBeNull();
+    const claim = await input.claimBrowserInput(row.id, 'exact-page', conversationId, true);
+    expect(claim?.id).toBe(row.id);
+    expect(await input.authorizeBrowserInput(row.id, 'exact-page', conversationId)).toBe(true);
+    expect(await input.acknowledgeBrowserInput(row.id, 'exact-page', conversationId, randomUUID())).toBe(true);
+    expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({ id: row.id, state: 'sent' });
+  } finally { clock.mockRestore(); }
+});
+
+it.each(['off', 'different-objective'] as const)('refuses old Goal browser pickup after control changed (%s)', async change => {
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'Goal control moved', conversationId });
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoContinue: true } });
+    await goal.setGoalSwitchNow(conversationId, 'goal', true);
+    await goal.setGoalObjectiveNow(conversationId, 'Original target');
+    await post('/events', { conversationId, events: [
+      { kind: 'model_selection', model: 'gpt-5.6-sol', time: now },
+      { kind: 'turn_start', turnId: 'completed-source', time: now + 1 },
+      { kind: 'assistant_message', messageId: randomUUID(), turnId: 'completed-source', text: 'Done', state: 'final', final: true, time: now + 2 },
+      { kind: 'turn_end', turnId: 'completed-source', outcome: 'completed', time: now + 3 }
+    ] });
+    now += 10;
+    const row = await input.enqueueInput({ ...message(session.id, 'goal'), objective: 'Original target' });
+    now += 60_001;
+    input.resetInputForTests();
+    expect((await input.listInputs()).find(entry => entry.id === row.id)?.state).toBe('failed');
+    if (change === 'off') await goal.setGoalSwitchNow(conversationId, 'goal', false);
+    else await goal.setGoalObjectiveNow(conversationId, 'Replacement target');
+    now += 120_000;
+    expect(await input.retryUnclaimedInput(row.id)).toBeNull();
+    expect((await input.listInputs()).find(entry => entry.id === row.id)?.state).toBe('failed');
+  } finally { clock.mockRestore(); }
+});
+
+it('does not treat a missing Goal objective as permission to send under a newer saved target', async () => {
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'Goal intent without objective', conversationId });
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoContinue: true } });
+    await goal.setGoalSwitchNow(conversationId, 'goal', true);
+    await post('/events', { conversationId, events: [
+      { kind: 'model_selection', model: 'gpt-5.6-sol', time: now },
+      { kind: 'turn_start', turnId: 'previous-turn', time: now + 1 },
+      { kind: 'assistant_message', messageId: randomUUID(), turnId: 'previous-turn', text: 'Done', state: 'final', final: true, time: now + 2 },
+      { kind: 'turn_end', turnId: 'previous-turn', outcome: 'completed', time: now + 3 }
+    ] });
+    now += 10;
+    const row = await input.enqueueInput(message(session.id, 'goal'));
+    now += 60_001;
+    input.resetInputForTests();
+    expect((await input.listInputs()).find(item => item.id === row.id)?.state).toBe('failed');
+    await goal.setGoalObjectiveNow(conversationId, 'Newer saved goal');
+    now += 120_000;
+    expect(await input.retryUnclaimedInput(row.id)).toBeNull();
+    expect((await input.listInputs()).find(item => item.id === row.id)?.pickupRetryCount).toBeUndefined();
+  } finally { clock.mockRestore(); }
+});
+
+it('does not recover a Goal when two local sessions claim the same provider conversation', async () => {
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    const conversationId = randomUUID();
+    const owner = await createSession({ title: 'First owner', conversationId });
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoContinue: true } });
+    await goal.setGoalSwitchNow(conversationId, 'goal', true);
+    await goal.setGoalObjectiveNow(conversationId, 'Preserve original owner');
+    await post('/events', { conversationId, events: [
+      { kind: 'model_selection', model: 'gpt-5.6-sol', time: now },
+      { kind: 'turn_start', turnId: 'original-owner-turn', time: now + 1 },
+      { kind: 'assistant_message', messageId: randomUUID(), turnId: 'original-owner-turn', text: 'Done', state: 'final', final: true, time: now + 2 },
+      { kind: 'turn_end', turnId: 'original-owner-turn', outcome: 'completed', time: now + 3 }
+    ] });
+    now += 10;
+    const row = await input.enqueueInput({ ...message(owner.id, 'goal'), objective: 'Preserve original owner' });
+    now += 60_001;
+    input.resetInputForTests();
+    expect((await input.listInputs()).find(item => item.id === row.id)?.state).toBe('failed');
+    await createSession({ title: 'Ambiguous second owner', conversationId });
+    now += 120_000;
+    expect(await input.retryUnclaimedInput(row.id)).toBeNull();
+    expect((await input.listInputs()).find(item => item.id === row.id)?.state).toBe('failed');
+  } finally { clock.mockRestore(); }
+});
+
+it('recovers independent Goal chats once each under concurrent pickup requests', async () => {
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoContinue: true } });
+    const ids: string[] = [];
+    for (const suffix of ['A', 'B']) {
+      const conversationId = randomUUID();
+      const session = await createSession({ title: `Concurrent Goal ${suffix}`, conversationId });
+      await goal.setGoalSwitchNow(conversationId, 'goal', true);
+      await goal.setGoalObjectiveNow(conversationId, `Complete distinct project ${suffix}`);
+      await post('/events', { conversationId, events: [
+        { kind: 'model_selection', model: 'gpt-5.6-sol', time: now },
+        { kind: 'turn_start', turnId: `source-${suffix}`, time: now + 1 },
+        { kind: 'assistant_message', messageId: randomUUID(), turnId: `source-${suffix}`, text: 'Done', state: 'final', final: true, time: now + 2 },
+        { kind: 'turn_end', turnId: `source-${suffix}`, outcome: 'completed', time: now + 3 }
+      ] });
+      now += 10;
+      const entry = await input.enqueueInput({ ...message(session.id, 'goal'), objective: `Complete distinct project ${suffix}` });
+      expect(entry.transportIntent).toBe('browser');
+      ids.push(entry.id);
+    }
+    now += 60_001;
+    input.resetInputForTests();
+    expect((await input.listInputs()).filter(row => ids.includes(row.id)).map(row => row.state)).toEqual(['failed', 'failed']);
+    now += 120_000;
+    const results = await Promise.all([input.retryUnclaimedInput(ids[0]!), input.retryUnclaimedInput(ids[0]!), input.retryUnclaimedInput(ids[1]!)]);
+    expect(results.filter(Boolean).map(row => row!.id).sort()).toEqual([...ids].sort());
+    expect(results.filter(row => row === null)).toHaveLength(1);
+    expect((await input.listInputs()).filter(row => ids.includes(row.id)).map(row => row.pickupRetryCount)).toEqual([1, 1]);
+  } finally { clock.mockRestore(); }
+});
+
+it.each(['before-claim', 'before-authorization'] as const)(
+  'does not spend a recovered Goal when its objective changes %s', async phase => {
+    let now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const conversationId = randomUUID();
+      const session = await createSession({ title: 'Goal claim fence', conversationId });
+      await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoContinue: true } });
+      await goal.setGoalSwitchNow(conversationId, 'goal', true);
+      await goal.setGoalObjectiveNow(conversationId, 'Original goal');
+      await post('/events', { conversationId, events: [
+        { kind: 'model_selection', model: 'gpt-5.6-sol', time: now },
+        { kind: 'turn_start', turnId: 'claim-source', time: now + 1 },
+        { kind: 'assistant_message', messageId: randomUUID(), turnId: 'claim-source', text: 'Done', state: 'final', final: true, time: now + 2 },
+        { kind: 'turn_end', turnId: 'claim-source', outcome: 'completed', time: now + 3 }
+      ] });
+      now += 10;
+      const row = await input.enqueueInput({ ...message(session.id, 'goal'), objective: 'Original goal' });
+      now += 60_001;
+      input.resetInputForTests();
+      expect((await input.listInputs()).find(item => item.id === row.id)?.state).toBe('failed');
+      now += 120_000;
+      expect((await input.retryUnclaimedInput(row.id))?.state).toBe('queued');
+      if (phase === 'before-claim') await goal.setGoalObjectiveNow(conversationId, 'Newer goal');
+      const claim = await input.claimBrowserInput(row.id, 'exact-page', conversationId, true);
+      if (phase === 'before-claim') {
+        expect(claim).toBeNull();
+        expect((await input.listInputs()).find(item => item.id === row.id)?.state).toBe('queued');
+      } else {
+        expect(claim).not.toBeNull();
+        await goal.setGoalObjectiveNow(conversationId, 'Newer goal');
+        expect(await input.authorizeBrowserInput(row.id, 'exact-page', conversationId)).toBe(false);
+        expect((await input.listInputs()).find(item => item.id === row.id)?.sendAuthorizedAt).toBeUndefined();
+      }
+    } finally { clock.mockRestore(); }
+  }
+);
+
+it.each(['before-claim', 'before-authorization'] as const)(
+  'rejects a recovered Goal pickup if a newer user message arrived %s', async phase => {
+    let now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const conversationId = randomUUID();
+      const session = await createSession({ title: 'Newer user veto', conversationId });
+      await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoContinue: true } });
+      await goal.setGoalSwitchNow(conversationId, 'goal', true);
+      await goal.setGoalObjectiveNow(conversationId, 'Preserve the project');
+      await post('/events', { conversationId, events: [
+        { kind: 'model_selection', model: 'gpt-5.6-sol', time: now },
+        { kind: 'turn_start', turnId: 'previous-user', time: now + 1 },
+        { kind: 'assistant_message', messageId: randomUUID(), turnId: 'previous-user', text: 'Done', state: 'final', final: true, time: now + 2 },
+        { kind: 'turn_end', turnId: 'previous-user', outcome: 'completed', time: now + 3 }
+      ] });
+      now += 10;
+      const row = await input.enqueueInput({ ...message(session.id, 'goal'), objective: 'Preserve the project' });
+      now += 60_001;
+      input.resetInputForTests();
+      expect((await input.listInputs()).find(item => item.id === row.id)?.state).toBe('failed');
+      now += 120_000;
+      expect((await input.retryUnclaimedInput(row.id))?.state).toBe('queued');
+      if (phase === 'before-claim') await post('/events', { conversationId, events: [
+        { kind: 'user_message', time: now + 1, messageId: randomUUID(), text: 'New work supersedes the recovery' }
+      ] });
+      const claimed = await input.claimBrowserInput(row.id, 'user-veto-page', conversationId, true);
+      if (phase === 'before-claim') {
+        expect(claimed).toBeNull();
+      } else {
+        expect(claimed?.id).toBe(row.id);
+        await post('/events', { conversationId, events: [
+          { kind: 'user_message', time: now + 1, messageId: randomUUID(), text: 'New work supersedes the recovery' }
+        ] });
+        expect(await input.authorizeBrowserInput(row.id, 'user-veto-page', conversationId)).toBe(false);
+        expect((await input.listInputs()).find(item => item.id === row.id)?.sendAuthorizedAt).toBeUndefined();
+      }
+    } finally { clock.mockRestore(); }
+  }
+);
 
 it('bounds an explicit next-tool delivery to four recorded images', async () => {
   const { default: sharp } = await import('sharp');

@@ -23,7 +23,7 @@ import { noteChatOrigin } from './recorder.js';
 import { seedBranchHistory } from './branch-history.js';
 import { DEFAULT_HELPER_CHAT_MODEL, isAstraModel, isProModel } from '../../shared/chat-models.js';
 import { inFlightToolCalls } from '../mcp/call-context.js';
-import { automaticFinishEnabled, goalDrivingMode, consumeGoalReplyForInputNow } from '../goal.js';
+import { automaticFinishEnabled, goalDrivingMode, goalSwitchFor, goalObjectiveFor, consumeGoalReplyForInputNow } from '../goal.js';
 import { finishInstruction } from '../../shared/finish.js';
 import { CONVERSATION_DELETED } from '../../shared/chat-error.js';
 import { attachmentSchema, validateInputAttachments, normalizeInputAttachments } from './input-attachments.js';
@@ -282,6 +282,10 @@ export async function sessionInputPolicy(sessionId: string, observedActivity?: I
 const CLOSE_REPORT_GRACE_MS = 5_000;
 async function browserInputAllowed(entry: InputEntry): Promise<boolean> {
   if (entry.error?.startsWith('Local chat setup failed:')) return false;
+  // The pre-Send pickup retry can cross a later Goal edit while its browser tab
+  // is opening. Recheck the exact retained instructions at claim AND at final
+  // Send authorization; one old row must never restore a superseded objective.
+  if (entry.pickupRetryCount && !await recoveredPickupCurrent(entry)) return false;
   // Authored Inject-now custody never changes transports. Its exact turn either
   // offers it from an MCP response or expires it visibly below.
   if (entry.delivery === 'tool') return false;
@@ -649,6 +653,43 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
   }
   return entries!;
 }
+/** Goal/Loop instructions are pending changes to a chat, not a blanket retry grant.
+ * Only the exact per-chat mode/objective that is *still already active* may reuse an
+ * input proved never authorized for native Send. A pending new objective, Off,
+ * inherited global mode or edited controls require an explicit user decision.
+ */
+function sameLiveAutomation(row: InputEntry): boolean {
+  if (!row.automation) return !row.objective && row.loopAfterTurn !== true;
+  if (!row.conversationId || row.automation === 'off') return false;
+  const current = goalSwitchFor(row.conversationId);
+  return current.own && current.enabled && current.mode === row.automation &&
+    current.afterTurn === (row.loopAfterTurn === true) &&
+    // A missing objective is not a wildcard. It proves only that the chat had
+    // no saved Goal target when this input was authored. Otherwise an old
+    // Goal-only row could revive after a later, different goal was installed.
+    goalObjectiveFor(row.conversationId) === (row.objective ?? '');
+}
+
+/** The first recovery check happened before requeueing, potentially minutes
+ * before a page became available. Repeat all relevant source/owner checks at
+ * claim and Send authorization; a newer authored message or running turn
+ * cancels this old pickup even if the Goal text has not changed.
+ */
+async function recoveredPickupCurrent(row: InputEntry): Promise<boolean> {
+  if (!row.pickupRetryCount || !row.sessionId || !row.conversationId || !sameLiveAutomation(row) ||
+      isChatBlocked(row.conversationId) || inFlightToolCalls(row.conversationId) > 0 ||
+      deliveryHooks?.recoveryAllowed?.(row.sessionId, row.conversationId) !== true ||
+      await conversationWasSuperseded(row.conversationId)) return false;
+  const session = await getSession(row.sessionId);
+  const exclusive = await findSessionByConversation(row.conversationId, { requireUnique: true });
+  if (!session || !exclusive || exclusive.id !== row.sessionId || session.conversationId !== row.conversationId || session.activeTurnId ||
+      session.browserRecoveryDismissedAt !== undefined) return false;
+  const [boundary] = await readRecentEvents(row.sessionId, 1, { kinds: ['turn_start', 'turn_end'] });
+  if (boundary?.kind !== 'turn_end' || boundary.time > row.createdAt || boundary.outcome === 'stopped') return false;
+  const [newer] = await readRecentEvents(row.sessionId, 1, { kinds: ['user_message'] });
+  return (!newer || newer.time <= row.createdAt) && sameLiveAutomation(row);
+}
+
 /** Requeue the same durable row once when the browser never claimed it. */
 export function retryUnclaimedInput(id: string): Promise<InputEntry | null> {
   return serial(async () => {
@@ -662,11 +703,13 @@ export function retryUnclaimedInput(id: string): Promise<InputEntry | null> {
         row.mode !== 'auto' || row.transportIntent !== 'browser' || row.purpose === 'decision' || row.opening || row.requiresAuthorization ||
         row.cancelledByUser || row.recovery || row.silenceBoundary || row.finishOwner || row.directTurn || row.queuedTurn ||
         row.companionInputId || row.attachments?.length || row.images?.length || row.toolImages?.length || row.delivery ||
-        row.attachmentDelivery || row.toolTurnId || row.automation || row.objective || row.stages?.length || row.loopAfterTurn ||
+        row.attachmentDelivery || row.toolTurnId || !sameLiveAutomation(row) || row.stages?.length ||
         !row.sessionId || !row.conversationId) return null;
     const session = await getSession(row.sessionId);
+    const exclusive = await findSessionByConversation(row.conversationId, { requireUnique: true });
     const activity = session ? deliveryHooks?.activity?.(session) ?? { possible: !!session.activeTurnId, exact: !!session.activeTurnId } : null;
-    if (!session || session.conversationId !== row.conversationId || activity?.possible || activity?.exact ||
+    if (!session || !exclusive || exclusive.id !== row.sessionId || session.conversationId !== row.conversationId || activity?.possible || activity?.exact ||
+        (row.automation && (session.origin?.kind === 'worker' || session.origin?.kind === 'helper')) ||
         deliveryHooks?.recoveryAllowed?.(row.sessionId, row.conversationId) !== true ||
         session.browserRecoveryDismissedAt !== undefined || isChatBlocked(row.conversationId) ||
         await conversationWasSuperseded(row.conversationId) || inFlightToolCalls(row.conversationId) > 0) return null;
@@ -1318,7 +1361,8 @@ export function authorizeBrowserInput(id: string, owner: string, conversationId:
     const current = await load();
     const row = current.find(row => row.id === id && row.owner === owner && row.state === 'browser' && row.conversationId === conversationId);
     if (!row || row.sendAuthorizedAt !== undefined || companionOf(current, row)) return false;
-    if (!(await browserInputAllowed(row)) || await target(row) !== conversationId) return false;
+    if (!(await browserInputAllowed(row)) || await target(row) !== conversationId ||
+        (row.pickupRetryCount && !await recoveredPickupCurrent(row))) return false;
     if (row.companionInputId) {
       const companion = current.find(other => other.id === row.companionInputId && other.state === 'browser' && other.owner === owner && other.sessionId === row.sessionId);
       const session = row.sessionId ? await getSession(row.sessionId) : null;

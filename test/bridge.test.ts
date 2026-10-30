@@ -11580,6 +11580,46 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('does not grant a new pre-Send Goal pickup during ChatGPT history Retry-After', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const { setGoalSwitchNow } = await import('../src/main/goal.js');
+      const { recoveryInputAllowed } = await import('../src/main/bridge.js');
+      await setGoalSwitchNow(PRIME, 'goal', true);
+      await events(PRIME, [{ kind: 'model_selection', time: Date.now(), model: 'GPT-5.6 Sol', reasoningEffort: 'high' },
+        openTurn('goal-retry-limit')]);
+      const session = (await findSessionByConversation(PRIME))!;
+      expect(recoveryInputAllowed(session.id, PRIME)).toBe(true);
+      const retryAt = Date.now() + 90_000;
+      await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: 'goal-retry-limit',
+        blocking: true, recoverable: false, retryAt,
+        text: 'ChatGPT temporarily rate-limited loading this conversation history.' }]);
+      expect(recoveryInputAllowed(session.id, PRIME)).toBe(false);
+      await vi.advanceTimersByTimeAsync(90_001);
+      expect(recoveryInputAllowed(session.id, PRIME)).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('restores provider pickup hold from the persisted session journal without a live bridge map', async () => {
+    vi.useFakeTimers();
+    try {
+      const { appendEvent } = await import('../src/main/session/store.js');
+      const { providerHistoryHoldsPickup } = await import('../src/main/bridge.js');
+      const conversationId = 'b2bc281e-c183-4b89-ae21-39fe7e7259b2';
+      const session = await createSession({ title: 'Persisted history limit', conversationId });
+      const retryAt = Date.now() + 75_000;
+      // This is a durable recorder event, not a browser observation. The live
+      // backoff map has never received an event for this distinct chat.
+      await appendEvent(session.id, { source: 'extension', time: Date.now(), kind: 'chat_error',
+        blocking: true, recoverable: false, retryAt,
+        message: { text: 'History temporarily limited', chars: 27, truncated: false } });
+      expect(await providerHistoryHoldsPickup(session.id, conversationId)).toBe(true);
+      await vi.advanceTimersByTimeAsync(75_001);
+      expect(await providerHistoryHoldsPickup(session.id, conversationId)).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('records a repeating history limit once, while its deadline keeps following the newest (2026-10-11)', async () => {
     // A throttled history answered every retry with the same limit: eight identical blocking notices
     // stacked up in eight minutes. One notice says it; the hold still follows each new Retry-After.
