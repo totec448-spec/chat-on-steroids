@@ -13,7 +13,7 @@ export function wakeBrowserWork(topic: 'wake' | 'browser-control' = 'wake'): voi
 /** `changed` hears an authenticated channel open or close: whether the browser is there at all. */
 export function attachBrowserWake(server: http.Server, allowed: (request: http.IncomingMessage) => boolean,
   authenticate: (token: string) => Promise<boolean>, changed: () => void = () => undefined,
-  options: { quietReconnectMs?: number } = {}): {
+  options: { quietReconnectMs?: number; summaryMs?: number } = {}): {
     connected(host?: WakeHost): boolean; revoke(): void; dispose(): void;
   } {
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 512, perMessageDeflate: false });
@@ -32,11 +32,59 @@ export function attachBrowserWake(server: http.Server, allowed: (request: http.I
    * is logged when that time is up.
    */
   const quietReconnectMs = options.quietReconnectMs ?? 10_000;
-  const churn = new Map<string, { closedAt: number | null; quiet: boolean; counted: number; saidAt: number; late: NodeJS.Timeout | null }>();
-  const churnOf = (host: string) => {
+  const summaryMs = options.summaryMs ?? 60 * 60_000;
+  type PendingClose = { at: number; quiet: boolean; timer: NodeJS.Timeout };
+  type Churn = { pending: PendingClose[]; quiet: boolean; counted: number; saidAt: number; flush: NodeJS.Timeout | null };
+  const churn = new Map<string, Churn>();
+  const churnOf = (host: string): Churn => {
     let entry = churn.get(host);
-    if (!entry) churn.set(host, entry = { closedAt: null, quiet: false, counted: 0, saidAt: Date.now(), late: null });
+    if (!entry) churn.set(host, entry = { pending: [], quiet: false, counted: 0, saidAt: Date.now(), flush: null });
     return entry;
+  };
+  const lateDrop = (host: string, entry: Churn, close: PendingClose) => {
+    clearTimeout(close.timer);
+    entry.pending = entry.pending.filter(other => other !== close);
+    if (!close.quiet) return; // Its disconnect was logged when it happened.
+    entry.quiet = false;
+    logInfo(`bridge: browser wake channel (${host}) disconnected: closed by the browser (it did not come back)`);
+  };
+  const flushCount = (host: string, entry: Churn) => {
+    if (entry.flush) { clearTimeout(entry.flush); entry.flush = null; }
+    if (entry.counted > 0) {
+      logInfo(`bridge: browser wake channel (${host}) was closed by the browser and reopened at once ${entry.counted} more ` +
+        'times since the last line like this; an extension whose background sleeps when idle does this');
+    }
+    entry.counted = 0;
+    entry.saidAt = Date.now();
+  };
+  /** A browser closed one of its channels: remember it for `quietReconnectMs`, one record per close. */
+  const browserClosed = (host: string) => {
+    const entry = churnOf(host);
+    const close: PendingClose = { at: Date.now(), quiet: entry.quiet, timer: setTimeout(() => lateDrop(host, entry, close), quietReconnectMs) };
+    close.timer.unref?.();
+    entry.pending.push(close);
+    if (!close.quiet) logInfo(`bridge: browser wake channel (${host}) disconnected: closed by the browser`);
+  };
+  /** A channel of `host` authenticated: was it one of its recent closes coming straight back? */
+  const browserOpened = (host: string) => {
+    const entry = churnOf(host);
+    const now = Date.now();
+    // A close whose grace ran out, though its timer has not fired yet on a busy computer, is a drop.
+    for (const close of [...entry.pending]) if (now - close.at > quietReconnectMs) lateDrop(host, entry, close);
+    const close = entry.pending[0];
+    if (close) { clearTimeout(close.timer); entry.pending.shift(); }
+    if (close && entry.quiet) {
+      entry.counted += 1;
+      if (now - entry.saidAt >= summaryMs) flushCount(host, entry);
+      else if (!entry.flush) {
+        entry.flush = setTimeout(() => flushCount(host, entry), Math.max(0, entry.saidAt + summaryMs - now));
+        entry.flush.unref?.();
+      }
+      return;
+    }
+    logInfo(`bridge: browser wake channel (${host}) authenticated`);
+    // Only a reconnect starts the pattern; a second channel opening alongside leaves it as it is.
+    if (close) { entry.quiet = true; entry.saidAt = now; }
   };
   let epoch = 0;
   const upgrade = (request: http.IncomingMessage, socket: import('node:stream').Duplex, head: Buffer) => {
@@ -54,22 +102,11 @@ export function attachBrowserWake(server: http.Server, allowed: (request: http.I
         clearTimeout(deadline);
         if (authorized.delete(client)) {
           const why = dropped.get(client);
-          const entry = churnOf(named(client));
-          entry.closedAt = Date.now();
-          if (why || !entry.quiet) {
-            entry.quiet = false;
-            logInfo(`bridge: browser wake channel (${named(client)}) disconnected: ${why ?? 'closed by the browser'}`);
-          } else {
-            const host = named(client);
-            if (entry.late) clearTimeout(entry.late);
-            entry.late = setTimeout(() => {
-              entry.late = null;
-              if (entry.closedAt === null) return;
-              entry.quiet = false;
-              logInfo(`bridge: browser wake channel (${host}) disconnected: closed by the browser (it did not come back)`);
-            }, quietReconnectMs);
-            entry.late.unref?.();
-          }
+          if (why) {
+            // The app's own drop always says so, and starts any pattern over.
+            churnOf(named(client)).quiet = false;
+            logInfo(`bridge: browser wake channel (${named(client)}) disconnected: ${why}`);
+          } else browserClosed(named(client));
           changed();
         }
         hosts.delete(client);
@@ -90,23 +127,7 @@ export function attachBrowserWake(server: http.Server, allowed: (request: http.I
           if (client.readyState !== WebSocket.OPEN) return;
           clearTimeout(deadline);
           authorized.set(client, Date.now());
-          const entry = churnOf(named(client));
-          const quick = entry.closedAt !== null && Date.now() - entry.closedAt <= quietReconnectMs;
-          entry.closedAt = null;
-          if (entry.late) { clearTimeout(entry.late); entry.late = null; }
-          if (quick && entry.quiet) {
-            entry.counted += 1;
-            if (Date.now() - entry.saidAt >= 60 * 60_000) {
-              logInfo(`bridge: browser wake channel (${named(client)}) was closed by the browser and reopened at once ${entry.counted} more ` +
-                'times since the last line like this; an extension whose background sleeps when idle does this');
-              entry.counted = 0;
-              entry.saidAt = Date.now();
-            }
-          } else {
-            logInfo(`bridge: browser wake channel (${named(client)}) authenticated`);
-            entry.quiet = quick;
-            if (quick) entry.saidAt = Date.now();
-          }
+          browserOpened(named(client));
           changed();
           // Reconnection always reads current work; no lost notification is durable state.
           client.send('wake');
@@ -142,6 +163,9 @@ export function attachBrowserWake(server: http.Server, allowed: (request: http.I
   return { connected: (host?: WakeHost) => [...authorized].some(([client, seen]) => client.readyState === WebSocket.OPEN &&
     client.bufferedAmount < 1024 && Date.now() - seen <= 45000 && (host === undefined || hosts.get(client) === host)), revoke, dispose() {
     subscribers.delete(wake); clearInterval(heartbeat); server.off('upgrade', upgrade); revoke(); sockets.close();
-    for (const entry of churn.values()) if (entry.late) clearTimeout(entry.late);
+    for (const entry of churn.values()) {
+      for (const close of entry.pending) clearTimeout(close.timer);
+      if (entry.flush) clearTimeout(entry.flush);
+    }
   } };
 }
