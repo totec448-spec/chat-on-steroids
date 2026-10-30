@@ -1078,7 +1078,9 @@ function recordCompanionDiagnostics(value: unknown, browser = ''): void {
   }
   // The extension shows its texts in the language it stored; say once when that is not the app's (2026-10-30).
   const language = next.language, wanted = getConfig().ui.language ?? null;
-  const languageState = language ? `${language.stored ?? 'none'}|${language.error ?? ''}` : '';
+  const languageState = language ? `${wanted ?? ''}|${language.stored ?? 'none'}|${language.error ?? ''}` : '';
+  // A report that matches clears the key, so the same mismatch coming back later is logged again.
+  if (language && wanted && language.stored === wanted && !language.error) extensionLanguageLogged.delete(browser);
   if (language && wanted && (language.stored !== wanted || language.error) && extensionLanguageLogged.get(browser) !== languageState) {
     logWarn(`browser: the extension's stored language is ${language.stored ?? 'none (it uses the browser\'s)'}, the app's is ${wanted}` +
       `${language.error ? `; last attempt: ${language.error}` : ''}`);

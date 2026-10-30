@@ -3093,17 +3093,32 @@ let appLanguageError = null;
 function appLanguageState() {
   return { applied: appLanguageApplied, error: appLanguageError };
 }
-async function followApp(data) {
+/** A storage read that gives up after FOLLOW_READ_MS instead of waiting for good. */
+async function boundedStorageGet(keys) {
+  let timer = null;
+  try {
+    return await Promise.race([
+      chrome.storage.local.get(keys),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`storage read did not answer within ${FOLLOW_READ_MS / 1000} s`)), FOLLOW_READ_MS); })
+    ]);
+  } finally { clearTimeout(timer); }
+}
+// Each status starts one without waiting for it; they run one after another, so a slow older read
+// can never write its language after a newer one (CodeRabbit on #1940).
+let followQueue = Promise.resolve();
+function followApp(data) {
+  const run = followQueue.then(() => followAppNow(data));
+  followQueue = run.catch(() => undefined);
+  return run;
+}
+async function followAppNow(data) {
   const language = APP_LANGUAGES.has(data?.language) ? data.language : null;
   const kept = data?.browserPreferences;
   const keptValid = kept && typeof kept.overwrite === 'boolean' && typeof kept.durations === 'boolean';
   if ((!language || language === appLanguageApplied) && !keptValid) return;
-  let readTimer = null;
   let readFailed = null;
-  const stored = await Promise.race([
-    chrome.storage.local.get([APP_LANGUAGE_KEY, RENDER_STREAM_KEY, SHOW_TIMES_KEY]),
-    new Promise((_, reject) => { readTimer = setTimeout(() => reject(new Error(`storage read did not answer within ${FOLLOW_READ_MS / 1000} s`)), FOLLOW_READ_MS); })
-  ]).catch(error => { readFailed = String(error?.message || error).slice(0, 200); return null; }).finally(() => clearTimeout(readTimer));
+  const stored = await boundedStorageGet([APP_LANGUAGE_KEY, RENDER_STREAM_KEY, SHOW_TIMES_KEY])
+    .catch(error => { readFailed = String(error?.message || error).slice(0, 200); return null; });
   const patch = {};
   // Unread storage still gets the language: it is the app's, not a preference the person set here.
   if (language && language !== appLanguageApplied && (!stored || stored[APP_LANGUAGE_KEY] !== language)) patch[APP_LANGUAGE_KEY] = language;
@@ -5002,10 +5017,15 @@ async function cachedEnvironmentDiagnostics() {
 
 /** Snapshot sent only to the current paired bridge; it does not grant work or recovery. */
 async function companionDiagnosticSnapshot(found) {
-  const preferences = await chrome.storage.local.get([RENDER_STREAM_KEY, SHOW_TIMES_KEY, APP_LANGUAGE_KEY]);
+  // Bounded like followApp's read: a storage that never answers must not hold every later report back.
+  let readFailed = null;
+  const preferences = await boundedStorageGet([RENDER_STREAM_KEY, SHOW_TIMES_KEY, APP_LANGUAGE_KEY])
+    .catch(error => { readFailed = String(error?.message || error).slice(0, 200); return {}; });
+  const languageState = appLanguageState();
   return {
     capturedAt: Date.now(),
-    language: { ...appLanguageState(), stored: typeof preferences[APP_LANGUAGE_KEY] === 'string' ? preferences[APP_LANGUAGE_KEY] : null },
+    language: { ...languageState, error: languageState.error ?? readFailed,
+      stored: typeof preferences[APP_LANGUAGE_KEY] === 'string' ? preferences[APP_LANGUAGE_KEY] : null },
     status: {
       connected: found !== null,
       port: found ? found.port : null,
