@@ -277,6 +277,24 @@ describe('completed request ownership', () => {
     expect((note as { contentSeq?: number }).contentSeq).toBeGreaterThan(0);
   });
 
+  // CodeRabbit on #1931: a fresh note of a turn whose view failed while thinking reopens that turn,
+  // and is new work that a later Goal decision must see.
+  it('counts a fresh progress note of a turn that failed while thinking as work, and reopens the turn', async () => {
+    const began = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(began);
+    const opened = await recordChatObservations(chat, [
+      { kind: 'user_message', time: began, messageId: 'question', text: 'Inspect the source.' },
+      { kind: 'turn_start', time: began + 1, turnId: turn }
+    ]);
+    clock.mockReturnValue(began + 10);
+    await recordChatObservations(chat, [{ kind: 'turn_end', time: Date.now(), turnId: turn, outcome: 'failed', reason: 'thinking_failed' }]);
+    clock.mockReturnValue(began + 30);
+    await lateNote();
+    const note = (await readEvents(opened.sessionId!)).find(event => event.kind === 'assistant_message' && event.messageId === 'progress-note');
+    expect((note as { contentSeq?: number }).contentSeq).toBeGreaterThan(0);
+    expect((await getSession(opened.sessionId!))?.activeTurnId).toBe(turn);
+  });
+
   it('still treats a message of another turn after the final as new work', async () => {
     const { id, began, clock } = await completed();
     clock.mockReturnValue(began + 30);

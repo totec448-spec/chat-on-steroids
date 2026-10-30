@@ -1532,22 +1532,30 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
   }
 }
 
-/** A fresh exact observation can disprove a failed view, including after reload/restart. */
-async function reopenThinkingFailure(sessionId: string, live: LiveConversation | undefined, at: number,
+/** The turn a fresh exact observation at `at` would reopen because its view failed while thinking, if any. */
+async function thinkingFailureToReopen(sessionId: string, live: LiveConversation | undefined, at: number,
   owner?: string): Promise<string | null> {
   if (!live || live.turnId) return null;
   const [boundary] = await readRecentEvents(sessionId, 1, { kinds: ['turn_start', 'turn_end', 'user_message'] });
   if (live.turnId || boundary?.kind !== 'turn_end' || boundary.reason !== 'thinking_failed' ||
       !boundary.turnId || (owner && boundary.turnId !== owner) || at <= boundary.time) return null;
-  await appendEvent(sessionId, { source: 'app', time: at, kind: 'turn_start', turnId: boundary.turnId,
+  return boundary.turnId;
+}
+
+/** A fresh exact observation can disprove a failed view, including after reload/restart. */
+async function reopenThinkingFailure(sessionId: string, live: LiveConversation | undefined, at: number,
+  owner?: string): Promise<string | null> {
+  const turnId = await thinkingFailureToReopen(sessionId, live, at, owner);
+  if (!turnId || !live || live.turnId) return null;
+  await appendEvent(sessionId, { source: 'app', time: at, kind: 'turn_start', turnId,
     detail: 'fresh work resumed the same turn after its native view failed' });
-  live.knownTurnEnds.delete(boundary.turnId);
-  live.openTurns.add(boundary.turnId);
-  live.turnId = boundary.turnId;
+  live.knownTurnEnds.delete(turnId);
+  live.openTurns.add(turnId);
+  live.turnId = turnId;
   live.turnStartedAt = live.lastTurnStartedAt ?? at;
   live.lastTurnOutcome = null;
   live.endedTurn = null;
-  return boundary.turnId;
+  return turnId;
 }
 
 /**
@@ -2326,8 +2334,10 @@ async function recordChatObservationsNow(
         // appeared: ChatGPT draws a finished turn's steps as one collapsed group, and the note
         // written before its tool calls can reach the page only then (2.1.48 release round). As
         // new work it kept Goal waiting for a newer final forever. A final, or a reopened turn, counts.
+        // A turn whose view failed while thinking is reopened by its fresh note below, so that note is work.
         const lateNoteOfEndedTurn = state !== 'final' && !!item.turnId && !!live &&
-          live.knownTurnEnds.has(item.turnId) && !live.openTurns.has(item.turnId);
+          live.knownTurnEnds.has(item.turnId) && !live.openTurns.has(item.turnId) &&
+          !(item.activeNow === true && await thinkingFailureToReopen(sessionId, live, item.time, item.turnId));
         const written = await upsertMessageEvent(sessionId, {
           ...base,
           kind: 'assistant_message',
