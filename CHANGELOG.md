@@ -44,6 +44,8 @@ Goal can have a second chat check each step's file changes. The theme can follow
 - **A chat that recovered by itself** is no longer reloaded again by a late report about its old, failed turn.
 - **Diagnostics reports** no longer garble ordinary words such as "worker" when a project or chat has a short name like "Work".
 - **Workers in their own Git worktrees** start from a linked checkout whose repository is in another approved folder, and come back after a restart.
+- **Goal no longer waits for good** after a step whose progress note ChatGPT showed only once the step had finished.
+- **Ctrl+K / ⌘K** no longer opens chat search on top of another open window, such as What's New.
 
 
 ## [2.1.47] — Scheduled runs, changed files under each answer, commit and pull request from Review, and your own chat style
