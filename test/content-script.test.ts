@@ -2732,6 +2732,37 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.some(message => message.type === 'page_note' && message.note === 'announcement-closed')).toBe(false);
   });
 
+  // CodeRabbit on #1947: a tool call that starts while the page waits for its message box is the reason,
+  // not the box.
+  it('says a running tool call holds a queued message, also one that starts during the wait', async () => {
+    let tools = 0;
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, pendingTools: tools } }),
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.fail ? { ok: true } : { input: claimed() } }),
+      page_note: () => ({ ok: true })
+    });
+    const timer = live.window.setTimeout;
+    let expire!: () => void;
+    live.window.setTimeout = ((fn: () => void, ms?: number) => {
+      if (ms === 15000) { expire = fn; return 0; }
+      return timer(fn, ms);
+    }) as typeof live.window.setTimeout;
+    live.hook.observe(); await live.hook.pullActivity();
+    announcement(live.document, { field: true, heading: 'Rename chat' });
+    const sending = live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA });
+    await settle(200);
+    tools = 1;
+    await live.hook.pullActivity();
+    expire();
+    expect(await sending).toEqual({ ok: false });
+    expect(live.sent.filter(message => message.type === 'page_note' && message.note === 'input-held')).toEqual([
+      expect.objectContaining({ reason: 'tool-running', inputId, conversationId: chatA })
+    ]);
+    // Already running when the next offer arrives: said at once.
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA })).toEqual({ ok: false });
+    expect(live.sent.filter(message => message.type === 'page_note' && message.note === 'input-held').map(message => message.reason)).toEqual(['tool-running', 'tool-running']);
+  });
+
   it('closes no dialog while ChatGPT limits the page\'s history, whatever language its notice is in (CodeRabbit on #1939)', async () => {
     live = await harness(`https://chatgpt.com/c/${chatA}`, {
       desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.fail ? { ok: true } : { input: claimed() } }),
@@ -2788,6 +2819,30 @@ describe('desktop input delivery and helper ownership', () => {
     expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA })).toEqual({ ok: false });
     expect(dialog.isConnected).toBe(false);
     expect(live.sent.some(message => message.type === 'page_note' && message.note === 'announcement-closed')).toBe(false);
+  });
+
+  // CodeRabbit on #1947: a turn the page still holds while ChatGPT shows no Stop is not "an answer running".
+  it('says the page still holds a turn ChatGPT no longer shows running, apart from a running answer', async () => {
+    live = await harness(`https://chatgpt.com/c/${chatA}`, { page_note: () => ({ ok: true }) });
+    startGenerating(live.document);
+    live.hook.observe(); await settle(); await live.hook.flush();
+    stopGenerating(live.document);
+    live.advance(30_000);
+    live.hook.observe(); await settle(); await live.hook.flush();
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA })).toEqual({ ok: false });
+    expect(live.sent.filter(message => message.type === 'page_note' && message.note === 'input-held')).toEqual([
+      expect.objectContaining({ reason: 'turn-held', inputId, conversationId: chatA })
+    ]);
+  });
+
+  // CodeRabbit on #1947: the tab moved to another chat before the offer arrived. That chat's state is
+  // not this message's reason, so nothing is said.
+  it('says nothing about a queued message for a chat this tab no longer shows', async () => {
+    live = await harness(`https://chatgpt.com/c/${chatA}`, { page_note: () => ({ ok: true }) });
+    startGenerating(live.document);
+    live.hook.observe(); await settle();
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatB })).toEqual({ ok: false });
+    expect(live.sent.filter(message => message.type === 'page_note')).toEqual([]);
   });
 
   it('says ChatGPT still shows an answer running when that holds a queued message back (2026-10-30)', async () => {
@@ -23578,6 +23633,30 @@ describe('app Stop command uses current native turn proof', () => {
     await live.hook.pullActivity();
     expect(await live.runtimeMessage({ type: 'clf-stop-turn', id: '1111111111111111', conversationId, turnId })).toEqual({ ok: true });
     expect(click).toHaveBeenCalledTimes(1);
+  });
+  // CodeRabbit on #1947: after the person's Stop, an automatic Continue that the page declines is no
+  // hold to report, even while ChatGPT still shows the answer stopping.
+  it('says nothing about an automatic Continue it declines after the person pressed Stop', async () => {
+    const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', turnId = 'late-stop-turn';
+    live = await harness(undefined, {
+      activity: () => ({ ok: true, data: { entries: [], stream: [], nextSince: 0, activeTurnId: turnId,
+        stopTurn: { turnId, userMessageId: 'm-late-question' } } }),
+      stop_redeem: () => ({ ok: true, command: { type: 'stop', conversationId, turnId, userMessageId: 'm-late-question' } }),
+      stop_ack: () => ({ ok: true }),
+      page_note: () => ({ ok: true })
+    });
+    await live.runtimeMessage({ type: 'clf-page-status' });
+    userTurn(live.document, 'late-question', 'Native question arrived later', { sent: false });
+    startGenerating(live.document, { send: false });
+    assistantTurn(live.document, 'late-stop-assistant', []);
+    const button = live.document.querySelector('[data-testid="stop-button"]') as HTMLButtonElement;
+    Object.defineProperty(button, 'getClientRects', { value: () => [{ width: 10, height: 10 }] });
+    await live.hook.pullActivity();
+    expect(await live.runtimeMessage({ type: 'clf-stop-turn', id: '1111111111111111', conversationId, turnId })).toEqual({ ok: true });
+    // ChatGPT still shows Stop: the page declines the Continue, and says nothing.
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: '11111111-2222-4333-8444-555555555555', conversationId,
+      recovery: { questionId: 'm-late-question', stop: false } })).toEqual({ ok: false });
+    expect(live.sent.filter(message => message.type === 'page_note')).toEqual([]);
   });
   it.each(['original', 'newer', 'missing'])('requires the original native question when reopening Stop (%s)', async question => {
     const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', turnId = 'persisted-stop-turn';

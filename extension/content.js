@@ -13381,12 +13381,18 @@
     let sourceQuiet = silencePickup;
     // Why this page holds the message back, for one app log line a minute (2026-10-30: a queued
     // Continue sat unsent for 17 minutes on a page that looked healthy, and nothing said why).
+    // Never for a stopped automatic Continue (the person's own Stop is no hold), and only while this
+    // page is still on the message's chat: another chat's state is not this message's reason.
     const held = (reason) => {
-      void ask({ type: 'page_note', note: 'input-held', reason, inputId: message.id, conversationId: message.conversationId || CLF_DOM.conversationId() }).catch(() => undefined);
+      if (message.recovery && stopRequestedAt) return false;
+      if (!alive || CLF_DOM.conversationId() !== (message.conversationId || null)) return false;
+      void ask({ type: 'page_note', note: 'input-held', reason, inputId: message.id, conversationId: message.conversationId || null }).catch(() => undefined);
       return false;
     };
     if (desktopInputBusy || modelCatalogBusy || !alive || goalBusy || job?.busy) return false;
-    if (generating && !message.directTurn && !silencePickup) return held('still-answering');
+    // A turn this page still holds although ChatGPT shows no Stop (its history stopped loading,
+    // 2026-10-28) is not "an answer running" on the page: it is said apart.
+    if (generating && !message.directTurn && !silencePickup) return held(CLF_DOM.generating() ? 'still-answering' : 'turn-held');
     if (pendingTools > 0 && !message.directTurn) return held('tool-running');
     const target = message.conversationId || null;
     const forEpoch = epoch;
@@ -13539,9 +13545,11 @@
       if (!composer || !onTarget() || stillAnswering || !CLF_DOM.composerVisible()) {
         // Say why this page held the message back. On 2026-10-30 a queued Continue sat unsent for 17
         // minutes on a page that looked healthy, and nothing anywhere said why.
-        const reason = !onTarget() ? 'page-moved' : stillAnswering ? 'still-answering' : !CLF_DOM.composer() ? 'no-composer' : 'composer-hidden';
-        void ask({ type: 'page_note', note: 'input-held', reason, inputId: message.id, conversationId: target }).catch(() => undefined);
-        return false;
+        // page-moved is said only while the tab is still on this chat (a reload or a new turn moved
+        // it on); a tab now on another chat stays silent, as does a stopped automatic Continue.
+        const reason = !onTarget() ? 'page-moved' : stillAnswering ? (CLF_DOM.generating() ? 'still-answering' : 'turn-held')
+          : pendingTools > 0 && !message.directTurn ? 'tool-running' : !CLF_DOM.composer() ? 'no-composer' : 'composer-hidden';
+        return held(reason);
       }
       const reply = await ask({ type: 'desktop_input', id: message.id, conversationId: target, requiresAuthorization: true,
         ...(project ? { project: CLF_DOM.projectHomeId() } : {}) });

@@ -502,6 +502,7 @@ interface Command {
 const HELD_INPUT_REASONS: Record<string, string> = {
   'page-moved': 'the tab moved on to another chat',
   'still-answering': 'ChatGPT still shows an answer running',
+  'turn-held': 'the page still holds a turn that ChatGPT no longer shows running',
   'tool-running': 'a tool call of this chat is still running on the page',
   'recovery-question-changed': 'its last question is not the one this automatic Continue answers',
   'recovery-question-unreadable': 'its last question cannot be read on the page, so this automatic Continue cannot be matched to it',
@@ -511,6 +512,13 @@ const HELD_INPUT_REASONS: Record<string, string> = {
 };
 /** When each page-note was last logged, by chat and heading (see `/page-note`). */
 const pageNotesLogged = new Map<string, number>();
+/** Marks a page-note key logged now, as the newest entry, so a full map evicts the oldest log, not this one. */
+function notePageNoteLogged(key: string, now: number): void {
+  pageNotesLogged.delete(key);
+  pageNotesLogged.set(key, now);
+  if (pageNotesLogged.size > 200) pageNotesLogged.delete(pageNotesLogged.keys().next().value!);
+}
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Bootstrap stages a page reports after redeeming, in order. See `commandProgress`. */
 const COMMAND_STEPS = ['revival-waiting', 'revival-busy', 'revival-draft', 'revival-editor', 'composer', 'model', 'composer-after-model', 'inserting', 'sending'] as const;
 /** Steps a wake reports while it waits, before redeeming. `revival-waiting` is what older pages send. */
@@ -5131,14 +5139,14 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     if (body?.['note'] === 'input-held') {
       const reason = typeof body['reason'] === 'string' && Object.hasOwn(HELD_INPUT_REASONS, body['reason']) ? body['reason'] : null;
-      const inputId = typeof body['inputId'] === 'string' && /^[0-9a-f-]{8,64}$/i.test(body['inputId']) ? body['inputId'] : null;
+      const inputId = typeof body['inputId'] === 'string' && UUID_SHAPE.test(body['inputId']) ? body['inputId'] : null;
       if (!reason || !inputId) return json(res, 400, { error: 'bad_request' }, origin);
       const chat = conversationId(body['conversationId']);
-      const key = `held|${chat ?? ''}|${reason}`;
+      // A new chat has no id before its first send: its message keys it, so two new chats stay apart.
+      const key = `held|${chat ?? `input:${inputId}`}|${reason}`;
       const now = Date.now();
       if (now - (pageNotesLogged.get(key) ?? 0) >= 60_000) {
-        pageNotesLogged.set(key, now);
-        if (pageNotesLogged.size > 200) pageNotesLogged.delete(pageNotesLogged.keys().next().value!);
+        notePageNoteLogged(key, now);
         logInfo(`bridge: ${chat ? `the page of ${chat}` : 'a ChatGPT page'} held queued message ${inputId} back: ${HELD_INPUT_REASONS[reason]}`);
       }
       return json(res, 200, { ok: true }, origin);
@@ -5149,8 +5157,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const key = `${chat ?? ''}|${heading}`;
     const now = Date.now();
     if (now - (pageNotesLogged.get(key) ?? 0) >= 60_000) {
-      pageNotesLogged.set(key, now);
-      if (pageNotesLogged.size > 200) pageNotesLogged.delete(pageNotesLogged.keys().next().value!);
+      notePageNoteLogged(key, now);
       logInfo(`bridge: ${chat ? `the page of ${chat}` : 'a ChatGPT page'} closed ChatGPT's announcement` +
         `${heading ? ` "${heading}"` : ''} that covered it, by Escape`);
     }
