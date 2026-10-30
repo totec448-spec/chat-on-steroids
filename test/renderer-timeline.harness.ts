@@ -16,6 +16,13 @@ import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import type { LocalProject } from '../src/shared/projects.js';
 import { positionOf, projectTimeline, residenceOf } from '../src/shared/chronology.js';
 
+/**
+ * `vi.waitFor` with room for the slow release runners (Intel macOS, Linux arm64): its default second
+ * can run out before the renderer has answered, which fails a test without a bug.
+ */
+export const waitFor = <T>(check: () => T | Promise<T>, options: { timeout?: number; interval?: number } = {}) =>
+  vi.waitFor(check, { timeout: 10_000, ...options });
+
 
 /**
  * The session timeline as the user reads it while a chat is running.
@@ -436,7 +443,7 @@ export async function sendDuringTurn(followUp: 'steer' | 'queue' | undefined, ke
   input.value = 'Also check the logs';
   input.dispatchEvent(new app.w.Event('input', { bubbles: true }));
   input.dispatchEvent(new app.w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...keys }));
-  await vi.waitFor(() => expect(app.live.sent).toHaveLength(1));
+  await waitFor(() => expect(app.live.sent).toHaveLength(1));
   return { app, sent: app.live.sent[0]! };
 }
 

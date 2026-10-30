@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { T0, boot, settle, settleHistoryFrame, summary, text, toolCall, type Handoff, type InputEntry, type LocalProject, type SessionEvent, type SessionSummary } from './renderer-timeline.harness.js';
+import { T0, boot, settle, settleHistoryFrame, summary, text, toolCall, waitFor, type Handoff, type InputEntry, type LocalProject, type SessionEvent, type SessionSummary } from './renderer-timeline.harness.js';
 
 vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTerminal: () => ({
   update: vi.fn(), show: vi.fn(), hide: vi.fn(), hasTabs: () => false,
@@ -365,7 +365,7 @@ it('keeps the prior transcript inert until the selected detail arrives and fence
   // Begin an A refresh, then change ownership twice. A stale response cannot become current
   // merely because the selected id later returns to A.
   app.notifySession();
-  await vi.waitFor(() => expect(details.map(entry => entry.id)).toEqual([first.id]));
+  await waitFor(() => expect(details.map(entry => entry.id)).toEqual([first.id]));
   (w.document.querySelector(`#sessionList [data-id="${second.id}"]`) as HTMLButtonElement).click();
   expect(w.document.getElementById('chatTitle')!.textContent).toBe('Session B');
   expect(timeline.textContent).toContain('A QUESTION');
@@ -375,7 +375,7 @@ it('keeps the prior transcript inert until the selected detail arrives and fence
   expect(w.document.getElementById('timelineEmpty')!.hidden).toBe(true);
   expect(w.document.getElementById('handoffBox')!.textContent).toBe('');
   expect(w.document.getElementById('sessionControlStatus')!.textContent).toBe('');
-  await vi.waitFor(() => expect(details.map(entry => entry.id)).toEqual([first.id, second.id]));
+  await waitFor(() => expect(details.map(entry => entry.id)).toEqual([first.id, second.id]));
   // The queue read also repaints detail while the destination read remains pending.
   await settle();
   expect(timeline.textContent).toContain('A QUESTION');
@@ -384,7 +384,7 @@ it('keeps the prior transcript inert until the selected detail arrives and fence
   (w.document.querySelector(`#sessionList [data-id="${first.id}"]`) as HTMLButtonElement).click();
   expect(w.document.getElementById('chatTitle')!.textContent).toBe('Session A');
   expect(timeline.textContent).toContain('A QUESTION');
-  await vi.waitFor(() => expect(details.map(entry => entry.id)).toEqual([first.id, second.id, first.id]));
+  await waitFor(() => expect(details.map(entry => entry.id)).toEqual([first.id, second.id, first.id]));
 
   const staleA: Extract<SessionEvent, { kind: 'user_message' }> = {
     seq: 4, time: T0 + 4, source: 'extension', kind: 'user_message', messageId: 'stale-a', message: text('STALE A QUESTION'), attachments: [attachment]
@@ -864,7 +864,7 @@ describe("a new chat's first message held for its project's ChatGPT Project", ()
     live.inputs.push({ id: 'first-message', sessionId: summary(live.events).id, state: 'queued', owner: 'page', text: 'Hi',
       mode: 'auto', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: null, projectId: project.id });
     await append([]);
-    await vi.waitFor(() => expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').toContain(expected), { timeout: 5000 });
+    await waitFor(() => expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').toContain(expected), { timeout: 5000 });
   });
 });
 

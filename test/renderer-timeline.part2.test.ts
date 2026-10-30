@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Lexer, T0, TOKEN, boot, colorChoice, compaction, menuItem, olderProjectFixture, prependUserPrompt, projectMenu, settle, settleHistoryFrame, summary, text, toolCall, type LocalProject, type SessionEvent, type SessionSummary } from './renderer-timeline.harness.js';
+import { Lexer, T0, TOKEN, boot, colorChoice, compaction, menuItem, olderProjectFixture, prependUserPrompt, projectMenu, settle, settleHistoryFrame, summary, text, toolCall, waitFor, type LocalProject, type SessionEvent, type SessionSummary } from './renderer-timeline.harness.js';
 
 vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTerminal: () => ({
   update: vi.fn(), show: vi.fn(), hide: vi.fn(), hasTabs: () => false,
@@ -308,7 +308,7 @@ it('keeps ordinary draft edits and parallel imports in the same draft lifetime',
   const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
   input.value = 'An ordinary edit while importing'; input.dispatchEvent(new w.Event('input', { bubbles: true }));
   paste('second.png');
-  await vi.waitFor(() => expect(api.dropFiles).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(api.dropFiles).toHaveBeenCalledTimes(2));
   finishes[1]!({ ok: true, data: [{ id: '11111111-2222-4333-8444-555555555555', name: 'second.png', size: 4, mimeType: 'image/png' }] });
   finishes[0]!({ ok: true, data: [{ id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'first.png', size: 4, mimeType: 'image/png' }] });
   await settle();
@@ -347,7 +347,7 @@ it.each(['new-same-key', 'a-b-a', 'opening-adopt-new', 'same-session-send-next',
   const paste = new w.Event('paste', { bubbles: true, cancelable: true });
   Object.defineProperty(paste, 'clipboardData', { value: { files: [new w.File(['image'], 'late.png', { type: 'image/png' })] } });
   w.document.getElementById('chatInput')!.dispatchEvent(paste);
-  await vi.waitFor(() => expect((w as any).api.dropFiles).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect((w as any).api.dropFiles).toHaveBeenCalledTimes(1));
 
   if (mode === 'new-same-key') {
     w.document.getElementById('newChat')!.click();
@@ -358,7 +358,7 @@ it.each(['new-same-key', 'a-b-a', 'opening-adopt-new', 'same-session-send-next',
     const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
     input.value = 'Adopt this opening';
     w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
-    await vi.waitFor(() => expect(w.document.querySelector('.sess.is-sel')).not.toBeNull());
+    await waitFor(() => expect(w.document.querySelector('.sess.is-sel')).not.toBeNull());
     w.document.getElementById('newChat')!.click();
   } else if (mode.startsWith('same-session')) {
     const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
@@ -366,8 +366,8 @@ it.each(['new-same-key', 'a-b-a', 'opening-adopt-new', 'same-session-send-next',
       (w as any).api.sendInput = vi.fn(async () => ({ ok: false, error: 'test rejected send' }));
     input.value = 'Submitted draft';
     w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
-    if (mode === 'same-session-send-next') await vi.waitFor(() => expect(app.live.sent).toHaveLength(1));
-    else await vi.waitFor(() => expect((w as any).api.sendInput).toHaveBeenCalledTimes(1));
+    if (mode === 'same-session-send-next') await waitFor(() => expect(app.live.sent).toHaveLength(1));
+    else await waitFor(() => expect((w as any).api.sendInput).toHaveBeenCalledTimes(1));
     await settle();
     input.value = 'Next draft'; input.dispatchEvent(new w.Event('input', { bubbles: true }));
   } else if (mode === 'plan-replaces') {
@@ -375,7 +375,7 @@ it.each(['new-same-key', 'a-b-a', 'opening-adopt-new', 'same-session-send-next',
     const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
     input.value = 'Turn this into a plan';
     w.document.getElementById('createPlan')!.click(); w.document.getElementById('composer')!.dispatchEvent(new w.Event('submit', { cancelable: true }));
-    await vi.waitFor(() => expect(input.value).toBe(''));
+    await waitFor(() => expect(input.value).toBe(''));
   } else {
     (w.document.querySelector('.delivery-retry') as HTMLButtonElement).click();
     expect((w.document.getElementById('chatInput') as HTMLTextAreaElement).value).toBe('Restored failed message');
@@ -1003,7 +1003,7 @@ it.each(['projects', 'inbox'] as const)("hands the keyboard on to search when th
   const done = Date.now() + 1;
   Object.assign(chats[0]!, { activityExpiresAt: null, lastAssistantFinalAt: done, lastTurnEndAt: done, lastTurnOutcome: 'completed', updatedAt: done });
   (w.document.getElementById('chatRefresh') as HTMLButtonElement).click();
-  await vi.waitFor(() => expect(header().hidden).toBe(false), { timeout: 5000 });
+  await waitFor(() => expect(header().hidden).toBe(false), { timeout: 5000 });
   header().focus();
   expect(w.document.activeElement).toBe(header());
 
@@ -1011,10 +1011,10 @@ it.each(['projects', 'inbox'] as const)("hands the keyboard on to search when th
   let reply: (value: unknown) => void = () => {};
   (w as any).api.getSession = vi.fn(() => new Promise(resolve => { reply = resolve; }));
   row().querySelector<HTMLElement>('[data-session-select]')!.click();
-  await vi.waitFor(() => expect((w as any).api.getSession).toHaveBeenCalled(), { timeout: 5000 });
+  await waitFor(() => expect((w as any).api.getSession).toHaveBeenCalled(), { timeout: 5000 });
   expect(header().hidden).toBe(false);
   reply({ ok: true, data: { summary: chats[0], events: [], total: 0, nextFrom: 0 } });
-  await vi.waitFor(() => expect(header().hidden).toBe(true), { timeout: 5000 });
+  await waitFor(() => expect(header().hidden).toBe(true), { timeout: 5000 });
   expect(w.document.activeElement).toBe(search());
 });
 
@@ -1073,7 +1073,7 @@ it('keeps unseen completions unread through failed and stale A-to-B-to-A detail 
 
   // A failed current read is not a review receipt.
   row('chat-b').click();
-  await vi.waitFor(() => expect(pending.map(entry => entry.id)).toEqual(['chat-b']));
+  await waitFor(() => expect(pending.map(entry => entry.id)).toEqual(['chat-b']));
   expect(row('chat-b').querySelector('.session-status.is-unseen')).not.toBeNull();
   pending[0]!.reply({ ok: false, error: 'B detail unavailable' });
   await settle();
@@ -1082,11 +1082,11 @@ it('keeps unseen completions unread through failed and stale A-to-B-to-A detail 
   // Returning to A creates a new selection/load generation. Neither the old A response nor
   // the intervening B response may acknowledge work just because the selected id later matches.
   row('chat-a').click();
-  await vi.waitFor(() => expect(pending.map(entry => entry.id)).toEqual(['chat-b', 'chat-a']));
+  await waitFor(() => expect(pending.map(entry => entry.id)).toEqual(['chat-b', 'chat-a']));
   row('chat-b').click();
-  await vi.waitFor(() => expect(pending.map(entry => entry.id)).toEqual(['chat-b', 'chat-a', 'chat-b']));
+  await waitFor(() => expect(pending.map(entry => entry.id)).toEqual(['chat-b', 'chat-a', 'chat-b']));
   row('chat-a').click();
-  await vi.waitFor(() => expect(pending.map(entry => entry.id)).toEqual(['chat-b', 'chat-a', 'chat-b', 'chat-a']));
+  await waitFor(() => expect(pending.map(entry => entry.id)).toEqual(['chat-b', 'chat-a', 'chat-b', 'chat-a']));
 
   pending[1]!.reply(detail(chats[0]!));
   pending[2]!.reply(detail(chats[1]!));
@@ -1293,7 +1293,7 @@ it('selects an acknowledged New Chat while recording notifications keep arriving
   live.inputs[0] = { ...live.inputs[0]!, state: 'sent', conversationId: 'chat-b', deliveredSessionId: summary([]).id };
   const timer = setInterval(app.notifySession, 30);
   try {
-    await vi.waitFor(() => expect(w.document.querySelector('#sessionList .is-sel')?.getAttribute('data-id')).toBe(summary([]).id), { timeout: 2000 });
+    await waitFor(() => expect(w.document.querySelector('#sessionList .is-sel')?.getAttribute('data-id')).toBe(summary([]).id), { timeout: 2000 });
   } finally { clearInterval(timer); }
 });
 
@@ -1532,7 +1532,7 @@ it('offers to open a new chat with the summary an abandoned compaction already s
   const reuse = card.querySelector<HTMLButtonElement>('.compaction-reuse')!;
   expect(reuse.textContent).toBe('Open a new chat with this summary');
   reuse.click();
-  await vi.waitFor(() => expect(live.controlCalls).toContainEqual(
+  await waitFor(() => expect(live.controlCalls).toContainEqual(
     expect.objectContaining({ action: `resume:${(handoff as Extract<SessionEvent, { kind: 'handoff' }>).handoffId}` })));
 });
 
@@ -1669,7 +1669,7 @@ describe('an answer while ChatGPT writes it', () => {
     alpha!.querySelector('.citation')!.dispatchEvent(new w.FocusEvent('focusin'));
     expect(alpha!.querySelector<HTMLElement>('.citation-card')!.hidden).toBe(false);
     code!.querySelector<HTMLButtonElement>('.tool-copy')!.click();
-    await vi.waitFor(() => expect(code!.querySelector('.tool-copy')!.textContent).toBe('Copied'));
+    await waitFor(() => expect(code!.querySelector('.tool-copy')!.textContent).toBe('Copied'));
     await append([answer(2, `${body}\n\nBeta.`, { references })]);
     expect(blocks(w)[0]).toBe(alpha);
     expect(blocks(w)[1]).toBe(code);
