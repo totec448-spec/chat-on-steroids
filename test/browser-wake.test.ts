@@ -7,9 +7,10 @@ import * as logger from '../src/main/logger.js';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0)) await close(); });
-async function setup(auth: (token: string) => Promise<boolean> = async token => token === 'paired', changed: () => void = () => undefined) {
+async function setup(auth: (token: string) => Promise<boolean> = async token => token === 'paired', changed: () => void = () => undefined,
+  options: { quietReconnectMs?: number } = {}) {
   const server = http.createServer();
-  const bridge = attachBrowserWake(server, req => req.headers.origin === 'chrome-extension://test', auth, changed);
+  const bridge = attachBrowserWake(server, req => req.headers.origin === 'chrome-extension://test', auth, changed, options);
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const port = (server.address() as import('node:net').AddressInfo).port;
   cleanup.push(async () => { bridge.dispose(); await new Promise<void>(resolve => server.close(() => resolve())); });
@@ -65,6 +66,43 @@ describe('authenticated wake-only browser transport', () => {
       ]);
     } finally { logged.mockRestore(); }
   });
+  // 2026-10-30: Firefox suspends an idle add-on's background page, which closes its wake channel; it
+  // reconnects about every 32 s. That was 2,592 log lines a day pushing everything else out of the log.
+  it('logs a browser that keeps closing and reopening its channel once, then once an hour, and still logs a real drop', async () => {
+    const logged = vi.spyOn(logger, 'logInfo').mockImplementation(() => undefined);
+    const start = Date.now();
+    let now = start;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const h = await setup(undefined, undefined, { quietReconnectMs: 200 });
+      const cycle = async () => {
+        const socket = h.client(undefined, 'browser'); await once(socket, 'open');
+        const ready = once(socket, 'message'); socket.send('paired'); await ready;
+        return socket;
+      };
+      const close = async (socket: WebSocket) => { const closed = once(socket, 'close'); socket.close(); await closed; await new Promise(resolve => setTimeout(resolve, 20)); };
+      let socket = await cycle();
+      for (let i = 0; i < 4; i++) {
+        now += 30_000; await close(socket);
+        now += 100; socket = await cycle();
+      }
+      const lines = () => logged.mock.calls.map(([line]) => String(line)).filter(line => line.includes('wake channel (browser)'));
+      // The first quick cycle reads as before; the next three are only counted.
+      expect(lines()).toEqual([
+        'bridge: browser wake channel (browser) authenticated',
+        'bridge: browser wake channel (browser) disconnected: closed by the browser',
+        'bridge: browser wake channel (browser) authenticated'
+      ]);
+      // An hour on, the count is said once.
+      now += 60 * 60_000; await close(socket); now += 100; socket = await cycle();
+      expect(lines().at(-1)).toBe('bridge: browser wake channel (browser) was closed by the browser and reopened at once 4 more times since the last line like this; ' +
+        'an extension whose background sleeps when idle does this');
+      // A close that is not followed by a reconnect is a real drop, and is logged after all.
+      now += 30_000; await close(socket);
+      await vi.waitFor(() => expect(lines().at(-1)).toBe('bridge: browser wake channel (browser) disconnected: closed by the browser (it did not come back)'), { timeout: 2_000 });
+    } finally { clock.mockRestore(); logged.mockRestore(); }
+  });
+
   it('says when it dropped a browser that stopped answering its heartbeat', async () => {
     const logged = vi.spyOn(logger, 'logInfo').mockImplementation(() => undefined);
     vi.useFakeTimers({ toFake: ['setInterval', 'Date'] });
