@@ -3103,13 +3103,27 @@ async function boundedStorageGet(keys) {
     ]);
   } finally { clearTimeout(timer); }
 }
-// Each status starts one without waiting for it; they run one after another, so a slow older read
-// can never write its language after a newer one (CodeRabbit on #1940).
-let followQueue = Promise.resolve();
+// Statuses are applied one at a time, so a slow older read can never write its language after a
+// newer one. While one runs, only the newest waiting status is kept: a burst of statuses must not
+// queue a read each and hold a newer language back (CodeRabbit on #1940). A status without a
+// language or kept preferences keeps the waiting one's.
+let followWaiting = null;
+let followRunning = null;
 function followApp(data) {
-  const run = followQueue.then(() => followAppNow(data));
-  followQueue = run.catch(() => undefined);
-  return run;
+  followWaiting = {
+    language: data?.language ?? followWaiting?.language,
+    browserPreferences: data?.browserPreferences ?? followWaiting?.browserPreferences
+  };
+  followRunning ??= (async () => {
+    try {
+      while (followWaiting) {
+        const next = followWaiting;
+        followWaiting = null;
+        await followAppNow(next).catch(() => undefined);
+      }
+    } finally { followRunning = null; }
+  })();
+  return followRunning;
 }
 async function followAppNow(data) {
   const language = APP_LANGUAGES.has(data?.language) ? data.language : null;
@@ -4220,8 +4234,12 @@ const HANDLERS = {
     return result;
   },
   async i18n_catalog(message) {
-    const messages = await globalThis.CLF_I18N?.catalogFor?.(String(message?.language || '')).catch(() => null);
-    return messages ? { ok: true, messages } : { ok: false };
+    // `current`: the language this worker applied from the app's last status (see followApp), so a
+    // page whose own storage read hangs still shows it.
+    const language = message?.current === true ? appLanguageApplied : String(message?.language || '');
+    if (!language) return { ok: false };
+    const messages = await globalThis.CLF_I18N?.catalogFor?.(language).catch(() => null);
+    return messages ? { ok: true, ...(message?.current === true ? { language } : {}), messages } : { ok: false };
   },
   async register_document(_message, sender) {
     let result = await registerDocument(sender, _message);
