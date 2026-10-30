@@ -11867,6 +11867,15 @@
    * immediately when the composer already exists, otherwise wake the instant React mounts
    * one, with only a bounded timer as the failure deadline.
    */
+  /** Closes ChatGPT announcements over this page (CLF_DOM.dismissAnnouncements) and tells the app which. */
+  async function closeAnnouncements(stillCurrent = () => true) {
+    const closed = await CLF_DOM.dismissAnnouncements(stillCurrent).catch(() => []);
+    for (const heading of closed) {
+      void ask({ type: 'page_note', note: 'announcement-closed', heading, conversationId: CLF_DOM.conversationId() }).catch(() => undefined);
+    }
+    return closed;
+  }
+
   function waitForComposer(timeoutMs = 12_000, stillCurrent = () => true) {
     if (!stillCurrent()) return Promise.resolve(null);
     const current = CLF_DOM.composer();
@@ -12181,9 +12190,13 @@
     // resource finished loading, not whether this editing host is usable, and waiting on it
     // is what turned a fresh resume tab into a blank tab for a minute on a throttled page.
     step('composer');
+    // A ChatGPT announcement over the fresh page hides the message box behind its modal (2026-10-30).
+    if (!(CLF_DOM.composerVisible() && CLF_DOM.composerWritable())) await closeAnnouncements(stillOnTarget);
     // A worker's hidden tab can take longer than 12 s to show the box on a busy machine; it has the
     // rest of its own budget, less what model, insert and Send need (#1086). A resume or wake keeps 12 s.
-    const readyComposer = await waitForComposer(boot.type === 'worker' ? commandWaitMs(12_000, 20_000) : 12_000);
+    let readyComposer = await waitForComposer(boot.type === 'worker' ? commandWaitMs(12_000, 20_000) : 12_000);
+    // One that opened after the page loaded gets the same treatment, once.
+    if (!readyComposer && (await closeAnnouncements(stillOnTarget)).length) readyComposer = await waitForComposer(5_000, stillOnTarget);
     // `transient`: this page redeemed the command, loaded the chat and typed nothing, so a wake
     // may be tried again without counting against the chat (#1086).
     if (!readyComposer) return void (await fail(t(
@@ -12193,7 +12206,10 @@
     if (await failIfRetargeted()) return;
 
     if (boot.model || boot.reasoningEffort) step('model');
-    if ((boot.model || boot.reasoningEffort) && !(await CLF_DOM.selectModelSettings(boot.model, boot.reasoningEffort, stillOnTarget))) {
+    // An announcement that opened over the picker refuses the choice; closing it earns one more try.
+    const chooseModel = () => CLF_DOM.selectModelSettings(boot.model, boot.reasoningEffort, stillOnTarget);
+    if ((boot.model || boot.reasoningEffort) && !(await chooseModel()) &&
+        !((await closeAnnouncements(stillOnTarget)).length && stillOnTarget() && await chooseModel())) {
       return void (await fail(t(
         'content_bootstrap_model_unavailable',
         'The requested model or reasoning is unavailable or could not be confirmed in ChatGPT'
@@ -13478,6 +13494,8 @@
       // Settings/plan dialogs retain the editor behind aria-hidden/inert. Claiming
       // that editor turns ordinary page unavailability into a false model failure.
       // Keep the input queued until this same document exposes its composer again.
+      // An announcement is not a dialog the person is using: close it so the message is not held behind it.
+      if (!writableComposer()) await closeAnnouncements(onTarget);
       const composer = await waitPageView(() => (message.directTurn || !CLF_DOM.generating()) &&
         (message.directTurn ? CLF_DOM.composerVisible() && CLF_DOM.composer() : writableComposer()),
         () => onTarget() && (message.directTurn || ((silencePickup || !generating) && pendingTools === 0)), 15000);
