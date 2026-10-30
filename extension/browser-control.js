@@ -29,6 +29,12 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
     if (!['http:','https:'].includes(url.protocol) || url.username || url.password) error('BROWSER_URL_UNSUPPORTED: use an HTTP(S) page without embedded credentials.');
     return url.href;
   };
+  const chatGPTUrl = raw => {
+    try {
+      const host = new URL(raw).hostname.toLowerCase().replace(/\.+$/,'');
+      return host === 'chatgpt.com' || host.endsWith('.chatgpt.com') || host === 'chat.openai.com';
+    } catch { return false; }
+  };
   function save() {
     const work = saving.catch(() => {}).then(() => chrome.storage.session.set({ [KEY]: {
       browserId, epoch, receipt,
@@ -38,7 +44,8 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
   }
   function newState(tabId, owner, lease = id()) {
     return { tabId, owner, lease, pageId: id(), contexts: new Map(), frames: new Map(), sessions: new Set(),
-      console: [], network: new Map(), streams: new Map(), streamBytes: 0, seq: 0, consoleDropped: 0, networkDropped: 0, screenshot: null, dialog: null, initialized: false };
+      console: [], network: new Map(), streams: new Map(), streamBytes: 0, seq: 0, consoleDropped: 0, networkDropped: 0, screenshot: null, dialog: null, initialized: false,
+      networkProtected: false, topUrl: null };
   }
   function dropStream(state, key) {
     const capture = state.streams.get(key);
@@ -52,6 +59,9 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
     state.network.clear();
   }
   function invalidate(state) {
+    // A new pageId makes old stream byte pages inaccessible; release their
+    // allocation at the same boundary so they cannot strand the tab budget.
+    for (const key of state.streams.keys()) dropStream(state,key);
     state.pageId = id(); state.screenshot = null; state.refFrames?.clear();
     for (const key of state.contexts.keys()) if (key.endsWith(':isolated')) state.contexts.delete(key);
   }
@@ -120,6 +130,12 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
     alive(state,command);
     pageURL(tab.url);
     if (tab.pendingUrl && tab.pendingUrl !== tab.url) error('BROWSER_NAVIGATING: wait for the destination and snapshot again.');
+    // Never expose ChatGPT response traffic through browser tools, including an
+    // attachment acquired before navigation or a tab not owned by orchestration.
+    if (command?.tool === 'browser_network' &&
+        (chatGPTUrl(tab.url) || protectedTab(state.tabId,tab.url,command?.conversationId))) {
+      error('BROWSER_NETWORK_PROTECTED: ChatGPT and protected tabs cannot expose response traffic.');
+    }
     const observes = ['browser_snapshot','browser_screenshot','browser_console','browser_network'].includes(command?.tool);
     if (!observes && protectedTab(state.tabId, tab.url, command?.conversationId)) error('BROWSER_EXECUTOR_TAB: active ChatGPT orchestration owns this tab. browser_snapshot can inspect its DOM directly without attach. Input, navigation and arbitrary JavaScript remain unavailable here.');
     return tab;
@@ -466,7 +482,7 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
     return { value:{tabId:handle(state.tabId),pageId,screenshotId:shot.id,width,height,scale,fullPage:shot.fullPage},image:{mimeType:'image/jpeg',data:result.data} };
   }
   const streamCurrent = (state,row,capture) => tabs.get(state.tabId) === state &&
-    state.network.get(row.requestId) === row && state.streams.get(row.requestId) === capture;
+    state.pageId === row.pageId && state.network.get(row.requestId) === row && state.streams.get(row.requestId) === capture;
   function streamStatus(row,capture) {
     const terminal = row.finished === true;
     return {enabled:true,pending:capture.pending,retainedBytes:capture.bytes,limitBytes:STREAM_BYTES,
@@ -511,6 +527,7 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
     if (capture) return capture;
     if (row.finished || !/^text\/event-stream(?:\s*;|$)/i.test(row.mimeType || '')) error('BROWSER_STREAM_REQUIRES_IN_FLIGHT_SSE: select an in-flight text/event-stream request. No request was replayed.');
     await authorize(command,false); alive(state,command);
+    await currentTab(state,command);
     if (state.network.get(row.requestId) !== row || row.finished) error('BROWSER_REQUEST_EXPIRED: request changed before stream capture.');
     // Another read may have enabled it while permission was being checked.
     capture = state.streams.get(row.requestId);
@@ -521,6 +538,7 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
       // CDP returns all bytes preceding its stream boundary. dataReceived.data contains
       // only the suffix; queue that suffix until bufferedData can be prepended once.
       const result = await send(state,'Network.streamResourceContent',{requestId:row.nativeId},row.sessionId,command);
+      await currentTab(state,command);
       if (!streamCurrent(state,row,capture)) error('BROWSER_STREAM_EXPIRED: capture was cleared or its request/attachment was replaced.');
       await authorize(command,false); alive(state,command);
       if (!streamCurrent(state,row,capture)) error('BROWSER_STREAM_EXPIRED: capture was cleared or its request/attachment was replaced.');
@@ -566,6 +584,8 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
     if (network && args.requestId) {
       const row = state.network.get(args.requestId);
       if (!row) error('BROWSER_REQUEST_EXPIRED: request is not in the retained buffer.');
+      if (chatGPTUrl(row.url)) error('BROWSER_NETWORK_PROTECTED: ChatGPT response traffic is unavailable.');
+      if (args.body && state.pageId !== row.pageId) error('BROWSER_REQUEST_EXPIRED: page changed before reading response bytes.');
       const capture = args.stream ? await enableStream(state,row,command) : state.streams.get(row.requestId);
       if (capture) {
         await authorize(command,false); alive(state,command);
@@ -576,22 +596,28 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
         if (capture) body = streamBody(row,capture,args);
         else if (args.bodyOffset !== undefined || args.bodyBytes !== undefined) error('BROWSER_STREAM_REQUIRED: byte pagination requires an explicitly retained stream.');
         else if (row.encodedBytes > 500000) body = { unavailable:'Response exceeds the 500 KB capture limit.' };
-        else try {
+        else {
+          await currentTab(state,command);
+          try {
           const data = await send(state,'Network.getResponseBody',{requestId:row.nativeId},row.sessionId);
           body = { text:cut(data.body,20000),base64Encoded:data.base64Encoded === true,truncated:data.body.length > 20000 };
-        } catch { body = { unavailable:'Chrome no longer retains this response body, or it has not completed.' }; }
+          } catch { body = { unavailable:'Chrome no longer retains this response body, or it has not completed.' }; }
+        }
       }
-      const { nativeId:_native,sessionId:_session,...value } = row;
+      await currentTab(state,command);
+      if ((args.body || capture) && (state.network.get(row.requestId) !== row || state.pageId !== row.pageId))
+        error('BROWSER_REQUEST_EXPIRED: request or page changed before response bytes could be returned.');
+      const { nativeId:_native,sessionId:_session,nativeLoaderId:_loader,nativeFrameId:_frame,...value } = row;
       return { ...value,...(capture ? {stream:streamStatus(row,capture)}: {}),...(body ? {body}: {}) };
     }
-    const rows = network ? [...state.network.values()] : state.console;
+    const rows = network ? [...state.network.values()].filter(row => !chatGPTUrl(row.url)) : state.console;
     const matching = rows.filter(row => row.seq > (args.after || 0) &&
       (!args.filter || JSON.stringify(row).toLowerCase().includes(args.filter.toLowerCase())) &&
       (network || !args.level || args.level === 'all' || row.level === args.level)).sort((a,b) => a.seq-b.seq);
     const selected = matching.slice(0,args.limit || 50);
     const values = []; let size = 0;
     for (const row of selected) {
-      const { nativeId:_native,sessionId:_session,requestHeaders:_rq,responseHeaders:_rs,postData:_post,...brief } = row;
+      const { nativeId:_native,sessionId:_session,nativeLoaderId:_loader,nativeFrameId:_frame,requestHeaders:_rq,responseHeaders:_rs,postData:_post,...brief } = row;
       const value = network ? brief : row;
       size += JSON.stringify(value).length;
       if (size > 24000) break;
@@ -749,6 +775,24 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
       for (const [key,ctx] of state.contexts) if (ctx.id === params.executionContextId && ctx.sessionId === source.sessionId) state.contexts.delete(key);
     } else if (method === 'Page.frameNavigated') {
       invalidate(state);
+      if (!params.frame?.parentId && !source.sessionId) {
+        const url = params.frame?.url;
+        const blocked = chatGPTUrl(url);
+        if (state.networkProtected || blocked || protectedTab(state.tabId,url || '',null)) clearNetwork(state);
+        // Orchestration protection is dynamic; only the ChatGPT origin persists
+        // until navigation. A released non-ChatGPT tab can capture again.
+        state.networkProtected = blocked;
+        state.topUrl = url;
+      }
+      // CDP reports the destination Document request before its frame commit.
+      // Rebind only that exact loader/frame request to the new page epoch;
+      // requests from the previous document must remain unreadable.
+      if (!state.networkProtected && params.frame?.loaderId && params.frame?.id && !chatGPTUrl(params.frame?.url)) {
+        for (const row of state.network.values()) {
+          if (row.type === 'Document' && row.nativeLoaderId === params.frame.loaderId &&
+              row.nativeFrameId === params.frame.id && !chatGPTUrl(row.url)) row.pageId = state.pageId;
+        }
+      }
       if (params.frame?.id) state.frames.set(params.frame.id,{...params.frame,sessionId:source.sessionId});
       // Reinstall the indicator after real document navigation, without a timer or page activation.
       if (!params.frame?.parentId && !source.sessionId && /^https?:/.test(params.frame?.url)) void page(state,'overlay').catch(() => {});
@@ -766,10 +810,14 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
       if (state.console.length > 200) { state.console.shift(); state.consoleDropped++; }
     } else if (method.startsWith('Network.') && params.requestId) {
       const key = `${source.sessionId || 'main'}:${params.requestId}`;
+      if (state.networkProtected || protectedTab(state.tabId,state.topUrl || '',null) || chatGPTUrl(params.documentURL)) {
+        dropStream(state,key);state.network.delete(key);return;
+      }
       let row = state.network.get(key);
       if (method === 'Network.requestWillBeSent') {
         dropStream(state,key);
-        row = {requestId:key,nativeId:params.requestId,sessionId:source.sessionId,pageId:state.pageId,url:cut(params.request?.url,2000),method:cut(params.request?.method,20),type:cut(params.type,30),requestHeaders:headers(params.request?.headers),postData:cut(params.request?.postData,4000),startedAt:params.timestamp,seq:++state.seq};
+        if (chatGPTUrl(params.request?.url)) { state.network.delete(key); return; }
+        row = {requestId:key,nativeId:params.requestId,sessionId:source.sessionId,nativeLoaderId:params.loaderId,nativeFrameId:params.frameId,pageId:state.pageId,url:cut(params.request?.url,2000),method:cut(params.request?.method,20),type:cut(params.type,30),requestHeaders:headers(params.request?.headers),postData:cut(params.request?.postData,4000),startedAt:params.timestamp,seq:++state.seq};
         state.network.set(key,row);
         if (state.network.size > 200) {const oldest=state.network.keys().next().value;dropStream(state,oldest);state.network.delete(oldest);state.networkDropped++;}
       } else if (row) {

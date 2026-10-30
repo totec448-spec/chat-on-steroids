@@ -175,6 +175,14 @@ background without moving the OS cursor or bringing the browser to the front.
 For Chromium network inspection, `browser_network` accepts `requestId` with `stream:true`
 to retain an in-flight `text/event-stream` response. Retention is bounded to 4 MiB per tab
 and 4096 nonempty chunks per request; exceeding either bound marks overflow.
+`browser_network` refuses ChatGPT pages (`chatgpt.com` and `chat.openai.com`) and
+tabs protected by CoS orchestration, including previously attached tabs that navigate
+into those pages. ChatGPT request traffic is excluded from retained listings even
+when encountered from another tab. This covers stream capture and legacy body reads.
+Captured response bytes remain only in extension memory while their attached tab
+and request entry are retained; there is no time-based expiry. Clear, request
+replacement, buffer eviction, debugger detach or tab release disposes the bytes.
+Page-state invalidation, including navigation, also releases retained stream bytes.
 Read captured bytes with `body:true`, optional `bodyOffset` (byte offset) and `bodyBytes`
 (default 65536, maximum 262144). Decode each base64 page to bytes and concatenate before
 UTF-8 decoding; a page can split a character. Inspect `terminal` and `complete` separately:
