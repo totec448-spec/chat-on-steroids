@@ -2322,6 +2322,12 @@ async function recordChatObservationsNow(
           uncertainTurnStartedAt !== null &&
           item.time >= uncertainTurnStartedAt;
         const goalEligible = item.goalEligible === true || recoveredGoalEligible;
+        // A progress note of a turn that already ended is not new work, even reported as just
+        // appeared: ChatGPT draws a finished turn's steps as one collapsed group, and the note
+        // written before its tool calls can reach the page only then (2.1.48 release round). As
+        // new work it kept Goal waiting for a newer final forever. A final, or a reopened turn, counts.
+        const lateNoteOfEndedTurn = state !== 'final' && !!item.turnId && !!live &&
+          live.knownTurnEnds.has(item.turnId) && !live.openTurns.has(item.turnId);
         const written = await upsertMessageEvent(sessionId, {
           ...base,
           kind: 'assistant_message',
@@ -2338,7 +2344,10 @@ async function recordChatObservationsNow(
           ...(item.resolvedModel ? { resolvedModel: item.resolvedModel } : {}),
           ...(item.references ? { references: item.references } : {}),
           ...(goalEligible && state === 'final' ? { goalEligible: true } : {})
-        }, { preferTime: item.authoredTime === true, work: item.activeNow === true });
+        }, { preferTime: item.authoredTime === true, work: item.activeNow === true && !lateNoteOfEndedTurn });
+        if (lateNoteOfEndedTurn && item.activeNow === true && written.contentChanged) {
+          logInfo(`session recorder: ${conversationId} reported a message of turn ${item.turnId} after that turn ended; kept in history, not counted as new work`);
+        }
         const canonicalTurn = written.event.turnId;
         // A stopped partial answer stays streaming in history. Re-observing its
         // DOM after restart cannot renew work, nor can an old message borrow a
