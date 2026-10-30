@@ -18,6 +18,7 @@ import type { CheckpointRestoreResult, ProjectGitChanged, ProjectGitDiff, Projec
 import type { PetLibraryState, PetOverlayControlState, PetRuntimeAsset } from '../shared/pets.js';
 import type { SkillSummary, ManagedSkill, GitHubSkillUpdateCheck, SkillLibrary, SkillsDraftScope } from '../shared/skills.js';
 import type { RunningToolActivity, SessionChange, SessionSearchReply, SessionSearchLocation, SessionBookmark, ToolEditReview } from '../shared/session.js';
+import type { SidebarShelf, SidebarShelfAttention, SidebarShelfEntry, SidebarShelfList, SidebarShelfChange, SidebarShelfBatchChange, SidebarShelfMutation, SidebarShelfRestore } from '../main/sidebar-thread-store.js';
 import type { TurnTrace } from '../shared/turn-trace.js';
 import type { RunningExecProcess } from '../shared/background-exec.js';
 import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '../shared/plugins.js';
@@ -116,6 +117,29 @@ export interface SessionDetail {
 }
 
 const api = {
+  getSidebarShelves: () => call<SidebarShelfList>('sidebarShelves:list'),
+  getSidebarShelf: (id: string, attention?: SidebarShelfAttention) =>
+    call<SidebarShelfEntry>('sidebarShelves:get', { id, attention }),
+  setSidebarShelf: (id: string, shelf: SidebarShelf, until?: number, attention?: SidebarShelfAttention, expectedRevision?: number) =>
+    call<SidebarShelfChange>('sidebarShelves:set', { id, shelf, until, attention, expectedRevision }),
+  restoreSidebarShelf: (id: string, snapshot: SidebarShelfEntry, expectedRevision: number) =>
+    call<SidebarShelfChange>('sidebarShelves:restore', { id, snapshot, expectedRevision }),
+  setSidebarShelves: (changes: SidebarShelfMutation[], expectedRevision: number) =>
+    call<SidebarShelfBatchChange>('sidebarShelves:setMany', { changes, expectedRevision }),
+  restoreSidebarShelves: (snapshots: SidebarShelfRestore[], expectedRevision: number) =>
+    call<SidebarShelfBatchChange>('sidebarShelves:restoreMany', { snapshots, expectedRevision }),
+  migrateLegacySidebarShelves: (records: Record<string, SidebarShelfEntry>) =>
+    call<SidebarShelfList>('sidebarShelves:migrateLegacy', records),
+  onSidebarShelvesChanged: (listener: (change: SidebarShelfChange) => void): (() => void) => {
+    const wrapped = (_event: unknown, change: SidebarShelfChange): void => listener(change);
+    ipcRenderer.on('sidebarShelves:changed', wrapped);
+    return () => ipcRenderer.removeListener('sidebarShelves:changed', wrapped);
+  },
+  onSidebarShelvesBatchChanged: (listener: (change: SidebarShelfBatchChange) => void): (() => void) => {
+    const wrapped = (_event: unknown, change: SidebarShelfBatchChange): void => listener(change);
+    ipcRenderer.on('sidebarShelves:batchChanged', wrapped);
+    return () => ipcRenderer.removeListener('sidebarShelves:batchChanged', wrapped);
+  },
   /** System.Speech is available only through Windows PowerShell. */
   dictationSupported: process.platform === 'win32',
   /** Start microphone access only on explicit user action; audio stays in Windows recognizer. */

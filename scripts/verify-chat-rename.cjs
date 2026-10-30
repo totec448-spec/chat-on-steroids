@@ -60,7 +60,8 @@ app.whenReady().then(async () => {
     await js(`${row}.querySelector('.sess-top').focus()`);
     await settle();
     assert.equal(await js(`getComputedStyle(${row}.querySelector('.sess-actions')).display`),'flex');
-    assert.equal(await js(`${row}.querySelectorAll('.sess-actions button').length`),1);
+    assert.equal(await js(`${row}.querySelectorAll('.sess-actions .row-menu-button').length`),1,'One contextual action menu');
+    assert.equal(await js(`${row}.querySelectorAll('.sess-actions .sidebar-shelf-drag-handle').length`),1,'Separate accessible shelf-drag handle');
     await js(`${row}.querySelector('.row-menu-button').click()`);
     await until(`!!document.querySelector('.row-menu')`);
     await capture(`${theme}-actions.png`);
