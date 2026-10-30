@@ -4,11 +4,14 @@ import { registerMacOSDesktopTools } from './tools-desktop-macos.js';
 import { registerWindowsDesktopTools } from './tools-desktop-windows.js';
 import { registerBrowserTools } from './tools-browser.js';
 import { desktopAutomationSupported } from '../platform.js';
+import { guardDesktopTools } from './desktop-caller.js';
 
 export function registerDesktopTools(reg: SurfaceRegistrar): void {
   registerBrowserTools(reg);
   if (desktopAutomationSupported()) {
-    if (process.platform === 'win32') registerWindowsDesktopTools(reg);
-    else registerMacOSDesktopTools(reg);
+    // The browser tools keep their own identity rules; screen, mouse and keyboard need a known chat.
+    const desktop = guardDesktopTools(reg);
+    if (process.platform === 'win32') registerWindowsDesktopTools(desktop);
+    else registerMacOSDesktopTools(desktop);
   }
 }

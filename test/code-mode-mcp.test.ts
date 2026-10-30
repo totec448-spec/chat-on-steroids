@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { beforeAll, afterAll, afterEach, expect, it, vi } from 'vitest';
+import { beforeAll, afterAll, afterEach, expect, it, onTestFinished, vi } from 'vitest';
 import { defaultConfig, getConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initDurableStore, flushDurable, resetDurableForTests } from '../src/main/durable.js';
 import { initSessionStore, createSession, getSession, readSessionPlan, readEvents, rebindSession, appendEvent, observeSessionModel, resetSessionStoreForTests } from '../src/main/session/store.js';
@@ -321,6 +321,14 @@ it.runIf(process.platform === 'win32').each([true, false])('routes sky through D
     callers.push(currentCall()!.caller.sessionId!);
     return { completedCount: 1, routes: ['uia'], cursor: null, clipboard: [] };
   });
+  if (!attributed) {
+    // Desktop control needs a known chat unless the person allowed it (2026-10-30), also from code mode.
+    const refused = await rpc('tools/call', { name: 'exec', arguments: { code: 'await sky.list_windows(); text("listed");' } }, who.requestId, 'desktop');
+    expect(text(refused)).toContain('DESKTOP_IDENTITY_REQUIRED');
+    expect(callers).toEqual([]);
+    getConfig().ui.desktopUnattributed = true;
+    onTestFinished(() => { delete getConfig().ui.desktopUnattributed; });
+  }
   const observed = await rpc('tools/call', { name: 'exec', arguments: { code: 'const window = (await sky.list_windows())[0]; const state = await sky.get_window_state({window,include_text:true}); nodeRepl.write({window:state.window,tree:state.accessibility.tree});' } }, who.requestId, 'desktop');
   expect(observed.result.isError, text(observed)).not.toBe(true);
   expect(observed.result.content.filter((item: any) => item.type === 'image')).toHaveLength(1);

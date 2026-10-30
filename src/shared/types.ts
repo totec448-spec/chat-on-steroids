@@ -252,6 +252,8 @@ export interface UiPrefs {
    * 2-minute Go ahead ('always').
    */
   desktopAsk?: 'off' | 'active' | 'always';
+  /** Desktop control for a call the app cannot tie to a chat. Off unless chosen. */
+  desktopUnattributed?: boolean;
   /** Light or Dark stays as chosen; System follows the operating system (#1914). */
   theme: import('./appearance.js').ThemeChoice;
   appearance?: import('./appearance.js').AppearanceSettings;

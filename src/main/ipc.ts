@@ -255,6 +255,7 @@ const settingsPatch = z.object({
     chatBrowser: z.enum(CHAT_BROWSERS).optional(),
     cosBrowserMinimize: z.enum(['taskbar', 'tray']).optional(),
     desktopAsk: z.enum(['off', 'active', 'always']).optional(),
+    desktopUnattributed: z.boolean().optional(),
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
     playfulContinue: z.boolean().optional(),
@@ -480,6 +481,9 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       // None saved is the default, off: a stale snapshot without the field and the form's Off are the same
       // choice, so the live value stays (also when none is saved, so nothing reads as changed).
       desktopAsk: (base.ui.desktopAsk ?? 'off') === (wanted.ui.desktopAsk ?? 'off') ? current.ui.desktopAsk : wanted.ui.desktopAsk,
+      // None saved is off, as in desktopAsk: a stale snapshot without the field changes nothing.
+      desktopUnattributed: (base.ui.desktopUnattributed === true) === (wanted.ui.desktopUnattributed === true)
+        ? current.ui.desktopUnattributed : wanted.ui.desktopUnattributed,
       developerMode: pick(current.ui.developerMode, base.ui.developerMode, wanted.ui.developerMode),
       playfulStatus: pick(current.ui.playfulStatus, base.ui.playfulStatus, wanted.ui.playfulStatus),
       playfulContinue: pick(current.ui.playfulContinue, base.ui.playfulContinue, wanted.ui.playfulContinue),
