@@ -8,7 +8,7 @@ import * as logger from '../src/main/logger.js';
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0)) await close(); });
 async function setup(auth: (token: string) => Promise<boolean> = async token => token === 'paired', changed: () => void = () => undefined,
-  options: { quietReconnectMs?: number } = {}) {
+  options: { quietReconnectMs?: number; summaryMs?: number } = {}) {
   const server = http.createServer();
   const bridge = attachBrowserWake(server, req => req.headers.origin === 'chrome-extension://test', auth, changed, options);
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
@@ -68,39 +68,80 @@ describe('authenticated wake-only browser transport', () => {
   });
   // 2026-10-30: Firefox suspends an idle add-on's background page, which closes its wake channel; it
   // reconnects about every 32 s. That was 2,592 log lines a day pushing everything else out of the log.
-  it('logs a browser that keeps closing and reopening its channel once, then once an hour, and still logs a real drop', async () => {
+  async function churnSetup(options: { quietReconnectMs?: number; summaryMs?: number }) {
     const logged = vi.spyOn(logger, 'logInfo').mockImplementation(() => undefined);
-    const start = Date.now();
-    let now = start;
+    let now = Date.now();
     const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    let changes = 0;
+    const h = await setup(undefined, () => { changes += 1; }, options);
+    // Each open and close is counted by the server itself, so a step waits for the server, not a sleep.
+    const settled = async (before: number) => vi.waitFor(() => expect(changes).toBeGreaterThan(before), { timeout: 2_000 });
+    const open = async () => {
+      const before = changes;
+      const socket = h.client(undefined, 'browser'); await once(socket, 'open');
+      const ready = once(socket, 'message'); socket.send('paired'); await ready;
+      await settled(before);
+      return socket;
+    };
+    const close = async (socket: WebSocket) => { const before = changes; socket.close(); await settled(before); };
+    const lines = () => logged.mock.calls.map(([line]) => String(line)).filter(line => line.includes('wake channel (browser)'));
+    return { open, close, lines, advance: (ms: number) => { now += ms; }, restore: () => { clock.mockRestore(); logged.mockRestore(); } };
+  }
+
+  it('logs a browser that keeps closing and reopening its channel once, then once an hour, and still logs a real drop', async () => {
+    const c = await churnSetup({ quietReconnectMs: 200 });
     try {
-      const h = await setup(undefined, undefined, { quietReconnectMs: 200 });
-      const cycle = async () => {
-        const socket = h.client(undefined, 'browser'); await once(socket, 'open');
-        const ready = once(socket, 'message'); socket.send('paired'); await ready;
-        return socket;
-      };
-      const close = async (socket: WebSocket) => { const closed = once(socket, 'close'); socket.close(); await closed; await new Promise(resolve => setTimeout(resolve, 20)); };
-      let socket = await cycle();
+      let socket = await c.open();
       for (let i = 0; i < 4; i++) {
-        now += 30_000; await close(socket);
-        now += 100; socket = await cycle();
+        c.advance(30_000); await c.close(socket);
+        c.advance(100); socket = await c.open();
       }
-      const lines = () => logged.mock.calls.map(([line]) => String(line)).filter(line => line.includes('wake channel (browser)'));
       // The first quick cycle reads as before; the next three are only counted.
-      expect(lines()).toEqual([
+      expect(c.lines()).toEqual([
         'bridge: browser wake channel (browser) authenticated',
         'bridge: browser wake channel (browser) disconnected: closed by the browser',
         'bridge: browser wake channel (browser) authenticated'
       ]);
       // An hour on, the count is said once.
-      now += 60 * 60_000; await close(socket); now += 100; socket = await cycle();
-      expect(lines().at(-1)).toBe('bridge: browser wake channel (browser) was closed by the browser and reopened at once 4 more times since the last line like this; ' +
+      c.advance(60 * 60_000); await c.close(socket); c.advance(100); socket = await c.open();
+      expect(c.lines().at(-1)).toBe('bridge: browser wake channel (browser) was closed by the browser and reopened at once 4 more times since the last line like this; ' +
         'an extension whose background sleeps when idle does this');
       // A close that is not followed by a reconnect is a real drop, and is logged after all.
-      now += 30_000; await close(socket);
-      await vi.waitFor(() => expect(lines().at(-1)).toBe('bridge: browser wake channel (browser) disconnected: closed by the browser (it did not come back)'), { timeout: 2_000 });
-    } finally { clock.mockRestore(); logged.mockRestore(); }
+      c.advance(30_000); await c.close(socket);
+      await vi.waitFor(() => expect(c.lines().at(-1)).toBe('bridge: browser wake channel (browser) disconnected: closed by the browser (it did not come back)'), { timeout: 2_000 });
+    } finally { c.restore(); }
+  });
+
+  it('logs each of two counted closes that do not come back, and a close whose grace ran out before a slow reconnect (CodeRabbit)', async () => {
+    const c = await churnSetup({ quietReconnectMs: 200 });
+    try {
+      let first = await c.open();
+      c.advance(30_000); await c.close(first); c.advance(100); first = await c.open();
+      const second = await c.open();
+      // Both close in the quiet pattern; neither comes back.
+      c.advance(30_000); await c.close(first); await c.close(second);
+      await vi.waitFor(() => expect(c.lines().filter(line => line.endsWith('(it did not come back)'))).toHaveLength(2), { timeout: 2_000 });
+      // A new quiet pattern, then a reconnect that arrives after the grace though before its timer fired.
+      let socket = await c.open();
+      c.advance(30_000); await c.close(socket); c.advance(100); socket = await c.open();
+      c.advance(30_000); await c.close(socket);
+      c.advance(500);
+      socket = await c.open();
+      expect(c.lines().slice(-2)).toEqual([
+        'bridge: browser wake channel (browser) disconnected: closed by the browser (it did not come back)',
+        'bridge: browser wake channel (browser) authenticated'
+      ]);
+    } finally { c.restore(); }
+  });
+
+  it('says the hourly count even when the browser then stays connected (CodeRabbit)', async () => {
+    const c = await churnSetup({ quietReconnectMs: 200, summaryMs: 300 });
+    try {
+      let socket = await c.open();
+      for (let i = 0; i < 3; i++) { c.advance(50); await c.close(socket); c.advance(50); socket = await c.open(); }
+      await vi.waitFor(() => expect(c.lines().at(-1)).toBe('bridge: browser wake channel (browser) was closed by the browser and reopened at once 2 more times ' +
+        'since the last line like this; an extension whose background sleeps when idle does this'), { timeout: 2_000 });
+    } finally { c.restore(); }
   });
 
   it('says when it dropped a browser that stopped answering its heartbeat', async () => {
