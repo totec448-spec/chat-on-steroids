@@ -3080,17 +3080,45 @@ function maintain(woken = false) {
  */
 const APP_LANGUAGE_KEY = 'appLanguage';
 const APP_LANGUAGES = new Set(['en', 'de', 'es', 'fr', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'ja', 'ko', 'zh-CN', 'zh-TW']);
+/*
+ * 2026-10-30: the extension in one Chrome never stored the app's language in weeks (the same build
+ * stored it at once elsewhere) and showed Chrome's language until its worker restarted. Nothing said
+ * why: a storage read that never answers, or a refused write, was swallowed. So the read is bounded,
+ * the language is written once per worker and again on a change rather than trusted to the stored copy,
+ * and the outcome is kept for the diagnostics report (`appLanguageState`).
+ */
+const FOLLOW_READ_MS = 5_000;
+let appLanguageApplied = null;
+let appLanguageError = null;
+function appLanguageState() {
+  return { applied: appLanguageApplied, error: appLanguageError };
+}
 async function followApp(data) {
-  const stored = await chrome.storage.local.get([APP_LANGUAGE_KEY, RENDER_STREAM_KEY, SHOW_TIMES_KEY]);
-  const patch = {};
-  if (APP_LANGUAGES.has(data?.language) && stored[APP_LANGUAGE_KEY] !== data.language) patch[APP_LANGUAGE_KEY] = data.language;
+  const language = APP_LANGUAGES.has(data?.language) ? data.language : null;
   const kept = data?.browserPreferences;
-  if (kept && typeof kept.overwrite === 'boolean' && typeof kept.durations === 'boolean' &&
-      !(RENDER_STREAM_KEY in stored) && !(SHOW_TIMES_KEY in stored)) {
+  const keptValid = kept && typeof kept.overwrite === 'boolean' && typeof kept.durations === 'boolean';
+  if ((!language || language === appLanguageApplied) && !keptValid) return;
+  let readTimer = null;
+  let readFailed = null;
+  const stored = await Promise.race([
+    chrome.storage.local.get([APP_LANGUAGE_KEY, RENDER_STREAM_KEY, SHOW_TIMES_KEY]),
+    new Promise((_, reject) => { readTimer = setTimeout(() => reject(new Error(`storage read did not answer within ${FOLLOW_READ_MS / 1000} s`)), FOLLOW_READ_MS); })
+  ]).catch(error => { readFailed = String(error?.message || error).slice(0, 200); return null; }).finally(() => clearTimeout(readTimer));
+  const patch = {};
+  // Unread storage still gets the language: it is the app's, not a preference the person set here.
+  if (language && language !== appLanguageApplied && (!stored || stored[APP_LANGUAGE_KEY] !== language)) patch[APP_LANGUAGE_KEY] = language;
+  // Kept preferences only fill an extension that provably has none, so they need the read.
+  if (keptValid && stored && !(RENDER_STREAM_KEY in stored) && !(SHOW_TIMES_KEY in stored)) {
     patch[RENDER_STREAM_KEY] = kept.overwrite;
     patch[SHOW_TIMES_KEY] = kept.durations;
   }
-  if (Object.keys(patch).length) await chrome.storage.local.set(patch);
+  try {
+    if (Object.keys(patch).length) await chrome.storage.local.set(patch);
+    if (language) appLanguageApplied = language;
+    appLanguageError = readFailed;
+  } catch (error) {
+    appLanguageError = String(error?.message || error).slice(0, 200);
+  }
 }
 
 /**
@@ -4974,9 +5002,10 @@ async function cachedEnvironmentDiagnostics() {
 
 /** Snapshot sent only to the current paired bridge; it does not grant work or recovery. */
 async function companionDiagnosticSnapshot(found) {
-  const preferences = await chrome.storage.local.get([RENDER_STREAM_KEY, SHOW_TIMES_KEY]);
+  const preferences = await chrome.storage.local.get([RENDER_STREAM_KEY, SHOW_TIMES_KEY, APP_LANGUAGE_KEY]);
   return {
     capturedAt: Date.now(),
+    language: { ...appLanguageState(), stored: typeof preferences[APP_LANGUAGE_KEY] === 'string' ? preferences[APP_LANGUAGE_KEY] : null },
     status: {
       connected: found !== null,
       port: found ? found.port : null,

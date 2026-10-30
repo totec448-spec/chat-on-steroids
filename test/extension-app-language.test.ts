@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 
 const root = path.join(process.cwd(), 'extension');
 const source = readFileSync(path.join(root, 'i18n.js'), 'utf8');
@@ -78,16 +78,18 @@ it('fills $1 substitutions from the app catalog', async () => {
 const background = readFileSync(path.join(root, 'background.js'), 'utf8');
 const followCode = background.slice(background.indexOf('const APP_LANGUAGE_KEY'), background.indexOf('let extensionReloadPending = false;'));
 
-function follower(store: Record<string, unknown>) {
+function follower(store: Record<string, unknown>, storage: { get?: (keys: string[]) => Promise<unknown>; set?: (value: Record<string, unknown>) => Promise<void> } = {}) {
+  const writes: Array<Record<string, unknown>> = [];
   const context = vm.createContext({
-    RENDER_STREAM_KEY: 'renderStreamEnabled', SHOW_TIMES_KEY: 'showStreamTimes',
+    RENDER_STREAM_KEY: 'renderStreamEnabled', SHOW_TIMES_KEY: 'showStreamTimes', setTimeout, clearTimeout,
     chrome: { storage: { local: {
-      get: async (keys: string[]) => Object.fromEntries(keys.filter(key => key in store).map(key => [key, store[key]])),
-      set: async (value: Record<string, unknown>) => { Object.assign(store, value); }
+      get: storage.get ?? (async (keys: string[]) => Object.fromEntries(keys.filter(key => key in store).map(key => [key, store[key]]))),
+      set: storage.set ?? (async (value: Record<string, unknown>) => { writes.push(value); Object.assign(store, value); })
     } } }
   });
-  vm.runInContext(`${followCode}\nglobalThis.follow = followApp;`, context);
-  return (data: unknown) => (context.follow as (data: unknown) => Promise<void>)(data);
+  vm.runInContext(`${followCode}\nglobalThis.follow = followApp; globalThis.state = appLanguageState;`, context);
+  const follow = (data: unknown) => (context.follow as (data: unknown) => Promise<void>)(data);
+  return Object.assign(follow, { writes, state: () => (context.state as () => unknown)() });
 }
 
 it('takes the app language and gives a reinstalled extension its kept preferences back', async () => {
@@ -100,6 +102,46 @@ it('never overwrites preferences the extension itself stored, nor takes an unkno
   const used: Record<string, unknown> = { showStreamTimes: false, appLanguage: 'de' };
   await follower(used)({ language: 'xx', browserPreferences: { overwrite: false, durations: true } });
   expect(used).toEqual({ showStreamTimes: false, appLanguage: 'de' });
+});
+
+// 2026-10-30: the extension in the maintainer's Chrome never stored the app's language (no write in its
+// storage in weeks, the same build stored it at once on the test machine) and showed Chrome's German until
+// its worker was restarted. A storage read that never answers must not keep the app's language out.
+it('takes the app language even when a storage read never answers, and says so in diagnostics', async () => {
+  vi.useFakeTimers();
+  try {
+    const store: Record<string, unknown> = {};
+    const follow = follower(store, { get: () => new Promise(() => undefined) });
+    const done = follow({ language: 'en' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    await done;
+    expect(store).toEqual({ appLanguage: 'en' });
+    expect(follow.state()).toEqual({ applied: 'en', error: 'storage read did not answer within 5 s' });
+  } finally { vi.useRealTimers(); }
+});
+
+it('writes the app language once per worker, not on every status, and again when it changes', async () => {
+  const store: Record<string, unknown> = {};
+  const follow = follower(store);
+  await follow({ language: 'en' });
+  await follow({ language: 'en' });
+  await follow({ language: 'en' });
+  expect(follow.writes).toEqual([{ appLanguage: 'en' }]);
+  await follow({ language: 'de' });
+  expect(follow.writes).toEqual([{ appLanguage: 'en' }, { appLanguage: 'de' }]);
+  expect(follow.state()).toEqual({ applied: 'de', error: null });
+});
+
+it('keeps a refused write for diagnostics and tries again on the next status', async () => {
+  const store: Record<string, unknown> = {};
+  let refuse = true;
+  const follow = follower(store, { set: async value => { if (refuse) throw new Error('QUOTA_BYTES quota exceeded'); Object.assign(store, value); } });
+  await follow({ language: 'en' });
+  expect(follow.state()).toEqual({ applied: null, error: 'QUOTA_BYTES quota exceeded' });
+  refuse = false;
+  await follow({ language: 'en' });
+  expect(store).toEqual({ appLanguage: 'en' });
+  expect(follow.state()).toEqual({ applied: 'en', error: null });
 });
 
 // Counts take the app language's plural form: Russian has three (1/21, 2–4, 5–20), and before
