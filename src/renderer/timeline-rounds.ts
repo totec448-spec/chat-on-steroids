@@ -320,12 +320,50 @@ function shareOut(parts: RoundPart[], runOf: ReadonlyMap<string, number>, count:
 }
 
 /**
+ * Whether two outline items describe the same thing: the same call or answer by its id, a sentence by
+ * ChatGPT's id when both have one and otherwise by exactly the same words, a recap by its words.
+ */
+function sameItem(a: TurnTrace[number], b: TurnTrace[number]): boolean {
+  if (a.kind === 'say' && b.kind === 'say') return a.id && b.id ? a.id === b.id : plain(a.text) === plain(b.text);
+  if ((a.kind === 'call' || a.kind === 'exec' || a.kind === 'answer') && b.kind === a.kind) return a.id === b.id;
+  if ((a.kind === 'recap' || a.kind === 'now') && b.kind === a.kind) return plain(a.text) === plain(b.text);
+  return false;
+}
+
+/**
+ * Each turn's own part of its outline. After an automatic "Continue" ChatGPT keeps the continued
+ * turns in one response, so a later turn's outline starts with the outlines of the turns before it
+ * (2.1.48 release round); drawn again, their sentences stood in every later turn. The longest
+ * outline of an earlier turn (`order`: oldest first) that this one begins with, without its live
+ * "now" line, is dropped from its start, also when nothing follows it yet. Only an id it shares
+ * proves the continuation: the same opening words alone can start two separate turns.
+ */
+function ownOutlines(traces: Readonly<Record<string, TurnTrace>>, order: readonly string[]): Record<string, TurnTrace> {
+  const settled = (trace: TurnTrace) => trace.filter(item => item.kind !== 'now');
+  const proven = (item: TurnTrace[number]) => item.kind === 'call' || item.kind === 'exec' || item.kind === 'answer' ||
+    (item.kind === 'say' && !!item.id);
+  return Object.fromEntries(Object.entries(traces).map(([turnId, trace]) => {
+    const position = order.indexOf(turnId);
+    let skip = 0;
+    for (const earlierId of position < 0 ? order : order.slice(0, position)) {
+      const prefix = traces[earlierId] ? settled(traces[earlierId]!) : [];
+      if (earlierId === turnId || prefix.length <= skip || prefix.length > trace.length || !prefix.some(proven)) continue;
+      if (prefix.every((item, index) => sameItem(item, trace[index]!))) skip = prefix.length;
+    }
+    return [turnId, skip ? trace.slice(skip) : trace];
+  }));
+}
+
+/**
  * The timeline as rounds. `working` says the newest turn is still running: its last round is the
  * live one, unless a recap already closed it. `liveTurnId` names that turn, so its outline shows
  * even before any of its work is recorded (a new chat's first sentences come before its first call).
  */
-export function structureTimeline(rows: readonly FlowRow[], traces: Readonly<Record<string, TurnTrace>>, working: boolean,
+export function structureTimeline(rows: readonly FlowRow[], allTraces: Readonly<Record<string, TurnTrace>>, working: boolean,
   liveTurnId?: string | null): RoundPart[] {
+  // Turns oldest first, as their rows appear; a turn with an outline but no rows yet (the live one) is the newest.
+  const order = [...new Set(rows.flatMap(row => row.event?.turnId ? [row.event.turnId] : []))];
+  const traces = ownOutlines(allTraces, order);
   const out: RoundPart[] = [];
   const runs: Array<{ start: number; rows: FlowRow[] }> = [];
   let current: FlowRow[] | null = null;
