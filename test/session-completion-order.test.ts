@@ -5,6 +5,7 @@ import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js
 import { recordChatObservations, recordToolCall, resetRecorderForTests } from '../src/main/session/recorder.js';
 import { appendEvent, flushSessions, getSession, initSessionStore, readActivityEvents, readCompletedFinal,
   readEvents, readRecentEvents, resetSessionStoreForTests, sessionsRoot } from '../src/main/session/store.js';
+import { getLog } from '../src/main/logger.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 let dir: string;
@@ -235,6 +236,52 @@ describe('completed request ownership', () => {
       expect(final).toMatchObject({ messageId: 'answer', turnId: turn });
       expect(await readCompletedFinal(opened.sessionId!, chat)).toMatchObject({ messageId: 'answer' });
     } else expect(final).toBeNull();
+  });
+
+  /**
+   * 2.1.48 release round (Windows VM, GPT-5.6): the model wrote a progress note before its tool calls,
+   * and the page first reported it after the turn had ended, when ChatGPT drew the turn's steps as one
+   * collapsed group, as "just appeared". Recorded after the final, it read as new work, and Goal waited for good.
+   */
+  const lateNote = (turnId = turn) => recordChatObservations(chat, [
+    { kind: 'assistant_message', time: Date.now(), turnId, messageId: 'progress-note',
+      providerMessageId: '66666666-7777-4888-8999-000000000000', text: 'I’ll inspect the source first.', state: 'streaming', activeNow: true }
+  ]);
+
+  it.each([false, true])('keeps a final complete when its turn’s progress note is reported after the turn ended (restart %s)', async restart => {
+    const { id, began, clock } = await completed();
+    const noted = () => getLog().filter(entry => entry.message ===
+      `session recorder: ${chat} reported a message of turn ${turn} after that turn ended; kept in history, not counted as new work`).length;
+    const before = noted();
+    clock.mockReturnValue(began + 30);
+    await lateNote();
+    await lateNote();
+    // Kept in the chat's history, as before, and logged once however often the page repeats it.
+    expect((await readEvents(id)).some(event => event.kind === 'assistant_message' && event.messageId === 'progress-note')).toBe(true);
+    expect(noted() - before).toBe(1);
+    if (restart) { await flushSessions(); resetRecorderForTests(); resetSessionStoreForTests(); }
+    expect(await readCompletedFinal(id, chat, turn)).toMatchObject({ messageId: 'answer', turnId: turn });
+    expect(await readCompletedFinal(id, chat)).toMatchObject({ messageId: 'answer' });
+  });
+
+  it('still counts a progress note as work once the same request reopened its turn', async () => {
+    // No native final: the same request calling tools after the end reopens the turn.
+    const { id, began, clock } = await completed(false);
+    clock.mockReturnValue(began + 30);
+    await call(Date.now());
+    expect((await getSession(id))?.activeTurnId).toBe(turn);
+    clock.mockReturnValue(began + 40);
+    await lateNote();
+    const note = (await readEvents(id)).find(event => event.kind === 'assistant_message' && event.messageId === 'progress-note');
+    expect(note).toMatchObject({ state: 'streaming' });
+    expect((note as { contentSeq?: number }).contentSeq).toBeGreaterThan(0);
+  });
+
+  it('still treats a message of another turn after the final as new work', async () => {
+    const { id, began, clock } = await completed();
+    clock.mockReturnValue(began + 30);
+    await lateNote('another-turn');
+    expect(await readCompletedFinal(id, chat, turn)).toBeNull();
   });
 
   it('still reopens a falsely completed view without native final proof', async () => {
