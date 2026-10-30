@@ -132,6 +132,24 @@ it('writes the app language once per worker, not on every status, and again when
   expect(follow.state()).toEqual({ applied: 'de', error: null });
 });
 
+it('applies statuses in order, so a slow older read cannot write its language last (CodeRabbit on #1940)', async () => {
+  const store: Record<string, unknown> = {};
+  let releaseFirst!: () => void;
+  let reads = 0;
+  const follow = follower(store, { get: async (keys: string[]) => {
+    reads += 1;
+    if (reads === 1) await new Promise<void>(resolve => { releaseFirst = resolve; });
+    return Object.fromEntries(keys.filter(key => key in store).map(key => [key, store[key]]));
+  } });
+  const older = follow({ language: 'en' });
+  const newer = follow({ language: 'de' });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  releaseFirst();
+  await Promise.all([older, newer]);
+  expect(store).toEqual({ appLanguage: 'de' });
+  expect(follow.writes).toEqual([{ appLanguage: 'en' }, { appLanguage: 'de' }]);
+});
+
 it('keeps a refused write for diagnostics and tries again on the next status', async () => {
   const store: Record<string, unknown> = {};
   let refuse = true;

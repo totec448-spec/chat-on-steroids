@@ -561,6 +561,14 @@ describe('who is allowed to talk to it', () => {
     // An older extension reports no language: nothing to say.
     await report(undefined);
     expect(lines()).toHaveLength(2);
+    // The app's language changing is a new mismatch (CodeRabbit on #1940) ...
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, language: 'fr' } });
+    await report({ applied: 'en', stored: 'de', error: null });
+    expect(lines().at(-1)).toBe("browser: the extension's stored language is de, the app's is fr");
+    // ... and once they match, the same mismatch coming back is said again.
+    await report({ applied: 'fr', stored: 'fr', error: null });
+    await report({ applied: 'en', stored: 'de', error: null });
+    expect(lines()).toHaveLength(4);
     warn.mockRestore();
   });
 
