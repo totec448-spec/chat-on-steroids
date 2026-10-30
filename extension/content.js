@@ -11867,11 +11867,18 @@
    * immediately when the composer already exists, otherwise wake the instant React mounts
    * one, with only a bounded timer as the failure deadline.
    */
-  /** Closes ChatGPT announcements over this page (CLF_DOM.dismissAnnouncements) and tells the app which. */
+  /**
+   * Closes ChatGPT announcements over this page (CLF_DOM.dismissAnnouncements) and tells the app which.
+   * Not while ChatGPT limits this page's history: its access-limit notice is a dialog like any other,
+   * recognized by wording in only some languages, and must stay for the person (CodeRabbit on #1939).
+   */
   async function closeAnnouncements(stillCurrent = () => true) {
+    if (Date.now() - historyLimitSeenAt < 10 * 60_000) return [];
+    const chat = CLF_DOM.conversationId();
     const closed = await CLF_DOM.dismissAnnouncements(stillCurrent).catch(() => []);
-    for (const heading of closed) {
-      void ask({ type: 'page_note', note: 'announcement-closed', heading, conversationId: CLF_DOM.conversationId() }).catch(() => undefined);
+    // Reported for the chat it was closed on; a page that moved on meanwhile says nothing.
+    if (stillCurrent() && CLF_DOM.conversationId() === chat) {
+      for (const heading of closed) void ask({ type: 'page_note', note: 'announcement-closed', heading, conversationId: chat }).catch(() => undefined);
     }
     return closed;
   }
@@ -12821,6 +12828,8 @@
     endDeletedTurn();
   });
   let pendingHistoryRateLimit = null;
+  /** When this page last saw ChatGPT limit a history read; see closeAnnouncements. */
+  let historyLimitSeenAt = 0;
   function publishHistoryRateLimit() {
     const limit = pendingHistoryRateLimit;
     if (!limit || limit.retryAt <= Date.now() || limit.published === limit.retryAt) return;
@@ -12837,6 +12846,7 @@
   }
   window.addEventListener('message', (event) => {
     if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-history-rate-limit') return;
+    historyLimitSeenAt = Date.now();
     const claimed = typeof event.data.conversationId === 'string' ? event.data.conversationId : '';
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(claimed) ||
         CLF_DOM.conversationId() !== claimed) return;

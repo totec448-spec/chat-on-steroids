@@ -2728,6 +2728,43 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.some(message => message.type === 'page_note')).toBe(false);
   });
 
+  it('closes no dialog while ChatGPT limits the page\'s history, whatever language its notice is in (CodeRabbit on #1939)', async () => {
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.fail ? { ok: true } : { input: claimed() } }),
+      page_note: () => ({ ok: true })
+    });
+    const timer = live.window.setTimeout;
+    let expire!: () => void;
+    live.window.setTimeout = ((fn: () => void, ms?: number) => {
+      if (ms === 15000) { expire = fn; return 0; }
+      return timer(fn, ms);
+    }) as typeof live.window.setTimeout;
+    const now = Date.now();
+    live.window.dispatchEvent(new live.window.MessageEvent('message', { source: live.window as unknown as Window, origin: 'https://chatgpt.com',
+      data: { type: 'cos-history-rate-limit', conversationId: chatA, observedAt: now, retryAt: now + 60_000 } }));
+    // The limit notice in a language the page does not recognize by wording.
+    const notice = announcement(live.document, { heading: 'Zu viele Anfragen' });
+    const sending = live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA });
+    await settle(200);
+    expire();
+    expect(await sending).toEqual({ ok: false });
+    expect(notice.isConnected).toBe(true);
+    expect(live.sent.some(message => message.type === 'page_note')).toBe(false);
+  });
+
+  it('reports a closed announcement only for the chat it was closed on (CodeRabbit on #1939)', async () => {
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.fail ? { ok: true } : { input: claimed() } }),
+      page_note: () => ({ ok: true })
+    });
+    const dialog = announcement(live.document);
+    // Closing it takes the page to another chat, as ChatGPT can while its animation runs.
+    live.document.addEventListener('keydown', event => { if (event.key === 'Escape') { live!.dom.reconfigure({ url: `https://chatgpt.com/c/${chatB}` }); live!.hook.observe(); } });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA })).toEqual({ ok: false });
+    expect(dialog.isConnected).toBe(false);
+    expect(live.sent.some(message => message.type === 'page_note')).toBe(false);
+  });
+
   it('closes an announcement over an existing chat so its queued message is sent, not held behind it', async () => {
     live = await harness(`https://chatgpt.com/c/${chatA}`, {
       desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.fail ? { ok: true } : { input: claimed() } }),
