@@ -1071,9 +1071,10 @@ describe('native image readiness', () => {
     expect(api.hasComposerAttachments()).toBe(true);
     draft.dispose();
   });
-  it('still refuses a tile whose second button is labelled with the file name too', () => {
+  // CodeRabbit on #1944: a blank label, or the file name with spaces around it, names no remove control.
+  it.each(['notes.zip', ' notes.zip ', '   ', ''])('still refuses a tile whose second button is not a remove control (label "%s")', label => {
     const host = document.createElement('div'); host.setAttribute('data-composer-attachments', '');
-    host.innerHTML = '<span><span><span>notes.zip</span><button type="button" aria-label="notes.zip"></button></span><button type="button" aria-label="notes.zip"></button></span>';
+    host.innerHTML = `<span><span><span>notes.zip</span><button type="button" aria-label="notes.zip"></button></span><button type="button" aria-label="${label}"></button></span>`;
     document.querySelector('form')!.append(host);
     expect(api.hasComposerAttachments()).toBe(false);
   });
