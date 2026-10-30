@@ -1097,6 +1097,11 @@ async function ensureOpen(id: string): Promise<OpenSession> {
 /** A hold-call result or app status is not evidence of new work. */
 function noteFinishWork(summary: SessionSummary, event: SessionEvent): void {
   if (!summary.finishTurn || (event.turnId && event.turnId !== summary.finishTurn.turnId)) return;
+  // A progress note of this turn reported after it completed or was stopped is not work, as in
+  // readCompletedFinal; a turn whose view failed is reopened by its fresh note, which stays work.
+  if (event.kind === 'assistant_message' && event.final !== true && event.state !== 'final' && !!event.turnId &&
+      summary.activeTurnId !== event.turnId && summary.timelineTurns?.[event.turnId]?.endOrigin !== undefined &&
+      (summary.lastTurnOutcome === 'completed' || summary.lastTurnOutcome === 'stopped')) return;
   const meaningful = event.kind === 'user_message' || event.kind === 'assistant_message' ||
     (event.kind === 'progress' && event.source !== 'app') ||
     (event.kind === 'tool_call' && !['keep_astra_on_forever', 'session_finish'].includes(event.call.tool));

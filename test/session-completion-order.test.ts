@@ -293,6 +293,7 @@ describe('completed request ownership', () => {
     const note = (await readEvents(opened.sessionId!)).find(event => event.kind === 'assistant_message' && event.messageId === 'progress-note');
     expect((note as { contentSeq?: number }).contentSeq).toBeGreaterThan(0);
     expect((await getSession(opened.sessionId!))?.activeTurnId).toBe(turn);
+    expect((await getSession(opened.sessionId!))?.finishTurn?.workSeq).toBe((note as { contentSeq?: number }).contentSeq);
   });
 
   // CodeRabbit on #1931: decided again when reading, from the stored records, so a note saved before
@@ -305,10 +306,14 @@ describe('completed request ownership', () => {
 
   it('settles a final whose turn’s late note was saved as work before this fix', async () => {
     const { id, began, clock } = await completed();
+    const work = (await getSession(id))?.finishTurn?.workSeq;
     clock.mockReturnValue(began + 30);
     await savedNote(id, turn, 999);
+    // Nor is it work for the finish decision, so Goal decides nothing again (CodeRabbit on #1931).
+    expect((await getSession(id))?.finishTurn?.workSeq).toBe(work);
     await flushSessions(); resetRecorderForTests(); resetSessionStoreForTests();
     expect(await readCompletedFinal(id, chat, turn)).toMatchObject({ messageId: 'answer', turnId: turn });
+    expect((await getSession(id))?.finishTurn?.workSeq).toBe(work);
   });
 
   it('settles a newer final when a late note of an older, ended turn is saved as work', async () => {
