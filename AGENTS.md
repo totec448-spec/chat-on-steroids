@@ -1232,7 +1232,7 @@ and `sessions:bookmark { id, messageId, excerpt, messageTime, on }` → the chat
 session; at most `MAX_BOOKMARKS` (200) per chat, excerpts one line of at most 160 characters. A
 missing or damaged file reads as no bookmarks; damaged entries are dropped. Nothing is sent to
 ChatGPT. The header list jumps through `sessions:locate-message`; a reply no longer in the chat
-shows a notice instead of scrolling. Long row menus scroll inside the window (`row-menu.ts`). A file holding more than the limit keeps the ones bookmarked first. Tests: `test/session-bookmarks.test.ts` (storage, limit, damaged files), the "bookmarked answers" cases in `test/renderer-timeline.test.ts` (answer action, header list, jump), and `scripts/verify-bookmark-list.cjs` (200 bookmarks in a short window, real Electron).
+shows a notice instead of scrolling. Long row menus scroll inside the window (`row-menu.ts`). A file holding more than the limit keeps the ones bookmarked first. Tests: `test/session-bookmarks.test.ts` (storage, limit, damaged files), the "bookmarked answers" cases in `test/renderer-timeline.part6.test.ts` (answer action, header list, jump), and `scripts/verify-bookmark-list.cjs` (200 bookmarks in a short window, real Electron).
 
 Edit & resubmit (#365): ChatGPT keeps an edited question as a new version beside the old one, under
 the same parent, and continues from the new one. The page reports each question's place in that tree
@@ -4311,7 +4311,7 @@ helper ends the Goal with findings still unsent, they become a note in the chat.
 cancels a review in progress (as the person's own Clear on the worker's row); its chat stays.
 Tests: `goal-review.test.ts`, `text-diff.test.ts`, `goal-reviewer.test.ts`, `goal-review-flow.test.ts`,
 `kernel-reviewer-readonly.test.ts`, the reviewer cases in `agents.test.ts`, `mcp-worktree-spawn.test.ts`,
-`bridge.test.ts`, `renderer-chat-models.test.ts`, `renderer-state.test.ts`, `renderer-timeline.test.ts`
+`bridge.test.ts`, `renderer-chat-models.test.ts`, `renderer-state.part*.test.ts`, `renderer-timeline.part*.test.ts`
 and `content-script.test.ts`.
 
 ## 18. Desktop workspace, plugins, connection and native control
@@ -5807,7 +5807,11 @@ the whole run replaying one long workflow; avoid optimizing speculative edge cas
 | Plugins/auth/native Desktop | manager/exposure/OAuth or computer frame owner | `plugins-*`, `computer*`, `tools-desktop-*`, `macos-*` |
 | Startup/connection/shipping | lifecycle/config/connection or packaging script | `config`, `window-*`, `shutdown`, `tunnel*`, `control-api`, `packaging`, `update`, `third-party-notices` |
 
-Discover current suites with `rg --files test`; do not maintain a stale suite count. Validate
+Discover current suites with `rg --files test`; do not maintain a stale suite count. Vitest runs files in
+parallel but the tests of one file in sequence, so a file that boots the renderer per test is split
+into parts sharing one harness (`renderer-timeline.part*.test.ts` with `renderer-timeline.harness.ts`,
+`renderer-state.part*.test.ts` with `renderer-state.harness.ts`). Add a new case to the part where its
+neighbours live, keep each part near a minute, and split again rather than grow one past two. Validate
 both ends of every changed protocol: app↔extension, content↔MAIN, main↔preload↔renderer,
 schema↔handler↔recorder and durable write↔restore. Run the nearest suites, adjacent boundary
 tests and `npm run verify` for production edits. Build/package when that layer can differ.
