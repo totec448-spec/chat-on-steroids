@@ -322,7 +322,7 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
   Object.assign(api, { query });
   const updated = (id: number, change: object) => tabUpdated.addListener.mock.calls[0]![0](id, change, tabs.find(tab => tab.id === id));
   vm.runInContext('Object.assign(testMaintenance, { offerStopTurns, noteTabConversation, ackCommand })', context);
-  return { ...api, scripting, updated, update, advance, navigator: browserNavigator, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, bind: (context.testMaintenance as any).bind as (message: any, sender: any, source: any) => Promise<any>, correlate: (context.testMaintenance as any).correlate as (message: any, sender: any, source: any) => Promise<any>, closed: (context.testMaintenance as any).closed as (message: any, sender: any, source: any) => Promise<any>, loadFailure: (context.testMaintenance as any).loadFailure as (message: any, sender: any, source: any) => Promise<any>, create, sendMessage, tabs, fetch, windows, remove, reload, local, localSaved, saved };
+  return { ...api, scripting, updated, update, advance, navigator: browserNavigator, inspectModels: (context.testMaintenance as any).inspectRequestedModels as (request: unknown, background: boolean) => Promise<void>, ackDesktopInput: (context.testMaintenance as any).ackDesktopInput as (...args: string[]) => Promise<any>, drainCommandAcks: (context.testMaintenance as any).drainCommandAcks as () => Promise<any>, desktopInput: (context.testMaintenance as any).desktopInput as (...args: any[]) => Promise<any>, events: (context.testMaintenance as any).events as (message: any, sender: any, source: any) => Promise<any>, bind: (context.testMaintenance as any).bind as (message: any, sender: any, source: any) => Promise<any>, correlate: (context.testMaintenance as any).correlate as (message: any, sender: any, source: any) => Promise<any>, closed: (context.testMaintenance as any).closed as (message: any, sender: any, source: any) => Promise<any>, loadFailure: (context.testMaintenance as any).loadFailure as (message: any, sender: any, source: any) => Promise<any>, query, create, sendMessage, tabs, fetch, windows, remove, reload, local, localSaved, saved };
 }
 
 // 2.1.47 round: a chat tab that loaded offline in the app's background window stayed on Chrome's
@@ -889,6 +889,45 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     const restarted = await worker([input], undefined, h.localSaved);
     await restarted.maintain();
     expect(restarted.create).not.toHaveBeenCalled();
+  });
+  it.each(['ready', 'preparing'])('reports a missing %s opening tab without replacing it, including after restart', async stage => {
+    const input = { id: firstId, conversationId: null };
+    const local = { inputOpenings: { [firstId]: { tab: 7, stage, conversationId: null } } };
+    const h = await worker([input], undefined, local);
+    await h.maintain();
+    const reports = h.fetch.mock.calls.filter(([url]) => new URL(url).pathname === '/input/opening-unavailable');
+    expect(reports).toHaveLength(1);
+    expect(JSON.parse(String(reports[0]![1]?.body))).toEqual({ id: firstId, tab: 7, stage });
+    expect(h.create).not.toHaveBeenCalled();
+    expect(h.sendMessage.mock.calls.some(([, message]) => message.type === 'clf-desktop-input')).toBe(false);
+    expect(h.localSaved.inputOpenings).toEqual(local.inputOpenings);
+    const restarted = await worker([input], undefined, h.localSaved);
+    await restarted.maintain();
+    expect(restarted.create).not.toHaveBeenCalled();
+    expect(restarted.fetch.mock.calls.some(([url]) => new URL(url).pathname === '/input/opening-unavailable')).toBe(true);
+  });
+  it.each(['existing-unmarked', 'alternate-marker', 'unreadable-scan', 'ambiguous-create', 'unknown-stage', 'missing-tab-value'])('retains opening custody without a missing-tab report for %s', async scenario => {
+    const input = { id: firstId, conversationId: null };
+    const h = await worker([input], undefined, { inputOpenings: { [firstId]: {
+      tab: ['ambiguous-create', 'missing-tab-value'].includes(scenario) ? null : 7,
+      stage: scenario === 'ambiguous-create' ? 'opening' : scenario === 'unknown-stage' ? 'unknown' : 'ready'
+    } } });
+    if (scenario === 'existing-unmarked') h.tabs.push({ id: 7, url: 'https://example.com/' });
+    if (scenario === 'alternate-marker') h.tabs.push({ id: 8, url: `https://chatgpt.com/?cos-input=${firstId}` });
+    if (scenario === 'unreadable-scan') {
+      const query = h.query.getMockImplementation()!;
+      let allTabScans = 0;
+      h.query.mockImplementation(async (...args: any[]) => {
+        // The first all-tab scan belongs to ordinary window layout; refuse the
+        // later absence check without failing unrelated maintenance first.
+        if (args[0] && Object.keys(args[0]).length === 0 && ++allTabScans === 2) throw new Error('tab scan unavailable');
+        return query();
+      });
+    }
+    await h.maintain();
+    expect(h.fetch.mock.calls.some(([url]) => new URL(url).pathname === '/input/opening-unavailable')).toBe(false);
+    expect(h.create).not.toHaveBeenCalled();
+    expect(h.sendMessage.mock.calls.some(([, message]) => message.type === 'clf-desktop-input')).toBe(false);
   });
   it('spends input opening authority before creation and permits a new explicit operation', async () => {
     const inputs = [{ id: firstId, conversationId: null }];
