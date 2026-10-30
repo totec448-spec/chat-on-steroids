@@ -241,7 +241,26 @@ app.whenReady().then(async () => {
     await until(`window.sidebarShelfFixture.revision()===5`);
     assert.equal(await js(`window.sidebarShelfFixture.records()['batch-chat-0']`),undefined);
     await js(`window.__sidebarBeforeReload = true`);
-    const finishedLoading = new Promise(resolve => win.webContents.once('did-finish-load', resolve));
+    const finishedLoading = new Promise((resolve, reject) => {
+      const contents = win.webContents;
+      const cleanup = () => {
+        clearTimeout(timeout);
+        contents.removeListener('did-finish-load', success);
+        contents.removeListener('did-fail-load', failed);
+        contents.removeListener('render-process-gone', crashed);
+      };
+      const success = () => { cleanup(); resolve(); };
+      const failure = reason => { cleanup(); reject(new Error(reason)); };
+      const failed = (_event, code, description, _url, isMainFrame) => {
+        // A reload can cancel an old navigation; only failures of the new main frame count.
+        if (isMainFrame !== false && code !== -3) failure(`Sidebar reload failed (${code}): ${description}`);
+      };
+      const crashed = (_event, details) => failure(`Sidebar renderer exited during reload: ${details.reason}`);
+      const timeout = setTimeout(() => failure('Timed out waiting for sidebar reload'), 20_000);
+      contents.once('did-finish-load', success);
+      contents.on('did-fail-load', failed);
+      contents.once('render-process-gone', crashed);
+    });
     win.webContents.reload();
     await finishedLoading;
     await until(`window.__sidebarBeforeReload === undefined && !!${row(2)}?.classList.contains('is-pinned')`);
