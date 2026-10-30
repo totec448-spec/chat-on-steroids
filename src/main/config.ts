@@ -365,6 +365,14 @@ const configSchema = z.object({
       logWarn('config: the saved ui.desktopAsk was damaged; the app asks before every desktop step until it is chosen again');
       return 'always' as const;
     }),
+    /**
+     * Desktop control for a call the app cannot tie to a chat (see mcp/desktop-caller.ts). Off unless
+     * chosen, and separate from multiAgent.allowUnattributedCalls on purpose.
+     */
+    desktopUnattributed: z.boolean().optional().catch(() => {
+      logWarn('config: the saved ui.desktopUnattributed was damaged; desktop control is used only for chats the app can name until it is chosen again');
+      return undefined;
+    }),
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
     playfulContinue: z.boolean().optional(),

@@ -3542,6 +3542,8 @@
   "{0} in {1}": "{0} em {1}",
   "Go ahead": "Pode ir",
   "Ask before using the mouse and keyboard": "Perguntar antes de usar o mouse e o teclado",
+  "Allow desktop control from calls without a known chat": "Permitir controle da área de trabalho para chamadas sem um chat conhecido",
+  "Normally the screen, mouse and keyboard are used only for a chat the app can name. With one ChatGPT account on several computers, a call it can't name may come from another computer's chat.": "Normalmente a tela, o mouse e o teclado só são usados para um chat que o app consegue identificar. Com uma conta do ChatGPT em vários computadores, uma chamada que ele não identifica pode vir de um chat de outro computador.",
   "A small question in the screen's corner, with Go ahead and Not now. Go ahead lets that chat continue for up to 2 minutes, until you use the mouse or keyboard again; a step the app can't match to a chat asks again. Browser steps never ask.": "Uma pequena pergunta no canto da tela, com Pode ir e Agora não. Pode ir deixa aquele chat continuar por até 2 minutos, até você usar o mouse ou o teclado de novo; uma etapa que o app não consegue ligar a um chat pergunta de novo. Etapas do navegador nunca perguntam.",
   "Ask while I'm using the computer": "Perguntar enquanto uso o computador",
   "Always ask": "Sempre perguntar",

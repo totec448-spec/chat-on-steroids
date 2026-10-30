@@ -179,6 +179,11 @@ describe('what an import would open up', () => {
       'multiAgent.allowUnattributedCalls', 'multiAgent.strictChatAllowlist', 'readOnly', 'ui.secretsShield']);
   });
 
+  it('counts desktop control for calls without a known chat as wider access (2026-10-30)', () => {
+    expect(widerAccess(base, after(copy => { (copy.ui as Record<string, unknown>).desktopUnattributed = true; }))).toEqual(['ui.desktopUnattributed']);
+    expect(widerAccess(after(copy => { (copy.ui as Record<string, unknown>).desktopUnattributed = true; }), base)).toEqual([]);
+  });
+
   it('counts the command rules as wider when they are switched off, even with the same rules', () => {
     expect(widerAccess(base, after(copy => { copy.commandAllowlist.enabled = false; }))).toEqual(['commandAllowlist']);
   });
