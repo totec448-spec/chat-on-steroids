@@ -4837,6 +4837,15 @@ const HANDLERS = {
    * How far a redeemed command's page got: a step name only, never its text. The app keeps the
    * last one so a command that runs out of time can say where it stopped. Best effort.
    */
+  /** A ChatGPT announcement the page closed (CLF_DOM.dismissAnnouncements), for one app log line. */
+  async page_note(message) {
+    if (message?.note !== 'announcement-closed') return { ok: false };
+    const heading = typeof message.heading === 'string' ? message.heading.replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+    // Best effort, and never in the tab's queue: a claim or receipt behind it must not wait on a log line.
+    void call('/page-note', { method: 'POST',
+      body: JSON.stringify({ note: 'announcement-closed', heading, conversationId: cleanConversationId(message.conversationId) }) }).catch(() => undefined);
+    return { ok: true };
+  },
   async command_step(message) {
     const id = typeof message.id === 'string' ? message.id.slice(0, 128) : '';
     const step = typeof message.step === 'string' ? message.step.slice(0, 32) : '';
@@ -5034,6 +5043,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     'stop_redeem',
     'stop_ack',
     'desktop_input',
+    'page_note',
     'model_catalog',
     'project_catalog',
     'plugin_refresh',
