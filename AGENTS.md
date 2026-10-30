@@ -5615,6 +5615,18 @@ user switches to the app and answers there, and either answer ends both. A damag
 treats missing and `off` as the same value. A refusal is the tool error `DECLINED_BY_USER: …` and
 nothing runs; nothing retries by itself. One `desktop ask:` log line per decision, never the step's text.
 
+**Desktop control needs a known chat (2026-10-30).** `mcp/desktop-caller.ts` wraps every macOS and
+Windows desktop tool (`registerDesktopTools` passes them a `guardDesktopTools` registrar; the browser
+tools on the same connector keep their own rules). A call with neither a session nor a conversation
+waits up to 20 s (the recorder's evidence window) for its request id to be proved, then runs, or
+returns `DESKTOP_IDENTITY_REQUIRED: …` as an identity refusal before any screen, mouse or keyboard
+access, with one `desktop: refused <tool>` log line. `multiAgent.allowUnattributedCalls` does not
+apply here: with one ChatGPT account on several computers such a call can come from another
+computer's chat. Only `ui.desktopUnattributed` (Settings row `#desktopUnattributed` under the control
+permission, macOS and Windows only; missing or damaged loads as off, with one log line for damaged;
+the settings merge treats missing and off as the same value) lets it run; turning it on counts as
+wider access in a settings import.
+
 `computer/index.ts` owns native actions, capture frames/accessibility refs, batching and
 postconditions. Registrars own live capability checks. Windows `windows-api.ts` implements the
 13 Window2 methods: `list_windows`, `get_window`, `list_apps`, `launch_app`, `get_window_state`,
