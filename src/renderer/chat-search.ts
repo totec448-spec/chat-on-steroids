@@ -256,6 +256,9 @@ export function initChatSearch(options: ChatSearchOptions): ChatSearch {
     if (event.key.toLowerCase() !== 'k' || event.shiftKey || event.altKey || event.repeat) return;
     if (isMac() ? !event.metaKey || event.ctrlKey : !event.ctrlKey || event.metaKey) return;
     if ((event.target as Element | null)?.closest?.('.xterm')) return;
+    // Never over another open dialog (What's New after an update, a confirmation): two modal dialogs
+    // stacked, and the first came back after this one closed.
+    if ([...document.querySelectorAll('dialog[open]')].some(other => other !== dialog)) return;
     event.preventDefault();
     open();
   });
