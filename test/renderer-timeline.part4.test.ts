@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { PLAYFUL_WORDS, T0, TOKEN, boot, dom, positionOf, projectTimeline, settle, settleHistoryFrame, summary, text, toolCall, type InputArgs, type InputEntry, type SessionEvent } from './renderer-timeline.harness.js';
+import { PLAYFUL_WORDS, T0, TOKEN, boot, dom, positionOf, projectTimeline, settle, settleHistoryFrame, summary, text, toolCall, waitFor, type InputArgs, type InputEntry, type SessionEvent } from './renderer-timeline.harness.js';
 
 vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTerminal: () => ({
   update: vi.fn(), show: vi.fn(), hide: vi.fn(), hasTabs: () => false,
@@ -525,7 +525,7 @@ it('says a Goal waits for its closed chat, without a spinner or a countdown', as
   const open = row.querySelector<HTMLButtonElement>('button.dock-action')!;
   expect(open.getAttribute('aria-label')).toBe('Open this chat in your browser');
   open.click();
-  await vi.waitFor(() => expect(opened).toHaveLength(1));
+  await waitFor(() => expect(opened).toHaveLength(1));
   // Any other wait has no such button.
   api.getSessionControls = async () => ({ ok: true, data: { automation: 'goal', objective: 'Ship the release', blocked: '', job: null,
     goalWait: { reason: 'settling' }, goalDraft: null } });
@@ -1289,7 +1289,7 @@ it('retains the visible collapsed group beyond the normal resident target and st
   // Await the actual read result, including its animation-frame yields.
   pane.scrollTop = 0; pane.dispatchEvent(new w.WheelEvent('wheel', { deltaY: -100 }));
   // 2.7 s here; the macOS x64 release runner stopped at 300–390 of 400 rows after 5 s (2026-10-15).
-  await vi.waitFor(() => expect(timeline.querySelectorAll('.ev-tool_call')).toHaveLength(rows.length), { timeout: 20_000 });
+  await waitFor(() => expect(timeline.querySelectorAll('.ev-tool_call')).toHaveLength(rows.length), { timeout: 20_000 });
   expect(timeline.querySelector('.tool-group')).toBe(group);
   expect(timeline.querySelectorAll('.raw')).toHaveLength(0);
   for (let i = 0; i < 14; i++) {

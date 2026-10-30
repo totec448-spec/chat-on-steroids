@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { JSDOM, T0, boot, settle, summary, text, toolCall, type InputArgs, type InputEntry, type SessionEvent } from './renderer-timeline.harness.js';
+import { JSDOM, T0, boot, settle, summary, text, toolCall, waitFor, type InputArgs, type InputEntry, type SessionEvent } from './renderer-timeline.harness.js';
 
 vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTerminal: () => ({
   update: vi.fn(), show: vi.fn(), hide: vi.fn(), hasTabs: () => false,
@@ -127,19 +127,19 @@ describe('ChatGPT\'s approval card in the timeline', () => {
       answerApproval: (_id, cardId, choice) => { answers.push([cardId, choice]); card = { ...card, answer: { choice, outcome: null } }; return { ok: true }; }
     });
     const timeline = w.document.getElementById('timeline')!;
-    await vi.waitFor(() => expect(timeline.querySelector('.approval-card')?.textContent).toContain('Allow ChatGPT to use Gmail?'));
+    await waitFor(() => expect(timeline.querySelector('.approval-card')?.textContent).toContain('Allow ChatGPT to use Gmail?'));
     // The recorded English is unchanged; the row now says the answer can be given here too.
     expect(timeline.querySelector('.approval-wait')?.textContent).toContain('here or in the browser');
     const buttons = () => [...timeline.querySelectorAll<HTMLButtonElement>('.approval-card button')];
     expect(buttons().map(button => button.textContent)).toEqual(['Deny', 'Allow once']);
     expect(buttons().every(button => !button.disabled)).toBe(true);
     buttons()[1]!.click();
-    await vi.waitFor(() => expect(answers).toEqual([['card-1234567', 'allow']]));
+    await waitFor(() => expect(answers).toEqual([['card-1234567', 'allow']]));
     expect(buttons().every(button => button.disabled)).toBe(true);
     expect(timeline.querySelector('.approval-card')?.textContent).toContain('Sending your answer to ChatGPT');
     // The page found a different card: nothing was pressed, and the row says so.
     card = { ...card, answer: { choice: 'allow', outcome: 'card_changed' } };
-    await vi.waitFor(() => expect(timeline.querySelector('.approval-card')?.textContent).toContain('Nothing was pressed'), { timeout: 4000 });
+    await waitFor(() => expect(timeline.querySelector('.approval-card')?.textContent).toContain('Nothing was pressed'), { timeout: 4000 });
   });
 
   it('keeps only the newest unanswered approval row live; older ones read as past, without buttons', async () => {
@@ -153,7 +153,7 @@ describe('ChatGPT\'s approval card in the timeline', () => {
       approvalCard: () => ({ id: 'card-1', lines: ['Allow ChatGPT to use Chat On Steroids Core?', 'Start a worker.'], allow: true, answer: null })
     });
     const timeline = w.document.getElementById('timeline')!;
-    await vi.waitFor(() => expect(timeline.querySelectorAll('.approval-card')).toHaveLength(1));
+    await waitFor(() => expect(timeline.querySelectorAll('.approval-card')).toHaveLength(1));
     const rows = [...timeline.querySelectorAll('.approval-wait')];
     expect(rows).toHaveLength(3);
     expect(rows.filter(row => row.classList.contains('is-waiting'))).toHaveLength(1);
@@ -169,7 +169,7 @@ describe('ChatGPT\'s approval card in the timeline', () => {
       approvalCard: () => ({ id: 'card-7654321', lines: ['Gmail', 'Allow ChatGPT to use Gmail?', 'External app access is unavailable in this conversation'], allow: false, answer: null })
     });
     const timeline = w.document.getElementById('timeline')!;
-    await vi.waitFor(() => expect(timeline.querySelector('.approval-card button')).not.toBeNull());
+    await waitFor(() => expect(timeline.querySelector('.approval-card button')).not.toBeNull());
     const [deny, allow] = [...timeline.querySelectorAll<HTMLButtonElement>('.approval-card button')];
     expect(deny!.disabled).toBe(false);
     expect(allow!.disabled).toBe(true);
@@ -183,11 +183,11 @@ it('shows a strict-mode refusal notice in the interface language', async () => {
   const { w } = await boot([{ seq: 1, time: T0, source: 'app', kind: 'progress', progressId: 'strict-chat-refusal:one',
     message: text(UNTRUSTED_NOTICE) } as SessionEvent]);
   const timeline = w.document.getElementById('timeline')!;
-  await vi.waitFor(() => expect(timeline.textContent).toContain('untrusted chat was refused'));
+  await waitFor(() => expect(timeline.textContent).toContain('untrusted chat was refused'));
   const { setLanguage } = await import('../src/renderer/i18n.js');
   setLanguage('de');
   try {
-    await vi.waitFor(() => expect(timeline.textContent).toContain('Chat vertrauen'));
+    await waitFor(() => expect(timeline.textContent).toContain('Chat vertrauen'));
     expect(timeline.textContent).not.toContain('untrusted chat was refused');
   } finally { setLanguage('en'); }
 });
@@ -459,7 +459,7 @@ it('stops counting a turn the app no longer sees running, even when nothing new 
   api.getSessionControls = async (id: string) => ({ ok: true, data: { ...(await original(id)).data, activeTurnId: null } });
   try {
     vi.setSystemTime(Date.now() + 5 * 60_000);
-    await vi.waitFor(() => expect(w.document.getElementById('chatState')!.textContent).not.toMatch(/^Working for /), { timeout: 5_000 });
+    await waitFor(() => expect(w.document.getElementById('chatState')!.textContent).not.toMatch(/^Working for /), { timeout: 5_000 });
   } finally { vi.useRealTimers(); }
 });
 
@@ -490,7 +490,7 @@ it('takes the stopped line away when the page is back, even when nothing new arr
   stopped = false;
   try {
     vi.setSystemTime(Date.now() + 60_000);
-    await vi.waitFor(() => expect(w.document.getElementById('chatState')!.textContent).toBe(''), { timeout: 5_000 });
+    await waitFor(() => expect(w.document.getElementById('chatState')!.textContent).toBe(''), { timeout: 5_000 });
   } finally { vi.useRealTimers(); }
 });
 

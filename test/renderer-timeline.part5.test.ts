@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { JSDOM, T0, boot, groupTitle, latestCallTitle, lineMoves, nativeStep, pressInComposer, sendDuringTurn, settle, settleHistoryFrame, slash, summary, text, toolCall, typed, typedDuringTurn, type InputEntry, type LocalProject, type SessionEvent, type SessionSummary } from './renderer-timeline.harness.js';
+import { JSDOM, T0, boot, groupTitle, latestCallTitle, lineMoves, nativeStep, pressInComposer, sendDuringTurn, settle, settleHistoryFrame, slash, summary, text, toolCall, typed, typedDuringTurn, waitFor, type InputEntry, type LocalProject, type SessionEvent, type SessionSummary } from './renderer-timeline.harness.js';
 
 vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTerminal: () => ({
   update: vi.fn(), show: vi.fn(), hide: vi.fn(), hasTabs: () => false,
@@ -617,16 +617,16 @@ it('finds in the open chat with Cmd/Ctrl+F, steps through matches and closes wit
   expect(w.document.activeElement).toBe(field);
   field.value = 'windows installer';
   field.dispatchEvent(new w.Event('input', { bubbles: true }));
-  await vi.waitFor(() => expect(w.document.getElementById('chatFindCount')!.textContent).toBe('2 of 2'));
+  await waitFor(() => expect(w.document.getElementById('chatFindCount')!.textContent).toBe('2 of 2'));
   expect(find).toHaveBeenCalledWith(summary(rows).id, 'windows installer');
   field.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-  await vi.waitFor(() => expect(w.document.getElementById('chatFindCount')!.textContent).toBe('1 of 2'));
+  await waitFor(() => expect(w.document.getElementById('chatFindCount')!.textContent).toBe('1 of 2'));
   field.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true, cancelable: true }));
-  await vi.waitFor(() => expect(w.document.getElementById('chatFindCount')!.textContent).toBe('2 of 2'));
+  await waitFor(() => expect(w.document.getElementById('chatFindCount')!.textContent).toBe('2 of 2'));
   find.mockResolvedValueOnce({ ok: true, data: [] });
   field.value = 'linux';
   field.dispatchEvent(new w.Event('input', { bubbles: true }));
-  await vi.waitFor(() => expect(w.document.getElementById('chatFindCount')!.textContent).toBe('No matches'));
+  await waitFor(() => expect(w.document.getElementById('chatFindCount')!.textContent).toBe('No matches'));
   field.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
   expect(bar.hidden).toBe(true);
 });

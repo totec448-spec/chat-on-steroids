@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BOOKMARK_EXCERPT_MAX, JSDOM, T0, boot, closeDom, menuItem, settle, summary, text, toolCall, type SessionEvent } from './renderer-timeline.harness.js';
+import { BOOKMARK_EXCERPT_MAX, JSDOM, T0, boot, closeDom, menuItem, settle, summary, text, toolCall, waitFor, type SessionEvent } from './renderer-timeline.harness.js';
 
 vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTerminal: () => ({
   update: vi.fn(), show: vi.fn(), hide: vi.fn(), hasTabs: () => false,
@@ -803,12 +803,12 @@ describe('a formula in an answer', () => {
     expect(rightClick(w, display.querySelector('.katex-html .mord')!)).toBe(true);
     expect([...w.document.querySelectorAll<HTMLElement>('.row-menu .row-menu-item')].map(item => item.textContent)).toEqual(['Copy LaTeX', 'Copy MathML']);
     menuItem(w, 'copy-latex').click();
-    await vi.waitFor(() => expect(writeClipboard).toHaveBeenLastCalledWith(tex));
+    await waitFor(() => expect(writeClipboard).toHaveBeenLastCalledWith(tex));
     expect(w.document.querySelector('.row-menu')).toBeNull();
 
     rightClick(w, w.document.querySelector('.ev-assistant_message .math-inline')!);
     menuItem(w, 'copy-mathml').click();
-    await vi.waitFor(() => expect(writeClipboard).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(writeClipboard).toHaveBeenCalledTimes(2));
     const mathml = String((writeClipboard.mock.calls as unknown as string[][])[1]![0]);
     expect(mathml).toMatch(/^<math xmlns="http:\/\/www\.w3\.org\/1998\/Math\/MathML">/);
     expect(mathml).toContain(String.raw`<annotation encoding="application/x-tex">a\neq 0</annotation>`);
@@ -816,7 +816,7 @@ describe('a formula in an answer', () => {
     await append([answer(2, [first, '', String.raw`\[`, String.raw`e^{i\pi}+1=0`, String.raw`\]`, '', 'End'].join('\n'))]);
     rightClick(w, w.document.querySelectorAll('.ev-assistant_message .math-display')[1]!);
     menuItem(w, 'copy-latex').click();
-    await vi.waitFor(() => expect(writeClipboard).toHaveBeenLastCalledWith(String.raw`e^{i\pi}+1=0`));
+    await waitFor(() => expect(writeClipboard).toHaveBeenLastCalledWith(String.raw`e^{i\pi}+1=0`));
   });
 
   it('leaves a right click on prose, or on LaTeX it could not draw, without a formula menu', async () => {
