@@ -8125,6 +8125,8 @@ const providerHistoryBackoffUntil = new Map<string, number>();
 const PROVIDER_HISTORY_STREAK_HOLDS_MS = [0, 120_000, 240_000, 480_000, 900_000];
 const PROVIDER_HISTORY_STREAK_RESET_MS = 15 * 60_000;
 const providerHistoryStreaks = new Map<string, { strikes: number; until: number }>();
+/** The hold deadline a deferred pickup was last logged for, so each hold is logged once. */
+const pickupHeldLogged = new Map<string, number>();
 type ProviderDeferredColdStart = {
   repair: Repair;
   pickup: { replyId: string; dueAt: number; attempts: number; expiresAt: number; stoppedAt?: number } | null;
@@ -8158,6 +8160,10 @@ function noteProviderHistoryBackoff(conversationId: string, observations: readon
       : item.time >= streak.until ? streak.strikes + 1 : streak.strikes;
     const floor = item.time + PROVIDER_HISTORY_STREAK_HOLDS_MS[Math.min(strikes, PROVIDER_HISTORY_STREAK_HOLDS_MS.length - 1)]!;
     until = Math.max(until, item.retryAt!, floor);
+    if (strikes > (streak?.strikes ?? 0)) {
+      logInfo(`bridge: ${conversationId} history was limited again after its wait (retry ${strikes}) — ` +
+        `holding automatic recovery ${Math.ceil((until - item.time) / 60_000)} minutes`);
+    }
     providerHistoryStreaks.set(conversationId, { strikes, until: Math.max(streak && strikes ? streak.until : 0, until) });
   }
   if (!until) return;
@@ -9634,7 +9640,16 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
     // A reload inside a history limit cannot bring the page back and can extend the limit. Counting
     // it anyway, at queue time, let it wait out the limit and then run with the next one due right
     // behind it (2026-10-30: two of three reloads 61 seconds apart). It is counted when it can run.
-    if (providerHistoryBackoff(reply.conversationId, now) !== null) continue;
+    const limitedUntil = providerHistoryBackoff(reply.conversationId, now);
+    if (limitedUntil !== null) {
+      if (pickupHeldLogged.get(reply.conversationId) !== limitedUntil) {
+        pickupHeldLogged.set(reply.conversationId, limitedUntil);
+        logInfo(`bridge: next automation/input step in ${reply.conversationId} waits for its history limit to end ` +
+          `(${Math.ceil((limitedUntil - now) / 1000)} s) — no reload is spent inside it`);
+      }
+      continue;
+    }
+    pickupHeldLogged.delete(reply.conversationId);
     if (!reply.queued && goalDraftBusy(reply.conversationId)) {
       notePickupActivity(reply.conversationId);
       continue;
@@ -11936,6 +11951,7 @@ export function resetBridgeForTests(): void {
   clearUnattributedIncident();
   providerHistoryBackoffUntil.clear();
   providerHistoryStreaks.clear();
+  pickupHeldLogged.clear();
   providerDeferredColdStarts.clear();
   activeUntil.clear();
   lastRecoverySweepTickAt = 0;

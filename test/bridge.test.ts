@@ -11698,6 +11698,9 @@ describe('unattributed activity recovery', () => {
         await vi.advanceTimersByTimeAsync(hold!.deadline - Date.now() + 1_000);
         expect(await limited(60_000)).toBe(expected);
       }
+      // Each longer hold says why in the log, once per failed retry.
+      expect(getLog().filter(entry => entry.message.includes(`${PRIME} history was limited again after its wait`))
+        .map(entry => /holding automatic recovery (\d+) minutes/.exec(entry.message)?.[1])).toEqual(['2', '4', '8', '15', '15']);
       // A longer Retry-After from ChatGPT still wins.
       const [held] = (await sessionControlsFor(session.id)).recovery ?? [];
       await vi.advanceTimersByTimeAsync(held!.deadline - Date.now() + 1_000);
@@ -16549,6 +16552,8 @@ describe('the goal loop over the bridge', () => {
         expect(await repairFor(), `no reload inside the limit (minute ${minute + 1})`).toBeUndefined();
         expect(goal.goalPendingReplyFor(chat)?.pickupAttempts ?? 0).toBe(0);
       }
+      // The wait is logged once for the hold, not on every pass.
+      expect(getLog().filter(entry => entry.message.includes(`next automation/input step in ${chat} waits for its history limit`))).toHaveLength(1);
 
       await vi.advanceTimersByTimeAsync(retryAt - Date.now() + 1_000);
       await sweepStaleSwarm(Date.now());
