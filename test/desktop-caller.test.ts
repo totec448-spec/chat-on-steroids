@@ -58,11 +58,12 @@ it('runs a desktop call from a known chat at once', async () => {
 it('waits for the page to prove a request that arrived before its evidence, then runs it', async () => {
   const { call, ran } = guarded();
   const pending = call({ requestId: 'late-request' });
-  await new Promise(resolve => setTimeout(resolve, 20));
+  await new Promise(resolve => setTimeout(resolve, 150));
   expect(ran).toEqual([]);
   observeRequestCorrelation({ requestId: 'late-request', conversationId: 'chat-a', sessionId: 'session-a', messageId: 'm1', tool: 'computer', observedAt: Date.now() });
   expect((await pending).isError).toBeUndefined();
   expect(ran).toEqual(['computer']);
+  expect(getLog().some(entry => /desktop: computer waited \d+ ms for its request late-request to be tied to a chat, then ran/.test(entry.message))).toBe(true);
 });
 
 it('refuses a request no page ever proves once the evidence window has passed', async () => {

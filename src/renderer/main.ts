@@ -926,6 +926,11 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     if (state && (!requestedSettings || requestedSettings.controlApi?.enabled === patch.controlApi?.enabled)) {
       $<HTMLInputElement>('controlApiEnabled').checked = state.config.controlApi?.enabled === true;
     }
+    // And for desktop control without a known chat (CodeRabbit on #1938): a box shown off while the
+    // saved value is still on would misstate what the desktop tools allow.
+    if (state && (!requestedSettings || requestedSettings.ui.desktopUnattributed === patch.ui.desktopUnattributed)) {
+      $<HTMLInputElement>('desktopUnattributed').checked = state.config.ui.desktopUnattributed === true;
+    }
     if (state && (!requestedSettings || requestedSettings.projects?.codeCheckpoints === patch.projects?.codeCheckpoints)) {
       $<HTMLInputElement>('codeCheckpoints').checked = state.config.projects?.codeCheckpoints === true;
     }
