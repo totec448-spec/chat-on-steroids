@@ -734,6 +734,8 @@ export interface CompanionDiagnostics {
   tab: CompanionTabDiagnostics | null;
   /** For the diagnostics report: names, versions, counts and booleans only. Absent from older extensions. */
   environment?: CompanionEnvironment | null;
+  /** The app language this extension worker applied, the one in its storage, and why not (2026-10-30). */
+  language?: { applied: string | null; stored: string | null; error: string | null } | null;
 }
 
 export interface CompanionEnvironment {
