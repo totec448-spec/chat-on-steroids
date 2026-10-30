@@ -11607,8 +11607,11 @@ describe('unattributed activity recovery', () => {
       expect(await notices()).toHaveLength(1);
       // The one notice keeps the first deadline ChatGPT gave, for the timeline to show (#1355).
       expect((await notices())[0]).toMatchObject({ blocking: true, retryAt: firstRetryAt });
-      // Whichever hold shows, its deadline is the newest Retry-After, though only one notice was written.
-      expect((await sessionControlsFor(session.id)).recovery?.map(hold => hold.deadline)).toEqual([retryAt]);
+      // Whichever hold shows, it lasts at least to the newest Retry-After, though only one notice was
+      // written; retries that kept being limited hold it longer (2026-10-30).
+      const holds = (await sessionControlsFor(session.id)).recovery ?? [];
+      expect(holds).toHaveLength(1);
+      expect(holds[0]!.deadline).toBeGreaterThanOrEqual(retryAt);
       // A passing failure in between does not change the limit: it is still one notice (2026-10-12).
       await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: 'history-limit-repeat', recoverable: false, text: 'Something else failed' }]);
       await events(PRIME, [{ kind: 'chat_error', time: Date.now() + 1, turnId: 'history-limit-repeat', recoverable: false, blocking: true, retryAt: Date.now() + 30_000, text: limit }]);
@@ -11661,6 +11664,51 @@ describe('unattributed activity recovery', () => {
     } finally {
       gate.release(); held.mockRestore();
     }
+  });
+
+  it('backs off further each time a retry after the history limit is limited again (2026-10-30)', async () => {
+    // A 327k-token chat was limited for half an hour: every reload after the 60-second hold drew
+    // another 429, so the chat was reloaded five times inside the limit and never came back.
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const { setGoalSwitchNow } = await import('../src/main/goal.js');
+      await setGoalSwitchNow(PRIME, 'loop', true, true);
+      await events(PRIME, [
+        { kind: 'model_selection', time: Date.now(), model: 'GPT-5.6 Sol', reasoningEffort: 'high' },
+        openTurn('history-limit-streak')
+      ]);
+      await attributed(PRIME, false, Date.now());
+      const session = (await findSessionByConversation(PRIME))!;
+      const limit = 'ChatGPT temporarily rate-limited loading this conversation history.';
+      const limited = async (retryAfterMs: number) => {
+        await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: 'history-limit-streak', recoverable: false,
+          blocking: true, retryAt: Date.now() + retryAfterMs, text: limit }]);
+        const [hold] = (await sessionControlsFor(session.id)).recovery ?? [];
+        return hold!.deadline - Date.now();
+      };
+      // The first limit is held exactly as long as ChatGPT asked.
+      expect(await limited(60_000)).toBe(60_000);
+      // A second limit while the first still holds is the same episode, not a failed retry.
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(await limited(60_000)).toBe(60_000);
+      // Each retry that is limited again waits longer: 2, 4, 8, then 15 minutes, and stays there.
+      for (const expected of [120_000, 240_000, 480_000, 900_000, 900_000]) {
+        const [hold] = (await sessionControlsFor(session.id)).recovery ?? [];
+        await vi.advanceTimersByTimeAsync(hold!.deadline - Date.now() + 1_000);
+        expect(await limited(60_000)).toBe(expected);
+      }
+      // Each longer hold says why in the log, once per failed retry.
+      expect(getLog().filter(entry => entry.message.includes(`${PRIME} history was limited again after its wait`))
+        .map(entry => /holding automatic recovery (\d+) minutes/.exec(entry.message)?.[1])).toEqual(['2', '4', '8', '15', '15']);
+      // A longer Retry-After from ChatGPT still wins.
+      const [held] = (await sessionControlsFor(session.id)).recovery ?? [];
+      await vi.advanceTimersByTimeAsync(held!.deadline - Date.now() + 1_000);
+      expect(await limited(20 * 60_000)).toBe(20 * 60_000);
+      // A limit that comes back after a quiet quarter of an hour starts over.
+      await vi.advanceTimersByTimeAsync(20 * 60_000 + 15 * 60_000 + 1_000);
+      expect(await limited(60_000)).toBe(60_000);
+    } finally { vi.useRealTimers(); }
   });
 
   it('refuses a pre-existing repair handout while a newer history Retry-After is active', async () => {
@@ -16236,7 +16284,12 @@ describe('the goal loop over the bridge', () => {
       await sweepStaleSwarm(Date.now());
       expect(recoveryBrowserWake).not.toHaveBeenCalled();
 
+      // The pickup is not even queued inside the limit (2026-10-30), so the start comes with the
+      // first maintenance pass after Retry-After rather than on its exact millisecond.
       await vi.advanceTimersByTimeAsync(60_001);
+      expect(recoveryBrowserWake).not.toHaveBeenCalled();
+      await sweepStaleSwarm(Date.now());
+      await vi.advanceTimersByTimeAsync(1);
       expect(recoveryBrowserWake).toHaveBeenCalledTimes(1);
       const authority = recoveryBrowserWake.mock.calls[0]?.[3];
       expect(await authority?.current()).toBe(true);
@@ -16462,6 +16515,62 @@ describe('the goal loop over the bridge', () => {
       input.resetInputForTests();
       vi.useRealTimers();
     }
+  });
+
+  it('spends no pickup reload while the history limit holds, and keeps the full gap after a delayed one (2026-10-30)', async () => {
+    // Live: reload 1 was counted when queued, sat seven minutes behind the history limit, and
+    // reload 2 followed it 61 seconds later — still inside the limit — burning two of three.
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = 'cafe0178-0000-4000-8000-000000000178';
+      const goal = await import('../src/main/goal.js');
+      await goal.setGoalSwitchNow(chat, 'goal', true);
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'work', messageId: 'limited-pickup-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'limited-pickup-turn' }
+      ] } });
+      await vi.advanceTimersByTimeAsync(1);
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'turn_end', time: Date.now(), turnId: 'limited-pickup-turn', outcome: 'completed' },
+        { kind: 'assistant_message', time: Date.now(), messageId: 'limited-pickup-final', turnId: 'limited-pickup-turn',
+          text: 'First part done.', state: 'final', final: true, goalEligible: true, activeNow: true }
+      ] } });
+      const repairFor = async () => (await request('GET', '/status')).body.repairs
+        ?.find((item: { conversationId: string }) => item.conversationId === chat);
+
+      // Just before the first pickup is due, ChatGPT limits the history for seven minutes.
+      await vi.advanceTimersByTimeAsync(2 * 60_000 - 10_000);
+      const retryAt = Date.now() + 7 * 60_000;
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'chat_error', time: Date.now(), recoverable: false, blocking: true, retryAt,
+          text: 'ChatGPT temporarily rate-limited loading this conversation history.' }
+      ] } });
+      for (let minute = 0; minute < 6; minute++) {
+        await vi.advanceTimersByTimeAsync(60_000);
+        await sweepStaleSwarm(Date.now());
+        expect(await repairFor(), `no reload inside the limit (minute ${minute + 1})`).toBeUndefined();
+        expect(goal.goalPendingReplyFor(chat)?.pickupAttempts ?? 0).toBe(0);
+      }
+      // The wait is logged once for the hold, not on every pass.
+      expect(getLog().filter(entry => entry.message.includes(`next automation/input step in ${chat} waits for its history limit`))).toHaveLength(1);
+
+      await vi.advanceTimersByTimeAsync(retryAt - Date.now() + 1_000);
+      await sweepStaleSwarm(Date.now());
+      const first = await repairFor();
+      expect(first).toMatchObject({ reason: 'goal' });
+      await request('GET', `/status?repaired=${first.token}&repairAction=reloaded`);
+      expect(goal.goalPendingReplyFor(chat)).toMatchObject({ pickupAttempts: 1 });
+
+      // The second reload keeps its full five-minute gap from the reload that actually ran.
+      await vi.advanceTimersByTimeAsync(5 * 60_000 - 10_000);
+      await sweepStaleSwarm(Date.now());
+      expect(await repairFor()).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(20_000);
+      await sweepStaleSwarm(Date.now());
+      expect(await repairFor()).toMatchObject({ reason: 'goal' });
+      expect(goal.goalPendingReplyFor(chat)).toMatchObject({ pickupAttempts: 2 });
+    } finally { vi.useRealTimers(); }
   });
 
   it('gives a queued head the bounded pickup schedule without an enabled Goal', async () => {

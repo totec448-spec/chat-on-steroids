@@ -8114,6 +8114,19 @@ const TURN_SCOPED_REPAIRS: ReadonlySet<Repair['reason']> = new Set(['unattribute
 const repairsInFlight = new Map<string, Repair>();
 /** Exact provider Retry-After deadline for conversation-history reads. It delays browser recovery; it never creates one. */
 const providerHistoryBackoffUntil = new Map<string, number>();
+/*
+ * A history limit that answers the retry after its own wait with another 429 is still running,
+ * and an exact one-minute hold sends the next reload straight back into it. Measured 2026-10-30:
+ * a 327k-token chat was limited for half an hour while every reload after the 60-second hold drew
+ * another 429. Each limited retry holds longer, the same steps the page's own Retry presses take
+ * (content.js LOAD_FAILURE_LIMITED_BACKOFF_MS); ChatGPT's own longer Retry-After still wins. A
+ * limit that returns after a quiet quarter of an hour starts over.
+ */
+const PROVIDER_HISTORY_STREAK_HOLDS_MS = [0, 120_000, 240_000, 480_000, 900_000];
+const PROVIDER_HISTORY_STREAK_RESET_MS = 15 * 60_000;
+const providerHistoryStreaks = new Map<string, { strikes: number; until: number }>();
+/** The hold deadline a deferred pickup was last logged for, so each hold is logged once. */
+const pickupHeldLogged = new Map<string, number>();
 type ProviderDeferredColdStart = {
   repair: Repair;
   pickup: { replyId: string; dueAt: number; attempts: number; expiresAt: number; stoppedAt?: number } | null;
@@ -8135,11 +8148,23 @@ function providerHistoryBackoff(conversationId: string, now = Date.now()): numbe
 function noteProviderHistoryBackoff(conversationId: string, observations: readonly ChatObservation[]): void {
   const now = Date.now();
   for (const [id, deadline] of providerHistoryBackoffUntil) if (deadline <= now) providerHistoryBackoffUntil.delete(id);
+  for (const [id, streak] of providerHistoryStreaks) if (now - streak.until > PROVIDER_HISTORY_STREAK_RESET_MS) providerHistoryStreaks.delete(id);
   let until = providerHistoryBackoff(conversationId, now) ?? 0;
   for (const item of observations) {
     if (item.kind !== 'chat_error' || item.blocking !== true || !Number.isFinite(item.retryAt) ||
         item.retryAt! <= now || item.retryAt! - item.time > 24 * 60 * 60_000) continue;
-    until = Math.max(until, item.retryAt!);
+    // Only a limit seen after the previous hold ran out is a failed retry; one inside the hold, or
+    // a replay of an older notice, belongs to the episode already counted.
+    const streak = providerHistoryStreaks.get(conversationId);
+    const strikes = !streak || item.time - streak.until > PROVIDER_HISTORY_STREAK_RESET_MS ? 0
+      : item.time >= streak.until ? streak.strikes + 1 : streak.strikes;
+    const floor = item.time + PROVIDER_HISTORY_STREAK_HOLDS_MS[Math.min(strikes, PROVIDER_HISTORY_STREAK_HOLDS_MS.length - 1)]!;
+    until = Math.max(until, item.retryAt!, floor);
+    if (strikes > (streak?.strikes ?? 0)) {
+      logInfo(`bridge: ${conversationId} history was limited again after its wait (retry ${strikes}) — ` +
+        `holding automatic recovery ${Math.ceil((until - item.time) / 60_000)} minutes`);
+    }
+    providerHistoryStreaks.set(conversationId, { strikes, until: Math.max(streak && strikes ? streak.until : 0, until) });
   }
   if (!until) return;
   providerHistoryBackoffUntil.set(conversationId, until);
@@ -9612,6 +9637,19 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
     }
     if (watch.stoppedAt || watch.attempts >= BROWSER_PICKUP_MAX_ATTEMPTS) continue;
     if (now < watch.dueAt || now < reply.listenUntil) continue;
+    // A reload inside a history limit cannot bring the page back and can extend the limit. Counting
+    // it anyway, at queue time, let it wait out the limit and then run with the next one due right
+    // behind it (2026-10-30: two of three reloads 61 seconds apart). It is counted when it can run.
+    const limitedUntil = providerHistoryBackoff(reply.conversationId, now);
+    if (limitedUntil !== null) {
+      if (pickupHeldLogged.get(reply.conversationId) !== limitedUntil) {
+        pickupHeldLogged.set(reply.conversationId, limitedUntil);
+        logInfo(`bridge: next automation/input step in ${reply.conversationId} waits for its history limit to end ` +
+          `(${Math.ceil((limitedUntil - now) / 1000)} s) — no reload is spent inside it`);
+      }
+      continue;
+    }
+    pickupHeldLogged.delete(reply.conversationId);
     if (!reply.queued && goalDraftBusy(reply.conversationId)) {
       notePickupActivity(reply.conversationId);
       continue;
@@ -11912,6 +11950,8 @@ export function resetBridgeForTests(): void {
   bridgeError = null;
   clearUnattributedIncident();
   providerHistoryBackoffUntil.clear();
+  providerHistoryStreaks.clear();
+  pickupHeldLogged.clear();
   providerDeferredColdStarts.clear();
   activeUntil.clear();
   lastRecoverySweepTickAt = 0;
