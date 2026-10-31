@@ -809,6 +809,15 @@ function chatHeldElsewhere(conversationId: string, browser: string | null): bool
   return holders.length > 0 && !holders.includes(browser);
 }
 
+/** The extension asks again every pass while an update is held: each reason is logged once a minute. */
+const updateHoldLoggedAt = new Map<string, number>();
+function logUpdateHold(hold: string, line: string): void {
+  const now = Date.now(), last = updateHoldLoggedAt.get(hold);
+  if (last !== undefined && now - last < 60_000 && now >= last) return;
+  updateHoldLoggedAt.set(hold, now);
+  logInfo(line);
+}
+
 /**
  * "Open in ChatGPT" for a chat this app knows, shown by the extension instead of the OS.
  *
@@ -2831,12 +2840,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // under it. The extension reads `hold` and asks again on a later pass (CodeRabbit on #1901).
     // A claim still deciding (the send check can take seconds) counts too: it may take its message next.
     if (claimsInProgress > 0 || (await listInputs()).some(inBrowserDelivery)) {
-      logInfo('bridge: the extension update waits: a message is being sent');
+      logUpdateHold('sending', 'bridge: the extension update waits: a message is being sent');
       return json(res, 200, { ready: false, hold: 'sending' }, origin);
     }
     // A tool call that started after the extension's last /status holds it too: the reload would cut
     // off the page that is waiting for its result.
-    if (runningToolCalls() > 0) return json(res, 200, { ready: false, hold: 'app-busy' }, origin);
+    if (runningToolCalls() > 0) {
+      logUpdateHold('app-busy', 'bridge: the extension update waits: a tool call is running in this app');
+      return json(res, 200, { ready: false, hold: 'app-busy' }, origin);
+    }
     const prepared = prepareExtensionUpdate(extensionBuildOf(req));
     // The extension reloads now: that browser takes no new message until it is back.
     if (prepared?.ready) extensionReloads.set(browserOf(req) ?? '', Date.now() + EXTENSION_RELOAD_PAUSE_MS);
