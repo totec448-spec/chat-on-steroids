@@ -2463,7 +2463,10 @@ skips a chat held by another browser for every browser except the chosen built-i
 may not claim it (#1960; before, such a chat's recovery sat with nobody able to take it). A browser that may not
 claim (not chosen, or out of date) is handed no repair that needs a claim, except a stalled-tab repair for a
 chat it holds, which `/repairs/claim` lets that holder take (`holdsStalledTab`): thawing its own frozen tab opens
-nothing new, and only it can; the chosen browser does not take a stalled repair over. `browser-proof.ts` keeps, across restarts, the version last seen there and
+nothing new, and only it can; the chosen browser does not take a stalled repair over. With "browser only" on, the
+chosen browser is not handed a repair for a chat another browser holds (it may not open it): the repair stays
+queued without spending offers, logged once per episode. A refused claim from a browser that is not chosen is
+logged once a minute per chat. `browser-proof.ts` keeps, across restarts, the version last seen there and
 ChatGPT's last signed-in answer, so a closed browser keeps its state and a logout stays a logout;
 a live answer always wins. The extension reports presence and that answer on its own
 (`POST /browser/presence`), from ChatGPT's `/api/auth/session` in an existing regular-profile tab,
