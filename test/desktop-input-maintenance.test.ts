@@ -909,6 +909,21 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     expect(restarted.create).not.toHaveBeenCalled();
     expect(restarted.fetch.mock.calls.some(([url]) => new URL(url).pathname === '/input/opening-unavailable')).toBe(true);
   });
+  // #1950 follow-up: the app proved nothing reached the lost tab and grants a fresh one.
+  it('opens a fresh tab for a lost new chat only when the app answers reopen', async () => {
+    const input = { id: firstId, conversationId: null };
+    const h = await worker([input], undefined, { inputOpenings: { [firstId]: { tab: 7, stage: 'ready', conversationId: null } } });
+    const fetch = h.fetch.getMockImplementation()!;
+    h.fetch.mockImplementation((url, init) => new URL(url).pathname === '/input/opening-unavailable'
+      ? Promise.resolve({ ok: true, status: 200, json: async () => ({ ok: true, reopen: true }) }) : fetch(url, init));
+    await h.maintain();
+    await vi.waitFor(() => expect(h.localSaved.inputOpenings?.[firstId]).toBeUndefined());
+    expect(h.create).not.toHaveBeenCalled();
+    await h.maintain();
+    expect(h.create).toHaveBeenCalledTimes(1);
+    expect(h.localSaved.inputOpenings?.[firstId]).toMatchObject({ stage: expect.any(String) });
+  });
+
   it('does not hold later input opening or the next maintenance pass behind a slow missing-tab report', async () => {
     const inputs = [{ id: firstId, conversationId: null }, { id: secondId, conversationId: null }];
     const h = await worker(inputs, undefined, { inputOpenings: { [firstId]: { tab: 7, stage: 'ready' } } });
