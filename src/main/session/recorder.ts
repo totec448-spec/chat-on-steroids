@@ -928,35 +928,45 @@ export async function repairDeterministicAttribution(affected?: ReadonlySet<stri
       let repaired = 0;
       for (const event of events) {
         if (event.kind !== 'tool_call' || event.call.attributionMethod !== 'generation' || !event.call.requestId) continue;
-        const proof = requestCorrelation(event.call.requestId);
-        if (!proof || !await getSession(proof.sessionId)) continue;
-        const same = proof.sessionId === summary.id;
-        const corrected = { ...event, call: { ...event.call, conversationId: proof.conversationId,
-          attribution: 'request_id' as const, attributionMethod: 'request_id' as const } };
-        // A provisional turn cannot establish an exact turn in a different conversation.
-        if (!same || proof.conversationId !== event.call.conversationId) delete corrected.turnId;
-        if (!same) {
-          const assets = new Map<string, string>();
-          for (const value of [event.call.args, event.call.result]) if (value.assetId) assets.set(value.assetId, 'text/plain');
-          for (const change of event.call.changes ?? []) if (change.reviewAssetId) assets.set(change.reviewAssetId, 'text/plain');
-          for (const asset of event.call.assets ?? []) assets.set(asset.id, asset.mimeType);
-          let complete = true;
-          for (const [id, mime] of assets) {
-            const bytes = await readAsset(summary.id, id);
-            if (!bytes) { complete = false; break; }
-            await writeAsset(proof.sessionId, bytes, mime);
+        try {
+          const proof = requestCorrelation(event.call.requestId);
+          if (!proof || !await getSession(proof.sessionId)) continue;
+          const same = proof.sessionId === summary.id;
+          const corrected = { ...event, call: { ...event.call, conversationId: proof.conversationId,
+            attribution: 'request_id' as const, attributionMethod: 'request_id' as const } };
+          // A provisional turn cannot establish an exact turn in a different conversation.
+          if (!same || proof.conversationId !== event.call.conversationId) delete corrected.turnId;
+          if (!same) {
+            // Logical positions belong to the source session; the destination assigns its own.
+            delete corrected.origin;
+            const assets = new Map<string, string>();
+            for (const value of [event.call.args, event.call.result]) if (value.assetId) assets.set(value.assetId, 'text/plain');
+            for (const change of event.call.changes ?? []) if (change.reviewAssetId) assets.set(change.reviewAssetId, 'text/plain');
+            for (const asset of event.call.assets ?? []) assets.set(asset.id, asset.mimeType);
+            let complete = true;
+            for (const [id, mime] of assets) {
+              const bytes = await readAsset(summary.id, id);
+              if (!bytes) { complete = false; break; }
+              await writeAsset(proof.sessionId, bytes, mime);
+            }
+            if (!complete) {
+              logInfo(`request attribution: skipped provisional repair for call ${event.call.callId}, request ${event.call.requestId}; source asset is missing`);
+              continue;
+            }
+            const existing = await readEvents(proof.sessionId, { kinds: ['tool_call'] });
+            if (!existing.some(row => row.kind === 'tool_call' && row.call.callId === event.call.callId)) {
+              const { seq: _seq, ...copy } = corrected;
+              await appendEvent(proof.sessionId, copy);
+              changed.add(proof.sessionId);
+            }
           }
-          if (!complete) continue;
-          const existing = await readEvents(proof.sessionId, { kinds: ['tool_call'] });
-          if (!existing.some(row => row.kind === 'tool_call' && row.call.callId === event.call.callId)) {
-            const { seq: _seq, ...copy } = corrected;
-            await appendEvent(proof.sessionId, copy);
-          }
+          const { seq: _seq, ...replacement } = corrected;
+          await reviseProvisionalCall(summary.id, event.call.callId, same ? replacement : null);
+          changed.add(summary.id); changed.add(proof.sessionId);
+          repairedCalls++; repaired++;
+        } catch (err) {
+          logWarn(`request attribution: provisional repair failed for call ${event.call.callId}, request ${event.call.requestId}; left pending for retry: ${(err as Error).message}`);
         }
-        const { seq: _seq, ...replacement } = corrected;
-        await reviseProvisionalCall(summary.id, event.call.callId, same ? replacement : null);
-        changed.add(summary.id); changed.add(proof.sessionId);
-        repairedCalls++; repaired++;
       }
       if (repaired) { repairedSessions++; logInfo(`request attribution: corrected ${repaired} provisional call(s) with exact request proof`); }
     }
@@ -1363,7 +1373,6 @@ export function recordToolCall(input: ToolCallInput): Promise<ToolCallRecord | n
           const conversationId = correlation?.conversationId ?? null;
           if (!conversationId && recordingContextCurrent(input.recordingContext)) {
             const context = input.recordingContext!;
-            logInfo(`request attribution: ${input.requestId} provisionally recorded in ${context.conversationId}; only observed running turn, not caller identity`);
             return { conversationId: context.conversationId, sessionId: context.sessionId,
               attribution: 'generation' as const, turnId: context.turnId };
           }
@@ -1590,7 +1599,11 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
     };
     if (target.attribution === 'generation') {
       const admitted = await recordProcessCall(sessionId, event, () => recordingContextCurrent(input.recordingContext));
-      if (!admitted) return fileToolCall(input, { conversationId: null, sessionId: null, turnId: null, attribution: 'unattributed' });
+      if (!admitted) {
+        logInfo(`request attribution: provisional admission rejected for call ${call.callId}, request ${input.requestId ?? 'none'}; recording context no longer current, retrying as unattributed`);
+        return fileToolCall(input, { conversationId: null, sessionId: null, turnId: null, attribution: 'unattributed' });
+      }
+      logInfo(`request attribution: ${input.requestId} provisionally recorded in ${target.conversationId}; only observed running turn, not caller identity`);
       notifyChanged(sessionId);
       if (input.requestId && requestCorrelation(input.requestId)) scheduleAttributionRepair(input.requestId);
       // Presentation cannot reopen a turn, bind an agent, transfer a terminal or grant

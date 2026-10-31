@@ -1,7 +1,11 @@
 import { mkdtemp, rm } from 'node:fs/promises';
+import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import * as store from '../src/main/session/store.js';
+import { getLog } from '../src/main/logger.js';
+import { positionOf } from '../src/shared/chronology.js';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { flushDurable, initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { requestCorrelation, restoreRequestCorrelations } from '../src/main/session/correlation.js';
@@ -37,7 +41,9 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await flushRecorder(); await flushSessions(); await flushDurable();
+  vi.restoreAllMocks();
   resetRecorderForTests(); resetSessionStoreForTests(); unsetSessionRootForTests(); resetDurableForTests();
+  vi.useRealTimers();
   await rm(directory, { recursive: true, force: true });
 });
 
@@ -102,10 +108,12 @@ it('gives exact request evidence precedence, even when it identifies another cha
 it('upgrades late same-chat proof without duplicating the call or losing turn boundaries', async () => {
   const id = await begin();
   const original = await record();
+  const previousOrigin = (await calls(id))[0]!.origin;
   await prove('chat-a', 'hidden-workflow');
   await flushRecorder();
   expect(await calls(id)).toHaveLength(1);
   expect((await calls(id))[0]?.call).toMatchObject({ callId: original!.callId, attributionMethod: 'request_id' });
+  expect((await calls(id))[0]?.origin).toBe(previousOrigin);
   expect((await readEvents(id, { kinds: ['turn_start'] }))).toHaveLength(1);
   expect((await getSession(id))?.provisionalToolCalls).toBe(0);
 });
@@ -114,13 +122,20 @@ it('moves late conflicting proof with overflow assets and preserves unrelated tr
   const source = await begin();
   const text = 'complete output\n'.repeat(30_000);
   const original = await record('hidden-workflow', captureRecordingContext(Date.now()), text);
+  const target = (await sessionForConversation('chat-b'))!;
+  const textBefore = 'Existing destination history';
+  for (let i = 0; i < 4; i++) await store.appendEvent(target, { kind: 'note', source: 'app', time: Date.now(),
+    message: { text: textBefore, truncated: false, chars: textBefore.length } });
   await prove('chat-b', 'hidden-workflow');
   await flushRecorder();
-  const target = (await sessionForConversation('chat-b'))!;
   expect(await calls(source)).toHaveLength(0);
   expect(await calls(target)).toHaveLength(1);
   expect((await calls(target))[0]?.call).toMatchObject({ callId: original!.callId, conversationId: 'chat-b', attributionMethod: 'request_id' });
   expect((await calls(target))[0]?.turnId).toBeUndefined();
+  const moved = (await calls(target))[0]!;
+  expect(positionOf(moved)).toBe(moved.seq);
+  expect(moved.seq).toBeGreaterThan(4);
+  expect((await readEvents(target)).at(-1)).toMatchObject({ kind: 'tool_call', call: { callId: original!.callId } });
   const transferred = (await calls(target))[0]!.call.result;
   expect(transferred.assetId).toBeTruthy();
   expect((await readAsset(target, transferred.assetId!))?.toString()).toBe(text);
@@ -128,6 +143,89 @@ it('moves late conflicting proof with overflow assets and preserves unrelated tr
   expect(await readEvents(source, { kinds: ['turn_start'] })).toHaveLength(1);
   await repairDeterministicAttribution();
   expect(await calls(target)).toHaveLength(1);
+});
+
+it.each(['asset quota', 'destination append', 'source revision'] as const)(
+  'continues repairs after a provisional %s failure and retries without duplication', async failure => {
+    const source = await begin();
+    const failed = (await record('failed-repair', captureRecordingContext(Date.now()), 'overflow result\n'.repeat(30_000)))!;
+    const healthy = (await record('healthy-repair'))!;
+    const legacy = (await record('legacy-repair', null))!;
+    // Keep the background repair timer from racing the explicitly awaited pass on slow disks.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const target = (await sessionForConversation('chat-b'))!;
+    const legacyTarget = (await sessionForConversation('chat-c'))!;
+    if (failure === 'asset quota') {
+      const write = store.writeAsset;
+      vi.spyOn(store, 'writeAsset').mockImplementation((id, ...args) => {
+        if (id === target) return Promise.reject(new Error('Session asset quota exceeded'));
+        return write(id, ...args);
+      });
+    } else if (failure === 'destination append') {
+      const append = store.appendEvent;
+      vi.spyOn(store, 'appendEvent').mockImplementation((id, event) => {
+        if (id === target && event.kind === 'tool_call' && event.call.callId === failed.callId) {
+          return Promise.reject(new Error('Simulated destination disk failure'));
+        }
+        return append(id, event);
+      });
+    } else {
+      const revise = store.reviseProvisionalCall;
+      vi.spyOn(store, 'reviseProvisionalCall').mockImplementation((id, callId, replacement) => {
+        if (id === source && callId === failed.callId) return Promise.reject(new Error('Simulated source disk failure'));
+        return revise(id, callId, replacement);
+      });
+    }
+    await prove('chat-b', 'failed-repair');
+    await prove('chat-b', 'healthy-repair');
+    await prove('chat-c', 'legacy-repair');
+    await expect(repairDeterministicAttribution()).resolves.toMatchObject({ calls: 2 });
+    expect((await calls(source)).map(row => row.call.callId)).toEqual([failed.callId]);
+    expect((await calls(target)).some(row => row.call.callId === healthy.callId)).toBe(true);
+    expect((await calls(legacyTarget)).map(row => row.call.callId)).toEqual([legacy.callId]);
+    expect(getLog().some(row => row.level === 'warn' && row.message.includes(failed.callId) && row.message.includes('failed-repair'))).toBe(true);
+    vi.restoreAllMocks();
+    await repairDeterministicAttribution();
+    expect(await calls(source)).toHaveLength(0);
+    expect((await calls(target)).map(row => row.call.callId).sort()).toEqual([failed.callId, healthy.callId].sort());
+  }
+);
+
+it('logs a missing source asset and leaves its provisional call available for repair', async () => {
+  const source = await begin();
+  const original = (await record('missing-asset', captureRecordingContext(Date.now()), 'overflow result\n'.repeat(30_000)))!;
+  await fs.rm(path.join(directory, 'sessions', source, 'assets', original.result.assetId!));
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const target = (await sessionForConversation('chat-b'))!;
+  await prove('chat-b', 'missing-asset');
+  await repairDeterministicAttribution();
+  expect(await calls(source)).toHaveLength(1);
+  expect(await calls(target)).toHaveLength(0);
+  expect(getLog().some(row => row.message.includes(original.callId) && row.message.includes('missing-asset') && row.message.includes('source asset is missing'))).toBe(true);
+});
+
+it('logs a lost recording context during asset preparation before filing the call as unattributed', async () => {
+  const source = await begin();
+  let enter!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  let release!: () => void;
+  const released = new Promise<void>(resolve => { release = resolve; });
+  const write = fs.writeFile.bind(fs);
+  let held = false;
+  vi.spyOn(fs, 'writeFile').mockImplementation(async (...args) => {
+    if (!held && String(args[0]).includes(source) && String(args[0]).includes(`${path.sep}assets${path.sep}`)) {
+      held = true; enter(); await released;
+    }
+    return write(...args);
+  });
+  const recording = record('lost-context', captureRecordingContext(Date.now()), 'overflow result\n'.repeat(30_000));
+  try {
+    await entered;
+    await recordChatObservations('chat-a', [{ kind: 'turn_end', time: Date.now(), turnId: 'turn-a', outcome: 'stopped' }]);
+  } finally { release(); }
+  expect(await recording).toMatchObject({ attributionMethod: 'unattributed', conversationId: null });
+  expect(await calls(source)).toHaveLength(0);
+  expect(getLog().some(row => row.message.includes('lost-context') && row.message.includes('recording context no longer current'))).toBe(true);
 });
 
 it('never promotes provisional history into exact correlations after a restart', async () => {
