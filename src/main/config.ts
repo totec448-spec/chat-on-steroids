@@ -431,7 +431,8 @@ const configSchema = z.object({
     // On by default since 2.1.49 (user decision 2026-10-31); see adoptStopFallback for earlier configs.
     rotateStopFallback: z.boolean().optional().default(true).catch(true),
     /** Set once the default-on stop fallback was applied to this config (adoptStopFallback). */
-    rotateStopFallbackAdopted: z.boolean().optional(),
+    // A damaged marker reads as adopted: a person's saved off is kept (CodeRabbit on #1954).
+    rotateStopFallbackAdopted: z.boolean().optional().catch(true),
     // Reading Codex's and Claude Code's own logs for the Usage page (#482). Missing means on.
     localAppUsage: z.boolean().optional().default(true),
     keepAwake: z.boolean().optional().default(true),

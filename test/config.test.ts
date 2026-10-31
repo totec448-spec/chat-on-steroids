@@ -251,6 +251,9 @@ describe('settings migration', () => {
     // Switched off after the change: it stays off.
     await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, rotateStopFallback: false } });
     expect((await loadConfig()).ui.rotateStopFallback).toBe(false);
+    // A damaged marker reads as adopted: the saved off is kept (CodeRabbit on #1954).
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...defaultConfig(), ui: { ...defaultConfig().ui, rotateStopFallback: false, rotateStopFallbackAdopted: 'yes' } }), 'utf8');
+    expect((await loadConfig()).ui.rotateStopFallback).toBe(false);
   });
   it('reads other apps’ usage for fresh and legacy settings and keeps it off once switched off', async () => {
     expect(defaultConfig().ui.localAppUsage).toBe(true);

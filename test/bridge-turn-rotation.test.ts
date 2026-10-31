@@ -355,7 +355,8 @@ describe('turn rotation (#1402)', () => {
  * the continue as an ordinary message once the stop shows. Loop stays on, and a call that arrives
  * while the stop lands is refused rather than run, so no command can run twice.
  */
-const { armRotationFence, rotationFenced } = await import('../src/main/rotation-fence.js');
+const { armRotationFence, rotationFenced, resetRotationFencesForTests, FENCE_MS } = await import('../src/main/rotation-fence.js');
+const { restoreCommands } = await import('../src/main/bridge.js');
 const { goalSwitchFor } = await import('../src/main/goal.js');
 const { rotationMessage } = await import('../src/shared/recovery.js');
 describe('stop fallback for fresh turns', () => {
@@ -405,6 +406,52 @@ describe('stop fallback for fresh turns', () => {
       expect(next).toMatchObject({ state: 'queued', text: rotationMessage() });
       expect(next).not.toHaveProperty('directTurn');
       expect((await request('GET', '/status')).body.inputs.map((input: { id: string }) => input.id)).toContain(next.id);
+    } finally { spy.mockRestore(); setRotationHoldForTests(15_000); await saveConfig({ ...config, sessions: { ...config.sessions, record: true } }); }
+  });
+
+  // CodeRabbit on #1954: the fence is in memory, the Stop it protects is durable. After a restart with
+  // that Stop still pending, the fence comes back for the rest of the Stop's budget.
+  it('brings the fence back with a fresh-turn Stop that survived a restart', async () => {
+    const config = defaultConfig();
+    await saveConfig({ ...config, sessions: { ...config.sessions, record: true }, ui: { ...config.ui, rotateStopFallback: true } });
+    setRotationHoldForTests(5_000);
+    const clock = { now: Date.now() };
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock.now);
+    try {
+      const chat = 'f0f00003-1111-4111-8111-000000000406', turn = 'g-stopfb-0-6';
+      const sessionId = await turnFor(chat, turn, 31);
+      await declineTwice(chat, sessionId, clock);
+      await (await heldCall(chat))();
+      await vi.waitFor(async () => {
+        expect((await request('GET', '/status')).body.stopTurns).toEqual([expect.objectContaining({ conversationId: chat, turnId: turn })]);
+      }, { timeout: 10_000, interval: 50 });
+      expect(rotationFenced(chat)).toBe(true);
+      await flushDurable();
+      // A restart: the in-memory fence is gone, the durable Stop is not.
+      resetRotationFencesForTests();
+      expect(rotationFenced(chat)).toBe(false);
+      await restoreCommands();
+      expect(rotationFenced(chat)).toBe(true);
+    } finally { spy.mockRestore(); setRotationHoldForTests(15_000); await saveConfig({ ...config, sessions: { ...config.sessions, record: true } }); }
+  });
+
+  // CodeRabbit on #1954: fresh turns switched off after the declines means no fallback Stop.
+  it('stops nothing once fresh turns were switched off after the declines', async () => {
+    const config = defaultConfig();
+    await saveConfig({ ...config, sessions: { ...config.sessions, record: true }, ui: { ...config.ui, rotateStopFallback: true } });
+    setRotationHoldForTests(1_000);
+    const clock = { now: Date.now() };
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => (clock.now += 5));
+    try {
+      const chat = 'f0f00003-1111-4111-8111-000000000407', turn = 'g-stopfb-0-7';
+      const sessionId = await turnFor(chat, turn, 31);
+      await declineTwice(chat, sessionId, clock);
+      const current = defaultConfig();
+      await saveConfig({ ...current, sessions: { ...current.sessions, record: true }, ui: { ...current.ui, rotateStopFallback: true, rotateTurnMinutes: 0 } });
+      await (await heldCall(chat))();
+      await new Promise(resolve => setTimeout(resolve, 900));
+      expect((await request('GET', '/status')).body.stopTurns ?? []).toEqual([]);
+      expect(rotationFenced(chat)).toBe(false);
     } finally { spy.mockRestore(); setRotationHoldForTests(15_000); await saveConfig({ ...config, sessions: { ...config.sessions, record: true } }); }
   });
 
@@ -478,7 +525,10 @@ describe('stop fallback for fresh turns', () => {
     try {
       armRotationFence('f0f00003-1111-4111-8111-000000000403', 'g-stopfb-0-3');
       expect(rotationFenced('f0f00003-1111-4111-8111-000000000403')).toBe(true);
-      vi.advanceTimersByTime(60_001);
+      // The Stop it protects may still land for 120 s: the fence outlasts that (CodeRabbit on #1954).
+      vi.advanceTimersByTime(120_000);
+      expect(rotationFenced('f0f00003-1111-4111-8111-000000000403')).toBe(true);
+      vi.advanceTimersByTime(FENCE_MS - 120_000 + 1);
       expect(rotationFenced('f0f00003-1111-4111-8111-000000000403')).toBe(false);
     } finally { vi.useRealTimers(); }
   });
