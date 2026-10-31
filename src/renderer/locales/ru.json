@@ -1,4 +1,13 @@
 {
+  "Long chats that get through ChatGPT's limits, pop-ups out of the way, and message times.": "Длинные чаты, которые переживают ограничения ChatGPT, всплывающие окна не мешают, и время сообщений.",
+  "Long chats keep going": "Длинные чаты продолжаются",
+  "When ChatGPT limits a long chat's history, the app waits instead of reloading it.": "Когда ChatGPT ограничивает историю длинного чата, приложение ждёт, а не перезагружает его.",
+  "Pop-ups out of the way": "Всплывающие окна не мешают",
+  "ChatGPT's announcements no longer block new chats or your messages.": "Объявления ChatGPT больше не блокируют новые чаты и ваши сообщения.",
+  "Your mouse stays yours": "Ваша мышь остаётся вашей",
+  "Only chats this app can name use your screen, mouse and keyboard.": "Экран, мышь и клавиатуру используют только чаты, которые это приложение может определить.",
+  "Message times": "Время сообщений",
+  "Turn on Show message times in Settings → General to see when each message was sent.": "Включите «Показывать время сообщений» в Настройки → Общие, чтобы видеть, когда отправлено каждое сообщение.",
   "Dictation unavailable": "Голосовой ввод недоступен",
   "Cancel dictation": "Отменить голосовой ввод",
   "Stop dictation": "Остановить голосовой ввод",

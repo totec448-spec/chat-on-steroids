@@ -1,4 +1,13 @@
 {
+  "Long chats that get through ChatGPT's limits, pop-ups out of the way, and message times.": "Cuộc trò chuyện dài vượt qua giới hạn của ChatGPT, cửa sổ bật lên không còn cản trở, và thời gian tin nhắn.",
+  "Long chats keep going": "Cuộc trò chuyện dài tiếp tục",
+  "When ChatGPT limits a long chat's history, the app waits instead of reloading it.": "Khi ChatGPT giới hạn lịch sử của một cuộc trò chuyện dài, ứng dụng chờ thay vì tải lại.",
+  "Pop-ups out of the way": "Cửa sổ bật lên không còn cản trở",
+  "ChatGPT's announcements no longer block new chats or your messages.": "Thông báo của ChatGPT không còn chặn cuộc trò chuyện mới hay tin nhắn của bạn.",
+  "Your mouse stays yours": "Chuột vẫn là của bạn",
+  "Only chats this app can name use your screen, mouse and keyboard.": "Chỉ những cuộc trò chuyện mà ứng dụng này xác định được mới dùng màn hình, chuột và bàn phím.",
+  "Message times": "Thời gian tin nhắn",
+  "Turn on Show message times in Settings → General to see when each message was sent.": "Bật Hiện thời gian tin nhắn trong Cài đặt → Chung để xem mỗi tin nhắn được gửi lúc nào.",
   "Dictation unavailable": "Không thể sử dụng đọc chính tả",
   "Cancel dictation": "Hủy đọc chính tả",
   "Stop dictation": "Dừng đọc chính tả",
