@@ -2911,7 +2911,7 @@ describe('automatic compaction', () => {
   // refusals must not use up the "never claimed … no page" budget, and each refusal says why. Nor do
   // the polls of a browser that may not claim it (CodeRabbit on #1953): with the built-in browser
   // chosen, Chrome still sees the chat but its polls are not offers anyone could take.
-  it.each(['one browser', 'a second, unchosen browser polling too'] as const)(
+  it.each(['one browser', 'a second, unchosen browser polling too', 'a second eligible browser polling without claiming'] as const)(
     'keeps offering a repair whose page keeps trying to claim it, and logs why each claim was refused (%s)', async variant => {
       await pair();
       const builtIn = 'd'.repeat(32), chrome = 'c'.repeat(32);
@@ -2922,8 +2922,10 @@ describe('automatic compaction', () => {
       heldRecording.conversationId = other;
       let busy: Promise<unknown> | null = null;
       try {
-        if (variant !== 'one browser') await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
-        const asker: Record<string, string> = variant === 'one browser' ? {} : { browser: builtIn, host: 'cos' };
+        const unchosen = variant === 'a second, unchosen browser polling too';
+        if (unchosen) await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+        const asker: Record<string, string> = unchosen ? { browser: builtIn, host: 'cos' } : variant === 'one browser' ? {} : { browser: 'a'.repeat(32), host: 'browser' };
+        const bystander: Record<string, string> = unchosen ? { browser: chrome, host: 'browser' } : { browser: 'b'.repeat(32), host: 'browser' };
         const session = await createSession({ conversationId });
         await compactSession(session.id);
         const offered = async (who: Record<string, string> = asker) => ((await request('POST', '/status', { body: { openConversations: [conversationId] }, ...who })).body.repairs ?? [])
@@ -2933,7 +2935,7 @@ describe('automatic compaction', () => {
         await vi.waitFor(() => expect(heldRecording.release).not.toBeNull(), { timeout: 10_000 });
         let tries = 0;
         for (let pass = 0; pass < 14; pass++) {
-          if (variant !== 'one browser') await offered({ browser: chrome, host: 'browser' });
+          if (variant !== 'one browser') await offered(bystander);
           const handout = await offered();
           if (!handout) break;
           tries += 1;
@@ -2941,7 +2943,8 @@ describe('automatic compaction', () => {
         }
         expect(tries).toBe(14);
         expect(getLog().some(entry => entry.message.includes(`${conversationId} never claimed`))).toBe(false);
-        expect(getLog().filter(entry => entry.message.includes(`refused the compaction repair claim for ${conversationId}`)).length).toBeGreaterThan(0);
+        // Said once a minute per chat and reason, not once per refusal.
+        expect(getLog().filter(entry => entry.message.includes(`refused the compaction repair claim for ${conversationId}: a chat was still saving its events`))).toHaveLength(1);
         heldRecording.release!(); heldRecording.conversationId = null; heldRecording.release = null;
         await busy; busy = null;
         // Once the write is done, the same repair is claimed.

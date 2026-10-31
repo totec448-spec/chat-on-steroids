@@ -3404,8 +3404,9 @@ When an unclaimed repair exhausts its offers the chat is marked page-less, the s
 and the user gets one notification through the stuck-chat notifier, once per episode; a page that asks for
 its chat again lifts the verdict.
 Only offers no page asked for count toward that budget (#1922): a `/repairs/claim` for the offered token
-that is refused (not current, another chat's events still being saved, replaced) proves a page and
-leaves the next offer uncounted, and the bridge logs `refused the <reason> repair claim for <chat>: <why>`
+that is refused (not current, another chat's events still being saved, replaced) proves a page: for
+2 minutes after it no offer counts (`CLAIM_ASKED_FRESH_MS`, whichever browser polls), nor does any offer to a
+browser that may not claim (`takesWork` false), and the bridge logs `refused the <reason> repair claim for <chat>: <why>`
 once a minute per chat and reason. The observation-write gate stays global: one chat's events can
 commit another's identity (a Compact & resume successor) and so revoke its handout.
 A responsive page flushes native progress and Stop before the main claim, then rechecks its
