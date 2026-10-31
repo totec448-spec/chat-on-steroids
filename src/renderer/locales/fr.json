@@ -1,4 +1,13 @@
 {
+  "Long chats that get through ChatGPT's limits, pop-ups out of the way, and message times.": "Des longues conversations qui passent les limites de ChatGPT, les fenêtres surgissantes écartées et l’heure des messages.",
+  "Long chats keep going": "Les longues conversations continuent",
+  "When ChatGPT limits a long chat's history, the app waits instead of reloading it.": "Quand ChatGPT limite l’historique d’une longue conversation, l’app attend au lieu de la recharger.",
+  "Pop-ups out of the way": "Les fenêtres surgissantes écartées",
+  "ChatGPT's announcements no longer block new chats or your messages.": "Les annonces de ChatGPT ne bloquent plus les nouvelles conversations ni vos messages.",
+  "Your mouse stays yours": "Votre souris reste la vôtre",
+  "Only chats this app can name use your screen, mouse and keyboard.": "Seules les conversations que cette app peut identifier utilisent votre écran, votre souris et votre clavier.",
+  "Message times": "Heure des messages",
+  "Turn on Show message times in Settings → General to see when each message was sent.": "Activez Afficher l’heure des messages dans Paramètres → Général pour voir quand chaque message a été envoyé.",
   "Dictation unavailable": "Dictée indisponible",
   "Cancel dictation": "Annuler la dictée",
   "Stop dictation": "Arrêter la dictée",
