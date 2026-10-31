@@ -7,12 +7,13 @@ const state = vi.hoisted(() => ({
   caps: {screen:true,control:true}, unattributed:true,
   caller: null as null | {sessionId?:string;conversationId?:string;requestId?:string},
   proofs: new Map<string,{sessionId:string;conversationId:string}>(),
-  attachment:'current', blocked:false, execute:vi.fn(), image:vi.fn(async()=> 'image/jpeg')
+  attachment:'current', blocked:false, execute:vi.fn(), image:vi.fn(async()=> 'image/jpeg'), log:vi.fn()
 }));
 vi.mock('../src/main/config.js',()=>({getConfig:()=>({multiAgent:{allowUnattributedCalls:state.unattributed}}),effectiveCapabilities:()=>state.caps}));
 vi.mock('../src/main/mcp/call-context.js',()=>({currentCall:()=>({caller:state.caller})}));
 vi.mock('../src/main/mcp/kernel.js',()=>({fail:(text:string)=>({isError:true,content:[{type:'text',text}]}),failIdentity:(text:string)=>({isError:true,content:[{type:'text',text}]})}));
 vi.mock('../src/main/browser-control.js',()=>({browserControl:{execute:state.execute}}));
+vi.mock('../src/main/logger.js',()=>({logInfo:state.log}));
 vi.mock('../src/main/session/store.js',()=>({conversationAttachment:async()=>state.attachment}));
 vi.mock('../src/main/session/correlation.js',()=>({requestCorrelation:(id:string)=>state.proofs.get(id) ?? null}));
 vi.mock('../src/main/session/blocked-chats.js',()=>({isChatBlocked:()=>state.blocked}));
@@ -33,11 +34,49 @@ const tabId='11111111-1111-4111-8111-111111111111:12';
 const pageId='22222222-2222-4222-8222-222222222222';
 beforeEach(()=>{
   state.caps={screen:true,control:true};state.unattributed=true;state.caller=null;state.attachment='current';state.blocked=false;
-  state.execute.mockReset().mockResolvedValue({value:{ok:true}});state.image.mockClear();
+  state.execute.mockReset().mockResolvedValue({value:{ok:true}});state.image.mockClear();state.log.mockClear();
   state.proofs.clear();
 });
 
 describe('Desktop browser invocation boundary',()=>{
+  it.each([
+    [{overflow:true},'retention_limit_exceeded'],
+    [{invalidBytes:true},'invalid_stream_bytes'],
+    [{pending:true},'awaiting_buffered_prefix'],
+    [{error:'private failure detail'},'capture_error'],
+    [{complete:true,terminal:true},'all_response_bytes_retained'],
+    [{terminal:true},'terminal_capture_incomplete'],
+    [{terminal:false},'response_still_in_flight']
+  ])('logs bounded stream decisions without response content (%j)',async(flags,reason)=>{
+    const value={url:'https://private.example/secret',requestId:'private-request',body:{base64:'private-bytes'},stream:{complete:false,...flags}};
+    state.execute.mockResolvedValue({value});
+    const result=await registrar().call('browser_network',{tabId,requestId:'private-request',body:true});
+    expect(result.structuredContent.value).toEqual(value);
+    expect(state.log).toHaveBeenCalledExactlyOnceWith(`browser_network stream reason=${reason} complete=${value.stream.complete}`);
+    expect(JSON.stringify(state.log.mock.calls)).not.toMatch(/private|secret|example|base64/);
+  });
+  it('logs an aborted stream without exposing its browser error and leaves finite reads to the kernel',async()=>{
+    const reg=registrar();
+    state.execute.mockResolvedValueOnce({value:{failed:'private network error',stream:{terminal:true,complete:false,error:'private network error'}}});
+    await reg.call('browser_network',{tabId,requestId:'r'});
+    expect(state.log).toHaveBeenCalledExactlyOnceWith('browser_network stream reason=network_request_failed complete=false');
+    state.log.mockClear();state.execute.mockResolvedValueOnce({value:{body:{text:'private finite body'}}});
+    await reg.call('browser_network',{tabId,requestId:'r',body:true});
+    expect(state.log).not.toHaveBeenCalled();
+  });
+  it('admits stream capture and byte pages through the actual strict schema',async()=>{
+    const reg=registrar();state.caps.control=false;
+    await reg.call('browser_network',{tabId,requestId:'main:42',stream:true,body:true,bodyOffset:65536,bodyBytes:262144});
+    expect(state.execute.mock.calls[0]![1]).toMatchObject({requestId:'main:42',stream:true,body:true,bodyOffset:65536,bodyBytes:262144});
+    state.caps.screen=false;
+    expect((await reg.call('browser_network',{tabId,requestId:'main:42',stream:true})).isError).toBe(true);
+    expect(state.execute).toHaveBeenCalledTimes(1);
+  });
+  it('rejects invalid stream page inputs while preserving legacy network calls',()=>{
+    const schema=registrar().tools.get('browser_network')!.schema;
+    for(const args of [{stream:true},{bodyBytes:1},{requestId:'r',bodyBytes:1},{requestId:'r',body:true,bodyOffset:-1},{requestId:'r',body:true,bodyOffset:0.5},{requestId:'r',body:true,bodyBytes:0},{requestId:'r',body:true,bodyBytes:262145},{requestId:'r',stream:true,clear:true},{requestId:'r',body:true,unknown:true}]) expect(schema.safeParse({tabId,...args}).success).toBe(false);
+    for(const args of [{},{clear:true},{requestId:'r',body:true},{requestId:'r',stream:true},{requestId:'r',body:true,bodyOffset:0,bodyBytes:1}]) expect(schema.safeParse({tabId,...args}).success).toBe(true);
+  });
   it('admits bounded DOM detail inspection with screen permission alone',async()=>{
     const reg=registrar();state.caps.control=false;
     expect((await reg.call('browser_snapshot',{tabId,mode:'inspect',format:'dom',selector:'main',maxNodes:30,maxChars:4000})).isError).not.toBe(true);
