@@ -606,6 +606,37 @@ describe('direct browser control over the paired bridge', () => {
 });
 
 describe('who is allowed to talk to it', () => {
+  // 2026-10-30: an extension that kept Chrome's language for weeks said nothing anywhere.
+  it('logs once when the extension\'s stored language is not the app\'s, with its last error', async () => {
+    await pair();
+    const logger = await import('../src/main/logger.js');
+    const warn = vi.spyOn(logger, 'logWarn');
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, language: 'en' } });
+    const report = (language: unknown) => request('POST', '/diagnostics', { body: { capturedAt: Date.now(), status: { connected: true, paired: true },
+      preferences: { overwrite: true, durations: false }, language } });
+    const lines = () => warn.mock.calls.map(([line]) => String(line)).filter(line => line.includes("the extension's stored language"));
+    await report({ applied: 'en', stored: 'en', error: null });
+    expect(lines()).toEqual([]);
+    await report({ applied: null, stored: null, error: 'storage read did not answer within 5 s' });
+    await report({ applied: null, stored: null, error: 'storage read did not answer within 5 s' });
+    await report({ applied: 'en', stored: 'de', error: null });
+    expect(lines()).toEqual([
+      "browser: the extension's stored language is none (it uses the browser's), the app's is en; last attempt: storage read did not answer within 5 s",
+      "browser: the extension's stored language is de, the app's is en"]);
+    // An older extension reports no language: nothing to say.
+    await report(undefined);
+    expect(lines()).toHaveLength(2);
+    // The app's language changing is a new mismatch (CodeRabbit on #1940) ...
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, language: 'fr' } });
+    await report({ applied: 'en', stored: 'de', error: null });
+    expect(lines().at(-1)).toBe("browser: the extension's stored language is de, the app's is fr");
+    // ... and once they match, the same mismatch coming back is said again.
+    await report({ applied: 'fr', stored: 'fr', error: null });
+    await report({ applied: 'en', stored: 'de', error: null });
+    expect(lines()).toHaveLength(4);
+    warn.mockRestore();
+  });
+
   // A chat tab the extension reloaded off Chrome's error page says so in the app's log, once (2.1.47 round).
   it('logs the extension\'s error-page reloads once each', async () => {
     await pair();
