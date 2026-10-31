@@ -1185,6 +1185,25 @@ it('keeps the app-wide options on the General page, not in Setup, and saves them
   await waitFor(() => expect(mounted.calls.at(-1)?.ui.followOutput).toBe(false));
 });
 
+// Message times (user request 2026-10-30): each chat row always carried its time, hidden. A General
+// switch, off unless chosen, shows it beside every message.
+it('shows message times only once the General switch is on, and hides them again when it is off', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const box = doc.getElementById('showMessageTimes') as HTMLInputElement;
+  expect(doc.querySelector('[data-panel="general"]')!.contains(box)).toBe(true);
+  expect(box.checked).toBe(false);
+  expect(doc.documentElement.classList.contains('show-message-times')).toBe(false);
+  box.checked = true;
+  box.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.showMessageTimes).toBe(true));
+  await waitFor(() => expect(doc.documentElement.classList.contains('show-message-times')).toBe(true));
+  box.checked = false;
+  box.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.showMessageTimes).toBe(false));
+  await waitFor(() => expect(doc.documentElement.classList.contains('show-message-times')).toBe(false));
+});
+
 // #924 / #1401: stable connector URLs for a tunnel of one's own, opt-in, only with secure storage.
 it('saves the stable connector URL option from For developers, and only with secure storage', async () => {
   const mounted = await mountChat();

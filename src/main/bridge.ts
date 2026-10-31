@@ -498,8 +498,29 @@ interface Command {
   progress?: { opened?: 'browser' | 'os'; step?: CommandStep; stepAt?: number };
 }
 
+/** Why a page held a queued message back, as the log says it (see `/page-note`, 2026-10-30). */
+const HELD_INPUT_REASONS: Record<string, string> = {
+  'page-moved': 'the page reloaded or moved on while it waited',
+  'chat-moved-on': 'the chat moved on while the page waited (a new message, another turn or new progress)',
+  'question-gone': 'the question it continues was no longer shown on the page while it waited',
+  'still-answering': 'ChatGPT still shows an answer running',
+  'turn-held': 'the page still holds a turn that ChatGPT no longer shows running',
+  'tool-running': 'a tool call of this chat is still running on the page',
+  'recovery-question-changed': 'its last question is not the one this automatic Continue answers',
+  'recovery-question-unreadable': 'its last question cannot be read on the page, so this automatic Continue cannot be matched to it',
+  'recovery-not-ready': 'the page could not yet prove the turn this automatic Continue answers is unfinished',
+  'no-composer': 'the page shows no message box',
+  'composer-hidden': 'its message box is covered or cannot be typed into'
+};
 /** When each page-note was last logged, by chat and heading (see `/page-note`). */
 const pageNotesLogged = new Map<string, number>();
+/** Marks a page-note key logged now, as the newest entry, so a full map evicts the oldest log, not this one. */
+function notePageNoteLogged(key: string, now: number): void {
+  pageNotesLogged.delete(key);
+  pageNotesLogged.set(key, now);
+  if (pageNotesLogged.size > 200) pageNotesLogged.delete(pageNotesLogged.keys().next().value!);
+}
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Bootstrap stages a page reports after redeeming, in order. See `commandProgress`. */
 const COMMAND_STEPS = ['revival-waiting', 'revival-busy', 'revival-draft', 'revival-editor', 'composer', 'model', 'composer-after-model', 'inserting', 'sending'] as const;
 /** Steps a wake reports while it waits, before redeeming. `revival-waiting` is what older pages send. */
@@ -5140,14 +5161,27 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       if ((err as Error).message === 'body_too_large') return tooLarge(res, origin);
       return json(res, 400, { error: 'bad_request' }, origin);
     }
+    if (body?.['note'] === 'input-held') {
+      const reason = typeof body['reason'] === 'string' && Object.hasOwn(HELD_INPUT_REASONS, body['reason']) ? body['reason'] : null;
+      const inputId = typeof body['inputId'] === 'string' && UUID_SHAPE.test(body['inputId']) ? body['inputId'] : null;
+      if (!reason || !inputId) return json(res, 400, { error: 'bad_request' }, origin);
+      const chat = conversationId(body['conversationId']);
+      // A new chat has no id before its first send: its message keys it, so two new chats stay apart.
+      const key = `held|${chat ?? `input:${inputId}`}|${reason}`;
+      const now = Date.now();
+      if (now - (pageNotesLogged.get(key) ?? 0) >= 60_000) {
+        notePageNoteLogged(key, now);
+        logInfo(`bridge: ${chat ? `the page of ${chat}` : 'a ChatGPT page'} held queued message ${inputId} back: ${HELD_INPUT_REASONS[reason]}`);
+      }
+      return json(res, 200, { ok: true }, origin);
+    }
     if (body?.['note'] !== 'announcement-closed') return json(res, 400, { error: 'bad_request' }, origin);
     const heading = typeof body['heading'] === 'string' ? body['heading'].replace(/[\u0000-\u001f\u007f"]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) : '';
     const chat = conversationId(body['conversationId']);
     const key = `${chat ?? ''}|${heading}`;
     const now = Date.now();
     if (now - (pageNotesLogged.get(key) ?? 0) >= 60_000) {
-      pageNotesLogged.set(key, now);
-      if (pageNotesLogged.size > 200) pageNotesLogged.delete(pageNotesLogged.keys().next().value!);
+      notePageNoteLogged(key, now);
       logInfo(`bridge: ${chat ? `the page of ${chat}` : 'a ChatGPT page'} closed ChatGPT's announcement` +
         `${heading ? ` "${heading}"` : ''} that covered it, by Escape`);
     }
