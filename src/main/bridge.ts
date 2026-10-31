@@ -803,6 +803,11 @@ function chatHolders(conversationId: string): string[] {
  * 2.1.21 (2026-09-30) chat A came to live in both browsers, the copy in the browser the user was
  * not working in wrote the Compact & Resume brief, and chat B was placed beside that copy.
  */
+/** Chats whose repair waits for a browser that may open them (browser only), said once per episode. */
+const browserOnlyHoldTold = new Set<string>();
+/** A refused claim from a browser that is not the chosen one, said once a minute per chat. */
+const unchosenClaimToldAt = new Map<string, number>();
+
 /** A stalled-tab repair for a chat this browser holds: the one repair a browser that is not chosen may take. */
 function holdsStalledTab(repair: Repair, conversationId: string, browser: string | null): boolean {
   return repair.reason === 'stalled' && !!browser && chatHolders(conversationId).includes(browser);
@@ -3216,7 +3221,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const [conversationId, repair] = found;
     // A browser that is not the chosen one takes no new work (#1516), except thawing its own frozen
     // tab: only the browser holding that tab can, and it opens nothing new (CodeRabbit on #1963).
-    if (unchosen && !holdsStalledTab(repair, conversationId, browserOf(req))) return json(res, 200, { allowed: false }, origin);
+    if (unchosen && !holdsStalledTab(repair, conversationId, browserOf(req))) {
+      const now = Date.now(), last = unchosenClaimToldAt.get(conversationId);
+      if (last === undefined || now - last >= 60_000 || now < last) {
+        unchosenClaimToldAt.set(conversationId, now);
+        if (unchosenClaimToldAt.size > 500) unchosenClaimToldAt.delete(unchosenClaimToldAt.keys().next().value!);
+        logInfo(`bridge: refused the ${repair.reason} repair claim for ${conversationId}: that browser is not the chosen one, which takes the repair`);
+      }
+      return json(res, 200, { allowed: false }, origin);
+    }
     const session = await getSession(repair.sessionId);
     // A Compact & resume the user pressed may act on the chat they closed: handout and claim agree.
     const current = session?.conversationId === conversationId && departureAllowsRepairFor(session, repair.reason, repair.episode) &&
@@ -10522,6 +10535,18 @@ async function takePendingRepairs(
     // the chosen built-in browser: the holder may not claim it, and the chat would sit (#1960, as
     // inputs do since #1516).
     if (!(chosen && repair.reason !== 'stalled') && chatHeldElsewhere(conversationId, browser)) continue;
+    // The chosen browser has no tab for a chat another browser holds, and with "browser only" it may
+    // not open one: offered, it would skip the repair unclaimed and spend the no-page budget on a chat
+    // that is open. It stays queued, said once, until a browser that can act asks (CodeRabbit on #1963).
+    if (chosen && repair.reason !== 'stalled' && getConfig().ui.browserOnly === true && chatHeldElsewhere(conversationId, browser)) {
+      const key = `${conversationId}:${repair.sessionId}:${repair.episode}`;
+      if (!browserOnlyHoldTold.has(key)) {
+        browserOnlyHoldTold.add(key);
+        if (browserOnlyHoldTold.size > 500) browserOnlyHoldTold.delete(browserOnlyHoldTold.values().next().value!);
+        logInfo(`bridge: the ${repair.reason} repair for ${conversationId} waits: another browser holds this chat, and "browser only" keeps the chosen built-in browser from opening it`);
+      }
+      continue;
+    }
     // A browser that may not claim (not the chosen one, or out of date) is handed no repair that needs
     // a claim: its claim is refused, and a failure it reported for a token another browser claimed
     // would requeue that claim (CodeRabbit on #1963). The holder's own frozen tab is the exception.
