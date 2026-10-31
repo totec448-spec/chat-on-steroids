@@ -2301,7 +2301,7 @@ Expanded tool arguments/results and Compact & Resume content use the chat pane's
 scrolling, without nested vertical text scrollers. Streaming compaction revisions retain the
 disclosure and unchanged sections; the timeline owner preserves the visible row or follows
 the bottom only when the reader was already there. Collapsed bodies leave layout entirely.
-Event rows (`eventRow`) and compaction blocks carry a `<time>` (hours and minutes of when the app saw the message, the question's clock too; `authoredTimeOf` only when the two are more than 5 minutes apart, as for an earlier answer read after a reload; none for a damaged time; it follows a language change; the full date in its title, `datetime`
+Event rows (`eventRow`) and compaction blocks carry a `<time>` (hours and minutes of when the app saw the message, the question's clock too; `authoredTimeOf` only when the app saw it more than 5 minutes after it was written, as for an earlier answer read after a reload; none for a damaged time; it follows a language change; the full date in its title, `datetime`
 attribute, `rowTime` in `dom.ts`). It is hidden unless `ui.showMessageTimes` (Settings → General,
 "Show message times", off by default; saved through `settings:save` like `followOutput`) puts
 `show-message-times` on the document element; then messages, images, sub-agent messages, chat

@@ -5802,7 +5802,7 @@ function eventRow(event: SessionEvent): HTMLElement {
   // after it was written (an earlier answer read after a reload) shows when it was written: ChatGPT's
   // clock and this computer's differ by seconds, so mixed, an answer read a minute before its question.
   const authored = authoredTimeOf(event);
-  const time = rowTime(authored !== undefined && Math.abs(event.time - authored) > AUTHORED_TIME_GAP_MS ? authored : event.time);
+  const time = rowTime(authored !== undefined && event.time - authored > AUTHORED_TIME_GAP_MS ? authored : event.time);
   const body = el('div', 'ev-body');
   const currentWorker = sessions.find(session => session.id === selectedId)?.origin;
   if (event.agent && event.agent !== 'prime' && !(currentWorker?.kind === 'worker' && currentWorker.agentId === event.agent)) {
