@@ -3,9 +3,15 @@ const STORAGE_KEY = 'chat-on-steroids.sidebar-order';
 const MAX_IDS = 5000;
 export const SIDEBAR_PROJECT_SCOPE = ':projects';
 type Entry = { id: string; scope: string };
+/**
+ * Dropping a row onto another place instead of between its neighbours (#1919: a chat onto a
+ * project or a group). `target` names the element under the pointer that takes the dragged row,
+ * or null; `drop` acts on it. Its highlight is `.is-drop-target`.
+ */
+export type SidebarDrop = { target: (id: string, at: Element | null) => HTMLElement | null; drop: (id: string, target: HTMLElement) => void };
 
 export function createSidebarOrder(list: HTMLElement, entries: () => Entry[], repaint: () => void,
-  dismissTooltip: () => void = () => document.getElementById('sessionTooltip')?.remove()) {
+  dismissTooltip: () => void = () => document.getElementById('sessionTooltip')?.remove(), place?: SidebarDrop) {
   const orders = new Map<string, string[]>();
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -51,7 +57,7 @@ export function createSidebarOrder(list: HTMLElement, entries: () => Entry[], re
     catch { /* Keep the order in this window when layout storage is unavailable. */ }
   }
 
-  let drag: { pointer: number; id: string; scope: string; x: number; y: number; row: HTMLElement; active: boolean; target?: string; after?: boolean } | null = null;
+  let drag: { pointer: number; id: string; scope: string; x: number; y: number; row: HTMLElement; active: boolean; target?: string; after?: boolean; onto?: HTMLElement } | null = null;
   let suppressClick = false;
   const rowId = (row: HTMLElement): string | undefined => row.dataset.sortId ?? row.dataset.id;
   const handle = (row: HTMLElement): HTMLElement => row.querySelector<HTMLElement>('[data-sort-handle]') ?? row;
@@ -59,12 +65,14 @@ export function createSidebarOrder(list: HTMLElement, entries: () => Entry[], re
     .filter(row => row.dataset.sortScope === scope && row.getClientRects().length > 0);
   function clearMarkers(): void {
     for (const row of list.querySelectorAll('.sort-before, .sort-after')) row.classList.remove('sort-before', 'sort-after');
+    for (const target of list.querySelectorAll('.is-drop-target')) target.classList.remove('is-drop-target');
   }
   function finish(commit: boolean): void {
     const current = drag;
     if (!current) return;
     drag = null;
-    if (commit && current.active && current.target) move(current.id, current.target, !!current.after, current.scope);
+    if (commit && current.active && current.onto) place?.drop(current.id, current.onto);
+    else if (commit && current.active && current.target) move(current.id, current.target, !!current.after, current.scope);
     current.row.classList.remove('is-sorting'); list.classList.remove('is-sorting'); clearMarkers();
     if (list.hasPointerCapture(current.pointer)) list.releasePointerCapture(current.pointer);
     // Normal clicks retain the original row until their selection handler has run.
@@ -99,8 +107,13 @@ export function createSidebarOrder(list: HTMLElement, entries: () => Entry[], re
       if (event.clientY < bounds.top + 28) scroll.scrollTop -= 18;
       else if (event.clientY > bounds.bottom - 28) scroll.scrollTop += 18;
     }
-    const candidates = rows(drag.scope).filter(row => rowId(row) !== drag!.id);
     clearMarkers();
+    // Over a place that takes the row (a project or a group for a chat): that, not a new position.
+    const under = place && typeof document.elementFromPoint === 'function' ? document.elementFromPoint(event.clientX, event.clientY) : null;
+    const onto = place?.target(drag.id, under) ?? undefined;
+    drag.onto = onto && list.contains(onto) ? onto : undefined;
+    if (drag.onto) { drag.onto.classList.add('is-drop-target'); drag.target = undefined; return; }
+    const candidates = rows(drag.scope).filter(row => rowId(row) !== drag!.id);
     const before = candidates.find(row => { const rect = row.getBoundingClientRect(); return event.clientY < rect.top + rect.height / 2; });
     const target = before ?? candidates.at(-1);
     drag.target = target && rowId(target); drag.after = !before;

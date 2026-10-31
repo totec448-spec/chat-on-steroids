@@ -2908,7 +2908,7 @@
   "Rename this group": "이 그룹 이름 바꾸기",
   "Delete group": "그룹 삭제",
   "Delete this group; its chats stay in the project": "이 그룹을 삭제합니다. 채팅은 프로젝트에 남습니다",
-  "Move a chat here from its menu.": "채팅 메뉴에서 여기로 옮길 수 있습니다.",
+  "Drag a chat here, or move it from its menu.": "채팅을 여기로 끌어오거나 메뉴에서 이동하세요.",
   "Show more chats in {0}": "{0}의 채팅 더 보기",
   "This project is not available": "이 프로젝트를 사용할 수 없습니다",
   "A project can hold up to 100 groups": "프로젝트에는 그룹을 최대 100개까지 만들 수 있습니다",
@@ -3692,5 +3692,16 @@
   "{0} sessions": "세션 {0}개",
   "{0} entries": "항목 {0}개",
   "{0} messages": "메시지 {0}개",
-  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "전송되지 않음: 이 새 채팅의 브라우저 탭이 닫혔거나 사라졌습니다. 메시지를 검토한 후 다시 전송하세요."
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "전송되지 않음: 이 새 채팅의 브라우저 탭이 닫혔거나 사라졌습니다. 메시지를 검토한 후 다시 전송하세요.",
+  "Move to project": "프로젝트로 이동",
+  "Move this chat to a project; its commands then run in that project's folder": "이 채팅을 프로젝트로 이동합니다. 이후 명령은 그 프로젝트 폴더에서 실행됩니다",
+  "Moved to {0}": "{0}(으)로 이동했습니다",
+  "Moved out of its project": "프로젝트에서 뺐습니다",
+  "ChatGPT keeps it where it was.": "ChatGPT에서는 원래 자리에 그대로 있습니다.",
+  "Undo": "실행 취소",
+  "Move undone": "이동을 취소했습니다",
+  "Today": "오늘",
+  "Yesterday": "어제",
+  "Previous 7 days": "지난 7일",
+  "Previous 30 days": "지난 30일"
 }

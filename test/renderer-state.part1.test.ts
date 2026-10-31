@@ -1456,7 +1456,7 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
   const actions = (): Array<string | undefined> => [...doc.querySelectorAll<HTMLElement>('.row-menu .row-menu-item')].map(item => item.dataset.rowAction);
   rowMenuItem(row(chat.id), 'rename');
   // Schedule… (#1826) sits with the chat's own actions.
-  expect(actions()).toEqual(['pin', 'rename', 'open', 'copy-link', 'share', 'schedule', 'block', 'remove']);
+  expect(actions()).toEqual(['pin', 'rename', 'open', 'copy-link', 'share', 'schedule', 'move-to-project', 'block', 'remove']);
   expect(doc.querySelector('.row-menu [data-row-action="remove"]')!.classList.contains('is-danger')).toBe(true);
   closeRowMenus(doc);
   // A row that is not a chat offers only what applies to it.
@@ -1476,12 +1476,12 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
   expect(row(loose.id).closest('.session-diagnostics')).not.toBeNull();
   // Groups are kept by the chat's own id, so it can be sorted into one of its project's groups already.
   rowMenuItem(row(pending.id), 'rename');
-  expect(actions()).toEqual(['rename', 'move-to-group', 'remove']);
+  expect(actions()).toEqual(['rename', 'move-to-project', 'move-to-group', 'remove']);
   closeRowMenus(doc);
   expect(row(renamed.id).closest('.session-diagnostics')).toBeNull();
   expect(shown(renamed.id)).not.toContain('not a chat');
   rowMenuItem(row(renamed.id), 'rename');
-  expect(actions()).toEqual(['rename', 'move-to-group', 'remove']);
+  expect(actions()).toEqual(['rename', 'move-to-project', 'move-to-group', 'remove']);
   closeRowMenus(doc);
   // A right click opens the same menu; its items run their action.
   row(chat.id).dispatchEvent(new mounted.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 40 }));
@@ -2384,4 +2384,57 @@ it('saves the ChatGPT browser choice from its settings control and restores it o
   expect(browser.value).toBe('edge');
   mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, chatBrowser: 'chrome' } } });
   expect(browser.value).toBe('chrome');
+});
+
+it('moves a chat to a project from its menu and undoes it from the toast (#1919)', async () => {
+  const base = { startedAt: 1, updatedAt: 2, endedAt: null, events: 0, userMessages: 0, toolCalls: 0,
+    lastToolCallAt: null, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
+    estimatedTokens: 0, contextTokens: 0, lastTurnOutcome: null, activeTurnId: null, agents: [], origin: null };
+  const website = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000011', docs = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000012';
+  let chat: Record<string, unknown> = { ...base, id: 'move-chat-0001', title: 'A chat', conversationId: 'move-conversation-0001', chatIds: ['move-conversation-0001'] };
+  const worker = { ...base, id: 'move-worker-0001', title: 'Worker', conversationId: 'move-conversation-0002', chatIds: ['move-conversation-0002'],
+    origin: { kind: 'worker' as const, fromSessionId: 'move-chat-0001', agentId: 'worker-1', task: 'Check' } };
+  const groups = { version: 1, groups: [], members: {} };
+  const moveChatProject = vi.fn(async (_id: string, projectId: string | null) => {
+    const from = (chat.projectId as string | undefined) ?? null;
+    chat = { ...chat, projectId: projectId ?? undefined };
+    return { ok: true, data: { from, fromGroup: null, groups } };
+  });
+  const mounted = await mountChat({}, [], {
+    listProjects: async () => ({ ok: true, data: [
+      { id: website, name: 'Website', path: '/work/website', createdAt: 1 },
+      { id: docs, name: 'Docs', path: '/work/docs', createdAt: 2, chatgpt: { state: 'linked', id: `g-p-${'d'.repeat(32)}`, updatedAt: 1 } }
+    ] }),
+    listSessions: async () => ({ ok: true, data: { sessions: [chat, worker], activeId: null, pressure: [], blocked: [], trusted: [] } }),
+    moveChatProject
+  });
+  const doc = mounted.window.document;
+  const row = () => doc.querySelector<HTMLElement>(`[data-id="${chat.id}"]`)!;
+  const toastText = () => doc.querySelector('.toast')?.firstChild?.textContent;
+  await waitFor(() => expect(row()).not.toBeNull());
+  rowMenuItem(row(), 'move-to-project')!.click();
+  const choices = () => [...doc.querySelectorAll<HTMLElement>('.row-menu')].at(-1)!.querySelectorAll<HTMLElement>('.row-menu-item');
+  expect([...choices()].map(item => item.dataset.rowAction)).toEqual([`project-${website}`, `project-${docs}`, 'project-none']);
+  expect(doc.querySelector(`[data-row-action="project-none"]`)!.getAttribute('aria-checked')).toBe('true');
+  doc.querySelector<HTMLButtonElement>(`[data-row-action="project-${website}"]`)!.click();
+  await waitFor(() => expect(moveChatProject).toHaveBeenCalledWith(chat.id, website, undefined));
+  await waitFor(() => expect(row().closest(`.project-group[data-project-id="${website}"]`)).not.toBeNull());
+  expect(toastText()).toBe('Moved to Website');
+  // Undo puts it back where it was: no project.
+  doc.querySelector<HTMLButtonElement>('.toast .toast-action')!.click();
+  await waitFor(() => expect(moveChatProject).toHaveBeenLastCalledWith(chat.id, null, null));
+  await waitFor(() => expect(row().closest('.project-group')).toBeNull());
+  expect(toastText()).toBe('Move undone');
+  expect(doc.querySelector('.toast .toast-action')).toBeNull();
+  // A linked ChatGPT Project: the toast says the move is only in this app.
+  rowMenuItem(row(), 'move-to-project')!.click();
+  doc.querySelector<HTMLButtonElement>(`[data-row-action="project-${docs}"]`)!.click();
+  await waitFor(() => expect(toastText()).toBe('Moved to Docs. ChatGPT keeps it where it was.'));
+  // Out of it again from the same submenu.
+  rowMenuItem(row(), 'move-to-project')!.click();
+  expect(doc.querySelector(`[data-row-action="project-${docs}"]`)!.getAttribute('aria-checked')).toBe('true');
+  doc.querySelector<HTMLButtonElement>('[data-row-action="project-none"]')!.click();
+  await waitFor(() => expect(moveChatProject).toHaveBeenLastCalledWith(chat.id, null, undefined));
+  await waitFor(() => expect(toastText()).toBe('Moved out of its project. ChatGPT keeps it where it was.'));
+  closeRowMenus(doc);
 });

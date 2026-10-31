@@ -2954,7 +2954,7 @@
   "Rename this group": "Bu grubu yeniden adlandır",
   "Delete group": "Grubu sil",
   "Delete this group; its chats stay in the project": "Bu grubu sil; sohbetleri projede kalır",
-  "Move a chat here from its menu.": "Bir sohbeti menüsünden buraya taşıyın.",
+  "Drag a chat here, or move it from its menu.": "Bir sohbeti buraya sürükleyin ya da menüsünden taşıyın.",
   "Show more chats in {0}": "{0} içinde daha fazla sohbet göster",
   "This project is not available": "Bu proje kullanılamıyor",
   "A project can hold up to 100 groups": "Bir projede en fazla 100 grup olabilir",
@@ -3773,5 +3773,16 @@
   "{0} messages": "{0} mesaj",
   "{0} messages|one": "{0} mesaj",
   "{0} actions|one": "{0} eylem",
-  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Gönderilmedi: bu yeni sohbetin tarayıcı sekmesi kapatıldı veya kayboldu. Mesajı gözden geçirip yeniden gönderin."
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Gönderilmedi: bu yeni sohbetin tarayıcı sekmesi kapatıldı veya kayboldu. Mesajı gözden geçirip yeniden gönderin.",
+  "Move to project": "Projeye taşı",
+  "Move this chat to a project; its commands then run in that project's folder": "Bu sohbeti bir projeye taşı; komutları artık o projenin klasöründe çalışır",
+  "Moved to {0}": "{0} projesine taşındı",
+  "Moved out of its project": "Projesinden çıkarıldı",
+  "ChatGPT keeps it where it was.": "ChatGPT onu olduğu yerde bırakır.",
+  "Undo": "Geri al",
+  "Move undone": "Taşıma geri alındı",
+  "Today": "Bugün",
+  "Yesterday": "Dün",
+  "Previous 7 days": "Son 7 gün",
+  "Previous 30 days": "Son 30 gün"
 }

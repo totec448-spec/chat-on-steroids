@@ -3049,7 +3049,7 @@
   "Rename this group": "Переименовать эту группу",
   "Delete group": "Удалить группу",
   "Delete this group; its chats stay in the project": "Удалить эту группу; её чаты останутся в проекте",
-  "Move a chat here from its menu.": "Переместите сюда чат через его меню.",
+  "Drag a chat here, or move it from its menu.": "Перетащите сюда чат или переместите его через меню чата.",
   "Show more chats in {0}": "Показать ещё чаты в {0}",
   "This project is not available": "Этот проект недоступен",
   "A project can hold up to 100 groups": "В проекте может быть до 100 групп",
@@ -3935,5 +3935,16 @@
   "{0} actions|one": "{0} действие",
   "{0} actions|few": "{0} действия",
   "{0} actions|many": "{0} действий",
-  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Не отправлено: вкладка браузера для этого нового чата закрыта или потеряна. Проверь сообщение и отправь заново."
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Не отправлено: вкладка браузера для этого нового чата закрыта или потеряна. Проверь сообщение и отправь заново.",
+  "Move to project": "Переместить в проект",
+  "Move this chat to a project; its commands then run in that project's folder": "Переместить этот чат в проект; его команды будут выполняться в папке этого проекта",
+  "Moved to {0}": "Перемещено в {0}",
+  "Moved out of its project": "Убрано из проекта",
+  "ChatGPT keeps it where it was.": "В ChatGPT чат остаётся там, где был.",
+  "Undo": "Отменить",
+  "Move undone": "Перемещение отменено",
+  "Today": "Сегодня",
+  "Yesterday": "Вчера",
+  "Previous 7 days": "Последние 7 дней",
+  "Previous 30 days": "Последние 30 дней"
 }

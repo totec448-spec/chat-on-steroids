@@ -7,7 +7,7 @@ import { bindBrowserInputProject, claimBrowserInput, enqueueInput, listInputs, p
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { flushDurable, initDurableStore, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import { createSession, getSession, initSessionStore, rebindSession, resetSessionStoreForTests, setSessionOrigin } from '../src/main/session/store.js';
-import { addProject, armProjectCreate, assignSessionProject, bindChatToLinkedProject, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, getSessionProject, inheritSessionProject, listProjects, markProjectGone, pendingProjectCreates, PROJECT_CREATE_ARMED_MS, PROJECT_CREATE_CLAIM_MS, projectWorkspace, removeProject, retryProjectCreate, sessionSecretsShieldOff, setProjectColor, setProjectSecretsShieldOff } from '../src/main/projects.js';
+import { addProject, armProjectCreate, assignSessionProject, bindChatToLinkedProject, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, getSessionProject, inheritSessionProject, listProjects, markProjectGone, moveChatToProject, pendingProjectCreates, PROJECT_CREATE_ARMED_MS, PROJECT_CREATE_CLAIM_MS, projectWorkspace, removeProject, retryProjectCreate, sessionSecretsShieldOff, setProjectColor, setProjectSecretsShieldOff } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 import { resetWorkspaces, setWorkspaceFor } from '../src/main/workspace.js';
 
@@ -332,4 +332,51 @@ it("never moves a worker, or a chat that already works in a folder, into a linke
     expect(await bindChatToLinkedProject(working.id, nativeId)).toBe('kept');
     expect((await getSession(working.id))?.projectId).toBeUndefined();
   } finally { resetWorkspaces(); }
+});
+
+it('moves a chat with its sub-agents to another project and out again, and keeps it where the person put it (#1919)', async () => {
+  const first = await linkedProject('first');
+  const second = await addProject(path.join(approved, 'second'));
+  const chat = await createSession({ title: 'Main', conversationId: randomUUID() });
+  await assignSessionProject(chat.id, first.id);
+  const worker = await createSession({ title: 'Worker', conversationId: randomUUID() });
+  await setSessionOrigin(worker.id, { kind: 'worker', fromSessionId: chat.id, agentId: 'worker-1', task: 'Check' }, 'Worker');
+  const nested = await createSession({ title: 'Nested', conversationId: randomUUID() });
+  await setSessionOrigin(nested.id, { kind: 'worker', fromSessionId: worker.id, agentId: 'worker-2', task: 'Check' }, 'Nested');
+  // A branch of the chat is a chat of its own: it stays.
+  const branch = await createSession({ title: 'Branch', conversationId: randomUUID() });
+  await setSessionOrigin(branch.id, { kind: 'desktop', fromSessionId: chat.id, agentId: null, task: '' }, 'Branch');
+
+  expect(await moveChatToProject(chat.id, second.id)).toEqual({ from: first.id, moved: [chat.id, worker.id, nested.id] });
+  for (const id of [chat.id, worker.id, nested.id]) expect(await getSession(id)).toMatchObject({ projectId: second.id, projectChosen: true });
+  expect((await getSession(branch.id))?.projectId).toBe(first.id);
+  // Its commands now run in the new project's folder.
+  expect(await getSessionProject(chat.id)).toMatchObject({ virtual: '/work/second' });
+  await expect(moveChatToProject(worker.id, first.id)).rejects.toThrow('A sub-agent chat follows its main chat');
+
+  expect(await moveChatToProject(chat.id, null)).toMatchObject({ from: second.id });
+  expect((await getSession(chat.id))?.projectId).toBeUndefined();
+  expect(await getSessionProject(chat.id)).toBeNull();
+  // Started in the linked ChatGPT Project, but the person took it out: the app does not put it back.
+  expect(await bindChatToLinkedProject(chat.id, nativeId)).toBe('kept');
+  expect((await getSession(chat.id))?.projectId).toBeUndefined();
+  expect(await moveChatToProject(chat.id, null)).toEqual({ from: null, moved: [] });
+});
+
+it('refuses a move to a project that is gone or taken off the sidebar (#1919)', async () => {
+  const project = await addProject(path.join(approved, 'first'));
+  const chat = await createSession({ title: 'Main', conversationId: randomUUID() });
+  await expect(moveChatToProject(chat.id, randomUUID())).rejects.toThrow('Project not found');
+  await removeProject(project.id);
+  await expect(moveChatToProject(chat.id, project.id)).rejects.toThrow('Project not found');
+  await expect(moveChatToProject('no-such-session', null)).rejects.toThrow('This chat no longer exists');
+  expect((await getSession(chat.id))?.projectChosen).toBeUndefined();
+});
+
+it('moves a chat into a project whose folder is missing (#1919)', async () => {
+  const project = await addProject(path.join(approved, 'first'));
+  await fs.rm(path.join(approved, 'first'), { recursive: true });
+  const chat = await createSession({ title: 'Main', conversationId: randomUUID() });
+  expect(await moveChatToProject(chat.id, project.id)).toMatchObject({ from: null });
+  expect((await getSession(chat.id))?.projectId).toBe(project.id);
 });

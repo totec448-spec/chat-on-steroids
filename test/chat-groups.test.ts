@@ -104,3 +104,16 @@ it('keeps both changes when two actions arrive before the store has loaded', asy
   expect(state.groups.map(group => group.id).sort()).toEqual([first.group.id, second.group.id].sort());
   expect(durable.reads).toBe(1);
 });
+
+it('places a moved chat in the group it was dropped on, or in none, and only in its new project (#1919)', async () => {
+  const { group: a } = await groups.createChatGroup('project-a', 'A', exists);
+  const { group: b } = await groups.createChatGroup('project-b', 'B', exists);
+  await groups.assignChatGroup(chat('one'), a.id);
+  expect((await groups.placeMovedChat('one', 'project-b', b.id)).members).toEqual({ one: b.id });
+  await expect(groups.placeMovedChat('one', 'project-a', b.id)).rejects.toThrow("This chat is not in that group's project");
+  await expect(groups.placeMovedChat('one', 'project-a', 'gone')).rejects.toThrow("This chat is not in that group's project");
+  expect((await groups.placeMovedChat('one', 'project-a', null)).members).toEqual({});
+  const writes = durable.writes;
+  expect((await groups.placeMovedChat('one', null, null)).members).toEqual({});
+  expect(durable.writes).toBe(writes);
+});

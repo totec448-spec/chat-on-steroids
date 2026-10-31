@@ -143,18 +143,35 @@ export const $ = <T extends HTMLElement>(id: string): T => document.getElementBy
 let toastTimer: number | undefined;
 let toastWatch: ResizeObserver | undefined;
 
-export function toast(message: string): void {
+/** How long a toast with an action (Undo) stays: long enough to read it and reach the button. */
+export const ACTION_TOAST_MS = 6000;
+
+/**
+ * A short notice. With `action`, it carries one button (Undo after a move, #1919) and stays
+ * `ACTION_TOAST_MS`; the pointer resting on it keeps it until the pointer leaves.
+ */
+export function toast(message: string, action?: { label: string; run: () => void }): void {
   document.querySelector('.toast')?.remove();
   toastWatch?.disconnect();
   const node = el('div', 'toast', message);
   node.setAttribute('role', 'status');
+  const close = () => { node.remove(); toastWatch?.disconnect(); };
+  if (action) {
+    node.classList.add('has-action');
+    const button = el('button', 'toast-action', action.label) as HTMLButtonElement;
+    button.type = 'button';
+    button.addEventListener('click', () => { window.clearTimeout(toastTimer); close(); action.run(); });
+    node.append(button);
+    node.addEventListener('pointerenter', () => window.clearTimeout(toastTimer));
+    node.addEventListener('pointerleave', () => { window.clearTimeout(toastTimer); toastTimer = window.setTimeout(close, 2000); });
+  }
   document.body.append(node);
   placeToast(node);
   // The composer and its dock can grow or the window resize while the toast shows: it follows.
   toastWatch = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { if (node.isConnected) placeToast(node); }) : undefined;
   for (const target of document.querySelectorAll('main, .card.is-session > .composer, .card.is-session > .composer-dock')) toastWatch?.observe(target);
   window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => { node.remove(); toastWatch?.disconnect(); }, 3200);
+  toastTimer = window.setTimeout(close, action ? ACTION_TOAST_MS : 3200);
 }
 
 /** Shown over the content it is about: centred on the open chat's composer and just above it and

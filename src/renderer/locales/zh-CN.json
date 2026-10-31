@@ -2908,7 +2908,7 @@
   "Rename this group": "重命名此分组",
   "Delete group": "删除分组",
   "Delete this group; its chats stay in the project": "删除此分组；其中的聊天仍留在项目中",
-  "Move a chat here from its menu.": "可从聊天菜单将它移到这里。",
+  "Drag a chat here, or move it from its menu.": "把对话拖到这里，或从它的菜单中移动。",
   "Show more chats in {0}": "显示 {0} 中的更多聊天",
   "This project is not available": "此项目不可用",
   "A project can hold up to 100 groups": "一个项目最多可有 100 个分组",
@@ -3692,5 +3692,16 @@
   "{0} sessions": "{0} 个会话",
   "{0} entries": "{0} 个条目",
   "{0} messages": "{0} 条消息",
-  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "未发送：此新聊天的浏览器标签页已关闭或丢失。请检查消息后重新发送。"
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "未发送：此新聊天的浏览器标签页已关闭或丢失。请检查消息后重新发送。",
+  "Move to project": "移到项目",
+  "Move this chat to a project; its commands then run in that project's folder": "将此对话移到一个项目；之后它的命令会在该项目的文件夹中运行",
+  "Moved to {0}": "已移到 {0}",
+  "Moved out of its project": "已移出所在项目",
+  "ChatGPT keeps it where it was.": "在 ChatGPT 中它仍在原处。",
+  "Undo": "撤销",
+  "Move undone": "已撤销移动",
+  "Today": "今天",
+  "Yesterday": "昨天",
+  "Previous 7 days": "过去 7 天",
+  "Previous 30 days": "过去 30 天"
 }
