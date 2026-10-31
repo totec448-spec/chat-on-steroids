@@ -3691,5 +3691,6 @@
   "{0} controls": "컨트롤 {0}개",
   "{0} sessions": "세션 {0}개",
   "{0} entries": "항목 {0}개",
-  "{0} messages": "메시지 {0}개"
+  "{0} messages": "메시지 {0}개",
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "전송되지 않음: 이 새 채팅의 브라우저 탭이 닫혔거나 사라졌습니다. 메시지를 검토한 후 다시 전송하세요."
 }
