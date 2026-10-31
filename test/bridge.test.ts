@@ -16837,7 +16837,13 @@ describe('the goal loop over the bridge', () => {
       const id = 'abca0177-0000-4000-8000-000000000177';
       await input.enqueueInput({ id, sessionId: session.id, text: 'next step', mode: 'after-turn', dueAt: Date.now(), model: null, reasoningEffort: null });
       await vi.advanceTimersByTimeAsync(1);
-      expect(await pickupNow(session.id)).toEqual({ ok: false, error: 'Nothing is waiting to be picked up in this chat any more.' });
+      // The stopped step the button shows: what main now projects for this chat.
+      const shownStep = async () => {
+        const row = (await sessionControlsFor(session.id)).recovery?.find(entry => entry.kind === 'pickup-stopped');
+        return { next: row?.next ?? 'queue', stoppedAt: row?.deadline ?? 0 };
+      };
+      expect(await pickupNow(session.id, await shownStep())).toEqual({ ok: false, code: 'nothing-waiting' });
+      expect(getLog().some(entry => entry.message.includes(`the person asked to pick up session ${session.id} now; nothing was tried — nothing is owed`))).toBe(true);
       await request('POST', '/events', { body: { conversationId: chat, events: [
         { kind: 'turn_end', time: Date.now(), turnId: 'now-turn', outcome: 'completed' }
       ] } });
@@ -16852,13 +16858,20 @@ describe('the goal loop over the bridge', () => {
       // Inside a history limit nothing is tried, and the person is told why.
       await request('POST', '/events', { body: { conversationId: chat, events: [{ kind: 'chat_error', time: Date.now(), recoverable: false, blocking: true,
         retryAt: Date.now() + 60_000, text: 'ChatGPT temporarily rate-limited loading this conversation history.' }] } });
-      expect(await pickupNow(session.id)).toEqual({ ok: false, error: 'ChatGPT limits this chat for a few minutes. The app tries again right after.' });
+      expect(await pickupNow(session.id, await shownStep())).toEqual({ ok: false, code: 'history-limit' });
       await vi.advanceTimersByTimeAsync(5 * 60_000);
+      const shown = await shownStep();
+      expect(shown).toMatchObject({ next: 'queue' });
+      // A click for a stopped step that is no longer the one waiting acts on nothing (CodeRabbit on #1979).
+      expect(await pickupNow(session.id, { ...shown, stoppedAt: shown.stoppedAt - 1 })).toEqual({ ok: false, code: 'changed' });
+      expect(await pickupNow(session.id, { ...shown, next: 'goal' })).toEqual({ ok: false, code: 'changed' });
       // A queued message of the person's own is tried again at once, not at its next slow slot.
-      expect(await pickupNow(session.id)).toEqual({ ok: true, did: 'retrying' });
+      expect(await pickupNow(session.id, shown)).toEqual({ ok: true, did: 'retrying' });
       expect((await request('GET', '/status')).body.repairs?.some((item: { conversationId: string }) => item.conversationId === chat)).toBe(true);
       expect((await input.listInputs()).find(row => row.id === id)).toMatchObject({ text: 'next step', state: 'queued', pickupRecovery: { attempts: 4 } });
       expect(told.filter(notice => notice.title === 'Recovery slowed')).toHaveLength(1);
+      // Its reload is still in flight: a second click starts nothing and says so, not "trying again".
+      expect(await pickupNow(session.id, await shownStep())).toEqual({ ok: false, code: 'not-started' });
     } finally {
       setStuckNotifier(null);
       await writeDurableNow('session-input', []);
