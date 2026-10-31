@@ -177,7 +177,10 @@ const REQUEST_TIMEOUT_MS = 180_000;
  * belongs to the page's Goal loop, which is the only place that can tell whether the turn is
  * still the one being answered. This is what that loop reads, published as `retryable`.
  */
-const SETTLED_FAILURE = /^(?:auth_rejected|out_of_credit|unknown_model|no_api_key|no_conversation|no_objective|invalid_provider|goal_marker_missing|goal_browser_cancelled|goal_browser_send_unconfirmed|goal_browser_send_failed|goal_helper_stop_unverified)(?:$|:)/;
+// An oversized, locally assembled context is deterministic until instructions or
+// the helper's learned size limit change. Reasking the same source without either
+// change only burns provider requests; preserve its owed reply and show the error.
+const SETTLED_FAILURE = /^(?:(?:auth_rejected|out_of_credit|unknown_model|no_api_key|no_conversation|no_objective|invalid_provider|goal_marker_missing|goal_browser_cancelled|goal_browser_send_unconfirmed|goal_browser_send_failed|goal_helper_stop_unverified)(?:$|:)|(?:request_failed:\s*)?goal_context_too_large(?:$|:))/;
 
 /** One failure classification shared by ordinary drafts and the conversation-less opening request. */
 function retryableGoalFailure(error: string): boolean {

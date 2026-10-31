@@ -103,6 +103,13 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
+it('does not retry a deterministic oversized Goal context while retaining transient provider retries', () => {
+  expect(goal.nativeGoalFailure('request_failed: goal_context_too_large', 'api')).toMatchObject({ retryable: false });
+  expect(goal.nativeGoalFailure('goal_context_too_large', 'api')).toMatchObject({ retryable: false });
+  expect(goal.nativeGoalFailure('request_failed: fetch failed', 'api')).toMatchObject({ retryable: true });
+  expect(goal.nativeGoalFailure('timeout_or_cancelled', 'api')).toMatchObject({ retryable: true });
+});
+
 it('preserves the Astra delivery preference across Goal/Loop, restart and finish-setting changes', async () => {
   const config = (await import('../src/main/config.js')).getConfig();
   await saveConfig({ ...config, ui: { ...config.ui, finishTool: true } });

@@ -655,6 +655,24 @@ it.each(['goal_browser_send_failed', 'goal_browser_send_unconfirmed'])('preserve
   expect(goal.goalDraftNeedsIntervention(id)).toBe(false);
 });
 
+it('does not spend repeated browser helper requests on the same oversized Goal source', async () => {
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, backend: 'chatgpt' } });
+  const id = 'oversized-helper-source';
+  await goal.setGoalSwitchNow(id, 'goal', true);
+  const sessionId = await recording(id, 'Continue the existing project');
+  await goal.acceptGoalReplyNow({ conversationId: id, sessionId, replyId: 'reply-overlong',
+    turnId: 'source-overlong', eventSeq: 10, blocked: false });
+  browser.request.mockRejectedValueOnce(new Error('goal_context_too_large'));
+  goal.startGoalDraft({ conversationId: id, sessionId, turnId: 'source-overlong' });
+  const failed = await settled(id);
+  expect(failed).toMatchObject({ stage: 'failed', error: 'request_failed: goal_context_too_large', retryable: false });
+  expect(goal.goalPendingReplyFor(id)?.turnId).toBe('source-overlong');
+  expect(goal.goalDraftNeedsIntervention(id)).toBe(true);
+  await goal.ackGoalDraftNow(id, failed.token);
+  expect(goal.startGoalDraft({ conversationId: id, sessionId, turnId: 'source-overlong' }).token).toBe(failed.token);
+  expect(browser.request).toHaveBeenCalledTimes(1);
+});
+
 it('generates a validated staged plan through the existing browser helper without an API key', async () => {
   browser.request.mockResolvedValueOnce(JSON.stringify({ action: 'continue', reply: JSON.stringify({ stages: ['Implement the requested feature', 'Test every acceptance criterion'] }) }));
   expect(await goal.draftTaskPlan('Build the feature and test it', 'chatgpt')).toEqual(['Implement the requested feature', 'Test every acceptance criterion']);
