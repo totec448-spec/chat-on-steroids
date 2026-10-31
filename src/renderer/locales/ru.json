@@ -1906,6 +1906,8 @@
   "How the app behaves day to day. Changes apply immediately.": "Как приложение ведёт себя в повседневной работе. Изменения применяются сразу.",
   "What you see while ChatGPT answers, and what your messages carry.": "Что вы видите, пока ChatGPT отвечает, и что содержат ваши сообщения.",
   "Follow new output": "Следовать за новым выводом",
+  "Show message times": "Показывать время сообщений",
+  "The time above each message. Point at a time for the full date.": "Время над каждым сообщением. Наведите на время, чтобы увидеть полную дату.",
   "Stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "Оставаться в конце чата, пока ответы растут, здесь и в ChatGPT. Прокрутка вверх ставит на паузу.",
   "Playful status words": "Шутливые статусы",
   "Show rotating gym jokes instead of “Working”.": "Показывать меняющиеся шутки про спортзал вместо «Работает».",

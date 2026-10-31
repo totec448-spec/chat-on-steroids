@@ -105,7 +105,7 @@ it('keeps the reported interface language and the extension preferences through 
   expect(getConfig().ui.browserPreferences).toEqual({ overwrite: false, durations: true });
 });
 
-it.each(['playfulStatus', 'playfulContinue', 'followOutput', 'announceTurns'] as const)('saves the %s display switch from Settings', async key => {
+it.each(['playfulStatus', 'playfulContinue', 'followOutput', 'announceTurns', 'showMessageTimes'] as const)('saves the %s display switch from Settings', async key => {
   // Both are plain ui booleans saved by the general Settings save. The save schema dropped keys
   // it did not list, so a switch that was not listed reverted on the next state push.
   const base = getConfig();
@@ -115,6 +115,18 @@ it.each(['playfulStatus', 'playfulContinue', 'followOutput', 'announceTurns'] as
   // A stale snapshot that never touched the switch keeps the saved value.
   expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
   expect(getConfig().ui[key]).toBe(wanted);
+});
+
+// CodeRabbit on #1948: a form from before the switch existed sends it off without an edit; that is not
+// turning it off.
+it('keeps Show message times on through a stale save whose form sends the switch off without an edit', async () => {
+  const base = getConfig();
+  expect(await save({ ...base, ui: { ...base.ui, showMessageTimes: true } }, base)).toMatchObject({ ok: true });
+  const now = getConfig();
+  const { showMessageTimes: _, ...older } = now.ui;
+  const stale = { ...now, ui: older };
+  expect(await save({ ...stale, ui: { ...older, showMessageTimes: false, theme: now.ui.theme === 'light' ? 'dark' : 'light' } }, stale)).toMatchObject({ ok: true });
+  expect(getConfig().ui.showMessageTimes).toBe(true);
 });
 
 it('saves the ask-before-mouse-and-keyboard choice (#1804), keeps it through a stale save, and refuses an unknown one', async () => {

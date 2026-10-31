@@ -2859,6 +2859,20 @@ input[readonly] {
   min-width: 0;
 }
 
+/* "Show message times" (Settings → General): a small time above each message, on the message's own
+   side. Activity rows (tool calls, progress) keep their compact log without one. */
+.show-message-times :is(.ev-user_message, .ev-assistant_message, .ev-native_image, .ev-agent_message, .ev-chat_error, .ev-compaction) {
+  row-gap: 3px;
+}
+.show-message-times :is(.ev-user_message, .ev-assistant_message, .ev-native_image, .ev-agent_message, .ev-chat_error, .ev-compaction) > time {
+  display: block;
+  padding-top: 0;
+  font-family: inherit;
+  font-size: calc(11.5px * var(--text-scale, 1));
+  white-space: nowrap;
+}
+.show-message-times .ev-user_message > time { justify-self: end; }
+
 /* Activity is a compact log; authored messages keep their own breathing room. */
 .ev-tool_call, .ev-page_tool, .ev-agent_message {
   padding: 1px 0;
