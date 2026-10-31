@@ -5789,14 +5789,20 @@ function stoppedTurnEnd(event: SessionEvent, history: readonly SessionEvent[]): 
     (later.kind === 'turn_start' || later.kind === 'turn_end'));
 }
 
+/** How far apart seen and written must be before a row shows when its message was written. */
+const AUTHORED_TIME_GAP_MS = 5 * 60_000;
+
 function eventRow(event: SessionEvent): HTMLElement {
   const row = el('div', `ev ev-${event.kind}`);
   // A note the app filed about its own work (a recovery reload), not ChatGPT's phase caption.
   if (event.kind === 'progress' && event.source === 'app') row.dataset.appNote = '';
   if (event.kind === 'assistant_message' && !withoutMessageReaction(event.message.text).trim()) row.hidden = true;
   tagImageRow(row, event);
-  // When the message was written (the page's own time) over when the app saw it (CodeRabbit on #1948).
-  const time = rowTime(authoredTimeOf(event) ?? event.time);
+  // When the app saw it, the same clock as the question above it. Only a message the app saw long
+  // after it was written (an earlier answer read after a reload) shows when it was written: ChatGPT's
+  // clock and this computer's differ by seconds, so mixed, an answer read a minute before its question.
+  const authored = authoredTimeOf(event);
+  const time = rowTime(authored !== undefined && event.time - authored > AUTHORED_TIME_GAP_MS ? authored : event.time);
   const body = el('div', 'ev-body');
   const currentWorker = sessions.find(session => session.id === selectedId)?.origin;
   if (event.agent && event.agent !== 'prime' && !(currentWorker?.kind === 'worker' && currentWorker.agentId === event.agent)) {
