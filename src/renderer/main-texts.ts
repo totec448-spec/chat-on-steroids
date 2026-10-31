@@ -107,6 +107,21 @@ export function mainTexts(): Record<MainText, string> {
     'New chat': t('New chat'),
     'hidden': t('hidden'),
     'Shared from Chat On Steroids': t('Shared from Chat On Steroids'),
+    'Connected to Chat On Steroids. Its notifications arrive here.': t('Connected to Chat On Steroids. Its notifications arrive here.'),
+    'This code is not valid any more. Get a new one in Chat On Steroids: Settings → Phone notifications → Telegram.': t('This code is not valid any more. Get a new one in Chat On Steroids: Settings → Phone notifications → Telegram.'),
+    'Chat On Steroids sends its notifications here. /status shows what your chats are doing.': t('Chat On Steroids sends its notifications here. /status shows what your chats are doing.'),
+    'I know /status and /help.': t('I know /status and /help.'),
+    'Deny': t('Deny'),
+    'Denied from Telegram at {0}.': t('Denied from Telegram at {0}.'),
+    'Already answered.': t('Already answered.'),
+    'Could not deny it. Open the chat in Chat On Steroids.': t('Could not deny it. Open the chat in Chat On Steroids.'),
+    'Nothing is running and nothing waits for you.': t('Nothing is running and nothing waits for you.'),
+    'Working: {0}': t('Working: {0}'),
+    'Waiting for your approval: {0}': t('Waiting for your approval: {0}'),
+    'waits for your approval': t('waits for your approval'),
+    'working': t('working'),
+    '{0} more': t('{0} more'),
+    'This is a test from Chat On Steroids. Telegram notifications work.': t('This is a test from Chat On Steroids. Telegram notifications work.')
   };
 }
 

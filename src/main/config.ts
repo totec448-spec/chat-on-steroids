@@ -446,6 +446,8 @@ const configSchema = z.object({
       return { ...raw, enabled: false, server: '' };
     }, z.object({
       enabled: z.boolean().catch(false),
+      // ntfy as a destination; Telegram (#1934) is the other. Settings from before Telegram: on.
+      ntfy: z.boolean().optional().default(true).catch(true),
       server: z.string().max(2048).optional().default(DEFAULT_PHONE_PUSH.server).catch(''),
       topic: z.string().max(64).catch(''),
       needsYou: z.boolean().catch(true),
