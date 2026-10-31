@@ -5,6 +5,7 @@ const fs = require('node:fs'), path = require('node:path'), assert = require('no
 const root = process.env.COS_UI_ROOT || path.resolve(__dirname, '..');
 const output = path.resolve(process.env.COS_UI_OUTPUT || path.join(root, '.tmp', 'compact-chat-rows'));
 const { fixtureConfigSource, BENIGN_RENDERER_ERRORS } = require(path.join(root, 'scripts/fixtures/app-defaults.cjs'));
+fs.mkdirSync(path.join(output, 'profile'), { recursive: true });
 app.setPath('userData', path.join(output, 'profile')); app.disableHardwareAcceleration();
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 let server, win;
