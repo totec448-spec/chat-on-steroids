@@ -2309,7 +2309,12 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
   await assertCurrent();
   if (!options.rotation) {
     // The person's Stop takes over a pending fresh-turn Stop of the same turn: no automatic continue
-    // may follow the stop they asked for (CodeRabbit on #1954).
+    // may follow the stop they asked for (CodeRabbit on #1954). The saved Stop loses its fresh-turn
+    // mark first, so a restart restores neither it nor its fence.
+    const pendingRotation = commands.find(entry => entry.spec.type === 'stop' && entry.spec.sessionId === sessionId &&
+      entry.spec.turnId === expectedTurnId && entry.spec.rotation === true);
+    if (pendingRotation && !await withdrawStopRotation(pendingRotation))
+      logWarn(`turn rotation: ${id} — the person's Stop over the fresh-turn Stop of turn ${expectedTurnId} could not be saved; a restart within ${Math.round(FENCE_MS / 1000)} s could still continue after it`);
     if (rotationFenceTurn(id) === expectedTurnId) {
       // On disk before their Stop goes out, so a restart cannot bring the fence back and continue
       // after it (CodeRabbit on #1954). Their Stop goes out even when the disk refuses: it is theirs.
@@ -6474,6 +6479,23 @@ async function writeCommandTransition(command: Command, transition: () => Promis
   finally {
     if (commandWrites.get(command.id) === work) commandWrites.delete(command.id);
   }
+}
+
+/** A fresh-turn Stop the person's own Stop takes over: saved without its mark (CodeRabbit on #1954). */
+async function withdrawStopRotation(command: Command): Promise<boolean> {
+  return writeCommandTransition(command, async () => {
+    if (!commands.includes(command) || command.spec.type !== 'stop' || !command.spec.rotation) return true;
+    const { rotation: _rotation, ...spec } = command.spec;
+    command.spec = spec;
+    try {
+      await writeDurableNow(COMMANDS_STATE, commandSnapshot());
+      return true;
+    } catch (err) {
+      persistCommands();
+      logWarn(`bridge: could not save the person's Stop over ${specKey(command.spec)} — ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+  });
 }
 
 async function persistCommandLease(
