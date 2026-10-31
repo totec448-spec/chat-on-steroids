@@ -1,4 +1,13 @@
 {
+  "Long chats that get through ChatGPT's limits, pop-ups out of the way, and message times.": "长对话能挺过 ChatGPT 的限制，弹窗不再挡路，还有消息时间。",
+  "Long chats keep going": "长对话继续进行",
+  "When ChatGPT limits a long chat's history, the app waits instead of reloading it.": "ChatGPT 限制长对话的历史记录时，应用会等待，而不是重新加载。",
+  "Pop-ups out of the way": "弹窗不再挡路",
+  "ChatGPT's announcements no longer block new chats or your messages.": "ChatGPT 的公告不再阻挡新对话和你的消息。",
+  "Your mouse stays yours": "鼠标仍归你掌控",
+  "Only chats this app can name use your screen, mouse and keyboard.": "只有本应用能识别的对话才会使用你的屏幕、鼠标和键盘。",
+  "Message times": "消息时间",
+  "Turn on Show message times in Settings → General to see when each message was sent.": "在 设置 → 通用 中开启“显示消息时间”，即可看到每条消息的发送时间。",
   "Dictation unavailable": "语音听写不可用",
   "Cancel dictation": "取消听写",
   "Stop dictation": "停止听写",
