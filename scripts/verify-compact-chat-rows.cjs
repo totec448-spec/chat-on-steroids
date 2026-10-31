@@ -178,8 +178,10 @@ app.whenReady().then(async () => {
   await until(`Math.round(document.querySelector('.sidebar').getBoundingClientRect().width)===180`);
   const minimumWidth=await js(`({width:Math.round(document.querySelector('.sidebar').getBoundingClientRect().width),aria:document.getElementById('sidebarResize').getAttribute('aria-valuenow')})`);
   assert.equal(minimumWidth.aria,'180','Keyboard Home reports the 180px minimum through aria-valuenow: '+JSON.stringify(minimumWidth));
+  const groupCount=await js(`(()=>{const count=document.querySelector('#projectList .chat-group .chat-group-heading .chat-group-count'),sidebar=document.querySelector('.sidebar'),r=count?.getBoundingClientRect(),s=sidebar.getBoundingClientRect(),style=count&&getComputedStyle(count);return count?{text:count.textContent.trim(),display:style.display,width:r.width,height:r.height,left:r.left,right:r.right,sidebarLeft:s.left,sidebarRight:s.right}:null})()`);
+  assert.ok(groupCount&&groupCount.text==='1'&&groupCount.display!=='none'&&groupCount.width>0&&groupCount.height>0&&groupCount.left>=groupCount.sidebarLeft&&groupCount.right<=groupCount.sidebarRight+1,'Nested chat-group count remains visible and in bounds at the 180px sidebar minimum: '+JSON.stringify(groupCount));
   await assertRows({narrow:true});await capture('dark-min-width-180.png');
-  console.log('PASS actual 180px minimum resize, accessible value and row truncation');
+  console.log('PASS actual 180px minimum resize, accessible value, row truncation and visible group count');
 
   await js(`setRowMode('dark',false,14,false,'projects','#493452')`);
   await until(`document.documentElement.dataset.theme==='dark'&&getComputedStyle(document.querySelector('.sess-top > b')).fontSize==='14px'`);
