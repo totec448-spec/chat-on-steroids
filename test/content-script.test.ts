@@ -2788,6 +2788,31 @@ describe('desktop input delivery and helper ownership', () => {
     ]);
   });
 
+  // CodeRabbit on #1947: a question seen before that is no longer on the page is not a new one.
+  it('says the question it continues is gone when that row leaves the page during the wait', async () => {
+    live = await harness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.fail ? { ok: true } : { input: claimed() } }),
+      page_note: () => ({ ok: true })
+    });
+    const timer = live.window.setTimeout;
+    let expire!: () => void;
+    live.window.setTimeout = ((fn: () => void, ms?: number) => {
+      if (ms === 15000) { expire = fn; return 0; }
+      return timer(fn, ms);
+    }) as typeof live.window.setTimeout;
+    const question = userTurn(live.document, 'asked-before', 'The question asked before');
+    live.hook.observe(); await settle();
+    announcement(live.document, { field: true, heading: 'Rename chat' });
+    const sending = live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA, silenceTurnId: 'quiet-turn' });
+    await settle(200);
+    (question as unknown as HTMLElement).remove();
+    expire();
+    expect(await sending).toEqual({ ok: false });
+    expect(live.sent.filter(message => message.type === 'page_note' && message.note === 'input-held')).toEqual([
+      expect.objectContaining({ reason: 'question-gone', inputId, conversationId: chatA })
+    ]);
+  });
+
   it('closes no dialog while ChatGPT limits the page\'s history, whatever language its notice is in (CodeRabbit on #1939)', async () => {
     live = await harness(`https://chatgpt.com/c/${chatA}`, {
       desktop_input: message => ({ ok: true, data: message.authorize || message.ack || message.fail ? { ok: true } : { input: claimed() } }),

@@ -502,6 +502,7 @@ interface Command {
 const HELD_INPUT_REASONS: Record<string, string> = {
   'page-moved': 'the page reloaded or moved on while it waited',
   'chat-moved-on': 'the chat moved on while the page waited (a new message, another turn or new progress)',
+  'question-gone': 'the question it continues was no longer shown on the page while it waited',
   'still-answering': 'ChatGPT still shows an answer running',
   'turn-held': 'the page still holds a turn that ChatGPT no longer shows running',
   'tool-running': 'a tool call of this chat is still running on the page',
