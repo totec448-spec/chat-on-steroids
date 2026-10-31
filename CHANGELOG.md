@@ -25,6 +25,7 @@ Long chats no longer stop when ChatGPT briefly limits a chat's history or the ap
 
 - **The log says why a message waits.** When a ChatGPT page holds a queued message back, the app log now says why: an answer or a tool still running, a covered message box, or a question the page can't read.
 - **A quieter log with Firefox.** Firefox's add-on reconnects every half minute while idle. That is now one summary line an hour instead of two lines each time.
+- **The bundled OpenAI tunnel client** is updated to v0.0.19.
 
 ### 🛠 Fixed
 
