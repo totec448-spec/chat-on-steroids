@@ -212,6 +212,32 @@ it('gives up on a write that never answers, says so, and still applies the next 
   } finally { vi.useRealTimers(); }
 });
 
+// CodeRabbit on #1940: a write that timed out can still land later. Until one is confirmed, the next
+// status writes again, even for the language this worker applied before.
+it('writes again after a timed-out write that lands late, even for the language applied before', async () => {
+  vi.useFakeTimers();
+  try {
+    const store: Record<string, unknown> = {};
+    let late: (() => void) | null = null;
+    let slow = false;
+    const follow = follower(store, { set: value => {
+      if (!slow) { Object.assign(store, value); return Promise.resolve(); }
+      return new Promise<void>(resolve => { late = () => { Object.assign(store, value); resolve(); }; });
+    } });
+    await follow({ language: 'de' });
+    slow = true;
+    const timedOut = follow({ language: 'en' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    await timedOut;
+    late!();
+    expect(store.appLanguage).toBe('en');
+    slow = false;
+    await follow({ language: 'de' });
+    expect(store.appLanguage).toBe('de');
+    expect(follow.state()).toEqual({ applied: 'de', error: null });
+  } finally { vi.useRealTimers(); }
+});
+
 it('keeps a refused write for diagnostics and tries again on the next status', async () => {
   const store: Record<string, unknown> = {};
   let refuse = true;
