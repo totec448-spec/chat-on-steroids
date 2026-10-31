@@ -917,11 +917,11 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     h.fetch.mockImplementation((url, init) => new URL(url).pathname === '/input/opening-unavailable'
       ? Promise.resolve({ ok: true, status: 200, json: async () => ({ ok: true, reopen: true }) }) : fetch(url, init));
     await h.maintain();
-    await vi.waitFor(() => expect(h.localSaved.inputOpenings?.[firstId]).toBeUndefined());
+    await vi.waitFor(() => expect((h.localSaved.inputOpenings as Record<string, unknown> | undefined)?.[firstId]).toBeUndefined());
     expect(h.create).not.toHaveBeenCalled();
     await h.maintain();
     expect(h.create).toHaveBeenCalledTimes(1);
-    expect(h.localSaved.inputOpenings?.[firstId]).toMatchObject({ stage: expect.any(String) });
+    expect((h.localSaved.inputOpenings as Record<string, unknown> | undefined)?.[firstId]).toMatchObject({ stage: expect.any(String) });
   });
 
   it('does not hold later input opening or the next maintenance pass behind a slow missing-tab report', async () => {
