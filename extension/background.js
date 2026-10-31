@@ -3090,6 +3090,8 @@ const APP_LANGUAGES = new Set(['en', 'de', 'es', 'fr', 'pt-BR', 'pt-PT', 'ru', '
 const FOLLOW_READ_MS = 5_000;
 let appLanguageApplied = null;
 let appLanguageError = null;
+/** A write that failed or timed out may still land later, so the next status writes again (CodeRabbit on #1940). */
+let appLanguageUnconfirmed = false;
 function appLanguageState() {
   return { applied: appLanguageApplied, error: appLanguageError };
 }
@@ -3142,13 +3144,13 @@ async function followAppNow(data) {
   const language = APP_LANGUAGES.has(data?.language) ? data.language : null;
   const kept = data?.browserPreferences;
   const keptValid = kept && typeof kept.overwrite === 'boolean' && typeof kept.durations === 'boolean';
-  if ((!language || language === appLanguageApplied) && !keptValid) return;
+  if ((!language || (language === appLanguageApplied && !appLanguageUnconfirmed)) && !keptValid) return;
   let readFailed = null;
   const stored = await boundedStorageGet([APP_LANGUAGE_KEY, RENDER_STREAM_KEY, SHOW_TIMES_KEY])
     .catch(error => { readFailed = String(error?.message || error).slice(0, 200); return null; });
   const patch = {};
   // Unread storage still gets the language: it is the app's, not a preference the person set here.
-  if (language && language !== appLanguageApplied && (!stored || stored[APP_LANGUAGE_KEY] !== language)) patch[APP_LANGUAGE_KEY] = language;
+  if (language && (language !== appLanguageApplied || appLanguageUnconfirmed) && (!stored || stored[APP_LANGUAGE_KEY] !== language)) patch[APP_LANGUAGE_KEY] = language;
   // Kept preferences only fill an extension that provably has none, so they need the read.
   if (keptValid && stored && !(RENDER_STREAM_KEY in stored) && !(SHOW_TIMES_KEY in stored)) {
     patch[RENDER_STREAM_KEY] = kept.overwrite;
@@ -3158,8 +3160,10 @@ async function followAppNow(data) {
     // A write that never answers is bounded too: it must not hold every later status (CodeRabbit on #1940).
     if (Object.keys(patch).length) await boundedStorage(chrome.storage.local.set(patch), 'write');
     if (language) appLanguageApplied = language;
+    appLanguageUnconfirmed = false;
     appLanguageError = readFailed;
   } catch (error) {
+    if (patch[APP_LANGUAGE_KEY]) appLanguageUnconfirmed = true;
     appLanguageError = String(error?.message || error).slice(0, 200);
   }
 }
