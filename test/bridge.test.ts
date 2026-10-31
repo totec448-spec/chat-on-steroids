@@ -28,6 +28,12 @@ import type { Config } from '../src/shared/types.js';
 const recoveryBrowserWake = vi.hoisted(() => vi.fn(async (_url: string, _retry?: boolean, _background?: boolean,
   _authority?: { current(): boolean | Promise<boolean> }) => {}));
 vi.mock('../src/main/browser-startup.js', () => ({ wakeBrowserUrl: recoveryBrowserWake }));
+// Makes the app withhold one queued input from the page, with a reason (2026-10-31).
+const withheldInput = vi.hoisted(() => ({ id: null as string | null, reason: '' }));
+vi.mock('../src/main/session/input.js', async original => {
+  const real = await original<typeof import('../src/main/session/input.js')>();
+  return { ...real, queuedInputOfferBlocker: async (id: string) => id === withheldInput.id ? withheldInput.reason : real.queuedInputOfferBlocker(id) };
+});
 // Holds one chat's observation write open, as a busy multi-agent run does (#1922).
 const heldRecording = vi.hoisted(() => ({ conversationId: null as string | null, release: null as (() => void) | null }));
 vi.mock('../src/main/session/recorder.js', async original => {
@@ -16490,6 +16496,86 @@ describe('the goal loop over the bridge', () => {
       const authority = recoveryBrowserWake.mock.calls[0]?.[3];
       expect(await authority?.current()).toBe(true);
     } finally { vi.useRealTimers(); }
+  });
+
+  // 2026-10-31: an automatic Continue the app itself withheld was "uncollected"; the pickup reloaded the
+  // chat three times for it, stopped, and nothing said which gate held it. A page cannot claim what is
+  // not offered, so no reload is spent, and the log names the gate.
+  it('spends no reload on a queued message the app does not offer, and says which gate holds it', async () => {
+    vi.useFakeTimers();
+    const input = await import('../src/main/session/input.js');
+    const { resetInputForTests, enqueueInput } = input;
+    resetInputForTests();
+    const id = 'abca0176-0000-4000-8000-000000000176';
+    try {
+      await writeDurableNow('session-input', []);
+      await pair();
+      const chat = 'cafe0176-0000-4000-8000-000000000176';
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'work', messageId: 'withheld-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'withheld-turn' }
+      ] } });
+      const session = (await findSessionByConversation(chat, { requireUnique: true }))!;
+      await enqueueInput({ id, sessionId: session.id, text: 'next step', mode: 'after-turn', dueAt: Date.now(), model: null, reasoningEffort: null });
+      await vi.advanceTimersByTimeAsync(1);
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'turn_end', time: Date.now(), turnId: 'withheld-turn', outcome: 'completed' }
+      ] } });
+      await recordFinalForTest(chat, 'withheld-turn');
+      withheldInput.id = id; withheldInput.reason = 'an earlier queued message of this chat (x) goes first';
+      for (const minutes of [2, 5, 10]) {
+        await vi.advanceTimersByTimeAsync(minutes * 60_000);
+        await sweepStaleSwarm(Date.now());
+        expect((await request('GET', '/status')).body.repairs?.some((repair: { conversationId: string }) => repair.conversationId === chat) ?? false).toBe(false);
+      }
+      expect(getLog().filter(entry => entry.message.includes(`next automation/input step in ${chat} is not offered to the page`)).map(entry => entry.message)).toEqual([
+        `bridge: next automation/input step in ${chat} is not offered to the page — an earlier queued message of this chat (x) goes first; no reload is spent on it`
+      ]);
+      expect((await input.listInputs()).find(entry => entry.id === id)?.pickupRecovery).toBeUndefined();
+      // Once the gate opens, the ordinary pickup schedule takes over again.
+      withheldInput.id = null;
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      expect((await request('GET', '/status')).body.repairs?.[0]).toMatchObject({ conversationId: chat, reason: 'goal' });
+    } finally {
+      withheldInput.id = null;
+      await writeDurableNow('session-input', []);
+      resetInputForTests();
+      vi.useRealTimers();
+    }
+  });
+
+  it('names the gate that holds a queued message from the page, and none for one it offers', async () => {
+    const input = await import('../src/main/session/input.js');
+    const { resetInputForTests, enqueueInput, claimBrowserInput, queuedInputOfferBlocker } = input;
+    resetInputForTests();
+    try {
+      await writeDurableNow('session-input', []);
+      await pair();
+      const chat = 'cafe0177-0000-4000-8000-000000000177';
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'work', messageId: 'gate-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'gate-turn' }
+      ] } });
+      const session = (await findSessionByConversation(chat, { requireUnique: true }))!;
+      const first = 'abca0177-0000-4000-8000-000000000001', second = 'abca0177-0000-4000-8000-000000000002', later = 'abca0177-0000-4000-8000-000000000003';
+      for (const id of [first, second]) await enqueueInput({ id, sessionId: session.id, text: id, mode: 'after-turn', dueAt: Date.now(), model: null, reasoningEffort: null });
+      await enqueueInput({ id: later, sessionId: session.id, text: 'later', mode: 'after-turn', dueAt: Date.now() + 60 * 60_000, model: null, reasoningEffort: null });
+      expect(await queuedInputOfferBlocker(first)).toBe("its chat's turn is still running");
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'turn_end', time: Date.now(), turnId: 'gate-turn', outcome: 'completed' }
+      ] } });
+      await recordFinalForTest(chat, 'gate-turn');
+      expect(await queuedInputOfferBlocker(first)).toBeNull();
+      expect(await queuedInputOfferBlocker(second)).toBe(`an earlier queued message of this chat (${first}) goes first`);
+      expect(await queuedInputOfferBlocker(later)).toBe('it is not due yet');
+      expect(await claimBrowserInput(first, 'page-owner', chat)).toBeTruthy();
+      expect(await queuedInputOfferBlocker(second)).toBe(`another message of this chat (${first}) is still being sent`);
+      expect(await queuedInputOfferBlocker(first)).toBe('it is no longer queued');
+    } finally {
+      await writeDurableNow('session-input', []);
+      resetInputForTests();
+    }
   });
 
   /** A missing page pickup gets a durable, visible stop instead of an endless reload loop. */
