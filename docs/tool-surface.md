@@ -170,6 +170,40 @@ attaching, including protected ChatGPT tabs. An attached tab also accepts `brows
 dialogs), `browser_evaluate`, `browser_console` and `browser_network`. Input works in the
 background without moving the OS cursor or bringing the browser to the front.
 
+### `browser_network` stream capture
+
+For Chromium network inspection, `browser_network` accepts `requestId` with `stream:true`
+to retain an in-flight `text/event-stream` response. Retention is bounded to 4 MiB per tab
+and 4096 nonempty chunks per request; exceeding either bound marks overflow.
+`browser_network` refuses ChatGPT pages (`chatgpt.com` and `chat.openai.com`) and
+tabs protected by CoS orchestration, including previously attached tabs that navigate
+into those pages. ChatGPT request traffic is excluded from retained listings even
+when encountered from another tab. This covers stream capture and legacy body reads.
+Captured response bytes remain only in extension memory while their attached tab
+and request entry are retained; there is no time-based expiry. Clear, request
+replacement, buffer eviction, debugger detach or tab release disposes the bytes.
+Top-level document navigation also releases retained stream bytes. A subframe
+navigation or same-document URL change does not interrupt the main page's stream.
+Already-open ChatGPT tabs are checked before recording network events, including
+third-party requests with no document URL.
+Capture from an individual child frame/session is discarded when that child
+navigates to another document or detaches. ChatGPT child frames are excluded even
+when the resource URL and document URL are not ChatGPT URLs. Read permission is
+rechecked after asynchronous response-body work before any byte page is returned.
+Child debugger sessions are bound to the top-level document epoch at attach time;
+an old session cannot contribute requests after the top page navigates.
+Child requests are admitted only after that debugger session initializes successfully;
+failed or pending initialization cannot leave retained request metadata or bytes.
+Read captured bytes with `body:true`, optional `bodyOffset` (byte offset) and `bodyBytes`
+(default 65536, maximum 262144). Decode each base64 page to bytes and concatenate before
+UTF-8 decoding; a page can split a character. Inspect `terminal` and `complete` separately:
+aborts, capture errors, invalid bytes and overflow never prove a complete response.
+`nextOffsetBytes:null` means the end of currently retained bytes, not the end of a live
+response. Poll again from `totalBytes` while `terminal:false`.
+Enable capture before the request finishes. Unsupported CDP capture is reported explicitly;
+ordinary finite response reads retain their existing behavior. Clear/release/eviction discard
+retained data. This operation uses the existing tab ownership and screen-read permission.
+
 ### Native desktop tools (Windows and macOS)
 
 Linux does not advertise or execute these schemas. Windows publishes one tool per operation:
