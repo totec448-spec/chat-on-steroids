@@ -8481,6 +8481,53 @@ function assistantRecoveryCancelledFor(conversationId: string, sessionId: string
  * The user's "don't reload this answer". Only a reload the browser has not claimed can be
  * withdrawn; a claimed one is already happening. Returns whether a countdown was cancelled.
  */
+/** Why the person's one click did nothing; the renderer words each one (CodeRabbit on #1979). */
+export type PickupNowRefusal = 'no-chat' | 'history-limit' | 'nothing-waiting' | 'changed' | 'not-sent' | 'not-started';
+
+/**
+ * The person's one click on a chat whose next step was not picked up (2026-10-31): an automatic
+ * Continue goes as an ordinary message now (a plain Continue was taken at once where the automatic
+ * one sat); a queued message or a Goal/Loop step is tried again now. Never inside a history limit.
+ * `shown`: the stopped step the button belonged to; a newer one is never acted on in its name.
+ * The answer says only what really started: `queued` is a queued ordinary message, not a delivery.
+ */
+export async function pickupNow(sessionId: string, shown: { next: string; stoppedAt: number }, now = Date.now()):
+    Promise<{ ok: true; did: 'queued' | 'retrying' } | { ok: false; code: PickupNowRefusal }> {
+  const refuse = (code: PickupNowRefusal, why: string) => {
+    logInfo(`bridge: the person asked to pick up session ${sessionId} now; nothing was tried — ${why}`);
+    return { ok: false as const, code };
+  };
+  const conversationId = (await getSession(sessionId))?.conversationId;
+  if (!conversationId) return refuse('no-chat', 'it has no ChatGPT conversation yet');
+  const limitedUntil = providerHistoryBackoff(conversationId, now);
+  if (limitedUntil !== null)
+    return refuse('history-limit', `ChatGPT limits ${conversationId}'s history for ${Math.ceil((limitedUntil - now) / 1000)} s more`);
+  const owed = (await owedPickups(now)).get(conversationId);
+  if (!owed || owed.sessionId !== sessionId) return refuse('nothing-waiting', `nothing is owed in ${conversationId} any more`);
+  const current = (await sessionRecoveryCountdowns(sessionId, conversationId)).find(row => row.kind === 'pickup-stopped');
+  if (!current || current.next !== shown.next || current.deadline !== shown.stoppedAt)
+    return refuse('changed', `the stopped step shown (${shown.next}, stopped ${new Date(shown.stoppedAt).toISOString()}) is no longer the one waiting in ${conversationId}`);
+  if (owed.queued && owed.inputId && shown.next === 'continue') {
+    const outcome = await continueAsOrdinaryMessage(owed.inputId, 'the person asked to continue now');
+    if ('row' in outcome) {
+      pickupWatch.delete(conversationId);
+      logInfo(`bridge: the person queued the automatic Continue in ${conversationId} now, as an ordinary message`);
+      wakeBrowserWork();
+      return { ok: true, did: 'queued' };
+    }
+    // A queued message of the person's own is no automatic Continue: it is retried instead.
+    if (!/no longer a queued automatic Continue/.test(outcome.refused)) return refuse('not-sent', `the Continue in ${conversationId} was not queued: ${outcome.refused}`);
+  }
+  const watch = pickupWatch.get(conversationId);
+  if (watch) watch.dueAt = now;
+  const focus: PickupFocus = { conversationId };
+  await inspectOwedPickups(now, focus);
+  if (!focus.started) return refuse('not-started', `no retry of ${conversationId} could start now (its tries are used up, or another repair or a gate holds it)`);
+  logInfo(`bridge: the person asked to pick up ${conversationId} now; ${focus.started === 'queued' ? 'its Continue was queued as an ordinary message' : 'its next try runs at once'}`);
+  wakeBrowserWork();
+  return { ok: true, did: focus.started };
+}
+
 export async function cancelAssistantRecovery(sessionId: string): Promise<boolean> {
   const conversationId = (await getSession(sessionId))?.conversationId;
   if (!conversationId) return false;
@@ -9781,7 +9828,10 @@ async function owedPickups(now: number): Promise<Map<string, OwedPickup>> {
   return owed;
 }
 
-async function inspectOwedPickups(now: number): Promise<boolean> {
+/** One chat whose outcome a caller of inspectOwedPickups needs: what started for it, if anything. */
+type PickupFocus = { conversationId: string; started?: 'queued' | 'retrying' };
+
+async function inspectOwedPickups(now: number, focus?: PickupFocus): Promise<boolean> {
   const floor = pickupWatchFloor;
   if (floor === null) return false;
   const owed = await owedPickups(now);
@@ -9837,6 +9887,7 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
           pickupWatch.delete(reply.conversationId);
           wakeBrowserWork();
           queued = true;
+          if (focus?.conversationId === reply.conversationId) focus.started = 'queued';
           continue;
         }
         // Why it stays, once per chat, input and reason (CodeRabbit on #1960). Not for a ticket that
@@ -9909,10 +9960,15 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
     if (!queueBrowserRecovery(reply.conversationId, reply.sessionId,
       `goal:${reply.replyId}:${watch.attempts}`, 'goal', 0, now)) continue;
     queued = true;
+    if (focus?.conversationId === reply.conversationId) focus.started = 'retrying';
     logInfo(`bridge: next automation/input step uncollected in ${reply.conversationId} — reload ${watch.attempts}` +
       (wasStopped ? ' (slow retry)' : ''));
-    if (watch.stoppedAt && !wasStopped) logWarn(`bridge: browser pickup recovery has not collected the step in ${reply.conversationId} after ${watch.attempts} reloads; ` +
-      `the chat shows as stopped, and the app keeps trying every 15 to 60 minutes`);
+    if (watch.stoppedAt && !wasStopped) {
+      logWarn(`bridge: browser pickup recovery has not collected the step in ${reply.conversationId} after ${watch.attempts} reloads; ` +
+        `the chat shows as stopped, and the app keeps trying every 15 to 60 minutes`);
+      // The alert: a desktop notice (and the phone, under its rules) once, when the quick tries run out.
+      noticeChatStopped('Recovery slowed', "The browser has not picked up this chat's next step. The app keeps trying; you can go on from the chat at once.", reply.sessionId);
+    }
   }
   return queued;
 }

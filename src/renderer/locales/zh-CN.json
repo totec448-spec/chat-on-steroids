@@ -3695,5 +3695,18 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "未发送：此新聊天的浏览器标签页已关闭或丢失。请检查消息后重新发送。",
   "Recovery stopped": "恢复已停止",
   "Stopped after {0} attempts": "已尝试 {0} 次，已停止",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "浏览器自动重新加载 {0} 次后，仍未接收到待处理步骤。原队列输入或目标待处理项仍已保存。CoS 不会再为这一步自动重载此聊天；请打开聊天手动继续。"
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "浏览器自动重新加载 {0} 次后，仍未接收到待处理步骤。原队列输入或目标待处理项仍已保存。CoS 不会再为这一步自动重载此聊天；请打开聊天手动继续。",
+  "The browser has not picked up this chat's next step. The app keeps trying; you can go on from the chat at once.": "浏览器尚未接收此聊天的下一步。应用会继续尝试；你可以在聊天中立即继续。",
+  "Continue now": "立即继续",
+  "Send the waiting Continue now, as an ordinary message": "现在把等待中的“继续”作为普通消息发送",
+  "Try now": "立即尝试",
+  "Try to send the waiting step now": "现在尝试发送等待中的步骤",
+  "Continue queued. It goes out as soon as ChatGPT takes it.": "“继续”已排队。ChatGPT 一接收就会发出。",
+  "Trying again now.": "正在重新尝试。",
+  "This chat has no ChatGPT conversation yet.": "此对话还没有 ChatGPT 会话。",
+  "ChatGPT limits this chat for a few minutes. The app tries again right after.": "ChatGPT 限制了此对话几分钟。应用会在之后立即重试。",
+  "Nothing is waiting to be picked up in this chat any more.": "此对话中已没有等待的内容。",
+  "This step changed meanwhile. Check the chat and try again.": "此步骤在此期间已更改。请查看聊天后重试。",
+  "Not sent now: something in this chat is still running. The app keeps trying.": "暂未发送：此聊天中仍有内容在运行。应用会继续尝试。",
+  "No new try could start now. The app keeps trying on its own.": "现在无法开始新的尝试。应用会自行继续尝试。"
 }

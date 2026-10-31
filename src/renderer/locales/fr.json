@@ -3857,5 +3857,18 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Message non envoyé : l’onglet du navigateur de cette nouvelle discussion a été fermé ou perdu. Vérifiez le message et envoyez-le à nouveau.",
   "Recovery stopped": "Récupération arrêtée",
   "Stopped after {0} attempts": "Arrêt après {0} tentatives",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Le navigateur n’a pas récupéré l’étape en attente après {0} rechargements automatiques. L’entrée d’origine en file d’attente ou l’obligation Goal reste enregistrée. CoS ne rechargera plus automatiquement cette conversation pour cette étape ; ouvrez-la et continuez manuellement."
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Le navigateur n’a pas récupéré l’étape en attente après {0} rechargements automatiques. L’entrée d’origine en file d’attente ou l’obligation Goal reste enregistrée. CoS ne rechargera plus automatiquement cette conversation pour cette étape ; ouvrez-la et continuez manuellement.",
+  "The browser has not picked up this chat's next step. The app keeps trying; you can go on from the chat at once.": "Le navigateur n'a pas pris en charge l'étape suivante de ce chat. L'app continue d'essayer ; vous pouvez reprendre tout de suite depuis le chat.",
+  "Continue now": "Continuer maintenant",
+  "Send the waiting Continue now, as an ordinary message": "Envoyer maintenant le Continuer en attente, comme un message ordinaire",
+  "Try now": "Essayer maintenant",
+  "Try to send the waiting step now": "Essayer d’envoyer maintenant l’étape en attente",
+  "Continue queued. It goes out as soon as ChatGPT takes it.": "Continuer mis en file. Il part dès que ChatGPT le prend.",
+  "Trying again now.": "Nouvel essai en cours.",
+  "This chat has no ChatGPT conversation yet.": "Cette conversation n’a pas encore de conversation ChatGPT.",
+  "ChatGPT limits this chat for a few minutes. The app tries again right after.": "ChatGPT limite cette conversation pendant quelques minutes. L’app réessaie juste après.",
+  "Nothing is waiting to be picked up in this chat any more.": "Plus rien n’attend dans cette conversation.",
+  "This step changed meanwhile. Check the chat and try again.": "Cette étape a changé entre-temps. Vérifiez le chat et réessayez.",
+  "Not sent now: something in this chat is still running. The app keeps trying.": "Non envoyé pour l'instant : quelque chose est encore en cours dans ce chat. L'app continue d'essayer.",
+  "No new try could start now. The app keeps trying on its own.": "Aucun nouvel essai n'a pu démarrer maintenant. L'app continue d'essayer d'elle-même."
 }

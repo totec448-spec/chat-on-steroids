@@ -73,6 +73,9 @@ app.whenReady().then(async () => {
   const previews = [
     { file: 'preview-pickup', kind: 'pickup', next: 'queue', deadline: 300_000, now: 0 },
     { file: 'preview-pickup-stopped', kind: 'pickup-stopped', next: 'queue', attempts: 3, deadline: 300_000, now: 0 },
+    // With the chat's one-click action, as chat.ts adds it to a slowed pickup (2026-10-31).
+    { file: 'preview-pickup-stopped-continue-now', kind: 'pickup-stopped', next: 'continue', attempts: 3, deadline: 300_000, now: 0, action: 'Continue now' },
+    { file: 'preview-pickup-stopped-try-now', kind: 'pickup-stopped', next: 'queue', attempts: 5, deadline: 300_000, now: 0, action: 'Try now' },
     { file: 'preview-unattributed', kind: 'unattributed', deadline: 15_000, now: 0 },
     { file: 'preview-unattributed-multiple', kind: 'unattributed', deadline: 60_000, now: 0 },
     { file: 'preview-unattributed-five-minute', kind: 'unattributed-wait', deadline: 300_000, now: 60_000 },
@@ -91,11 +94,18 @@ app.whenReady().then(async () => {
       const sample = ${JSON.stringify(preview)};
       document.documentElement.dataset.theme = 'dark';
       document.body.style.paddingTop = '30px';
-      recovery.renderRecoveryCountdowns(document.getElementById('recoveryStatus'), [sample], sample.now);
+      recovery.renderRecoveryCountdowns(document.getElementById('recoveryStatus'), [sample], sample.now, () => {
+        if (!sample.action) return null;
+        const button = document.createElement('button'); button.type = 'button'; button.className = 'dock-action is-labelled';
+        const glyph = document.createElement('i'); glyph.className = 'ico ph ' + (sample.next === 'continue' ? 'ph-play' : 'ph-arrow-clockwise');
+        const words = document.createElement('span'); words.textContent = sample.action;
+        button.append(glyph, words); return button;
+      });
       document.querySelector('#activeGoalRow .queue-label').textContent = sample.next === 'goal'
         ? 'Goal · Complete the requested task and verify the result.'
         : 'Loop · Continue the requested work and verify the result.';
-      return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      // A glyph first used here is not drawn until its font has loaded.
+      return document.fonts.ready.then(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     })()`);
     await captureOffscreenFrame(win, path.join(output, `${preview.file}.png`));
   }

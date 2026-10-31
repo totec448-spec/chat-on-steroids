@@ -3695,5 +3695,18 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Chưa gửi: thẻ trình duyệt của cuộc trò chuyện mới này đã bị đóng hoặc bị mất. Hãy kiểm tra tin nhắn rồi gửi lại.",
   "Recovery stopped": "Đã dừng khôi phục",
   "Stopped after {0} attempts": "Đã dừng sau {0} lần thử",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Trình duyệt không nhận được bước đang chờ sau {0} lần tự tải lại. Mục nhập gốc trong hàng đợi hoặc nghĩa vụ Goal vẫn được lưu. CoS sẽ không tự tải lại cuộc trò chuyện này cho bước đó nữa; hãy mở cuộc trò chuyện và tiếp tục thủ công."
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Trình duyệt không nhận được bước đang chờ sau {0} lần tự tải lại. Mục nhập gốc trong hàng đợi hoặc nghĩa vụ Goal vẫn được lưu. CoS sẽ không tự tải lại cuộc trò chuyện này cho bước đó nữa; hãy mở cuộc trò chuyện và tiếp tục thủ công.",
+  "The browser has not picked up this chat's next step. The app keeps trying; you can go on from the chat at once.": "Trình duyệt chưa nhận bước tiếp theo của cuộc trò chuyện này. Ứng dụng vẫn tiếp tục thử; bạn có thể tiếp tục ngay từ cuộc trò chuyện.",
+  "Continue now": "Tiếp tục ngay",
+  "Send the waiting Continue now, as an ordinary message": "Gửi ngay lệnh Tiếp tục đang chờ như một tin nhắn thường",
+  "Try now": "Thử ngay",
+  "Try to send the waiting step now": "Thử gửi ngay bước đang chờ",
+  "Continue queued. It goes out as soon as ChatGPT takes it.": "Đã xếp hàng Tiếp tục. Tin nhắn sẽ được gửi ngay khi ChatGPT nhận.",
+  "Trying again now.": "Đang thử lại ngay.",
+  "This chat has no ChatGPT conversation yet.": "Cuộc trò chuyện này chưa có cuộc hội thoại ChatGPT.",
+  "ChatGPT limits this chat for a few minutes. The app tries again right after.": "ChatGPT giới hạn cuộc trò chuyện này trong vài phút. Ứng dụng sẽ thử lại ngay sau đó.",
+  "Nothing is waiting to be picked up in this chat any more.": "Không còn gì chờ trong cuộc trò chuyện này.",
+  "This step changed meanwhile. Check the chat and try again.": "Bước này đã thay đổi trong lúc đó. Hãy kiểm tra cuộc trò chuyện và thử lại.",
+  "Not sent now: something in this chat is still running. The app keeps trying.": "Chưa gửi lúc này: vẫn còn tác vụ đang chạy trong cuộc trò chuyện này. Ứng dụng vẫn tiếp tục thử.",
+  "No new try could start now. The app keeps trying on its own.": "Hiện chưa thể bắt đầu lần thử mới. Ứng dụng vẫn tự tiếp tục thử."
 }

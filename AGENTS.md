@@ -3210,7 +3210,19 @@ sent manually; reactivating the same Goal reply does not refund its attempts. Th
 lifetime bounds the slow retries too (2026-10-31: a chat must not stop for good while it is unfinished). Page activity that
 pushes a retry out is saved with its owners (queued input and Goal reply), so a restart keeps the later
 deadline. A stop with no retry left (24 reloads, or 12 hours) carries `exhausted` and reads "Recovery
-stopped" instead of "Recovery slowed". Two exceptions keep a chat from stopping while it
+stopped" instead of "Recovery slowed".
+When the quick reloads run out, the chat also gets a stop notice ("Recovery slowed", desktop and, under
+its rules, the phone). The notice row offers one click (`sessions:pickupNow` → `pickupNow` in bridge.ts):
+**Continue now** for a waiting automatic Continue (sent at once as an ordinary message through
+`continueAsOrdinaryMessage`, with all its checks), **Try now** for a queued message or Goal/Loop step (its
+next try runs at once and counts as a reload). The click names the stopped step it was shown for
+(`next` and its stop time, the row's `deadline`); a different step now waiting is refused (`changed`), never
+acted on in its name. The reply says only what really started: `queued` (the Continue is a queued ordinary
+message, not yet delivered) or `retrying` (this chat's reload was queued, read from `inspectOwedPickups`'
+`focus`); otherwise a refusal code (`no-chat`, `history-limit`, `nothing-waiting`, `changed`, `not-sent`,
+`not-started`) that the renderer words with fixed, translated texts, and only while the same chat is still
+selected. An exhausted stop offers only Continue now, for a waiting Continue; nothing is left to try again.
+Every click and refusal is logged. Two exceptions keep a chat from stopping while it
 is unfinished (2026-10-31): a queued input the app itself does not offer (`queuedInputOfferBlocker`
 names the gate) spends no reload, and the bridge logs `next automation/input step in <chat> is not
 offered to the page — <gate>; no reload is spent on it` once per chat, input and gate; and an

@@ -4948,6 +4948,9 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .composer-dock button { flex-shrink: 0; }
 .composer-dock .dock-action { border: 0; border-radius: 5px; background: transparent; color: var(--soft); padding: 4px; display: inline-flex; align-items: center; cursor: pointer; }
 .composer-dock .dock-action:hover { color: var(--ink); background: var(--hover); }
+/* A dock action with its words (Continue now): the one thing to do about the row, so it is said. */
+.composer-dock .dock-action.is-labelled { gap: 5px; padding: 3px 8px; color: var(--ink); font: inherit; font-size: calc(12px * var(--text-scale, 1)); font-weight: 550; white-space: nowrap; }
+.composer-dock .dock-action.is-labelled:disabled { opacity: .55; cursor: default; }
 .composer-dock .queued-input.is-editing { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; }
 .composer-dock .queued-input.is-editing textarea { grid-row: 1 / span 2; min-width: 0; width: 100%; }
 .composer-dock .queued-input.is-editing > button { grid-column: 2; justify-self: center; }
