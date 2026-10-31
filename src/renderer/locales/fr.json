@@ -3853,5 +3853,6 @@
   "{0} messages|one": "{0} message",
   "{0} messages|many": "{0} de messages",
   "{0} actions|one": "{0} action",
-  "{0} actions|many": "{0} d’actions"
+  "{0} actions|many": "{0} d’actions",
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Message non envoyé : l’onglet du navigateur de cette nouvelle discussion a été fermé ou perdu. Vérifiez le message et envoyez-le à nouveau."
 }

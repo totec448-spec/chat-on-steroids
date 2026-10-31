@@ -3934,5 +3934,6 @@
   "{0} messages|many": "{0} сообщений",
   "{0} actions|one": "{0} действие",
   "{0} actions|few": "{0} действия",
-  "{0} actions|many": "{0} действий"
+  "{0} actions|many": "{0} действий",
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Не отправлено: вкладка браузера для этого нового чата закрыта или потеряна. Проверь сообщение и отправь заново."
 }

@@ -3853,5 +3853,6 @@
   "{0} messages|one": "{0} mensagem",
   "{0} messages|many": "{0} de mensagens",
   "{0} actions|one": "{0} ação",
-  "{0} actions|many": "{0} de ações"
+  "{0} actions|many": "{0} de ações",
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Não enviado: a aba do navegador deste novo chat foi fechada ou perdida. Revise a mensagem e envie novamente."
 }
