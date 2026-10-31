@@ -3167,6 +3167,34 @@ describe('desktop input delivery and helper ownership', () => {
     }
   });
 
+  // CodeRabbit on #1972: text the person typed while a wake's model was being chosen stays theirs.
+  it('leaves a draft typed while a wake chose its model, and tries the wake again later', async () => {
+    const commandId = 'cmd-wake-draft';
+    let page!: Document;
+    const selection = vi.fn(async () => {
+      const box = page.querySelector('#prompt-textarea')!;
+      box.textContent = 'my own words';
+      return false;
+    });
+    live = await harness(`https://chatgpt.com/c/${chatA}?clf=${commandId}`, {
+      redeem: () => ({ ok: true, command: { id: commandId, type: 'revive', text: 'Now do the second half.', agent: 'worker-1',
+        model: 'gpt-5.6-sol', reasoningEffort: 'high', conversationId: chatA } })
+    }, (document) => {
+      page = document;
+      let dom: any;
+      Object.defineProperty(document.defaultView!, 'CLF_DOM', { configurable: true,
+        get: () => dom, set: value => { dom = value; dom.selectModelSettings = selection; } });
+    });
+    await settle();
+    await new Promise(resolve => globalThis.setTimeout(resolve, 300));
+    await settle();
+    expect(selection).toHaveBeenCalled();
+    expect(composerText(live.document)).toBe('my own words');
+    const steps = live.sent.filter(message => message.type === 'command_step').map(message => message.step);
+    expect(steps).not.toContain('inserting');
+    expect(live.sent.find(message => message.type === 'ack' && message.status === 'failed')?.error).toContain('did not replace it');
+  });
+
   it.each(['worker', 'resume', 'revive', 'trusted-edit', 'new-user', 'foreign-route', 'rejected-ack'])('retires only an owned late bootstrap draft (%s)', async kind => {
     const commandId = 'cmd-late-bootstrap';
     const prompt = '[[CLF-RESUME:0123456789abcdef0123456789abcdef]]\nContinue exact task.';

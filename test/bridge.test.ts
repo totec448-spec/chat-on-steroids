@@ -355,11 +355,12 @@ async function waitForOpened(count = 1, timeout?: number): Promise<void> {
 
 async function waitForRevival(): Promise<{ id: string; conversationId: string }> {
   let revival: { id: string; conversationId: string } | null = null;
+  // The release runners (Intel macOS, Linux arm64) are slow: not vi.waitFor's one-second default.
   await vi.waitFor(async () => {
     const status = await request('GET', '/status');
     revival = status.body.revival ?? null;
     expect(revival).toMatchObject({ id: expect.any(String), conversationId: expect.any(String) });
-  });
+  }, { timeout: 10_000, interval: 50 });
   return revival!;
 }
 
