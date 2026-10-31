@@ -11597,6 +11597,39 @@ describe('unattributed activity recovery', () => {
       expect(lines().slice(before)).toHaveLength(3);
       expect(lines().at(-1)).toBe('bridge: a ChatGPT page closed ChatGPT\'s announcement "A new feature" that covered it, by Escape');
       expect((await note({ note: 'something-else' })).status).toBe(400);
+      // Why a page held a queued message back, once a minute per chat and reason (2026-10-30).
+      const held = () => getLog().filter(entry => entry.message.includes('held queued message')).map(entry => entry.message);
+      const heldBefore = held().length;
+      await note({ note: 'input-held', reason: 'still-answering', inputId: 'abcdef01-2345-4678-9abc-def012345678', conversationId: PRIME });
+      await note({ note: 'input-held', reason: 'still-answering', inputId: 'abcdef01-2345-4678-9abc-def012345678', conversationId: PRIME });
+      expect(held().slice(heldBefore)).toEqual([`bridge: the page of ${PRIME} held queued message abcdef01-2345-4678-9abc-def012345678 back: ChatGPT still shows an answer running`]);
+      expect((await note({ note: 'input-held', reason: 'made-up', inputId: 'abcdef01-2345-4678-9abc-def012345678' })).status).toBe(400);
+      // CodeRabbit on #1947: only a message id (a UUID) is taken.
+      expect((await note({ note: 'input-held', reason: 'still-answering', inputId: '--------', conversationId: PRIME })).status).toBe(400);
+      // Two new chats (no id yet) held for the same reason are each said.
+      const fresh = ['11111111-2222-4333-8444-555555555555', '66666666-7777-4888-8999-aaaaaaaaaaaa'];
+      for (const inputId of fresh) await note({ note: 'input-held', reason: 'no-composer', inputId, conversationId: null });
+      expect(held().slice(heldBefore + 1)).toEqual(fresh.map(id => `bridge: a ChatGPT page held queued message ${id} back: the page shows no message box`));
+    } finally { vi.useRealTimers(); }
+  });
+
+  // CodeRabbit on #1947: a key logged again moves to the newest end, so a full map evicts the oldest log.
+  it('keeps a page note just logged again when the full log map evicts its oldest key', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const note = (body: unknown) => request('POST', '/page-note', { body });
+      const id = (index: number) => `${String(index).padStart(8, '0')}-0000-4000-8000-000000000000`;
+      const lines = (inputId: string) => getLog().filter(entry => entry.message.includes(`held queued message ${inputId} `)).length;
+      await note({ note: 'input-held', reason: 'tool-running', inputId: id(0), conversationId: id(0) });
+      for (let index = 1; index < 200; index++) await note({ note: 'input-held', reason: 'tool-running', inputId: id(index), conversationId: id(index) });
+      await vi.advanceTimersByTimeAsync(60_000);
+      await note({ note: 'input-held', reason: 'tool-running', inputId: id(0), conversationId: id(0) });
+      expect(lines(id(0))).toBe(2);
+      // One more key fills the map past its limit: the oldest (id 1) goes, not the one just logged.
+      await note({ note: 'input-held', reason: 'tool-running', inputId: id(200), conversationId: id(200) });
+      await note({ note: 'input-held', reason: 'tool-running', inputId: id(0), conversationId: id(0) });
+      expect(lines(id(0))).toBe(2);
     } finally { vi.useRealTimers(); }
   });
 
