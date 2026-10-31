@@ -1492,8 +1492,8 @@
   "Automatically continue interrupted responses": "Автоматически продолжать прерванные ответы",
   "Recover unfinished answers, including in Goal and Loop. Reload after 2 minutes without progress (Pro: 10). If still generating, wait 1 more minute (Pro: 5), then stop and send. A final answer selects Goal or Loop instead of Continue. Undelivered steps get at most three page reloads (after 2, 5, and 10 minutes); recovery then stops visibly while the original pending work remains saved.": "Восстанавливать незавершённые ответы, включая Цель и Цикл. Перезагрузить после 2 минут без прогресса (Pro: 10). Если генерация продолжается, подождать ещё 1 минуту (Pro: 5), затем остановить и отправить. Финальный ответ выбирает Цель или Цикл вместо Continue. Для неполученных шагов выполняется не более трёх перезагрузок (через 2, 5 и 10 минут); затем восстановление явно останавливается, а исходная незавершённая работа остаётся сохранённой.",
   "Waiting for delivery": "Ожидание доставки",
-  "Stopped after {0} attempts": "Остановлено после {0} попыток",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Браузер не получил ожидающий шаг после {0} автоматических перезагрузок. Исходный ввод в очереди или задача «Цель» остаётся сохранённой. CoS больше не будет автоматически перезагружать этот чат для данного шага; откройте чат и продолжите вручную.",
+  "Retrying slowly · {0} reloads": "Медленные повторы · перезагрузок: {0}",
+  "The browser did not collect the pending step after {0} automatic reloads. Its queued message or Goal step stays saved, and CoS keeps trying every 15 to 60 minutes. To go on now, open the chat and continue.": "Браузер не забрал ожидающий шаг после {0} автоматических перезагрузок. Сообщение в очереди или шаг Цели остаются сохранёнными, и CoS продолжает пытаться каждые 15–60 минут. Чтобы продолжить сейчас, откройте чат и продолжите.",
   "Make this workspace yours. Changes appear immediately.": "Настройте это рабочее пространство под себя. Изменения применяются сразу.",
   "Appearance preview": "Предпросмотр оформления",
   "How will your next idea look?": "Как будет выглядеть ваша следующая идея?",
@@ -1882,7 +1882,7 @@
   "A chat stopped": "Чат остановился",
   "Its last turn produced nothing and nothing followed. Send a message there to start a fresh turn.": "Последний ход ничего не выдал, и продолжения не последовало. Отправьте сообщение в этом чате, чтобы начать новый ход.",
   "Its last turn failed and nothing followed. Send a message there to start a fresh turn.": "Последний ход завершился с ошибкой, и продолжения не последовало. Отправьте сообщение в этом чате, чтобы начать новый ход.",
-  "Recovery stopped": "Восстановление остановлено",
+  "Recovery slowed": "Восстановление замедлено",
   "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "Браузер не подхватил восстановление этого чата, поэтому приложение прекратило повторные попытки. Снова откройте его вкладку — восстановление продолжится.",
   "Degraded": "Снижено",
   "Opening": "Открывается",
@@ -3935,5 +3935,6 @@
   "{0} actions|one": "{0} действие",
   "{0} actions|few": "{0} действия",
   "{0} actions|many": "{0} действий",
-  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Не отправлено: вкладка браузера для этого нового чата закрыта или потеряна. Проверь сообщение и отправь заново."
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Не отправлено: вкладка браузера для этого нового чата закрыта или потеряна. Проверь сообщение и отправь заново.",
+  "Recovery stopped": "Восстановление остановлено"
 }

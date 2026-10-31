@@ -16579,7 +16579,7 @@ describe('the goal loop over the bridge', () => {
   });
 
   /** A missing page pickup gets a durable, visible stop instead of an endless reload loop. */
-  it('stops queued pickup after three persisted reload attempts and preserves the original input', async () => {
+  it('shows queued pickup as stopped after three reloads, keeps retrying every 15 to 60 minutes, and preserves the original input', async () => {
     vi.useFakeTimers();
     const input = await import('../src/main/session/input.js');
     const { resetInputForTests, enqueueInput } = input;
@@ -16616,7 +16616,8 @@ describe('the goal loop over the bridge', () => {
       await request('GET', `/status?repaired=${third.token}&repairAction=reloaded`);
 
       const row = (await input.listInputs()).find(entry => entry.id === 'abca0175-0000-4000-8000-000000000175');
-      expect(row).toMatchObject({ text: 'next step', state: 'queued', pickupRecovery: { attempts: 3, stoppedAt: Date.now() } });
+      // Shown as stopped (the person can Continue it in one click), with the first slow retry in 15 minutes.
+      expect(row).toMatchObject({ text: 'next step', state: 'queued', pickupRecovery: { attempts: 3, stoppedAt: Date.now(), nextAt: Date.now() + 15 * 60_000 } });
       expect((await sessionControlsFor(session.id)).recovery).toContainEqual({
         kind: 'pickup-stopped', deadline: Date.now(), attempts: 3, next: 'queue'
       });
@@ -16637,20 +16638,30 @@ describe('the goal loop over the bridge', () => {
       });
 
       // Dropping in-memory bridge/input state models a restart. Durable ownership restores the
-      // stopped state, so another sweep cannot reset the budget or reload this page again.
+      // stopped state and its slow schedule: the budget is not reset, and the chat is not given up.
       resetBridgeForTests();
       resetInputForTests();
       await pair();
       expect((await input.listInputs()).find(entry => entry.id === row!.id)).toMatchObject({
-        text: 'next step', pickupRecovery: { attempts: 3, stoppedAt: Date.now() }
+        text: 'next step', pickupRecovery: { attempts: 3, stoppedAt: Date.now(), nextAt: Date.now() + 15 * 60_000 }
       });
-      await vi.advanceTimersByTimeAsync(15 * 60_000);
-      await sweepStaleSwarm(Date.now());
-      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      // Nothing before the slow retry is due.
+      await vi.advanceTimersByTimeAsync(14 * 60_000);
       await sweepStaleSwarm(Date.now());
       expect((await request('GET', '/status')).body.repairs?.some((repair: { conversationId: string }) => repair.conversationId === chat)).toBe(false);
-      expect((await sessionControlsFor(session.id)).recovery).toContainEqual(expect.objectContaining({ kind: 'pickup-stopped', attempts: 3, next: 'queue' }));
-      expect(recoveryBrowserWake).toHaveBeenCalledTimes(3);
+      // The slow retry after 15 minutes, then the next after 30 more.
+      for (const [minutes, attempts] of [[1, 4], [30, 5]] as const) {
+        await vi.advanceTimersByTimeAsync(minutes * 60_000);
+        await sweepStaleSwarm(Date.now());
+        const slow = (await request('GET', '/status')).body.repairs?.find((repair: { conversationId: string }) => repair.conversationId === chat);
+        expect(slow).toMatchObject({ reason: 'goal' });
+        await request('GET', `/status?repaired=${slow.token}&repairAction=reloaded`);
+        expect((await input.listInputs()).find(entry => entry.id === row!.id)?.pickupRecovery).toMatchObject({ attempts, stoppedAt });
+        expect(getLog().some(entry => entry.message.includes(`uncollected in ${chat} — reload ${attempts} (slow retry)`))).toBe(true);
+      }
+      expect(recoveryBrowserWake).toHaveBeenCalledTimes(5);
+      expect(getLog().filter(entry => entry.message.includes(`has not collected the step in ${chat} after 3 reloads; the chat shows as stopped, and the app keeps trying`))).toHaveLength(1);
+      expect((await sessionControlsFor(session.id)).recovery).toContainEqual(expect.objectContaining({ kind: 'pickup-stopped', next: 'queue' }));
       expect((await readSessionList({ limit: 60 })).recoveryStopped).toEqual([chat]);
       // The person acting on it ends it: the countdown and the list agree it is gone.
       expect(await input.cancelInput(row!.id)).toBe(true);
@@ -16753,10 +16764,15 @@ describe('the goal loop over the bridge', () => {
         expect(goal.goalPendingReplyFor(chat)).toMatchObject({ pickupAttempts: index + 1 });
         if (index === 0) expect(await input.cancelInput(row.id)).toBe(true);
       }
-      expect(goal.goalPendingReplyFor(chat)).toMatchObject({ pickupAttempts: 3, pickupStoppedAt: Date.now() });
+      const stoppedAt = Date.now();
+      expect(goal.goalPendingReplyFor(chat)).toMatchObject({ pickupAttempts: 3, pickupStoppedAt: stoppedAt });
+      // Shown as stopped, but not given up: the shared budget's slow retry comes 15 minutes later.
       await vi.advanceTimersByTimeAsync(15 * 60_000);
       await sweepStaleSwarm(Date.now());
-      expect((await request('GET', '/status')).body.repairs?.some((item: { conversationId: string }) => item.conversationId === chat)).toBe(false);
+      const slow = (await request('GET', '/status')).body.repairs?.find((item: { conversationId: string }) => item.conversationId === chat);
+      expect(slow).toMatchObject({ reason: 'goal' });
+      await request('GET', `/status?repaired=${slow.token}&repairAction=reloaded`);
+      expect(goal.goalPendingReplyFor(chat)).toMatchObject({ pickupAttempts: 4, pickupStoppedAt: stoppedAt });
     } finally {
       await writeDurableNow('session-input', []);
       input.resetInputForTests();
@@ -16857,9 +16873,11 @@ describe('the goal loop over the bridge', () => {
       }
       const stopped = (await listInputs()).find(item => item.id === id);
       expect(stopped).toMatchObject({ text: 'next step', pickupRecovery: { attempts: 3, stoppedAt: Date.now() } });
+      // Shown as stopped; the slow retry still comes, 15 minutes later.
       await vi.advanceTimersByTimeAsync(15 * 60_000);
       await sweepStaleSwarm(Date.now());
-      expect((await request('GET', '/status')).body.repairs).toEqual([]);
+      expect((await request('GET', '/status')).body.repairs).toEqual([expect.objectContaining({ conversationId: chat, reason: 'goal' })]);
+      // The pickup's 12-hour window still bounds it.
       await vi.advanceTimersByTimeAsync(12 * 60 * 60_000);
       await sweepStaleSwarm(Date.now());
       expect((await request('GET', '/status')).body.repairs).toEqual([]);
@@ -16991,8 +17009,9 @@ describe('the goal loop over the bridge', () => {
       goal.restoreGoalReplies(stoppedSnapshot);
       goal.restoreGoalSwitches(switchSnapshot);
       await pair();
+      // Restored as stopped, and still retried on the slow cadence.
       await vi.advanceTimersByTimeAsync(60 * 60_000);
-      expect(await takeRepair()).toBeNull();
+      expect(await takeRepair()).toMatchObject({ reason: 'goal' });
 
       // The existing durable expiry still bounds unattended browser recovery.
       await vi.advanceTimersByTimeAsync(12 * 60 * 60_000);

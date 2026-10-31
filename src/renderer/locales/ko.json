@@ -1394,8 +1394,8 @@
   "Automatically continue interrupted responses": "중단된 응답 자동으로 계속",
   "Recover unfinished answers, including in Goal and Loop. Reload after 2 minutes without progress (Pro: 10). If still generating, wait 1 more minute (Pro: 5), then stop and send. A final answer selects Goal or Loop instead of Continue. Undelivered steps get at most three page reloads (after 2, 5, and 10 minutes); recovery then stops visibly while the original pending work remains saved.": "Goal과 Loop를 포함해 끝나지 않은 답변을 복구합니다. 진행이 없으면 2분 후 새로고침합니다(Pro: 10분). 그래도 생성 중이면 1분 더 기다린 뒤(Pro: 5분) 중지하고 전송합니다. 최종 답변이 나오면 Continue 대신 Goal 또는 Loop를 선택합니다. 전달되지 않은 단계는 2, 5, 10분 후 최대 세 번 새로고침하며, 이후에는 복구를 명확히 중지하고 원래 대기 중인 작업을 저장합니다.",
   "Waiting for delivery": "전송 대기 중",
-  "Stopped after {0} attempts": "{0}회 시도 후 중지됨",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "자동 새로고침 {0}회 후에도 브라우저가 대기 중인 단계를 가져오지 못했습니다. 원래 대기열 입력 또는 Goal 작업은 저장되어 있습니다. CoS는 이 단계 때문에 이 채팅을 더 이상 자동 새로고침하지 않습니다. 채팅을 열어 직접 계속하세요.",
+  "Retrying slowly · {0} reloads": "천천히 재시도 중 · 새로 고침 {0}번",
+  "The browser did not collect the pending step after {0} automatic reloads. Its queued message or Goal step stays saved, and CoS keeps trying every 15 to 60 minutes. To go on now, open the chat and continue.": "자동 새로 고침 {0}번 후에도 브라우저가 대기 중인 단계를 가져가지 않았습니다. 대기열의 메시지나 Goal 단계는 저장된 채로 있으며, CoS가 15~60분마다 계속 시도합니다. 지금 이어 가려면 채팅을 열고 계속하세요.",
   "Make this workspace yours. Changes appear immediately.": "이 워크스페이스를 원하는 모습으로 꾸며보세요. 변경 사항은 즉시 적용됩니다.",
   "Appearance preview": "모양 미리보기",
   "How will your next idea look?": "다음 아이디어는 어떤 모습일까요?",
@@ -1784,7 +1784,7 @@
   "A chat stopped": "채팅이 멈췄습니다",
   "Its last turn produced nothing and nothing followed. Send a message there to start a fresh turn.": "마지막 턴이 아무것도 만들지 못했고 이후에도 아무것도 이어지지 않았습니다. 새 턴을 시작하려면 그 채팅에 메시지를 보내세요.",
   "Its last turn failed and nothing followed. Send a message there to start a fresh turn.": "마지막 턴이 실패했고 이후에도 아무것도 이어지지 않았습니다. 새 턴을 시작하려면 그 채팅에 메시지를 보내세요.",
-  "Recovery stopped": "복구 중지됨",
+  "Recovery slowed": "복구 속도 낮춤",
   "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "브라우저가 이 채팅의 복구 요청을 받지 않아 앱이 재시도를 중지했습니다. 탭을 다시 열면 복구가 다시 시작됩니다.",
   "Use minimum effort: {0}": "최소 추론 수준 사용: {0}",
   "Use maximum effort: {0}": "최대 추론 수준 사용: {0}",
@@ -3692,5 +3692,6 @@
   "{0} sessions": "세션 {0}개",
   "{0} entries": "항목 {0}개",
   "{0} messages": "메시지 {0}개",
-  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "전송되지 않음: 이 새 채팅의 브라우저 탭이 닫혔거나 사라졌습니다. 메시지를 검토한 후 다시 전송하세요."
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "전송되지 않음: 이 새 채팅의 브라우저 탭이 닫혔거나 사라졌습니다. 메시지를 검토한 후 다시 전송하세요.",
+  "Recovery stopped": "복구 중지됨"
 }
