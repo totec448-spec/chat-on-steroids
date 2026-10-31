@@ -435,6 +435,42 @@ describe('stop fallback for fresh turns', () => {
     } finally { spy.mockRestore(); setRotationHoldForTests(15_000); await saveConfig({ ...config, sessions: { ...config.sessions, record: true } }); }
   });
 
+  // CodeRabbit on #1954: a fresh-turn Stop the page could not send protects nothing: the fence goes at
+  // once. And the person's own Stop over a pending fresh-turn Stop files no continue after it.
+  it.each(['failed', 'person'] as const)('lifts the fence when the fresh-turn Stop ends without a continue (%s)', async variant => {
+    const config = defaultConfig();
+    await saveConfig({ ...config, sessions: { ...config.sessions, record: true }, ui: { ...config.ui, rotateStopFallback: true } });
+    setRotationHoldForTests(5_000);
+    const clock = { now: Date.now() };
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock.now);
+    try {
+      const chat = variant === 'failed' ? 'f0f00003-1111-4111-8111-000000000408' : 'f0f00003-1111-4111-8111-000000000409';
+      const turn = `g-stopfb-0-${variant}`;
+      const sessionId = await turnFor(chat, turn, 31);
+      await declineTwice(chat, sessionId, clock);
+      await (await heldCall(chat))();
+      let stop: { id: string } | undefined;
+      await vi.waitFor(async () => {
+        stop = (await request('GET', '/status')).body.stopTurns?.find((row: { conversationId: string }) => row.conversationId === chat);
+        expect(stop).toBeTruthy();
+      }, { timeout: 10_000, interval: 50 });
+      expect(rotationFenced(chat)).toBe(true);
+      if (variant === 'failed') {
+        const redeemed = await request('POST', '/commands/redeem', { body: { id: stop!.id, client: 'stop-client', conversationId: chat } });
+        expect(redeemed.status).toBe(200);
+        const acked = await request('POST', '/commands/ack', { body: { id: stop!.id, status: 'failed', client: 'stop-client', conversationId: chat, turnId: turn, error: 'native_stop_unavailable_or_turn_changed' } });
+        expect(acked.status).toBe(200);
+        expect(rotationFenced(chat)).toBe(false);
+      } else {
+        await stopSessionTurn(sessionId, turn);
+        expect(rotationFenced(chat)).toBe(false);
+        await events(chat, [{ kind: 'turn_end', time: clock.now, turnId: turn, outcome: 'stopped' }]);
+        await new Promise(resolve => setTimeout(resolve, 200));
+        expect((await listInputs()).some(entry => entry.sessionId === sessionId && entry.purpose === 'rotation' && entry.afterStop === true)).toBe(false);
+      }
+    } finally { spy.mockRestore(); setRotationHoldForTests(15_000); await saveConfig({ ...config, sessions: { ...config.sessions, record: true } }); }
+  });
+
   // CodeRabbit on #1954: fresh turns switched off after the declines means no fallback Stop.
   it('stops nothing once fresh turns were switched off after the declines', async () => {
     const config = defaultConfig();

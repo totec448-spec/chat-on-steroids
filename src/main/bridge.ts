@@ -2267,6 +2267,12 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
   };
   await assertCurrent();
   if (!options.rotation) {
+    // The person's Stop takes over a pending fresh-turn Stop of the same turn: no automatic continue
+    // may follow the stop they asked for (CodeRabbit on #1954).
+    if (rotationFenceTurn(id) === expectedTurnId) {
+      clearRotationFence(id);
+      logInfo(`turn rotation: ${id} — the person stopped turn ${expectedTurnId}; the fresh turn the app was starting is cancelled`);
+    }
     await setSessionAutomation(sessionId, 'off');
     await assertCurrent();
     if (continuationForSession(sessionId)) { await cancelResumeNow(sessionId); await assertCurrent(); }
@@ -6537,6 +6543,14 @@ async function finalizeCommand(command: Command, receipt: CommandReceipt): Promi
     command.timer = null;
     commands = commands.filter((entry) => entry !== command);
     commandReceipts = [...commandReceipts.filter((entry) => entry.id !== receipt.id), receipt].slice(-MAX_COMMAND_RECEIPTS);
+    // A fresh-turn Stop the page could not send protects nothing any more: no stop and no continue
+    // follow, so its chat's calls run again at once (CodeRabbit on #1954). A Stop that went out keeps
+    // the fence until its stopped end is processed, which files the continue.
+    if (receipt.outcome === 'terminal-failure' && command.spec.type === 'stop' && command.spec.rotation &&
+        rotationFenceTurn(command.spec.conversationId) === command.spec.turnId) {
+      clearRotationFence(command.spec.conversationId);
+      logInfo(`turn rotation: ${command.spec.conversationId} — the page could not stop turn ${command.spec.turnId}; its calls run again and no fresh turn follows`);
+    }
     changed();
     return true;
   });
@@ -11248,9 +11262,6 @@ function commandProgress(command: Command, now = Date.now()): string {
 
 /** Finishes a command that has nothing left to do, timer and all. */
 function retire(command: Command, why: string): void {
-  // A fresh-turn Stop that ends here no longer protects anything: its fence goes with it.
-  if (command.spec.type === 'stop' && command.spec.rotation && rotationFenceTurn(command.spec.conversationId) === command.spec.turnId)
-    clearRotationFence(command.spec.conversationId);
   if (command.timer) clearTimeout(command.timer);
   command.timer = null;
   delete command.placement;
