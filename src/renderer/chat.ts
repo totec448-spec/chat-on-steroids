@@ -98,7 +98,7 @@ import {
   foldProgress,
   toolCallSummary
 } from '../shared/session.js';
-import { chronological, positionOf, residenceOf } from '../shared/chronology.js';
+import { authoredTimeOf, chronological, positionOf, residenceOf } from '../shared/chronology.js';
 import { recentChatActivity, sessionWorkingAt, workerReportedFinish } from '../shared/session-activity.js';
 import {
   DEFAULT_GOAL_MODEL,
@@ -109,7 +109,7 @@ import {
 } from '../shared/goal.js';
 import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS, type HandoffLength } from '../shared/handoff.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
-import { $, ago, clockTime, compactAgeText, compactNumber, disclosureChevron, el, elapsedDurationText, icon, run, setIcon, toast } from './dom.js';
+import { $, ago, clockTime, compactAgeText, compactNumber, disclosureChevron, el, elapsedDurationText, icon, rowTime, run, setIcon, toast } from './dom.js';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_REPAIR_DEFERRED_TEXT, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
 import { STRICT_REFUSAL_PROGRESS_PREFIX, UNPROVEN_WORKER_NOTICE, UNTRUSTED_NOTICE, UNTRUSTED_WORKER_NOTICE } from '../shared/trust-notices.js';
 import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
@@ -5795,9 +5795,8 @@ function eventRow(event: SessionEvent): HTMLElement {
   if (event.kind === 'progress' && event.source === 'app') row.dataset.appNote = '';
   if (event.kind === 'assistant_message' && !withoutMessageReaction(event.message.text).trim()) row.hidden = true;
   tagImageRow(row, event);
-  const time = document.createElement('time');
-  time.textContent = clockTime(event.time);
-  time.title = new Date(event.time).toLocaleString(currentLanguage());
+  // When the message was written (the page's own time) over when the app saw it (CodeRabbit on #1948).
+  const time = rowTime(authoredTimeOf(event) ?? event.time);
   const body = el('div', 'ev-body');
   const currentWorker = sessions.find(session => session.id === selectedId)?.origin;
   if (event.agent && event.agent !== 'prime' && !(currentWorker?.kind === 'worker' && currentWorker.agentId === event.agent)) {
@@ -6218,9 +6217,7 @@ function compactionRow(block: CompactionBlock, previous?: HTMLElement, latest = 
   } else box.append(raw);
 
   if (previous) return row;
-  const time = document.createElement('time');
-  time.textContent = clockTime(block.time);
-  time.title = new Date(block.time).toLocaleString(currentLanguage());
+  const time = rowTime(block.time);
   const body = el('div', 'ev-body');
   body.append(box);
   row.append(time, body);
