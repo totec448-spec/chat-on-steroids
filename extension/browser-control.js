@@ -5,7 +5,7 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
   const KEY = 'cosBrowserControl';
   const tabs = new Map();
   const STREAM_BYTES = 4 * 1024 * 1024, STREAM_PAGE_BYTES = 256 * 1024;
-  let browserId, epoch = null, receipt = null, loading, pumping, again = false, saving = Promise.resolve();
+  let browserId, epoch = null, receipt = null, loading, readySettled = false, pumping, again = false, saving = Promise.resolve();
   let policy = { read: false, write: false };
   const id = () => crypto.randomUUID();
   const cut = (s, n = 1000) => String(s ?? '').slice(0,n);
@@ -45,7 +45,8 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
   function newState(tabId, owner, lease = id()) {
     return { tabId, owner, lease, pageId: id(), contexts: new Map(), frames: new Map(), sessions: new Set(),
       console: [], network: new Map(), streams: new Map(), streamBytes: 0, seq: 0, consoleDropped: 0, networkDropped: 0, screenshot: null, dialog: null, initialized: false,
-      networkProtected: false, topUrl: null };
+      networkProtected: false, topUrl: null, networkEpoch: 0, sessionUrls: new Map(),
+      sessionEpochs: new Map(), sessionReady: new Set(), sessionTokens: new Map() };
   }
   function dropStream(state, key) {
     const capture = state.streams.get(key);
@@ -58,10 +59,16 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
     for (const key of state.streams.keys()) dropStream(state,key);
     state.network.clear();
   }
+  function retireChildNetwork(state,frameId,sessionId,keepLoaderId) {
+    for (const [key,row] of state.network) {
+      if (!(frameId && row.nativeFrameId === frameId || sessionId && row.sessionId === sessionId)) continue;
+      if (keepLoaderId && row.type === 'Document' && row.nativeFrameId === frameId && row.nativeLoaderId === keepLoaderId) continue;
+      dropStream(state,key);state.network.delete(key);
+    }
+  }
   function invalidate(state) {
-    // A new pageId makes old stream byte pages inaccessible; release their
-    // allocation at the same boundary so they cannot strand the tab budget.
-    for (const key of state.streams.keys()) dropStream(state,key);
+    // DOM refs invalidate on frame/SPA changes. Network bytes have a separate
+    // top-document epoch so a child frame cannot interrupt a main-page SSE.
     state.pageId = id(); state.screenshot = null; state.refFrames?.clear();
     for (const key of state.contexts.keys()) if (key.endsWith(':isolated')) state.contexts.delete(key);
   }
@@ -75,7 +82,19 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
           const state = newState(entry.tabId, entry.owner, entry.lease);state.restored = true;tabs.set(entry.tabId,state);
         }
       }
+      // A restored attachment may never receive another Page.frameNavigated event.
+      // Seed its top-level provenance before admitting any network event.
+      await Promise.all([...tabs.values()].map(async state => {
+        try {
+          const tab = await chrome.tabs.get(state.tabId);
+          if (tabs.get(state.tabId) === state && tab?.url && !tab.pendingUrl) {
+            state.topUrl = tab.url; state.networkProtected = chatGPTUrl(tab.url);
+            if (state.networkProtected) clearNetwork(state);
+          }
+        } catch { /* Unknown provenance remains fail-closed for network events. */ }
+      }));
       await save();
+      readySettled = true;
     })();
     return loading;
   }
@@ -129,6 +148,10 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
     const tab = await getTab(state.tabId);
     alive(state,command);
     pageURL(tab.url);
+    if (state.topUrl === null && !(tab.pendingUrl && tab.pendingUrl !== tab.url)) {
+      state.topUrl = tab.url; state.networkProtected = chatGPTUrl(tab.url);
+      if (state.networkProtected) clearNetwork(state);
+    }
     if (tab.pendingUrl && tab.pendingUrl !== tab.url) error('BROWSER_NAVIGATING: wait for the destination and snapshot again.');
     // Never expose ChatGPT response traffic through browser tools, including an
     // attachment acquired before navigation or a tab not owned by orchestration.
@@ -482,7 +505,7 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
     return { value:{tabId:handle(state.tabId),pageId,screenshotId:shot.id,width,height,scale,fullPage:shot.fullPage},image:{mimeType:'image/jpeg',data:result.data} };
   }
   const streamCurrent = (state,row,capture) => tabs.get(state.tabId) === state &&
-    state.pageId === row.pageId && state.network.get(row.requestId) === row && state.streams.get(row.requestId) === capture;
+    state.networkEpoch === row.networkEpoch && state.network.get(row.requestId) === row && state.streams.get(row.requestId) === capture;
   function streamStatus(row,capture) {
     const terminal = row.finished === true;
     return {enabled:true,pending:capture.pending,retainedBytes:capture.bytes,limitBytes:STREAM_BYTES,
@@ -528,7 +551,8 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
     if (row.finished || !/^text\/event-stream(?:\s*;|$)/i.test(row.mimeType || '')) error('BROWSER_STREAM_REQUIRES_IN_FLIGHT_SSE: select an in-flight text/event-stream request. No request was replayed.');
     await authorize(command,false); alive(state,command);
     await currentTab(state,command);
-    if (state.network.get(row.requestId) !== row || row.finished) error('BROWSER_REQUEST_EXPIRED: request changed before stream capture.');
+    if (state.networkEpoch !== row.networkEpoch || state.network.get(row.requestId) !== row || row.finished)
+      error('BROWSER_REQUEST_EXPIRED: request or top-level document changed before stream capture.');
     // Another read may have enabled it while permission was being checked.
     capture = state.streams.get(row.requestId);
     if (capture) return capture;
@@ -585,7 +609,8 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
       const row = state.network.get(args.requestId);
       if (!row) error('BROWSER_REQUEST_EXPIRED: request is not in the retained buffer.');
       if (chatGPTUrl(row.url)) error('BROWSER_NETWORK_PROTECTED: ChatGPT response traffic is unavailable.');
-      if (args.body && state.pageId !== row.pageId) error('BROWSER_REQUEST_EXPIRED: page changed before reading response bytes.');
+      if (args.body && state.networkEpoch !== row.networkEpoch) error('BROWSER_REQUEST_EXPIRED: top-level document changed before reading response bytes.');
+      if (args.body) { await authorize(command,false); alive(state,command); }
       const capture = args.stream ? await enableStream(state,row,command) : state.streams.get(row.requestId);
       if (capture) {
         await authorize(command,false); alive(state,command);
@@ -605,9 +630,14 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
         }
       }
       await currentTab(state,command);
-      if ((args.body || capture) && (state.network.get(row.requestId) !== row || state.pageId !== row.pageId))
+      // CDP and the final tab lookup are asynchronous. A capability revoked
+      // during either must not receive bytes already materialized in memory.
+      if (args.body) { await authorize(command,false); alive(state,command); }
+      if (state.networkProtected || chatGPTUrl(state.topUrl) || protectedTab(state.tabId,state.topUrl || '',command?.conversationId))
+        error('BROWSER_NETWORK_PROTECTED: protected tab response traffic is unavailable.');
+      if ((args.body || capture) && (state.network.get(row.requestId) !== row || state.networkEpoch !== row.networkEpoch))
         error('BROWSER_REQUEST_EXPIRED: request or page changed before response bytes could be returned.');
-      const { nativeId:_native,sessionId:_session,nativeLoaderId:_loader,nativeFrameId:_frame,...value } = row;
+      const { nativeId:_native,sessionId:_session,nativeLoaderId:_loader,nativeFrameId:_frame,networkEpoch:_epoch,...value } = row;
       return { ...value,...(capture ? {stream:streamStatus(row,capture)}: {}),...(body ? {body}: {}) };
     }
     const rows = network ? [...state.network.values()].filter(row => !chatGPTUrl(row.url)) : state.console;
@@ -617,7 +647,7 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
     const selected = matching.slice(0,args.limit || 50);
     const values = []; let size = 0;
     for (const row of selected) {
-      const { nativeId:_native,sessionId:_session,nativeLoaderId:_loader,nativeFrameId:_frame,requestHeaders:_rq,responseHeaders:_rs,postData:_post,...brief } = row;
+      const { nativeId:_native,sessionId:_session,nativeLoaderId:_loader,nativeFrameId:_frame,networkEpoch:_epoch,requestHeaders:_rq,responseHeaders:_rs,postData:_post,...brief } = row;
       const value = network ? brief : row;
       size += JSON.stringify(value).length;
       if (size > 24000) break;
@@ -758,24 +788,57 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
     return result;
   };
   async function event(source,method,params) {
+    // Drop network events that arrived before restore/origin validation finished:
+    // their source document may already have navigated while ready() awaited.
+    const unverifiedAtArrival = !readySettled;
     await ready(); const state = tabs.get(source.tabId); if (!state) return;
+    if (unverifiedAtArrival && method.startsWith('Network.')) return;
     if (method === 'Target.attachedToTarget' && params.targetInfo?.type === 'iframe') {
-      if (state.sessions.size >= 32) return;
-      state.sessions.add(params.sessionId);
-      await initialize(state,params.sessionId).catch(() => state.sessions.delete(params.sessionId));
+      const sessionId = params.sessionId;
+      if (!sessionId || state.sessions.size >= 32) return;
+      const token = id(), attachedEpoch = state.networkEpoch;
+      state.sessions.add(sessionId);
+      state.sessionTokens.set(sessionId,token);
+      state.sessionEpochs.set(sessionId,attachedEpoch);
+      if (params.targetInfo.url) state.sessionUrls.set(sessionId,params.targetInfo.url);
+      try {
+        await initialize(state,sessionId);
+        if (tabs.get(state.tabId) === state && state.sessionTokens.get(sessionId) === token &&
+            state.sessionEpochs.get(sessionId) === attachedEpoch) state.sessionReady.add(sessionId);
+      } catch {
+        if (state.sessionTokens.get(sessionId) === token) {
+          retireChildNetwork(state,null,sessionId);
+          state.sessions.delete(sessionId);
+          state.sessionUrls.delete(sessionId);
+          state.sessionEpochs.delete(sessionId);
+          state.sessionReady.delete(sessionId);
+          state.sessionTokens.delete(sessionId);
+        }
+      }
     } else if (method === 'Target.detachedFromTarget') {
+      retireChildNetwork(state,null,params.sessionId);
+      state.sessionUrls.delete(params.sessionId);
+      state.sessionEpochs.delete(params.sessionId);
+      state.sessionReady.delete(params.sessionId);
+      state.sessionTokens.delete(params.sessionId);
       state.sessions.delete(params.sessionId); invalidate(state);
     } else if (method === 'Runtime.executionContextCreated') {
       const ctx = params.context;
       if (ctx?.auxData?.isDefault && ctx.auxData.frameId) state.contexts.set(`${ctx.auxData.frameId}:main`,{id:ctx.id,sessionId:source.sessionId});
     } else if (method === 'Runtime.executionContextsCleared') {
       for (const [key,ctx] of state.contexts) if (ctx.sessionId === source.sessionId) state.contexts.delete(key);
+      if (source.sessionId) retireChildNetwork(state,null,source.sessionId);
       invalidate(state);
     } else if (method === 'Runtime.executionContextDestroyed') {
       for (const [key,ctx] of state.contexts) if (ctx.id === params.executionContextId && ctx.sessionId === source.sessionId) state.contexts.delete(key);
     } else if (method === 'Page.frameNavigated') {
       invalidate(state);
-      if (!params.frame?.parentId && !source.sessionId) {
+      const topLevel = !params.frame?.parentId && !source.sessionId;
+      if (!topLevel) retireChildNetwork(state,params.frame?.id,source.sessionId,
+        !chatGPTUrl(params.frame?.url) ? params.frame?.loaderId : null);
+      if (topLevel) {
+        state.networkEpoch++;
+        for (const key of state.streams.keys()) dropStream(state,key);
         const url = params.frame?.url;
         const blocked = chatGPTUrl(url);
         if (state.networkProtected || blocked || protectedTab(state.tabId,url || '',null)) clearNetwork(state);
@@ -787,12 +850,15 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
       // CDP reports the destination Document request before its frame commit.
       // Rebind only that exact loader/frame request to the new page epoch;
       // requests from the previous document must remain unreadable.
-      if (!state.networkProtected && params.frame?.loaderId && params.frame?.id && !chatGPTUrl(params.frame?.url)) {
+      if (topLevel && !state.networkProtected && params.frame?.loaderId && params.frame?.id && !chatGPTUrl(params.frame?.url)) {
         for (const row of state.network.values()) {
           if (row.type === 'Document' && row.nativeLoaderId === params.frame.loaderId &&
-              row.nativeFrameId === params.frame.id && !chatGPTUrl(row.url)) row.pageId = state.pageId;
+              row.nativeFrameId === params.frame.id && !chatGPTUrl(row.url)) {
+            row.pageId = state.pageId; row.networkEpoch = state.networkEpoch;
+          }
         }
       }
+      if (source.sessionId && params.frame?.url) state.sessionUrls.set(source.sessionId,params.frame.url);
       if (params.frame?.id) state.frames.set(params.frame.id,{...params.frame,sessionId:source.sessionId});
       // Reinstall the indicator after real document navigation, without a timer or page activation.
       if (!params.frame?.parentId && !source.sessionId && /^https?:/.test(params.frame?.url)) void page(state,'overlay').catch(() => {});
@@ -810,14 +876,22 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
       if (state.console.length > 200) { state.console.shift(); state.consoleDropped++; }
     } else if (method.startsWith('Network.') && params.requestId) {
       const key = `${source.sessionId || 'main'}:${params.requestId}`;
-      if (state.networkProtected || protectedTab(state.tabId,state.topUrl || '',null) || chatGPTUrl(params.documentURL)) {
+      // Debugger events are concurrent and ordered by Chrome, not an awaited
+      // tabs.get. Top-level origin was established at attach/restore/commit.
+      const protectedFrame = params.frameId && chatGPTUrl(state.frames.get(params.frameId)?.url);
+      const protectedSession = source.sessionId && (chatGPTUrl(state.sessionUrls.get(source.sessionId)) ||
+        [...state.frames.values()].some(frame => frame.sessionId === source.sessionId && chatGPTUrl(frame.url)));
+      const staleSession = source.sessionId && (!state.sessionReady.has(source.sessionId) ||
+        state.sessionEpochs.get(source.sessionId) !== state.networkEpoch);
+      if (state.topUrl === null || state.networkProtected || staleSession || protectedTab(state.tabId,state.topUrl,null) ||
+          chatGPTUrl(params.documentURL) || protectedFrame || protectedSession) {
         dropStream(state,key);state.network.delete(key);return;
       }
       let row = state.network.get(key);
       if (method === 'Network.requestWillBeSent') {
         dropStream(state,key);
         if (chatGPTUrl(params.request?.url)) { state.network.delete(key); return; }
-        row = {requestId:key,nativeId:params.requestId,sessionId:source.sessionId,nativeLoaderId:params.loaderId,nativeFrameId:params.frameId,pageId:state.pageId,url:cut(params.request?.url,2000),method:cut(params.request?.method,20),type:cut(params.type,30),requestHeaders:headers(params.request?.headers),postData:cut(params.request?.postData,4000),startedAt:params.timestamp,seq:++state.seq};
+        row = {requestId:key,nativeId:params.requestId,sessionId:source.sessionId,nativeLoaderId:params.loaderId,nativeFrameId:params.frameId,pageId:state.pageId,networkEpoch:state.networkEpoch,url:cut(params.request?.url,2000),method:cut(params.request?.method,20),type:cut(params.type,30),requestHeaders:headers(params.request?.headers),postData:cut(params.request?.postData,4000),startedAt:params.timestamp,seq:++state.seq};
         state.network.set(key,row);
         if (state.network.size > 200) {const oldest=state.network.keys().next().value;dropStream(state,oldest);state.network.delete(oldest);state.networkDropped++;}
       } else if (row) {
@@ -837,7 +911,7 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
                 if (capture.pending) capture.queued.push(bytes);
                 else { capture.chunks.push(bytes); validateStreamChunk(capture,bytes); }
               }
-            } else if (!capture.pending && params.dataLength > 0) { capture.invalidBytes = true; capture.error = 'Stream event omitted its response bytes.'; }
+            } else if (params.dataLength > 0) { capture.invalidBytes = true; capture.error = 'Stream event omitted its response bytes.'; }
           }
           finishStream(row,capture);
         }

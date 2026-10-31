@@ -182,7 +182,18 @@ when encountered from another tab. This covers stream capture and legacy body re
 Captured response bytes remain only in extension memory while their attached tab
 and request entry are retained; there is no time-based expiry. Clear, request
 replacement, buffer eviction, debugger detach or tab release disposes the bytes.
-Page-state invalidation, including navigation, also releases retained stream bytes.
+Top-level document navigation also releases retained stream bytes. A subframe
+navigation or same-document URL change does not interrupt the main page's stream.
+Already-open ChatGPT tabs are checked before recording network events, including
+third-party requests with no document URL.
+Capture from an individual child frame/session is discarded when that child
+navigates to another document or detaches. ChatGPT child frames are excluded even
+when the resource URL and document URL are not ChatGPT URLs. Read permission is
+rechecked after asynchronous response-body work before any byte page is returned.
+Child debugger sessions are bound to the top-level document epoch at attach time;
+an old session cannot contribute requests after the top page navigates.
+Child requests are admitted only after that debugger session initializes successfully;
+failed or pending initialization cannot leave retained request metadata or bytes.
 Read captured bytes with `body:true`, optional `bodyOffset` (byte offset) and `bodyBytes`
 (default 65536, maximum 262144). Decode each base64 page to bytes and concatenate before
 UTF-8 decoding; a page can split a character. Inspect `terminal` and `complete` separately:
