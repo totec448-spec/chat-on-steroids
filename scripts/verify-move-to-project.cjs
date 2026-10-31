@@ -188,7 +188,13 @@ app.whenReady().then(async () => {
     win.webContents.sendInputEvent({type:'mouseMove',x:from.x,y:from.y-12});
     await new Promise(r=>setTimeout(r,25));
     win.webContents.sendInputEvent({type:'mouseMove',...onto});
-    await until(`document.querySelector('[data-project-id="second-project"] > summary').classList.contains('is-drop-target')`, 'project row highlighted');
+    try {
+      await until(`document.querySelector('[data-project-id="second-project"] > summary').classList.contains('is-drop-target')`, 'project row highlighted');
+    } catch (error) {
+      // Say what was under the pointer, so a failure on another screen can be read from the log.
+      console.error('under the pointer:', JSON.stringify(await js(`document.elementsFromPoint(${onto.x}, ${onto.y}).slice(0, 4).map(e => e.tagName + '.' + e.className)`)), JSON.stringify({ from, onto, height: await js('innerHeight') }));
+      throw error;
+    }
     assert.equal(await js(`document.querySelectorAll('.sort-before, .sort-after').length`), 0, 'no reorder marker while over a project');
     await screenshot('drag-onto-project.png');
     win.webContents.sendInputEvent({type:'mouseUp',button:'left',clickCount:1,...onto});
