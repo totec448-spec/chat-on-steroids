@@ -12,16 +12,21 @@ function deferred<T>() {
   return {promise,resolve};
 }
 
-async function fixture(options: {url?:string; protected?:boolean} = {}) {
-  const saved = {browserId:randomUUID(),epoch:'epoch',receipt:null,tabs:[{tabId:17,owner:'A',lease:'lease'}]};
+async function fixture(options: {url?:string; protected?:boolean; deferReady?:boolean; freshAttach?:boolean} = {}) {
+  const saved = {browserId:randomUUID(),epoch:'epoch',receipt:null,
+    tabs:options.freshAttach ? [] : [{tabId:17,owner:'A',lease:'lease'}]};
   const chrome = {
     storage:{session:{get:vi.fn(async()=>({cosBrowserControl:saved})),set:vi.fn(async(_value:unknown)=>{})}},
     permissions:{contains:vi.fn(async()=>true)},
     tabs:{get:vi.fn(async()=>({id:17,url:options.url ?? 'https://fixture.invalid/'}))},
     scripting:{executeScript:vi.fn(async()=>[])},
-    debugger:{detach:vi.fn(async()=>{}),getTargets:vi.fn(async()=>[{tabId:17,attached:true}]),
+    debugger:{attach:vi.fn(async()=>{}),detach:vi.fn(async()=>{}),getTargets:vi.fn(async()=>[{tabId:17,attached:true}]),
       sendCommand:vi.fn(async(_target:unknown,method:string,_args:unknown):Promise<any>=>
-        method === 'Network.streamResourceContent' ? {bufferedData:''} : method === 'Network.getResponseBody' ? {body:'legacy body',base64Encoded:false} : {})}
+        method === 'Network.streamResourceContent' ? {bufferedData:''}
+          : method === 'Network.getResponseBody' ? {body:'legacy body',base64Encoded:false}
+          : method === 'Page.getFrameTree' ? {frameTree:{frame:{id:'top-frame',url:options.url ?? 'https://fixture.invalid/'}}}
+          : method === 'Page.createIsolatedWorld' ? {executionContextId:1}
+          : method === 'Runtime.evaluate' ? {result:{value:{}}} : {})}
   };
   const create = runInNewContext(`${source};createBrowserControl`, {
     browserPage:()=>{},crypto:{randomUUID},navigator:{userAgent:'Chrome'},setTimeout,clearTimeout,TextEncoder,TextDecoder,URL,atob,btoa
@@ -29,7 +34,7 @@ async function fixture(options: {url?:string; protected?:boolean} = {}) {
   let allowed = true;
   const transport = vi.fn(async()=>({ok:true,data:{allowed,epoch:'epoch',policy:{read:true,write:true},requests:[]}}));
   const control = create(chrome,transport,()=>options.protected === true);
-  await control.pump();
+  if(!options.deferReady) await control.pump();
   const command = (tool:string,args:Record<string,unknown>,owner='A')=>({id:randomUUID(),epoch:'epoch',owner,conversationId:null,tool,args:{tabId:17,...args},expiresAt:Date.now()+25000});
   const call = async(args:Record<string,unknown>,owner='A') => (await control.execute(command('browser_network',args,owner))).value;
   const event = (method:string,params:Record<string,unknown>)=>control.event({tabId:17},method,params);
@@ -44,6 +49,26 @@ async function fixture(options: {url?:string; protected?:boolean} = {}) {
 }
 
 describe('explicit bounded browser SSE capture',()=>{
+  it('attaches an ordinary ChatGPT tab and drops its iframe request before navigation away',async()=>{
+    const f=await fixture({url:'https://chatgpt.com/c/fixture',freshAttach:true});
+    expect((await f.control.execute(f.command('browser_tabs',{action:'attach'}))).value)
+      .toMatchObject({attached:true,url:'https://chatgpt.com/c/fixture'});
+    expect(f.chrome.debugger.attach).toHaveBeenCalledWith({tabId:17},'1.3');
+    await f.event('Target.attachedToTarget',{
+      sessionId:'iframe-session',targetInfo:{type:'iframe',url:'https://embedded.invalid/frame'}
+    });
+    await f.control.event({tabId:17,sessionId:'iframe-session'},'Network.requestWillBeSent',{
+      requestId:'iframe-private',timestamp:1,documentURL:'https://embedded.invalid/frame',
+      request:{url:'https://api.embedded.invalid/private',method:'POST',headers:{'X-Fixture':'synthetic'},postData:'fixture-private'}
+    });
+    await f.control.event({tabId:17,sessionId:'iframe-session'},'Network.responseReceived',{
+      requestId:'iframe-private',response:{status:200,mimeType:'text/event-stream'}
+    });
+    f.chrome.tabs.get.mockResolvedValue({id:17,url:'https://fixture.invalid/'});
+    await f.event('Page.frameNavigated',{frame:{id:'top-frame',url:'https://fixture.invalid/'}});
+    expect((await f.call({})).entries).toHaveLength(0);
+    await expect(f.call({requestId:'iframe-session:iframe-private'})).rejects.toThrow(/REQUEST_EXPIRED/);
+  });
   it('rejects response bytes from ChatGPT tabs even when the tab is already owned',async()=>{
     const f=await fixture({url:'https://chatgpt.com/c/fixture',protected:true});
     const requestId=await f.request();
@@ -97,6 +122,140 @@ describe('explicit bounded browser SSE capture',()=>{
     await f.event('Network.responseReceived',{requestId:'third-party',response:{status:200,mimeType:'text/event-stream'}});
     expect((await f.call({})).entries).toHaveLength(0);
   });
+  it('does not retain third-party traffic from an already-open ChatGPT tab without a documentURL',async()=>{
+    const f=await fixture({url:'https://chatgpt.com/c/fixture'});
+    await f.event('Network.requestWillBeSent',{requestId:'third-party',timestamp:1,request:{url:'https://external.invalid/private',method:'GET'}});
+    await f.event('Network.responseReceived',{requestId:'third-party',response:{status:200,mimeType:'text/event-stream'}});
+    f.chrome.tabs.get.mockResolvedValue({id:17,url:'https://fixture.invalid/'});
+    await f.event('Page.frameNavigated',{frame:{id:'top-frame',url:'https://fixture.invalid/'}});
+    expect((await f.call({})).entries).toHaveLength(0);
+  });
+  it('does not admit an old ChatGPT event that arrived before restored tab provenance settled',async()=>{
+    const f=await fixture({url:'https://chatgpt.com/c/fixture',deferReady:true});
+    const origin=deferred<{id:number;url:string}>();
+    f.chrome.tabs.get.mockImplementation(async()=>origin.promise);
+    const pending=f.event('Network.requestWillBeSent',{requestId:'startup-private',timestamp:1,
+      documentURL:'https://embedded.invalid/app',
+      request:{url:'https://api.embedded.invalid/private',method:'POST',postData:'fixture-private'}});
+    const navigated=f.event('Page.frameNavigated',{frame:{id:'top-frame',url:'https://fixture.invalid/'}});
+    origin.resolve({id:17,url:'https://fixture.invalid/'});
+    await Promise.all([pending,navigated]);await f.control.pump();
+    expect((await f.call({})).entries).toHaveLength(0);
+  });
+  it('rejects a cross-origin child request from an already-open ChatGPT tab after leaving it',async()=>{
+    const f=await fixture({url:'https://chatgpt.com/c/fixture'});
+    await f.event('Target.attachedToTarget',{sessionId:'child-session',targetInfo:{type:'iframe',url:'https://embedded.invalid/app'}});
+    await f.control.event({tabId:17,sessionId:'child-session'},'Network.requestWillBeSent',{
+      requestId:'private',timestamp:1,documentURL:'https://embedded.invalid/app',
+      request:{url:'https://api.embedded.invalid/private',method:'POST',headers:{'X-Private':'synthetic-secret'},postData:'fixture-private'}
+    });
+    f.chrome.tabs.get.mockResolvedValue({id:17,url:'https://fixture.invalid/'});
+    await f.event('Page.frameNavigated',{frame:{id:'top-frame',url:'https://fixture.invalid/'}});
+    expect((await f.call({})).entries).toHaveLength(0);
+    await expect(f.call({requestId:'child-session:private'})).rejects.toThrow(/REQUEST_EXPIRED/);
+  });
+  it('rejects an old ChatGPT child-session event after the top document commits a safe page',async()=>{
+    const f=await fixture({url:'https://chatgpt.com/c/fixture'});
+    await f.event('Target.attachedToTarget',{sessionId:'child-old',targetInfo:{type:'iframe',url:'https://embedded.invalid/app'}});
+    f.chrome.tabs.get.mockResolvedValue({id:17,url:'https://fixture.invalid/'});
+    await f.event('Page.frameNavigated',{frame:{id:'top-frame',url:'https://fixture.invalid/'}});
+    await f.control.event({tabId:17,sessionId:'child-old'},'Network.requestWillBeSent',{
+      requestId:'stale',timestamp:1,documentURL:'https://embedded.invalid/app',
+      request:{url:'https://api.embedded.invalid/private',method:'POST',headers:{'X-Private':'fixture-secret'},postData:'fixture-private'}
+    });
+    expect((await f.call({})).entries).toHaveLength(0);
+    await expect(f.call({requestId:'child-old:stale'})).rejects.toThrow(/REQUEST_EXPIRED/);
+    await f.event('Target.attachedToTarget',{sessionId:'child-new',targetInfo:{type:'iframe',url:'https://safe-child.invalid/app'}});
+    await f.control.event({tabId:17,sessionId:'child-new'},'Network.requestWillBeSent',{
+      requestId:'good',timestamp:2,request:{url:'https://safe-child.invalid/data',method:'GET'}
+    });
+    expect((await f.call({})).entries).toHaveLength(1);
+  });
+  it('does not accept requests from a child debugger session whose initialization failed',async()=>{
+    const f=await fixture();
+    f.chrome.debugger.sendCommand.mockRejectedValueOnce(new Error('synthetic session initialization failure'));
+    await f.event('Target.attachedToTarget',{sessionId:'child-failed',targetInfo:{type:'iframe',url:'https://child.invalid/'}});
+    await f.control.event({tabId:17,sessionId:'child-failed'},'Network.requestWillBeSent',{
+      requestId:'not-authorized',timestamp:1,request:{url:'https://child.invalid/private',method:'GET'}
+    });
+    expect((await f.call({})).entries).toHaveLength(0);
+  });
+  it('retains no child request while its debugger initialization is pending and later fails',async()=>{
+    const f=await fixture(),opened=deferred<void>(),fail=deferred<void>();
+    const original=f.chrome.debugger.sendCommand.getMockImplementation()!;
+    f.chrome.debugger.sendCommand.mockImplementation(async(target,method,args)=>{
+      if(method==='Page.enable' && (target as {sessionId?:string}).sessionId==='child-pending'){
+        opened.resolve();await fail.promise;throw new Error('synthetic child initialization rejected');
+      }
+      return original(target,method,args);
+    });
+    const attaching=f.event('Target.attachedToTarget',{
+      sessionId:'child-pending',targetInfo:{type:'iframe',url:'https://child.invalid/app'}
+    });
+    await opened.promise;
+    await f.control.event({tabId:17,sessionId:'child-pending'},'Network.requestWillBeSent',{
+      requestId:'during-init',timestamp:1,request:{url:'https://api.child.invalid/private',method:'POST',postData:'synthetic-private'}
+    });
+    await f.control.event({tabId:17,sessionId:'child-pending'},'Network.responseReceived',{
+      requestId:'during-init',response:{status:200,mimeType:'text/event-stream'}
+    });
+    const whilePending=(await f.call({})).entries;
+    fail.resolve();await attaching;
+    expect(whilePending).toHaveLength(0);
+    expect((await f.call({})).entries).toHaveLength(0);
+    await expect(f.call({requestId:'child-pending:during-init'})).rejects.toThrow(/REQUEST_EXPIRED/);
+  });
+  it('does not admit a protected request whose tab lookup finishes after navigation',async()=>{
+    const f=await fixture({url:'https://chatgpt.com/c/fixture'});
+    await f.event('Target.attachedToTarget',{sessionId:'child-session',targetInfo:{type:'iframe',url:'https://embedded.invalid/app'}});
+    const lookup=deferred<{id:number;url:string}>();
+    f.chrome.tabs.get.mockImplementation(async()=>lookup.promise);
+    const pending=f.control.event({tabId:17,sessionId:'child-session'},'Network.requestWillBeSent',{
+      requestId:'private-late',timestamp:1,documentURL:'https://embedded.invalid/app',
+      request:{url:'https://api.embedded.invalid/private',method:'POST',headers:{'X-Private':'synthetic-secret'},postData:'fixture-private'}
+    });
+    await Promise.resolve();
+    await f.event('Page.frameNavigated',{frame:{id:'top-frame',url:'https://fixture.invalid/'}});
+    lookup.resolve({id:17,url:'https://fixture.invalid/'});
+    await pending;
+    expect((await f.call({})).entries).toHaveLength(0);
+    await expect(f.call({requestId:'child-session:private-late'})).rejects.toThrow(/REQUEST_EXPIRED/);
+  });
+  it('preserves responseReceived ordering without waiting on a tab lookup per request',async()=>{
+    const f=await fixture(),lookup=deferred<{id:number;url:string}>();
+    f.chrome.tabs.get.mockImplementation(async()=>lookup.promise);
+    const sent=f.event('Network.requestWillBeSent',{
+      requestId:'ordered',timestamp:1,request:{url:'https://fixture.invalid/events',method:'GET'}
+    });
+    await Promise.resolve();
+    await f.event('Network.responseReceived',{requestId:'ordered',response:{status:200,mimeType:'text/event-stream'}});
+    lookup.resolve({id:17,url:'https://fixture.invalid/'});await sent;
+    expect(await f.call({requestId:'main:ordered'})).toMatchObject({status:200,mimeType:'text/event-stream'});
+  });
+  it('rejects a late legacy response body after read permission is revoked',async()=>{
+    const f=await fixture(),requestId=await f.request(),started=deferred<void>(),response=deferred<{body:string;base64Encoded:boolean}>();
+    f.chrome.debugger.sendCommand.mockImplementation(async(_target,method)=>{
+      if(method==='Network.getResponseBody'){started.resolve();return response.promise;}
+      return {};
+    });
+    const pending=f.call({requestId,body:true});await started.promise;
+    f.revokePermission();
+    const rejected=expect(pending).rejects.toThrow(/PERMISSION_REVOKED/);
+    response.resolve({body:'SECRET_AFTER_REVOKE',base64Encoded:false});await rejected;
+  });
+  it('rejects a retained stream byte page when permission is revoked during the final tab check',async()=>{
+    const f=await fixture(),requestId=await f.request(),started=deferred<void>(),lookup=deferred<{id:number;url:string}>();
+    await f.call({requestId,stream:true});await f.chunk(encoded('SECRET_STREAM_BYTES'));await f.finish();
+    let lookups=0;
+    f.chrome.tabs.get.mockImplementation(async()=>{
+      if(++lookups===2){started.resolve();return lookup.promise;}
+      return {id:17,url:'https://fixture.invalid/'};
+    });
+    const pending=f.call({requestId,body:true});await started.promise;
+    f.revokePermission();
+    const rejected=expect(pending).rejects.toThrow(/PERMISSION_REVOKED/);
+    lookup.resolve({id:17,url:'https://fixture.invalid/'});await rejected;
+  });
   it('disposes existing response buffers when the main frame enters ChatGPT',async()=>{
     const f=await fixture(),requestId=await f.request();
     await f.call({requestId,stream:true});await f.chunk(encoded('prior bytes'));
@@ -136,12 +295,63 @@ describe('explicit bounded browser SSE capture',()=>{
     const rejected=expect(pending).rejects.toThrow(/NETWORK_PROTECTED/);
     enable.resolve({bufferedData:encoded('PRIVATE_RESPONSE')});await rejected;
   });
+  it('does not claim complete if live bytes are missing while SSE enable is pending',async()=>{
+    const f=await fixture(),requestId=await f.request(),opened=deferred<void>(),enable=deferred<{bufferedData:string}>();
+    f.chrome.debugger.sendCommand.mockImplementation(async(_target,method)=>{
+      if(method==='Network.streamResourceContent'){opened.resolve();return enable.promise;}
+      return {};
+    });
+    const pending=f.call({requestId,stream:true});await opened.promise;
+    await f.event('Network.dataReceived',{requestId:'r',dataLength:12});
+    await f.finish();
+    enable.resolve({bufferedData:''});await pending;
+    expect((await f.call({requestId})).stream).toMatchObject({terminal:true,complete:false,invalidBytes:true});
+  });
   it('frees stale stream allocation when pageId changes on ordinary navigation',async()=>{
     const f=await fixture(),requestId=await f.request('old');
     await f.call({requestId,stream:true});await f.chunk(encoded('x'.repeat(4*1024*1024)),'old');await f.finish('old');
     await f.event('Page.frameNavigated',{frame:{id:'top-frame',url:'https://another.invalid/'}});
     const next=await f.request('next');await f.call({requestId:next,stream:true});await f.chunk(encoded('next'),'next');await f.finish('next');
     expect((await f.call({requestId:next})).stream).toMatchObject({overflow:false,retainedBytes:4,complete:true});
+  });
+  it.each(['subframe','same-document'])('retains a main-page SSE across unrelated %s navigation',async(kind)=>{
+    const f=await fixture(),requestId=await f.request();
+    await f.call({requestId,stream:true});
+    await f.chunk(encoded('before-'));
+    if(kind==='subframe') await f.event('Page.frameNavigated',{frame:{id:'child-frame',parentId:'main-frame',url:'https://child.invalid/'}});
+    else await f.event('Page.navigatedWithinDocument',{frameId:'main-frame',url:'https://fixture.invalid/#next'});
+    await f.chunk(encoded('after'));await f.finish();
+    const page=await f.call({requestId,body:true});
+    expect(page.stream).toMatchObject({retainedBytes:12,terminal:true,complete:true});
+    expect(Buffer.from(page.body.base64,'base64').toString()).toBe('before-after');
+  });
+  it.each(['child-navigation','child-detach'])('expires the child response byte buffer on %s without affecting the main tab',async(action)=>{
+    const f=await fixture(),child='child-session:child-request';
+    await f.event('Target.attachedToTarget',{sessionId:'child-session',targetInfo:{type:'iframe',url:'https://child.invalid/'}});
+    await f.control.event({tabId:17,sessionId:'child-session'},'Network.requestWillBeSent',{
+      requestId:'child-request',frameId:'child-frame',timestamp:1,
+      request:{url:'https://child.invalid/sse',method:'GET'}
+    });
+    await f.control.event({tabId:17,sessionId:'child-session'},'Network.responseReceived',{
+      requestId:'child-request',response:{status:200,mimeType:'text/event-stream'}
+    });
+    await f.call({requestId:child,stream:true});
+    await f.control.event({tabId:17,sessionId:'child-session'},'Network.dataReceived',{
+      requestId:'child-request',data:encoded('child-data'),dataLength:10
+    });
+    if(action==='child-navigation') await f.control.event({tabId:17,sessionId:'child-session'},'Page.frameNavigated',{
+      frame:{id:'child-frame',parentId:'main-frame',url:'https://next-child.invalid/'}
+    });
+    else await f.event('Target.detachedFromTarget',{sessionId:'child-session'});
+    await expect(f.call({requestId:child,body:true})).rejects.toThrow(/REQUEST_EXPIRED/);
+  });
+  it('excludes third-party responses from a ChatGPT child frame on an otherwise safe tab',async()=>{
+    const f=await fixture();
+    await f.event('Page.frameNavigated',{frame:{id:'child-frame',parentId:'main-frame',url:'https://chatgpt.com/c/fixture'}});
+    await f.event('Network.requestWillBeSent',{requestId:'child-private',frameId:'child-frame',timestamp:1,
+      request:{url:'https://api.child.invalid/private',method:'GET'}
+    });
+    expect((await f.call({})).entries).toHaveLength(0);
   });
   it('preserves the destination document body across its own frame commit without reviving an older page',async()=>{
     const f=await fixture(),old=await f.request('old');
