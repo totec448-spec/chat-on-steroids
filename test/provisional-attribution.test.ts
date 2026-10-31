@@ -240,7 +240,7 @@ it.each(['asset quota', 'destination append', 'source revision'] as const)(
   }
 );
 
-it.each(['destination read', 'destination append'] as const)(
+it.each(['source read', 'destination read', 'destination append'] as const)(
   'repairs later provisional calls after a legacy %s failure and retries without duplication', async failure => {
     const source = await begin();
     const provisional = (await record('later-provisional'))!;
@@ -255,10 +255,10 @@ it.each(['destination read', 'destination append'] as const)(
     await prove('chat-c', 'legacy-second');
     const order = (await indexedSessions()).map(row => row.id);
     expect(order.indexOf(legacySource)).toBeLessThan(order.indexOf(source));
-    if (failure === 'destination read') {
+    if (failure === 'source read' || failure === 'destination read') {
       const read = store.readEvents;
-      vi.spyOn(store, 'readEvents').mockImplementation((id, options) => id === legacyTarget
-        ? Promise.reject(new Error('Simulated destination read failure')) : read(id, options));
+      vi.spyOn(store, 'readEvents').mockImplementation((id, options) => id === (failure === 'source read' ? legacySource : legacyTarget)
+        ? Promise.reject(new Error(`Simulated ${failure} failure`)) : read(id, options));
     } else {
       const append = store.appendEvent;
       vi.spyOn(store, 'appendEvent').mockImplementation((id, event) =>
@@ -270,14 +270,42 @@ it.each(['destination read', 'destination append'] as const)(
     expect((await calls(legacySource)).map(row => row.call.callId)).toEqual([first.callId, second.callId]);
     expect((await calls(target)).map(row => row.call.callId)).toEqual([provisional.callId]);
     expect(await calls(source)).toHaveLength(0);
-    expect(await calls(legacyTarget)).toHaveLength(failure === 'destination read' ? 0 : 1);
+    expect(await calls(legacyTarget)).toHaveLength(failure === 'destination append' ? 1 : 0);
     expect(getLog().some(row => row.level === 'warn' && row.message.includes(legacySource) &&
-      row.message.includes('destination'))).toBe(true);
+      row.message.includes('failed'))).toBe(true);
     await repairDeterministicAttribution(new Set(['unrelated-trigger']));
     expect((await calls(legacyTarget)).map(row => row.call.callId).sort()).toEqual([first.callId, second.callId].sort());
     expect(await calls(legacySource)).toHaveLength(0);
   }
 );
+
+it('continues after an unreadable provisional source and repairs it on a later trigger', async () => {
+  const healthySource = await begin();
+  const healthy = (await record('healthy-source'))!;
+  await recordChatObservations('chat-a', [{ kind: 'turn_end', time: Date.now(), turnId: 'turn-a', outcome: 'completed' }]);
+  const failedSource = await begin('chat-b', 'turn-b');
+  const failed = (await record('unreadable-source'))!;
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const healthyTarget = (await sessionForConversation('chat-c'))!;
+  const failedTarget = (await sessionForConversation('chat-d'))!;
+  await prove('chat-c', 'healthy-source');
+  await prove('chat-d', 'unreadable-source');
+  const order = (await indexedSessions()).map(row => row.id);
+  expect(order.indexOf(failedSource)).toBeLessThan(order.indexOf(healthySource));
+  const read = store.readEvents;
+  vi.spyOn(store, 'readEvents').mockImplementation((id, options) => id === failedSource
+    ? Promise.reject(new Error('Simulated source read failure')) : read(id, options));
+  await expect(repairDeterministicAttribution()).resolves.toMatchObject({ calls: 1 });
+  vi.restoreAllMocks();
+  expect((await calls(healthyTarget)).map(row => row.call.callId)).toEqual([healthy.callId]);
+  expect(await calls(healthySource)).toHaveLength(0);
+  expect((await calls(failedSource)).map(row => row.call.callId)).toEqual([failed.callId]);
+  expect(await calls(failedTarget)).toHaveLength(0);
+  expect(getLog().some(row => row.level === 'warn' && row.message.includes(failedSource) && row.message.includes('failed'))).toBe(true);
+  await repairDeterministicAttribution(new Set(['unrelated-trigger']));
+  expect((await calls(failedTarget)).map(row => row.call.callId)).toEqual([failed.callId]);
+  expect(await calls(failedSource)).toHaveLength(0);
+});
 
 it('logs a missing source asset and leaves its provisional call available for repair', async () => {
   const source = await begin();
