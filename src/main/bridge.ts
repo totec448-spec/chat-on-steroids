@@ -500,6 +500,8 @@ interface Command {
 
 /** When each page-note was last logged, by chat and heading (see `/page-note`). */
 const pageNotesLogged = new Map<string, number>();
+/** When each repair-claim refusal was last logged, by chat and reason (#1922). */
+const claimRefusalsLogged = new Map<string, number>();
 /** Bootstrap stages a page reports after redeeming, in order. See `commandProgress`. */
 const COMMAND_STEPS = ['revival-waiting', 'revival-busy', 'revival-draft', 'revival-editor', 'composer', 'model', 'composer-after-model', 'inserting', 'sending'] as const;
 /** Steps a wake reports while it waits, before redeeming. `revival-waiting` is what older pages send. */
@@ -3185,6 +3187,22 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     // An observation still publishing can revoke this handout. Refuse this
     // claim transiently; the same unclaimed token remains eligible to be checked.
     const allowed = current && observationWritesInFlight === 0 && repairsInFlight.get(conversationId) === repair && repair.state === 'handed' && !repair.claimed;
+    if (!allowed) {
+      // The page is there and asked: this offer is not one nobody picked up (#1922). Say why it
+      // was refused, once a minute per chat and reason, so "never asked" and "refused" differ.
+      repair.claimAsked = true;
+      const why = !current ? 'the chat no longer needs it or recovery is paused'
+        : observationWritesInFlight > 0 ? 'a chat was still saving its events; the page may claim it again'
+        : 'it was replaced or already claimed';
+      const key = `${conversationId}|${why}`;
+      const now = Date.now();
+      if (now - (claimRefusalsLogged.get(key) ?? 0) >= 60_000) {
+        claimRefusalsLogged.delete(key);
+        claimRefusalsLogged.set(key, now);
+        if (claimRefusalsLogged.size > 200) claimRefusalsLogged.delete(claimRefusalsLogged.keys().next().value!);
+        logInfo(`bridge: refused the ${repair.reason} repair claim for ${conversationId}: ${why}`);
+      }
+    }
     if (allowed) {
       repair.claimed = true;
       if (repair.reason === 'assistant-error' && repair.assistantSource)
@@ -8095,6 +8113,11 @@ interface Repair {
    * needs a page to report something back.
    */
   offers?: number;
+  /**
+   * A page asked to claim this repair since it was last offered (#1922). A claim refused for the
+   * moment still proves a page is there, so that offer is not counted toward the no-page budget.
+   */
+  claimAsked?: boolean;
   /** Stable local owner; the browser action is valid only while this session is still here. */
   sessionId: string;
   endedTurns: number;
@@ -10446,7 +10469,9 @@ async function takePendingRepairs(
       continue;
     }
     if (unclaimed) {
-      repair.offers = (repair.offers ?? 1) + 1;
+      // A page that asked since the last offer was refused, not absent: that offer does not count.
+      repair.offers = (repair.offers ?? 1) + (repair.claimAsked ? 0 : 1);
+      repair.claimAsked = false;
       if (repair.offers > UNCLAIMED_REPAIR_OFFERS) {
         // Nothing is listening. Say that, rather than go on offering into an empty room until
         // some other subsystem happens to clear the entry — and say it as what it is: the
@@ -11976,6 +12001,7 @@ export function resetBridgeForTests(): void {
   clearUnattributedIncident();
   providerHistoryBackoffUntil.clear();
   pageNotesLogged.clear();
+  claimRefusalsLogged.clear();
   providerHistoryStreaks.clear();
   pickupHeldLogged.clear();
   providerDeferredColdStarts.clear();
