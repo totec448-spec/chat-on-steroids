@@ -399,7 +399,8 @@ const api = {
   },
   getSessionControls: (id: string) => call<SessionControlsView>('sessions:controls', { id }),
   cancelRecovery: (id: string) => call<boolean>('sessions:cancelRecovery', { id }),
-  pickupNow: (id: string) => call<{ ok: true; did: 'sent' | 'retrying' } | { ok: false; error: string }>('sessions:pickupNow', { id }),
+  pickupNow: (id: string, shown: { next: 'queue' | 'goal' | 'loop' | 'continue'; stoppedAt: number }) =>
+    call<{ ok: true; did: 'queued' | 'retrying' } | { ok: false; code: 'no-chat' | 'history-limit' | 'nothing-waiting' | 'changed' | 'not-sent' | 'not-started' }>('sessions:pickupNow', { id, ...shown }),
   setSessionAutomation: (id: string, automation: SessionControlsView['automation'], afterTurn?: boolean) => call<SessionControlsView>('sessions:automation', { id, automation, afterTurn }),
   setSessionObjective: (id: string, text: string, mode: 'goal' | 'loop') => call<SessionControlsView>('sessions:objective', { id, text, mode }),
   compactSession: (id: string) => call<SessionControlsView>('sessions:compact', { id }),
