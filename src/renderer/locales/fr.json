@@ -1872,6 +1872,8 @@
   "How the app behaves day to day. Changes apply immediately.": "Le comportement de l’app au quotidien. Les changements s’appliquent immédiatement.",
   "What you see while ChatGPT answers, and what your messages carry.": "Ce que vous voyez pendant que ChatGPT répond, et ce que contiennent vos messages.",
   "Follow new output": "Suivre les nouveaux contenus",
+  "Show message times": "Afficher l’heure des messages",
+  "The time above each message. Point at a time for the full date.": "L’heure au-dessus de chaque message. Survolez une heure pour voir la date complète.",
   "Stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "Rester en bas de la discussion pendant que les réponses s'allongent, ici et sur ChatGPT. Remonter le met en pause.",
   "Playful status words": "Statuts ludiques",
   "Show rotating gym jokes instead of “Working”.": "Afficher des blagues de salle de sport en rotation au lieu de « En cours ».",

@@ -391,6 +391,11 @@ const configSchema = z.object({
       : typeof value === 'string' ? value.trim().slice(0, 300) || undefined : 'damaged').optional(),
     /** Keep the chat at its end while it grows, in the app and on ChatGPT, until the reader scrolls up. */
     followOutput: z.boolean().optional().default(true),
+    /** Each chat message's time above it. Off unless chosen; a damaged value reads as off. */
+    showMessageTimes: z.boolean().optional().catch(() => {
+      logWarn('config: the saved ui.showMessageTimes was damaged; message times stay hidden until the switch is set again');
+      return undefined;
+    }),
     mentionCore: z.boolean().optional().default(true),
     mentionPlugins: z.boolean().optional().default(false),
     language: z.enum(UI_LANGUAGES).optional(),
