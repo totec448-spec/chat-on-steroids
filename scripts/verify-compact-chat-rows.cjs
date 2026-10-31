@@ -7,6 +7,8 @@ const output = path.resolve(process.env.COS_UI_OUTPUT || path.join(root, '.tmp',
 const { fixtureConfigSource, BENIGN_RENDERER_ERRORS } = require(path.join(root, 'scripts/fixtures/app-defaults.cjs'));
 fs.mkdirSync(path.join(output, 'profile'), { recursive: true });
 app.setPath('userData', path.join(output, 'profile')); app.disableHardwareAcceleration();
+// A non-persistent, per-process partition prevents Chromium storage from leaking between runs.
+const fixturePartition = `compact-chat-rows-${process.pid}-${Date.now()}`;
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 let server, win;
 const fixture = `(() => {
@@ -58,7 +60,7 @@ app.whenReady().then(async () => {
         res.end(fixtureConfigSource()+fs.readFileSync(path.join(root,'scripts/fixtures/composer-ui.js'),'utf8')+fixture);
       });}}] });
   await server.listen();
-  win = new BrowserWindow({show:false,width:1280,height:820,webPreferences:{sandbox:true,offscreen:true,backgroundThrottling:false}});
+  win = new BrowserWindow({show:false,width:1280,height:820,webPreferences:{sandbox:true,offscreen:true,backgroundThrottling:false,partition:fixturePartition}});
   const errors=[];
   win.webContents.on('console-message',e=>{if(e.level==='error'&&!BENIGN_RENDERER_ERRORS.includes(e.message))errors.push(e.message);});
   const js=code=>win.webContents.executeJavaScript(code);
@@ -163,6 +165,8 @@ app.whenReady().then(async () => {
   console.log(`PASS narrow 820px: sidebar ${sidebarWidth}px, no row overflow`);
 
   // Real Chromium pointer drag at the compact row pitch: move the first unfiled chat after the second.
+  const initialChatOrder=await js(`([...document.querySelectorAll('#chatList > .sess[data-id]')]).map(row=>row.dataset.id)`);
+  assert.deepEqual(initialChatOrder,['compact-row-3','compact-row-4','compact-row-5'],'The isolated fixture starts with the expected unfiled chat order before dragging');
   const dragPoints=await js(`(()=>{const from=document.querySelector('#chatList .sess[data-id="compact-row-3"] .sess-top').getBoundingClientRect(),to=document.querySelector('#chatList .sess[data-id="compact-row-5"]').getBoundingClientRect();return {fromX:from.left+from.width/2,fromY:from.top+from.height/2,toX:to.left+to.width/2,toY:to.top+2}})()`);
   win.webContents.sendInputEvent({type:'mouseDown',x:dragPoints.fromX,y:dragPoints.fromY,button:'left',clickCount:1});
   win.webContents.sendInputEvent({type:'mouseMove',x:dragPoints.toX,y:dragPoints.toY,movementX:0,movementY:dragPoints.toY-dragPoints.fromY});
