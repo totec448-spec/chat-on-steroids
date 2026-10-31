@@ -1058,8 +1058,17 @@ function sanitiseCompanionDiagnostics(value: unknown): CompanionDiagnostics | nu
       durations: preferences.durations === true
     },
     tab: diagnosticTab(root.tab),
-    environment: diagnosticEnvironment(root.environment)
+    environment: diagnosticEnvironment(root.environment),
+    language: diagnosticLanguage(root.language)
   };
+}
+
+const LANGUAGE_TAG = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/;
+function diagnosticLanguage(value: unknown): CompanionDiagnostics['language'] {
+  const root = diagnosticObject(value);
+  if (!root) return null;
+  const tag = (field: unknown) => typeof field === 'string' && LANGUAGE_TAG.test(field) ? field : null;
+  return { applied: tag(root.applied), stored: tag(root.stored), error: diagnosticString(root.error, 200) };
 }
 
 function diagnosticEnvironment(value: unknown): CompanionEnvironment | null {
@@ -1079,6 +1088,8 @@ function diagnosticEnvironment(value: unknown): CompanionEnvironment | null {
   };
 }
 
+/** Per browser: the extension language state last logged, so a repeating report logs once. */
+const extensionLanguageLogged = new Map<string, string>();
 /** Per browser: the last error-page reload the app has logged (the extension's clock) and its count. */
 const errorPageReloadsLogged = new Map<string, { at: number; count: number; skippedAt?: number }>();
 const ERROR_PAGE_SKIPS: Record<string, (nextIn: number) => string> = {
@@ -1110,6 +1121,17 @@ function recordCompanionDiagnostics(value: unknown, browser = ''): void {
     logInfo(`browser: a ChatGPT tab is on Chrome's error page; ${skipLine(nextIn)}`);
     errorPageReloadsLogged.set(browser, { ...current, skippedAt });
     if (errorPageReloadsLogged.size > 16) errorPageReloadsLogged.delete(errorPageReloadsLogged.keys().next().value!);
+  }
+  // The extension shows its texts in the language it stored; say once when that is not the app's (2026-10-30).
+  const language = next.language, wanted = getConfig().ui.language ?? null;
+  const languageState = language ? `${wanted ?? ''}|${language.stored ?? 'none'}|${language.error ?? ''}` : '';
+  // A report that matches clears the key, so the same mismatch coming back later is logged again.
+  if (language && wanted && language.stored === wanted && !language.error) extensionLanguageLogged.delete(browser);
+  if (language && wanted && (language.stored !== wanted || language.error) && extensionLanguageLogged.get(browser) !== languageState) {
+    logWarn(`browser: the extension's stored language is ${language.stored ?? 'none (it uses the browser\'s)'}, the app's is ${wanted}` +
+      `${language.error ? `; last attempt: ${language.error}` : ''}`);
+    extensionLanguageLogged.set(browser, languageState);
+    if (extensionLanguageLogged.size > 16) extensionLanguageLogged.delete(extensionLanguageLogged.keys().next().value!);
   }
   // Remember what the extension holds, but only values it actually stored: a fresh install
   // reports its defaults, and those must not overwrite the choices it is about to get back.
