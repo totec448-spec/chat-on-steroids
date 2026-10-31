@@ -14,7 +14,7 @@ export function renderRecoveryCountdowns(host: HTMLElement, countdowns: readonly
       const row = el('div', 'recovery-notice');
       const label = el('span', 'queue-label', () => {
         if (countdown.next) {
-          const reason = countdown.kind === 'pickup-stopped' ? t('Recovery stopped') : countdown.kind === 'pickup' ? t('Waiting for delivery') : countdown.kind === 'post-reload'
+          const reason = countdown.kind === 'pickup-stopped' ? countdown.exhausted ? t('Recovery stopped') : t('Recovery slowed') : countdown.kind === 'pickup' ? t('Waiting for delivery') : countdown.kind === 'post-reload'
             ? countdown.generating ? t('Reloaded · turn still marked generating') : t('Reloaded') :
             countdown.kind === 'thinking-failed' ? t('Thinking failed') : t('Turn still marked generating · extra wait');
           const next = countdown.next === 'continue' ? t('Automatic Continue') : countdown.next === 'queue' ? t('Queued message') : countdown.next === 'goal' ? t('Goal') : t('Loop');
@@ -38,8 +38,10 @@ export function renderRecoveryCountdowns(host: HTMLElement, countdowns: readonly
           : t('Chat On Steroids is sending ChatGPT the request to write the brief for a new chat.')
         : countdown.kind === 'provider-limit'
         ? t('Automatic recovery is paused during the history rate-limit wait. Reloading earlier can prolong the limit.')
-        : countdown.kind === 'pickup-stopped'
+        : countdown.kind === 'pickup-stopped' && countdown.exhausted
         ? t('The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.', [String(countdown.attempts ?? 3)])
+        : countdown.kind === 'pickup-stopped'
+        ? t('The browser did not collect the pending step after {0} automatic reloads. Its queued message or Goal step stays saved, and CoS keeps trying every 15 to 60 minutes. To go on now, open the chat and continue.', [String(countdown.attempts ?? 3)])
         : countdown.kind === 'native-busy' || countdown.generating
         ? t('Delivery was deferred because the turn is still marked generating. This is the remaining extra wait, not a new reload timer. Fresh work or a final answer cancels recovery.')
         : countdown.next === 'continue'
@@ -74,7 +76,7 @@ export function renderRecoveryCountdowns(host: HTMLElement, countdowns: readonly
       : countdown.kind === 'provider-limit'
       ? seconds ? t('Retry check in {0}', [time]) : t('Retry window ended')
       : countdown.kind === 'pickup-stopped'
-      ? t('Stopped after {0} attempts', [String(countdown.attempts ?? 3)])
+      ? countdown.exhausted ? t('Stopped after {0} attempts', [String(countdown.attempts ?? 3)]) : t('Retrying slowly · {0} reloads', [String(countdown.attempts ?? 3)])
       : countdown.kind === 'pickup'
       ? seconds ? t('Reload in {0}', [time]) : t('Reload pending…')
       : countdown.next === 'continue'

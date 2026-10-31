@@ -17,6 +17,7 @@ import { app, dialog, screen, shell, webContents, type BrowserWindow } from 'ele
 import { chatLines, crashLines, errorSummaryLines, installKind, installLines, systemLines, toolCallLines, type ChatFactsSession } from './diagnostics-facts.js';
 import type { CompanionDiagnostics, CompanionEnvironment, UpdateStatus } from '../shared/types.js';
 import { getConfig } from './config.js';
+import { goalSwitchFor } from './goal.js';
 import { flushLogFile, logFilePath } from './logger.js';
 import { dialogLabel, mainText } from './main-texts.js';
 import { scrubText, type ScrubContext } from './report-scrub.js';
@@ -146,7 +147,12 @@ export async function collectReportFacts(sources: { update: UpdateStatus; sessio
     errors: errorSummaryLines(),
     tools: toolCallLines(sources.now),
     // Finished inputs say nothing about a stuck chat; only waiting and moving ones are counted.
-    chats: chatLines(sources.sessions, sources.inputs.filter(input => !['sent', 'failed', 'cancelled'].includes(input.state)), sources.now),
+    chats: chatLines(sources.sessions, sources.inputs.filter(input => !['sent', 'failed', 'cancelled'].includes(input.state)), sources.now, session => {
+      const conversationId = session.conversationId;
+      if (!conversationId) return null;
+      const mode = goalSwitchFor(conversationId);
+      return `${mode.enabled ? mode.mode : 'Normal'} (${mode.own ? 'this chat' : 'app setting'})`;
+    }),
     startup: startupLines()
   };
 }
