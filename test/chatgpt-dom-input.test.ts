@@ -1056,6 +1056,28 @@ describe('native image readiness', () => {
     expect(await draft.clear()).toBe(true);
     expect(api.hasComposerAttachments()).toBe(false); draft.dispose();
   });
+  // #1942 (2026-10-30): in German the remove label is "<name> entfernen", the name first, so no file was
+  // ever recognized and every message with an attachment hung until "upload not confirmed".
+  it.each([['German', 'notes.zip entfernen'], ['no name in the label', 'Datei entfernen']])('accepts the two-button file tile whatever its remove label says (%s)', async (_case, removal) => {
+    const input = upload(); input.accept = '';
+    const draft = api.captureComposerDraft('Exact app prompt');
+    input.addEventListener('change', () => {
+      const host = document.createElement('div'); host.setAttribute('data-composer-attachments', '');
+      host.innerHTML = `<span><span><span>notes.zip</span><button type="button" aria-label="notes.zip"></button></span><button type="button" aria-label="${removal}"></button></span>`;
+      document.querySelector('form')!.append(host);
+    });
+    const file = new dom.window.File(['exact bytes'], 'notes.zip', { type: 'application/zip' });
+    expect(await api.uploadImages([], () => true, draft, [file])).toBe(true);
+    expect(api.hasComposerAttachments()).toBe(true);
+    draft.dispose();
+  });
+  // CodeRabbit on #1944: a blank label, or the file name with spaces around it, names no remove control.
+  it.each(['notes.zip', ' notes.zip ', '   ', ''])('still refuses a tile whose second button is not a remove control (label "%s")', label => {
+    const host = document.createElement('div'); host.setAttribute('data-composer-attachments', '');
+    host.innerHTML = `<span><span><span>notes.zip</span><button type="button" aria-label="notes.zip"></button></span><button type="button" aria-label="${label}"></button></span>`;
+    document.querySelector('form')!.append(host);
+    expect(api.hasComposerAttachments()).toBe(false);
+  });
   it.each(['Quitar', 'Remove', '削除'])('accepts the current two-button file tile before authorizing Send (%s)', async removeLabel => {
     const input = upload(); input.accept = '';
     const draft = api.captureComposerDraft('Exact app prompt');
