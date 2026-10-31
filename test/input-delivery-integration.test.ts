@@ -264,6 +264,9 @@ it('says when the extension updates past answering pages after its long wait (20
     const call = callContext.trackInFlight({ tool: 'exec_command', caller: { transportKey: null, requestId: null, conversationId: null },
       evidence: callContext.emptyEvidence() } as never, () => new Promise<void>(resolve => { finish = resolve; }));
     expect((await post('/extension/update', { pastBusyChatsMs: 31 * 60_000 })).body).toEqual({ ready: false, hold: 'app-busy' });
+    // Said once, not on every pass the extension asks again (CodeRabbit on #1961).
+    await post('/extension/update', { pastBusyChatsMs: 31 * 60_000 });
+    expect(logged.mock.calls.filter(([line]) => String(line).includes('the extension update waits: a tool call is running in this app'))).toHaveLength(1);
     finish(); await call;
   } finally { clock.mockRestore(); logged.mockRestore(); extensionPath.prepare = () => null; }
 });
