@@ -36,7 +36,8 @@ app.whenReady().then(async () => {
       bridge:{running:false,port:0,paired:false,present:false,lastSeenAt:null,extensionVersion:null},
       update:{current:'2.0.9',latest:null,stage:'idle',error:null,checkedAt:null}};
     const projects = [{id:'demo-project',name:'Translations',path:'C:/demo',createdAt:1,chatgpt:{state:'linked',id:'g-p-'+'d'.repeat(32),updatedAt:1}},{id:'second-project',name:'Documentation',path:'C:/docs',createdAt:2}];
-    const titles = ['Spanish round 1','Spanish Q&A','Italian round 1','Glossary','Style guide','Release notes','Review','Changelog'];
+    // Few project chats: every drag below must fit on a CI screen, whatever its height.
+    const titles = ['Spanish round 1','Spanish Q&A','Italian round 1'];
     const rows = titles.map((title,i)=>({id:'task-'+i,title,projectId:'demo-project',
       conversationId:'chat-'+i,chatIds:['chat-'+i],startedAt:1,updatedAt:Date.now()-i*9*3600000,endedAt:2,events:0,userMessages:0,
       toolCalls:0,lastToolCallAt:null,processExitNonzero:0,toolRejected:0,toolInternalErrors:0,errors:0,
@@ -168,8 +169,15 @@ app.whenReady().then(async () => {
 
     // Dragging a chat onto a project row moves it there; the row lights up while it would take it.
     await js(`document.querySelector('[data-project-id="demo-project"] > summary').click()`);
+    // The window is only as tall as the screen (smaller on CI): the sidebar is scrolled so the middle
+    // of a drag sits in the middle of the window, away from the edges that scroll it during a drag.
+    const frame = (a, b) => js(`(() => { const one=document.querySelector('${a}').getBoundingClientRect(), two=document.querySelector('${b}').getBoundingClientRect();
+      const list=document.querySelector('${a}').closest('.scroll'); list.scrollTop += (one.top+two.top)/2 - innerHeight/2; })()`)
+      .then(() => js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))'));
     const at = sel => js(`(() => { const r=document.querySelector('${sel}').getBoundingClientRect(); return {x:Math.round(r.left+40),y:Math.round(r.top+r.height/2)}; })()`);
+    await frame('[data-id="loose-0"] .sess-top', '[data-project-id="second-project"] > summary');
     const from = await at('[data-id="loose-0"] .sess-top'), onto = await at('[data-project-id="second-project"] > summary');
+    assert.ok(from.y < await js('innerHeight') - 40 && onto.y > 40, 'both ends of the drag are on screen: '+JSON.stringify({from,onto}));
     win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...from});
     await new Promise(r=>setTimeout(r,25));
     win.webContents.sendInputEvent({type:'mouseMove',x:from.x,y:from.y-12});
@@ -191,8 +199,7 @@ app.whenReady().then(async () => {
     await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
     await js(`document.querySelector('[data-project-id="demo-project"] > summary').click()`);
     await until(`document.querySelector('[data-project-id="demo-project"]').open`, 'project open again');
-    await js(`document.querySelector('[data-project-id="demo-project"]').scrollIntoView({block:'start'})`);
-    await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+    await frame('[data-id="loose-0"] .sess-top', '[data-group-id="g-italian"] > summary');
     const chat = await at('[data-id="loose-0"] .sess-top'), group = await at('[data-group-id="g-italian"] > summary');
     assert.ok(chat.y < await js('innerHeight') - 40 && group.y > 40, 'both ends of the drag are on screen: '+JSON.stringify({chat,group}));
     win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...chat});
@@ -207,6 +214,10 @@ app.whenReady().then(async () => {
     // Escape during a drag over a project drops nothing.
     const calls = (await js('window.moveCalls')).length;
     await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+    // Translations folded, so the drag is short.
+    await js(`document.querySelector('[data-project-id="demo-project"] > summary').click()`);
+    await until(`!document.querySelector('[data-project-id="demo-project"]').open`, 'Translations folded');
+    await frame('[data-id="other-task"] .sess-top', '[data-project-id="demo-project"] > summary');
     const third = await at('[data-id="other-task"] .sess-top');
     win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...third});
     await new Promise(r=>setTimeout(r,25));
