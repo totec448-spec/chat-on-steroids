@@ -2968,7 +2968,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         ...(req.method === 'POST' && imageExportRequested ? { imageExports: pendingImageExports() } : {}),
         // A failure report closes this request. Reissuing the repair in the same response would
         // replace the visible failure with "Trying" before a renderer could ever observe it.
-        repairs: repairFailed || repairHeld ? [] : await takePendingRepairs(Date.now(), browser, takesWork),
+        repairs: repairFailed || repairHeld ? [] : await takePendingRepairs(Date.now(), browser, takesWork, chosenBuiltIn),
         ...tabPolicy,
         recoveryMonitoring: browserRecoveryMonitoring(),
         // A newer extension build ships with this app. The extension reloads into it on its own
@@ -10425,7 +10425,9 @@ async function takePendingRepairs(
   now = Date.now(),
   browser: string | null = null,
   /** Whether this browser may claim what it is offered; only its offers count toward the no-page budget. */
-  canClaim = true
+  canClaim = true,
+  /** The chosen built-in browser, which takes a repair over from a browser that is not chosen (#1960). */
+  chosen = false
 ): Promise<Array<{ conversationId: string; token: string; reason: Repair['reason']; focus: boolean }>> {
   retireSpentRepairs();
   const pickupFloor = pickupWatchFloor;
@@ -10496,8 +10498,10 @@ async function takePendingRepairs(
     continueFollows?: boolean;
   }> = [];
   for (const [conversationId, repair] of repairsInFlight) {
-    // Another browser holds this chat. Offered here, a reload finds no tab and opens a copy.
-    if (chatHeldElsewhere(conversationId, browser)) continue;
+    // Another browser holds this chat. Offered here, a reload finds no tab and opens a copy. Not for
+    // the chosen built-in browser: the holder may not claim it, and the chat would sit (#1960, as
+    // inputs do since #1516).
+    if (!chosen && chatHeldElsewhere(conversationId, browser)) continue;
     const unclaimed = repair.reason !== 'unattributed' && repairNeedsClaim(repair) && repair.state === 'handed' && !repair.claimed;
     if (repair.state !== 'queued' && !unclaimed) continue;
     if (now < repair.notBefore) continue;
