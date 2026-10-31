@@ -66,7 +66,7 @@ const {
   spawn,
   swarmStateForCaller
 } = await import('../src/main/agents.js');
-const { registerIpc, cleanSessionName } = await import('../src/main/ipc.js');
+const { registerIpc, cleanSessionName, personsMessage } = await import('../src/main/ipc.js');
 const { openInPreferredBrowser } = await import('../src/main/browser.js');
 const bridgeModule = await import('../src/main/bridge.js');
 const { app, nativeTheme, safeStorage, shell, dialog } = await import('electron');
@@ -3281,4 +3281,13 @@ describe('phone notifications over IPC', () => {
     expect(await handlers.get('phonePush:token')!(null, { token: '' })).toMatchObject({ ok: true, data: { hasPhonePushToken: false } });
     expect(await getSecret('ntfyToken')).toBeNull();
   });
+});
+
+// #1919: only a message the person wrote carries a moved chat's folder line.
+it('tells a person\'s message from the app\'s own', () => {
+  const base = { id: 'i1', sessionId: 's1', text: 'Next step', mode: 'auto', state: 'queued' } as never as Parameters<typeof personsMessage>[0];
+  expect(personsMessage(base)).toBe(true);
+  expect(personsMessage({ ...base, scheduled: { scheduleId: 'x', dueAt: 1, late: false } } as never)).toBe(true);
+  for (const own of [{ opening: true }, { recovery: { questionId: 'q' } }, { continuedFrom: 'recovery' }, { purpose: 'decision' },
+    { purpose: 'rotation' }, { finishOwner: 'f' }, { mode: 'finish' }]) expect(personsMessage({ ...base, ...own } as never)).toBe(false);
 });

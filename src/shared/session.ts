@@ -677,6 +677,8 @@ export interface SessionSummary {
    * to a project by itself again, as it does for a chat started in a linked ChatGPT Project.
    */
   projectChosen?: true;
+  /** Moved into its project since the person's last message: the next one names the folder once. */
+  projectNotePending?: true;
   id: string;
   title: string;
   /**

@@ -391,3 +391,23 @@ it('runs overlapping moves of one chat in order, each reporting the project it r
   expect(toSecond.from).toBe(first.id);
   expect((await getSession(chat.id))?.projectId).toBe(second.id);
 });
+
+it('names the new folder once in the person\'s next message after a move into a project (#1919)', async () => {
+  const { prepareSkillFollowup } = await import('../src/main/session/prompt.js');
+  const { clearProjectNote } = await import('../src/main/session/store.js');
+  const { userPromptText } = await import('../src/shared/user-prompt.js');
+  const project = await addProject(path.join(approved, 'second'));
+  const chat = await createSession({ title: 'Main', conversationId: randomUUID() });
+  await moveChatToProject(chat.id, project.id);
+  expect((await getSession(chat.id))?.projectNotePending).toBe(true);
+  const noted = await prepareSkillFollowup('Next step', 'Next step', undefined, { sessionId: chat.id }, true);
+  expect(noted).toContain('Selected project directory: /work/second');
+  // The person's words stay exactly theirs after the app's frame.
+  expect(userPromptText(noted)).toBe('Next step');
+  expect(await prepareSkillFollowup('Next step', 'Next step', undefined, { sessionId: chat.id }, false)).toBe('Next step');
+  await clearProjectNote(chat.id);
+  expect((await getSession(chat.id))?.projectNotePending).toBeUndefined();
+  // Moved in again, then out: out has no folder to name.
+  await moveChatToProject(chat.id, null);
+  expect((await getSession(chat.id))?.projectNotePending).toBeUndefined();
+});
