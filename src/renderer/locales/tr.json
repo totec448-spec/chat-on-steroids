@@ -1840,6 +1840,8 @@
   "How the app behaves day to day. Changes apply immediately.": "Uygulamanın günlük davranışı. Değişiklikler hemen uygulanır.",
   "What you see while ChatGPT answers, and what your messages carry.": "ChatGPT yanıt verirken gördükleriniz ve mesajlarınızın taşıdıkları.",
   "Follow new output": "Yeni çıktıyı takip et",
+  "Show message times": "Mesaj saatlerini göster",
+  "The time above each message. Point at a time for the full date.": "Her mesajın üstünde saati. Tam tarih için bir saatin üzerine gelin.",
   "Stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "Yanıtlar uzarken sohbetin sonunda kal, burada ve ChatGPT'de. Yukarı kaydırmak duraklatır.",
   "Playful status words": "Eğlenceli durum sözcükleri",
   "Show rotating gym jokes instead of “Working”.": "“Çalışıyor” yerine değişen spor salonu şakaları göster.",

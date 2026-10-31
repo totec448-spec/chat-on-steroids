@@ -1320,6 +1320,27 @@ it('loads desktop control for calls without a known chat as off when missing or 
   warn.mockRestore();
 });
 
+// 2026-10-30: "Show message times". A config from before the switch loads as off; a damaged value too,
+// said once.
+it('loads Show message times as off when missing or damaged, and logs only the damaged one', async () => {
+  const logger = await import('../src/main/logger.js');
+  const warn = vi.spyOn(logger, 'logWarn');
+  const lines = () => warn.mock.calls.map(call => String(call[0])).filter(line => line.includes('showMessageTimes'));
+  for (const [saved, loadedAs] of [[true, true], [false, false], [undefined, undefined]] as const) {
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...defaultConfig(), ui: { ...defaultConfig().ui, showMessageTimes: saved } }), 'utf8');
+    warn.mockClear();
+    expect((await loadConfig()).ui.showMessageTimes).toBe(loadedAs);
+    expect(lines()).toEqual([]);
+  }
+  for (const damaged of ['yes', 1, null]) {
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...defaultConfig(), ui: { ...defaultConfig().ui, showMessageTimes: damaged } }), 'utf8');
+    warn.mockClear();
+    expect((await loadConfig()).ui.showMessageTimes).toBeUndefined();
+    expect(lines()).toEqual(['config: the saved ui.showMessageTimes was damaged; message times stay hidden until the switch is set again']);
+  }
+  warn.mockRestore();
+});
+
 // #1856 (CodeRabbit): a damaged saved chat style falls back to the built-in text and says so once, never its content.
 it('logs a damaged saved chat style without its text, and nothing for an absent one', async () => {
   const logger = await import('../src/main/logger.js');

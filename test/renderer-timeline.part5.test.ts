@@ -1659,3 +1659,38 @@ describe('prompt recall in the composer', () => {
     expect(composer(w).value).toBe('Second question');
   });
 });
+
+// "Show message times" (2026-10-30): a message's time reads as hours and minutes, the full date and
+// seconds on hover.
+it('labels each message with its hour and minute, and the full date in its title', async () => {
+  const at = T0 + 3_723_000;
+  const { w } = await boot([
+    { seq: 1, time: at, source: 'extension', kind: 'user_message', turnId: 't1', message: { text: 'Hello', chars: 5, truncated: false } } as any
+  ]);
+  const time = await waitFor(() => { const node = w.document.querySelector('.ev-user_message > time'); expect(node).toBeTruthy(); return node!; });
+  expect(time.textContent).toBe(new Date(at).toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' }));
+  expect(time.getAttribute('title')).toBe(new Date(at).toLocaleString('en'));
+  expect(time.getAttribute('datetime')).toBe(new Date(at).toISOString());
+});
+
+// CodeRabbit on #1948: a damaged saved time never breaks the chat; a message shows when it was written
+// (the page's own time) over when the app saw it; and the time follows a language change.
+it('keeps a damaged time from breaking the chat, shows when a message was written, and follows the language', async () => {
+  const written = T0 + 60_000;
+  const { w } = await boot([
+    { seq: 1, time: 1e20, source: 'extension', kind: 'user_message', turnId: 't1', message: { text: 'Hello', chars: 5, truncated: false } } as any,
+    { seq: 2, time: T0 + 3_600_000, authoredAt: written, source: 'extension', kind: 'assistant_message', turnId: 't1', messageId: 'answer-1',
+      final: true, state: 'final', message: { text: 'Answer', chars: 6, truncated: false } } as any
+  ]);
+  const answerTime = await waitFor(() => { const node = w.document.querySelector('.ev-assistant_message > time'); expect(node).toBeTruthy(); return node!; });
+  const damaged = w.document.querySelector('.ev-user_message > time')!;
+  expect(w.document.querySelector('.ev-user_message .said')).toBeTruthy();
+  expect([damaged.textContent, damaged.getAttribute('title'), damaged.getAttribute('datetime')]).toEqual(['', null, null]);
+  expect(answerTime.textContent).toBe(new Date(written).toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' }));
+  expect(answerTime.getAttribute('aria-label')).toBe(new Date(written).toLocaleString('en'));
+  const language = w.document.getElementById('uiLanguage') as HTMLSelectElement;
+  language.value = 'de';
+  language.dispatchEvent(new w.Event('change', { bubbles: true }));
+  expect(answerTime.textContent).toBe(new Date(written).toLocaleTimeString('de', { hour: 'numeric', minute: '2-digit' }));
+  expect(answerTime.getAttribute('title')).toBe(new Date(written).toLocaleString('de'));
+});

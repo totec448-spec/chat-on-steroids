@@ -232,6 +232,24 @@ export function clockTime(atMs: number): string {
   return new Date(atMs).toLocaleTimeString(currentLanguage());
 }
 
+/**
+ * A chat row's time: hours and minutes ("3:52 PM", "15:52"), its full date in the title, and a
+ * machine-readable `datetime`. Shown only with "Show message times" on.
+ */
+export function rowTime(atMs: number): HTMLTimeElement {
+  const time = document.createElement('time');
+  const at = new Date(atMs);
+  // A damaged saved time (say 1e20) has no date; the row shows none rather than failing to draw.
+  if (!Number.isFinite(at.getTime())) return time;
+  // Bound, so a language change repaints rows already drawn. The full date is also the accessible
+  // name: the title alone is out of reach without a pointer (CodeRabbit on #1948).
+  ui(time, 'textContent', () => at.toLocaleTimeString(currentLanguage(), { hour: 'numeric', minute: '2-digit' }));
+  ui(time, 'title', () => at.toLocaleString(currentLanguage()));
+  ui(time, 'aria-label', () => at.toLocaleString(currentLanguage()));
+  time.dateTime = at.toISOString();
+  return time;
+}
+
 /** "1.2k", "3.4M" — for token and character counts that get large. */
 /** A count in a few characters: "999", "1.0k", "12k", "1.3M", "2.0B" (never "1000k" or "2000.0M"). */
 export function compactNumber(value: number): string {

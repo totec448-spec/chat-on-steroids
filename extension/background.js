@@ -4839,11 +4839,19 @@ const HANDLERS = {
    */
   /** A ChatGPT announcement the page closed (CLF_DOM.dismissAnnouncements), for one app log line. */
   async page_note(message) {
-    if (message?.note !== 'announcement-closed') return { ok: false };
-    const heading = typeof message.heading === 'string' ? message.heading.replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+    const conversationId = cleanConversationId(message?.conversationId);
+    let body = null;
+    if (message?.note === 'announcement-closed') {
+      const heading = typeof message.heading === 'string' ? message.heading.replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+      body = { note: 'announcement-closed', heading, conversationId };
+    } else if (message?.note === 'input-held' && ['page-moved', 'chat-moved-on', 'question-gone', 'still-answering', 'turn-held', 'tool-running', 'no-composer', 'composer-hidden', 'recovery-question-changed',
+        'recovery-question-unreadable', 'recovery-not-ready'].includes(message.reason) &&
+        typeof message.inputId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(message.inputId)) {
+      body = { note: 'input-held', reason: message.reason, inputId: message.inputId, conversationId };
+    }
+    if (!body) return { ok: false };
     // Best effort, and never in the tab's queue: a claim or receipt behind it must not wait on a log line.
-    void call('/page-note', { method: 'POST',
-      body: JSON.stringify({ note: 'announcement-closed', heading, conversationId: cleanConversationId(message.conversationId) }) }).catch(() => undefined);
+    void call('/page-note', { method: 'POST', body: JSON.stringify(body) }).catch(() => undefined);
     return { ok: true };
   },
   async command_step(message) {
