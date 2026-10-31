@@ -497,7 +497,9 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       // An emptied address turns the send check off.
       sendCheckUrl: pick(current.ui.sendCheckUrl, base.ui.sendCheckUrl, wanted.ui.sendCheckUrl || undefined),
       followOutput: pick(current.ui.followOutput, base.ui.followOutput, wanted.ui.followOutput),
-      showMessageTimes: pick(current.ui.showMessageTimes, base.ui.showMessageTimes, wanted.ui.showMessageTimes),
+      // An absent value is off: a form from before the switch sends off without an edit (CodeRabbit on #1948).
+      showMessageTimes: (base.ui.showMessageTimes === true) === (wanted.ui.showMessageTimes === true)
+        ? current.ui.showMessageTimes : wanted.ui.showMessageTimes,
       mentionCore: pick(current.ui.mentionCore, base.ui.mentionCore, wanted.ui.mentionCore),
       mentionPlugins: pick(current.ui.mentionPlugins, base.ui.mentionPlugins, wanted.ui.mentionPlugins),
       // Not part of the settings form: reported by the window and the extension, carried through.

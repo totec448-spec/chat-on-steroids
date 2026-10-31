@@ -932,6 +932,10 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     if (state && (!requestedSettings || requestedSettings.ui.desktopUnattributed === patch.ui.desktopUnattributed)) {
       $<HTMLInputElement>('desktopUnattributed').checked = state.config.ui.desktopUnattributed === true;
     }
+    // And message times: a switch left on after a failed save would show what the setting hides.
+    if (state && (!requestedSettings || requestedSettings.ui.showMessageTimes === patch.ui.showMessageTimes)) {
+      $<HTMLInputElement>('showMessageTimes').checked = state.config.ui.showMessageTimes === true;
+    }
     if (state && (!requestedSettings || requestedSettings.projects?.codeCheckpoints === patch.projects?.codeCheckpoints)) {
       $<HTMLInputElement>('codeCheckpoints').checked = state.config.projects?.codeCheckpoints === true;
     }

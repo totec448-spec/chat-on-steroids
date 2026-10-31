@@ -239,9 +239,14 @@ export function clockTime(atMs: number): string {
 export function rowTime(atMs: number): HTMLTimeElement {
   const time = document.createElement('time');
   const at = new Date(atMs);
-  time.textContent = at.toLocaleTimeString(currentLanguage(), { hour: 'numeric', minute: '2-digit' });
-  time.title = at.toLocaleString(currentLanguage());
-  if (Number.isFinite(atMs)) time.dateTime = at.toISOString();
+  // A damaged saved time (say 1e20) has no date; the row shows none rather than failing to draw.
+  if (!Number.isFinite(at.getTime())) return time;
+  // Bound, so a language change repaints rows already drawn. The full date is also the accessible
+  // name: the title alone is out of reach without a pointer (CodeRabbit on #1948).
+  ui(time, 'textContent', () => at.toLocaleTimeString(currentLanguage(), { hour: 'numeric', minute: '2-digit' }));
+  ui(time, 'title', () => at.toLocaleString(currentLanguage()));
+  ui(time, 'aria-label', () => at.toLocaleString(currentLanguage()));
+  time.dateTime = at.toISOString();
   return time;
 }
 
