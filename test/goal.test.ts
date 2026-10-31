@@ -2504,7 +2504,12 @@ describe('a chat driven towards a specific goal', () => {
 
     // Compact & Resume replaces the conversation and the loop goes on running in its
     // replacement; leaving the override behind would hand chat B back to the app-wide setting.
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
     expect(goal.moveGoalSwitch('c-switch-parent', 'c-switch-child')).toBe(true);
+    // #1882: said, so a page that later shows another mode can be compared.
+    expect(info).toHaveBeenCalledWith("goal: c-switch-parent's own loop switch moved to c-switch-child (Compact & Resume)");
+    info.mockRestore();
     expect(goal.goalSwitchFor('c-switch-parent').own).toBe(false);
     expect(goal.goalSwitchFor('c-switch-child')).toEqual({ enabled: true, mode: 'loop', own: true, afterTurn: false });
 
