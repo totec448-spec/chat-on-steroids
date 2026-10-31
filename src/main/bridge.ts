@@ -1,6 +1,6 @@
 import { nextWorkerArchive, onWorkerChatReady, readyForWake, settleWorkerArchive } from './worker-archive.js';
 import { considerTurnRotation, noteRotationDeclined, noteStopFallback, stopFallbackDue, type RotationDeps } from './turn-rotation.js';
-import { armRotationFence, clearRotationFence, rotationFenced, rotationFenceTurn } from './rotation-fence.js';
+import { armRotationFence, clearRotationFence, FENCE_MS, rotationFenced, rotationFenceTurn } from './rotation-fence.js';
 import { conversationProgress } from './session/progress.js';
 import { cosSignInTransfer, SignInTransferError } from './cos-browser/sign-in-transfer.js';
 import { externalBrowserProof, noteExternalInstalled, noteExternalSignedIn, resetBrowserProofForTests } from './browser-proof.js';
@@ -453,7 +453,9 @@ type CommandSpec =
   | { type: 'resume'; sessionId: string; token: string }
   | { type: 'stop'; sessionId: string; conversationId: string; turnId: string; userMessageId?: string;
     /** Asked for a turn the page holds after the app stopped counting it as work (`heldTurnId`). */
-    held?: true };
+    held?: true;
+    /** A fresh-turn Stop (the stop fallback): its chat's rotation fence lives as long as it does. */
+    rotation?: true };
 
 interface Command {
   id: string;
@@ -2278,7 +2280,8 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
     entry.spec.turnId === expectedTurnId && entry.spec.held === true);
   const held = pendingHeld || (!atQueue.activeTurnId && atQueue.heldTurnId === expectedTurnId);
   const alreadyQueued = commands.some(entry => entry.spec.type === 'stop' && entry.spec.sessionId === sessionId && entry.spec.turnId === expectedTurnId);
-  const command = queue({ type: 'stop', sessionId, conversationId: id, turnId: expectedTurnId, ...(userMessageId ? { userMessageId } : {}), ...(held ? { held: true as const } : {}) });
+  const command = queue({ type: 'stop', sessionId, conversationId: id, turnId: expectedTurnId, ...(userMessageId ? { userMessageId } : {}),
+    ...(held ? { held: true as const } : {}), ...(options.rotation ? { rotation: true as const } : {}) });
   try {
     // Reuse the command lease barrier: status must not hand out an unsaved request.
     const pendingLease = commandWrites.get(command.id);
@@ -10211,7 +10214,9 @@ function noteCallAttribution(
     if (!pro && sourceTurnId && filedSession?.activeTurnId === sourceTurnId &&
         filedSession.origin?.kind !== 'worker' && filedSession.origin?.kind !== 'helper' &&
         !isWorkerConversation(conversationId) && !(tool && GOAL_HOLD_TOOLS.has(tool)) && callHoldOpen(conversationId)) {
-      if (stopFallbackDue(conversationId, sourceTurnId, getConfig().ui.rotateStopFallback !== false, Date.now()) && !rotationFenced(conversationId)) {
+      // Fresh turns switched off (0 minutes) since the declines: no fallback (CodeRabbit on #1954).
+      if ((getConfig().ui.rotateTurnMinutes ?? 30) > 0 &&
+          stopFallbackDue(conversationId, sourceTurnId, getConfig().ui.rotateStopFallback !== false, Date.now()) && !rotationFenced(conversationId)) {
         // ChatGPT offered no Send for this turn's continue twice: stop the turn once this result has
         // gone out, refusing (not running) any call that comes meanwhile, and continue after the stop.
         noteStopFallback(conversationId, sourceTurnId, Date.now());
@@ -11211,6 +11216,9 @@ function commandProgress(command: Command, now = Date.now()): string {
 
 /** Finishes a command that has nothing left to do, timer and all. */
 function retire(command: Command, why: string): void {
+  // A fresh-turn Stop that ends here no longer protects anything: its fence goes with it.
+  if (command.spec.type === 'stop' && command.spec.rotation && rotationFenceTurn(command.spec.conversationId) === command.spec.turnId)
+    clearRotationFence(command.spec.conversationId);
   if (command.timer) clearTimeout(command.timer);
   command.timer = null;
   delete command.placement;
@@ -11681,7 +11689,8 @@ function restoredCommandSpec(version: number, raw: Partial<CommandSpec>): Comman
         typeof stop.conversationId !== 'string' || !conversationId(stop.conversationId) ||
         typeof stop.turnId !== 'string' || !stop.turnId || stop.turnId.length > 256) return null;
     if (stop.userMessageId !== undefined && (typeof stop.userMessageId !== 'string' || !stop.userMessageId || stop.userMessageId.length > 256)) return null;
-    return { type: 'stop', sessionId: stop.sessionId, conversationId: stop.conversationId, turnId: stop.turnId, ...(stop.userMessageId ? { userMessageId: stop.userMessageId } : {}), ...(stop.held === true ? { held: true as const } : {}) };
+    return { type: 'stop', sessionId: stop.sessionId, conversationId: stop.conversationId, turnId: stop.turnId, ...(stop.userMessageId ? { userMessageId: stop.userMessageId } : {}), ...(stop.held === true ? { held: true as const } : {}),
+      ...(stop.rotation === true ? { rotation: true as const } : {}) };
   }
   if (
     version >= 3 &&
@@ -11965,6 +11974,12 @@ export async function restoreCommands(): Promise<void> {
   // This is the only publication point of restore. Everything above operated on local arrays;
   // everything below may again use ordinary live command helpers and timers.
   commands = plan.commands;
+  // A fresh-turn Stop that survived the restart is still pending: its fence comes back with it, for
+  // what is left of the command's budget (CodeRabbit on #1954).
+  for (const command of commands) {
+    if (command.spec.type === 'stop' && command.spec.rotation)
+      armRotationFence(command.spec.conversationId, command.spec.turnId, command.createdAt + FENCE_MS - Date.now());
+  }
   commandReceipts = plan.receipts;
   for (const token of plan.resumeTokens) rememberToken(token.sessionId, token.token);
   rearmRetainedCommandDeadlines();

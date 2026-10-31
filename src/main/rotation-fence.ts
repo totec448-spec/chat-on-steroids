@@ -5,18 +5,20 @@
  * From the decision until ChatGPT shows the turn stopped, a tool call of that chat is refused, not
  * run: a Stop that lands while a call runs can make the model run that call again (measured
  * 2026-10-18, #1662). A refused call never ran, so making it again in the fresh turn is safe.
- * The fence lifts when the stop shows, or after a minute when it never does.
+ * The fence lifts when the stop shows, when its Stop command ends without showing it, or when that
+ * command's own 120 s budget has run out (plus a margin): a fence shorter than the Stop it protects
+ * let a call run while the Stop could still land (CodeRabbit on #1954).
  */
-const FENCE_MS = 60_000;
+export const FENCE_MS = 120_000 + 15_000;
 const fences = new Map<string, { turnId: string; timer: ReturnType<typeof setTimeout> }>();
 
 export const ROTATION_FENCE_REFUSAL =
   'TURN_CONTINUING: Chat On Steroids is continuing this task in a fresh turn, so this call was not run. ' +
   'Do not retry it in this turn: the next message continues the task, and you can make the call there.';
 
-export function armRotationFence(conversationId: string, turnId: string): void {
+export function armRotationFence(conversationId: string, turnId: string, ms = FENCE_MS): void {
   clearRotationFence(conversationId);
-  const timer = setTimeout(() => { if (fences.get(conversationId)?.timer === timer) fences.delete(conversationId); }, FENCE_MS);
+  const timer = setTimeout(() => { if (fences.get(conversationId)?.timer === timer) fences.delete(conversationId); }, Math.max(0, ms));
   timer.unref?.();
   fences.set(conversationId, { turnId, timer });
 }
