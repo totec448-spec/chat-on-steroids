@@ -270,6 +270,10 @@ function allCaps(): Capabilities {
 
 beforeAll(async () => {
   base = await makeTempDir('clf-mcp-');
+  // The usage tool reads Codex's and Claude Code's own logs. Without this it read the real home
+  // folders, which on a busy developer machine took past the 30 s test timeout (2026-10-31, twice).
+  vi.stubEnv('CODEX_HOME', path.join(base, 'no-codex'));
+  vi.stubEnv('CLAUDE_CONFIG_DIR', path.join(base, 'no-claude'));
   // This suite calls real tools, and calling a tool records it. Recording is on by
   // default now, so without a directory of its own the recorder wrote session folders
   // into the process's working directory — which for a test run is the repository.
