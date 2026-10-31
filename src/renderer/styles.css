@@ -2688,6 +2688,15 @@ input[readonly] {
 .sess:hover, .sess.is-pointed, .sess.is-sel { background: var(--hover); }
 .sess-top { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
 .sess-top b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(14px * var(--text-scale, 1)); font-weight: 400; line-height: 22px; }
+/* Compact the existing Projects/Chats tree without changing the separate multi-line Inbox cards.
+   Keep the focusable row control at least 24px high and the overlaid menu at 26px; larger text grows naturally. */
+#sessionList:not(.is-inbox) .sess:not(.sess-card) { min-height: 32px; margin-block: 1px; padding-block: 4px; }
+#sessionList:not(.is-inbox) .sess:not(.sess-card) .sess-top { min-height: 24px; }
+#sessionList:not(.is-inbox) .sess:not(.sess-card) .sess-top > b { line-height: 1.4; }
+/* The title mask used to reserve the menu column also masked the keyboard outline. Paint focus on
+   the unmasked row instead, without changing the hover fade or the row's measured size. */
+#sessionList:not(.is-inbox) .sess:has(> .sess-top:focus-visible) { outline: 2px solid var(--blue); outline-offset: -2px; }
+#sessionList:not(.is-inbox) .sess:has(> .sess-top:focus-visible) > .sess-top { outline: none; }
 .sess-top .sess-rename { flex: 1; min-width: 0; margin: -1px 0; padding: 0 6px; height: 24px; border: 1px solid var(--accent); border-radius: 6px;
   background: var(--card); color: var(--ink); font: inherit; font-size: calc(14px * var(--text-scale, 1)); line-height: 22px; outline: none;
   cursor: text; user-select: text; }
