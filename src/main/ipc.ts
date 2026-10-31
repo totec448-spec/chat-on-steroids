@@ -44,6 +44,7 @@ import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { isValidTopic, normalizeServer, testPhonePush } from './phone-push.js';
+import { connectTelegram, disconnectTelegram, onTelegramChange, telegramView, testTelegram } from './telegram-app.js';
 
 import { DEFAULT_PHONE_PUSH, type PhonePushSettings } from '../shared/phone-push.js';
 import { retryGoalBrowserHelper } from './goal.js';
@@ -195,8 +196,9 @@ import {
 } from './computer/index.js';
 
 /** Why phone settings cannot be saved as they are, or null. Only an enabled form is checked. */
-function phonePushProblem(push: { enabled: boolean; topic: string; server: string }): string | null {
-  if (!push.enabled) return null;
+function phonePushProblem(push: { enabled: boolean; ntfy?: boolean; topic: string; server: string }): string | null {
+  // ntfy's topic and server matter only while ntfy is a destination; Telegram needs neither (#1934).
+  if (!push.enabled || push.ntfy === false) return null;
   if (!isValidTopic(push.topic)) return 'Choose a topic of letters, digits, - and _ (up to 64).';
   if (!normalizeServer(push.server)) return 'Enter the address of an ntfy server, such as https://ntfy.sh.';
   return null;
@@ -300,7 +302,7 @@ const settingsPatch = z.object({
     keepScreenAwake: z.boolean().optional(),
     privacyScreenshots: z.boolean(),
     phonePush: z.object({
-      enabled: z.boolean(), server: z.string().max(2048), topic: z.string().max(64), needsYou: z.boolean(), failures: z.boolean(),
+      enabled: z.boolean(), ntfy: z.boolean().optional(), server: z.string().max(2048), topic: z.string().max(64), needsYou: z.boolean(), failures: z.boolean(),
       finishedAfterMinutes: z.number().int().min(0).max(240).nullable(), onlyWhenAway: z.boolean(),
       quietHours: z.object({ from: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), to: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/) }).strict().nullable(),
       includeDetails: z.boolean()
@@ -408,13 +410,15 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
   }
   const pick = <T>(live: T, before: T, next: T): T => (Object.is(before, next) ? live : next);
   // Field by field, like the rest of the form: a change elsewhere never undoes one made here.
-  const mergePhonePush = (live: PhonePushSettings | undefined, before: PhonePushSettings | undefined, next: PhonePushSettings | undefined): PhonePushSettings | undefined => {
+  const mergePhonePush = (live: PhonePushSettings | undefined, before: Partial<PhonePushSettings> | undefined, next: (Omit<PhonePushSettings, 'ntfy'> & { ntfy?: boolean }) | undefined): PhonePushSettings | undefined => {
     if (!next) return live;
-    const now = live ?? DEFAULT_PHONE_PUSH, was = before ?? DEFAULT_PHONE_PUSH;
+    const now = { ...DEFAULT_PHONE_PUSH, ...live }, was = { ...DEFAULT_PHONE_PUSH, ...before };
+    // A form or backup from before Telegram has no ntfy switch: it changes nothing about it.
+    const wanted: PhonePushSettings = { ...next, ntfy: next.ntfy ?? was.ntfy };
     const field = <K extends keyof PhonePushSettings>(key: K): PhonePushSettings[K] =>
-      JSON.stringify(was[key]) === JSON.stringify(next[key]) ? now[key] : next[key];
+      JSON.stringify(was[key]) === JSON.stringify(wanted[key]) ? now[key] : wanted[key];
     const merged: PhonePushSettings = {
-      enabled: field('enabled'), server: field('server'), topic: field('topic'), needsYou: field('needsYou'), failures: field('failures'),
+      enabled: field('enabled'), ntfy: field('ntfy'), server: field('server'), topic: field('topic'), needsYou: field('needsYou'), failures: field('failures'),
       finishedAfterMinutes: field('finishedAfterMinutes'), onlyWhenAway: field('onlyWhenAway'), quietHours: field('quietHours'), includeDetails: field('includeDetails')
     };
     return { ...merged, server: normalizeServer(merged.server) ?? merged.server.trim() };
@@ -539,7 +543,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         base.ui.privacyScreenshots,
         wanted.ui.privacyScreenshots
       ),
-      phonePush: mergePhonePush(current.ui.phonePush, base.ui.phonePush, wanted.ui.phonePush),
+      phonePush: mergePhonePush(current.ui.phonePush, base.ui.phonePush as PhonePushSettings | undefined, wanted.ui.phonePush as PhonePushSettings | undefined),
       // Missing means on, here as in the saved settings.
       secretsShield: pick(current.ui.secretsShield !== false, base.ui.secretsShield !== false, wanted.ui.secretsShield ?? current.ui.secretsShield !== false),
       theme: pick(current.ui.theme, base.ui.theme, wanted.ui.theme)
@@ -685,6 +689,7 @@ async function buildState(): Promise<AppState> {
     hasGoalKey: await hasSecret('openRouterApiKey'),
     hasCustomProviderKey: await hasSecret('customProviderApiKey'),
     hasPhonePushToken: await hasSecret('ntfyToken'),
+    telegram: telegramView(),
     // After the reads above: only a read can find the file unreadable.
     credentialsUnreadable: storedSecretsUnreadable(),
     resolvedBinary: resolvedBinary(config),
@@ -733,6 +738,9 @@ export async function openSessionChat(id: string): Promise<void> {
   // the conversation in that same preferred browser (never the system default by accident).
   if (!(await revealChatInBrowser(conversationId))) await openInPreferredBrowser(chatUrl(conversationId), { reveal: true });
 }
+
+/** The Telegram bot's change listener of the current registration; a second registration replaces it. */
+let dropTelegramListener: (() => void) | null = null;
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
   registerWorkspaceTerminalIpc(getWindow);
@@ -805,6 +813,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
 
   // Phone notifications: a test message now, and the optional access token (kept in secure storage).
   handle('phonePush:test', async () => { await testPhonePush(); });
+  // Telegram (#1934): the token goes to secure storage and never comes back to the window.
+  handle('telegram:connect', async payload => {
+    const { token } = z.object({ token: z.string().max(256) }).strict().parse(payload);
+    await connectTelegram(token);
+    return buildState();
+  });
+  handle('telegram:disconnect', async () => { await disconnectTelegram(); return buildState(); });
+  handle('telegram:test', async () => { await testTelegram(); });
+  dropTelegramListener?.();
+  dropTelegramListener = onTelegramChange(() => { void buildState().then(state => push('state:changed', state)).catch(() => undefined); });
   handle('phonePush:token', async payload => {
     const { token } = z.object({ token: z.string().max(512) }).strict().parse(payload);
     const trimmed = token.trim();

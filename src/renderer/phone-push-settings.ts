@@ -24,6 +24,7 @@ export function readPhonePush(previous: PhonePushSettings | undefined): PhonePus
   const [from, to] = quiet.split('-');
   return {
     enabled: checkbox('phonePushEnabled').checked,
+    ntfy: checkbox('phonePushNtfy').checked,
     // Cleared stays empty and is refused while on: ntfy.sh is chosen only with Default.
     server: $<HTMLInputElement>('phonePushServer').value.trim(),
     topic: $<HTMLInputElement>('phonePushTopic').value.trim(),
@@ -60,6 +61,9 @@ export function applyPhonePush(state: AppState): void {
   const quietValue = push.quietHours ? `${push.quietHours.from}-${push.quietHours.to}` : '';
   set('phonePushEnabled', push.enabled, () => { checkbox('phonePushEnabled').checked = push.enabled; });
   $('phonePushOptions').hidden = !push.enabled;
+  set('phonePushNtfy', push.ntfy !== false, () => { checkbox('phonePushNtfy').checked = push.ntfy !== false; });
+  $('phonePushNtfyOptions').hidden = !checkbox('phonePushNtfy').checked;
+  applyTelegram(state);
   set('phonePushTopic', push.topic, () => { $<HTMLInputElement>('phonePushTopic').value = push.topic; });
   set('phonePushServer', push.server, () => { $<HTMLInputElement>('phonePushServer').value = push.server; });
   syncServerDefault();
@@ -103,6 +107,33 @@ export function applyPhonePush(state: AppState): void {
     : t('Only if your server needs one. Kept in secure storage.');
 }
 
+/** The person opened the Telegram setup and has not finished or cancelled it. */
+let telegramSetupOpen = false;
+
+/** The Telegram row (#1934): linked or not, and the two setup steps while linking. */
+function applyTelegram(state: AppState): void {
+  const telegram = state.telegram ?? { state: 'off' as const, botName: null, userName: null };
+  const status = $('telegramStatus');
+  const linked = telegram.state === 'linked' || telegram.state === 'conflict';
+  status.classList.toggle('is-warn', telegram.state === 'conflict' || telegram.state === 'token-refused');
+  ui(status, 'textContent', () => telegram.state === 'linked' ? t('Linked to {0} through {1}.', [telegram.userName ?? '', telegram.botName ?? ''])
+    : telegram.state === 'pairing' ? t('Waiting for the code from your Telegram account…')
+    : telegram.state === 'conflict' ? t('Another app reads this bot\'s messages, perhaps on another computer. Unlink it there, or link a new bot here.')
+    : telegram.state === 'token-refused' ? t('Telegram refused the bot token. Link the bot again.')
+    : t('Not linked. Notifications can also go to a Telegram bot of your own.'));
+  $('telegramTest').hidden = telegram.state !== 'linked';
+  $('telegramUnlink').hidden = !linked && telegram.state !== 'token-refused';
+  $('telegramLink').hidden = linked || telegram.state === 'pairing';
+  if (telegram.state === 'pairing') telegramSetupOpen = true;
+  if (linked) telegramSetupOpen = false;
+  $('telegramSetup').hidden = !telegramSetupOpen;
+  $('telegramTokenStep').hidden = telegram.state === 'pairing';
+  $('telegramCodeStep').hidden = telegram.state !== 'pairing';
+  $<HTMLInputElement>('telegramCode').value = telegram.state === 'pairing' && telegram.code ? `/start ${telegram.code}` : '';
+  ui($('telegramCodeHint'), 'textContent', () => t('Send this message to {0} from your own Telegram account. The code works for 10 minutes.', [telegram.botName ?? t('your bot')]));
+  alignFieldButtons();
+}
+
 /**
  * The field rows' buttons take the widest one's width, so the three text fields end on one edge in
  * every language and at every zoom. Measured while shown; hidden rows have no width.
@@ -129,7 +160,7 @@ function quietLabel(from: string, to: string): string {
   return `${clock(from)} – ${clock(to)}`;
 }
 
-export function initPhonePushSettings(api: Pick<AppApi, 'testPhonePush' | 'setPhonePushToken' | 'writeClipboard'>, hooks: {
+export function initPhonePushSettings(api: Pick<AppApi, 'testPhonePush' | 'setPhonePushToken' | 'writeClipboard' | 'connectTelegram' | 'disconnectTelegram' | 'testTelegram'>, hooks: {
   save(): Promise<boolean>; applied(state: AppState): void; toast(message: string): void;
 }): void {
   for (const option of $<HTMLSelectElement>('phonePushQuiet').options) {
@@ -143,6 +174,14 @@ export function initPhonePushSettings(api: Pick<AppApi, 'testPhonePush' | 'setPh
     $('phonePushOptions').hidden = !checkbox('phonePushEnabled').checked;
     alignFieldButtons();
   });
+  // ntfy is one destination of two (#1934): on by default, with a fresh topic when first turned on.
+  checkbox('phonePushNtfy').addEventListener('change', () => {
+    const topic = $<HTMLInputElement>('phonePushTopic');
+    if (checkbox('phonePushNtfy').checked && !topic.value.trim()) topic.value = newTopic();
+    $('phonePushNtfyOptions').hidden = !checkbox('phonePushNtfy').checked;
+    alignFieldButtons();
+  });
+  initTelegram(api, hooks);
   onLanguageChange(alignFieldButtons);
   // Server, token and a new topic are rarely needed with ntfy.sh; they wait behind Advanced.
   $('phonePushAdvanced').addEventListener('toggle', alignFieldButtons);
@@ -202,4 +241,64 @@ export function initPhonePushSettings(api: Pick<AppApi, 'testPhonePush' | 'setPh
       status.classList.toggle('is-warn', !reply.ok);
     } finally { testing = false; button.disabled = false; }
   });
+}
+
+/** Link, test and unlink the Telegram bot. The token goes to secure storage and is never shown again. */
+function initTelegram(api: Pick<AppApi, 'connectTelegram' | 'disconnectTelegram' | 'testTelegram' | 'writeClipboard'>, hooks: {
+  applied(state: AppState): void; toast(message: string): void;
+}): void {
+  let busy = false;
+  const once = async (work: () => Promise<void>) => {
+    if (busy) return;
+    busy = true;
+    try { await work(); } finally { busy = false; }
+  };
+  $('telegramLink').addEventListener('click', () => {
+    telegramSetupOpen = true;
+    $('telegramSetup').hidden = false;
+    $('telegramTokenStep').hidden = false;
+    $('telegramCodeStep').hidden = true;
+    alignFieldButtons();
+    $<HTMLInputElement>('telegramToken').focus();
+  });
+  const submit = () => once(async () => {
+    const field = $<HTMLInputElement>('telegramToken');
+    const submitted = field.value;
+    if (!submitted.trim()) { field.focus(); return; }
+    const button = $<HTMLButtonElement>('telegramContinue');
+    button.disabled = true;
+    try {
+      const reply = await api.connectTelegram(submitted);
+      if (!reply.ok) { hooks.toast(t(reply.error)); return; }
+      if (field.value === submitted) field.value = '';
+      hooks.applied(reply.data);
+    } finally { button.disabled = false; }
+  });
+  $('telegramContinue').addEventListener('click', () => void submit());
+  $('telegramToken').addEventListener('keydown', event => { if ((event as KeyboardEvent).key === 'Enter') { event.preventDefault(); void submit(); } });
+  $('telegramCopyCode').addEventListener('click', async () => {
+    const code = $<HTMLInputElement>('telegramCode').value;
+    if (!code) return;
+    const reply = await api.writeClipboard(code);
+    hooks.toast(reply.ok ? t('Copied. Send it to your bot in Telegram.') : t(reply.error));
+  });
+  // Cancel while a code waits forgets the token too: nothing is left half linked.
+  $('telegramCancel').addEventListener('click', () => once(async () => {
+    telegramSetupOpen = false;
+    $<HTMLInputElement>('telegramToken').value = '';
+    if (!$('telegramCodeStep').hidden) {
+      const reply = await api.disconnectTelegram();
+      if (reply.ok) hooks.applied(reply.data); else hooks.toast(t(reply.error));
+    } else $('telegramSetup').hidden = true;
+  }));
+  $('telegramUnlink').addEventListener('click', () => once(async () => {
+    const reply = await api.disconnectTelegram();
+    if (!reply.ok) { hooks.toast(t(reply.error)); return; }
+    hooks.applied(reply.data);
+    hooks.toast(t('Telegram bot unlinked. Its token is forgotten.'));
+  }));
+  $('telegramTest').addEventListener('click', () => once(async () => {
+    const reply = await api.testTelegram();
+    hooks.toast(reply.ok ? t('Sent. Check Telegram.') : t(reply.error));
+  }));
 }

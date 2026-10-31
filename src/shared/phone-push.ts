@@ -2,7 +2,10 @@
 export interface QuietHours { from: string; to: string }
 
 export interface PhonePushSettings {
+  /** Phone notifications at all; each destination below is on its own too. */
   enabled: boolean;
+  /** Through ntfy (server and topic). Missing, as in settings from before Telegram: on. */
+  ntfy?: boolean;
   server: string;
   topic: string;
   needsYou: boolean;
@@ -16,7 +19,7 @@ export interface PhonePushSettings {
 }
 
 export const DEFAULT_PHONE_PUSH: PhonePushSettings = {
-  enabled: false, server: 'https://ntfy.sh', topic: '', needsYou: true, failures: true, finishedAfterMinutes: 5,
+  enabled: false, ntfy: true, server: 'https://ntfy.sh', topic: '', needsYou: true, failures: true, finishedAfterMinutes: 5,
   onlyWhenAway: true, quietHours: null, includeDetails: false
 };
 

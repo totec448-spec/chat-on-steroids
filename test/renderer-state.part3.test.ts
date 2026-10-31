@@ -1383,7 +1383,7 @@ describe('phone notifications in Settings', () => {
     await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.enabled).toBe(true));
     const saved = mounted.calls.at(-1).ui.phonePush;
     expect(saved.topic).toMatch(/^cos-[a-km-np-z2-9]{20}$/);
-    expect(saved).toEqual({ enabled: true, server: 'https://ntfy.sh', topic: saved.topic, needsYou: true, failures: true,
+    expect(saved).toEqual({ enabled: true, ntfy: true, server: 'https://ntfy.sh', topic: saved.topic, needsYou: true, failures: true,
       finishedAfterMinutes: 5, onlyWhenAway: true, quietHours: null, includeDetails: false });
   });
 
