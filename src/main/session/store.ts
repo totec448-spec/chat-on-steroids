@@ -2621,6 +2621,7 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
     }
     if (publicSummary.titleSource !== undefined && !['fallback', 'provider', 'manual'].includes(publicSummary.titleSource)) delete publicSummary.titleSource;
     if (publicSummary.projectChosen !== undefined && publicSummary.projectChosen !== true) delete publicSummary.projectChosen;
+    if (publicSummary.projectNotePending !== undefined && publicSummary.projectNotePending !== true) delete publicSummary.projectNotePending;
     const auto = publicSummary.autoTitle;
     if (auto !== undefined && (publicSummary.titleSource !== 'manual' || !auto || typeof auto !== 'object' ||
         typeof auto.title !== 'string' || !['fallback', 'provider'].includes(auto.source))) delete publicSummary.autoTitle;
@@ -3597,8 +3598,21 @@ export async function moveSessionProject(id: string, projectId: string | null): 
   if (projectId !== null && !/^[a-f0-9-]{36}$/i.test(projectId)) throw new Error('Invalid project id');
   const entry = await ensureOpen(id);
   await enqueueSessionOperation(entry, 'project move', async () => {
-    const { projectId: _previous, ...rest } = entry.summary;
-    const staged: SessionSummary = { ...rest, ...(projectId ? { projectId } : {}), projectChosen: true };
+    const { projectId: _previous, projectNotePending: _note, ...rest } = entry.summary;
+    // Into a project: the person's next message tells ChatGPT the folder, once (#1919).
+    const staged: SessionSummary = { ...rest, ...(projectId ? { projectId, projectNotePending: true as const } : {}), projectChosen: true };
+    await writeSummary(staged, entry.historySeq);
+    entry.summary = staged;
+    publishAttachmentSummary(staged);
+  });
+}
+
+/** The person's message that told ChatGPT a moved chat's folder was delivered. */
+export async function clearProjectNote(id: string): Promise<void> {
+  const entry = await ensureOpen(id);
+  await enqueueSessionOperation(entry, 'project note', async () => {
+    if (!entry.summary.projectNotePending) return;
+    const { projectNotePending: _done, ...staged } = entry.summary;
     await writeSummary(staged, entry.historySeq);
     entry.summary = staged;
     publishAttachmentSummary(staged);
