@@ -100,6 +100,8 @@ const entrySchema = inputArgs.extend({
   /** Shared unfinished-response fallback belongs to this question in every mode. */
   /** An automatic Continue the app sent on as an ordinary message (`continueAsOrdinaryMessage`). */
   continuedFrom: z.literal('recovery').optional(),
+  /** A new chat's tab vanished before anything reached it, and a fresh one was opened this often (max 2). */
+  openingReopens: z.number().int().min(1).max(2).optional(),
   /** The question that Continue continues, still checked until it is sent (CodeRabbit on #1960). */
   continuesQuestionId: z.string().max(200).optional(),
   recovery: z.object({ questionId: z.string(), episode: z.string().max(200).optional(), pro: z.boolean(), busyUntil: z.number(), phase: z.enum(['ready', 'stopping', 'reloading', 'resumed']), reloadOwner: z.string().optional(),
@@ -1370,20 +1372,39 @@ export function setInputAutomation(id: string, automation: NonNullable<InputArgs
     return true;
   });
 }
+/** How often a new chat whose tab vanished before anything reached it gets a fresh tab. */
+export const OPENING_REOPENS = 2;
+
 /** A missing elected tab is not replay authority. End only a never-handed-out opening. */
 export function failUnclaimedBrowserOpening(id: string, currentOwner: () => boolean): Promise<boolean> {
+  return lostBrowserOpening(id, currentOwner).then(outcome => outcome === 'failed');
+}
+
+/**
+ * A new chat whose elected tab vanished before anything reached it (#1950 follow-up, 2026-10-31):
+ * nothing was offered, authorized or delivered, so its message was typed nowhere. It gets a fresh
+ * tab, twice at most, rather than "Not sent" at once; after that it fails as before. Anything that
+ * may have reached a page is never reopened.
+ */
+export function lostBrowserOpening(id: string, currentOwner: () => boolean): Promise<'reopen' | 'failed' | 'kept'> {
   return serial(async () => {
     const current = await load();
     const row = current.find(entry => entry.id === id);
     if (!currentOwner() || !row?.opening || row.state !== 'queued' || row.owner !== null || row.offeredAt !== undefined ||
         row.sendAuthorizedAt !== undefined || row.deliveredAt !== undefined || row.conversationId ||
-        !row.sessionId || row.purpose || row.lifetime || row.branch) return false;
+        !row.sessionId || row.purpose || row.lifetime || row.branch) return 'kept';
     const session = await getSession(row.sessionId);
-    if (!currentOwner() || session?.origin?.kind !== 'desktop' || session.conversationId) return false;
+    if (!currentOwner() || session?.origin?.kind !== 'desktop' || session.conversationId) return 'kept';
+    const reopens = row.openingReopens ?? 0;
+    if (reopens < OPENING_REOPENS) {
+      await commit(current.map(entry => entry === row ? { ...entry, openingReopens: reopens + 1 } : entry));
+      logInfo(`input ${id}: its new chat's tab vanished before anything reached it; opening a fresh one (${reopens + 1} of ${OPENING_REOPENS})`);
+      return 'reopen';
+    }
     await commit(current.map(entry => entry === row ? { ...entry, state: 'failed',
       error: 'Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.' } : entry));
-    logWarn(`input ${id}: not sent; its elected opening tab is absent before any browser claim`);
-    return true;
+    logWarn(`input ${id}: not sent; its elected opening tab is absent before any browser claim, after ${OPENING_REOPENS} fresh tab(s)`);
+    return 'failed';
   });
 }
 export function noteInputStartupError(id: string, error: string | null): Promise<InputEntry | null> {

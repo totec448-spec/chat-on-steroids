@@ -38,7 +38,7 @@ export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
-import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, failUnclaimedBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation } from './session/input.js';
+import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation } from './session/input.js';
 /**
  * The local bridge between the Chrome extension and this app.
  *
@@ -3125,7 +3125,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const ownsOpening = () => openingCustody.get(body.id as string) === browser && !staleCompanion(req) && !notChosenBrowser(req);
     if (!browser || !ownsOpening())
       return json(res, 409, { error: 'opening_not_owned' }, origin);
-    return json(res, 200, { ok: await failUnclaimedBrowserOpening(body.id, ownsOpening) }, origin);
+    // A lost tab before anything reached it gets a fresh one (the extension forgets the old election);
+    // after two, the message fails with Retry as before.
+    const outcome = await lostBrowserOpening(body.id, ownsOpening);
+    return json(res, 200, { ok: outcome !== 'kept', ...(outcome === 'reopen' ? { reopen: true } : {}) }, origin);
   }
   if (['/input/claim', '/input/bind', '/input/ack', '/input/fail', '/input/answer', '/input/progress', '/input/attachment'].includes(route) && req.method === 'POST') {
     const body = await readBody(req) as Record<string, unknown>;

@@ -473,7 +473,11 @@ describe('lost first-message opening', () => {
         body: { id: row.id, tab: 7, stage: 'ready' }
       });
       if (phase === 'unclaimed') {
-        expect(reply.body).toEqual({ ok: true });
+        // Nothing reached the lost tab: twice a fresh one (the extension forgets the old), then Not sent.
+        expect(reply.body).toEqual({ ok: true, reopen: true });
+        expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued', openingReopens: 1 });
+        expect((await request('POST', '/input/opening-unavailable', { browser, body: { id: row.id, tab: 8, stage: 'ready' } })).body).toEqual({ ok: true, reopen: true });
+        expect((await request('POST', '/input/opening-unavailable', { browser, body: { id: row.id, tab: 9, stage: 'ready' } })).body).toEqual({ ok: true });
         expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed' });
         expect(await input.pendingBrowserInputs()).toEqual([]);
         expect(await input.claimBrowserInput(row.id, '7:late-document:0', null, true)).toBeNull();
