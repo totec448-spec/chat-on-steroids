@@ -3772,5 +3772,6 @@
   "{0} entries|one": "{0} kayıt",
   "{0} messages": "{0} mesaj",
   "{0} messages|one": "{0} mesaj",
-  "{0} actions|one": "{0} eylem"
+  "{0} actions|one": "{0} eylem",
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Gönderilmedi: bu yeni sohbetin tarayıcı sekmesi kapatıldı veya kayboldu. Mesajı gözden geçirip yeniden gönderin."
 }
