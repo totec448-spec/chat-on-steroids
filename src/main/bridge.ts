@@ -803,6 +803,11 @@ function chatHolders(conversationId: string): string[] {
  * 2.1.21 (2026-09-30) chat A came to live in both browsers, the copy in the browser the user was
  * not working in wrote the Compact & Resume brief, and chat B was placed beside that copy.
  */
+/** A stalled-tab repair for a chat this browser holds: the one repair a browser that is not chosen may take. */
+function holdsStalledTab(repair: Repair, conversationId: string, browser: string | null): boolean {
+  return repair.reason === 'stalled' && !!browser && chatHolders(conversationId).includes(browser);
+}
+
 function chatHeldElsewhere(conversationId: string, browser: string | null): boolean {
   if (!browser) return false;
   const holders = chatHolders(conversationId);
@@ -3189,14 +3194,18 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   }
 
   if (route === '/repairs/claim' && req.method === 'POST') {
-    if (staleCompanion(req) || notChosenBrowser(req)) return json(res, 200, { allowed: false }, origin);
+    if (staleCompanion(req)) return json(res, 200, { allowed: false }, origin);
+    const unchosen = notChosenBrowser(req);
     let body: unknown;
-    try { body = await readBody(req); } catch { return json(res, 400, { error: 'bad_request' }, origin); }
+    try { body = await readBody(req); } catch { return unchosen ? json(res, 200, { allowed: false }, origin) : json(res, 400, { error: 'bad_request' }, origin); }
     const token = body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>).token : null;
-    if (typeof token !== 'string' || token.length > 128) return json(res, 400, { error: 'bad_request' }, origin);
+    if (typeof token !== 'string' || token.length > 128) return unchosen ? json(res, 200, { allowed: false }, origin) : json(res, 400, { error: 'bad_request' }, origin);
     const found = [...repairsInFlight].find(([, repair]) => repairNeedsClaim(repair) && repair.token === token && repair.state === 'handed');
     if (!found) return json(res, 200, { allowed: false }, origin);
     const [conversationId, repair] = found;
+    // A browser that is not the chosen one takes no new work (#1516), except thawing its own frozen
+    // tab: only the browser holding that tab can, and it opens nothing new (CodeRabbit on #1963).
+    if (unchosen && !holdsStalledTab(repair, conversationId, browserOf(req))) return json(res, 200, { allowed: false }, origin);
     const session = await getSession(repair.sessionId);
     // A Compact & resume the user pressed may act on the chat they closed: handout and claim agree.
     const current = session?.conversationId === conversationId && departureAllowsRepairFor(session, repair.reason, repair.episode) &&
@@ -10501,7 +10510,11 @@ async function takePendingRepairs(
     // Another browser holds this chat. Offered here, a reload finds no tab and opens a copy. Not for
     // the chosen built-in browser: the holder may not claim it, and the chat would sit (#1960, as
     // inputs do since #1516).
-    if (!chosen && chatHeldElsewhere(conversationId, browser)) continue;
+    if (!(chosen && repair.reason !== 'stalled') && chatHeldElsewhere(conversationId, browser)) continue;
+    // A browser that may not claim (not the chosen one, or out of date) is handed no repair that needs
+    // a claim: its claim is refused, and a failure it reported for a token another browser claimed
+    // would requeue that claim (CodeRabbit on #1963). The holder's own frozen tab is the exception.
+    if (!canClaim && repairNeedsClaim(repair) && !holdsStalledTab(repair, conversationId, browser)) continue;
     const unclaimed = repair.reason !== 'unattributed' && repairNeedsClaim(repair) && repair.state === 'handed' && !repair.claimed;
     if (repair.state !== 'queued' && !unclaimed) continue;
     if (now < repair.notBefore) continue;
