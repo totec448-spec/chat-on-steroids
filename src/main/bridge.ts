@@ -2947,7 +2947,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         ...(req.method === 'POST' && imageExportRequested ? { imageExports: pendingImageExports() } : {}),
         // A failure report closes this request. Reissuing the repair in the same response would
         // replace the visible failure with "Trying" before a renderer could ever observe it.
-        repairs: repairFailed || repairHeld ? [] : await takePendingRepairs(Date.now(), browser),
+        repairs: repairFailed || repairHeld ? [] : await takePendingRepairs(Date.now(), browser, takesWork),
         ...tabPolicy,
         recoveryMonitoring: browserRecoveryMonitoring(),
         // A newer extension build ships with this app. The extension reloads into it on its own
@@ -10386,7 +10386,9 @@ async function tickUnattributedIncident(): Promise<void> {
  */
 async function takePendingRepairs(
   now = Date.now(),
-  browser: string | null = null
+  browser: string | null = null,
+  /** Whether this browser may claim what it is offered; only its offers count toward the no-page budget. */
+  canClaim = true
 ): Promise<Array<{ conversationId: string; token: string; reason: Repair['reason']; focus: boolean }>> {
   retireSpentRepairs();
   const pickupFloor = pickupWatchFloor;
@@ -10470,8 +10472,10 @@ async function takePendingRepairs(
     }
     if (unclaimed) {
       // A page that asked since the last offer was refused, not absent: that offer does not count.
-      repair.offers = (repair.offers ?? 1) + (repair.claimAsked ? 0 : 1);
-      repair.claimAsked = false;
+      // Nor does an offer to a browser that may not claim it (not the chosen one, or out of date):
+      // its polls would use up the budget while the chosen page keeps asking (CodeRabbit on #1953).
+      repair.offers = (repair.offers ?? 1) + (canClaim && !repair.claimAsked ? 1 : 0);
+      if (canClaim) repair.claimAsked = false;
       if (repair.offers > UNCLAIMED_REPAIR_OFFERS) {
         // Nothing is listening. Say that, rather than go on offering into an empty room until
         // some other subsystem happens to clear the entry — and say it as what it is: the
