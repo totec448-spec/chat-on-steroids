@@ -16,7 +16,7 @@ import { CONVERSATION_DELETED } from '../shared/chat-error.js';
 import { prepareSessionPrompt } from './session/prompt.js';
 import { NEW_CHAT, noteAutomaticReply } from './session/automatic-replies.js';
 import { pendingChatModelRequest, observeChatModels, requestChatModels } from './chat-models.js';
-import { resumeModelSelection } from './resume-model.js';
+import { resumeModelSelection, wakeModelSelection } from './resume-model.js';
 import { isDeliberateEffort, isProModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
 import { injectedUserMessage, recordedRequestTurn, responseTurnId, type TimelineTurns } from '../shared/chronology.js';
@@ -524,7 +524,8 @@ function notePageNoteLogged(key: string, now: number): void {
 }
 const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Bootstrap stages a page reports after redeeming, in order. See `commandProgress`. */
-const COMMAND_STEPS = ['revival-waiting', 'revival-busy', 'revival-draft', 'revival-editor', 'composer', 'model', 'composer-after-model', 'inserting', 'sending'] as const;
+// `model-unconfirmed`: a wake whose worker model the picker could not confirm goes out anyway (#1952).
+const COMMAND_STEPS = ['revival-waiting', 'revival-busy', 'revival-draft', 'revival-editor', 'composer', 'model', 'model-unconfirmed', 'composer-after-model', 'inserting', 'sending'] as const;
 /** Steps a wake reports while it waits, before redeeming. `revival-waiting` is what older pages send. */
 const REVIVAL_WAIT_STEPS = new Set<string>(['revival-waiting', 'revival-busy', 'revival-draft', 'revival-editor']);
 type CommandStep = typeof COMMAND_STEPS[number];
@@ -544,6 +545,7 @@ const COMMAND_STEP_TEXT: Record<CommandStep, string> = {
   'revival-editor': 'its page never showed a usable message box',
   composer: 'waiting for ChatGPT\'s message box',
   model: 'choosing the model and reasoning',
+  'model-unconfirmed': 'going on without the worker\'s model, which the picker could not confirm',
   'composer-after-model': 'waiting for the message box after choosing the model',
   inserting: 'putting the task into the message box',
   sending: 'sending the task'
@@ -5251,6 +5253,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const allowed = step && REVIVAL_WAIT_STEPS.has(step) ? command?.owner === null : command?.owner != null && command.owner === body['client'];
     if (!step || !command || !allowed) return json(res, 200, { ok: false }, origin);
     command.progress = { ...command.progress, step, stepAt: Date.now() };
+    if (step === 'model-unconfirmed' && command.spec.type === 'revive') {
+      const wanted = commandModelSelection(command);
+      logWarn(`bridge: ${command.spec.agent}'s wake in ${command.spec.conversationId} goes out on ChatGPT's current model: ` +
+        `${[wanted?.model, wanted?.reasoningEffort].filter(Boolean).join(' ') || 'its model'} could not be confirmed in the picker, and a wake is not held back for it`);
+    }
     if (command.spec.type === 'resume' && command.timer && continuationByToken(command.spec.token)?.automatic) armDeadline(command);
     // A worker about to send gets its receipt window, and its page learns the new deadline (#1086).
     if (command.spec.type === 'worker' && step === 'sending') {
@@ -7326,7 +7333,7 @@ function pendingBrowserPlacement(conversationId: string | null, browser: string 
   const spec = command.spec;
   const worker = spec.type === 'worker';
   // Only what this ChatGPT account offers: a Free plan has no picker to confirm a model with (#1766).
-  const selection = spec.type === 'resume' ? resumeModelSelection(continuationByToken(spec.token)?.requestedModel, spec.token) : null;
+  const selection = commandModelSelection(command);
   return {
     id: command.id, model: worker ? spec.model : selection?.model ?? null,
     reasoningEffort: worker ? spec.reasoningEffort : selection?.reasoningEffort ?? null,
@@ -11450,10 +11457,24 @@ function revivalFor(agent: string, runId: string): WorkerRevival | null {
  * gets here, and by the transaction itself if it somehow does. A continuation that can no
  * longer be claimed yields no text, and the command carries nothing to type.
  */
+/**
+ * The model a resume or a worker wake asks the page to choose before it types. A wake asks for the
+ * model and effort its worker was opened with (#1952): typed without one, it went out on whatever
+ * ChatGPT's box held. Only the exact worker of that run counts; anything else chooses nothing.
+ */
+function commandModelSelection(command: Command): { model: string | null; reasoningEffort: ReasoningEffort | null } | null {
+  const spec = command.spec;
+  if (spec.type === 'resume') return resumeModelSelection(continuationByToken(spec.token)?.requestedModel, spec.token);
+  if (spec.type !== 'revive') return null;
+  const agent = agentInfoForOwnedConversation(spec.conversationId);
+  if (!agent || agent.id !== spec.agent || (agent.runId !== undefined && agent.runId !== spec.runId)) return null;
+  return wakeModelSelection(agent, command.id);
+}
+
 function describe(command: Command, client: string | null, claimedSummary?: string): BridgeCommand {
   const spec = command.spec;
   // Only what this ChatGPT account offers: a Free plan has no picker to confirm a model with (#1766).
-  const selection = spec.type === 'resume' ? resumeModelSelection(continuationByToken(spec.token)?.requestedModel, spec.token) : null;
+  const selection = commandModelSelection(command);
   const expiresAt = Date.now() + Math.max(1, commandDeadlineDelay(command));
   if (spec.type === 'stop') return { id: command.id, expiresAt, kind: 'stop-turn', type: 'stop', text: '', agent: null, model: null, reasoningEffort: null, conversationId: spec.conversationId, turnId: spec.turnId, ...(spec.userMessageId ? { userMessageId: spec.userMessageId } : {}), ...(spec.held ? { held: true } : {}) };
   // A resume's claim is persisted by /commands/redeem before this renderer is called. A

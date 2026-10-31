@@ -3137,6 +3137,36 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.some(message => message.type === 'desktop_input' && message.ack)).toBe(false);
   });
 
+  // #1952: a wake asks for its worker's model. When the picker cannot confirm it, the wake still goes
+  // out (a worker that never wakes stops its run) and the page says so; a new worker's chat still refuses.
+  it.each(['revive', 'worker'] as const)('types a %s only when its model is confirmed, except a wake', async type => {
+    const commandId = `cmd-wake-model-${type}`;
+    const selection = vi.fn(async () => false);
+    live = await harness(type === 'revive' ? `https://chatgpt.com/c/${chatA}?clf=${commandId}` : `https://chatgpt.com/?clf=${commandId}`, {
+      redeem: () => ({ ok: true, command: { id: commandId, type, text: 'Now do the second half.', agent: 'worker-1',
+        model: 'gpt-5.6-sol', reasoningEffort: 'high', ...(type === 'revive' ? { conversationId: chatA } : {}) } })
+    }, (document) => {
+      // The page's picker is replaced before content.js starts and redeems its command.
+      let dom: any;
+      Object.defineProperty(document.defaultView!, 'CLF_DOM', { configurable: true,
+        get: () => dom, set: value => { dom = value; dom.selectModelSettings = selection; } });
+    });
+    await settle();
+    await new Promise(resolve => globalThis.setTimeout(resolve, 300));
+    await settle();
+    expect(selection).toHaveBeenCalledWith('gpt-5.6-sol', 'high', expect.any(Function));
+    const steps = live.sent.filter(message => message.type === 'command_step').map(message => message.step);
+    const modelFailure = (message: Record<string, any>) => message.type === 'ack' && String(message.error ?? '').includes('model or reasoning');
+    if (type === 'revive') {
+      // On to Send (this fixture page never shows the reply): typed, not refused for its model.
+      expect(steps).toEqual(['composer', 'model', 'model-unconfirmed', 'composer-after-model', 'inserting', 'sending']);
+      expect(live.sent.some(modelFailure)).toBe(false);
+    } else {
+      expect(steps).toEqual(['composer', 'model']);
+      expect(live.sent.some(modelFailure)).toBe(true);
+    }
+  });
+
   it.each(['worker', 'resume', 'revive', 'trusted-edit', 'new-user', 'foreign-route', 'rejected-ack'])('retires only an owned late bootstrap draft (%s)', async kind => {
     const commandId = 'cmd-late-bootstrap';
     const prompt = '[[CLF-RESUME:0123456789abcdef0123456789abcdef]]\nContinue exact task.';

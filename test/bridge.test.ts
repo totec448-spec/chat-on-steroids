@@ -5952,6 +5952,25 @@ describe('delivering a bootstrap', () => {
    * names the same id back, and the browser has to say which conversation it typed into
    * before the broker will believe the worker is awake.
    */
+  // #1952: a worker opened on GPT-5.6 high went on in GPT-6 medium, because its wake was typed
+  // without choosing a model. The wake carries the worker's own model and effort.
+  it('asks the page to choose the worker\'s own model and effort before typing its wake', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'write the audit', model: 'gpt-5-6', reasoning_effort: 'high' }], caller: { conversationId: PRIME_CHAT } });
+    const bootstrap = await redeem();
+    expect(bootstrap).toMatchObject({ model: 'gpt-5-6', reasoningEffort: 'high' });
+    const conversationId = 'cafecafe-7654-3210-fedc-ba98765432a1';
+    await request('POST', '/commands/ack', { body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' } });
+    finishAgent({ conversationId }, 'the first half is done');
+    wake([{ to: 'worker-1', text: 'now do the second half' }]);
+    const revival = await waitForRevival();
+    const claimed = await request('POST', '/commands/redeem', { body: { id: revival.id, client: 'tab-wake-model', conversationId } });
+    expect(claimed.body.command).toMatchObject({ type: 'revive', model: 'gpt-5-6', reasoningEffort: 'high' });
+    // The picker could not confirm it: the wake goes out anyway, and the app says on what.
+    expect((await request('POST', '/commands/step', { body: { id: revival.id, client: 'tab-wake-model', step: 'model-unconfirmed' } })).body).toEqual({ ok: true });
+    expect(getLog().some(entry => entry.message.includes(`worker-1's wake in ${conversationId} goes out on ChatGPT's current model: gpt-5-6 high could not be confirmed`))).toBe(true);
+  });
+
   it("routes revival to the worker's own chat without opening a duplicate, and treats the typed message as an offer", async () => {
     await pair();
     spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
