@@ -3695,5 +3695,17 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "未傳送：此新聊天的瀏覽器分頁已關閉或遺失。請檢查訊息後重新傳送。",
   "Recovery stopped": "恢復已停止",
   "Stopped after {0} attempts": "已嘗試 {0} 次，已停止",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "瀏覽器自動重新載入 {0} 次後，仍未接收到待處理步驟。原佇列輸入或目標待處理項仍已儲存。CoS 不會再為這一步自動重新載入此聊天；請開啟聊天手動繼續。"
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "瀏覽器自動重新載入 {0} 次後，仍未接收到待處理步驟。原佇列輸入或目標待處理項仍已儲存。CoS 不會再為這一步自動重新載入此聊天；請開啟聊天手動繼續。",
+  "Drag a chat here, or move it from its menu.": "把對話拖到這裡，或從它的選單中移動。",
+  "Move to project": "移到專案",
+  "Move this chat to a project; its commands then run in that project's folder": "將此對話移到一個專案；之後它的指令會在該專案的資料夾中執行",
+  "Moved to {0}": "已移到 {0}",
+  "Moved out of its project": "已移出所在專案",
+  "ChatGPT keeps it where it was.": "在 ChatGPT 中它仍在原處。",
+  "Undo": "復原",
+  "Move undone": "已復原移動",
+  "Today": "今天",
+  "Yesterday": "昨天",
+  "Previous 7 days": "過去 7 天",
+  "Previous 30 days": "過去 30 天"
 }

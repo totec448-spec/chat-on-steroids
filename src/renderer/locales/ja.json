@@ -3695,5 +3695,17 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "未送信: この新しいチャットのブラウザータブが閉じられたか、失われました。メッセージを確認してから再送信してください。",
   "Recovery stopped": "復旧を停止しました",
   "Stopped after {0} attempts": "{0} 回試行して停止",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "自動再読み込みを {0} 回行っても、ブラウザーは保留中のステップを受け取りませんでした。元のキュー入力またはゴールの保留項目は保存されています。CoS はこのステップのためにこのチャットを自動再読み込みしません。チャットを開いて手動で続行してください。"
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "自動再読み込みを {0} 回行っても、ブラウザーは保留中のステップを受け取りませんでした。元のキュー入力またはゴールの保留項目は保存されています。CoS はこのステップのためにこのチャットを自動再読み込みしません。チャットを開いて手動で続行してください。",
+  "Drag a chat here, or move it from its menu.": "チャットをここへドラッグするか、そのメニューから移動します。",
+  "Move to project": "プロジェクトへ移動",
+  "Move this chat to a project; its commands then run in that project's folder": "このチャットをプロジェクトへ移動します。以後のコマンドはそのプロジェクトのフォルダーで実行されます",
+  "Moved to {0}": "{0} へ移動しました",
+  "Moved out of its project": "プロジェクトから外しました",
+  "ChatGPT keeps it where it was.": "ChatGPT では元の場所のままです。",
+  "Undo": "元に戻す",
+  "Move undone": "移動を元に戻しました",
+  "Today": "今日",
+  "Yesterday": "昨日",
+  "Previous 7 days": "過去 7 日間",
+  "Previous 30 days": "過去 30 日間"
 }

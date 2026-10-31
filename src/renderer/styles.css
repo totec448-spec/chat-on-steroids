@@ -2686,6 +2686,10 @@ input[readonly] {
 
 .sess { position: relative; display: flex; align-items: center; min-height: 36px; padding: 7px 10px; margin: 2px 0; border-radius: 8px; cursor: pointer; }
 .sess:hover, .sess.is-pointed, .sess.is-sel { background: var(--hover); }
+/* Date headings in a chat list (#1919): quiet text on the rows' text edge, no count or icon. The
+   first one sits close under its list's heading; later ones keep a little air above. */
+.chat-date-section { padding: 10px 10px 3px; color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); font-weight: 600; line-height: 1.4; user-select: none; }
+.chat-date-section:first-child { padding-top: 4px; }
 .sess-top { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
 .sess-top b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(14px * var(--text-scale, 1)); font-weight: 400; line-height: 22px; }
 .sess-top .sess-rename { flex: 1; min-width: 0; margin: -1px 0; padding: 0 6px; height: 24px; border: 1px solid var(--accent); border-radius: 6px;
@@ -3990,6 +3994,21 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
   box-shadow: 0 8px 24px -8px rgb(0 0 0 / 45%);
   z-index: 10;
 }
+/* One action (Undo) after the message, on the same line while it fits. */
+.toast.has-action { display: flex; align-items: center; gap: 12px; text-align: start; padding-inline-end: 8px; }
+.toast-action {
+  flex: none;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  background: color-mix(in srgb, var(--page) 16%, transparent);
+  border: 0;
+  border-radius: 8px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.toast-action:hover { background: color-mix(in srgb, var(--page) 26%, transparent); }
+.toast-action:focus-visible { outline: 2px solid var(--page); outline-offset: 1px; }
 
 /* ------------------------------------------------------------- the goal loop */
 
@@ -4502,7 +4521,7 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 /* Its center 27px from the menu's, where a chat row's sub-agent arrow sits beside its "⋯" on hover. */
 .project-heading > .project-new { width: 24px; margin-inline-end: -7px; }
 /* Heading: 8px padding + 17px folder + 9px gap. Rows already supply 10px padding. */
-.project-group > .sess, .project-group > .worker-group { margin-inline-start: 24px; }
+.project-group > .sess, .project-group > .worker-group, .project-group > .chat-date-section { margin-inline-start: 24px; }
 .project-show-more { margin-inline-start: 34px; color: var(--faint); font-size: calc(14px * var(--text-scale, 1)); padding: 6px 0; border: 0; background: transparent; }
 /* Chat groups inside a project (#1038): one step in, a heading like the project's, its chats one more step in. */
 .project-group > .chat-group { position: relative; margin: 2px 0 2px 24px; }
@@ -4527,6 +4546,8 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 :is(.sess, .project-group, .chat-group).is-sorting { opacity: .45; }
 :is(.sess, .project-group, .chat-group).sort-before::before, :is(.sess, .project-group, .chat-group).sort-after::after { content: ''; position: absolute; inset-inline: 0; height: 2px; border-radius: 2px; background: var(--blue); pointer-events: none; }
 :is(.sess, .project-group, .chat-group).sort-before::before { top: -2px; }
+/* A project or group a dragged chat would move into (#1919): the row's own hover shape, in the accent. */
+:is(.project-heading, .chat-group-heading).is-drop-target { background: color-mix(in srgb, var(--blue) 16%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 55%, transparent); }
 :is(.sess, .project-group, .chat-group).sort-after::after { bottom: -2px; }
 
 /* Right-side work panes. Files and Sub-agents are mutually exclusive projections of the

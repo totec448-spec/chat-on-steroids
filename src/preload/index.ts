@@ -159,6 +159,8 @@ const api = {
   renameChatGroup: (id: string, name: string) => call<ChatGroupsState>('chatGroups:rename', { id, name }),
   deleteChatGroup: (id: string) => call<ChatGroupsState>('chatGroups:delete', { id }),
   assignChatGroup: (sessionId: string, groupId: string | null) => call<ChatGroupsState>('chatGroups:assign', { sessionId, groupId }),
+  moveChatProject: (sessionId: string, projectId: string | null, groupId?: string | null) =>
+    call<{ from: string | null; fromGroup: string | null; groups: ChatGroupsState }>('sessions:moveProject', { sessionId, projectId, ...(groupId !== undefined ? { groupId } : {}) }),
   petsList: () => call<PetLibraryState>('pets:list'),
   petsOverlayState: () => call<PetOverlayControlState>('pets:overlayState'),
   petsSetOverlayVisible: (visible: boolean) => call<PetOverlayControlState>('pets:overlayVisible', { visible }),

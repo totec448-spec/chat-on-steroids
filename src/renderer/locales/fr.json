@@ -3857,5 +3857,17 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Message non envoyé : l’onglet du navigateur de cette nouvelle discussion a été fermé ou perdu. Vérifiez le message et envoyez-le à nouveau.",
   "Recovery stopped": "Récupération arrêtée",
   "Stopped after {0} attempts": "Arrêt après {0} tentatives",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Le navigateur n’a pas récupéré l’étape en attente après {0} rechargements automatiques. L’entrée d’origine en file d’attente ou l’obligation Goal reste enregistrée. CoS ne rechargera plus automatiquement cette conversation pour cette étape ; ouvrez-la et continuez manuellement."
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Le navigateur n’a pas récupéré l’étape en attente après {0} rechargements automatiques. L’entrée d’origine en file d’attente ou l’obligation Goal reste enregistrée. CoS ne rechargera plus automatiquement cette conversation pour cette étape ; ouvrez-la et continuez manuellement.",
+  "Drag a chat here, or move it from its menu.": "Faites glisser une conversation ici, ou déplacez-la depuis son menu.",
+  "Move to project": "Déplacer vers un projet",
+  "Move this chat to a project; its commands then run in that project's folder": "Déplacer cette conversation vers un projet ; ses commandes s’exécutent ensuite dans le dossier de ce projet",
+  "Moved to {0}": "Déplacée vers {0}",
+  "Moved out of its project": "Retirée de son projet",
+  "ChatGPT keeps it where it was.": "ChatGPT la laisse où elle était.",
+  "Undo": "Annuler",
+  "Move undone": "Déplacement annulé",
+  "Today": "Aujourd’hui",
+  "Yesterday": "Hier",
+  "Previous 7 days": "7 derniers jours",
+  "Previous 30 days": "30 derniers jours"
 }

@@ -672,6 +672,11 @@ export interface SessionSummary {
   selectedModel?: { conversationId: string; model: string; observedAt: number; reasoningEffort?: ReasoningEffort };
   /** Explicit local project; durable across frontend conversation replacement. */
   projectId?: string;
+  /**
+   * The person moved this chat to its project, or out of one (#1919). The app then never binds it
+   * to a project by itself again, as it does for a chat started in a linked ChatGPT Project.
+   */
+  projectChosen?: true;
   id: string;
   title: string;
   /**
