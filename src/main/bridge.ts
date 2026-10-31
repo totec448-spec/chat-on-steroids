@@ -8041,13 +8041,17 @@ async function sessionRecoveryCountdowns(sessionId: string, conversationId: stri
   if (recovery?.silenceBoundary && recoveryInputAllowed(sessionId, conversationId)) {
     const stoppedAt = recovery.pickupRecovery?.stoppedAt ??
       (stoppedQueued?.inputId === recovery.id ? stoppedQueued.pickupStoppedAt : undefined);
-    if (stoppedAt) return [{ kind: 'pickup-stopped', deadline: stoppedAt,
-      attempts: recovery.pickupRecovery?.attempts ?? BROWSER_PICKUP_MAX_ATTEMPTS, next: 'continue' }];
+    if (stoppedAt) {
+      const attempts = recovery.pickupRecovery?.attempts ?? BROWSER_PICKUP_MAX_ATTEMPTS;
+      return [{ kind: 'pickup-stopped', deadline: stoppedAt, attempts, next: 'continue',
+        ...(pickupExhausted(attempts, recovery.silenceBoundary.acceptedAt ?? recovery.createdAt ?? Date.now()) ? { exhausted: true as const } : {}) }];
+    }
   }
   if (stoppedQueued) {
     const queuedRow = rows.find(row => row.id === stoppedQueued.inputId);
     return [{ kind: 'pickup-stopped', deadline: stoppedQueued.pickupStoppedAt!,
-      attempts: stoppedQueued.pickupAttempts, next: queuedRow?.recovery ? 'continue' : 'queue' }];
+      attempts: stoppedQueued.pickupAttempts, next: queuedRow?.recovery ? 'continue' : 'queue',
+      ...(pickupExhausted(stoppedQueued.pickupAttempts, stoppedQueued.acceptedAt) ? { exhausted: true as const } : {}) }];
   }
   const pendingGoal = goalActiveFor(conversationId) ? goalPendingReplyFor(conversationId) : null;
   if (pendingGoal?.pickupStoppedAt && runningToolCalls(conversationId) === 0) {
@@ -8056,8 +8060,10 @@ async function sessionRecoveryCountdowns(sessionId: string, conversationId: stri
     const questionPosition = latestQuestion?.kind === 'user_message' ? latestQuestion.origin ?? latestQuestion.seq : latestQuestion?.seq ?? 0;
     if (source && !(latestQuestion && ((pendingGoal.eventSeq > 0 && questionPosition > pendingGoal.eventSeq) ||
         (latestQuestion.kind === 'turn_start' && latestQuestion.turnId !== source)))) {
+      const attempts = pendingGoal.pickupAttempts ?? BROWSER_PICKUP_MAX_ATTEMPTS;
       return [{ kind: 'pickup-stopped', deadline: pendingGoal.pickupStoppedAt,
-        attempts: pendingGoal.pickupAttempts ?? BROWSER_PICKUP_MAX_ATTEMPTS, next: goalModeFor(conversationId) }];
+        attempts, next: goalModeFor(conversationId),
+        ...(pickupExhausted(attempts, pendingGoal.acceptedAt) ? { exhausted: true as const } : {}) }];
     }
   }
   // Preserve pre-existing recovery/pickup precedence. A 429 only replaces
@@ -9514,7 +9520,7 @@ const PICKUP_BACKOFF_MS = BROWSER_PICKUP_BACKOFF_MS;
  * obligation and gets its own schedule; a discharged one takes its schedule with it.
  */
 /** One durable source episode owns a bounded retry budget; the composer projects its stop reason. */
-const pickupWatch = new Map<string, { replyId: string; dueAt: number; attempts: number; expiresAt: number; stoppedAt?: number }>();
+const pickupWatch = new Map<string, { replyId: string; dueAt: number; attempts: number; expiresAt: number; stoppedAt?: number; inputId?: string; goalReplyId?: string }>();
 const PICKUP_WATCH_LIFETIME_MS = 12 * 60 * 60_000;
 
 /**
@@ -9633,11 +9639,24 @@ function forgetGoalWatch(conversationId: string): void {
 let pickupWatchFloor: number | null = null;
 let compactionWatchFloor: number | null = null;
 
+/** A stopped pickup with no slow retry left: its attempts, or its lifetime, are used up. */
+function pickupExhausted(attempts: number, acceptedAt: number, now = Date.now()): boolean {
+  return attempts >= BROWSER_PICKUP_ATTEMPT_LIMIT || now - acceptedAt >= PICKUP_WATCH_LIFETIME_MS;
+}
+
 /** Any sign of life pushes the next reload out by the gap this chat is currently on. */
 function notePickupActivity(conversationId: string): void {
   const watch = pickupWatch.get(conversationId);
   if (!watch) return;
   watch.dueAt = Date.now() + browserPickupDelay(watch.attempts);
+  // A postponed deadline is saved with its owners, so a restart does not reload the chat early by
+  // the deadline it had before (CodeRabbit on #1971). Before the first reload there is none to save.
+  if (watch.attempts === 0) return;
+  const state = { attempts: watch.attempts, nextAt: watch.dueAt, ...(watch.stoppedAt ? { stoppedAt: watch.stoppedAt } : {}) };
+  if (watch.inputId) void syncQueuedPickupRecoveryNow(watch.inputId, watch.replyId, state)
+    .catch(error => logWarn(`bridge: could not save the postponed pickup in ${conversationId}: ${String(error)}`));
+  if (watch.goalReplyId) void syncGoalPickupRecoveryNow(conversationId, watch.goalReplyId, state)
+    .catch(error => logWarn(`bridge: could not save the postponed Goal pickup in ${conversationId}: ${String(error)}`));
 }
 
 /**
@@ -9731,6 +9750,8 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
       const attempts = Math.min(BROWSER_PICKUP_ATTEMPT_LIMIT, reply.pickupAttempts);
       const stopped = reply.pickupStoppedAt ?? (attempts >= BROWSER_PICKUP_MAX_ATTEMPTS ? reply.acceptedAt : undefined);
       watch = { replyId: reply.replyId, attempts,
+        ...(reply.queued && reply.inputId ? { inputId: reply.inputId } : {}),
+        ...(reply.goalReplyId ? { goalReplyId: reply.goalReplyId } : {}),
         expiresAt: reply.acceptedAt + PICKUP_WATCH_LIFETIME_MS,
         // A stop recorded before slow retries existed has no next time: the first slow one follows it.
         dueAt: reply.pickupNextAt ?? (stopped ? Math.max(stopped, floor) + BROWSER_PICKUP_SLOW_MS[0]

@@ -9,6 +9,8 @@ export type RecoveryCountdown = {
   deadline: number;
   /** Attempts already spent for a pickup that stopped at its durable limit. */
   attempts?: number;
+  /** A stopped pickup with no slow retries left: its attempts or its 12 hours are used up. */
+  exhausted?: true;
   /** The existing UI clock reveals this row without needing a new backend event. */
   visibleAt?: number;
   next?: 'queue' | 'goal' | 'loop' | 'continue';

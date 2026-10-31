@@ -3193,7 +3193,10 @@ After the third uncollected reload the composer shows a persistent stop status (
 Continue in one click) and the bridge warns once that it `keeps trying every 15 to 60 minutes`; slow
 reloads log `— reload <n> (slow retry)`. None runs inside a history limit. A queue item can still be
 sent manually; reactivating the same Goal reply does not refund its attempts. The twelve-hour source
-lifetime bounds the slow retries too (2026-10-31: a chat must not stop for good while it is unfinished). Two exceptions keep a chat from stopping while it
+lifetime bounds the slow retries too (2026-10-31: a chat must not stop for good while it is unfinished). Page activity that
+pushes a retry out is saved with its owners (queued input and Goal reply), so a restart keeps the later
+deadline. A stop with no retry left (24 reloads, or 12 hours) carries `exhausted` and reads "Recovery
+stopped" instead of "Recovery slowed". Two exceptions keep a chat from stopping while it
 is unfinished (2026-10-31): a queued input the app itself does not offer (`queuedInputOfferBlocker`
 names the gate) spends no reload, and the bridge logs `next automation/input step in <chat> is not
 offered to the page — <gate>; no reload is spent on it` once per chat, input and gate; and an
