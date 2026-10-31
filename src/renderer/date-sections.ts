@@ -15,7 +15,9 @@ function dayStart(atMs: number): Date {
   return new Date(at.getFullYear(), at.getMonth(), at.getDate());
 }
 
-export function dateSection(atMs: number, now = Date.now()): DateSection {
+export function dateSection(atMs: number, now = Date.now()): DateSection | null {
+  // A chat without a usable time (a damaged record) has no section: it stays under the one before it.
+  if (!Number.isFinite(atMs) || !Number.isFinite(now) || Number.isNaN(new Date(atMs).getTime())) return null;
   const today = dayStart(now), day = dayStart(atMs);
   // Calendar days, not 24-hour spans: rounding absorbs a daylight-saving hour. A time ahead of
   // this computer's clock (another device's clock) counts as today.
@@ -39,7 +41,7 @@ export function dateSections(now = Date.now()): (atMs: number) => DateSection | 
   let shown = -1;
   return atMs => {
     const section = dateSection(atMs, now);
-    if (section.rank <= shown) return null;
+    if (!section || section.rank <= shown) return null;
     shown = section.rank;
     return section;
   };
