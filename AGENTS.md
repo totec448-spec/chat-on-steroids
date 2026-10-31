@@ -2301,7 +2301,7 @@ Expanded tool arguments/results and Compact & Resume content use the chat pane's
 scrolling, without nested vertical text scrollers. Streaming compaction revisions retain the
 disclosure and unchanged sections; the timeline owner preserves the visible row or follows
 the bottom only when the reader was already there. Collapsed bodies leave layout entirely.
-Event rows (`eventRow`) and compaction blocks carry a `<time>` (hours and minutes of when the message was written, `authoredTimeOf` before the observed time; none for a damaged time; it follows a language change; the full date in its title, `datetime`
+Event rows (`eventRow`) and compaction blocks carry a `<time>` (hours and minutes of when the app saw the message, the question's clock too; `authoredTimeOf` only when the app saw it more than 5 minutes after it was written, as for an earlier answer read after a reload; none for a damaged time; it follows a language change; the full date in its title, `datetime`
 attribute, `rowTime` in `dom.ts`). It is hidden unless `ui.showMessageTimes` (Settings → General,
 "Show message times", off by default; saved through `settings:save` like `followOutput`) puts
 `show-message-times` on the document element; then messages, images, sub-agent messages, chat
@@ -3190,7 +3190,20 @@ attempt count and next deadline are stored with the exact Goal reply or queued i
 restart cannot reset the limit. After the third uncollected reload, recovery stops and the composer
 shows a persistent stop status while the original obligation remains saved. A queue item can still
 be sent manually; reactivating the same Goal reply does not refund its attempts. The twelve-hour source
-lifetime remains a separate retirement bound. The session list carries stopped chats as
+lifetime remains a separate retirement bound. Two exceptions keep a chat from stopping while it
+is unfinished (2026-10-31): a queued input the app itself does not offer (`queuedInputOfferBlocker`
+names the gate) spends no reload, and the bridge logs `next automation/input step in <chat> is not
+offered to the page — <gate>; no reload is spent on it` once per chat, input and gate; and an
+automatic Continue (`recovery`) still queued 10 minutes after its boundary (`RECOVERY_ORDINARY_AFTER_MS`)
+with a reload spent, a stop, or an offer gate becomes an ordinary message once
+(`continueAsOrdinaryMessage`: `recovery`, `silenceBoundary` and `pickupRecovery` removed, mode `auto`,
+`continuedFrom: 'recovery'` so `automaticSendKind` still names it `continue` and the send check asks; its 10 minutes
+count from its own boundary, not a pickup it shares; a refusal is logged once per chat, input and reason;
+`continuesQuestionId` keeps its question, and claim, Send authorization and the expiry sweep withdraw it as
+"Automatic Continue cancelled: …" once another user message or the complete answer arrives),
+only while the chat's latest recorded question is still the one it continues, no turn is open, the
+chat is not blocked or closed and no tool call runs; it is logged `input <id>: no page took the
+automatic Continue (<why>); sending it as an ordinary message …`. The session list carries stopped chats as
 `recoveryStopped` (the same `pickup-stopped` predicate); a queued input's stop pushes
 `session:changed` with its outbox write, a Goal reply's stop pushes from the pickup sweep as soon as
 it is recorded (before, and whether or not, its last reload is queued), and a
