@@ -11,6 +11,7 @@
  * test/content-script.test.ts against the real content script.
  */
 
+import { BROWSER_PICKUP_ATTEMPT_LIMIT } from '../src/shared/recovery.js';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { recordLoopMcpProof } from './goal-mcp-proof.js';
 import * as prompts from '../src/shared/goal.js';
@@ -2094,7 +2095,7 @@ describe('a chat driven towards a specific goal', () => {
     expect(goal.goalPendingReplyFor('invalid-provisional')).toBeNull();
   });
 
-  it('persists the three-reload Goal pickup stop and refuses a fourth attempt after restore', async () => {
+  it('persists the Goal pickup stop after three reloads and keeps retrying slowly, across a restore, up to the bound', async () => {
     const conversationId = 'goal-pickup-bound';
     const session = await createSession({ title: 'Bounded Goal pickup', conversationId });
     const acceptedAt = Date.now();
@@ -2105,14 +2106,22 @@ describe('a chat driven towards a specific goal', () => {
       .toEqual({ attempts: 1, nextAt: acceptedAt + 420_000 });
     expect(await goal.recordGoalPickupAttemptNow(conversationId, 'goal-reply-bound', acceptedAt + 420_000, acceptedAt + 1_020_000))
       .toEqual({ attempts: 2, nextAt: acceptedAt + 1_020_000 });
-    expect(await goal.recordGoalPickupAttemptNow(conversationId, 'goal-reply-bound', acceptedAt + 1_020_000, acceptedAt + 1_920_000))
-      .toEqual({ attempts: 3, stoppedAt: acceptedAt + 1_020_000 });
+    // The third reload shows the chat as stopped, and the first slow retry is already due 15 minutes later.
+    const slow = acceptedAt + 1_020_000 + 15 * 60_000;
+    expect(await goal.recordGoalPickupAttemptNow(conversationId, 'goal-reply-bound', acceptedAt + 1_020_000, slow))
+      .toEqual({ attempts: 3, nextAt: slow, stoppedAt: acceptedAt + 1_020_000 });
 
     const saved = goal.snapshotGoalReplies();
     goal.resetGoalStateForTests();
     goal.restoreGoalReplies(saved);
-    expect(goal.goalPendingReplyFor(conversationId)).toMatchObject({ pickupAttempts: 3, pickupStoppedAt: acceptedAt + 1_020_000 });
-    expect(await goal.recordGoalPickupAttemptNow(conversationId, 'goal-reply-bound', acceptedAt + 1_920_000)).toBeNull();
+    expect(goal.goalPendingReplyFor(conversationId)).toMatchObject({ pickupAttempts: 3, pickupNextAt: slow, pickupStoppedAt: acceptedAt + 1_020_000 });
+    // The slow retry after the restore keeps the first stop time.
+    expect(await goal.recordGoalPickupAttemptNow(conversationId, 'goal-reply-bound', slow, slow + 30 * 60_000))
+      .toEqual({ attempts: 4, nextAt: slow + 30 * 60_000, stoppedAt: acceptedAt + 1_020_000 });
+    // Never more than the hard bound.
+    for (let attempt = 5; attempt <= BROWSER_PICKUP_ATTEMPT_LIMIT; attempt++)
+      expect(await goal.recordGoalPickupAttemptNow(conversationId, 'goal-reply-bound', slow + attempt, slow + attempt + 1)).toMatchObject({ attempts: attempt });
+    expect(await goal.recordGoalPickupAttemptNow(conversationId, 'goal-reply-bound', slow + 100)).toBeNull();
   });
 
   it('upgrades a decided provisional turn to the stable reply without reopening it', async () => {
@@ -2495,7 +2504,12 @@ describe('a chat driven towards a specific goal', () => {
 
     // Compact & Resume replaces the conversation and the loop goes on running in its
     // replacement; leaving the override behind would hand chat B back to the app-wide setting.
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
     expect(goal.moveGoalSwitch('c-switch-parent', 'c-switch-child')).toBe(true);
+    // #1882: said, so a page that later shows another mode can be compared.
+    expect(info).toHaveBeenCalledWith("goal: c-switch-parent's own loop switch moved to c-switch-child (Compact & Resume)");
+    info.mockRestore();
     expect(goal.goalSwitchFor('c-switch-parent').own).toBe(false);
     expect(goal.goalSwitchFor('c-switch-child')).toEqual({ enabled: true, mode: 'loop', own: true, afterTurn: false });
 

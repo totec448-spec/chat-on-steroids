@@ -9,6 +9,8 @@ export type RecoveryCountdown = {
   deadline: number;
   /** Attempts already spent for a pickup that stopped at its durable limit. */
   attempts?: number;
+  /** A stopped pickup with no slow retries left: its attempts or its 12 hours are used up. */
+  exhausted?: true;
   /** The existing UI clock reveals this row without needing a new backend event. */
   visibleAt?: number;
   next?: 'queue' | 'goal' | 'loop' | 'continue';
@@ -18,9 +20,22 @@ export type RecoveryCountdown = {
   generating?: true;
 };
 
-/** A pickup is offered at most three times: after 2, 5 and 10 minutes. */
+/**
+ * A pickup is offered three times quickly: after 2, 5 and 10 minutes. Then the chat shows as stopped
+ * (the person can Continue it in one click), but the app keeps trying on a slow cadence, 15, 30, then
+ * every 60 minutes, for as long as the pickup lives: a chat must not stop for good while it is
+ * unfinished (user decision 2026-10-31).
+ */
 export const BROWSER_PICKUP_MAX_ATTEMPTS = 3;
 export const BROWSER_PICKUP_BACKOFF_MS = [2, 5, 10].map(minutes => minutes * 60_000) as [number, ...number[]];
+export const BROWSER_PICKUP_SLOW_MS = [15, 30, 60].map(minutes => minutes * 60_000) as [number, ...number[]];
+/** Hard bound on all reloads of one pickup: the 12-hour pickup window holds fewer than this. */
+export const BROWSER_PICKUP_ATTEMPT_LIMIT = 24;
+/** The wait before the reload after `attempts` reloads: the quick burst, then the slow cadence. */
+export function browserPickupDelay(attempts: number): number {
+  if (attempts < BROWSER_PICKUP_MAX_ATTEMPTS) return BROWSER_PICKUP_BACKOFF_MS[Math.max(0, attempts)]!;
+  return BROWSER_PICKUP_SLOW_MS[Math.min(attempts - BROWSER_PICKUP_MAX_ATTEMPTS, BROWSER_PICKUP_SLOW_MS.length - 1)]!;
+}
 
 const CONTINUE_TEXTS = [
   'Continue until you are fully finished.',
