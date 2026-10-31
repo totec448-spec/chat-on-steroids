@@ -3164,7 +3164,9 @@ async function followAppNow(data) {
     // A write that never answers is bounded too: it must not hold every later status (CodeRabbit on #1940).
     if (Object.keys(patch).length) await boundedStorage(chrome.storage.local.set(patch), 'write');
     if (language) appLanguageApplied = language;
-    appLanguageUnconfirmed = false;
+    // Confirmed only by writing the language, or by reading it already stored: a status with kept
+    // preferences alone proves nothing about it (CodeRabbit on #1940).
+    if (patch[APP_LANGUAGE_KEY] || (language && stored?.[APP_LANGUAGE_KEY] === language)) appLanguageUnconfirmed = false;
     appLanguageError = readFailed;
   } catch (error) {
     if (patch[APP_LANGUAGE_KEY]) appLanguageUnconfirmed = true;

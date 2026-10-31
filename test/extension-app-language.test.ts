@@ -238,6 +238,20 @@ it('writes again after a timed-out write that lands late, even for the language 
   } finally { vi.useRealTimers(); }
 });
 
+// CodeRabbit on #1940: a status with kept preferences but no language does not confirm a language
+// whose write failed, so the next status with that language still writes it.
+it('keeps retrying a failed language write across a preferences-only status', async () => {
+  const store: Record<string, unknown> = {};
+  let refuse = true;
+  const follow = follower(store, { set: async value => { if (refuse && 'appLanguage' in value) throw new Error('write refused'); Object.assign(store, value); } });
+  await follow({ language: 'en' });
+  refuse = false;
+  await follow({ browserPreferences: { overwrite: false, durations: true } });
+  expect(store.appLanguage).toBeUndefined();
+  await follow({ language: 'en' });
+  expect(store.appLanguage).toBe('en');
+});
+
 it('keeps a refused write for diagnostics and tries again on the next status', async () => {
   const store: Record<string, unknown> = {};
   let refuse = true;
