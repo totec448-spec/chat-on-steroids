@@ -819,6 +819,15 @@ function chatHeldElsewhere(conversationId: string, browser: string | null): bool
   return holders.length > 0 && !holders.includes(browser);
 }
 
+/** The extension asks again every pass while an update is held: each reason is logged once a minute. */
+const updateHoldLoggedAt = new Map<string, number>();
+function logUpdateHold(hold: string, line: string): void {
+  const now = Date.now(), last = updateHoldLoggedAt.get(hold);
+  if (last !== undefined && now - last < 60_000 && now >= last) return;
+  updateHoldLoggedAt.set(hold, now);
+  logInfo(line);
+}
+
 /**
  * "Open in ChatGPT" for a chat this app knows, shown by the extension instead of the OS.
  *
@@ -2834,16 +2843,28 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   // The extension is idle and about to reload into the build this app ships: bring the folder
   // Chrome loads from up to date first, and say whether it now holds that build.
   if (route === '/extension/update' && req.method === 'POST') {
+    // Read first, so the holds below are checked at the moment the folder is replaced (CodeRabbit on #1961).
+    const updateBody = await readBody(req).catch(() => null) as { pastBusyChatsMs?: unknown } | null;
+    const pastBusy = typeof updateBody?.pastBusyChatsMs === 'number' && Number.isFinite(updateBody.pastBusyChatsMs) ? updateBody.pastBusyChatsMs : 0;
     // A message claimed since the extension's last /status is being sent: its folder is not replaced
     // under it. The extension reads `hold` and asks again on a later pass (CodeRabbit on #1901).
     // A claim still deciding (the send check can take seconds) counts too: it may take its message next.
     if (claimsInProgress > 0 || (await listInputs()).some(inBrowserDelivery)) {
-      logInfo('bridge: the extension update waits: a message is being sent');
+      logUpdateHold('sending', 'bridge: the extension update waits: a message is being sent');
       return json(res, 200, { ready: false, hold: 'sending' }, origin);
+    }
+    // A tool call that started after the extension's last /status holds it too: the reload would cut
+    // off the page that is waiting for its result.
+    if (runningToolCalls() > 0) {
+      logUpdateHold('app-busy', 'bridge: the extension update waits: a tool call is running in this app');
+      return json(res, 200, { ready: false, hold: 'app-busy' }, origin);
     }
     const prepared = prepareExtensionUpdate(extensionBuildOf(req));
     // The extension reloads now: that browser takes no new message until it is back.
     if (prepared?.ready) extensionReloads.set(browserOf(req) ?? '', Date.now() + EXTENSION_RELOAD_PAUSE_MS);
+    // An update that waited only for answering pages for long goes ahead at a quiet moment (2026-10-31);
+    // said only when it really goes ahead.
+    if (prepared?.ready && pastBusy > 0) logInfo(`bridge: the extension updates although a ChatGPT tab is still answering: it waited ${Math.round(pastBusy / 60_000)} minutes for every page to be idle, and no tool call runs and nothing is being sent now`);
     if (prepared?.ready) logInfo(`bridge: extension folder updated to build ${prepared.build}; the extension reloads itself now`);
     else if (prepared) logWarn(`bridge: could not update the extension folder to build ${prepared.build}`);
     return json(res, 200, prepared ?? { ready: false }, origin);

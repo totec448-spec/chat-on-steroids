@@ -3275,6 +3275,24 @@ function updatedByBrowser() {
   return typeof chrome.runtime.getBrowserInfo === 'function';
 }
 
+/** How long an offered update waits only for answering ChatGPT pages before it goes ahead anyway. */
+const CHAT_BUSY_UPDATE_AFTER_MS = 30 * 60_000;
+/** Since when this update attempt has waited for answering pages, kept across worker restarts. */
+let chatBusySince = null;
+async function chatBusyWait(attempt) {
+  const key = 'extensionUpdateBusySince';
+  if (!chatBusySince) {
+    const stored = await chrome.storage.session?.get?.(key).catch(() => null);
+    const saved = stored?.[key];
+    if (saved && saved.attempt === attempt && Number.isFinite(saved.at)) chatBusySince = saved;
+  }
+  if (!chatBusySince || chatBusySince.attempt !== attempt) {
+    chatBusySince = { attempt, at: Date.now() };
+    await chrome.storage.session?.set?.({ [key]: chatBusySince }).catch(() => undefined);
+  }
+  return Math.max(0, Date.now() - chatBusySince.at);
+}
+
 async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands, liveSending = null) {
   if (extensionReloadPending) return;
   if (updatedByBrowser()) { extensionUpdateHold = offer ? 'browser-updates-itself' : null; return; }
@@ -3294,18 +3312,30 @@ async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands, liveS
   if (liveCommands.size) { extensionUpdateHold = 'commands'; return; }
   const attempt = `${workerStampValue}>${offer.build}`;
   if ((await chrome.storage.local.get('extensionReloadAttempt')).extensionReloadAttempt === attempt) { extensionUpdateHold = 'already-tried'; return; }
+  let busyFor = 0;
   for (const tab of await chrome.tabs.query({ url: CHATGPT_TAB_URLS })) {
     if (!Number.isInteger(tab.id) || tab.discarded === true) continue;
     const ping = await tabReply(tab.id, { type: 'clf-recorder-ping' }).catch(() => null);
     // A page that cannot answer has nothing running here. One that answers without `busy` runs an
     // older recorder that cannot say, so it is treated as busy.
-    if (ping && ping.busy !== false) { extensionUpdateHold = 'chat-busy'; return; }
+    if (ping && ping.busy !== false) {
+      // Long Goal and Loop chats answer almost without a pause, so an update that waits for every
+      // page to be idle could wait for days (2026-10-31, the maintainer's Mac). After waiting this
+      // long only for answering pages, it goes ahead at a moment when no tool call runs and nothing
+      // is being sent: the reload re-injects the pages, and the app recovers an answer in progress.
+      busyFor = await chatBusyWait(attempt);
+      if (busyFor < CHAT_BUSY_UPDATE_AFTER_MS) { extensionUpdateHold = 'chat-busy'; return; }
+      break;
+    }
   }
   extensionReloadPending = true;
   try {
-    const prepared = await call('/extension/update', { method: 'POST', body: '{}' });
+    const prepared = await call('/extension/update', { method: 'POST',
+      body: JSON.stringify(busyFor ? { pastBusyChatsMs: busyFor } : {}) });
     // The app saw a message go out since the last status: that holds the update, as one listed would.
     if (prepared.ok && prepared.data?.hold === 'sending') { extensionUpdateHold = 'sending'; return; }
+    // A tool call started after the last status: the app holds the update at the last moment too.
+    if (prepared.ok && prepared.data?.hold === 'app-busy') { extensionUpdateHold = 'app-busy'; return; }
     if (!prepared.ok || prepared.data?.ready !== true || prepared.data.build !== offer.build) { extensionUpdateHold = 'folder-not-ready'; return; }
     extensionUpdateHold = null;
     await chrome.storage.local.set({ extensionReloadAttempt: attempt });
