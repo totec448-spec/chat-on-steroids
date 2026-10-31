@@ -8,9 +8,9 @@
  * Tool ownership has one path only: normalized HTTP x-request-id -> ChatGPT
  * message.metadata.request_id -> conversationId. The correlation registry records that
  * exact proof. ConversationId then maps to a session and, independently, to swarm role.
- * If the exact request cannot be proven, the call goes to Unattributed activity. No
- * tool-name, timing, visible-row, active-tab, generation, or agent-payload heuristic may
- * choose an owner.
+ * If the exact request cannot be proven, the caller stays unidentified. A separately
+ * labelled, reversible single-turn recording context may place its history, but cannot
+ * choose a caller, permission, workspace, agent, inbox or terminal owner.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -46,6 +46,7 @@ import {
   MAX_ASSET_BYTES,
   appendEvent,
   recordProcessCall,
+  reviseProvisionalCall,
   completeProcessCall,
   observeSessionModel,
   conversationAttachment,
@@ -82,8 +83,13 @@ import { summarizeToolCall } from './summarize.js';
 import { editReplacement, replacedQuestion } from './edits.js';
 import { takeAutomaticReply } from './automatic-replies.js';
 import { noteRouteRequestSighted } from '../tunnel/route-settle.js';
+import { isChatBlocked } from './blocked-chats.js';
 
 interface LiveConversation {
+  /** Recording-only workflow continuity, advanced solely by explicit continued turn ends. */
+  recordingLineage?: RecordingLineage;
+  /** Fresh page proof in this process, not reconstructed from historical turns. */
+  pageRequest?: { requestId: string; at: number };
   conversationId: string;
   sessionId: string;
   /** Durable local turn lifecycle only. Never used as MCP ownership evidence. */
@@ -866,6 +872,8 @@ function noteCallEvidence(
       }
     } else if (result === 'stored') {
       stored = true;
+      const live = conversations.get(conversationId);
+      if (live) live.pageRequest = { requestId: call.requestId, at: observedAt };
       logInfo(`request attribution: ${call.requestId} -> conversation ${conversationId}`);
       noteRouteRequestSighted(call.requestId, conversationId, observedAt,
         typeof call.createTime === 'number' && Number.isFinite(call.createTime) ? call.createTime * 1000 : null);
@@ -915,6 +923,43 @@ export async function repairDeterministicAttribution(affected?: ReadonlySet<stri
   const changed = new Set<string>();
 
   for (const summary of await indexedSessions()) {
+    if ((summary.provisionalToolCalls ?? 0) > 0) {
+      const events = await readEvents(summary.id, { kinds: ['tool_call'] });
+      let repaired = 0;
+      for (const event of events) {
+        if (event.kind !== 'tool_call' || event.call.attributionMethod !== 'generation' || !event.call.requestId) continue;
+        const proof = requestCorrelation(event.call.requestId);
+        if (!proof || !await getSession(proof.sessionId)) continue;
+        const same = proof.sessionId === summary.id;
+        const corrected = { ...event, call: { ...event.call, conversationId: proof.conversationId,
+          attribution: 'request_id' as const, attributionMethod: 'request_id' as const } };
+        // A provisional turn cannot establish an exact turn in a different conversation.
+        if (!same || proof.conversationId !== event.call.conversationId) delete corrected.turnId;
+        if (!same) {
+          const assets = new Map<string, string>();
+          for (const value of [event.call.args, event.call.result]) if (value.assetId) assets.set(value.assetId, 'text/plain');
+          for (const change of event.call.changes ?? []) if (change.reviewAssetId) assets.set(change.reviewAssetId, 'text/plain');
+          for (const asset of event.call.assets ?? []) assets.set(asset.id, asset.mimeType);
+          let complete = true;
+          for (const [id, mime] of assets) {
+            const bytes = await readAsset(summary.id, id);
+            if (!bytes) { complete = false; break; }
+            await writeAsset(proof.sessionId, bytes, mime);
+          }
+          if (!complete) continue;
+          const existing = await readEvents(proof.sessionId, { kinds: ['tool_call'] });
+          if (!existing.some(row => row.kind === 'tool_call' && row.call.callId === event.call.callId)) {
+            const { seq: _seq, ...copy } = corrected;
+            await appendEvent(proof.sessionId, copy);
+          }
+        }
+        const { seq: _seq, ...replacement } = corrected;
+        await reviseProvisionalCall(summary.id, event.call.callId, same ? replacement : null);
+        changed.add(summary.id); changed.add(proof.sessionId);
+        repairedCalls++; repaired++;
+      }
+      if (repaired) { repairedSessions++; logInfo(`request attribution: corrected ${repaired} provisional call(s) with exact request proof`); }
+    }
     if (!isUnattributedSession(summary)) continue;
     const cached = repairBuckets.get(summary.id);
     if (affected && cached?.toolCalls === summary.toolCalls && cached.updatedAt === summary.updatedAt &&
@@ -1054,7 +1099,7 @@ export async function repairDeterministicAttribution(affected?: ReadonlySet<stri
     );
   }
 
-  if (repairedSessions > 0) notifyChanged(...changed);
+  if (changed.size > 0) notifyChanged(...changed);
   return { sessions: repairedSessions, calls: repairedCalls };
 }
 
@@ -1175,6 +1220,8 @@ export interface ToolContentPart {
 }
 
 export interface ToolCallInput {
+  /** Captured before the handler. Presentation only; never binds caller or agent identity. */
+  recordingContext?: RecordingContext | null;
   /** Proven by dispatcher nesting, never inferred from request ids or timing. */
   nested?: boolean;
   tool: string;
@@ -1210,6 +1257,58 @@ export interface ToolCallInput {
 const requestRecordings = new Map<string, Promise<void>>();
 const sessionRecordings = new Map<string, Promise<void>>();
 const pendingRecordings = new Set<Promise<unknown>>();
+
+/** A process-local witness, never a provider identity or a durable request correlation. */
+export interface RecordingContext {
+  conversationId: string;
+  sessionId: string;
+  turnId: string;
+  lineage: RecordingLineage;
+  cohort: Array<{ live: LiveConversation; lineage?: RecordingLineage }>;
+}
+
+interface RecordingLineage {
+  turnId: string;
+  continuing?: true;
+  /** One evidenced continuous response, independent of when tools first run or change ID. */
+  anchor?: RecordingContext;
+}
+
+/** #1752: ChatGPT can hide a tool workflow's id even from its response stream.
+ * Capture the only observed response before work starts, anchored by fresh exact page proof
+ * at its origin. Other chats, restored history and headerless/local clients cannot
+ * manufacture this context. The caller still needs exact proof for workspace/inbox access. */
+export function captureRecordingContext(startedAt: number): RecordingContext | null {
+  if (!getConfig().multiAgent.allowUnattributedCalls || getConfig().multiAgent.strictChatAllowlist) return null;
+  const active = [...conversations.values()].filter(live => live.turnId && live.turnStartedAt !== null);
+  if (active.length !== 1) return null;
+  const live = active[0]!;
+  if (isChatBlocked(live.conversationId) || live.turnStartedAt! > startedAt) return null;
+  const previous = live.recordingLineage?.anchor;
+  if (previous) {
+    // A steering message can precede the very first tool and ChatGPT can change its
+    // workflow ID. The explicit response lineage, not a prior tool call, owns placement.
+    return recordingContextCurrent(previous) ? { ...previous, turnId: live.turnId! } : null;
+  }
+  const page = live.pageRequest;
+  if (!page || page.at < live.turnStartedAt! || page.at > startedAt ||
+      requestCorrelation(page.requestId)?.sessionId !== live.sessionId) return null;
+  const lineage = live.recordingLineage ??= { turnId: live.turnId! };
+  const context = { conversationId: live.conversationId, sessionId: live.sessionId, turnId: live.turnId!, lineage,
+    cohort: [...conversations.values()].map(live => ({ live, lineage: live.recordingLineage })) };
+  lineage.anchor = context;
+  logInfo(`request attribution: anchored recording context in ${live.conversationId}; page-proven continuous response`);
+  return context;
+}
+
+export function recordingContextCurrent(context: RecordingContext | null | undefined): boolean {
+  if (!context || !getConfig().multiAgent.allowUnattributedCalls || getConfig().multiAgent.strictChatAllowlist ||
+      isChatBlocked(context.conversationId) || context.cohort.length !== conversations.size) return false;
+  const owner = conversations.get(context.conversationId);
+  return context.cohort.every(({ live, lineage }) => conversations.get(live.conversationId) === live && live.recordingLineage === lineage) &&
+    owner?.recordingLineage === context.lineage && (owner.turnId === context.lineage.turnId ||
+      (owner.turnId === null && owner.lastTurnOutcome === 'completed' && owner.endedTurn?.turnId === context.lineage.turnId));
+}
 
 function serializeRecording<T>(queues: Map<string, Promise<void>>, key: string, run: () => Promise<T>): Promise<T> {
   const work = (queues.get(key) ?? Promise.resolve()).then(run);
@@ -1262,6 +1361,12 @@ export function recordToolCall(input: ToolCallInput): Promise<ToolCallRecord | n
     attributing = input.requestId
       ? awaitRequestCorrelation(input.requestId, REQUEST_ID_GRACE_MS).then((correlation) => {
           const conversationId = correlation?.conversationId ?? null;
+          if (!conversationId && recordingContextCurrent(input.recordingContext)) {
+            const context = input.recordingContext!;
+            logInfo(`request attribution: ${input.requestId} provisionally recorded in ${context.conversationId}; only observed running turn, not caller identity`);
+            return { conversationId: context.conversationId, sessionId: context.sessionId,
+              attribution: 'generation' as const, turnId: context.turnId };
+          }
           // Say which request id gave up, not just that something did. `unattributed` is the
           // one outcome whose cause always lives in the browser half of the join, so the log
           // has to carry the id that the page never confirmed — it is the only handle anyone
@@ -1369,7 +1474,7 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
         callModel = { model: selection.model, ...(selection.reasoningEffort ? { reasoningEffort: selection.reasoningEffort } : {}) };
       }
       const origin = summary?.origin;
-      if (origin?.kind === 'worker' && origin.agentId && /^worker-\d+$/.test(origin.agentId)) {
+      if (target.attribution !== 'generation' && origin?.kind === 'worker' && origin.agentId && /^worker-\d+$/.test(origin.agentId)) {
         // Request/session ownership is older and stronger than whatever live broker role this
         // conversation may hold now. A stale request from worker-1 must stay worker-1 even if
         // the same ChatGPT conversation later participates in another run as prime.
@@ -1460,9 +1565,11 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
       attributionMethod:
         target.attribution === 'superseded'
           ? 'superseded'
-          : target.conversationId && input.requestId
-            ? 'request_id'
-            : 'unattributed',
+          : target.attribution === 'generation'
+            ? 'generation'
+            : target.conversationId && input.requestId
+              ? 'request_id'
+              : 'unattributed',
       args: await storeText(sessionId, redactCredentialText(safeJson(redactArgs(input.tool, input.args))), MAX_TOOL_ARGS_CHARS),
       result: await storeText(sessionId, resultText, MAX_TOOL_RESULT_CHARS),
       outcome: input.outcome,
@@ -1470,18 +1577,27 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
       summary,
       ...(changes.length > 0 ? { changes } : {}),
       ...(assets.length > 0 ? { assets } : {}),
-      ...(input.endsActivity === true ? { endsActivity: true as const } : {})
+      ...(input.endsActivity === true && target.attribution !== 'generation' ? { endsActivity: true as const } : {})
     };
 
-    const recordCall = call.process ? recordProcessCall : appendEvent;
-    await recordCall(sessionId, {
+    const event = {
       time: input.startedAt,
-      source: 'mcp',
-      kind: 'tool_call',
+      source: 'mcp' as const,
+      kind: 'tool_call' as const,
       call,
       ...(eventAgent ? { agent: eventAgent } : {}),
       ...(target.turnId ? { turnId: target.turnId } : {})
-    });
+    };
+    if (target.attribution === 'generation') {
+      const admitted = await recordProcessCall(sessionId, event, () => recordingContextCurrent(input.recordingContext));
+      if (!admitted) return fileToolCall(input, { conversationId: null, sessionId: null, turnId: null, attribution: 'unattributed' });
+      notifyChanged(sessionId);
+      if (input.requestId && requestCorrelation(input.requestId)) scheduleAttributionRepair(input.requestId);
+      // Presentation cannot reopen a turn, bind an agent, transfer a terminal or grant
+      // activity to the bridge. Only exact request proof may trigger those effects.
+      return call;
+    }
+    await (call.process ? recordProcessCall : appendEvent)(sessionId, event);
     if (call.process && evidence.processCompletion) {
       // Bind once to the recorded call, never look up a reusable numeric process id.
       // A process that exited during recorder admission resolves this same promise.
@@ -2513,6 +2629,15 @@ async function recordChatObservationsNow(
         // Commit before publishing the lifecycle projection. If append rejects, the same
         // browser event remains eligible for its normal at-least-once retry.
         if (live) {
+          const prior = live.recordingLineage;
+          const continuing = live.turnId === null && prior?.continuing === true &&
+            live.endedTurn?.turnId === prior.turnId && item.time >= live.endedTurn.endedAt && live.lastTurnOutcome === 'completed';
+          live.recordingLineage = continuing ? prior : { turnId: item.turnId };
+          live.recordingLineage.turnId = item.turnId;
+          delete live.recordingLineage.continuing;
+          if (continuing && prior.anchor) logInfo(
+            `request attribution: continued recording context in ${conversationId}; explicit continued turn`
+          );
           live.knownTurnStarts.add(item.turnId);
           // Turn lifecycle is presentation/recovery state only in 1.8. It is never consulted
           // for MCP ownership, so a replayed journal timestamp cannot misattribute a call.
@@ -2559,8 +2684,20 @@ async function recordChatObservationsNow(
           ...(item.detail ? { detail: item.detail } : {}),
           ...(item.continued === true ? { continued: true as const } : {})
         });
+        // Anchor the response before closing it, even when no tool has run yet. Its next
+        // continued turn may be the first place ChatGPT starts a hidden tool workflow.
+        if (live?.turnId === item.turnId && item.outcome === 'completed' && item.continued === true) {
+          captureRecordingContext(Math.min(item.time, Date.now()));
+        }
         // As above, durable journal state owns idempotency; in-memory state follows it.
         if (live) {
+          if (live.turnId === item.turnId || stopOverride) {
+            if (item.outcome !== 'completed') live.recordingLineage = { turnId: item.turnId };
+            else if (live.recordingLineage) {
+              if (item.continued === true) live.recordingLineage.continuing = true;
+              else delete live.recordingLineage.continuing;
+            }
+          }
           const endedStartedAt = live.turnId === item.turnId ? live.turnStartedAt : null;
           if (live.turnId === item.turnId || stopOverride) activity.endedTurnId = item.turnId;
           live.knownTurnEnds.add(item.turnId);

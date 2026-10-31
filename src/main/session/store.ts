@@ -932,6 +932,7 @@ async function rebuildSummaryFromHistory(
         nativeQuestion: rebuilt.nativeQuestion,
         userMessages: rebuilt.userMessages,
         toolCalls: rebuilt.toolCalls,
+        provisionalToolCalls: rebuilt.provisionalToolCalls ?? 0,
         lastToolCallAt: rebuilt.lastToolCallAt,
         lastToolActivity: rebuilt.lastToolActivity,
         lastAssistantFinalAt: rebuilt.lastAssistantFinalAt,
@@ -1140,6 +1141,7 @@ function applyToSummary(summary: SessionSummary, event: SessionEvent): void {
   if (event.kind === 'user_message') summary.userMessages += 1;
   if (event.kind === 'tool_call') {
     summary.toolCalls += 1;
+    if (event.call.attributionMethod === 'generation') summary.provisionalToolCalls = (summary.provisionalToolCalls ?? 0) + 1;
     const priorToolAt = summary.lastToolCallAt ?? 0;
     summary.lastToolCallAt = Math.max(priorToolAt, event.time);
     // Attribution repair can append an older call after newer activity. Keep the projection
@@ -1700,10 +1702,12 @@ function retainedAssets(assets: readonly AssetRef[] | undefined, retired: readon
   return kept.length ? kept : undefined;
 }
 
-/** Canonical background launch: the call UUID owns its later process status. */
-export async function recordProcessCall(sessionId: string, event: Omit<Extract<SessionEvent, { kind: 'tool_call' }>, 'seq'>): Promise<void> {
+/** Canonical call: process updates and provisional attribution revise this same UUID. */
+export async function recordProcessCall(sessionId: string, event: Omit<Extract<SessionEvent, { kind: 'tool_call' }>, 'seq'>,
+  admit?: () => boolean): Promise<boolean> {
   const entry = await ensureOpen(sessionId);
-  await enqueueSessionOperation(entry, 'process call', async () => {
+  return enqueueSessionOperation(entry, 'process call', async () => {
+    if (admit && !admit()) return false;
     const key = messageKey({ ...event, seq: 0 })!;
     if (entry.messages.has(key)) throw new Error('Process call identity already recorded');
     const denied = deniedAssetIds(sessionId, event.call.assets);
@@ -1723,6 +1727,39 @@ export async function recordProcessCall(sessionId: string, event: Omit<Extract<S
     entry.historySeq = full.seq;
     applyToSummary(entry.summary, full);
     scheduleMeta(entry);
+    return true;
+  });
+}
+
+/** Revise/remove only canonical provisional calls after exact request proof arrives.
+ * The recorder copies assets and a conflicting destination before requesting removal.
+ * Keep journal seqs unchanged: canonical messages and turn boundaries must not move. */
+export async function reviseProvisionalCall(sessionId: string, callId: string,
+  replacement: Omit<Extract<SessionEvent, { kind: 'tool_call' }>, 'seq'> | null): Promise<void> {
+  const entry = await ensureOpen(sessionId);
+  await enqueueSessionOperation(entry, 'provisional attribution', async () => {
+    const key = `tool_call\u0000${callId}`;
+    const previous = entry.messages.get(key);
+    if (previous?.kind !== 'tool_call' || previous.call.attributionMethod !== 'generation') return;
+    // Invalidate the checkpoint before changing shards, including when the deleted shard
+    // was not the newest. A crash at any following boundary must rebuild the counters.
+    await writeSummary(entry.summary, -1);
+    if (replacement) {
+      const full = { ...replacement, seq: entry.nextSeq, origin: previous.origin ?? previous.seq };
+      await writeCanonicalMessage(sessionId, key, full);
+      entry.messages.set(key, full);
+      entry.nextSeq++;
+      entry.historySeq = full.seq;
+    } else {
+      const name = `${createHash('sha256').update(key).digest('hex')}.json`;
+      await fs.rm(path.join(sessionDir(sessionId), 'messages', name), { force: true });
+      entry.messages.delete(key);
+    }
+    entry.summary = await rebuildSummaryFromHistory(sessionId, entry.messages, entry.summary, entry.historySeq, true);
+    // Canonical calls are read from messages; an old incremental tail must not replay one.
+    entry.tail = entry.tail.filter(event => event.kind !== 'tool_call' || event.call.callId !== callId);
+    scheduleMeta(entry);
+    publishAttachmentSummary(entry.summary);
   });
 }
 
