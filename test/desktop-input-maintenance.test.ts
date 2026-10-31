@@ -255,7 +255,7 @@ async function worker(inputs: Array<{ id: string; conversationId: string | null;
   const event = { addListener: () => {} };
   const tabUpdated = { addListener: vi.fn() };
   const localSaved: Record<string, unknown> = { port: 8765, token: 'test-pairing', ...priorLocal };
-  const local = { get: async () => ({ ...localSaved }), set: vi.fn(async (value: object) => { Object.assign(localSaved, value); }), remove: async () => {} };
+  const local = { get: async () => ({ ...localSaved }), set: vi.fn(async (value: object) => { Object.assign(localSaved, value); }), remove: async (keys: string | string[]) => { for (const key of [keys].flat()) delete localSaved[key]; } };
   const saved: Record<string, unknown> = { ...priorSession };
   // A key listed in `__unreadable` fails to read, as session storage can.
   const session = { get: async (key?: string) => { if (typeof key === 'string' && (saved.__unreadable as string[] | undefined)?.includes(key)) throw new Error('storage unavailable'); return { ...saved }; }, set: async (value: object) => { Object.assign(saved, value); }, remove: async (key: string) => { delete saved[key]; } };
@@ -917,11 +917,27 @@ describe('one browser maintenance flight per desktop outbox publication', () => 
     h.fetch.mockImplementation((url, init) => new URL(url).pathname === '/input/opening-unavailable'
       ? Promise.resolve({ ok: true, status: 200, json: async () => ({ ok: true, reopen: true }) }) : fetch(url, init));
     await h.maintain();
-    await vi.waitFor(() => expect((h.localSaved.inputOpenings as Record<string, unknown> | undefined)?.[firstId]).toBeUndefined());
+    await vi.waitFor(() => expect((h.localSaved.inputOpenings as Record<string, unknown> | undefined)?.[firstId]).toBeUndefined(), { timeout: 10_000, interval: 20 });
     expect(h.create).not.toHaveBeenCalled();
     await h.maintain();
     expect(h.create).toHaveBeenCalledTimes(1);
     expect((h.localSaved.inputOpenings as Record<string, unknown> | undefined)?.[firstId]).toMatchObject({ stage: expect.any(String) });
+  });
+
+  // CodeRabbit on #1980: an election saved under the old key must not come back after a restart.
+  it('forgets a lost opening saved under the old key too, so a restart does not report it again', async () => {
+    const input = { id: firstId, conversationId: null };
+    const h = await worker([input], undefined, { desktopInputTabs: { [firstId]: { tab: 7, stage: 'ready', conversationId: null } } });
+    expect(h.localSaved.desktopInputTabs).toBeUndefined();
+    const fetch = h.fetch.getMockImplementation()!;
+    h.fetch.mockImplementation((url, init) => new URL(url).pathname === '/input/opening-unavailable'
+      ? Promise.resolve({ ok: true, status: 200, json: async () => ({ ok: true, reopen: true }) }) : fetch(url, init));
+    await h.maintain();
+    await vi.waitFor(() => expect((h.localSaved.inputOpenings as Record<string, unknown> | undefined)?.[firstId]).toBeUndefined(), { timeout: 10_000, interval: 20 });
+    const restarted = await worker([input], undefined, h.localSaved);
+    await restarted.maintain();
+    expect(restarted.fetch.mock.calls.some(([url]) => new URL(url).pathname === '/input/opening-unavailable')).toBe(false);
+    expect(restarted.create).toHaveBeenCalledTimes(1);
   });
 
   it('does not hold later input opening or the next maintenance pass behind a slow missing-tab report', async () => {
