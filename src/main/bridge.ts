@@ -64,7 +64,7 @@ import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSend
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import type { BridgeStatus, CompanionDiagnostics, CompanionEnvironment, CompanionPageDiagnostics, CompanionTabDiagnostics, CompanionTraceEntry } from '../shared/types.js';
-import { BROWSER_PICKUP_BACKOFF_MS, BROWSER_PICKUP_MAX_ATTEMPTS, recoveryBusyMs } from '../shared/recovery.js';
+import { BROWSER_PICKUP_ATTEMPT_LIMIT, BROWSER_PICKUP_BACKOFF_MS, BROWSER_PICKUP_MAX_ATTEMPTS, BROWSER_PICKUP_SLOW_MS, browserPickupDelay, recoveryBusyMs } from '../shared/recovery.js';
 import { CHAT_ACTIVE_MS, CHAT_SILENCE_MS, continuationMarkerOf, isReasoningEffort, normalizedToolOutcome, toolCallSummary, unescapeMarkdown,
   type ReasoningEffort, type SessionEvent, type SessionOrigin, type StoredText, type ToolCallRecord } from '../shared/session.js';
 import { blockedChatIds, isChatBlocked, chatBlockedAt } from './session/blocked-chats.js';
@@ -9493,8 +9493,10 @@ function finishSilentChats(conversationIds: readonly string[], inspected?: Spent
  * with nothing arriving is this app's standing definition of a chat that has stopped, and a
  * conversation the loop is driving does not get a different definition just because what stalled
  * was the pickup rather than the turn. The next two wait 5 and 10 minutes; after the third
- * reload the schedule stops for good and the chat shows "Recovery stopped", with the
- * obligation kept for a manual return (2026-10-06: endless reloads did more harm than good).
+ * reload the chat shows "Recovery slowed" and the obligation is kept for a manual return. Quick
+ * reloads stop there (2026-10-06: endless reloads did more harm than good), but slow retries every
+ * 15 to 60 minutes go on within the pickup's lifetime: a chat must not stop for good while it is
+ * unfinished (user decision 2026-10-31). See `browserPickupDelay`.
  */
 // Asserted non-empty: the opening gap is read unconditionally when a schedule is armed, and a
 // schedule with no first step would be a watchdog that never starts.
@@ -9634,9 +9636,8 @@ let compactionWatchFloor: number | null = null;
 /** Any sign of life pushes the next reload out by the gap this chat is currently on. */
 function notePickupActivity(conversationId: string): void {
   const watch = pickupWatch.get(conversationId);
-  if (!watch || watch.stoppedAt) return;
-  const gap = PICKUP_BACKOFF_MS[Math.min(watch.attempts, PICKUP_BACKOFF_MS.length - 1)]!;
-  watch.dueAt = Date.now() + gap;
+  if (!watch) return;
+  watch.dueAt = Date.now() + browserPickupDelay(watch.attempts);
 }
 
 /**
@@ -9727,10 +9728,13 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
       await syncGoalPickupRecoveryNow(reply.conversationId, reply.goalReplyId, sharedState);
     let watch = pickupWatch.get(reply.conversationId);
     if (!watch || watch.replyId !== reply.replyId) {
-      const attempts = Math.min(BROWSER_PICKUP_MAX_ATTEMPTS, reply.pickupAttempts);
+      const attempts = Math.min(BROWSER_PICKUP_ATTEMPT_LIMIT, reply.pickupAttempts);
+      const stopped = reply.pickupStoppedAt ?? (attempts >= BROWSER_PICKUP_MAX_ATTEMPTS ? reply.acceptedAt : undefined);
       watch = { replyId: reply.replyId, attempts,
         expiresAt: reply.acceptedAt + PICKUP_WATCH_LIFETIME_MS,
-        dueAt: reply.pickupNextAt ?? Math.max(reply.acceptedAt, floor) + PICKUP_BACKOFF_MS[0],
+        // A stop recorded before slow retries existed has no next time: the first slow one follows it.
+        dueAt: reply.pickupNextAt ?? (stopped ? Math.max(stopped, floor) + BROWSER_PICKUP_SLOW_MS[0]
+          : Math.max(reply.acceptedAt, floor) + PICKUP_BACKOFF_MS[0]),
         ...(reply.pickupStoppedAt || attempts >= BROWSER_PICKUP_MAX_ATTEMPTS
           ? { stoppedAt: reply.pickupStoppedAt ?? reply.acceptedAt } : {}) };
       pickupWatch.set(reply.conversationId, watch);
@@ -9761,7 +9765,7 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
         }
       }
     }
-    if (watch.stoppedAt || watch.attempts >= BROWSER_PICKUP_MAX_ATTEMPTS) continue;
+    if (watch.attempts >= BROWSER_PICKUP_ATTEMPT_LIMIT) continue;
     if (now < watch.dueAt || now < reply.listenUntil) continue;
     // A reload inside a history limit cannot bring the page back and can extend the limit. Counting
     // it anyway, at queue time, let it wait out the limit and then run with the next one due right
@@ -9800,8 +9804,8 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
       }
     }
     const nextAttempts = watch.attempts + 1;
-    const nextAt = nextAttempts < BROWSER_PICKUP_MAX_ATTEMPTS
-      ? now + PICKUP_BACKOFF_MS[nextAttempts]! : undefined;
+    const wasStopped = !!watch.stoppedAt;
+    const nextAt = nextAttempts < BROWSER_PICKUP_ATTEMPT_LIMIT ? now + browserPickupDelay(nextAttempts) : undefined;
     const reserved = reply.queued && reply.inputId
       ? await recordQueuedPickupAttemptNow(reply.inputId, reply.replyId, now, nextAt, sharedState)
       : !reply.queued && reply.goalReplyId
@@ -9815,12 +9819,14 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
     // The session list's `recoveryStopped`, pushed as soon as the stop is recorded, whether or not
     // its last reload can still be queued. A queued input's stop already pushed with its outbox
     // write; a Goal reply's ledger has no push of its own.
-    if (watch.stoppedAt) notifyChanged();
+    if (watch.stoppedAt && !wasStopped) notifyChanged();
     if (!queueBrowserRecovery(reply.conversationId, reply.sessionId,
       `goal:${reply.replyId}:${watch.attempts}`, 'goal', 0, now)) continue;
     queued = true;
-    logInfo(`bridge: next automation/input step uncollected in ${reply.conversationId} — reload ${watch.attempts}`);
-    if (watch.stoppedAt) logWarn(`bridge: browser pickup recovery stopped after ${watch.attempts} reloads; the original obligation remains queued in ${reply.conversationId}`);
+    logInfo(`bridge: next automation/input step uncollected in ${reply.conversationId} — reload ${watch.attempts}` +
+      (wasStopped ? ' (slow retry)' : ''));
+    if (watch.stoppedAt && !wasStopped) logWarn(`bridge: browser pickup recovery has not collected the step in ${reply.conversationId} after ${watch.attempts} reloads; ` +
+      `the chat shows as stopped, and the app keeps trying every 15 to 60 minutes`);
   }
   return queued;
 }

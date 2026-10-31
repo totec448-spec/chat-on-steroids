@@ -1456,8 +1456,8 @@
   "Automatically continue interrupted responses": "Continuar automaticamente respostas interrompidas",
   "Recover unfinished answers, including in Goal and Loop. Reload after 2 minutes without progress (Pro: 10). If still generating, wait 1 more minute (Pro: 5), then stop and send. A final answer selects Goal or Loop instead of Continue. Undelivered steps get at most three page reloads (after 2, 5, and 10 minutes); recovery then stops visibly while the original pending work remains saved.": "Recuperar respostas inacabadas, incluindo em Goal e Loop. Recarregar após 2 minutos sem progresso (Pro: 10). Se ainda estiver a gerar, aguardar mais 1 minuto (Pro: 5), depois parar e enviar. Uma resposta final seleciona Goal ou Loop em vez de Continue. Os passos não recebidos provocam no máximo três recarregamentos (após 2, 5 e 10 minutos); depois, a recuperação para visivelmente e o trabalho pendente original permanece guardado.",
   "Waiting for delivery": "À espera de entrega",
-  "Stopped after {0} attempts": "Parado após {0} tentativas",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "O navegador não recebeu o passo pendente após {0} recarregamentos automáticos. A entrada original na fila ou a obrigação do Goal permanece guardada. O CoS não voltará a recarregar este chat automaticamente para este passo; abra-o e continue manualmente.",
+  "Retrying slowly · {0} reloads": "A tentar de novo devagar · {0} recarregamentos",
+  "The browser did not collect the pending step after {0} automatic reloads. Its queued message or Goal step stays saved, and CoS keeps trying every 15 to 60 minutes. To go on now, open the chat and continue.": "O navegador não recolheu o passo pendente após {0} recarregamentos automáticos. A mensagem na fila ou o passo do Goal continua guardado, e o CoS continua a tentar a cada 15 a 60 minutos. Para continuar já, abra o chat e prossiga.",
   "Make this workspace yours. Changes appear immediately.": "Personalize esta área de trabalho. As alterações aparecem imediatamente.",
   "Appearance preview": "Pré-visualização do aspeto",
   "How will your next idea look?": "Qual será o aspeto da sua próxima ideia?",
@@ -1848,7 +1848,7 @@
   "A chat stopped": "Um chat parou",
   "Its last turn produced nothing and nothing followed. Send a message there to start a fresh turn.": "O último turno não produziu nada e nada se seguiu. Envie uma mensagem aí para iniciar um novo turno.",
   "Its last turn failed and nothing followed. Send a message there to start a fresh turn.": "O último turno falhou e nada se seguiu. Envie uma mensagem aí para iniciar um novo turno.",
-  "Recovery stopped": "Recuperação interrompida",
+  "Recovery slowed": "Recuperação mais lenta",
   "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "O navegador não assumiu a reparação deste chat, por isso a app deixou de tentar. Volte a abrir o separador e a recuperação continua.",
   "Use minimum effort: {0}": "Usar esforço mínimo: {0}",
   "Use maximum effort: {0}": "Usar esforço máximo: {0}",
@@ -3854,5 +3854,6 @@
   "{0} messages|many": "{0} de mensagens",
   "{0} actions|one": "{0} ação",
   "{0} actions|many": "{0} de ações",
-  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Não enviado: o separador do navegador desta nova conversa foi fechado ou perdido. Reveja a mensagem e volte a enviá-la."
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Não enviado: o separador do navegador desta nova conversa foi fechado ou perdido. Reveja a mensagem e volte a enviá-la.",
+  "Recovery stopped": "Recuperação interrompida"
 }

@@ -1466,8 +1466,8 @@
   "Automatically continue interrupted responses": "Reprendre automatiquement les réponses interrompues",
   "Recover unfinished answers, including in Goal and Loop. Reload after 2 minutes without progress (Pro: 10). If still generating, wait 1 more minute (Pro: 5), then stop and send. A final answer selects Goal or Loop instead of Continue. Undelivered steps get at most three page reloads (after 2, 5, and 10 minutes); recovery then stops visibly while the original pending work remains saved.": "Récupère les réponses inachevées, y compris dans Goal et Loop. Recharge après 2 minutes sans progression (Pro : 10). Si la génération continue, attendez 1 minute de plus (Pro : 5), puis arrêtez et envoyez. Une réponse finale sélectionne Goal ou Loop à la place de Continue. Les étapes non récupérées déclenchent au maximum trois rechargements (après 2, 5 et 10 minutes) ; la récupération s’arrête ensuite de façon visible et le travail initial reste enregistré.",
   "Waiting for delivery": "En attente de livraison",
-  "Stopped after {0} attempts": "Arrêt après {0} tentatives",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Le navigateur n’a pas récupéré l’étape en attente après {0} rechargements automatiques. L’entrée d’origine en file d’attente ou l’obligation Goal reste enregistrée. CoS ne rechargera plus automatiquement cette conversation pour cette étape ; ouvrez-la et continuez manuellement.",
+  "Retrying slowly · {0} reloads": "Nouvel essai lent · {0} rechargements",
+  "The browser did not collect the pending step after {0} automatic reloads. Its queued message or Goal step stays saved, and CoS keeps trying every 15 to 60 minutes. To go on now, open the chat and continue.": "Le navigateur n’a pas récupéré l’étape en attente après {0} rechargements automatiques. Le message en file d’attente ou l’étape Goal reste enregistré, et CoS réessaie toutes les 15 à 60 minutes. Pour continuer tout de suite, ouvrez la conversation et poursuivez.",
   "Make this workspace yours. Changes appear immediately.": "Faites de cet espace de travail le vôtre. Les changements apparaissent immédiatement.",
   "Appearance preview": "Aperçu de l'apparence",
   "How will your next idea look?": "À quoi ressemblera votre prochaine idée ?",
@@ -1848,7 +1848,7 @@
   "A chat stopped": "Un chat s’est arrêté",
   "Its last turn produced nothing and nothing followed. Send a message there to start a fresh turn.": "Son dernier tour n’a rien produit et rien n’a suivi. Envoyez-y un message pour lancer un nouveau tour.",
   "Its last turn failed and nothing followed. Send a message there to start a fresh turn.": "Son dernier tour a échoué et rien n’a suivi. Envoyez-y un message pour lancer un nouveau tour.",
-  "Recovery stopped": "Récupération arrêtée",
+  "Recovery slowed": "Récupération ralentie",
   "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "Le navigateur n’a pas pris en charge la réparation de ce chat, l’app a donc cessé de réessayer. Rouvrez son onglet et la récupération reprendra.",
   "Use minimum effort: {0}": "Utiliser l’effort minimal : {0}",
   "Use maximum effort: {0}": "Utiliser l’effort maximal : {0}",
@@ -3854,5 +3854,6 @@
   "{0} messages|many": "{0} de messages",
   "{0} actions|one": "{0} action",
   "{0} actions|many": "{0} d’actions",
-  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Message non envoyé : l’onglet du navigateur de cette nouvelle discussion a été fermé ou perdu. Vérifiez le message et envoyez-le à nouveau."
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Message non envoyé : l’onglet du navigateur de cette nouvelle discussion a été fermé ou perdu. Vérifiez le message et envoyez-le à nouveau.",
+  "Recovery stopped": "Récupération arrêtée"
 }
