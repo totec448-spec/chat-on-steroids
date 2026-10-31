@@ -3693,5 +3693,7 @@
   "{0} entries": "{0} 個項目",
   "{0} messages": "{0} 則訊息",
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "未傳送：此新聊天的瀏覽器分頁已關閉或遺失。請檢查訊息後重新傳送。",
-  "Recovery stopped": "恢復已停止"
+  "Recovery stopped": "恢復已停止",
+  "Stopped after {0} attempts": "已嘗試 {0} 次，已停止",
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "瀏覽器自動重新載入 {0} 次後，仍未接收到待處理步驟。原佇列輸入或目標待處理項仍已儲存。CoS 不會再為這一步自動重新載入此聊天；請開啟聊天手動繼續。"
 }

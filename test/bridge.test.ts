@@ -16674,6 +16674,58 @@ describe('the goal loop over the bridge', () => {
     }
   });
 
+  // CodeRabbit on #1971: the page asking pushes a stopped pickup's slow retry out, and a restart
+  // keeps the later deadline instead of reloading the chat by the earlier one.
+  it('keeps a slow retry postponed by page activity across a restart', async () => {
+    vi.useFakeTimers();
+    const input = await import('../src/main/session/input.js');
+    input.resetInputForTests();
+    try {
+      await writeDurableNow('session-input', []);
+      await pair();
+      const chat = 'cafe0176-0000-4000-8000-000000000176';
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'work', messageId: 'postponed-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'postponed-turn' }
+      ] } });
+      const session = (await findSessionByConversation(chat, { requireUnique: true }))!;
+      const id = 'abca0176-0000-4000-8000-000000000176';
+      await input.enqueueInput({ id, sessionId: session.id, text: 'next step', mode: 'after-turn', dueAt: Date.now(), model: null, reasoningEffort: null });
+      await vi.advanceTimersByTimeAsync(1);
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'turn_end', time: Date.now(), turnId: 'postponed-turn', outcome: 'completed' }
+      ] } });
+      await recordFinalForTest(chat, 'postponed-turn');
+      for (const minutes of [2, 5, 10]) {
+        await vi.advanceTimersByTimeAsync(minutes * 60_000);
+        await sweepStaleSwarm(Date.now());
+        const repair = (await request('GET', '/status')).body.repairs?.find((item: { conversationId: string }) => item.conversationId === chat);
+        await request('GET', `/status?repaired=${repair.token}&repairAction=reloaded`);
+      }
+      const stoppedAt = Date.now();
+      expect((await input.listInputs()).find(row => row.id === id)?.pickupRecovery).toMatchObject({ attempts: 3, nextAt: stoppedAt + 15 * 60_000 });
+      // Five minutes later the page asks: the slow retry moves to 15 minutes from now, and is saved.
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await request('POST', '/goal/draft', { body: { conversationId: chat } });
+      await vi.waitFor(async () => expect((await input.listInputs()).find(row => row.id === id)?.pickupRecovery)
+        .toMatchObject({ attempts: 3, stoppedAt, nextAt: stoppedAt + 20 * 60_000 }), { timeout: 10_000, interval: 50 });
+      resetBridgeForTests();
+      input.resetInputForTests();
+      await pair();
+      // Where the old deadline was: nothing.
+      await vi.advanceTimersByTimeAsync(11 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      expect((await request('GET', '/status')).body.repairs?.some((item: { conversationId: string }) => item.conversationId === chat)).toBe(false);
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      expect((await request('GET', '/status')).body.repairs?.some((item: { conversationId: string }) => item.conversationId === chat)).toBe(true);
+    } finally {
+      await writeDurableNow('session-input', []);
+      input.resetInputForTests();
+      vi.useRealTimers();
+    }
+  });
+
   it('does not reopen a manually dismissed chat for a failed unclaimed input at bridge startup', async () => {
     const realSetTimeout = setTimeout;
     vi.useFakeTimers();
@@ -16877,10 +16929,13 @@ describe('the goal loop over the bridge', () => {
       await vi.advanceTimersByTimeAsync(15 * 60_000);
       await sweepStaleSwarm(Date.now());
       expect((await request('GET', '/status')).body.repairs).toEqual([expect.objectContaining({ conversationId: chat, reason: 'goal' })]);
-      // The pickup's 12-hour window still bounds it.
+      // Still retrying: the chat says so, not that it stopped.
+      expect((await sessionControlsFor(session!.id)).recovery?.find(entry => entry.kind === 'pickup-stopped')).not.toHaveProperty('exhausted');
+      // The pickup's 12-hour window still bounds it, and then the chat says it has stopped (#1971).
       await vi.advanceTimersByTimeAsync(12 * 60 * 60_000);
       await sweepStaleSwarm(Date.now());
       expect((await request('GET', '/status')).body.repairs).toEqual([]);
+      expect((await sessionControlsFor(session!.id)).recovery?.find(entry => entry.kind === 'pickup-stopped')).toMatchObject({ exhausted: true });
       expect(await cancelInput(id)).toBe(true);
     } finally {
       await writeDurableNow('session-input', []);

@@ -3774,5 +3774,7 @@
   "{0} messages|one": "{0} Nachricht",
   "{0} actions|one": "{0} Aktion",
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Nicht gesendet: Der Browser-Tab für diesen neuen Chat wurde geschlossen oder ging verloren. Prüfe die Nachricht und sende sie erneut.",
-  "Recovery stopped": "Wiederherstellung beendet"
+  "Recovery stopped": "Wiederherstellung beendet",
+  "Stopped after {0} attempts": "Nach {0} Versuchen gestoppt",
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Der Browser hat den ausstehenden Schritt auch nach {0} automatischen Neuladungen nicht übernommen. Die ursprüngliche Eingabe in der Warteschlange oder der Goal-Auftrag bleibt gespeichert. CoS lädt diesen Chat für diesen Schritt nicht erneut automatisch; öffne den Chat und fahre manuell fort."
 }

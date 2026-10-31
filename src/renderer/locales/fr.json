@@ -3855,5 +3855,7 @@
   "{0} actions|one": "{0} action",
   "{0} actions|many": "{0} d’actions",
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Message non envoyé : l’onglet du navigateur de cette nouvelle discussion a été fermé ou perdu. Vérifiez le message et envoyez-le à nouveau.",
-  "Recovery stopped": "Récupération arrêtée"
+  "Recovery stopped": "Récupération arrêtée",
+  "Stopped after {0} attempts": "Arrêt après {0} tentatives",
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Le navigateur n’a pas récupéré l’étape en attente après {0} rechargements automatiques. L’entrée d’origine en file d’attente ou l’obligation Goal reste enregistrée. CoS ne rechargera plus automatiquement cette conversation pour cette étape ; ouvrez-la et continuez manuellement."
 }
