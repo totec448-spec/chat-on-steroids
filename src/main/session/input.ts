@@ -1780,6 +1780,92 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
     return result;
   });
 }
+/**
+ * Why a queued message is not on the offer list, in the order `pendingBrowserInputs` checks; null
+ * when it is offered. A page cannot claim a message the app itself withholds, so reloading the page
+ * for it changes nothing (2026-10-31: an automatic Continue sat withheld after a silence reload, the
+ * pickup reloaded the chat for it and then gave up, and nothing anywhere said which gate held it).
+ */
+export function queuedInputOfferBlocker(id: string): Promise<string | null> {
+  return serial(async () => {
+    const current = await load();
+    const entry = current.find(row => row.id === id);
+    if (!entry || entry.state !== 'queued') return 'it is no longer queued';
+    if (!preparable(entry)) return 'it cannot be prepared for the browser';
+    if (entry.dueAt > Date.now()) return 'it is not due yet';
+    if (heldBySendCheck(entry)) return `the send check holds it (${entry.sendCheck?.reason ?? 'no answer yet'})`;
+    if (queuedFollowup(entry) && !await completedStageBoundary(entry, current)) {
+      const first = ordered(current).find(row => row.sessionId === entry.sessionId && queuedFollowup(row) && row.state === 'queued');
+      if (first && first.id !== entry.id) return `an earlier queued message of this chat (${first.id}) goes first`;
+      if (!await browserInputAllowed(entry)) return await notAllowedReason(entry);
+      const turnId = await eligibleStageEnd(entry);
+      if (!turnId) {
+        if (entry.recovery) {
+          const invalid = await recoveryInvalidReason(entry);
+          if (invalid) return `its automatic Continue no longer applies: ${invalid}`;
+          if (!['ready', 'resumed'].includes(entry.recovery.phase)) return `its recovery is still ${entry.recovery.phase}`;
+          if ((entry.silenceBoundary?.listenUntil ?? 0) > Date.now()) return 'it still listens for the turn to finish by itself';
+        }
+        return 'the turn it follows has not ended';
+      }
+      if (current.some(row => row !== entry && row.sessionId === entry.sessionId && row.state === 'queued' && row.silenceBoundary?.turnId === turnId))
+        return 'another queued message owns the same turn';
+      const other = current.find(row => row.sessionId === entry.sessionId && (consumedTurn(row, turnId) || row.state === 'tool' || row.state === 'browser'));
+      if (other) return other.state === 'browser' || other.state === 'tool'
+        ? `another message of this chat (${other.id}) is still being sent` : `another message (${other.id}) already continued this turn`;
+      return 'a message to send right away goes first';
+    }
+    if (!await browserInputAllowed(entry)) return await notAllowedReason(entry);
+    try {
+      const conversationId = await target(entry);
+      if (conversationId && !readyForWake(conversationId)) return 'its chat is being restored from ChatGPT\'s archive';
+    } catch { return 'its chat cannot be resolved'; }
+    return null;
+  });
+}
+
+async function notAllowedReason(entry: InputEntry): Promise<string> {
+  if (entry.error?.startsWith('Local chat setup failed:')) return 'its local chat setup failed';
+  if (entry.delivery === 'tool' || entry.attachmentDelivery === 'tool') return 'it goes out with a tool result, not through the page';
+  const session = entry.sessionId ? await getSession(entry.sessionId) : null;
+  if (session?.browserRecoveryDismissedAt !== undefined) return 'its chat\'s tab was closed';
+  if (entry.silenceBoundary) return 'the turn it continues is no longer the chat\'s open turn';
+  if (!session?.conversationId) return 'its chat has no ChatGPT conversation yet';
+  if (isChatBlocked(session.conversationId)) return 'its chat is blocked';
+  if (session.activeTurnId) return 'its chat\'s turn is still running';
+  if (entry.directTurn) return 'the turn it was typed into has ended';
+  const policy = await sessionInputPolicy(entry.sessionId!);
+  if (policy.stoppedWait) return `its chat was stopped and ${policy.stoppedWait}`;
+  if (!policy.browserAllowed) return 'ChatGPT or a running tool call still shows work in its chat';
+  return 'it waits for a tool result, not for the page';
+}
+
+/**
+ * An automatic Continue no page took becomes an ordinary message, once: the chat must not stop
+ * while it is unfinished (user decision 2026-10-31). On 2026-10-30/31 such a Continue sat unclaimed
+ * after a silence reload, the pickup stopped after its reloads, and a plain "Continue" typed into the
+ * same chat was taken in under a second, twice. Only while the app's own record shows nothing newer:
+ * the chat's latest question is still the one the Continue answers, no turn runs and no tool call is
+ * in flight. Returns the converted row, or null with nothing changed.
+ */
+export function continueAsOrdinaryMessage(id: string, why: string): Promise<InputEntry | null> {
+  return serial(async () => {
+    const current = await load();
+    const row = current.find(entry => entry.id === id);
+    if (!row?.recovery || row.state !== 'queued' || row.sendAuthorizedAt !== undefined || !row.sessionId) return null;
+    const session = await getSession(row.sessionId);
+    if (!session?.conversationId || session.activeTurnId || isChatBlocked(session.conversationId) ||
+        session.browserRecoveryDismissedAt !== undefined || inFlightToolCalls(session.conversationId) > 0) return null;
+    const question = await readLatestUserMessage(row.sessionId);
+    if (question?.messageId !== row.recovery.questionId) return null;
+    const { recovery: _recovery, silenceBoundary: _boundary, pickupRecovery: _pickup, requestedMode: _requested, ...rest } = row;
+    const ordinary: InputEntry = { ...rest, mode: 'auto', dueAt: Date.now() };
+    await commit(current.map(entry => entry === row ? ordinary : entry));
+    logInfo(`input ${id}: no page took the automatic Continue (${why}); sending it as an ordinary message — the chat's latest question is still the one it continues and nothing runs`);
+    return ordinary;
+  });
+}
+
 /** Holds a queued automatic send the send check refused, until its next ask in 30 s (#1794). */
 export function holdInputForSendCheck(id: string, attempt: number, reason: string, answered: boolean): Promise<boolean> {
   return serial(async () => {

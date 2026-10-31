@@ -2564,6 +2564,74 @@ describe('native progress silence authority', () => {
     expect(live[0]!.id).not.toBe(first.id);
   });
 
+  // 2026-10-31: an automatic Continue no page took after a stalled turn; a plain Continue in the same
+  // chat was taken at once. The fallback turns it into that ordinary message, once, and only while
+  // nothing newer happened in the chat.
+  it('turns an automatic Continue no page took into an ordinary message, only while nothing newer happened', async () => {
+    const source = await open('gpt-5.6-sol');
+    expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+    const ticket = (await input.listInputs()).find(row => row.recovery && row.state === 'queued')!;
+    // The turn is still open in the record: an ordinary message could not go out, so nothing changes.
+    expect(await input.continueAsOrdinaryMessage(ticket.id, 'test')).toBeNull();
+    await post('/events', { conversationId: source.conversationId, events: [
+      { kind: 'turn_end', turnId: source.turnId, outcome: 'stalled', time: Date.now() }
+    ] });
+    const ordinary = await input.continueAsOrdinaryMessage(ticket.id, 'not claimed after its reloads');
+    expect(ordinary).toMatchObject({ id: ticket.id, text: ticket.text, mode: 'auto', state: 'queued' });
+    expect(ordinary).not.toHaveProperty('recovery');
+    expect(ordinary).not.toHaveProperty('silenceBoundary');
+    expect(logger.getLog().some(entry => entry.message.includes(`input ${ticket.id}: no page took the automatic Continue (not claimed after its reloads); sending it as an ordinary message`))).toBe(true);
+    // Offered like a typed message, and only once converted.
+    expect((await input.pendingBrowserInputs()).find(row => row.id === ticket.id)).toEqual(expect.not.objectContaining({ recovery: expect.anything() }));
+    expect(await input.continueAsOrdinaryMessage(ticket.id, 'again')).toBeNull();
+  });
+
+  it('sends an automatic Continue no page claims as an ordinary message after a reload and ten minutes, instead of stopping', async () => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const source = await open('gpt-5.6-sol');
+      expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+      const ticket = (await input.listInputs()).find(row => row.recovery && row.state === 'queued')!;
+      await post('/events', { conversationId: source.conversationId, events: [
+        { kind: 'turn_end', turnId: source.turnId, outcome: 'stalled', time: now }
+      ] });
+      // The page reloads on the pickup schedule and never claims the ticket.
+      let reloads = 0;
+      for (let minute = 1; minute <= 16; minute++) {
+        now += 60_000;
+        await (await bridge()).sweepStaleSwarm(now);
+        const repairs = (await post('/status', { openConversations: [source.conversationId] })).body.repairs ?? [];
+        for (const repair of repairs.filter((row: any) => row.conversationId === source.conversationId)) {
+          if (repair.requiresClaim) await post('/repairs/claim', { conversationId: source.conversationId, token: repair.token });
+          await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [source.conversationId] });
+          reloads += 1;
+        }
+        if (!(await input.listInputs()).find(row => row.id === ticket.id)?.recovery) break;
+      }
+      const row = (await input.listInputs()).find(entry => entry.id === ticket.id)!;
+      expect(row).toMatchObject({ state: 'queued', mode: 'auto', text: ticket.text });
+      expect(row.recovery).toBeUndefined();
+      expect(row.pickupRecovery?.stoppedAt).toBeUndefined();
+      // The silence reload and at most two pickup reloads: no third reload and no stop.
+      expect(reloads).toBeGreaterThanOrEqual(2);
+      expect(reloads).toBeLessThanOrEqual(3);
+      expect(logger.getLog().some(entry => entry.message.includes(`input ${ticket.id}: no page took the automatic Continue (not claimed after`))).toBe(true);
+      expect((await input.pendingBrowserInputs()).some(entry => entry.id === ticket.id)).toBe(true);
+    } finally { clock.mockRestore(); }
+  });
+
+  it('leaves an automatic Continue alone once the person asked something newer', async () => {
+    const source = await open('gpt-5.6-sol');
+    expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+    const ticket = (await input.listInputs()).find(row => row.recovery && row.state === 'queued')!;
+    await post('/events', { conversationId: source.conversationId, events: [
+      { kind: 'turn_end', turnId: source.turnId, outcome: 'stalled', time: Date.now() },
+      { kind: 'user_message', messageId: randomUUID(), text: 'Actually, do this instead', time: Date.now(), authoredNow: true }
+    ] });
+    expect(await input.continueAsOrdinaryMessage(ticket.id, 'test')).toBeNull();
+    expect((await input.listInputs()).find(row => row.id === ticket.id)).toMatchObject({ recovery: expect.anything() });
+  });
+
   it('keeps authored queued work ahead of automatic Continue after a committed handoff', async () => {
     let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     try {
