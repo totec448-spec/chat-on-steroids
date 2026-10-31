@@ -3211,7 +3211,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     if (!allowed) {
       // The page is there and asked: this offer is not one nobody picked up (#1922). Say why it
       // was refused, once a minute per chat and reason, so "never asked" and "refused" differ.
-      repair.claimAsked = true;
+      repair.claimAskedAt = Date.now();
       const why = !current ? 'the chat no longer needs it or recovery is paused'
         : observationWritesInFlight > 0 ? 'a chat was still saving its events; the page may claim it again'
         : 'it was replaced or already claimed';
@@ -8148,10 +8148,11 @@ interface Repair {
    */
   offers?: number;
   /**
-   * A page asked to claim this repair since it was last offered (#1922). A claim refused for the
-   * moment still proves a page is there, so that offer is not counted toward the no-page budget.
+   * When a page last asked to claim this repair (#1922). A claim refused for the moment still proves
+   * a page is there, so offers made while one asked recently are not counted toward the no-page
+   * budget, whichever browser polls in between (CodeRabbit on #1953).
    */
-  claimAsked?: boolean;
+  claimAskedAt?: number;
   /** Stable local owner; the browser action is valid only while this session is still here. */
   sessionId: string;
   endedTurns: number;
@@ -8497,6 +8498,8 @@ async function assistantRepairCurrent(conversationId: string, repair: Repair): P
  * is to offer again; this only ends the case where nothing is listening at all.
  */
 const UNCLAIMED_REPAIR_OFFERS = 10;
+/** How long a page's refused claim keeps a repair's offers from counting as unclaimed (#1922). */
+const CLAIM_ASKED_FRESH_MS = 2 * 60_000;
 const unclaimedRepairTold = new Set<string>();
 /**
  * Chats this app has concluded have no page, until one reports in again.
@@ -10508,8 +10511,8 @@ async function takePendingRepairs(
       // A page that asked since the last offer was refused, not absent: that offer does not count.
       // Nor does an offer to a browser that may not claim it (not the chosen one, or out of date):
       // its polls would use up the budget while the chosen page keeps asking (CodeRabbit on #1953).
-      repair.offers = (repair.offers ?? 1) + (canClaim && !repair.claimAsked ? 1 : 0);
-      if (canClaim) repair.claimAsked = false;
+      const askedRecently = repair.claimAskedAt !== undefined && now - repair.claimAskedAt < CLAIM_ASKED_FRESH_MS;
+      repair.offers = (repair.offers ?? 1) + (canClaim && !askedRecently ? 1 : 0);
       if (repair.offers > UNCLAIMED_REPAIR_OFFERS) {
         // Nothing is listening. Say that, rather than go on offering into an empty room until
         // some other subsystem happens to clear the entry — and say it as what it is: the
