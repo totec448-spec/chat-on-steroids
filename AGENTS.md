@@ -2458,7 +2458,9 @@ refreshes or model-list requests; `/input/claim` and `/repairs/claim` refuse it 
 tab to open through `/activity` or its `/compact` reply either (`opensNewWork`, #1852), which also
 holds for an out-of-date companion. It still records and stops what the person
 opens there, and works on as before once the CoS browser is gone. The chosen CoS browser takes a
-new chat's opening custody over from another browser. `browser-proof.ts` keeps, across restarts, the version last seen there and
+new chat's opening custody over from another browser, and a chat's repair too: `takePendingRepairs`
+skips a chat held by another browser for every browser except the chosen built-in one, since the holder
+may not claim it (#1960; before, such a chat's recovery sat with nobody able to take it). `browser-proof.ts` keeps, across restarts, the version last seen there and
 ChatGPT's last signed-in answer, so a closed browser keeps its state and a logout stays a logout;
 a live answer always wins. The extension reports presence and that answer on its own
 (`POST /browser/presence`), from ChatGPT's `/api/auth/session` in an existing regular-profile tab,
