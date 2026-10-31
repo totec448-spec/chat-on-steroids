@@ -248,6 +248,8 @@ it('keeps retrying a failed language write across a preferences-only status', as
   refuse = false;
   await follow({ browserPreferences: { overwrite: false, durations: true } });
   expect(store.appLanguage).toBeUndefined();
+  // Diagnostics keep saying why the language is unsaved.
+  expect(follow.state()).toEqual({ applied: 'en', error: 'write refused' });
   await follow({ language: 'en' });
   expect(store.appLanguage).toBe('en');
 });

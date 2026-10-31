@@ -3167,7 +3167,8 @@ async function followAppNow(data) {
     // Confirmed only by writing the language, or by reading it already stored: a status with kept
     // preferences alone proves nothing about it (CodeRabbit on #1940).
     if (patch[APP_LANGUAGE_KEY] || (language && stored?.[APP_LANGUAGE_KEY] === language)) appLanguageUnconfirmed = false;
-    appLanguageError = readFailed;
+    // An unconfirmed language keeps the error that left it unsaved (CodeRabbit on #1940).
+    if (!appLanguageUnconfirmed) appLanguageError = readFailed;
   } catch (error) {
     if (patch[APP_LANGUAGE_KEY]) appLanguageUnconfirmed = true;
     appLanguageError = String(error?.message || error).slice(0, 200);
