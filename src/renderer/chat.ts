@@ -98,7 +98,7 @@ import {
   foldProgress,
   toolCallSummary
 } from '../shared/session.js';
-import { chronological, positionOf, residenceOf } from '../shared/chronology.js';
+import { authoredTimeOf, chronological, positionOf, residenceOf } from '../shared/chronology.js';
 import { recentChatActivity, sessionWorkingAt, workerReportedFinish } from '../shared/session-activity.js';
 import {
   DEFAULT_GOAL_MODEL,
@@ -5795,7 +5795,8 @@ function eventRow(event: SessionEvent): HTMLElement {
   if (event.kind === 'progress' && event.source === 'app') row.dataset.appNote = '';
   if (event.kind === 'assistant_message' && !withoutMessageReaction(event.message.text).trim()) row.hidden = true;
   tagImageRow(row, event);
-  const time = rowTime(event.time);
+  // When the message was written (the page's own time) over when the app saw it (CodeRabbit on #1948).
+  const time = rowTime(authoredTimeOf(event) ?? event.time);
   const body = el('div', 'ev-body');
   const currentWorker = sessions.find(session => session.id === selectedId)?.origin;
   if (event.agent && event.agent !== 'prime' && !(currentWorker?.kind === 'worker' && currentWorker.agentId === event.agent)) {

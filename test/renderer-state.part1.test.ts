@@ -2346,6 +2346,18 @@ it('restores desktop control without a known chat after its save fails, though t
   expect(box.checked).toBe(true);
 });
 
+// CodeRabbit on #1948: a switch left on after a failed save would show times the saved setting hides.
+it('restores Show message times after its save fails, though the box kept the focus', async () => {
+  const mounted = await mountChat({}, [], { saveSettings: async () => ({ ok: false, error: 'Settings could not be saved.' }) });
+  const w = mounted.window;
+  const box = w.document.getElementById('showMessageTimes') as HTMLInputElement;
+  expect(box.checked).toBe(false);
+  box.focus(); box.checked = true; box.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle(); await settle();
+  expect(box.checked).toBe(false);
+  expect(w.document.documentElement.classList.contains('show-message-times')).toBe(false);
+});
+
 it('saves the background placement from its settings control and restores it on state push', async () => {
   const mounted = await mountChat();
   const w = mounted.window;
