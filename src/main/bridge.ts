@@ -1,6 +1,6 @@
 import { nextWorkerArchive, onWorkerChatReady, readyForWake, settleWorkerArchive } from './worker-archive.js';
 import { considerTurnRotation, noteRotationDeclined, noteStopFallback, stopFallbackDue, type RotationDeps } from './turn-rotation.js';
-import { armRotationFence, clearRotationFence, FENCE_MS, rotationFenced, rotationFenceTurn } from './rotation-fence.js';
+import { armRotationFence, clearRotationFence, FENCE_MS, restoreRotationFences, rotationFenced, rotationFenceTurn } from './rotation-fence.js';
 import { conversationProgress } from './session/progress.js';
 import { cosSignInTransfer, SignInTransferError } from './cos-browser/sign-in-transfer.js';
 import { externalBrowserProof, noteExternalInstalled, noteExternalSignedIn, resetBrowserProofForTests } from './browser-proof.js';
@@ -12028,6 +12028,10 @@ export async function restoreCommands(): Promise<void> {
   // This is the only publication point of restore. Everything above operated on local arrays;
   // everything below may again use ordinary live command helpers and timers.
   commands = plan.commands;
+  // Fences of the previous run come back for what is left of them, also when ChatGPT already took
+  // the Stop and only its stopped end is still to come (CodeRabbit on #1954).
+  const fencesBack = await restoreRotationFences();
+  if (fencesBack) logInfo(`turn rotation: restored ${fencesBack} fresh-turn fence(s) from the previous run; the continue follows each stopped end`);
   // A fresh-turn Stop that survived the restart is still pending: its fence comes back with it, for
   // what is left of the command's budget (CodeRabbit on #1954).
   for (const command of commands) {
