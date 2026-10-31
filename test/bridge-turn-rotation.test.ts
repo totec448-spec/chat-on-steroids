@@ -515,6 +515,43 @@ describe('stop fallback for fresh turns', () => {
     } finally { spy.mockRestore(); setRotationHoldForTests(15_000); await saveConfig({ ...config, sessions: { ...config.sessions, record: true } }); }
   });
 
+  // CodeRabbit on #1954: a restart right after the person's Stop cleared the fence must not bring it
+  // back from the saved fresh-turn Stop. That Stop loses its mark on disk before the fence goes.
+  it("saves the person's Stop over a fresh-turn Stop before the fence goes, so a restart cannot re-arm it", async () => {
+    const config = defaultConfig();
+    await saveConfig({ ...config, sessions: { ...config.sessions, record: true }, ui: { ...config.ui, rotateStopFallback: true } });
+    setRotationHoldForTests(5_000);
+    const clock = { now: Date.now() };
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock.now);
+    const fence = await import('../src/main/rotation-fence.js');
+    const durable = await import('../src/main/durable.js');
+    const clear = fence.clearRotationFence;
+    let savedAtClear: unknown[] | null = null;
+    const clearSpy = vi.spyOn(fence, 'clearRotationFence').mockImplementation(async id => {
+      // What a restart at this moment would read: the commands as saved.
+      await flushDurable();
+      savedAtClear = (await durable.readDurable<{ commands?: unknown[] }>('bridge-commands'))?.commands ?? [];
+      return clear(id);
+    });
+    try {
+      const chat = 'f0f00003-1111-4111-8111-000000000419', turn = 'g-stopfb-0-19';
+      const sessionId = await turnFor(chat, turn, 31);
+      await declineTwice(chat, sessionId, clock);
+      await (await heldCall(chat))();
+      await vi.waitFor(async () => {
+        expect((await request('GET', '/status')).body.stopTurns).toEqual([expect.objectContaining({ conversationId: chat, turnId: turn })]);
+      }, { timeout: 10_000, interval: 50 });
+      await stopSessionTurn(sessionId, turn);
+      expect(savedAtClear).not.toBeNull();
+      expect(JSON.stringify(savedAtClear)).toContain(turn);
+      expect(JSON.stringify(savedAtClear)).not.toContain('"rotation":true');
+      // And the restart itself: no fence comes back, so no continue follows the person's Stop.
+      resetRotationFencesForTests();
+      await restoreCommands();
+      expect(rotationFenced(chat)).toBe(false);
+    } finally { clearSpy.mockRestore(); spy.mockRestore(); setRotationHoldForTests(15_000); await saveConfig({ ...config, sessions: { ...config.sessions, record: true } }); }
+  });
+
   // CodeRabbit on #1954: fresh turns switched off after the declines means no fallback Stop.
   it('stops nothing once fresh turns were switched off after the declines', async () => {
     const config = defaultConfig();
