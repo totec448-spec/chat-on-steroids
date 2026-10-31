@@ -15,7 +15,9 @@ export const STOP_NOTICE_TEXTS = [
   'A chat is paused until you allow or deny a tool call in ChatGPT. Click to answer it in the app.',
   'Goal paused',
   'ChatGPT gave the same answer three times in a row, so Goal stopped asking. Open the chat to continue.',
-  'The reviewer found a problem Goal cannot safely go past. Open the chat to check it.'
+  'The reviewer found a problem Goal cannot safely go past. Open the chat to check it.',
+  'Recovery slowed',
+  "The browser has not picked up this chat's next step. The app keeps trying; Continue now in the chat sends it at once."
 ] as const;
 
 export type StopNoticeText = typeof STOP_NOTICE_TEXTS[number];

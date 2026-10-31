@@ -3857,5 +3857,15 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Não enviado: o separador do navegador desta nova conversa foi fechado ou perdido. Reveja a mensagem e volte a enviá-la.",
   "Recovery stopped": "Recuperação interrompida",
   "Stopped after {0} attempts": "Parado após {0} tentativas",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "O navegador não recebeu o passo pendente após {0} recarregamentos automáticos. A entrada original na fila ou a obrigação do Goal permanece guardada. O CoS não voltará a recarregar este chat automaticamente para este passo; abra-o e continue manualmente."
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "O navegador não recebeu o passo pendente após {0} recarregamentos automáticos. A entrada original na fila ou a obrigação do Goal permanece guardada. O CoS não voltará a recarregar este chat automaticamente para este passo; abra-o e continue manualmente.",
+  "The browser has not picked up this chat's next step. The app keeps trying; Continue now in the chat sends it at once.": "O navegador não recolheu o próximo passo deste chat. A app continua a tentar; Continuar agora no chat envia-o de imediato.",
+  "Continue now": "Continuar agora",
+  "Send the waiting Continue now, as an ordinary message": "Enviar agora o Continuar pendente, como mensagem normal",
+  "Try now": "Tentar agora",
+  "Try to send the waiting step now": "Tentar enviar agora o passo pendente",
+  "Sent.": "Enviado.",
+  "Trying again now.": "A tentar de novo agora.",
+  "This chat has no ChatGPT conversation yet.": "Este chat ainda não tem uma conversa do ChatGPT.",
+  "ChatGPT limits this chat for a few minutes. The app tries again right after.": "O ChatGPT limita este chat durante alguns minutos. A app tenta de novo logo a seguir.",
+  "Nothing is waiting to be picked up in this chat any more.": "Já nada está à espera neste chat."
 }

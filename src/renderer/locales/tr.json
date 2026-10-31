@@ -3776,5 +3776,15 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Gönderilmedi: bu yeni sohbetin tarayıcı sekmesi kapatıldı veya kayboldu. Mesajı gözden geçirip yeniden gönderin.",
   "Recovery stopped": "Kurtarma durduruldu",
   "Stopped after {0} attempts": "{0} denemeden sonra durduruldu",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Tarayıcı, bekleyen adımı {0} otomatik yeniden yüklemeden sonra almadı. Özgün kuyruk girdisi veya Hedef yükümlülüğü kayıtlı kalır. CoS bu adım için sohbeti yeniden otomatik yüklemeyecek; sohbeti açıp elle devam edin."
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Tarayıcı, bekleyen adımı {0} otomatik yeniden yüklemeden sonra almadı. Özgün kuyruk girdisi veya Hedef yükümlülüğü kayıtlı kalır. CoS bu adım için sohbeti yeniden otomatik yüklemeyecek; sohbeti açıp elle devam edin.",
+  "The browser has not picked up this chat's next step. The app keeps trying; Continue now in the chat sends it at once.": "Tarayıcı bu sohbetin sonraki adımını almadı. Uygulama denemeye devam ediyor; sohbetteki Şimdi devam et onu hemen gönderir.",
+  "Continue now": "Şimdi devam et",
+  "Send the waiting Continue now, as an ordinary message": "Bekleyen Devam'ı şimdi normal bir mesaj olarak gönder",
+  "Try now": "Şimdi dene",
+  "Try to send the waiting step now": "Bekleyen adımı şimdi göndermeyi dene",
+  "Sent.": "Gönderildi.",
+  "Trying again now.": "Şimdi yeniden deneniyor.",
+  "This chat has no ChatGPT conversation yet.": "Bu sohbetin henüz bir ChatGPT konuşması yok.",
+  "ChatGPT limits this chat for a few minutes. The app tries again right after.": "ChatGPT bu sohbeti birkaç dakikalığına sınırlıyor. Uygulama hemen ardından yeniden dener.",
+  "Nothing is waiting to be picked up in this chat any more.": "Bu sohbette artık bekleyen bir şey yok."
 }

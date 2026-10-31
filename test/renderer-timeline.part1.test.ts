@@ -1235,3 +1235,36 @@ it.each([7, 10, 11])('uses the same visible delivery choice and payload for %s a
   expect(live.sent[0]?.attachments).toEqual(files);
   expect(live.sent[0]?.delivery).toBe(count > 10 ? undefined : 'tool');
 });
+
+// 2026-10-31: a chat whose next step was not picked up offers one click to go on, in words.
+it.each([['continue', 'Continue now', 'sent', 'Sent.'], ['queue', 'Try now', 'retrying', 'Trying again now.']] as const)(
+  'offers %s on a slowed pickup and says what it did', async (next, label, did, said) => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  const id = summary([]).id;
+  api.getSessionControls = async () => ({ ok: true, data: { sessionId: id, automation: 'off', objective: '', blocked: '', job: null,
+    recovery: [{ kind: 'pickup-stopped', deadline: Date.now() - 60_000, attempts: 3, next }] } });
+  const pickupNow = vi.fn(async () => ({ ok: true, data: { ok: true, did } }));
+  api.pickupNow = pickupNow;
+  await append([]);
+  const button = await waitFor(() => {
+    const found = w.document.querySelector<HTMLButtonElement>('#recoveryStatus .dock-action.is-labelled');
+    expect(found?.textContent).toBe(label);
+    return found!;
+  });
+  button.click();
+  await waitFor(() => expect(pickupNow).toHaveBeenCalledWith(id));
+  await waitFor(() => expect(w.document.querySelector('.toast')?.textContent).toBe(said));
+});
+
+it('says why a pickup could not be tried now', async () => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  api.getSessionControls = async () => ({ ok: true, data: { sessionId: summary([]).id, automation: 'off', objective: '', blocked: '', job: null,
+    recovery: [{ kind: 'pickup-stopped', deadline: Date.now() - 60_000, attempts: 3, next: 'goal' }] } });
+  api.pickupNow = async () => ({ ok: true, data: { ok: false, error: 'ChatGPT limits this chat for a few minutes. The app tries again right after.' } });
+  await append([]);
+  const button = await waitFor(() => w.document.querySelector<HTMLButtonElement>('#recoveryStatus .dock-action.is-labelled')!);
+  button.click();
+  await waitFor(() => expect(w.document.querySelector('.toast')?.textContent).toBe('ChatGPT limits this chat for a few minutes. The app tries again right after.'));
+});

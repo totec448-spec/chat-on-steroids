@@ -24,7 +24,10 @@ export function stopNoticeTexts(): Record<(typeof STOP_NOTICE_TEXTS)[number], st
     'ChatGPT gave the same answer three times in a row, so Goal stopped asking. Open the chat to continue.':
       t('ChatGPT gave the same answer three times in a row, so Goal stopped asking. Open the chat to continue.'),
     'The reviewer found a problem Goal cannot safely go past. Open the chat to check it.':
-      t('The reviewer found a problem Goal cannot safely go past. Open the chat to check it.')
+      t('The reviewer found a problem Goal cannot safely go past. Open the chat to check it.'),
+    'Recovery slowed': t('Recovery slowed'),
+    "The browser has not picked up this chat's next step. The app keeps trying; Continue now in the chat sends it at once.":
+      t("The browser has not picked up this chat's next step. The app keeps trying; Continue now in the chat sends it at once.")
   };
 }
 

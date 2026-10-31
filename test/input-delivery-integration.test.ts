@@ -2678,6 +2678,25 @@ describe('native progress silence authority', () => {
     } finally { clock.mockRestore(); }
   });
 
+  // 2026-10-31: the person's one click sends a waiting automatic Continue now, as an ordinary message.
+  it('sends a waiting automatic Continue now when the person asks, without waiting ten minutes', async () => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const source = await open('gpt-5.6-sol');
+      expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+      const ticket = (await input.listInputs()).find(row => row.recovery && row.state === 'queued')!;
+      await post('/events', { conversationId: source.conversationId, events: [
+        { kind: 'turn_end', turnId: source.turnId, outcome: 'stalled', time: now }
+      ] });
+      now += 3 * 60_000;
+      expect(await (await bridge()).pickupNow(source.session.id, now)).toEqual({ ok: true, did: 'sent' });
+      const row = (await input.listInputs()).find(entry => entry.id === ticket.id)!;
+      expect(row).toMatchObject({ state: 'queued', mode: 'auto', text: ticket.text, continuedFrom: 'recovery' });
+      expect(row.recovery).toBeUndefined();
+      expect(logger.getLog().some(entry => entry.message.includes(`the person sent the automatic Continue in ${source.conversationId} now`))).toBe(true);
+    } finally { clock.mockRestore(); }
+  });
+
   it('says once why an automatic Continue is not sent as an ordinary message yet (CodeRabbit on #1960)', async () => {
     let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     try {

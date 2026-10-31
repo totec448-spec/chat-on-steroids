@@ -3695,5 +3695,15 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "未送信: この新しいチャットのブラウザータブが閉じられたか、失われました。メッセージを確認してから再送信してください。",
   "Recovery stopped": "復旧を停止しました",
   "Stopped after {0} attempts": "{0} 回試行して停止",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "自動再読み込みを {0} 回行っても、ブラウザーは保留中のステップを受け取りませんでした。元のキュー入力またはゴールの保留項目は保存されています。CoS はこのステップのためにこのチャットを自動再読み込みしません。チャットを開いて手動で続行してください。"
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "自動再読み込みを {0} 回行っても、ブラウザーは保留中のステップを受け取りませんでした。元のキュー入力またはゴールの保留項目は保存されています。CoS はこのステップのためにこのチャットを自動再読み込みしません。チャットを開いて手動で続行してください。",
+  "The browser has not picked up this chat's next step. The app keeps trying; Continue now in the chat sends it at once.": "ブラウザーがこのチャットの次のステップを受け取っていません。アプリは再試行を続けます。チャットの「今すぐ続行」ですぐに送信できます。",
+  "Continue now": "今すぐ続行",
+  "Send the waiting Continue now, as an ordinary message": "待機中の続行を通常のメッセージとして今すぐ送信",
+  "Try now": "今すぐ試す",
+  "Try to send the waiting step now": "待機中のステップを今すぐ送信してみる",
+  "Sent.": "送信しました。",
+  "Trying again now.": "今すぐ再試行しています。",
+  "This chat has no ChatGPT conversation yet.": "このチャットにはまだ ChatGPT の会話がありません。",
+  "ChatGPT limits this chat for a few minutes. The app tries again right after.": "ChatGPT がこのチャットを数分間制限しています。直後にアプリが再試行します。",
+  "Nothing is waiting to be picked up in this chat any more.": "このチャットで待っているものはもうありません。"
 }

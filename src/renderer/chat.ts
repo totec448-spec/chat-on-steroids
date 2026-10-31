@@ -6896,7 +6896,27 @@ function paintRecoveryStatus(): boolean {
       await refreshSessionControls();
     })
     : null;
-  if (renderRecoveryCountdowns(host, countdowns, Date.now(), cancelReload)) return true;
+  // 2026-10-31: a chat whose next step was not picked up gets one click to go on: the waiting
+  // Continue as an ordinary message, or a queued message or Goal/Loop step tried again at once.
+  const pickupNowAction = (countdown: RecoveryCountdown) => {
+    if (countdown.kind !== 'pickup-stopped' || !sessionForCountdown) return null;
+    const continuing = countdown.next === 'continue';
+    const button = el('button', 'dock-action is-labelled') as HTMLButtonElement;
+    button.type = 'button';
+    ui(button, 'title', () => continuing ? t('Send the waiting Continue now, as an ordinary message') : t('Try to send the waiting step now'));
+    button.append(icon(continuing ? 'i-play' : 'i-retry'), el('span', '', () => continuing ? t('Continue now') : t('Try now')));
+    button.onclick = async () => {
+      button.disabled = true;
+      try {
+        const done = await run(api.pickupNow(sessionForCountdown));
+        if (done && !done.ok) toast(t(done.error));
+        else if (done) toast(done.did === 'sent' ? t('Sent.') : t('Trying again now.'));
+        await refreshSessionControls();
+      } finally { button.disabled = false; }
+    };
+    return button;
+  };
+  if (renderRecoveryCountdowns(host, countdowns, Date.now(), countdown => cancelReload(countdown) ?? pickupNowAction(countdown))) return true;
   const recovery = detailFor === selectedId ? [...events].reverse().find(event => event.source === 'app' && event.kind === 'progress' && event.progressId?.startsWith('browser-repair:')) : undefined;
   const sessionId = selectedId;
   const revision = recovery?.kind === 'progress' ? JSON.stringify([recovery.progressId, recovery.time, recovery.message.text]) : '';

@@ -399,6 +399,7 @@ const api = {
   },
   getSessionControls: (id: string) => call<SessionControlsView>('sessions:controls', { id }),
   cancelRecovery: (id: string) => call<boolean>('sessions:cancelRecovery', { id }),
+  pickupNow: (id: string) => call<{ ok: true; did: 'sent' | 'retrying' } | { ok: false; error: string }>('sessions:pickupNow', { id }),
   setSessionAutomation: (id: string, automation: SessionControlsView['automation'], afterTurn?: boolean) => call<SessionControlsView>('sessions:automation', { id, automation, afterTurn }),
   setSessionObjective: (id: string, text: string, mode: 'goal' | 'loop') => call<SessionControlsView>('sessions:objective', { id, text, mode }),
   compactSession: (id: string) => call<SessionControlsView>('sessions:compact', { id }),
