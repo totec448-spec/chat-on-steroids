@@ -15,7 +15,7 @@ import { execFile } from 'node:child_process';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { app, dialog, screen, shell, webContents, type BrowserWindow } from 'electron';
 import { chatLines, crashLines, errorSummaryLines, installKind, installLines, systemLines, toolCallLines, type ChatFactsSession } from './diagnostics-facts.js';
-import type { CompanionEnvironment, UpdateStatus } from '../shared/types.js';
+import type { CompanionDiagnostics, CompanionEnvironment, UpdateStatus } from '../shared/types.js';
 import { getConfig } from './config.js';
 import { flushLogFile, logFilePath } from './logger.js';
 import { dialogLabel, mainText } from './main-texts.js';
@@ -154,10 +154,16 @@ export async function collectReportFacts(sources: { update: UpdateStatus; sessio
 /** The companion's browser and ChatGPT page facts as sentences; empty for an older extension. */
 function environmentLines(extension: unknown): string[] {
   const environment = (extension && typeof extension === 'object' ? (extension as { environment?: CompanionEnvironment | null }).environment : null) ?? null;
-  if (!environment) return [];
+  const language = (extension && typeof extension === 'object' ? (extension as { language?: CompanionDiagnostics['language'] }).language : null) ?? null;
+  const languageLine = language
+    ? [`Extension language: stored ${language.stored ?? 'none (uses the browser\'s)'}, applied by this worker ${language.applied ?? 'not yet'}` +
+      `${language.error ? `, last attempt: ${language.error}` : ''}`]
+    : [];
+  if (!environment) return languageLine;
   const { browser, tabs, page } = environment;
   const found = (value: boolean) => value ? 'found' : 'NOT found';
   return [
+    ...languageLine,
     `Browser: ${browser.name}${browser.version ? ` ${browser.version}` : ''}`,
     `ChatGPT tabs: ${tabs.open} open, ${tabs.discarded} discarded, ${tabs.frozen} frozen, ${tabs.loading} loading, ${tabs.grouped} in a tab group, ${tabs.inBackgroundWindow} in the app's background window`,
     page

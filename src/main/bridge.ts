@@ -803,10 +803,29 @@ function chatHolders(conversationId: string): string[] {
  * 2.1.21 (2026-09-30) chat A came to live in both browsers, the copy in the browser the user was
  * not working in wrote the Compact & Resume brief, and chat B was placed beside that copy.
  */
+/** Chats whose repair waits for a browser that may open them (browser only), said once per episode. */
+const browserOnlyHoldTold = new Set<string>();
+/** A refused claim from a browser that is not the chosen one, said once a minute per chat. */
+const unchosenClaimToldAt = new Map<string, number>();
+
+/** A stalled-tab repair for a chat this browser holds: the one repair a browser that is not chosen may take. */
+function holdsStalledTab(repair: Repair, conversationId: string, browser: string | null): boolean {
+  return repair.reason === 'stalled' && !!browser && chatHolders(conversationId).includes(browser);
+}
+
 function chatHeldElsewhere(conversationId: string, browser: string | null): boolean {
   if (!browser) return false;
   const holders = chatHolders(conversationId);
   return holders.length > 0 && !holders.includes(browser);
+}
+
+/** The extension asks again every pass while an update is held: each reason is logged once a minute. */
+const updateHoldLoggedAt = new Map<string, number>();
+function logUpdateHold(hold: string, line: string): void {
+  const now = Date.now(), last = updateHoldLoggedAt.get(hold);
+  if (last !== undefined && now - last < 60_000 && now >= last) return;
+  updateHoldLoggedAt.set(hold, now);
+  logInfo(line);
 }
 
 /**
@@ -1037,8 +1056,17 @@ function sanitiseCompanionDiagnostics(value: unknown): CompanionDiagnostics | nu
       durations: preferences.durations === true
     },
     tab: diagnosticTab(root.tab),
-    environment: diagnosticEnvironment(root.environment)
+    environment: diagnosticEnvironment(root.environment),
+    language: diagnosticLanguage(root.language)
   };
+}
+
+const LANGUAGE_TAG = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/;
+function diagnosticLanguage(value: unknown): CompanionDiagnostics['language'] {
+  const root = diagnosticObject(value);
+  if (!root) return null;
+  const tag = (field: unknown) => typeof field === 'string' && LANGUAGE_TAG.test(field) ? field : null;
+  return { applied: tag(root.applied), stored: tag(root.stored), error: diagnosticString(root.error, 200) };
 }
 
 function diagnosticEnvironment(value: unknown): CompanionEnvironment | null {
@@ -1058,6 +1086,8 @@ function diagnosticEnvironment(value: unknown): CompanionEnvironment | null {
   };
 }
 
+/** Per browser: the extension language state last logged, so a repeating report logs once. */
+const extensionLanguageLogged = new Map<string, string>();
 /** Per browser: the last error-page reload the app has logged (the extension's clock) and its count. */
 const errorPageReloadsLogged = new Map<string, { at: number; count: number; skippedAt?: number }>();
 const ERROR_PAGE_SKIPS: Record<string, (nextIn: number) => string> = {
@@ -1089,6 +1119,17 @@ function recordCompanionDiagnostics(value: unknown, browser = ''): void {
     logInfo(`browser: a ChatGPT tab is on Chrome's error page; ${skipLine(nextIn)}`);
     errorPageReloadsLogged.set(browser, { ...current, skippedAt });
     if (errorPageReloadsLogged.size > 16) errorPageReloadsLogged.delete(errorPageReloadsLogged.keys().next().value!);
+  }
+  // The extension shows its texts in the language it stored; say once when that is not the app's (2026-10-30).
+  const language = next.language, wanted = getConfig().ui.language ?? null;
+  const languageState = language ? `${wanted ?? ''}|${language.stored ?? 'none'}|${language.error ?? ''}` : '';
+  // A report that matches clears the key, so the same mismatch coming back later is logged again.
+  if (language && wanted && language.stored === wanted && !language.error) extensionLanguageLogged.delete(browser);
+  if (language && wanted && (language.stored !== wanted || language.error) && extensionLanguageLogged.get(browser) !== languageState) {
+    logWarn(`browser: the extension's stored language is ${language.stored ?? 'none (it uses the browser\'s)'}, the app's is ${wanted}` +
+      `${language.error ? `; last attempt: ${language.error}` : ''}`);
+    extensionLanguageLogged.set(browser, languageState);
+    if (extensionLanguageLogged.size > 16) extensionLanguageLogged.delete(extensionLanguageLogged.keys().next().value!);
   }
   // Remember what the extension holds, but only values it actually stored: a fresh install
   // reports its defaults, and those must not overwrite the choices it is about to get back.
@@ -2824,16 +2865,28 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   // The extension is idle and about to reload into the build this app ships: bring the folder
   // Chrome loads from up to date first, and say whether it now holds that build.
   if (route === '/extension/update' && req.method === 'POST') {
+    // Read first, so the holds below are checked at the moment the folder is replaced (CodeRabbit on #1961).
+    const updateBody = await readBody(req).catch(() => null) as { pastBusyChatsMs?: unknown } | null;
+    const pastBusy = typeof updateBody?.pastBusyChatsMs === 'number' && Number.isFinite(updateBody.pastBusyChatsMs) ? updateBody.pastBusyChatsMs : 0;
     // A message claimed since the extension's last /status is being sent: its folder is not replaced
     // under it. The extension reads `hold` and asks again on a later pass (CodeRabbit on #1901).
     // A claim still deciding (the send check can take seconds) counts too: it may take its message next.
     if (claimsInProgress > 0 || (await listInputs()).some(inBrowserDelivery)) {
-      logInfo('bridge: the extension update waits: a message is being sent');
+      logUpdateHold('sending', 'bridge: the extension update waits: a message is being sent');
       return json(res, 200, { ready: false, hold: 'sending' }, origin);
+    }
+    // A tool call that started after the extension's last /status holds it too: the reload would cut
+    // off the page that is waiting for its result.
+    if (runningToolCalls() > 0) {
+      logUpdateHold('app-busy', 'bridge: the extension update waits: a tool call is running in this app');
+      return json(res, 200, { ready: false, hold: 'app-busy' }, origin);
     }
     const prepared = prepareExtensionUpdate(extensionBuildOf(req));
     // The extension reloads now: that browser takes no new message until it is back.
     if (prepared?.ready) extensionReloads.set(browserOf(req) ?? '', Date.now() + EXTENSION_RELOAD_PAUSE_MS);
+    // An update that waited only for answering pages for long goes ahead at a quiet moment (2026-10-31);
+    // said only when it really goes ahead.
+    if (prepared?.ready && pastBusy > 0) logInfo(`bridge: the extension updates although a ChatGPT tab is still answering: it waited ${Math.round(pastBusy / 60_000)} minutes for every page to be idle, and no tool call runs and nothing is being sent now`);
     if (prepared?.ready) logInfo(`bridge: extension folder updated to build ${prepared.build}; the extension reloads itself now`);
     else if (prepared) logWarn(`bridge: could not update the extension folder to build ${prepared.build}`);
     return json(res, 200, prepared ?? { ready: false }, origin);
@@ -2968,7 +3021,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         ...(req.method === 'POST' && imageExportRequested ? { imageExports: pendingImageExports() } : {}),
         // A failure report closes this request. Reissuing the repair in the same response would
         // replace the visible failure with "Trying" before a renderer could ever observe it.
-        repairs: repairFailed || repairHeld ? [] : await takePendingRepairs(Date.now(), browser, takesWork),
+        repairs: repairFailed || repairHeld ? [] : await takePendingRepairs(Date.now(), browser, takesWork, chosenBuiltIn),
         ...tabPolicy,
         recoveryMonitoring: browserRecoveryMonitoring(),
         // A newer extension build ships with this app. The extension reloads into it on its own
@@ -3200,14 +3253,26 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
   }
 
   if (route === '/repairs/claim' && req.method === 'POST') {
-    if (staleCompanion(req) || notChosenBrowser(req)) return json(res, 200, { allowed: false }, origin);
+    if (staleCompanion(req)) return json(res, 200, { allowed: false }, origin);
+    const unchosen = notChosenBrowser(req);
     let body: unknown;
-    try { body = await readBody(req); } catch { return json(res, 400, { error: 'bad_request' }, origin); }
+    try { body = await readBody(req); } catch { return unchosen ? json(res, 200, { allowed: false }, origin) : json(res, 400, { error: 'bad_request' }, origin); }
     const token = body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>).token : null;
-    if (typeof token !== 'string' || token.length > 128) return json(res, 400, { error: 'bad_request' }, origin);
+    if (typeof token !== 'string' || token.length > 128) return unchosen ? json(res, 200, { allowed: false }, origin) : json(res, 400, { error: 'bad_request' }, origin);
     const found = [...repairsInFlight].find(([, repair]) => repairNeedsClaim(repair) && repair.token === token && repair.state === 'handed');
     if (!found) return json(res, 200, { allowed: false }, origin);
     const [conversationId, repair] = found;
+    // A browser that is not the chosen one takes no new work (#1516), except thawing its own frozen
+    // tab: only the browser holding that tab can, and it opens nothing new (CodeRabbit on #1963).
+    if (unchosen && !holdsStalledTab(repair, conversationId, browserOf(req))) {
+      const now = Date.now(), last = unchosenClaimToldAt.get(conversationId);
+      if (last === undefined || now - last >= 60_000 || now < last) {
+        unchosenClaimToldAt.set(conversationId, now);
+        if (unchosenClaimToldAt.size > 500) unchosenClaimToldAt.delete(unchosenClaimToldAt.keys().next().value!);
+        logInfo(`bridge: refused the ${repair.reason} repair claim for ${conversationId}: that browser is not the chosen one, which takes the repair`);
+      }
+      return json(res, 200, { allowed: false }, origin);
+    }
     const session = await getSession(repair.sessionId);
     // A Compact & resume the user pressed may act on the chat they closed: handout and claim agree.
     const current = session?.conversationId === conversationId && departureAllowsRepairFor(session, repair.reason, repair.episode) &&
@@ -10508,7 +10573,9 @@ async function takePendingRepairs(
   now = Date.now(),
   browser: string | null = null,
   /** Whether this browser may claim what it is offered; only its offers count toward the no-page budget. */
-  canClaim = true
+  canClaim = true,
+  /** The chosen built-in browser, which takes a repair over from a browser that is not chosen (#1960). */
+  chosen = false
 ): Promise<Array<{ conversationId: string; token: string; reason: Repair['reason']; focus: boolean }>> {
   retireSpentRepairs();
   const pickupFloor = pickupWatchFloor;
@@ -10579,8 +10646,26 @@ async function takePendingRepairs(
     continueFollows?: boolean;
   }> = [];
   for (const [conversationId, repair] of repairsInFlight) {
-    // Another browser holds this chat. Offered here, a reload finds no tab and opens a copy.
-    if (chatHeldElsewhere(conversationId, browser)) continue;
+    // Another browser holds this chat. Offered here, a reload finds no tab and opens a copy. Not for
+    // the chosen built-in browser: the holder may not claim it, and the chat would sit (#1960, as
+    // inputs do since #1516).
+    if (!(chosen && repair.reason !== 'stalled') && chatHeldElsewhere(conversationId, browser)) continue;
+    // The chosen browser has no tab for a chat another browser holds, and with "browser only" it may
+    // not open one: offered, it would skip the repair unclaimed and spend the no-page budget on a chat
+    // that is open. It stays queued, said once, until a browser that can act asks (CodeRabbit on #1963).
+    if (chosen && repair.reason !== 'stalled' && getConfig().ui.browserOnly === true && chatHeldElsewhere(conversationId, browser)) {
+      const key = `${conversationId}:${repair.sessionId}:${repair.episode}`;
+      if (!browserOnlyHoldTold.has(key)) {
+        browserOnlyHoldTold.add(key);
+        if (browserOnlyHoldTold.size > 500) browserOnlyHoldTold.delete(browserOnlyHoldTold.values().next().value!);
+        logInfo(`bridge: the ${repair.reason} repair for ${conversationId} waits: another browser holds this chat, and "browser only" keeps the chosen built-in browser from opening it`);
+      }
+      continue;
+    }
+    // A browser that may not claim (not the chosen one, or out of date) is handed no repair that needs
+    // a claim: its claim is refused, and a failure it reported for a token another browser claimed
+    // would requeue that claim (CodeRabbit on #1963). The holder's own frozen tab is the exception.
+    if (!canClaim && repairNeedsClaim(repair) && !holdsStalledTab(repair, conversationId, browser)) continue;
     const unclaimed = repair.reason !== 'unattributed' && repairNeedsClaim(repair) && repair.state === 'handed' && !repair.claimed;
     if (repair.state !== 'queued' && !unclaimed) continue;
     if (now < repair.notBefore) continue;
