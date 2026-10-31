@@ -3691,5 +3691,6 @@
   "{0} controls": "{0} 個控制項",
   "{0} sessions": "{0} 個對話",
   "{0} entries": "{0} 個項目",
-  "{0} messages": "{0} 則訊息"
+  "{0} messages": "{0} 則訊息",
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "未傳送：此新聊天的瀏覽器分頁已關閉或遺失。請檢查訊息後重新傳送。"
 }

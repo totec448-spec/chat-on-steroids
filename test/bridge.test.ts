@@ -437,6 +437,55 @@ beforeEach(async () => {
   token = null;
 });
 
+describe('lost first-message opening', () => {
+  const browser = 'openingownerbrowser1234', other = 'otheropeningbrowser1234';
+  let input: typeof import('../src/main/session/input.js');
+  beforeEach(async () => {
+    input = await import('../src/main/session/input.js');
+    input.resetInputForTests();
+    await writeDurableNow('session-input', []);
+  });
+  afterEach(async () => {
+    input.resetInputForTests();
+    await writeDurableNow('session-input', []);
+  });
+  it.each(['unclaimed', 'other-browser', 'missing-browser', 'no-handout', 'claimed', 'authorized'])(
+    'accepts a missing-tab report only from its holder before any claim (%s)', async phase => {
+      await pair();
+      const row = await input.enqueueInput({ id: randomUUID(), sessionId: null, text: 'Opening task',
+        mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null });
+      if (phase !== 'no-handout') {
+        const status = await request('POST', '/status', { browser, body: { openConversations: [] } });
+        expect(status.body.inputs).toContainEqual({ id: row.id, conversationId: null });
+      }
+      if (phase === 'claimed' || phase === 'authorized')
+        expect(await input.claimBrowserInput(row.id, '7:document:0', null, true)).not.toBeNull();
+      if (phase === 'authorized') expect(await input.authorizeBrowserInput(row.id, '7:document:0', null)).toBe(true);
+      const before = await input.listInputs();
+      const reply = await request('POST', '/input/opening-unavailable', {
+        ...(phase === 'missing-browser' ? {} : { browser: phase === 'other-browser' ? other : browser }),
+        body: { id: row.id, tab: 7, stage: 'ready' }
+      });
+      if (phase === 'unclaimed') {
+        expect(reply.body).toEqual({ ok: true });
+        expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed' });
+        expect(await input.pendingBrowserInputs()).toEqual([]);
+        expect(await input.claimBrowserInput(row.id, '7:late-document:0', null, true)).toBeNull();
+      } else {
+        expect(reply.status).toBe(['claimed', 'authorized'].includes(phase) ? 200 : 409);
+        expect(reply.body.ok).not.toBe(true);
+        expect(await input.listInputs()).toEqual(before);
+      }
+    });
+  it.each([{ tab: null, stage: 'opening' }, { tab: 7.5, stage: 'ready' }, { tab: 7, stage: 'sent' }])(
+    'refuses an invalid opening report %j', async report => {
+      await pair();
+      expect((await request('POST', '/input/opening-unavailable', {
+        browser, body: { id: randomUUID(), ...report }
+      })).status).toBe(400);
+    });
+});
+
 // ------------------------------------------------------------------ origin
 
 describe('explicit CoS sign-in transfer over the paired bridge', () => {
