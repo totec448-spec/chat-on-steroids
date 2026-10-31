@@ -117,6 +117,23 @@ export async function assignChatGroup(session: ChatGroupSession | null, groupId:
   return save();
 }
 
+/**
+ * A chat the person moved to another project (#1919) leaves its old project's group, and joins
+ * `groupId` when it was dropped onto a group of its new project.
+ */
+export async function placeMovedChat(sessionId: string, projectId: string | null, groupId: string | null): Promise<ChatGroupsState> {
+  await ready();
+  const target = groupId ? state.groups.find(group => group.id === groupId) : undefined;
+  if (groupId && (!target || target.projectId !== projectId)) throw new Error("This chat is not in that group's project");
+  const current = state.members[sessionId];
+  if (current === (groupId ?? undefined)) return snapshot();
+  if (groupId) {
+    if (current === undefined && Object.keys(state.members).length >= MAX_CHAT_GROUP_MEMBERS) throw new Error('Too many grouped chats');
+    state.members[sessionId] = groupId;
+  } else delete state.members[sessionId];
+  return save();
+}
+
 /** A chat that no longer exists leaves its group. */
 export async function forgetChatGroupMember(sessionId: string): Promise<void> {
   await ready();

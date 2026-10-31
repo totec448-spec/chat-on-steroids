@@ -36,6 +36,7 @@ import { MAX_TASK_REQUEST_CHARS, taskRequestProblem } from '../shared/task-progr
 import { shownSessionTitle } from './session-title.js';
 import { preserveTimelineViewport, ROUNDING_PX } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
+import { dateSections, type DateSection } from './date-sections.js';
 import { createSidebarPins, pinnedSortScope } from './sidebar-pins.js';
 import { createComposerDrafts } from './composer-drafts.js';
 import { createSidebarCompletionState } from './sidebar-completion.js';
@@ -257,6 +258,48 @@ async function deleteChatGroup(group: ChatGroup): Promise<void> {
   if (await applyChatGroups(api.deleteChatGroup(group.id))) toast(t('Group deleted. Its chats stay in the project.'));
 }
 
+/**
+ * Moves a main chat, with its sub-agents, to a project or out of one (#1919), and offers Undo. Only
+ * in this app: a linked ChatGPT Project keeps the conversation where it was, and the toast says so.
+ */
+async function moveChatToProject(sessionId: string, projectId: string | null, groupId?: string | null, undo = false): Promise<void> {
+  const moved = await run(api.moveChatProject(sessionId, projectId, groupId));
+  if (!moved) return;
+  chatGroups = moved.groups;
+  if (projectId) expandedProjects.add(projectId);
+  if (groupId) collapsedGroups.delete(groupId);
+  await loadSessions();
+  if (undo) { toast(t('Move undone')); return; }
+  const project = projectId ? projects.find(row => row.id === projectId) : undefined;
+  const linked = [moved.from, projectId].some(id => id && projects.find(row => row.id === id)?.chatgpt?.state === 'linked');
+  const message = project ? t('Moved to {0}', [project.name]) : t('Moved out of its project');
+  toast(linked ? `${message}. ${t('ChatGPT keeps it where it was.')}` : message,
+    { label: t('Undo'), run: () => void moveChatToProject(sessionId, moved.from, moved.fromGroup, true) });
+}
+
+/** The chat menu's Move to project (#1919): any main chat, into a listed project or out of one. */
+function moveToProjectMenuItems(summary: SessionSummary): RowMenuItem[] {
+  if (summary.origin?.kind === 'worker' || summary.origin?.kind === 'helper' || isUnattributedSession(summary)) return [];
+  // Rows build their menus on every paint: the project lookups wait until the submenu opens.
+  if (!summary.projectId && !projects.some(project => !project.ungrouped)) return [];
+  return [{
+    action: 'move-to-project', icon: 'i-folder', label: () => t('Move to project'),
+    title: () => t("Move this chat to a project; its commands then run in that project's folder"),
+    submenu: () => {
+      const current = projectGroup(summary.projectId);
+      const listed = projects.filter(project => !project.ungrouped);
+      return [
+      ...listed.map(project => ({
+        action: `project-${project.id}`, checked: current === project.id, label: () => project.name,
+        run: () => { if (current !== project.id) void moveChatToProject(summary.id, project.id); }
+      } satisfies RowMenuItem)),
+      { action: 'project-none', separated: listed.length > 0, checked: !current, label: () => t('No project'),
+        run: () => { if (summary.projectId) void moveChatToProject(summary.id, null); } }
+      ];
+    }
+  }];
+}
+
 /** The chat menu's group items, for a main chat of a project. */
 function chatGroupMenuItems(summary: SessionSummary): RowMenuItem[] {
   const projectId = projectGroup(summary.projectId);
@@ -298,6 +341,8 @@ function projectMenuItems(id: string): RowMenuItem[] {
   const shieldOff = projects.find(row => row.id === id)?.secretsShieldOff === true;
   const shieldEverywhere = deps.state()?.config.ui.secretsShield !== false;
   return [
+    // The row's + button, here too, as a context menu holds every action (#1919).
+    { action: 'chat-new', icon: 'i-plus', label: () => t('New chat'), title: () => t('New chat in this project'), run: () => selectNewChat(id) },
     { action: 'group-new', icon: 'i-group', label: () => t('New group'), title: () => t('Add a group to sort this project\'s chats'),
       run: () => void newChatGroup(id) },
     // A project without a ChatGPT Project, or whose creation failed, can take a new or an existing one (#1756).
@@ -1236,7 +1281,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   } else if (summary.conversationId === null) {
     // A new chat whose first message has not gone out yet (#1759): no ChatGPT link to open, copy or block.
     items.push({ action: 'rename', icon: 'i-pencil', label: () => t('Rename'), title: () => t("Rename this chat in the app. Its title in ChatGPT stays the same."), run: () => startRename(summary) });
-    items.push(...chatGroupMenuItems(summary));
+    items.push(...moveToProjectMenuItems(summary), ...chatGroupMenuItems(summary));
   } else {
     const policyLineage = [
       summary.conversationId,
@@ -1272,7 +1317,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
       items.push({ action: 'schedule', icon: 'i-clock', label: () => t('Schedule…'), title: () => t('Send a message into this chat at set times'),
         run: () => void scheduleDialog?.open(summary.id, summary.id === selectedId ? $<HTMLTextAreaElement>('chatInput').value : '') });
     }
-    items.push(...chatGroupMenuItems(summary));
+    items.push(...moveToProjectMenuItems(summary), ...chatGroupMenuItems(summary));
     // The stop this app can actually make. It does not touch the running ChatGPT turn — nothing
     // here can — it takes this chat's tools away, and a model whose every call is refused with
     // an instruction to stop finishes its turn on its own.
@@ -2237,7 +2282,7 @@ function chatGroupSection(group: ChatGroup, tasks: ProjectTask[]): HTMLElement {
     if (task.workers) workerGroup(task.entry.id, task.workers, row, rows);
   }
   section.append(...rows);
-  if (!tasks.length) section.append(el('p', 'chat-group-empty', () => t("Move a chat here from its menu.")));
+  if (!tasks.length) section.append(el('p', 'chat-group-empty', () => t("Drag a chat here, or move it from its menu.")));
   if (shown.length < ordered.length) {
     const showMore = el('button', 'btn project-show-more chat-group-show-more', () => t("Show more")) as HTMLButtonElement;
     showMore.type = 'button'; ui(showMore, 'aria-label', () => t("Show more chats in {0}", [group.name]));
@@ -2301,6 +2346,13 @@ function unattributedActivity(entries: SessionSummary[]): HTMLElement | null {
   return disclosure;
 }
 
+/** A date heading in a chat list (#1919): quiet text, no count or icon. */
+function dateHeading(section: DateSection): HTMLElement {
+  const heading = el('div', 'chat-date-section', section.label);
+  heading.setAttribute('role', 'heading'); heading.setAttribute('aria-level', '3');
+  return heading;
+}
+
 function paintSessions(): void {
   // Keep the pointer's elected rows alive while asynchronous activity snapshots arrive.
   if (sidebarOrder?.interacting) return;
@@ -2341,6 +2393,8 @@ function paintSessions(): void {
   // even though those nodes are immediately discarded by the project page limit.
   const projectRows = new Map<string, ProjectTask[]>();
   const diagnostics: SessionSummary[] = [];
+  // Date headings (#1919) for the chats list; each project's list has its own.
+  const chatSection = dateSections();
   // Pinned chats lead their own list (#1133). Resolve project membership once for
   // this paint: scanning all sessions for each project and then searching the project
   // catalog for every comparison used to multiply work on frequent activity pushes.
@@ -2372,6 +2426,8 @@ function paintSessions(): void {
       tasks.push({ entry, workers, selected: entry.id === selectedId || workers?.some(worker => worker.id === selectedId) === true });
       projectRows.set(projectId, tasks);
     } else {
+      const heading = pinnedChat(entry) ? null : chatSection(entry.updatedAt);
+      if (heading) rows.push(dateHeading(heading));
       const row = sessionRow(entry); rows.push(row);
       row.dataset.sortScope = pinnedSortScope('', pinnedChat(entry));
       if (workers) workerGroup(entry.id, workers, row, rows);
@@ -2417,7 +2473,7 @@ function paintSessions(): void {
       heading.addEventListener('contextmenu', event => { event.preventDefault(); openRowMenu(menu({ x: event.clientX, y: event.clientY })); });
       // The project's primary action, beside its menu rather than inside it: one click, as in ChatGPT.
       const create = el('button', 'btn row-menu-button project-new') as HTMLButtonElement;
-      create.type = 'button'; create.dataset.newProject = id; create.append(icon('i-pencil'));
+      create.type = 'button'; create.dataset.newProject = id; create.append(icon('i-plus'));
       ui(create, 'title', () => t('New chat in this project'));
       ui(create, 'aria-label', () => t('New chat in this project'));
       create.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); selectNewChat(id); });
@@ -2436,7 +2492,10 @@ function paintSessions(): void {
     const count = projectVisibleCounts.get(id) ?? PROJECT_TASK_PAGE_SIZE;
     const shown = tasks.filter((task, index) => index < count || task.selected);
     const shownRows: HTMLElement[] = [];
+    const projectSection = dateSections();
     for (const task of shown) {
+      const heading = pinnedChat(task.entry) ? null : projectSection(task.entry.updatedAt);
+      if (heading) shownRows.push(dateHeading(heading));
       const row = sessionRow(task.entry);
       row.dataset.sortScope = pinnedSortScope(id, pinnedChat(task.entry));
       shownRows.push(row);
@@ -9265,7 +9324,28 @@ export function initChat(next: Deps): void {
     ...chatGroups.groups.map(group => ({ id: group.id, scope: chatGroupsScope(group.projectId) })),
     ...sessions.filter(entry => !isUnattributedSession(entry) && entry.origin?.kind !== 'worker')
       .map(entry => ({ id: entry.id, scope: pinnedSortScope(chatSortList(entry), pinnedChat(entry)) }))
-  ], paintSessions, removeSessionTooltip);
+  ], paintSessions, removeSessionTooltip, {
+    // A main chat dragged onto a project or one of its groups (its row or its chats) moves there
+    // (#1919); the heading of that place lights up.
+    target: (id, at) => {
+      const summary = sessions.find(entry => entry.id === id);
+      const heading = at?.closest<HTMLElement>('.chat-group, .project-group')?.querySelector<HTMLElement>(':scope > .project-heading, :scope > .chat-group-heading');
+      const projectId = heading?.closest<HTMLElement>('.project-group')?.dataset.projectId;
+      if (!summary || !heading || !projectId || summary.origin?.kind === 'worker' || summary.origin?.kind === 'helper' || isUnattributedSession(summary)) return null;
+      const groupId = heading.classList.contains('chat-group-heading') ? heading.closest<HTMLElement>('.chat-group')?.dataset.groupId : undefined;
+      const here = projectGroup(summary.projectId) === projectId;
+      if (here && (!groupId || chatGroupOf(chatGroups, summary)?.id === groupId)) return null;
+      return heading;
+    },
+    drop: (id, heading) => {
+      const projectId = heading.closest<HTMLElement>('.project-group')?.dataset.projectId;
+      const groupId = heading.classList.contains('chat-group-heading') ? heading.closest<HTMLElement>('.chat-group')?.dataset.groupId ?? null : null;
+      const summary = sessions.find(entry => entry.id === id);
+      if (!projectId || !summary) return;
+      if (projectGroup(summary.projectId) === projectId) { if (groupId) void applyChatGroups(api.assignChatGroup(id, groupId)); return; }
+      void moveChatToProject(id, projectId, groupId);
+    }
+  });
   void run(api.chatGroups()).then(state => { if (state) { chatGroups = state; paintSessions(); } });
   deps = next;
   initComposerDictation();

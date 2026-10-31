@@ -8,7 +8,7 @@ import { nativePathIdentity, resolvePath, uniqueRootName } from './sandbox.js';
 import { parseRemote, remoteIdentity, sftpFor } from './remote/ssh.js';
 import { SftpError, type SftpClient } from './remote/sftp.js';
 import type { RemoteFolder, Root } from '../shared/types.js';
-import { bindSessionProject, findSessionByConversation, getSession } from './session/store.js';
+import { bindSessionProject, findSessionByConversation, getSession, indexedSessions, moveSessionProject } from './session/store.js';
 import { workspaceForChat } from './workspace.js';
 import { logInfo } from './logger.js';
 import { isListedChatgptProject } from './chatgpt-project-catalog.js';
@@ -316,6 +316,34 @@ export async function getSessionProject(sessionId: string): Promise<{ virtual: s
   if (!project) throw new Error('The session project is unavailable');
   return resolveProject(project);
 }
+/**
+ * The person moves a main chat to a project, or out of one with `null` (#1919). Its sub-agent and
+ * helper chats move with it: they follow their main chat and are never moved on their own. A
+ * project whose folder is missing is allowed; its row already says so. Returns where it was.
+ */
+export async function moveChatToProject(sessionId: string, projectId: string | null): Promise<{ from: string | null; moved: string[] }> {
+  const session = await getSession(sessionId);
+  if (!session) throw new Error('This chat no longer exists');
+  if (session.origin?.kind === 'worker' || session.origin?.kind === 'helper') throw new Error('A sub-agent chat follows its main chat');
+  if (projectId !== null) {
+    const project = await getProject(projectId);
+    if (!project || project.ungrouped) throw new Error('Project not found');
+  }
+  const from = session.projectId ?? null;
+  if (from === projectId) return { from, moved: [] };
+  // Every chat that descends from this one through its sub-agents and helpers, however deep.
+  const all = await indexedSessions();
+  const family = [session.id];
+  for (let index = 0; index < family.length; index++) {
+    for (const child of all) {
+      if ((child.origin?.kind === 'worker' || child.origin?.kind === 'helper') && child.origin.fromSessionId === family[index] && !family.includes(child.id)) family.push(child.id);
+    }
+  }
+  for (const id of family) await moveSessionProject(id, projectId);
+  logInfo(`projects: the person moved chat ${sessionId}${family.length > 1 ? ` and its ${family.length - 1} sub-agent chat(s)` : ''} from ${from ? `project ${from}` : 'no project'} to ${projectId ? `project ${projectId}` : 'no project'}; its commands now run in ${projectId ? "that project's folder" : 'the folder it worked in before'}`);
+  return { from, moved: family };
+}
+
 /** The broker supplies an exact prime conversation; unrelated families are never consulted. */
 export async function inheritSessionProject(sessionId: string, primeConversationId: string): Promise<void> {
   const prime = await findSessionByConversation(primeConversationId, { requireUnique: true });
@@ -334,7 +362,8 @@ export async function bindChatToLinkedProject(sessionId: string, chatgptProjectI
   if (!CHATGPT_PROJECT_ID.test(chatgptProjectId)) return 'none';
   const session = await getSession(sessionId);
   if (!session) return 'none';
-  if (session.projectId || session.origin?.kind === 'worker' || session.origin?.kind === 'helper') return 'kept';
+  // A chat the person moved, or took out of its project, stays where they put it (#1919).
+  if (session.projectId || session.projectChosen || session.origin?.kind === 'worker' || session.origin?.kind === 'helper') return 'kept';
   if (workspaceForChat(session.conversationId ?? null)) return 'kept';
   const linked = (await listProjects()).filter(project =>
     !project.ungrouped && project.chatgpt?.state === 'linked' && project.chatgpt.id === chatgptProjectId);

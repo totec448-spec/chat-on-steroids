@@ -2620,6 +2620,7 @@ function normalizeSummary(id: string, raw: string): MetaCheckpoint | null {
         : {};
     }
     if (publicSummary.titleSource !== undefined && !['fallback', 'provider', 'manual'].includes(publicSummary.titleSource)) delete publicSummary.titleSource;
+    if (publicSummary.projectChosen !== undefined && publicSummary.projectChosen !== true) delete publicSummary.projectChosen;
     const auto = publicSummary.autoTitle;
     if (auto !== undefined && (publicSummary.titleSource !== 'manual' || !auto || typeof auto !== 'object' ||
         typeof auto.title !== 'string' || !['fallback', 'provider'].includes(auto.source))) delete publicSummary.autoTitle;
@@ -3582,6 +3583,22 @@ export async function bindSessionProject(id: string, projectId: string): Promise
     if (entry.summary.projectId === projectId) return;
     if (entry.summary.projectId) throw new Error('Session already belongs to another project');
     const staged = { ...entry.summary, projectId };
+    await writeSummary(staged, entry.historySeq);
+    entry.summary = staged;
+    publishAttachmentSummary(staged);
+  });
+}
+
+/**
+ * The person moves a chat to another project, or out of one (#1919): unlike the one-time binding
+ * above, this replaces a project. Its commands then run in the new project's folder.
+ */
+export async function moveSessionProject(id: string, projectId: string | null): Promise<void> {
+  if (projectId !== null && !/^[a-f0-9-]{36}$/i.test(projectId)) throw new Error('Invalid project id');
+  const entry = await ensureOpen(id);
+  await enqueueSessionOperation(entry, 'project move', async () => {
+    const { projectId: _previous, ...rest } = entry.summary;
+    const staged: SessionSummary = { ...rest, ...(projectId ? { projectId } : {}), projectChosen: true };
     await writeSummary(staged, entry.historySeq);
     entry.summary = staged;
     publishAttachmentSummary(staged);

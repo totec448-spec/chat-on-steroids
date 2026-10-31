@@ -3000,7 +3000,7 @@
   "Rename this group": "Renommer ce groupe",
   "Delete group": "Supprimer le groupe",
   "Delete this group; its chats stay in the project": "Supprimer ce groupe ; ses chats restent dans le projet",
-  "Move a chat here from its menu.": "Déplacez un chat ici depuis son menu.",
+  "Drag a chat here, or move it from its menu.": "Faites glisser une conversation ici, ou déplacez-la depuis son menu.",
   "Show more chats in {0}": "Afficher plus de chats dans {0}",
   "This project is not available": "Ce projet n’est pas disponible",
   "A project can hold up to 100 groups": "Un projet peut contenir jusqu’à 100 groupes",
@@ -3854,5 +3854,16 @@
   "{0} messages|many": "{0} de messages",
   "{0} actions|one": "{0} action",
   "{0} actions|many": "{0} d’actions",
-  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Message non envoyé : l’onglet du navigateur de cette nouvelle discussion a été fermé ou perdu. Vérifiez le message et envoyez-le à nouveau."
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Message non envoyé : l’onglet du navigateur de cette nouvelle discussion a été fermé ou perdu. Vérifiez le message et envoyez-le à nouveau.",
+  "Move to project": "Déplacer vers un projet",
+  "Move this chat to a project; its commands then run in that project's folder": "Déplacer cette conversation vers un projet ; ses commandes s’exécutent ensuite dans le dossier de ce projet",
+  "Moved to {0}": "Déplacée vers {0}",
+  "Moved out of its project": "Retirée de son projet",
+  "ChatGPT keeps it where it was.": "ChatGPT la laisse où elle était.",
+  "Undo": "Annuler",
+  "Move undone": "Déplacement annulé",
+  "Today": "Aujourd’hui",
+  "Yesterday": "Hier",
+  "Previous 7 days": "7 derniers jours",
+  "Previous 30 days": "30 derniers jours"
 }

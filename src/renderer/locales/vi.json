@@ -2908,7 +2908,7 @@
   "Rename this group": "Đổi tên nhóm này",
   "Delete group": "Xóa nhóm",
   "Delete this group; its chats stay in the project": "Xóa nhóm này; các cuộc trò chuyện vẫn ở trong dự án",
-  "Move a chat here from its menu.": "Chuyển một cuộc trò chuyện vào đây từ menu của nó.",
+  "Drag a chat here, or move it from its menu.": "Kéo một cuộc trò chuyện vào đây, hoặc chuyển nó từ menu của nó.",
   "Show more chats in {0}": "Hiện thêm cuộc trò chuyện trong {0}",
   "This project is not available": "Dự án này không khả dụng",
   "A project can hold up to 100 groups": "Một dự án có thể có tối đa 100 nhóm",
@@ -3692,5 +3692,16 @@
   "{0} sessions": "{0} phiên",
   "{0} entries": "{0} mục",
   "{0} messages": "{0} tin nhắn",
-  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Chưa gửi: thẻ trình duyệt của cuộc trò chuyện mới này đã bị đóng hoặc bị mất. Hãy kiểm tra tin nhắn rồi gửi lại."
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Chưa gửi: thẻ trình duyệt của cuộc trò chuyện mới này đã bị đóng hoặc bị mất. Hãy kiểm tra tin nhắn rồi gửi lại.",
+  "Move to project": "Chuyển vào dự án",
+  "Move this chat to a project; its commands then run in that project's folder": "Chuyển cuộc trò chuyện này vào một dự án; các lệnh của nó sẽ chạy trong thư mục của dự án đó",
+  "Moved to {0}": "Đã chuyển vào {0}",
+  "Moved out of its project": "Đã đưa ra khỏi dự án",
+  "ChatGPT keeps it where it was.": "ChatGPT vẫn giữ nó ở chỗ cũ.",
+  "Undo": "Hoàn tác",
+  "Move undone": "Đã hoàn tác việc chuyển",
+  "Today": "Hôm nay",
+  "Yesterday": "Hôm qua",
+  "Previous 7 days": "7 ngày qua",
+  "Previous 30 days": "30 ngày qua"
 }

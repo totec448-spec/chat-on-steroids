@@ -453,10 +453,12 @@ it('offers a new chat beside a project\'s menu, and its color as a submenu and r
   expect(button.getAttribute('aria-expanded')).toBe('true');
   const menu = w.document.querySelector<HTMLElement>('.row-menu')!;
   expect(menu.getAttribute('role')).toBe('menu');
-  expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['group-new', 'chatgpt-change', 'chatgpt-unlink', 'color', 'secrets-shield', 'remove']);
+  expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['chat-new', 'group-new', 'chatgpt-change', 'chatgpt-unlink', 'color', 'secrets-shield', 'remove']);
   expect(menuItem(w, 'remove').classList.contains('is-danger')).toBe(true);
-  expect(w.document.activeElement).toBe(menuItem(w, 'group-new'));
+  expect(w.document.activeElement).toBe(menuItem(w, 'chat-new'));
   // Keyboard: Down and Up move, Right opens the color submenu on the current choice, Left comes back.
+  menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  expect(w.document.activeElement).toBe(menuItem(w, 'group-new'));
   menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
   expect(w.document.activeElement).toBe(menuItem(w, 'chatgpt-change'));
   menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
@@ -487,10 +489,15 @@ it('offers a new chat beside a project\'s menu, and its color as a submenu and r
   expect(menuItem(w, 'color')).not.toBeNull();
   w.document.body.dispatchEvent(new w.Event('pointerdown', { bubbles: true }));
   expect(w.document.querySelector('.row-menu')).toBeNull();
-  // New chat in this project: the row's own button, no longer a menu item.
-  expect(projectMenu(w, project.id) && menuItem(w, 'new-chat')).toBeNull();
-  w.document.body.dispatchEvent(new w.Event('pointerdown', { bubbles: true }));
-  (w.document.querySelector(`.project-heading > [data-new-project="${project.id}"]`) as HTMLButtonElement).click(); await settle();
+  // New chat in this project: the row's + button, and the first item of its menu too (#1919).
+  const create = w.document.querySelector(`.project-heading > [data-new-project="${project.id}"]`) as HTMLButtonElement;
+  expect(create.querySelector('.ph-plus')).not.toBeNull();
+  expect(create.getAttribute('aria-label')).toBe('New chat in this project');
+  create.click(); await settle();
+  expect((w.document.getElementById('chatInput') as HTMLTextAreaElement).placeholder).toBe('Message in Workspace…');
+  (w.document.getElementById('newChat') as HTMLButtonElement).click(); await settle();
+  expect((w.document.getElementById('chatInput') as HTMLTextAreaElement).placeholder).not.toBe('Message in Workspace…');
+  projectMenu(w, project.id); menuItem(w, 'chat-new').click(); await settle();
   expect((w.document.getElementById('chatInput') as HTMLTextAreaElement).placeholder).toBe('Message in Workspace…');
 });
 
@@ -956,7 +963,7 @@ it("marks every New response seen from the header, or one project's from its men
   const refresh = async () => { (w.document.getElementById('chatRefresh') as HTMLButtonElement).click(); await settle(); };
   expect(header().hidden).toBe(true);
   projectMenu(w, project.id);
-  expect(actions()).toEqual(['group-new', 'chatgpt-change', 'chatgpt-unlink', 'color', 'secrets-shield', 'remove']);
+  expect(actions()).toEqual(['chat-new', 'group-new', 'chatgpt-change', 'chatgpt-unlink', 'color', 'secrets-shield', 'remove']);
   w.document.querySelector<HTMLElement>('.row-menu')!.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 
   // p1, p2 and u1 finish in the background; p3 is still running.
@@ -970,13 +977,13 @@ it("marks every New response seen from the header, or one project's from its men
   expect(header().hidden).toBe(false);
 
   projectMenu(w, project.id);
-  expect(actions()).toEqual(['group-new', 'chatgpt-change', 'chatgpt-unlink', 'mark-seen', 'color', 'secrets-shield', 'remove']);
+  expect(actions()).toEqual(['chat-new', 'group-new', 'chatgpt-change', 'chatgpt-unlink', 'mark-seen', 'color', 'secrets-shield', 'remove']);
   menuItem(w, 'mark-seen').click();
   await settle();
   expect(unseen()).toEqual(['u1']);
   expect(row('p3').querySelector('.session-status.is-active')).not.toBeNull();
   projectMenu(w, project.id);
-  expect(actions()).toEqual(['group-new', 'chatgpt-change', 'chatgpt-unlink', 'color', 'secrets-shield', 'remove']);
+  expect(actions()).toEqual(['chat-new', 'group-new', 'chatgpt-change', 'chatgpt-unlink', 'color', 'secrets-shield', 'remove']);
   w.document.querySelector<HTMLElement>('.row-menu')!.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 
   header().focus();
@@ -1950,4 +1957,30 @@ describe('an answer while ChatGPT writes it', () => {
     expect(blocks(w).map(block => block.textContent)).toEqual(['Alpha.', 'Beta']);
     expect(fading(w)).toEqual([]);
   });
+});
+
+it('heads the chats list and each project list by date, with pinned chats above and no empty sections (#1919)', async () => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee1', name: 'Dated', path: '/dated', createdAt: 1 };
+  const now = Date.now(), day = 86_400_000;
+  const chat = (id: string, age: number, projectId?: string): SessionSummary => ({ ...summary([]), id, conversationId: `chat-${id}`, updatedAt: now - age, ...(projectId ? { projectId } : {}) });
+  const sessions = [chat('today-a', 0), chat('today-b', 60_000), chat('yesterday', day + 1), chat('old', 400 * day), chat('in-project', day + 1, project.id)];
+  const { w } = await boot([], false, [], [project], { sessions });
+  const list = w.document.getElementById('chatList')!;
+  const headings = (root: Element) => [...root.querySelectorAll<HTMLElement>('.chat-date-section')].map(node => node.textContent);
+  const order = () => [...list.children].map(node => (node as HTMLElement).dataset.id ?? `# ${node.textContent}`);
+  const year = String(new Date(now - 400 * day).getFullYear());
+  expect(order()).toEqual(['# Today', 'today-a', 'today-b', '# Yesterday', 'yesterday', `# ${year}`, 'old']);
+  for (const node of list.querySelectorAll('.chat-date-section')) {
+    expect(node.getAttribute('role')).toBe('heading');
+    expect(node.querySelector('.ico, button')).toBeNull();
+  }
+  // Each project list has its own.
+  const group = w.document.querySelector(`.project-group[data-project-id="${project.id}"]`)!;
+  (group.querySelector('summary') as HTMLElement).click(); await settle();
+  expect(headings(group)).toEqual(['Yesterday']);
+  // A pinned chat leads without a heading, and its section goes when it held nothing else.
+  const row = (id: string) => w.document.querySelector<HTMLElement>(`#chatList [data-id="${id}"]`)!;
+  (row('yesterday').querySelector('[data-row-menu]') as HTMLButtonElement).click();
+  menuItem(w, 'pin').click(); await settle();
+  expect(order()).toEqual(['yesterday', '# Today', 'today-a', 'today-b', `# ${year}`, 'old']);
 });
