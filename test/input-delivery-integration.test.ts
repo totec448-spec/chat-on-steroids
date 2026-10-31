@@ -237,6 +237,40 @@ it('lists a queued message as open but not as being sent until a browser claims 
 
 // CodeRabbit on #1901: the extension's update decision and its delivery ran side by side, so a claim
 // could start while the folder was being replaced. The app, which holds every claim, closes that gap.
+it('says when the extension updates past answering pages after its long wait (2026-10-31)', async () => {
+  const prepare = vi.fn(() => ({ build: 'bbbbbbbbbbbb', ready: true }));
+  extensionPath.prepare = prepare;
+  const logged = vi.spyOn(logger, 'logInfo');
+  // An hour back, so the 20 s pause a ready update starts has ended for the tests after this one.
+  const back = Date.now() - 60 * 60_000; const clock = vi.spyOn(Date, 'now').mockImplementation(() => back);
+  try {
+    expect((await post('/extension/update', { pastBusyChatsMs: 31 * 60_000 })).body).toMatchObject({ ready: true, build: 'bbbbbbbbbbbb' });
+    expect(logged.mock.calls.map(([line]) => String(line)).filter(line => line.includes('updates although a ChatGPT tab is still answering'))).toEqual([
+      'bridge: the extension updates although a ChatGPT tab is still answering: it waited 31 minutes for every page to be idle, and no tool call runs and nothing is being sent now'
+    ]);
+    // An ordinary update says nothing of the kind; a malformed value is ignored.
+    logged.mockClear();
+    await post('/extension/update', {});
+    await post('/extension/update', { pastBusyChatsMs: 'long' });
+    expect(logged.mock.calls.some(([line]) => String(line).includes('still answering'))).toBe(false);
+    // Said only when the update really goes ahead (CodeRabbit on #1961).
+    extensionPath.prepare = () => ({ build: 'bbbbbbbbbbbb', ready: false });
+    await post('/extension/update', { pastBusyChatsMs: 31 * 60_000 });
+    expect(logged.mock.calls.some(([line]) => String(line).includes('still answering'))).toBe(false);
+    // A tool call that started after the extension's last status holds it at the last moment.
+    extensionPath.prepare = prepare;
+    const callContext = await import('../src/main/mcp/call-context.js');
+    let finish!: () => void;
+    const call = callContext.trackInFlight({ tool: 'exec_command', caller: { transportKey: null, requestId: null, conversationId: null },
+      evidence: callContext.emptyEvidence() } as never, () => new Promise<void>(resolve => { finish = resolve; }));
+    expect((await post('/extension/update', { pastBusyChatsMs: 31 * 60_000 })).body).toEqual({ ready: false, hold: 'app-busy' });
+    // Said once, not on every pass the extension asks again (CodeRabbit on #1961).
+    await post('/extension/update', { pastBusyChatsMs: 31 * 60_000 });
+    expect(logged.mock.calls.filter(([line]) => String(line).includes('the extension update waits: a tool call is running in this app'))).toHaveLength(1);
+    finish(); await call;
+  } finally { clock.mockRestore(); logged.mockRestore(); extensionPath.prepare = () => null; }
+});
+
 it('refuses the extension update while a message is being sent, and new claims while the extension reloads', async () => {
   let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
   const prepare = vi.fn(() => ({ build: 'bbbbbbbbbbbb', ready: true }));
