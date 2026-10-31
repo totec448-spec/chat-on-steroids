@@ -69,6 +69,39 @@ describe('explicit bounded browser SSE capture',()=>{
     expect((await f.call({})).entries).toHaveLength(0);
     await expect(f.call({requestId:'iframe-session:iframe-private'})).rejects.toThrow(/REQUEST_EXPIRED/);
   });
+  it('reseeds the top-level origin when navigation happens between preflight and debugger attach',async()=>{
+    const options={url:'https://safe.invalid/',freshAttach:true};
+    const f=await fixture(options);
+    const attachStarted=deferred<void>(),finishAttach=deferred<void>();
+    let currentUrl='https://safe.invalid/';
+    f.chrome.tabs.get.mockImplementation(async()=>({id:17,url:currentUrl,status:'complete'}));
+    f.chrome.debugger.attach.mockImplementation(async()=>{
+      attachStarted.resolve();
+      await finishAttach.promise;
+    });
+    const attaching=f.control.execute(f.command('browser_tabs',{action:'attach'}));
+    await attachStarted.promise;
+    // The navigation occurs while Chrome has not yet attached the debugger, so
+    // this controller cannot receive Page.frameNavigated for the ChatGPT page.
+    currentUrl='https://chatgpt.com/c/fixture';
+    options.url=currentUrl;
+    finishAttach.resolve();
+    expect((await attaching).value).toMatchObject({attached:true,url:'https://chatgpt.com/c/fixture'});
+    await f.event('Target.attachedToTarget',{
+      sessionId:'late-chatgpt-iframe',targetInfo:{type:'iframe',url:'https://embedded.invalid/frame'}
+    });
+    await f.control.event({tabId:17,sessionId:'late-chatgpt-iframe'},'Network.requestWillBeSent',{
+      requestId:'late-private',timestamp:1,documentURL:'https://embedded.invalid/frame',
+      request:{url:'https://api.embedded.invalid/private',method:'POST',headers:{'X-Fixture':'synthetic'},postData:'fixture-private'}
+    });
+    await f.control.event({tabId:17,sessionId:'late-chatgpt-iframe'},'Network.responseReceived',{
+      requestId:'late-private',response:{status:200,mimeType:'text/event-stream'}
+    });
+    currentUrl='https://safe-after.invalid/';
+    await f.event('Page.frameNavigated',{frame:{id:'top-frame',url:currentUrl}});
+    expect((await f.call({})).entries).toHaveLength(0);
+    await expect(f.call({requestId:'late-chatgpt-iframe:late-private'})).rejects.toThrow(/REQUEST_EXPIRED/);
+  });
   it('rejects response bytes from ChatGPT tabs even when the tab is already owned',async()=>{
     const f=await fixture({url:'https://chatgpt.com/c/fixture',protected:true});
     const requestId=await f.request();
