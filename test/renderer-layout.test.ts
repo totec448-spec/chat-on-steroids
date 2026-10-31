@@ -248,7 +248,7 @@ function rule(selector: string): string {
 
 describe('the session card header', () => {
   it('indents rendered project tasks once and gives worker children their additional depth', () => {
-    expect(rule('.project-group > .sess, .project-group > .worker-group')).toContain('margin-inline-start: 24px');
+    expect(rule('.project-group > .sess, .project-group > .worker-group, .project-group > .chat-date-section')).toContain('margin-inline-start: 24px');
     expect(rule('.worker-group')).toContain('padding-left: 16px');
     expect(css).not.toContain('.project-group .session-row');
   });

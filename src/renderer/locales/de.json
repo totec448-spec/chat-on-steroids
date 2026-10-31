@@ -3776,5 +3776,17 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Nicht gesendet: Der Browser-Tab für diesen neuen Chat wurde geschlossen oder ging verloren. Prüfe die Nachricht und sende sie erneut.",
   "Recovery stopped": "Wiederherstellung beendet",
   "Stopped after {0} attempts": "Nach {0} Versuchen gestoppt",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Der Browser hat den ausstehenden Schritt auch nach {0} automatischen Neuladungen nicht übernommen. Die ursprüngliche Eingabe in der Warteschlange oder der Goal-Auftrag bleibt gespeichert. CoS lädt diesen Chat für diesen Schritt nicht erneut automatisch; öffne den Chat und fahre manuell fort."
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Der Browser hat den ausstehenden Schritt auch nach {0} automatischen Neuladungen nicht übernommen. Die ursprüngliche Eingabe in der Warteschlange oder der Goal-Auftrag bleibt gespeichert. CoS lädt diesen Chat für diesen Schritt nicht erneut automatisch; öffne den Chat und fahre manuell fort.",
+  "Drag a chat here, or move it from its menu.": "Zieh einen Chat hierher oder verschieb ihn über sein Menü.",
+  "Move to project": "In Projekt verschieben",
+  "Move this chat to a project; its commands then run in that project's folder": "Diesen Chat in ein Projekt verschieben; seine Befehle laufen dann im Ordner dieses Projekts",
+  "Moved to {0}": "Nach {0} verschoben",
+  "Moved out of its project": "Aus seinem Projekt genommen",
+  "ChatGPT keeps it where it was.": "ChatGPT lässt ihn, wo er war.",
+  "Undo": "Rückgängig",
+  "Move undone": "Verschieben rückgängig gemacht",
+  "Today": "Heute",
+  "Yesterday": "Gestern",
+  "Previous 7 days": "Letzte 7 Tage",
+  "Previous 30 days": "Letzte 30 Tage"
 }

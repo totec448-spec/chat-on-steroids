@@ -3857,5 +3857,17 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "No enviado: la pestaña del navegador de este chat nuevo se cerró o se perdió. Revisa el mensaje y vuelve a enviarlo.",
   "Recovery stopped": "Recuperación detenida",
   "Stopped after {0} attempts": "Detenido después de {0} intentos",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "El navegador no recogió el paso pendiente tras {0} recargas automáticas. La entrada original de la cola o la tarea de Objetivo sigue guardada. CoS no volverá a recargar este chat automáticamente para este paso; ábrelo y continúa manualmente."
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "El navegador no recogió el paso pendiente tras {0} recargas automáticas. La entrada original de la cola o la tarea de Objetivo sigue guardada. CoS no volverá a recargar este chat automáticamente para este paso; ábrelo y continúa manualmente.",
+  "Drag a chat here, or move it from its menu.": "Arrastra un chat aquí o muévelo desde su menú.",
+  "Move to project": "Mover a proyecto",
+  "Move this chat to a project; its commands then run in that project's folder": "Mueve este chat a un proyecto; sus comandos se ejecutarán en la carpeta de ese proyecto",
+  "Moved to {0}": "Movido a {0}",
+  "Moved out of its project": "Sacado de su proyecto",
+  "ChatGPT keeps it where it was.": "ChatGPT lo deja donde estaba.",
+  "Undo": "Deshacer",
+  "Move undone": "Movimiento deshecho",
+  "Today": "Hoy",
+  "Yesterday": "Ayer",
+  "Previous 7 days": "Últimos 7 días",
+  "Previous 30 days": "Últimos 30 días"
 }

@@ -3695,5 +3695,17 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Chưa gửi: thẻ trình duyệt của cuộc trò chuyện mới này đã bị đóng hoặc bị mất. Hãy kiểm tra tin nhắn rồi gửi lại.",
   "Recovery stopped": "Đã dừng khôi phục",
   "Stopped after {0} attempts": "Đã dừng sau {0} lần thử",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Trình duyệt không nhận được bước đang chờ sau {0} lần tự tải lại. Mục nhập gốc trong hàng đợi hoặc nghĩa vụ Goal vẫn được lưu. CoS sẽ không tự tải lại cuộc trò chuyện này cho bước đó nữa; hãy mở cuộc trò chuyện và tiếp tục thủ công."
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Trình duyệt không nhận được bước đang chờ sau {0} lần tự tải lại. Mục nhập gốc trong hàng đợi hoặc nghĩa vụ Goal vẫn được lưu. CoS sẽ không tự tải lại cuộc trò chuyện này cho bước đó nữa; hãy mở cuộc trò chuyện và tiếp tục thủ công.",
+  "Drag a chat here, or move it from its menu.": "Kéo một cuộc trò chuyện vào đây, hoặc chuyển nó từ menu của nó.",
+  "Move to project": "Chuyển vào dự án",
+  "Move this chat to a project; its commands then run in that project's folder": "Chuyển cuộc trò chuyện này vào một dự án; các lệnh của nó sẽ chạy trong thư mục của dự án đó",
+  "Moved to {0}": "Đã chuyển vào {0}",
+  "Moved out of its project": "Đã đưa ra khỏi dự án",
+  "ChatGPT keeps it where it was.": "ChatGPT vẫn giữ nó ở chỗ cũ.",
+  "Undo": "Hoàn tác",
+  "Move undone": "Đã hoàn tác việc chuyển",
+  "Today": "Hôm nay",
+  "Yesterday": "Hôm qua",
+  "Previous 7 days": "7 ngày qua",
+  "Previous 30 days": "30 ngày qua"
 }

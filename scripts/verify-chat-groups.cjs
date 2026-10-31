@@ -112,7 +112,7 @@ app.whenReady().then(async () => {
     // The project's own list pages as before: five chats, then "Show more" for the rest.
     assert.deepEqual(await js(loose), ['task-2','task-3','task-4','task-5','task-6']);
     assert.equal(await js(`!!document.querySelector('[data-project-id="demo-project"] > .project-show-more')`), true);
-    assert.equal(await js(`document.querySelector('[data-group-id="g-italian"] .chat-group-empty')?.textContent`), 'Move a chat here from its menu.');
+    assert.equal(await js(`document.querySelector('[data-group-id="g-italian"] .chat-group-empty')?.textContent`), 'Drag a chat here, or move it from its menu.');
     // The other project's chat is untouched, and a group never shows outside its project.
     assert.equal(await js(`document.querySelectorAll('[data-project-id="second-project"] .chat-group').length`), 0);
     // A group's chats sit one step further in than the project's own chats.

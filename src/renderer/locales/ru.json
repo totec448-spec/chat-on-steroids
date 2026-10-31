@@ -3938,5 +3938,17 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Не отправлено: вкладка браузера для этого нового чата закрыта или потеряна. Проверь сообщение и отправь заново.",
   "Recovery stopped": "Восстановление остановлено",
   "Stopped after {0} attempts": "Остановлено после {0} попыток",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Браузер не получил ожидающий шаг после {0} автоматических перезагрузок. Исходный ввод в очереди или задача «Цель» остаётся сохранённой. CoS больше не будет автоматически перезагружать этот чат для данного шага; откройте чат и продолжите вручную."
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Браузер не получил ожидающий шаг после {0} автоматических перезагрузок. Исходный ввод в очереди или задача «Цель» остаётся сохранённой. CoS больше не будет автоматически перезагружать этот чат для данного шага; откройте чат и продолжите вручную.",
+  "Drag a chat here, or move it from its menu.": "Перетащите сюда чат или переместите его через меню чата.",
+  "Move to project": "Переместить в проект",
+  "Move this chat to a project; its commands then run in that project's folder": "Переместить этот чат в проект; его команды будут выполняться в папке этого проекта",
+  "Moved to {0}": "Перемещено в {0}",
+  "Moved out of its project": "Убрано из проекта",
+  "ChatGPT keeps it where it was.": "В ChatGPT чат остаётся там, где был.",
+  "Undo": "Отменить",
+  "Move undone": "Перемещение отменено",
+  "Today": "Сегодня",
+  "Yesterday": "Вчера",
+  "Previous 7 days": "Последние 7 дней",
+  "Previous 30 days": "Последние 30 дней"
 }
