@@ -1885,6 +1885,66 @@ describe('activity feed', () => {
     }
   });
 
+  // #1960 (scuan2, reproduced on v2.1.49): with the built-in browser chosen, a repair for a chat that
+  // ordinary Chrome still holds went only to Chrome, whose claim is refused; the chosen browser never
+  // got it, and the chat sat. The chosen built-in browser takes a repair over, as it does inputs (#1516).
+  it('hands a repair for a chat an unchosen browser holds to the chosen built-in browser', async () => {
+    await pair();
+    const chrome = 'c'.repeat(32), builtIn = 'd'.repeat(32);
+    const before = getConfig().ui.chatBrowser;
+    try {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+      const conversationId = randomUUID();
+      const session = await createSession({ conversationId });
+      const status = (browser: string, host: string, open: string[]) =>
+        request('POST', '/status', { body: { openConversations: open }, browser, host });
+      // The built-in browser is present; Chrome has the chat open.
+      await status(builtIn, 'cos', []);
+      await status(chrome, 'browser', [conversationId]);
+      await compactSession(session.id);
+      const fromChrome = ((await status(chrome, 'browser', [conversationId])).body.repairs ?? [])
+        .find((row: { conversationId: string }) => row.conversationId === conversationId);
+      // Chrome, not chosen, is handed no token it could not claim (CodeRabbit on #1963).
+      expect(fromChrome).toBeUndefined();
+      const fromBuiltIn = ((await status(builtIn, 'cos', [])).body.repairs ?? [])
+        .find((row: { conversationId: string }) => row.conversationId === conversationId);
+      expect(fromBuiltIn).toMatchObject({ reason: 'compaction' });
+      expect((await request('POST', '/repairs/claim', { body: { token: fromBuiltIn.token }, browser: builtIn, host: 'cos' })).body.allowed).toBe(true);
+    } finally {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: before } });
+    }
+  });
+
+  // CodeRabbit on #1963: with "browser only", the chosen built-in browser may not open the chat Chrome
+  // holds. It is not handed the repair (which it would skip unclaimed, spending the no-page budget on an
+  // open chat); the repair waits, said once, and Chrome's refused claim is logged.
+  it('keeps a repair waiting rather than spending it when browser only keeps the chosen browser from opening the chat', async () => {
+    await pair();
+    const chrome = 'c'.repeat(32), builtIn = 'd'.repeat(32);
+    const before = getConfig().ui;
+    try {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos', browserOnly: true } });
+      const conversationId = randomUUID();
+      const session = await createSession({ conversationId });
+      const status = (browser: string, host: string, open: string[]) =>
+        request('POST', '/status', { body: { openConversations: open }, browser, host });
+      await status(builtIn, 'cos', []);
+      await status(chrome, 'browser', [conversationId]);
+      await compactSession(session.id);
+      for (let pass = 0; pass < 15; pass++) {
+        expect(((await status(builtIn, 'cos', [])).body.repairs ?? []).some((row: { conversationId: string }) => row.conversationId === conversationId)).toBe(false);
+        await status(chrome, 'browser', [conversationId]);
+      }
+      const waits = getLog().filter(entry => entry.message.includes(`repair for ${conversationId} waits: another browser holds this chat, and "browser only"`));
+      expect(waits).toHaveLength(1);
+      // Never declared pageless: the chat is open in Chrome. Once browser only is off, the chosen browser takes it.
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, browserOnly: false } });
+      expect(((await status(builtIn, 'cos', [])).body.repairs ?? []).find((row: { conversationId: string }) => row.conversationId === conversationId)).toMatchObject({ reason: 'compaction' });
+    } finally {
+      await saveConfig({ ...getConfig(), ui: before });
+    }
+  });
+
   it('gives new work only to the built-in browser while it is the chosen one and present (#1516)', async () => {
     // 2026-10-15: with the built-in browser chosen and Chrome with the extension still open, every
     // new chat opened a tab in Chrome. Chrome keeps recording what the person opens there.
