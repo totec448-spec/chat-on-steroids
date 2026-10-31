@@ -68,12 +68,13 @@ export function rotationFenceTurn(conversationId: string): string | null {
   return fences.get(conversationId)?.turnId ?? null;
 }
 
-export function clearRotationFence(conversationId: string): void {
+/** Resolves once the cleared state is on disk (false when it could not be saved; true when there was none). */
+export function clearRotationFence(conversationId: string): Promise<boolean> {
   const fence = fences.get(conversationId);
-  if (!fence) return;
+  if (!fence) return Promise.resolve(true);
   clearTimeout(fence.timer);
   fences.delete(conversationId);
-  void persist();
+  return persist();
 }
 
 export function resetRotationFencesForTests(): void {

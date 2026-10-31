@@ -46,3 +46,14 @@ it('never keeps a fence longer than a Stop\'s budget, and ignores damaged rows',
   expect(fence.rotationFenced('chat-c')).toBe(true);
   expect(fence.rotationFenced('chat-d')).toBe(false);
 });
+
+it('resolves a cleared fence once the clearing is saved, and says when it could not be', async () => {
+  expect(await fence.clearRotationFence('no-fence')).toBe(true);
+  await fence.armRotationFence('chat-e', 'turn-e');
+  expect(await fence.clearRotationFence('chat-e')).toBe(true);
+  expect(durable.rows).toEqual([]);
+  await fence.armRotationFence('chat-f', 'turn-f');
+  durable.fail = true;
+  expect(await fence.clearRotationFence('chat-f')).toBe(false);
+  expect(fence.rotationFenced('chat-f')).toBe(false);
+});

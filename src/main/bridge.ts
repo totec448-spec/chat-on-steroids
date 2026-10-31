@@ -2311,8 +2311,11 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
     // The person's Stop takes over a pending fresh-turn Stop of the same turn: no automatic continue
     // may follow the stop they asked for (CodeRabbit on #1954).
     if (rotationFenceTurn(id) === expectedTurnId) {
-      clearRotationFence(id);
+      // On disk before their Stop goes out, so a restart cannot bring the fence back and continue
+      // after it (CodeRabbit on #1954). Their Stop goes out even when the disk refuses: it is theirs.
+      const cleared = await clearRotationFence(id);
       logInfo(`turn rotation: ${id} — the person stopped turn ${expectedTurnId}; the fresh turn the app was starting is cancelled`);
+      if (!cleared) logWarn(`turn rotation: ${id} — the cancelled fresh turn could not be saved; a restart within ${Math.round(FENCE_MS / 1000)} s could still continue after the person's Stop`);
     }
     await setSessionAutomation(sessionId, 'off');
     await assertCurrent();
@@ -6624,7 +6627,7 @@ async function finalizeCommand(command: Command, receipt: CommandReceipt): Promi
     // the fence until its stopped end is processed, which files the continue.
     if (receipt.outcome === 'terminal-failure' && command.spec.type === 'stop' && command.spec.rotation &&
         rotationFenceTurn(command.spec.conversationId) === command.spec.turnId) {
-      clearRotationFence(command.spec.conversationId);
+      void clearRotationFence(command.spec.conversationId);
       logInfo(`turn rotation: ${command.spec.conversationId} — the page could not stop turn ${command.spec.turnId}; its calls run again and no fresh turn follows`);
     }
     changed();
@@ -8920,7 +8923,7 @@ async function noteRecoveryObservations(
   // calls may run again, and the continue goes as an ordinary message.
   const fencedTurn = rotationFenceTurn(conversationId);
   if (lastEnd === 'stopped' && sessionId && fencedTurn && ended?.turnId === fencedTurn) {
-    clearRotationFence(conversationId);
+    void clearRotationFence(conversationId);
     void fileRotationContinueAfterStop(sessionId, fencedTurn).then(row => {
       logInfo(row ? `turn rotation: ${conversationId} — turn ${fencedTurn} stopped; continuing in a fresh turn`
         : `turn rotation: ${conversationId} — turn ${fencedTurn} stopped; a message was already waiting, so it goes instead of the continue`);
@@ -10388,14 +10391,14 @@ function noteCallAttribution(
         const timer = setTimeout(() => {
           void fenceSaved.then(saved => {
             if (!saved) {
-              clearRotationFence(conversationId);
+              void clearRotationFence(conversationId);
               logWarn(`turn rotation: ${conversationId} — not stopping turn ${sourceTurnId}: its fence could not be saved, so a restart could lose the continue`);
               return;
             }
             if (rotationFenceTurn(conversationId) !== sourceTurnId) return;
             return stopSessionTurn(sessionId, sourceTurnId, { rotation: true });
           }).catch(error => {
-            clearRotationFence(conversationId);
+            void clearRotationFence(conversationId);
             logWarn(`turn rotation: ${conversationId} — could not stop turn ${sourceTurnId}: ${String(error)}`);
           });
         }, ROTATION_STOP_DELAY_MS);
