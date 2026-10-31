@@ -3776,6 +3776,11 @@ input.num:disabled { opacity: .5; cursor: default; }
 /* The chevron's glyph sits 5px inside its box; its ink starts on the rows' text edge. */
 .phone-push-advanced > summary .sum-chev { margin-left: -5px; }
 .phone-push-advanced > .setting:first-of-type { border-top: 1px solid var(--line); }
+/* ntfy's own rows and the Telegram setup (#1934) are groups among the card's rows: the same lines
+   between rows, on the same edges. */
+.phone-push-group > .setting:first-child, .phone-push-group + .setting, .phone-push-group + .phone-push-group { border-top: 1px solid var(--line); }
+.telegram-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 8px; max-width: 100%; }
+.telegram-setup-actions { display: flex; justify-content: flex-end; padding: 0 2px 13px; }
 
 /* Inside a settings row the switch is one of several controls, not the thing the
    row pushes to the far end. */

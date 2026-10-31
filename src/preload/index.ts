@@ -175,6 +175,9 @@ const api = {
     // `warnings`: what went wrong after the settings were written, each a sentence of its own.
     call<{ state: AppState; changedCount: number; keyCount: number; warnings?: string[] }>('settings:importApply', { token, includeKeys, ...(passphrase !== undefined ? { passphrase } : {}) }),
   testPhonePush: () => call<void>('phonePush:test', undefined),
+  connectTelegram: (token: string) => call<AppState>('telegram:connect', { token }),
+  disconnectTelegram: () => call<AppState>('telegram:disconnect', undefined),
+  testTelegram: () => call<void>('telegram:test', undefined),
   setPhonePushToken: (token: string) => call<AppState>('phonePush:token', { token }),
   markWhatsNewSeen: () => call<void>('ui:whatsNewSeen'),
   /** #1833: the first-run tour was taken, skipped or declined. */

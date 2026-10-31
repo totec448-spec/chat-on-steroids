@@ -917,6 +917,8 @@ export interface AppState {
   hasCustomProviderKey: boolean;
   /** An ntfy access token is saved (never the token itself). */
   hasPhonePushToken?: boolean;
+  /** The Telegram bot (#1934): linked or not, its @name and the account; never the token. */
+  telegram?: { state: 'off' | 'pairing' | 'linked' | 'conflict' | 'token-refused'; botName: string | null; userName: string | null; code?: string; codeUntil?: number };
   /** Resolved path of the tunnel binary we would run, or null if we cannot find one. */
   resolvedBinary: string | null;
   /** Version of the tunnel-client copy shipped inside the app, for diagnostics. */

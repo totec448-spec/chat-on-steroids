@@ -34,6 +34,8 @@ import { unifiedExecManager } from './codex/manager.js';
 import { workspaceTerminalsExited } from './workspace-terminal.js';
 import { getSecret, initSecretsPath, keychainReadPending } from './secrets.js';
 import { installPhonePush, pushToPhone } from './phone-push.js';
+import { startTelegram, stopTelegram, telegramDestination } from './telegram-app.js';
+import { approvalCardView, requestApprovalAnswer } from './approval-wait.js';
 import { createSoundReadiness, installSoundCues, soundCue, soundQuietHours } from './sound-cues.js';
 import { DEFAULT_PHONE_PUSH } from '../shared/phone-push.js';
 import { mainText, mainTextTranslations, onMainTextsChange, restoreMainTextTranslations } from './main-texts.js';
@@ -99,6 +101,7 @@ import {
   GOAL_HELPER_SIZE_STATE,
   restoreGoalHelperSize,
   goalSwitchEnabledFor,
+  goalSwitchFor,
   restoreGoalObjectives,
   restoreGoalOutcomes,
   restoreGoalReplies,
@@ -292,8 +295,13 @@ const chatNoticeAt = new Map<string, number>();
 /** A chat that waits for the person, for the phone: its own rules decide whether it goes out. */
 const phoneNeedsYou = (sessionId: string): void => {
   soundCue('needs-you', sessionId);
-  void getSession(sessionId).catch(() => null).then(summary => pushToPhone({ kind: 'needs-you', sessionId,
-    chatTitle: summary?.title || 'Chat On Steroids', conversationId: summary?.conversationId ?? null }));
+  void getSession(sessionId).catch(() => null).then(summary => {
+    // An approval card that waits, unanswered: Telegram offers Deny under the message (#1934).
+    const card = summary?.conversationId ? approvalCardView(summary.conversationId) : null;
+    return pushToPhone({ kind: 'needs-you', sessionId,
+      chatTitle: summary?.title || 'Chat On Steroids', conversationId: summary?.conversationId ?? null,
+      ...(card && !card.answer ? { approval: { sessionId, cardId: card.id } } : {}) });
+  });
 };
 
 function showWindow(): void {
@@ -538,8 +546,29 @@ void app.whenReady().then(async () => {
       const reply = await net.fetch(url, { method: 'POST', body, headers, signal: AbortSignal.timeout(10_000) });
       return { ok: reply.ok, status: reply.status };
     },
-    log: logInfo
+    log: logInfo,
+    telegram: telegramDestination
   });
+  // A Telegram bot of the person's own, as a second phone destination (#1934): outgoing requests only.
+  void startTelegram({
+    fetch: (url, init) => net.fetch(url, init),
+    log: logInfo,
+    mainText,
+    details: () => ({ ...DEFAULT_PHONE_PUSH, ...getConfig().ui.phonePush }).includeDetails,
+    chats: async () => (await listSessions()).filter(chat => chat.origin?.kind !== 'helper').map(chat => {
+      const goal = chat.conversationId ? goalSwitchFor(chat.conversationId) : null;
+      const card = chat.conversationId ? approvalCardView(chat.conversationId) : null;
+      return { title: chat.title, working: !!chat.activeTurnId, approval: !!card && !card.answer,
+        automation: goal?.enabled ? (goal.mode === 'loop' ? 'Loop' as const : 'Goal' as const) : null };
+    }),
+    deny: async (sessionId, cardId) => {
+      const conversationId = (await getSession(sessionId).catch(() => null))?.conversationId;
+      if (!conversationId) return 'already';
+      const answer = requestApprovalAnswer(conversationId, cardId, 'deny');
+      if (answer.ok) { logInfo(`approval card: the user chose deny in Telegram for ${conversationId}`); return 'denied'; }
+      return answer.error === 'no_card' || answer.error === 'card_changed' || answer.error === 'answer_pending' ? 'already' : 'failed';
+    }
+  }).catch(error => logWarn(`telegram: could not start: ${error instanceof Error ? error.message : String(error)}`));
   // Codex's turn-completion notifications: a finished answer in a background window.
   const turnNotifier = createTurnNotifier({
     getSession,
@@ -814,6 +843,8 @@ app.on('before-quit', () => {
   windowActivation.disable();
   usageWarmup.abort();
   void stopAgentRuntimeGc();
+  // Its long poll would otherwise hold a request open while the app goes.
+  stopTelegram();
 });
 
 app.on('window-all-closed', () => {

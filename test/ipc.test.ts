@@ -3206,7 +3206,7 @@ describe('settings backup over IPC', () => {
 });
 
 describe('phone notifications over IPC', () => {
-  const phone = (over: Record<string, unknown> = {}) => ({ enabled: true, server: 'https://ntfy.sh/', topic: 'cos-fixturetopic234567', needsYou: true, failures: true,
+  const phone = (over: Record<string, unknown> = {}) => ({ enabled: true, ntfy: true, server: 'https://ntfy.sh/', topic: 'cos-fixturetopic234567', needsYou: true, failures: true,
     finishedAfterMinutes: 5, onlyWhenAway: true, quietHours: null, includeDetails: false, ...over });
   beforeAll(() => {
     // An earlier test registers the handlers against a destroyed window; these use the live one.
@@ -3225,6 +3225,22 @@ describe('phone notifications over IPC', () => {
     // Switched off, a half-filled form still saves.
     expect((await save({ ...now, ui: { ...now.ui, phonePush: phone({ enabled: false, topic: '' }) } }, now)).ok).toBe(true);
     expect(getConfig().ui.phonePush).toMatchObject({ enabled: false, topic: '' });
+  });
+
+  // #1934: with ntfy off (Telegram only), its topic and server are not asked for, and an older form
+  // without the switch leaves it as it is.
+  it('needs no ntfy topic with ntfy off, and keeps the switch through a form that has none', async () => {
+    const base = getConfig();
+    const first = await save({ ...base, ui: { ...base.ui, phonePush: phone({ ntfy: false, topic: '', server: '' }) } }, base);
+    expect(first.ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ enabled: true, ntfy: false, topic: '' });
+    const now = getConfig();
+    const { ntfy: _ntfy, ...older } = phone({ ntfy: false, topic: '', server: '', includeDetails: true });
+    expect((await save({ ...now, ui: { ...now.ui, phonePush: older as never } }, now)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ ntfy: false, includeDetails: true });
+    const later = getConfig();
+    expect(await save({ ...later, ui: { ...later.ui, phonePush: phone({ ntfy: true, topic: '' }) } }, later))
+      .toEqual({ ok: false, error: 'Choose a topic of letters, digits, - and _ (up to 64).' });
   });
 
   it('checks the settings as they will be saved, not the stale form, and logs a refusal', async () => {

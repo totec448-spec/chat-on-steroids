@@ -107,7 +107,23 @@ export const MAIN_TEXTS = [
   // A chat shared as a web page: the page's own labels ('You' is above).
   'New chat',
   'hidden',
-  'Shared from Chat On Steroids'
+  'Shared from Chat On Steroids',
+  // The Telegram bot's own messages (#1934): telegram.ts and telegram-status.ts.
+  "Connected to Chat On Steroids. Its notifications arrive here.",
+  "This code is not valid any more. Get a new one in Chat On Steroids: Settings → Phone notifications → Telegram.",
+  "Chat On Steroids sends its notifications here. /status shows what your chats are doing.",
+  "I know /status and /help.",
+  "Deny",
+  "Denied from Telegram at {0}.",
+  "Already answered.",
+  "Could not deny it. Open the chat in Chat On Steroids.",
+  "Nothing is running and nothing waits for you.",
+  "Working: {0}",
+  "Waiting for your approval: {0}",
+  "waits for your approval",
+  "working",
+  "{0} more",
+  "This is a test from Chat On Steroids. Telegram notifications work."
 ] as const;
 
 export type MainText = typeof MAIN_TEXTS[number];
