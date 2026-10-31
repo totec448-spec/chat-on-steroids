@@ -321,7 +321,18 @@ export async function getSessionProject(sessionId: string): Promise<{ virtual: s
  * helper chats move with it: they follow their main chat and are never moved on their own. A
  * project whose folder is missing is allowed; its row already says so. Returns where it was.
  */
-export async function moveChatToProject(sessionId: string, projectId: string | null): Promise<{ from: string | null; moved: string[] }> {
+const chatMoves = new Map<string, Promise<unknown>>();
+export function moveChatToProject(sessionId: string, projectId: string | null): Promise<{ from: string | null; moved: string[] }> {
+  // One move at a time per chat: each reads the project it really replaces, so its Undo goes back
+  // there, not to where an overlapping move started (CodeRabbit on #1965).
+  const move = (chatMoves.get(sessionId) ?? Promise.resolve()).catch(() => undefined).then(() => moveChatNow(sessionId, projectId));
+  const settled = move.catch(() => undefined);
+  chatMoves.set(sessionId, settled);
+  void settled.then(() => { if (chatMoves.get(sessionId) === settled) chatMoves.delete(sessionId); });
+  return move;
+}
+
+async function moveChatNow(sessionId: string, projectId: string | null): Promise<{ from: string | null; moved: string[] }> {
   const session = await getSession(sessionId);
   if (!session) throw new Error('This chat no longer exists');
   if (session.origin?.kind === 'worker' || session.origin?.kind === 'helper') throw new Error('A sub-agent chat follows its main chat');

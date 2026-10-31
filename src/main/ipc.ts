@@ -52,7 +52,7 @@ import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser } from '.
 import { wakeBrowserUrl } from './browser-startup.js';
 import { registerPluginIpc } from './plugins-ipc.js';
 import { deletePet, importPet, loadPetAsset, petLibraryState, setPetEnabled, setPetFavorite } from './pet-library.js';
-import { assignChatGroup, chatGroupsState, createChatGroup, deleteChatGroup, forgetChatGroupMember, placeMovedChat, renameChatGroup } from './chat-groups.js';
+import { assignChatGroup, chatGroupsState, createChatGroup, deleteChatGroup, forgetChatGroupMember, movedChatGroup, placeMovedChat, renameChatGroup } from './chat-groups.js';
 import { petOverlayControlState, refreshPetOverlayActivities, refreshPetOverlayAppearance, setPetOverlayVisible } from './pet-overlay.js';
 import { confirmedPluginSchemas, pluginRefreshPublications, pluginRefreshStatuses, onPluginRefreshChange, pluginRefreshUnreadable, resetPluginRefreshLedger } from './plugin-refresh.js';
 /**
@@ -1221,7 +1221,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       projectId: z.string().min(1).max(160).nullable(), groupId: groupId.nullable().optional() }).strict().parse(payload);
     const fromGroup = (await chatGroupsState()).members[sessionId] ?? null;
     const { from } = await moveChatToProject(sessionId, projectId);
-    const groups = await placeMovedChat(sessionId, projectId, projectId === null ? null : target ?? (from === projectId ? fromGroup : null));
+    const groups = await placeMovedChat(sessionId, projectId, movedChatGroup(projectId, target, from, fromGroup));
     return { from, fromGroup, groups };
   });
   handle('pets:list', async () => petLibraryState());

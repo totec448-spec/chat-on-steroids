@@ -1961,14 +1961,17 @@ describe('an answer while ChatGPT writes it', () => {
 
 it('heads the chats list and each project list by date, with pinned chats above and no empty sections (#1919)', async () => {
   const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeee1', name: 'Dated', path: '/dated', createdAt: 1 };
-  const now = Date.now(), day = 86_400_000;
-  const chat = (id: string, age: number, projectId?: string): SessionSummary => ({ ...summary([]), id, conversationId: `chat-${id}`, updatedAt: now - age, ...(projectId ? { projectId } : {}) });
-  const sessions = [chat('today-a', 0), chat('today-b', 60_000), chat('yesterday', day + 1), chat('old', 400 * day), chat('in-project', day + 1, project.id)];
+  // Local calendar days at noon, never 24-hour steps: right after midnight, or across a clock change,
+  // "yesterday" is still yesterday. Today's chats are seconds old.
+  const now = Date.now(), today = new Date(now);
+  const daysAgo = (n: number) => new Date(today.getFullYear(), today.getMonth(), today.getDate() - n, 12).getTime();
+  const chat = (id: string, at: number, projectId?: string): SessionSummary => ({ ...summary([]), id, conversationId: `chat-${id}`, updatedAt: at, ...(projectId ? { projectId } : {}) });
+  const sessions = [chat('today-a', now - 1000), chat('today-b', now - 2000), chat('yesterday', daysAgo(1)), chat('old', daysAgo(400)), chat('in-project', daysAgo(1), project.id)];
   const { w } = await boot([], false, [], [project], { sessions });
   const list = w.document.getElementById('chatList')!;
   const headings = (root: Element) => [...root.querySelectorAll<HTMLElement>('.chat-date-section')].map(node => node.textContent);
   const order = () => [...list.children].map(node => (node as HTMLElement).dataset.id ?? `# ${node.textContent}`);
-  const year = String(new Date(now - 400 * day).getFullYear());
+  const year = String(new Date(daysAgo(400)).getFullYear());
   expect(order()).toEqual(['# Today', 'today-a', 'today-b', '# Yesterday', 'yesterday', `# ${year}`, 'old']);
   for (const node of list.querySelectorAll('.chat-date-section')) {
     expect(node.getAttribute('role')).toBe('heading');
