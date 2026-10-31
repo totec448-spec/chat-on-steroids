@@ -254,6 +254,20 @@ it('keeps retrying a failed language write across a preferences-only status', as
   expect(store.appLanguage).toBe('en');
 });
 
+it('keeps the language write\'s error when a later preferences-only write fails too', async () => {
+  const store: Record<string, unknown> = {};
+  const follow = follower(store, { set: async value => { throw new Error('appLanguage' in value ? 'language refused' : 'preferences refused'); } });
+  await follow({ language: 'en' });
+  await follow({ browserPreferences: { overwrite: false, durations: true } });
+  expect(follow.state()).toEqual({ applied: 'en', error: 'language refused' });
+  // With the language saved, a failing preferences write is the error to show.
+  const saved: Record<string, unknown> = {};
+  const other = follower(saved, { set: async value => { if (!('appLanguage' in value)) throw new Error('preferences refused'); Object.assign(saved, value); } });
+  await other({ language: 'en' });
+  await other({ browserPreferences: { overwrite: false, durations: true } });
+  expect(other.state()).toEqual({ applied: 'en', error: 'preferences refused' });
+});
+
 it('keeps a refused write for diagnostics and tries again on the next status', async () => {
   const store: Record<string, unknown> = {};
   let refuse = true;
