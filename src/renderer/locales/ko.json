@@ -3695,5 +3695,15 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "전송되지 않음: 이 새 채팅의 브라우저 탭이 닫혔거나 사라졌습니다. 메시지를 검토한 후 다시 전송하세요.",
   "Recovery stopped": "복구 중지됨",
   "Stopped after {0} attempts": "{0}회 시도 후 중지됨",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "자동 새로고침 {0}회 후에도 브라우저가 대기 중인 단계를 가져오지 못했습니다. 원래 대기열 입력 또는 Goal 작업은 저장되어 있습니다. CoS는 이 단계 때문에 이 채팅을 더 이상 자동 새로고침하지 않습니다. 채팅을 열어 직접 계속하세요."
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "자동 새로고침 {0}회 후에도 브라우저가 대기 중인 단계를 가져오지 못했습니다. 원래 대기열 입력 또는 Goal 작업은 저장되어 있습니다. CoS는 이 단계 때문에 이 채팅을 더 이상 자동 새로고침하지 않습니다. 채팅을 열어 직접 계속하세요.",
+  "The browser has not picked up this chat's next step. The app keeps trying; Continue now in the chat sends it at once.": "브라우저가 이 채팅의 다음 단계를 가져가지 않았습니다. 앱이 계속 시도하며, 채팅의 지금 계속하기로 바로 보낼 수 있습니다.",
+  "Continue now": "지금 계속하기",
+  "Send the waiting Continue now, as an ordinary message": "대기 중인 계속하기를 일반 메시지로 지금 보내기",
+  "Try now": "지금 시도",
+  "Try to send the waiting step now": "대기 중인 단계를 지금 보내 보기",
+  "Sent.": "보냈습니다.",
+  "Trying again now.": "지금 다시 시도합니다.",
+  "This chat has no ChatGPT conversation yet.": "이 채팅에는 아직 ChatGPT 대화가 없습니다.",
+  "ChatGPT limits this chat for a few minutes. The app tries again right after.": "ChatGPT가 이 채팅을 몇 분 동안 제한합니다. 그 직후 앱이 다시 시도합니다.",
+  "Nothing is waiting to be picked up in this chat any more.": "이 채팅에서 기다리는 것이 더 이상 없습니다."
 }

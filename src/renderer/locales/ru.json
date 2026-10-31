@@ -3938,5 +3938,15 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Не отправлено: вкладка браузера для этого нового чата закрыта или потеряна. Проверь сообщение и отправь заново.",
   "Recovery stopped": "Восстановление остановлено",
   "Stopped after {0} attempts": "Остановлено после {0} попыток",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Браузер не получил ожидающий шаг после {0} автоматических перезагрузок. Исходный ввод в очереди или задача «Цель» остаётся сохранённой. CoS больше не будет автоматически перезагружать этот чат для данного шага; откройте чат и продолжите вручную."
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Браузер не получил ожидающий шаг после {0} автоматических перезагрузок. Исходный ввод в очереди или задача «Цель» остаётся сохранённой. CoS больше не будет автоматически перезагружать этот чат для данного шага; откройте чат и продолжите вручную.",
+  "The browser has not picked up this chat's next step. The app keeps trying; Continue now in the chat sends it at once.": "Браузер не забрал следующий шаг этого чата. Приложение продолжает пытаться; «Продолжить сейчас» в чате отправит его сразу.",
+  "Continue now": "Продолжить сейчас",
+  "Send the waiting Continue now, as an ordinary message": "Отправить ожидающее «Продолжить» сейчас как обычное сообщение",
+  "Try now": "Попробовать сейчас",
+  "Try to send the waiting step now": "Попробовать отправить ожидающий шаг сейчас",
+  "Sent.": "Отправлено.",
+  "Trying again now.": "Пробую снова.",
+  "This chat has no ChatGPT conversation yet.": "У этого чата ещё нет разговора в ChatGPT.",
+  "ChatGPT limits this chat for a few minutes. The app tries again right after.": "ChatGPT ограничил этот чат на несколько минут. Приложение попробует сразу после этого.",
+  "Nothing is waiting to be picked up in this chat any more.": "В этом чате больше ничего не ждёт."
 }

@@ -3857,5 +3857,15 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Message non envoyé : l’onglet du navigateur de cette nouvelle discussion a été fermé ou perdu. Vérifiez le message et envoyez-le à nouveau.",
   "Recovery stopped": "Récupération arrêtée",
   "Stopped after {0} attempts": "Arrêt après {0} tentatives",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Le navigateur n’a pas récupéré l’étape en attente après {0} rechargements automatiques. L’entrée d’origine en file d’attente ou l’obligation Goal reste enregistrée. CoS ne rechargera plus automatiquement cette conversation pour cette étape ; ouvrez-la et continuez manuellement."
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Le navigateur n’a pas récupéré l’étape en attente après {0} rechargements automatiques. L’entrée d’origine en file d’attente ou l’obligation Goal reste enregistrée. CoS ne rechargera plus automatiquement cette conversation pour cette étape ; ouvrez-la et continuez manuellement.",
+  "The browser has not picked up this chat's next step. The app keeps trying; Continue now in the chat sends it at once.": "Le navigateur n’a pas récupéré la prochaine étape de cette conversation. L’app continue d’essayer ; Continuer maintenant dans la conversation l’envoie tout de suite.",
+  "Continue now": "Continuer maintenant",
+  "Send the waiting Continue now, as an ordinary message": "Envoyer maintenant le Continuer en attente, comme un message ordinaire",
+  "Try now": "Essayer maintenant",
+  "Try to send the waiting step now": "Essayer d’envoyer maintenant l’étape en attente",
+  "Sent.": "Envoyé.",
+  "Trying again now.": "Nouvel essai en cours.",
+  "This chat has no ChatGPT conversation yet.": "Cette conversation n’a pas encore de conversation ChatGPT.",
+  "ChatGPT limits this chat for a few minutes. The app tries again right after.": "ChatGPT limite cette conversation pendant quelques minutes. L’app réessaie juste après.",
+  "Nothing is waiting to be picked up in this chat any more.": "Plus rien n’attend dans cette conversation."
 }

@@ -110,6 +110,7 @@ const {
   startBridge,
   stopBridge,
   sweepStaleSwarm,
+  pickupNow,
   noteRecoverySweepTick,
   unpair,
   workerBriefForTests
@@ -16811,6 +16812,55 @@ describe('the goal loop over the bridge', () => {
       await sweepStaleSwarm(Date.now());
       expect((await request('GET', '/status')).body.repairs?.some((item: { conversationId: string }) => item.conversationId === chat)).toBe(true);
     } finally {
+      await writeDurableNow('session-input', []);
+      input.resetInputForTests();
+      vi.useRealTimers();
+    }
+  });
+
+  // 2026-10-31: the alert when a chat's quick tries run out, and the person's one click to go on.
+  it('alerts once when quick tries run out, and tries a stopped queued message again at once on request', async () => {
+    vi.useFakeTimers();
+    const input = await import('../src/main/session/input.js');
+    input.resetInputForTests();
+    const told: Array<{ title: string; sessionId: string }> = [];
+    setStuckNotifier((title, _body, sessionId) => { told.push({ title, sessionId }); return true; });
+    try {
+      await writeDurableNow('session-input', []);
+      await pair();
+      const chat = 'cafe0177-0000-4000-8000-000000000177';
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'work', messageId: 'now-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'now-turn' }
+      ] } });
+      const session = (await findSessionByConversation(chat, { requireUnique: true }))!;
+      const id = 'abca0177-0000-4000-8000-000000000177';
+      await input.enqueueInput({ id, sessionId: session.id, text: 'next step', mode: 'after-turn', dueAt: Date.now(), model: null, reasoningEffort: null });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await pickupNow(session.id)).toEqual({ ok: false, error: 'Nothing is waiting to be picked up in this chat any more.' });
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'turn_end', time: Date.now(), turnId: 'now-turn', outcome: 'completed' }
+      ] } });
+      await recordFinalForTest(chat, 'now-turn');
+      for (const minutes of [2, 5, 10]) {
+        await vi.advanceTimersByTimeAsync(minutes * 60_000);
+        await sweepStaleSwarm(Date.now());
+        const repair = (await request('GET', '/status')).body.repairs?.find((item: { conversationId: string }) => item.conversationId === chat);
+        await request('GET', `/status?repaired=${repair.token}&repairAction=reloaded`);
+      }
+      expect(told.filter(notice => notice.title === 'Recovery slowed')).toEqual([{ title: 'Recovery slowed', sessionId: session.id }]);
+      // Inside a history limit nothing is tried, and the person is told why.
+      await request('POST', '/events', { body: { conversationId: chat, events: [{ kind: 'chat_error', time: Date.now(), recoverable: false, blocking: true,
+        retryAt: Date.now() + 60_000, text: 'ChatGPT temporarily rate-limited loading this conversation history.' }] } });
+      expect(await pickupNow(session.id)).toEqual({ ok: false, error: 'ChatGPT limits this chat for a few minutes. The app tries again right after.' });
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      // A queued message of the person's own is tried again at once, not at its next slow slot.
+      expect(await pickupNow(session.id)).toEqual({ ok: true, did: 'retrying' });
+      expect((await request('GET', '/status')).body.repairs?.some((item: { conversationId: string }) => item.conversationId === chat)).toBe(true);
+      expect((await input.listInputs()).find(row => row.id === id)).toMatchObject({ text: 'next step', state: 'queued', pickupRecovery: { attempts: 4 } });
+      expect(told.filter(notice => notice.title === 'Recovery slowed')).toHaveLength(1);
+    } finally {
+      setStuckNotifier(null);
       await writeDurableNow('session-input', []);
       input.resetInputForTests();
       vi.useRealTimers();

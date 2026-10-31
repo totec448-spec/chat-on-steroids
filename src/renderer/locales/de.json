@@ -3776,5 +3776,15 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Nicht gesendet: Der Browser-Tab für diesen neuen Chat wurde geschlossen oder ging verloren. Prüfe die Nachricht und sende sie erneut.",
   "Recovery stopped": "Wiederherstellung beendet",
   "Stopped after {0} attempts": "Nach {0} Versuchen gestoppt",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Der Browser hat den ausstehenden Schritt auch nach {0} automatischen Neuladungen nicht übernommen. Die ursprüngliche Eingabe in der Warteschlange oder der Goal-Auftrag bleibt gespeichert. CoS lädt diesen Chat für diesen Schritt nicht erneut automatisch; öffne den Chat und fahre manuell fort."
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Der Browser hat den ausstehenden Schritt auch nach {0} automatischen Neuladungen nicht übernommen. Die ursprüngliche Eingabe in der Warteschlange oder der Goal-Auftrag bleibt gespeichert. CoS lädt diesen Chat für diesen Schritt nicht erneut automatisch; öffne den Chat und fahre manuell fort.",
+  "The browser has not picked up this chat's next step. The app keeps trying; Continue now in the chat sends it at once.": "Der Browser hat den nächsten Schritt dieses Chats nicht übernommen. Die App versucht es weiter; „Jetzt fortsetzen“ im Chat sendet ihn sofort.",
+  "Continue now": "Jetzt fortsetzen",
+  "Send the waiting Continue now, as an ordinary message": "Das wartende Weiter jetzt als normale Nachricht senden",
+  "Try now": "Jetzt versuchen",
+  "Try to send the waiting step now": "Den wartenden Schritt jetzt zu senden versuchen",
+  "Sent.": "Gesendet.",
+  "Trying again now.": "Wird jetzt erneut versucht.",
+  "This chat has no ChatGPT conversation yet.": "Dieser Chat hat noch keine ChatGPT-Unterhaltung.",
+  "ChatGPT limits this chat for a few minutes. The app tries again right after.": "ChatGPT begrenzt diesen Chat für ein paar Minuten. Die App versucht es gleich danach wieder.",
+  "Nothing is waiting to be picked up in this chat any more.": "In diesem Chat wartet nichts mehr darauf, übernommen zu werden."
 }

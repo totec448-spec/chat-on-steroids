@@ -8481,6 +8481,43 @@ function assistantRecoveryCancelledFor(conversationId: string, sessionId: string
  * The user's "don't reload this answer". Only a reload the browser has not claimed can be
  * withdrawn; a claimed one is already happening. Returns whether a countdown was cancelled.
  */
+/**
+ * The person's one click on a chat whose next step was not picked up (2026-10-31): an automatic
+ * Continue goes as an ordinary message now (a plain Continue was taken at once where the automatic
+ * one sat); a queued message or a Goal/Loop step is tried again now. Never inside a history limit.
+ */
+export async function pickupNow(sessionId: string, now = Date.now()): Promise<{ ok: true; did: 'sent' | 'retrying' } | { ok: false; error: string }> {
+  const conversationId = (await getSession(sessionId))?.conversationId;
+  if (!conversationId) return { ok: false, error: 'This chat has no ChatGPT conversation yet.' };
+  const limitedUntil = providerHistoryBackoff(conversationId, now);
+  if (limitedUntil !== null) {
+    logInfo(`bridge: the person asked to pick up ${conversationId} now, but ChatGPT limits its history for ${Math.ceil((limitedUntil - now) / 1000)} s more; nothing was tried`);
+    return { ok: false, error: 'ChatGPT limits this chat for a few minutes. The app tries again right after.' };
+  }
+  const owed = (await owedPickups(now)).get(conversationId);
+  if (!owed || owed.sessionId !== sessionId) return { ok: false, error: 'Nothing is waiting to be picked up in this chat any more.' };
+  if (owed.queued && owed.inputId) {
+    const outcome = await continueAsOrdinaryMessage(owed.inputId, 'the person asked to continue now');
+    if ('row' in outcome) {
+      pickupWatch.delete(conversationId);
+      logInfo(`bridge: the person sent the automatic Continue in ${conversationId} now, as an ordinary message`);
+      wakeBrowserWork();
+      return { ok: true, did: 'sent' };
+    }
+    // A queued message of the person's own is no automatic Continue: it is retried instead.
+    if (!/no longer a queued automatic Continue/.test(outcome.refused)) {
+      logInfo(`bridge: the person asked to continue ${conversationId} now, refused: ${outcome.refused}`);
+      return { ok: false, error: `Not sent: ${outcome.refused}.` };
+    }
+  }
+  const watch = pickupWatch.get(conversationId);
+  if (watch) watch.dueAt = now;
+  logInfo(`bridge: the person asked to pick up ${conversationId} now; its next try runs at once`);
+  await inspectOwedPickups(now);
+  wakeBrowserWork();
+  return { ok: true, did: 'retrying' };
+}
+
 export async function cancelAssistantRecovery(sessionId: string): Promise<boolean> {
   const conversationId = (await getSession(sessionId))?.conversationId;
   if (!conversationId) return false;
@@ -9911,8 +9948,12 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
     queued = true;
     logInfo(`bridge: next automation/input step uncollected in ${reply.conversationId} — reload ${watch.attempts}` +
       (wasStopped ? ' (slow retry)' : ''));
-    if (watch.stoppedAt && !wasStopped) logWarn(`bridge: browser pickup recovery has not collected the step in ${reply.conversationId} after ${watch.attempts} reloads; ` +
-      `the chat shows as stopped, and the app keeps trying every 15 to 60 minutes`);
+    if (watch.stoppedAt && !wasStopped) {
+      logWarn(`bridge: browser pickup recovery has not collected the step in ${reply.conversationId} after ${watch.attempts} reloads; ` +
+        `the chat shows as stopped, and the app keeps trying every 15 to 60 minutes`);
+      // The alert: a desktop notice (and the phone, under its rules) once, when the quick tries run out.
+      noticeChatStopped('Recovery slowed', "The browser has not picked up this chat's next step. The app keeps trying; Continue now in the chat sends it at once.", reply.sessionId);
+    }
   }
   return queued;
 }
