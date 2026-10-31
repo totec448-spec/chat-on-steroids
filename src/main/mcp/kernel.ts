@@ -110,6 +110,8 @@ import {
   awaitFreshCallOrigin,
   evidenceWindow,
   freshCallOrigin,
+  captureRecordingContext,
+  recordingContextCurrent,
   recordAgentMessage,
   recordProgress,
   recordToolCall
@@ -565,9 +567,16 @@ function withUnattributedNotice(
   conversationId: string | null | undefined,
   result: ToolResult,
   requestId: string | null,
-  allowUnattributed: boolean
+  allowUnattributed: boolean,
+  provisional = false
 ): ToolResult {
   if (conversationId) return result;
+  if (provisional) return { ...result, content: [...result.content, { type: 'text', text:
+    '\n--- Recording context ---\n' +
+    'Exact caller identity is not available. The recorder may provisionally place this operation in the only observed running chat, ' +
+    'pending exact request evidence. This does not grant access to that chat’s workspace, messages, workers or terminals. ' +
+    'Continue using enabled self-contained tools with their existing permissions. Do not repeat a completed operation to repair attribution.'
+  }] };
   const eta = unattributedRepairEta(Date.now(), requestId);
   const recovery = eta === null ? '' : `The next attribution recovery check is in about ${eta}s. `;
   return {
@@ -672,6 +681,7 @@ export async function dispatch(
   // those gaps describes a machine that has not finished changing. The counter therefore
   // opens with the request and closes with it.
   const context: CallContext = {
+    recordingContext: parent?.recordingContext ?? (inboundProviderRequest() && requestId ? captureRecordingContext(Date.now()) : null),
     publication: parent?.publication ?? inboundPublication() ?? { completedAt: null, failed: false },
     startedAt: Date.now(),
     activity: summarizeRunningCall(name, args, emptyEvidence()),
@@ -1158,7 +1168,8 @@ async function dispatchTracked(
     context.caller.conversationId,
     deliveryFenced ? baseResult : withInbox(context.caller, context.agent, baseResult, isFinish),
     context.caller.requestId,
-    context.allowUnattributed === true
+    context.allowUnattributed === true,
+    recordingContextCurrent(context.recordingContext)
   );
   if (!nested && recoveredWorkerRole && !deliveryFenced) delivered = {
     ...delivered,
@@ -1213,6 +1224,7 @@ async function dispatchTracked(
   // while ChatGPT still sees the call running; the answer waits for it below, bounded.
   const closeHold = !nested && context.caller.conversationId ? openCallHold(context.caller.conversationId) : null;
   const recording = recordToolCall({
+    recordingContext: context.recordingContext,
     nested,
     tool: name,
     args: surface === 'plugins' ? pluginManager.redact(args) : args,
