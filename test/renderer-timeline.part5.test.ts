@@ -1694,3 +1694,19 @@ it('keeps a damaged time from breaking the chat, shows when a message was writte
   expect(answerTime.textContent).toBe(new Date(written).toLocaleTimeString('de', { hour: 'numeric', minute: '2-digit' }));
   expect(answerTime.getAttribute('title')).toBe(new Date(written).toLocaleString('de'));
 });
+
+// 2.1.49 round: answers carry ChatGPT's own time, questions the app's. Mixed, an answer could read a
+// minute before its question. Live rows keep the app's clock; only a message the app saw long after
+// it was written (after a reload) shows when it was written.
+it('keeps one clock for live rows and shows the written time only for a message seen much later', async () => {
+  const question = T0 + 62_000, answerWritten = T0 + 58_000;
+  const { w } = await boot([
+    { seq: 1, time: question, source: 'extension', kind: 'user_message', turnId: 't1', message: { text: 'Hello', chars: 5, truncated: false } } as any,
+    { seq: 2, time: question + 3_000, authoredAt: answerWritten, source: 'extension', kind: 'assistant_message', turnId: 't1', messageId: 'answer-1',
+      final: true, state: 'final', message: { text: 'Answer', chars: 6, truncated: false } } as any
+  ]);
+  const clock = (at: number) => new Date(at).toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' });
+  const answer = await waitFor(() => { const node = w.document.querySelector('.ev-assistant_message > time'); expect(node).toBeTruthy(); return node!; });
+  expect(answer.textContent).toBe(clock(question + 3_000));
+  expect(w.document.querySelector('.ev-user_message > time')!.textContent).toBe(clock(question));
+});
