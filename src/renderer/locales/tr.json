@@ -1,4 +1,13 @@
 {
+  "Long chats that get through ChatGPT's limits, pop-ups out of the way, and message times.": "ChatGPT'nin sınırlarını aşan uzun sohbetler, yoldan çekilen açılır pencereler ve mesaj saatleri.",
+  "Long chats keep going": "Uzun sohbetler devam eder",
+  "When ChatGPT limits a long chat's history, the app waits instead of reloading it.": "ChatGPT uzun bir sohbetin geçmişini sınırladığında uygulama yeniden yüklemek yerine bekler.",
+  "Pop-ups out of the way": "Açılır pencereler yoldan çekildi",
+  "ChatGPT's announcements no longer block new chats or your messages.": "ChatGPT duyuruları artık yeni sohbetleri ve mesajlarınızı engellemiyor.",
+  "Your mouse stays yours": "Fareniz sizin kalır",
+  "Only chats this app can name use your screen, mouse and keyboard.": "Ekranınızı, farenizi ve klavyenizi yalnızca bu uygulamanın tanıyabildiği sohbetler kullanır.",
+  "Message times": "Mesaj saatleri",
+  "Turn on Show message times in Settings → General to see when each message was sent.": "Her mesajın ne zaman gönderildiğini görmek için Ayarlar → Genel'de Mesaj saatlerini göster'i açın.",
   "Dictation unavailable": "Sesle yazma kullanılamıyor",
   "Cancel dictation": "Sesle yazmayı iptal et",
   "Stop dictation": "Sesle yazmayı durdur",

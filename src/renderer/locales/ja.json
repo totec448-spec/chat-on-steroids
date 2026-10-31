@@ -1,4 +1,13 @@
 {
+  "Long chats that get through ChatGPT's limits, pop-ups out of the way, and message times.": "ChatGPT の制限を乗り越える長いチャット、邪魔なポップアップの解消、メッセージの時刻。",
+  "Long chats keep going": "長いチャットが止まらない",
+  "When ChatGPT limits a long chat's history, the app waits instead of reloading it.": "ChatGPT が長いチャットの履歴を制限したとき、アプリは再読み込みせずに待ちます。",
+  "Pop-ups out of the way": "ポップアップを閉じます",
+  "ChatGPT's announcements no longer block new chats or your messages.": "ChatGPT のお知らせが新しいチャットやメッセージを妨げなくなりました。",
+  "Your mouse stays yours": "マウスはあなたのもの",
+  "Only chats this app can name use your screen, mouse and keyboard.": "このアプリが特定できるチャットだけが画面・マウス・キーボードを使います。",
+  "Message times": "メッセージの時刻",
+  "Turn on Show message times in Settings → General to see when each message was sent.": "設定 → 一般 で「メッセージの時刻を表示」をオンにすると、各メッセージの送信時刻がわかります。",
   "Dictation unavailable": "音声入力を利用できません",
   "Cancel dictation": "音声入力をキャンセル",
   "Stop dictation": "音声入力を停止",

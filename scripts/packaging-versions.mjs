@@ -3,19 +3,19 @@ import { SUPPORTED_ARCHES, SUPPORTED_PLATFORMS } from './packaging-targets.mjs';
 export { SUPPORTED_ARCHES, SUPPORTED_PLATFORMS };
 
 export const TUNNEL_CLIENT = Object.freeze({
-  version: 'v0.0.18',
+  version: 'v0.0.19',
   targets: Object.freeze({
     win32: Object.freeze({
-      x64: Object.freeze({ upstreamArch: 'amd64', sha256: '8d0da1ce79532d44ccc5ed5d8bd36cdfffba37dfd287c602d69635c8bb5db2b2' }),
-      arm64: Object.freeze({ upstreamArch: 'arm64', sha256: 'b73237513d50bf7acbeb960d80d9cbb6513879292f80ec1bd04b886fac1fe1c8' })
+      x64: Object.freeze({ upstreamArch: 'amd64', sha256: '1d0ecc3a54f2a51e27a635ac155f40fbb95df58c52cdeddf6c75532cc0bbeb25' }),
+      arm64: Object.freeze({ upstreamArch: 'arm64', sha256: 'a054bfb19d72b446cc9802a7987a17eab517502355d27b18e51814bbb0b32731' })
     }),
     darwin: Object.freeze({
-      x64: Object.freeze({ upstreamArch: 'amd64', sha256: '95595c6538b3f9872c1367592aede22e0d18ea7f6bdd51cd17fe0bf7e5ca8b26' }),
-      arm64: Object.freeze({ upstreamArch: 'arm64', sha256: 'ba7a0994f7dd15bc8708aa1602ecf54371a492319a641ab9c33dc00f1fd56bfe' })
+      x64: Object.freeze({ upstreamArch: 'amd64', sha256: 'dff97674c77cac59e6ab3d901e6cff50fb17a5784c01d8959d1f4adb3afdf4bf' }),
+      arm64: Object.freeze({ upstreamArch: 'arm64', sha256: '2243d024b77af8ee4b4ab7a1447949e5fc8d82bcd2d51b178927f2da9e47ecfd' })
     }),
     linux: Object.freeze({
-      x64: Object.freeze({ upstreamArch: 'amd64', sha256: '3c82307316acd93c88a384b62af1d81d3f4cb0efa975f9c0bfaef922866a04c4' }),
-      arm64: Object.freeze({ upstreamArch: 'arm64', sha256: 'a5f3d70efc75f5e66ab5c67c44d272aa80b2736f93f875f165140517750ec035' })
+      x64: Object.freeze({ upstreamArch: 'amd64', sha256: '9ee9448592345a9dd1517fb79791ab54d24f051142eb92bcbe8cd355effc9142' }),
+      arm64: Object.freeze({ upstreamArch: 'arm64', sha256: '5a19e556c4a8736ab7a6fde6f0568f6e7411fa2dff21186fc15bc30e9b98a603' })
     })
   })
 });
