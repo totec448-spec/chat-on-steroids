@@ -16,7 +16,8 @@ import { flushSessions, getSession, indexedSessions, initSessionStore, readAsset
   resetSessionStoreForTests, unsetSessionRootForTests } from '../src/main/session/store.js';
 import { dispatch, ok } from '../src/main/mcp/kernel.js';
 import { withInboundRequestId } from '../src/main/mcp/inbound.js';
-import { currentCaller } from '../src/main/mcp/call-context.js';
+import { currentCaller, emptyEvidence } from '../src/main/mcp/call-context.js';
+import type { ProcessCompletion } from '../src/main/codex/unified-exec.js';
 import type { RecordingContext } from '../src/main/session/recorder.js';
 
 let directory: string;
@@ -58,6 +59,42 @@ it('records the unexposed second id in the sole evidenced turn without granting 
   expect(requestCorrelation('hidden-workflow')).toBeNull();
   expect(freshCallOrigin('read', Date.now(), 'hidden-workflow')).toBeNull();
 });
+
+it.each(['before relocation', 'after relocation', 'during relocation', 'without relocation'] as const)(
+  'records a provisional background command exit %s', async phase => {
+    const source = await begin();
+    let finish!: (completion: ProcessCompletion) => void;
+    const completion = new Promise<ProcessCompletion>(resolve => { finish = resolve; });
+    const call = await recordToolCall({ tool: 'exec_command', args: { cmd: 'fixture' },
+      content: [{ type: 'text', text: 'initial output' }], startedAt: Date.now(), durationMs: 1, outcome: 'ok',
+      requestId: 'background-workflow', recordingContext: captureRecordingContext(Date.now()),
+      evidence: { ...emptyEvidence(), running: true, processSessionId: '1234', processCompletion: completion } });
+    expect(call).toMatchObject({ attributionMethod: 'generation', process: { sessionId: '1234' } });
+    const exit = { completedAt: Date.now(), durationMs: 42, exitCode: 7 };
+    if (phase === 'before relocation') { finish(exit); await flushRecorder(); }
+    let target = source;
+    if (phase !== 'without relocation') {
+      target = (await sessionForConversation('chat-b'))!;
+      if (phase === 'during relocation') {
+        const write = store.recordProcessCall;
+        vi.spyOn(store, 'recordProcessCall').mockImplementation(async (id, event, admit) => {
+          if (id === target) finish(exit);
+          return write(id, event, admit);
+        });
+      }
+      await prove('chat-b', 'background-workflow');
+      await flushRecorder();
+      expect(await calls(source)).toHaveLength(0);
+    }
+    if (phase !== 'before relocation') { finish(exit); await flushRecorder(); }
+    const rows = await calls(target);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ call: { callId: call!.callId,
+      process: { sessionId: '1234', ...exit }, summary: { metric: '✕ exit 7', tone: 'bad' } } });
+    expect((await getSession(target))?.toolCalls).toBe(1);
+    expect(requestCorrelation('background-workflow')?.conversationId ?? null).toBe(phase === 'without relocation' ? null : 'chat-b');
+  }
+);
 
 it('never chooses one of two running chats', async () => {
   await begin(); await begin('chat-b', 'turn-b');
@@ -376,10 +413,14 @@ it('cannot seed a continued response from page evidence belonging to an older co
 
 it('only provider ingress can capture presentation context; handlers retain unknown identity', async () => {
   const id = await begin();
-  await withInboundRequestId('provider-hidden', () => dispatch('read', {}, null, 'provider-hidden', 'core', async () => {
+  const result = await withInboundRequestId('provider-hidden', () => dispatch('read', {}, null, 'provider-hidden', 'core', async () => {
     expect(currentCaller()?.conversationId).toBeNull();
     return ok('completed');
   }), undefined, undefined, true);
+  const text = result.content.filter(part => part.type === 'text').map(part => part.text).join('\n');
+  expect(text).toContain('--- Recording context ---');
+  expect(text).toContain('Use the process and run ids returned to this request; later exact proof attaches that state to its chat.');
+  expect(text).not.toContain('next attribution recovery check');
   await flushRecorder();
   expect((await calls(id))[0]?.call.attributionMethod).toBe('generation');
   await withInboundRequestId('local-hidden', () => dispatch('read', {}, null, 'local-hidden', 'core', async () => ok('local')));

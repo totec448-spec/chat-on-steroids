@@ -755,24 +755,24 @@ const MAX_REPAIR_BUCKETS = 128;
 const MAX_REPAIR_REQUEST_IDS = 50_000;
 let attributionRepairChain: Promise<void> = Promise.resolve();
 
+/** Relocation and process completion must revise the same current call snapshot in order. */
+function serializeAttributionMutation<T>(run: () => Promise<T>): Promise<T> {
+  const work = attributionRepairChain.then(run);
+  attributionRepairChain = work.then(() => undefined, () => undefined);
+  return work;
+}
+
 function startAttributionRepair(): void {
   if (!attributionRepairRequested) return;
   attributionRepairRequested = false;
   const affected = fullAttributionRepair ? undefined : new Set(repairRequestIds);
   fullAttributionRepair = false;
   repairRequestIds.clear();
-  const run = attributionRepairChain.then(async () => {
-    try {
-      await repairDeterministicAttribution(affected);
-    } catch (err) {
+  void repairDeterministicAttribution(affected)
+    .catch(err => {
       logWarn(`late request attribution repair failed: ${(err as Error).message}`);
-    }
-    if (attributionRepairRequested) startAttributionRepair();
-  });
-  attributionRepairChain = run.then(
-    () => undefined,
-    () => undefined
-  );
+    })
+    .then(() => { if (attributionRepairRequested) startAttributionRepair(); });
 }
 
 /**
@@ -915,7 +915,11 @@ export async function awaitFreshCallOrigin(
  * Calls keep their original callId, so a crash after copying some rows but before rewriting the
  * old bucket is idempotent on the next launch. Assets are copied before any history is removed.
  */
-export async function repairDeterministicAttribution(affected?: ReadonlySet<string>): Promise<{ sessions: number; calls: number }> {
+export function repairDeterministicAttribution(affected?: ReadonlySet<string>): Promise<{ sessions: number; calls: number }> {
+  return serializeAttributionMutation(() => repairAttributionNow(affected));
+}
+
+async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ sessions: number; calls: number }> {
   if (!recordingEnabled()) return { sessions: 0, calls: 0 };
   let repairedSessions = 0;
   let repairedCalls = 0;
@@ -956,7 +960,7 @@ export async function repairDeterministicAttribution(affected?: ReadonlySet<stri
             const existing = await readEvents(proof.sessionId, { kinds: ['tool_call'] });
             if (!existing.some(row => row.kind === 'tool_call' && row.call.callId === event.call.callId)) {
               const { seq: _seq, ...copy } = corrected;
-              await appendEvent(proof.sessionId, copy);
+              await (copy.call.process ? recordProcessCall : appendEvent)(proof.sessionId, copy);
               changed.add(proof.sessionId);
             }
           }
@@ -1415,13 +1419,18 @@ export function recordToolCall(input: ToolCallInput): Promise<ToolCallRecord | n
 export async function flushRecorder(): Promise<void> {
   // Admission is synchronous even while a request is still waiting for its owner. Include work
   // admitted during a flush too; endpoint/bridge shutdown closes producers before this barrier.
-  while (pendingRecordings.size) await Promise.all([...pendingRecordings]);
-  if (attributionRepairTimer) {
-    clearTimeout(attributionRepairTimer);
-    attributionRepairTimer = null;
-    startAttributionRepair();
+  for (;;) {
+    while (pendingRecordings.size) await Promise.all([...pendingRecordings]);
+    if (attributionRepairTimer) {
+      clearTimeout(attributionRepairTimer);
+      attributionRepairTimer = null;
+      startAttributionRepair();
+    }
+    const chain = attributionRepairChain;
+    await chain.catch(() => undefined);
+    // A just-resolved process promise can enqueue completion while this barrier yields.
+    if (!pendingRecordings.size && !attributionRepairTimer && chain === attributionRepairChain) break;
   }
-  await attributionRepairChain.catch(() => undefined);
 }
 
 async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolCallRecord | null> {
@@ -1563,7 +1572,7 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
 
     const call: ToolCallRecord = {
       ...(input.nested === true ? { nested: true } : {}),
-      ...(target.attribution === 'request_id' && target.conversationId && evidence.processCompletion && evidence.processSessionId && input.tool === 'exec_command'
+      ...((target.attribution === 'request_id' || target.attribution === 'generation') && target.conversationId && evidence.processCompletion && evidence.processSessionId && input.tool === 'exec_command'
         ? { process: { sessionId: evidence.processSessionId } } : {}),
       ...callModel,
       callId: randomUUID(),
@@ -1603,24 +1612,35 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
         logInfo(`request attribution: provisional admission rejected for call ${call.callId}, request ${input.requestId ?? 'none'}; recording context no longer current, retrying as unattributed`);
         return fileToolCall(input, { conversationId: null, sessionId: null, turnId: null, attribution: 'unattributed' });
       }
+    } else await (call.process ? recordProcessCall : appendEvent)(sessionId, event);
+    if (call.process && evidence.processCompletion) {
+      // Bind once to the recorded call, never look up a reusable numeric process id.
+      // A process that exited during recorder admission resolves this same promise.
+      void evidence.processCompletion.then(completion => {
+        const complete = async () => {
+          // Exact proof may have moved this UUID while the process was running. Update
+          // both retained copies if source removal failed; terminal custody never changes.
+          const exact = target.attribution === 'generation' && input.requestId ? requestCorrelation(input.requestId)?.sessionId : undefined;
+          const sessions = new Set([sessionId, ...(exact ? [exact] : [])]);
+          for (const id of sessions) {
+            if (!await getSession(id)) continue;
+            await completeProcessCall(id, call.callId, completion);
+            notifyChanged(id);
+          }
+        };
+        const work = (target.attribution === 'generation' ? serializeAttributionMutation(complete) : complete())
+          .catch(() => logWarn('session recorder could not store process completion'));
+        pendingRecordings.add(work);
+        void work.then(() => pendingRecordings.delete(work));
+      });
+    }
+    if (target.attribution === 'generation') {
       logInfo(`request attribution: ${input.requestId} provisionally recorded in ${target.conversationId}; only observed running turn, not caller identity`);
       notifyChanged(sessionId);
       if (input.requestId && requestCorrelation(input.requestId)) scheduleAttributionRepair(input.requestId);
       // Presentation cannot reopen a turn, bind an agent, transfer a terminal or grant
       // activity to the bridge. Only exact request proof may trigger those effects.
       return call;
-    }
-    await (call.process ? recordProcessCall : appendEvent)(sessionId, event);
-    if (call.process && evidence.processCompletion) {
-      // Bind once to the recorded call, never look up a reusable numeric process id.
-      // A process that exited during recorder admission resolves this same promise.
-      void evidence.processCompletion.then(completion => {
-        const work = completeProcessCall(sessionId, call.callId, completion)
-          .then(() => notifyChanged(sessionId))
-          .catch(() => logWarn('session recorder could not store process completion'));
-        pendingRecordings.add(work);
-        void work.then(() => pendingRecordings.delete(work));
-      });
     }
     const reopenedTurnId = input.endsActivity === true ? null : await serializeObservations(target.conversationId ?? sessionId, () => reopenFalselyEndedTurn(
       sessionId,
