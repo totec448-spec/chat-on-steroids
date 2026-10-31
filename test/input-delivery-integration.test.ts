@@ -2589,6 +2589,25 @@ describe('native progress silence authority', () => {
     // Offered like a typed message, and only once converted.
     expect((await input.pendingBrowserInputs()).find(row => row.id === ticket.id)).toEqual(expect.not.objectContaining({ recovery: expect.anything() }));
     expect(await input.continueAsOrdinaryMessage(ticket.id, 'again')).toEqual({ refused: 'it is no longer a queued automatic Continue' });
+    expect(ordinary).toMatchObject({ continuesQuestionId: ticket.recovery!.questionId });
+  });
+
+  // CodeRabbit on #1960: the converted Continue keeps its question and is still checked until Send.
+  it('withdraws a Continue sent on as an ordinary message once the person asks something newer', async () => {
+    const source = await open('gpt-5.6-sol');
+    expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+    const ticket = (await input.listInputs()).find(row => row.recovery && row.state === 'queued')!;
+    await post('/events', { conversationId: source.conversationId, events: [
+      { kind: 'turn_end', turnId: source.turnId, outcome: 'stalled', time: Date.now() }
+    ] });
+    expect(await input.continueAsOrdinaryMessage(ticket.id, 'test')).toHaveProperty('row');
+    await post('/events', { conversationId: source.conversationId, events: [
+      { kind: 'user_message', messageId: randomUUID(), text: 'Do this instead', time: Date.now(), authoredNow: true }
+    ] });
+    expect(await input.claimBrowserInput(ticket.id, 'page-owner', source.conversationId, true)).toBeNull();
+    expect((await input.listInputs()).find(row => row.id === ticket.id)).toMatchObject({
+      state: 'cancelled', error: 'Automatic Continue cancelled: another user message arrived.'
+    });
   });
 
   it('sends an automatic Continue no page claims as an ordinary message after a reload and ten minutes, instead of stopping', async () => {
