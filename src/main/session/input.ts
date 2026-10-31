@@ -98,6 +98,8 @@ const entrySchema = inputArgs.extend({
   /** The active turn at admission; its final may already be waiting in the browser journal. */
   queuedTurn: z.object({ conversationId: z.string().min(1).max(256), turnId: z.string().min(1).max(256) }).optional(),
   /** Shared unfinished-response fallback belongs to this question in every mode. */
+  /** An automatic Continue the app sent on as an ordinary message (`continueAsOrdinaryMessage`). */
+  continuedFrom: z.literal('recovery').optional(),
   recovery: z.object({ questionId: z.string(), episode: z.string().max(200).optional(), pro: z.boolean(), busyUntil: z.number(), phase: z.enum(['ready', 'stopping', 'reloading', 'resumed']), reloadOwner: z.string().optional(),
     /** First release of an unbroken run of pages withdrawing this Continue before Send (#820). */
     withdrawnSince: z.number().optional(),
@@ -158,8 +160,9 @@ export type InputEntry = z.infer<typeof entrySchema>;
  * which is never asked about. Finish replies are asked before they are filed, as they can also
  * reach ChatGPT in a tool result.
  */
-export function automaticSendKind(row: Pick<InputEntry, 'recovery' | 'purpose' | 'afterStop' | 'scheduled'>): SendCheckKind | null {
-  if (row.recovery) return 'continue';
+export function automaticSendKind(row: Pick<InputEntry, 'recovery' | 'purpose' | 'afterStop' | 'scheduled' | 'continuedFrom'>): SendCheckKind | null {
+  // An automatic Continue sent as an ordinary message is still the app's own send (CodeRabbit on #1960).
+  if (row.recovery || row.continuedFrom === 'recovery') return 'continue';
   if (row.purpose === 'rotation' || row.afterStop) return 'fresh-turn';
   if (row.scheduled) return 'scheduled';
   return null;
@@ -1848,21 +1851,27 @@ async function notAllowedReason(entry: InputEntry): Promise<string> {
  * the chat's latest question is still the one the Continue answers, no turn runs and no tool call is
  * in flight. Returns the converted row, or null with nothing changed.
  */
-export function continueAsOrdinaryMessage(id: string, why: string): Promise<InputEntry | null> {
+export function continueAsOrdinaryMessage(id: string, why: string, minAgeMs = 0): Promise<{ row: InputEntry } | { refused: string }> {
   return serial(async () => {
     const current = await load();
     const row = current.find(entry => entry.id === id);
-    if (!row?.recovery || row.state !== 'queued' || row.sendAuthorizedAt !== undefined || !row.sessionId) return null;
+    if (!row?.recovery || row.state !== 'queued' || row.sendAuthorizedAt !== undefined || !row.sessionId) return { refused: 'it is no longer a queued automatic Continue' };
+    // Its own age, not a pickup it shares with an older Goal step (CodeRabbit on #1960).
+    const since = row.silenceBoundary?.acceptedAt ?? row.createdAt;
+    if (Date.now() - since < minAgeMs) return { refused: 'it is not old enough yet' };
     const session = await getSession(row.sessionId);
-    if (!session?.conversationId || session.activeTurnId || isChatBlocked(session.conversationId) ||
-        session.browserRecoveryDismissedAt !== undefined || inFlightToolCalls(session.conversationId) > 0) return null;
+    if (!session?.conversationId) return { refused: 'its chat has no ChatGPT conversation' };
+    if (session.activeTurnId) return { refused: 'its turn is still open in the record' };
+    if (isChatBlocked(session.conversationId)) return { refused: 'its chat is blocked' };
+    if (session.browserRecoveryDismissedAt !== undefined) return { refused: 'its chat\'s tab was closed' };
+    if (inFlightToolCalls(session.conversationId) > 0) return { refused: 'a tool call of its chat is still running' };
     const question = await readLatestUserMessage(row.sessionId);
-    if (question?.messageId !== row.recovery.questionId) return null;
+    if (question?.messageId !== row.recovery.questionId) return { refused: 'a newer question arrived in its chat' };
     const { recovery: _recovery, silenceBoundary: _boundary, pickupRecovery: _pickup, requestedMode: _requested, ...rest } = row;
-    const ordinary: InputEntry = { ...rest, mode: 'auto', dueAt: Date.now() };
+    const ordinary: InputEntry = { ...rest, mode: 'auto', dueAt: Date.now(), continuedFrom: 'recovery' };
     await commit(current.map(entry => entry === row ? ordinary : entry));
     logInfo(`input ${id}: no page took the automatic Continue (${why}); sending it as an ordinary message — the chat's latest question is still the one it continues and nothing runs`);
-    return ordinary;
+    return { row: ordinary };
   });
 }
 

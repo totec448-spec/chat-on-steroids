@@ -3167,7 +3167,9 @@ names the gate) spends no reload, and the bridge logs `next automation/input ste
 offered to the page — <gate>; no reload is spent on it` once per chat, input and gate; and an
 automatic Continue (`recovery`) still queued 10 minutes after its boundary (`RECOVERY_ORDINARY_AFTER_MS`)
 with a reload spent, a stop, or an offer gate becomes an ordinary message once
-(`continueAsOrdinaryMessage`: `recovery`, `silenceBoundary` and `pickupRecovery` removed, mode `auto`),
+(`continueAsOrdinaryMessage`: `recovery`, `silenceBoundary` and `pickupRecovery` removed, mode `auto`,
+`continuedFrom: 'recovery'` so `automaticSendKind` still names it `continue` and the send check asks; its 10 minutes
+count from its own boundary, not a pickup it shares; a refusal is logged once per chat, input and reason),
 only while the chat's latest recorded question is still the one it continues, no turn is open, the
 chat is not blocked or closed and no tool call runs; it is logged `input <id>: no page took the
 automatic Continue (<why>); sending it as an ordinary message …`. The session list carries stopped chats as
