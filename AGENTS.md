@@ -2991,6 +2991,12 @@ is still deciding (past the reload check, e.g. waiting for the send check); once
 ready, `/input/claim` from that browser (`x-extension-browser`) hands out nothing for 20 s (checked
 again right before the claim takes its message), and the
 extension's `deliverDesktopInputs` starts nothing while its reload is pending.
+An answering ChatGPT page (`clf-recorder-ping` busy) holds the update as `chat-busy` for at most
+30 minutes per offered build (`CHAT_BUSY_UPDATE_AFTER_MS`; the start is kept in `storage.session` as
+`extensionUpdateBusySince`, so a worker restart does not reset it). After that the update goes ahead at
+a pass where nothing else holds it (no tool call in the app, nothing sent, no command), and
+`/extension/update` receives `{ pastBusyChatsMs }` and logs that it updated past an answering page
+(2026-10-31: long Goal chats answered almost without a pause and the update waited for hours).
 Managed idle/retired/duplicate pruning records a successful removal against the exact tab,
 document, navigation epoch and conversation in the existing session-storage snapshot. Its
 lifecycle event carries a non-manual departure through the close outbox; it does not create

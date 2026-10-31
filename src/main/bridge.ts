@@ -2831,6 +2831,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       logInfo('bridge: the extension update waits: a message is being sent');
       return json(res, 200, { ready: false, hold: 'sending' }, origin);
     }
+    // An update that waited only for answering pages for long goes ahead at a quiet moment (2026-10-31).
+    const updateBody = await readBody(req).catch(() => null) as { pastBusyChatsMs?: unknown } | null;
+    const pastBusy = typeof updateBody?.pastBusyChatsMs === 'number' && Number.isFinite(updateBody.pastBusyChatsMs) ? updateBody.pastBusyChatsMs : 0;
+    if (pastBusy > 0) logInfo(`bridge: the extension updates although a ChatGPT tab is still answering: it waited ${Math.round(pastBusy / 60_000)} minutes for every page to be idle, and no tool call runs and nothing is being sent now`);
     const prepared = prepareExtensionUpdate(extensionBuildOf(req));
     // The extension reloads now: that browser takes no new message until it is back.
     if (prepared?.ready) extensionReloads.set(browserOf(req) ?? '', Date.now() + EXTENSION_RELOAD_PAUSE_MS);
