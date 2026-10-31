@@ -8,7 +8,7 @@ import { getLog } from '../src/main/logger.js';
 import { positionOf } from '../src/shared/chronology.js';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { flushDurable, initDurableStore, resetDurableForTests } from '../src/main/durable.js';
-import { requestCorrelation, restoreRequestCorrelations } from '../src/main/session/correlation.js';
+import { requestCorrelation, restoreRequestCorrelations, resetCorrelationRegistryForTests } from '../src/main/session/correlation.js';
 import { captureRecordingContext, flushRecorder, freshCallOrigin, recordChatObservations, recordRequestEvidence,
   recordToolCall, recordingContextCurrent, repairDeterministicAttribution, resetRecorderForTests,
   sessionForConversation } from '../src/main/session/recorder.js';
@@ -306,6 +306,53 @@ it('continues after an unreadable provisional source and repairs it on a later t
   expect((await calls(failedTarget)).map(row => row.call.callId)).toEqual([failed.callId]);
   expect(await calls(failedSource)).toHaveLength(0);
 });
+
+it.each(['transient error', 'persistent error', 'lost exact proof'] as const)(
+  'uses one delayed storage retry without a page sighting: %s', async scenario => {
+    const source = await begin();
+    const original = (await record('retry-workflow'))!;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const target = (await sessionForConversation('chat-b'))!;
+    await prove('chat-b', 'retry-workflow');
+    const read = store.readEvents;
+    let attempts = 0;
+    const fault = vi.spyOn(store, 'readEvents').mockImplementation((id, options) => {
+      if (id === source && (++attempts === 1 || scenario === 'persistent error')) {
+        return Promise.reject(new Error('Simulated storage interruption'));
+      }
+      return read(id, options);
+    });
+    await repairDeterministicAttribution();
+    expect(attempts).toBe(1);
+    expect(getLog().some(row => row.message.includes('scheduling one retry in 1000ms'))).toBe(true);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(attempts).toBe(1);
+    if (scenario === 'lost exact proof') resetCorrelationRegistryForTests();
+    await vi.advanceTimersByTimeAsync(1);
+    await flushRecorder();
+    expect(attempts).toBe(2);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await flushRecorder();
+    expect(attempts).toBe(2);
+    fault.mockRestore();
+    if (scenario === 'transient error') {
+      expect(await calls(source)).toHaveLength(0);
+      expect((await calls(target)).map(row => row.call.callId)).toEqual([original.callId]);
+    } else {
+      expect((await calls(source)).map(row => row.call.callId)).toEqual([original.callId]);
+      expect(await calls(target)).toHaveLength(0);
+      if (scenario === 'lost exact proof') expect(requestCorrelation('retry-workflow')).toBeNull();
+      else {
+        expect(getLog().some(row => row.message.includes('automatic storage retry exhausted'))).toBe(true);
+        await prove('chat-b', 'fresh-trigger');
+        await vi.advanceTimersByTimeAsync(250);
+        await flushRecorder();
+        expect(await calls(source)).toHaveLength(0);
+        expect((await calls(target)).map(row => row.call.callId)).toEqual([original.callId]);
+      }
+    }
+  }
+);
 
 it('logs a missing source asset and leaves its provisional call available for repair', async () => {
   const source = await begin();
