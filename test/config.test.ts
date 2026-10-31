@@ -234,15 +234,26 @@ describe('settings migration', () => {
     await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, rotateTurnMinutes: 0 } });
     expect((await loadConfig()).ui.rotateTurnMinutes).toBe(0);
   });
-  it('keeps the stop fallback for fresh turns off unless chosen, also for legacy and malformed settings', async () => {
-    expect(defaultConfig().ui.rotateStopFallback).toBe(false);
-    const legacy = defaultConfig(); delete legacy.ui.rotateStopFallback;
+  // User decision 2026-10-31: fresh turns failed in long chats where ChatGPT shows only Stop, so the
+  // stop-and-continue fallback is on by default. Configs from before it are turned on once (a saved
+  // false there was the old default, not a choice); after that a person's off stays off.
+  it('turns the stop fallback for fresh turns on for new and earlier configs once, then keeps a later choice', async () => {
+    expect(defaultConfig().ui).toMatchObject({ rotateStopFallback: true, rotateStopFallbackAdopted: true });
+    const legacy = defaultConfig(); delete legacy.ui.rotateStopFallback; delete legacy.ui.rotateStopFallbackAdopted;
     await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
-    expect((await loadConfig()).ui.rotateStopFallback).toBe(false);
-    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...legacy, ui: { ...legacy.ui, rotateStopFallback: 'yes', startAtLogin: true } }), 'utf8');
-    expect((await loadConfig()).ui).toMatchObject({ rotateStopFallback: false, startAtLogin: true });
-    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, rotateStopFallback: true } });
+    expect((await loadConfig()).ui).toMatchObject({ rotateStopFallback: true, rotateStopFallbackAdopted: true });
+    // 2.1.48 wrote the old default with every save.
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...legacy, ui: { ...legacy.ui, rotateStopFallback: false } }), 'utf8');
     expect((await loadConfig()).ui.rotateStopFallback).toBe(true);
+    // A malformed value reads as the default.
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...legacy, ui: { ...legacy.ui, rotateStopFallback: 'yes', rotateStopFallbackAdopted: true, startAtLogin: true } }), 'utf8');
+    expect((await loadConfig()).ui).toMatchObject({ rotateStopFallback: true, startAtLogin: true });
+    // Switched off after the change: it stays off.
+    await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, rotateStopFallback: false } });
+    expect((await loadConfig()).ui.rotateStopFallback).toBe(false);
+    // A damaged marker reads as adopted: the saved off is kept (CodeRabbit on #1954).
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify({ ...defaultConfig(), ui: { ...defaultConfig().ui, rotateStopFallback: false, rotateStopFallbackAdopted: 'yes' } }), 'utf8');
+    expect((await loadConfig()).ui.rotateStopFallback).toBe(false);
   });
   it('reads other apps’ usage for fresh and legacy settings and keeps it off once switched off', async () => {
     expect(defaultConfig().ui.localAppUsage).toBe(true);

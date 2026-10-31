@@ -741,8 +741,11 @@ export async function repairPrimeFromResumeShadow(conversationId: string): Promi
   // The chat's own Goal/Loop switch travels with its objective. A loop that was running in A
   // is still running in B — the whole point of Compact & Resume is that the work continues —
   // and leaving the override behind would silently hand B back to the app-wide setting.
-  if (goalSwitchFor(conversationId).own) clearGoalSwitch(fromConversationId);
-  else if (moveGoalSwitch(fromConversationId, conversationId)) goalChanged = true;
+  if (goalSwitchFor(conversationId).own) {
+    const kept = goalSwitchFor(conversationId), dropped = goalSwitchFor(fromConversationId);
+    if (dropped.own) logInfo(`goal: ${conversationId} already had its own ${kept.enabled ? kept.mode : 'Normal'} switch, so ${fromConversationId}'s ${dropped.enabled ? dropped.mode : 'Normal'} was dropped (Compact & Resume)`);
+    clearGoalSwitch(fromConversationId);
+  } else if (moveGoalSwitch(fromConversationId, conversationId)) goalChanged = true;
   // The recovery hook uses success semantics: replaying an already-repaired target returns true
   // by design. Here this boolean means "changed on this call" and drives a user-visible warning,
   // so an already-owned target must not be counted as a fresh broker mutation. Missing Goal or
