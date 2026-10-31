@@ -2256,6 +2256,22 @@ function offerDesktopInput(tabId, message) {
   void chrome.tabs.sendMessage(tabId, message).catch(() => undefined);
 }
 
+// Missing-tab reports only expose a pre-claim failure in main; they never
+// authorize a new tab or Send. Keep their slow bridge requests off the single
+// maintenance flight, with a small bound shared across consecutive passes.
+// A failed report leaves the durable election intact for the next normal pass.
+const openingUnavailableReports = new Map();
+const MAX_OPENING_UNAVAILABLE_REPORTS = 3;
+function reportUnavailableOpening(id, tab, stage) {
+  if (openingUnavailableReports.has(id) || openingUnavailableReports.size >= MAX_OPENING_UNAVAILABLE_REPORTS) return;
+  const pending = call('/input/opening-unavailable', { method: 'POST',
+    body: JSON.stringify({ id, tab, stage }) });
+  openingUnavailableReports.set(id, pending);
+  void pending.catch(() => undefined).finally(() => {
+    if (openingUnavailableReports.get(id) === pending) openingUnavailableReports.delete(id);
+  });
+}
+
 async function deliverDesktopInputs(inputs, background, reusableConversations = [], activeIds, refreshRendering = async () => {}) {
   if (!Array.isArray(inputs)) return;
   // A reload into a new build is under way: no tab is elected or message started now; the app offers
@@ -2403,8 +2419,7 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
             ['ready', 'preparing'].includes(elected.stage)) {
           const currentTabs = await chrome.tabs.query({}).catch(() => null);
           if (Array.isArray(currentTabs) && !currentTabs.some(row => row.id === elected.tab || matchesInput(input, row)))
-            await call('/input/opening-unavailable', { method: 'POST',
-              body: JSON.stringify({ id: input.id, tab: elected.tab, stage: elected.stage }) });
+            reportUnavailableOpening(input.id, elected.tab, elected.stage);
         }
         continue;
       }
