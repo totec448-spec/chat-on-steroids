@@ -748,6 +748,8 @@ export const REQUEST_ID_GRACE_MS = evidenceWindow(20_000);
 let attributionRepairTimer: NodeJS.Timeout | null = null;
 let attributionRepairRequested = false;
 let fullAttributionRepair = false;
+/** One delayed storage retry per page-evidence/startup trigger, using the same timer. */
+let attributionRepairRetryUsed = false;
 const repairRequestIds = new Set<string>();
 // Derived negative-read cache only: exact ownership still comes from correlation.ts.
 const repairBuckets = new Map<string, { toolCalls: number; updatedAt: number; requestIds: Set<string> }>();
@@ -771,8 +773,9 @@ function startAttributionRepair(): void {
   void repairDeterministicAttribution(affected)
     .catch(err => {
       logWarn(`late request attribution repair failed: ${(err as Error).message}`);
+      retryFailedAttributionRepair();
     })
-    .then(() => { if (attributionRepairRequested) startAttributionRepair(); });
+    .then(() => { if (attributionRepairRequested && !attributionRepairTimer) startAttributionRepair(); });
 }
 
 /**
@@ -781,6 +784,7 @@ function startAttributionRepair(): void {
  * recorder/session flush just because startup deliberately did not block the first window on it.
  */
 export function queueDeterministicAttributionRepair(): void {
+  attributionRepairRetryUsed = false;
   attributionRepairRequested = true;
   fullAttributionRepair = true;
   if (attributionRepairTimer) {
@@ -791,6 +795,11 @@ export function queueDeterministicAttributionRepair(): void {
 }
 
 function scheduleAttributionRepair(requestId: string): void {
+  if (attributionRepairRetryUsed && attributionRepairTimer) {
+    clearTimeout(attributionRepairTimer);
+    attributionRepairTimer = null;
+  }
+  attributionRepairRetryUsed = false;
   attributionRepairRequested = true;
   repairRequestIds.add(requestId);
   if (repairRequestIds.size > 50_000) { repairRequestIds.clear(); fullAttributionRepair = true; }
@@ -799,6 +808,23 @@ function scheduleAttributionRepair(requestId: string): void {
     attributionRepairTimer = null;
     startAttributionRepair();
   }, 250);
+  attributionRepairTimer.unref?.();
+}
+
+function retryFailedAttributionRepair(): void {
+  if (attributionRepairRetryUsed) {
+    logWarn('request attribution: automatic storage retry exhausted; pending calls await new evidence or startup');
+    return;
+  }
+  attributionRepairRetryUsed = true;
+  attributionRepairRequested = true;
+  fullAttributionRepair = true;
+  if (attributionRepairTimer) clearTimeout(attributionRepairTimer);
+  logInfo('request attribution: storage repair failed; scheduling one retry in 1000ms using existing exact proof');
+  attributionRepairTimer = setTimeout(() => {
+    attributionRepairTimer = null;
+    startAttributionRepair();
+  }, 1000);
   attributionRepairTimer.unref?.();
 }
 
@@ -925,6 +951,7 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
   let repairedCalls = 0;
   /** The rewritten source and every target session gained or lost transcript rows. */
   const changed = new Set<string>();
+  let storageFailed = false;
 
   for (const summary of await indexedSessions()) try {
     if ((summary.provisionalToolCalls ?? 0) > 0) {
@@ -969,6 +996,7 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
           changed.add(summary.id); changed.add(proof.sessionId);
           repairedCalls++; repaired++;
         } catch (err) {
+          storageFailed = true;
           logWarn(`request attribution: provisional repair failed for call ${event.call.callId}, request ${event.call.requestId}; left pending for retry: ${(err as Error).message}`);
         }
       }
@@ -1060,6 +1088,7 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
       }
     } catch (err) {
       assetsComplete = false;
+      storageFailed = true;
       logWarn(`could not repair unattributed session ${summary.id}: ${(err as Error).message}`);
     }
     if (!assetsComplete) continue;
@@ -1096,6 +1125,7 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
       }
     } catch (err) {
       // Keep the source intact; a later trigger retries copied UUIDs without duplicating them.
+      storageFailed = true;
       repairBuckets.delete(summary.id);
       logWarn(`could not repair unattributed session ${summary.id}; destination read or append failed: ${(err as Error).message}`);
       continue;
@@ -1121,11 +1151,13 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
     );
   } catch (err) {
     // An unreadable source/checkpoint must not block other sessions or their notifications.
+    storageFailed = true;
     repairBuckets.delete(summary.id);
     logWarn(`request attribution: repair failed for source session ${summary.id}; left pending for retry: ${(err as Error).message}`);
   }
 
   if (changed.size > 0) notifyChanged(...changed);
+  if (storageFailed) retryFailedAttributionRepair();
   return { sessions: repairedSessions, calls: repairedCalls };
 }
 
@@ -3089,6 +3121,7 @@ export function resetRecorderForTests(): void {
   fullAttributionRepair = false;
   repairRequestIds.clear();
   repairBuckets.clear();
+  attributionRepairRetryUsed = false;
   agentConversationLookup = () => null;
   agentBinder = () => undefined;
   // The attribution listener is deliberately not cleared here: it belongs to the bridge's

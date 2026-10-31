@@ -822,6 +822,10 @@ Trust or turn recovery. Canonical tool-call shards preserve call UUIDs; the summ
 `provisionalToolCalls` count identifies history needing reconciliation. Exact late proof upgrades
 or moves those calls with their assets through `reviseProvisionalCall`, preserving unrelated
 messages and sequence anchors. Startup never restores exact ownership from provisional rows.
+Storage failures during attribution repair use the existing repair timer for one delayed
+in-process retry (one second) per page-evidence/startup trigger. The retry rereads durable
+history and the exact correlation registry; it cannot promote calls without proof. A repeated
+failure exhausts the automatic budget until new evidence or startup, with a diagnostic line.
 Provisional background commands retain canonical process-call shards and bind their exact
 process-lifetime completion promise. Attribution repair and these completions share the
 recorder's serialized attribution queue: an exit before relocation is copied with the call;
