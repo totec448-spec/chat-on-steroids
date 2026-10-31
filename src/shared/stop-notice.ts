@@ -17,7 +17,7 @@ export const STOP_NOTICE_TEXTS = [
   'ChatGPT gave the same answer three times in a row, so Goal stopped asking. Open the chat to continue.',
   'The reviewer found a problem Goal cannot safely go past. Open the chat to check it.',
   'Recovery slowed',
-  "The browser has not picked up this chat's next step. The app keeps trying; Continue now in the chat sends it at once."
+  "The browser has not picked up this chat's next step. The app keeps trying; you can go on from the chat at once."
 ] as const;
 
 export type StopNoticeText = typeof STOP_NOTICE_TEXTS[number];

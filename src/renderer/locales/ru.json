@@ -3939,14 +3939,17 @@
   "Recovery stopped": "Восстановление остановлено",
   "Stopped after {0} attempts": "Остановлено после {0} попыток",
   "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Браузер не получил ожидающий шаг после {0} автоматических перезагрузок. Исходный ввод в очереди или задача «Цель» остаётся сохранённой. CoS больше не будет автоматически перезагружать этот чат для данного шага; откройте чат и продолжите вручную.",
-  "The browser has not picked up this chat's next step. The app keeps trying; Continue now in the chat sends it at once.": "Браузер не забрал следующий шаг этого чата. Приложение продолжает пытаться; «Продолжить сейчас» в чате отправит его сразу.",
+  "The browser has not picked up this chat's next step. The app keeps trying; you can go on from the chat at once.": "Браузер не забрал следующий шаг этого чата. Приложение продолжает попытки; продолжить можно сразу из чата.",
   "Continue now": "Продолжить сейчас",
   "Send the waiting Continue now, as an ordinary message": "Отправить ожидающее «Продолжить» сейчас как обычное сообщение",
   "Try now": "Попробовать сейчас",
   "Try to send the waiting step now": "Попробовать отправить ожидающий шаг сейчас",
-  "Sent.": "Отправлено.",
+  "Continue queued. It goes out as soon as ChatGPT takes it.": "«Продолжить» поставлено в очередь. Оно уйдёт, как только ChatGPT его примет.",
   "Trying again now.": "Пробую снова.",
   "This chat has no ChatGPT conversation yet.": "У этого чата ещё нет разговора в ChatGPT.",
   "ChatGPT limits this chat for a few minutes. The app tries again right after.": "ChatGPT ограничил этот чат на несколько минут. Приложение попробует сразу после этого.",
-  "Nothing is waiting to be picked up in this chat any more.": "В этом чате больше ничего не ждёт."
+  "Nothing is waiting to be picked up in this chat any more.": "В этом чате больше ничего не ждёт.",
+  "This step changed meanwhile. Check the chat and try again.": "Этот шаг тем временем изменился. Проверьте чат и попробуйте снова.",
+  "Not sent now: something in this chat is still running. The app keeps trying.": "Сейчас не отправлено: в этом чате ещё что-то выполняется. Приложение продолжает попытки.",
+  "No new try could start now. The app keeps trying on its own.": "Сейчас новая попытка не смогла начаться. Приложение продолжает попытки само."
 }

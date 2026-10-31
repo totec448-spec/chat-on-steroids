@@ -26,8 +26,8 @@ export function stopNoticeTexts(): Record<(typeof STOP_NOTICE_TEXTS)[number], st
     'The reviewer found a problem Goal cannot safely go past. Open the chat to check it.':
       t('The reviewer found a problem Goal cannot safely go past. Open the chat to check it.'),
     'Recovery slowed': t('Recovery slowed'),
-    "The browser has not picked up this chat's next step. The app keeps trying; Continue now in the chat sends it at once.":
-      t("The browser has not picked up this chat's next step. The app keeps trying; Continue now in the chat sends it at once.")
+    "The browser has not picked up this chat's next step. The app keeps trying; you can go on from the chat at once.":
+      t("The browser has not picked up this chat's next step. The app keeps trying; you can go on from the chat at once.")
   };
 }
 

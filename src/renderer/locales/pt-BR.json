@@ -3858,14 +3858,17 @@
   "Recovery stopped": "Recuperação interrompida",
   "Stopped after {0} attempts": "Interrompido após {0} tentativas",
   "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "O navegador não recebeu a etapa pendente após {0} recarregamentos automáticos. A entrada original na fila ou a tarefa do Goal continua salva. O CoS não recarregará este chat automaticamente para esta etapa; abra-o e continue manualmente.",
-  "The browser has not picked up this chat's next step. The app keeps trying; Continue now in the chat sends it at once.": "O navegador não pegou a próxima etapa deste chat. O app continua tentando; Continuar agora no chat envia na hora.",
+  "The browser has not picked up this chat's next step. The app keeps trying; you can go on from the chat at once.": "O navegador não pegou a próxima etapa deste chat. O app continua tentando; você pode seguir agora mesmo pelo chat.",
   "Continue now": "Continuar agora",
   "Send the waiting Continue now, as an ordinary message": "Enviar agora o Continuar pendente, como mensagem normal",
   "Try now": "Tentar agora",
   "Try to send the waiting step now": "Tentar enviar agora a etapa pendente",
-  "Sent.": "Enviado.",
+  "Continue queued. It goes out as soon as ChatGPT takes it.": "Continuar na fila. Ele sai assim que o ChatGPT aceitar.",
   "Trying again now.": "Tentando de novo agora.",
   "This chat has no ChatGPT conversation yet.": "Este chat ainda não tem uma conversa do ChatGPT.",
   "ChatGPT limits this chat for a few minutes. The app tries again right after.": "O ChatGPT limita este chat por alguns minutos. O app tenta de novo logo depois.",
-  "Nothing is waiting to be picked up in this chat any more.": "Nada mais está esperando neste chat."
+  "Nothing is waiting to be picked up in this chat any more.": "Nada mais está esperando neste chat.",
+  "This step changed meanwhile. Check the chat and try again.": "Esta etapa mudou nesse meio-tempo. Confira o chat e tente de novo.",
+  "Not sent now: something in this chat is still running. The app keeps trying.": "Não enviado agora: algo neste chat ainda está em execução. O app continua tentando.",
+  "No new try could start now. The app keeps trying on its own.": "Nenhuma nova tentativa pôde começar agora. O app continua tentando sozinho."
 }

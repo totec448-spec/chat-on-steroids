@@ -1988,7 +1988,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // #1032: the user keeps this answer from being reloaded; false once the browser claimed it.
   handle('sessions:cancelRecovery', async (payload) => cancelAssistantRecovery(sessionIdArg.parse(payload).id));
   // A chat whose next step was not picked up: the person's one click (2026-10-31).
-  handle('sessions:pickupNow', async (payload) => pickupNow(sessionIdArg.parse(payload).id));
+  handle('sessions:pickupNow', async (payload) => {
+    const args = z.object({ id: z.string().min(1).max(200), next: z.enum(['queue', 'goal', 'loop', 'continue']), stoppedAt: z.number().finite() }).parse(payload);
+    return pickupNow(args.id, { next: args.next, stoppedAt: args.stoppedAt });
+  });
   handle('sessions:automation', async (payload) => {
     const { id, automation, afterTurn } = sessionIdArg.extend({ automation: z.enum(['off', 'goal', 'loop']), afterTurn: z.boolean().optional() }).parse(payload);
     return setSessionAutomation(id, automation, afterTurn);

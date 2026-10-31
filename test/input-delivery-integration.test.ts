@@ -2689,11 +2689,19 @@ describe('native progress silence authority', () => {
         { kind: 'turn_end', turnId: source.turnId, outcome: 'stalled', time: now }
       ] });
       now += 3 * 60_000;
-      expect(await (await bridge()).pickupNow(source.session.id, now)).toEqual({ ok: true, did: 'sent' });
+      // Its quick tries ran out: the chat shows the stopped Continue, with its button.
+      const stoppedAt = now;
+      await writeDurableNow('session-input', (await input.listInputs()).map(entry => entry.id === ticket.id
+        ? { ...entry, pickupRecovery: { attempts: 3, stoppedAt } } : entry));
+      input.resetInputForTests();
+      const bridgeModule = await bridge();
+      expect((await bridgeModule.sessionControlsFor(source.session.id)).recovery).toContainEqual(expect.objectContaining({ kind: 'pickup-stopped', next: 'continue', deadline: stoppedAt }));
+      // Queued as an ordinary message: that is no delivery yet, and the answer says so (CodeRabbit on #1979).
+      expect(await bridgeModule.pickupNow(source.session.id, { next: 'continue', stoppedAt }, now)).toEqual({ ok: true, did: 'queued' });
       const row = (await input.listInputs()).find(entry => entry.id === ticket.id)!;
       expect(row).toMatchObject({ state: 'queued', mode: 'auto', text: ticket.text, continuedFrom: 'recovery' });
       expect(row.recovery).toBeUndefined();
-      expect(logger.getLog().some(entry => entry.message.includes(`the person sent the automatic Continue in ${source.conversationId} now`))).toBe(true);
+      expect(logger.getLog().some(entry => entry.message.includes(`the person queued the automatic Continue in ${source.conversationId} now`))).toBe(true);
     } finally { clock.mockRestore(); }
   });
 

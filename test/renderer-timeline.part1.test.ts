@@ -1237,13 +1237,14 @@ it.each([7, 10, 11])('uses the same visible delivery choice and payload for %s a
 });
 
 // 2026-10-31: a chat whose next step was not picked up offers one click to go on, in words.
-it.each([['continue', 'Continue now', 'sent', 'Sent.'], ['queue', 'Try now', 'retrying', 'Trying again now.']] as const)(
+it.each([['continue', 'Continue now', 'queued', 'Continue queued. It goes out as soon as ChatGPT takes it.'], ['queue', 'Try now', 'retrying', 'Trying again now.']] as const)(
   'offers %s on a slowed pickup and says what it did', async (next, label, did, said) => {
   const { w, append } = await boot([]);
   const api = (w as any).api;
   const id = summary([]).id;
+  const stoppedAt = Date.now() - 60_000;
   api.getSessionControls = async () => ({ ok: true, data: { sessionId: id, automation: 'off', objective: '', blocked: '', job: null,
-    recovery: [{ kind: 'pickup-stopped', deadline: Date.now() - 60_000, attempts: 3, next }] } });
+    recovery: [{ kind: 'pickup-stopped', deadline: stoppedAt, attempts: 3, next }] } });
   const pickupNow = vi.fn(async () => ({ ok: true, data: { ok: true, did } }));
   api.pickupNow = pickupNow;
   await append([]);
@@ -1253,7 +1254,8 @@ it.each([['continue', 'Continue now', 'sent', 'Sent.'], ['queue', 'Try now', 're
     return found!;
   });
   button.click();
-  await waitFor(() => expect(pickupNow).toHaveBeenCalledWith(id));
+  // The click names the stopped step it was shown for (CodeRabbit on #1979).
+  await waitFor(() => expect(pickupNow).toHaveBeenCalledWith(id, { next, stoppedAt }));
   await waitFor(() => expect(w.document.querySelector('.toast')?.textContent).toBe(said));
 });
 
@@ -1262,9 +1264,56 @@ it('says why a pickup could not be tried now', async () => {
   const api = (w as any).api;
   api.getSessionControls = async () => ({ ok: true, data: { sessionId: summary([]).id, automation: 'off', objective: '', blocked: '', job: null,
     recovery: [{ kind: 'pickup-stopped', deadline: Date.now() - 60_000, attempts: 3, next: 'goal' }] } });
-  api.pickupNow = async () => ({ ok: true, data: { ok: false, error: 'ChatGPT limits this chat for a few minutes. The app tries again right after.' } });
+  api.pickupNow = async () => ({ ok: true, data: { ok: false, code: 'history-limit' } });
   await append([]);
-  const button = await waitFor(() => w.document.querySelector<HTMLButtonElement>('#recoveryStatus .dock-action.is-labelled')!);
+  // Asserted inside the wait: a null element must keep it waiting (CodeRabbit on #1979).
+  const button = await waitFor(() => {
+    const found = w.document.querySelector<HTMLButtonElement>('#recoveryStatus .dock-action.is-labelled');
+    expect(found).not.toBeNull();
+    return found!;
+  });
   button.click();
   await waitFor(() => expect(w.document.querySelector('.toast')?.textContent).toBe('ChatGPT limits this chat for a few minutes. The app tries again right after.'));
+});
+
+// CodeRabbit on #1979: tries used up leave only a waiting Continue to send; nothing to try again.
+it.each([['goal', false], ['continue', true]] as const)('offers a button on an exhausted %s pickup: %s', async (next, offered) => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  api.getSessionControls = async () => ({ ok: true, data: { sessionId: summary([]).id, automation: 'off', objective: '', blocked: '', job: null,
+    recovery: [{ kind: 'pickup-stopped', deadline: Date.now() - 60_000, attempts: 24, exhausted: true, next }] } });
+  await append([]);
+  await waitFor(() => expect(w.document.querySelector('#recoveryStatus')?.textContent).not.toBe(''));
+  expect(!!w.document.querySelector('#recoveryStatus .dock-action.is-labelled')).toBe(offered);
+});
+
+// CodeRabbit on #1979: the answer for one chat is not shown over another chat selected meanwhile.
+it('keeps the answer of a pickup click off another chat selected meanwhile', async () => {
+  const first: SessionSummary = { ...summary([]), id: 'pickup-first', title: 'First', conversationId: 'pickup-first-chat', chatIds: ['pickup-first-chat'] };
+  const second: SessionSummary = { ...summary([]), id: 'pickup-second', title: 'Second', conversationId: 'pickup-second-chat', chatIds: ['pickup-second-chat'] };
+  const { w } = await boot([], false, [], [], { sessions: [first, second] });
+  const api = (w as any).api;
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { sessionId: id, automation: 'off', objective: '', blocked: '', job: null,
+    recovery: id === first.id ? [{ kind: 'pickup-stopped', deadline: Date.now() - 60_000, attempts: 3, next: 'queue' }] : [] } });
+  let answer: ((value: unknown) => void) | undefined;
+  api.pickupNow = () => new Promise(resolve => { answer = resolve; });
+  const select = async (id: string) => {
+    w.document.querySelector<HTMLElement>(`[data-id="${id}"] [data-session-select]`)!
+      .dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await settle();
+  };
+  await select(first.id);
+  const button = await waitFor(() => {
+    const found = w.document.querySelector<HTMLButtonElement>('#recoveryStatus .dock-action.is-labelled');
+    expect(found).not.toBeNull();
+    return found!;
+  });
+  button.click();
+  await waitFor(() => expect(answer).toBeTypeOf('function'));
+  await select(second.id);
+  expect(w.document.querySelector(`.sess.is-sel[data-id="${second.id}"]`)).not.toBeNull();
+  answer!({ ok: true, data: { ok: true, did: 'retrying' } });
+  await settle();
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect([...w.document.querySelectorAll('.toast')].map(node => node.textContent)).not.toContain('Trying again now.');
 });
