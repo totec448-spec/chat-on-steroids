@@ -2701,7 +2701,30 @@ of trusted browser input or successful pointer lock; prefer native actions and o
 
 Traversal, result text, decoded image pixels/bytes, frame/session counts and console/network
 buffers are bounded. Console and network capture starts at attach; retained history is not a
-complete trace. Request bodies are fetched only on request with explicit truncation. Images use
+complete trace. Request bodies are fetched only on request with explicit truncation.
+`browser_network` stream retention is opt-in for an exact owned, in-flight SSE request.
+`browser_network` must refuse ChatGPT or orchestration-protected tabs, including a
+previously attached tab after navigation; ChatGPT request URLs must never enter
+retained network records. Entering a ChatGPT top-level frame clears earlier capture.
+Seed the current top-level tab origin before retaining events, including restored
+attachments; nested frames and SPA URL changes must not retire a live top-level SSE.
+Top-level navigation must retire the previous byte epoch, while an exact destination
+Document loader/frame may be rebound to the new epoch.
+Network events arriving before restore/origin verification must be discarded.
+Child frame/session navigation or detach retires only its own captured bytes;
+ChatGPT child-frame traffic is excluded even without a ChatGPT request URL.
+Check live read permission again after asynchronous body work and before byte publication.
+Unknown or old child debugger sessions must not add requests after a top-level
+document transition; only sessions attached in the current network epoch can do so.
+Child-session request admission also waits for successful debugger initialization;
+pending or failed initialization never grants a readable network record.
+Keep the strict schema and extension handler aligned: 4 MiB retained per tab, byte pages
+of 64 KiB by default and at most 256 KiB, returned as base64. Raw retained bytes must
+never enter metadata listings. Clear, eviction and release dispose retained bytes;
+late CDP completion cannot restore disposed captures. Terminal does not imply complete:
+failure, overflow, invalid bytes or capture errors must keep completeness false.
+Test the real extension handler at the CDP boundary as well as the tool schema.
+Images use
 native MCP image blocks without duplicate base64 in text/structured output. Page data never
 becomes local-tool authority. Tests: `browser-control.test.ts`, `tools-browser.test.ts`, bridge
 HTTP tests and `scripts/verify-browser-control.mjs` (isolated real Chromium, no signed-in tabs).
