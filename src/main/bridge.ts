@@ -9730,11 +9730,24 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
     // happened in the chat or anything runs.
     if (reply.queued && reply.inputId && now - reply.acceptedAt >= RECOVERY_ORDINARY_AFTER_MS) {
       const stuck = watch.stoppedAt || watch.attempts >= 1 ? `not claimed after ${watch.attempts} reload(s)` : await queuedInputOfferBlocker(reply.inputId);
-      if (stuck && await continueAsOrdinaryMessage(reply.inputId, stuck)) {
-        pickupWatch.delete(reply.conversationId);
-        wakeBrowserWork();
-        queued = true;
-        continue;
+      if (stuck) {
+        const outcome = await continueAsOrdinaryMessage(reply.inputId, stuck, RECOVERY_ORDINARY_AFTER_MS);
+        if ('row' in outcome) {
+          pickupWatch.delete(reply.conversationId);
+          wakeBrowserWork();
+          queued = true;
+          continue;
+        }
+        // Why it stays, once per chat, input and reason (CodeRabbit on #1960). Not for a ticket that
+        // is no automatic Continue or not old enough: those are ordinary waits.
+        if (!/no longer a queued automatic Continue|not old enough/.test(outcome.refused)) {
+          const key = `${reply.conversationId}|${reply.inputId}|ordinary:${outcome.refused}`;
+          if (!pickupWithheldLogged.has(key)) {
+            pickupWithheldLogged.add(key);
+            if (pickupWithheldLogged.size > 200) pickupWithheldLogged.delete(pickupWithheldLogged.values().next().value!);
+            logInfo(`bridge: the automatic Continue in ${reply.conversationId} is not sent as an ordinary message yet — ${outcome.refused}`);
+          }
+        }
       }
     }
     if (watch.stoppedAt || watch.attempts >= BROWSER_PICKUP_MAX_ATTEMPTS) continue;

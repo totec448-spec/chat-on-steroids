@@ -2572,18 +2572,23 @@ describe('native progress silence authority', () => {
     expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
     const ticket = (await input.listInputs()).find(row => row.recovery && row.state === 'queued')!;
     // The turn is still open in the record: an ordinary message could not go out, so nothing changes.
-    expect(await input.continueAsOrdinaryMessage(ticket.id, 'test')).toBeNull();
+    expect(await input.continueAsOrdinaryMessage(ticket.id, 'test')).toEqual({ refused: 'its turn is still open in the record' });
     await post('/events', { conversationId: source.conversationId, events: [
       { kind: 'turn_end', turnId: source.turnId, outcome: 'stalled', time: Date.now() }
     ] });
-    const ordinary = await input.continueAsOrdinaryMessage(ticket.id, 'not claimed after its reloads');
-    expect(ordinary).toMatchObject({ id: ticket.id, text: ticket.text, mode: 'auto', state: 'queued' });
+    // Not before it has waited long enough itself.
+    expect(await input.continueAsOrdinaryMessage(ticket.id, 'test', 60 * 60_000)).toEqual({ refused: 'it is not old enough yet' });
+    const outcome = await input.continueAsOrdinaryMessage(ticket.id, 'not claimed after its reloads');
+    const ordinary = 'row' in outcome ? outcome.row : null;
+    expect(ordinary).toMatchObject({ id: ticket.id, text: ticket.text, mode: 'auto', state: 'queued', continuedFrom: 'recovery' });
+    // Still the app's own send: the send check asks before it goes (CodeRabbit on #1960).
+    expect(input.automaticSendKind(ordinary!)).toBe('continue');
     expect(ordinary).not.toHaveProperty('recovery');
     expect(ordinary).not.toHaveProperty('silenceBoundary');
     expect(logger.getLog().some(entry => entry.message.includes(`input ${ticket.id}: no page took the automatic Continue (not claimed after its reloads); sending it as an ordinary message`))).toBe(true);
     // Offered like a typed message, and only once converted.
     expect((await input.pendingBrowserInputs()).find(row => row.id === ticket.id)).toEqual(expect.not.objectContaining({ recovery: expect.anything() }));
-    expect(await input.continueAsOrdinaryMessage(ticket.id, 'again')).toBeNull();
+    expect(await input.continueAsOrdinaryMessage(ticket.id, 'again')).toEqual({ refused: 'it is no longer a queued automatic Continue' });
   });
 
   it('sends an automatic Continue no page claims as an ordinary message after a reload and ten minutes, instead of stopping', async () => {
@@ -2620,6 +2625,29 @@ describe('native progress silence authority', () => {
     } finally { clock.mockRestore(); }
   });
 
+  it('says once why an automatic Continue is not sent as an ordinary message yet (CodeRabbit on #1960)', async () => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const source = await open('gpt-5.6-sol');
+      expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+      const ticket = (await input.listInputs()).find(row => row.recovery && row.state === 'queued')!;
+      // The turn stays open in the record: the page reloads on schedule and never claims it.
+      for (let minute = 1; minute <= 16; minute++) {
+        now += 60_000;
+        await (await bridge()).sweepStaleSwarm(now);
+        const repairs = (await post('/status', { openConversations: [source.conversationId] })).body.repairs ?? [];
+        for (const repair of repairs.filter((row: any) => row.conversationId === source.conversationId)) {
+          if (repair.requiresClaim) await post('/repairs/claim', { conversationId: source.conversationId, token: repair.token });
+          await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [source.conversationId] });
+        }
+      }
+      expect((await input.listInputs()).find(row => row.id === ticket.id)?.recovery).toBeDefined();
+      expect(logger.getLog().map(entry => entry.message).filter(line => line.includes(`automatic Continue in ${source.conversationId} is not sent as an ordinary message yet`))).toEqual([
+        `bridge: the automatic Continue in ${source.conversationId} is not sent as an ordinary message yet — its turn is still open in the record`
+      ]);
+    } finally { clock.mockRestore(); }
+  });
+
   it('leaves an automatic Continue alone once the person asked something newer', async () => {
     const source = await open('gpt-5.6-sol');
     expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
@@ -2628,8 +2656,11 @@ describe('native progress silence authority', () => {
       { kind: 'turn_end', turnId: source.turnId, outcome: 'stalled', time: Date.now() },
       { kind: 'user_message', messageId: randomUUID(), text: 'Actually, do this instead', time: Date.now(), authoredNow: true }
     ] });
-    expect(await input.continueAsOrdinaryMessage(ticket.id, 'test')).toBeNull();
-    expect((await input.listInputs()).find(row => row.id === ticket.id)).toMatchObject({ recovery: expect.anything() });
+    // The newer question already withdrew the Continue; either way it is never sent as an ordinary message.
+    expect(await input.continueAsOrdinaryMessage(ticket.id, 'test')).toHaveProperty('refused');
+    const left = (await input.listInputs()).find(row => row.id === ticket.id)!;
+    expect(left).toMatchObject({ recovery: expect.anything() });
+    expect(left.continuedFrom).toBeUndefined();
   });
 
   it('keeps authored queued work ahead of automatic Continue after a committed handoff', async () => {
