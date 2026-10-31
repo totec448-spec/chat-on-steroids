@@ -3108,17 +3108,100 @@ function maintain(woken = false) {
  */
 const APP_LANGUAGE_KEY = 'appLanguage';
 const APP_LANGUAGES = new Set(['en', 'de', 'es', 'fr', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'ja', 'ko', 'zh-CN', 'zh-TW']);
-async function followApp(data) {
-  const stored = await chrome.storage.local.get([APP_LANGUAGE_KEY, RENDER_STREAM_KEY, SHOW_TIMES_KEY]);
-  const patch = {};
-  if (APP_LANGUAGES.has(data?.language) && stored[APP_LANGUAGE_KEY] !== data.language) patch[APP_LANGUAGE_KEY] = data.language;
+/*
+ * 2026-10-30: the extension in one Chrome never stored the app's language in weeks (the same build
+ * stored it at once elsewhere) and showed Chrome's language until its worker restarted. Nothing said
+ * why: a storage read that never answers, or a refused write, was swallowed. So the read is bounded,
+ * the language is written once per worker and again on a change rather than trusted to the stored copy,
+ * and the outcome is kept for the diagnostics report (`appLanguageState`).
+ */
+const FOLLOW_READ_MS = 5_000;
+let appLanguageApplied = null;
+let appLanguageError = null;
+/** A write that failed or timed out may still land later, so the next status writes again (CodeRabbit on #1940). */
+let appLanguageUnconfirmed = false;
+function appLanguageState() {
+  return { applied: appLanguageApplied, error: appLanguageError };
+}
+/** A storage call that gives up after FOLLOW_READ_MS instead of waiting for good. */
+async function boundedStorage(call, what) {
+  let timer = null;
+  try {
+    return await Promise.race([
+      call,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`storage ${what} did not answer within ${FOLLOW_READ_MS / 1000} s`)), FOLLOW_READ_MS); })
+    ]);
+  } finally { clearTimeout(timer); }
+}
+function boundedStorageGet(keys) {
+  return boundedStorage(chrome.storage.local.get(keys), 'read');
+}
+// Statuses are applied one at a time, so a slow older read can never write its language after a
+// newer one. While one runs, only the newest waiting status is kept: a burst of statuses must not
+// queue a read each and hold a newer language back (CodeRabbit on #1940). A status without a
+// language or kept preferences keeps the waiting one's.
+let followWaiting = null;
+let followRunning = null;
+function followApp(data) {
+  followWaiting = {
+    language: data?.language ?? followWaiting?.language,
+    browserPreferences: data?.browserPreferences ?? followWaiting?.browserPreferences
+  };
+  followRunning ??= (async () => {
+    try {
+      while (followWaiting) {
+        const next = followWaiting;
+        followWaiting = null;
+        await followAppNow(next).catch(() => undefined);
+      }
+    } finally { followRunning = null; }
+  })();
+  return followRunning;
+}
+/**
+ * Settles once no status is being applied, at most after two bounded storage calls and a little: a
+ * diagnostics snapshot read just after a language change otherwise saw the old stored language,
+ * and the app logged a mismatch that was not one (CodeRabbit on #1940).
+ */
+function followSettled() {
+  let timer = null;
+  return Promise.race([followRunning ?? Promise.resolve(), new Promise(resolve => { timer = setTimeout(resolve, 2 * FOLLOW_READ_MS + 1_000); })])
+    .catch(() => undefined).finally(() => clearTimeout(timer));
+}
+async function followAppNow(data) {
+  const language = APP_LANGUAGES.has(data?.language) ? data.language : null;
   const kept = data?.browserPreferences;
-  if (kept && typeof kept.overwrite === 'boolean' && typeof kept.durations === 'boolean' &&
-      !(RENDER_STREAM_KEY in stored) && !(SHOW_TIMES_KEY in stored)) {
+  const keptValid = kept && typeof kept.overwrite === 'boolean' && typeof kept.durations === 'boolean';
+  if ((!language || (language === appLanguageApplied && !appLanguageUnconfirmed)) && !keptValid) return;
+  let readFailed = null;
+  const stored = await boundedStorageGet([APP_LANGUAGE_KEY, RENDER_STREAM_KEY, SHOW_TIMES_KEY])
+    .catch(error => { readFailed = String(error?.message || error).slice(0, 200); return null; });
+  const patch = {};
+  // Unread storage still gets the language: it is the app's, not a preference the person set here.
+  if (language && (language !== appLanguageApplied || appLanguageUnconfirmed) && (!stored || stored[APP_LANGUAGE_KEY] !== language)) patch[APP_LANGUAGE_KEY] = language;
+  // Kept preferences only fill an extension that provably has none, so they need the read.
+  if (keptValid && stored && !(RENDER_STREAM_KEY in stored) && !(SHOW_TIMES_KEY in stored)) {
     patch[RENDER_STREAM_KEY] = kept.overwrite;
     patch[SHOW_TIMES_KEY] = kept.durations;
   }
-  if (Object.keys(patch).length) await chrome.storage.local.set(patch);
+  // The worker takes the app's language at once, whatever storage does: a page that asks
+  // (`i18n_catalog` with `current`) gets it even while the write below fails (CodeRabbit on #1940).
+  // A failed write stays unconfirmed, so the next status writes again.
+  if (language) appLanguageApplied = language;
+  try {
+    // A write that never answers is bounded too: it must not hold every later status (CodeRabbit on #1940).
+    if (Object.keys(patch).length) await boundedStorage(chrome.storage.local.set(patch), 'write');
+    if (language) appLanguageApplied = language;
+    // Confirmed only by writing the language, or by reading it already stored: a status with kept
+    // preferences alone proves nothing about it (CodeRabbit on #1940).
+    if (patch[APP_LANGUAGE_KEY] || (language && stored?.[APP_LANGUAGE_KEY] === language)) appLanguageUnconfirmed = false;
+    // An unconfirmed language keeps the error that left it unsaved (CodeRabbit on #1940).
+    if (!appLanguageUnconfirmed) appLanguageError = readFailed;
+  } catch (error) {
+    if (patch[APP_LANGUAGE_KEY]) appLanguageUnconfirmed = true;
+    // A failed preferences-only write does not replace the reason the language is still unsaved (CodeRabbit on #1940).
+    if (patch[APP_LANGUAGE_KEY] || !appLanguageUnconfirmed) appLanguageError = String(error?.message || error).slice(0, 200);
+  }
 }
 
 /**
@@ -3275,6 +3358,24 @@ function updatedByBrowser() {
   return typeof chrome.runtime.getBrowserInfo === 'function';
 }
 
+/** How long an offered update waits only for answering ChatGPT pages before it goes ahead anyway. */
+const CHAT_BUSY_UPDATE_AFTER_MS = 30 * 60_000;
+/** Since when this update attempt has waited for answering pages, kept across worker restarts. */
+let chatBusySince = null;
+async function chatBusyWait(attempt) {
+  const key = 'extensionUpdateBusySince';
+  if (!chatBusySince) {
+    const stored = await chrome.storage.session?.get?.(key).catch(() => null);
+    const saved = stored?.[key];
+    if (saved && saved.attempt === attempt && Number.isFinite(saved.at)) chatBusySince = saved;
+  }
+  if (!chatBusySince || chatBusySince.attempt !== attempt) {
+    chatBusySince = { attempt, at: Date.now() };
+    await chrome.storage.session?.set?.({ [key]: chatBusySince }).catch(() => undefined);
+  }
+  return Math.max(0, Date.now() - chatBusySince.at);
+}
+
 async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands, liveSending = null) {
   if (extensionReloadPending) return;
   if (updatedByBrowser()) { extensionUpdateHold = offer ? 'browser-updates-itself' : null; return; }
@@ -3294,18 +3395,30 @@ async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands, liveS
   if (liveCommands.size) { extensionUpdateHold = 'commands'; return; }
   const attempt = `${workerStampValue}>${offer.build}`;
   if ((await chrome.storage.local.get('extensionReloadAttempt')).extensionReloadAttempt === attempt) { extensionUpdateHold = 'already-tried'; return; }
+  let busyFor = 0;
   for (const tab of await chrome.tabs.query({ url: CHATGPT_TAB_URLS })) {
     if (!Number.isInteger(tab.id) || tab.discarded === true) continue;
     const ping = await tabReply(tab.id, { type: 'clf-recorder-ping' }).catch(() => null);
     // A page that cannot answer has nothing running here. One that answers without `busy` runs an
     // older recorder that cannot say, so it is treated as busy.
-    if (ping && ping.busy !== false) { extensionUpdateHold = 'chat-busy'; return; }
+    if (ping && ping.busy !== false) {
+      // Long Goal and Loop chats answer almost without a pause, so an update that waits for every
+      // page to be idle could wait for days (2026-10-31, the maintainer's Mac). After waiting this
+      // long only for answering pages, it goes ahead at a moment when no tool call runs and nothing
+      // is being sent: the reload re-injects the pages, and the app recovers an answer in progress.
+      busyFor = await chatBusyWait(attempt);
+      if (busyFor < CHAT_BUSY_UPDATE_AFTER_MS) { extensionUpdateHold = 'chat-busy'; return; }
+      break;
+    }
   }
   extensionReloadPending = true;
   try {
-    const prepared = await call('/extension/update', { method: 'POST', body: '{}' });
+    const prepared = await call('/extension/update', { method: 'POST',
+      body: JSON.stringify(busyFor ? { pastBusyChatsMs: busyFor } : {}) });
     // The app saw a message go out since the last status: that holds the update, as one listed would.
     if (prepared.ok && prepared.data?.hold === 'sending') { extensionUpdateHold = 'sending'; return; }
+    // A tool call started after the last status: the app holds the update at the last moment too.
+    if (prepared.ok && prepared.data?.hold === 'app-busy') { extensionUpdateHold = 'app-busy'; return; }
     if (!prepared.ok || prepared.data?.ready !== true || prepared.data.build !== offer.build) { extensionUpdateHold = 'folder-not-ready'; return; }
     extensionUpdateHold = null;
     await chrome.storage.local.set({ extensionReloadAttempt: attempt });
@@ -4205,8 +4318,12 @@ const HANDLERS = {
     return result;
   },
   async i18n_catalog(message) {
-    const messages = await globalThis.CLF_I18N?.catalogFor?.(String(message?.language || '')).catch(() => null);
-    return messages ? { ok: true, messages } : { ok: false };
+    // `current`: the language this worker applied from the app's last status (see followApp), so a
+    // page whose own storage read hangs still shows it.
+    const language = message?.current === true ? appLanguageApplied : String(message?.language || '');
+    if (!language) return { ok: false };
+    const messages = await globalThis.CLF_I18N?.catalogFor?.(language).catch(() => null);
+    return messages ? { ok: true, ...(message?.current === true ? { language } : {}), messages } : { ok: false };
   },
   async register_document(_message, sender) {
     let result = await registerDocument(sender, _message);
@@ -5019,9 +5136,16 @@ async function cachedEnvironmentDiagnostics() {
 
 /** Snapshot sent only to the current paired bridge; it does not grant work or recovery. */
 async function companionDiagnosticSnapshot(found) {
-  const preferences = await chrome.storage.local.get([RENDER_STREAM_KEY, SHOW_TIMES_KEY]);
+  // Bounded like followApp's read: a storage that never answers must not hold every later report back.
+  await followSettled();
+  let readFailed = null;
+  const preferences = await boundedStorageGet([RENDER_STREAM_KEY, SHOW_TIMES_KEY, APP_LANGUAGE_KEY])
+    .catch(error => { readFailed = String(error?.message || error).slice(0, 200); return {}; });
+  const languageState = appLanguageState();
   return {
     capturedAt: Date.now(),
+    language: { ...languageState, error: languageState.error ?? readFailed,
+      stored: typeof preferences[APP_LANGUAGE_KEY] === 'string' ? preferences[APP_LANGUAGE_KEY] : null },
     status: {
       connected: found !== null,
       port: found ? found.port : null,

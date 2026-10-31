@@ -2461,7 +2461,15 @@ refreshes or model-list requests; `/input/claim` and `/repairs/claim` refuse it 
 tab to open through `/activity` or its `/compact` reply either (`opensNewWork`, #1852), which also
 holds for an out-of-date companion. It still records and stops what the person
 opens there, and works on as before once the CoS browser is gone. The chosen CoS browser takes a
-new chat's opening custody over from another browser. `browser-proof.ts` keeps, across restarts, the version last seen there and
+new chat's opening custody over from another browser, and a chat's repair too: `takePendingRepairs`
+skips a chat held by another browser for every browser except the chosen built-in one, since the holder
+may not claim it (#1960; before, such a chat's recovery sat with nobody able to take it). A browser that may not
+claim (not chosen, or out of date) is handed no repair that needs a claim, except a stalled-tab repair for a
+chat it holds, which `/repairs/claim` lets that holder take (`holdsStalledTab`): thawing its own frozen tab opens
+nothing new, and only it can; the chosen browser does not take a stalled repair over. With "browser only" on, the
+chosen browser is not handed a repair for a chat another browser holds (it may not open it): the repair stays
+queued without spending offers, logged once per episode. A refused claim from a browser that is not chosen is
+logged once a minute per chat. `browser-proof.ts` keeps, across restarts, the version last seen there and
 ChatGPT's last signed-in answer, so a closed browser keeps its state and a logout stays a logout;
 a live answer always wins. The extension reports presence and that answer on its own
 (`POST /browser/presence`), from ChatGPT's `/api/auth/session` in an existing regular-profile tab,
@@ -3017,6 +3025,12 @@ is still deciding (past the reload check, e.g. waiting for the send check); once
 ready, `/input/claim` from that browser (`x-extension-browser`) hands out nothing for 20 s (checked
 again right before the claim takes its message), and the
 extension's `deliverDesktopInputs` starts nothing while its reload is pending.
+An answering ChatGPT page (`clf-recorder-ping` busy) holds the update as `chat-busy` for at most
+30 minutes per offered build (`CHAT_BUSY_UPDATE_AFTER_MS`; the start is kept in `storage.session` as
+`extensionUpdateBusySince`, so a worker restart does not reset it). After that the update goes ahead at
+a pass where nothing else holds it (no tool call in the app, nothing sent, no command), and
+`/extension/update` receives `{ pastBusyChatsMs }` and logs that it updated past an answering page
+(2026-10-31: long Goal chats answered almost without a pause and the update waited for hours).
 Managed idle/retired/duplicate pruning records a successful removal against the exact tab,
 document, navigation epoch and conversation in the existing session-storage snapshot. Its
 lifecycle event carries a non-manual departure through the close outbox; it does not create
@@ -4822,6 +4836,12 @@ with no extension catalog reads as English. The same reply carries `browserPrefe
 extension's Overwrite and Timestamps values as it last reported them stored (`preferencesStored` in
 `/diagnostics`; defaults are never kept). An extension with neither value in its storage, such as a
 reinstall under a new id, takes them back; stored values always win.
+`followApp` writes `appLanguage` once per worker and again when the app's language changes, not on
+the stored copy's word alone: its storage read is bounded to 5 s, and an unanswered read still writes
+the language (2026-10-30: one Chrome kept the browser's language for weeks with nothing said). Its
+outcome, with the stored value, goes into `/diagnostics` as `language: { applied, stored, error }`;
+the app logs one `browser: the extension's stored language is …` line per distinct mismatch or error,
+and the diagnostics report's browser section has an `Extension language:` line.
 Setup uses SVG flags only, with native language names in tooltips and
 accessible labels; Appearance retains the named language dropdown. Both controls share the
 same persisted preference. `translate="no"` protects text and attributes, including native
