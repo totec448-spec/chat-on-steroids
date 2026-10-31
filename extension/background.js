@@ -2265,7 +2265,15 @@ const MAX_OPENING_UNAVAILABLE_REPORTS = 3;
 function reportUnavailableOpening(id, tab, stage) {
   if (openingUnavailableReports.has(id) || openingUnavailableReports.size >= MAX_OPENING_UNAVAILABLE_REPORTS) return;
   const pending = call('/input/opening-unavailable', { method: 'POST',
-    body: JSON.stringify({ id, tab, stage }) });
+    body: JSON.stringify({ id, tab, stage }) }).then(async reply => {
+    // The app proved nothing reached the lost tab and grants a fresh one: forget the old election,
+    // so the next pass opens a new tab for this new chat (#1950 follow-up). Only then.
+    if (reply?.ok && reply.data?.reopen === true && inputOpenings[id]?.tab === tab) {
+      delete inputOpenings[id];
+      await persistLive();
+    }
+    return reply;
+  });
   openingUnavailableReports.set(id, pending);
   void pending.catch(() => undefined).finally(() => {
     if (openingUnavailableReports.get(id) === pending) openingUnavailableReports.delete(id);
