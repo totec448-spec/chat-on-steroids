@@ -3306,6 +3306,8 @@ async function reloadForExtensionUpdate(offer, liveOpenings, liveCommands, liveS
       body: JSON.stringify(busyFor ? { pastBusyChatsMs: busyFor } : {}) });
     // The app saw a message go out since the last status: that holds the update, as one listed would.
     if (prepared.ok && prepared.data?.hold === 'sending') { extensionUpdateHold = 'sending'; return; }
+    // A tool call started after the last status: the app holds the update at the last moment too.
+    if (prepared.ok && prepared.data?.hold === 'app-busy') { extensionUpdateHold = 'app-busy'; return; }
     if (!prepared.ok || prepared.data?.ready !== true || prepared.data.build !== offer.build) { extensionUpdateHold = 'folder-not-ready'; return; }
     extensionUpdateHold = null;
     await chrome.storage.local.set({ extensionReloadAttempt: attempt });

@@ -172,3 +172,10 @@ it('counts the wait for answering pages per offered build', async () => {
   expect(h.reload).not.toHaveBeenCalled();
   expect(h.hold()).toBe('chat-busy');
 });
+
+it('waits when the app says a tool call started since its last status (CodeRabbit on #1961)', async () => {
+  const h = worker({ prepared: { ready: false, hold: 'app-busy' } });
+  await h.run();
+  expect(h.reload).not.toHaveBeenCalled();
+  expect(h.hold()).toBe('app-busy');
+});

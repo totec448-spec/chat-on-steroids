@@ -253,6 +253,18 @@ it('says when the extension updates past answering pages after its long wait (20
     await post('/extension/update', {});
     await post('/extension/update', { pastBusyChatsMs: 'long' });
     expect(logged.mock.calls.some(([line]) => String(line).includes('still answering'))).toBe(false);
+    // Said only when the update really goes ahead (CodeRabbit on #1961).
+    extensionPath.prepare = () => ({ build: 'bbbbbbbbbbbb', ready: false });
+    await post('/extension/update', { pastBusyChatsMs: 31 * 60_000 });
+    expect(logged.mock.calls.some(([line]) => String(line).includes('still answering'))).toBe(false);
+    // A tool call that started after the extension's last status holds it at the last moment.
+    extensionPath.prepare = prepare;
+    const callContext = await import('../src/main/mcp/call-context.js');
+    let finish!: () => void;
+    const call = callContext.trackInFlight({ tool: 'exec_command', caller: { transportKey: null, requestId: null, conversationId: null },
+      evidence: callContext.emptyEvidence() } as never, () => new Promise<void>(resolve => { finish = resolve; }));
+    expect((await post('/extension/update', { pastBusyChatsMs: 31 * 60_000 })).body).toEqual({ ready: false, hold: 'app-busy' });
+    finish(); await call;
   } finally { clock.mockRestore(); logged.mockRestore(); extensionPath.prepare = () => null; }
 });
 
