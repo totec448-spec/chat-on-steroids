@@ -1065,32 +1065,40 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
     if (!assetsComplete) continue;
 
     let firstTargetSessionId: string | null = null;
-    for (const [sessionKey, group] of owned) {
-      const targetSessionId = destinations.get(sessionKey)!;
-      firstTargetSessionId ??= targetSessionId;
-      const existingCallIds = new Set(
-        (await readEvents(targetSessionId, { kinds: ['tool_call'] }))
-          .filter((event): event is Extract<SessionEvent, { kind: 'tool_call' }> => event.kind === 'tool_call')
-          .map((event) => event.call.callId)
-      );
-      for (const { event, conversationId } of group) {
-        if (existingCallIds.has(event.call.callId)) continue;
-        await appendEvent(targetSessionId, {
-          time: event.time,
-          source: 'mcp',
-          kind: 'tool_call',
-          call: {
-            ...event.call,
-            attribution: 'request_id',
-            conversationId,
-            attributionMethod: 'request_id'
-          },
-          ...(event.agent ? { agent: event.agent } : {}),
-          ...(event.turnId ? { turnId: event.turnId } : {})
-        });
-        existingCallIds.add(event.call.callId);
-        repairedCalls += 1;
+    try {
+      for (const [sessionKey, group] of owned) {
+        const targetSessionId = destinations.get(sessionKey)!;
+        firstTargetSessionId ??= targetSessionId;
+        const existingCallIds = new Set(
+          (await readEvents(targetSessionId, { kinds: ['tool_call'] }))
+            .filter((event): event is Extract<SessionEvent, { kind: 'tool_call' }> => event.kind === 'tool_call')
+            .map((event) => event.call.callId)
+        );
+        for (const { event, conversationId } of group) {
+          if (existingCallIds.has(event.call.callId)) continue;
+          await appendEvent(targetSessionId, {
+            time: event.time,
+            source: 'mcp',
+            kind: 'tool_call',
+            call: {
+              ...event.call,
+              attribution: 'request_id',
+              conversationId,
+              attributionMethod: 'request_id'
+            },
+            ...(event.agent ? { agent: event.agent } : {}),
+            ...(event.turnId ? { turnId: event.turnId } : {})
+          });
+          changed.add(targetSessionId);
+          existingCallIds.add(event.call.callId);
+          repairedCalls += 1;
+        }
       }
+    } catch (err) {
+      // Keep the source intact; a later trigger retries copied UUIDs without duplicating them.
+      repairBuckets.delete(summary.id);
+      logWarn(`could not repair unattributed session ${summary.id}; destination read or append failed: ${(err as Error).message}`);
+      continue;
     }
 
     let repaired: { retained: number; deleted: boolean };
@@ -1623,9 +1631,13 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
           const exact = target.attribution === 'generation' && input.requestId ? requestCorrelation(input.requestId)?.sessionId : undefined;
           const sessions = new Set([sessionId, ...(exact ? [exact] : [])]);
           for (const id of sessions) {
-            if (!await getSession(id)) continue;
-            await completeProcessCall(id, call.callId, completion);
-            notifyChanged(id);
+            try {
+              if (!await getSession(id)) continue;
+              await completeProcessCall(id, call.callId, completion);
+              notifyChanged(id);
+            } catch (err) {
+              logWarn(`session recorder could not store process completion for call ${call.callId} in session ${id}: ${(err as Error).message}`);
+            }
           }
         };
         const work = (target.attribution === 'generation' ? serializeAttributionMutation(complete) : complete())
