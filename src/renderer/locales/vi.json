@@ -1405,8 +1405,8 @@
   "Automatically continue interrupted responses": "Tự động tiếp tục phản hồi bị gián đoạn",
   "Recover unfinished answers, including in Goal and Loop. Reload after 2 minutes without progress (Pro: 10). If still generating, wait 1 more minute (Pro: 5), then stop and send. A final answer selects Goal or Loop instead of Continue. Undelivered steps get at most three page reloads (after 2, 5, and 10 minutes); recovery then stops visibly while the original pending work remains saved.": "Khôi phục câu trả lời chưa hoàn tất, kể cả trong Goal và Loop. Tải lại sau 2 phút không có tiến triển (Pro: 10). Nếu vẫn đang tạo phản hồi, chờ thêm 1 phút (Pro: 5), rồi dừng và gửi. Khi có câu trả lời cuối cùng, dùng Goal hoặc Loop thay cho Continue. Bước chưa được nhận chỉ được tải lại tối đa ba lần (sau 2, 5 và 10 phút); sau đó quá trình khôi phục sẽ dừng rõ ràng và công việc đang chờ ban đầu vẫn được lưu.",
   "Waiting for delivery": "Đang chờ gửi",
-  "Stopped after {0} attempts": "Đã dừng sau {0} lần thử",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Trình duyệt không nhận được bước đang chờ sau {0} lần tự tải lại. Mục nhập gốc trong hàng đợi hoặc nghĩa vụ Goal vẫn được lưu. CoS sẽ không tự tải lại cuộc trò chuyện này cho bước đó nữa; hãy mở cuộc trò chuyện và tiếp tục thủ công.",
+  "Retrying slowly · {0} reloads": "Đang thử lại chậm · {0} lần tải lại",
+  "The browser did not collect the pending step after {0} automatic reloads. Its queued message or Goal step stays saved, and CoS keeps trying every 15 to 60 minutes. To go on now, open the chat and continue.": "Trình duyệt chưa nhận bước đang chờ sau {0} lần tự tải lại. Tin nhắn trong hàng đợi hoặc bước Goal vẫn được lưu, và CoS tiếp tục thử mỗi 15 đến 60 phút. Để tiếp tục ngay, hãy mở cuộc trò chuyện và tiếp tục.",
   "Make this workspace yours. Changes appear immediately.": "Tùy chỉnh không gian làm việc theo ý bạn. Thay đổi hiển thị ngay.",
   "Appearance preview": "Xem trước giao diện",
   "How will your next idea look?": "Ý tưởng tiếp theo của bạn sẽ trông thế nào?",
@@ -1784,7 +1784,7 @@
   "A chat stopped": "Một cuộc trò chuyện đã dừng",
   "Its last turn produced nothing and nothing followed. Send a message there to start a fresh turn.": "Lượt cuối không tạo ra nội dung và không có hoạt động tiếp theo. Gửi tin nhắn trong cuộc trò chuyện đó để bắt đầu lượt mới.",
   "Its last turn failed and nothing followed. Send a message there to start a fresh turn.": "Lượt cuối thất bại và không có hoạt động tiếp theo. Gửi tin nhắn trong cuộc trò chuyện đó để bắt đầu lượt mới.",
-  "Recovery stopped": "Đã dừng khôi phục",
+  "Recovery slowed": "Khôi phục chậm lại",
   "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "Trình duyệt không nhận yêu cầu sửa lỗi của cuộc trò chuyện này nên ứng dụng đã ngừng thử lại. Mở lại tab để tiếp tục khôi phục.",
   "Degraded": "Suy giảm",
   "Opening": "Đang mở",
@@ -3692,5 +3692,8 @@
   "{0} sessions": "{0} phiên",
   "{0} entries": "{0} mục",
   "{0} messages": "{0} tin nhắn",
-  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Chưa gửi: thẻ trình duyệt của cuộc trò chuyện mới này đã bị đóng hoặc bị mất. Hãy kiểm tra tin nhắn rồi gửi lại."
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Chưa gửi: thẻ trình duyệt của cuộc trò chuyện mới này đã bị đóng hoặc bị mất. Hãy kiểm tra tin nhắn rồi gửi lại.",
+  "Recovery stopped": "Đã dừng khôi phục",
+  "Stopped after {0} attempts": "Đã dừng sau {0} lần thử",
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Trình duyệt không nhận được bước đang chờ sau {0} lần tự tải lại. Mục nhập gốc trong hàng đợi hoặc nghĩa vụ Goal vẫn được lưu. CoS sẽ không tự tải lại cuộc trò chuyện này cho bước đó nữa; hãy mở cuộc trò chuyện và tiếp tục thủ công."
 }

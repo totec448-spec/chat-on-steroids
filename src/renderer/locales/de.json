@@ -1429,8 +1429,8 @@
   "Automatically continue interrupted responses": "Unterbrochene Antworten automatisch fortsetzen",
   "Recover unfinished answers, including in Goal and Loop. Reload after 2 minutes without progress (Pro: 10). If still generating, wait 1 more minute (Pro: 5), then stop and send. A final answer selects Goal or Loop instead of Continue. Undelivered steps get at most three page reloads (after 2, 5, and 10 minutes); recovery then stops visibly while the original pending work remains saved.": "Stellt unfertige Antworten wieder her, auch in Goal und Loop. Nach 2 Minuten ohne Fortschritt wird neu geladen (Pro: 10). Antwortet ChatGPT dann noch, wird 1 weitere Minute gewartet (Pro: 5), dann gestoppt und gesendet. Bei einer fertigen Antwort greift Goal oder Loop statt „Weiter“. Nicht zugestellte Schritte lösen höchstens drei Neuladungen nach 2, 5 und 10 Minuten aus; danach stoppt die Wiederherstellung sichtbar und die ursprüngliche ausstehende Aufgabe bleibt gespeichert.",
   "Waiting for delivery": "Warte auf Zustellung",
-  "Stopped after {0} attempts": "Nach {0} Versuchen gestoppt",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Der Browser hat den ausstehenden Schritt auch nach {0} automatischen Neuladungen nicht übernommen. Die ursprüngliche Eingabe in der Warteschlange oder der Goal-Auftrag bleibt gespeichert. CoS lädt diesen Chat für diesen Schritt nicht erneut automatisch; öffne den Chat und fahre manuell fort.",
+  "Retrying slowly · {0} reloads": "Langsame Wiederholung · {0} Neuladungen",
+  "The browser did not collect the pending step after {0} automatic reloads. Its queued message or Goal step stays saved, and CoS keeps trying every 15 to 60 minutes. To go on now, open the chat and continue.": "Der Browser hat den ausstehenden Schritt nach {0} automatischen Neuladungen nicht übernommen. Die Nachricht in der Warteschlange oder der Goal-Schritt bleibt gespeichert, und CoS versucht es alle 15 bis 60 Minuten weiter. Um sofort weiterzumachen, öffne den Chat und setze ihn fort.",
   "Make this workspace yours. Changes appear immediately.": "Gestalte diesen Arbeitsbereich nach deinem Geschmack. Änderungen wirken sofort.",
   "Appearance preview": "Vorschau der Darstellung",
   "How will your next idea look?": "Wie sieht deine nächste Idee aus?",
@@ -1816,7 +1816,7 @@
   "A chat stopped": "Ein Chat ist stehen geblieben",
   "Its last turn produced nothing and nothing followed. Send a message there to start a fresh turn.": "Sein letzter Durchlauf hat nichts geliefert, und danach kam nichts mehr. Schreib dort eine Nachricht, um einen neuen Durchlauf zu starten.",
   "Its last turn failed and nothing followed. Send a message there to start a fresh turn.": "Sein letzter Durchlauf ist fehlgeschlagen, und danach kam nichts mehr. Schreib dort eine Nachricht, um einen neuen Durchlauf zu starten.",
-  "Recovery stopped": "Wiederherstellung beendet",
+  "Recovery slowed": "Wiederherstellung verlangsamt",
   "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "Der Browser hat die Reparatur dieses Chats nicht übernommen, deshalb versucht die App es nicht mehr. Öffne seinen Tab wieder, dann geht die Wiederherstellung weiter.",
   "Use minimum effort: {0}": "Niedrigste Denkstufe verwenden: {0}",
   "Use maximum effort: {0}": "Höchste Denkstufe verwenden: {0}",
@@ -3773,5 +3773,8 @@
   "{0} messages": "{0} Nachrichten",
   "{0} messages|one": "{0} Nachricht",
   "{0} actions|one": "{0} Aktion",
-  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Nicht gesendet: Der Browser-Tab für diesen neuen Chat wurde geschlossen oder ging verloren. Prüfe die Nachricht und sende sie erneut."
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Nicht gesendet: Der Browser-Tab für diesen neuen Chat wurde geschlossen oder ging verloren. Prüfe die Nachricht und sende sie erneut.",
+  "Recovery stopped": "Wiederherstellung beendet",
+  "Stopped after {0} attempts": "Nach {0} Versuchen gestoppt",
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Der Browser hat den ausstehenden Schritt auch nach {0} automatischen Neuladungen nicht übernommen. Die ursprüngliche Eingabe in der Warteschlange oder der Goal-Auftrag bleibt gespeichert. CoS lädt diesen Chat für diesen Schritt nicht erneut automatisch; öffne den Chat und fahre manuell fort."
 }

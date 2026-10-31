@@ -29,7 +29,7 @@ import { CONVERSATION_DELETED } from '../../shared/chat-error.js';
 import { attachmentSchema, validateInputAttachments, normalizeInputAttachments } from './input-attachments.js';
 import { MAX_CHATGPT_MESSAGE_CHARS } from '../../shared/user-prompt.js';
 import type { PromptLimits } from './prompt.js';
-import { BROWSER_PICKUP_MAX_ATTEMPTS, recoveryMessage, recoveryBusyMs, rotationMessage } from '../../shared/recovery.js';
+import { BROWSER_PICKUP_ATTEMPT_LIMIT, BROWSER_PICKUP_MAX_ATTEMPTS, recoveryMessage, recoveryBusyMs, rotationMessage } from '../../shared/recovery.js';
 import { invokedSkills } from '../../shared/skill-invocation.js';
 import { SKILL_ID_PATTERN } from '../../shared/skills.js';
 import { autoSelectManagedSkills } from '../skill-routing.js';
@@ -134,7 +134,7 @@ const entrySchema = inputArgs.extend({
   /** Times a Send the page proved untaken (its exact text still in the composer) was requeued. */
   notTakenRetries: z.number().int().nonnegative().optional(),
   /** Browser reload budget for this exact queued input; survives app restart. */
-  pickupRecovery: z.object({ attempts: z.number().int().min(0).max(BROWSER_PICKUP_MAX_ATTEMPTS),
+  pickupRecovery: z.object({ attempts: z.number().int().min(0).max(BROWSER_PICKUP_ATTEMPT_LIMIT),
     nextAt: z.number().int().positive().optional(), stoppedAt: z.number().int().positive().optional() }).optional(),
   cancelledByUser: z.literal(true).optional(),
   error: z.string().max(200).optional(),
@@ -1126,15 +1126,14 @@ async function rowsForPickupSource(current: InputEntry[], sessionId: string, sou
 }
 
 function mergedPickupState(rows: InputEntry[], inherited?: PickupRecoveryState): PickupRecoveryState {
-  const attempts = Math.min(BROWSER_PICKUP_MAX_ATTEMPTS,
+  const attempts = Math.min(BROWSER_PICKUP_ATTEMPT_LIMIT,
     Math.max(inherited?.attempts ?? 0, ...rows.map(row => row.pickupRecovery?.attempts ?? 0)));
+  // The next slow retry belongs to the newest reload, before and after the chat shows as stopped.
+  const nextAt = (inherited?.attempts === attempts ? inherited.nextAt : undefined) ??
+    rows.find(row => row.pickupRecovery?.attempts === attempts)?.pickupRecovery?.nextAt;
   const stoppedAt = inherited?.stoppedAt ?? rows.find(row => row.pickupRecovery?.stoppedAt)?.pickupRecovery?.stoppedAt;
-  if (stoppedAt || attempts >= BROWSER_PICKUP_MAX_ATTEMPTS) return {
-    attempts, stoppedAt: stoppedAt ?? rows.find(row => row.pickupRecovery?.stoppedAt)?.pickupRecovery?.stoppedAt ?? Date.now()
-  };
-  const nextAt = inherited?.attempts === attempts ? inherited.nextAt : undefined;
-  return { attempts, ...(nextAt ?? rows.find(row => row.pickupRecovery?.attempts === attempts)?.pickupRecovery?.nextAt
-    ? { nextAt: nextAt ?? rows.find(row => row.pickupRecovery?.attempts === attempts)?.pickupRecovery?.nextAt } : {}) };
+  if (stoppedAt || attempts >= BROWSER_PICKUP_MAX_ATTEMPTS) return { attempts, stoppedAt: stoppedAt ?? Date.now(), ...(nextAt ? { nextAt } : {}) };
+  return { attempts, ...(nextAt ? { nextAt } : {}) };
 }
 
 /** Copies a source-turn budget to every durable input owner, so reorder/replacement cannot reset it. */
@@ -1167,15 +1166,16 @@ export function recordQueuedPickupAttemptNow(inputId: string, sourceTurnId: stri
     if (!session || session.conversationId !== row.conversationId || session.browserRecoveryDismissedAt !== undefined) return null;
     const matches = await rowsForPickupSource(current, row.sessionId, sourceTurnId);
     const prior = mergedPickupState(matches, inherited);
-    if (prior.stoppedAt || prior.attempts >= BROWSER_PICKUP_MAX_ATTEMPTS) {
+    // Past the quick burst the chat shows as stopped, and slow retries go on until the hard bound.
+    if (prior.attempts >= BROWSER_PICKUP_ATTEMPT_LIMIT) {
       const next = current.map(entry => matches.includes(entry) && !samePickupState(entry.pickupRecovery, prior)
         ? { ...entry, pickupRecovery: prior } : entry);
       if (next.some((entry, index) => entry !== current[index])) await commit(next);
       return null;
     }
     const attempts = prior.attempts + 1;
-    const pickupRecovery = attempts >= BROWSER_PICKUP_MAX_ATTEMPTS ? { attempts, stoppedAt: at }
-      : { attempts, ...(nextAt !== undefined ? { nextAt } : {}) };
+    const stoppedAt = prior.stoppedAt ?? (attempts >= BROWSER_PICKUP_MAX_ATTEMPTS ? at : undefined);
+    const pickupRecovery = { attempts, ...(nextAt !== undefined ? { nextAt } : {}), ...(stoppedAt ? { stoppedAt } : {}) };
     const next = current.map(entry => matches.includes(entry) ? { ...entry, pickupRecovery } : entry);
     await commit(next);
     return { attempts, ...('nextAt' in pickupRecovery && pickupRecovery.nextAt ? { nextAt: pickupRecovery.nextAt } : {}),

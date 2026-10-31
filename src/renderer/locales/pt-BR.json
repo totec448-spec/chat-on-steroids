@@ -1442,8 +1442,8 @@
   "Automatically continue interrupted responses": "Continuar automaticamente respostas interrompidas",
   "Recover unfinished answers, including in Goal and Loop. Reload after 2 minutes without progress (Pro: 10). If still generating, wait 1 more minute (Pro: 5), then stop and send. A final answer selects Goal or Loop instead of Continue. Undelivered steps get at most three page reloads (after 2, 5, and 10 minutes); recovery then stops visibly while the original pending work remains saved.": "Recupere respostas inacabadas, inclusive em Goal e Loop. A página é atualizada após 2 minutos sem progresso (Pro: 10). Se a resposta ainda estiver sendo gerada, aguarde mais 1 minuto (Pro: 5), interrompa a geração e envie a mensagem. Se houver uma resposta final, será selecionado Goal ou Loop em vez de Continuar. Etapas não recebidas geram no máximo três atualizações (após 2, 5 e 10 minutos); depois, a recuperação para de forma visível e o trabalho pendente original continua salvo.",
   "Waiting for delivery": "Aguardando o envio",
-  "Stopped after {0} attempts": "Interrompido após {0} tentativas",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "O navegador não recebeu a etapa pendente após {0} recarregamentos automáticos. A entrada original na fila ou a tarefa do Goal continua salva. O CoS não recarregará este chat automaticamente para esta etapa; abra-o e continue manualmente.",
+  "Retrying slowly · {0} reloads": "Tentando de novo devagar · {0} recarregamentos",
+  "The browser did not collect the pending step after {0} automatic reloads. Its queued message or Goal step stays saved, and CoS keeps trying every 15 to 60 minutes. To go on now, open the chat and continue.": "O navegador não pegou a etapa pendente depois de {0} recarregamentos automáticos. A mensagem na fila ou a etapa do Goal continua salva, e o CoS segue tentando a cada 15 a 60 minutos. Para seguir agora, abra o chat e continue.",
   "Make this workspace yours. Changes appear immediately.": "Personalize seu espaço de trabalho. As alterações aparecem imediatamente.",
   "Appearance preview": "Prévia da aparência",
   "How will your next idea look?": "Como será sua próxima ideia?",
@@ -1848,7 +1848,7 @@
   "A chat stopped": "Um chat parou",
   "Its last turn produced nothing and nothing followed. Send a message there to start a fresh turn.": "O último turno não produziu nada e nada veio depois. Envie uma mensagem lá para começar um novo turno.",
   "Its last turn failed and nothing followed. Send a message there to start a fresh turn.": "O último turno falhou e nada veio depois. Envie uma mensagem lá para começar um novo turno.",
-  "Recovery stopped": "Recuperação interrompida",
+  "Recovery slowed": "Recuperação mais lenta",
   "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "O navegador não assumiu o reparo deste chat, então o app parou de tentar. Abra a aba dele de novo e a recuperação continua.",
   "Use minimum effort: {0}": "Usar esforço mínimo: {0}",
   "Use maximum effort: {0}": "Usar esforço máximo: {0}",
@@ -3854,5 +3854,8 @@
   "{0} messages|many": "{0} de mensagens",
   "{0} actions|one": "{0} ação",
   "{0} actions|many": "{0} de ações",
-  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Não enviado: a aba do navegador deste novo chat foi fechada ou perdida. Revise a mensagem e envie novamente."
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Não enviado: a aba do navegador deste novo chat foi fechada ou perdida. Revise a mensagem e envie novamente.",
+  "Recovery stopped": "Recuperação interrompida",
+  "Stopped after {0} attempts": "Interrompido após {0} tentativas",
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "O navegador não recebeu a etapa pendente após {0} recarregamentos automáticos. A entrada original na fila ou a tarefa do Goal continua salva. O CoS não recarregará este chat automaticamente para esta etapa; abra-o e continue manualmente."
 }
