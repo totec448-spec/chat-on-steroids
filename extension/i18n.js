@@ -62,9 +62,37 @@
     try { scope.dispatchEvent?.(new CustomEvent('clf-i18n-changed', { detail: { language } })); } catch { /* No listeners here. */ }
   }
 
+  /** A promise that settles as `fallback` after `ms`, so a read that never answers cannot hold the page. */
+  function bounded(promise, ms, fallback) {
+    let timer = null;
+    return Promise.race([promise, new Promise(resolve => { timer = setTimeout(() => resolve(fallback), ms); })])
+      .finally(() => clearTimeout(timer));
+  }
+  const inWorker = typeof ServiceWorkerGlobalScope === 'function' && scope instanceof ServiceWorkerGlobalScope;
+  /**
+   * The language the service worker applied from the app's last status, with its catalog. A page
+   * whose storage read never answered showed Chrome's language although the worker knew the app's
+   * (CodeRabbit on #1940). A worker that has not heard from the app yet names none.
+   */
+  async function workerLanguage() {
+    if (inWorker) return false;
+    const reply = await bounded(chrome.runtime.sendMessage({ type: 'i18n_catalog', current: true }), 2_000, null).catch(() => null);
+    if (!reply || reply.ok !== true || typeof reply.language !== 'string' || !FOLDERS[reply.language] ||
+        !reply.messages || typeof reply.messages !== 'object') return false;
+    // A change event may already have brought a newer language; it wins.
+    if (catalogLanguage === null) {
+      catalog = reply.messages;
+      catalogLanguage = reply.language;
+      try { scope.dispatchEvent?.(new CustomEvent('clf-i18n-changed', { detail: { language: reply.language } })); } catch { /* No listeners here. */ }
+    }
+    return true;
+  }
+
   const ready = (async () => {
     try {
-      const stored = await chrome.storage.local.get(LANGUAGE_KEY);
+      if (await workerLanguage()) return;
+      // The stored copy: for a worker that has not heard from the app since it started.
+      const stored = await bounded(chrome.storage.local.get(LANGUAGE_KEY), 5_000, null);
       await useLanguage(stored?.[LANGUAGE_KEY]);
     } catch {
       // No storage or no catalog: chrome.i18n stays the source, as before.
