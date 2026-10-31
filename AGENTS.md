@@ -5985,6 +5985,9 @@ readable); known personal values (project paths/names, chat titles, worker tasks
 approved roots, tunnel profile/ids) become `<x:xxxx>`. Settings contribute only booleans, numbers
 and short option names; keys naming tunnels, profiles, paths, roots, prompts, URLs, keys or ids are
 dropped unless the value is a number or boolean. Never add message, task or title text to a section.
+The *Active chats* lines end with each chat's Goal/Loop state as the app holds it (`mode loop (this chat)`,
+`mode Normal (app setting)`; #1882), never its id. Compact & Resume logs when a chat's own switch moves to
+the new chat, or is dropped because the new chat already had its own.
 Tests: `report-scrub.test.ts`, `diagnostics-report.test.ts` and `ipc.test.ts` (no personal value survives).
 
 Send feedback (Activity's button, `/feedback`; `feedback-dialog.ts`) writes a problem report or an idea
