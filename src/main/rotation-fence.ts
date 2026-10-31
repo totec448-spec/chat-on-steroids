@@ -21,23 +21,27 @@ const fences = new Map<string, { turnId: string; until: number; timer: ReturnTyp
  * (CodeRabbit on #1954). `restoreRotationFences` brings back what is left of each.
  */
 const FENCES_STATE = 'rotation-fences';
-function persist(): void {
+function persist(): Promise<boolean> {
   const rows = [...fences].map(([conversationId, fence]) => ({ conversationId, turnId: fence.turnId, until: fence.until }));
-  void writeDurableNow(FENCES_STATE, rows).catch(error => logWarn(`turn rotation: could not save the fresh-turn fences — ${String(error)}`));
+  return writeDurableNow(FENCES_STATE, rows).then(() => true, error => {
+    logWarn(`turn rotation: could not save the fresh-turn fences — ${String(error)}`);
+    return false;
+  });
 }
 
 export const ROTATION_FENCE_REFUSAL =
   'TURN_CONTINUING: Chat On Steroids is continuing this task in a fresh turn, so this call was not run. ' +
   'Do not retry it in this turn: the next message continues the task, and you can make the call there.';
 
-export function armRotationFence(conversationId: string, turnId: string, ms = FENCE_MS): void {
+/** Resolves once the fence is on disk (false when it could not be saved): the Stop waits for it. */
+export function armRotationFence(conversationId: string, turnId: string, ms = FENCE_MS): Promise<boolean> {
   const previous = fences.get(conversationId);
   if (previous) clearTimeout(previous.timer);
   const wait = Math.min(FENCE_MS, Math.max(0, ms));
-  const timer = setTimeout(() => { if (fences.get(conversationId)?.timer === timer) { fences.delete(conversationId); persist(); } }, wait);
+  const timer = setTimeout(() => { if (fences.get(conversationId)?.timer === timer) { fences.delete(conversationId); void persist(); } }, wait);
   timer.unref?.();
   fences.set(conversationId, { turnId, until: Date.now() + wait, timer });
-  persist();
+  return persist();
 }
 
 /** Brings back the fences of the previous run, each for what is left of it (never longer than `FENCE_MS`). */
@@ -48,10 +52,10 @@ export async function restoreRotationFences(now = Date.now()): Promise<number> {
     const { conversationId, turnId, until } = (row ?? {}) as { conversationId?: unknown; turnId?: unknown; until?: unknown };
     if (typeof conversationId !== 'string' || typeof turnId !== 'string' || typeof until !== 'number' || !Number.isFinite(until)) continue;
     if (conversationId.length > 200 || turnId.length > 200 || until <= now || fences.has(conversationId)) continue;
-    armRotationFence(conversationId, turnId, until - now);
+    void armRotationFence(conversationId, turnId, until - now);
     restored++;
   }
-  if (!restored) persist();
+  if (!restored) void persist();
   return restored;
 }
 
@@ -69,7 +73,7 @@ export function clearRotationFence(conversationId: string): void {
   if (!fence) return;
   clearTimeout(fence.timer);
   fences.delete(conversationId);
-  persist();
+  void persist();
 }
 
 export function resetRotationFencesForTests(): void {
