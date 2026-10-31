@@ -98,6 +98,10 @@ const entrySchema = inputArgs.extend({
   /** The active turn at admission; its final may already be waiting in the browser journal. */
   queuedTurn: z.object({ conversationId: z.string().min(1).max(256), turnId: z.string().min(1).max(256) }).optional(),
   /** Shared unfinished-response fallback belongs to this question in every mode. */
+  /** An automatic Continue the app sent on as an ordinary message (`continueAsOrdinaryMessage`). */
+  continuedFrom: z.literal('recovery').optional(),
+  /** The question that Continue continues, still checked until it is sent (CodeRabbit on #1960). */
+  continuesQuestionId: z.string().max(200).optional(),
   recovery: z.object({ questionId: z.string(), episode: z.string().max(200).optional(), pro: z.boolean(), busyUntil: z.number(), phase: z.enum(['ready', 'stopping', 'reloading', 'resumed']), reloadOwner: z.string().optional(),
     /** First release of an unbroken run of pages withdrawing this Continue before Send (#820). */
     withdrawnSince: z.number().optional(),
@@ -158,8 +162,9 @@ export type InputEntry = z.infer<typeof entrySchema>;
  * which is never asked about. Finish replies are asked before they are filed, as they can also
  * reach ChatGPT in a tool result.
  */
-export function automaticSendKind(row: Pick<InputEntry, 'recovery' | 'purpose' | 'afterStop' | 'scheduled'>): SendCheckKind | null {
-  if (row.recovery) return 'continue';
+export function automaticSendKind(row: Pick<InputEntry, 'recovery' | 'purpose' | 'afterStop' | 'scheduled' | 'continuedFrom'>): SendCheckKind | null {
+  // An automatic Continue sent as an ordinary message is still the app's own send (CodeRabbit on #1960).
+  if (row.recovery || row.continuedFrom === 'recovery') return 'continue';
   if (row.purpose === 'rotation' || row.afterStop) return 'fresh-turn';
   if (row.scheduled) return 'scheduled';
   return null;
@@ -565,6 +570,10 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
     }
     if (row.recovery && !terminal(row) && row.sendAuthorizedAt === undefined) {
       const reason = await recoveryInvalidReason(row);
+      if (reason) return { ...row, state: 'cancelled', error: `Automatic Continue cancelled: ${reason}.` };
+    }
+    if (row.continuesQuestionId && !terminal(row) && row.sendAuthorizedAt === undefined) {
+      const reason = await continuedInvalidReason(row);
       if (reason) return { ...row, state: 'cancelled', error: `Automatic Continue cancelled: ${reason}.` };
     }
     if (row.finishOwner && !terminal(row) && !(await finishInputCurrent(row)))
@@ -1319,6 +1328,7 @@ export function authorizeBrowserInput(id: string, owner: string, conversationId:
     const row = current.find(row => row.id === id && row.owner === owner && row.state === 'browser' && row.conversationId === conversationId);
     if (!row || row.sendAuthorizedAt !== undefined || companionOf(current, row)) return false;
     if (!(await browserInputAllowed(row)) || await target(row) !== conversationId) return false;
+    if (await continuedInvalidReason(row)) return false;
     if (row.companionInputId) {
       const companion = current.find(other => other.id === row.companionInputId && other.state === 'browser' && other.owner === owner && other.sessionId === row.sessionId);
       const session = row.sessionId ? await getSession(row.sessionId) : null;
@@ -1796,6 +1806,112 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
     return result;
   });
 }
+/**
+ * Why a queued message is not on the offer list, in the order `pendingBrowserInputs` checks; null
+ * when it is offered. A page cannot claim a message the app itself withholds, so reloading the page
+ * for it changes nothing (2026-10-31: an automatic Continue sat withheld after a silence reload, the
+ * pickup reloaded the chat for it and then gave up, and nothing anywhere said which gate held it).
+ */
+export function queuedInputOfferBlocker(id: string): Promise<string | null> {
+  return serial(async () => {
+    const current = await load();
+    const entry = current.find(row => row.id === id);
+    if (!entry || entry.state !== 'queued') return 'it is no longer queued';
+    if (!preparable(entry)) return 'it cannot be prepared for the browser';
+    if (entry.dueAt > Date.now()) return 'it is not due yet';
+    if (heldBySendCheck(entry)) return `the send check holds it (${entry.sendCheck?.reason ?? 'no answer yet'})`;
+    if (queuedFollowup(entry) && !await completedStageBoundary(entry, current)) {
+      const first = ordered(current).find(row => row.sessionId === entry.sessionId && queuedFollowup(row) && row.state === 'queued');
+      if (first && first.id !== entry.id) return `an earlier queued message of this chat (${first.id}) goes first`;
+      if (!await browserInputAllowed(entry)) return await notAllowedReason(entry);
+      const turnId = await eligibleStageEnd(entry);
+      if (!turnId) {
+        if (entry.recovery) {
+          const invalid = await recoveryInvalidReason(entry);
+          if (invalid) return `its automatic Continue no longer applies: ${invalid}`;
+          if (!['ready', 'resumed'].includes(entry.recovery.phase)) return `its recovery is still ${entry.recovery.phase}`;
+          if ((entry.silenceBoundary?.listenUntil ?? 0) > Date.now()) return 'it still listens for the turn to finish by itself';
+        }
+        return 'the turn it follows has not ended';
+      }
+      if (current.some(row => row !== entry && row.sessionId === entry.sessionId && row.state === 'queued' && row.silenceBoundary?.turnId === turnId))
+        return 'another queued message owns the same turn';
+      const other = current.find(row => row.sessionId === entry.sessionId && (consumedTurn(row, turnId) || row.state === 'tool' || row.state === 'browser'));
+      if (other) return other.state === 'browser' || other.state === 'tool'
+        ? `another message of this chat (${other.id}) is still being sent` : `another message (${other.id}) already continued this turn`;
+      return 'a message to send right away goes first';
+    }
+    if (!await browserInputAllowed(entry)) return await notAllowedReason(entry);
+    try {
+      const conversationId = await target(entry);
+      if (conversationId && !readyForWake(conversationId)) return 'its chat is being restored from ChatGPT\'s archive';
+    } catch { return 'its chat cannot be resolved'; }
+    return null;
+  });
+}
+
+async function notAllowedReason(entry: InputEntry): Promise<string> {
+  if (entry.error?.startsWith('Local chat setup failed:')) return 'its local chat setup failed';
+  if (entry.delivery === 'tool' || entry.attachmentDelivery === 'tool') return 'it goes out with a tool result, not through the page';
+  const session = entry.sessionId ? await getSession(entry.sessionId) : null;
+  if (session?.browserRecoveryDismissedAt !== undefined) return 'its chat\'s tab was closed';
+  if (entry.silenceBoundary) return 'the turn it continues is no longer the chat\'s open turn';
+  if (!session?.conversationId) return 'its chat has no ChatGPT conversation yet';
+  if (isChatBlocked(session.conversationId)) return 'its chat is blocked';
+  if (session.activeTurnId) return 'its chat\'s turn is still running';
+  if (entry.directTurn) return 'the turn it was typed into has ended';
+  const policy = await sessionInputPolicy(entry.sessionId!);
+  if (policy.stoppedWait) return `its chat was stopped and ${policy.stoppedWait}`;
+  if (!policy.browserAllowed) return 'ChatGPT or a running tool call still shows work in its chat';
+  return 'it waits for a tool result, not for the page';
+}
+
+/**
+ * An automatic Continue no page took becomes an ordinary message, once: the chat must not stop
+ * while it is unfinished (user decision 2026-10-31). On 2026-10-30/31 such a Continue sat unclaimed
+ * after a silence reload, the pickup stopped after its reloads, and a plain "Continue" typed into the
+ * same chat was taken in under a second, twice. Only while the app's own record shows nothing newer:
+ * the chat's latest question is still the one the Continue answers, no turn runs and no tool call is
+ * in flight. Returns the converted row, or null with nothing changed.
+ */
+export function continueAsOrdinaryMessage(id: string, why: string, minAgeMs = 0): Promise<{ row: InputEntry } | { refused: string }> {
+  return serial(async () => {
+    const current = await load();
+    const row = current.find(entry => entry.id === id);
+    if (!row?.recovery || row.state !== 'queued' || row.sendAuthorizedAt !== undefined || !row.sessionId) return { refused: 'it is no longer a queued automatic Continue' };
+    // Its own age, not a pickup it shares with an older Goal step (CodeRabbit on #1960).
+    const since = row.silenceBoundary?.acceptedAt ?? row.createdAt;
+    if (Date.now() - since < minAgeMs) return { refused: 'it is not old enough yet' };
+    const session = await getSession(row.sessionId);
+    if (!session?.conversationId) return { refused: 'its chat has no ChatGPT conversation' };
+    if (session.activeTurnId) return { refused: 'its turn is still open in the record' };
+    if (isChatBlocked(session.conversationId)) return { refused: 'its chat is blocked' };
+    if (session.browserRecoveryDismissedAt !== undefined) return { refused: 'its chat\'s tab was closed' };
+    if (inFlightToolCalls(session.conversationId) > 0) return { refused: 'a tool call of its chat is still running' };
+    const question = await readLatestUserMessage(row.sessionId);
+    if (question?.messageId !== row.recovery.questionId) return { refused: 'a newer question arrived in its chat' };
+    const { recovery: _recovery, silenceBoundary: _boundary, pickupRecovery: _pickup, requestedMode: _requested, ...rest } = row;
+    const ordinary: InputEntry = { ...rest, mode: 'auto', dueAt: Date.now(), continuedFrom: 'recovery', continuesQuestionId: row.recovery.questionId };
+    await commit(current.map(entry => entry === row ? ordinary : entry));
+    logInfo(`input ${id}: no page took the automatic Continue (${why}); sending it as an ordinary message — the chat's latest question is still the one it continues and nothing runs`);
+    return { row: ordinary };
+  });
+}
+
+/**
+ * Why an automatic Continue sent on as an ordinary message no longer applies, or null: a newer
+ * question in its chat, or the complete answer arrived after all. Checked until Send, as the
+ * automatic Continue itself was (CodeRabbit on #1960).
+ */
+async function continuedInvalidReason(row: InputEntry): Promise<string | null> {
+  if (!row.continuesQuestionId || !row.sessionId) return null;
+  const question = await readLatestUserMessage(row.sessionId);
+  if (question?.messageId !== row.continuesQuestionId) return 'another user message arrived';
+  const session = await getSession(row.sessionId);
+  if (session?.conversationId && await readCompletedFinal(row.sessionId, session.conversationId)) return 'the complete answer arrived';
+  return null;
+}
+
 /** Holds a queued automatic send the send check refused, until its next ask in 30 s (#1794). */
 export function holdInputForSendCheck(id: string, attempt: number, reason: string, answered: boolean): Promise<boolean> {
   return serial(async () => {
@@ -1816,6 +1932,7 @@ export function claimBrowserInput(id: string, owner: string, conversationId: str
     if (entry.recovery && entry.state === 'browser' && entry.owner !== owner) return null;
     if (entry.recovery?.reloadOwner === owner) return null;
     if (companionOf(current, entry)) return null;
+    if (await continuedInvalidReason(entry)) return null;
     const completedTurnId = entry.state === 'browser' ? entry.completedTurnId : queuedFollowup(entry)
       ? await completedStageBoundary(entry, current) : manualInput(entry) ? await eligibleStageEnd(entry) : undefined;
     if (queuedFollowup(entry) && !completedTurnId) return null;
