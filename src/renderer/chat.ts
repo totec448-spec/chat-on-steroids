@@ -1043,7 +1043,8 @@ function sessionBadges(summary: SessionSummary): Badge[] {
   // waiting on an approval card or a recovery that gave up cannot go on without them, and a blocked
   // chat is the app actively refusing its work; the user came to the list to find them at a glance.
   if (approvalChats.has(summary.conversationId)) badges.push({ text: 'Needs approval', tone: 'is-failed' });
-  if (stoppedChats.has(summary.conversationId)) badges.push({ text: 'Recovery stopped', tone: 'is-failed' });
+  // Its quick reloads did not collect the step; slow retries go on (2026-10-31).
+  if (stoppedChats.has(summary.conversationId)) badges.push({ text: 'Recovery slowed', tone: 'is-failed' });
   if (blockedChats.has(summary.conversationId)) badges.push({ text: 'blocked', tone: 'is-failed' });
   if (origin?.kind === 'worker') badges.push({ text: origin.agentId ?? 'worker', tone: '' });
   else if (origin?.kind === 'resume') badges.push({ text: 'resumed', tone: '' });
@@ -1781,7 +1782,7 @@ type ChatAttention = 'approval' | 'recovery' | 'blocked' | 'failed';
 const ATTENTION_ORDER: readonly ChatAttention[] = ['approval', 'recovery', 'blocked', 'failed'];
 const ATTENTION: Record<ChatAttention, { icon: string; label: () => string }> = {
   approval: { icon: 'i-lock', label: () => t('Needs approval') },
-  recovery: { icon: 'i-retry', label: () => t('Recovery stopped') },
+  recovery: { icon: 'i-retry', label: () => t('Recovery slowed') },
   blocked: { icon: 'i-ban', label: () => t('Blocked') },
   failed: { icon: 'i-warning', label: () => t('Failed') }
 };
