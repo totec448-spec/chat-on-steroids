@@ -2425,6 +2425,25 @@ it('moves a chat to a project from its menu and undoes it from the toast (#1919)
   await waitFor(() => expect(moveChatProject).toHaveBeenLastCalledWith(chat.id, null, null));
   await waitFor(() => expect(row().closest('.project-group')).toBeNull());
   expect(toastText()).toBe('Move undone');
+  // CodeRabbit on #1965: the keyboard on Undo keeps the toast until it leaves, and focus then returns.
+  const undoFocus = doc.createElement('button'); doc.body.append(undoFocus); undoFocus.focus();
+  const { toast } = await import('../src/renderer/dom.js');
+  vi.useFakeTimers();
+  try {
+    toast('Moved to Website', { label: 'Undo', run: () => undefined });
+    const button = doc.querySelector<HTMLButtonElement>('.toast .toast-action')!;
+    button.focus();
+    vi.advanceTimersByTime(20_000);
+    expect(doc.querySelector('.toast .toast-action')).toBe(button);
+    button.dispatchEvent(new mounted.window.FocusEvent('focusout', { bubbles: true, relatedTarget: undoFocus }));
+    undoFocus.focus();
+    vi.advanceTimersByTime(2_100);
+    expect(doc.querySelector('.toast')).toBeNull();
+    toast('Moved to Website', { label: 'Undo', run: () => undefined });
+    doc.querySelector<HTMLButtonElement>('.toast .toast-action')!.focus();
+    doc.querySelector<HTMLButtonElement>('.toast .toast-action')!.click();
+    expect(doc.activeElement).toBe(undoFocus);
+  } finally { vi.useRealTimers(); undoFocus.remove(); }
   expect(doc.querySelector('.toast .toast-action')).toBeNull();
   // A linked ChatGPT Project: the toast says the move is only in this app.
   rowMenuItem(row(), 'move-to-project')!.click();

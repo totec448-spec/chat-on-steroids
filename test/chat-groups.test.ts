@@ -117,3 +117,11 @@ it('places a moved chat in the group it was dropped on, or in none, and only in 
   expect((await groups.placeMovedChat('one', null, null)).members).toEqual({});
   expect(durable.writes).toBe(writes);
 });
+
+it('keeps an explicit group choice for a moved chat, null included (#1965)', () => {
+  expect(groups.movedChatGroup(null, 'g1', 'project-a', 'g0')).toBeNull();
+  expect(groups.movedChatGroup('project-a', null, 'project-a', 'g0')).toBeNull();
+  expect(groups.movedChatGroup('project-a', 'g1', 'project-a', 'g0')).toBe('g1');
+  expect(groups.movedChatGroup('project-a', undefined, 'project-a', 'g0')).toBe('g0');
+  expect(groups.movedChatGroup('project-b', undefined, 'project-a', 'g0')).toBeNull();
+});

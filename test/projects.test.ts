@@ -380,3 +380,14 @@ it('moves a chat into a project whose folder is missing (#1919)', async () => {
   expect(await moveChatToProject(chat.id, project.id)).toMatchObject({ from: null });
   expect((await getSession(chat.id))?.projectId).toBe(project.id);
 });
+
+it('runs overlapping moves of one chat in order, each reporting the project it replaced (#1965)', async () => {
+  const first = await addProject(path.join(approved, 'first'));
+  const second = await addProject(path.join(approved, 'second'));
+  const chat = await createSession({ title: 'Main', conversationId: randomUUID() });
+  const [toFirst, toSecond] = await Promise.all([moveChatToProject(chat.id, first.id), moveChatToProject(chat.id, second.id)]);
+  expect(toFirst.from).toBeNull();
+  // Undo of the second goes back to the first, where the chat really was.
+  expect(toSecond.from).toBe(first.id);
+  expect((await getSession(chat.id))?.projectId).toBe(second.id);
+});

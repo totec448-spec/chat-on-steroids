@@ -155,15 +155,26 @@ export function toast(message: string, action?: { label: string; run: () => void
   toastWatch?.disconnect();
   const node = el('div', 'toast', message);
   node.setAttribute('role', 'status');
-  const close = () => { node.remove(); toastWatch?.disconnect(); };
+  // Focus that was in the toast goes back to where it came from, never to the page body.
+  const before = document.activeElement as HTMLElement | null;
+  const close = () => {
+    const hadFocus = node.contains(document.activeElement);
+    node.remove(); toastWatch?.disconnect();
+    if (hadFocus && before?.isConnected && typeof before.focus === 'function') before.focus({ preventScroll: true });
+  };
   if (action) {
     node.classList.add('has-action');
     const button = el('button', 'toast-action', action.label) as HTMLButtonElement;
     button.type = 'button';
     button.addEventListener('click', () => { window.clearTimeout(toastTimer); close(); action.run(); });
     node.append(button);
-    node.addEventListener('pointerenter', () => window.clearTimeout(toastTimer));
-    node.addEventListener('pointerleave', () => { window.clearTimeout(toastTimer); toastTimer = window.setTimeout(close, 2000); });
+    // A pointer resting on it, or the keyboard on its button, keeps it until they leave.
+    const hold = () => window.clearTimeout(toastTimer);
+    const release = () => { window.clearTimeout(toastTimer); toastTimer = window.setTimeout(close, 2000); };
+    node.addEventListener('pointerenter', hold);
+    node.addEventListener('pointerleave', () => { if (!node.contains(document.activeElement)) release(); });
+    node.addEventListener('focusin', hold);
+    node.addEventListener('focusout', event => { if (!node.contains(event.relatedTarget as Node | null) && !node.matches(':hover')) release(); });
   }
   document.body.append(node);
   placeToast(node);

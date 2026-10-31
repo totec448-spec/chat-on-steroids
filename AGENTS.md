@@ -4588,8 +4588,9 @@ Move to project (#1919) changes a main chat's project, unlike the one-time bindi
 chat and a missing or removed project, allows a project whose folder is missing, moves every
 descendant sub-agent and helper chat (by `origin.fromSessionId`) with it, never a branch, logs the
 move, and sets `projectChosen: true` on each summary, which stops `bindChatToLinkedProject` from
-binding it again. The chat's commands then run in the new project's folder (the binding is the
-workspace authority); nothing is sent to ChatGPT and a linked ChatGPT Project keeps the conversation.
+binding it again. Moved into a project, the chat's commands then run in that project's folder (the
+binding is the workspace authority); moved out (\`null\`), they run in the folder the chat worked in
+before. Moves of one chat run one at a time, so each reports the project it replaced (for Undo); nothing is sent to ChatGPT and a linked ChatGPT Project keeps the conversation.
 `placeMovedChat` drops the old group membership or joins `groupId` of the new project. The renderer
 offers it in the chat menu (projects, then No project) and by dragging a chat row onto a project or
 group (`SidebarDrop` in `sidebar-order.ts`, highlight `.is-drop-target`; Escape cancels), then shows

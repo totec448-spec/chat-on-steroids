@@ -15,6 +15,8 @@ const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
 const { fixtureConfigSource } = require('./fixtures/app-defaults.cjs');
 const output = path.join(root, 'outputs/move-to-project');
+// Electron refuses a userData folder that does not exist yet, as on a fresh checkout.
+fs.mkdirSync(path.join(output, 'runtime'), { recursive: true });
 app.setPath('userData', path.join(output, 'runtime'));
 app.whenReady().then(async () => {
   const { createServer } = await import('vite');
@@ -38,15 +40,17 @@ app.whenReady().then(async () => {
     const projects = [{id:'demo-project',name:'Translations',path:'C:/demo',createdAt:1,chatgpt:{state:'linked',id:'g-p-'+'d'.repeat(32),updatedAt:1}},{id:'second-project',name:'Documentation',path:'C:/docs',createdAt:2}];
     // Few project chats: every drag below must fit on a CI screen, whatever its height.
     const titles = ['Spanish round 1','Spanish Q&A','Italian round 1'];
+    // Local calendar days at noon, never 24-hour steps: right after midnight or across a clock change,
+    // "yesterday" is still yesterday. Today's chats are seconds old.
+    const daysAgo = n => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate() - n, 12).getTime(); };
     const rows = titles.map((title,i)=>({id:'task-'+i,title,projectId:'demo-project',
-      conversationId:'chat-'+i,chatIds:['chat-'+i],startedAt:1,updatedAt:Date.now()-i*9*3600000,endedAt:2,events:0,userMessages:0,
+      conversationId:'chat-'+i,chatIds:['chat-'+i],startedAt:1,updatedAt:i ? daysAgo(i) : Date.now()-1000,endedAt:2,events:0,userMessages:0,
       toolCalls:0,lastToolCallAt:null,processExitNonzero:0,toolRejected:0,toolInternalErrors:0,errors:0,
       estimatedTokens:0,contextTokens:0,lastHandoffId:null,lastHandoffAt:null,lastTurnOutcome:null,activeTurnId:null,agents:[],origin:null}));
-    rows.push({...rows[0],id:'other-task',title:'Docs chat',projectId:'second-project',conversationId:'chat-x',chatIds:['chat-x'],updatedAt:Date.now()-45*86400000});
+    rows.push({...rows[0],id:'other-task',title:'Docs chat',projectId:'second-project',conversationId:'chat-x',chatIds:['chat-x'],updatedAt:daysAgo(45)});
     // Chats outside any project, from today back to last year.
-    const day = 86400000, now = Date.now();
-    for (const [i,[title,age]] of [['Plan the trip',60000],['Grocery list',3600000],['Fix the printer',day+60000],['Tax questions',3*day],['Recipe ideas',12*day],['Old notes',400*day]].entries())
-      rows.push({...rows[0],id:'loose-'+i,title,projectId:undefined,conversationId:'loose-chat-'+i,chatIds:['loose-chat-'+i],updatedAt:now-age});
+    for (const [i,[title,at]] of [['Plan the trip',Date.now()-2000],['Grocery list',Date.now()-3000],['Fix the printer',daysAgo(1)],['Tax questions',daysAgo(3)],['Recipe ideas',daysAgo(12)],['Old notes',daysAgo(400)]].entries())
+      rows.push({...rows[0],id:'loose-'+i,title,projectId:undefined,conversationId:'loose-chat-'+i,chatIds:['loose-chat-'+i],updatedAt:at});
     window.moveCalls = [];
     // The app's chat groups, with main's own rules: a chat only into its own project's group.
     const groups = {version:1,groups:[{id:'g-spanish',projectId:'demo-project',name:'Spanish',createdAt:1},{id:'g-italian',projectId:'demo-project',name:'Italian',createdAt:2}],members:{'task-0':'g-spanish','task-1':'g-spanish'}};
@@ -124,9 +128,10 @@ app.whenReady().then(async () => {
     const chats = `[...document.getElementById('chatList').children].map(n=>n.dataset.id ?? '# '+n.textContent)`;
     const toast = `document.querySelector('.toast')?.firstChild?.textContent ?? ''`;
     const place = id => `(() => { const row=document.querySelector('[data-id="${id}"]'); return row.closest('.chat-group')?.dataset.groupId ?? row.closest('.project-group')?.dataset.projectId ?? 'chats'; })()`;
-    const year = String(new Date(Date.now()-400*86400000).getFullYear());
+    const daysAgo = n => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate() - n, 12); };
+    const year = String(daysAgo(400).getFullYear());
     // The Documentation chat is 45 days old: its month, or its year when that month was last year.
-    const docsDate = new Date(Date.now()-45*86400000);
+    const docsDate = daysAgo(45);
     const docsSection = docsDate.getFullYear() === new Date().getFullYear() ? docsDate.toLocaleString('en-US',{month:'long'}) : String(docsDate.getFullYear());
     await load('?reset=1');
 

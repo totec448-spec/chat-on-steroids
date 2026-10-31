@@ -118,6 +118,16 @@ export async function assignChatGroup(session: ChatGroupSession | null, groupId:
 }
 
 /**
+ * The group a moved chat ends in (#1919): none out of a project; the one asked for, `null` included;
+ * when none was asked for, its old group if it stayed in the same project, else none.
+ */
+export function movedChatGroup(projectId: string | null, requested: string | null | undefined, from: string | null, fromGroup: string | null): string | null {
+  if (projectId === null) return null;
+  if (requested !== undefined) return requested;
+  return from === projectId ? fromGroup : null;
+}
+
+/**
  * A chat the person moved to another project (#1919) leaves its old project's group, and joins
  * `groupId` when it was dropped onto a group of its new project.
  */
