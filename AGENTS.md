@@ -3397,6 +3397,11 @@ offers retain one token; a claimed action is not reissued merely because its ACK
 When an unclaimed repair exhausts its offers the chat is marked page-less, the session gets its timeline note
 and the user gets one notification through the stuck-chat notifier, once per episode; a page that asks for
 its chat again lifts the verdict.
+Only offers no page asked for count toward that budget (#1922): a `/repairs/claim` for the offered token
+that is refused (not current, another chat's events still being saved, replaced) proves a page and
+leaves the next offer uncounted, and the bridge logs `refused the <reason> repair claim for <chat>: <why>`
+once a minute per chat and reason. The observation-write gate stays global: one chat's events can
+commit another's identity (a Compact & resume successor) and so revoke its handout.
 A responsive page flushes native progress and Stop before the main claim, then rechecks its
 captured work/question/document after the claim. An explicit veto or navigation prevents the
 browser action. An unresponsive page supplies no new proof; the original main-process grant
