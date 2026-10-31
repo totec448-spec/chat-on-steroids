@@ -204,7 +204,7 @@ it('gives up on a write that never answers, says so, and still applies the next 
     await vi.advanceTimersByTimeAsync(1_000);
     await first;
     expect(settled).toBe(true);
-    expect(follow.state()).toEqual({ applied: null, error: 'storage write did not answer within 5 s' });
+    expect(follow.state()).toEqual({ applied: 'en', error: 'storage write did not answer within 5 s' });
     hang = false;
     await follow({ language: 'en' });
     expect(store).toEqual({ appLanguage: 'en' });
@@ -243,7 +243,7 @@ it('keeps a refused write for diagnostics and tries again on the next status', a
   let refuse = true;
   const follow = follower(store, { set: async value => { if (refuse) throw new Error('QUOTA_BYTES quota exceeded'); Object.assign(store, value); } });
   await follow({ language: 'en' });
-  expect(follow.state()).toEqual({ applied: null, error: 'QUOTA_BYTES quota exceeded' });
+  expect(follow.state()).toEqual({ applied: 'en', error: 'QUOTA_BYTES quota exceeded' });
   refuse = false;
   await follow({ language: 'en' });
   expect(store).toEqual({ appLanguage: 'en' });

@@ -3156,6 +3156,10 @@ async function followAppNow(data) {
     patch[RENDER_STREAM_KEY] = kept.overwrite;
     patch[SHOW_TIMES_KEY] = kept.durations;
   }
+  // The worker takes the app's language at once, whatever storage does: a page that asks
+  // (`i18n_catalog` with `current`) gets it even while the write below fails (CodeRabbit on #1940).
+  // A failed write stays unconfirmed, so the next status writes again.
+  if (language) appLanguageApplied = language;
   try {
     // A write that never answers is bounded too: it must not hold every later status (CodeRabbit on #1940).
     if (Object.keys(patch).length) await boundedStorage(chrome.storage.local.set(patch), 'write');
