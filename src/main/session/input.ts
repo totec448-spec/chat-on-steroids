@@ -1360,6 +1360,22 @@ export function setInputAutomation(id: string, automation: NonNullable<InputArgs
     return true;
   });
 }
+/** A missing elected tab is not replay authority. End only a never-handed-out opening. */
+export function failUnclaimedBrowserOpening(id: string, currentOwner: () => boolean): Promise<boolean> {
+  return serial(async () => {
+    const current = await load();
+    const row = current.find(entry => entry.id === id);
+    if (!currentOwner() || !row?.opening || row.state !== 'queued' || row.owner !== null || row.offeredAt !== undefined ||
+        row.sendAuthorizedAt !== undefined || row.deliveredAt !== undefined || row.conversationId ||
+        !row.sessionId || row.purpose || row.lifetime || row.branch) return false;
+    const session = await getSession(row.sessionId);
+    if (!currentOwner() || session?.origin?.kind !== 'desktop' || session.conversationId) return false;
+    await commit(current.map(entry => entry === row ? { ...entry, state: 'failed',
+      error: 'Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.' } : entry));
+    logWarn(`input ${id}: not sent; its elected opening tab is absent before any browser claim`);
+    return true;
+  });
+}
 export function noteInputStartupError(id: string, error: string | null): Promise<InputEntry | null> {
   return serial(async () => {
     const current = await load();

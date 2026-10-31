@@ -2324,7 +2324,7 @@ Expanded tool arguments/results and Compact & Resume content use the chat pane's
 scrolling, without nested vertical text scrollers. Streaming compaction revisions retain the
 disclosure and unchanged sections; the timeline owner preserves the visible row or follows
 the bottom only when the reader was already there. Collapsed bodies leave layout entirely.
-Event rows (`eventRow`) and compaction blocks carry a `<time>` (hours and minutes of when the message was written, `authoredTimeOf` before the observed time; none for a damaged time; it follows a language change; the full date in its title, `datetime`
+Event rows (`eventRow`) and compaction blocks carry a `<time>` (hours and minutes of when the app saw the message, the question's clock too; `authoredTimeOf` only when the app saw it more than 5 minutes after it was written, as for an earlier answer read after a reload; none for a damaged time; it follows a language change; the full date in its title, `datetime`
 attribute, `rowTime` in `dom.ts`). It is hidden unless `ui.showMessageTimes` (Settings → General,
 "Show message times", off by default; saved through `settings:save` like `followOutput`) puts
 `show-message-times` on the document element; then messages, images, sub-agent messages, chat
@@ -3058,6 +3058,12 @@ input, a repair, a Compact & Resume replacement with no page waiting — goes on
 holding that chat. A browser handed work for a chat it lacks opens the chat itself, so a second
 copy would otherwise run that work. A chat open nowhere, like a brand-new chat, goes to the
 first browser it is handed to while that browser polls. Requests without an id are not told apart.
+If an elected new-chat tab is absent from a successful all-tab scan, with no surviving input
+marker, the extension reports `/input/opening-unavailable` without reopening. Only the browser
+holding that opening may report it. The outbox fails only an unbound desktop opening still
+queued with no owner, offer, Send authorization or receipt. The existing delivery notice offers
+review in the composer; only an explicit Send creates a new input in the same reserved session.
+Claimed or ambiguous sends retain their custody and cannot be retried through this report.
 
 "Open in ChatGPT" on a chat row is shown by the extension, not the OS: the OS hands a URL to
 whichever browser window last had focus, which can be a browser without the extension or one

@@ -9,6 +9,12 @@ const languages = Object.keys(names) as Language[];
 const catalogs = Object.fromEntries(languages.filter(locale => locale !== 'en').map(locale =>
   [locale, JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>]));
 
+it.each(languages.filter(locale => locale !== 'en'))('translates the lost-opening delivery notice into %s', locale => {
+  const key = 'Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.';
+  expect(catalogs[locale]?.[key]).toBeTruthy();
+  expect(catalogs[locale]?.[key]).not.toBe(key);
+});
+
 let dom: JSDOM;
 beforeEach(() => {
   vi.resetModules();
