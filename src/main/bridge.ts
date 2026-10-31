@@ -38,7 +38,7 @@ export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
-import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, failUnclaimedBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation } from './session/input.js';
+import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, failUnclaimedBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation } from './session/input.js';
 /**
  * The local bridge between the Chrome extension and this app.
  *
@@ -8237,6 +8237,10 @@ const PROVIDER_HISTORY_STREAK_HOLDS_MS = [0, 120_000, 240_000, 480_000, 900_000]
 const PROVIDER_HISTORY_STREAK_RESET_MS = 15 * 60_000;
 const providerHistoryStreaks = new Map<string, { strikes: number; until: number }>();
 /** The hold deadline a deferred pickup was last logged for, so each hold is logged once. */
+/** How long an automatic Continue may sit untaken before it becomes an ordinary message. */
+const RECOVERY_ORDINARY_AFTER_MS = 10 * 60_000;
+/** Withheld pickups already logged, by chat, input and reason. */
+const pickupWithheldLogged = new Set<string>();
 const pickupHeldLogged = new Map<string, number>();
 type ProviderDeferredColdStart = {
   repair: Repair;
@@ -9748,6 +9752,32 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
           ? { stoppedAt: reply.pickupStoppedAt ?? reply.acceptedAt } : {}) };
       pickupWatch.set(reply.conversationId, watch);
     }
+    // An automatic Continue nothing took for long becomes an ordinary message rather than another
+    // reload or a stop: the chat must not stop while it is unfinished (user decision 2026-10-31).
+    // Checked between reloads and after a stop too; the conversion itself refuses while anything newer
+    // happened in the chat or anything runs.
+    if (reply.queued && reply.inputId && now - reply.acceptedAt >= RECOVERY_ORDINARY_AFTER_MS) {
+      const stuck = watch.stoppedAt || watch.attempts >= 1 ? `not claimed after ${watch.attempts} reload(s)` : await queuedInputOfferBlocker(reply.inputId);
+      if (stuck) {
+        const outcome = await continueAsOrdinaryMessage(reply.inputId, stuck, RECOVERY_ORDINARY_AFTER_MS);
+        if ('row' in outcome) {
+          pickupWatch.delete(reply.conversationId);
+          wakeBrowserWork();
+          queued = true;
+          continue;
+        }
+        // Why it stays, once per chat, input and reason (CodeRabbit on #1960). Not for a ticket that
+        // is no automatic Continue or not old enough: those are ordinary waits.
+        if (!/no longer a queued automatic Continue|not old enough/.test(outcome.refused)) {
+          const key = `${reply.conversationId}|${reply.inputId}|ordinary:${outcome.refused}`;
+          if (!pickupWithheldLogged.has(key)) {
+            pickupWithheldLogged.add(key);
+            if (pickupWithheldLogged.size > 200) pickupWithheldLogged.delete(pickupWithheldLogged.values().next().value!);
+            logInfo(`bridge: the automatic Continue in ${reply.conversationId} is not sent as an ordinary message yet — ${outcome.refused}`);
+          }
+        }
+      }
+    }
     if (watch.stoppedAt || watch.attempts >= BROWSER_PICKUP_MAX_ATTEMPTS) continue;
     if (now < watch.dueAt || now < reply.listenUntil) continue;
     // A reload inside a history limit cannot bring the page back and can extend the limit. Counting
@@ -9771,6 +9801,21 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
     if (held?.state === 'done' && held.reason === 'goal') repairsInFlight.delete(reply.conversationId);
     else if (held && held.state !== 'done') continue;
     if (!workerRecoveryAllowed(reply.conversationId) || pagelessChats.has(reply.conversationId)) continue;
+    // A page cannot claim what the app itself does not offer: reloading it then changes nothing and
+    // only spends the budget (2026-10-31: three reloads for an automatic Continue the app withheld,
+    // then a stop, and no word of why). Say which gate holds it, once per chat and reason.
+    if (reply.queued && reply.inputId) {
+      const blocker = await queuedInputOfferBlocker(reply.inputId);
+      if (blocker) {
+        const key = `${reply.conversationId}|${reply.inputId}|${blocker}`;
+        if (!pickupWithheldLogged.has(key)) {
+          pickupWithheldLogged.add(key);
+          if (pickupWithheldLogged.size > 200) pickupWithheldLogged.delete(pickupWithheldLogged.values().next().value!);
+          logInfo(`bridge: next automation/input step in ${reply.conversationId} is not offered to the page — ${blocker}; no reload is spent on it`);
+        }
+        continue;
+      }
+    }
     const nextAttempts = watch.attempts + 1;
     const nextAt = nextAttempts < BROWSER_PICKUP_MAX_ATTEMPTS
       ? now + PICKUP_BACKOFF_MS[nextAttempts]! : undefined;
@@ -12086,6 +12131,7 @@ export function resetBridgeForTests(): void {
   claimRefusalsLogged.clear();
   providerHistoryStreaks.clear();
   pickupHeldLogged.clear();
+  pickupWithheldLogged.clear();
   providerDeferredColdStarts.clear();
   activeUntil.clear();
   lastRecoverySweepTickAt = 0;
