@@ -353,8 +353,11 @@ describe('a chat tab left on Chrome\'s error page', () => {
     await vi.waitFor(() => expect(h.fetch.mock.calls.some(([url, init]: any) => new URL(url).pathname === '/diagnostics' &&
       JSON.parse(init.body).errorPageReloads?.count === 1)).toBe(true), { timeout: 5_000 });
   });
-  const reported = (h: Awaited<ReturnType<typeof errorPage>>) => h.fetch.mock.calls
-    .filter(([url]: any) => new URL(url).pathname === '/diagnostics').map(([, init]: any) => JSON.parse(init.body).errorPageReloads?.skipped).filter(Boolean);
+  // Each skip once, by when it happened: a report sent again (a change while one was in flight) carries
+  // the same skip, and the app logs it once by that time (#1940 made the snapshot's read bounded).
+  const reported = (h: Awaited<ReturnType<typeof errorPage>>) => [...new Map(h.fetch.mock.calls
+    .filter(([url]: any) => new URL(url).pathname === '/diagnostics').map(([, init]: any) => JSON.parse(init.body).errorPageReloads?.skipped).filter(Boolean)
+    .map((skip: any) => [`${skip.reason}:${skip.at}`, skip])).values()];
   // CodeRabbit on #1911: a skipped reload says why in the app's log, once per reason.
   const pings = (h: Awaited<ReturnType<typeof errorPage>>) => h.sendMessage.mock.calls.filter(([, message]: any) => message.type === 'clf-recorder-ping').length;
   // The next recorder check, a minute later on the worker's clock.
