@@ -926,7 +926,7 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
   /** The rewritten source and every target session gained or lost transcript rows. */
   const changed = new Set<string>();
 
-  for (const summary of await indexedSessions()) {
+  for (const summary of await indexedSessions()) try {
     if ((summary.provisionalToolCalls ?? 0) > 0) {
       const events = await readEvents(summary.id, { kinds: ['tool_call'] });
       let repaired = 0;
@@ -1119,6 +1119,10 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
       `repaired ${tools.length - unknown.length} deterministically attributed call(s) from session ${summary.id}; ` +
         `${repaired.retained} remain unknown`
     );
+  } catch (err) {
+    // An unreadable source/checkpoint must not block other sessions or their notifications.
+    repairBuckets.delete(summary.id);
+    logWarn(`request attribution: repair failed for source session ${summary.id}; left pending for retry: ${(err as Error).message}`);
   }
 
   if (changed.size > 0) notifyChanged(...changed);
