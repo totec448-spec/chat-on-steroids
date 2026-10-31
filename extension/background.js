@@ -3171,7 +3171,8 @@ async function followAppNow(data) {
     if (!appLanguageUnconfirmed) appLanguageError = readFailed;
   } catch (error) {
     if (patch[APP_LANGUAGE_KEY]) appLanguageUnconfirmed = true;
-    appLanguageError = String(error?.message || error).slice(0, 200);
+    // A failed preferences-only write does not replace the reason the language is still unsaved (CodeRabbit on #1940).
+    if (patch[APP_LANGUAGE_KEY] || !appLanguageUnconfirmed) appLanguageError = String(error?.message || error).slice(0, 200);
   }
 }
 
