@@ -1808,6 +1808,8 @@
   "How the app behaves day to day. Changes apply immediately.": "앱의 일상적인 동작입니다. 변경 사항은 즉시 적용됩니다.",
   "What you see while ChatGPT answers, and what your messages carry.": "ChatGPT가 답변하는 동안 보이는 내용과 메시지에 함께 담기는 내용입니다.",
   "Follow new output": "새 출력 따라가기",
+  "Show message times": "메시지 시간 표시",
+  "The time above each message. Point at a time for the full date.": "각 메시지 위에 시간을 표시합니다. 시간을 가리키면 전체 날짜가 보입니다.",
   "Stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "답변이 늘어나는 동안 채팅 끝에 머뭅니다(여기와 ChatGPT). 위로 스크롤하면 일시 중지됩니다.",
   "Playful status words": "장난스러운 상태 문구",
   "Show rotating gym jokes instead of “Working”.": "“작업 중” 대신 돌아가며 표시되는 운동 농담을 사용합니다.",

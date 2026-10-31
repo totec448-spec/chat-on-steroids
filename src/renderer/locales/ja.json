@@ -1808,6 +1808,8 @@
   "How the app behaves day to day. Changes apply immediately.": "アプリの日常的な動作です。変更はすぐに反映されます。",
   "What you see while ChatGPT answers, and what your messages carry.": "ChatGPT が回答している間に表示される内容と、メッセージに含まれる内容。",
   "Follow new output": "新しい出力を追う",
+  "Show message times": "メッセージの時刻を表示",
+  "The time above each message. Point at a time for the full date.": "各メッセージの上に時刻を表示します。時刻にポインターを合わせると日付も表示されます。",
   "Stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.": "回答が伸びる間、チャットの末尾にとどまります（ここと ChatGPT）。上にスクロールすると一時停止します。",
   "Playful status words": "遊び心のあるステータス",
   "Show rotating gym jokes instead of “Working”.": "「作業中」の代わりにジムネタを順番に表示します。",

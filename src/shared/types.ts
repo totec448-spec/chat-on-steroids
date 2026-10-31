@@ -189,6 +189,8 @@ export interface UiPrefs {
   sendCheckUrl?: string;
   /** Keep the chat at its end while it grows, here and on ChatGPT, until the reader scrolls up. On unless false. */
   followOutput?: boolean;
+  /** Show each chat message's time above it (the full date on hover). Off unless true (2026-10-30). */
+  showMessageTimes?: boolean;
   /** Add the Chat On Steroids Core mention to the user's own prompts sent from the app. On unless false. */
   mentionCore?: boolean;
   /** Prefer the installed Plugins app on regular COS-managed sends; worker/recovery sends still use Core. Off by default. */
