@@ -28,21 +28,37 @@ function note(line: string): void {
 
 /** `resume` names the resume being handed out, so each one logs its own decision once. */
 export function resumeModelSelection(requested: { model: string; reasoningEffort: ReasoningEffort | null } | null | undefined, resume = ''): Selection {
-  key = resume;
+  return offeredSelection(requested, resume, 'resume', 'the new chat');
+}
+
+/**
+ * The model a sleeping worker's wake asks for: the one it was opened with (#1952). Without it the
+ * wake was typed on whatever ChatGPT's message box held, often its default model and effort, so a
+ * worker opened on GPT-5.6 high went on in GPT-6 medium. Vetted against this account exactly as a
+ * resume is. `wake` names the wake command, so each logs its decision once.
+ */
+export function wakeModelSelection(requested: { model: string | null; reasoningEffort: ReasoningEffort | null } | null | undefined, wake = ''): Selection {
+  // A worker opened on the account default has no model to choose; its reasoning alone still is.
+  if (!requested?.model) return { model: null, reasoningEffort: requested?.reasoningEffort ?? null };
+  return offeredSelection({ model: requested.model, reasoningEffort: requested.reasoningEffort }, wake, 'worker wake', 'the wake');
+}
+
+function offeredSelection(requested: { model: string; reasoningEffort: ReasoningEffort | null } | null | undefined, which: string, what: string, target: string): Selection {
+  key = which;
   if (!requested) return { model: null, reasoningEffort: null };
   const catalog = getChatModels();
   if (!catalog.models.length) {
     if (catalog.state !== 'unavailable') return { model: requested.model, reasoningEffort: requested.reasoningEffort };
-    note("resume: this ChatGPT account shows no readable model picker; the new chat uses ChatGPT's current selection");
+    note(`${what}: this ChatGPT account shows no readable model picker; ${target} uses ChatGPT's current selection`);
     return { model: null, reasoningEffort: null };
   }
   const offered = resolveChatModel(catalog.models, requested.model);
   if (!offered) {
-    note(`resume: model "${requested.model}" is not offered by this ChatGPT account; the new chat uses ChatGPT's current selection`);
+    note(`${what}: model "${requested.model}" is not offered by this ChatGPT account; ${target} uses ChatGPT's current selection`);
     return { model: null, reasoningEffort: null };
   }
   if (requested.reasoningEffort && !offered.efforts.includes(requested.reasoningEffort)) {
-    note(`resume: reasoning "${requested.reasoningEffort}" is not offered for ${requested.model} by this ChatGPT account; the new chat uses ChatGPT's current reasoning`);
+    note(`${what}: reasoning "${requested.reasoningEffort}" is not offered for ${requested.model} by this ChatGPT account; ${target} uses ChatGPT's current reasoning`);
     return { model: requested.model, reasoningEffort: null };
   }
   return { model: requested.model, reasoningEffort: requested.reasoningEffort };

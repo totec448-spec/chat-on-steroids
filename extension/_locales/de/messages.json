@@ -1267,5 +1267,8 @@
   },
   "content_task_waiting_app": {
     "message": "Wartet auf eine Antwort von Chat On Steroids."
+  },
+  "content_revival_draft_appeared": {
+    "message": "Während der Weckruf des Workers vorbereitet wurde, wurde etwas in den Chat geschrieben, daher hat der Weckruf es nicht ersetzt."
   }
 }

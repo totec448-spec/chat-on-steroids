@@ -1369,5 +1369,8 @@
   },
   "content_task_waiting_app": {
     "message": "Ожидание ответа Chat On Steroids."
+  },
+  "content_revival_draft_appeared": {
+    "message": "Пока готовилось пробуждение воркера, в чат что-то ввели, поэтому пробуждение не заменило этот текст."
   }
 }

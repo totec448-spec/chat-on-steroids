@@ -1216,5 +1216,8 @@
   },
   "content_task_waiting_app": {
     "message": "Đang chờ Chat On Steroids phản hồi."
+  },
+  "content_revival_draft_appeared": {
+    "message": "Có nội dung được nhập vào cuộc trò chuyện trong lúc chuẩn bị đánh thức worker, nên lệnh đánh thức không thay thế nó."
   }
 }

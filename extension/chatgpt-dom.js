@@ -3476,7 +3476,10 @@ var CLF_DOM = (() => {
       // Exact provider slug is preferred. Existing saved display slugs may resolve
       // only to an actually observed, available pair; never to an account default.
       const name = normalizeModelLabel(model);
-      const modelRank = choice => !model || choice.familyId === model || choice.id === model ? 2
+      // Effort only keeps the current model: its efforts, never another model's (CodeRabbit on #1972).
+      // An unreadable current model offers nothing, so the request stays unconfirmed.
+      const modelRank = choice => !model ? (current?.familyId && choice.familyId === current.familyId ? 2 : 0)
+        : choice.familyId === model || choice.id === model ? 2
         : name && normalizeModelLabel(choice.familyLabel) === name ? 1 : 0;
       // Every available choice of the requested model, read once across versions, so the effort
       // can be resolved against what the account actually offers before anything is moved.

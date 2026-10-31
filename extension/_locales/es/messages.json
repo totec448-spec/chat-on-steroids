@@ -1318,5 +1318,8 @@
   },
   "content_task_waiting_app": {
     "message": "Esperando la respuesta de Chat On Steroids."
+  },
+  "content_revival_draft_appeared": {
+    "message": "Se escribió algo en el chat mientras se preparaba el aviso del worker, así que el aviso no lo reemplazó."
   }
 }

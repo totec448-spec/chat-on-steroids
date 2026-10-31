@@ -1216,5 +1216,8 @@
   },
   "content_task_waiting_app": {
     "message": "Chat On Steroids の応答を待っています。"
+  },
+  "content_revival_draft_appeared": {
+    "message": "ワーカーの起動を準備している間にチャットに入力があったため、起動メッセージはそれを置き換えませんでした。"
   }
 }
