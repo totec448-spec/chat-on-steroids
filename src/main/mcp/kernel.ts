@@ -571,11 +571,14 @@ function withUnattributedNotice(
   provisional = false
 ): ToolResult {
   if (conversationId) return result;
+  const requestOwnershipNotice =
+    'This request id owns its workspace, update_plan, terminals and agents/subagents. Use the process and run ids returned to this request; later exact proof attaches that state to its chat. ';
   if (provisional) return { ...result, content: [...result.content, { type: 'text', text:
     '\n--- Recording context ---\n' +
     'Exact caller identity is not available. The recorder may provisionally place this operation in the only observed running chat, ' +
     'pending exact request evidence. This does not grant access to that chat’s workspace, messages, workers or terminals. ' +
-    'Continue using enabled self-contained tools with their existing permissions. Do not repeat a completed operation to repair attribution.'
+    'Continue using enabled self-contained tools with their existing permissions. Do not repeat a completed operation to repair attribution. ' +
+    requestOwnershipNotice
   }] };
   const eta = unattributedRepairEta(Date.now(), requestId);
   const recovery = eta === null ? '' : `The next attribution recovery check is in about ${eta}s. `;
@@ -591,7 +594,7 @@ function withUnattributedNotice(
             'Unattributed does not switch on Read-only mode or disable tools. Continue using every enabled tool, ' +
             'including apply_patch, exec_command, Desktop and Plugins; their existing permissions still apply. ' +
             (requestId
-              ? 'This request id owns its workspace, update_plan, terminals and agents/subagents. Use the process and run ids returned to this request; later exact proof attaches that state to its chat. '
+              ? requestOwnershipNotice
               : 'This call has no request id, so request-owned plans and worker families cannot be created until a request id or exact chat proof is available. ') +
             'A refusal about a particular process, worker or chat target applies only to that operation, not to file edits or other tools. ' +
             'Report the actual tool result; do not claim mutation or terminal tools are unavailable because of this notice, and never replay successful work. ' +

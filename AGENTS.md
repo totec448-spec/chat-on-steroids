@@ -822,6 +822,16 @@ Trust or turn recovery. Canonical tool-call shards preserve call UUIDs; the summ
 `provisionalToolCalls` count identifies history needing reconciliation. Exact late proof upgrades
 or moves those calls with their assets through `reviseProvisionalCall`, preserving unrelated
 messages and sequence anchors. Startup never restores exact ownership from provisional rows.
+Provisional background commands retain canonical process-call shards and bind their exact
+process-lifetime completion promise. Attribution repair and these completions share the
+recorder's serialized attribution queue: an exit before relocation is copied with the call;
+an exit after relocation revises its UUID in the proven destination. If source removal failed,
+completion revises both retained copies so a later repair cannot lose the exit. This changes
+history only, never process custody or output receipts.
+The model-facing Recording context notice replaces the allow-unattributed Identity notice
+for these calls, preserving its request-owned process/run-id and later-exact-proof guidance.
+It omits the recovery-check ETA because provisional placement cannot promise an identity
+recovery time. The strict/refused identity notice and its recovery instructions are unchanged.
 
 After a local identity refusal, `kernel.ts` appends one **Identity recovered** notice to an
 eligible outer tool result once exact request/conversation/session proof is available. Refusal
