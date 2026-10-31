@@ -14,6 +14,15 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.49': {
+    lead: () => t("Long chats that get through ChatGPT's limits, pop-ups out of the way, and message times."),
+    highlights: [
+      { icon: 'i-chat', title: () => t("Long chats keep going"), text: () => t("When ChatGPT limits a long chat's history, the app waits instead of reloading it.") },
+      { icon: 'i-check-circle', title: () => t("Pop-ups out of the way"), text: () => t("ChatGPT's announcements no longer block new chats or your messages.") },
+      { icon: 'i-lock', title: () => t("Your mouse stays yours"), text: () => t("Only chats this app can name use your screen, mouse and keyboard.") },
+      { icon: 'i-clock', title: () => t("Message times"), text: () => t("Turn on Show message times in Settings → General to see when each message was sent.") }
+    ]
+  },
   '2.1.48': {
     lead: () => t("A reviewer for Goal steps, a theme that follows your system, and a question before the mouse and keyboard."),
     highlights: [

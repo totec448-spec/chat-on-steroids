@@ -1,4 +1,13 @@
 {
+  "Long chats that get through ChatGPT's limits, pop-ups out of the way, and message times.": "ChatGPT의 제한을 넘기는 긴 채팅, 방해되지 않는 팝업, 메시지 시간.",
+  "Long chats keep going": "긴 채팅이 계속됩니다",
+  "When ChatGPT limits a long chat's history, the app waits instead of reloading it.": "ChatGPT가 긴 채팅의 기록을 제한하면 앱이 새로 고치지 않고 기다립니다.",
+  "Pop-ups out of the way": "팝업이 방해하지 않습니다",
+  "ChatGPT's announcements no longer block new chats or your messages.": "ChatGPT의 공지가 더 이상 새 채팅이나 메시지를 막지 않습니다.",
+  "Your mouse stays yours": "마우스는 내 것",
+  "Only chats this app can name use your screen, mouse and keyboard.": "이 앱이 식별할 수 있는 채팅만 화면, 마우스, 키보드를 사용합니다.",
+  "Message times": "메시지 시간",
+  "Turn on Show message times in Settings → General to see when each message was sent.": "설정 → 일반에서 메시지 시간 표시를 켜면 각 메시지를 보낸 시간을 볼 수 있습니다.",
   "Dictation unavailable": "음성 받아쓰기를 사용할 수 없음",
   "Cancel dictation": "받아쓰기 취소",
   "Stop dictation": "받아쓰기 중지",
