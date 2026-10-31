@@ -3772,5 +3772,6 @@
   "{0} entries|one": "{0} Eintrag",
   "{0} messages": "{0} Nachrichten",
   "{0} messages|one": "{0} Nachricht",
-  "{0} actions|one": "{0} Aktion"
+  "{0} actions|one": "{0} Aktion",
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Nicht gesendet: Der Browser-Tab für diesen neuen Chat wurde geschlossen oder ging verloren. Prüfe die Nachricht und sende sie erneut."
 }

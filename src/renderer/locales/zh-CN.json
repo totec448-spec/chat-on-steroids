@@ -3691,5 +3691,6 @@
   "{0} controls": "{0} 个控件",
   "{0} sessions": "{0} 个会话",
   "{0} entries": "{0} 个条目",
-  "{0} messages": "{0} 条消息"
+  "{0} messages": "{0} 条消息",
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "未发送：此新聊天的浏览器标签页已关闭或丢失。请检查消息后重新发送。"
 }
