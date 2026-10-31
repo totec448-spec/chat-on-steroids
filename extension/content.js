@@ -13385,8 +13385,12 @@
     // page is still on the message's chat: another chat's state is not this message's reason.
     const held = (reason) => {
       if (message.recovery && stopRequestedAt) return false;
-      if (!alive || CLF_DOM.conversationId() !== (message.conversationId || null)) return false;
-      void ask({ type: 'page_note', note: 'input-held', reason, inputId: message.id, conversationId: message.conversationId || null }).catch(() => undefined);
+      const chat = message.conversationId || null, heldEpoch = epoch;
+      if (!alive || CLF_DOM.conversationId() !== chat) return false;
+      // Sent only while this document is still on the same chat and navigation: a registration that
+      // is still pending must not let the note go out stamped for a page that moved on (CodeRabbit).
+      void ask({ type: 'page_note', note: 'input-held', reason, inputId: message.id, conversationId: chat },
+        () => alive && epoch === heldEpoch && CLF_DOM.conversationId() === chat).catch(() => undefined);
       return false;
     };
     if (desktopInputBusy || modelCatalogBusy || !alive || goalBusy || job?.busy) return false;
@@ -13413,8 +13417,10 @@
       if (!alive) return 'page-closed';
       if (epoch !== forEpoch || CLF_DOM.conversationId() !== target) return 'left-chat';
       if (message.recovery && !sendAttempted && stopRequestedAt) return 'stop-requested';
-      const newUser = !(message.directTurn && sourceUser === undefined) &&
-        CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id !== sourceUser;
+      const lastUser = CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id;
+      // A question captured before that is no longer on the page is not a new one (CodeRabbit on #1947).
+      if ((sourceQuiet || message.directTurn) && !sendAttempted && sourceUser !== undefined && lastUser === undefined) return 'source-question-missing';
+      const newUser = !(message.directTurn && sourceUser === undefined) && lastUser !== sourceUser;
       if ((sourceQuiet || message.directTurn) && !sendAttempted && newUser) return 'new-user-message';
       if ((sourceQuiet || message.directTurn) && !sendAttempted && turnId && turnId !== sourceTurn) return 'turn-changed';
       // Named with what moved it: a pickup withdrawn for minutes otherwise cannot say by what (#1586).
@@ -13549,7 +13555,8 @@
         // it on); a tab now on another chat stays silent, as does a stopped automatic Continue.
         // A new question or progress on this chat is not the tab leaving it (CodeRabbit on #1947).
         const moved = !onTarget() ? offTarget() : null;
-        const reason = moved ? (['new-user-message', 'turn-changed'].includes(moved) || moved.startsWith('turn-progressed') ? 'chat-moved-on' : 'page-moved')
+        const reason = moved ? (moved === 'source-question-missing' ? 'question-gone'
+          : ['new-user-message', 'turn-changed'].includes(moved) || moved.startsWith('turn-progressed') ? 'chat-moved-on' : 'page-moved')
           : stillAnswering ? (CLF_DOM.generating() ? 'still-answering' : 'turn-held')
           : pendingTools > 0 && !message.directTurn ? 'tool-running' : !CLF_DOM.composer() ? 'no-composer' : 'composer-hidden';
         return held(reason);

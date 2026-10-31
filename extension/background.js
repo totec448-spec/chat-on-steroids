@@ -4844,7 +4844,7 @@ const HANDLERS = {
     if (message?.note === 'announcement-closed') {
       const heading = typeof message.heading === 'string' ? message.heading.replace(/\s+/g, ' ').trim().slice(0, 80) : '';
       body = { note: 'announcement-closed', heading, conversationId };
-    } else if (message?.note === 'input-held' && ['page-moved', 'chat-moved-on', 'still-answering', 'turn-held', 'tool-running', 'no-composer', 'composer-hidden', 'recovery-question-changed',
+    } else if (message?.note === 'input-held' && ['page-moved', 'chat-moved-on', 'question-gone', 'still-answering', 'turn-held', 'tool-running', 'no-composer', 'composer-hidden', 'recovery-question-changed',
         'recovery-question-unreadable', 'recovery-not-ready'].includes(message.reason) &&
         typeof message.inputId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(message.inputId)) {
       body = { note: 'input-held', reason: message.reason, inputId: message.inputId, conversationId };
