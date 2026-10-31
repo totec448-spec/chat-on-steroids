@@ -2908,36 +2908,51 @@ describe('automatic compaction', () => {
   });
 
   // #1922 (scuan2): a page that tries to claim a repair and is refused for the moment is a page. Its
-  // refusals must not use up the "never claimed … no page" budget, and each refusal says why.
-  it('keeps offering a repair whose page keeps trying to claim it, and logs why each claim was refused', async () => {
-    await pair();
-    const conversationId = randomUUID();
-    const session = await createSession({ conversationId });
-    await compactSession(session.id);
-    const offered = async () => (await request('GET', '/status')).body.repairs
-      .find((row: { conversationId: string }) => row.conversationId === conversationId);
-    const first = await offered();
-    expect(first).toMatchObject({ reason: 'compaction' });
-    // Another chat keeps saving its events meanwhile, so each claim is refused for the moment.
-    const other = randomUUID();
-    heldRecording.conversationId = other;
-    const busy = request('POST', '/events', { body: { conversationId: other, events: [{ kind: 'progress', time: Date.now(), turnId: 'other-turn', text: 'Working' }] } });
-    await vi.waitFor(() => expect(heldRecording.release).not.toBeNull());
-    let tries = 0;
-    for (let pass = 0; pass < 14; pass++) {
-      const handout = await offered();
-      if (!handout) break;
-      tries += 1;
-      expect((await request('POST', '/repairs/claim', { body: { token: handout.token } })).body.allowed).toBe(false);
-    }
-    expect(tries).toBe(14);
-    heldRecording.release!(); heldRecording.conversationId = null; heldRecording.release = null;
-    await busy;
-    // Once the write is done, the same repair is claimed.
-    expect((await request('POST', '/repairs/claim', { body: { token: (await offered()).token } })).body.allowed).toBe(true);
-    expect(getLog().some(entry => entry.message.includes(`${conversationId} never claimed`))).toBe(false);
-    expect(getLog().filter(entry => entry.message.includes(`refused the compaction repair claim for ${conversationId}`)).length).toBeGreaterThan(0);
-  });
+  // refusals must not use up the "never claimed … no page" budget, and each refusal says why. Nor do
+  // the polls of a browser that may not claim it (CodeRabbit on #1953): with the built-in browser
+  // chosen, Chrome still sees the chat but its polls are not offers anyone could take.
+  it.each(['one browser', 'a second, unchosen browser polling too'] as const)(
+    'keeps offering a repair whose page keeps trying to claim it, and logs why each claim was refused (%s)', async variant => {
+      await pair();
+      const builtIn = 'd'.repeat(32), chrome = 'c'.repeat(32);
+      const before = getConfig().ui.chatBrowser;
+      const conversationId = randomUUID();
+      // Another chat keeps saving its events meanwhile, so each claim is refused for the moment.
+      const other = randomUUID();
+      heldRecording.conversationId = other;
+      let busy: Promise<unknown> | null = null;
+      try {
+        if (variant !== 'one browser') await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+        const asker: Record<string, string> = variant === 'one browser' ? {} : { browser: builtIn, host: 'cos' };
+        const session = await createSession({ conversationId });
+        await compactSession(session.id);
+        const offered = async (who: Record<string, string> = asker) => ((await request('POST', '/status', { body: { openConversations: [conversationId] }, ...who })).body.repairs ?? [])
+          .find((row: { conversationId: string }) => row.conversationId === conversationId);
+        expect(await offered()).toMatchObject({ reason: 'compaction' });
+        busy = request('POST', '/events', { body: { conversationId: other, events: [{ kind: 'progress', time: Date.now(), turnId: 'other-turn', text: 'Working' }] } });
+        await vi.waitFor(() => expect(heldRecording.release).not.toBeNull(), { timeout: 10_000 });
+        let tries = 0;
+        for (let pass = 0; pass < 14; pass++) {
+          if (variant !== 'one browser') await offered({ browser: chrome, host: 'browser' });
+          const handout = await offered();
+          if (!handout) break;
+          tries += 1;
+          expect((await request('POST', '/repairs/claim', { body: { token: handout.token }, ...asker })).body.allowed).toBe(false);
+        }
+        expect(tries).toBe(14);
+        expect(getLog().some(entry => entry.message.includes(`${conversationId} never claimed`))).toBe(false);
+        expect(getLog().filter(entry => entry.message.includes(`refused the compaction repair claim for ${conversationId}`)).length).toBeGreaterThan(0);
+        heldRecording.release!(); heldRecording.conversationId = null; heldRecording.release = null;
+        await busy; busy = null;
+        // Once the write is done, the same repair is claimed.
+        expect((await request('POST', '/repairs/claim', { body: { token: (await offered()).token }, ...asker })).body.allowed).toBe(true);
+      } finally {
+        // Never leave the write open: later claims in this file would all be refused.
+        heldRecording.release?.(); heldRecording.conversationId = null; heldRecording.release = null;
+        await busy?.catch(() => undefined);
+        await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: before } });
+      }
+    });
 
   it('hands out an explicitly requested Compact & resume for a chat whose tab the user closed', async () => {
     // 2026-09-30, live on 2.1.22: the test chat's tab had been closed, so its automatic recovery
