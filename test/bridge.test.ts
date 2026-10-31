@@ -1849,7 +1849,8 @@ describe('activity feed', () => {
       await compactSession(session.id);
       const fromChrome = ((await status(chrome, 'browser', [conversationId])).body.repairs ?? [])
         .find((row: { conversationId: string }) => row.conversationId === conversationId);
-      if (fromChrome) expect((await request('POST', '/repairs/claim', { body: { token: fromChrome.token }, browser: chrome, host: 'browser' })).body.allowed).toBe(false);
+      // Chrome, not chosen, is handed no token it could not claim (CodeRabbit on #1963).
+      expect(fromChrome).toBeUndefined();
       const fromBuiltIn = ((await status(builtIn, 'cos', [])).body.repairs ?? [])
         .find((row: { conversationId: string }) => row.conversationId === conversationId);
       expect(fromBuiltIn).toMatchObject({ reason: 'compaction' });
