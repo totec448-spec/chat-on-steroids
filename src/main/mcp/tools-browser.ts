@@ -1,6 +1,7 @@
 /** Compact browser tools, carried by Desktop and the same invocation/recording kernel. */
 import { z } from 'zod';
 import { browserControl } from '../browser-control.js';
+import { logInfo } from '../logger.js';
 import { browserToolWrites, BROWSER_LIMITS, type BrowserTool } from '../../shared/browser-control.js';
 import { effectiveCapabilities, getConfig } from '../config.js';
 import { currentCall } from './call-context.js';
@@ -69,8 +70,12 @@ const declarations: Record<BrowserTool, { description: string; inputSchema: z.Zo
     inputSchema: z.object({ tabId, after: z.number().int().min(0).default(0), limit: bounded.default(50), level: z.enum(['all','error','warning','info','debug']).default('all'), filter: z.string().max(200).optional(), clear: z.boolean().default(false) }).strict()
   },
   browser_network: {
-    description: 'Inspect captured requests, response status, timing and failures since attach. Pass requestId for bounded headers/body of that exact request; bodies may be unavailable/evicted. Cursor pagination and URL filter avoid dumping traffic. No request interception or replay.',
-    inputSchema: z.object({ tabId, after: z.number().int().min(0).default(0), limit: bounded.default(50), filter: z.string().max(200).optional(), requestId: z.string().max(160).optional(), body: z.boolean().default(false), clear: z.boolean().default(false) }).strict()
+    description: 'Inspect captured requests, response status, timing and failures since attach. Pass requestId for bounded headers/body of that exact request. stream:true enables bounded retention for an in-flight text/event-stream response (4 MiB total per tab); enable before completion. body:true reads captured stream bytes as base64 pages: bodyOffset is a byte offset, bodyBytes defaults to 65536 and is at most 262144. Join decoded byte pages before UTF-8 decoding. terminal is distinct from complete; failures, overflow or invalid bytes never prove completeness. Bodies may be unavailable/evicted. Cursor pagination and URL filter avoid dumping traffic. No request interception or replay.',
+    inputSchema: z.object({ tabId, after: z.number().int().min(0).default(0), limit: bounded.default(50), filter: z.string().max(200).optional(), requestId: z.string().max(160).optional(), body: z.boolean().default(false), clear: z.boolean().default(false), stream: z.boolean().optional(), bodyOffset: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).optional(), bodyBytes: z.number().int().min(1).max(262144).optional() }).strict().superRefine((v,ctx)=>{
+      if (v.stream && !v.requestId) ctx.addIssue({code:'custom',path:['requestId'],message:'stream requires requestId'});
+      if ((v.bodyOffset !== undefined || v.bodyBytes !== undefined) && (!v.body || !v.requestId)) ctx.addIssue({code:'custom',path:['body'],message:'Byte pagination requires body:true and requestId'});
+      if (v.clear && (v.stream || v.bodyOffset !== undefined || v.bodyBytes !== undefined)) ctx.addIssue({code:'custom',path:['clear'],message:'Clear cannot be combined with stream capture or byte pagination'});
+    })
   }
 };
 
@@ -104,6 +109,24 @@ export function registerBrowserTools(reg: SurfaceRegistrar): void {
         };
         const result = await browserControl.execute(tool, args, owner, exact?.conversationId ?? caller?.conversationId ?? null, allowed);
         if (result.error) return fail(result.error);
+        if (tool === 'browser_network' && result.value && typeof result.value === 'object') {
+          const value = result.value as Record<string, unknown>;
+          const stream = value.stream;
+          if (stream && typeof stream === 'object') {
+            const status = stream as Record<string, unknown>;
+            // Log the decision once per invocation, never response bytes, identifiers,
+            // URLs or the browser's arbitrary error text.
+            const reason = status.overflow === true ? 'retention_limit_exceeded'
+              : status.invalidBytes === true ? 'invalid_stream_bytes'
+              : status.pending === true ? 'awaiting_buffered_prefix'
+              : value.failed ? 'network_request_failed'
+              : status.error ? 'capture_error'
+              : status.complete === true ? 'all_response_bytes_retained'
+              : status.terminal === true ? 'terminal_capture_incomplete'
+              : 'response_still_in_flight';
+            logInfo(`browser_network stream reason=${reason} complete=${status.complete === true}`);
+          }
+        }
         // No duplicate image in structured/text results. Reuse the existing full pixel validator.
         const response: ToolResult = { content: [{ type: 'text', text: JSON.stringify(result.value ?? null) }], structuredContent: { value: result.value ?? null } };
         if (result.image) {
