@@ -317,6 +317,10 @@ export function createBrowserControl(chrome, transport, protectedTab = () => fal
         await save(); // Crash before/after attach never grants an automatic reattach.
         await chrome.debugger.attach({ tabId },'1.3');
         acquired = true;
+        // The preflight URL predates debugger ownership; navigation during attach
+        // was not observed. Force the post-initialize currentTab/Page event to seed it.
+        state.topUrl = null;
+        state.networkProtected = false;
       }
       if (!state.initialized) await initialize(state);
       await page(state,'overlay');
