@@ -60,7 +60,8 @@ it('records the unexposed second id in the sole evidenced turn without granting 
   expect(freshCallOrigin('read', Date.now(), 'hidden-workflow')).toBeNull();
 });
 
-it.each(['before relocation', 'after relocation', 'during relocation', 'without relocation'] as const)(
+it.each(['before relocation', 'after relocation', 'during relocation', 'without relocation',
+  'with source read failure', 'with source write failure'] as const)(
   'records a provisional background command exit %s', async phase => {
     const source = await begin();
     let finish!: (completion: ProcessCompletion) => void;
@@ -86,12 +87,23 @@ it.each(['before relocation', 'after relocation', 'during relocation', 'without 
       await flushRecorder();
       expect(await calls(source)).toHaveLength(0);
     }
+    if (phase === 'with source read failure') {
+      const read = store.getSession;
+      vi.spyOn(store, 'getSession').mockImplementation(id => id === source
+        ? Promise.reject(new Error('Simulated source read failure')) : read(id));
+    } else if (phase === 'with source write failure') {
+      const complete = store.completeProcessCall;
+      vi.spyOn(store, 'completeProcessCall').mockImplementation((id, ...args) => id === source
+        ? Promise.reject(new Error('Simulated source write failure')) : complete(id, ...args));
+    }
     if (phase !== 'before relocation') { finish(exit); await flushRecorder(); }
     const rows = await calls(target);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ call: { callId: call!.callId,
       process: { sessionId: '1234', ...exit }, summary: { metric: '✕ exit 7', tone: 'bad' } } });
     expect((await getSession(target))?.toolCalls).toBe(1);
+    if (phase.includes('source')) expect(getLog().some(row => row.level === 'warn' &&
+      row.message.includes(source) && row.message.includes(call!.callId))).toBe(true);
     expect(requestCorrelation('background-workflow')?.conversationId ?? null).toBe(phase === 'without relocation' ? null : 'chat-b');
   }
 );
@@ -225,6 +237,45 @@ it.each(['asset quota', 'destination append', 'source revision'] as const)(
     await repairDeterministicAttribution();
     expect(await calls(source)).toHaveLength(0);
     expect((await calls(target)).map(row => row.call.callId).sort()).toEqual([failed.callId, healthy.callId].sort());
+  }
+);
+
+it.each(['destination read', 'destination append'] as const)(
+  'repairs later provisional calls after a legacy %s failure and retries without duplication', async failure => {
+    const source = await begin();
+    const provisional = (await record('later-provisional'))!;
+    const first = (await record('legacy-first', null))!;
+    const second = (await record('legacy-second', null))!;
+    const legacySource = (await indexedSessions()).find(row => row.conversationId === null)!.id;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const target = (await sessionForConversation('chat-b'))!;
+    const legacyTarget = (await sessionForConversation('chat-c'))!;
+    await prove('chat-b', 'later-provisional');
+    await prove('chat-c', 'legacy-first');
+    await prove('chat-c', 'legacy-second');
+    const order = (await indexedSessions()).map(row => row.id);
+    expect(order.indexOf(legacySource)).toBeLessThan(order.indexOf(source));
+    if (failure === 'destination read') {
+      const read = store.readEvents;
+      vi.spyOn(store, 'readEvents').mockImplementation((id, options) => id === legacyTarget
+        ? Promise.reject(new Error('Simulated destination read failure')) : read(id, options));
+    } else {
+      const append = store.appendEvent;
+      vi.spyOn(store, 'appendEvent').mockImplementation((id, event) =>
+        id === legacyTarget && event.kind === 'tool_call' && event.call.callId === second.callId
+          ? Promise.reject(new Error('Simulated destination append failure')) : append(id, event));
+    }
+    await expect(repairDeterministicAttribution()).resolves.toBeDefined();
+    vi.restoreAllMocks();
+    expect((await calls(legacySource)).map(row => row.call.callId)).toEqual([first.callId, second.callId]);
+    expect((await calls(target)).map(row => row.call.callId)).toEqual([provisional.callId]);
+    expect(await calls(source)).toHaveLength(0);
+    expect(await calls(legacyTarget)).toHaveLength(failure === 'destination read' ? 0 : 1);
+    expect(getLog().some(row => row.level === 'warn' && row.message.includes(legacySource) &&
+      row.message.includes('destination'))).toBe(true);
+    await repairDeterministicAttribution(new Set(['unrelated-trigger']));
+    expect((await calls(legacyTarget)).map(row => row.call.callId).sort()).toEqual([first.callId, second.callId].sort());
+    expect(await calls(legacySource)).toHaveLength(0);
   }
 );
 
