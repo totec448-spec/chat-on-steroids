@@ -100,6 +100,8 @@ const entrySchema = inputArgs.extend({
   /** Shared unfinished-response fallback belongs to this question in every mode. */
   /** An automatic Continue the app sent on as an ordinary message (`continueAsOrdinaryMessage`). */
   continuedFrom: z.literal('recovery').optional(),
+  /** The question that Continue continues, still checked until it is sent (CodeRabbit on #1960). */
+  continuesQuestionId: z.string().max(200).optional(),
   recovery: z.object({ questionId: z.string(), episode: z.string().max(200).optional(), pro: z.boolean(), busyUntil: z.number(), phase: z.enum(['ready', 'stopping', 'reloading', 'resumed']), reloadOwner: z.string().optional(),
     /** First release of an unbroken run of pages withdrawing this Continue before Send (#820). */
     withdrawnSince: z.number().optional(),
@@ -568,6 +570,10 @@ async function expireQueued(current: InputEntry[]): Promise<InputEntry[]> {
     }
     if (row.recovery && !terminal(row) && row.sendAuthorizedAt === undefined) {
       const reason = await recoveryInvalidReason(row);
+      if (reason) return { ...row, state: 'cancelled', error: `Automatic Continue cancelled: ${reason}.` };
+    }
+    if (row.continuesQuestionId && !terminal(row) && row.sendAuthorizedAt === undefined) {
+      const reason = await continuedInvalidReason(row);
       if (reason) return { ...row, state: 'cancelled', error: `Automatic Continue cancelled: ${reason}.` };
     }
     if (row.finishOwner && !terminal(row) && !(await finishInputCurrent(row)))
@@ -1322,6 +1328,7 @@ export function authorizeBrowserInput(id: string, owner: string, conversationId:
     const row = current.find(row => row.id === id && row.owner === owner && row.state === 'browser' && row.conversationId === conversationId);
     if (!row || row.sendAuthorizedAt !== undefined || companionOf(current, row)) return false;
     if (!(await browserInputAllowed(row)) || await target(row) !== conversationId) return false;
+    if (await continuedInvalidReason(row)) return false;
     if (row.companionInputId) {
       const companion = current.find(other => other.id === row.companionInputId && other.state === 'browser' && other.owner === owner && other.sessionId === row.sessionId);
       const session = row.sessionId ? await getSession(row.sessionId) : null;
@@ -1868,11 +1875,25 @@ export function continueAsOrdinaryMessage(id: string, why: string, minAgeMs = 0)
     const question = await readLatestUserMessage(row.sessionId);
     if (question?.messageId !== row.recovery.questionId) return { refused: 'a newer question arrived in its chat' };
     const { recovery: _recovery, silenceBoundary: _boundary, pickupRecovery: _pickup, requestedMode: _requested, ...rest } = row;
-    const ordinary: InputEntry = { ...rest, mode: 'auto', dueAt: Date.now(), continuedFrom: 'recovery' };
+    const ordinary: InputEntry = { ...rest, mode: 'auto', dueAt: Date.now(), continuedFrom: 'recovery', continuesQuestionId: row.recovery.questionId };
     await commit(current.map(entry => entry === row ? ordinary : entry));
     logInfo(`input ${id}: no page took the automatic Continue (${why}); sending it as an ordinary message — the chat's latest question is still the one it continues and nothing runs`);
     return { row: ordinary };
   });
+}
+
+/**
+ * Why an automatic Continue sent on as an ordinary message no longer applies, or null: a newer
+ * question in its chat, or the complete answer arrived after all. Checked until Send, as the
+ * automatic Continue itself was (CodeRabbit on #1960).
+ */
+async function continuedInvalidReason(row: InputEntry): Promise<string | null> {
+  if (!row.continuesQuestionId || !row.sessionId) return null;
+  const question = await readLatestUserMessage(row.sessionId);
+  if (question?.messageId !== row.continuesQuestionId) return 'another user message arrived';
+  const session = await getSession(row.sessionId);
+  if (session?.conversationId && await readCompletedFinal(row.sessionId, session.conversationId)) return 'the complete answer arrived';
+  return null;
 }
 
 /** Holds a queued automatic send the send check refused, until its next ask in 30 s (#1794). */
@@ -1895,6 +1916,7 @@ export function claimBrowserInput(id: string, owner: string, conversationId: str
     if (entry.recovery && entry.state === 'browser' && entry.owner !== owner) return null;
     if (entry.recovery?.reloadOwner === owner) return null;
     if (companionOf(current, entry)) return null;
+    if (await continuedInvalidReason(entry)) return null;
     const completedTurnId = entry.state === 'browser' ? entry.completedTurnId : queuedFollowup(entry)
       ? await completedStageBoundary(entry, current) : manualInput(entry) ? await eligibleStageEnd(entry) : undefined;
     if (queuedFollowup(entry) && !completedTurnId) return null;
