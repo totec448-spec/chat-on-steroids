@@ -233,6 +233,26 @@ app.whenReady().then(async () => {
       await wait(`queueFixture.sent.at(-1)?.attachments.length === ${count}`);
       assert.equal(await js('queueFixture.sent.at(-1).delivery'), 'tool'); checks.push(`${count} images select Inject now`);
     }
+    const sendsBeforeReview = await js('queueFixture.sent.length');
+    win.setSize(1024, 768);
+    await js(`queueFixture.events=[];queueFixture.session.activeTurnId=null;queueFixture.inputs=[{id:'lost-opening-ui',sessionId:queueFixture.session.id,
+      text:'Review this first message before sending',mode:'auto',opening:true,automation:'goal',dueAt:0,
+      state:'failed',owner:null,createdAt:Date.now(),conversationId:null,model:null,reasoningEffort:null,
+      error:'Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.'}];
+      queueFixture.notify({kind:'changed',sessionId:queueFixture.session.id})`);
+    await wait('!!document.querySelector(\'#inputQueue [data-input-id="lost-opening-ui"].is-delivery-error .delivery-retry\')');
+    assert.ok((await js('document.querySelector(\'#inputQueue [data-input-id="lost-opening-ui"]\').textContent')).includes('Not sent: the browser tab'));
+    assert.equal(await js('queueFixture.sent.length'), sendsBeforeReview);
+    await js(`document.querySelector('#inputQueue [data-input-id="lost-opening-ui"]').scrollIntoView({block:'nearest'});new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+    await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true });
+    fs.writeFileSync(path.join(output, 'lost-opening-not-sent.png'), (await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toPNG());
+    await click('#inputQueue [data-input-id="lost-opening-ui"] .delivery-retry');
+    await wait('document.getElementById("chatInput").value === "Review this first message before sending"');
+    assert.equal(await js('queueFixture.sent.length'), sendsBeforeReview);
+    assert.equal(await js('queueFixture.inputs[0].state'), 'failed');
+    await js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+    fs.writeFileSync(path.join(output, 'lost-opening-restored-draft.png'), (await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toPNG());
+    checks.push('lost opening is visibly not sent; Retry delivery restores a draft without resending or requeueing');
     fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify(checks, null, 2));
     console.log(JSON.stringify({ passed: checks.length, output }));
   } finally { win?.destroy(); await server.close(); }

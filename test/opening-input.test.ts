@@ -6,7 +6,7 @@ import { initConfigPath, defaultConfig, saveConfig } from '../src/main/config.js
 import { initDurableStore, readDurable, writeDurableNow, flushDurable, resetDurableForTests } from '../src/main/durable.js';
 import { initSessionStore, getSession, createSession, findSessionByConversation, listSessions, rebindSession, resetSessionStoreForTests } from '../src/main/session/store.js';
 import { enqueueInput, listInputs, pendingBrowserInputs, claimBrowserInput, authorizeBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject,
-  cancelInput, failBrowserInput, resetInputForTests, configureInputDelivery, setInputAutomation, type InputArgs, type InputEntry } from '../src/main/session/input.js';
+  cancelInput, failBrowserInput, failUnclaimedBrowserOpening, resetInputForTests, configureInputDelivery, setInputAutomation, type InputArgs, type InputEntry } from '../src/main/session/input.js';
 import { addProject } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 import { isChatTrusted, resetTrustedChatsForTests, setChatTrusted } from '../src/main/session/trusted-chats.js';
@@ -283,6 +283,129 @@ it('keeps an unoffered opening queued past connection startup and edits only its
   vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 120_000);
   expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued', automation: 'loop', loopAfterTurn: true });
   expect((await listInputs()).find(entry => entry.id === second.id)).toMatchObject({ state: 'queued', automation: 'off' });
+});
+
+it.each([
+  { automation: 'off' as const, project: false },
+  { automation: 'goal' as const, project: false },
+  { automation: 'off' as const, project: true },
+  { automation: 'goal' as const, project: true }
+])('restores an ordinary first input and never replays an uncertain Send (%j)', async ({ automation, project }) => {
+  let projectId: string | undefined;
+  if (project) {
+    const folder = path.join(directory, 'local-project');
+    await fs.mkdir(folder);
+    const approved = await validateNewRoot(folder, []);
+    await saveConfig({ ...defaultConfig(), roots: [{ name: 'local-project', path: approved }] });
+    projectId = (await addProject(approved, { chatgpt: 'later' })).id;
+  }
+  const row = await enqueueInput(args({ automation, ...(projectId ? { projectId } : {}),
+    model: 'gpt-6', reasoningEffort: 'high',
+    authoredSource: 'text', images: [], attachments: [], loopAfterTurn: false }));
+  resetInputForTests(); resetSessionStoreForTests(); initSessionStore(directory);
+  const restored = (await listInputs()).find(entry => entry.id === row.id)!;
+  expect(restored).toMatchObject({ id: row.id, sessionId: row.id, opening: true,
+    mode: 'auto', state: 'queued', owner: null, conversationId: null, transportIntent: 'browser', automation });
+  expect(restored.offeredAt).toBeUndefined();
+  expect(restored.sendAuthorizedAt).toBeUndefined();
+  expect(await pendingBrowserInputs()).toEqual([{ id: row.id, conversationId: null }]);
+  const owner = '7:opening-document:0';
+  expect(await claimBrowserInput(row.id, owner, null, true)).toMatchObject({ id: row.id, sessionId: row.id });
+  expect(await authorizeBrowserInput(row.id, owner, null)).toBe(true);
+  // Losing a receipt or restarting does not prove that the native click never happened.
+  resetInputForTests(); resetSessionStoreForTests(); initSessionStore(directory);
+  expect(await pendingBrowserInputs()).toEqual([]);
+  expect(await claimBrowserInput(row.id, owner, null, true)).toBeNull();
+  expect(await claimBrowserInput(row.id, '8:replacement-document:0', null, true)).toBeNull();
+  expect(await authorizeBrowserInput(row.id, owner, null)).toBe(false);
+  const conversation = randomUUID();
+  expect(await acknowledgeBrowserInput(row.id, owner, conversation, 'late-native-receipt')).toBe(true);
+  expect(await getSession(row.id)).toMatchObject({ conversationId: conversation, ...(projectId ? { projectId } : {}) });
+  expect(await pendingBrowserInputs()).toEqual([]);
+  expect(await claimBrowserInput(row.id, owner, conversation, true)).toBeNull();
+});
+
+it.each([false, true])('offers only a reviewed new input after a never-claimed opening loses its tab (project=%s)', async project => {
+  let projectId: string | undefined;
+  if (project) {
+    const folder = path.join(directory, 'lost-opening-project');
+    await fs.mkdir(folder);
+    const approved = await validateNewRoot(folder, []);
+    await saveConfig({ ...defaultConfig(), roots: [{ name: 'project', path: approved }] });
+    projectId = (await addProject(approved, { chatgpt: 'later' })).id;
+  }
+  const row = await enqueueInput(args({ automation: 'goal', ...(projectId ? { projectId } : {}) }));
+  expect(await failUnclaimedBrowserOpening(row.id, () => true)).toBe(true);
+  expect(await failUnclaimedBrowserOpening(row.id, () => true)).toBe(false);
+  expect(getLog().filter(entry => entry.message.includes(`input ${row.id}: not sent; its elected opening tab`))).toHaveLength(1);
+  expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed',
+    sessionId: row.sessionId, error: expect.stringContaining('Not sent: the browser tab') });
+  resetInputForTests(); resetSessionStoreForTests(); initSessionStore(directory);
+  expect(await pendingBrowserInputs()).toEqual([]);
+  expect(await claimBrowserInput(row.id, 'late-old-page', null, true)).toBeNull();
+  expect(await acknowledgeBrowserInput(row.id, 'late-old-page', randomUUID(), 'wrong-receipt')).toBe(false);
+  const retry = await enqueueInput(args({ sessionId: row.sessionId, automation: 'goal', ...(projectId ? { projectId } : {}) }));
+  expect(retry.id).not.toBe(row.id);
+  expect(retry).toMatchObject({ opening: true, sessionId: row.sessionId, ...(projectId ? { projectId } : {}) });
+  expect(await pendingBrowserInputs()).toEqual([{ id: retry.id, conversationId: null }]);
+  expect(await claimBrowserInput(retry.id, 'reviewed-page', null, true)).not.toBeNull();
+  expect(await authorizeBrowserInput(retry.id, 'reviewed-page', null)).toBe(true);
+  const conversation = randomUUID();
+  expect(await acknowledgeBrowserInput(retry.id, 'reviewed-page', conversation, 'reviewed-receipt')).toBe(true);
+  expect(await getSession(row.sessionId!)).toMatchObject({ conversationId: conversation, ...(projectId ? { projectId } : {}) });
+  expect(await pendingBrowserInputs()).toEqual([]);
+});
+
+it.each(['claimed', 'authorized', 'legacy-offer', 'cancelled', 'bound', 'sent'])('keeps exact custody when a missing-tab report follows %s', async phase => {
+  const row = await enqueueInput(args());
+  const owner = '7:original-document:0', conversation = randomUUID();
+  if (['claimed', 'authorized', 'sent'].includes(phase)) await claimBrowserInput(row.id, owner, null, true);
+  if (['authorized', 'sent'].includes(phase)) await authorizeBrowserInput(row.id, owner, null);
+  if (phase === 'sent') await acknowledgeBrowserInput(row.id, owner, conversation, 'native-receipt');
+  if (phase === 'cancelled') await cancelInput(row.id);
+  if (phase === 'bound') expect(await rebindSession(row.sessionId!, null, conversation)).toBe(true);
+  if (phase === 'legacy-offer') {
+    await writeDurableNow('session-input', (await listInputs()).map(entry => ({ ...entry, offeredAt: Date.now() })));
+    resetInputForTests();
+  }
+  const before = await listInputs();
+  expect(await failUnclaimedBrowserOpening(row.id, () => true)).toBe(false);
+  expect(await listInputs()).toEqual(before);
+  if (phase === 'authorized') {
+    resetInputForTests();
+    expect(await pendingBrowserInputs()).toEqual([]);
+    expect(await claimBrowserInput(row.id, 'replacement-document', null, true)).toBeNull();
+    expect(await acknowledgeBrowserInput(row.id, owner, conversation, 'late-receipt')).toBe(true);
+  }
+});
+
+it('rechecks browser custody after the missing-tab report waits for session metadata', async () => {
+  const row = await enqueueInput(args());
+  const store = await import('../src/main/session/store.js');
+  const readSession = store.getSession;
+  let owns = true;
+  vi.spyOn(store, 'getSession').mockImplementation(async id => {
+    const session = await readSession(id);
+    if (id === row.sessionId) owns = false;
+    return session;
+  });
+  expect(await failUnclaimedBrowserOpening(row.id, () => owns)).toBe(false);
+  expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued', owner: null });
+});
+
+it('serializes a missing-tab report with the first claim in either order', async () => {
+  const first = await enqueueInput(args());
+  const [failed, lateClaim] = await Promise.all([
+    failUnclaimedBrowserOpening(first.id, () => true), claimBrowserInput(first.id, 'late-page', null, true)
+  ]);
+  expect(failed).toBe(true); expect(lateClaim).toBeNull();
+  const second = await enqueueInput(args());
+  const [claimed, staleReport] = await Promise.all([
+    claimBrowserInput(second.id, 'first-page', null, true), failUnclaimedBrowserOpening(second.id, () => true)
+  ]);
+  expect(claimed).not.toBeNull(); expect(staleReport).toBe(false);
+  expect(await authorizeBrowserInput(second.id, 'first-page', null)).toBe(true);
+  expect(await authorizeBrowserInput(second.id, 'first-page', null)).toBe(false);
 });
 
 it('keeps legacy canonical bytes valid after partial session creation and retry', async () => {
