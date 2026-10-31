@@ -150,10 +150,18 @@ it('shows the existing ticket pickup deadline after the native busy wait', () =>
 it('shows a stopped pickup persistently with its attempt count and recovery reason', () => {
   renderRecoveryCountdowns(host, [{ kind: 'pickup-stopped', deadline: 120_000, attempts: 3, next: 'queue' }], 0);
   expect(host.hidden).toBe(false);
-  expect(host.textContent).toContain('Recovery stopped · next: Queued message');
-  expect(host.textContent).toContain('Stopped after 3 attempts');
-  expect(host.querySelector('.recovery-notice')?.getAttribute('title')).toContain('original queued input or Goal obligation remains saved');
+  expect(host.textContent).toContain('Recovery slowed · next: Queued message');
+  expect(host.textContent).toContain('Retrying slowly · 3 reloads');
+  expect(host.querySelector('.recovery-notice')?.getAttribute('title')).toContain('stays saved, and CoS keeps trying every 15 to 60 minutes');
   expect(host.querySelector('[role="timer"]')?.getAttribute('aria-live')).toBe('off');
+});
+
+it('says a pickup with no retries left has stopped, not that it keeps trying (#1971)', () => {
+  renderRecoveryCountdowns(host, [{ kind: 'pickup-stopped', deadline: 120_000, attempts: 24, next: 'queue', exhausted: true }], 0);
+  expect(host.textContent).toContain('Recovery stopped · next: Queued message');
+  expect(host.textContent).toContain('Stopped after 24 attempts');
+  expect(host.querySelector('.recovery-notice')?.getAttribute('title')).toContain('will not reload this chat for this step again');
+  expect(host.textContent).not.toContain('Retrying slowly');
 });
 
 it('offers an action only where the caller supplies one, and explains what the interrupted-response reload does (#1032)', () => {
