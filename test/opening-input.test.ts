@@ -6,7 +6,7 @@ import { initConfigPath, defaultConfig, saveConfig } from '../src/main/config.js
 import { initDurableStore, readDurable, writeDurableNow, flushDurable, resetDurableForTests } from '../src/main/durable.js';
 import { initSessionStore, getSession, createSession, findSessionByConversation, listSessions, rebindSession, resetSessionStoreForTests } from '../src/main/session/store.js';
 import { enqueueInput, listInputs, pendingBrowserInputs, claimBrowserInput, authorizeBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject,
-  cancelInput, failBrowserInput, failUnclaimedBrowserOpening, resetInputForTests, configureInputDelivery, setInputAutomation, type InputArgs, type InputEntry } from '../src/main/session/input.js';
+  cancelInput, failBrowserInput, failUnclaimedBrowserOpening, lostBrowserOpening, resetInputForTests, configureInputDelivery, setInputAutomation, type InputArgs, type InputEntry } from '../src/main/session/input.js';
 import { addProject } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 import { isChatTrusted, resetTrustedChatsForTests, setChatTrusted } from '../src/main/session/trusted-chats.js';
@@ -335,6 +335,11 @@ it.each([false, true])('offers only a reviewed new input after a never-claimed o
     projectId = (await addProject(approved, { chatgpt: 'later' })).id;
   }
   const row = await enqueueInput(args({ automation: 'goal', ...(projectId ? { projectId } : {}) }));
+  // Nothing reached the lost tab: a fresh one twice (#1950 follow-up), then Not sent.
+  expect(await lostBrowserOpening(row.id, () => true)).toBe('reopen');
+  expect(await lostBrowserOpening(row.id, () => true)).toBe('reopen');
+  expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued', openingReopens: 2 });
+  expect(getLog().filter(entry => entry.message.includes(`input ${row.id}: its new chat's tab vanished before anything reached it; opening a fresh one`))).toHaveLength(2);
   expect(await failUnclaimedBrowserOpening(row.id, () => true)).toBe(true);
   expect(await failUnclaimedBrowserOpening(row.id, () => true)).toBe(false);
   expect(getLog().filter(entry => entry.message.includes(`input ${row.id}: not sent; its elected opening tab`))).toHaveLength(1);
@@ -395,10 +400,19 @@ it('rechecks browser custody after the missing-tab report waits for session meta
 
 it('serializes a missing-tab report with the first claim in either order', async () => {
   const first = await enqueueInput(args());
+  await writeDurableNow('session-input', (await listInputs()).map(entry => entry.id === first.id ? { ...entry, openingReopens: 2 } : entry));
+  resetInputForTests();
   const [failed, lateClaim] = await Promise.all([
     failUnclaimedBrowserOpening(first.id, () => true), claimBrowserInput(first.id, 'late-page', null, true)
   ]);
   expect(failed).toBe(true); expect(lateClaim).toBeNull();
+  // With a fresh tab still due, the report reopens; the message stays one, so any one page may still claim it, once.
+  const reopened = await enqueueInput(args());
+  const [outcome, claim] = await Promise.all([lostBrowserOpening(reopened.id, () => true), claimBrowserInput(reopened.id, 'fresh-page', null, true)]);
+  expect(outcome).toBe('reopen'); expect(claim).not.toBeNull();
+  // Send is authorized once, for the page that claimed it.
+  expect(await authorizeBrowserInput(reopened.id, 'fresh-page', null)).toBe(true);
+  expect(await authorizeBrowserInput(reopened.id, 'fresh-page', null)).toBe(false);
   const second = await enqueueInput(args());
   const [claimed, staleReport] = await Promise.all([
     claimBrowserInput(second.id, 'first-page', null, true), failUnclaimedBrowserOpening(second.id, () => true)

@@ -3050,9 +3050,11 @@ holding that chat. A browser handed work for a chat it lacks opens the chat itse
 copy would otherwise run that work. A chat open nowhere, like a brand-new chat, goes to the
 first browser it is handed to while that browser polls. Requests without an id are not told apart.
 If an elected new-chat tab is absent from a successful all-tab scan, with no surviving input
-marker, the extension reports `/input/opening-unavailable` without reopening. Only the browser
-holding that opening may report it. The outbox fails only an unbound desktop opening still
-queued with no owner, offer, Send authorization or receipt. The existing delivery notice offers
+marker, the extension reports `/input/opening-unavailable` without reopening by itself. Only the
+browser holding that opening may report it. For an unbound desktop opening still queued with no
+owner, offer, Send authorization or receipt (nothing reached any page), main (`lostBrowserOpening`)
+answers `{ ok: true, reopen: true }` twice (`openingReopens`, logged): the extension then forgets that
+election and its next pass opens a fresh tab. The third report fails the opening as before. The existing delivery notice offers
 review in the composer; only an explicit Send creates a new input in the same reserved session.
 Claimed or ambiguous sends retain their custody and cannot be retried through this report.
 
