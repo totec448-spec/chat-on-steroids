@@ -1418,8 +1418,8 @@
   "Automatically continue interrupted responses": "中断した応答を自動で続行",
   "Recover unfinished answers, including in Goal and Loop. Reload after 2 minutes without progress (Pro: 10). If still generating, wait 1 more minute (Pro: 5), then stop and send. A final answer selects Goal or Loop instead of Continue. Undelivered steps get at most three page reloads (after 2, 5, and 10 minutes); recovery then stops visibly while the original pending work remains saved.": "ゴールとループを含め、未完了の回答を復旧します。進捗が2分間ない場合に再読み込みします（Pro は10分）。まだ生成中ならさらに1分待ち（Pro は5分）、停止して送信します。最終回答がある場合は、自動続行ではなくゴールまたはループを使います。未受信のステップは2、5、10分後に最大3回再読み込みし、その後は復旧を明示的に停止して元の保留中の作業を保存します。",
   "Waiting for delivery": "受領待ち",
-  "Stopped after {0} attempts": "{0} 回試行して停止",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "自動再読み込みを {0} 回行っても、ブラウザーは保留中のステップを受け取りませんでした。元のキュー入力またはゴールの保留項目は保存されています。CoS はこのステップのためにこのチャットを自動再読み込みしません。チャットを開いて手動で続行してください。",
+  "Retrying slowly · {0} reloads": "低速で再試行中 · {0} 回再読み込み",
+  "The browser did not collect the pending step after {0} automatic reloads. Its queued message or Goal step stays saved, and CoS keeps trying every 15 to 60 minutes. To go on now, open the chat and continue.": "{0} 回の自動再読み込み後も、ブラウザーは保留中のステップを受け取りませんでした。キューのメッセージまたは ゴールのステップは保存されたままで、CoS は 15〜60 分ごとに再試行を続けます。今すぐ続けるには、チャットを開いて続行してください。",
   "Make this workspace yours. Changes appear immediately.": "自分に合ったワークスペースに。変更はすぐに反映されます。",
   "Appearance preview": "外観のプレビュー",
   "How will your next idea look?": "次のアイデアを、どんな画面で？",
@@ -1784,7 +1784,7 @@
   "A chat stopped": "チャットが停止しました",
   "Its last turn produced nothing and nothing followed. Send a message there to start a fresh turn.": "最後のターンは何も出力せず、その後も何も続きませんでした。新しいターンを始めるには、そのチャットにメッセージを送ってください。",
   "Its last turn failed and nothing followed. Send a message there to start a fresh turn.": "最後のターンが失敗し、その後も何も続きませんでした。新しいターンを始めるには、そのチャットにメッセージを送ってください。",
-  "Recovery stopped": "復旧を停止しました",
+  "Recovery slowed": "復旧を低速化",
   "The browser did not pick up this chat's repair, so the app stopped retrying. Open its tab again and recovery resumes.": "ブラウザーがこのチャットの修復を引き受けなかったため、アプリは再試行を停止しました。タブを開き直すと復旧が再開されます。",
   "Use minimum effort: {0}": "最小の思考レベルを使用: {0}",
   "Use maximum effort: {0}": "最大の思考レベルを使用: {0}",
@@ -3692,5 +3692,8 @@
   "{0} sessions": "{0} 件のセッション",
   "{0} entries": "{0} 件のエントリ",
   "{0} messages": "{0} 件のメッセージ",
-  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "未送信: この新しいチャットのブラウザータブが閉じられたか、失われました。メッセージを確認してから再送信してください。"
+  "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "未送信: この新しいチャットのブラウザータブが閉じられたか、失われました。メッセージを確認してから再送信してください。",
+  "Recovery stopped": "復旧を停止しました",
+  "Stopped after {0} attempts": "{0} 回試行して停止",
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "自動再読み込みを {0} 回行っても、ブラウザーは保留中のステップを受け取りませんでした。元のキュー入力またはゴールの保留項目は保存されています。CoS はこのステップのためにこのチャットを自動再読み込みしません。チャットを開いて手動で続行してください。"
 }
