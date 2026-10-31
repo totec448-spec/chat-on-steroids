@@ -10177,7 +10177,7 @@ function noteCallAttribution(
     if (!pro && sourceTurnId && filedSession?.activeTurnId === sourceTurnId &&
         filedSession.origin?.kind !== 'worker' && filedSession.origin?.kind !== 'helper' &&
         !isWorkerConversation(conversationId) && !(tool && GOAL_HOLD_TOOLS.has(tool)) && callHoldOpen(conversationId)) {
-      if (stopFallbackDue(conversationId, sourceTurnId, getConfig().ui.rotateStopFallback === true, Date.now()) && !rotationFenced(conversationId)) {
+      if (stopFallbackDue(conversationId, sourceTurnId, getConfig().ui.rotateStopFallback !== false, Date.now()) && !rotationFenced(conversationId)) {
         // ChatGPT offered no Send for this turn's continue twice: stop the turn once this result has
         // gone out, refusing (not running) any call that comes meanwhile, and continue after the stop.
         noteStopFallback(conversationId, sourceTurnId, Date.now());

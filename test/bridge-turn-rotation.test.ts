@@ -455,6 +455,9 @@ describe('stop fallback for fresh turns', () => {
   });
 
   it('does none of it with the setting off', async () => {
+    // On by default since 2.1.49: switched off here.
+    const config = defaultConfig();
+    await saveConfig({ ...config, sessions: { ...config.sessions, record: true }, ui: { ...config.ui, rotateStopFallback: false } });
     setRotationHoldForTests(1_000);
     const clock = { now: Date.now() };
     // Ticking, so the ordinary continue's hold can run out.
