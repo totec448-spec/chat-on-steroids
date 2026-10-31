@@ -109,7 +109,10 @@ export function createSidebarOrder(list: HTMLElement, entries: () => Entry[], re
     }
     clearMarkers();
     // Over a place that takes the row (a project or a group for a chat): that, not a new position.
-    const under = place && typeof document.elementFromPoint === 'function' ? document.elementFromPoint(event.clientX, event.clientY) : null;
+    // The topmost element of the sidebar list under the pointer: a tooltip or a menu over the row is skipped.
+    const under = !place ? null : typeof document.elementsFromPoint === 'function'
+      ? document.elementsFromPoint(event.clientX, event.clientY).find(element => list.contains(element)) ?? null
+      : typeof document.elementFromPoint === 'function' ? document.elementFromPoint(event.clientX, event.clientY) : null;
     const onto = place?.target(drag.id, under) ?? undefined;
     drag.onto = onto && list.contains(onto) ? onto : undefined;
     if (drag.onto) { drag.onto.classList.add('is-drop-target'); drag.target = undefined; return; }
