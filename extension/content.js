@@ -12215,8 +12215,12 @@
     if (boot.model || boot.reasoningEffort) step('model');
     // An announcement that opened over the picker refuses the choice; closing it earns one more try.
     const chooseModel = () => CLF_DOM.selectModelSettings(boot.model, boot.reasoningEffort, stillOnTarget);
-    if ((boot.model || boot.reasoningEffort) && !(await chooseModel()) &&
-        !((await closeAnnouncements(stillOnTarget)).length && stillOnTarget() && await chooseModel())) {
+    let modelChosen = !(boot.model || boot.reasoningEffort) || await chooseModel() ||
+      ((await closeAnnouncements(stillOnTarget)).length > 0 && stillOnTarget() && await chooseModel());
+    // A wake goes out on ChatGPT's current model rather than not at all: a worker that never wakes
+    // stops its whole run. The app logs which model it could not confirm (#1952).
+    if (!modelChosen && boot.type === 'revive' && stillOnTarget()) { step('model-unconfirmed'); modelChosen = true; }
+    if (!modelChosen) {
       return void (await fail(t(
         'content_bootstrap_model_unavailable',
         'The requested model or reasoning is unavailable or could not be confirmed in ChatGPT'
