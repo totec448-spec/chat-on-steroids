@@ -1,6 +1,6 @@
 import { nextWorkerArchive, onWorkerChatReady, readyForWake, settleWorkerArchive } from './worker-archive.js';
 import { considerTurnRotation, noteRotationDeclined, noteStopFallback, stopFallbackDue, type RotationDeps } from './turn-rotation.js';
-import { armRotationFence, clearRotationFence, rotationFenced, rotationFenceTurn } from './rotation-fence.js';
+import { armRotationFence, clearRotationFence, FENCE_MS, restoreRotationFences, rotationFenced, rotationFenceTurn } from './rotation-fence.js';
 import { conversationProgress } from './session/progress.js';
 import { cosSignInTransfer, SignInTransferError } from './cos-browser/sign-in-transfer.js';
 import { externalBrowserProof, noteExternalInstalled, noteExternalSignedIn, resetBrowserProofForTests } from './browser-proof.js';
@@ -64,7 +64,7 @@ import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSend
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import type { BridgeStatus, CompanionDiagnostics, CompanionEnvironment, CompanionPageDiagnostics, CompanionTabDiagnostics, CompanionTraceEntry } from '../shared/types.js';
-import { BROWSER_PICKUP_BACKOFF_MS, BROWSER_PICKUP_MAX_ATTEMPTS, recoveryBusyMs } from '../shared/recovery.js';
+import { BROWSER_PICKUP_ATTEMPT_LIMIT, BROWSER_PICKUP_BACKOFF_MS, BROWSER_PICKUP_MAX_ATTEMPTS, BROWSER_PICKUP_SLOW_MS, browserPickupDelay, recoveryBusyMs } from '../shared/recovery.js';
 import { CHAT_ACTIVE_MS, CHAT_SILENCE_MS, continuationMarkerOf, isReasoningEffort, normalizedToolOutcome, toolCallSummary, unescapeMarkdown,
   type ReasoningEffort, type SessionEvent, type SessionOrigin, type StoredText, type ToolCallRecord } from '../shared/session.js';
 import { blockedChatIds, isChatBlocked, chatBlockedAt } from './session/blocked-chats.js';
@@ -453,7 +453,9 @@ type CommandSpec =
   | { type: 'resume'; sessionId: string; token: string }
   | { type: 'stop'; sessionId: string; conversationId: string; turnId: string; userMessageId?: string;
     /** Asked for a turn the page holds after the app stopped counting it as work (`heldTurnId`). */
-    held?: true };
+    held?: true;
+    /** A fresh-turn Stop (the stop fallback): its chat's rotation fence lives as long as it does. */
+    rotation?: true };
 
 interface Command {
   id: string;
@@ -2306,6 +2308,20 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
   };
   await assertCurrent();
   if (!options.rotation) {
+    // The person's Stop takes over a pending fresh-turn Stop of the same turn: no automatic continue
+    // may follow the stop they asked for (CodeRabbit on #1954). The saved Stop loses its fresh-turn
+    // mark first, so a restart restores neither it nor its fence.
+    const pendingRotation = commands.find(entry => entry.spec.type === 'stop' && entry.spec.sessionId === sessionId &&
+      entry.spec.turnId === expectedTurnId && entry.spec.rotation === true);
+    if (pendingRotation && !await withdrawStopRotation(pendingRotation))
+      logWarn(`turn rotation: ${id} — the person's Stop over the fresh-turn Stop of turn ${expectedTurnId} could not be saved; a restart within ${Math.round(FENCE_MS / 1000)} s could still continue after it`);
+    if (rotationFenceTurn(id) === expectedTurnId) {
+      // On disk before their Stop goes out, so a restart cannot bring the fence back and continue
+      // after it (CodeRabbit on #1954). Their Stop goes out even when the disk refuses: it is theirs.
+      const cleared = await clearRotationFence(id);
+      logInfo(`turn rotation: ${id} — the person stopped turn ${expectedTurnId}; the fresh turn the app was starting is cancelled`);
+      if (!cleared) logWarn(`turn rotation: ${id} — the cancelled fresh turn could not be saved; a restart within ${Math.round(FENCE_MS / 1000)} s could still continue after the person's Stop`);
+    }
     await setSessionAutomation(sessionId, 'off');
     await assertCurrent();
     if (continuationForSession(sessionId)) { await cancelResumeNow(sessionId); await assertCurrent(); }
@@ -2321,7 +2337,8 @@ export async function stopSessionTurn(sessionId: string, expectedTurnId: string,
     entry.spec.turnId === expectedTurnId && entry.spec.held === true);
   const held = pendingHeld || (!atQueue.activeTurnId && atQueue.heldTurnId === expectedTurnId);
   const alreadyQueued = commands.some(entry => entry.spec.type === 'stop' && entry.spec.sessionId === sessionId && entry.spec.turnId === expectedTurnId);
-  const command = queue({ type: 'stop', sessionId, conversationId: id, turnId: expectedTurnId, ...(userMessageId ? { userMessageId } : {}), ...(held ? { held: true as const } : {}) });
+  const command = queue({ type: 'stop', sessionId, conversationId: id, turnId: expectedTurnId, ...(userMessageId ? { userMessageId } : {}),
+    ...(held ? { held: true as const } : {}), ...(options.rotation ? { rotation: true as const } : {}) });
   try {
     // Reuse the command lease barrier: status must not hand out an unsaved request.
     const pendingLease = commandWrites.get(command.id);
@@ -6464,6 +6481,23 @@ async function writeCommandTransition(command: Command, transition: () => Promis
   }
 }
 
+/** A fresh-turn Stop the person's own Stop takes over: saved without its mark (CodeRabbit on #1954). */
+async function withdrawStopRotation(command: Command): Promise<boolean> {
+  return writeCommandTransition(command, async () => {
+    if (!commands.includes(command) || command.spec.type !== 'stop' || !command.spec.rotation) return true;
+    const { rotation: _rotation, ...spec } = command.spec;
+    command.spec = spec;
+    try {
+      await writeDurableNow(COMMANDS_STATE, commandSnapshot());
+      return true;
+    } catch (err) {
+      persistCommands();
+      logWarn(`bridge: could not save the person's Stop over ${specKey(command.spec)} — ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+  });
+}
+
 async function persistCommandLease(
   command: Command,
   owner: string | null,
@@ -6610,6 +6644,14 @@ async function finalizeCommand(command: Command, receipt: CommandReceipt): Promi
     command.timer = null;
     commands = commands.filter((entry) => entry !== command);
     commandReceipts = [...commandReceipts.filter((entry) => entry.id !== receipt.id), receipt].slice(-MAX_COMMAND_RECEIPTS);
+    // A fresh-turn Stop the page could not send protects nothing any more: no stop and no continue
+    // follow, so its chat's calls run again at once (CodeRabbit on #1954). A Stop that went out keeps
+    // the fence until its stopped end is processed, which files the continue.
+    if (receipt.outcome === 'terminal-failure' && command.spec.type === 'stop' && command.spec.rotation &&
+        rotationFenceTurn(command.spec.conversationId) === command.spec.turnId) {
+      void clearRotationFence(command.spec.conversationId);
+      logInfo(`turn rotation: ${command.spec.conversationId} — the page could not stop turn ${command.spec.turnId}; its calls run again and no fresh turn follows`);
+    }
     changed();
     return true;
   });
@@ -8106,13 +8148,17 @@ async function sessionRecoveryCountdowns(sessionId: string, conversationId: stri
   if (recovery?.silenceBoundary && recoveryInputAllowed(sessionId, conversationId)) {
     const stoppedAt = recovery.pickupRecovery?.stoppedAt ??
       (stoppedQueued?.inputId === recovery.id ? stoppedQueued.pickupStoppedAt : undefined);
-    if (stoppedAt) return [{ kind: 'pickup-stopped', deadline: stoppedAt,
-      attempts: recovery.pickupRecovery?.attempts ?? BROWSER_PICKUP_MAX_ATTEMPTS, next: 'continue' }];
+    if (stoppedAt) {
+      const attempts = recovery.pickupRecovery?.attempts ?? BROWSER_PICKUP_MAX_ATTEMPTS;
+      return [{ kind: 'pickup-stopped', deadline: stoppedAt, attempts, next: 'continue',
+        ...(pickupExhausted(attempts, recovery.silenceBoundary.acceptedAt ?? recovery.createdAt ?? Date.now()) ? { exhausted: true as const } : {}) }];
+    }
   }
   if (stoppedQueued) {
     const queuedRow = rows.find(row => row.id === stoppedQueued.inputId);
     return [{ kind: 'pickup-stopped', deadline: stoppedQueued.pickupStoppedAt!,
-      attempts: stoppedQueued.pickupAttempts, next: queuedRow?.recovery ? 'continue' : 'queue' }];
+      attempts: stoppedQueued.pickupAttempts, next: queuedRow?.recovery ? 'continue' : 'queue',
+      ...(pickupExhausted(stoppedQueued.pickupAttempts, stoppedQueued.acceptedAt) ? { exhausted: true as const } : {}) }];
   }
   const pendingGoal = goalActiveFor(conversationId) ? goalPendingReplyFor(conversationId) : null;
   if (pendingGoal?.pickupStoppedAt && runningToolCalls(conversationId) === 0) {
@@ -8121,8 +8167,10 @@ async function sessionRecoveryCountdowns(sessionId: string, conversationId: stri
     const questionPosition = latestQuestion?.kind === 'user_message' ? latestQuestion.origin ?? latestQuestion.seq : latestQuestion?.seq ?? 0;
     if (source && !(latestQuestion && ((pendingGoal.eventSeq > 0 && questionPosition > pendingGoal.eventSeq) ||
         (latestQuestion.kind === 'turn_start' && latestQuestion.turnId !== source)))) {
+      const attempts = pendingGoal.pickupAttempts ?? BROWSER_PICKUP_MAX_ATTEMPTS;
       return [{ kind: 'pickup-stopped', deadline: pendingGoal.pickupStoppedAt,
-        attempts: pendingGoal.pickupAttempts ?? BROWSER_PICKUP_MAX_ATTEMPTS, next: goalModeFor(conversationId) }];
+        attempts, next: goalModeFor(conversationId),
+        ...(pickupExhausted(attempts, pendingGoal.acceptedAt) ? { exhausted: true as const } : {}) }];
     }
   }
   // Preserve pre-existing recovery/pickup precedence. A 429 only replaces
@@ -8903,7 +8951,7 @@ async function noteRecoveryObservations(
   // calls may run again, and the continue goes as an ordinary message.
   const fencedTurn = rotationFenceTurn(conversationId);
   if (lastEnd === 'stopped' && sessionId && fencedTurn && ended?.turnId === fencedTurn) {
-    clearRotationFence(conversationId);
+    void clearRotationFence(conversationId);
     void fileRotationContinueAfterStop(sessionId, fencedTurn).then(row => {
       logInfo(row ? `turn rotation: ${conversationId} — turn ${fencedTurn} stopped; continuing in a fresh turn`
         : `turn rotation: ${conversationId} — turn ${fencedTurn} stopped; a message was already waiting, so it goes instead of the continue`);
@@ -9558,8 +9606,10 @@ function finishSilentChats(conversationIds: readonly string[], inspected?: Spent
  * with nothing arriving is this app's standing definition of a chat that has stopped, and a
  * conversation the loop is driving does not get a different definition just because what stalled
  * was the pickup rather than the turn. The next two wait 5 and 10 minutes; after the third
- * reload the schedule stops for good and the chat shows "Recovery stopped", with the
- * obligation kept for a manual return (2026-10-06: endless reloads did more harm than good).
+ * reload the chat shows "Recovery slowed" and the obligation is kept for a manual return. Quick
+ * reloads stop there (2026-10-06: endless reloads did more harm than good), but slow retries every
+ * 15 to 60 minutes go on within the pickup's lifetime: a chat must not stop for good while it is
+ * unfinished (user decision 2026-10-31). See `browserPickupDelay`.
  */
 // Asserted non-empty: the opening gap is read unconditionally when a schedule is armed, and a
 // schedule with no first step would be a watchdog that never starts.
@@ -9577,7 +9627,7 @@ const PICKUP_BACKOFF_MS = BROWSER_PICKUP_BACKOFF_MS;
  * obligation and gets its own schedule; a discharged one takes its schedule with it.
  */
 /** One durable source episode owns a bounded retry budget; the composer projects its stop reason. */
-const pickupWatch = new Map<string, { replyId: string; dueAt: number; attempts: number; expiresAt: number; stoppedAt?: number }>();
+const pickupWatch = new Map<string, { replyId: string; dueAt: number; attempts: number; expiresAt: number; stoppedAt?: number; inputId?: string; goalReplyId?: string }>();
 const PICKUP_WATCH_LIFETIME_MS = 12 * 60 * 60_000;
 
 /**
@@ -9696,12 +9746,24 @@ function forgetGoalWatch(conversationId: string): void {
 let pickupWatchFloor: number | null = null;
 let compactionWatchFloor: number | null = null;
 
+/** A stopped pickup with no slow retry left: its attempts, or its lifetime, are used up. */
+function pickupExhausted(attempts: number, acceptedAt: number, now = Date.now()): boolean {
+  return attempts >= BROWSER_PICKUP_ATTEMPT_LIMIT || now - acceptedAt >= PICKUP_WATCH_LIFETIME_MS;
+}
+
 /** Any sign of life pushes the next reload out by the gap this chat is currently on. */
 function notePickupActivity(conversationId: string): void {
   const watch = pickupWatch.get(conversationId);
-  if (!watch || watch.stoppedAt) return;
-  const gap = PICKUP_BACKOFF_MS[Math.min(watch.attempts, PICKUP_BACKOFF_MS.length - 1)]!;
-  watch.dueAt = Date.now() + gap;
+  if (!watch) return;
+  watch.dueAt = Date.now() + browserPickupDelay(watch.attempts);
+  // A postponed deadline is saved with its owners, so a restart does not reload the chat early by
+  // the deadline it had before (CodeRabbit on #1971). Before the first reload there is none to save.
+  if (watch.attempts === 0) return;
+  const state = { attempts: watch.attempts, nextAt: watch.dueAt, ...(watch.stoppedAt ? { stoppedAt: watch.stoppedAt } : {}) };
+  if (watch.inputId) void syncQueuedPickupRecoveryNow(watch.inputId, watch.replyId, state)
+    .catch(error => logWarn(`bridge: could not save the postponed pickup in ${conversationId}: ${String(error)}`));
+  if (watch.goalReplyId) void syncGoalPickupRecoveryNow(conversationId, watch.goalReplyId, state)
+    .catch(error => logWarn(`bridge: could not save the postponed Goal pickup in ${conversationId}: ${String(error)}`));
 }
 
 /**
@@ -9792,10 +9854,15 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
       await syncGoalPickupRecoveryNow(reply.conversationId, reply.goalReplyId, sharedState);
     let watch = pickupWatch.get(reply.conversationId);
     if (!watch || watch.replyId !== reply.replyId) {
-      const attempts = Math.min(BROWSER_PICKUP_MAX_ATTEMPTS, reply.pickupAttempts);
+      const attempts = Math.min(BROWSER_PICKUP_ATTEMPT_LIMIT, reply.pickupAttempts);
+      const stopped = reply.pickupStoppedAt ?? (attempts >= BROWSER_PICKUP_MAX_ATTEMPTS ? reply.acceptedAt : undefined);
       watch = { replyId: reply.replyId, attempts,
+        ...(reply.queued && reply.inputId ? { inputId: reply.inputId } : {}),
+        ...(reply.goalReplyId ? { goalReplyId: reply.goalReplyId } : {}),
         expiresAt: reply.acceptedAt + PICKUP_WATCH_LIFETIME_MS,
-        dueAt: reply.pickupNextAt ?? Math.max(reply.acceptedAt, floor) + PICKUP_BACKOFF_MS[0],
+        // A stop recorded before slow retries existed has no next time: the first slow one follows it.
+        dueAt: reply.pickupNextAt ?? (stopped ? Math.max(stopped, floor) + BROWSER_PICKUP_SLOW_MS[0]
+          : Math.max(reply.acceptedAt, floor) + PICKUP_BACKOFF_MS[0]),
         ...(reply.pickupStoppedAt || attempts >= BROWSER_PICKUP_MAX_ATTEMPTS
           ? { stoppedAt: reply.pickupStoppedAt ?? reply.acceptedAt } : {}) };
       pickupWatch.set(reply.conversationId, watch);
@@ -9826,7 +9893,7 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
         }
       }
     }
-    if (watch.stoppedAt || watch.attempts >= BROWSER_PICKUP_MAX_ATTEMPTS) continue;
+    if (watch.attempts >= BROWSER_PICKUP_ATTEMPT_LIMIT) continue;
     if (now < watch.dueAt || now < reply.listenUntil) continue;
     // A reload inside a history limit cannot bring the page back and can extend the limit. Counting
     // it anyway, at queue time, let it wait out the limit and then run with the next one due right
@@ -9865,8 +9932,8 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
       }
     }
     const nextAttempts = watch.attempts + 1;
-    const nextAt = nextAttempts < BROWSER_PICKUP_MAX_ATTEMPTS
-      ? now + PICKUP_BACKOFF_MS[nextAttempts]! : undefined;
+    const wasStopped = !!watch.stoppedAt;
+    const nextAt = nextAttempts < BROWSER_PICKUP_ATTEMPT_LIMIT ? now + browserPickupDelay(nextAttempts) : undefined;
     const reserved = reply.queued && reply.inputId
       ? await recordQueuedPickupAttemptNow(reply.inputId, reply.replyId, now, nextAt, sharedState)
       : !reply.queued && reply.goalReplyId
@@ -9880,12 +9947,14 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
     // The session list's `recoveryStopped`, pushed as soon as the stop is recorded, whether or not
     // its last reload can still be queued. A queued input's stop already pushed with its outbox
     // write; a Goal reply's ledger has no push of its own.
-    if (watch.stoppedAt) notifyChanged();
+    if (watch.stoppedAt && !wasStopped) notifyChanged();
     if (!queueBrowserRecovery(reply.conversationId, reply.sessionId,
       `goal:${reply.replyId}:${watch.attempts}`, 'goal', 0, now)) continue;
     queued = true;
-    logInfo(`bridge: next automation/input step uncollected in ${reply.conversationId} — reload ${watch.attempts}`);
-    if (watch.stoppedAt) logWarn(`bridge: browser pickup recovery stopped after ${watch.attempts} reloads; the original obligation remains queued in ${reply.conversationId}`);
+    logInfo(`bridge: next automation/input step uncollected in ${reply.conversationId} — reload ${watch.attempts}` +
+      (wasStopped ? ' (slow retry)' : ''));
+    if (watch.stoppedAt && !wasStopped) logWarn(`bridge: browser pickup recovery has not collected the step in ${reply.conversationId} after ${watch.attempts} reloads; ` +
+      `the chat shows as stopped, and the app keeps trying every 15 to 60 minutes`);
   }
   return queued;
 }
@@ -10358,15 +10427,27 @@ function noteCallAttribution(
     if (!pro && sourceTurnId && filedSession?.activeTurnId === sourceTurnId &&
         filedSession.origin?.kind !== 'worker' && filedSession.origin?.kind !== 'helper' &&
         !isWorkerConversation(conversationId) && !(tool && GOAL_HOLD_TOOLS.has(tool)) && callHoldOpen(conversationId)) {
-      if (stopFallbackDue(conversationId, sourceTurnId, getConfig().ui.rotateStopFallback === true, Date.now()) && !rotationFenced(conversationId)) {
+      // Fresh turns switched off (0 minutes) since the declines: no fallback (CodeRabbit on #1954).
+      if ((getConfig().ui.rotateTurnMinutes ?? 30) > 0 &&
+          stopFallbackDue(conversationId, sourceTurnId, getConfig().ui.rotateStopFallback !== false, Date.now()) && !rotationFenced(conversationId)) {
         // ChatGPT offered no Send for this turn's continue twice: stop the turn once this result has
         // gone out, refusing (not running) any call that comes meanwhile, and continue after the stop.
         noteStopFallback(conversationId, sourceTurnId, Date.now());
-        armRotationFence(conversationId, sourceTurnId);
+        // The fence is on disk before the Stop can go out: a restart after ChatGPT took the Stop must
+        // still find it and file the continue (CodeRabbit on #1954).
+        const fenceSaved = armRotationFence(conversationId, sourceTurnId);
         logInfo(`turn rotation: ${conversationId} — ChatGPT offered no Send for the continue; stopping turn ${sourceTurnId} after this result to continue in a fresh one`);
         const timer = setTimeout(() => {
-          void stopSessionTurn(sessionId, sourceTurnId, { rotation: true }).catch(error => {
-            clearRotationFence(conversationId);
+          void fenceSaved.then(saved => {
+            if (!saved) {
+              void clearRotationFence(conversationId);
+              logWarn(`turn rotation: ${conversationId} — not stopping turn ${sourceTurnId}: its fence could not be saved, so a restart could lose the continue`);
+              return;
+            }
+            if (rotationFenceTurn(conversationId) !== sourceTurnId) return;
+            return stopSessionTurn(sessionId, sourceTurnId, { rotation: true });
+          }).catch(error => {
+            void clearRotationFence(conversationId);
             logWarn(`turn rotation: ${conversationId} — could not stop turn ${sourceTurnId}: ${String(error)}`);
           });
         }, ROTATION_STOP_DELAY_MS);
@@ -11854,7 +11935,8 @@ function restoredCommandSpec(version: number, raw: Partial<CommandSpec>): Comman
         typeof stop.conversationId !== 'string' || !conversationId(stop.conversationId) ||
         typeof stop.turnId !== 'string' || !stop.turnId || stop.turnId.length > 256) return null;
     if (stop.userMessageId !== undefined && (typeof stop.userMessageId !== 'string' || !stop.userMessageId || stop.userMessageId.length > 256)) return null;
-    return { type: 'stop', sessionId: stop.sessionId, conversationId: stop.conversationId, turnId: stop.turnId, ...(stop.userMessageId ? { userMessageId: stop.userMessageId } : {}), ...(stop.held === true ? { held: true as const } : {}) };
+    return { type: 'stop', sessionId: stop.sessionId, conversationId: stop.conversationId, turnId: stop.turnId, ...(stop.userMessageId ? { userMessageId: stop.userMessageId } : {}), ...(stop.held === true ? { held: true as const } : {}),
+      ...(stop.rotation === true ? { rotation: true as const } : {}) };
   }
   if (
     version >= 3 &&
@@ -12138,6 +12220,16 @@ export async function restoreCommands(): Promise<void> {
   // This is the only publication point of restore. Everything above operated on local arrays;
   // everything below may again use ordinary live command helpers and timers.
   commands = plan.commands;
+  // Fences of the previous run come back for what is left of them, also when ChatGPT already took
+  // the Stop and only its stopped end is still to come (CodeRabbit on #1954).
+  const fencesBack = await restoreRotationFences();
+  if (fencesBack) logInfo(`turn rotation: restored ${fencesBack} fresh-turn fence(s) from the previous run; the continue follows each stopped end`);
+  // A fresh-turn Stop that survived the restart is still pending: its fence comes back with it, for
+  // what is left of the command's budget (CodeRabbit on #1954).
+  for (const command of commands) {
+    if (command.spec.type === 'stop' && command.spec.rotation)
+      void armRotationFence(command.spec.conversationId, command.spec.turnId, command.createdAt + FENCE_MS - Date.now());
+  }
   commandReceipts = plan.receipts;
   for (const token of plan.resumeTokens) rememberToken(token.sessionId, token.token);
   rearmRetainedCommandDeadlines();

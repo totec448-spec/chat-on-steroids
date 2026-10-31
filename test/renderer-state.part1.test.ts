@@ -914,7 +914,7 @@ it('ranks the inbox by what each chat needs: approval, stopped recovery, blocked
   expect(inboxCardIds(doc)).toEqual(['approval', 'recovery', 'blocked', 'failed', 'stalled', 'working', 'unseen', 'rest']);
   // Each state in one word or two on the meta line, with its own glyph, the title and the button's own text saying it too.
   const expected: Array<[string, string, string]> = [
-    ['approval', 'Needs approval', 'ph-lock-key'], ['recovery', 'Recovery stopped', 'ph-arrow-clockwise'],
+    ['approval', 'Needs approval', 'ph-lock-key'], ['recovery', 'Recovery slowed', 'ph-arrow-clockwise'],
     ['blocked', 'Blocked', 'ph-prohibit'], ['failed', 'Failed', 'ph-warning'], ['stalled', 'Failed', 'ph-warning']
   ];
   for (const [id, label, glyph] of expected) {

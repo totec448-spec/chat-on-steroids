@@ -36,6 +36,7 @@ const { resetBridgeForTests, setRotationHoldForTests, shutdownBridge, startBridg
 const { resetBrowserStartupForTests } = await import('../src/main/browser-startup.js');
 const { getSession } = await import('../src/main/session/store.js');
 const { flushDurable, initDurableStore, writeDurableSoon } = await import('../src/main/durable.js');
+const { getLog } = await import('../src/main/logger.js');
 const { findSessionByConversation, initSessionStore, resetSessionStoreForTests } = await import('../src/main/session/store.js');
 const { recordToolCall, resetRecorderForTests } = await import('../src/main/session/recorder.js');
 const { listInputs, resetInputForTests } = await import('../src/main/session/input.js');
@@ -355,7 +356,8 @@ describe('turn rotation (#1402)', () => {
  * the continue as an ordinary message once the stop shows. Loop stays on, and a call that arrives
  * while the stop lands is refused rather than run, so no command can run twice.
  */
-const { armRotationFence, rotationFenced } = await import('../src/main/rotation-fence.js');
+const { armRotationFence, rotationFenced, resetRotationFencesForTests, FENCE_MS } = await import('../src/main/rotation-fence.js');
+const { restoreCommands } = await import('../src/main/bridge.js');
 const { goalSwitchFor } = await import('../src/main/goal.js');
 const { rotationMessage } = await import('../src/shared/recovery.js');
 describe('stop fallback for fresh turns', () => {
@@ -408,6 +410,168 @@ describe('stop fallback for fresh turns', () => {
     } finally { spy.mockRestore(); setRotationHoldForTests(15_000); await saveConfig({ ...config, sessions: { ...config.sessions, record: true } }); }
   });
 
+  // CodeRabbit on #1954: the fence is in memory, the Stop it protects is durable. After a restart with
+  // that Stop still pending, the fence comes back for the rest of the Stop's budget.
+  it('brings the fence back with a fresh-turn Stop that survived a restart', async () => {
+    const config = defaultConfig();
+    await saveConfig({ ...config, sessions: { ...config.sessions, record: true }, ui: { ...config.ui, rotateStopFallback: true } });
+    setRotationHoldForTests(5_000);
+    const clock = { now: Date.now() };
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock.now);
+    try {
+      const chat = 'f0f00003-1111-4111-8111-000000000406', turn = 'g-stopfb-0-6';
+      const sessionId = await turnFor(chat, turn, 31);
+      await declineTwice(chat, sessionId, clock);
+      await (await heldCall(chat))();
+      await vi.waitFor(async () => {
+        expect((await request('GET', '/status')).body.stopTurns).toEqual([expect.objectContaining({ conversationId: chat, turnId: turn })]);
+      }, { timeout: 10_000, interval: 50 });
+      expect(rotationFenced(chat)).toBe(true);
+      await flushDurable();
+      // A restart: the in-memory fence is gone, the durable Stop is not.
+      resetRotationFencesForTests();
+      expect(rotationFenced(chat)).toBe(false);
+      await restoreCommands();
+      expect(rotationFenced(chat)).toBe(true);
+    } finally { spy.mockRestore(); setRotationHoldForTests(15_000); await saveConfig({ ...config, sessions: { ...config.sessions, record: true } }); }
+  });
+
+  // CodeRabbit on #1954: ChatGPT took the Stop (its command is done) and the app restarts before the
+  // stopped end arrives. The fence and the continue it owes come back from disk.
+  it('keeps the fence and the continue across a restart after ChatGPT took the Stop', async () => {
+    const config = defaultConfig();
+    await saveConfig({ ...config, sessions: { ...config.sessions, record: true }, ui: { ...config.ui, rotateStopFallback: true } });
+    setRotationHoldForTests(5_000);
+    const clock = { now: Date.now() };
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock.now);
+    try {
+      const chat = 'f0f00003-1111-4111-8111-000000000417', turn = 'g-stopfb-0-17';
+      const sessionId = await turnFor(chat, turn, 31);
+      await declineTwice(chat, sessionId, clock);
+      await (await heldCall(chat))();
+      let stop: { id: string } | undefined;
+      await vi.waitFor(async () => {
+        stop = (await request('GET', '/status')).body.stopTurns?.find((row: { conversationId: string }) => row.conversationId === chat);
+        expect(stop).toBeTruthy();
+      }, { timeout: 10_000, interval: 50 });
+      expect((await request('POST', '/commands/redeem', { body: { id: stop!.id, client: 'stop-client', conversationId: chat } })).status).toBe(200);
+      expect((await request('POST', '/commands/ack', { body: { id: stop!.id, status: 'sent', client: 'stop-client', conversationId: chat, turnId: turn } })).status).toBe(200);
+      expect(rotationFenced(chat)).toBe(true);
+      await flushDurable();
+      // A restart: the Stop command is done, so only the fence's own record brings it back.
+      resetRotationFencesForTests();
+      await restoreCommands();
+      expect(rotationFenced(chat)).toBe(true);
+      expect(getLog().some(entry => entry.message.includes('restored 1 fresh-turn fence(s) from the previous run'))).toBe(true);
+      await events(chat, [{ kind: 'turn_end', time: clock.now, turnId: turn, outcome: 'stopped' }]);
+      await vi.waitFor(async () => {
+        expect(rotationFenced(chat)).toBe(false);
+        expect((await listInputs()).some(entry => entry.sessionId === sessionId && entry.purpose === 'rotation' && entry.afterStop === true)).toBe(true);
+      }, { timeout: 10_000, interval: 50 });
+      // A fence whose time ran out while the app was closed does not come back.
+      await flushDurable();
+      const { armRotationFence, restoreRotationFences } = await import('../src/main/rotation-fence.js');
+      armRotationFence(chat, turn, 1_000);
+      await flushDurable();
+      resetRotationFencesForTests();
+      await restoreRotationFences(clock.now + 2_000);
+      expect(rotationFenced(chat)).toBe(false);
+    } finally { spy.mockRestore(); setRotationHoldForTests(15_000); await saveConfig({ ...config, sessions: { ...config.sessions, record: true } }); }
+  });
+
+  // CodeRabbit on #1954: a fresh-turn Stop the page could not send protects nothing: the fence goes at
+  // once. And the person's own Stop over a pending fresh-turn Stop files no continue after it.
+  it.each(['failed', 'person'] as const)('lifts the fence when the fresh-turn Stop ends without a continue (%s)', async variant => {
+    const config = defaultConfig();
+    await saveConfig({ ...config, sessions: { ...config.sessions, record: true }, ui: { ...config.ui, rotateStopFallback: true } });
+    setRotationHoldForTests(5_000);
+    const clock = { now: Date.now() };
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock.now);
+    try {
+      const chat = variant === 'failed' ? 'f0f00003-1111-4111-8111-000000000408' : 'f0f00003-1111-4111-8111-000000000409';
+      const turn = `g-stopfb-0-${variant}`;
+      const sessionId = await turnFor(chat, turn, 31);
+      await declineTwice(chat, sessionId, clock);
+      await (await heldCall(chat))();
+      let stop: { id: string } | undefined;
+      await vi.waitFor(async () => {
+        stop = (await request('GET', '/status')).body.stopTurns?.find((row: { conversationId: string }) => row.conversationId === chat);
+        expect(stop).toBeTruthy();
+      }, { timeout: 10_000, interval: 50 });
+      expect(rotationFenced(chat)).toBe(true);
+      if (variant === 'failed') {
+        const redeemed = await request('POST', '/commands/redeem', { body: { id: stop!.id, client: 'stop-client', conversationId: chat } });
+        expect(redeemed.status).toBe(200);
+        const acked = await request('POST', '/commands/ack', { body: { id: stop!.id, status: 'failed', client: 'stop-client', conversationId: chat, turnId: turn, error: 'native_stop_unavailable_or_turn_changed' } });
+        expect(acked.status).toBe(200);
+        expect(rotationFenced(chat)).toBe(false);
+      } else {
+        await stopSessionTurn(sessionId, turn);
+        expect(rotationFenced(chat)).toBe(false);
+        await events(chat, [{ kind: 'turn_end', time: clock.now, turnId: turn, outcome: 'stopped' }]);
+        await new Promise(resolve => setTimeout(resolve, 200));
+        expect((await listInputs()).some(entry => entry.sessionId === sessionId && entry.purpose === 'rotation' && entry.afterStop === true)).toBe(false);
+      }
+    } finally { spy.mockRestore(); setRotationHoldForTests(15_000); await saveConfig({ ...config, sessions: { ...config.sessions, record: true } }); }
+  });
+
+  // CodeRabbit on #1954: a restart right after the person's Stop cleared the fence must not bring it
+  // back from the saved fresh-turn Stop. That Stop loses its mark on disk before the fence goes.
+  it("saves the person's Stop over a fresh-turn Stop before the fence goes, so a restart cannot re-arm it", async () => {
+    const config = defaultConfig();
+    await saveConfig({ ...config, sessions: { ...config.sessions, record: true }, ui: { ...config.ui, rotateStopFallback: true } });
+    setRotationHoldForTests(5_000);
+    const clock = { now: Date.now() };
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => clock.now);
+    const fence = await import('../src/main/rotation-fence.js');
+    const durable = await import('../src/main/durable.js');
+    const clear = fence.clearRotationFence;
+    let savedAtClear: unknown[] | null = null;
+    const clearSpy = vi.spyOn(fence, 'clearRotationFence').mockImplementation(async id => {
+      // What a restart at this moment would read: the commands as saved.
+      await flushDurable();
+      savedAtClear = (await durable.readDurable<{ commands?: unknown[] }>('bridge-commands'))?.commands ?? [];
+      return clear(id);
+    });
+    try {
+      const chat = 'f0f00003-1111-4111-8111-000000000419', turn = 'g-stopfb-0-19';
+      const sessionId = await turnFor(chat, turn, 31);
+      await declineTwice(chat, sessionId, clock);
+      await (await heldCall(chat))();
+      await vi.waitFor(async () => {
+        expect((await request('GET', '/status')).body.stopTurns).toEqual([expect.objectContaining({ conversationId: chat, turnId: turn })]);
+      }, { timeout: 10_000, interval: 50 });
+      await stopSessionTurn(sessionId, turn);
+      expect(savedAtClear).not.toBeNull();
+      expect(JSON.stringify(savedAtClear)).toContain(turn);
+      expect(JSON.stringify(savedAtClear)).not.toContain('"rotation":true');
+      // And the restart itself: no fence comes back, so no continue follows the person's Stop.
+      resetRotationFencesForTests();
+      await restoreCommands();
+      expect(rotationFenced(chat)).toBe(false);
+    } finally { clearSpy.mockRestore(); spy.mockRestore(); setRotationHoldForTests(15_000); await saveConfig({ ...config, sessions: { ...config.sessions, record: true } }); }
+  });
+
+  // CodeRabbit on #1954: fresh turns switched off after the declines means no fallback Stop.
+  it('stops nothing once fresh turns were switched off after the declines', async () => {
+    const config = defaultConfig();
+    await saveConfig({ ...config, sessions: { ...config.sessions, record: true }, ui: { ...config.ui, rotateStopFallback: true } });
+    setRotationHoldForTests(1_000);
+    const clock = { now: Date.now() };
+    const spy = vi.spyOn(Date, 'now').mockImplementation(() => (clock.now += 5));
+    try {
+      const chat = 'f0f00003-1111-4111-8111-000000000407', turn = 'g-stopfb-0-7';
+      const sessionId = await turnFor(chat, turn, 31);
+      await declineTwice(chat, sessionId, clock);
+      const current = defaultConfig();
+      await saveConfig({ ...current, sessions: { ...current.sessions, record: true }, ui: { ...current.ui, rotateStopFallback: true, rotateTurnMinutes: 0 } });
+      await (await heldCall(chat))();
+      await new Promise(resolve => setTimeout(resolve, 900));
+      expect((await request('GET', '/status')).body.stopTurns ?? []).toEqual([]);
+      expect(rotationFenced(chat)).toBe(false);
+    } finally { spy.mockRestore(); setRotationHoldForTests(15_000); await saveConfig({ ...config, sessions: { ...config.sessions, record: true } }); }
+  });
+
   // 2.1.44 publish, Linux arm64 (twice): no browser was running there and launching one failed.
   // stopSessionTurn had already queued the Stop, then threw on the launch, and the fallback lifted
   // the fence: a call arriving before the Stop landed would have run, the double run the fence is for.
@@ -455,6 +619,9 @@ describe('stop fallback for fresh turns', () => {
   });
 
   it('does none of it with the setting off', async () => {
+    // On by default since 2.1.49: switched off here.
+    const config = defaultConfig();
+    await saveConfig({ ...config, sessions: { ...config.sessions, record: true }, ui: { ...config.ui, rotateStopFallback: false } });
     setRotationHoldForTests(1_000);
     const clock = { now: Date.now() };
     // Ticking, so the ordinary continue's hold can run out.
@@ -475,7 +642,10 @@ describe('stop fallback for fresh turns', () => {
     try {
       armRotationFence('f0f00003-1111-4111-8111-000000000403', 'g-stopfb-0-3');
       expect(rotationFenced('f0f00003-1111-4111-8111-000000000403')).toBe(true);
-      vi.advanceTimersByTime(60_001);
+      // The Stop it protects may still land for 120 s: the fence outlasts that (CodeRabbit on #1954).
+      vi.advanceTimersByTime(120_000);
+      expect(rotationFenced('f0f00003-1111-4111-8111-000000000403')).toBe(true);
+      vi.advanceTimersByTime(FENCE_MS - 120_000 + 1);
       expect(rotationFenced('f0f00003-1111-4111-8111-000000000403')).toBe(false);
     } finally { vi.useRealTimers(); }
   });
