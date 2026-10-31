@@ -10316,10 +10316,20 @@ function noteCallAttribution(
         // ChatGPT offered no Send for this turn's continue twice: stop the turn once this result has
         // gone out, refusing (not running) any call that comes meanwhile, and continue after the stop.
         noteStopFallback(conversationId, sourceTurnId, Date.now());
-        armRotationFence(conversationId, sourceTurnId);
+        // The fence is on disk before the Stop can go out: a restart after ChatGPT took the Stop must
+        // still find it and file the continue (CodeRabbit on #1954).
+        const fenceSaved = armRotationFence(conversationId, sourceTurnId);
         logInfo(`turn rotation: ${conversationId} — ChatGPT offered no Send for the continue; stopping turn ${sourceTurnId} after this result to continue in a fresh one`);
         const timer = setTimeout(() => {
-          void stopSessionTurn(sessionId, sourceTurnId, { rotation: true }).catch(error => {
+          void fenceSaved.then(saved => {
+            if (!saved) {
+              clearRotationFence(conversationId);
+              logWarn(`turn rotation: ${conversationId} — not stopping turn ${sourceTurnId}: its fence could not be saved, so a restart could lose the continue`);
+              return;
+            }
+            if (rotationFenceTurn(conversationId) !== sourceTurnId) return;
+            return stopSessionTurn(sessionId, sourceTurnId, { rotation: true });
+          }).catch(error => {
             clearRotationFence(conversationId);
             logWarn(`turn rotation: ${conversationId} — could not stop turn ${sourceTurnId}: ${String(error)}`);
           });
@@ -12081,7 +12091,7 @@ export async function restoreCommands(): Promise<void> {
   // what is left of the command's budget (CodeRabbit on #1954).
   for (const command of commands) {
     if (command.spec.type === 'stop' && command.spec.rotation)
-      armRotationFence(command.spec.conversationId, command.spec.turnId, command.createdAt + FENCE_MS - Date.now());
+      void armRotationFence(command.spec.conversationId, command.spec.turnId, command.createdAt + FENCE_MS - Date.now());
   }
   commandReceipts = plan.receipts;
   for (const token of plan.resumeTokens) rememberToken(token.sessionId, token.token);
