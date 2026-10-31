@@ -469,6 +469,9 @@ A worker revival (wake) command carries the model and effort its worker was open
 page chooses them before it types (#1952; before, a wake went out on whatever ChatGPT's box held).
 Unlike a new worker, a wake whose model the picker cannot confirm is still typed: the page reports
 step `model-unconfirmed` and the bridge logs which model it could not confirm.
+An effort-only request (no model) keeps ChatGPT's current model: `selectModelSettings` rounds the
+effort within that model only and never moves to another model offering the effort; with the current
+model unreadable it confirms nothing.
 Decision/planner helpers keep their separate role-specific contract. Selecting Goal/Loop for
 a normal new executor chat does not turn it into a helper. Direct user sends in Chrome are
 not intercepted.
