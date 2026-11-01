@@ -105,8 +105,11 @@ const entrySchema = inputArgs.extend({
    * A damaged count reads as used up: it must never make the outbox unreadable, nor grant more tabs.
    */
   openingReopens: z.number().int().min(1).max(2).optional().catch(2),
-  /** The lost tab the last fresh one was granted for: a repeat report of it gets the same grant. */
-  openingReopenedTab: z.number().int().nonnegative().optional().catch(undefined),
+  /**
+   * The lost tab the last fresh one was granted for, as `<browser>:<tab>` (tab ids are per browser
+   * session): a repeat report of it gets the same grant.
+   */
+  openingReopenedTab: z.string().min(1).max(220).optional().catch(undefined),
   /** The question that Continue continues, still checked until it is sent (CodeRabbit on #1960). */
   continuesQuestionId: z.string().max(200).optional(),
   recovery: z.object({ questionId: z.string(), episode: z.string().max(200).optional(), pro: z.boolean(), busyUntil: z.number(), phase: z.enum(['ready', 'stopping', 'reloading', 'resumed']), reloadOwner: z.string().optional(),
@@ -1381,7 +1384,7 @@ export function setInputAutomation(id: string, automation: NonNullable<InputArgs
 export const OPENING_REOPENS = 2;
 
 /** A missing elected tab is not replay authority. End only a never-handed-out opening. */
-export function failUnclaimedBrowserOpening(id: string, currentOwner: () => boolean, tab?: number): Promise<boolean> {
+export function failUnclaimedBrowserOpening(id: string, currentOwner: () => boolean, tab?: string): Promise<boolean> {
   return lostBrowserOpening(id, currentOwner, tab).then(outcome => outcome === 'failed');
 }
 
@@ -1391,7 +1394,7 @@ export function failUnclaimedBrowserOpening(id: string, currentOwner: () => bool
  * tab, twice at most, rather than "Not sent" at once; after that it fails as before. Anything that
  * may have reached a page is never reopened.
  */
-export function lostBrowserOpening(id: string, currentOwner: () => boolean, tab?: number): Promise<'reopen' | 'failed' | 'kept'> {
+export function lostBrowserOpening(id: string, currentOwner: () => boolean, tab?: string): Promise<'reopen' | 'failed' | 'kept'> {
   return serial(async () => {
     const current = await load();
     const row = current.find(entry => entry.id === id);

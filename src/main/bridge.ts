@@ -3129,7 +3129,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       return json(res, 409, { error: 'opening_not_owned' }, origin);
     // A lost tab before anything reached it gets a fresh one (the extension forgets the old election);
     // after two, the message fails with Retry as before.
-    const outcome = await lostBrowserOpening(body.id, ownsOpening, body.tab as number);
+    // The tab as this browser numbers it: another browser's tab 7 is another tab (CodeRabbit on #1980).
+    const outcome = await lostBrowserOpening(body.id, ownsOpening, `${browser}:${body.tab as number}`);
     return json(res, 200, { ok: outcome !== 'kept', ...(outcome === 'reopen' ? { reopen: true } : {}) }, origin);
   }
   if (['/input/claim', '/input/bind', '/input/ack', '/input/fail', '/input/answer', '/input/progress', '/input/attachment'].includes(route) && req.method === 'POST') {
