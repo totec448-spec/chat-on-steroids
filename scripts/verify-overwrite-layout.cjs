@@ -108,7 +108,9 @@ app.whenReady().then(async () => {
       measurements.push({ zoom, width, mode, gap: result.closed.gap, expandedGap: result.expanded.gap });
       // The first plain argument; switches such as verify-ui's --lang=en-US are not a destination.
       const destinationArg = process.argv.slice(2).find(arg => !arg.startsWith('--'));
-      if (destinationArg && zoom === 1 && width === 800 && mode === 'open') {
+      // Electron may include the fixture script path in argv. Never overwrite
+      // executable source with screenshot bytes; accept explicit PNG targets only.
+      if (destinationArg && path.extname(destinationArg).toLowerCase() === '.png' && zoom === 1 && width === 800 && mode === 'open') {
         const destination = path.resolve(destinationArg); fs.mkdirSync(path.dirname(destination), { recursive: true });
         await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
         fs.writeFileSync(destination, (await win.webContents.capturePage()).toPNG());
