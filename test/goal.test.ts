@@ -104,6 +104,74 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
+describe('first-party failed test during automatic Goal STOP', () => {
+  const sourceTurn = 'goal-tested-source';
+
+  async function fixture(id: string, afterPatch = false) {
+    const session = await createSession({ conversationId: id });
+    await appendEvent(session.id, { source: 'extension', kind: 'user_message', time: 1,
+      message: { text: 'Fix this code and make its tests pass', truncated: false, chars: 33 } });
+    const tool = (seq: number, name: string, outcome: 'process_exit_nonzero' | 'ok') => ({
+      kind: 'tool_call' as const, source: 'mcp' as const, time: seq, turnId: sourceTurn,
+      call: { callId: `call-${seq}`, tool: name, conversationId: id, requestId: `request-${seq}`,
+        attribution: 'request_id' as const, attributionMethod: 'request_id' as const,
+        args: { text: JSON.stringify(name === 'exec_command' ? { cmd: 'npm test' } : {}), truncated: false, chars: 18 },
+        result: { text: 'private test output', truncated: false, chars: 19 }, outcome, durationMs: 10,
+        summary: { title: 'Tool', tone: 'neutral' as const, kind: 'run' as const } }
+    });
+    await appendEvent(session.id, tool(2, 'exec_command', 'process_exit_nonzero'));
+    if (afterPatch) await appendEvent(session.id, tool(3, 'apply_patch', 'ok'));
+    return session;
+  }
+
+  it('asks the existing helper once again and can CONTINUE after a failed npm test', async () => {
+    const id = 'goal-test-second-opinion';
+    const session = await fixture(id);
+    const fetcher = vi.fn(async (_url: unknown, _init: RequestInit) => fetcher.mock.calls.length === 1
+      ? decision('stop') : decision('continue', 'Repair the failing test'));
+    globalThis.fetch = fetcher as typeof fetch;
+    goal.startGoalDraft({ sessionId: session.id, conversationId: id, turnId: sourceTurn });
+    expect((await settled(id)).stage).toBe('ready');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const prompt = JSON.stringify(JSON.parse(String(fetcher.mock.calls[1]![1]?.body)));
+    expect(prompt).toContain('A first-party Core test command');
+    expect(prompt).not.toContain('private test output');
+  });
+
+  it('accepts a second STOP for an intentionally failing test, without a third helper call', async () => {
+    const id = 'goal-test-intentional-failure';
+    const session = await fixture(id);
+    const fetcher = vi.fn(async () => decision('stop'));
+    globalThis.fetch = fetcher as typeof fetch;
+    goal.startGoalDraft({ sessionId: session.id, conversationId: id, turnId: sourceTurn });
+    expect((await settled(id)).stage).toBe('no-reply');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not reconsider after a newer apply_patch made the failed test stale', async () => {
+    const id = 'goal-test-stale-after-edit';
+    const session = await fixture(id, true);
+    const fetcher = vi.fn(async () => decision('stop'));
+    globalThis.fetch = fetcher as typeof fetch;
+    goal.startGoalDraft({ sessionId: session.id, conversationId: id, turnId: sourceTurn });
+    expect((await settled(id)).stage).toBe('no-reply');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses the same advisory check for a Goal Session Finish follow-up', async () => {
+    const id = 'goal-finish-test-second-opinion';
+    const session = await fixture(id);
+    await appendEvent(session.id, { source: 'extension', kind: 'turn_end', turnId: sourceTurn,
+      outcome: 'completed', time: 10 });
+    const fetcher = vi.fn(async () => fetcher.mock.calls.length === 1
+      ? decision('stop') : decision('continue', 'Make the failing suite pass'));
+    globalThis.fetch = fetcher as typeof fetch;
+    expect(await goal.draftFastFollowup(session.id, AbortSignal.timeout(60000), undefined, undefined, 'goal'))
+      .toBe('Make the failing suite pass');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+});
+
 it('preserves the Astra delivery preference across Goal/Loop, restart and finish-setting changes', async () => {
   const config = (await import('../src/main/config.js')).getConfig();
   await saveConfig({ ...config, ui: { ...config.ui, finishTool: true } });
