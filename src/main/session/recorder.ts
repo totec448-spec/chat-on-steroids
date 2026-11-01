@@ -91,6 +91,7 @@ interface LiveConversation {
   /** Fresh page proof in this process, not reconstructed from historical turns. */
   pageRequest?: { requestId: string; at: number; createAt?: number; turnId?: string };
   questionId?: string;
+  questionOrigin?: number;
   questionAt?: number;
   turnQuestionAt?: number;
   conversationId: string;
@@ -2517,16 +2518,26 @@ async function recordChatObservationsNow(
           ...(takeAutomaticReply(conversationId, item.text ?? '') ? { automatic: true as const } : {}),
           messageId: item.messageId
         }, { preferTime: item.authoredTime === true, work: item.authoredNow === true });
-        if (!written.changed) continue;
-        if (live && !live.turnId) {
-          if (written.event.origin === written.event.seq) {
+        if (live) {
+          if (item.authoredNow === true) {
             live.questionId = item.messageId;
-            delete live.questionAt;
-          }
-          if (item.authoredTime === true && live.questionId === item.messageId && live.questionAt === undefined) {
-            live.questionAt = written.event.time;
+            live.questionOrigin = written.event.origin ?? written.event.seq;
+            const authoredAt = item.authoredTime === true ? written.event.time : written.event.authoredAt;
+            if (authoredAt !== undefined) live.questionAt = authoredAt;
+            else delete live.questionAt;
+          } else if (item.authoredTime === true && live.questionId === item.messageId) {
+            if (live.questionOrigin !== undefined) {
+              if (live.questionAt === undefined) live.questionAt = written.event.time;
+            } else if (live.turnId && live.turnQuestionAt === undefined) {
+              live.turnQuestionAt = written.event.time;
+              if (live.pageRequest && !live.pageRequest.turnId && live.pageRequest.createAt !== undefined &&
+                  live.pageRequest.createAt >= written.event.time && live.pageRequest.createAt - written.event.time <= 15_000) {
+                live.pageRequest.turnId = live.turnId;
+              }
+            }
           }
         }
+        if (!written.changed) continue;
         if (item.authoredNow === true) {
           activity.meaningful = true; activity.at = Math.max(activity.at ?? 0, item.time);
           activity.working = true;
@@ -2535,10 +2546,6 @@ async function recordChatObservationsNow(
       }
       case 'assistant_message': {
         if (!item.messageId) continue;
-        if (live && !live.turnId) {
-          delete live.questionId;
-          delete live.questionAt;
-        }
         const state = item.state ?? (item.final === true ? 'final' : 'streaming');
         // A reload can destroy the document-local generation id after this recorder already
         // made the only honest lifecycle verdict it could: unknown/failed/interrupted/stalled.
@@ -2597,6 +2604,14 @@ async function recordChatObservationsNow(
           logInfo(`session recorder: ${conversationId} reported a message of turn ${item.turnId} after that turn ended; kept in history, not counted as new work`);
         }
         const canonicalTurn = written.event.turnId;
+        if (live && !live.turnId && live.questionOrigin !== undefined &&
+            (written.event.origin ?? written.event.seq) > live.questionOrigin &&
+            item.activeNow === true && item.authoredTime !== true && !lateNoteOfEndedTurn && !canonicalTurn &&
+            (live.questionAt === undefined || written.event.authoredAt === undefined || written.event.authoredAt >= live.questionAt)) {
+          delete live.questionId;
+          delete live.questionOrigin;
+          delete live.questionAt;
+        }
         // A stopped partial answer stays streaming in history. Re-observing its
         // DOM after restart cannot renew work, nor can an old message borrow a
         // newer page turn. Preserve the revision while using its canonical owner
@@ -2760,8 +2775,9 @@ async function recordChatObservationsNow(
           if (continuing && prior.anchor) logInfo(
             `request attribution: continued recording context in ${conversationId}; explicit continued turn`
           );
-          const questionAt = live.questionAt;
-          delete live.questionId;
+          const questionAt = continuing ? undefined : live.questionAt;
+          if (continuing) delete live.questionId;
+          delete live.questionOrigin;
           delete live.questionAt;
           live.turnQuestionAt = questionAt;
           if (live.pageRequest && !continuing && !live.pageRequest.turnId &&
@@ -2844,8 +2860,10 @@ async function recordChatObservationsNow(
               : null;
           live.turnRequestIds = new Set<string>();
           if (live.turnId === item.turnId) {
-            delete live.questionId;
-            delete live.questionAt;
+            if (live.questionOrigin === undefined) {
+              delete live.questionId;
+              delete live.questionAt;
+            }
             delete live.turnQuestionAt;
             if (live.pageRequest && (live.pageRequest.turnId === item.turnId || live.pageRequest.at <= item.time)) {
               delete live.pageRequest;
