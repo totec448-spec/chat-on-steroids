@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const { WebSocket } = require('ws');
@@ -61,7 +62,12 @@ const executable = [
   '/snap/bin/chromium'
 ].find(candidate => candidate && fs.existsSync(candidate));
 assert(executable, 'No Chromium found; set COS_CHROME to a Chrome or Chromium executable.');
-const profile = path.join(output, 'profile');
+// Snap Chromium has a private /tmp, so the verifier must share its profile
+// directory with the confined browser in ~/snap/chromium/common.
+const snapChromium = path.resolve(executable) === '/snap/bin/chromium';
+const snapProfileRoot = path.join(os.homedir(), 'snap/chromium/common');
+if (snapChromium) fs.mkdirSync(snapProfileRoot, { recursive: true });
+const profile = snapChromium ? fs.mkdtempSync(path.join(snapProfileRoot, 'cos-shell-runtime-')) : path.join(output, 'profile');
 fs.rmSync(path.join(profile, 'DevToolsActivePort'), { force: true });
 const browser = spawn(executable, [`--user-data-dir=${profile}`, '--headless=new', '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check', '--disable-background-networking', 'about:blank'], { windowsHide: true, stdio: 'ignore' });
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -294,7 +300,21 @@ async function evaluate(expression) {
     fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report, null, 2));
   } finally {
-    if (socket?.readyState === WebSocket.OPEN) { try { await cdp('Browser.close', {}, null); } catch {} socket.close(); }
+    if (socket?.readyState === WebSocket.OPEN) { try { await cdp('Browser.close', {}, null); } catch {} }
+    // Wait for Chromium itself to close its CDP connection before deleting the
+    // Snap profile; the launcher can exit while Chromium still writes cache files.
+    if (socket && socket.readyState !== WebSocket.CLOSED) {
+      await Promise.race([new Promise(resolve => socket.once('close', resolve)), delay(3000)]);
+      socket.close();
+    }
     browser.kill();
+    if (snapChromium) {
+      // The Snap wrapper can outlive the CDP browser and recreate cache files.
+      // Retire its private temporary profile after the wrapper has fully exited.
+      const cleanup = spawn(process.execPath, ['-e',
+        'setTimeout(() => require("node:fs").rmSync(process.argv[1], { recursive: true, force: true, maxRetries: 30, retryDelay: 200 }), 5000)', profile],
+        { detached: true, stdio: 'ignore', windowsHide: true });
+      cleanup.unref();
+    }
   }
 })().catch(error => { console.error(error.message); process.exitCode = 1; });

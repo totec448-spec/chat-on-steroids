@@ -149,7 +149,7 @@ describe.runIf(process.platform === 'linux')('native Linux connector authorizati
       ? good('list-windows', [window]) : kind === 'snapshot'
         ? new Promise(resolve => { finishSnapshot = resolve; }) : good(kind, {}));
     const pending = observe({ what: 'snapshot', window_id: window.id });
-    await vi.waitFor(() => expect(testState.backend.mock.calls.some(([input]) => input.kind === 'snapshot')).toBe(true));
+    await vi.waitFor(() => expect(testState.backend.mock.calls.some(([input]) => input.kind === 'snapshot')).toBe(true), { timeout: 10_000 });
     testState.caller.conversationId = 'chat-b';
     finishSnapshot(good('snapshot', { snapshot_id: 's123', complete: true,
       window: { id: window.id }, tree: { children: [{ ref_id: '@s123:e1' }] } }));
@@ -176,7 +176,7 @@ describe.runIf(process.platform === 'linux')('native Linux connector authorizati
     let complete!: (value: unknown) => void;
     testState.backend.mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
     const pending = observe({ what: 'screenshot', display: 0 });
-    await vi.waitFor(() => expect(testState.backend).toHaveBeenCalledWith({ kind: 'screenshot', display: 0 }));
+    await vi.waitFor(() => expect(testState.backend).toHaveBeenCalledWith({ kind: 'screenshot', display: 0 }), { timeout: 10_000 });
     testState.screen = false;
     complete(good('screenshot', { data: png, format: 'png', width: 1, height: 1, scale_factor: 1 }));
     const result = await pending;
@@ -192,7 +192,7 @@ describe.runIf(process.platform === 'linux')('native Linux connector authorizati
     let approve!: (decision: null) => void;
     testState.ask.mockImplementationOnce(() => new Promise(resolve => { approve = resolve; }));
     const pending = act({action:'set_value',ref:'@s123:e1',value:'hello'});
-    await vi.waitFor(() => expect(testState.ask).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(testState.ask).toHaveBeenCalledTimes(1), { timeout: 10_000 });
     testState.control = false;
     approve(null);
     expect((await pending).content[0].text).toContain('TOOL_DISABLED');

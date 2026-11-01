@@ -3698,6 +3698,7 @@
   "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "浏览器自动重新加载 {0} 次后，仍未接收到待处理步骤。原队列输入或目标待处理项仍已保存。CoS 不会再为这一步自动重载此聊天；请打开聊天手动继续。",
   "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.": "ChatGPT 的模型选择器未确认助手的模型。目标将使用 ChatGPT 当前的选择再次询问。",
   "Allow native Linux Desktop access": "允许原生 Linux 桌面访问",
+  "Native Linux Desktop access on": "已启用原生 Linux 桌面访问",
   "Off by default. Permits Linux accessibility and display screenshots only while screen/control permissions allow them. Browser access alone never enables this. Unattributed calls may observe when separately permitted, but may never act on refs.": "默认关闭。仅在具有屏幕查看和控制权限时允许 Linux 无障碍访问和显示器截图。仅有浏览器权限不能启用。未关联会话的调用获单独许可后可以观察，但不能通过引用执行操作。",
   "Test GNOME screenshot permission": "测试 GNOME 截屏权限",
   "Click while the Chat On Steroids window is active. If GNOME asks, choose Allow. The screenshot is discarded.": "请在 Chat On Steroids 窗口处于活动状态时点击。如果 GNOME 询问，请选择“允许”。截屏会被丢弃。",
