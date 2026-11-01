@@ -4,6 +4,7 @@ import path from 'node:path';
 const fixture = vi.hoisted(() => {
   type Listener = (...args: any[]) => void;
   const children: any[] = [];
+  const removedDirectories: string[] = [];
 
   const emitter = () => {
     const listeners = new Map<string, Listener[]>();
@@ -56,7 +57,7 @@ const fixture = vi.hoisted(() => {
     child.emit('close', 0);
   });
 
-  return { children, spawn, health, termination, terminate };
+  return { children, spawn, health, termination, terminate, removedDirectories };
 });
 
 vi.mock('node:child_process', () => ({ spawn: fixture.spawn }));
@@ -74,6 +75,7 @@ vi.mock('node:fs', async (importOriginal) => {
       ...actual.promises,
       mkdtemp: async (prefix: string) => `${prefix}fixture`,
       rm: async (_path: string, options?: { recursive?: boolean }) => {
+        if (options?.recursive) fixture.removedDirectories.push(_path);
         if (!options?.recursive) fixture.health.url = null;
       },
       readFile: async () => {
@@ -96,6 +98,7 @@ const settings = {
 
 beforeEach(() => {
   fixture.children.length = 0;
+  fixture.removedDirectories.length = 0;
   fixture.spawn.mockClear();
   fixture.terminate.mockClear();
   fixture.health.url = null;
@@ -118,8 +121,14 @@ describe('OpenAI tunnel process ownership', () => {
       const healthFile = call[1][call[1].indexOf('--health.url-file') + 1]!;
       expect(call[2].env.TMPDIR).toBeTypeOf('string');
       expect(healthFile).toBe(path.join(call[2].env.TMPDIR!, 'health.url'));
-      await handle.stop();
+      fixture.termination.held = true;
+      const stopping = handle.stop();
+      await vi.waitFor(() => expect(fixture.termination.release).toBeTypeOf('function'));
+      expect(fixture.removedDirectories).toEqual([]);
+      fixture.termination.release!();
+      await stopping;
       expect(fixture.terminate).toHaveBeenCalledOnce();
+      expect(fixture.removedDirectories).toEqual([call[2].env.TMPDIR]);
     } finally {
       Object.defineProperty(process, 'platform', { value: platform, configurable: true });
     }
