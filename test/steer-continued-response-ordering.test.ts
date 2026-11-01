@@ -177,27 +177,38 @@ describe('steer / follow-up continued turn ordering', () => {
     ];
   }
 
-  it('demonstrates the current chronology ordering where the final response precedes the steer question and turn-2 tools', () => {
+  it('orders the steer follow-up question and continued turn responses chronologically', () => {
     const events = buildSteerEvents();
     const ordered = chronological(events);
-    const kinds = ordered.map(e => `${e.kind}${e.kind === 'user_message' ? ':' + (e as any).message?.text?.slice(0, 15) : ''}${e.kind === 'assistant_message' && (e as any).final ? ':FINAL' : ''}`);
 
-    // Currently, because the consolidated final assistant message has turnId 'g-turn-5' (origin 1379),
-    // it is placed inside Turn 1 before the steer question and before Turn 2's tools:
-    const finalAnswerIndex = ordered.findIndex(e => e.kind === 'assistant_message' && (e as any).final === true);
+    const initialQuestionIndex = ordered.findIndex(e => e.kind === 'user_message' && (e as any).message?.text?.includes('Repetidor Arcano: familiar'));
+    const turn1ToolIndex = ordered.findIndex(e => e.kind === 'tool_call' && e.turnId === 'g-turn-5');
+    const turn1EndIndex = ordered.findIndex(e => e.kind === 'turn_end' && e.turnId === 'g-turn-5');
     const steerQuestionIndex = ordered.findIndex(e => e.kind === 'user_message' && (e as any).message?.text?.includes('Pero nuestro juego'));
+    const turn2StartIndex = ordered.findIndex(e => e.kind === 'turn_start' && e.turnId === 'g-turn-6');
     const turn2ToolIndex = ordered.findIndex(e => e.kind === 'tool_call' && e.turnId === 'g-turn-6');
+    const finalAnswerIndex = ordered.findIndex(e => e.kind === 'assistant_message' && (e as any).final === true);
+    const turn2EndIndex = ordered.findIndex(e => e.kind === 'turn_end' && e.turnId === 'g-turn-6');
 
-    // THIS IS THE BUG:
-    // 1. The final answer appears BEFORE the user's steer question that it answers!
-    expect(finalAnswerIndex).toBeLessThan(steerQuestionIndex);
-    // 2. The final answer appears BEFORE the tools executed in Turn 2!
-    expect(finalAnswerIndex).toBeLessThan(turn2ToolIndex);
-    // 3. The tools executed in Turn 2 appear AT THE VERY BOTTOM (after the final answer):
-    expect(turn2ToolIndex).toBeGreaterThan(finalAnswerIndex);
+    // 1. Initial question starts Turn 1:
+    expect(initialQuestionIndex).toBeLessThan(turn1ToolIndex);
+    expect(turn1ToolIndex).toBeLessThan(turn1EndIndex);
+
+    // 2. Steer follow-up question appears AFTER Turn 1 and BEFORE Turn 2:
+    expect(steerQuestionIndex).toBeGreaterThan(turn1EndIndex);
+    expect(steerQuestionIndex).toBeLessThan(turn2StartIndex);
+
+    // 3. Turn 2 tools appear AFTER the user steer message and Turn 2 start:
+    expect(turn2ToolIndex).toBeGreaterThan(turn2StartIndex);
+
+    // 4. Final consolidated assistant response appears AFTER Turn 2 tools (closing the turn):
+    expect(finalAnswerIndex).toBeGreaterThan(turn2ToolIndex);
+
+    // 5. Final response appears before Turn 2 end:
+    expect(finalAnswerIndex).toBeLessThan(turn2EndIndex);
   });
 
-  it('demonstrates the bug rendered in the Electron timeline DOM', async () => {
+  it('renders correctly in the Electron timeline DOM with steer question and tools above the final response', async () => {
     const events = buildSteerEvents();
     const { w } = await boot(events);
 
@@ -213,16 +224,17 @@ describe('steer / follow-up continued turn ordering', () => {
     expect(finalAnswerEl).toBeDefined();
     expect(turn2ToolEl).toBeDefined();
 
-    const finalAnswerPos = renderedNodes.indexOf(finalAnswerEl!);
     const steerQuestionPos = renderedNodes.indexOf(steerQuestionEl!);
     const turn2ToolPos = renderedNodes.indexOf(turn2ToolEl!);
+    const finalAnswerPos = renderedNodes.indexOf(finalAnswerEl!);
 
     // IN THE RENDERED DOM:
-    // Final consolidated answer is rendered ABOVE the user's follow-up question:
-    expect(finalAnswerPos).toBeLessThan(steerQuestionPos);
-    // Final consolidated answer is rendered ABOVE Turn 2's tools:
-    expect(finalAnswerPos).toBeLessThan(turn2ToolPos);
-    // Turn 2's working tools are rendered at the bottom:
-    expect(turn2ToolPos).toBeGreaterThan(finalAnswerPos);
+    // 1. Steer question appears before Turn 2 tools:
+    expect(steerQuestionPos).toBeLessThan(turn2ToolPos);
+    // 2. Turn 2's tools appear before the final consolidated response:
+    expect(turn2ToolPos).toBeLessThan(finalAnswerPos);
+    // 3. Final consolidated answer is rendered at the bottom of Turn 2:
+    expect(finalAnswerPos).toBeGreaterThan(steerQuestionPos);
+    expect(finalAnswerPos).toBeGreaterThan(turn2ToolPos);
   });
 });
