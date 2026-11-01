@@ -195,16 +195,24 @@ describe('the file Get update opens for an installation that cannot update itsel
 });
 
 describe('native signed Mac update handoff', () => {
+  it('never gives native updating a ZIP that fails the published checksum', async () => {
+    mac.eligible = true;
+    github({ checksums: `${'a'.repeat(64)}  Chat-On-Steroids-macOS-${process.arch}.zip\n` });
+    await checkForUpdates();
+    expect(updateStatus().stage).toBe('failed');
+    expect(mac.stage).not.toHaveBeenCalled();
+    expect(markInstallOnQuit()).toBe(false);
+  });
   it('pins the published ZIP digest and keeps the verified native candidate until quit', async () => {
     mac.eligible = true;
     const name = `Chat-On-Steroids-macOS-${process.arch}.zip`;
-    const { asked } = github({ checksums: `${'a'.repeat(64)}  ${name}\n` });
+    const { asked } = github({ checksums: `${sha256('installer bytes')}  ${name}\n` });
     await asPlatform('darwin', undefined, () => checkForUpdates());
     expect(updateStatus()).toMatchObject({ stage: 'ready', latest: NEXT });
     expect(mac.stage).toHaveBeenCalledExactlyOnceWith(NEXT,
-      `https://github.com/totec448-spec/chat-on-steroids/releases/download/v${NEXT}/${name}`, 'a'.repeat(64));
+      path.join(userData, 'updates', NEXT, name));
     await checkForUpdates();
-    expect(asked).toEqual(['latest', 'SHA256SUMS.txt']);
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt', name]);
     expect(markInstallOnQuit(NEXT)).toBe(true);
     await applyStagedUpdate();
     expect(mac.restart).not.toHaveBeenCalled();
@@ -215,7 +223,7 @@ describe('native signed Mac update handoff', () => {
   });
   it('does not relaunch on an ordinary quit and reports a failed native verification', async () => {
     mac.eligible = true;
-    github({ checksums: `${'a'.repeat(64)}  Chat-On-Steroids-macOS-${process.arch}.zip\n` });
+    github({ checksums: `${sha256('installer bytes')}  Chat-On-Steroids-macOS-${process.arch}.zip\n` });
     mac.stage.mockRejectedValueOnce(new Error('native signature refused'));
     await checkForUpdates();
     expect(updateStatus()).toMatchObject({ stage: 'failed', error: 'native signature refused' });

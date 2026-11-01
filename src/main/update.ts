@@ -28,7 +28,7 @@
  * *told* a new version exists and is given the release page, and nothing is downloaded behind
  * it. That is a real limitation, not parity, and the notice says so rather than implying an
  * update is on its way. Ad-hoc Mac installations also stay manual. Writable Developer ID
- * installations assessed by Gatekeeper delegate their ZIP download and same-signer atomic
+ * installations assessed by Gatekeeper delegate verified ZIP installation and same-signer atomic
  * replacement to Electron/Squirrel; its candidate remains selected until termination.
  *
  * What this module does **not** own: the version of the browser extension. The bridge already
@@ -280,7 +280,8 @@ async function runPass(): Promise<void> {
     const digest = (await releaseDigests(release.version)).get(name);
     if (!digest) throw new Error(`release ${release.version} publishes no ${name}`);
     set({ latest: release.version, stage: 'downloading' });
-    await stageMacUpdate(release.version, assetUrl(release.version, name), digest);
+    const file = await adopt(release.version, name, digest) ?? await download(release.version, name, digest);
+    await stageMacUpdate(release.version, file);
     staged = { version: release.version, kind: 'mac' };
     set({ stage: 'ready' });
     logInfo(`update: native Mac update ${release.version} passed download and signing verification; ready on quit`);

@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process';
 import { access, constants } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { app, autoUpdater } from 'electron';
@@ -34,11 +36,12 @@ export function canUpdateMac(): Promise<boolean> {
 }
 
 /**
- * The existing updater selects a version and its published digest. Squirrel owns the download,
- * digest/signature verification and atomic replacement; no second timer or installer is added.
- * A loopback feed supplies only public release metadata, not an app/file/tool endpoint.
+ * The existing updater has already downloaded and checksum-verified this ZIP. Electron 44.3
+ * ignores a feed's sha256 field, so never delegate download integrity to that field. Squirrel
+ * receives only these verified bytes, and owns signature verification and atomic replacement.
  */
-export async function stageMacUpdate(version: string, url: string, sha256: string): Promise<void> {
+export async function stageMacUpdate(version: string, file: string): Promise<void> {
+  const size = (await stat(file)).size;
   if (!listeningForErrors) {
     listeningForErrors = true;
     autoUpdater.on('error', err => {
@@ -47,10 +50,19 @@ export async function stageMacUpdate(version: string, url: string, sha256: strin
       if (restarting) app.exit(0);
     });
   }
+  let feedUrl = '';
   const server = createServer((req, res) => {
-    if (req.method !== 'GET' || req.url !== '/feed') { res.writeHead(404).end(); return; }
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ url, name: version, sha256 }));
+    if (req.method !== 'GET') { res.writeHead(404).end(); return; }
+    if (req.url === '/release.zip') {
+      res.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Length': size });
+      const stream = createReadStream(file);
+      stream.on('error', err => res.destroy(err));
+      res.on('close', () => stream.destroy());
+      stream.pipe(res);
+    } else if (req.url === '/feed') {
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ url: `${feedUrl}/release.zip`, name: version }));
+    } else res.writeHead(404).end();
   });
   try {
     await new Promise<void>((resolve, reject) => {
@@ -60,6 +72,7 @@ export async function stageMacUpdate(version: string, url: string, sha256: strin
     server.unref();
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('native update feed did not bind to loopback');
+    feedUrl = `http://127.0.0.1:${address.port}`;
     await new Promise<void>((resolve, reject) => {
       const cleanup = () => {
         autoUpdater.removeListener('update-downloaded', downloaded);
@@ -73,7 +86,7 @@ export async function stageMacUpdate(version: string, url: string, sha256: strin
       autoUpdater.once('update-not-available', unavailable);
       autoUpdater.once('error', failed);
       try {
-        autoUpdater.setFeedURL({ url: `http://127.0.0.1:${address.port}/feed` });
+        autoUpdater.setFeedURL({ url: `${feedUrl}/feed` });
         autoUpdater.checkForUpdates();
       } catch (err) { failed(err as Error); }
     });

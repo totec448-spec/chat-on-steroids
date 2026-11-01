@@ -6073,9 +6073,10 @@ partial file, verify SHA-256 before staging/adoption, and rehash at ordinary qui
 off. Windows NSIS/Linux AppImage can apply automatically; DEB and ad-hoc/read-only Mac
 installations stay manual, and development does not stage. `mac-update.ts` probes packaged Mac
 eligibility once: writable bundle parent, valid CoS Developer ID signature and Gatekeeper
-assessment. For eligible Macs, Electron/Squirrel receives the selected public ZIP URL and its
-published SHA-256 through a transient loopback feed, and owns download, digest/signature
-verification and atomic replacement. A verified native candidate stays selected until quit;
+assessment. For eligible Macs the existing updater downloads/adopts and SHA-256 verifies the
+ZIP before Electron/Squirrel can see it. Electron 44.3 ignores a native feed sha256 field, so
+`mac-update.ts` serves only that verified archive through a transient loopback feed; Squirrel
+owns signature verification and atomic replacement. A verified native candidate stays selected until quit;
 ordinary termination installs without relaunch. Explicit Install transfers final exit to
 `finishNativeUpdateQuit` only after every shutdown phase and the final log flush; native quit
 re-entry sees `shutdownComplete`. A failed relaunch logs and exits, with the existing handoff

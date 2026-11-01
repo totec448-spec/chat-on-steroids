@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import path from 'node:path';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 
 const fixture = vi.hoisted(() => ({
   command: vi.fn(), access: vi.fn(), log: vi.fn(), warn: vi.fn(), exit: vi.fn(),
@@ -14,10 +16,13 @@ vi.mock('electron', async () => {
   return { app: { get isPackaged() { return fixture.packaged; }, exit: fixture.exit }, autoUpdater: fixture.native };
 });
 vi.mock('node:child_process', () => ({ execFile: fixture.command }));
-vi.mock('node:fs/promises', () => ({ access: fixture.access, constants: { W_OK: 2 } }));
+vi.mock('node:fs/promises', async importOriginal => ({
+  ...await importOriginal<typeof import('node:fs/promises')>(), access: fixture.access
+}));
 vi.mock('../src/main/logger.js', () => ({ logInfo: fixture.log, logWarn: fixture.warn }));
 const platform = process.platform, executable = process.execPath;
 let adapter: typeof import('../src/main/mac-update.js');
+let dir: string, archive: string;
 beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
@@ -30,8 +35,12 @@ beforeEach(async () => {
   Object.defineProperty(process, 'execPath', { value: path.join('/Applications', 'Chat On Steroids.app', 'Contents', 'MacOS', 'Chat On Steroids'), configurable: true });
   adapter = await import('../src/main/mac-update.js');
   fixture.native.removeAllListeners();
+  dir = mkdtempSync(path.join(tmpdir(), 'cos-native-update-'));
+  archive = path.join(dir, 'verified.zip');
+  writeFileSync(archive, 'verified archive bytes');
 });
 afterEach(() => {
+  rmSync(dir, { recursive: true, force: true });
   Object.defineProperty(process, 'platform', { value: platform, configurable: true });
   Object.defineProperty(process, 'execPath', { value: executable, configurable: true });
 });
@@ -61,12 +70,14 @@ it.each(['/usr/bin/codesign', '/usr/sbin/spctl'])('keeps the manual path when %s
   expect(await adapter.canUpdateMac()).toBe(false);
   expect(fixture.log.mock.calls.flat().join(' ')).not.toContain('private path');
 });
-it('serves only the selected public URL and digest, and closes the loopback feed after native verification', async () => {
-  const staging = adapter.stageMacUpdate('99.0.0', 'https://example.com/release.zip', 'a'.repeat(64));
+it('serves only the already verified ZIP and closes the feed after native verification', async () => {
+  const staging = adapter.stageMacUpdate('99.0.0', archive);
   await vi.waitFor(() => expect(fixture.check).toHaveBeenCalledOnce());
   const feed = fixture.feed;
   expect(new URL(feed).hostname).toBe('127.0.0.1');
-  expect(await (await fetch(feed)).json()).toEqual({ name: '99.0.0', url: 'https://example.com/release.zip', sha256: 'a'.repeat(64) });
+  const metadata = await (await fetch(feed)).json();
+  expect(metadata).toEqual({ name: '99.0.0', url: new URL('/release.zip', feed).href });
+  expect(await (await fetch(metadata.url)).text()).toBe('verified archive bytes');
   expect((await fetch(feed, { method: 'POST' })).status).toBe(404);
   expect((await fetch(`${feed}/other`)).status).toBe(404);
   fixture.native.emit('update-downloaded');
@@ -78,7 +89,7 @@ it('serves only the selected public URL and digest, and closes the loopback feed
 });
 it.each(['error', 'update-not-available', 'sync'])('rejects %s without leaving a feed or completion listener', async event => {
   if (event === 'sync') fixture.check.mockImplementation(() => { throw new Error('native start failed'); });
-  const staging = adapter.stageMacUpdate('99.0.0', 'https://example.com/release.zip', 'a'.repeat(64));
+  const staging = adapter.stageMacUpdate('99.0.0', archive);
   const rejected = expect(staging).rejects.toThrow();
   await vi.waitFor(() => expect(fixture.check).toHaveBeenCalledOnce());
   if (event !== 'sync') fixture.native.emit(event, new Error('native verification failed'));
@@ -87,7 +98,7 @@ it.each(['error', 'update-not-available', 'sync'])('rejects %s without leaving a
   await expect(fetch(fixture.feed)).rejects.toThrow();
 });
 it('only requests native relaunch at the final exit boundary, and exits safely on a late error', async () => {
-  const staging = adapter.stageMacUpdate('99.0.0', 'https://example.com/release.zip', 'a'.repeat(64));
+  const staging = adapter.stageMacUpdate('99.0.0', archive);
   await vi.waitFor(() => expect(fixture.check).toHaveBeenCalledOnce());
   fixture.native.emit('update-downloaded');
   await staging;
