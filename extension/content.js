@@ -452,6 +452,17 @@
    */
   let quietSince = 0;
   /**
+   * When ChatGPT's approval card was last seen. Right after the person answers it, the turn goes on,
+   * but the last message's native final can still be on the page for a moment; closing on it lost
+   * every later section (#1977, CodeRabbit on #1992). Finals wait out this window after the card.
+   */
+  let approvalSeenAt = -Infinity;
+  const APPROVAL_SETTLE_MS = 10_000;
+  function approvalHolding() {
+    if (CLF_DOM.approvalWaiting()) { approvalSeenAt = Date.now(); return true; }
+    return Date.now() - approvalSeenAt < APPROVAL_SETTLE_MS;
+  }
+  /**
    * How the turn looked when its stop button first went missing, and the turn it described.
    *
    * The outcome is read on the first quiet observation rather than at the close, because the
@@ -5178,7 +5189,9 @@
         // recorder would close the turn on it, and the turn goes on once the person answers (#1977,
         // CodeRabbit on #1992). The message's state is part of its signature, so the refresh after
         // the card goes publishes it as final.
-        const heldForApproval = generating && index === activeTurnIndex && CLF_DOM.approvalWaiting();
+        // The running turn, or the last one while its owner is not resolved yet (as liveAssistant below).
+        const heldForApproval = generating && (index === activeTurnIndex || (activeTurnIndex < 0 && index === answer.turns.length - 1)) &&
+          approvalHolding();
         const exactTerminal = Boolean(
           terminalMessageId && !heldForApproval &&
             (message.rawMessageId === terminalMessageId || message.messageId === terminalMessageId)
@@ -5286,8 +5299,8 @@
       Boolean(answer.turns[activeTurnIndex]?.endMessageId) &&
       !settledFinals.has(answer.turns[activeTurnIndex].endMessageId) &&
       // A turn waiting on ChatGPT's approval card is not over, whatever its last message says
-      // (#1977); the next refresh after the card goes reads the final again.
-      !CLF_DOM.approvalWaiting()
+      // (#1977), nor in the moment after it is answered; a refresh after that reads the final again.
+      !approvalHolding()
     ) {
       fiberTerminalMessageId = answer.turns[activeTurnIndex].endMessageId;
       settledFinals.add(fiberTerminalMessageId);
@@ -14768,6 +14781,7 @@
       streamRootKeys: () => [...streamRootsByKey.keys()],
       /** So a test settles a turn by the real window rather than a copy of the number. */
       TURN_SETTLE_MS,
+      APPROVAL_SETTLE_MS,
       DESKTOP_RECEIPT_MS,
       STALL_MS,
       GOAL_RETRY_MS,
