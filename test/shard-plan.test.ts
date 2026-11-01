@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { byWeight, parseShard, planShards, readWeights } from '../scripts/shard-plan.mjs';
+import { byWeight, parseShard, planShards, readWeights, shardChecks } from '../scripts/shard-plan.mjs';
 
 // CI shards (2026-10-31): every item in exactly one shard, close loads, the same plan in every job.
 describe('shard plan', () => {
@@ -35,5 +35,16 @@ describe('shard plan', () => {
   it('keeps only usable weights from a damaged file', () => {
     expect([...readWeights('{"a": 1.5, "b": -1, "c": "x", "d": 0}')]).toEqual([['a', 1.5], ['d', 0]]);
     expect(readWeights('not json').size).toBe(0);
+  });
+
+  it('runs every check that is not skipped exactly once across the UI shards, and names skipped ones only in the first', () => {
+    const found = ['a', 'b', 'c', 'd', 'e', 'f', 'skip-1', 'skip-2'];
+    const skip = new Set(['skip-1', 'skip-2', 'not-found']);
+    const shards = [1, 2, 3].map(index => shardChecks(found, skip, weights, { index, count: 3 }));
+    const ran = shards.flat().filter(name => !skip.has(name));
+    expect(ran.sort()).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
+    expect(shards[0]!.filter(name => skip.has(name))).toEqual(['skip-1', 'skip-2']);
+    expect(shards.slice(1).flat().some(name => skip.has(name))).toBe(false);
+    expect(shardChecks(found, skip, weights, null)).toEqual(found);
   });
 });

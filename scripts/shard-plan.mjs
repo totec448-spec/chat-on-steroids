@@ -31,6 +31,18 @@ export function planShards(items, weights, count) {
   return plan;
 }
 
+/**
+ * The UI checks one shard runs, in order: its share of the checks that run (skipped ones take no
+ * share), longest first, and the skipped ones named once, by the first shard. Without a shard: all.
+ */
+export function shardChecks(found, skip, weights, shard) {
+  if (!shard) return [...found];
+  const runnable = found.filter(name => !skip.has(name));
+  const plan = planShards(runnable, weights, shard.count);
+  return [...byWeight(runnable.filter(name => plan.get(name) === shard.index - 1), weights),
+    ...(shard.index === 1 ? found.filter(name => skip.has(name)) : [])];
+}
+
 /** `1/3` style shard (1-based) from an environment value, or null when unset or malformed. */
 export function parseShard(value) {
   const match = /^(\d+)\/(\d+)$/.exec(String(value ?? '').trim());

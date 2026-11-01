@@ -11,7 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { buildProblem, needsBuild } from './ui-build-state.mjs';
-import { byWeight, parseShard, planShards, readWeights } from './shard-plan.mjs';
+import { parseShard, readWeights, shardChecks } from './shard-plan.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const electron = createRequire(import.meta.url)('electron');
@@ -37,11 +37,7 @@ let weights = new Map();
 try { weights = readWeights(readFileSync(path.join(root, 'scripts', 'ui-check-weights.json'), 'utf8')); } catch { /* every check weighs the same */ }
 // Only the checks that run are planned: a skipped one would take a share of a shard's time while
 // running nowhere. The first shard names the skipped ones, once (CodeRabbit on #1983).
-const runnable = found.filter(name => !skip.has(name));
-const plan = shard ? planShards(runnable, weights, shard.count) : null;
-const scripts = plan
-  ? [...byWeight(runnable.filter(name => plan.get(name) === shard.index - 1), weights), ...(shard.index === 1 ? found.filter(name => skip.has(name)) : [])]
-  : found;
+const scripts = shardChecks(found, skip, weights, shard);
 if (shard) console.log(`UI checks shard ${shard.index} of ${shard.count}: ${scripts.length} of ${found.length} checks`);
 // CI runners are shared and uneven: a different check timed out on each run while all of them
 // passed on a real machine. With VERIFY_UI_RETRY a failed check runs once more; a pass on retry
