@@ -5,13 +5,14 @@ import { expect, it, vi } from 'vitest';
 const background = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
 const code = background.slice(background.indexOf('let extensionReloadPending = false;'), background.indexOf('async function maintainOnce() {'));
 
-function worker(options: { running?: string; pings?: Array<object | null>; prepared?: object; attempt?: string; firefox?: boolean; openings?: Record<string, object> } = {}) {
+function worker(options: { running?: string; pings?: Array<object | null>; prepared?: object; attempt?: string; firefox?: boolean; openings?: Record<string, object>; clock?: { now: number } } = {}) {
   const store: Record<string, unknown> = options.attempt ? { extensionReloadAttempt: options.attempt } : {};
   const reload = vi.fn();
   const call = vi.fn(async () => ({ ok: true, data: options.prepared ?? { build: 'bbbbbbbbbbbb', ready: true } }));
   const pings = options.pings ?? [{ ok: true, busy: false }];
   const context = vm.createContext({
     CHATGPT_TAB_URLS: ['https://chatgpt.com/*'], workerStampReady: Promise.resolve(), workerStampValue: options.running ?? 'aaaaaaaaaaaa', call,
+    ...(options.clock ? { Date: { now: () => options.clock!.now } } : {}),
     inputOpenings: options.openings ?? {},
     tabReply: async (id: number) => pings[id - 1] ?? null,
     chrome: { runtime: { reload, ...(options.firefox ? { getBrowserInfo: async () => ({ name: 'Firefox' }) } : {}) }, tabs: { query: async () => pings.map((_, index) => ({ id: index + 1 })) },
@@ -136,4 +137,45 @@ it('waits when the app says a message went out since its last status (CodeRabbit
   await h.run(undefined, { inputs: [], sending: [] });
   expect(h.reload).not.toHaveBeenCalled();
   expect(h.hold()).toBe('sending');
+});
+
+// 2026-10-31: on the maintainer's Mac a long Goal chat answered almost without a pause, so the
+// update waited on "a ChatGPT tab is still answering" for hours. After 30 minutes of waiting only for
+// answering pages it goes ahead at a moment when no tool call runs and nothing is being sent.
+it('updates past answering pages after waiting 30 minutes for them, at a moment with no tool call and nothing sent', async () => {
+  const clock = { now: 1_000_000 };
+  const h = worker({ pings: [{ ok: true, busy: true }], clock });
+  await h.run();
+  expect(h.hold()).toBe('chat-busy');
+  clock.now += 29 * 60_000;
+  await h.run();
+  expect(h.reload).not.toHaveBeenCalled();
+  clock.now += 2 * 60_000;
+  // A tool call runs right now: still waits.
+  await h.run({ build: 'bbbbbbbbbbbb', busy: true });
+  expect(h.hold()).toBe('app-busy');
+  // Something is being sent: still waits.
+  await h.run(undefined, { inputs: ['i'] });
+  expect(h.reload).not.toHaveBeenCalled();
+  await h.run();
+  expect(h.reload).toHaveBeenCalledTimes(1);
+  expect(h.call).toHaveBeenCalledWith('/extension/update', { method: 'POST', body: JSON.stringify({ pastBusyChatsMs: 31 * 60_000 }) });
+});
+
+it('counts the wait for answering pages per offered build', async () => {
+  const clock = { now: 1_000_000 };
+  const h = worker({ pings: [{ ok: true, busy: true }], clock });
+  await h.run({ build: 'cccccccccccc', busy: false });
+  clock.now += 31 * 60_000;
+  // A different build is offered now: its wait starts over.
+  await h.run();
+  expect(h.reload).not.toHaveBeenCalled();
+  expect(h.hold()).toBe('chat-busy');
+});
+
+it('waits when the app says a tool call started since its last status (CodeRabbit on #1961)', async () => {
+  const h = worker({ prepared: { ready: false, hold: 'app-busy' } });
+  await h.run();
+  expect(h.reload).not.toHaveBeenCalled();
+  expect(h.hold()).toBe('app-busy');
 });

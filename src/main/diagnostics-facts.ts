@@ -197,6 +197,8 @@ export interface ChatFactsSession {
   id: string; updatedAt: number; endedAt: number | null; toolCalls: number;
   /** Present on real sessions; never reported. */
   title?: string;
+  /** For the chat's Goal/Loop state; never reported. */
+  conversationId?: string | null;
   processExitNonzero?: number; toolRejected?: number; lastToolCallAt?: number | null;
   selectedModel?: { model?: string } | null; workerAssignment?: unknown;
 }
@@ -205,7 +207,9 @@ export interface ChatFactsSession {
 const MAX_CHAT_LINES = 15;
 
 /** Chats active in the last day, newest first and numbered; never their ids, titles or tasks. */
-export function chatLines(sessions: ChatFactsSession[], inputs: Array<{ sessionId: string | null; state: string }>, now = Date.now()): string[] {
+export function chatLines(sessions: ChatFactsSession[], inputs: Array<{ sessionId: string | null; state: string }>, now = Date.now(),
+  /** Each chat's Goal/Loop state as the app holds it (#1882), to compare with what its page showed. */
+  modeOf: (session: ChatFactsSession) => string | null = () => null): string[] {
   const active = sessions.filter(session => session.endedAt === null && now - session.updatedAt <= DAY)
     .sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
   const lines = active.slice(0, MAX_CHAT_LINES).map((session, index) => {
@@ -214,7 +218,7 @@ export function chatLines(sessions: ChatFactsSession[], inputs: Array<{ sessionI
     const model = session.selectedModel?.model && /^[A-Za-z0-9._:-]{1,40}$/.test(session.selectedModel.model) ? `, model ${session.selectedModel.model}` : '';
     return `#${index + 1} ${session.workerAssignment ? 'worker' : 'main'} chat${model}: active ${spokenAge(session.updatedAt, now)}, ` +
       `${session.toolCalls} tool call(s), ${session.processExitNonzero ?? 0} failed command(s), ${session.toolRejected ?? 0} refused, ` +
-      `inputs: ${states.length ? states.join(', ') : 'none'}`;
+      `inputs: ${states.length ? states.join(', ') : 'none'}` + (modeOf(session) ? `, mode ${modeOf(session)}` : '');
   });
   const known = new Set(sessions.map(session => session.id));
   const orphaned = inputs.filter(input => !input.sessionId || !known.has(input.sessionId)).length;

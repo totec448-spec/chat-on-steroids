@@ -63,7 +63,7 @@ import { findSessionByConversation, getSession, readEvents, readHandoff, readRec
 import { foldProgress } from '../shared/session.js';
 import { modelFacingText } from '../shared/content-reference.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
-import { BROWSER_PICKUP_MAX_ATTEMPTS, rotationMessage } from '../shared/recovery.js';
+import { BROWSER_PICKUP_ATTEMPT_LIMIT, BROWSER_PICKUP_MAX_ATTEMPTS, rotationMessage } from '../shared/recovery.js';
 
 /** A finish-only preference has authority only while the finish tool is available. */
 export async function astraFinishOnly(sessionId: string, conversationId: string): Promise<boolean> {
@@ -515,7 +515,7 @@ export function restoreGoalReplies(snapshot: GoalRepliesSnapshot | null): void {
       ...(raw.silencePro === true ? { silencePro: true } : {}),
       ...(raw.recoveryStopClaimed === true ? { recoveryStopClaimed: true } : {}),
       ...(Number.isSafeInteger(raw.pickupAttempts) && raw.pickupAttempts! >= 0
-        ? { pickupAttempts: Math.min(BROWSER_PICKUP_MAX_ATTEMPTS, raw.pickupAttempts!) } : {}),
+        ? { pickupAttempts: Math.min(BROWSER_PICKUP_ATTEMPT_LIMIT, raw.pickupAttempts!) } : {}),
       ...(Number.isSafeInteger(raw.pickupNextAt) && raw.pickupNextAt! > 0 ? { pickupNextAt: raw.pickupNextAt } : {}),
       ...(Number.isSafeInteger(raw.pickupStoppedAt) && raw.pickupStoppedAt! > 0
         ? { pickupStoppedAt: raw.pickupStoppedAt }
@@ -611,14 +611,14 @@ export async function recordGoalPickupAttemptNow(conversationId: string, replyId
   attempts: number; nextAt?: number; stoppedAt?: number
 } | null> {
   const reply = goalReplies.get(conversationId);
-  if (!reply || reply.state !== 'pending' || reply.replyId !== replyId || reply.pickupStoppedAt ||
-      (reply.pickupAttempts ?? 0) >= BROWSER_PICKUP_MAX_ATTEMPTS) return null;
+  // Past the quick burst the reply shows as stopped, and slow retries go on until the hard bound.
+  if (!reply || reply.state !== 'pending' || reply.replyId !== replyId ||
+      (reply.pickupAttempts ?? 0) >= BROWSER_PICKUP_ATTEMPT_LIMIT) return null;
   const previous = { ...reply };
   reply.pickupAttempts = (reply.pickupAttempts ?? 0) + 1;
-  if (reply.pickupAttempts >= BROWSER_PICKUP_MAX_ATTEMPTS) {
-    reply.pickupStoppedAt = at;
-    delete reply.pickupNextAt;
-  } else if (nextAt !== undefined) reply.pickupNextAt = nextAt;
+  if (reply.pickupAttempts >= BROWSER_PICKUP_MAX_ATTEMPTS) reply.pickupStoppedAt ??= at;
+  if (nextAt !== undefined) reply.pickupNextAt = nextAt;
+  else delete reply.pickupNextAt;
   try {
     await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies());
   } catch (error) {
@@ -636,17 +636,16 @@ export async function syncGoalPickupRecoveryNow(conversationId: string, replyId:
 }): Promise<boolean> {
   const reply = goalReplies.get(conversationId);
   if (!reply || reply.replyId !== replyId || !Number.isSafeInteger(state.attempts) || state.attempts < 0) return false;
-  const attempts = Math.min(BROWSER_PICKUP_MAX_ATTEMPTS, Math.max(reply.pickupAttempts ?? 0, state.attempts));
-  const stoppedAt = reply.pickupStoppedAt ?? state.stoppedAt;
-  const nextAt = stoppedAt || attempts >= BROWSER_PICKUP_MAX_ATTEMPTS ? undefined
-    : state.attempts >= (reply.pickupAttempts ?? 0) ? state.nextAt ?? reply.pickupNextAt : reply.pickupNextAt;
+  const attempts = Math.min(BROWSER_PICKUP_ATTEMPT_LIMIT, Math.max(reply.pickupAttempts ?? 0, state.attempts));
+  const stoppedAt = reply.pickupStoppedAt ?? state.stoppedAt ?? (attempts >= BROWSER_PICKUP_MAX_ATTEMPTS ? Date.now() : undefined);
+  // The next retry, slow ones after the stop included, belongs to the newest reload.
+  const nextAt = state.attempts >= (reply.pickupAttempts ?? 0) ? state.nextAt ?? reply.pickupNextAt : reply.pickupNextAt;
   if (reply.pickupAttempts === attempts && reply.pickupStoppedAt === stoppedAt && reply.pickupNextAt === nextAt) return true;
   const previous = { ...reply };
   reply.pickupAttempts = attempts;
-  if (stoppedAt || attempts >= BROWSER_PICKUP_MAX_ATTEMPTS) {
-    reply.pickupStoppedAt = stoppedAt ?? Date.now();
-    delete reply.pickupNextAt;
-  } else if (nextAt !== undefined) reply.pickupNextAt = nextAt;
+  if (stoppedAt) reply.pickupStoppedAt = stoppedAt;
+  if (nextAt !== undefined) reply.pickupNextAt = nextAt;
+  else delete reply.pickupNextAt;
   try {
     await writeDurableNow(GOAL_REPLIES_STATE, snapshotGoalReplies());
   } catch (error) {
@@ -1271,6 +1270,8 @@ export function moveGoalSwitch(fromConversationId: string, toConversationId: str
   goalSwitches.delete(fromConversationId);
   goalSwitches.set(toConversationId, row);
   persistGoalSwitches();
+  // #1882: which mode the replacement chat took over, so a page that later shows another can be compared.
+  logInfo(`goal: ${fromConversationId}'s own ${row.enabled ? row.mode : 'Normal'} switch moved to ${toConversationId} (Compact & Resume)`);
   return true;
 }
 
@@ -1891,6 +1892,9 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
       // Only a timeout teaches the size: a newer turn or Goal switched off also cancels a prompt.
       onSentUnanswered: () => { if (request.signal.reason?.name === 'TimeoutError') noteGoalHelperUnanswered(prompt.length); },
       ...goalHelperSelection()
+    }).catch((error: unknown) => {
+      if (error instanceof Error && error.message.startsWith('goal_helper_model_unconfirmed')) noteHelperModelUnconfirmed();
+      throw error;
     }), false);
     request.signal.throwIfAborted();
     return decision;
@@ -2005,10 +2009,24 @@ let helperFallbackLogged = '';
 /** The helper model as it will actually run, for progress and logs; never a model it will not use. */
 function helperModelLabel(): string { return goalHelperSelection().model ?? "ChatGPT's current selection"; }
 
+/**
+ * The picker could not confirm the helper's model (2026-11-01: four times a day on the maintainer's
+ * Mac, each one a Goal that then waited for a person). For a while the helper runs on ChatGPT's
+ * current selection, as it does for a model the account does not offer, so the next ask goes out.
+ */
+const HELPER_MODEL_FALLBACK_MS = 30 * 60_000;
+let helperModelUnconfirmedUntil = 0;
+function noteHelperModelUnconfirmed(now = Date.now()): void {
+  helperModelUnconfirmedUntil = now + HELPER_MODEL_FALLBACK_MS;
+  logWarn(`goal: ChatGPT's picker did not confirm the helper's model; the helper uses ChatGPT's current selection for ${HELPER_MODEL_FALLBACK_MS / 60_000} minutes`);
+}
+export function resetHelperModelFallbackForTests(): void { helperModelUnconfirmedUntil = 0; }
+
 export function goalHelperSelection(): { model: string | null; reasoningEffort: ReasoningEffort | null } {
   const settings = getConfig().goal;
   let model: string | null = settings.helperModel ?? DEFAULT_HELPER_CHAT_MODEL;
   let reasoningEffort: ReasoningEffort | null = settings.helperReasoning ?? 'high';
+  if (Date.now() < helperModelUnconfirmedUntil) return { model: null, reasoningEffort: null };
   const catalog = getChatModels();
   const models = catalog.models;
   // No readable picker at all (seen on Free plans, #1282): no model can ever be confirmed, so an
