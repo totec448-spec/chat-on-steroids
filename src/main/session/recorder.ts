@@ -89,9 +89,8 @@ interface LiveConversation {
   /** Recording-only workflow continuity, advanced solely by explicit continued turn ends. */
   recordingLineage?: RecordingLineage;
   /** Fresh page proof in this process, not reconstructed from historical turns. */
-  pageRequest?: { requestId: string; at: number; turnId?: string };
+  pageRequest?: { requestId: string; at: number; createAt?: number; turnId?: string };
   questionAt?: number;
-  questionAuthoredNow?: boolean;
   conversationId: string;
   sessionId: string;
   /** Durable local turn lifecycle only. Never used as MCP ownership evidence. */
@@ -901,16 +900,33 @@ function noteCallEvidence(
       }
     } else if (result === 'stored') {
       stored = true;
+      const createAt = typeof call.createTime === 'number' && Number.isFinite(call.createTime)
+        ? (call.createTime > 1e12 ? call.createTime : call.createTime * 1000)
+        : undefined;
       const live = conversations.get(conversationId);
-      if (live) live.pageRequest = { requestId: call.requestId, at: observedAt, ...(turnId ? { turnId } : {}) };
+      if (live) {
+        live.pageRequest = {
+          requestId: call.requestId,
+          at: observedAt,
+          ...(createAt !== undefined ? { createAt } : {}),
+          ...(turnId ? { turnId } : {})
+        };
+      }
       logInfo(`request attribution: ${call.requestId} -> conversation ${conversationId}`);
-      noteRouteRequestSighted(call.requestId, conversationId, observedAt,
-        typeof call.createTime === 'number' && Number.isFinite(call.createTime) ? call.createTime * 1000 : null);
+      noteRouteRequestSighted(call.requestId, conversationId, observedAt, createAt ?? null);
       scheduleAttributionRepair(call.requestId);
     } else if (result === 'same' && turnId) {
+      const createAt = typeof call.createTime === 'number' && Number.isFinite(call.createTime)
+        ? (call.createTime > 1e12 ? call.createTime : call.createTime * 1000)
+        : undefined;
       const live = conversations.get(conversationId);
       if (live && (!live.turnId || live.turnId === turnId)) {
-        live.pageRequest = { requestId: call.requestId, at: observedAt, turnId };
+        live.pageRequest = {
+          requestId: call.requestId,
+          at: observedAt,
+          ...(createAt !== undefined ? { createAt } : {}),
+          turnId
+        };
       }
     }
   }
@@ -2502,7 +2518,6 @@ async function recordChatObservationsNow(
           const questionAt = Math.min(item.time, written.event.time);
           if (!live.endedTurn || questionAt >= live.endedTurn.endedAt || item.authoredNow === true) {
             live.questionAt = questionAt;
-            live.questionAuthoredNow = item.authoredNow === true;
           }
         }
         if (item.authoredNow === true) {
@@ -2515,7 +2530,6 @@ async function recordChatObservationsNow(
         if (!item.messageId) continue;
         if (live && !live.turnId) {
           delete live.questionAt;
-          delete live.questionAuthoredNow;
         }
         const state = item.state ?? (item.final === true ? 'final' : 'streaming');
         // A reload can destroy the document-local generation id after this recorder already
@@ -2739,13 +2753,13 @@ async function recordChatObservationsNow(
             `request attribution: continued recording context in ${conversationId}; explicit continued turn`
           );
           const questionAt = live.questionAt;
-          const questionAuthoredNow = live.questionAuthoredNow === true;
           delete live.questionAt;
-          delete live.questionAuthoredNow;
           if (live.pageRequest && !continuing && !live.pageRequest.turnId &&
-              live.pageRequest.at <= item.time && (!live.endedTurn || live.pageRequest.at > live.endedTurn.endedAt) &&
+              live.pageRequest.createAt !== undefined &&
+              live.pageRequest.createAt <= item.time &&
+              (!live.endedTurn || live.pageRequest.createAt > live.endedTurn.endedAt) &&
               questionAt !== undefined && item.time - questionAt <= 15_000 &&
-              (live.pageRequest.at >= questionAt || (questionAuthoredNow && item.time - live.pageRequest.at <= 15_000))) {
+              live.pageRequest.createAt >= questionAt) {
             live.pageRequest.turnId = item.turnId;
           }
           live.knownTurnStarts.add(item.turnId);
@@ -2824,7 +2838,6 @@ async function recordChatObservationsNow(
           live.turnRequestIds = new Set<string>();
           if (live.turnId === item.turnId) {
             delete live.questionAt;
-            delete live.questionAuthoredNow;
             if (live.pageRequest && (live.pageRequest.turnId === item.turnId || live.pageRequest.at <= item.time)) {
               delete live.pageRequest;
             }
