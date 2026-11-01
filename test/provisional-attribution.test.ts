@@ -130,6 +130,10 @@ it('anchors a turn when the response request id arrives between the new question
     { kind: 'user_message', time: now - 1000, authoredTime: true, messageId: 'question-0', text: 'Warmup' },
     { kind: 'turn_start', time: now - 400, turnId: 'turn-0' }
   ]);
+  await recordRequestEvidence('chat-a', [{
+    kind: 'tool_evidence', time: now - 350, fiberConversationId: 'chat-a',
+    calls: [{ requestId: 'historical-older-create-time', messageId: 'm-old-create', tool: 'read', order: 0, answered: false, createTime: (now - 5000) / 1000 }]
+  }]);
   expect(captureRecordingContext(now)).toBeNull();
   await recordChatObservations('chat-a', [{ kind: 'turn_end', time: now - 300, turnId: 'turn-0', outcome: 'completed' }]);
 

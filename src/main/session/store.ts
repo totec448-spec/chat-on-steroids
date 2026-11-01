@@ -4328,7 +4328,12 @@ function invalidateAssetUsage(sessionId: string): void {
   globalAssetUsage = null;
 }
 
-export async function readAsset(sessionId: string, assetId: string, maxBytes?: number): Promise<Buffer | null> {
+export async function readAsset(
+  sessionId: string,
+  assetId: string,
+  maxBytes?: number,
+  options?: { throwOnReadError?: boolean }
+): Promise<Buffer | null> {
   assertSessionId(sessionId);
   if (!/^[0-9a-f]{8,64}\.(png|jpg|txt|bin)$/.test(assetId)) return null;
   try {
@@ -4350,7 +4355,8 @@ export async function readAsset(sessionId: string, assetId: string, maxBytes?: n
       }
       return null;
     } finally { await handle.close(); }
-  } catch {
+  } catch (err) {
+    if (options?.throwOnReadError && (err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err;
     return null;
   }
 }

@@ -91,6 +91,7 @@ interface LiveConversation {
   /** Fresh page proof in this process, not reconstructed from historical turns. */
   pageRequest?: { requestId: string; at: number; createAt?: number; turnId?: string };
   questionAt?: number;
+  turnQuestionAt?: number;
   conversationId: string;
   sessionId: string;
   /** Durable local turn lifecycle only. Never used as MCP ownership evidence. */
@@ -904,7 +905,8 @@ function noteCallEvidence(
         ? (call.createTime > 1e12 ? call.createTime : call.createTime * 1000)
         : undefined;
       const live = conversations.get(conversationId);
-      if (live) {
+      if (live && (turnId || live.turnStartedAt === null || createAt === undefined ||
+          createAt >= (live.turnQuestionAt ?? live.turnStartedAt))) {
         live.pageRequest = {
           requestId: call.requestId,
           at: observedAt,
@@ -1000,7 +1002,7 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
             for (const asset of event.call.assets ?? []) assets.set(asset.id, asset.mimeType);
             let complete = true;
             for (const [id, mime] of assets) {
-              const bytes = await readAsset(summary.id, id);
+              const bytes = await readAsset(summary.id, id, undefined, { throwOnReadError: true });
               if (!bytes) { complete = false; break; }
               await writeAsset(proof.sessionId, bytes, mime);
             }
@@ -1101,7 +1103,7 @@ async function repairAttributionNow(affected?: ReadonlySet<string>): Promise<{ s
           for (const asset of event.call.assets ?? []) assets.set(asset.id, asset.mimeType);
         }
         for (const [assetId, mimeType] of assets) {
-          const data = await readAsset(summary.id, assetId);
+          const data = await readAsset(summary.id, assetId, undefined, { throwOnReadError: true });
           if (!data) {
             assetsComplete = false;
             break;
@@ -1373,8 +1375,9 @@ export function captureRecordingContext(startedAt: number): RecordingContext | n
     return recordingContextCurrent(previous) ? { ...previous, turnId: live.turnId! } : null;
   }
   const page = live.pageRequest;
-  if (!page || (page.turnId ? page.turnId !== live.turnId : page.at < live.turnStartedAt!) || page.at > startedAt ||
-      requestCorrelation(page.requestId)?.sessionId !== live.sessionId) return null;
+  if (!page || (page.turnId ? page.turnId !== live.turnId : page.at < live.turnStartedAt! ||
+      (page.createAt !== undefined && page.createAt < (live.turnQuestionAt ?? live.turnStartedAt!))) ||
+      page.at > startedAt || requestCorrelation(page.requestId)?.sessionId !== live.sessionId) return null;
   const lineage = live.recordingLineage ??= { turnId: live.turnId! };
   const context = { conversationId: live.conversationId, sessionId: live.sessionId, turnId: live.turnId!, lineage,
     cohort: [...conversations.values()].map(live => ({ live, lineage: live.recordingLineage })) };
@@ -2754,6 +2757,7 @@ async function recordChatObservationsNow(
           );
           const questionAt = live.questionAt;
           delete live.questionAt;
+          live.turnQuestionAt = questionAt;
           if (live.pageRequest && !continuing && !live.pageRequest.turnId &&
               live.pageRequest.createAt !== undefined &&
               live.pageRequest.createAt <= item.time &&
@@ -2838,6 +2842,7 @@ async function recordChatObservationsNow(
           live.turnRequestIds = new Set<string>();
           if (live.turnId === item.turnId) {
             delete live.questionAt;
+            delete live.turnQuestionAt;
             if (live.pageRequest && (live.pageRequest.turnId === item.turnId || live.pageRequest.at <= item.time)) {
               delete live.pageRequest;
             }
