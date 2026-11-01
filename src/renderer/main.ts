@@ -3032,6 +3032,14 @@ document.addEventListener('click', (event) => {
   if (external?.dataset.linkExternal) void run(api.openLink(external.dataset.linkExternal, { external: true }));
   const link = target.closest<HTMLElement>('[data-link]');
   if (link?.dataset.link) void run(api.openLink(link.dataset.link));
+  // A plain web link outside the chat (the Usage price links, Send feedback's guide link): the window
+  // denies new windows, so without this it did nothing (design audit 2026-11-01). Chat links route
+  // themselves and mark the click handled; the main process validates the address again.
+  const anchor = target.closest<HTMLAnchorElement>('a[href]');
+  if (anchor && !event.defaultPrevented && /^https?:\/\//i.test(anchor.href)) {
+    event.preventDefault();
+    void run(api.openLink(anchor.href, { external: true }));
+  }
 });
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape' || $('connectionPopover').hidden) return;
