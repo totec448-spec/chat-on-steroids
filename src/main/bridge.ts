@@ -10031,8 +10031,12 @@ async function inspectOwedPickups(now: number, focus?: PickupFocus): Promise<boo
     // its last reload can still be queued. A queued input's stop already pushed with its outbox
     // write; a Goal reply's ledger has no push of its own.
     const justStopped = Boolean(watch.stoppedAt && !wasStopped);
-    if (justStopped) {
-      notifyChanged();
+    // The person may have blocked or stopped the chat while the stop mark was being saved: then nothing
+    // keeps trying, and a notice saying so would be wrong (CodeRabbit on #1979).
+    const stillOwed = justStopped && !isChatBlocked(reply.conversationId) && !stopRequestedFor(reply.conversationId) &&
+      (await getSession(reply.sessionId).catch(() => null))?.conversationId === reply.conversationId;
+    if (justStopped) notifyChanged();
+    if (stillOwed) {
       // The alert goes with the saved stop mark, once, also when this pass's reload cannot be queued
       // (another repair holds the chat): later passes see the chat already stopped (CodeRabbit on #1979).
       logWarn(`bridge: browser pickup recovery has not collected the step in ${reply.conversationId} after ${watch.attempts} reloads; ` +
