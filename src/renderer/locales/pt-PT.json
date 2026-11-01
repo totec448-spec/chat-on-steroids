@@ -3858,5 +3858,7 @@
   "Recovery stopped": "Recuperação interrompida",
   "Stopped after {0} attempts": "Parado após {0} tentativas",
   "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "O navegador não recebeu o passo pendente após {0} recarregamentos automáticos. A entrada original na fila ou a obrigação do Goal permanece guardada. O CoS não voltará a recarregar este chat automaticamente para este passo; abra-o e continue manualmente.",
-  "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.": "O seletor do ChatGPT não confirmou o modelo do assistente. Goal pergunta novamente com a seleção atual do ChatGPT."
+  "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.": "O seletor do ChatGPT não confirmou o modelo do assistente. Goal pergunta novamente com a seleção atual do ChatGPT.",
+  "Plugins could not be loaded.": "Não foi possível carregar os plugins.",
+  "Pets could not be loaded.": "Não foi possível carregar os mascotes."
 }
