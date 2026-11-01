@@ -5951,7 +5951,8 @@ Pull-request CI (`ci.yml`, since 2026-10-31) runs the same checks in parallel jo
 `verify:ci` per OS (release builds still run `verify:ci`): one Linux job for privacy, notices and
 the typecheck; the unit tests in shards (`vitest run --shard=i/n`: Windows 3, macOS 2, Linux 2; macOS
 stays at two because the account runs at most five macOS jobs at once); `computer`/`mcp-shutdown`
-and the live plugin suites only in each OS's first shard; the UI checks in three shards per OS
+and the live plugin suites only in each OS's first shard; the UI checks in two shards on macOS (four
+macOS jobs per pull request in all) and three on Windows
 (`VERIFY_UI_SHARD=i/n` in `verify-ui.mjs`). Shards are balanced by measured seconds, not file count:
 `test/weighted-sequencer.ts` (Vitest's sequencer; it also runs the longest files first) and
 `verify-ui.mjs` share `scripts/shard-plan.mjs`, reading `test/test-weights.json` and
