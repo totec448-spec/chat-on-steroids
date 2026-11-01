@@ -2786,13 +2786,17 @@ var CLF_DOM = (() => {
     if (attachmentHost && tileParent && tileParent !== attachmentHost) {
       const actions = [...tileParent.querySelectorAll('button')];
       if (actions.length === 2 && actions[1] === button) {
-        const open = actions[0], name = open.getAttribute('aria-label');
+        const open = actions[0], label = open.getAttribute('aria-label');
         const removal = (button.getAttribute('aria-label') || '').trim();
-        const labelled = [...tileParent.querySelectorAll('span')].some(node =>
-          !node.children.length && node.textContent === name);
+        const shownNames = [...tileParent.querySelectorAll('span')].filter(node => !node.children.length).map(node => node.textContent);
+        // The name the tile shows, which its open button's label must be. On some accounts that label is
+        // the name twice ("a.htmla.html", Spanish ChatGPT, #1986): every file waited out its 10 minutes.
+        // Only that exact doubling is accepted besides the name itself.
+        const name = label && shownNames.includes(label) ? label
+          : label ? shownNames.find(shown => !!shown && label === shown + shown) : undefined;
         // The tile's structure is the proof, not the remove label's wording: "Remove notes.zip" in
         // English, "notes.zip entfernen" in German (#1942), and a label naming no file at all.
-        if (name && removal && removal !== name.trim() && labelled &&
+        if (name && removal && removal !== label.trim() && removal !== name.trim() &&
             open.closest('[data-composer-attachments]') === attachmentHost) return name;
       }
     }
