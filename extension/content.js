@@ -5192,8 +5192,15 @@
         // The running turn, or the last one while its owner is not resolved yet (as liveAssistant below).
         const heldForApproval = generating && (index === activeTurnIndex || (activeTurnIndex < 0 && index === answer.turns.length - 1)) &&
           approvalHolding();
+        // A scan still in flight when the turn was stopped can return after it ended: its last message is
+        // partial prose, never a final answer (a final would let recovery read the stop as completed;
+        // CodeRabbit on #1992). Once ChatGPT runs that turn again, it may end normally.
+        // Without an owner (a stop unmaps the section), the last turn on the page is the stopped one until a
+        // new turn runs.
+        const staleAfterStop = !!stoppedEnd && !(generating && index === activeTurnIndex) &&
+          (localOwner ? stoppedEnd.turnId === localOwner : !generating && index === answer.turns.length - 1);
         const exactTerminal = Boolean(
-          terminalMessageId && !heldForApproval &&
+          terminalMessageId && !heldForApproval && !staleAfterStop &&
             (message.rawMessageId === terminalMessageId || message.messageId === terminalMessageId)
         );
         const state = terminalMessageId
