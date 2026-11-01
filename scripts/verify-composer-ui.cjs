@@ -194,13 +194,18 @@ app.whenReady().then(async () => {
   await check('Cancel reaches native controller', `composerFixture.controls.job===null`);
   // 2026-11-01: a Compact & Resume waiting too long for ChatGPT's summary offers the last saved one,
   // and the context meter carries a dot until the person acts on it.
-  await js(`composerFixture.controls.job={busy:true,phase:'requesting',stage:'handoff-pending'};composerFixture.controls.lastSummary={handoffId:'2026-11-01-36ad1800',createdAt:Date.now()-3600000,earlierChat:true};composerFixture.notify()`);
-  await until(`document.getElementById('contextMeter').hasAttribute('data-attention')`);
+  // Nothing else repaints this quiet chat: the controls are asked again when the 15 minutes run out (CodeRabbit on #2019).
+  await js(`window.offerAt=Date.now()+1500;composerFixture.controls.job={busy:true,phase:'requesting',stage:'handoff-pending',handoffId:null,startedAt:Date.now()-15*60000+1500};composerFixture.notify()`);
+  await pause(400);
+  await check('No offer before the deadline', `!document.getElementById('contextMeter').hasAttribute('data-attention')&&document.getElementById('resumeLastSummary').hidden`);
+  await until(`document.getElementById('contextMeter').hasAttribute('data-attention')`, 8000);
+  await check('The offer is said to screen readers', `/15 minutes/.test(document.getElementById('contextMeterNotice').textContent)&&document.getElementById('contextMeterButton').getAttribute('aria-describedby')==='contextMeterNotice'`);
   await click('#contextMeterButton'); await pause(200);
   await check('A stuck Compact & Resume offers the last summary', `!document.getElementById('resumeLastSummary').hidden&&getComputedStyle(document.getElementById('resumeLastSummary')).display!=='none'&&/15 minutes/.test(document.getElementById('sessionControlStatus').textContent)`);
   await capture('context-last-summary');
   await click('#resumeLastSummary'); await pause(300);
-  await check('Continuing from the last summary reaches the native controller', `window.resumedFrom==='2026-11-01-36ad1800'&&document.getElementById('resumeLastSummary').hidden&&!document.getElementById('contextMeter').hasAttribute('data-attention')`);
+  await check('Continuing from the last summary reaches the native controller', `window.resumedFrom==='2026-11-01-36ad1800'&&document.getElementById('resumeLastSummary').hidden&&!document.getElementById('contextMeter').hasAttribute('data-attention')&&document.getElementById('contextMeterNotice').textContent===''`);
+  await js(`window.offerAt=0`);
   await js(`composerFixture.controls.job=null;composerFixture.notify()`); await pause(200);
   await click('#attachmentMenu > summary'); await capture('add');
   await click('#composerSkills');
