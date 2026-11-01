@@ -140,6 +140,46 @@ export function el(tag: string, className = '', text: string | (() => string) = 
 
 export const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
+/**
+ * Paints a panel now when it is on screen, and otherwise once it is shown, with the newest paint
+ * only. Every state push used to rebuild Setup and Settings lists nobody could see: about 1,000
+ * nodes a minute of garbage, which left Blink's heap at 1.1 GB with 180 MB of it in use
+ * (2026-11-01, 80–92% fragmented pages that a collection never hands back).
+ */
+const pendingPaints = new Map<Element, () => void>();
+let shownWatch: ResizeObserver | undefined;
+
+/** The outermost hidden element around `node`: the one whose box appears when the panel is shown. */
+function hiddenRoot(node: Element): Element {
+  let root = node;
+  while (root.parentElement && !root.parentElement.checkVisibility()) root = root.parentElement;
+  return root;
+}
+
+function flushShownPaints(): void {
+  shownWatch?.disconnect();
+  for (const [node, paint] of [...pendingPaints]) {
+    if (!node.isConnected) { pendingPaints.delete(node); continue; }
+    if (!node.checkVisibility()) { shownWatch!.observe(hiddenRoot(node)); shownWatch!.observe(node); continue; }
+    pendingPaints.delete(node);
+    paint();
+  }
+}
+
+export function paintWhenShown(node: Element, paint: () => void): void {
+  // Without the two browser features (tests in jsdom), paint as before.
+  if (typeof node.checkVisibility !== 'function' || typeof ResizeObserver !== 'function' || node.checkVisibility()) {
+    pendingPaints.delete(node);
+    paint();
+    return;
+  }
+  pendingPaints.set(node, paint);
+  // A shown panel gets a box before the frame is painted, so it never shows the older list.
+  shownWatch ??= new ResizeObserver(flushShownPaints);
+  shownWatch.observe(hiddenRoot(node));
+  shownWatch.observe(node);
+}
+
 let toastTimer: number | undefined;
 let toastWatch: ResizeObserver | undefined;
 
