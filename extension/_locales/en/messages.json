@@ -1267,5 +1267,8 @@
   },
   "content_task_waiting_app": {
     "message": "Waiting for Chat On Steroids to answer."
+  },
+  "content_revival_draft_appeared": {
+    "message": "Something was typed in the chat while the worker's wake was getting ready, so the wake did not replace it."
   }
 }

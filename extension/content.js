@@ -452,6 +452,17 @@
    */
   let quietSince = 0;
   /**
+   * When ChatGPT's approval card was last seen. Right after the person answers it, the turn goes on,
+   * but the last message's native final can still be on the page for a moment; closing on it lost
+   * every later section (#1977, CodeRabbit on #1992). Finals wait out this window after the card.
+   */
+  let approvalSeenAt = -Infinity;
+  const APPROVAL_SETTLE_MS = 10_000;
+  function approvalHolding() {
+    if (CLF_DOM.approvalWaiting()) { approvalSeenAt = Date.now(); return true; }
+    return Date.now() - approvalSeenAt < APPROVAL_SETTLE_MS;
+  }
+  /**
    * How the turn looked when its stop button first went missing, and the turn it described.
    *
    * The outcome is read on the first quiet observation rather than at the close, because the
@@ -3267,7 +3278,13 @@
       }
     }
 
-    if (generating && nowGenerating && quietSince > 0) {
+    // ChatGPT's tool approval card hides Stop while the turn waits for a person. That is a held
+    // turn, not a quiet one: closing it after the settle window lost every answer section that
+    // followed the person's answer (#1977, 2.1.49 on Windows). It counts as still generating here.
+    // The app's Stop still ends it: with the card standing there is no native Stop to press, and
+    // the stop is recorded as the page sees it, as before (CodeRabbit on #1992).
+    const heldForApproval = CLF_DOM.approvalWaiting() && !stopRequestedAt;
+    if (generating && (nowGenerating || heldForApproval) && quietSince > 0) {
       // The stop button came back, so it never went away in the sense that matters: this is
       // one turn that flickered, not two turns. Everything the generation holds — its id,
       // its baselines, its reported-progress map — is still the right state to carry on
@@ -3277,7 +3294,7 @@
       quietOutcome = null;
     }
 
-    if (generating && !nowGenerating) {
+    if (generating && !nowGenerating && !heldForApproval) {
       // The turn as it stood on the first quiet observation, read once. See quietOutcome.
       if (quietSince === 0) {
         quietSince = Date.now();
@@ -5173,8 +5190,15 @@
         // like a sequence of finished answers and could let recovery treat the wrong one as
         // completion evidence.
         const terminalMessageId = turn.endMessageId;
+        // The running turn's last message is not final while ChatGPT's approval card waits: the
+        // recorder would close the turn on it, and the turn goes on once the person answers (#1977,
+        // CodeRabbit on #1992). The message's state is part of its signature, so the refresh after
+        // the card goes publishes it as final.
+        // The running turn, or the last one while its owner is not resolved yet (as liveAssistant below).
+        const heldForApproval = generating && (index === activeTurnIndex || (activeTurnIndex < 0 && index === answer.turns.length - 1)) &&
+          approvalHolding();
         const exactTerminal = Boolean(
-          terminalMessageId &&
+          terminalMessageId && !heldForApproval &&
             (message.rawMessageId === terminalMessageId || message.messageId === terminalMessageId)
         );
         const state = terminalMessageId
@@ -5278,7 +5302,10 @@
       activeTurnIndex >= 0 &&
       activeLocalTurnId === turnId &&
       Boolean(answer.turns[activeTurnIndex]?.endMessageId) &&
-      !settledFinals.has(answer.turns[activeTurnIndex].endMessageId)
+      !settledFinals.has(answer.turns[activeTurnIndex].endMessageId) &&
+      // A turn waiting on ChatGPT's approval card is not over, whatever its last message says
+      // (#1977), nor in the moment after it is answered; a refresh after that reads the final again.
+      !approvalHolding()
     ) {
       fiberTerminalMessageId = answer.turns[activeTurnIndex].endMessageId;
       settledFinals.add(fiberTerminalMessageId);
@@ -12220,8 +12247,16 @@
     if (boot.model || boot.reasoningEffort) step('model');
     // An announcement that opened over the picker refuses the choice; closing it earns one more try.
     const chooseModel = () => CLF_DOM.selectModelSettings(boot.model, boot.reasoningEffort, stillOnTarget);
-    if ((boot.model || boot.reasoningEffort) && !(await chooseModel()) &&
-        !((await closeAnnouncements(stillOnTarget)).length && stillOnTarget() && await chooseModel())) {
+    // Confirmed is what the picker proved; only that is ever reported as the chat's model.
+    const modelConfirmed = !!(boot.model || boot.reasoningEffort) && (await chooseModel() ||
+      ((await closeAnnouncements(stillOnTarget)).length > 0 && stillOnTarget() && await chooseModel()));
+    let mayGoOn = !(boot.model || boot.reasoningEffort) || modelConfirmed;
+    // A wake or a Compact & Resume goes out on ChatGPT's current model rather than not at all: a worker
+    // that never wakes stops its whole run (#1952), and an abandoned resume stops its chat for good
+    // (2026-11-01, Mac). A resume tries the model again in its new chat (publishBootstrapSelection).
+    // The app logs which model it could not confirm. A new worker's chat still refuses.
+    if (!mayGoOn && (boot.type === 'revive' || boot.type === 'resume') && stillOnTarget()) { step('model-unconfirmed'); mayGoOn = true; }
+    if (!mayGoOn) {
       return void (await fail(t(
         'content_bootstrap_model_unavailable',
         'The requested model or reasoning is unavailable or could not be confirmed in ChatGPT'
@@ -12275,7 +12310,8 @@
       // Accepted Send owns the first turn even when no model was explicitly selected and no
       // further native mutation will wake a hidden document.
       observe();
-      if (!boot.model) return;
+      // A wake that went on without the picker's proof reports nothing (CodeRabbit on #1972).
+      if (!boot.model || !modelConfirmed) return;
       // The picker proved this selection before the new worker had a conversation.
       // Once Send supplies its identity, journal that proof through the ordinary
       // model-selection owner. The closed picker cannot rediscover it passively.
@@ -12289,6 +12325,14 @@
         'content_delivery_signed_out',
         'ChatGPT is not signed in in this browser. Sign in to ChatGPT there, then send again.'
       )));
+    }
+    // A wake types into the person's own chat: text or a file put in the box while the model was
+    // being chosen is theirs, so the wake waits for its next try (CodeRabbit on #1972).
+    if (boot.type === 'revive' && (!CLF_DOM.composerSubmitReady?.() || CLF_DOM.hasComposerAttachments?.())) {
+      return void (await fail(t(
+        'content_revival_draft_appeared',
+        'Something was typed in the chat while the worker\'s wake was getting ready, so the wake did not replace it.'
+      ), 'transient'));
     }
     let insertionFailure = '';
     step('inserting');
@@ -14744,6 +14788,7 @@
       streamRootKeys: () => [...streamRootsByKey.keys()],
       /** So a test settles a turn by the real window rather than a copy of the number. */
       TURN_SETTLE_MS,
+      APPROVAL_SETTLE_MS,
       DESKTOP_RECEIPT_MS,
       STALL_MS,
       GOAL_RETRY_MS,

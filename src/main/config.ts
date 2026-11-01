@@ -428,7 +428,11 @@ const configSchema = z.object({
     sounds: z.boolean().optional().default(false),
     // #1402: a fresh turn after this many minutes of one (0 = off). A malformed value keeps the default.
     rotateTurnMinutes: z.number().int().min(0).max(120).optional().default(30).catch(30),
-    rotateStopFallback: z.boolean().optional().default(false).catch(false),
+    // On by default since 2.1.49 (user decision 2026-10-31); see adoptStopFallback for earlier configs.
+    rotateStopFallback: z.boolean().optional().default(true).catch(true),
+    /** Set once the default-on stop fallback was applied to this config (adoptStopFallback). */
+    // A damaged marker reads as adopted: a person's saved off is kept (CodeRabbit on #1954).
+    rotateStopFallbackAdopted: z.boolean().optional().catch(true),
     // Reading Codex's and Claude Code's own logs for the Usage page (#482). Missing means on.
     localAppUsage: z.boolean().optional().default(true),
     keepAwake: z.boolean().optional().default(true),
@@ -685,7 +689,7 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform, rele
     // Fresh installs refresh changed connector tools on their own: a permission chosen in Setup
     // changes the tool list, and nothing else tells a new user to refresh the plugin in ChatGPT.
     // Older configs keep the schema default (off).
-    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, keepAwake: true, keepScreenAwake: false, cosBrowserMinimize: 'taskbar', turnNotifications: true, sounds: false, rotateTurnMinutes: 30, rotateStopFallback: false, localAppUsage: true, privacyScreenshots: false, secretsShield: true, theme: 'dark', autoRefreshPlugins: true, autoSelectSkills: false, backgroundChats: true, backgroundPlacement: 'window', followUp: 'steer', enterSends: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true, mentionPlugins: false,
+    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, keepAwake: true, keepScreenAwake: false, cosBrowserMinimize: 'taskbar', turnNotifications: true, sounds: false, rotateTurnMinutes: 30, rotateStopFallback: true, rotateStopFallbackAdopted: true, localAppUsage: true, privacyScreenshots: false, secretsShield: true, theme: 'dark', autoRefreshPlugins: true, autoSelectSkills: false, backgroundChats: true, backgroundPlacement: 'window', followUp: 'steer', enterSends: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true, mentionPlugins: false,
       // The built-in browser is opt-in: Chrome with the companion stays the default for new and
       // existing installs alike, and the built-in one runs only once someone chooses it.
       chatBrowser: 'chrome' },
@@ -829,7 +833,7 @@ export async function loadConfig(): Promise<Config> {
       current = conservativeRecoveryConfig();
       recovered = true;
     } else {
-      current = adoptCurrentGoalPrompt(adoptWiderWindow(adoptAutoCompaction(recalibrateTokens(parsed.data))));
+      current = adoptStopFallback(adoptCurrentGoalPrompt(adoptWiderWindow(adoptAutoCompaction(recalibrateTokens(parsed.data)))));
       // Duplicate root names would make a virtual path ambiguous.
       const seen = new Set<string>();
       current.roots = current.roots.filter((r) => {
@@ -908,6 +912,17 @@ function adoptAutoCompaction(config: Config): Config {
  * that already holds it, whether from 1.7 or from a person, simply keeps it.
  */
 const SUPERSEDED_AUTO_DEFAULTS = { auto: true, autoTokens: 300_000 };
+
+/**
+ * The stop-and-continue fallback for fresh turns became the default in 2.1.49: in long chats
+ * ChatGPT often shows only Stop at a tool result, so the fresh turn's Continue had no Send and
+ * rotation gave up (user decision 2026-10-31). Until then every save wrote the old default, off,
+ * so a saved false is not a choice: such a config is turned on once and marked; a later off stays.
+ */
+function adoptStopFallback(config: Config): Config {
+  if (config.ui.rotateStopFallbackAdopted === true) return config;
+  return { ...config, ui: { ...config.ui, rotateStopFallback: true, rotateStopFallbackAdopted: true } };
+}
 
 function adoptWiderWindow(config: Config): Config {
   const { auto, autoTokens } = config.compaction;
