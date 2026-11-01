@@ -173,6 +173,15 @@ export function updateStatus(): UpdateStatus {
 let generation = 0;
 const passGeneration = new AsyncLocalStorage<number>();
 const stale = (): boolean => { const own = passGeneration.getStore(); return own !== undefined && own !== generation; };
+/** Aborted by the reset: the requests of a pass from before it stop rather than finish. */
+let resetSignal = new AbortController();
+/**
+ * Called after every wait in a pass, before it writes a file or the staged update: a pass that
+ * outlived a reset wrote the installer and staged it for the next state (CodeRabbit on #2018).
+ */
+function stillCurrent(): void {
+  if (stale()) throw new Error('the update state was reset while this pass was waiting');
+}
 
 function set(next: Partial<UpdateStatus>): void {
   if (stale()) return;
@@ -251,6 +260,7 @@ export function checkForUpdates(): Promise<void> {
       // This pass owns GitHub requests; keep its transport failure readable without
       // relabeling HTTP, filesystem or other diagnostics. The log keeps the original.
       const reason = err instanceof TypeError && err.message === 'fetch failed' ? 'GitHub could not be reached' : err.message;
+      if (stale()) return;
       set({ stage: 'failed', error: reason });
       logWarn(`update check failed: ${err.message}`);
     })
@@ -265,6 +275,7 @@ export function checkForUpdates(): Promise<void> {
 async function runPass(): Promise<void> {
   set({ stage: 'checking', error: null });
   const release = { version: await latestVersion() };
+  stillCurrent();
   // GitHub answered. From here the UI can tell "current" from "not asked yet", whatever the
   // rest of this pass does with the answer.
   set({ checkedAt: Date.now() });
@@ -293,8 +304,10 @@ async function runPass(): Promise<void> {
   // both the manifest of what the release contains and the proof of what may be executed, so
   // neither adopting a file nor fetching one happens without it.
   const expected = (await releaseDigests(release.version)).get(artifact.name);
+  stillCurrent();
   if (!expected) throw new Error(`release ${release.version} publishes no ${artifact.name}`);
   const carried = await adopt(release.version, artifact.name, expected);
+  stillCurrent();
   if (carried) {
     staged = { version: release.version, file: carried, kind: artifact.kind, target: artifact.target, digest: expected };
     set({ latest: release.version, stage: 'ready' });
@@ -303,6 +316,7 @@ async function runPass(): Promise<void> {
   }
   set({ latest: release.version, stage: 'downloading' });
   const file = await download(release.version, artifact.name, expected);
+  stillCurrent();
   staged = { version: release.version, file, kind: artifact.kind, target: artifact.target, digest: expected };
   set({ stage: 'ready' });
   logInfo(`update: ${release.version} is downloaded and ready to install`);
@@ -447,17 +461,20 @@ async function download(version: string, name: string, expected: string): Promis
   const stalled = new Error(`downloading ${name} stopped: no data for ${DOWNLOAD_STALL_MS / 1000} seconds`);
   const watch = setTimeout(() => quiet.abort(stalled), DOWNLOAD_STALL_MS);
   const hash = createHash('sha256');
+  const signal = AbortSignal.any([quiet.signal, resetSignal.signal]);
   try {
-    const response = await get(assetUrl(version, name), quiet.signal);
+    const response = await get(assetUrl(version, name), signal);
+    stillCurrent();
     if (!response.body) throw new Error(`downloading ${name} returned no content`);
     const body = Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]);
     body.on('data', (chunk: Buffer) => { hash.update(chunk); watch.refresh(); });
-    await pipeline(body, createWriteStream(`${file}.part`), { signal: quiet.signal });
+    await pipeline(body, createWriteStream(`${file}.part`), { signal });
   } catch (err) {
     throw quiet.signal.aborted ? stalled : err;
   } finally {
     clearTimeout(watch);
   }
+  stillCurrent();
   const digest = hash.digest('hex');
   if (digest !== expected) {
     await rm(`${file}.part`, { force: true });
@@ -634,6 +651,8 @@ export async function applyStagedUpdate(): Promise<void> {
 /** Test seam: forgets the pass, the staged file and everything reported about them. */
 export function resetUpdateForTests(): void {
   generation += 1;
+  resetSignal.abort();
+  resetSignal = new AbortController();
   installFolderAccess = probeInstallFolder;
   status = CLEAR;
   staged = null;
