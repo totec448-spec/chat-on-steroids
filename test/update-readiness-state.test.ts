@@ -153,3 +153,13 @@ it('uses the Korean setup action exactly once in the connection recovery guidanc
   const row = updateReadiness(next).find(row => row.id === 'core')!;
   expect(row.nextStep).toBe('연결 설정 확인에서 연결을 확인한 후 모두 업데이트를 선택하여 다시 시도하세요.');
 });
+
+it('keeps blocked cache failures explicit and directs recovery instead of an unchanged retry', async () => {
+  const { updateReadiness } = await import('../src/renderer/update-readiness-state.js');
+  const next = state();
+  next.update.stage = 'failed'; next.update.error = 'the update staging path must use ordinary directories';
+  expect(updateReadiness(next).find(row => row.id === 'app')).toMatchObject({
+    status: 'fail', reason: 'The update cache must be a folder, not a link.',
+    nextStep: 'Save a Diagnostics report from Activity for help with recovery. The saved state has been kept.'
+  });
+});
