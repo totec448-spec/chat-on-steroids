@@ -113,8 +113,7 @@ const {
   pickupNow,
   noteRecoverySweepTick,
   unpair,
-  workerBriefForTests
-} = await import('../src/main/bridge.js');
+  workerBriefForTests, forgetPickupWatchesForTests } = await import('../src/main/bridge.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
 const { setStuckNotifier } = await import('../src/main/stuck-notice.js');
 const {
@@ -16865,7 +16864,9 @@ describe('the goal loop over the bridge', () => {
       // A click for a stopped step that is no longer the one waiting acts on nothing (CodeRabbit on #1979).
       expect(await pickupNow(session.id, { ...shown, stoppedAt: shown.stoppedAt - 1 })).toEqual({ ok: false, code: 'changed' });
       expect(await pickupNow(session.id, { ...shown, next: 'goal' })).toEqual({ ok: false, code: 'changed' });
-      // A queued message of the person's own is tried again at once, not at its next slow slot.
+      // A queued message of the person's own is tried again at once, not at its next slow slot, also
+      // right after a restart, before the first sweep made its watch again (CodeRabbit on #1979).
+      forgetPickupWatchesForTests();
       expect(await pickupNow(session.id, shown)).toEqual({ ok: true, did: 'retrying' });
       expect((await request('GET', '/status')).body.repairs?.some((item: { conversationId: string }) => item.conversationId === chat)).toBe(true);
       expect((await input.listInputs()).find(row => row.id === id)).toMatchObject({ text: 'next step', state: 'queued', pickupRecovery: { attempts: 4 } });
