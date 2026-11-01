@@ -1,7 +1,7 @@
 // Production renderer and real Chromium layout; synthetic state only, nothing is sent anywhere.
 // Send feedback: Activity's button and /feedback open the dialog; a problem report needs what
-// happened and the saved diagnostics report, an idea needs both of its fields; a newer release is
-// pointed out; the done step names the file to attach. The dialog and Activity's header (which
+// happened and the saved diagnostics report; there is no idea form, only a link that sends new
+// features to pull requests (2026-11-01); a newer release is pointed out; the done step names the file to attach. The dialog and Activity's header (which
 // gained the button) fit in every language, both themes and a narrow window.
 const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
@@ -20,7 +20,8 @@ const fixture = `(() => {
    r.data.config.ui={...r.data.config.ui,theme:window.fixtureTheme};
    r.data.update={current:'2.1.46',latest:'2.1.47',stage:'idle',error:null,checkedAt:Date.now()};return r;},
   saveDiagnosticsReport:()=>{window.reports++;return ok({saved:true,name:'diagnostics-2026-10-24-0130.txt'});},
-  openFeedbackIssue:report=>{window.opened.push(report);return ok({trimmed:false});}
+  openFeedbackIssue:report=>{window.opened.push(report);return ok({trimmed:false});},
+  openLink:(url,options)=>{(window.links??=[]).push([url,options??{}]);return ok(true);}
  };
  window.api=new Proxy(methods,{get:(target,key)=>key in target?target[key]:old[key]});
 })();`;
@@ -101,9 +102,20 @@ app.whenReady().then(async () => {
     await until(`document.documentElement.dataset.theme===${JSON.stringify(theme)}`);
     await open();
     await header(`en ${theme}`);
-    // The kind chosen last is part of the draft; the dark round ended on an idea.
-    if (theme==='light') { assert.equal(await js(`document.activeElement.id`),'feedbackProblem'); await js(`document.querySelector('input[name="feedbackKind"][value="bug"]').click()`); }
-    else assert.equal(await js(`document.activeElement.id`),'feedbackWhat');
+    assert.equal(await js(`document.activeElement.id`),'feedbackWhat');
+    assert.equal(await js(`document.querySelector('input[name="feedbackKind"]')`),null,'No idea form');
+    // The form opens right at the body's padding, with the update notice and without it (no space left by the old switch).
+    const topGap = () => js(`(()=>{const body=document.querySelector('#feedbackForm .feedback-fields'),pad=parseFloat(getComputedStyle(body).paddingTop),top=body.getBoundingClientRect().top;
+      const first=[...body.querySelectorAll('#feedbackUpdate, #feedbackBug > .plugin-field')].find(n=>n.checkVisibility());return Math.round(first.getBoundingClientRect().top-top-pad)})()`);
+    assert.equal(await topGap(),0,'No extra space above the update notice');
+    await js(`document.getElementById('feedbackUpdate').hidden=true`);
+    assert.equal(await topGap(),0,'No extra space above the first field');
+    await js(`document.getElementById('feedbackUpdate').hidden=false`);
+    assert.equal(await js(`document.querySelector('#feedbackFeatures a').href`),'https://github.com/totec448-spec/chat-on-steroids/blob/main/CONTRIBUTING.md#new-features');
+    // The window denies new windows: the click goes through the app's link API, in the person's browser.
+    await js(`window.links=[];document.querySelector('#feedbackFeatures a').click()`);
+    assert.deepEqual(await js('window.links'),[['https://github.com/totec448-spec/chat-on-steroids/blob/main/CONTRIBUTING.md#new-features',{external:true}]]);
+    assert.equal(await js(`${dialog}.open`),true,'Following the guide link keeps the draft open');
     assert.equal(await js(`document.getElementById('feedbackUpdate').hidden`),false,'A newer release is pointed out');
     await layout(`en ${theme} problem`);
     await capture(`${theme}-problem.png`);
@@ -124,13 +136,8 @@ app.whenReady().then(async () => {
     await capture(`${theme}-done.png`);
     await js(`document.getElementById('feedbackDoneClose').click()`);
     await until(`!${dialog}.open`);
-    // An idea: two fields, no report, no update notice.
+    // Escape closes without sending.
     await open();
-    await js(`(()=>{const i=document.querySelector('input[name="feedbackKind"][value="idea"]');i.click();})()`);
-    await until(`!document.getElementById('feedbackIdea').hidden`);
-    assert.equal(await js(`document.getElementById('feedbackUpdate').hidden`),true);
-    await layout(`en ${theme} idea`);
-    await capture(`${theme}-idea.png`);
     win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'}); win.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'});
     await until(`!${dialog}.open`);
   }
@@ -139,7 +146,7 @@ app.whenReady().then(async () => {
   // /feedback opens the same dialog.
   await load('en');
   await js(`(()=>{const input=document.getElementById('chatInput');input.focus();input.value='/feedback';input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
-  await until(`[...document.querySelectorAll('.skill-autocomplete [role="option"]')].some(o=>o.textContent.includes('Report a problem or suggest an idea.'))`);
+  await until(`[...document.querySelectorAll('.skill-autocomplete [role="option"]')].some(o=>o.textContent.includes('Report a problem.'))`);
   win.webContents.sendInputEvent({type:'keyDown',keyCode:'Enter'}); win.webContents.sendInputEvent({type:'keyUp',keyCode:'Enter'});
   await until(`${dialog}.open`);
 
@@ -148,10 +155,6 @@ app.whenReady().then(async () => {
     await open();
     await header(language);
     await layout(`${language} problem`);
-    await js(`document.querySelector('input[name="feedbackKind"][value="idea"]').click()`);
-    await layout(`${language} idea`);
-    if (['de','ru','ja'].includes(language)) await capture(`${language}-idea.png`);
-    await js(`document.querySelector('input[name="feedbackKind"][value="bug"]').click()`);
     if (['de','ru','ja'].includes(language)) await capture(`${language}-problem.png`);
     await js(`document.getElementById('feedbackCancel').click()`);
     await until(`!${dialog}.open`);
@@ -165,7 +168,7 @@ app.whenReady().then(async () => {
     await capture(`${language}-720.png`);
   }
   assert.deepEqual(errors,[]);
-  console.log('PASS: send feedback from Activity and /feedback; problem needs text and report, idea needs both fields; update notice; done step; 13 languages, both themes, 720 px');
+  console.log('PASS: send feedback from Activity and /feedback; problem needs text and report, no idea form; update notice; done step; 13 languages, both themes, 720 px');
   // The dev server can keep a socket open after the window is gone; the check must still end.
   win.destroy();await Promise.race([server.close(),new Promise(resolve=>setTimeout(resolve,2000))]);app.exit(0);
 }).catch(async error=>{fs.mkdirSync(output,{recursive:true});if(win&&!win.isDestroyed())fs.writeFileSync(path.join(output,'failure.png'),(await win.webContents.capturePage()).toPNG());console.error(error);await Promise.race([server?.close(),new Promise(resolve=>setTimeout(resolve,2000))]);app.exit(1);});
