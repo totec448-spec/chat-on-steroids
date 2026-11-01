@@ -234,6 +234,11 @@ export function checkForUpdatesIfStale(now = Date.now()): Promise<void> {
 export function checkForUpdates(): Promise<void> {
   if (pass) return pass;
   const run = runPass()
+    .then(async () => {
+      // All successful staging paths share this publication boundary, including an
+      // already-ready candidate. A failed pass never retires another download.
+      if (staged) await pruneUpdateCache(staged.version);
+    })
     .catch((err: Error) => {
       // This pass owns GitHub requests; keep its transport failure readable without
       // relabeling HTTP, filesystem or other diagnostics. The log keeps the original.
@@ -286,7 +291,6 @@ async function runPass(): Promise<void> {
   const carried = await adopt(release.version, artifact.name, expected);
   if (carried) {
     staged = { version: release.version, file: carried, kind: artifact.kind, target: artifact.target, digest: expected };
-    await pruneUpdateCache(release.version);
     set({ latest: release.version, stage: 'ready' });
     logInfo(`update: ${release.version} was already downloaded and is ready to install`);
     return;
@@ -294,7 +298,6 @@ async function runPass(): Promise<void> {
   set({ latest: release.version, stage: 'downloading' });
   const file = await download(release.version, artifact.name, expected);
   staged = { version: release.version, file, kind: artifact.kind, target: artifact.target, digest: expected };
-  await pruneUpdateCache(release.version);
   set({ stage: 'ready' });
   logInfo(`update: ${release.version} is downloaded and ready to install`);
 }
