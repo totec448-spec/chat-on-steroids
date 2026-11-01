@@ -158,6 +158,7 @@ interface Hook {
   streamRootKeys(): string[];
   /** How long the stop button must stay gone before content.js calls a turn finished. */
   TURN_SETTLE_MS: number;
+  APPROVAL_SETTLE_MS: number;
   /** How long an app-owned Send waits for its exact user row after the click. */
   DESKTOP_RECEIPT_MS: number;
   /** Test seam for the no-visible-progress fallback. */
@@ -20063,8 +20064,16 @@ describe('one live isolated-world recorder per document', () => {
     // Nor is its last message published as final: the recorder would close the turn on it (CodeRabbit on #1992).
     expect(emitted(live.sent, 'assistant_message').some(row => row.event.final === true)).toBe(false);
     card.remove();
-    await bindFiberTurns([{ section, turn: { turnId: 'approval-native', endMessageId: 'approval-native-message',
+    const nativeFinal = () => bindFiberTurns([{ section, turn: { turnId: 'approval-native', endMessageId: 'approval-native-message',
       messages: [{ role: 'assistant', messageId: 'approval-native-message', rawMessageId: 'approval-native-message', rawText: 'Checking.' }] } }]);
+    // Right after the person answered, the old final is still on the page while the turn goes on
+    // (CodeRabbit on #1992): neither a final message nor the end yet.
+    await nativeFinal();
+    live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end')).toEqual([]);
+    expect(emitted(live.sent, 'assistant_message').some(row => row.event.final === true)).toBe(false);
+    live.advance(live.hook.APPROVAL_SETTLE_MS);
+    await nativeFinal();
     await settleTurn(live); await live.hook.flush();
     expect(emitted(live.sent, 'turn_end')).toHaveLength(1);
     expect(emitted(live.sent, 'assistant_message').some(row => row.event.final === true)).toBe(true);
