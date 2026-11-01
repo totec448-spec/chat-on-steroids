@@ -14094,7 +14094,7 @@
       const pathList = listUrl.pathname === '/settings/plugins-settings' && !listUrl.hash;
       if (pathList || (listUrl.pathname === '/' && listUrl.hash === '#settings/Plugins')) {
         const installedAppId = request.observeOnly === true ? request.appId ?? null : null;
-        const installedSurface = installedAppId ? request.surface ?? null : null;
+        const installedSurface = request.surface ?? null;
         if (request.appId && !installedAppId) {
           const url = new URL(location.href);
           if (pathList) url.pathname = `/settings/plugins-settings/plugin_${request.appId}`;
@@ -14104,7 +14104,7 @@
         }
         let linkHref = null;
         const buttons = await waitPageView(() => {
-          const found = CLF_DOM.pluginInstalledButtons(request.connectorName, installedAppId, installedSurface);
+          const found = CLF_DOM.pluginInstalledButtons(request.connectorName, installedAppId, installedSurface, true);
           linkHref = found?.length === 1 && found[0].tagName === 'A' ? found[0].href : null;
           return found;
         }, current, 8000);
@@ -14122,7 +14122,7 @@
           // The native installed link already names an exact management route. Recheck
           // the same visible owner across the await and carry custody into navigation;
           // reading the destination's schema is a later step, not a prerequisite here.
-          const found = CLF_DOM.pluginInstalledButtons(request.connectorName, installedAppId, installedSurface);
+          const found = CLF_DOM.pluginInstalledButtons(request.connectorName, installedAppId, installedSurface, true);
           if (!current() || !button.isConnected || found?.length !== 1 || found[0] !== button || button.href !== linkHref) return false;
           const url = new URL(linkHref, requestHref);
           const route = /^\/settings\/plugins-settings\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(url.pathname);
@@ -14136,7 +14136,7 @@
         // claim Refresh until the management document has its marker again.
         const discovered = await waitPageView(async () => {
           const href = location.href, appId = pluginViewAppId(href);
-          const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools);
+          const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools, null, request.surface);
           return appId && next?.appId === appId ? href : null;
         }, () => alive && epoch === requestEpoch && !generating && !CLF_DOM.generating() &&
           new URL(location.href).origin === 'https://chatgpt.com' && CLF_DOM.pluginManagementIdle(), 8000);
@@ -14149,7 +14149,7 @@
       // DOM observer and leave an unclaimed request available if hydration times out.
       const settle = settledPluginView();
       const view = await waitPageView(async () => {
-        const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools, request.appId);
+        const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools, request.appId, request.surface);
         const appId = pluginViewAppId(location.href);
         return settle(appId && next?.appId === appId && Array.isArray(next.tools) && (next.tools.length > 0 || next.settled === true) ? next : null);
       }, current, 12000, 250);
@@ -14212,7 +14212,7 @@
       // a refresh that had worked as failed in 2 of 3 runs. Look every half second, for up to a
       // minute (the worker leaves a busy tab open); the one click stays one click.
       const after = await waitPageView(async () => {
-        const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools, appId);
+        const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools, appId, request.surface);
         return next && before !== expected && schemaKey(next.tools) === expected ? next : null;
       }, stillCurrent, 60000, 500);
       if (!after) {

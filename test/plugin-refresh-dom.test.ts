@@ -475,3 +475,45 @@ it('keeps the Plugins connector\'s larger catalog limit after a rename, by its p
   api.setConnectorApps({ core: [], desktop: [], plugins: [{ appId: 'asdk_app_synthetic', linkId: null, name: 'My external apps' }] });
   expect((await api.pluginRefreshView('Chat On Steroids Plugins'))?.tools).toHaveLength(118);
 });
+
+it('lets the refresh owner inspect the native tunnel despite colliding call-derived aliases', async () => {
+  const { api, connector } = settingsPage(); connector.name = 'Chat On Steroids Plugins';
+  api.setConnectorApps({ core: [{ appId: connector.id, name: connector.name }], desktop: [],
+    plugins: [{ appId: connector.id, name: connector.name }, { appId: 'asdk_app_foreign', name: 'Other app' }] });
+  expect(await api.pluginRefreshView(connector.name)).toBeNull();
+  expect(await api.pluginRefreshView(connector.name, [], null, 'plugins')).toMatchObject({
+    appId: connector.id, tunnelId: 'tunnel_synthetic01', tools: [tool]
+  });
+  connector.tunnel_id = null;
+  expect(await api.pluginRefreshView(connector.name, [], null, 'plugins')).toBeNull();
+});
+it('navigates a unique configured-name row for tunnel inspection, never an ambiguous row', () => {
+  const { api } = settingsPage('/settings/plugins-settings');
+  api.setConnectorApps({ core: [{ appId: 'asdk_app_synthetic', name: 'Chat On Steroids Plugins' }], desktop: [],
+    plugins: [{ appId: 'asdk_app_synthetic', name: 'Chat On Steroids Plugins' }] });
+  const main = dom.window.document.querySelector('main')!;
+  main.innerHTML = '<a href="/settings/plugins-settings/plugin_asdk_app_synthetic"><div>Chat On Steroids Plugins</div></a>';
+  expect(api.pluginInstalledButtons('Chat On Steroids Plugins')).toBeNull();
+  expect(api.pluginInstalledButtons('Chat On Steroids Plugins', null, 'plugins', true)).toEqual([main.querySelector('a')]);
+  main.insertAdjacentHTML('beforeend', '<a href="/settings/plugins-settings/plugin_asdk_app_other"><div>Chat On Steroids Plugins</div></a>');
+  expect(api.pluginInstalledButtons('Chat On Steroids Plugins', null, 'plugins', true)).toHaveLength(2);
+});
+it('keeps the requested Plugins catalog bound when aliases also put its exact ID on Core', async () => {
+  const { api, connector } = settingsPage(); connector.name = 'Chat On Steroids Plugins';
+  connector.actions = Array.from({ length: 80 }, (_, i) => ({ name: `tool_${i}`, description: 'External tool', description_model: '', params: tool.inputSchema }));
+  api.setConnectorApps({ core: [{ appId: connector.id, name: connector.name }], desktop: [],
+    plugins: [{ appId: connector.id, name: connector.name }] });
+  expect(await api.pluginRefreshView(connector.name, [], connector.id)).toBeNull();
+  expect((await api.pluginRefreshView(connector.name, [], connector.id, 'plugins')).tools).toHaveLength(80);
+  expect(await api.pluginRefreshView(connector.name, [], connector.id, 'core')).toBeNull();
+});
+it.each([false, true])('retains exact installed-ID navigation after a rename (hidden=%s)', hidden => {
+  const { api } = settingsPage('/settings/plugins-settings');
+  api.setConnectorApps({ core: [{ appId: 'asdk_app_synthetic', name: 'Stale name' }], desktop: [],
+    plugins: [{ appId: 'asdk_app_synthetic', name: 'Stale name' }] });
+  const main = dom.window.document.querySelector('main')!;
+  main.innerHTML = `<a ${hidden ? 'hidden' : ''} href="/settings/plugins-settings/plugin_asdk_app_synthetic"><span>Renamed</span></a>` +
+    '<a href="/settings/plugins-settings/plugin_asdk_app_foreign"><span>Chat On Steroids Plugins</span></a>';
+  const result = api.pluginInstalledButtons('Renamed', 'asdk_app_synthetic', 'plugins', true);
+  expect(result).toEqual(hidden ? null : [main.querySelector('a')]);
+});

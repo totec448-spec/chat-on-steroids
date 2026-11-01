@@ -5276,6 +5276,12 @@ duplicate surfaces and I/O failures leave the ledger intact and reject new work 
 allows initial enrollment. Tolerant reads for auxiliary state keep their existing behavior.
 
 
+For native tunnel-backed refresh, the helper visits the unique configured-name installed row
+or its durable exact App ID and reads the card's tunnel even if call-derived aliases collide.
+Main checks that tunnel against the requested surface before initial enrollment/Current/Claim;
+navigation and page-reported tunnel IDs alone grant no Refresh authority. Other identity
+consumers and legacy pages retain their existing alias checks.
+
 **Scoped refresh receipts.** Each published surface captures its configured tunnel/profile.
 New ledger rows carry `tunnelKey`; old rows with a concrete App ID require that same App ID
 to prove the configured OpenAI tunnel. A completed, unambiguous receipt may then bind a changed

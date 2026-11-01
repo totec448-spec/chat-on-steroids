@@ -2882,13 +2882,16 @@ var CLF_DOM = (() => {
   }
 
   /** Observed ChatGPT Plugins settings surface. Missing/ambiguous structure is not proof. */
-  async function pluginRefreshView(connectorName, expectedTools = [], expectedAppId = null) {
+  async function pluginRefreshView(connectorName, expectedTools = [], expectedAppId = null, expectedSurface = null) {
     // A durable exact-ID request already identifies its connector even when names collide.
     // Use that ID's proven surface for limits too, rather than borrowing another surface's name.
     const identified = expectedAppId ? ownApps.filter(app => app.appId === expectedAppId) : [];
     const proven = identified.length ? identified : provenAppsFor(connectorName);
-    if (proven === null && !expectedAppId) return null;
-    const externalPlugins = proven?.length ? proven.every(app => app.surface === 'plugins') : pluginsConnectorName(connectorName);
+    const surfaceAt = ['core', 'desktop', 'plugins'].indexOf(expectedSurface);
+    const nativeInspection = surfaceAt >= 0 && !location.hash &&
+      /^\/settings\/plugins-settings\/plugin_asdk_app_[a-zA-Z0-9_-]+$/.test(location.pathname) &&
+      (expectedAppId !== null || connectorNames()[surfaceAt] === connectorName);
+    if (proven === null && !expectedAppId && !nativeInspection) return null;
     const snapshot = await new Promise(resolve => {
       const nonce = crypto.randomUUID();
       const finish = value => { clearTimeout(timer); window.removeEventListener('message', receive); resolve(value); };
@@ -2901,7 +2904,14 @@ var CLF_DOM = (() => {
     });
     const route = /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.hash) ||
       (!location.hash ? /^\/(?:settings\/plugins-settings|plugins)\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.pathname) : null);
-    if (!snapshot || snapshot.appId !== route?.[1] || (expectedAppId ? snapshot.appId !== expectedAppId : !ownSnapshot(snapshot, connectorName)) ||
+    // The helper may inspect the native tunnel even when older call-derived aliases collide.
+    // This only reads a card: main verifies this tunnel against the requested surface before
+    // granting Current/Claim. Never substitute these aliases for that stronger proof.
+    const tunnelInspection = nativeInspection && /^tunnel_[a-zA-Z0-9]{8,80}$/.test(snapshot?.tunnelId || '') &&
+      (expectedAppId ? snapshot?.appId === expectedAppId : snapshot?.connectorName === connectorName);
+    const externalPlugins = tunnelInspection ? expectedSurface === 'plugins'
+      : proven?.length ? proven.every(app => app.surface === 'plugins') : pluginsConnectorName(connectorName);
+    if (!snapshot || snapshot.appId !== route?.[1] || (!tunnelInspection && (expectedAppId ? snapshot.appId !== expectedAppId : !ownSnapshot(snapshot, connectorName))) ||
         !Array.isArray(snapshot.tools) || (snapshot.tools.length < 1 && !externalPlugins) || snapshot.tools.length > (externalPlugins ? 257 : 64) || JSON.stringify(snapshot.tools).length > 300000 ||
         snapshot.tools.some(tool => !tool || typeof tool.name !== 'string' || !/^[a-z][a-z0-9_]{0,79}$/.test(tool.name) || typeof tool.description !== 'string' || tool.inputSchema?.type !== 'object') ||
         new Set(snapshot.tools.map(tool => tool.name)).size !== snapshot.tools.length) return null;
@@ -2923,13 +2933,19 @@ var CLF_DOM = (() => {
     return target !== null && (target ? snapshot.appId === target : proven.length
       ? proven.some(app => app.appId === snapshot.appId) : snapshot.connectorName === connectorName);
   }
-  function pluginInstalledButtons(connectorName, expectedAppId = null, expectedSurface = null) {
+  function pluginInstalledButtons(connectorName, expectedAppId = null, expectedSurface = null, inspectTunnel = false) {
     // Native links name their exact App Id, even when a fresh provider rename has not reached
     // the learned name yet. Legacy buttons still need names; the destination proves identity.
     // A scoped enrolled observation keeps its App Id; other proven aliases cannot replace it.
     if (expectedAppId !== null && (typeof expectedAppId !== 'string' || !/^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(expectedAppId))) return null;
     let proven = provenAppsFor(connectorName);
-    if (expectedAppId !== null && expectedSurface !== null) {
+    const nativeInspection = inspectTunnel && ['core', 'desktop', 'plugins'].includes(expectedSurface) &&
+      location.pathname === '/settings/plugins-settings' && !location.hash &&
+      (expectedAppId !== null || connectorNames()[['core', 'desktop', 'plugins'].indexOf(expectedSurface)] === connectorName);
+    // Navigate only to the unique configured-name row or the durable exact ID. The destination
+    // must expose a native tunnel for main to verify; navigating grants no Refresh authority.
+    if (nativeInspection) proven = [];
+    if (!nativeInspection && expectedAppId !== null && expectedSurface !== null) {
       const surfaceAt = ['core', 'desktop', 'plugins'].indexOf(expectedSurface);
       if (surfaceAt < 0) return null;
       const identified = ownApps.filter(app => app.appId === expectedAppId);
@@ -2954,7 +2970,7 @@ var CLF_DOM = (() => {
       // The newer shell lists installed plugins on the /settings/plugins-settings page itself.
       if (location.pathname === '/settings/plugins-settings' && !location.hash) {
         const main = document.querySelector('main');
-        if (!main || (!proven.length && !connectorNames().includes(connectorName))) return null;
+        if (!main || (!nativeInspection && !proven.length && !connectorNames().includes(connectorName))) return null;
         // Measured 2026-10-11: installed rows became links to exact management pages.
         // Catalog and external links cannot identify an installed connector.
         const rows = [...main.querySelectorAll('button,a[href]')].filter(button => {
