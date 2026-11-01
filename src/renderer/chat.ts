@@ -94,6 +94,7 @@ import {
   DEFAULT_RECORDING_STORAGE_GIB,
   isUnattributedSession,
   RECORDING_STORAGE_LIMITS_GIB,
+  STUCK_SUMMARY_MS,
   TURN_OUTCOME_LABELS,
   foldProgress,
   toolCallSummary
@@ -2980,6 +2981,7 @@ function mergeDetailDelta(delta: SessionEvent[]): void {
 }
 
 let controlsGeneration = 0;
+let lastSummaryTimer: ReturnType<typeof setTimeout> | null = null;
 let controlledSessionId: string | null = null;
 let controlledTurnId: string | null = null;
 /** A turn the page still holds after the app stopped counting it as work: Stop only, no Working (2.1.47 round). */
@@ -3525,6 +3527,16 @@ async function refreshSessionControls(): Promise<void> {
   // A Compact & Resume that ChatGPT never wrote a summary for (it may no longer serve the chat at all)
   // can go on from the last saved one; the context meter carries a dot until then (2026-11-01).
   const lastSummary = controls.blocked ? null : controls.lastSummary ?? null;
+  // The offer appears on its own once the 15 minutes pass, also in a quiet chat nothing else repaints
+  // (CodeRabbit on #2019), and is said to screen readers, since the dot and the popover are not.
+  if (lastSummaryTimer) { clearTimeout(lastSummaryTimer); lastSummaryTimer = null; }
+  const waitingJob = controls.job;
+  if (!lastSummary && !controls.blocked && waitingJob?.stage === 'handoff-pending' && !waitingJob.handoffId) {
+    const due = waitingJob.startedAt + STUCK_SUMMARY_MS - Date.now();
+    if (due > 0) lastSummaryTimer = setTimeout(() => { lastSummaryTimer = null; if (selectedId === id) void refreshSessionControls(); }, due + 1_000);
+  }
+  ui($('contextMeterNotice'), 'textContent', () => lastSummary
+    ? t("ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.") : '');
   $('resumeLastSummary').hidden = !lastSummary;
   $('resumeLastSummary').dataset.handoffId = lastSummary?.handoffId ?? '';
   $('contextMeter').toggleAttribute('data-attention', !!lastSummary);

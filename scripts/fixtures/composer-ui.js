@@ -40,7 +40,8 @@
   listSessions:()=>ok({sessions:[{...summary,events:events.length,activeTurnId:controls.activeTurnId}],activeId:id,pressure:[]}),
   listProjects:()=>ok([]),runningTools:()=>ok([]),listPausedHelpers:()=>ok([]),listInputs:()=>ok(inputs),
   getSession:()=>ok({summary:{...summary,events:events.length,activeTurnId:controls.activeTurnId},events,total:events.length,nextFrom:events.length+1}),
-  getSessionControls:()=>ok(controls),getHandoff:()=>ok(null),
+  // As main computes it: the saved summary is offered once its deadline passed (offerAt), never before.
+  getSessionControls:()=>{if(window.offerAt&&Date.now()>=window.offerAt&&controls.job?.stage==='handoff-pending'&&!controls.lastSummary)controls.lastSummary={handoffId:'2026-11-01-36ad1800',createdAt:Date.now()-3600000,earlierChat:true};return ok(controls);},getHandoff:()=>ok(null),
   setSessionAutomation:(_id,mode)=>{controls.automation=mode;notify();return ok(controls);},
   setSessionObjective:(_id,text,mode)=>{controls.objective=text;controls.automation=mode;notify();return ok(controls);},
   compactSession:()=>{controls.job={busy:true,phase:'requesting',reason:'manual'};notify();return ok(controls);},

@@ -21,6 +21,7 @@ import { isDeliberateEffort, isProModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
 import { injectedUserMessage, recordedRequestTurn, responseTurnId, type TimelineTurns } from '../shared/chronology.js';
 import type { SessionSummary } from '../shared/session.js';
+import { STUCK_SUMMARY_MS } from '../shared/session.js';
 import { messageReferences } from '../shared/session.js';
 import { turnTrace } from '../shared/turn-trace.js';
 import { checkAutomaticSend, SEND_CHECK_RETRY_MS } from './send-check.js';
@@ -236,6 +237,7 @@ import {
   normalizeProjectId,
   openContinuationNow,
   reopenWithHandoffNow,
+  savedSummaryUsable,
   releaseContinuationDestinationSendNow,
   recoverContinuationFromRecordedBootstrap,
   repairPrimeFromResumeShadow,
@@ -2287,9 +2289,13 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
  */
 async function continueStuckFromSavedSummary(entry: { token: string; sessionId: string; from: string }, watch: { continuedFromSaved?: boolean }): Promise<boolean> {
   watch.continuedFromSaved = true;
-  if (!goalArmedFor(entry.from) || !goalSwitchFor(entry.from).enabled) return false;
+  // Unattended means Goal or Loop on and the chat not blocked (a block keeps the switch's state; CodeRabbit on #2019).
+  const unattended = (): boolean => !goalBlockReason(entry.from) && goalArmedFor(entry.from) && goalSwitchFor(entry.from).enabled;
+  if (!unattended()) return false;
   const session = await getSession(entry.sessionId).catch(() => null);
   if (!session?.lastHandoffId || session.conversationId !== entry.from) return false;
+  // Checked again after the reads: the person may have blocked the chat or turned the switch off meanwhile.
+  if (!unattended() || !await savedSummaryUsable(entry.sessionId, session.lastHandoffId) || !unattended()) return false;
   try {
     await resumeFromSavedSummary(entry.sessionId, session.lastHandoffId);
     logWarn(`bridge: compaction ticket ${entry.token.slice(0, 8)} for ${entry.from} never reached ChatGPT; ` +
@@ -2301,16 +2307,14 @@ async function continueStuckFromSavedSummary(entry: { token: string; sessionId: 
   }
 }
 
-/** How long a Compact & Resume may wait for ChatGPT's summary before the last saved one is offered. */
-export const STUCK_SUMMARY_MS = 15 * 60_000;
+export { STUCK_SUMMARY_MS };
 async function stuckSummaryOffer(sessionId: string, session: SessionSummary): Promise<SessionControlsView['lastSummary']> {
   const job = resumeJobFor(sessionId);
   if (!job || job.stage !== 'handoff-pending' || job.handoffId || Date.now() - job.startedAt < STUCK_SUMMARY_MS) return null;
-  if (!session.lastHandoffId) return null;
+  if (!session.lastHandoffId || !await savedSummaryUsable(sessionId, session.lastHandoffId)) return null;
   const saved = await readHandoff(sessionId, session.lastHandoffId).catch(() => null);
   if (!saved) return null;
   const source = saved.provenance?.sourceConversationId;
-  if (source && source !== session.conversationId && !session.chatIds.includes(source)) return null;
   return { handoffId: saved.id, createdAt: saved.createdAt, earlierChat: !!source && source !== session.conversationId };
 }
 /** One absolute budget includes opening an absent tab and native hydration. */
@@ -2525,6 +2529,8 @@ export async function compactSession(sessionId: string): Promise<SessionControls
 /** Compact & Resume again from the summary an abandoned run already captured (#1215). */
 export async function resumeFromSavedSummary(sessionId: string, handoffId: string): Promise<SessionControlsView> {
   await controlledConversation(sessionId);
+  // A summary that cannot be used ends nothing: the waiting Compact & Resume stays (CodeRabbit on #2019).
+  if (!await savedSummaryUsable(sessionId, handoffId)) throw new Error('This summary can no longer be used. Start Compact & Resume again.');
   // The person chose the saved summary over a Compact & Resume still waiting for ChatGPT's: that ticket ends.
   const waiting = continuationForSession(sessionId);
   if (waiting && waiting.state === 'awaiting-summary' && !waiting.handoffId) {

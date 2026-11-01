@@ -1356,3 +1356,6 @@ export const UNATTRIBUTED_SESSION_TITLE = 'Unattributed activity';
 export function isUnattributedSession(summary: { conversationId: string | null; title: string; origin?: SessionOrigin | null }): boolean {
   return summary.conversationId === null && !summary.origin && summary.title === UNATTRIBUTED_SESSION_TITLE;
 }
+
+/** How long a Compact & Resume may wait for ChatGPT's summary before the last saved one is offered (2026-11-01). */
+export const STUCK_SUMMARY_MS = 15 * 60_000;
