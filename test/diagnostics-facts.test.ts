@@ -149,6 +149,18 @@ describe('chats', () => {
     expect(lines.join('\n')).not.toMatch(/Secret|s1|s2/);
   });
 
+  // #1882: each chat's Goal/Loop state as the app holds it, to compare with what its page showed.
+  it('adds each chat\'s mode when the app knows it', () => {
+    const now = Date.UTC(2026, 9, 15, 12);
+    const lines = facts.chatLines([
+      { id: 's1', conversationId: 'c1', updatedAt: now - 60_000, endedAt: null, toolCalls: 0, lastToolCallAt: null },
+      { id: 's2', conversationId: null, updatedAt: now - 120_000, endedAt: null, toolCalls: 0, lastToolCallAt: null }
+    ], [], now, session => session.conversationId === 'c1' ? 'loop (this chat)' : null);
+    expect(lines[0]).toBe('#1 main chat: active 1 min ago, 0 tool call(s), 0 failed command(s), 0 refused, inputs: none, mode loop (this chat)');
+    expect(lines[1]).toMatch(/inputs: none$/);
+    expect(lines.join('\n')).not.toContain('c1');
+  });
+
   // Seen on the 2.1.39 RC (Windows): the oldest of a day's chats came first and the list had no end.
   it('lists the most recently active chats first, at most 15', () => {
     const now = Date.UTC(2026, 9, 15, 12);
