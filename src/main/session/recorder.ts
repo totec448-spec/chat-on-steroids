@@ -2528,10 +2528,11 @@ async function recordChatObservationsNow(
           } else if (item.authoredTime === true && live.questionId === item.messageId) {
             if (live.questionOrigin !== undefined) {
               if (live.questionAt === undefined) live.questionAt = written.event.time;
-            } else if (live.turnId && live.turnQuestionAt === undefined) {
+            } else if (live.turnId && live.turnStartedAt !== null && live.turnQuestionAt === undefined) {
               live.turnQuestionAt = written.event.time;
               if (live.pageRequest && !live.pageRequest.turnId && live.pageRequest.createAt !== undefined &&
-                  live.pageRequest.createAt >= written.event.time && live.pageRequest.createAt - written.event.time <= 15_000) {
+                  live.pageRequest.createAt >= written.event.time && live.pageRequest.createAt <= live.turnStartedAt &&
+                  live.turnStartedAt - written.event.time <= 15_000) {
                 live.pageRequest.turnId = live.turnId;
               }
             }
@@ -2782,7 +2783,8 @@ async function recordChatObservationsNow(
           live.turnQuestionAt = questionAt;
           if (live.pageRequest && !continuing && !live.pageRequest.turnId &&
               live.pageRequest.createAt !== undefined && questionAt !== undefined &&
-              live.pageRequest.createAt >= questionAt && live.pageRequest.createAt - questionAt <= 15_000) {
+              live.pageRequest.createAt >= questionAt && live.pageRequest.createAt <= item.time &&
+              item.time - questionAt <= 15_000) {
             live.pageRequest.turnId = item.turnId;
           }
           live.knownTurnStarts.add(item.turnId);
