@@ -9,9 +9,9 @@ import { positionOf } from '../src/shared/chronology.js';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { flushDurable, initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { requestCorrelation, restoreRequestCorrelations, resetCorrelationRegistryForTests } from '../src/main/session/correlation.js';
-import { captureRecordingContext, flushRecorder, freshCallOrigin, recordChatObservations, recordRequestEvidence,
-  recordToolCall, recordingContextCurrent, repairDeterministicAttribution, resetRecorderForTests,
-  sessionForConversation } from '../src/main/session/recorder.js';
+import { captureRecordingContext, flushRecorder, freshCallOrigin, onSessionChange, recordChatObservations,
+  recordRequestEvidence, recordToolCall, recordingContextCurrent, repairDeterministicAttribution,
+  resetRecorderForTests, sessionForConversation } from '../src/main/session/recorder.js';
 import { flushSessions, getSession, indexedSessions, initSessionStore, readAsset, readEvents, rebindSession,
   resetSessionStoreForTests, unsetSessionRootForTests } from '../src/main/session/store.js';
 import { dispatch, ok } from '../src/main/mcp/kernel.js';
@@ -122,16 +122,22 @@ it('requires page evidence from this turn, not an old request seen before it', a
 
 it('anchors a turn when the response request id arrives between the new question and turn_start or re-reports with turnId', async () => {
   const now = Date.now();
-  await recordRequestEvidence('chat-a', [{
-    kind: 'tool_evidence', time: now - 500, fiberConversationId: 'chat-a',
-    calls: [{ requestId: 'historical-without-create-time', messageId: 'm-hist', tool: 'read', order: 0, answered: false }]
-  }]);
   await recordChatObservations('chat-a', [
     { kind: 'user_message', time: now - 6000, messageId: 'question-old', text: 'Earlier DOM question' },
-    { kind: 'user_message', time: now - 1000, authoredNow: true, authoredTime: true, messageId: 'question-0', text: 'Warmup' },
+    { kind: 'user_message', time: now - 1000, authoredNow: true, authoredTime: true, messageId: 'question-0', text: 'Warmup' }
+  ]);
+  await recordRequestEvidence('chat-a', [{
+    kind: 'tool_evidence', time: now - 600, fiberConversationId: 'chat-a',
+    calls: [
+      { requestId: 'historical-without-create-time', messageId: 'm-hist', tool: 'read', order: 0, answered: false },
+      { requestId: 'historical-between-question-and-turn', messageId: 'm-hist-window', tool: 'read', order: 1, answered: false, createTime: (now - 5000) / 1000 }
+    ]
+  }]);
+  await recordChatObservations('chat-a', [
     { kind: 'turn_start', time: now - 400, turnId: 'turn-0' },
     { kind: 'assistant_message', time: now - 380, turnId: 'turn-0', messageId: 'reply-0', text: 'Warmup reply', state: 'final', final: true }
   ]);
+  expect(captureRecordingContext(now)).toBeNull();
   await recordRequestEvidence('chat-a', [{
     kind: 'tool_evidence', time: now - 350, fiberConversationId: 'chat-a',
     calls: [{ requestId: 'historical-older-create-time', messageId: 'm-old-create', tool: 'read', order: 0, answered: false, createTime: (now - 5000) / 1000 }]
@@ -243,10 +249,11 @@ it.each(['asset quota', 'destination append', 'source revision'] as const)(
     const failed = (await record('failed-repair', captureRecordingContext(Date.now()), 'overflow result\n'.repeat(30_000)))!;
     const healthy = (await record('healthy-repair'))!;
     const legacy = (await record('legacy-repair', null))!;
-    // Keep the background repair timer from racing the explicitly awaited pass on slow disks.
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const target = (await sessionForConversation('chat-b'))!;
     const legacyTarget = (await sessionForConversation('chat-c'))!;
+    await new Promise(resolve => setTimeout(resolve, 410));
+    // Keep the background repair timer from racing the explicitly awaited pass on slow disks.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     if (failure === 'asset quota') {
       const write = store.writeAsset;
       vi.spyOn(store, 'writeAsset').mockImplementation((id, ...args) => {
@@ -271,15 +278,25 @@ it.each(['asset quota', 'destination append', 'source revision'] as const)(
     await prove('chat-b', 'failed-repair');
     await prove('chat-b', 'healthy-repair');
     await prove('chat-c', 'legacy-repair');
-    await expect(repairDeterministicAttribution()).resolves.toMatchObject({ calls: 2 });
-    expect((await calls(source)).map(row => row.call.callId)).toEqual([failed.callId]);
-    expect((await calls(target)).some(row => row.call.callId === healthy.callId)).toBe(true);
-    expect((await calls(legacyTarget)).map(row => row.call.callId)).toEqual([legacy.callId]);
-    expect(getLog().some(row => row.level === 'warn' && row.message.includes(failed.callId) && row.message.includes('failed-repair'))).toBe(true);
-    vi.restoreAllMocks();
-    await repairDeterministicAttribution();
-    expect(await calls(source)).toHaveLength(0);
-    expect((await calls(target)).map(row => row.call.callId).sort()).toEqual([failed.callId, healthy.callId].sort());
+    const notified = new Set<string>();
+    const unsubscribe = onSessionChange(change => { for (const id of change.sessionIds ?? []) notified.add(id); });
+    try {
+      await expect(repairDeterministicAttribution()).resolves.toMatchObject({ calls: 2 });
+      await vi.advanceTimersByTimeAsync(400);
+      expect(notified.has(source)).toBe(true);
+      expect(notified.has(target)).toBe(true);
+      expect(notified.has(legacyTarget)).toBe(true);
+      expect((await calls(source)).map(row => row.call.callId)).toEqual([failed.callId]);
+      expect((await calls(target)).some(row => row.call.callId === healthy.callId)).toBe(true);
+      expect((await calls(legacyTarget)).map(row => row.call.callId)).toEqual([legacy.callId]);
+      expect(getLog().some(row => row.level === 'warn' && row.message.includes(failed.callId) && row.message.includes('failed-repair'))).toBe(true);
+      vi.restoreAllMocks();
+      await repairDeterministicAttribution();
+      expect(await calls(source)).toHaveLength(0);
+      expect((await calls(target)).map(row => row.call.callId).sort()).toEqual([failed.callId, healthy.callId].sort());
+    } finally {
+      unsubscribe();
+    }
   }
 );
 
