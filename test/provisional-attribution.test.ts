@@ -138,6 +138,8 @@ it('anchors a turn when the response request id arrives between the new question
     { kind: 'assistant_message', time: now - 380, turnId: 'turn-0', messageId: 'reply-0', text: 'Warmup reply', state: 'final', final: true }
   ]);
   expect(captureRecordingContext(now)).toBeNull();
+  expect(getLog().some(row => row.message.includes('historical-between-question-and-turn') &&
+    row.message.includes('turn-0') && row.message.includes('outside the question/turn-start window'))).toBe(true);
   await recordRequestEvidence('chat-a', [{
     kind: 'tool_evidence', time: now - 350, fiberConversationId: 'chat-a',
     calls: [{ requestId: 'historical-older-create-time', messageId: 'm-old-create', tool: 'read', order: 0, answered: false, createTime: (now - 5000) / 1000 }]
