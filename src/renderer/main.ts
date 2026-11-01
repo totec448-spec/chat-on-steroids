@@ -3025,6 +3025,17 @@ $('soundCues').addEventListener('change', event => {
 });
 api.onSoundCue?.(playSoundCue);
 
+/**
+ * A plain web link outside the chat (the Usage price links, Send feedback's guide link): the window
+ * denies new windows, so without this it did nothing (design audit 2026-11-01). Chat links route
+ * themselves and mark the click handled; the main process validates the address again.
+ */
+function openPlainWebLink(event: MouseEvent): void {
+  const anchor = (event.target as Element | null)?.closest?.<HTMLAnchorElement>('a[href]');
+  if (!anchor || event.defaultPrevented || !/^https?:\/\//i.test(anchor.href)) return;
+  event.preventDefault();
+  void run(api.openLink(anchor.href, { external: true }));
+}
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
   if (!target.closest('.connection-anchor') && !$('connectionPopover').contains(target) && !$('connectionPopover').hidden) setConnectionPopover(false);
@@ -3032,15 +3043,11 @@ document.addEventListener('click', (event) => {
   if (external?.dataset.linkExternal) void run(api.openLink(external.dataset.linkExternal, { external: true }));
   const link = target.closest<HTMLElement>('[data-link]');
   if (link?.dataset.link) void run(api.openLink(link.dataset.link));
-  // A plain web link outside the chat (the Usage price links, Send feedback's guide link): the window
-  // denies new windows, so without this it did nothing (design audit 2026-11-01). Chat links route
-  // themselves and mark the click handled; the main process validates the address again.
-  const anchor = target.closest<HTMLAnchorElement>('a[href]');
-  if (anchor && !event.defaultPrevented && /^https?:\/\//i.test(anchor.href)) {
-    event.preventDefault();
-    void run(api.openLink(anchor.href, { external: true }));
-  }
+  openPlainWebLink(event);
 });
+// A middle-click on the same links (auxclick), so it opens in the browser instead of being denied
+// (CodeRabbit on #2011). Chat links handle their own middle-click and mark it handled.
+document.addEventListener('auxclick', event => { if (event.button === 1) openPlainWebLink(event); });
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape' || $('connectionPopover').hidden) return;
   setConnectionPopover(false);
