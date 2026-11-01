@@ -307,6 +307,25 @@ describe('what leaves this machine', () => {
     await appendEvent(later.id, { time: 130, source: 'extension', kind: 'assistant_message', turnId: 'l-2', messageId: 'l-c', final: false,
       message: { text: 'Starting step two.', chars: 18, truncated: false } });
     expect(goal.templateDecisionText(await goal.conversationMessages(later.id))).toBe('Starting step two.');
+    // A Retry reuses the question: the earlier generation's final answer stays recorded before the new
+    // generation's commentary, and is never read for the new one (CodeRabbit on #2014).
+    const retried = await createSession({ title: 'retried', conversationId: 'retried-turn' });
+    await appendEvent(retried.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'Go', chars: 2, truncated: false } });
+    await appendEvent(retried.id, { time: 110, source: 'extension', kind: 'assistant_message', turnId: 'gen-1', messageId: 'r-final', final: true,
+      message: { text: 'Done.\n[[COS_GOAL:COMPLETE]]', chars: 27, truncated: false } });
+    await appendEvent(retried.id, { time: 120, source: 'extension', kind: 'assistant_message', turnId: 'gen-2', messageId: 'r-c', final: false,
+      message: { text: 'Trying again.', chars: 13, truncated: false } });
+    expect(goal.templateDecisionText(await goal.conversationMessages(retried.id))).toBe('Trying again.');
+    // Much commentary after the final answer: the context cut keeps the final answer (CodeRabbit on #2014).
+    const long = await createSession({ title: 'long commentary', conversationId: 'long-commentary' });
+    await appendEvent(long.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'Go', chars: 2, truncated: false } });
+    await appendEvent(long.id, { time: 101, source: 'extension', kind: 'assistant_message', turnId: 'long-turn', messageId: 'long-final', final: true,
+      message: { text: 'All done.\n[[COS_GOAL:CONTINUE]]', chars: 31, truncated: false } });
+    for (let n = 0; n < 130; n++) await appendEvent(long.id, { time: 102 + n, source: 'extension', kind: 'assistant_message', turnId: 'long-turn',
+      messageId: `long-c-${n}`, final: false, message: { text: `Note ${n}.`, chars: 8, truncated: false } });
+    const longMessages = await goal.conversationMessages(long.id);
+    expect(longMessages.length).toBeLessThanOrEqual(120);
+    expect(goal.templateDecisionText(longMessages)).toBe('All done.\n[[COS_GOAL:CONTINUE]]');
   });
 
   // 2.1.43, live on Windows: a Goal step split by two fresh turns ran its five commands as 2 + 2 + 1.
