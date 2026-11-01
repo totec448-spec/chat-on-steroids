@@ -286,8 +286,9 @@ export function initPets(api: AppApi, runtime: PetController): void {
   void (async () => {
     const own = ++epoch;
     const next = await run(api.petsList());
-    // An import that finished first already showed the library; this older read changes nothing.
-    if (own !== epoch) return;
+    // A newer change, or an import that finished first (imports apply without a request number), already
+    // decided what the library shows; this older read changes nothing (CodeRabbit on #2002).
+    if (own !== epoch || loaded) return;
     if (next) apply(next);
     else if (!loaded) { loadFailed = true; render(); }
   })();
