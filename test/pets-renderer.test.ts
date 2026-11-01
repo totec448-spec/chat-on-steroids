@@ -158,6 +158,11 @@ it('says the pets could not be loaded when the library cannot be read', async ()
   for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement, HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
   const api: any = { petsList: () => Promise.resolve({ ok: false as const, error: 'Pet library unavailable' }) };
   const { initPets } = await import('../src/renderer/pets.js'); initPets(api, { applyLibraryState: vi.fn() } as any);
-  await vi.waitFor(() => expect(w.document.getElementById('petsInstalled')!.textContent).toBe('Pets could not be loaded.'));
+  await vi.waitFor(() => expect(w.document.getElementById('petsInstalled')!.textContent).toBe('Pets could not be loaded.'), { timeout: 10_000 });
+  expect(w.document.getElementById('petsCount')!.textContent).toBe('');
+  // Typing in the search repaints the list, and the failure stays (CodeRabbit on #2002).
+  const search = w.document.getElementById('petsSearch') as HTMLInputElement;
+  search.value = 'wil'; search.dispatchEvent(new w.Event('input'));
+  expect(w.document.getElementById('petsInstalled')!.textContent).toBe('Pets could not be loaded.');
   expect(w.document.getElementById('petsCount')!.textContent).toBe('');
 });
