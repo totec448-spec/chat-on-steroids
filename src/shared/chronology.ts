@@ -340,14 +340,27 @@ export function residenceOf(entry: Chronological): number {
  * reload can have every message marked final, and interim prose must keep interleaving with
  * the tool calls it ran between — the terminal message is the only one whose position is a
  * matter of definition rather than observation.
+ *
+ * When a turn ends with `continued: true`, an answer that was consolidated after that end
+ * belongs to the continuation and must not close this turn. An answer that completed at or
+ * before the continued end remains the closing message of its turn.
  */
-function closing<T extends Chronological>(group: readonly T[]): T | null {
-  if (group.some(entry => entry.kind === 'turn_end' && entry.continued === true)) return null;
+function closing<T extends Chronological>(group: readonly T[], isContinued = false): T | null {
+  const continuedEnd = group.find(entry => entry.kind === 'turn_end' && entry.continued === true);
+  const endPosition = continuedEnd ? positionOf(continuedEnd) : undefined;
   let found: T | null = null;
   for (const entry of group) {
     if (entry.kind !== 'assistant_message') continue;
     if (entry.final !== true && entry.state !== 'final') continue;
-    if (!found || residenceOf(entry) > residenceOf(found)) found = entry;
+    if (endPosition !== undefined && residenceOf(entry) > endPosition) continue;
+    if (!found) {
+      found = entry;
+      continue;
+    }
+    const order = isContinued
+      ? residenceOf(entry) > residenceOf(found)
+      : positionOf(entry) > positionOf(found);
+    if (order) found = entry;
   }
   return found;
 }
@@ -504,10 +517,19 @@ export function chronological<T extends Chronological>(entries: readonly T[]): T
     if (entry.kind === 'turn_start' && entry.turnId) pendingAnchor = anchors.get(entry.turnId);
   }
 
+  const continuedAnchors = new Set<number>();
+  for (const [sourceTurn, targetTurn] of continuedTo) {
+    const sAnchor = anchors.get(sourceTurn);
+    if (sAnchor !== undefined) continuedAnchors.add(sAnchor);
+    const tAnchor = anchors.get(targetTurn);
+    if (tAnchor !== undefined) continuedAnchors.add(tAnchor);
+  }
+
   const out: T[] = [];
   for (const anchor of [...groups.keys()].sort((a, b) => a - b)) {
     const group = groups.get(anchor)!;
-    const ends = closing(group);
+    const isContinued = continuedAnchors.has(anchor) || group.some(entry => entry.kind === 'turn_end' && entry.continued === true);
+    const ends = closing(group, isContinued);
     placeBefore(group);
     group.sort((a, b) => rank(a, ends) - rank(b, ends) || byTime(a, b));
     out.push(...group);
