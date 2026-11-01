@@ -2124,6 +2124,20 @@ describe('a chat driven towards a specific goal', () => {
     expect(await goal.recordGoalPickupAttemptNow(conversationId, 'goal-reply-bound', slow + 100)).toBeNull();
   });
 
+  // CodeRabbit on #1979: the sweep and the person's click can both find the same retry due.
+  it('reserves a Goal pickup retry only for the attempt count the caller saw', async () => {
+    const conversationId = 'goal-pickup-race';
+    const session = await createSession({ title: 'Goal pickup race', conversationId });
+    const at = Date.now();
+    await goal.acceptGoalReplyNow({ conversationId, sessionId: session.id, replyId: 'goal-reply-race',
+      turnId: 'goal-turn-race', eventSeq: 7, blocked: false });
+    expect(await goal.recordGoalPickupAttemptNow(conversationId, 'goal-reply-race', at, at + 1, 0)).toMatchObject({ attempts: 1 });
+    // The second pass read zero too: it reserves nothing, and the count stays at one.
+    expect(await goal.recordGoalPickupAttemptNow(conversationId, 'goal-reply-race', at, at + 1, 0)).toBeNull();
+    expect(goal.goalPendingReplyFor(conversationId)).toMatchObject({ pickupAttempts: 1 });
+    expect(await goal.recordGoalPickupAttemptNow(conversationId, 'goal-reply-race', at, at + 1, 1)).toMatchObject({ attempts: 2 });
+  });
+
   it('upgrades a decided provisional turn to the stable reply without reopening it', async () => {
     const conversationId = 'c-reply-provisional-upgrade';
     const turnId = 'g-reply-provisional-upgrade';

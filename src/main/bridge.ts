@@ -9853,10 +9853,15 @@ async function inspectOwedPickups(now: number, focus?: PickupFocus): Promise<boo
     if (repair?.reason === 'goal' && (now >= watch.expiresAt || repair.state !== 'handed' || owed.has(conversationId))) repairsInFlight.delete(conversationId);
   }
   let queued = false;
+  let focusSkipLogged = false;
   for (const reply of owed.values()) {
     // The person's click is about one chat: another chat's pickup is neither tried nor spent by it
     // (CodeRabbit on #1979).
-    if (focus && reply.conversationId !== focus.conversationId) continue;
+    if (focus && reply.conversationId !== focus.conversationId) {
+      // Said once per pass that skips anything: the person's click leaves other chats to the sweep.
+      if (!focusSkipLogged) { focusSkipLogged = true; logInfo(`bridge: the person's pickup click for ${focus.conversationId} leaves other chats' pickups to the regular sweep`); }
+      continue;
+    }
     const session = await getSession(reply.sessionId);
     if (session?.conversationId !== reply.conversationId || isChatBlocked(reply.conversationId) ||
         stopRequestedFor(reply.conversationId) || await conversationWasSuperseded(reply.conversationId) ||
@@ -9960,9 +9965,9 @@ async function inspectOwedPickups(now: number, focus?: PickupFocus): Promise<boo
     const wasStopped = !!watch.stoppedAt;
     const nextAt = nextAttempts < BROWSER_PICKUP_ATTEMPT_LIMIT ? now + browserPickupDelay(nextAttempts) : undefined;
     const reserved = reply.queued && reply.inputId
-      ? await recordQueuedPickupAttemptNow(reply.inputId, reply.replyId, now, nextAt, sharedState)
+      ? await recordQueuedPickupAttemptNow(reply.inputId, reply.replyId, now, nextAt, sharedState, watch.attempts)
       : !reply.queued && reply.goalReplyId
-        ? await recordGoalPickupAttemptNow(reply.conversationId, reply.goalReplyId, now, nextAt)
+        ? await recordGoalPickupAttemptNow(reply.conversationId, reply.goalReplyId, now, nextAt, watch.attempts)
         : null;
     if (!reserved) continue;
     watch.attempts = reserved.attempts;
