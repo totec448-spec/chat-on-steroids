@@ -158,6 +158,7 @@ interface Hook {
   streamRootKeys(): string[];
   /** How long the stop button must stay gone before content.js calls a turn finished. */
   TURN_SETTLE_MS: number;
+  APPROVAL_SETTLE_MS: number;
   /** How long an app-owned Send waits for its exact user row after the click. */
   DESKTOP_RECEIPT_MS: number;
   /** Test seam for the no-visible-progress fallback. */
@@ -20011,6 +20012,73 @@ describe('one live isolated-world recorder per document', () => {
     expect(await live.runtimeMessage({ type: 'clf-recorder-ping' })).toMatchObject({ busy: false });
   });
 
+  // #1977: ChatGPT's tool approval card hides Stop while the turn waits for a person. Twelve seconds
+  // of it closed the turn as completed; the answer sections after the person answered were lost.
+  const approvalCard = (document: Document) => {
+    const card = document.createElement('div');
+    card.setAttribute('data-codex-approval-surface', 'true');
+    card.append(document.createElement('button'), document.createElement('button'));
+    card.getClientRects = () => [{ width: 600, height: 200 }] as unknown as DOMRectList;
+    document.body.append(card);
+    return card;
+  };
+
+  it('keeps a turn open while an approval card waits, however long, and ends it once after (#1977)', async () => {
+    live = await nonProHarness();
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'approval-turn', []);
+    prose(live.document, section, 'approval-progress', 'Checking the window first.');
+    live.hook.observe(); await settle();
+    expect(emitted(live.sent, 'turn_start')).toHaveLength(1);
+    const card = approvalCard(live.document);
+    stopGenerating(live.document);
+    for (let pass = 0; pass < 8; pass++) {
+      live.hook.observe(); await settle();
+      live.advance(live.hook.TURN_SETTLE_MS);
+    }
+    live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end')).toEqual([]);
+    // Answered: the turn goes on, then really ends.
+    card.remove();
+    startGenerating(live.document, { send: false });
+    prose(live.document, section, 'approval-result', 'Done: the window is set.');
+    live.hook.observe(); await settle();
+    await settleTurn(live); await live.hook.flush();
+    const ends = emitted(live.sent, 'turn_end');
+    expect(ends).toHaveLength(1);
+    expect(ends[0]!.event).toMatchObject({ outcome: 'completed' });
+  });
+
+  it('does not take a native final as the end while an approval card waits (#1977)', async () => {
+    live = await harness();
+    startGenerating(live.document);
+    const section = assistantTurn(live.document, 'approval-native', []);
+    prose(live.document, section, 'approval-native-message', 'Checking.');
+    live.hook.observe(); await settle();
+    const card = approvalCard(live.document);
+    stopGenerating(live.document);
+    await bindFiberTurns([{ section, turn: { turnId: 'approval-native', endMessageId: 'approval-native-message',
+      messages: [{ role: 'assistant', messageId: 'approval-native-message', rawMessageId: 'approval-native-message', rawText: 'Checking.' }] } }]);
+    live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end')).toEqual([]);
+    // Nor is its last message published as final: the recorder would close the turn on it (CodeRabbit on #1992).
+    expect(emitted(live.sent, 'assistant_message').some(row => row.event.final === true)).toBe(false);
+    card.remove();
+    const nativeFinal = () => bindFiberTurns([{ section, turn: { turnId: 'approval-native', endMessageId: 'approval-native-message',
+      messages: [{ role: 'assistant', messageId: 'approval-native-message', rawMessageId: 'approval-native-message', rawText: 'Checking.' }] } }]);
+    // Right after the person answered, the old final is still on the page while the turn goes on
+    // (CodeRabbit on #1992): neither a final message nor the end yet.
+    await nativeFinal();
+    live.hook.observe(); await settle(); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end')).toEqual([]);
+    expect(emitted(live.sent, 'assistant_message').some(row => row.event.final === true)).toBe(false);
+    live.advance(live.hook.APPROVAL_SETTLE_MS);
+    await nativeFinal();
+    await settleTurn(live); await live.hook.flush();
+    expect(emitted(live.sent, 'turn_end')).toHaveLength(1);
+    expect(emitted(live.sent, 'assistant_message').some(row => row.event.final === true)).toBe(true);
+  });
+
   it('reports the recorder protocol version rather than the unrelated Fiber protocol version', async () => {
     live = await harness();
 
@@ -23824,6 +23892,27 @@ describe('app Stop command uses current native turn proof', () => {
     expect(await live!.runtimeMessage(h.request)).toEqual({ ok: true });
     live!.hook.observe(); await settle(); await live!.hook.flush();
     expect(h.clicks()).toBe(0);
+    expect(emitted(live!.sent, 'turn_end').map(row => row.event)).toEqual([
+      expect.objectContaining({ turnId: h.request.turnId, outcome: 'stopped' })
+    ]);
+  });
+
+  // CodeRabbit on #1992: an approval card holds the turn open (#1977), but the app's Stop still ends it.
+  it('ends a turn held by an approval card when the app asks to stop it', async () => {
+    const h = await setup();
+    stopGenerating(live!.document);
+    const card = live!.document.createElement('div');
+    card.setAttribute('data-codex-approval-surface', 'true');
+    card.append(live!.document.createElement('button'), live!.document.createElement('button'));
+    card.getClientRects = () => [{ width: 600, height: 200 }] as unknown as DOMRectList;
+    live!.document.body.append(card);
+    live!.advance(30_000);
+    live!.hook.observe(); await settle(); await live!.hook.flush();
+    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
+    expect(await live!.runtimeMessage(h.request)).toEqual({ ok: true });
+    live!.hook.observe(); await settle();
+    live!.advance(live!.hook.TURN_SETTLE_MS);
+    live!.hook.observe(); await settle(); await live!.hook.flush();
     expect(emitted(live!.sent, 'turn_end').map(row => row.event)).toEqual([
       expect.objectContaining({ turnId: h.request.turnId, outcome: 'stopped' })
     ]);
