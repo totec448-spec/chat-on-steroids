@@ -89,7 +89,9 @@ interface LiveConversation {
   /** Recording-only workflow continuity, advanced solely by explicit continued turn ends. */
   recordingLineage?: RecordingLineage;
   /** Fresh page proof in this process, not reconstructed from historical turns. */
-  pageRequest?: { requestId: string; at: number };
+  pageRequest?: { requestId: string; at: number; turnId?: string };
+  questionAt?: number;
+  questionAuthoredNow?: boolean;
   conversationId: string;
   sessionId: string;
   /** Durable local turn lifecycle only. Never used as MCP ownership evidence. */
@@ -847,7 +849,8 @@ function noteCallEvidence(
   sessionId: string,
   fiberConversationId: string | null | undefined,
   calls: readonly PageCallEvidence[],
-  at: number
+  at: number,
+  turnId?: string
 ): boolean {
   if (fiberConversationId && fiberConversationId !== conversationId) {
     // Name the discarded ids. Without them this line says a batch was dropped but not
@@ -899,11 +902,16 @@ function noteCallEvidence(
     } else if (result === 'stored') {
       stored = true;
       const live = conversations.get(conversationId);
-      if (live) live.pageRequest = { requestId: call.requestId, at: observedAt };
+      if (live) live.pageRequest = { requestId: call.requestId, at: observedAt, ...(turnId ? { turnId } : {}) };
       logInfo(`request attribution: ${call.requestId} -> conversation ${conversationId}`);
       noteRouteRequestSighted(call.requestId, conversationId, observedAt,
         typeof call.createTime === 'number' && Number.isFinite(call.createTime) ? call.createTime * 1000 : null);
       scheduleAttributionRepair(call.requestId);
+    } else if (result === 'same' && turnId) {
+      const live = conversations.get(conversationId);
+      if (live && (!live.turnId || live.turnId === turnId)) {
+        live.pageRequest = { requestId: call.requestId, at: observedAt, turnId };
+      }
     }
   }
   return stored;
@@ -1349,7 +1357,7 @@ export function captureRecordingContext(startedAt: number): RecordingContext | n
     return recordingContextCurrent(previous) ? { ...previous, turnId: live.turnId! } : null;
   }
   const page = live.pageRequest;
-  if (!page || page.at < live.turnStartedAt! || page.at > startedAt ||
+  if (!page || (page.turnId ? page.turnId !== live.turnId : page.at < live.turnStartedAt!) || page.at > startedAt ||
       requestCorrelation(page.requestId)?.sessionId !== live.sessionId) return null;
   const lineage = live.recordingLineage ??= { turnId: live.turnId! };
   const context = { conversationId: live.conversationId, sessionId: live.sessionId, turnId: live.turnId!, lineage,
@@ -2278,7 +2286,7 @@ export async function recordRequestEvidence(
   let storedOwner = false;
   for (const item of observations) {
     if (item.kind === 'tool_evidence' && item.calls?.length) {
-      storedOwner = noteCallEvidence(conversationId, sessionId, item.fiberConversationId, item.calls, item.time) || storedOwner;
+      storedOwner = noteCallEvidence(conversationId, sessionId, item.fiberConversationId, item.calls, item.time, item.turnId) || storedOwner;
     }
   }
   if (storedOwner) await commitRequestCorrelations();
@@ -2490,6 +2498,13 @@ async function recordChatObservationsNow(
           messageId: item.messageId
         }, { preferTime: item.authoredTime === true, work: item.authoredNow === true });
         if (!written.changed) continue;
+        if (live && !live.turnId && written.event.origin === written.event.seq) {
+          const questionAt = Math.min(item.time, written.event.time);
+          if (!live.endedTurn || questionAt >= live.endedTurn.endedAt || item.authoredNow === true) {
+            live.questionAt = questionAt;
+            live.questionAuthoredNow = item.authoredNow === true;
+          }
+        }
         if (item.authoredNow === true) {
           activity.meaningful = true; activity.at = Math.max(activity.at ?? 0, item.time);
           activity.working = true;
@@ -2498,6 +2513,10 @@ async function recordChatObservationsNow(
       }
       case 'assistant_message': {
         if (!item.messageId) continue;
+        if (live && !live.turnId) {
+          delete live.questionAt;
+          delete live.questionAuthoredNow;
+        }
         const state = item.state ?? (item.final === true ? 'final' : 'streaming');
         // A reload can destroy the document-local generation id after this recorder already
         // made the only honest lifecycle verdict it could: unknown/failed/interrupted/stalled.
@@ -2719,6 +2738,16 @@ async function recordChatObservationsNow(
           if (continuing && prior.anchor) logInfo(
             `request attribution: continued recording context in ${conversationId}; explicit continued turn`
           );
+          const questionAt = live.questionAt;
+          const questionAuthoredNow = live.questionAuthoredNow === true;
+          delete live.questionAt;
+          delete live.questionAuthoredNow;
+          if (live.pageRequest && !continuing && !live.pageRequest.turnId &&
+              live.pageRequest.at <= item.time && (!live.endedTurn || live.pageRequest.at > live.endedTurn.endedAt) &&
+              questionAt !== undefined && item.time - questionAt <= 15_000 &&
+              (live.pageRequest.at >= questionAt || (questionAuthoredNow && item.time - live.pageRequest.at <= 15_000))) {
+            live.pageRequest.turnId = item.turnId;
+          }
           live.knownTurnStarts.add(item.turnId);
           // Turn lifecycle is presentation/recovery state only in 1.8. It is never consulted
           // for MCP ownership, so a replayed journal timestamp cannot misattribute a call.
@@ -2794,6 +2823,11 @@ async function recordChatObservationsNow(
               : null;
           live.turnRequestIds = new Set<string>();
           if (live.turnId === item.turnId) {
+            delete live.questionAt;
+            delete live.questionAuthoredNow;
+            if (live.pageRequest && (live.pageRequest.turnId === item.turnId || live.pageRequest.at <= item.time)) {
+              delete live.pageRequest;
+            }
             live.turnStartedAt = null;
             live.turnId = null;
           }

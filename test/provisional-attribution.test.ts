@@ -120,6 +120,25 @@ it('requires page evidence from this turn, not an old request seen before it', a
   expect(captureRecordingContext(Date.now())).toBeNull();
 });
 
+it('anchors a turn when the response request id arrives between the new question and turn_start or re-reports with turnId', async () => {
+  const now = Date.now();
+  await prove('chat-a', 'fast-stream-request', now - 500);
+  await recordChatObservations('chat-a', [
+    { kind: 'user_message', time: now - 1000, authoredTime: true, messageId: 'question-1', text: 'Next step' },
+    { kind: 'turn_start', time: now - 10, turnId: 'turn-1' }
+  ]);
+  expect(await record('hidden-workflow-1')).toMatchObject({ attributionMethod: 'generation', conversationId: 'chat-a' });
+
+  await recordChatObservations('chat-a', [{ kind: 'turn_end', time: now, turnId: 'turn-1', outcome: 'completed' }]);
+  await prove('chat-a', 'reobserved-request', now + 1);
+  await recordChatObservations('chat-a', [
+    { kind: 'turn_start', time: now + 10, turnId: 'turn-2' },
+    { kind: 'tool_evidence', time: now + 12, turnId: 'turn-2', fiberConversationId: 'chat-a',
+      calls: [{ requestId: 'reobserved-request', messageId: 'm-req', tool: 'read', order: 0, answered: false }] }
+  ]);
+  expect(await record('hidden-workflow-2')).toMatchObject({ attributionMethod: 'generation', conversationId: 'chat-a' });
+});
+
 it('does not acquire a context from a different chat after recording admission', async () => {
   await begin();
   const context = captureRecordingContext(Date.now());
