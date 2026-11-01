@@ -152,11 +152,18 @@ export function initSkillsLibrary(api: AppApi): () => void {
     render();
   };
 
-  const update = async (request: Promise<{ ok: true; data: ManagedSkill[] | null } | { ok: false; error: string }>): Promise<boolean> => {
+  /**
+   * Applies the newest request's list. While no list has arrived yet, the newest request ending without one
+   * decides what the page shows: a failed load says so, and a change that ended without a list (a cancelled
+   * import) loads again rather than leaving "Loading…" for good. An older request says nothing (CodeRabbit on #2002).
+   */
+  const update = async (request: Promise<{ ok: true; data: ManagedSkill[] | null } | { ok: false; error: string }>, load = false): Promise<boolean> => {
     const own = ++epoch;
     const next = await run(request);
-    if (!next || own !== epoch) return false;
-    setSkills(next); return true;
+    if (own !== epoch) return false;
+    if (next) { setSkills(next); return true; }
+    if (!loaded) { if (load) { loadFailed = true; render(); } else void loadList(); }
+    return false;
   };
 
   const checkUpdates = (force: boolean): Promise<void> => {
@@ -282,13 +289,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
   };
 
   $('skillsSearch').addEventListener('input', render);
-  const loadList = async (): Promise<boolean> => {
-    const own = epoch + 1;
-    if (await update(api.listManagedSkills())) return true;
-    // A load that a newer one replaced says nothing: the newer one decides (CodeRabbit on #2002).
-    if (!loaded && own === epoch) { loadFailed = true; render(); }
-    return false;
-  };
+  const loadList = (): Promise<boolean> => update(api.listManagedSkills(), true);
   const refresh = (force: boolean): void => {
     void (async () => { if (await loadList()) await checkUpdates(force); })();
   };
