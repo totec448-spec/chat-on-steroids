@@ -398,6 +398,20 @@ it('rechecks browser custody after the missing-tab report waits for session meta
   expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued', owner: null });
 });
 
+// #1980 saved data: rows from before the field reopen as usual; a damaged count loads and reopens no more.
+it.each([['saved before the count existed', undefined, 'reopen'], ['with a damaged count', 7, 'failed'], ['with a damaged type', 'two', 'failed']] as const)(
+  'loads an opening %s and treats its lost tab accordingly', async (_name, count, outcome) => {
+    const row = await enqueueInput(args());
+    await writeDurableNow('session-input', (await listInputs()).map(entry => {
+      if (entry.id !== row.id) return entry;
+      const { openingReopens: _drop, ...rest } = entry as typeof entry & { openingReopens?: number };
+      return count === undefined ? rest : { ...rest, openingReopens: count };
+    }));
+    resetInputForTests();
+    expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued' });
+    expect(await lostBrowserOpening(row.id, () => true)).toBe(outcome);
+  });
+
 it('serializes a missing-tab report with the first claim in either order', async () => {
   const first = await enqueueInput(args());
   await writeDurableNow('session-input', (await listInputs()).map(entry => entry.id === first.id ? { ...entry, openingReopens: 2 } : entry));
