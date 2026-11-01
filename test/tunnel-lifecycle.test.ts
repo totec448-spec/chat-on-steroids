@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import path from 'node:path';
 
 const fixture = vi.hoisted(() => {
   type Listener = (...args: any[]) => void;
@@ -115,7 +116,8 @@ describe('OpenAI tunnel process ownership', () => {
       await vi.waitFor(() => expect(fixture.spawn).toHaveBeenCalledOnce());
       const call = fixture.spawn.mock.calls[0] as unknown as [string, string[], { env: Record<string, string> }];
       const healthFile = call[1][call[1].indexOf('--health.url-file') + 1]!;
-      expect(healthFile).toBe(`${call[2].env.TMPDIR}/health.url`);
+      expect(call[2].env.TMPDIR).toBeTypeOf('string');
+      expect(healthFile).toBe(path.join(call[2].env.TMPDIR!, 'health.url'));
       await handle.stop();
       expect(fixture.terminate).toHaveBeenCalledOnce();
     } finally {
