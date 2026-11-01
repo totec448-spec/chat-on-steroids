@@ -328,6 +328,46 @@ describe('what leaves this machine', () => {
     expect(goal.templateDecisionText(longMessages)).toBe('All done.\n[[COS_GOAL:CONTINUE]]');
   });
 
+  // CodeRabbit on #2014: the final answer must not take a user correction's place in the helper's context.
+  it('keeps user corrections in the context and still reads the Offline marker when the final answer does not fit', async () => {
+    const session = await createSession({ title: 'corrections first', conversationId: 'corrections-first' });
+    const user = (time: number, text: string) => appendEvent(session.id, { time, source: 'extension', kind: 'user_message', message: { text, chars: text.length, truncated: false } });
+    await user(100, 'O'.repeat(48_000));
+    await user(110, 'A'.repeat(48_000));
+    await user(120, 'B'.repeat(10_000));
+    const final = `${'F'.repeat(11_900)}\n[[COS_GOAL:CONTINUE]]`;
+    await appendEvent(session.id, { time: 130, source: 'extension', kind: 'assistant_message', turnId: 'cf-turn', messageId: 'cf-final', final: true,
+      message: { text: final, chars: final.length, truncated: false } });
+    await appendEvent(session.id, { time: 140, source: 'extension', kind: 'assistant_message', turnId: 'cf-turn', messageId: 'cf-after', final: false,
+      message: { text: 'C'.repeat(12_000), chars: 12_000, truncated: false } });
+    const messages = await goal.conversationMessages(session.id);
+    expect(messages.filter(message => message.role === 'user').map(message => message.content[0])).toEqual(['O', 'A', 'B']);
+    expect(goal.templateDecisionText(messages)).toBe(final);
+  });
+
+  // CodeRabbit on #2014: a reload can record the same commentary again without its turn. The store keeps a
+  // stable message's first turn, so the marker is still read from the final answer.
+  it('keeps the turn of a message re-recorded without it, by its exact message id', async () => {
+    const { upsertMessageEvent } = await import('../src/main/session/store.js');
+    const session = await createSession({ title: 'reloaded commentary', conversationId: 'reloaded-commentary' });
+    const say = (time: number, messageId: string, text: string, final: boolean, turnId?: string) => upsertMessageEvent(session.id, { time, source: 'extension',
+      kind: 'assistant_message', ...(turnId ? { turnId } : {}), messageId, final, message: { text, chars: text.length, truncated: false } });
+    await appendEvent(session.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'Keep going', chars: 10, truncated: false } });
+    await say(110, 'r-final', 'Tests pass.\n[[COS_GOAL:CONTINUE]]', true, 'reload-turn');
+    await say(120, 'r-after', 'Checking the logs.', false, 'reload-turn');
+    await say(130, 'r-after', 'Checking the logs once more.', false);
+    expect(goal.templateDecisionText(await goal.conversationMessages(session.id))).toBe('Tests pass.\n[[COS_GOAL:CONTINUE]]');
+    // A different message recorded without a turn has no identity tying it to the earlier answer: it is
+    // read as its own, as before, rather than borrowing that answer's marker by position.
+    const loose = await createSession({ title: 'loose commentary', conversationId: 'loose-commentary' });
+    await appendEvent(loose.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'Go', chars: 2, truncated: false } });
+    await appendEvent(loose.id, { time: 110, source: 'extension', kind: 'assistant_message', turnId: 'loose-turn', messageId: 'l-final', final: true,
+      message: { text: 'Done.\n[[COS_GOAL:COMPLETE]]', chars: 27, truncated: false } });
+    await appendEvent(loose.id, { time: 120, source: 'extension', kind: 'assistant_message', messageId: 'l-other', final: false,
+      message: { text: 'Something else.', chars: 15, truncated: false } });
+    expect(goal.templateDecisionText(await goal.conversationMessages(loose.id))).toBe('Something else.');
+  });
+
   // 2.1.43, live on Windows: a Goal step split by two fresh turns ran its five commands as 2 + 2 + 1.
   // The rotated turns have no answer, so the helper saw "1 tool call" and asked three more times.
   it('counts the calls of the turns a fresh turn continued into the answer that finished them', async () => {
