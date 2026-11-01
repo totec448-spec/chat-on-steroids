@@ -3243,6 +3243,23 @@ describe('phone notifications over IPC', () => {
       .toEqual({ ok: false, error: 'Choose a topic of letters, digits, - and _ (up to 64).' });
   });
 
+  // Telegram phase 2 (2026-10-31): replies as messages stay off until switched on, and a form without
+  // the switch (an older window or backup) leaves it as it is.
+  it('keeps the Telegram reply switch off by default and through a form that has none', async () => {
+    const base = getConfig();
+    expect((await save({ ...base, ui: { ...base.ui, phonePush: phone() } }, base)).ok).toBe(true);
+    expect(getConfig().ui.phonePush?.telegramSteer).toBeUndefined();
+    const on = getConfig();
+    expect((await save({ ...on, ui: { ...on.ui, phonePush: phone({ telegramSteer: true }) } }, on)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ telegramSteer: true });
+    const now = getConfig();
+    expect((await save({ ...now, ui: { ...now.ui, phonePush: phone({ includeDetails: true }) } }, now)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ telegramSteer: true, includeDetails: true });
+    const later = getConfig();
+    expect((await save({ ...later, ui: { ...later.ui, phonePush: phone({ telegramSteer: false }) } }, later)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ telegramSteer: false });
+  });
+
   it('checks the settings as they will be saved, not the stale form, and logs a refusal', async () => {
     const { getLog } = await import('../src/main/logger.js');
     // Off, with a topic: the form the renderer still shows.

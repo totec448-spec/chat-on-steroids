@@ -223,9 +223,9 @@ beforeEach(() => vi.clearAllMocks());
 
 describe('ntfy and Telegram as two destinations (#1934)', () => {
   const telegramFake = (works = true) => {
-    const messages: Array<{ text: string; approval?: { sessionId: string; cardId: string } }> = [];
-    return { messages, destination: { send: vi.fn(async (text: string, approval?: { sessionId: string; cardId: string }) => {
-      messages.push({ text, ...(approval ? { approval } : {}) }); return works; }) } };
+    const messages: Array<{ text: string; about?: { sessionId?: string; cardId?: string } }> = [];
+    return { messages, destination: { send: vi.fn(async (text: string, about?: { sessionId?: string; cardId?: string }) => {
+      messages.push({ text, ...(about ? { about } : {}) }); return works; }) } };
   };
   function withTelegram(over: Partial<PhonePushSettings>, telegram: ReturnType<typeof telegramFake> | null, ntfyWorks = true) {
     const sent: unknown[] = [];
@@ -243,13 +243,13 @@ describe('ntfy and Telegram as two destinations (#1934)', () => {
     const { push, sent, log } = withTelegram({}, telegram);
     expect(await push.notify({ kind: 'needs-you', sessionId: 's1', chatTitle: 'Payroll export', approval: { sessionId: 's1', cardId: 'card-1' } })).toBe('sent');
     expect(sent).toHaveLength(1);
-    expect(telegram.messages).toEqual([{ text: 'A chat is waiting for you.', approval: { sessionId: 's1', cardId: 'card-1' } }]);
+    expect(telegram.messages).toEqual([{ text: 'A chat is waiting for you.', about: { sessionId: 's1', cardId: 'card-1' } }]);
     // No name without "Include chat names and answers", in Telegram as in ntfy.
     expect(JSON.stringify(telegram.messages)).not.toContain('Payroll');
     expect(log).toHaveBeenCalledWith('phone push: sent "needs you" to Telegram with Deny');
-    // A finished chat has no approval to deny.
+    // A finished chat has no approval to deny; it still names its chat, so a reply acts on it.
     await push.notify({ kind: 'finished', sessionId: 's2', workedMs: 20 * 60_000, approval: { sessionId: 's2', cardId: 'card-2' } });
-    expect(telegram.messages[1]).toEqual({ text: 'Finished after 20 min.' });
+    expect(telegram.messages[1]).toEqual({ text: 'Finished after 20 min.', about: { sessionId: 's2' } });
   });
 
   it('names the chat and links it in Telegram only with details on', async () => {
