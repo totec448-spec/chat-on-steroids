@@ -35,8 +35,7 @@ describe('steer / follow-up continued turn ordering', () => {
       // 2. Turn 1 starts (g-turn-5)
       {
         kind: 'turn_start',
-        seq: 2,
-        origin: 1378,
+        seq: 1378,
         time: T0 + 100,
         source: 'extension',
         turnId: 'g-turn-5'
@@ -93,8 +92,7 @@ describe('steer / follow-up continued turn ordering', () => {
       // 6. Turn 1 ends with continued: true
       {
         kind: 'turn_end',
-        seq: 6,
-        origin: 1409,
+        seq: 1409,
         time: T0 + 401,
         source: 'extension',
         turnId: 'g-turn-5',
@@ -104,8 +102,7 @@ describe('steer / follow-up continued turn ordering', () => {
       // 7. Turn 2 starts (g-turn-6) for the continued request
       {
         kind: 'turn_start',
-        seq: 7,
-        origin: 1410,
+        seq: 1410,
         time: T0 + 401,
         source: 'extension',
         turnId: 'g-turn-6'
@@ -167,14 +164,13 @@ describe('steer / follow-up continued turn ordering', () => {
       // 11. Turn 2 ends
       {
         kind: 'turn_end',
-        seq: 11,
-        origin: 1494,
+        seq: 1494,
         time: T0 + 801,
         source: 'extension',
         turnId: 'g-turn-6',
         outcome: 'completed'
       }
-    ] as SessionEvent[];
+    ];
   }
 
   it('orders the steer follow-up question and continued turn responses chronologically', () => {
