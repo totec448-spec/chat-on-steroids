@@ -2037,6 +2037,7 @@
   "The saved plugin update state could not be read.": "Não foi possível ler o estado guardado de atualização dos plugins.",
   "The release information has no valid version number.": "As informações da versão não contêm um número de versão válido.",
   "The downloaded update did not match the published checksum.": "A soma de verificação da atualização transferida não corresponde à publicada.",
+  "The update cache must be a folder, not a link.": "A cache de atualizações tem de ser uma pasta, não uma ligação.",
   "GitHub could not be reached. Check your connection": "Não foi possível contactar o GitHub. Verifique a sua ligação",
   "Could not check for updates: HTTP {0}.": "Não foi possível procurar atualizações: HTTP {0}.",
   "Could not download {0}: HTTP {1}.": "Não foi possível transferir {0}: HTTP {1}.",

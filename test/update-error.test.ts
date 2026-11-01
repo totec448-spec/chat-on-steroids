@@ -18,6 +18,7 @@ const reasons = [
   'GitHub could not be reached',
   'There is no downloaded update to install yet',
   'Could not read plugin-refresh state',
+  'the update staging path must use ordinary directories',
   'the latest release has no usable version tag',
   'the release page named no usable version tag',
   'it is not the published file',
@@ -59,6 +60,7 @@ it.each(languages)('localizes the main-process update reasons and recovery guida
   expect(recovery.toLowerCase()).toContain(t('Diagnostics report').toLowerCase());
   if (locale !== 'en') expect(recovery).not.toBe(englishRecovery);
   expect(recovery).not.toContain(t('Choose Update all to retry.'));
+  expect(updateErrorNextStep('the update staging path must use ordinary directories')).toBe(recovery);
 });
 it('keeps unknown external diagnostics intact and offers explicit retry', async () => {
   const { setLanguage, t } = await import('../src/renderer/i18n.js');
