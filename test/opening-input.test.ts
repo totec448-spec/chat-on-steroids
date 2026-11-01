@@ -412,6 +412,17 @@ it.each([['saved before the count existed', undefined, 'reopen'], ['with a damag
     expect(await lostBrowserOpening(row.id, () => true)).toBe(outcome);
   });
 
+// CodeRabbit on #1980: tab ids are per browser session; another browser's tab 7 is another loss.
+it('tells a repeat report from another browser\'s tab with the same number', async () => {
+  const row = await enqueueInput(args());
+  expect(await lostBrowserOpening(row.id, () => true, 'browser-a:7')).toBe('reopen');
+  expect(await lostBrowserOpening(row.id, () => true, 'browser-a:7')).toBe('reopen');
+  expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ openingReopens: 1 });
+  expect(await lostBrowserOpening(row.id, () => true, 'browser-b:7')).toBe('reopen');
+  expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ openingReopens: 2, openingReopenedTab: 'browser-b:7' });
+  expect(await lostBrowserOpening(row.id, () => true, 'browser-a:9')).toBe('failed');
+});
+
 it('serializes a missing-tab report with the first claim in either order', async () => {
   const first = await enqueueInput(args());
   await writeDurableNow('session-input', (await listInputs()).map(entry => entry.id === first.id ? { ...entry, openingReopens: 2 } : entry));
