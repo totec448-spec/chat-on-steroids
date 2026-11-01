@@ -16,14 +16,23 @@ does not change or provision repository secrets, Keychain access or release poli
    (or `dist:mac:x64`). The command fails before packaging if required settings
    are absent. It requires real signing, hardened runtime, notarization, a stapled
    ticket, Gatekeeper acceptance and the existing packaged-runtime/bundle checks.
-4. Before changing the public release workflow, prove two successive signed builds
+4. Before enabling a signed public release, prove two successive signed builds
    update under the same identity on both Mac architectures. Check launch, saved
    keys, Desktop permissions and rollback/recovery as well as package validity.
 
-Do not upload a manually signed artifact into an existing release candidate.
-The release workflow must build and verify its own signed artifacts from the reviewed
-tag before publication. Its current unsigned-DMG assertions must remain until that
-workflow is explicitly migrated; this opt-in packaging command does not migrate it.
+For GitHub-native builds, configure the publisher-owned `CSC_LINK` (base64 P12),
+`CSC_KEY_PASSWORD`, `CSC_NAME`, `APPLE_API_KEY_BASE64` (base64 P8),
+`APPLE_API_KEY_ID` and `APPLE_API_ISSUER` repository secrets. Dispatch the reviewed tag
+through Publish release with `signed_macos: true`. The reusable candidate workflow
+imports the signing certificate through electron-builder and materializes the P8
+under runner temp with mode 0600, deleting it even on failure. Only explicitly
+signed Mac jobs receive the credentials. Default releases and canaries stay unsigned.
+Both the unpacked app and the apps extracted from DMG/ZIP must pass the signed audit;
+unsigned candidates retain the existing unsigned-DMG assertion.
+
+Do not upload a manually signed artifact into an existing release candidate. The
+workflow builds and verifies its own artifacts from the reviewed tag before publication.
+Update the release notes and public signing policy when first enabling this option.
 
 An existing ad-hoc installation needs one user-approved installation of the first
 signed release. Stable publisher signing enables later native updates and gives

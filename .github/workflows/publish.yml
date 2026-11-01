@@ -9,6 +9,11 @@ name: Publish release
 on:
   workflow_dispatch:
     inputs:
+      signed_macos:
+        description: Build Developer ID signed and notarized Mac artifacts (publisher credentials required)
+        required: false
+        default: false
+        type: boolean
       firefox_build:
         description: 'Firefox-only fourth version part (1 makes the add-on 2.1.43.1). Only when Mozilla already holds this version; it never signs one twice.'
         required: false
@@ -103,6 +108,15 @@ jobs:
     name: Build candidate
     needs: preflight
     uses: ./.github/workflows/release.yml
+    with:
+      signed_macos: ${{ inputs.signed_macos }}
+    secrets:
+      CSC_LINK: ${{ inputs.signed_macos && secrets.CSC_LINK || '' }}
+      CSC_KEY_PASSWORD: ${{ inputs.signed_macos && secrets.CSC_KEY_PASSWORD || '' }}
+      CSC_NAME: ${{ inputs.signed_macos && secrets.CSC_NAME || '' }}
+      APPLE_API_KEY_BASE64: ${{ inputs.signed_macos && secrets.APPLE_API_KEY_BASE64 || '' }}
+      APPLE_API_KEY_ID: ${{ inputs.signed_macos && secrets.APPLE_API_KEY_ID || '' }}
+      APPLE_API_ISSUER: ${{ inputs.signed_macos && secrets.APPLE_API_ISSUER || '' }}
 
   # Mozilla signs each add-on version once, so the Firefox add-on is signed here, for a tag, and
   # never by canary builds. Self-hosted ("unlisted"): the release carries the signed package and

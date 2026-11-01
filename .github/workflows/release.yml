@@ -7,6 +7,23 @@ on:
         description: all for a release; common for a canary (the targets most installs use, see scripts/release-targets.mjs)
         type: string
         default: all
+      signed_macos:
+        description: Build Developer ID signed and notarized Mac artifacts (publisher credentials required)
+        type: boolean
+        default: false
+    secrets:
+      CSC_LINK:
+        required: false
+      CSC_KEY_PASSWORD:
+        required: false
+      CSC_NAME:
+        required: false
+      APPLE_API_KEY_BASE64:
+        required: false
+      APPLE_API_KEY_ID:
+        required: false
+      APPLE_API_ISSUER:
+        required: false
   workflow_dispatch:
     inputs:
       platforms:
@@ -14,6 +31,10 @@ on:
         type: choice
         options: [all, common]
         default: all
+      signed_macos:
+        description: Build Developer ID signed and notarized Mac artifacts (publisher credentials required)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -77,6 +98,17 @@ jobs:
           architecture: ${{ matrix.arch }}
           cache: npm
 
+      - name: Prepare explicit Mac signing credentials
+        if: matrix.platform == 'darwin' && inputs.signed_macos
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          CSC_NAME: ${{ secrets.CSC_NAME }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: node scripts/prepare-mac-signing.mjs
+
       - name: Install dependencies
         run: npm ci
 
@@ -96,17 +128,25 @@ jobs:
         run: node -e "if(process.platform!=='${{ matrix.platform }}'||process.arch!=='${{ matrix.arch }}')throw new Error('Expected ${{ matrix.platform }}-${{ matrix.arch }}, got '+process.platform+'-'+process.arch)"
 
       - name: Package
-        run: npm run ${{ matrix.script }}
+        env:
+          CSC_LINK: ${{ matrix.platform == 'darwin' && inputs.signed_macos && secrets.CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.platform == 'darwin' && inputs.signed_macos && secrets.CSC_KEY_PASSWORD || '' }}
+          CSC_NAME: ${{ matrix.platform == 'darwin' && inputs.signed_macos && secrets.CSC_NAME || '' }}
+          APPLE_API_KEY_ID: ${{ matrix.platform == 'darwin' && inputs.signed_macos && secrets.APPLE_API_KEY_ID || '' }}
+          APPLE_API_ISSUER: ${{ matrix.platform == 'darwin' && inputs.signed_macos && secrets.APPLE_API_ISSUER || '' }}
+        run: npm run ${{ matrix.script }} -- ${{ matrix.platform == 'darwin' && inputs.signed_macos && '--signed-mac' || '' }}
 
       - name: Smoke packaged runtime natively
         run: node scripts/smoke-packaged-runtime.mjs --platform ${{ matrix.platform }} --arch ${{ matrix.arch }}
 
       - name: Audit packaged macOS bundle metadata and Mach-O payloads
         if: matrix.platform == 'darwin'
-        run: node scripts/smoke-macos-bundle.mjs ${{ matrix.arch }}
+        run: node scripts/smoke-macos-bundle.mjs ${{ matrix.arch }} ${{ inputs.signed_macos && '--signed' || '' }}
 
       - name: Verify generated macOS archives
         if: matrix.platform == 'darwin'
+        env:
+          SIGNED_MAC: ${{ inputs.signed_macos }}
         shell: bash
         run: |
           set -euo pipefail
@@ -115,23 +155,28 @@ jobs:
           test -f "$dmg"
           test -f "$zip"
           hdiutil verify "$dmg"
-          # ZIP containers cannot be code-signed, but DMGs can. v2.0.2 explicitly promises a
-          # publisher-unsigned Mac distribution, so reject a signed outer disk image as well as
-          # the .app. Fail closed if codesign itself errors for any reason other than the expected
-          # unsigned-object result.
-          set +e
-          codesign --display --verbose=4 "$dmg" >dmg-codesign.log 2>&1
-          dmg_codesign_status=$?
-          set -e
-          if [ "$dmg_codesign_status" -eq 0 ]; then
-            cat dmg-codesign.log
-            echo "macOS DMG unexpectedly has a code signature; release metadata says publisher-unsigned" >&2
-            exit 1
-          fi
-          if [ "$dmg_codesign_status" -ne 1 ] || ! grep -Eqi 'code object is not signed( at all)?' dmg-codesign.log; then
-            cat dmg-codesign.log
-            echo "Could not prove the macOS DMG is unsigned (codesign status $dmg_codesign_status)" >&2
-            exit 1
+          signed_args=()
+          if [ "$SIGNED_MAC" = true ]; then
+            signed_args=(--signed)
+          else
+            # ZIP containers cannot be code-signed, but DMGs can. v2.0.2 explicitly promises a
+            # publisher-unsigned Mac distribution, so reject a signed outer disk image as well as
+            # the .app. Fail closed if codesign itself errors for any reason other than the expected
+            # unsigned-object result.
+            set +e
+            codesign --display --verbose=4 "$dmg" >dmg-codesign.log 2>&1
+            dmg_codesign_status=$?
+            set -e
+            if [ "$dmg_codesign_status" -eq 0 ]; then
+              cat dmg-codesign.log
+              echo "macOS DMG unexpectedly has a code signature; release metadata says publisher-unsigned" >&2
+              exit 1
+            fi
+            if [ "$dmg_codesign_status" -ne 1 ] || ! grep -Eqi 'code object is not signed( at all)?' dmg-codesign.log; then
+              cat dmg-codesign.log
+              echo "Could not prove the macOS DMG is unsigned (codesign status $dmg_codesign_status)" >&2
+              exit 1
+            fi
           fi
           unzip -tq "$zip"
           mount_dir="$(mktemp -d)"
@@ -148,13 +193,13 @@ jobs:
           test "$(readlink "$mount_dir/Applications")" = /Applications
           test -x "$mount_dir/Chat On Steroids.app/Contents/MacOS/Chat On Steroids"
           test -f "$mount_dir/Chat On Steroids.app/Contents/Info.plist"
-          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$mount_dir/Chat On Steroids.app"
+          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$mount_dir/Chat On Steroids.app" "${signed_args[@]}"
           # ditto is the macOS-native ZIP extractor and preserves executable modes/metadata.
           ditto -x -k "$zip" "$zip_dir"
           test -d "$zip_dir/Chat On Steroids.app"
           test -x "$zip_dir/Chat On Steroids.app/Contents/MacOS/Chat On Steroids"
           test -f "$zip_dir/Chat On Steroids.app/Contents/Info.plist"
-          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$zip_dir/Chat On Steroids.app"
+          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$zip_dir/Chat On Steroids.app" "${signed_args[@]}"
 
       - name: Launch packaged macOS app normally
         if: matrix.platform == 'darwin'
@@ -204,7 +249,7 @@ jobs:
           deb_smoke_root="$(mktemp -d)"
           cleanup_path_with_retries() {
             target="$1"
-            for attempt in 1 2 3 4 5; do
+            for _attempt in 1 2 3 4 5; do
               rm -rf "$target" 2>/dev/null && return 0
               sleep 0.2
             done
@@ -305,6 +350,10 @@ jobs:
           }
           run_appimage_smoke normal "$normal_smoke_root" "$PATH" appimage-normal-gui.log
           run_appimage_smoke forced-fallback "$fallback_smoke_root" "$fake_bin:$PATH" appimage-fallback-gui.log
+
+      - name: Remove temporary notarization key
+        if: always() && matrix.platform == 'darwin' && inputs.signed_macos
+        run: node -e "const fs=require('node:fs');const dir=process.env.COS_MAC_SIGNING_DIR;if(dir)fs.rmSync(dir,{recursive:true,force:true})"
 
       - name: Upload package artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

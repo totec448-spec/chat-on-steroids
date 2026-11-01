@@ -1,7 +1,11 @@
 import { expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 // @ts-ignore Packaging scripts are plain ESM.
 import { signedMacConfig } from '../scripts/signed-mac-config.mjs';
+// @ts-ignore Packaging scripts are plain ESM.
+import { prepareMacSigning } from '../scripts/prepare-mac-signing.mjs';
 
 const identity = { CSC_NAME: 'Example Publisher (TEAMID)' };
 const api = { APPLE_API_KEY: '/home/you/AuthKey.p8', APPLE_API_KEY_ID: 'KEYID', APPLE_API_ISSUER: 'ISSUER' };
@@ -41,4 +45,31 @@ it('keeps unsigned packaging as the default and explicitly audits signed candida
   const audit = readFileSync('scripts/smoke-macos-bundle.mjs', 'utf8');
   expect(audit).toContain("['stapler', 'validate', app]");
   expect(audit).toContain("['--assess', '--type', 'execute', '--verbose=2', app]");
+});
+it('isolates the CI notarization file and exports only its path, never its bytes', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'cos-signing-'));
+  try {
+    const pem = '-----BEGIN PRIVATE KEY-----\ntest-only-not-a-real-key\n-----END PRIVATE KEY-----';
+    const env = { ...identity, ...api, CSC_LINK: 'test-certificate', CSC_KEY_PASSWORD: 'test-only',
+      APPLE_API_KEY_BASE64: Buffer.from(pem).toString('base64'), RUNNER_TEMP: root, GITHUB_ENV: path.join(root, 'env') };
+    const dir = prepareMacSigning(env);
+    expect(readFileSync(path.join(dir, 'AuthKey.p8'), 'utf8')).toBe(pem);
+    if (process.platform !== 'win32') expect(statSync(path.join(dir, 'AuthKey.p8')).mode & 0o777).toBe(0o600);
+    const published = readFileSync(env.GITHUB_ENV, 'utf8');
+    expect(published).toContain(`APPLE_API_KEY=${path.join(dir, 'AuthKey.p8')}`);
+    expect(published).not.toContain(pem);
+    expect(() => prepareMacSigning({ ...env, APPLE_API_KEY_BASE64: 'not base64!' })).toThrow('base64');
+    expect(readdirSync(root).filter(name => name.startsWith('cos-notary-'))).toEqual([path.basename(dir)]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+it('keeps unsigned workflow defaults and passes signing secrets only to an explicit native Mac build', () => {
+  for (const name of ['release', 'publish']) {
+    const workflow = readFileSync(`.github/workflows/${name}.yml`, 'utf8');
+    expect(workflow).toMatch(/signed_macos:[\s\S]*?default: false/);
+  }
+  const workflow = readFileSync('.github/workflows/release.yml', 'utf8');
+  expect(workflow).toContain("if: matrix.platform == 'darwin' && inputs.signed_macos");
+  expect(workflow).toContain("matrix.platform == 'darwin' && inputs.signed_macos && secrets.CSC_LINK || ''");
+  expect(workflow).toContain("if: always() && matrix.platform == 'darwin' && inputs.signed_macos");
+  expect(workflow).toContain('"${signed_args[@]}"');
 });

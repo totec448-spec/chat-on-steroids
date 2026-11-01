@@ -6048,8 +6048,12 @@ An explicit `--signed-mac` packaging option selects `electron-builder.signed-mac
 `signed-mac-config.mjs` requires an identified signing certificate and complete notarization
 credentials before any build work. Real signing is mandatory, and the signed bundle audit
 requires Developer ID, a stapled notarization ticket and Gatekeeper acceptance as well as the
-ordinary native/runtime checks. The default unsigned release workflow is unchanged; see
-`docs/signed-macos.md` for the publisher-owned migration and two-build acceptance gates.
+ordinary native/runtime checks. `publish.yml` forwards named signing/notarization secrets to
+the reusable candidate workflow only for an explicit `signed_macos` dispatch. Only signed Mac
+jobs materialize the notarization key in runner temp, and an always-run step removes it. The
+unpacked app and extracted archive apps receive the same signed audit; unsigned defaults and
+canaries keep their existing unsigned policy. See `docs/signed-macos.md` for publisher setup
+and the two-build acceptance gates.
 
 Dependency updates retain upstream compatibility contracts: Node typings follow Electron's
 embedded Node major, and Vite stays within electron-vite's declared peer range. Electron 44
