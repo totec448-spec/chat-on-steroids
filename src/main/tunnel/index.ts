@@ -14,7 +14,6 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { promises as fs } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import type { ConnectionState, TunnelHealth, TunnelSettings } from '../../shared/types.js';
 import { childEnv, terminateProcessTree } from '../exec.js';
@@ -24,6 +23,7 @@ import { ago, POLL_FRESH_MS, readClientStatus, readPollHealth } from './health.j
 import { locateBinary } from './locate.js';
 import { proxyEnvironment, proxyForLog } from './proxy.js';
 import { noteTunnelClientConnected } from './route-settle.js';
+import { createTunnelWorkDir } from './workdir.js';
 
 type ProxyResolver = (url: string) => Promise<string>;
 let resolveSystemProxy: ProxyResolver | null = null;
@@ -325,7 +325,7 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
     throw new TunnelError('Add your OpenAI tunnel API key first.');
   }
 
-  const workDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cglf-'));
+  const workDir = await createTunnelWorkDir();
   const healthFile = path.join(workDir, 'health.url');
 
   const args = [
@@ -601,6 +601,9 @@ async function startOpenAiTunnel(opts: TunnelStartOptions): Promise<TunnelHandle
       // Keep both credentials and the secret local MCP path out of argv/process listings.
       // tunnel-client officially supports these environment-backed configuration fields.
       env: childEnv({
+        // The same private directory was just created successfully. Do not pass an
+        // inherited, possibly deleted installer TMPDIR back to the macOS client.
+        ...(process.platform === 'darwin' ? { TMPDIR: workDir } : {}),
         CONTROL_PLANE_API_KEY: opts.apiKey ?? '',
         MCP_SERVER_URL: `url=${opts.localUrl},channel=main`,
         ...(discoveryHeaders ? { MCP_DISCOVERY_EXTRA_HEADERS: discoveryHeaders } : {}),
