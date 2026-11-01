@@ -19,7 +19,10 @@ app.whenReady().then(async () => {
   let win;
   let server;
   try {
-    win = new BrowserWindow({ show: false, width: 1500, height: 1000,
+    // A native Wayland window must be mapped for dependable Chromium captures
+    // in this explicit Linux UI-test mode; normal test defaults stay hidden.
+    const showLinuxFixture = process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1';
+    win = new BrowserWindow({ show: showLinuxFixture, width: 1500, height: 1000,
       webPreferences: { sandbox: true, contextIsolation: true, backgroundThrottling: false } });
     await win.loadURL('data:text/html,' + encodeURIComponent('<h1>Project preview</h1><p>Local synthetic PDF fixture.</p>'));
     const pdf = await win.webContents.printToPDF({ pageSize: 'A5' });

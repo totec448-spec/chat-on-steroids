@@ -71,7 +71,10 @@ app.whenReady().then(async () => {
   let win;
   try {
     await server.listen(); fs.mkdirSync(output,{recursive:true});
-    win = new BrowserWindow({show:false,width:1100,height:760,webPreferences:{sandbox:true,backgroundThrottling:false}});
+    // Hidden Wayland windows may stall on fixture frames; only the opted-in
+    // local Linux UI check maps this synthetic test window.
+    const showLinuxFixture = process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1';
+    win = new BrowserWindow({show:showLinuxFixture,width:1100,height:760,webPreferences:{sandbox:true,backgroundThrottling:false}});
     const js = code=>win.webContents.executeJavaScript(code);
     const until = async (code, message) => {
       for (let i=0;i<200;i++) { if (await js(code)) return; await new Promise(r=>setTimeout(r,15)); }

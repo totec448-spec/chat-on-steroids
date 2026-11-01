@@ -8,7 +8,10 @@ const root = path.resolve(__dirname, '..');
 const output = path.join(root, 'outputs/connection-compact');
 app.setPath('userData', path.join(output, 'runtime'));
 app.whenReady().then(async () => {
-  const win = new BrowserWindow({ show: false, width: 1100, height: 800, webPreferences: { sandbox: true } });
+  // Hidden Wayland windows throttle animation frames needed for the live
+  // capture fixture; map only in explicitly opted-in local Linux UI tests.
+  const showLinuxFixture = process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1';
+  const win = new BrowserWindow({ show: showLinuxFixture, width: 1100, height: 800, webPreferences: { sandbox: true } });
   try {
     const css = fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8');
     const html = withoutScripts(fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')).replace(/<link\b[^>]*>/gi, '');

@@ -48,7 +48,11 @@ app.whenReady().then(async () => {
   let win;
   try {
     await server.listen();
-    win = new BrowserWindow({ show: preview, width: 1280, height: 1000, webPreferences: { sandbox: true, backgroundThrottling: false } });
+    // A hidden native Wayland surface cannot deliver requestAnimationFrame to
+    // this screenshot fixture. Show only the isolated opt-in Linux UI test.
+    const showLinuxFixture = process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1';
+    win = new BrowserWindow({ show: preview || showLinuxFixture, width: 1280, height: 1000,
+      webPreferences: { sandbox: true, backgroundThrottling: false } });
     await win.loadURL(server.resolvedUrls.local[0] + 'browser-setup-preview.html');
     const js = code => win.webContents.executeJavaScript(code);
     for (let attempt=0; attempt<100 && !await js('!!window.fixtureReady'); attempt++) await new Promise(resolve=>setTimeout(resolve,100));
