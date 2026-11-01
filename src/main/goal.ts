@@ -607,13 +607,15 @@ export function pendingGoalReplies(
 }
 
 /** Durably reserves one reload for this exact Goal reply before the browser can act. */
-export async function recordGoalPickupAttemptNow(conversationId: string, replyId: string, at: number, nextAt?: number): Promise<{
+/** `expected`: as for queued inputs, a count another pass moved past means this pass reserves nothing. */
+export async function recordGoalPickupAttemptNow(conversationId: string, replyId: string, at: number, nextAt?: number, expected?: number): Promise<{
   attempts: number; nextAt?: number; stoppedAt?: number
 } | null> {
   const reply = goalReplies.get(conversationId);
   // Past the quick burst the reply shows as stopped, and slow retries go on until the hard bound.
   if (!reply || reply.state !== 'pending' || reply.replyId !== replyId ||
-      (reply.pickupAttempts ?? 0) >= BROWSER_PICKUP_ATTEMPT_LIMIT) return null;
+      (reply.pickupAttempts ?? 0) >= BROWSER_PICKUP_ATTEMPT_LIMIT ||
+      (expected !== undefined && (reply.pickupAttempts ?? 0) > expected)) return null;
   const previous = { ...reply };
   reply.pickupAttempts = (reply.pickupAttempts ?? 0) + 1;
   if (reply.pickupAttempts >= BROWSER_PICKUP_MAX_ATTEMPTS) reply.pickupStoppedAt ??= at;

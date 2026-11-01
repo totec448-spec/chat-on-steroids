@@ -1156,7 +1156,11 @@ function samePickupState(a: PickupRecoveryState | undefined, b: PickupRecoverySt
 }
 
 /** Reserve a source-turn reload against all of its queued owners before browser handout. */
-export function recordQueuedPickupAttemptNow(inputId: string, sourceTurnId: string, at: number, nextAt?: number, inherited?: PickupRecoveryState): Promise<PickupRecoveryState | null> {
+/**
+ * `expected`: the attempts the caller read before deciding a retry is due. Another pass that reserved
+ * meanwhile moved the count past it, and this one then reserves nothing (CodeRabbit on #1979).
+ */
+export function recordQueuedPickupAttemptNow(inputId: string, sourceTurnId: string, at: number, nextAt?: number, inherited?: PickupRecoveryState, expected?: number): Promise<PickupRecoveryState | null> {
   return serial(async () => {
     const current = await load();
     const row = current.find(entry => entry.id === inputId);
@@ -1166,6 +1170,7 @@ export function recordQueuedPickupAttemptNow(inputId: string, sourceTurnId: stri
     if (!session || session.conversationId !== row.conversationId || session.browserRecoveryDismissedAt !== undefined) return null;
     const matches = await rowsForPickupSource(current, row.sessionId, sourceTurnId);
     const prior = mergedPickupState(matches, inherited);
+    if (expected !== undefined && prior.attempts > expected) return null;
     // Past the quick burst the chat shows as stopped, and slow retries go on until the hard bound.
     if (prior.attempts >= BROWSER_PICKUP_ATTEMPT_LIMIT) {
       const next = current.map(entry => matches.includes(entry) && !samePickupState(entry.pickupRecovery, prior)
