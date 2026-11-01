@@ -8499,6 +8499,20 @@ describe('targeted open', () => {
     }
   });
 
+  // 2026-11-01 (Mac): a resume whose model the picker could not confirm was abandoned. It now goes on
+  // on ChatGPT's current model, and the app says which model it could not confirm.
+  it('logs a Compact & Resume that goes on without its model', async () => {
+    setBrowserOpener(async (url) => { opened.push(url); });
+    await pair();
+    const { sessionId, token } = await automaticCompactedSession('66666666-7777-8888-9999-aaaaaaaaaaaf', 'the brief');
+    const first = queueResume(sessionId, token)!;
+    await waitForOpened(1, 10_000);
+    await redeem(first.id, 'tab-1');
+    expect((await request('POST', '/commands/step', { body: { id: first.id, client: 'tab-1', step: 'model-unconfirmed' } })).body).toEqual({ ok: true });
+    expect(getLog().some(entry => entry.level === 'warn' && entry.message.includes(`the Compact & Resume of session ${sessionId} starts its new chat on ChatGPT's current model`))).toBe(true);
+    expect(continuationByToken(token)?.state).not.toBe('aborted');
+  });
+
   /**
    * #882 (2026-10-04): the replacement chat of an automatic handoff stopped at "choosing the model
    * and reasoning" and the app waited out its whole 15-minute window. Meanwhile the prime was

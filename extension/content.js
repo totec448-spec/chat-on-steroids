@@ -12246,9 +12246,11 @@
     const modelConfirmed = !!(boot.model || boot.reasoningEffort) && (await chooseModel() ||
       ((await closeAnnouncements(stillOnTarget)).length > 0 && stillOnTarget() && await chooseModel()));
     let mayGoOn = !(boot.model || boot.reasoningEffort) || modelConfirmed;
-    // A wake goes out on ChatGPT's current model rather than not at all: a worker that never wakes
-    // stops its whole run. The app logs which model it could not confirm (#1952).
-    if (!mayGoOn && boot.type === 'revive' && stillOnTarget()) { step('model-unconfirmed'); mayGoOn = true; }
+    // A wake or a Compact & Resume goes out on ChatGPT's current model rather than not at all: a worker
+    // that never wakes stops its whole run (#1952), and an abandoned resume stops its chat for good
+    // (2026-11-01, Mac). A resume tries the model again in its new chat (publishBootstrapSelection).
+    // The app logs which model it could not confirm. A new worker's chat still refuses.
+    if (!mayGoOn && (boot.type === 'revive' || boot.type === 'resume') && stillOnTarget()) { step('model-unconfirmed'); mayGoOn = true; }
     if (!mayGoOn) {
       return void (await fail(t(
         'content_bootstrap_model_unavailable',
