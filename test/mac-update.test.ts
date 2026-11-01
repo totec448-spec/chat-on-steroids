@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 
 const fixture = vi.hoisted(() => ({
   command: vi.fn(), access: vi.fn(), log: vi.fn(), warn: vi.fn(), exit: vi.fn(),
-  packaged: true, native: null as any, feed: '', check: vi.fn(), quit: vi.fn()
+  packaged: true, native: null as any, server: null as any, feed: '', check: vi.fn(), quit: vi.fn()
 }));
 vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events');
@@ -16,6 +16,13 @@ vi.mock('electron', async () => {
   return { app: { get isPackaged() { return fixture.packaged; }, exit: fixture.exit }, autoUpdater: fixture.native };
 });
 vi.mock('node:child_process', () => ({ execFile: fixture.command }));
+vi.mock('node:http', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:http')>();
+  return { ...actual, createServer: (...args: Parameters<typeof actual.createServer>) => {
+    fixture.server = actual.createServer(...args);
+    return fixture.server;
+  } };
+});
 vi.mock('node:fs/promises', async importOriginal => ({
   ...await importOriginal<typeof import('node:fs/promises')>(), access: fixture.access
 }));
@@ -95,6 +102,16 @@ it.each(['error', 'update-not-available', 'sync'])('rejects %s without leaving a
   if (event !== 'sync') fixture.native.emit(event, new Error('native verification failed'));
   await rejected;
   expect(fixture.native.listenerCount('update-downloaded')).toBe(0);
+  await expect(fetch(fixture.feed)).rejects.toThrow();
+});
+it('handles a feed error without crashing or inventing a native download outcome', async () => {
+  const staging = adapter.stageMacUpdate('99.0.0', archive);
+  const rejected = expect(staging).rejects.toThrow('native transport failed');
+  await vi.waitFor(() => expect(fixture.check).toHaveBeenCalledOnce());
+  expect(() => fixture.server.emit('error', new Error('feed unavailable'))).not.toThrow();
+  expect(fixture.native.listenerCount('update-downloaded')).toBe(1);
+  fixture.native.emit('error', new Error('native transport failed'));
+  await rejected;
   await expect(fetch(fixture.feed)).rejects.toThrow();
 });
 it('only requests native relaunch at the final exit boundary, and exits safely on a late error', async () => {

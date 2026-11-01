@@ -67,6 +67,10 @@ export async function stageMacUpdate(version: string, file: string): Promise<voi
       res.end(JSON.stringify({ url: `${feedUrl}/release.zip`, name: version }));
     } else res.writeHead(404).end();
   });
+  server.on('error', err => {
+    logWarn(`update: native update feed failed: ${err.message}`);
+    server.closeAllConnections(); // Native transport still owns whether the transfer completed.
+  });
   try {
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
