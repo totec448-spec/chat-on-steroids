@@ -8,7 +8,7 @@ const logged = vi.hoisted(() => [] as string[]);
 vi.mock('../src/main/chat-models.js', async original => ({ ...(await original<object>()), getChatModels: () => ({ state: state.catalogState, models: state.models }) }));
 vi.mock('../src/main/logger.js', () => ({ logInfo: (line: string) => { logged.push(line); }, logWarn: (line: string) => { logged.push(line); } }));
 
-const { resetResumeModelForTests, resumeModelSelection } = await import('../src/main/resume-model.js');
+const { resetResumeModelForTests, resumeModelSelection, wakeModelSelection } = await import('../src/main/resume-model.js');
 
 beforeEach(() => {
   state.models = [
@@ -64,4 +64,18 @@ it('logs each resume once, however often its command is rendered', () => {
 it('asks for nothing when the source chat had no known model', () => {
   expect(resumeModelSelection(null)).toEqual({ model: null, reasoningEffort: null });
   expect(resumeModelSelection(undefined)).toEqual({ model: null, reasoningEffort: null });
+});
+
+// #1952: a wake asks for the model and effort its worker was opened with, vetted like a resume's.
+it('gives a worker wake its own model and effort, or what the account offers of them', () => {
+  expect(wakeModelSelection({ model: 'gpt-5-6-thinking', reasoningEffort: 'high' }, 'wake-a')).toEqual({ model: 'gpt-5-6-thinking', reasoningEffort: 'high' });
+  // Opened on the account default: no model to choose, its effort alone still is.
+  expect(wakeModelSelection({ model: null, reasoningEffort: 'high' }, 'wake-b')).toEqual({ model: null, reasoningEffort: 'high' });
+  expect(wakeModelSelection(null, 'wake-c')).toEqual({ model: null, reasoningEffort: null });
+  expect(wakeModelSelection({ model: 'gpt-7', reasoningEffort: 'high' }, 'wake-d')).toEqual({ model: null, reasoningEffort: null });
+  expect(wakeModelSelection({ model: 'gpt-5-6-thinking', reasoningEffort: 'xhigh' }, 'wake-e')).toEqual({ model: 'gpt-5-6-thinking', reasoningEffort: null });
+  expect(logged).toEqual([
+    'worker wake: model "gpt-7" is not offered by this ChatGPT account; the wake uses ChatGPT\'s current selection',
+    'worker wake: reasoning "xhigh" is not offered for gpt-5-6-thinking by this ChatGPT account; the wake uses ChatGPT\'s current reasoning'
+  ]);
 });
