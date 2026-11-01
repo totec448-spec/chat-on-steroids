@@ -422,13 +422,36 @@ it('says the plugins could not be loaded when the first load fails, and lists th
   vi.resetModules();
   const fresh = await import('../src/renderer/plugins.js');
   api.pluginsSnapshot!.mockImplementationOnce(async () => ({ ok: false, error: 'Plugin store unavailable' }));
-  await fresh.refreshPlugins();
+  // The page's own start, so its search box is wired as in the app.
+  fresh.initPlugins(); await tick(); await tick();
   expect(document.getElementById('pluginsCount')!.textContent).toBe('');
   expect(document.getElementById('pluginsInstalled')!.textContent).toBe('Plugins could not be loaded.');
+  // Typing in the search repaints the list, and the failure stays (CodeRabbit on #2002).
+  const search = document.getElementById('pluginsSearch') as HTMLInputElement;
+  search.value = 'mem'; search.dispatchEvent(new (window as any).Event('input'));
+  expect(document.getElementById('pluginsInstalled')!.textContent).toBe('Plugins could not be loaded.');
+  expect(document.getElementById('pluginsCount')!.textContent).toBe('');
+  search.value = ''; search.dispatchEvent(new (window as any).Event('input'));
   await fresh.refreshPlugins();
   expect(document.querySelectorAll('#pluginsInstalled .plugin-card')).toHaveLength(1);
   // Once a list has shown, a later failed refresh keeps it and only says so in the toast.
   api.pluginsSnapshot!.mockImplementationOnce(async () => ({ ok: false, error: 'Plugin store unavailable' }));
   await fresh.refreshPlugins();
+  expect(document.querySelectorAll('#pluginsInstalled .plugin-card')).toHaveLength(1);
+});
+
+// CodeRabbit on #2002: a refresh that a newer one replaced says nothing while the newer one is on its way.
+it('shows no load error for a plugin refresh that a newer one replaced', async () => {
+  vi.resetModules();
+  const fresh = await import('../src/renderer/plugins.js');
+  const replies: Array<(reply: unknown) => void> = [];
+  api.pluginsSnapshot!.mockImplementation(() => new Promise(resolve => replies.push(resolve)));
+  const first = fresh.refreshPlugins();
+  const second = fresh.refreshPlugins();
+  replies[0]!({ ok: false, error: 'Plugin store unavailable' });
+  await first;
+  expect(document.getElementById('pluginsInstalled')!.textContent).not.toBe('Plugins could not be loaded.');
+  replies[1]!({ ok: true, data: state });
+  await second;
   expect(document.querySelectorAll('#pluginsInstalled .plugin-card')).toHaveLength(1);
 });

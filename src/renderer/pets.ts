@@ -211,11 +211,13 @@ export function initPets(api: AppApi, runtime: PetController): void {
   let state: PetLibraryState = { pets: [] };
   let epoch = 0;
   let loaded = false;
+  // The first load failed and no list arrived since: the list says so, also when the search repaints it.
+  let loadFailed = false;
 
   $('petsFormatInstructions').textContent = PET_FORMAT_INSTRUCTIONS;
 
   const apply = (next: PetLibraryState): void => {
-    state = next; loaded = true; runtime.applyLibraryState(next); render();
+    state = next; loaded = true; loadFailed = false; runtime.applyLibraryState(next); render();
   };
   const mutate = async (request: ReturnType<AppApi['petsList']>): Promise<boolean> => {
     const own = ++epoch; const next = await run(request);
@@ -249,6 +251,12 @@ export function initPets(api: AppApi, runtime: PetController): void {
   };
   const render = (): void => {
     const favoritesList = $('petsFavorites'), libraryList = $('petsInstalled'); favoritesList.replaceChildren(); libraryList.replaceChildren();
+    if (loadFailed) {
+      ui($('petsCount'), 'textContent', () => '');
+      $('petsFavoritesSection').hidden = true;
+      libraryList.append(el('p', 'plugin-no-results muted', () => t('Pets could not be loaded.')));
+      return;
+    }
     const query = $<HTMLInputElement>('petsSearch').value.trim().toLowerCase();
     const visible = state.pets.filter(pet => `${pet.displayName} ${pet.builtin ? t(pet.description) : pet.description}`.toLowerCase().includes(query));
     const favorites = visible.filter(pet => pet.favorite), library = visible.filter(pet => !pet.favorite);
@@ -276,12 +284,11 @@ export function initPets(api: AppApi, runtime: PetController): void {
     if (next) apply(next);
   })());
   void (async () => {
+    const own = ++epoch;
     const next = await run(api.petsList());
+    // An import that finished first already showed the library; this older read changes nothing.
+    if (own !== epoch) return;
     if (next) apply(next);
-    else if (!loaded) {
-      // A failed first load says so, not Loading… for good.
-      $('petsCount').textContent = '';
-      $('petsInstalled').replaceChildren(el('p', 'plugin-no-results muted', () => t('Pets could not be loaded.')));
-    }
+    else if (!loaded) { loadFailed = true; render(); }
   })();
 }
