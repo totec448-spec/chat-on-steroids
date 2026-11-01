@@ -25,6 +25,14 @@ const spawnOptions: Array<Record<string, unknown> | undefined> = [];
 const elevation: { exitCode: number | 'held'; finish: ((code: number) => void) | null } = { exitCode: 0, finish: null };
 /** What icacls answers when the app repeats the installer's access grant: an exit code, or a spawn error. */
 const icacls: { calls: Array<{ file: string; args: string[] }>; result: number | string | null } = { calls: [], result: null };
+const cleanupFault = vi.hoisted(() => ({ file: '' }));
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...actual, rm: async (file: Parameters<typeof actual.rm>[0], options?: Parameters<typeof actual.rm>[1]) => {
+    if (String(file) === cleanupFault.file) throw Object.assign(new Error('installer still open'), { code: 'EACCES' });
+    return actual.rm(file, options);
+  } };
+});
 vi.mock('node:child_process', () => ({
   spawn: (file: string, args: string[], options?: Record<string, unknown>) => {
     spawned.push({ file, args });
@@ -157,6 +165,7 @@ beforeEach(() => {
   elevation.finish = null;
   relaunched.length = 0;
   warnings.length = 0;
+  cleanupFault.file = '';
   resetUpdateForTests();
 });
 
@@ -213,6 +222,23 @@ describe('cleanup of updater-owned downloads', () => {
     expect(updateStatus().stage).toBe('failed');
     expect(existsSync(previous)).toBe(true);
     expect(JSON.parse(readFileSync(note, 'utf8')).version).toBe('98.0.0');
+  });
+  it('does not discard a previous candidate when the replacement fails its checksum', async () => {
+    const previous = cached('98.0.0');
+    github({ checksums: `${'a'.repeat(64)}  ${WINDOWS_ASSET}\n` });
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus().stage).toBe('failed');
+    expect(existsSync(previous)).toBe(true);
+  });
+  it('defers a locked obsolete installer without failing the update or touching another file', async () => {
+    cleanupFault.file = cached('0.0.1');
+    const removable = cached('0.0.2');
+    github({ version: APP_VERSION });
+    await checkForUpdates();
+    expect(updateStatus().stage).toBe('idle');
+    expect(existsSync(cleanupFault.file)).toBe(true);
+    expect(existsSync(removable)).toBe(false);
+    expect(warnings).toContain('update: obsolete 0.0.1 download is still in use or cannot be removed; cleanup deferred');
   });
   it('retires superseded candidates only after verifying the replacement, keeping the handoff receipt', async () => {
     const previous = cached('98.0.0');
