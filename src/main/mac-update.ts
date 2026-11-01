@@ -1,7 +1,6 @@
 import { execFile } from 'node:child_process';
-import { access, constants } from 'node:fs/promises';
+import { access, constants, stat } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { app, autoUpdater } from 'electron';
@@ -20,16 +19,20 @@ export function canUpdateMac(): Promise<boolean> {
   if (process.platform !== 'darwin' || !app.isPackaged || !['x64', 'arm64'].includes(process.arch)) return Promise.resolve(false);
   return eligibility ??= (async () => {
     const bundle = path.dirname(path.dirname(path.dirname(process.execPath)));
+    let reason = 'not an installed app bundle';
     try {
       if (!bundle.endsWith('.app')) throw new Error('not an installed app bundle');
+      reason = 'bundle parent is not writable';
       await access(path.dirname(bundle), constants.W_OK);
+      reason = 'no valid CoS Developer ID signature';
       await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', '-R',
         'identifier "com.chatonsteroids.app" and anchor apple generic and certificate leaf[field.1.2.840.113635.100.6.1.13] exists', bundle]);
+      reason = 'Gatekeeper did not accept the installation';
       await run('/usr/sbin/spctl', ['--assess', '--type', 'execute', bundle]);
       logInfo('update: this writable Developer ID Mac installation can use native updates');
       return true;
     } catch {
-      logInfo('update: Mac installation is not writable and publisher-trusted; keeping the manual download path');
+      logInfo(`update: ${reason}; keeping the manual Mac download path`);
       return false;
     }
   })();

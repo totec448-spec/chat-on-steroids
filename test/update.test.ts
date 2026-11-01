@@ -14,7 +14,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -195,6 +195,18 @@ describe('the file Get update opens for an installation that cannot update itsel
 });
 
 describe('native signed Mac update handoff', () => {
+  it('still honors explicit native relaunch if the best-effort handoff receipt cannot be saved', async () => {
+    mac.eligible = true;
+    github({ checksums: `${sha256('installer bytes')}  Chat-On-Steroids-macOS-${process.arch}.zip\n` });
+    await checkForUpdates();
+    expect(markInstallOnQuit()).toBe(true);
+    renameSync(path.join(userData, 'updates'), path.join(userData, 'moved-cache'));
+    writeFileSync(path.join(userData, 'updates'), 'not a directory');
+    await applyStagedUpdate();
+    expect(finishNativeUpdateQuit()).toBe(true);
+    expect(mac.restart).toHaveBeenCalledOnce();
+    expect(warnings).toContain('update: native handoff receipt could not be saved; continuing the verified native install');
+  });
   it('never gives native updating a ZIP that fails the published checksum', async () => {
     mac.eligible = true;
     github({ checksums: `${'a'.repeat(64)}  Chat-On-Steroids-macOS-${process.arch}.zip\n` });

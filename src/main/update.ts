@@ -592,8 +592,9 @@ export async function applyStagedUpdate(): Promise<void> {
     if (ready.kind !== 'mac' && (await fileDigest(ready.file)) !== ready.digest) throw new Error('the staged artifact changed after verification');
     if (ready.kind === 'mac') {
       // Squirrel applies on termination. Only an explicit Install asks it to reopen the app.
-      await mkdir(path.dirname(handoffNote()), { recursive: true });
-      await writeFile(handoffNote(), JSON.stringify({ version: ready.version, at: Date.now() }));
+      await mkdir(path.dirname(handoffNote()), { recursive: true })
+        .then(() => writeFile(handoffNote(), JSON.stringify({ version: ready.version, at: Date.now() })))
+        .catch(() => logWarn('update: native handoff receipt could not be saved; continuing the verified native install'));
       nativeRestart = relaunch;
       handoffStep('installer');
     } else if (ready.kind === 'installer') {
