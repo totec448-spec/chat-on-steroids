@@ -130,7 +130,8 @@ app.whenReady().then(async () => {
       buttons: buttons.map(b => b.id), right: Math.round(Math.max(...buttons.map(b => b.getBoundingClientRect().right))),
       setup: shown(document.getElementById('telegramSetup')), token: shown(document.getElementById('telegramTokenStep')), code: shown(document.getElementById('telegramCodeStep')),
       codeText: document.getElementById('telegramCode').value, hint: document.getElementById('telegramCodeHint').textContent,
-      ntfy: shown(document.getElementById('phonePushNtfyOptions')) }; })()`;
+      ntfy: shown(document.getElementById('phonePushNtfyOptions')),
+      steer: shown(document.getElementById('telegramSteerRow')), steerOn: document.getElementById('telegramSteer').checked }; })()`;
   const telegram = next => win.webContents.executeJavaScript(`phone.applyPhonePush({ ...window.fixtureState, telegram: ${JSON.stringify(next)} }); true`);
   for (const language of ['en', 'de']) {
     await win.webContents.executeJavaScript(`phone.setLanguage(${JSON.stringify(language)}); document.getElementById('phonePushAdvanced').open = false; true`);
@@ -138,6 +139,7 @@ app.whenReady().then(async () => {
     let row = await win.webContents.executeJavaScript(telegramRow);
     let layout = await shot(`telegram-off-${language}`);
     assert.deepEqual(row.buttons, ['telegramLink'], 'not linked: Link… only ' + language);
+    assert.equal(row.steer, false, 'no reply switch without a linked bot ' + language);
     assert.equal(row.right, layout.controlRights[0], 'the Telegram button ends where switches end ' + language);
     assert.equal(row.setup, false);
     // Link…: the token step, its field on the same grid as the topic.
@@ -165,6 +167,8 @@ app.whenReady().then(async () => {
     assert.deepEqual(row.buttons, ['telegramTest', 'telegramUnlink'], 'linked: Send test and Unlink ' + language);
     assert.ok(row.status.includes('@sam_phone') && row.status.includes('@cos_home_bot') && !row.warn, 'linked status ' + language);
     assert.equal(row.setup, false, 'the setup closes once linked ' + language);
+    // Phase 2: replies as messages have their own switch, shown with a linked bot and off by default.
+    assert.ok(row.steer && !row.steerOn, 'linked: the reply switch is shown and off ' + language);
     assert.equal(row.right, layout.controlRights[0], 'linked buttons end where switches end ' + language);
     // Another app reads the bot: said as a warning, with Unlink.
     await telegram({ state: 'conflict', botName: '@cos_home_bot', userName: '@sam_phone' });
