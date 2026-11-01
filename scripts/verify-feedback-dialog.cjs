@@ -90,7 +90,7 @@ app.whenReady().then(async () => {
     // In a normal window everything fits; only a short one scrolls the fields (the buttons stay put).
     // Judged at the size the window really got: a CI runner's small virtual screen clamps it below 800.
     if (!label.includes('720')&&!label.includes('error')&&view.height>=780) assert.equal(view.fieldsScroll,false,`${label}: no scrolling at 1280 x ${view.height}`);
-    if (label.includes('error')) assert.equal(await js(`(()=>{const e=document.getElementById('feedbackError').getBoundingClientRect(),f=document.querySelector('.feedback-fields').getBoundingClientRect();return e.top>=f.top&&e.bottom<=f.bottom;})()`),true,`${label}: the error is in view`);
+    if (label.includes('error')) assert.equal(await js(`(()=>{const e=document.getElementById('feedbackError').getBoundingClientRect(),f=document.querySelector('.feedback-fields').getBoundingClientRect();return e.top>=f.top-1&&e.bottom<=f.bottom+1;})()`),true,`${label}: the error is in view`);
     assert.equal(view.primaryShown,true,`${label}: the main button is in view without scrolling`);
     assert.equal(view.edges.length<=1,true,`${label}: every block starts at one left edge ${JSON.stringify(view.edges)}`);
   };
@@ -105,7 +105,7 @@ app.whenReady().then(async () => {
     assert.equal(await js(`document.activeElement.id`),'feedbackWhat');
     assert.equal(await js(`document.querySelector('input[name="feedbackKind"]')`),null,'No idea form');
     // The form opens right at the body's padding, with the update notice and without it (no space left by the old switch).
-    const topGap = () => js(`(()=>{const body=document.querySelector('#feedbackForm .feedback-fields'),pad=parseFloat(getComputedStyle(body).paddingTop),top=body.getBoundingClientRect().top;
+    const topGap = () => js(`(()=>{const body=document.querySelector('#feedbackForm .feedback-fields');body.scrollTop=0;const pad=parseFloat(getComputedStyle(body).paddingTop),top=body.getBoundingClientRect().top;
       const first=[...body.querySelectorAll('#feedbackUpdate, #feedbackBug > .plugin-field')].find(n=>n.checkVisibility());return Math.round(first.getBoundingClientRect().top-top-pad)})()`);
     assert.equal(await topGap(),0,'No extra space above the update notice');
     await js(`document.getElementById('feedbackUpdate').hidden=true`);

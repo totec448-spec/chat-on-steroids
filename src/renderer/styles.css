@@ -263,6 +263,9 @@
 /* The form opens with the update notice or, without one, the first field: no extra space above either
    (the kind switch that used to come first went with the idea form, 2026-11-01). */
 .feedback-fields > .feedback-update:first-child { margin-top: 0; }
+/* Scrolled into view in a short window, the error keeps some room below it instead of ending flush
+   against the scroll area's edge (a fraction of a pixel past it on CI's small screen). */
+#feedbackError { scroll-margin-bottom: 12px; }
 .feedback-fields > .feedback-update[hidden]:first-child + #feedbackBug > .plugin-field:first-child { margin-top: 0; }
 .feedback-update span { flex: 1 1 16rem; min-width: 0; }
 .feedback-dialog .plugin-field small { color: var(--faint); font-size: inherit; font-weight: 400; }
