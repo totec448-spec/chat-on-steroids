@@ -8526,8 +8526,6 @@ export async function pickupNow(sessionId: string, shown: { next: string; stoppe
     // A queued message of the person's own is no automatic Continue: it is retried instead.
     if (!/no longer a queued automatic Continue/.test(outcome.refused)) return refuse('not-sent', `the Continue in ${conversationId} was not queued: ${outcome.refused}`);
   }
-  const watch = pickupWatch.get(conversationId);
-  if (watch) watch.dueAt = now;
   // The exact owed step the button stood for: a replacement that arrives meanwhile is not tried in
   // its name (CodeRabbit on #1979).
   const focus: PickupFocus = { conversationId, replyId: owed.replyId };
@@ -9856,6 +9854,9 @@ async function inspectOwedPickups(now: number, focus?: PickupFocus): Promise<boo
   }
   let queued = false;
   for (const reply of owed.values()) {
+    // The person's click is about one chat: another chat's pickup is neither tried nor spent by it
+    // (CodeRabbit on #1979).
+    if (focus && reply.conversationId !== focus.conversationId) continue;
     const session = await getSession(reply.sessionId);
     if (session?.conversationId !== reply.conversationId || isChatBlocked(reply.conversationId) ||
         stopRequestedFor(reply.conversationId) || await conversationWasSuperseded(reply.conversationId) ||
@@ -9887,7 +9888,9 @@ async function inspectOwedPickups(now: number, focus?: PickupFocus): Promise<boo
     }
     // The person's click is due now, also for a watch this pass just made again after a restart
     // (CodeRabbit on #1979).
-    if (focus?.conversationId === reply.conversationId && focus.replyId === reply.replyId) watch.dueAt = Math.min(watch.dueAt, now);
+    // Due now for the person's click only: a click that starts nothing leaves the schedule as it was
+    // (CodeRabbit on #1979).
+    const dueAt = focus?.conversationId === reply.conversationId && focus.replyId === reply.replyId ? Math.min(watch.dueAt, now) : watch.dueAt;
     // An automatic Continue nothing took for long becomes an ordinary message rather than another
     // reload or a stop: the chat must not stop while it is unfinished (user decision 2026-10-31).
     // Checked between reloads and after a stop too; the conversion itself refuses while anything newer
@@ -9916,7 +9919,7 @@ async function inspectOwedPickups(now: number, focus?: PickupFocus): Promise<boo
       }
     }
     if (watch.attempts >= BROWSER_PICKUP_ATTEMPT_LIMIT) continue;
-    if (now < watch.dueAt || now < reply.listenUntil) continue;
+    if (now < dueAt || now < reply.listenUntil) continue;
     // A reload inside a history limit cannot bring the page back and can extend the limit. Counting
     // it anyway, at queue time, let it wait out the limit and then run with the next one due right
     // behind it (2026-10-30: two of three reloads 61 seconds apart). It is counted when it can run.
