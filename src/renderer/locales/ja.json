@@ -3695,5 +3695,6 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "未送信: この新しいチャットのブラウザータブが閉じられたか、失われました。メッセージを確認してから再送信してください。",
   "Recovery stopped": "復旧を停止しました",
   "Stopped after {0} attempts": "{0} 回試行して停止",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "自動再読み込みを {0} 回行っても、ブラウザーは保留中のステップを受け取りませんでした。元のキュー入力またはゴールの保留項目は保存されています。CoS はこのステップのためにこのチャットを自動再読み込みしません。チャットを開いて手動で続行してください。"
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "自動再読み込みを {0} 回行っても、ブラウザーは保留中のステップを受け取りませんでした。元のキュー入力またはゴールの保留項目は保存されています。CoS はこのステップのためにこのチャットを自動再読み込みしません。チャットを開いて手動で続行してください。",
+  "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.": "ChatGPT のモデル選択でヘルパーのモデルを確認できませんでした。ゴールは ChatGPT の現在の選択でもう一度尋ねます。"
 }
