@@ -741,6 +741,16 @@ describe('who is allowed to talk to it', () => {
     expect(status.body).toMatchObject({ language: 'en', browserPreferences: { overwrite: false, durations: true } });
   });
 
+  // 2026-11-01: the popup looks like the app: its colors for both themes and the theme it shows.
+  it('hands the app\'s theme and colors to the extension in /status', async () => {
+    await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, theme: 'light' } });
+    const status = await request('POST', '/status', { body: { openConversations: [] } });
+    expect(status.body.appearance.theme).toBe('light');
+    expect(status.body.appearance.light['--page']).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(status.body.appearance.dark['--accent-fill']).toMatch(/^#[0-9a-f]{6}$/i);
+  });
+
   it('accepts only an exact plugin id or an exact missing report on /core-plugin', async () => {
     await pair();
     expect((await request('POST', '/core-plugin', { body: { appId: 'asdk_app_6aa5b6651c3c81919f03cb5dc38bf019' } })).status).toBe(200);
