@@ -23897,6 +23897,24 @@ describe('app Stop command uses current native turn proof', () => {
     ]);
   });
 
+  // CodeRabbit on #1992: a Fiber scan that returns after the app stopped the turn must not publish the
+  // stopped turn's partial last message as a final answer.
+  it('publishes no final for a turn the app stopped, even when ChatGPT names its last message', async () => {
+    const h = await setup();
+    const section = live!.document.querySelector('[data-turn-id="native-stop-answer"]') as HTMLElement;
+    prose(live!.document, section, 'stopped-partial', 'Half an answ');
+    stopGenerating(live!.document);
+    live!.advance(30_000);
+    live!.hook.observe(); await settle();
+    expect(await live!.runtimeMessage(h.request)).toEqual({ ok: true });
+    live!.hook.observe(); await settle(); await live!.hook.flush();
+    expect(emitted(live!.sent, 'turn_end').map(row => row.event.outcome)).toEqual(['stopped']);
+    await bindFiberTurns([{ section, turn: { turnId: 'native-stop-answer', endMessageId: 'stopped-partial',
+      messages: [{ role: 'assistant', messageId: 'stopped-partial', rawMessageId: 'stopped-partial', rawText: 'Half an answ' }] } }]);
+    live!.hook.observe(); await settle(); await live!.hook.flush();
+    expect(emitted(live!.sent, 'assistant_message').some(row => row.event.final === true)).toBe(false);
+  });
+
   // CodeRabbit on #1992: an approval card holds the turn open (#1977), but the app's Stop still ends it.
   it('ends a turn held by an approval card when the app asks to stop it', async () => {
     const h = await setup();
