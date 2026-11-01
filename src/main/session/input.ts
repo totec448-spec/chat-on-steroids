@@ -1874,7 +1874,12 @@ async function notAllowedReason(entry: InputEntry): Promise<string> {
  * the chat's latest question is still the one the Continue answers, no turn runs and no tool call is
  * in flight. Returns the converted row, or null with nothing changed.
  */
-export function continueAsOrdinaryMessage(id: string, why: string, minAgeMs = 0): Promise<{ row: InputEntry } | { refused: string }> {
+/**
+ * `lastGate`: the caller's own final check on the chat, run inside this one serialized step right
+ * before the commit (a history limit can arrive during the reads above; CodeRabbit on #1979). It
+ * returns why the conversion must wait, or null.
+ */
+export function continueAsOrdinaryMessage(id: string, why: string, minAgeMs = 0, lastGate?: (conversationId: string) => string | null): Promise<{ row: InputEntry } | { refused: string }> {
   return serial(async () => {
     const current = await load();
     const row = current.find(entry => entry.id === id);
@@ -1890,6 +1895,8 @@ export function continueAsOrdinaryMessage(id: string, why: string, minAgeMs = 0)
     if (inFlightToolCalls(session.conversationId) > 0) return { refused: 'a tool call of its chat is still running' };
     const question = await readLatestUserMessage(row.sessionId);
     if (question?.messageId !== row.recovery.questionId) return { refused: 'a newer question arrived in its chat' };
+    const gated = lastGate?.(session.conversationId);
+    if (gated) return { refused: gated };
     const { recovery: _recovery, silenceBoundary: _boundary, pickupRecovery: _pickup, requestedMode: _requested, ...rest } = row;
     const ordinary: InputEntry = { ...rest, mode: 'auto', dueAt: Date.now(), continuedFrom: 'recovery', continuesQuestionId: row.recovery.questionId };
     await commit(current.map(entry => entry === row ? ordinary : entry));

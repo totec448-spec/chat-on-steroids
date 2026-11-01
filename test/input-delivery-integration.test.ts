@@ -2696,6 +2696,10 @@ describe('native progress silence authority', () => {
       input.resetInputForTests();
       const bridgeModule = await bridge();
       expect((await bridgeModule.sessionControlsFor(source.session.id)).recovery).toContainEqual(expect.objectContaining({ kind: 'pickup-stopped', next: 'continue', deadline: stoppedAt }));
+      // The caller's last gate runs inside the conversion: refusing it leaves the automatic Continue as it was.
+      expect(await input.continueAsOrdinaryMessage(ticket.id, 'gate test', 0, () => 'ChatGPT limits its chat\'s history'))
+        .toEqual({ refused: 'ChatGPT limits its chat\'s history' });
+      expect((await input.listInputs()).find(entry => entry.id === ticket.id)).toMatchObject({ state: 'queued', recovery: expect.anything() });
       // Queued as an ordinary message: that is no delivery yet, and the answer says so (CodeRabbit on #1979).
       expect(await bridgeModule.pickupNow(source.session.id, { next: 'continue', stoppedAt }, now)).toEqual({ ok: true, did: 'queued' });
       const row = (await input.listInputs()).find(entry => entry.id === ticket.id)!;
