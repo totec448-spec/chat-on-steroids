@@ -143,6 +143,14 @@ app.whenReady().then(async () => {
     if (language === 'de') await capture('add-de');
     await click('#attachmentMenu > summary'); await pause(150);
   }
+  // CodeRabbit on #2006: at 200% zoom in a 900 px window little room is left beside the sidebar. The menu
+  // stays inside the composer and a label too long for it wraps instead of overflowing.
+  win.webContents.setZoomFactor(2); await pause(300);
+  await click('#attachmentMenu > summary'); await pause(250);
+  await check('Add menu fits the composer at 200% zoom', `(()=>{const p=document.querySelector('#attachmentMenu > .composer-popover').getBoundingClientRect(),c=document.querySelector('.composer').getBoundingClientRect();
+    return p.left>=c.left-1&&p.right<=c.right+1&&[...document.querySelectorAll('#attachmentMenu > .composer-popover button')].every(b=>b.scrollWidth<=b.clientWidth+1)})()`);
+  await capture('add-zoom-200');
+  await click('#attachmentMenu > summary'); await pause(150);
   win.setContentSize(1440, 960); win.webContents.setZoomFactor(1);
   if (modelMenuWasOpen) await click('#modelMenu > summary');
   await win.webContents.debugger.sendCommand('Runtime.releaseObject', { objectId: appearanceWindow.objectId });
