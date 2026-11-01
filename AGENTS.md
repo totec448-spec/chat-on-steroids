@@ -1756,7 +1756,10 @@ holds a call before it is sent, so nothing reaches the app and only the user can
 page reports it on every `/activity` poll as optional `approval=1|0` (older extensions omit it);
 `src/main/approval-wait.ts` keeps the episode fresh for 75 s. While it stands, silence recovery
 (before the no-recorded-call verdict), `recoveryHeldByCalls`, the worker sleep sweep and the page's
-ten-minute stall clock all wait. The chat gets one `approval-wait:` progress row (texts in
+ten-minute stall clock all wait. Nor does the page end the turn while the card stands: neither the
+quiet window after Stop goes nor a native final closes it (`heldForApproval` in the observer, and the
+Fiber terminal check), since the turn goes on once the person answers (#1977: 2.1.49 closed it after
+12 s and lost every answer section that followed). The chat gets one `approval-wait:` progress row (texts in
 `src/shared/approval-wait.ts`, translated by the renderer, with Open in browser) and, after 30 s, one
 stop-notice-style desktop notice whose click opens the chat in the app. The app never answers the
 card on its own. The session list carries every waiting chat as `approval`; a catalog-only

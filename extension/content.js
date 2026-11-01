@@ -3267,7 +3267,11 @@
       }
     }
 
-    if (generating && nowGenerating && quietSince > 0) {
+    // ChatGPT's tool approval card hides Stop while the turn waits for a person. That is a held
+    // turn, not a quiet one: closing it after the settle window lost every answer section that
+    // followed the person's answer (#1977, 2.1.49 on Windows). It counts as still generating here.
+    const heldForApproval = CLF_DOM.approvalWaiting();
+    if (generating && (nowGenerating || heldForApproval) && quietSince > 0) {
       // The stop button came back, so it never went away in the sense that matters: this is
       // one turn that flickered, not two turns. Everything the generation holds — its id,
       // its baselines, its reported-progress map — is still the right state to carry on
@@ -3277,7 +3281,7 @@
       quietOutcome = null;
     }
 
-    if (generating && !nowGenerating) {
+    if (generating && !nowGenerating && !heldForApproval) {
       // The turn as it stood on the first quiet observation, read once. See quietOutcome.
       if (quietSince === 0) {
         quietSince = Date.now();
@@ -5273,7 +5277,10 @@
       activeTurnIndex >= 0 &&
       activeLocalTurnId === turnId &&
       Boolean(answer.turns[activeTurnIndex]?.endMessageId) &&
-      !settledFinals.has(answer.turns[activeTurnIndex].endMessageId)
+      !settledFinals.has(answer.turns[activeTurnIndex].endMessageId) &&
+      // A turn waiting on ChatGPT's approval card is not over, whatever its last message says
+      // (#1977); the next refresh after the card goes reads the final again.
+      !CLF_DOM.approvalWaiting()
     ) {
       fiberTerminalMessageId = answer.turns[activeTurnIndex].endMessageId;
       settledFinals.add(fiberTerminalMessageId);
