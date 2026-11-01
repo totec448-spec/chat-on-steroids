@@ -10,7 +10,11 @@ const output = path.join(root, 'outputs/settings-focus');
 app.setPath('userData', path.join(output, 'runtime'));
 app.whenReady().then(async () => {
   fs.mkdirSync(output, { recursive: true });
-  const win = new BrowserWindow({ show: false, width: 1000, height: 900,
+  // Native select pickers cannot receive focus in a hidden Wayland window. In
+  // the explicitly opted-in local Wayland UI run, show only this isolated fixture.
+  const nativePickerNeedsWindow = process.platform === 'linux' &&
+    (process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1' || process.env.COS_VERIFY_UI_LINUX_X11 === '1');
+  const win = new BrowserWindow({ show: nativePickerNeedsWindow, width: 1000, height: 900,
     webPreferences: { sandbox: true, backgroundThrottling: false } });
   try {
     const html = withoutScripts(fs.readFileSync(path.join(root, 'out/renderer/index.html'), 'utf8'))

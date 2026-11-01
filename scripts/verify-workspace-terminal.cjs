@@ -200,7 +200,7 @@ app.whenReady().then(async () => {
       while (Date.now() < attemptEnd && !(await interrupted())) await new Promise(resolve => setTimeout(resolve, 40));
     }
     win.setSize(830, 700); await new Promise(resolve => setTimeout(resolve, 300));
-    const geometry = await js(`(()=>{const p=document.getElementById('workspaceTerminal').getBoundingClientRect();return {width:p.width,height:p.height,fits:p.right<=innerWidth+1&&p.bottom<=innerHeight+1}})()`);
+    const geometry = await js(`(()=>{const p=document.getElementById('workspaceTerminal').getBoundingClientRect();return {width:p.width,height:p.height,left:p.left,top:p.top,right:p.right,bottom:p.bottom,viewport:[innerWidth,innerHeight],fits:p.right<=innerWidth+1&&p.bottom<=innerHeight+1}})()`);
     assert.ok(geometry.fits, JSON.stringify(geometry));
     fs.writeFileSync(path.join(output, 'terminal.png'), (await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toPNG());
     await js(`window.api.terminalWrite(${JSON.stringify(second)}, "exit 7\\r")`); await until(`exits[${JSON.stringify(second)}]===7`);

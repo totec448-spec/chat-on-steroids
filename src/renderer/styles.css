@@ -1636,6 +1636,27 @@ main {
   background: none;
 }
 
+.tools .linux-consent-row button {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 9px;
+  padding: 7px 12px;
+  border: 1px solid var(--edge);
+  border-radius: var(--r-sm);
+  background: var(--card);
+  color: var(--ink);
+  cursor: pointer;
+}
+.tools .linux-consent-row button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+.tools .linux-consent-row .linux-consent-result {
+  margin-top: 7px;
+  overflow-wrap: anywhere;
+}
+
 /* The tools this group actually publishes, named as the model sees them. Set apart from
    the rows above because it is a fact about the connector, not another thing to tick. */
 .tool-names {

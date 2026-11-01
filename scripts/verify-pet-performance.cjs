@@ -7,7 +7,9 @@ const path = require('node:path');
 const os = require('node:os');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
-const label = process.argv[2] || 'current';
+// Linux Electron flags may cause Chromium to retain its script path in argv.
+// The benchmark label is the first actual positional argument, not that path.
+const label = process.argv.slice(2).find(arg => !arg.startsWith('--') && path.resolve(root, arg) !== __filename) || 'current';
 assert.match(label, /^[a-z0-9-]+$/i);
 const output = path.join(root, 'outputs/pet-performance', label);
 const check = process.argv.includes('--check');
@@ -74,7 +76,10 @@ async function buildAndRun() {
     esbuild: { supported: { 'top-level-await': true } } });
   const { spawn } = require('node:child_process');
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
-  const child = spawn(require('electron'), [__filename, label, ...(check ? ['--check'] : []), ...(fullHost ? ['--full-host'] : [])],
+  const display = process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1' ? 'wayland'
+    : process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_X11 === '1' ? 'x11' : null;
+  const testFlags = display ? ['--no-sandbox', `--ozone-platform=${display}`] : [];
+  const child = spawn(require('electron'), [...testFlags, __filename, label, ...(check ? ['--check'] : []), ...(fullHost ? ['--full-host'] : [])],
     { cwd: root, env, stdio: 'inherit', windowsHide: true });
   child.on('error', error => { console.error(error); process.exitCode = 1; });
   child.on('exit', code => { process.exitCode = code ?? 1; });

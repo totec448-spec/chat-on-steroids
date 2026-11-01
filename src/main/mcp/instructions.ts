@@ -29,7 +29,12 @@ export function serverInstructions(
   skills = skillCatalogInstructions()
 ): string {
   if (surface === 'plugins') return 'External MCP tools enabled by the user in Chat On Steroids. Each tool retains its upstream schema and annotations. External servers run with their own operating-system or service permissions; CoS approved folders do not sandbox them. Use only for the user\'s requested task. A failed or disconnected call may already have taken effect: never automatically retry a mutation after an ambiguous failure. Disabled tools require the user to re-enable them in Settings. Core and Desktop are separate connectors.' + (canAddCodeMode(pluginManager.tools()) ? '\n\n' + CODE_MODE_INSTRUCTIONS : '');
-  return surface === 'desktop' ? [browserInstructions(), ...(platform === 'win32' || platform === 'darwin' ? [desktopInstructions(ctx, platform)] : [`Files, patches and shell commands live in the separate "${surfaceDefinition('core').connectorName}" connector.`, CODE_MODE_INSTRUCTIONS, ...userInstructions()])].join('\n\n') : coreInstructions(ctx, platform, skills);
+  return surface === 'desktop' ? [browserInstructions(), ...(platform === 'win32' || platform === 'darwin' ? [desktopInstructions(ctx, platform)] : platform === 'linux' ? [
+    'Native Linux desktop tools linux_observe and linux_act are available only after separately enabling Linux Desktop access. Observe windows and their accessibility trees, then use fresh snapshot refs for semantic click/set_value. Reobserve after every action. Native input on browser windows and any ambiguous target is forbidden; use browser_* tools instead.',
+    'A Linux screenshot is a Wayland portal DISPLAY capture, never a window image. A portal prompt may need the person at the computer; denied, cancelled or timed-out captures must not be retried automatically. No physical coordinates or keyboard fallback.',
+    'The optional Allow unattributed desktop calls setting permits Linux observations without a proven chat, but NEVER permits linux_act or cross-chat accessibility refs. Tools also require the live Linux opt-in and screen/control permission; Read-only prevents input.',
+    `Files, patches and shell commands live in the separate "${surfaceDefinition('core').connectorName}" connector.`, CODE_MODE_INSTRUCTIONS, ...userInstructions()
+  ] : [CODE_MODE_INSTRUCTIONS, ...userInstructions()])].join('\n\n') : coreInstructions(ctx, platform, skills);
 }
 
 function browserInstructions(): string {

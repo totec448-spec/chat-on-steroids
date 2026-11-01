@@ -7,7 +7,9 @@ const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
 const { fixtureConfigSource, BENIGN_RENDERER_ERRORS } = require('./fixtures/app-defaults.cjs');
 // The first plain argument; switches such as verify-ui's --lang=en-US are not an output folder.
-const outputArg = process.argv.slice(2).find(arg => !arg.startsWith('--'));
+// Electron can include the entry script in argv after native Linux window flags.
+// It is not a requested output directory (and mkdir on that .cjs file fails).
+const outputArg = process.argv.slice(2).find(arg => !arg.startsWith('--') && path.resolve(root, arg) !== __filename);
 const output = outputArg ? path.resolve(root, outputArg) : path.join(root, '.tmp/message-send-20260918/ui');
 // A fresh profile each run: a composer draft the previous run left behind makes the send button
 // read Send instead of Stop, and the run then fails on the second try on the same machine.

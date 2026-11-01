@@ -19,7 +19,9 @@ app.whenReady().then(async () => {
   const html = withoutScripts(fs.readFileSync(path.join(root, 'out/renderer/index.html'), 'utf8'))
     .replace('<head>', `<head><base href="${pathToFileURL(path.join(root, 'out/renderer/')).href}">`);
   const file = path.join(output, 'fixture.html'); fs.writeFileSync(file, html);
-  const win = new BrowserWindow({ show: false, width: 1440, height: 950,
+  // Chromium suspends requestAnimationFrame in hidden Wayland windows; this
+  // check awaits animation frames for production geometry and screenshots.
+  const win = new BrowserWindow({ show: process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1', width: 1440, height: 950,
     webPreferences: { sandbox: true, backgroundThrottling: false } });
   try {
     await win.loadFile(file);

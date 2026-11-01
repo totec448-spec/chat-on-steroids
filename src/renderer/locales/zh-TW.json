@@ -3696,5 +3696,15 @@
   "Recovery stopped": "恢復已停止",
   "Stopped after {0} attempts": "已嘗試 {0} 次，已停止",
   "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "瀏覽器自動重新載入 {0} 次後，仍未接收到待處理步驟。原佇列輸入或目標待處理項仍已儲存。CoS 不會再為這一步自動重新載入此聊天；請開啟聊天手動繼續。",
-  "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.": "ChatGPT 的模型選擇器未確認助手的模型。目標將使用 ChatGPT 目前的選擇再次詢問。"
+  "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.": "ChatGPT 的模型選擇器未確認助手的模型。目標將使用 ChatGPT 目前的選擇再次詢問。",
+  "Allow native Linux Desktop access": "允許原生 Linux 桌面存取",
+  "Off by default. Permits Linux accessibility and display screenshots only while screen/control permissions allow them. Browser access alone never enables this. Unattributed calls may observe when separately permitted, but may never act on refs.": "預設關閉。只有具備螢幕檢視及控制權限時，才允許 Linux 無障礙存取與顯示器截圖。僅有瀏覽器權限無法啟用。未歸屬呼叫經另行授權可觀察，但不可使用參照執行操作。",
+  "Test GNOME screenshot permission": "測試 GNOME 螢幕截圖權限",
+  "Click while the Chat On Steroids window is active. If GNOME asks, choose Allow. The screenshot is discarded.": "請在 Chat On Steroids 視窗處於作用中時點擊。如果 GNOME 詢問，請選擇「允許」。截圖會被捨棄。",
+  "Request screenshot permission": "要求螢幕截圖權限",
+  "Waiting for GNOME screenshot permission…": "正在等待 GNOME 螢幕截圖權限…",
+  "Screenshot permission confirmed. No image was saved.": "螢幕截圖權限已確認。未儲存任何影像。",
+  "Screenshot permission request failed: {0}": "螢幕截圖權限要求失敗：{0}",
+  "A screenshot permission request is already running.": "螢幕截圖權限要求已在進行中。",
+  "Screenshot permission can be requested only from the Chat On Steroids main window.": "只能從 Chat On Steroids 主視窗要求螢幕截圖權限。"
 }

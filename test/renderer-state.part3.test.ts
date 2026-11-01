@@ -1042,7 +1042,42 @@ it('offers to ask before using the mouse and keyboard, off by default, under the
   linux.platform = { ...(linux.platform ?? {}), family: 'linux', name: 'Linux', desktopAutomation: false };
   mounted.push(linux);
   await settle();
-  expect(row.hidden).toBe(true);
+  expect(row.hidden).toBe(false);
+  const native = w.document.getElementById('linuxDesktopEnabled') as HTMLInputElement;
+  expect(native.closest<HTMLElement>('.linux-desktop-row')?.hidden).toBe(false);
+  expect(native.checked).toBe(false);
+  native.checked = true;
+  native.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.ui.linuxDesktopEnabled).toBe(true);
+  // The harness's save mock returns its original platform unless the test pushes it
+  // again; a real Linux app's platform remains Linux across a settings save.
+  const savedLinux = structuredClone(linux);
+  savedLinux.config.ui.linuxDesktopEnabled = true;
+  mounted.push(savedLinux);
+  await settle();
+  const consent = w.document.getElementById('linuxScreenshotConsent') as HTMLButtonElement;
+  expect(consent.closest<HTMLElement>('.linux-consent-row')?.hidden).toBe(false);
+  expect(consent.disabled).toBe(false);
+});
+
+it('requests Linux screenshot consent only after the user clicks, and shows a reply without image data', async () => {
+  const request = vi.fn(async () => ({ ok: true as const, data: { pngBytes: 640 } }));
+  const mounted = await mountChat({}, [], { linuxScreenshotConsent: request });
+  const w = mounted.window;
+  const button = w.document.getElementById('linuxScreenshotConsent') as HTMLButtonElement;
+  expect(button.disabled).toBe(true);
+  const linux = structuredClone(mounted.state);
+  linux.platform = { family: 'linux', name: 'Linux', desktopAutomation: false };
+  linux.config.ui.linuxDesktopEnabled = true;
+  mounted.push(linux);
+  await settle();
+  expect(button.disabled).toBe(false);
+  expect(request).not.toHaveBeenCalled();
+  button.click();
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(w.document.getElementById('linuxScreenshotConsentResult')?.textContent).toContain('No image was saved'));
+  expect(button.disabled).toBe(false);
 });
 
 // CodeRabbit on #1864 (Haz's keyboard condition): the question waits in the app's window too, reachable by keyboard.

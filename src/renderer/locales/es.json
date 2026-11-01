@@ -3858,5 +3858,15 @@
   "Recovery stopped": "Recuperación detenida",
   "Stopped after {0} attempts": "Detenido después de {0} intentos",
   "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "El navegador no recogió el paso pendiente tras {0} recargas automáticas. La entrada original de la cola o la tarea de Objetivo sigue guardada. CoS no volverá a recargar este chat automáticamente para este paso; ábrelo y continúa manualmente.",
-  "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.": "El selector de ChatGPT no confirmó el modelo del ayudante. Objetivo vuelve a preguntar con la selección actual de ChatGPT."
+  "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.": "El selector de ChatGPT no confirmó el modelo del ayudante. Objetivo vuelve a preguntar con la selección actual de ChatGPT.",
+  "Allow native Linux Desktop access": "Permitir acceso nativo al escritorio Linux",
+  "Off by default. Permits Linux accessibility and display screenshots only while screen/control permissions allow them. Browser access alone never enables this. Unattributed calls may observe when separately permitted, but may never act on refs.": "Desactivado de forma predeterminada. Permite accesibilidad de Linux y capturas de pantalla solo con permisos de pantalla/control. El acceso al navegador no lo activa. Las llamadas sin atribución pueden observar con permiso separado, pero no actuar sobre referencias.",
+  "Test GNOME screenshot permission": "Probar permiso de capturas de GNOME",
+  "Click while the Chat On Steroids window is active. If GNOME asks, choose Allow. The screenshot is discarded.": "Haz clic con la ventana de Chat On Steroids activa. Si GNOME pregunta, elige Permitir. La captura se descarta.",
+  "Request screenshot permission": "Solicitar permiso para capturas",
+  "Waiting for GNOME screenshot permission…": "Esperando el permiso de GNOME para capturas…",
+  "Screenshot permission confirmed. No image was saved.": "Permiso de captura confirmado. No se guardó ninguna imagen.",
+  "Screenshot permission request failed: {0}": "Error al solicitar permiso de captura: {0}",
+  "A screenshot permission request is already running.": "Ya hay una solicitud de permiso de captura en curso.",
+  "Screenshot permission can be requested only from the Chat On Steroids main window.": "El permiso de captura de pantalla solo se puede solicitar desde la ventana principal de Chat On Steroids."
 }

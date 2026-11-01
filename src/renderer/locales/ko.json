@@ -3696,5 +3696,15 @@
   "Recovery stopped": "복구 중지됨",
   "Stopped after {0} attempts": "{0}회 시도 후 중지됨",
   "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "자동 새로고침 {0}회 후에도 브라우저가 대기 중인 단계를 가져오지 못했습니다. 원래 대기열 입력 또는 Goal 작업은 저장되어 있습니다. CoS는 이 단계 때문에 이 채팅을 더 이상 자동 새로고침하지 않습니다. 채팅을 열어 직접 계속하세요.",
-  "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.": "ChatGPT 모델 선택기가 도우미 모델을 확인하지 못했습니다. Goal이 ChatGPT의 현재 선택으로 다시 묻습니다."
+  "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.": "ChatGPT 모델 선택기가 도우미 모델을 확인하지 못했습니다. Goal이 ChatGPT의 현재 선택으로 다시 묻습니다.",
+  "Allow native Linux Desktop access": "Linux 데스크톱 기본 접근 허용",
+  "Off by default. Permits Linux accessibility and display screenshots only while screen/control permissions allow them. Browser access alone never enables this. Unattributed calls may observe when separately permitted, but may never act on refs.": "기본적으로 꺼져 있습니다. 화면/제어 권한이 있을 때만 Linux 접근성 및 디스플레이 스크린샷을 허용합니다. 브라우저 권한만으로 활성화되지 않습니다. 출처 불명 호출은 별도 허용 시 관찰만 가능하며 참조 작업은 불가합니다.",
+  "Test GNOME screenshot permission": "GNOME 스크린샷 권한 테스트",
+  "Click while the Chat On Steroids window is active. If GNOME asks, choose Allow. The screenshot is discarded.": "Chat On Steroids 창이 활성화된 상태에서 클릭하세요. GNOME이 요청하면 허용을 선택하세요. 스크린샷은 삭제됩니다.",
+  "Request screenshot permission": "스크린샷 권한 요청",
+  "Waiting for GNOME screenshot permission…": "GNOME 스크린샷 권한 대기 중…",
+  "Screenshot permission confirmed. No image was saved.": "스크린샷 권한이 확인되었습니다. 이미지는 저장되지 않았습니다.",
+  "Screenshot permission request failed: {0}": "스크린샷 권한 요청 실패: {0}",
+  "A screenshot permission request is already running.": "스크린샷 권한 요청이 이미 진행 중입니다.",
+  "Screenshot permission can be requested only from the Chat On Steroids main window.": "스크린샷 권한은 Chat On Steroids의 기본 창에서만 요청할 수 있습니다."
 }

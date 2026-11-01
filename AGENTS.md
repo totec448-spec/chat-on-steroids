@@ -208,7 +208,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Continue prompt | Built-in phrases (`ui.customContinue` unset). | Settings › Agents & automation. The person's text (trimmed, at most 500 characters, `CUSTOM_CONTINUE_MAX_CHARS`) replaces only the Continue phrase of a silence-recovery Continue (`recoveryMessage({ custom })`, frozen in the outbox row when it is filed); the notice to check existing work and the optional playful aside stay. Empty, too long or damaged reads as unset. Fresh-turn rotation keeps `rotationMessage()`, which `goal.ts` recognises by its text. |
 | Goal / Loop | Off, preferred mode Goal. Both decision backends default to ChatGPT, helper `gpt-6` High (`DEFAULT_HELPER_CHAT_MODEL`, which High runs on its thinking lane); a config holding a superseded helper (`SUPERSEDED_HELPER_CHAT_MODELS`: `gpt-5.6-sol`, `gpt-6-thinking`) adopts it on load. | API uses the configured OpenRouter/custom endpoint and stored model. These defaults are not account-availability proof. |
 | Ordinary new-chat model | Automatic: no persisted model or reasoning override. | Optional `ui.defaultChatModel` / `ui.defaultChatReasoning` apply only to a fresh ordinary chat before it has a conversation selection. A recorded conversation or accepted opening input wins. Worker and Goal/Loop/Plan defaults remain separate. |
-| Desktop | Windows on; macOS retains its off default and separate native OS consent; Linux supports extension browser control. | Existing screen/control grants also govern browser tools; unsupported native clipboard remains masked. No new per-tab permission dialog. |
+| Desktop | Windows on; macOS retains its off default and separate native OS consent; Linux native desktop access **Off** unless `ui.linuxDesktopEnabled` is explicitly enabled. | Existing screen/control grants govern browser tools but do **not** authorize native Linux AT-SPI or Wayland captures. Linux native access needs its independent opt-in plus live screen/control; ref input additionally needs proven chat/session identity. Unknown callers can only observe when separately allowed. Native Linux clipboard remains unsupported. |
 | Shell/UI | Dark theme, minimize to tray, no automatic connector connection/login startup by default. | Optional browser/finish/plan choices are resolved by current config and their consumer, not invented from absent fields. |
 | Command policy | Off, in Allowlist mode, with no rules. | Missing legacy settings stay Off; a missing mode defaults to Allowlist. Rules and mode persist while Off. An enabled empty Allowlist rejects every launch; an enabled empty Denylist permits simple supported commands. |
 | Plugin auto-refresh | On. | Configs written before the setting existed read Off (schema default); conservative recovery also turns it off. While it is off and `ui.autoRefreshPluginsAsked` is not set, the window offers it once (`pluginRefresh:offer`); either answer sets `autoRefreshPluginsAsked`, which a settings save never clears. Local status/discovery never claims ChatGPT refreshed its connector snapshot. |
@@ -427,7 +427,7 @@ still checks live policy. Schema visibility is never the security boundary.
 | Surface | Advertised operations under current eligibility |
 | --- | --- |
 | Core — `chat-on-steroids-core` | `read`, `view_image`, `find` when command execution is off, `apply_patch`, `exec_command`/`write_stdin`, `update_plan`, `agents`, `session_finish`, code-mode `exec`. |
-| Desktop — `chat-on-steroids-desktop` | All Chromium extension hosts: `browser_tabs`, `browser_snapshot`, `browser_screenshot`, `browser_console`, `browser_network`, `browser_navigate`, `browser_action`, `browser_evaluate`. Windows additionally exposes 13 Window2 operations, clipboard and `exec` with `sky`; macOS adds `observe`/`computer`. Surface `exec` composes browser tools too. |
+| Desktop — `chat-on-steroids-desktop` | All Chromium extension hosts: `browser_tabs`, `browser_snapshot`, `browser_screenshot`, `browser_console`, `browser_network`, `browser_navigate`, `browser_action`, `browser_evaluate`. Windows additionally exposes 13 Window2 operations, clipboard and `exec` with `sky`; macOS adds `observe`/`computer`; Linux opt-in adds `linux_observe` (apps/windows/displays, exact accessibility tree, display PNG via GNOME portal) and `linux_act` (fresh chat-bound refs for semantic click/set_value only). Surface `exec` composes browser tools too. |
 | Plugins — `chat-on-steroids-plugins` | Enabled external tools with their upstream names and schemas, plus code-mode `exec` when that composition name is available. |
 
 `read` needs read/browse/metadata as appropriate; images need read; patch checks each hunk's
@@ -437,6 +437,13 @@ the finish setting controls `session_finish`. Windows publishes four observation
 screen access, nine input/launch methods under control, and clipboard methods under their own
 permissions. Multiline `type_text` additionally requires clipboard write. macOS `computer`
 registration can exist for control or clipboard access; each action rechecks its own permission.
+Linux native tools additionally require `ui.linuxDesktopEnabled` (missing means Off), an external
+`agent-desktop 1.0.2` executable, and live screen/control as appropriate. Input checks the
+exact session/conversation/Setup profile, target process incarnation, unexpired ref and permission
+again after any confirmation wait. Browser-window native actions and coordinate/physical-input
+fallbacks are refused. The GNOME screenshot portal may require a user click from focused CoS
+Settings before a display capture can succeed; a denied request is never automatically retried.
+See `docs/tool-surface.md` for the backend's versioned payload and local acceptance procedure.
 
 ChatGPT may cache one surface's complete tool list. Core/Desktop exposure is monotonic for an
 endpoint lifetime: a previously exposed schema can remain while a revoked handler returns

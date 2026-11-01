@@ -5,9 +5,11 @@ import { registerWindowsDesktopTools } from './tools-desktop-windows.js';
 import { registerBrowserTools } from './tools-browser.js';
 import { desktopAutomationSupported } from '../platform.js';
 import { guardDesktopTools } from './desktop-caller.js';
+import { registerLinuxDesktopTools } from './tools-desktop-linux.js';
 
 export function registerDesktopTools(reg: SurfaceRegistrar): void {
   registerBrowserTools(reg);
+  if (process.platform === 'linux') registerLinuxDesktopTools(guardDesktopTools(reg));
   if (desktopAutomationSupported()) {
     // The browser tools keep their own identity rules; screen, mouse and keyboard need a known chat.
     const desktop = guardDesktopTools(reg);

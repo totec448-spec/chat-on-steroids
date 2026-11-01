@@ -61,7 +61,10 @@ app.whenReady().then(async () => {
   let win;
   try {
     await server.listen(); fs.mkdirSync(output,{recursive:true});
-    win = new BrowserWindow({show:false,width:1100,height:900,webPreferences:{sandbox:true,backgroundThrottling:false}});
+    // In an explicitly opted-in local Wayland UI run, hidden Chromium windows
+    // do not reliably receive the animation frames this fixture awaits.
+    const showWaylandFixture = process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1';
+    win = new BrowserWindow({show:showWaylandFixture,width:1100,height:900,webPreferences:{sandbox:true,backgroundThrottling:false}});
     await win.loadURL(server.resolvedUrls.local[0]+'fixture.html');
     win.webContents.setZoomFactor(1);
     const js = code=>win.webContents.executeJavaScript(code);

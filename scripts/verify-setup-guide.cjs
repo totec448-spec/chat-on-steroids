@@ -47,7 +47,11 @@ app.whenReady().then(async () => {
   let win;
   try {
     await server.listen();
-    win = new BrowserWindow({ show: false, width: 1100, height: 900,
+    // The layout check awaits native animation frames; test-only Linux display
+    // sessions must map this isolated fixture for reliable frame delivery.
+    const showLinuxFixture = process.platform === 'linux' &&
+      (process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1' || process.env.COS_VERIFY_UI_LINUX_X11 === '1');
+    win = new BrowserWindow({ show: showLinuxFixture, width: 1100, height: 900,
       webPreferences: { sandbox: true, backgroundThrottling: false } });
     await win.loadURL(server.resolvedUrls.local[0] + 'setup-preview.html');
     const ready = await win.webContents.executeJavaScript('window.fixtureReady');
