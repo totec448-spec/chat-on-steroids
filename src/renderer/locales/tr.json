@@ -3776,5 +3776,6 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Gönderilmedi: bu yeni sohbetin tarayıcı sekmesi kapatıldı veya kayboldu. Mesajı gözden geçirip yeniden gönderin.",
   "Recovery stopped": "Kurtarma durduruldu",
   "Stopped after {0} attempts": "{0} denemeden sonra durduruldu",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Tarayıcı, bekleyen adımı {0} otomatik yeniden yüklemeden sonra almadı. Özgün kuyruk girdisi veya Hedef yükümlülüğü kayıtlı kalır. CoS bu adım için sohbeti yeniden otomatik yüklemeyecek; sohbeti açıp elle devam edin."
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Tarayıcı, bekleyen adımı {0} otomatik yeniden yüklemeden sonra almadı. Özgün kuyruk girdisi veya Hedef yükümlülüğü kayıtlı kalır. CoS bu adım için sohbeti yeniden otomatik yüklemeyecek; sohbeti açıp elle devam edin.",
+  "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.": "ChatGPT'nin model seçicisi yardımcının modelini onaylamadı. Hedef, ChatGPT'nin geçerli seçimiyle yeniden sorar."
 }

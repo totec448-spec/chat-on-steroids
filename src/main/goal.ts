@@ -1892,6 +1892,9 @@ async function requestGoalDecision(request: GoalRequest): Promise<GoalDecision |
       // Only a timeout teaches the size: a newer turn or Goal switched off also cancels a prompt.
       onSentUnanswered: () => { if (request.signal.reason?.name === 'TimeoutError') noteGoalHelperUnanswered(prompt.length); },
       ...goalHelperSelection()
+    }).catch((error: unknown) => {
+      if (error instanceof Error && error.message.startsWith('goal_helper_model_unconfirmed')) noteHelperModelUnconfirmed();
+      throw error;
     }), false);
     request.signal.throwIfAborted();
     return decision;
@@ -2006,10 +2009,24 @@ let helperFallbackLogged = '';
 /** The helper model as it will actually run, for progress and logs; never a model it will not use. */
 function helperModelLabel(): string { return goalHelperSelection().model ?? "ChatGPT's current selection"; }
 
+/**
+ * The picker could not confirm the helper's model (2026-11-01: four times a day on the maintainer's
+ * Mac, each one a Goal that then waited for a person). For a while the helper runs on ChatGPT's
+ * current selection, as it does for a model the account does not offer, so the next ask goes out.
+ */
+const HELPER_MODEL_FALLBACK_MS = 30 * 60_000;
+let helperModelUnconfirmedUntil = 0;
+function noteHelperModelUnconfirmed(now = Date.now()): void {
+  helperModelUnconfirmedUntil = now + HELPER_MODEL_FALLBACK_MS;
+  logWarn(`goal: ChatGPT's picker did not confirm the helper's model; the helper uses ChatGPT's current selection for ${HELPER_MODEL_FALLBACK_MS / 60_000} minutes`);
+}
+export function resetHelperModelFallbackForTests(): void { helperModelUnconfirmedUntil = 0; }
+
 export function goalHelperSelection(): { model: string | null; reasoningEffort: ReasoningEffort | null } {
   const settings = getConfig().goal;
   let model: string | null = settings.helperModel ?? DEFAULT_HELPER_CHAT_MODEL;
   let reasoningEffort: ReasoningEffort | null = settings.helperReasoning ?? 'high';
+  if (Date.now() < helperModelUnconfirmedUntil) return { model: null, reasoningEffort: null };
   const catalog = getChatModels();
   const models = catalog.models;
   // No readable picker at all (seen on Free plans, #1282): no model can ever be confirmed, so an

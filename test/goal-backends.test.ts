@@ -631,6 +631,25 @@ describe('Goal decision backends', () => {
   });
 });
 
+// 2026-11-01 (maintainer's Mac log, four times a day): ChatGPT's picker failed to confirm the helper's
+// model, nothing was typed, and each Goal then waited for a person. That failure is retryable, and the
+// helper runs on ChatGPT's current selection for a while so the next ask goes out.
+it('asks again on ChatGPT\'s current selection when the picker did not confirm the helper\'s model', async () => {
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, backend: 'chatgpt' } });
+  goal.resetHelperModelFallbackForTests();
+  const id = 'helper-model-unconfirmed';
+  await goal.setGoalSwitchNow(id, 'goal', true);
+  const sessionId = await recording(id, 'Next task');
+  await goal.acceptGoalReplyNow({ conversationId: id, sessionId, replyId: 'reply-one', turnId: 'turn-one', eventSeq: 10, blocked: false });
+  expect(goal.goalHelperSelection().model).not.toBeNull();
+  browser.request.mockRejectedValueOnce(new Error('goal_helper_model_unconfirmed: Requested model or reasoning could not be confirmed'));
+  goal.startGoalDraft({ conversationId: id, sessionId, turnId: 'turn-one' });
+  expect(await settled(id)).toMatchObject({ stage: 'failed', retryable: true });
+  expect(goal.goalDraftNeedsIntervention(id)).toBe(false);
+  expect(goal.goalHelperSelection()).toEqual({ model: null, reasoningEffort: null });
+  goal.resetHelperModelFallbackForTests();
+});
+
 it.each(['goal_browser_send_failed', 'goal_browser_send_unconfirmed'])('preserves source debt after %s without automatic transport retry', async failure => {
   await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, backend: 'chatgpt' } });
   const id = 'failed-helper-pickup';

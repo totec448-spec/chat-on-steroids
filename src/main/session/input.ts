@@ -2404,7 +2404,10 @@ export function failBrowserInput(id: string, owner: string, error: string, detai
       logWarn(`input ${entry.id}: the browser could not send it — ${error.slice(0, 200)}${detail ? ` (${detail.slice(0, 80)})` : ''}; ` +
         (entry.companionInputId ? 'cancelled with its companion' : 'reported as not sent'));
     }
-    decisionWaiters.get(id)?.reject(new Error('goal_browser_send_failed: ' + error.slice(0, 200)));
+    // Only the picker failed to confirm the helper's model: nothing was typed, so Goal may ask again
+    // (on ChatGPT's current selection) instead of stopping for a person (2026-11-01, Mac log).
+    const code = detail === 'model-unconfirmed' && entry.purpose === 'decision' ? 'goal_helper_model_unconfirmed' : 'goal_browser_send_failed';
+    decisionWaiters.get(id)?.reject(new Error(code + ': ' + error.slice(0, 200)));
     decisionWaiters.delete(id);
     return true;
   });

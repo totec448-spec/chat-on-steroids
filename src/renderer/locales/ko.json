@@ -3695,5 +3695,6 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "전송되지 않음: 이 새 채팅의 브라우저 탭이 닫혔거나 사라졌습니다. 메시지를 검토한 후 다시 전송하세요.",
   "Recovery stopped": "복구 중지됨",
   "Stopped after {0} attempts": "{0}회 시도 후 중지됨",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "자동 새로고침 {0}회 후에도 브라우저가 대기 중인 단계를 가져오지 못했습니다. 원래 대기열 입력 또는 Goal 작업은 저장되어 있습니다. CoS는 이 단계 때문에 이 채팅을 더 이상 자동 새로고침하지 않습니다. 채팅을 열어 직접 계속하세요."
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "자동 새로고침 {0}회 후에도 브라우저가 대기 중인 단계를 가져오지 못했습니다. 원래 대기열 입력 또는 Goal 작업은 저장되어 있습니다. CoS는 이 단계 때문에 이 채팅을 더 이상 자동 새로고침하지 않습니다. 채팅을 열어 직접 계속하세요.",
+  "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.": "ChatGPT 모델 선택기가 도우미 모델을 확인하지 못했습니다. Goal이 ChatGPT의 현재 선택으로 다시 묻습니다."
 }
