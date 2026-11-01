@@ -312,6 +312,16 @@ app.whenReady().then(async () => {
       await until(`!document.getElementById('updateAll').disabled`);
       assert.equal(await js(`document.getElementById('updateAllError').hidden`),true,lang+' explicit successful retry clears network error');
       assert.equal(await js(`document.getElementById('updateReadinessSummary').dataset.ready`),'true');
+      await js(`(()=>{const next=structuredClone(window.fixtureState);next.update={...next.update,stage:'failed',latest:'99.0.0',error:'the update staging path must use ordinary directories'};window.fixturePush(next)})()`);
+      const cacheError = await js(`document.querySelector('[data-update-part="app"]').textContent`);
+      assert.ok(cacheError.includes(copy('The update cache must be a folder, not a link.')),lang+' linked cache reason is translated');
+      assert.ok(cacheError.includes(copy('Save a Diagnostics report from Activity for help with recovery. The saved state has been kept.')),lang+' blocked cache directs diagnostics rather than unchanged retry');
+      await js(`document.getElementById('updateAll').click();window.fixtureFinishUpdate({ok:false,error:'the update staging path must use ordinary directories'})`);
+      await until(`!document.getElementById('updateAll').disabled`);
+      await until(`!document.querySelector('.toast')`);
+      assert.equal(await js(`document.getElementById('updateDiagnosticsReport').checkVisibility()`),true,lang+' blocked cache exposes report action');
+      assert.equal(await js(`(()=>{const c=document.querySelector('.update-readiness');return c.scrollWidth<=c.clientWidth+1&&[...c.querySelectorAll('p:not(.sr-only),button')].every(e=>e.scrollWidth<=e.clientWidth+1)})()`),true,lang+' cache rejection copy wraps');
+      if(lang==='ja'){await pause(200);await shot('cache-rejection-ja.png');}
       console.log('PASS locale: '+lang+'; closed details, translated failure, both actions reachable, no implicit retry');
     }
     assert.deepEqual(errors,[],'No production renderer errors');
