@@ -1,5 +1,6 @@
 import { closeRemoteSessions } from './remote/ssh.js';
-import { stopInputStartup } from './session/start-input.js';
+import { sendDesktopInput, stopInputStartup } from './session/start-input.js';
+import { steerFromTelegram } from './telegram-steer.js';
 import { browserExtensionRequired } from '../shared/types.js';
 import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js';
 /**
@@ -42,7 +43,7 @@ import { mainText, mainTextTranslations, onMainTextsChange, restoreMainTextTrans
 import { isMainText } from '../shared/main-texts.js';
 import { executableFingerprint, initKeychainNotice } from './keychain-notice.js';
 import { pluginManager } from './plugins/manager.js';
-import { sessionActivityExpiresAt, setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
+import { sessionActivityExpiresAt, sessionControlsFor, setBrowserOpener, setBrowserWorkArea, setSessionAutomation, shutdownBridge, startBridge, stopSessionTurn } from './bridge.js';
 import { setStuckNotifier } from './stuck-notice.js';
 import { flushSessions, getSession, initSessionStore, listSessions, readRecentEvents, setRecordingStorageLimit } from './session/store.js';
 import { runDueSchedules, type RunnerDeps } from './scheduled-runs.js';
@@ -558,9 +559,42 @@ void app.whenReady().then(async () => {
     chats: async () => (await listSessions()).filter(chat => chat.origin?.kind !== 'helper').map(chat => {
       const goal = chat.conversationId ? goalSwitchFor(chat.conversationId) : null;
       const card = chat.conversationId ? approvalCardView(chat.conversationId) : null;
-      return { title: chat.title, working: !!chat.activeTurnId, approval: !!card && !card.answer,
+      return { sessionId: chat.id, title: chat.title, working: !!chat.activeTurnId, approval: !!card && !card.answer,
         automation: goal?.enabled ? (goal.mode === 'loop' ? 'Loop' as const : 'Goal' as const) : null };
     }),
+    // Phase 2 (2026-10-31): the app's own Stop and Goal/Loop switch, and the composer's send path.
+    stop: async sessionId => {
+      try {
+        const controls = await sessionControlsFor(sessionId);
+        const turnId = controls.activeTurnId ?? controls.heldTurnId;
+        if (!turnId) return 'nothing';
+        await stopSessionTurn(sessionId, turnId);
+        logInfo(`telegram: Stop requested for session ${sessionId}, turn ${turnId}`);
+        return 'done';
+      } catch (error) {
+        logWarn(`telegram: could not stop session ${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
+        return 'failed';
+      }
+    },
+    setAutomation: async (sessionId, on) => {
+      const conversationId = (await getSession(sessionId).catch(() => null))?.conversationId;
+      if (!conversationId) return false;
+      try {
+        // Off keeps which of Goal and Loop it was; on brings that one back.
+        await setSessionAutomation(sessionId, on ? goalSwitchFor(conversationId).mode : 'off');
+        return true;
+      } catch (error) {
+        logWarn(`telegram: could not turn ${on ? 'on' : 'off'} Goal/Loop for session ${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
+        return false;
+      }
+    },
+    steer: (sessionId, text) => steerFromTelegram({
+      allowed: () => ({ ...DEFAULT_PHONE_PUSH, ...getConfig().ui.phonePush }).telegramSteer === true,
+      session: getSession,
+      followUpQueues: () => getConfig().ui.followUp === 'queue',
+      send: sendDesktopInput,
+      log: logInfo
+    }, sessionId, text),
     deny: async (sessionId, cardId) => {
       const conversationId = (await getSession(sessionId).catch(() => null))?.conversationId;
       if (!conversationId) return 'already';

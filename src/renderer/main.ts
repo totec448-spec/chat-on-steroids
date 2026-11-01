@@ -3007,6 +3007,7 @@ for (const id of [
   'phonePushAway',
   'phonePushQuiet',
   'phonePushDetails',
+  'telegramSteer',
   'secretsShield',
   'tunnelKind',
   'tunnelId',

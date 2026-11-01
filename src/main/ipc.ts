@@ -305,7 +305,8 @@ const settingsPatch = z.object({
       enabled: z.boolean(), ntfy: z.boolean().optional(), server: z.string().max(2048), topic: z.string().max(64), needsYou: z.boolean(), failures: z.boolean(),
       finishedAfterMinutes: z.number().int().min(0).max(240).nullable(), onlyWhenAway: z.boolean(),
       quietHours: z.object({ from: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), to: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/) }).strict().nullable(),
-      includeDetails: z.boolean()
+      includeDetails: z.boolean(),
+      telegramSteer: z.boolean().optional()
     }).strict().optional(),
     secretsShield: z.boolean().optional(),
     // Set from the Commit dialog (projectCommit:flow); a settings save carries it through.
@@ -414,12 +415,13 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     if (!next) return live;
     const now = { ...DEFAULT_PHONE_PUSH, ...live }, was = { ...DEFAULT_PHONE_PUSH, ...before };
     // A form or backup from before Telegram has no ntfy switch: it changes nothing about it.
-    const wanted: PhonePushSettings = { ...next, ntfy: next.ntfy ?? was.ntfy };
+    const wanted: PhonePushSettings = { ...next, ntfy: next.ntfy ?? was.ntfy, telegramSteer: next.telegramSteer ?? was.telegramSteer };
     const field = <K extends keyof PhonePushSettings>(key: K): PhonePushSettings[K] =>
       JSON.stringify(was[key]) === JSON.stringify(wanted[key]) ? now[key] : wanted[key];
     const merged: PhonePushSettings = {
       enabled: field('enabled'), ntfy: field('ntfy'), server: field('server'), topic: field('topic'), needsYou: field('needsYou'), failures: field('failures'),
-      finishedAfterMinutes: field('finishedAfterMinutes'), onlyWhenAway: field('onlyWhenAway'), quietHours: field('quietHours'), includeDetails: field('includeDetails')
+      finishedAfterMinutes: field('finishedAfterMinutes'), onlyWhenAway: field('onlyWhenAway'), quietHours: field('quietHours'), includeDetails: field('includeDetails'),
+      ...(field('telegramSteer') !== undefined ? { telegramSteer: field('telegramSteer') } : {})
     };
     return { ...merged, server: normalizeServer(merged.server) ?? merged.server.trim() };
   };
