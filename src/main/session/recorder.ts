@@ -2530,10 +2530,16 @@ async function recordChatObservationsNow(
               if (live.questionAt === undefined) live.questionAt = written.event.time;
             } else if (live.turnId && live.turnStartedAt !== null && live.turnQuestionAt === undefined) {
               live.turnQuestionAt = written.event.time;
-              if (live.pageRequest && !live.pageRequest.turnId && live.pageRequest.createAt !== undefined &&
-                  live.pageRequest.createAt >= written.event.time && live.pageRequest.createAt <= live.turnStartedAt &&
-                  live.turnStartedAt - written.event.time <= 15_000) {
-                live.pageRequest.turnId = live.turnId;
+              if (live.pageRequest && !live.pageRequest.turnId && live.pageRequest.createAt !== undefined) {
+                if (live.pageRequest.createAt >= written.event.time && live.pageRequest.createAt <= live.turnStartedAt &&
+                    live.turnStartedAt - written.event.time <= 15_000) {
+                  live.pageRequest.turnId = live.turnId;
+                } else {
+                  logInfo(
+                    `request attribution: ${live.pageRequest.requestId} not bound to turn ${live.turnId}; ` +
+                      'creation time is outside the question/turn-start window'
+                  );
+                }
               }
             }
           }
@@ -2782,10 +2788,16 @@ async function recordChatObservationsNow(
           delete live.questionAt;
           live.turnQuestionAt = questionAt;
           if (live.pageRequest && !continuing && !live.pageRequest.turnId &&
-              live.pageRequest.createAt !== undefined && questionAt !== undefined &&
-              live.pageRequest.createAt >= questionAt && live.pageRequest.createAt <= item.time &&
-              item.time - questionAt <= 15_000) {
-            live.pageRequest.turnId = item.turnId;
+              live.pageRequest.createAt !== undefined && questionAt !== undefined) {
+            if (live.pageRequest.createAt >= questionAt && live.pageRequest.createAt <= item.time &&
+                item.time - questionAt <= 15_000) {
+              live.pageRequest.turnId = item.turnId;
+            } else {
+              logInfo(
+                `request attribution: ${live.pageRequest.requestId} not bound to turn ${item.turnId}; ` +
+                  'creation time is outside the question/turn-start window'
+              );
+            }
           }
           live.knownTurnStarts.add(item.turnId);
           // Turn lifecycle is presentation/recovery state only in 1.8. It is never consulted
