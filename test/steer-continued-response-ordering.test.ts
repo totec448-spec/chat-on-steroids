@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { boot, closeDom, text, toolCall, type SessionEvent } from './renderer-timeline.harness.js';
-import { chronological, projectTimeline } from '../src/shared/chronology.js';
+import { boot, text, type SessionEvent } from './renderer-timeline.harness.js';
+import { chronological } from '../src/shared/chronology.js';
 
 vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTerminal: () => ({
   update: vi.fn(), show: vi.fn(), hide: vi.fn(), hasTabs: () => false,
@@ -174,7 +174,7 @@ describe('steer / follow-up continued turn ordering', () => {
         turnId: 'g-turn-6',
         outcome: 'completed'
       }
-    ];
+    ] as SessionEvent[];
   }
 
   it('orders the steer follow-up question and continued turn responses chronologically', () => {
