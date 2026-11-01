@@ -71,5 +71,5 @@ it('keeps unsigned workflow defaults and passes signing secrets only to an expli
   expect(workflow).toContain("if: matrix.platform == 'darwin' && inputs.signed_macos");
   expect(workflow).toContain("matrix.platform == 'darwin' && inputs.signed_macos && secrets.CSC_LINK || ''");
   expect(workflow).toContain("if: always() && matrix.platform == 'darwin' && inputs.signed_macos");
-  expect(workflow).toContain('"${signed_args[@]}"');
+  expect(workflow).toContain('${signed_arg:+"$signed_arg"}');
 });

@@ -155,9 +155,9 @@ jobs:
           test -f "$dmg"
           test -f "$zip"
           hdiutil verify "$dmg"
-          signed_args=()
+          signed_arg=''
           if [ "$SIGNED_MAC" = true ]; then
-            signed_args=(--signed)
+            signed_arg='--signed'
           else
             # ZIP containers cannot be code-signed, but DMGs can. v2.0.2 explicitly promises a
             # publisher-unsigned Mac distribution, so reject a signed outer disk image as well as
@@ -193,13 +193,13 @@ jobs:
           test "$(readlink "$mount_dir/Applications")" = /Applications
           test -x "$mount_dir/Chat On Steroids.app/Contents/MacOS/Chat On Steroids"
           test -f "$mount_dir/Chat On Steroids.app/Contents/Info.plist"
-          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$mount_dir/Chat On Steroids.app" "${signed_args[@]}"
+          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$mount_dir/Chat On Steroids.app" ${signed_arg:+"$signed_arg"}
           # ditto is the macOS-native ZIP extractor and preserves executable modes/metadata.
           ditto -x -k "$zip" "$zip_dir"
           test -d "$zip_dir/Chat On Steroids.app"
           test -x "$zip_dir/Chat On Steroids.app/Contents/MacOS/Chat On Steroids"
           test -f "$zip_dir/Chat On Steroids.app/Contents/Info.plist"
-          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$zip_dir/Chat On Steroids.app" "${signed_args[@]}"
+          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$zip_dir/Chat On Steroids.app" ${signed_arg:+"$signed_arg"}
 
       - name: Launch packaged macOS app normally
         if: matrix.platform == 'darwin'
