@@ -828,13 +828,16 @@ describe('a check or download that goes wrong on a bad connection', () => {
     // moves only after that: on a slow runner the chunk used to arrive after the jump, the watch
     // restarted there, and the test waited out its timeout (14 retries in 15 CI runs, 2026-11-01).
     let taken = false;
-    const stalled = new ReadableStream<Uint8Array>({
+    // A fresh stream per request: a pass left over from an earlier test can still reach this fake and
+    // took the one shared stream first, so this test's own download found it used ("Response body object
+    // should not be disturbed or locked") and failed — every other run on Windows (#2008).
+    const stalled = () => new ReadableStream<Uint8Array>({
       start(controller) { controller.enqueue(new TextEncoder().encode(body.slice(0, 5))); },
       pull() { taken = true; return new Promise<void>(() => undefined); }
     });
     const { fetch } = github({ body });
     const answer = fetch.getMockImplementation()!;
-    fetch.mockImplementation(async (input: string | URL) => String(input).endsWith(WINDOWS_ASSET) ? new Response(stalled, { status: 200 }) : answer(input));
+    fetch.mockImplementation(async (input: string | URL) => String(input).endsWith(WINDOWS_ASSET) ? new Response(stalled(), { status: 200 }) : answer(input));
     let done = false;
     const pass = asPlatform('win32', undefined, () => checkForUpdates()).then(() => { done = true; });
     await vi.waitFor(() => expect(taken).toBe(true), { timeout: 10_000, interval: 5 });
