@@ -1414,6 +1414,17 @@ describe('browser decision lifetime', () => {
     await rejection;
     expect((await listInputs())[0]?.state).toBe('failed');
   });
+  // 2026-11-01: only the picker failed; nothing was typed, so Goal may ask again.
+  it('rejects a helper whose model the page could not confirm with its own retryable code', async () => {
+    const controller = new AbortController();
+    const answer = requestBrowserDecision('Choose one', controller.signal);
+    const rejection = expect(answer).rejects.toThrow('goal_helper_model_unconfirmed: Requested model or reasoning could not be confirmed');
+    const row = (await listInputs())[0]!;
+    await claimBrowserInput(row.id, 'document', null);
+    await failBrowserInput(row.id, 'document', 'Requested model or reasoning could not be confirmed', 'model-unconfirmed');
+    await rejection;
+    expect((await listInputs())[0]?.state).toBe('failed');
+  });
   it('rejects cancellation that races a persisted answer', async () => {
     const controller = new AbortController();
     const answer = requestBrowserDecision('Choose one', controller.signal);

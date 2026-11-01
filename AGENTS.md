@@ -4266,7 +4266,7 @@ server obligation once safe; do not acknowledge it as handled or require a reloa
 
 | Backend/role | Behavior |
 | --- | --- |
-| ChatGPT decision helper | Default driver backend. Each Goal/Loop decision uses a Temporary Chat with bounded reference history; outputs a decision, never executes that history. |
+| ChatGPT decision helper | Default driver backend. Each Goal/Loop decision uses a Temporary Chat with bounded reference history; outputs a decision, never executes that history. A helper whose model the page could not confirm (`detail: 'model-unconfirmed'`, nothing typed) fails with the retryable `goal_helper_model_unconfirmed`, and `goalHelperSelection` then uses ChatGPT's current selection for 30 minutes (`HELPER_MODEL_FALLBACK_MS`, logged), as for a model the account does not offer; every other helper send failure stays settled. |
 | API driver | OpenRouter-compatible default or explicit compatible endpoint/model/key. Supports bounded streamed progress and validated final decision. |
 | Goal templates | Offline explicit terminal-marker policy; only Goal supports this backend. Missing/ambiguous expected markers pause rather than infer completion from prose. |
 | Temporary planner | Captures a new workflow for the user in Temporary Chat. Shares temporary transport with decision helpers while retaining its staged-workflow role. |
