@@ -471,7 +471,9 @@ A worker revival (wake) command carries the model and effort its worker was open
 (`commandModelSelection` → `wakeModelSelection`, vetted against the account like a resume's), so the
 page chooses them before it types (#1952; before, a wake went out on whatever ChatGPT's box held).
 Unlike a new worker, a wake whose model the picker cannot confirm is still typed: the page reports
-step `model-unconfirmed` and the bridge logs which model it could not confirm.
+step `model-unconfirmed` and the bridge logs which model it could not confirm. A Compact & Resume does the
+same (2026-11-01: an abandoned resume stopped its chat for good); its new chat then tries the model once more
+(`publishBootstrapSelection`).
 An effort-only request (no model) keeps ChatGPT's current model: `selectModelSettings` rounds the
 effort within that model only and never moves to another model offering the effort; with the current
 model unreadable it confirms nothing.

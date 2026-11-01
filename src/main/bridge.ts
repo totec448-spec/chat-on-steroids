@@ -547,7 +547,7 @@ const COMMAND_STEP_TEXT: Record<CommandStep, string> = {
   'revival-editor': 'its page never showed a usable message box',
   composer: 'waiting for ChatGPT\'s message box',
   model: 'choosing the model and reasoning',
-  'model-unconfirmed': 'going on without the worker\'s model, which the picker could not confirm',
+  'model-unconfirmed': 'going on without the requested model, which the picker could not confirm',
   'composer-after-model': 'waiting for the message box after choosing the model',
   inserting: 'putting the task into the message box',
   sending: 'sending the task'
@@ -5296,6 +5296,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       const wanted = commandModelSelection(command);
       logWarn(`bridge: ${command.spec.agent}'s wake in ${command.spec.conversationId} goes out on ChatGPT's current model: ` +
         `${[wanted?.model, wanted?.reasoningEffort].filter(Boolean).join(' ') || 'its model'} could not be confirmed in the picker, and a wake is not held back for it`);
+    } else if (step === 'model-unconfirmed' && command.spec.type === 'resume') {
+      const wanted = commandModelSelection(command);
+      logWarn(`bridge: the Compact & Resume of session ${command.spec.sessionId} starts its new chat on ChatGPT's current model: ` +
+        `${[wanted?.model, wanted?.reasoningEffort].filter(Boolean).join(' ') || 'its model'} could not be confirmed in the picker, and a resume is not abandoned for it`);
     }
     if (command.spec.type === 'resume' && command.timer && continuationByToken(command.spec.token)?.automatic) armDeadline(command);
     // A worker about to send gets its receipt window, and its page learns the new deadline (#1086).
