@@ -213,6 +213,16 @@ describe('cleanup of updater-owned downloads', () => {
     expect([future, backup, damaged].every(existsSync)).toBe(true);
     expect(updateStatus().stage).toBe('failed');
   });
+  it('preserves a legacy flat installer while removing an obsolete version offline', async () => {
+    const old = cached('0.0.1');
+    const legacy = path.join(userData, 'updates', WINDOWS_ASSET);
+    writeFileSync(legacy, 'legacy installer bytes');
+    github({ fail: 'release' });
+    await checkForUpdates();
+    expect(existsSync(old)).toBe(false);
+    expect(readFileSync(legacy, 'utf8')).toBe('legacy installer bytes');
+    expect(updateStatus().stage).toBe('failed');
+  });
   it('keeps the previous candidate and the handoff note when a newer download fails', async () => {
     const previous = cached('98.0.0');
     const note = path.join(userData, 'updates', 'handoff.json');
