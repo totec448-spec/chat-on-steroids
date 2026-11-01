@@ -10033,9 +10033,15 @@ async function inspectOwedPickups(now: number, focus?: PickupFocus): Promise<boo
     const justStopped = Boolean(watch.stoppedAt && !wasStopped);
     // The person may have blocked or stopped the chat while the stop mark was being saved: then nothing
     // keeps trying, and a notice saying so would be wrong (CodeRabbit on #1979).
-    const stillOwed = justStopped && !isChatBlocked(reply.conversationId) && !stopRequestedFor(reply.conversationId) &&
-      (await getSession(reply.sessionId).catch(() => null))?.conversationId === reply.conversationId;
-    if (justStopped) notifyChanged();
+    let skipped: string | null = null;
+    if (justStopped) {
+      if (isChatBlocked(reply.conversationId)) skipped = 'the chat was blocked';
+      else if (stopRequestedFor(reply.conversationId)) skipped = 'a Stop is pending';
+      else if ((await getSession(reply.sessionId).catch(() => null))?.conversationId !== reply.conversationId) skipped = 'the session moved to another chat';
+      notifyChanged();
+      if (skipped) logInfo(`bridge: no Recovery slowed notice for ${reply.conversationId} — ${skipped} while its stop mark was saved`);
+    }
+    const stillOwed = justStopped && !skipped;
     if (stillOwed) {
       // The alert goes with the saved stop mark, once, also when this pass's reload cannot be queued
       // (another repair holds the chat): later passes see the chat already stopped (CodeRabbit on #1979).
