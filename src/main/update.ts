@@ -37,6 +37,7 @@
  * wrong.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmod, copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
@@ -164,7 +165,17 @@ export function updateStatus(): UpdateStatus {
   return { ...status };
 }
 
+/**
+ * Which reset an update pass started under. A pass still waiting on the network when the state is
+ * reset (between tests) must not write the next one's status: on Windows a pass left from an earlier
+ * test fetched the installer again, failed, and turned a running download to "failed" (#2008).
+ */
+let generation = 0;
+const passGeneration = new AsyncLocalStorage<number>();
+const stale = (): boolean => { const own = passGeneration.getStore(); return own !== undefined && own !== generation; };
+
 function set(next: Partial<UpdateStatus>): void {
+  if (stale()) return;
   status = { ...status, ...next };
   for (const listener of listeners) listener();
 }
@@ -205,6 +216,7 @@ export function startUpdateChecks(): void {
 
 /** After a pass: a failure is asked again soon, a success ends the waiting. */
 function scheduleRetry(): void {
+  if (stale()) return;
   if (retry) { clearTimeout(retry); retry = null; }
   if (!recheck) return;
   if (status.stage !== 'failed') { failures = 0; return; }
@@ -233,7 +245,8 @@ export function checkForUpdatesIfStale(now = Date.now()): Promise<void> {
  */
 export function checkForUpdates(): Promise<void> {
   if (pass) return pass;
-  const run = runPass()
+  // The pass, its failure and its retry all belong to the reset they started under.
+  const run = passGeneration.run(generation, () => runPass()
     .catch((err: Error) => {
       // This pass owns GitHub requests; keep its transport failure readable without
       // relabeling HTTP, filesystem or other diagnostics. The log keeps the original.
@@ -244,7 +257,7 @@ export function checkForUpdates(): Promise<void> {
     .finally(() => {
       if (pass === run) pass = null;
       scheduleRetry();
-    });
+    }));
   pass = run;
   return run;
 }
@@ -620,6 +633,7 @@ export async function applyStagedUpdate(): Promise<void> {
 
 /** Test seam: forgets the pass, the staged file and everything reported about them. */
 export function resetUpdateForTests(): void {
+  generation += 1;
   installFolderAccess = probeInstallFolder;
   status = CLEAR;
   staged = null;
