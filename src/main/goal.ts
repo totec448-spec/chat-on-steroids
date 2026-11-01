@@ -2753,14 +2753,19 @@ const answerBeforeNote = new WeakMap<ChatMessage, string>();
 /** What the Offline marker check reads: the newest answer as written, without the app's own note. */
 /** Assistant messages ChatGPT marked final, as opposed to its commentary (#2007). */
 const finalAnswers = new WeakSet<ChatMessage>();
+/** The turn each recorded assistant message belongs to, where the recording names one. */
+const turnOfMessage = new WeakMap<ChatMessage, string>();
 
 export function templateDecisionText(messages: readonly ChatMessage[]): string {
   const lastAt = messages.findLastIndex(message => message.role === 'assistant');
   if (lastAt < 0) return '';
   // Commentary ChatGPT writes after its final answer in the same turn is not the answer: the marker is
-  // in the final one (#2007). Walk back to it, never past the user message that opened the turn.
+  // in the final one (#2007). Walk back to it, never past the user message that opened the turn, and
+  // never into another turn: a Retry keeps the earlier generation's answers before the new one's.
   let chosen = messages[lastAt]!;
+  const turn = turnOfMessage.get(chosen);
   for (let at = lastAt; at >= 0 && messages[at]!.role === 'assistant'; at--) {
+    if (turnOfMessage.get(messages[at]!) !== turn) break;
     if (finalAnswers.has(messages[at]!)) { chosen = messages[at]!; break; }
   }
   return answerBeforeNote.get(chosen) ?? chosen.content;
@@ -2923,6 +2928,7 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
       const content = clip(event.kind === 'assistant_message' ? modelFacingText(event.message.text, event.renderedHtml) : event.message.text);
       if (content) next = { role: 'assistant', content };
       if (next && event.kind === 'assistant_message' && event.final) finalAnswers.add(next);
+      if (next && typeof event.turnId === 'string' && event.turnId) turnOfMessage.set(next, event.turnId);
     }
     if (!next) continue;
 
@@ -2971,6 +2977,8 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
     const noted = { ...answer, content: `${answer.content}\n\n${toolCallFootnote(count, before)}` };
     answerBeforeNote.set(noted, answerBeforeNote.get(answer) ?? answer.content);
     if (finalAnswers.has(answer)) finalAnswers.add(noted);
+    const answerTurn = turnOfMessage.get(answer);
+    if (answerTurn) turnOfMessage.set(noted, answerTurn);
     ordered[at] = noted;
   }
   for (const text of deliveredInput.slice(-5)) {
@@ -3045,8 +3053,15 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
   // Delivered input is appended after recorded history. Reserve the newest result itself,
   // not merely the final array row, so a large injected request cannot hide actual progress.
   const newestResultAt = ordered.findLastIndex(message => message.role === 'assistant');
+  // And that turn's final answer, which holds the Offline marker even when much commentary followed it
+  // (CodeRabbit on #2014): the marker check reads it, so it must survive the cut.
+  let newestFinalAt = -1;
+  const newestTurn = newestResultAt >= 0 ? turnOfMessage.get(ordered[newestResultAt]!) : undefined;
+  for (let at = newestResultAt; at >= 0 && ordered[at]!.role === 'assistant' && turnOfMessage.get(ordered[at]!) === newestTurn; at--) {
+    if (finalAnswers.has(ordered[at]!)) { newestFinalAt = at; break; }
+  }
   const priorities = [...ordered.keys()].reverse().sort((left, right) => {
-    const rank = (at: number): number => at === newestResultAt ? 0 : at === ordered.length - 1 ? 1
+    const rank = (at: number): number => at === newestResultAt || at === newestFinalAt ? 0 : at === ordered.length - 1 ? 1
       : ordered[at]!.role === 'user' && ordered[at]!.origin !== 'automatic' ? 2 : 3;
     return rank(left) - rank(right);
   });
