@@ -837,8 +837,8 @@ describe('a check or download that goes wrong on a bad connection', () => {
     fetch.mockImplementation(async (input: string | URL) => String(input).endsWith(WINDOWS_ASSET) ? new Response(stalled, { status: 200 }) : answer(input));
     let done = false;
     const pass = asPlatform('win32', undefined, () => checkForUpdates()).then(() => { done = true; });
-    await vi.waitFor(() => expect(updateStatus().stage).toBe('downloading'));
     await vi.waitFor(() => expect(taken).toBe(true), { timeout: 10_000, interval: 5 });
+    expect(updateStatus().stage).toBe('downloading');
     // The chunk's 'data' event (which restarts the watch) runs on Node's own queue, not the faked timers.
     await new Promise(resolve => setImmediate(resolve));
     await vi.advanceTimersByTimeAsync(59_000);
