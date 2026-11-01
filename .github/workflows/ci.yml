@@ -16,12 +16,16 @@ concurrency:
 jobs:
   checks:
     # Checks that read the source, not the OS: once, on Linux, beside the test shards (CI speed-up
-    # 2026-10-31; they used to run before the tests on every OS).
-    name: Typecheck, privacy and notices
+    # 2026-10-31; they used to run before the tests on every OS). The notices check reads each OS's own
+    # optional native packages, so it stays on every OS, in its first test shard.
+    name: Typecheck and privacy
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Dependency install scripts run in this job; it never pushes.
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -33,9 +37,6 @@ jobs:
 
       - name: Privacy
         run: npm run verify:privacy
-
-      - name: Third-party notices and native sources
-        run: npm run verify:notices
 
       - name: Typecheck
         run: npm run typecheck
@@ -61,6 +62,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Dependency install scripts run in this job; it never pushes.
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -74,6 +78,11 @@ jobs:
         run: |
           npm run rg
           node -e "require('electron')"
+
+      - name: Third-party notices and native sources of this OS
+        # Each OS installs only its own optional native packages; their licences are checked where they exist.
+        if: matrix.first
+        run: npm run verify:notices
 
       - name: Unit tests
         env:
@@ -120,6 +129,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Dependency install scripts run in this job; it never pushes.
+          persist-credentials: false
           # The interface decision needs the history, not old file contents.
           fetch-depth: 0
           filter: blob:none
@@ -201,6 +212,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Dependency install scripts run in this job; it never pushes.
+          persist-credentials: false
           # The interface decision needs the history, not old file contents.
           fetch-depth: 0
           filter: blob:none

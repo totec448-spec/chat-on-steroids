@@ -5948,8 +5948,8 @@ forces Node, bounded hooks/tests, `CLF_BRIDGE_PORTS=0`
 and test-only `CLF_EVIDENCE_MS=1500`; never let tests contact the installed production bridge.
 Opt-in live plugin/macOS probes are separate evidence, not implied by the ordinary suite.
 Pull-request CI (`ci.yml`, since 2026-10-31) runs the same checks in parallel jobs rather than
-`verify:ci` per OS (release builds still run `verify:ci`): one Linux job for privacy, notices and
-the typecheck; the unit tests in shards (`vitest run --shard=i/n`: Windows 3, macOS 2, Linux 2; macOS
+`verify:ci` per OS (release builds still run `verify:ci`): one Linux job for privacy and the
+typecheck; the notices check (it reads each OS's own optional native packages) in each OS's first shard; the unit tests in shards (`vitest run --shard=i/n`: Windows 3, macOS 2, Linux 2; macOS
 stays at two because the account runs at most five macOS jobs at once); `computer`/`mcp-shutdown`
 and the live plugin suites only in each OS's first shard; the UI checks in two shards on macOS (four
 macOS jobs per pull request in all) and three on Windows
