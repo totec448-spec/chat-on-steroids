@@ -2755,8 +2755,16 @@ const answerBeforeNote = new WeakMap<ChatMessage, string>();
 const finalAnswers = new WeakSet<ChatMessage>();
 /** The turn each recorded assistant message belongs to, where the recording names one. */
 const turnOfMessage = new WeakMap<ChatMessage, string>();
+/**
+ * The marker text read from the whole projection before the context cut. The cut keeps user
+ * corrections ahead of the final answer, so the answer the marker sits in may not be among the
+ * messages sent (CodeRabbit on #2014).
+ */
+const decisionTextOf = new WeakMap<readonly ChatMessage[], string>();
 
 export function templateDecisionText(messages: readonly ChatMessage[]): string {
+  const known = decisionTextOf.get(messages);
+  if (known !== undefined) return known;
   const lastAt = messages.findLastIndex(message => message.role === 'assistant');
   if (lastAt < 0) return '';
   // Commentary ChatGPT writes after its final answer in the same turn is not the answer: the marker is
@@ -3053,15 +3061,8 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
   // Delivered input is appended after recorded history. Reserve the newest result itself,
   // not merely the final array row, so a large injected request cannot hide actual progress.
   const newestResultAt = ordered.findLastIndex(message => message.role === 'assistant');
-  // And that turn's final answer, which holds the Offline marker even when much commentary followed it
-  // (CodeRabbit on #2014): the marker check reads it, so it must survive the cut.
-  let newestFinalAt = -1;
-  const newestTurn = newestResultAt >= 0 ? turnOfMessage.get(ordered[newestResultAt]!) : undefined;
-  for (let at = newestResultAt; at >= 0 && ordered[at]!.role === 'assistant' && turnOfMessage.get(ordered[at]!) === newestTurn; at--) {
-    if (finalAnswers.has(ordered[at]!)) { newestFinalAt = at; break; }
-  }
   const priorities = [...ordered.keys()].reverse().sort((left, right) => {
-    const rank = (at: number): number => at === newestResultAt || at === newestFinalAt ? 0 : at === ordered.length - 1 ? 1
+    const rank = (at: number): number => at === newestResultAt ? 0 : at === ordered.length - 1 ? 1
       : ordered[at]!.role === 'user' && ordered[at]!.origin !== 'automatic' ? 2 : 3;
     return rank(left) - rank(right);
   });
@@ -3073,9 +3074,12 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
     chars += message.content.length;
     selected.push({ at, message });
   }
-  return [...anchors, ...selected]
+  const result = [...anchors, ...selected]
     .sort((left, right) => left.at - right.at)
     .map((entry) => entry.message);
+  // The Offline marker is read from everything recorded, whatever the cut left out.
+  decisionTextOf.set(result, templateDecisionText(ordered));
+  return result;
 }
 
 /*
