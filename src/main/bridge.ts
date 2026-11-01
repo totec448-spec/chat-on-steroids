@@ -10996,6 +10996,9 @@ function repairChangeDetail(detail: string | null): string | null {
   return `the answer made progress${source ? ` (${source})` : ''}`;
 }
 
+/** Repairs a still-loading tab only delays: the same episode retries after the navigation cooldown. */
+const NAVIGATION_RETRIED: ReadonlySet<string> = new Set(['assistant-error', 'no-tab', 'compaction']);
+
 async function failRepairAttempt(
   token: string,
   action: 'reloaded' | 'reopened' | 'resumed' | 'preserved' | 'present' | null,
@@ -11017,6 +11020,11 @@ async function failRepairAttempt(
     } else if (streaming) {
       if (!repair.awaitingStream)
         logInfo(`bridge: ChatGPT is answering again in ${conversationId}; the ${repair.reason} repair waits until it finishes`);
+    } else if (why === 'changed' && changeDetail === 'navigating' && NAVIGATION_RETRIED.has(repair.reason)) {
+      // A tab that is still loading (often the one a worker's wake just opened) is no failure: the
+      // same repair tries again after the short cooldown below. As a warning it counted as a problem
+      // in Activity, sixteen times in two days on the maintainer's Mac (2026-11-01).
+      logInfo(`bridge: the tab of ${conversationId} was still loading; the ${repair.reason} repair tries again in ${Math.round(NAVIGATION_RECOVERY_COOLDOWN_MS / 1000)} s`);
     } else {
       const exact = why === 'changed' ? repairChangeDetail(changeDetail) : null;
       const detail = why && Object.hasOwn(REPAIR_FAIL_REASONS, why) ? `: ${REPAIR_FAIL_REASONS[why]}${exact ? ` — ${exact}` : ''}` : '';
@@ -11033,8 +11041,7 @@ async function failRepairAttempt(
     if (repairsInFlight.get(conversationId) !== repair) return;
     if (repair.reason === 'assistant-error' && turnRepairSpent.get(conversationId)?.token === token)
       turnRepairSpent.delete(conversationId);
-    if (why === 'changed' && changeDetail === 'navigating' &&
-        (repair.reason === 'assistant-error' || repair.reason === 'no-tab' || repair.reason === 'compaction')) {
+    if (why === 'changed' && changeDetail === 'navigating' && NAVIGATION_RETRIED.has(repair.reason)) {
       // Navigation is transient; keep the same repair episode and retry after the short navigation cooldown.
       repair.notBefore = Math.max(repair.notBefore, Date.now() + NAVIGATION_RECOVERY_COOLDOWN_MS);
     }

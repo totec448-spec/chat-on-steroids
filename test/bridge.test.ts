@@ -9534,6 +9534,10 @@ describe('unattributed activity recovery', () => {
             '&repairAction=reloaded&why=changed&detail=navigating');
         };
         await failWhileNavigating(first!);
+        // A still-loading tab is no failure: said once as information, never as a warning (2026-11-01).
+        const said = getLog().filter(entry => entry.message.includes(conversationId));
+        expect(said.some(entry => entry.message.includes('was still loading; the ' + reason + ' repair tries again'))).toBe(true);
+        expect(said.some(entry => entry.level === 'warn' && entry.message.includes('reported failed'))).toBe(false);
 
         expect(await maintenance()).toBeNull();
         await vi.advanceTimersByTimeAsync(NAVIGATION_RECOVERY_COOLDOWN_MS - 1);
