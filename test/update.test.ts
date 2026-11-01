@@ -14,7 +14,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, symlinkSync, linkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -284,6 +284,60 @@ describe('cleanup of updater-owned downloads', () => {
     expect(existsSync(path.join(backup, '0.0.1'))).toBe(true);
     expect(updateStatus().stage).toBe('idle');
     expect(warnings).toContain('update: cache cleanup skipped because the updates root is not an ordinary directory');
+  });
+  it.each(['root', 'version'])('refuses a new download through a linked %s without overwriting its target', async linked => {
+    const target = path.join(userData, 'outside-cache');
+    const dir = linked === 'root' ? path.join(target, NEXT) : target;
+    mkdirSync(dir, { recursive: true });
+    const outside = path.join(dir, WINDOWS_ASSET);
+    writeFileSync(outside, 'keep this file');
+    const updates = path.join(userData, 'updates');
+    if (linked === 'version') mkdirSync(updates);
+    symlinkSync(target, linked === 'root' ? updates : path.join(updates, NEXT), 'junction');
+    const { asked } = github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(readFileSync(outside, 'utf8')).toBe('keep this file');
+    expect(updateStatus()).toMatchObject({ stage: 'failed', error: 'the update staging path must use ordinary directories' });
+    expect(markInstallOnQuit()).toBe(false);
+    expect(existsSync(`${outside}.part`)).toBe(false);
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt']);
+  });
+  it.each(['root', 'version'])('preserves legacy checksum-verified adoption through a linked %s without new writes', async linked => {
+    const target = path.join(userData, 'existing-downloads');
+    const dir = linked === 'root' ? path.join(target, NEXT) : target;
+    mkdirSync(dir, { recursive: true });
+    const outside = path.join(dir, WINDOWS_ASSET);
+    writeFileSync(outside, 'installer bytes');
+    const updates = path.join(userData, 'updates');
+    if (linked === 'version') mkdirSync(updates);
+    symlinkSync(target, linked === 'root' ? updates : path.join(updates, NEXT), 'junction');
+    const { asked } = github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus().stage).toBe('ready');
+    expect(readFileSync(outside, 'utf8')).toBe('installer bytes');
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt']);
+    expect(spawned).toEqual([]);
+  });
+  it('restarts a linked partial file with a fresh inode instead of truncating its other name', async () => {
+    const outside = path.join(userData, 'keep.txt');
+    writeFileSync(outside, 'keep this file');
+    const dir = path.join(userData, 'updates', NEXT);
+    mkdirSync(dir, { recursive: true });
+    linkSync(outside, path.join(dir, `${WINDOWS_ASSET}.part`));
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus().stage).toBe('ready');
+    expect(readFileSync(outside, 'utf8')).toBe('keep this file');
+    expect(readFileSync(path.join(dir, WINDOWS_ASSET), 'utf8')).toBe('installer bytes');
+  });
+  it('does not recursively erase an unexpected directory at the selected partial-file name', async () => {
+    const dir = path.join(userData, 'updates', NEXT, `${WINDOWS_ASSET}.part`);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'keep'), 'keep this file');
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus().stage).toBe('failed');
+    expect(readFileSync(path.join(dir, 'keep'), 'utf8')).toBe('keep this file');
   });
   it('does not clean an installed app cache from an unpackaged developer run', async () => {
     const old = cached('0.0.1');
