@@ -3021,6 +3021,9 @@ describe('automatic compaction', () => {
     try {
       vi.setSystemTime(Date.now() + STUCK_SUMMARY_MS + 1_000);
       expect((await sessionControlsFor(session.id)).lastSummary).toMatchObject({ handoffId: saved, earlierChat: true });
+      // A summary that cannot be used ends nothing: the waiting Compact & Resume stays (CodeRabbit on #2019).
+      await expect(resumeFromSavedSummary(session.id, 'not-a-saved-summary')).rejects.toThrow('This summary can no longer be used');
+      expect(continuationForSession(session.id)?.token).toBe(stuck.token);
       await resumeFromSavedSummary(session.id, saved);
       const now = continuationForSession(session.id)!;
       expect(now.token).not.toBe(stuck.token);
@@ -3034,7 +3037,7 @@ describe('automatic compaction', () => {
   // The unattended case (2026-11-01): a Loop chat ran on with nobody watching, and its automatic
   // compaction could never ask ChatGPT for a summary. After a slowed burst too failed, it continues from
   // the last saved summary in a new chat of the same session, by itself.
-  it.each(['loop', 'off'] as const)('continues a Loop chat from its last saved summary when its automatic compaction never reaches ChatGPT (automation %s)', async automation => {
+  it.each(['loop', 'off', 'blocked'] as const)('continues a Loop chat from its last saved summary when its automatic compaction never reaches ChatGPT (automation %s)', async automation => {
     vi.useFakeTimers();
     try {
       await pair();
@@ -3045,7 +3048,9 @@ describe('automatic compaction', () => {
       expect(await claimContinuationNow(first.token, 'page-b')).not.toBeNull();
       expect(await commitContinuation(first.token, chatB)).toBe(true);
       const saved = (await findSessionByConversation(chatB))!.lastHandoffId!;
-      if (automation === 'loop') await setSessionAutomation(session.id, 'loop');
+      if (automation !== 'off') await setSessionAutomation(session.id, 'loop');
+      // A block keeps the switch's state, but a blocked chat is never moved (CodeRabbit on #2019).
+      if (automation === 'blocked') setChatBlocked(chatB, true);
       const filed = await request('POST', '/compact', { body: { conversationId: chatB, ticket: true, automatic: true } });
       const ticket = filed.body.token as string;
       let continued = false;
@@ -3061,7 +3066,8 @@ describe('automatic compaction', () => {
         const now = continuationForSession(session.id);
         continued = !!now && now.token !== ticket && now.state === 'awaiting-chat';
       }
-      if (automation === 'off') {
+      if (automation === 'blocked') setChatBlocked(chatB, false);
+      if (automation !== 'loop') {
         // Somebody is meant to be watching a chat without Goal or Loop: it is never moved by itself,
         // and the controls offer the saved summary instead.
         expect(continued).toBe(false);
