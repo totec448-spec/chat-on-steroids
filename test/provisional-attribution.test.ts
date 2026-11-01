@@ -122,9 +122,23 @@ it('requires page evidence from this turn, not an old request seen before it', a
 
 it('anchors a turn when the response request id arrives between the new question and turn_start or re-reports with turnId', async () => {
   const now = Date.now();
-  await prove('chat-a', 'fast-stream-request', now - 500);
+  await recordRequestEvidence('chat-a', [{
+    kind: 'tool_evidence', time: now - 500, fiberConversationId: 'chat-a',
+    calls: [{ requestId: 'historical-without-create-time', messageId: 'm-hist', tool: 'read', order: 0, answered: false }]
+  }]);
   await recordChatObservations('chat-a', [
-    { kind: 'user_message', time: now - 1000, authoredTime: true, messageId: 'question-1', text: 'Next step' },
+    { kind: 'user_message', time: now - 1000, authoredTime: true, messageId: 'question-0', text: 'Warmup' },
+    { kind: 'turn_start', time: now - 400, turnId: 'turn-0' }
+  ]);
+  expect(captureRecordingContext(now)).toBeNull();
+  await recordChatObservations('chat-a', [{ kind: 'turn_end', time: now - 300, turnId: 'turn-0', outcome: 'completed' }]);
+
+  await recordRequestEvidence('chat-a', [{
+    kind: 'tool_evidence', time: now - 100, fiberConversationId: 'chat-a',
+    calls: [{ requestId: 'fast-stream-request', messageId: 'm-fast', tool: 'read', order: 0, answered: false, createTime: (now - 150) / 1000 }]
+  }]);
+  await recordChatObservations('chat-a', [
+    { kind: 'user_message', time: now - 200, authoredTime: true, messageId: 'question-1', text: 'Next step' },
     { kind: 'turn_start', time: now - 10, turnId: 'turn-1' }
   ]);
   expect(await record('hidden-workflow-1')).toMatchObject({ attributionMethod: 'generation', conversationId: 'chat-a' });
@@ -134,7 +148,7 @@ it('anchors a turn when the response request id arrives between the new question
   await recordChatObservations('chat-a', [
     { kind: 'turn_start', time: now + 10, turnId: 'turn-2' },
     { kind: 'tool_evidence', time: now + 12, turnId: 'turn-2', fiberConversationId: 'chat-a',
-      calls: [{ requestId: 'reobserved-request', messageId: 'm-req', tool: 'read', order: 0, answered: false }] }
+      calls: [{ requestId: 'reobserved-request', messageId: 'm-req', tool: '', order: 0, answered: false }] }
   ]);
   expect(await record('hidden-workflow-2')).toMatchObject({ attributionMethod: 'generation', conversationId: 'chat-a' });
 });
