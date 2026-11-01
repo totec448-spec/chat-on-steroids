@@ -5269,6 +5269,8 @@ descriptions and input schemas, not app-version/instruction churn. Changes debou
 Refresh targets the exact account-observed installed app id, durably claims before clicking,
 and completes only after observed declarations fully match. Automatic refresh is opt-in;
 unsupported/manual-required stays visible instead of opening more helper tabs.
+Plugins inspection preserves external MCP tool names verbatim, including hyphens, periods
+and uppercase characters within MAIN's 64-character name bound; Core/Desktop keep their own naming contract.
 
 Refresh custody uses strict durable reads. Malformed JSON, JSON null, invalid rows,
 duplicate surfaces and I/O failures leave the ledger intact and reject new work with
