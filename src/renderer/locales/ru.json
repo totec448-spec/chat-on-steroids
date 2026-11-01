@@ -3939,5 +3939,7 @@
   "Recovery stopped": "Восстановление остановлено",
   "Stopped after {0} attempts": "Остановлено после {0} попыток",
   "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Браузер не получил ожидающий шаг после {0} автоматических перезагрузок. Исходный ввод в очереди или задача «Цель» остаётся сохранённой. CoS больше не будет автоматически перезагружать этот чат для данного шага; откройте чат и продолжите вручную.",
-  "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.": "Выбор модели в ChatGPT не подтвердил модель помощника. Цель спросит снова с текущим выбором ChatGPT."
+  "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.": "Выбор модели в ChatGPT не подтвердил модель помощника. Цель спросит снова с текущим выбором ChatGPT.",
+  "Continue in a new chat from the last summary": "Продолжить в новом чате с последней сводкой",
+  "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT уже 15 минут не пишет сводку. Последняя сохранённая сводка может продолжить работу в новом чате."
 }
