@@ -2143,7 +2143,7 @@ async function run(draft: GoalDraft): Promise<void> {
   draft.abort = abort;
   const timer = setTimeout(() => abort.abort(new DOMException('Goal request timed out', 'TimeoutError')), REQUEST_TIMEOUT_MS);
   try {
-    const request: GoalRequest = {
+    const request: GoalRequest | null = draft.backend === 'templates' ? null : {
       backend: draft.backend,
       endpoint,
       reasoning,
@@ -2178,9 +2178,9 @@ async function run(draft: GoalDraft): Promise<void> {
     };
     let decision = draft.backend === 'templates'
       ? templateGoalDecision(templateDecisionText(messages), Math.floor(Math.random() * 200), Math.floor(Math.random() * 200))
-      : await requestDrivingDecision(request);
+      : await requestDrivingDecision(request!);
     if (draft.backend !== 'templates' && decision.action === 'stop') {
-      decision = await reconsiderNativeTestStop(decision, request, draft.sessionId, draft.conversationId, reviewTurn);
+      decision = await reconsiderNativeTestStop(decision, request!, draft.sessionId, draft.conversationId, reviewTurn);
     }
     if (draft.acknowledged || drafts.get(draft.conversationId) !== draft) return;
     if (await astraFinishOnly(draft.sessionId, draft.conversationId)) return settle(draft, 'no-reply');
@@ -2303,14 +2303,14 @@ export async function draftFastFollowup(sessionId: string, signal: AbortSignal =
   const messages = preparedMessages ?? await conversationMessages(sessionId, appInput);
   if (!objective && !messages.some(message => message.role === 'user')) throw new Error('No recorded user request is available for Goal');
   const prompt = mode === 'loop' ? settings.loopPrompt : objective ? settings.objectivePrompt : settings.prompt;
-  const request: GoalRequest = { sourceSessionId: sessionId, backend, endpoint, reasoning: settings.reasoning, key: key ?? '', model: settings.model, mode,
+  const request: GoalRequest | null = backend === 'templates' ? null : { sourceSessionId: sessionId, backend, endpoint, reasoning: settings.reasoning, key: key ?? '', model: settings.model, mode,
     system: objective ? [prompt, goalObjectiveMessage(objective)] : [prompt],
     messages,
     original: await originalRequestBlock(sessionId, messages),
     trailer: mode === 'loop' ? GOAL_LOOP_TRAILER : objective ? GOAL_OBJECTIVE_TRAILER : GOAL_SYSTEM_TRAILER, signal, publish };
   let decision = backend === 'templates'
     ? templateGoalDecision(templateDecisionText(messages), Math.floor(Math.random() * 200), Math.floor(Math.random() * 200))
-    : await requestDrivingDecision(request)
+    : await requestDrivingDecision(request!)
       .catch(error => {
         if (signal.aborted && signal.reason?.name === 'TimeoutError') throw nativeGoalFailure('timeout_or_cancelled: Goal request timed out', backend);
         signal.throwIfAborted();
@@ -2319,7 +2319,7 @@ export async function draftFastFollowup(sessionId: string, signal: AbortSignal =
   if (backend !== 'templates' && decision.action === 'stop' && mode === 'goal') {
     const [sourceEnd] = await readRecentEvents(sessionId, 1, { kinds: ['turn_end'] });
     const sourceTurn = sourceEnd?.turnId ? await goalReplySourceTurn(sessionId, sourceEnd.turnId) : undefined;
-    decision = await reconsiderNativeTestStop(decision, request, sessionId, session.conversationId, sourceTurn);
+    decision = await reconsiderNativeTestStop(decision, request!, sessionId, session.conversationId, sourceTurn);
   }
   if (decision.action === 'stop') {
     if (mode === 'loop') throw new Error('loop_stop_refused');
