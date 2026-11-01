@@ -39,7 +39,7 @@
 
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmod, copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -251,6 +251,8 @@ export function checkForUpdates(): Promise<void> {
 
 async function runPass(): Promise<void> {
   set({ stage: 'checking', error: null });
+  // Installed downloads are obsolete even when the release server is unreachable.
+  if (app.isPackaged) await pruneUpdateCache();
   const release = { version: await latestVersion() };
   // GitHub answered. From here the UI can tell "current" from "not asked yet", whatever the
   // rest of this pass does with the answer.
@@ -284,6 +286,7 @@ async function runPass(): Promise<void> {
   const carried = await adopt(release.version, artifact.name, expected);
   if (carried) {
     staged = { version: release.version, file: carried, kind: artifact.kind, target: artifact.target, digest: expected };
+    await pruneUpdateCache(release.version);
     set({ latest: release.version, stage: 'ready' });
     logInfo(`update: ${release.version} was already downloaded and is ready to install`);
     return;
@@ -291,6 +294,7 @@ async function runPass(): Promise<void> {
   set({ latest: release.version, stage: 'downloading' });
   const file = await download(release.version, artifact.name, expected);
   staged = { version: release.version, file, kind: artifact.kind, target: artifact.target, digest: expected };
+  await pruneUpdateCache(release.version);
   set({ stage: 'ready' });
   logInfo(`update: ${release.version} is downloaded and ready to install`);
 }
@@ -298,6 +302,32 @@ async function runPass(): Promise<void> {
 /** Where one release's artifact is kept. Versioned, so no build is ever taken for another. */
 function stagingDir(version: string): string {
   return path.join(app.getPath('userData'), 'updates', version);
+}
+
+/** Only version directories owned by this updater, never other app copies or user backups. */
+async function pruneUpdateCache(keepVersion?: string): Promise<void> {
+  const root = path.join(app.getPath('userData'), 'updates');
+  try {
+    // A linked cache root is not authority to recursively clean somebody else's directory.
+    const stat = await lstat(root);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      logWarn('update: cache cleanup skipped because the updates root is not an ordinary directory');
+      return;
+    }
+    for (const entry of await readdir(root, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !/^\d+\.\d+\.\d+$/.test(entry.name) || entry.name === keepVersion) continue;
+      if (isNewer(entry.name, APP_VERSION) && !keepVersion) continue;
+      try {
+        await rm(path.join(root, entry.name), { recursive: true, force: true });
+        logInfo(`update: removed obsolete ${entry.name} download from the update cache`);
+      } catch {
+        // Windows may still have its installer open. Leave it for the next ordinary pass.
+        logWarn(`update: obsolete ${entry.name} download is still in use or cannot be removed; cleanup deferred`);
+      }
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') logWarn('update: cache could not be read; cleanup deferred');
+  }
 }
 
 /** The SHA-256 of a file already on disk. */
@@ -424,9 +454,8 @@ async function get(url: string, timeout: number | AbortSignal, headers: Record<s
  */
 async function download(version: string, name: string, expected: string): Promise<string> {
   const dir = stagingDir(version);
-  // One staged build at a time. Anything already here is either this same download starting
-  // over or an artifact for a release nobody is going to install now.
-  await rm(path.join(app.getPath('userData'), 'updates'), { recursive: true, force: true });
+  // Keep the previous verified download and handoff note until a successor is verified.
+  // An interrupted transfer owns only this version's .part file, never the entire cache.
   await mkdir(dir, { recursive: true });
   const file = path.join(dir, name);
   // Stopped when the connection goes quiet, not when the file is simply large for the line.
