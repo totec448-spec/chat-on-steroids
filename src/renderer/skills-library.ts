@@ -10,6 +10,8 @@ export function initSkillsLibrary(api: AppApi): () => void {
   let epoch = 0;
   // Until a list arrives the header says Loading…; a failed first load says so instead of loading for good.
   let loaded = false;
+  // The first load failed and no list arrived since: the list says so, also when the search repaints it.
+  let loadFailed = false;
   const checks = new Map<string, GitHubSkillUpdateCheck>();
   const checking = new Set<string>();
   let linkTarget: ManagedSkill | null = null;
@@ -91,6 +93,11 @@ export function initSkillsLibrary(api: AppApi): () => void {
   const render = (): void => {
     renderRecommended();
     const host = $('skillsInstalled');
+    if (loadFailed) {
+      ui($('skillsCount'), 'textContent', () => '');
+      host.replaceChildren(el('p', 'plugin-no-results muted', () => t('Skills could not be loaded.')));
+      return;
+    }
     const query = $<HTMLInputElement>('skillsSearch').value.trim().toLocaleLowerCase();
     const visible = skills.filter(skill => `${skill.id} ${skill.name} ${skill.description}`.toLocaleLowerCase().includes(query));
     ui($('skillsCount'), 'textContent', () => tn('{0} skill', '{0} skills', skills.length));
@@ -137,7 +144,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
   };
 
   const setSkills = (next: ManagedSkill[]): void => {
-    skills = next; loaded = true;
+    skills = next; loaded = true; loadFailed = false;
     for (const [id, check] of checks) {
       if (skills.find(skill => skill.id === id)?.origin?.revision !== check.originRevision) checks.delete(id);
     }
@@ -276,11 +283,10 @@ export function initSkillsLibrary(api: AppApi): () => void {
 
   $('skillsSearch').addEventListener('input', render);
   const loadList = async (): Promise<boolean> => {
+    const own = epoch + 1;
     if (await update(api.listManagedSkills())) return true;
-    if (!loaded) {
-      $('skillsCount').textContent = '';
-      $('skillsInstalled').replaceChildren(el('p', 'plugin-no-results muted', () => t('Skills could not be loaded.')));
-    }
+    // A load that a newer one replaced says nothing: the newer one decides (CodeRabbit on #2002).
+    if (!loaded && own === epoch) { loadFailed = true; render(); }
     return false;
   };
   const refresh = (force: boolean): void => {

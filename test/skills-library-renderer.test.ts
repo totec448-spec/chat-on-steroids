@@ -250,10 +250,39 @@ it('says the skills could not be loaded when the first load fails, and lists the
     : { ok: true as const, data: [{ id: 'review', name: 'Review', description: 'Reviews code.', path: '/skills/review/SKILL.md', origin: null }] as ManagedSkill[] });
   const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
   initSkillsLibrary({ listManagedSkills, skillsCheckGithub: vi.fn(async () => ({ ok: true as const, data: [] })) } as any);
-  await vi.waitFor(() => expect(w.document.getElementById('skillsInstalled')!.textContent).toBe('Skills could not be loaded.'));
+  await vi.waitFor(() => expect(w.document.getElementById('skillsInstalled')!.textContent).toBe('Skills could not be loaded.'), { timeout: 10_000 });
   expect(w.document.getElementById('skillsCount')!.textContent).toBe('');
+  // Typing in the search repaints the list, and the failure stays (CodeRabbit on #2002).
+  const search = w.document.getElementById('skillsSearch') as HTMLInputElement;
+  search.value = 'rev'; search.dispatchEvent(new w.Event('input'));
+  expect(w.document.getElementById('skillsInstalled')!.textContent).toBe('Skills could not be loaded.');
+  expect(w.document.getElementById('skillsCount')!.textContent).toBe('');
+  search.value = ''; search.dispatchEvent(new w.Event('input'));
   fail = false;
   (w.document.getElementById('skillsRefresh') as HTMLButtonElement).click();
-  await vi.waitFor(() => expect(w.document.querySelectorAll('.skill-library-card')).toHaveLength(1));
+  await vi.waitFor(() => expect(w.document.querySelectorAll('.skill-library-card')).toHaveLength(1), { timeout: 10_000 });
   expect(w.document.getElementById('skillsCount')!.textContent).toContain('1 skill');
+});
+
+// CodeRabbit on #2002: a load that Refresh replaced says nothing while the newer one is still on its way.
+it('shows no load error for a load that Refresh replaced', async () => {
+  dom = new JSDOM(`<!doctype html><body>
+    <input id="skillsSearch"><button id="skillsRefresh"></button>
+    <button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <span id="skillsCount">Loading…</span><div id="skillsInstalled"></div><span id="skillsRecommendedCount"></span><div id="skillsRecommended"></div>
+  </body>`, { url: 'https://skills.test/' });
+  const w = dom.window;
+  for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement, HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
+  const replies: Array<(reply: unknown) => void> = [];
+  const listManagedSkills = vi.fn(() => new Promise(resolve => replies.push(resolve)));
+  const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
+  initSkillsLibrary({ listManagedSkills, skillsCheckGithub: vi.fn(async () => ({ ok: true as const, data: [] })) } as any);
+  (w.document.getElementById('skillsRefresh') as HTMLButtonElement).click();
+  expect(replies).toHaveLength(2);
+  replies[0]!({ ok: false, error: 'Skill library unavailable' });
+  for (let i = 0; i < 6; i++) await Promise.resolve();
+  expect(w.document.getElementById('skillsInstalled')!.textContent).not.toContain('could not be loaded');
+  replies[1]!({ ok: true, data: [{ id: 'review', name: 'Review', description: 'Reviews code.', path: '/skills/review/SKILL.md', origin: null }] });
+  await vi.waitFor(() => expect(w.document.querySelectorAll('.skill-library-card')).toHaveLength(1), { timeout: 10_000 });
 });

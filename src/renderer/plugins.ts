@@ -7,6 +7,8 @@ import { paintSharedTunnel } from './tunnel-warning.js';
 
 let snapshot: PluginSnapshot = { plugins: [], catalog: [], schemaRevision: 0 };
 let pluginsLoaded = false;
+/** The first snapshot failed and none arrived since: the list says so, also when the search repaints it. */
+let pluginsLoadFailed = false;
 let epoch = 0;
 let appState: AppState | null = null;
 let applyAppState: (next: AppState) => void = () => {};
@@ -51,7 +53,7 @@ function dialog(title: string | (() => string)): { box: HTMLDialogElement; body:
 async function mutate(work: ReturnType<typeof window.api.pluginsSnapshot>, notify = true): Promise<boolean> {
   const own = ++epoch; const result = await run(work);
   if (!result) return false;
-  if (own === epoch) { snapshot = result; pluginsLoaded = true; renderInstalled(); }
+  if (own === epoch) { snapshot = result; pluginsLoaded = true; pluginsLoadFailed = false; renderInstalled(); }
   if (notify) toast(t("Plugin settings saved. Refresh {0} in ChatGPT to update its tools.", [pluginsConnectorName()]));
   return true;
 }
@@ -60,10 +62,13 @@ function pluginsConnectorName(): string {
   return appState?.status.surfaces.find(item => item.id === 'plugins')?.connectorName ?? 'Chat On Steroids Plugins';
 }
 export async function refreshPlugins(): Promise<void> {
-  if (await mutate(window.api.pluginsSnapshot(), false) || pluginsLoaded) return;
-  // A failed first load says so, not Loading… for good; Check local status tries again.
-  $('pluginsCount').textContent = '';
-  $('pluginsInstalled').replaceChildren(el('p', 'plugin-no-results muted', () => t("Plugins could not be loaded.")));
+  const own = epoch + 1;
+  if (await mutate(window.api.pluginsSnapshot(), false)) return;
+  // A failed first load says so, not Loading… for good; Check local status tries again. A refresh that a
+  // newer one replaced says nothing: the newer one decides (CodeRabbit on #2002).
+  if (pluginsLoaded || own !== epoch) return;
+  pluginsLoadFailed = true;
+  renderInstalled();
 }
 export function applyPluginsState(next: AppState): void {
   appState = next;
@@ -154,6 +159,11 @@ function showConnection(): void {
 }
 function renderInstalled(): void {
   const list = $('pluginsInstalled');
+  if (pluginsLoadFailed) {
+    ui($('pluginsCount'), 'textContent', () => '');
+    list.replaceChildren(el('p', 'plugin-no-results muted', () => t("Plugins could not be loaded.")));
+    return;
+  }
   list.replaceChildren(); ui($('pluginsCount'), 'textContent', () => tn("{0} installed", "{0} installed", snapshot.plugins.length));
   const query = $<HTMLInputElement>('pluginsSearch').value.trim().toLowerCase();
   const matches = (name: string, description = '') => `${name} ${description}`.toLowerCase().includes(query);
