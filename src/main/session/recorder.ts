@@ -906,7 +906,7 @@ function noteCallEvidence(
         : undefined;
       const live = conversations.get(conversationId);
       if (live && (turnId || live.turnStartedAt === null || createAt === undefined ||
-          createAt >= (live.turnQuestionAt ?? live.turnStartedAt))) {
+          (live.turnQuestionAt !== undefined && createAt >= live.turnQuestionAt))) {
         live.pageRequest = {
           requestId: call.requestId,
           at: observedAt,
@@ -1376,7 +1376,7 @@ export function captureRecordingContext(startedAt: number): RecordingContext | n
   }
   const page = live.pageRequest;
   if (!page || (page.turnId ? page.turnId !== live.turnId : page.at < live.turnStartedAt! ||
-      (page.createAt !== undefined && page.createAt < (live.turnQuestionAt ?? live.turnStartedAt!))) ||
+      (page.createAt !== undefined && (live.turnQuestionAt === undefined || page.createAt < live.turnQuestionAt))) ||
       page.at > startedAt || requestCorrelation(page.requestId)?.sessionId !== live.sessionId) return null;
   const lineage = live.recordingLineage ??= { turnId: live.turnId! };
   const context = { conversationId: live.conversationId, sessionId: live.sessionId, turnId: live.turnId!, lineage,
@@ -2517,11 +2517,8 @@ async function recordChatObservationsNow(
           messageId: item.messageId
         }, { preferTime: item.authoredTime === true, work: item.authoredNow === true });
         if (!written.changed) continue;
-        if (live && !live.turnId && written.event.origin === written.event.seq) {
-          const questionAt = Math.min(item.time, written.event.time);
-          if (!live.endedTurn || questionAt >= live.endedTurn.endedAt || item.authoredNow === true) {
-            live.questionAt = questionAt;
-          }
+        if (live && !live.turnId && item.authoredTime === true && written.event.origin === written.event.seq) {
+          live.questionAt = written.event.time;
         }
         if (item.authoredNow === true) {
           activity.meaningful = true; activity.at = Math.max(activity.at ?? 0, item.time);
@@ -2759,11 +2756,8 @@ async function recordChatObservationsNow(
           delete live.questionAt;
           live.turnQuestionAt = questionAt;
           if (live.pageRequest && !continuing && !live.pageRequest.turnId &&
-              live.pageRequest.createAt !== undefined &&
-              live.pageRequest.createAt <= item.time &&
-              (!live.endedTurn || live.pageRequest.createAt > live.endedTurn.endedAt) &&
-              questionAt !== undefined && item.time - questionAt <= 15_000 &&
-              live.pageRequest.createAt >= questionAt) {
+              live.pageRequest.createAt !== undefined && questionAt !== undefined &&
+              live.pageRequest.createAt >= questionAt && live.pageRequest.createAt - questionAt <= 15_000) {
             live.pageRequest.turnId = item.turnId;
           }
           live.knownTurnStarts.add(item.turnId);
