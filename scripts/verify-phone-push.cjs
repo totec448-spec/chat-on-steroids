@@ -159,21 +159,21 @@ app.whenReady().then(async () => {
     assert.deepEqual(layout.cut, [], 'nothing cut in the code step ' + language);
     await win.webContents.executeJavaScript(`document.getElementById('telegramCopyCode').click(); true`);
     // Linked: who and through which bot, with Send test and Unlink; the setup closes.
-    await telegram({ state: 'linked', botName: '@cos_home_bot', userName: '@maxim' });
+    await telegram({ state: 'linked', botName: '@cos_home_bot', userName: '@sam_phone' });
     row = await win.webContents.executeJavaScript(telegramRow);
     layout = await shot(`telegram-linked-${language}`);
     assert.deepEqual(row.buttons, ['telegramTest', 'telegramUnlink'], 'linked: Send test and Unlink ' + language);
-    assert.ok(row.status.includes('@maxim') && row.status.includes('@cos_home_bot') && !row.warn, 'linked status ' + language);
+    assert.ok(row.status.includes('@sam_phone') && row.status.includes('@cos_home_bot') && !row.warn, 'linked status ' + language);
     assert.equal(row.setup, false, 'the setup closes once linked ' + language);
     assert.equal(row.right, layout.controlRights[0], 'linked buttons end where switches end ' + language);
     // Another app reads the bot: said as a warning, with Unlink.
-    await telegram({ state: 'conflict', botName: '@cos_home_bot', userName: '@maxim' });
+    await telegram({ state: 'conflict', botName: '@cos_home_bot', userName: '@sam_phone' });
     row = await win.webContents.executeJavaScript(telegramRow);
     await shot(`telegram-conflict-${language}`);
     assert.ok(row.warn && row.buttons.includes('telegramUnlink'), 'conflict warns ' + language);
     // Telegram only: ntfy off hides its topic, test and Advanced.
     await win.webContents.executeJavaScript(`window.fixtureState.config.ui.phonePush.ntfy = false; true`);
-    await telegram({ state: 'linked', botName: '@cos_home_bot', userName: '@maxim' });
+    await telegram({ state: 'linked', botName: '@cos_home_bot', userName: '@sam_phone' });
     row = await win.webContents.executeJavaScript(telegramRow);
     layout = await shot(`telegram-only-${language}`);
     assert.equal(row.ntfy, false, 'ntfy off hides its rows ' + language);
