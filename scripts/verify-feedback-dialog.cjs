@@ -116,6 +116,9 @@ app.whenReady().then(async () => {
     await js(`window.links=[];document.querySelector('#feedbackFeatures a').click()`);
     assert.deepEqual(await js('window.links'),[['https://github.com/totec448-spec/chat-on-steroids/blob/main/CONTRIBUTING.md#new-features',{external:true}]]);
     assert.equal(await js(`${dialog}.open`),true,'Following the guide link keeps the draft open');
+    // A middle-click (auxclick) takes the same way, instead of being denied by the window (CodeRabbit on #2011).
+    await js(`window.links=[];document.querySelector('#feedbackFeatures a').dispatchEvent(new MouseEvent('auxclick',{button:1,bubbles:true,cancelable:true}))`);
+    assert.equal(await js('window.links.length'),1,'A middle-click on the guide link opens it in the browser');
     assert.equal(await js(`document.getElementById('feedbackUpdate').hidden`),false,'A newer release is pointed out');
     await layout(`en ${theme} problem`);
     await capture(`${theme}-problem.png`);
