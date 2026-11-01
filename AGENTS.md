@@ -6044,6 +6044,12 @@ The macOS afterPack hook removes Electron's unused camera, microphone and audio-
 privacy descriptions before sealing, retaining Screen Recording. Strict plist readback and
 bundle smoke checks reject failed cleanup. This does not establish publisher signing,
 notarization or permission continuity across updates.
+An explicit `--signed-mac` packaging option selects `electron-builder.signed-mac.mjs`;
+`signed-mac-config.mjs` requires an identified signing certificate and complete notarization
+credentials before any build work. Real signing is mandatory, and the signed bundle audit
+requires Developer ID, a stapled notarization ticket and Gatekeeper acceptance as well as the
+ordinary native/runtime checks. The default unsigned release workflow is unchanged; see
+`docs/signed-macos.md` for the publisher-owned migration and two-build acceptance gates.
 
 Dependency updates retain upstream compatibility contracts: Node typings follow Electron's
 embedded Node major, and Vite stays within electron-vite's declared peer range. Electron 44

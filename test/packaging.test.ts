@@ -602,6 +602,12 @@ describe('cross-platform packaging targets', () => {
     expect(source).toContain('exec "$BIN" "\\${NO_SANDBOX[@]}" "\\${args[@]}"');
   });
 
+  it('keeps Developer ID packaging an explicit opt-in with a notarization audit', () => {
+    const script = readFileSync(path.join(root, 'scripts', 'package.mjs'), 'utf8');
+    expect(script).toContain("args.includes('--signed-mac')");
+    expect(script).toContain("if (signedMac) run(node, ['scripts/smoke-macos-bundle.mjs', arch, '--signed'])");
+  });
+
   it('pins the current macOS release to unsigned thin native bundles with explicit metadata checks', () => {
     const builder = yamlFile('electron-builder.yml');
     const macSmoke = readFileSync(path.join(root, 'scripts', 'smoke-macos-bundle.mjs'), 'utf8');

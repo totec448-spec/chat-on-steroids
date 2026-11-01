@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { normalizeArch, normalizePlatform, PLATFORM_INFO } from './packaging-targets.mjs';
+import { signedMacConfig } from './signed-mac-config.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -16,6 +17,12 @@ function value(name, fallback) {
 const platform = normalizePlatform(value('platform', process.platform));
 const arches = value('arch', process.arch).split(',').map((item) => normalizeArch(item.trim()));
 const dirOnly = args.includes('--dir');
+const signedMac = args.includes('--signed-mac');
+if (signedMac) {
+  if (platform !== 'darwin' || process.platform !== 'darwin') throw new Error('--signed-mac requires a macOS target and host');
+  // Fail before downloads/builds; notarize:true alone silently skips missing credentials.
+  signedMacConfig();
+}
 
 function run(command, commandArgs, env = process.env) {
   const result = spawnSync(command, commandArgs, { cwd: root, stdio: 'inherit', env });
@@ -51,10 +58,12 @@ for (const arch of arches) {
     'never'
   ];
   if (dirOnly) builderArgs.push('--dir');
+  if (signedMac) builderArgs.push('--config', 'electron-builder.signed-mac.mjs');
   run(node, builderArgs, { ...process.env, COS_PACKAGE_ARCH: arch });
   // A successful electron-builder exit only proves that an artifact was assembled. Exercise the
   // unpacked artifact immediately so missing transitive runtime modules (for example when the
   // checkout's node_modules was linked to another tree) fail this same packaging command instead
   // of producing an installer that crashes before the first BrowserWindow exists.
   run(node, ['scripts/smoke-packaged-runtime.mjs', ...targetArgs]);
+  if (signedMac) run(node, ['scripts/smoke-macos-bundle.mjs', arch, '--signed']);
 }

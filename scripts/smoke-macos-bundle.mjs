@@ -17,8 +17,10 @@ const expectedMachArch = arch === 'x64' ? 'x86_64' : 'arm64';
 const oppositeMachArch = arch === 'x64' ? 'arm64' : 'x86_64';
 const releaseDir = path.resolve('release');
 const unpackedDir = arch === 'arm64' ? 'mac-arm64' : 'mac';
-const app = process.argv[3]
-  ? path.resolve(process.argv[3])
+const signed = process.argv.includes('--signed');
+const explicitApp = process.argv.slice(3).find(arg => arg !== '--signed');
+const app = explicitApp
+  ? path.resolve(explicitApp)
   : path.join(releaseDir, unpackedDir, 'Chat On Steroids.app');
 const contents = path.join(app, 'Contents');
 const resources = path.join(contents, 'Resources');
@@ -175,15 +177,23 @@ if (launchedMachOCount < 6) {
 // The afterPack hook creates the seal and runs the real --verify --deep --strict against the app
 // it just sealed, where a failure can still stop the build before an artifact exists.
 const signature = run('codesign', ['--display', '--verbose=4', app], { allowFailure: true });
-assertNoTrustBearingMacCodeSignature(
-  app,
-  signature,
-  existsSync(path.join(contents, '_CodeSignature', 'CodeResources'))
-);
+if (signed) {
+  // A valid seal is not publisher trust, and a Developer ID is not notarization.
+  run('codesign', ['--verify', '--deep', '--strict', '-R',
+    'identifier "com.chatonsteroids.app" and anchor apple generic and certificate leaf[field.1.2.840.113635.100.6.1.13] exists', app]);
+  run('xcrun', ['stapler', 'validate', app]);
+  run('spctl', ['--assess', '--type', 'execute', '--verbose=2', app]);
+} else {
+  assertNoTrustBearingMacCodeSignature(
+    app,
+    signature,
+    existsSync(path.join(contents, '_CodeSignature', 'CodeResources'))
+  );
+}
 // Check the copied payload too: a valid source seal does not prove that DMG/ZIP
 // construction preserved every sealed resource and nested executable.
 run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app]);
 
 process.stdout.write(
-  `macOS ${arch} bundle metadata/icon, ${launchedMachOCount} launchable executable modes, ${machOCount} thin Mach-O payloads, deployment floors and unsigned policy verified.\n`
+  `macOS ${arch} bundle metadata/icon, ${launchedMachOCount} launchable executable modes, ${machOCount} thin Mach-O payloads, deployment floors and ${signed ? 'Developer ID/notarization' : 'unsigned policy'} verified.\n`
 );
