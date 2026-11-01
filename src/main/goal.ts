@@ -1270,6 +1270,8 @@ export function moveGoalSwitch(fromConversationId: string, toConversationId: str
   goalSwitches.delete(fromConversationId);
   goalSwitches.set(toConversationId, row);
   persistGoalSwitches();
+  // #1882: which mode the replacement chat took over, so a page that later shows another can be compared.
+  logInfo(`goal: ${fromConversationId}'s own ${row.enabled ? row.mode : 'Normal'} switch moved to ${toConversationId} (Compact & Resume)`);
   return true;
 }
 
