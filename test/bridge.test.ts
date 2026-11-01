@@ -477,6 +477,9 @@ describe('lost first-message opening', () => {
         // Nothing reached the lost tab: twice a fresh one (the extension forgets the old), then Not sent.
         expect(reply.body).toEqual({ ok: true, reopen: true });
         expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued', openingReopens: 1 });
+        // The same lost tab again (its answer never reached the extension): the same grant, nothing spent.
+        expect((await request('POST', '/input/opening-unavailable', { browser, body: { id: row.id, tab: 7, stage: 'ready' } })).body).toEqual({ ok: true, reopen: true });
+        expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued', openingReopens: 1, openingReopenedTab: 7 });
         expect((await request('POST', '/input/opening-unavailable', { browser, body: { id: row.id, tab: 8, stage: 'ready' } })).body).toEqual({ ok: true, reopen: true });
         expect((await request('POST', '/input/opening-unavailable', { browser, body: { id: row.id, tab: 9, stage: 'ready' } })).body).toEqual({ ok: true });
         expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed' });

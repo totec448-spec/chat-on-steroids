@@ -105,6 +105,8 @@ const entrySchema = inputArgs.extend({
    * A damaged count reads as used up: it must never make the outbox unreadable, nor grant more tabs.
    */
   openingReopens: z.number().int().min(1).max(2).optional().catch(2),
+  /** The lost tab the last fresh one was granted for: a repeat report of it gets the same grant. */
+  openingReopenedTab: z.number().int().nonnegative().optional().catch(undefined),
   /** The question that Continue continues, still checked until it is sent (CodeRabbit on #1960). */
   continuesQuestionId: z.string().max(200).optional(),
   recovery: z.object({ questionId: z.string(), episode: z.string().max(200).optional(), pro: z.boolean(), busyUntil: z.number(), phase: z.enum(['ready', 'stopping', 'reloading', 'resumed']), reloadOwner: z.string().optional(),
@@ -1379,8 +1381,8 @@ export function setInputAutomation(id: string, automation: NonNullable<InputArgs
 export const OPENING_REOPENS = 2;
 
 /** A missing elected tab is not replay authority. End only a never-handed-out opening. */
-export function failUnclaimedBrowserOpening(id: string, currentOwner: () => boolean): Promise<boolean> {
-  return lostBrowserOpening(id, currentOwner).then(outcome => outcome === 'failed');
+export function failUnclaimedBrowserOpening(id: string, currentOwner: () => boolean, tab?: number): Promise<boolean> {
+  return lostBrowserOpening(id, currentOwner, tab).then(outcome => outcome === 'failed');
 }
 
 /**
@@ -1389,7 +1391,7 @@ export function failUnclaimedBrowserOpening(id: string, currentOwner: () => bool
  * tab, twice at most, rather than "Not sent" at once; after that it fails as before. Anything that
  * may have reached a page is never reopened.
  */
-export function lostBrowserOpening(id: string, currentOwner: () => boolean): Promise<'reopen' | 'failed' | 'kept'> {
+export function lostBrowserOpening(id: string, currentOwner: () => boolean, tab?: number): Promise<'reopen' | 'failed' | 'kept'> {
   return serial(async () => {
     const current = await load();
     const row = current.find(entry => entry.id === id);
@@ -1399,8 +1401,15 @@ export function lostBrowserOpening(id: string, currentOwner: () => boolean): Pro
     const session = await getSession(row.sessionId);
     if (!currentOwner() || session?.origin?.kind !== 'desktop' || session.conversationId) return 'kept';
     const reopens = row.openingReopens ?? 0;
+    // The extension asks again for the same lost tab when the answer did not reach it: that is the
+    // grant it already has, not another tab spent (CodeRabbit on #1980).
+    if (tab !== undefined && reopens > 0 && row.openingReopenedTab === tab) {
+      logInfo(`input ${id}: the lost tab ${tab} was reported again; the fresh tab already granted for it stands`);
+      return 'reopen';
+    }
     if (reopens < OPENING_REOPENS) {
-      await commit(current.map(entry => entry === row ? { ...entry, openingReopens: reopens + 1 } : entry));
+      await commit(current.map(entry => entry === row ? { ...entry, openingReopens: reopens + 1,
+        ...(tab !== undefined ? { openingReopenedTab: tab } : {}) } : entry));
       logInfo(`input ${id}: its new chat's tab vanished before anything reached it; opening a fresh one (${reopens + 1} of ${OPENING_REOPENS})`);
       return 'reopen';
     }

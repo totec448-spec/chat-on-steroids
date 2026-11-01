@@ -3065,7 +3065,7 @@ marker, the extension reports `/input/opening-unavailable` without reopening by 
 browser holding that opening may report it. For an unbound desktop opening still queued with no
 owner, offer, Send authorization or receipt (nothing reached any page), main (`lostBrowserOpening`)
 answers `{ ok: true, reopen: true }` twice (`openingReopens`, logged): the extension then forgets that
-election and its next pass opens a fresh tab. The third report fails the opening as before. The existing delivery notice offers
+election and its next pass opens a fresh tab. A repeat report of the same lost tab (`openingReopenedTab`) gets the same grant without spending another. The third different report fails the opening as before. The existing delivery notice offers
 review in the composer; only an explicit Send creates a new input in the same reserved session.
 Claimed or ambiguous sends retain their custody and cannot be retried through this report.
 
