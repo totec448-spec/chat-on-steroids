@@ -2751,9 +2751,19 @@ async function pauseRepeatingGoal(draft: GoalDraft, answer: string): Promise<voi
 const answerBeforeNote = new WeakMap<ChatMessage, string>();
 
 /** What the Offline marker check reads: the newest answer as written, without the app's own note. */
+/** Assistant messages ChatGPT marked final, as opposed to its commentary (#2007). */
+const finalAnswers = new WeakSet<ChatMessage>();
+
 export function templateDecisionText(messages: readonly ChatMessage[]): string {
-  const last = messages.filter(message => message.role === 'assistant').at(-1);
-  return last ? answerBeforeNote.get(last) ?? last.content : '';
+  const lastAt = messages.findLastIndex(message => message.role === 'assistant');
+  if (lastAt < 0) return '';
+  // Commentary ChatGPT writes after its final answer in the same turn is not the answer: the marker is
+  // in the final one (#2007). Walk back to it, never past the user message that opened the turn.
+  let chosen = messages[lastAt]!;
+  for (let at = lastAt; at >= 0 && messages[at]!.role === 'assistant'; at--) {
+    if (finalAnswers.has(messages[at]!)) { chosen = messages[at]!; break; }
+  }
+  return answerBeforeNote.get(chosen) ?? chosen.content;
 }
 
 interface ChatMessage {
@@ -2912,6 +2922,7 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
     } else if ((event.kind === 'assistant_message' && (event.final || event.messageId)) || (event.kind === 'progress' && event.source === 'extension')) {
       const content = clip(event.kind === 'assistant_message' ? modelFacingText(event.message.text, event.renderedHtml) : event.message.text);
       if (content) next = { role: 'assistant', content };
+      if (next && event.kind === 'assistant_message' && event.final) finalAnswers.add(next);
     }
     if (!next) continue;
 
@@ -2959,6 +2970,7 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
     const answer = ordered[at]!;
     const noted = { ...answer, content: `${answer.content}\n\n${toolCallFootnote(count, before)}` };
     answerBeforeNote.set(noted, answerBeforeNote.get(answer) ?? answer.content);
+    if (finalAnswers.has(answer)) finalAnswers.add(noted);
     ordered[at] = noted;
   }
   for (const text of deliveredInput.slice(-5)) {
