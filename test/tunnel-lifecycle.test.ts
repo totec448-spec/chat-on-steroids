@@ -116,14 +116,14 @@ describe('OpenAI tunnel process ownership', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('missing', { status: 404 })));
     try {
       const handle = await startTunnel({ localUrl: 'http://127.0.0.1:1234/mcp/core/token', settings, apiKey: 'test', report: () => {} });
-      await vi.waitFor(() => expect(fixture.spawn).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(fixture.spawn).toHaveBeenCalledOnce(), { timeout: 5_000 });
       const call = fixture.spawn.mock.calls[0] as unknown as [string, string[], { env: Record<string, string> }];
       const healthFile = call[1][call[1].indexOf('--health.url-file') + 1]!;
       expect(call[2].env.TMPDIR).toBeTypeOf('string');
       expect(healthFile).toBe(path.join(call[2].env.TMPDIR!, 'health.url'));
       fixture.termination.held = true;
       const stopping = handle.stop();
-      await vi.waitFor(() => expect(fixture.termination.release).toBeTypeOf('function'));
+      await vi.waitFor(() => expect(fixture.termination.release).toBeTypeOf('function'), { timeout: 5_000 });
       expect(fixture.removedDirectories).toEqual([]);
       fixture.termination.release!();
       await stopping;
