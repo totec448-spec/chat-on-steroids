@@ -237,6 +237,40 @@ it('lists a queued message as open but not as being sent until a browser claims 
 
 // CodeRabbit on #1901: the extension's update decision and its delivery ran side by side, so a claim
 // could start while the folder was being replaced. The app, which holds every claim, closes that gap.
+it('says when the extension updates past answering pages after its long wait (2026-10-31)', async () => {
+  const prepare = vi.fn(() => ({ build: 'bbbbbbbbbbbb', ready: true }));
+  extensionPath.prepare = prepare;
+  const logged = vi.spyOn(logger, 'logInfo');
+  // An hour back, so the 20 s pause a ready update starts has ended for the tests after this one.
+  const back = Date.now() - 60 * 60_000; const clock = vi.spyOn(Date, 'now').mockImplementation(() => back);
+  try {
+    expect((await post('/extension/update', { pastBusyChatsMs: 31 * 60_000 })).body).toMatchObject({ ready: true, build: 'bbbbbbbbbbbb' });
+    expect(logged.mock.calls.map(([line]) => String(line)).filter(line => line.includes('updates although a ChatGPT tab is still answering'))).toEqual([
+      'bridge: the extension updates although a ChatGPT tab is still answering: it waited 31 minutes for every page to be idle, and no tool call runs and nothing is being sent now'
+    ]);
+    // An ordinary update says nothing of the kind; a malformed value is ignored.
+    logged.mockClear();
+    await post('/extension/update', {});
+    await post('/extension/update', { pastBusyChatsMs: 'long' });
+    expect(logged.mock.calls.some(([line]) => String(line).includes('still answering'))).toBe(false);
+    // Said only when the update really goes ahead (CodeRabbit on #1961).
+    extensionPath.prepare = () => ({ build: 'bbbbbbbbbbbb', ready: false });
+    await post('/extension/update', { pastBusyChatsMs: 31 * 60_000 });
+    expect(logged.mock.calls.some(([line]) => String(line).includes('still answering'))).toBe(false);
+    // A tool call that started after the extension's last status holds it at the last moment.
+    extensionPath.prepare = prepare;
+    const callContext = await import('../src/main/mcp/call-context.js');
+    let finish!: () => void;
+    const call = callContext.trackInFlight({ tool: 'exec_command', caller: { transportKey: null, requestId: null, conversationId: null },
+      evidence: callContext.emptyEvidence() } as never, () => new Promise<void>(resolve => { finish = resolve; }));
+    expect((await post('/extension/update', { pastBusyChatsMs: 31 * 60_000 })).body).toEqual({ ready: false, hold: 'app-busy' });
+    // Said once, not on every pass the extension asks again (CodeRabbit on #1961).
+    await post('/extension/update', { pastBusyChatsMs: 31 * 60_000 });
+    expect(logged.mock.calls.filter(([line]) => String(line).includes('the extension update waits: a tool call is running in this app'))).toHaveLength(1);
+    finish(); await call;
+  } finally { clock.mockRestore(); logged.mockRestore(); extensionPath.prepare = () => null; }
+});
+
 it('refuses the extension update while a message is being sent, and new claims while the extension reloads', async () => {
   let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
   const prepare = vi.fn(() => ({ build: 'bbbbbbbbbbbb', ready: true }));
@@ -2564,6 +2598,124 @@ describe('native progress silence authority', () => {
     expect(live[0]!.id).not.toBe(first.id);
   });
 
+  // 2026-10-31: an automatic Continue no page took after a stalled turn; a plain Continue in the same
+  // chat was taken at once. The fallback turns it into that ordinary message, once, and only while
+  // nothing newer happened in the chat.
+  it('turns an automatic Continue no page took into an ordinary message, only while nothing newer happened', async () => {
+    const source = await open('gpt-5.6-sol');
+    expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+    const ticket = (await input.listInputs()).find(row => row.recovery && row.state === 'queued')!;
+    // The turn is still open in the record: an ordinary message could not go out, so nothing changes.
+    expect(await input.continueAsOrdinaryMessage(ticket.id, 'test')).toEqual({ refused: 'its turn is still open in the record' });
+    await post('/events', { conversationId: source.conversationId, events: [
+      { kind: 'turn_end', turnId: source.turnId, outcome: 'stalled', time: Date.now() }
+    ] });
+    // Not before it has waited long enough itself.
+    expect(await input.continueAsOrdinaryMessage(ticket.id, 'test', 60 * 60_000)).toEqual({ refused: 'it is not old enough yet' });
+    const outcome = await input.continueAsOrdinaryMessage(ticket.id, 'not claimed after its reloads');
+    const ordinary = 'row' in outcome ? outcome.row : null;
+    expect(ordinary).toMatchObject({ id: ticket.id, text: ticket.text, mode: 'auto', state: 'queued', continuedFrom: 'recovery' });
+    // Still the app's own send: the send check asks before it goes (CodeRabbit on #1960).
+    expect(input.automaticSendKind(ordinary!)).toBe('continue');
+    expect(ordinary).not.toHaveProperty('recovery');
+    expect(ordinary).not.toHaveProperty('silenceBoundary');
+    expect(logger.getLog().some(entry => entry.message.includes(`input ${ticket.id}: no page took the automatic Continue (not claimed after its reloads); sending it as an ordinary message`))).toBe(true);
+    // Offered like a typed message, and only once converted.
+    expect((await input.pendingBrowserInputs()).find(row => row.id === ticket.id)).toEqual(expect.not.objectContaining({ recovery: expect.anything() }));
+    expect(await input.continueAsOrdinaryMessage(ticket.id, 'again')).toEqual({ refused: 'it is no longer a queued automatic Continue' });
+    expect(ordinary).toMatchObject({ continuesQuestionId: ticket.recovery!.questionId });
+  });
+
+  // CodeRabbit on #1960: the converted Continue keeps its question and is still checked until Send.
+  it('withdraws a Continue sent on as an ordinary message once the person asks something newer', async () => {
+    const source = await open('gpt-5.6-sol');
+    expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+    const ticket = (await input.listInputs()).find(row => row.recovery && row.state === 'queued')!;
+    await post('/events', { conversationId: source.conversationId, events: [
+      { kind: 'turn_end', turnId: source.turnId, outcome: 'stalled', time: Date.now() }
+    ] });
+    expect(await input.continueAsOrdinaryMessage(ticket.id, 'test')).toHaveProperty('row');
+    await post('/events', { conversationId: source.conversationId, events: [
+      { kind: 'user_message', messageId: randomUUID(), text: 'Do this instead', time: Date.now(), authoredNow: true }
+    ] });
+    expect(await input.claimBrowserInput(ticket.id, 'page-owner', source.conversationId, true)).toBeNull();
+    expect((await input.listInputs()).find(row => row.id === ticket.id)).toMatchObject({
+      state: 'cancelled', error: 'Automatic Continue cancelled: another user message arrived.'
+    });
+  });
+
+  it('sends an automatic Continue no page claims as an ordinary message after a reload and ten minutes, instead of stopping', async () => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const source = await open('gpt-5.6-sol');
+      expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+      const ticket = (await input.listInputs()).find(row => row.recovery && row.state === 'queued')!;
+      await post('/events', { conversationId: source.conversationId, events: [
+        { kind: 'turn_end', turnId: source.turnId, outcome: 'stalled', time: now }
+      ] });
+      // The page reloads on the pickup schedule and never claims the ticket.
+      let reloads = 0;
+      for (let minute = 1; minute <= 16; minute++) {
+        now += 60_000;
+        await (await bridge()).sweepStaleSwarm(now);
+        const repairs = (await post('/status', { openConversations: [source.conversationId] })).body.repairs ?? [];
+        for (const repair of repairs.filter((row: any) => row.conversationId === source.conversationId)) {
+          if (repair.requiresClaim) await post('/repairs/claim', { conversationId: source.conversationId, token: repair.token });
+          await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [source.conversationId] });
+          reloads += 1;
+        }
+        if (!(await input.listInputs()).find(row => row.id === ticket.id)?.recovery) break;
+      }
+      const row = (await input.listInputs()).find(entry => entry.id === ticket.id)!;
+      expect(row).toMatchObject({ state: 'queued', mode: 'auto', text: ticket.text });
+      expect(row.recovery).toBeUndefined();
+      expect(row.pickupRecovery?.stoppedAt).toBeUndefined();
+      // The silence reload and at most two pickup reloads: no third reload and no stop.
+      expect(reloads).toBeGreaterThanOrEqual(2);
+      expect(reloads).toBeLessThanOrEqual(3);
+      expect(logger.getLog().some(entry => entry.message.includes(`input ${ticket.id}: no page took the automatic Continue (not claimed after`))).toBe(true);
+      expect((await input.pendingBrowserInputs()).some(entry => entry.id === ticket.id)).toBe(true);
+    } finally { clock.mockRestore(); }
+  });
+
+  it('says once why an automatic Continue is not sent as an ordinary message yet (CodeRabbit on #1960)', async () => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const source = await open('gpt-5.6-sol');
+      expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+      const ticket = (await input.listInputs()).find(row => row.recovery && row.state === 'queued')!;
+      // The turn stays open in the record: the page reloads on schedule and never claims it.
+      for (let minute = 1; minute <= 16; minute++) {
+        now += 60_000;
+        await (await bridge()).sweepStaleSwarm(now);
+        const repairs = (await post('/status', { openConversations: [source.conversationId] })).body.repairs ?? [];
+        for (const repair of repairs.filter((row: any) => row.conversationId === source.conversationId)) {
+          if (repair.requiresClaim) await post('/repairs/claim', { conversationId: source.conversationId, token: repair.token });
+          await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [source.conversationId] });
+        }
+      }
+      expect((await input.listInputs()).find(row => row.id === ticket.id)?.recovery).toBeDefined();
+      expect(logger.getLog().map(entry => entry.message).filter(line => line.includes(`automatic Continue in ${source.conversationId} is not sent as an ordinary message yet`))).toEqual([
+        `bridge: the automatic Continue in ${source.conversationId} is not sent as an ordinary message yet — its turn is still open in the record`
+      ]);
+    } finally { clock.mockRestore(); }
+  });
+
+  it('leaves an automatic Continue alone once the person asked something newer', async () => {
+    const source = await open('gpt-5.6-sol');
+    expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+    const ticket = (await input.listInputs()).find(row => row.recovery && row.state === 'queued')!;
+    await post('/events', { conversationId: source.conversationId, events: [
+      { kind: 'turn_end', turnId: source.turnId, outcome: 'stalled', time: Date.now() },
+      { kind: 'user_message', messageId: randomUUID(), text: 'Actually, do this instead', time: Date.now(), authoredNow: true }
+    ] });
+    // The newer question already withdrew the Continue; either way it is never sent as an ordinary message.
+    expect(await input.continueAsOrdinaryMessage(ticket.id, 'test')).toHaveProperty('refused');
+    const left = (await input.listInputs()).find(row => row.id === ticket.id)!;
+    expect(left).toMatchObject({ recovery: expect.anything() });
+    expect(left.continuedFrom).toBeUndefined();
+  });
+
   it('keeps authored queued work ahead of automatic Continue after a committed handoff', async () => {
     let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     try {
@@ -3280,9 +3432,10 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
       expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ pickupRecovery: { attempts: 3, stoppedAt: now } });
       input.resetInputForTests();
       expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ pickupRecovery: { attempts: 3, stoppedAt: now } });
+      // Shown as stopped, and retried slowly: 15 minutes later the same ticket is reloaded for again.
       now += 15 * 60_000;
       await bridge.sweepStaleSwarm(now);
-      expect((await post('/status', { openConversations: [conversationId] })).body.repairs.some((item: any) => item.conversationId === conversationId)).toBe(false);
+      expect((await post('/status', { openConversations: [conversationId] })).body.repairs.some((item: any) => item.conversationId === conversationId)).toBe(true);
       expect((await input.listInputs()).find(item => item.id === row.id)?.text).toBe(row.text);
       expect((await input.claimBrowserInput(row.id, 'restored-doc', conversationId, true))?.text).toBe(row.text);
       expect(await input.authorizeBrowserInput(row.id, 'restored-doc', conversationId)).toBe(true);

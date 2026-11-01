@@ -216,7 +216,10 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Phone notifications | Off (`ui.phonePush`, missing means off). | ntfy (`phone-push.ts`, Settings → General → Phone notifications). Three kinds: needs you (the Session finish and stuck/approval notifiers), failures (tunnel loss), finished (the turn notifier hands every completed top-level chat over with `workedMs` from the turn's `turn_start` event, whether or not the window is focused). The phone keeps its own rules: kind switches, finished only after `finishedAfterMinutes` (null never, 0 always; an unknown length counts as long), quiet hours (local, may wrap midnight), away = `powerMonitor.getSystemIdleState(180)` is idle/locked/unknown, at most once per chat and kind in 2 min and 20 an hour; a message that did not arrive does not count. JSON publish to the server root (UTF-8 safe), optional Bearer token from secure storage (`ntfyToken`, IPC `phonePush:token`, `AppState.hasPhonePushToken`). By default a message only says what happened; `includeDetails` adds the chat's name, the answer's start and a `click` link to the ChatGPT chat. One `phone push:` log line per decision, never the message. `phonePush:test` sends now regardless of the rules. |
 | Sounds (#1802) | Off (`ui.sounds`, missing means off). | Settings → General → Chats → Play sounds. `main/sound-cues.ts` decides at the same three points that hand events to the phone (needs you, failed, finished): finished only while the window is not focused, nothing during phone notifications' quiet hours while those are on, at most once per chat and kind in 2 min. It sends `sound:cue` (`SoundCue` in `shared/sound-cues.ts`) to the window, which plays a short Web Audio tone (`renderer/sound-cues.ts`, no audio files); with no window (tray only) nothing plays. One `sound:` log line per decision except when off. Turning the setting on plays the finished sound once as a preview. |
 | Fresh turns for long work | Every 30 minutes (`ui.rotateTurnMinutes`: 0 off, 20/30/45/60; missing or malformed means 30). | #1402. Measured: turns up to ~35 minutes ended cleanly, 37–64 minutes almost always broke; Stop + "continue" by hand never did. `turn-rotation.ts` `considerTurnRotation` runs on each attributed tool call (`noteCallAttribution`, after its `grantActivity`) for the chat's exact running turn. Once that turn's own `turn_start` is `rotateTurnMinutes` old, `input.ts` `fileRotationInput` files one `purpose: 'rotation'` direct-turn message (`rotationMessage()`, Core mention kept) into exactly that turn. The native send makes ChatGPT end the turn as interrupted and continue in a fresh one; the call in flight keeps its result. It must go in while that call still waits for its answer (#1662, measured 2026-10-18: 6/6 clean while a call ran; sent in the gap after a result ChatGPT sometimes queued it behind the reply, and a Stop during a call made the model run it again). So the kernel opens `rotation-hold.ts` `openCallHold` around recording an attributed call, rotation is considered only while `callHoldOpen`, and the bridge's `awaitRotationDelivery` holds the call's answer until the row is sent or settled; a row still unauthorized after 15 s is withdrawn (`withdrawUnsentRotation`, cancelled without an error) and the call answers. The page never stops a turn for it: offered no Send (ChatGPT shows only Stop at that moment), it sends nothing and reports `desktop_input` `fail` with `error` = `input.ts` `ROTATION_DECLINED` word for word and `detail: 'no-send'`; `failBrowserInput` cancels the row with that error, `rotationDelivery` answers `declined`, the held call answers at once, and `noteRotationDeclined` lets a tool result a minute later try again without spending one of the turn's two filings (at most six declines per turn; measured 2026-10-20 on Loop chats, where every continue fell on a Stop moment). Never for Pro, worker or helper chats, and never at the result of a Goal/Loop hold tool (`GOAL_HOLD_TOOLS`: `session_finish`, `keep_astra_on_forever`), which is Loop's next instruction. Goal and Loop chats rotate like any other (2.1.43): the rotated turn ends without a final answer, so no Goal/Loop decision is filed for it, and its continue is recorded with empty `authoredText`, which the Goal helper's transcript leaves out; never for a blocked chat, beside another pending message, or into a different turn. One per turn: a refused filing retries after 1 minute, one the page did not take after 5. A rotation row is not `manualInput`: a page that cannot take it during the turn drops it rather than keeping it for after the turn, and the timeline raises no delivery notice for it. A message of the user's own cancels a rotation that was never handed out. |
-| Stop fallback for fresh turns | Off (`ui.rotateStopFallback`, experimental; disabled while fresh turns are off). | Where ChatGPT shows only Stop at a tool result it offers no Send for the continue (`ROTATION_DECLINED`, `no-send`). After `STOP_FALLBACK_AFTER_DECLINES` (2) such declines in one turn and the usual minute, the next held result takes the fallback instead of a third continue (`stopFallbackDue`/`noteStopFallback`, once per turn): `rotation-fence.ts` arms a fence (the kernel refuses that chat's calls with `ROTATION_FENCE_REFUSAL`, nothing runs, so a Stop landing mid-call cannot repeat a call, #1662), and 500 ms later `stopSessionTurn(…, { rotation: true })` queues the native Stop without turning Goal/Loop off or cancelling Compact & Resume. The stopped end of exactly that turn lifts the fence and files `fileRotationContinueAfterStop`: a `purpose: 'rotation'`, `afterStop: true` ordinary message (no `directTurn`), which `typedAfterStop` lets through once the turn shows stopped and nothing runs. The fence lifts after 60 s without a stopped end. Live 2026-10-20 (VM): Stop 1 s after a result, then "continue", repeated no step (2 runs). |
+| Stop fallback for fresh turns | On since 2.1.49 (`ui.rotateStopFallback`; disabled while fresh turns are off). Earlier configs are turned on once (`adoptStopFallback`, marked `ui.rotateStopFallbackAdopted`), because every earlier save wrote the old default; a later off stays off. | Where ChatGPT shows only Stop at a tool result it offers no Send for the continue (`ROTATION_DECLINED`, `no-send`). After `STOP_FALLBACK_AFTER_DECLINES` (2) such declines in one turn and the usual minute, the next held result takes the fallback instead of a third continue (`stopFallbackDue`/`noteStopFallback`, once per turn): `rotation-fence.ts` arms a fence (the kernel refuses that chat's calls with `ROTATION_FENCE_REFUSAL`, nothing runs, so a Stop landing mid-call cannot repeat a call, #1662), and 500 ms later `stopSessionTurn(…, { rotation: true })` queues the native Stop without turning Goal/Loop off or cancelling Compact & Resume. The stopped end of exactly that turn lifts the fence and files `fileRotationContinueAfterStop`: a `purpose: 'rotation'`, `afterStop: true` ordinary message (no `directTurn`), which `typedAfterStop` lets through once the turn shows stopped and nothing runs. The fence lifts at the processed stopped end (which files the continue), at once when the page reports it could not send that Stop (a terminal-failure receipt) or when the person's own Stop takes the turn over (no continue follows; the pending Stop is first saved without its `rotation` mark, `withdrawStopRotation`, so a restart restores neither it nor its fence), or after the Stop's 120 s budget plus 15 s (`FENCE_MS`) without a stopped end; fences are kept in the durable store `rotation-fences` (`[{ conversationId,
+turnId, until }]`) and `restoreCommands` brings back what is left of each (`restoreRotationFences`), so a restart
+after ChatGPT took the Stop but before its stopped end still files the continue; the fresh-turn Stop
+goes out only once its fence is on disk (`armRotationFence` resolves), and not at all when it cannot be saved; a fresh-turn Stop carries `rotation: true`, so after a restart a pending one re-arms its fence for what is left of that time. With fresh turns at 0 minutes no fallback Stop is taken, even after declines. Live 2026-10-20 (VM): Stop 1 s after a result, then "continue", repeated no step (2 runs). |
 | Follow-up behavior | Join the running turn (`ui.followUp: 'steer'`; a broken value loads as that). | Codex's "Follow-up behavior". Each running turn starts the composer's delivery choice from this default (`queue` selects After this turn); a choice made in the send menu lasts for that turn. Cmd/Ctrl+Shift+Enter sends the other way (`sendComposer('auto' \| 'after-turn')`); with no running turn it is an ordinary send. |
 | Enter key | Enter sends (`ui.enterSends`, missing means true). | Codex's "Enter key behavior". With `false`, Enter adds a line in the composer and Cmd/Ctrl+Enter sends; Shift+Enter always adds a line and Cmd/Ctrl+Shift+Enter keeps sending the other way (Follow-up behavior). |
 | Code checkpoints | Off (`projects.codeCheckpoints`; missing or malformed means Off). | Settings → Workspace, Folders: “Save a checkpoint before each turn's first edit”. `checkpointBeforePatch` reads `getConfig()` in the main process at capture time (never a renderer claim), so a flip applies to the next patch without a restart. Off stops new turn checkpoints only: existing ones stay listed in Review and Restore, including its own “Before restore” undo entry, keeps working. §10. |
@@ -464,6 +467,16 @@ is absent, empty or reading is disabled; no file content is read when read permi
 The opening outbox input / new-worker command owns this eligibility; no history scan or extra
 sent flag decides it. Existing-chat messages, Goal/Loop continuations, plan checkpoints, worker
 revivals, compaction requests and resumed-chat bootstraps receive no appended setup block.
+A worker revival (wake) command carries the model and effort its worker was opened with
+(`commandModelSelection` → `wakeModelSelection`, vetted against the account like a resume's), so the
+page chooses them before it types (#1952; before, a wake went out on whatever ChatGPT's box held).
+Unlike a new worker, a wake whose model the picker cannot confirm is still typed: the page reports
+step `model-unconfirmed` and the bridge logs which model it could not confirm. A Compact & Resume does the
+same (2026-11-01: an abandoned resume stopped its chat for good); its new chat then tries the model once more
+(`publishBootstrapSelection`).
+An effort-only request (no model) keeps ChatGPT's current model: `selectModelSettings` rounds the
+effort within that model only and never moves to another model offering the effort; with the current
+model unreadable it confirms nothing.
 Decision/planner helpers keep their separate role-specific contract. Selecting Goal/Loop for
 a normal new executor chat does not turn it into a helper. Direct user sends in Chrome are
 not intercepted.
@@ -1782,7 +1795,11 @@ holds a call before it is sent, so nothing reaches the app and only the user can
 page reports it on every `/activity` poll as optional `approval=1|0` (older extensions omit it);
 `src/main/approval-wait.ts` keeps the episode fresh for 75 s. While it stands, silence recovery
 (before the no-recorded-call verdict), `recoveryHeldByCalls`, the worker sleep sweep and the page's
-ten-minute stall clock all wait. The chat gets one `approval-wait:` progress row (texts in
+ten-minute stall clock all wait. Nor does the page end the turn while the card stands: neither the
+quiet window after Stop goes nor a native final closes it (`heldForApproval` in the observer, and the
+Fiber terminal check), since the turn goes on once the person answers (#1977: 2.1.49 closed it after
+12 s and lost every answer section that followed). Its last message is not published as `final`
+meanwhile (the recorder closes a turn on a final), nor for 10 s after the card goes (`APPROVAL_SETTLE_MS`: the old final can still be on the page while the turn goes on), and the app's Stop still ends it as stopped. The chat gets one `approval-wait:` progress row (texts in
 `src/shared/approval-wait.ts`, translated by the renderer, with Open in browser) and, after 30 s, one
 stop-notice-style desktop notice whose click opens the chat in the app. The app never answers the
 card on its own. The session list carries every waiting chat as `approval`; a catalog-only
@@ -2495,7 +2512,15 @@ refreshes or model-list requests; `/input/claim` and `/repairs/claim` refuse it 
 tab to open through `/activity` or its `/compact` reply either (`opensNewWork`, #1852), which also
 holds for an out-of-date companion. It still records and stops what the person
 opens there, and works on as before once the CoS browser is gone. The chosen CoS browser takes a
-new chat's opening custody over from another browser. `browser-proof.ts` keeps, across restarts, the version last seen there and
+new chat's opening custody over from another browser, and a chat's repair too: `takePendingRepairs`
+skips a chat held by another browser for every browser except the chosen built-in one, since the holder
+may not claim it (#1960; before, such a chat's recovery sat with nobody able to take it). A browser that may not
+claim (not chosen, or out of date) is handed no repair that needs a claim, except a stalled-tab repair for a
+chat it holds, which `/repairs/claim` lets that holder take (`holdsStalledTab`): thawing its own frozen tab opens
+nothing new, and only it can; the chosen browser does not take a stalled repair over. With "browser only" on, the
+chosen browser is not handed a repair for a chat another browser holds (it may not open it): the repair stays
+queued without spending offers, logged once per episode. A refused claim from a browser that is not chosen is
+logged once a minute per chat. `browser-proof.ts` keeps, across restarts, the version last seen there and
 ChatGPT's last signed-in answer, so a closed browser keeps its state and a logout stays a logout;
 a live answer always wins. The extension reports presence and that answer on its own
 (`POST /browser/presence`), from ChatGPT's `/api/auth/session` in an existing regular-profile tab,
@@ -3051,6 +3076,12 @@ is still deciding (past the reload check, e.g. waiting for the send check); once
 ready, `/input/claim` from that browser (`x-extension-browser`) hands out nothing for 20 s (checked
 again right before the claim takes its message), and the
 extension's `deliverDesktopInputs` starts nothing while its reload is pending.
+An answering ChatGPT page (`clf-recorder-ping` busy) holds the update as `chat-busy` for at most
+30 minutes per offered build (`CHAT_BUSY_UPDATE_AFTER_MS`; the start is kept in `storage.session` as
+`extensionUpdateBusySince`, so a worker restart does not reset it). After that the update goes ahead at
+a pass where nothing else holds it (no tool call in the app, nothing sent, no command), and
+`/extension/update` receives `{ pastBusyChatsMs }` and logs that it updated past an answering page
+(2026-10-31: long Goal chats answered almost without a pause and the update waited for hours).
 Managed idle/retired/duplicate pruning records a successful removal against the exact tab,
 document, navigation epoch and conversation in the existing session-storage snapshot. Its
 lifecycle event carries a non-manual departure through the close outbox; it does not create
@@ -3222,12 +3253,31 @@ existing Goal reply ledger. The exact final is checked before its one durable St
 again in the native page. Unfinished Continue keeps its Stop claim in the existing outbox.
 Both use the same native Stop/idle helper, then send on that document. There is **no immediate
 reload after Stop**. Undelivered Continue, queued input and Goal/Loop decisions share one
-pickup projection and the bounded 2/5/10-minute reload schedule (three reloads total). The
-attempt count and next deadline are stored with the exact Goal reply or queued input, so an app
-restart cannot reset the limit. After the third uncollected reload, recovery stops and the composer
-shows a persistent stop status while the original obligation remains saved. A queue item can still
-be sent manually; reactivating the same Goal reply does not refund its attempts. The twelve-hour source
-lifetime remains a separate retirement bound. The session list carries stopped chats as
+pickup projection and its reload schedule (`browserPickupDelay` in `shared/recovery.ts`): three
+quick reloads after 2, 5 and 10 minutes, then slow retries after 15, 30 and every 60 minutes, at most
+`BROWSER_PICKUP_ATTEMPT_LIMIT` (24) in all. The attempt count, the first stop time and the next deadline
+are stored with the exact Goal reply or queued input, so an app restart neither resets nor ends them.
+After the third uncollected reload the composer shows a persistent stop status (the person can
+Continue in one click) and the bridge warns once that it `keeps trying every 15 to 60 minutes`; slow
+reloads log `— reload <n> (slow retry)`. None runs inside a history limit. A queue item can still be
+sent manually; reactivating the same Goal reply does not refund its attempts. The twelve-hour source
+lifetime bounds the slow retries too (2026-10-31: a chat must not stop for good while it is unfinished). Page activity that
+pushes a retry out is saved with its owners (queued input and Goal reply), so a restart keeps the later
+deadline. A stop with no retry left (24 reloads, or 12 hours) carries `exhausted` and reads "Recovery
+stopped" instead of "Recovery slowed". Two exceptions keep a chat from stopping while it
+is unfinished (2026-10-31): a queued input the app itself does not offer (`queuedInputOfferBlocker`
+names the gate) spends no reload, and the bridge logs `next automation/input step in <chat> is not
+offered to the page — <gate>; no reload is spent on it` once per chat, input and gate; and an
+automatic Continue (`recovery`) still queued 10 minutes after its boundary (`RECOVERY_ORDINARY_AFTER_MS`)
+with a reload spent, a stop, or an offer gate becomes an ordinary message once
+(`continueAsOrdinaryMessage`: `recovery`, `silenceBoundary` and `pickupRecovery` removed, mode `auto`,
+`continuedFrom: 'recovery'` so `automaticSendKind` still names it `continue` and the send check asks; its 10 minutes
+count from its own boundary, not a pickup it shares; a refusal is logged once per chat, input and reason;
+`continuesQuestionId` keeps its question, and claim, Send authorization and the expiry sweep withdraw it as
+"Automatic Continue cancelled: …" once another user message or the complete answer arrives),
+only while the chat's latest recorded question is still the one it continues, no turn is open, the
+chat is not blocked or closed and no tool call runs; it is logged `input <id>: no page took the
+automatic Continue (<why>); sending it as an ordinary message …`. The session list carries stopped chats as
 `recoveryStopped` (the same `pickup-stopped` predicate); a queued input's stop pushes
 `session:changed` with its outbox write, a Goal reply's stop pushes from the pickup sweep as soon as
 it is recorded (before, and whether or not, its last reload is queued), and a
@@ -4259,7 +4309,7 @@ server obligation once safe; do not acknowledge it as handled or require a reloa
 
 | Backend/role | Behavior |
 | --- | --- |
-| ChatGPT decision helper | Default driver backend. Each Goal/Loop decision uses a Temporary Chat with bounded reference history; outputs a decision, never executes that history. |
+| ChatGPT decision helper | Default driver backend. Each Goal/Loop decision uses a Temporary Chat with bounded reference history; outputs a decision, never executes that history. A helper whose model the page could not confirm (`detail: 'model-unconfirmed'`, nothing typed) fails with the retryable `goal_helper_model_unconfirmed`, and `goalHelperSelection` then uses ChatGPT's current selection for 30 minutes (`HELPER_MODEL_FALLBACK_MS`, logged), as for a model the account does not offer; every other helper send failure stays settled. |
 | API driver | OpenRouter-compatible default or explicit compatible endpoint/model/key. Supports bounded streamed progress and validated final decision. |
 | Goal templates | Offline explicit terminal-marker policy; only Goal supports this backend. Missing/ambiguous expected markers pause rather than infer completion from prose. |
 | Temporary planner | Captures a new workflow for the user in Temporary Chat. Shares temporary transport with decision helpers while retaining its staged-workflow role. |
@@ -4843,6 +4893,12 @@ with no extension catalog reads as English. The same reply carries `browserPrefe
 extension's Overwrite and Timestamps values as it last reported them stored (`preferencesStored` in
 `/diagnostics`; defaults are never kept). An extension with neither value in its storage, such as a
 reinstall under a new id, takes them back; stored values always win.
+`followApp` writes `appLanguage` once per worker and again when the app's language changes, not on
+the stored copy's word alone: its storage read is bounded to 5 s, and an unanswered read still writes
+the language (2026-10-30: one Chrome kept the browser's language for weeks with nothing said). Its
+outcome, with the stored value, goes into `/diagnostics` as `language: { applied, stored, error }`;
+the app logs one `browser: the extension's stored language is …` line per distinct mismatch or error,
+and the diagnostics report's browser section has an `Extension language:` line.
 Setup uses SVG flags only, with native language names in tooltips and
 accessible labels; Appearance retains the named language dropdown. Both controls share the
 same persisted preference. `translate="no"` protects text and attributes, including native
@@ -5983,6 +6039,9 @@ readable); known personal values (project paths/names, chat titles, worker tasks
 approved roots, tunnel profile/ids) become `<x:xxxx>`. Settings contribute only booleans, numbers
 and short option names; keys naming tunnels, profiles, paths, roots, prompts, URLs, keys or ids are
 dropped unless the value is a number or boolean. Never add message, task or title text to a section.
+The *Active chats* lines end with each chat's Goal/Loop state as the app holds it (`mode loop (this chat)`,
+`mode Normal (app setting)`; #1882), never its id. Compact & Resume logs when a chat's own switch moves to
+the new chat, or is dropped because the new chat already had its own.
 Tests: `report-scrub.test.ts`, `diagnostics-report.test.ts` and `ipc.test.ts` (no personal value survives).
 
 Send feedback (Activity's button, `/feedback`; `feedback-dialog.ts`) writes a problem report or an idea

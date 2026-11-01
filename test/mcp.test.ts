@@ -302,6 +302,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  vi.unstubAllEnvs();
   if (endpoint) await endpoint.stop();
   // Every live exec test uses UnifiedExecProcessManager. The old teardown still stopped the
   // retired connector-native process manager, which meant it looked like this suite protected
@@ -312,6 +313,11 @@ afterAll(async () => {
 
 beforeEach(async () => {
   if (endpoint) await endpoint.stop();
+  // The usage tool reads Codex's and Claude Code's own logs. Without this it read the real home
+  // folders, which on a busy developer machine took past the 30 s test timeout (2026-10-31, twice).
+  // Per test, because a test that calls vi.unstubAllEnvs() would otherwise drop it for the rest.
+  vi.stubEnv('CODEX_HOME', path.join(base, 'no-codex'));
+  vi.stubEnv('CLAUDE_CONFIG_DIR', path.join(base, 'no-claude'));
   resetWorkspaces();
   ctx.caps = withCaps({});
   ctx.readOnly = true;
@@ -938,6 +944,8 @@ describe('surface boundaries', () => {
 
   it('answers usage without the identity notice, which only matters for chat-bound work', async () => {
     everything();
+    // Never the developer's own logs (CodeRabbit on #1964).
+    expect(process.env['CODEX_HOME']).toBe(path.join(base, 'no-codex'));
     // usage reads nothing that belongs to a chat. It answers before the page's evidence for its
     // request arrives, so it always looked unattributed, and the notice reached the model each time.
     const usage = JSON.stringify((await core('tools/call', { name: 'usage', arguments: {} })).body.result?.content);

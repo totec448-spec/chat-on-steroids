@@ -1805,7 +1805,7 @@ function apply(next: AppState): void {
     rotate.add(option);
   }
   applyValue(rotate, rotateMinutes, previousState ? String(previousState.config.ui.rotateTurnMinutes ?? 30) : undefined);
-  applyChecked($<HTMLInputElement>('rotateStopFallback'), config.ui.rotateStopFallback === true, previousState?.config.ui.rotateStopFallback);
+  applyChecked($<HTMLInputElement>('rotateStopFallback'), config.ui.rotateStopFallback !== false, previousState?.config.ui.rotateStopFallback);
   $<HTMLInputElement>('rotateStopFallback').disabled = (config.ui.rotateTurnMinutes ?? 30) === 0;
   applyChecked($<HTMLInputElement>('backgroundChats'), config.ui.backgroundChats === true, previousState?.config.ui.backgroundChats);
   applyValue($<HTMLSelectElement>('backgroundPlacement'), config.ui.backgroundPlacement ?? 'window', previousState?.config.ui.backgroundPlacement ?? 'window');

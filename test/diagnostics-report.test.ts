@@ -101,6 +101,13 @@ describe('the diagnostics report', () => {
     expect(none).toContain('Page checks: no awake ChatGPT tab answered');
   });
 
+  it('says which language the extension stored and applied, and why not (2026-10-30)', () => {
+    const report = renderDiagnosticsReport({ ...sources, extension: { status: {}, language: { applied: null, stored: null, error: 'storage read did not answer within 5 s' } } });
+    expect(report).toContain("Extension language: stored none (uses the browser's), applied by this worker not yet, last attempt: storage read did not answer within 5 s");
+    const fine = renderDiagnosticsReport({ ...sources, extension: { status: {}, language: { applied: 'en', stored: 'en', error: null } } });
+    expect(fine).toContain('Extension language: stored en, applied by this worker en');
+  });
+
   it('scrubs Windows paths inside JSON sections, where backslashes are doubled', () => {
     const report = renderDiagnosticsReport({ ...sources, home: 'C:\\Users\\Jane',
       commands: [{ command: 'c2', what: 'worker:run-1:worker-3', lastError: 'spawn C:\\Users\\Jane\\bin\\codex.exe ENOENT' }],

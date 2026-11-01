@@ -226,6 +226,8 @@ export interface UiPrefs {
    * message once the stop shows. Missing means off.
    */
   rotateStopFallback?: boolean;
+  /** The default-on stop fallback was applied to this config once (2.1.49). */
+  rotateStopFallbackAdopted?: boolean;
   /** Usage › Other apps: read Codex's and Claude Code's local logs (numbers only). Missing means on. */
   localAppUsage?: boolean;
   /** Codex's "Follow-up behavior": a message typed during a turn joins it (`steer`, the default) or waits for its end (`queue`). */
@@ -738,6 +740,8 @@ export interface CompanionDiagnostics {
   tab: CompanionTabDiagnostics | null;
   /** For the diagnostics report: names, versions, counts and booleans only. Absent from older extensions. */
   environment?: CompanionEnvironment | null;
+  /** The app language this extension worker applied, the one in its storage, and why not (2026-10-30). */
+  language?: { applied: string | null; stored: string | null; error: string | null } | null;
 }
 
 export interface CompanionEnvironment {
