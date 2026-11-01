@@ -304,7 +304,7 @@ it('decodes the entities a DIL fallback writes for | and & in plain text, once',
   };
   expect(await read('a&#124;b \\<c> &amp;d \\\\e \\*f\\*\n`a|b <c> &d \\e *f*`\nEND'))
     .toBe('a|b <c> &d \\e *f*\n`a|b <c> &d \\e *f*`\nEND');
-  expect(await read('KIWI &#124; /home/maxim/cos-ssh-live')).toBe('KIWI | /home/maxim/cos-ssh-live');
+  expect(await read('KIWI &#124; /home/sam/cos-ssh-live')).toBe('KIWI | /home/sam/cos-ssh-live');
   // A literal entity the model wrote has its & encoded, so one pass gives back the literal text.
   expect(await read('Write &amp;#124; or &amp;amp; or &amp;lt;b&amp;gt; &#x7C; &#X7c;')).toBe('Write &#124; or &amp; or &lt;b&gt; | |');
   // Code and formulas keep their own text.
