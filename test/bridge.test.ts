@@ -8506,7 +8506,7 @@ describe('targeted open', () => {
     await pair();
     const { sessionId, token } = await automaticCompactedSession('66666666-7777-8888-9999-aaaaaaaaaaaf', 'the brief');
     const first = queueResume(sessionId, token)!;
-    await waitForOpened(1);
+    await waitForOpened(1, 10_000);
     await redeem(first.id, 'tab-1');
     expect((await request('POST', '/commands/step', { body: { id: first.id, client: 'tab-1', step: 'model-unconfirmed' } })).body).toEqual({ ok: true });
     expect(getLog().some(entry => entry.level === 'warn' && entry.message.includes(`the Compact & Resume of session ${sessionId} starts its new chat on ChatGPT's current model`))).toBe(true);
