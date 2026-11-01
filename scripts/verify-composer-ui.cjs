@@ -192,6 +192,16 @@ app.whenReady().then(async () => {
   await check('Compact reaches native controller', `composerFixture.controls.job?.phase==='requesting'`);
   await click('#contextMeterButton'); await click('#cancelCompaction'); await pause(300);
   await check('Cancel reaches native controller', `composerFixture.controls.job===null`);
+  // 2026-11-01: a Compact & Resume waiting too long for ChatGPT's summary offers the last saved one,
+  // and the context meter carries a dot until the person acts on it.
+  await js(`composerFixture.controls.job={busy:true,phase:'requesting',stage:'handoff-pending'};composerFixture.controls.lastSummary={handoffId:'2026-11-01-36ad1800',createdAt:Date.now()-3600000,earlierChat:true};composerFixture.notify()`);
+  await until(`document.getElementById('contextMeter').hasAttribute('data-attention')`);
+  await click('#contextMeterButton'); await pause(200);
+  await check('A stuck Compact & Resume offers the last summary', `!document.getElementById('resumeLastSummary').hidden&&getComputedStyle(document.getElementById('resumeLastSummary')).display!=='none'&&/15 minutes/.test(document.getElementById('sessionControlStatus').textContent)`);
+  await capture('context-last-summary');
+  await click('#resumeLastSummary'); await pause(300);
+  await check('Continuing from the last summary reaches the native controller', `window.resumedFrom==='2026-11-01-36ad1800'&&document.getElementById('resumeLastSummary').hidden&&!document.getElementById('contextMeter').hasAttribute('data-attention')`);
+  await js(`composerFixture.controls.job=null;composerFixture.notify()`); await pause(200);
   await click('#attachmentMenu > summary'); await capture('add');
   await click('#composerSkills');
   await check('Slash commands and skills use original picker', `!document.getElementById('skillPicker').hidden&&document.querySelectorAll('.slash-menu-option').length>=7`);

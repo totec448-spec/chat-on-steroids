@@ -3751,13 +3751,25 @@ awaiting-summary -> awaiting-chat -> claimed -> committing -> committed
 disk. `sessions:resumeFromHandoff` (preload `resumeFromHandoff(id, handoffId)`, bridge
 `resumeFromSavedSummary`) starts a new run from it through `reopenWithHandoffNow`: only when that
 handoff is still the session's `lastHandoffId`, no continuation is open, and its provenance
-source is the session's current chat. The new run is an ordinary transaction: it reserves A
+source is the session's current chat or an earlier one in its `chatIds` (2026-11-01: ChatGPT can stop
+serving a chat, "temporarily limited access to this conversation history", before it writes a summary
+of its own). A summary from an earlier chat is sent behind `earlierSummaryNote()`, which says work
+may have continued after it and asks to check the current state first. The new run is an ordinary transaction: it reserves A
 again with the abandoned run's project, records the source request as already sent (nothing is
 asked of ChatGPT), and `attachSummary` writes a fresh handoff with the same text bound to the
 new token. Claim, commit, restart recovery and provenance then work unchanged; a failed attach
 aborts the new run. Timeline `handoff` events carry an optional `continuation` token so the
 reopened run's row owns its handoff; the reuse button is shown only on the newest Compact &
 Resume row.
+
+**A Compact & Resume ChatGPT never answers.** `SessionControlsView.lastSummary` (`{ handoffId,
+createdAt, earlierChat }`) is set once a continuation has waited in `awaiting-summary` without a
+handoff for `STUCK_SUMMARY_MS` (15 minutes) and the session has a usable `lastHandoffId`; the context
+meter shows a dot and its popover the button "Continue in a new chat from the last summary". Using
+it, `resumeFromSavedSummary` first cancels that waiting continuation. A chat with Goal or Loop on
+does this by itself (`continueStuckFromSavedSummary`), once per ticket, when an automatic ticket's
+first slowed burst of pickups could not ask either; a chat without them is never moved by itself.
+The new ChatGPT chat joins the same session, as after any Compact & Resume.
 
 Restart restoration must converge on that same committed projection. A persisted send attempt
 can outlive a transport command; expiration releases transport, not permission for another

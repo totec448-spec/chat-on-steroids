@@ -77,6 +77,9 @@ const {
   cancelAssistantRecovery,
   onBridgeChange,
   compactSession,
+  resumeFromSavedSummary,
+  setSessionAutomation,
+  STUCK_SUMMARY_MS,
   setSessionObjective,
   unattributedRepairEta,
   cancelResume,
@@ -2997,6 +3000,78 @@ describe('automatic compaction', () => {
     expect(repairs).toHaveLength(claimed ? 0 : 1);
     if (!claimed) expect(repairs[0]).toMatchObject({ reason: 'compaction', requiresClaim: true });
     expect((await request('POST', '/repairs/claim', { body: { token: errorRepair.token } })).body.allowed).toBe(false);
+  });
+
+  // 2026-11-01: ChatGPT stopped serving a resumed chat ("temporarily limited access to this conversation
+  // history"), so its Compact & Resume never got a summary and the chat sat stuck for hours. After a
+  // while the last saved summary (written in the earlier chat) is offered, and using it ends that wait.
+  it('offers the last saved summary when a Compact & Resume waits too long, and continuing from it cancels the wait', async () => {
+    await pair();
+    const chatA = randomUUID(), chatB = randomUUID();
+    const session = await createSession({ conversationId: chatA });
+    const first = await openContinuationNow(session.id, chatA);
+    await attachSummary(first.token, 'TASK\n\nKeep auditing the fleet manager and fix what the audit finds.\n'.repeat(4));
+    expect(await claimContinuationNow(first.token, 'page-b')).not.toBeNull();
+    expect(await commitContinuation(first.token, chatB)).toBe(true);
+    const saved = (await findSessionByConversation(chatB))!.lastHandoffId!;
+    await compactSession(session.id);
+    const stuck = continuationForSession(session.id)!;
+    expect((await sessionControlsFor(session.id)).lastSummary).toBeNull();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(Date.now() + STUCK_SUMMARY_MS + 1_000);
+      expect((await sessionControlsFor(session.id)).lastSummary).toMatchObject({ handoffId: saved, earlierChat: true });
+      await resumeFromSavedSummary(session.id, saved);
+      const now = continuationForSession(session.id)!;
+      expect(now.token).not.toBe(stuck.token);
+      expect(now.state).toBe('awaiting-chat');
+      expect(getLog().some(entry => entry.message.includes(`continues from saved summary ${saved}; the Compact & Resume still waiting for ChatGPT's summary is cancelled`))).toBe(true);
+      // The new run has its summary already: nothing is offered any more.
+      expect((await sessionControlsFor(session.id)).lastSummary).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  // The unattended case (2026-11-01): a Loop chat ran on with nobody watching, and its automatic
+  // compaction could never ask ChatGPT for a summary. After a slowed burst too failed, it continues from
+  // the last saved summary in a new chat of the same session, by itself.
+  it.each(['loop', 'off'] as const)('continues a Loop chat from its last saved summary when its automatic compaction never reaches ChatGPT (automation %s)', async automation => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chatA = randomUUID(), chatB = randomUUID();
+      const session = await createSession({ conversationId: chatA });
+      const first = await openContinuationNow(session.id, chatA);
+      await attachSummary(first.token, 'TASK\n\nKeep auditing the fleet manager and fix what the audit finds.\n'.repeat(4));
+      expect(await claimContinuationNow(first.token, 'page-b')).not.toBeNull();
+      expect(await commitContinuation(first.token, chatB)).toBe(true);
+      const saved = (await findSessionByConversation(chatB))!.lastHandoffId!;
+      if (automation === 'loop') await setSessionAutomation(session.id, 'loop');
+      const filed = await request('POST', '/compact', { body: { conversationId: chatB, ticket: true, automatic: true } });
+      const ticket = filed.body.token as string;
+      let continued = false;
+      for (let pass = 0; pass < 30 && !continued; pass++) {
+        await vi.advanceTimersByTimeAsync(2 * 60_000);
+        await sweepStaleSwarm(Date.now());
+        const repair = ((await request('GET', '/status')).body.repairs as Array<{ conversationId: string; reason: string; token: string }> | undefined)
+          ?.find(row => row.conversationId === chatB && row.reason === 'compaction');
+        if (repair) {
+          await request('POST', '/repairs/claim', { body: { token: repair.token } });
+          await request('GET', `/status?repaired=${encodeURIComponent(repair.token)}&repairAction=reloaded`);
+        }
+        const now = continuationForSession(session.id);
+        continued = !!now && now.token !== ticket && now.state === 'awaiting-chat';
+      }
+      if (automation === 'off') {
+        // Somebody is meant to be watching a chat without Goal or Loop: it is never moved by itself,
+        // and the controls offer the saved summary instead.
+        expect(continued).toBe(false);
+        expect(getLog().some(entry => entry.message.includes(`continues in a new chat from saved summary ${saved}`))).toBe(false);
+        return;
+      }
+      expect(continued).toBe(true);
+      expect(continuationForSession(session.id)).toMatchObject({ state: 'awaiting-chat' });
+      expect(getLog().some(entry => entry.message.includes(`the loop chat continues in a new chat from saved summary ${saved}`))).toBe(true);
+    } finally { vi.useRealTimers(); }
   });
 
   it.each(['cancelled', 'replaced', 'dispatched'] as const)('opens a manual source immediately and revokes a %s ticket before browser action', async scenario => {

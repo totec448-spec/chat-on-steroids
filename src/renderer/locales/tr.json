@@ -3777,5 +3777,7 @@
   "Recovery stopped": "Kurtarma durduruldu",
   "Stopped after {0} attempts": "{0} denemeden sonra durduruldu",
   "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Tarayıcı, bekleyen adımı {0} otomatik yeniden yüklemeden sonra almadı. Özgün kuyruk girdisi veya Hedef yükümlülüğü kayıtlı kalır. CoS bu adım için sohbeti yeniden otomatik yüklemeyecek; sohbeti açıp elle devam edin.",
-  "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.": "ChatGPT'nin model seçicisi yardımcının modelini onaylamadı. Hedef, ChatGPT'nin geçerli seçimiyle yeniden sorar."
+  "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.": "ChatGPT'nin model seçicisi yardımcının modelini onaylamadı. Hedef, ChatGPT'nin geçerli seçimiyle yeniden sorar.",
+  "Continue in a new chat from the last summary": "Son özetle yeni bir sohbette devam et",
+  "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT 15 dakikadır özeti yazmadı. Son kaydedilen özet, işi yeni bir sohbette sürdürebilir."
 }

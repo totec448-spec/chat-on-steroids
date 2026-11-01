@@ -3858,5 +3858,7 @@
   "Recovery stopped": "Récupération arrêtée",
   "Stopped after {0} attempts": "Arrêt après {0} tentatives",
   "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Le navigateur n’a pas récupéré l’étape en attente après {0} rechargements automatiques. L’entrée d’origine en file d’attente ou l’obligation Goal reste enregistrée. CoS ne rechargera plus automatiquement cette conversation pour cette étape ; ouvrez-la et continuez manuellement.",
-  "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.": "Le sélecteur de ChatGPT n’a pas confirmé le modèle de l’assistant. Goal redemande avec la sélection actuelle de ChatGPT."
+  "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.": "Le sélecteur de ChatGPT n’a pas confirmé le modèle de l’assistant. Goal redemande avec la sélection actuelle de ChatGPT.",
+  "Continue in a new chat from the last summary": "Continuer dans un nouveau chat avec le dernier résumé",
+  "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT n'a pas écrit le résumé depuis 15 minutes. Le dernier résumé enregistré peut poursuivre le travail dans un nouveau chat."
 }

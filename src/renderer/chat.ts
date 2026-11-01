@@ -3456,13 +3456,13 @@ async function refreshSessionControls(): Promise<void> {
     // Retire the previous selection's projection before awaiting the new owner's IPC.
     // Replace the translation binding too, so a locale refresh cannot revive its status.
     ui($('sessionControlStatus'), 'textContent', () => '');
-    for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
+    for (const action of ['compactSession', 'cancelCompaction', 'resumeLastSummary']) $(action).hidden = true;
   }
   paintAutomationSwitch();
   if (!id) { controlledSessionId = null; controlledTurnId = null; controlledHeldTurnId = null; controlledPageless = false; paintDeliveryControls(); menu.hidden = false;
     $<HTMLTextAreaElement>('sessionObjective').disabled = false;
     paintTaskActions();
-    for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
+    for (const action of ['compactSession', 'cancelCompaction', 'resumeLastSummary']) $(action).hidden = true;
     return; }
   const opening = pendingComposerInputs.find(row => row.opening && row.sessionId === id && ['queued', 'browser'].includes(row.state));
   if (!sessions.find(row => row.id === id)?.conversationId) {
@@ -3477,7 +3477,7 @@ async function refreshSessionControls(): Promise<void> {
     const objective = $<HTMLTextAreaElement>('sessionObjective');
     objective.value = opening?.objective ?? ''; objective.disabled = true;
     objective.dataset.sessionId = id;
-    for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
+    for (const action of ['compactSession', 'cancelCompaction', 'resumeLastSummary']) $(action).hidden = true;
     paintAutomationSwitch(); paintDeliveryControls(); repaintHeld();
     return;
   }
@@ -3503,7 +3503,7 @@ async function refreshSessionControls(): Promise<void> {
   repaintHeld();
   menu.hidden = !controls;
   $('compactSession').hidden = !controls;
-  if (!controls) { $('cancelCompaction').hidden = true; return; }
+  if (!controls) { $('cancelCompaction').hidden = true; $('resumeLastSummary').hidden = true; $('contextMeter').removeAttribute('data-attention'); return; }
   const objective = $<HTMLTextAreaElement>('sessionObjective');
   if (objective.dataset.sessionId !== id || !objective.dataset.edited) {
     objective.value = controls.objective;
@@ -3522,7 +3522,15 @@ async function refreshSessionControls(): Promise<void> {
   paintAutomationSwitch();
   $<HTMLButtonElement>('compactSession').disabled = !!controls.blocked || !!controls.job?.busy;
   $('cancelCompaction').hidden = !controls.job?.busy;
-  ui($('sessionControlStatus'), 'textContent', () => controls.blocked === 'worker' ? t("This sub-agent is managed by its prime.") : controls.blocked === 'blocked' ? t("This chat is blocked.") : controls.job?.busy ? t("Compaction is running in ChatGPT.") : '');
+  // A Compact & Resume that ChatGPT never wrote a summary for (it may no longer serve the chat at all)
+  // can go on from the last saved one; the context meter carries a dot until then (2026-11-01).
+  const lastSummary = controls.blocked ? null : controls.lastSummary ?? null;
+  $('resumeLastSummary').hidden = !lastSummary;
+  $('resumeLastSummary').dataset.handoffId = lastSummary?.handoffId ?? '';
+  $('contextMeter').toggleAttribute('data-attention', !!lastSummary);
+  ui($('sessionControlStatus'), 'textContent', () => controls.blocked === 'worker' ? t("This sub-agent is managed by its prime.") : controls.blocked === 'blocked' ? t("This chat is blocked.")
+    : lastSummary ? t("ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.")
+    : controls.job?.busy ? t("Compaction is running in ChatGPT.") : '');
 }
 
 async function loadDetail(navigate = false, olderBefore?: number, newerFrom?: number): Promise<boolean> {
@@ -9470,6 +9478,13 @@ export function initChat(next: Deps): void {
       }
     });
   }
+  $('resumeLastSummary').addEventListener('click', async () => {
+    const id = selectedId, button = $<HTMLButtonElement>('resumeLastSummary'), handoffId = button.dataset.handoffId;
+    if (!id || !handoffId) return;
+    button.disabled = true;
+    try { if (await run(api.resumeFromHandoff(id, handoffId))) toast(t("Opening a new chat with the saved summary")); }
+    finally { button.disabled = false; if (selectedId === id) void refreshSessionControls(); }
+  });
   for (const [buttonId, cancel] of [['compactSession', false], ['cancelCompaction', true]] as const) {
     $(buttonId).addEventListener('click', async () => {
       const id = selectedId; if (!id) return;
