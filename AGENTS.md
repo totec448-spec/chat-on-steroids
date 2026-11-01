@@ -6079,6 +6079,10 @@ adopted. Cleanup never removes `handoff.json`, unrecognized entries, linked dire
 app copies or user backups; a linked cache root is skipped. Locked files defer to the next
 ordinary check without failing an update. `update.test.ts` covers previous-version cache and
 handoff records, failed transfers, restart adoption and directory links.
+New download writes reject linked cache roots/version directories. They unlink only the
+selected stale partial-file entry (never recursively) and create its replacement exclusively,
+so a partial-file link cannot truncate another file. Existing checksum-verified adoption is
+still read-only and retains its prior linked-path behavior.
 The updater classifies its own `TypeError('fetch failed')` as `GitHub could not be reached`,
 retaining the original diagnostic in its warning log. The card, update banners and retained
 Update all error share the renderer's update-error formatter; unknown errors remain literal.
