@@ -471,7 +471,9 @@ A worker revival (wake) command carries the model and effort its worker was open
 (`commandModelSelection` → `wakeModelSelection`, vetted against the account like a resume's), so the
 page chooses them before it types (#1952; before, a wake went out on whatever ChatGPT's box held).
 Unlike a new worker, a wake whose model the picker cannot confirm is still typed: the page reports
-step `model-unconfirmed` and the bridge logs which model it could not confirm.
+step `model-unconfirmed` and the bridge logs which model it could not confirm. A Compact & Resume does the
+same (2026-11-01: an abandoned resume stopped its chat for good); its new chat then tries the model once more
+(`publishBootstrapSelection`).
 An effort-only request (no model) keeps ChatGPT's current model: `selectModelSettings` rounds the
 effort within that model only and never moves to another model offering the effort; with the current
 model unreadable it confirms nothing.
@@ -1756,7 +1758,11 @@ holds a call before it is sent, so nothing reaches the app and only the user can
 page reports it on every `/activity` poll as optional `approval=1|0` (older extensions omit it);
 `src/main/approval-wait.ts` keeps the episode fresh for 75 s. While it stands, silence recovery
 (before the no-recorded-call verdict), `recoveryHeldByCalls`, the worker sleep sweep and the page's
-ten-minute stall clock all wait. The chat gets one `approval-wait:` progress row (texts in
+ten-minute stall clock all wait. Nor does the page end the turn while the card stands: neither the
+quiet window after Stop goes nor a native final closes it (`heldForApproval` in the observer, and the
+Fiber terminal check), since the turn goes on once the person answers (#1977: 2.1.49 closed it after
+12 s and lost every answer section that followed). Its last message is not published as `final`
+meanwhile (the recorder closes a turn on a final), nor for 10 s after the card goes (`APPROVAL_SETTLE_MS`: the old final can still be on the page while the turn goes on), and the app's Stop still ends it as stopped. The chat gets one `approval-wait:` progress row (texts in
 `src/shared/approval-wait.ts`, translated by the renderer, with Open in browser) and, after 30 s, one
 stop-notice-style desktop notice whose click opens the chat in the app. The app never answers the
 card on its own. The session list carries every waiting chat as `approval`; a catalog-only
@@ -3061,9 +3067,11 @@ holding that chat. A browser handed work for a chat it lacks opens the chat itse
 copy would otherwise run that work. A chat open nowhere, like a brand-new chat, goes to the
 first browser it is handed to while that browser polls. Requests without an id are not told apart.
 If an elected new-chat tab is absent from a successful all-tab scan, with no surviving input
-marker, the extension reports `/input/opening-unavailable` without reopening. Only the browser
-holding that opening may report it. The outbox fails only an unbound desktop opening still
-queued with no owner, offer, Send authorization or receipt. The existing delivery notice offers
+marker, the extension reports `/input/opening-unavailable` without reopening by itself. Only the
+browser holding that opening may report it. For an unbound desktop opening still queued with no
+owner, offer, Send authorization or receipt (nothing reached any page), main (`lostBrowserOpening`)
+answers `{ ok: true, reopen: true }` twice (`openingReopens`, logged): the extension then forgets that
+election and its next pass opens a fresh tab. A repeat report of the same lost tab (`openingReopenedTab`: `<browser>:<tab>`, since tab ids are per browser session) gets the same grant without spending another. The third different report fails the opening as before. The existing delivery notice offers
 review in the composer; only an explicit Send creates a new input in the same reserved session.
 Claimed or ambiguous sends retain their custody and cannot be retried through this report.
 
@@ -4266,7 +4274,7 @@ server obligation once safe; do not acknowledge it as handled or require a reloa
 
 | Backend/role | Behavior |
 | --- | --- |
-| ChatGPT decision helper | Default driver backend. Each Goal/Loop decision uses a Temporary Chat with bounded reference history; outputs a decision, never executes that history. |
+| ChatGPT decision helper | Default driver backend. Each Goal/Loop decision uses a Temporary Chat with bounded reference history; outputs a decision, never executes that history. A helper whose model the page could not confirm (`detail: 'model-unconfirmed'`, nothing typed) fails with the retryable `goal_helper_model_unconfirmed`, and `goalHelperSelection` then uses ChatGPT's current selection for 30 minutes (`HELPER_MODEL_FALLBACK_MS`, logged), as for a model the account does not offer; every other helper send failure stays settled. |
 | API driver | OpenRouter-compatible default or explicit compatible endpoint/model/key. Supports bounded streamed progress and validated final decision. |
 | Goal templates | Offline explicit terminal-marker policy; only Goal supports this backend. Missing/ambiguous expected markers pause rather than infer completion from prose. |
 | Temporary planner | Captures a new workflow for the user in Temporary Chat. Shares temporary transport with decision helpers while retaining its staged-workflow role. |

@@ -3695,5 +3695,6 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "Chưa gửi: thẻ trình duyệt của cuộc trò chuyện mới này đã bị đóng hoặc bị mất. Hãy kiểm tra tin nhắn rồi gửi lại.",
   "Recovery stopped": "Đã dừng khôi phục",
   "Stopped after {0} attempts": "Đã dừng sau {0} lần thử",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Trình duyệt không nhận được bước đang chờ sau {0} lần tự tải lại. Mục nhập gốc trong hàng đợi hoặc nghĩa vụ Goal vẫn được lưu. CoS sẽ không tự tải lại cuộc trò chuyện này cho bước đó nữa; hãy mở cuộc trò chuyện và tiếp tục thủ công."
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "Trình duyệt không nhận được bước đang chờ sau {0} lần tự tải lại. Mục nhập gốc trong hàng đợi hoặc nghĩa vụ Goal vẫn được lưu. CoS sẽ không tự tải lại cuộc trò chuyện này cho bước đó nữa; hãy mở cuộc trò chuyện và tiếp tục thủ công.",
+  "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.": "Bộ chọn mô hình của ChatGPT không xác nhận mô hình của trợ lý. Goal sẽ hỏi lại với lựa chọn hiện tại của ChatGPT."
 }
