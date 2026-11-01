@@ -35,8 +35,13 @@ const shard = parseShard(process.env.VERIFY_UI_SHARD);
 if (process.env.VERIFY_UI_SHARD && !shard) { console.error(`VERIFY_UI_SHARD must look like 1/3, not "${process.env.VERIFY_UI_SHARD}"`); process.exit(2); }
 let weights = new Map();
 try { weights = readWeights(readFileSync(path.join(root, 'scripts', 'ui-check-weights.json'), 'utf8')); } catch { /* every check weighs the same */ }
-const plan = shard ? planShards(found, weights, shard.count) : null;
-const scripts = plan ? byWeight(found.filter(name => plan.get(name) === shard.index - 1), weights) : found;
+// Only the checks that run are planned: a skipped one would take a share of a shard's time while
+// running nowhere. The first shard names the skipped ones, once (CodeRabbit on #1983).
+const runnable = found.filter(name => !skip.has(name));
+const plan = shard ? planShards(runnable, weights, shard.count) : null;
+const scripts = plan
+  ? [...byWeight(runnable.filter(name => plan.get(name) === shard.index - 1), weights), ...(shard.index === 1 ? found.filter(name => skip.has(name)) : [])]
+  : found;
 if (shard) console.log(`UI checks shard ${shard.index} of ${shard.count}: ${scripts.length} of ${found.length} checks`);
 // CI runners are shared and uneven: a different check timed out on each run while all of them
 // passed on a real machine. With VERIFY_UI_RETRY a failed check runs once more; a pass on retry
