@@ -106,6 +106,22 @@ beforeEach(() => {
 });
 
 describe('OpenAI tunnel process ownership', () => {
+  it('gives the macOS client its live private temporary directory, and stops it before cleanup', async () => {
+    const platform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('missing', { status: 404 })));
+    try {
+      const handle = await startTunnel({ localUrl: 'http://127.0.0.1:1234/mcp/core/token', settings, apiKey: 'test', report: () => {} });
+      await vi.waitFor(() => expect(fixture.spawn).toHaveBeenCalledOnce());
+      const call = fixture.spawn.mock.calls[0] as unknown as [string, string[], { env: Record<string, string> }];
+      const healthFile = call[1][call[1].indexOf('--health.url-file') + 1]!;
+      expect(healthFile).toBe(`${call[2].env.TMPDIR}/health.url`);
+      await handle.stop();
+      expect(fixture.terminate).toHaveBeenCalledOnce();
+    } finally {
+      Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+    }
+  });
   // #1255: without this, a computer that reaches the internet through a system proxy could not
   // connect the tunnel unless the person set HTTPS_PROXY before starting the app.
   it('starts the tunnel program with the system proxy, and without one when there is none or the lookup fails', async () => {
