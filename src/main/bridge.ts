@@ -10030,19 +10030,21 @@ async function inspectOwedPickups(now: number, focus?: PickupFocus): Promise<boo
     // The session list's `recoveryStopped`, pushed as soon as the stop is recorded, whether or not
     // its last reload can still be queued. A queued input's stop already pushed with its outbox
     // write; a Goal reply's ledger has no push of its own.
-    if (watch.stoppedAt && !wasStopped) notifyChanged();
+    const justStopped = Boolean(watch.stoppedAt && !wasStopped);
+    if (justStopped) {
+      notifyChanged();
+      // The alert goes with the saved stop mark, once, also when this pass's reload cannot be queued
+      // (another repair holds the chat): later passes see the chat already stopped (CodeRabbit on #1979).
+      logWarn(`bridge: browser pickup recovery has not collected the step in ${reply.conversationId} after ${watch.attempts} reloads; ` +
+        `the chat shows as stopped, and the app keeps trying every 15 to 60 minutes`);
+      noticeChatStopped('Recovery slowed', "The browser has not picked up this chat's next step. The app keeps trying; you can go on from the chat at once.", reply.sessionId);
+    }
     if (!queueBrowserRecovery(reply.conversationId, reply.sessionId,
       `goal:${reply.replyId}:${watch.attempts}`, 'goal', 0, now)) continue;
     queued = true;
     if (focus?.conversationId === reply.conversationId && focus.replyId === reply.replyId) focus.started = 'retrying';
     logInfo(`bridge: next automation/input step uncollected in ${reply.conversationId} — reload ${watch.attempts}` +
       (wasStopped ? ' (slow retry)' : ''));
-    if (watch.stoppedAt && !wasStopped) {
-      logWarn(`bridge: browser pickup recovery has not collected the step in ${reply.conversationId} after ${watch.attempts} reloads; ` +
-        `the chat shows as stopped, and the app keeps trying every 15 to 60 minutes`);
-      // The alert: a desktop notice (and the phone, under its rules) once, when the quick tries run out.
-      noticeChatStopped('Recovery slowed', "The browser has not picked up this chat's next step. The app keeps trying; you can go on from the chat at once.", reply.sessionId);
-    }
   }
   return queued;
 }
