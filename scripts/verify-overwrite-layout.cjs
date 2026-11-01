@@ -109,7 +109,14 @@ app.whenReady().then(async () => {
       // The first plain argument; switches such as verify-ui's --lang=en-US are not a destination.
       // Electron can include this fixture's own script path before an explicit
       // screenshot destination. Exclude the script, not extensionless targets.
-      const destinationArg = process.argv.slice(2).find(arg => !arg.startsWith('--') && path.resolve(arg) !== __filename);
+      const scriptFile = fs.realpathSync(__filename);
+      const destinationArg = process.argv.slice(2).find(arg => {
+        if (arg.startsWith('--')) return false;
+        const candidate = path.resolve(arg);
+        if (candidate === __filename) return false;
+        try { return fs.realpathSync(candidate) !== scriptFile; }
+        catch { return true; } // A new screenshot destination does not exist yet.
+      });
       if (destinationArg && zoom === 1 && width === 800 && mode === 'open') {
         const destination = path.resolve(destinationArg); fs.mkdirSync(path.dirname(destination), { recursive: true });
         await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
