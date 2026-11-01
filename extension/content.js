@@ -4983,17 +4983,19 @@
             (previous.calls || []).some(seen => turn.calls.some(call => call.messageId === seen.messageId))));
         const witnessedSend = Boolean(newestUser?.id && openedUserMessageId === newestUser.id);
         if (advanced.length && generating && index === activeTurnIndex && (knownTurn || witnessedSend)) noteTurnProgress(turnId, 'page-call');
-        emit({
-          kind: 'tool_evidence',
-          ...(index === activeTurnIndex ? { turnId: activeLocalTurnId } : {}),
-          ...(turn.conversationId && !(
-            turn === ownedPageTurn &&
-            askedConversation &&
-            concreteConversation(turn.conversationId) &&
-            concreteConversation(turn.conversationId) !== askedConversation
-          ) ? { fiberConversationId: turn.conversationId } : {}),
-          calls: fresh
-        });
+        for (let offset = 0; offset < fresh.length; offset += 200) {
+          emit({
+            kind: 'tool_evidence',
+            ...(index === activeTurnIndex ? { turnId: activeLocalTurnId } : {}),
+            ...(turn.conversationId && !(
+              turn === ownedPageTurn &&
+              askedConversation &&
+              concreteConversation(turn.conversationId) &&
+              concreteConversation(turn.conversationId) !== askedConversation
+            ) ? { fiberConversationId: turn.conversationId } : {}),
+            calls: fresh.slice(offset, offset + 200)
+          });
+        }
       }
     }
     // What the settle window is waiting for, decided from the scan itself rather than from a
