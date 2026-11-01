@@ -44,7 +44,7 @@ app.whenReady().then(async () => {
     await import('/main.ts');
     window.fixtureReady=true;
   `;
-  const server = await createServer({configFile:false,root:path.join(root,'src/renderer'),
+  const server = await createServer({configFile:false,root:path.join(root,'src/renderer'),cacheDir:path.join(output,'vite'),
     server:{host:'127.0.0.1',port:0,fs:{allow:[root,fs.realpathSync(path.join(root,'node_modules'))]}},plugins:[{name:'shared-tunnel-fixture',configureServer(vite) {
       vite.middlewares.use('/fixture.html',async (_req,res)=>{
         // The page's one script tag, by its exact text: the fixture loads main.ts itself, after the API.
@@ -58,7 +58,7 @@ app.whenReady().then(async () => {
   let win;
   try {
     await server.listen();
-    win=new BrowserWindow({show:false,width:1100,height:900,webPreferences:{sandbox:true,backgroundThrottling:false}});
+    win=new BrowserWindow({show:process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1',width:1100,height:900,webPreferences:{sandbox:true,backgroundThrottling:false}});
     const js=code=>win.webContents.executeJavaScript(code);
     const frame=()=>js('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
     // The app applies its own theme setting, so each theme is its own page load.

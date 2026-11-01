@@ -28,6 +28,9 @@ const sh = WINDOWS ? {
 };
 const output = path.join(root, 'outputs/terminal-acceptance');
 fs.mkdirSync(output, { recursive: true });
+// A previous failed run can leave remembered terminal tabs behind. This fixture
+// must start from an empty synthetic Electron profile, not reopen those tabs.
+fs.rmSync(path.join(output, 'runtime'), { recursive: true, force: true });
 app.setPath('userData', path.join(output, 'runtime'));
 // Without a listener, destroying the only window quits Electron at once, before the cleanup below
 // can wait for the shell the check closed last. Its ConPTY exit then lands while Node tears down,
@@ -62,7 +65,7 @@ app.whenReady().then(async () => {
     });`);
   // A hidden window on Windows advances no animations, so the docks' slide-in never settles there
   // and a click is measured mid-drawer. Shown, it behaves like the app itself (2026-10-06, VM 141).
-  let win = new BrowserWindow({ show: WINDOWS, width: 1100, height: 800, webPreferences: { preload, sandbox: true, contextIsolation: true, backgroundThrottling: false } });
+  let win = new BrowserWindow({ show: WINDOWS || (process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1'), width: 1100, height: 800, webPreferences: { preload, sandbox: true, contextIsolation: true, backgroundThrottling: false } });
   backend.registerWorkspaceTerminalIpc(() => win);
   const fixture = `
     window.errors=[];window.addEventListener('error',e=>window.errors.push(e.message));window.addEventListener('unhandledrejection',e=>window.errors.push(String(e.reason)));
@@ -88,7 +91,7 @@ app.whenReady().then(async () => {
     window.docks=docks;
     const proto=crypto.randomUUID.bind(crypto);crypto.randomUUID=()=>{const id=proto();window.ids.push(id);return id;};
     window.ready=true;`;
-  const server = await createServer({ configFile: false, root: path.join(root, 'src/renderer'), server: { host: '127.0.0.1', port: 0 }, plugins: [{ name: 'terminal-fixture', configureServer(vite) {
+  const server = await createServer({ configFile: false, root: path.join(root, 'src/renderer'), cacheDir: path.join(output, 'vite'), server: { host: '127.0.0.1', port: 0 }, plugins: [{ name: 'terminal-fixture', configureServer(vite) {
     vite.middlewares.use('/fixture.html', async (_, response) => {
       const source = withoutScripts(fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')).replace('</body>', '<script type="module">' + fixture + '</script></body>');
       response.setHeader('Content-Type', 'text/html'); response.end(await vite.transformIndexHtml('/fixture.html', source));
@@ -103,7 +106,7 @@ app.whenReady().then(async () => {
     win.webContents.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button: 'left', clickCount: 1 });
     return point;
   };
-  const until = async expression => { const end = Date.now() + 15_000; while (Date.now() < end) { if (await js(expression)) return; await new Promise(resolve => setTimeout(resolve, 40)); } throw new Error('Timeout: ' + expression + ' ' + JSON.stringify(await js('({errors,outputs})'))); };
+  const until = async expression => { const end = Date.now() + 15_000; while (Date.now() < end) { if (await js(expression)) return; await new Promise(resolve => setTimeout(resolve, 40)); } throw new Error('Timeout: ' + expression + ' ' + JSON.stringify(await js('({errors,outputs,ids,tab:document.querySelector("#workspaceTerminal .terminal-tab")?.outerHTML})'))); };
   try {
     await server.listen(); await win.loadURL(server.resolvedUrls.local[0] + 'fixture.html'); await until('window.ready');
     await js("window.setTerminalProject(null);document.getElementById('terminalToggle').click()");

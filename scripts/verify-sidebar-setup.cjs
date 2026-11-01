@@ -68,7 +68,7 @@ app.whenReady().then(async () => {
   // actual icon assets outside this checkout; never publish a missing-glyph screenshot as proof.
   const iconFiles = ['@phosphor-icons/web/regular/Phosphor.woff2', '@phosphor-icons/web/fill/Phosphor-Fill.woff2']
     .map(file => fs.realpathSync(require.resolve(file)));
-  const server = await createServer({ configFile:false, root:path.join(root,'src/renderer'),
+  const server = await createServer({ configFile:false, root:path.join(root,'src/renderer'), cacheDir:path.join(output,'vite'),
     server:{host:'127.0.0.1',port:0,fs:{allow:[root,...iconFiles]}}, plugins:[{ name:'sidebar-fixture', configureServer(vite) {
       vite.middlewares.use('/fixture.html', async (_request,response) => {
         const source = withoutScripts(fs.readFileSync(path.join(root,'src/renderer/index.html'),'utf8')).replace('</body>', '<script type="module">'+fixture+'</script></body>');
@@ -78,7 +78,7 @@ app.whenReady().then(async () => {
   let win;
   try {
     await server.listen(); fs.mkdirSync(output,{recursive:true});
-    win = new BrowserWindow({show:false,width:1100,height:900,webPreferences:{sandbox:true,backgroundThrottling:false}});
+    win = new BrowserWindow({show:process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1',width:1100,height:900,webPreferences:{sandbox:true,backgroundThrottling:false}});
     await win.loadURL(server.resolvedUrls.local[0]+'fixture.html?reset=1');
     win.webContents.setZoomFactor(1);
     const js = code=>win.webContents.executeJavaScript(code);

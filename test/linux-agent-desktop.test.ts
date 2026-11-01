@@ -20,7 +20,9 @@ describe('Linux desktop subprocess boundary', () => {
     expect(() => linuxDesktopArgs({ kind: 'click', session: 'session-1', ref: '@e1' })).toThrow();
   });
 
-  it('retains backend delivery information even when the executable exits unsuccessfully', async () => {
+  // These fixtures are POSIX shell scripts. Win32 cannot execute a shebang;
+  // the adapter remains Linux-only at the MCP registration boundary.
+  it.skipIf(process.platform === 'win32')('retains backend delivery information even when the executable exits unsuccessfully', async () => {
     directory = await mkdtemp(join(tmpdir(), 'cos-linux-desktop-'));
     const binary = join(directory, 'backend');
     await writeFile(binary, '#!/bin/sh\nprintf \'%s\\n\' \'{"ok":false,"command":"click","error":{"code":"STALE_REF","disposition":{"delivery":"not_delivered","retry":"safe"}}}\'\nexit 1\n');
@@ -29,7 +31,7 @@ describe('Linux desktop subprocess boundary', () => {
     expect(result).toMatchObject({ ok: false, error: { code: 'STALE_REF', disposition: { retry: 'safe' } } });
   });
 
-  it('accepts only the verified Linux backend version', async () => {
+  it.skipIf(process.platform === 'win32')('accepts only the verified Linux backend version', async () => {
     directory = await mkdtemp(join(tmpdir(), 'cos-linux-desktop-'));
     const binary = join(directory, 'backend');
     await writeFile(binary, '#!/bin/sh\nprintf \'%s\\n\' \'{"ok":true,"command":"version","data":{"os":"linux","version":"1.0.2"}}\'\n');

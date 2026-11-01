@@ -56,7 +56,9 @@ const executable = [
     .flatMap(base => [path.join(base, 'Google/Chrome/Application/chrome.exe'), path.join(base, 'Microsoft/Edge/Application/msedge.exe')]),
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   '/Applications/Chromium.app/Contents/MacOS/Chromium',
-  '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser'
+  '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser',
+  // Ubuntu's Chromium package is installed as a snap on supported desktops.
+  '/snap/bin/chromium'
 ].find(candidate => candidate && fs.existsSync(candidate));
 assert(executable, 'No Chromium found; set COS_CHROME to a Chrome or Chromium executable.');
 const profile = path.join(output, 'profile');

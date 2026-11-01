@@ -372,6 +372,10 @@ function attachOverlay(win) {
         assert.equal(restored.data.visible, true);
         assert.equal(restored.data.activeCount, 1);
         assert.equal(win.isVisible(), true, 'The View visibility command must restore a dismissed active pet.');
+        // The IPC acknowledgement describes main-process state; the overlay
+        // renderer receives its restored snapshot asynchronously afterward.
+        await until(async () => await win.webContents.executeJavaScript(
+          'document.querySelectorAll(".pet-shell").length === 1'), 'restored pet rendered');
         assert.equal(await win.webContents.executeJavaScript('document.querySelectorAll(".pet-shell").length'), 1);
         const restoredRect = await win.webContents.executeJavaScript('document.querySelector(".pet-shell").getBoundingClientRect().toJSON()');
         assert.ok(Math.abs(restoredRect.x - 333) < 2 && Math.abs(restoredRect.y - 444) < 2,

@@ -59,7 +59,8 @@ app.whenReady().then(async () => {
     await import('/main.ts');
     window.fixtureReady=true;
   `;
-  const server = await createServer({ configFile: false, root: path.join(root, 'src/renderer'),
+  // Prevent shared Vite optimizer cache races with other renderer checks.
+  const server = await createServer({ configFile: false, root: path.join(root, 'src/renderer'), cacheDir: path.join(output, 'vite'),
     server: { host: '127.0.0.1', port: 0 }, plugins: [{ name: 'queue-fixture', configureServer(vite) {
       vite.middlewares.use('/fixture.html', async (_request, response) => {
         const source = withoutScripts(fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')).replace('</body>', '<script type="module">' + fixture + '</script></body>');
@@ -69,7 +70,10 @@ app.whenReady().then(async () => {
   let win;
   try {
     fs.mkdirSync(output, { recursive: true }); await server.listen();
-    win = new BrowserWindow({ show: false, width: 1100, height: 800, webPreferences: { sandbox: true, backgroundThrottling: false } });
+    // The fixture awaits many animation frames, which native Wayland does not
+    // deliver reliably to a hidden window. Map only in opt-in local UI tests.
+    const showLinuxFixture = process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1';
+    win = new BrowserWindow({ show: showLinuxFixture, width: 1100, height: 800, webPreferences: { sandbox: true, backgroundThrottling: false } });
     await win.loadURL(server.resolvedUrls.local[0] + 'fixture.html');
     const js = code => win.webContents.executeJavaScript(code);
     const wait = async condition => {

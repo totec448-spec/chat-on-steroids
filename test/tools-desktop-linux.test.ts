@@ -52,7 +52,9 @@ beforeEach(() => {
   testState.ask.mockResolvedValue(null); testState.version.mockResolvedValue(undefined);
 });
 
-describe('native Linux connector authorization', () => {
+// The production registrar deliberately does not expose Linux tools on
+// Windows/macOS. Exercise the Linux authorization logic only where registered.
+describe.runIf(process.platform === 'linux')('native Linux connector authorization', () => {
   it('requires separate opt-in even when browser screen/control are enabled', async () => {
     const {observe,act} = handlers(); testState.enabled = false;
     expect((await observe({what:'windows'})).content[0].text).toContain('LINUX_DESKTOP_DISABLED');
@@ -263,4 +265,14 @@ describe('native Linux connector authorization', () => {
     expect((await act({action:'click',ref:'@s123:e1'})).content[0].text).toContain('DESKTOP_TARGET_UNPROVEN');
     expect(testState.backend.mock.calls.filter(([arg]) => arg.kind === 'click')).toHaveLength(0);
   });
+});
+
+it.runIf(process.platform !== 'linux')('never registers Linux Desktop tools on non-Linux hosts', () => {
+  const entries: string[] = [];
+  registerLinuxDesktopTools({
+    ctx: { exposedLinuxDesktop: true }, exposedCaps: { screen: true, control: true },
+    register: (name: string) => { entries.push(name); },
+    guarded: async (_cap: string, _name: string, fn: () => Promise<unknown>) => fn()
+  } as never);
+  expect(entries).toEqual([]);
 });

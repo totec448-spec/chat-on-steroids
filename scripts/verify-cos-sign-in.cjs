@@ -124,6 +124,11 @@ async function loadHost(launched) {
 async function captureWindow(host, name) {
   // macOS grants window capture only with Screen Recording access, which CI runners lack.
   if (process.platform === 'darwin' && require('electron').systemPreferences.getMediaAccessStatus('screen') !== 'granted') return null;
+  // On GNOME Wayland, desktopCapturer invokes an independent ScreenCast portal
+  // permission prompt. Do not request a global capture as a side effect of this
+  // synthetic login test; UI interaction and in-page screenshots still run.
+  // The production consent path has its own explicit live acceptance checks.
+  if (process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1') return null;
   // This fixture's own window: another running app instance has windows with the same title.
   const ids = new Set([...host.frames.values()].map(frame => frame.base.getMediaSourceId()));
   await new Promise(resolve => setTimeout(resolve, 400));
@@ -266,7 +271,10 @@ app.whenReady().then(async () => {
     contextBridge.executeInMainWorld({ func: () => { globalThis.chrome = globalThis.__fixtureChrome; } });
   `);
   for (const locale of ['en', 'pt_BR']) {
-    const win = new BrowserWindow({ width: 364, height: 680, show: false,
+    // Wayland pauses frame delivery to hidden Chromium windows, including this
+    // local synthetic sign-in fixture. Map only in the opted-in Linux UI check.
+    const showLinuxFixture = process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1';
+    const win = new BrowserWindow({ width: 364, height: 680, show: showLinuxFixture,
       webPreferences: { preload, contextIsolation: true, sandbox: false, nodeIntegration: false, backgroundThrottling: false,
         partition: `cos-sign-in-ui-${locale}`, additionalArguments: [`--fixture-locale=${locale}`] } });
     win.webContents.on('preload-error', (_event, _file, error) => console.error(error.stack));

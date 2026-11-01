@@ -15,7 +15,7 @@ app.whenReady().then(async () => {
     .replace('<head>', `<head><base href="${pathToFileURL(path.join(root, 'out/renderer/')).href}">`);
   const fixture = path.join(output, 'fixture.html');
   fs.writeFileSync(fixture, html);
-  const win = new BrowserWindow({ show: false, width: 1000, height: 850, webPreferences: { sandbox: true } });
+  const win = new BrowserWindow({ show: process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1', width: 1000, height: 850, webPreferences: { sandbox: true } });
   try {
     await win.loadFile(fixture);
     const js = code => win.webContents.executeJavaScript(code);

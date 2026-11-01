@@ -45,7 +45,8 @@ app.whenReady().then(async () => {
     await import('/main.ts');
     window.fixtureReady=true;
   `;
-  const server = await createServer({configFile:false,root:path.join(root,'src/renderer'),
+  // Keep Vite's dependency optimizer isolated from other Electron UI fixtures.
+  const server = await createServer({configFile:false,root:path.join(root,'src/renderer'),cacheDir:path.join(output,'vite'),
     server:{host:'127.0.0.1',port:0},plugins:[{name:'disconnect-fixture',configureServer(vite) {
       vite.middlewares.use('/fixture.html',async (_req,res)=>{
         const html=withoutScripts(fs.readFileSync(path.join(root,'src/renderer/index.html'),'utf8'))
@@ -56,7 +57,10 @@ app.whenReady().then(async () => {
   let win;
   try {
     await server.listen();
-    win=new BrowserWindow({show:false,width:1100,height:800,webPreferences:{sandbox:true,backgroundThrottling:false}});
+    // requestAnimationFrame is suspended in a hidden native Wayland window;
+    // this opt-in run shows only the synthetic test fixture.
+    const showLinuxFixture = process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1';
+    win=new BrowserWindow({show:showLinuxFixture,width:1100,height:800,webPreferences:{sandbox:true,backgroundThrottling:false}});
     await win.loadURL(server.resolvedUrls.local[0]+'fixture.html');
     const js=code=>win.webContents.executeJavaScript(code);
     for(let i=0;i<100 && !(await js('!!window.fixtureReady'));i++) await new Promise(resolve=>setTimeout(resolve,25));

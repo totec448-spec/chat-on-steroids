@@ -17,7 +17,7 @@ app.whenReady().then(async () => {
   let server;
   const results = [];
   try {
-    win = new BrowserWindow({ show: false, width: 1500, height: 1000,
+    win = new BrowserWindow({ show: process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1', width: 1500, height: 1000,
       webPreferences: { sandbox: true, contextIsolation: true, backgroundThrottling: false } });
     await win.loadURL('data:text/html,' + encodeURIComponent('<h1>Project preview</h1><p>Local synthetic PDF fixture.</p>'));
     const pdf = await win.webContents.printToPDF({ pageSize: 'A5' });
@@ -102,7 +102,7 @@ app.whenReady().then(async () => {
         if(!view)throw new Error('Editor not ready');view.dispatch({changes:{from:0,to:view.state.doc.length,insert:text}});}};
       window.fixtureReady=true;
     `;
-    server = await createServer({ configFile: false, root: path.join(root, 'src/renderer'),
+    server = await createServer({ configFile: false, root: path.join(root, 'src/renderer'), cacheDir: path.join(output, 'vite'),
       server: { host: '127.0.0.1', port: 0 }, plugins: [{ name: 'pr-workspace-fixture', configureServer(vite) {
         vite.middlewares.use('/fixture.html', async (_request, response) => {
           const source = withoutScripts(fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8'))

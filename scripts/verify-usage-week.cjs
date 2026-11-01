@@ -34,7 +34,7 @@ app.whenReady().then(async () => {
     document.documentElement.dataset.theme='dark';
     window.fixtureReady=true;
   `;
-  const server = await createServer({ configFile: false, root: path.join(root, 'src/renderer'),
+  const server = await createServer({ configFile: false, root: path.join(root, 'src/renderer'), cacheDir: path.join(output, 'vite'),
     server: { host: '127.0.0.1', port: 0 }, plugins: [{ name: 'usage-week-fixture', configureServer(vite) {
       vite.middlewares.use('/fixture.html', async (_request, response) => {
         const source = withoutScripts(fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')).replace('</body>', '<script type="module">' + fixture + '</script></body>');
@@ -44,7 +44,7 @@ app.whenReady().then(async () => {
   let win;
   try {
     fs.mkdirSync(output, { recursive: true }); await server.listen();
-    win = new BrowserWindow({ show: false, width: 1040, height: 850, webPreferences: { sandbox: true, backgroundThrottling: false } });
+    win = new BrowserWindow({ show: process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1', width: 1040, height: 850, webPreferences: { sandbox: true, backgroundThrottling: false } });
     const js = source => win.webContents.executeJavaScript(source);
     await win.loadURL(server.resolvedUrls.local[0] + 'fixture.html');
     for (let i = 0; i < 100 && !await js('!!window.fixtureReady'); i++) await new Promise(resolve => setTimeout(resolve, 25));
