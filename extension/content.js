@@ -12215,8 +12215,14 @@
     if (boot.model || boot.reasoningEffort) step('model');
     // An announcement that opened over the picker refuses the choice; closing it earns one more try.
     const chooseModel = () => CLF_DOM.selectModelSettings(boot.model, boot.reasoningEffort, stillOnTarget);
-    if ((boot.model || boot.reasoningEffort) && !(await chooseModel()) &&
-        !((await closeAnnouncements(stillOnTarget)).length && stillOnTarget() && await chooseModel())) {
+    // Confirmed is what the picker proved; only that is ever reported as the chat's model.
+    const modelConfirmed = !!(boot.model || boot.reasoningEffort) && (await chooseModel() ||
+      ((await closeAnnouncements(stillOnTarget)).length > 0 && stillOnTarget() && await chooseModel()));
+    let mayGoOn = !(boot.model || boot.reasoningEffort) || modelConfirmed;
+    // A wake goes out on ChatGPT's current model rather than not at all: a worker that never wakes
+    // stops its whole run. The app logs which model it could not confirm (#1952).
+    if (!mayGoOn && boot.type === 'revive' && stillOnTarget()) { step('model-unconfirmed'); mayGoOn = true; }
+    if (!mayGoOn) {
       return void (await fail(t(
         'content_bootstrap_model_unavailable',
         'The requested model or reasoning is unavailable or could not be confirmed in ChatGPT'
@@ -12270,7 +12276,8 @@
       // Accepted Send owns the first turn even when no model was explicitly selected and no
       // further native mutation will wake a hidden document.
       observe();
-      if (!boot.model) return;
+      // A wake that went on without the picker's proof reports nothing (CodeRabbit on #1972).
+      if (!boot.model || !modelConfirmed) return;
       // The picker proved this selection before the new worker had a conversation.
       // Once Send supplies its identity, journal that proof through the ordinary
       // model-selection owner. The closed picker cannot rediscover it passively.
@@ -12284,6 +12291,14 @@
         'content_delivery_signed_out',
         'ChatGPT is not signed in in this browser. Sign in to ChatGPT there, then send again.'
       )));
+    }
+    // A wake types into the person's own chat: text or a file put in the box while the model was
+    // being chosen is theirs, so the wake waits for its next try (CodeRabbit on #1972).
+    if (boot.type === 'revive' && (!CLF_DOM.composerSubmitReady?.() || CLF_DOM.hasComposerAttachments?.())) {
+      return void (await fail(t(
+        'content_revival_draft_appeared',
+        'Something was typed in the chat while the worker\'s wake was getting ready, so the wake did not replace it.'
+      ), 'transient'));
     }
     let insertionFailure = '';
     step('inserting');

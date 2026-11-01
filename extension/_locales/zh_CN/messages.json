@@ -1216,5 +1216,8 @@
   },
   "content_task_waiting_app": {
     "message": "正在等待 Chat On Steroids 响应。"
+  },
+  "content_revival_draft_appeared": {
+    "message": "准备唤醒工作者时，对话中输入了内容，因此唤醒没有替换它。"
   }
 }
