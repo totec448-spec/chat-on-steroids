@@ -50,9 +50,17 @@ function dialog(title: string | (() => string)): { box: HTMLDialogElement; body:
   const body = el('div', 'plugin-dialog-body'); box.append(head, body);
   box.addEventListener('close', () => box.remove()); document.body.append(box); box.showModal(); return { box, body };
 }
-async function mutate(work: ReturnType<typeof window.api.pluginsSnapshot>, notify = true): Promise<boolean> {
+/**
+ * While no snapshot has arrived yet, the newest request ending without one decides what the page shows: a
+ * failed load says so, and a change that failed loads again rather than leaving "Loading…" for good. An older
+ * request says nothing (CodeRabbit on #2002).
+ */
+async function mutate(work: ReturnType<typeof window.api.pluginsSnapshot>, notify = true, load = false): Promise<boolean> {
   const own = ++epoch; const result = await run(work);
-  if (!result) return false;
+  if (!result) {
+    if (own === epoch && !pluginsLoaded) { if (load) { pluginsLoadFailed = true; renderInstalled(); } else void refreshPlugins(); }
+    return false;
+  }
   if (own === epoch) { snapshot = result; pluginsLoaded = true; pluginsLoadFailed = false; renderInstalled(); }
   if (notify) toast(t("Plugin settings saved. Refresh {0} in ChatGPT to update its tools.", [pluginsConnectorName()]));
   return true;
@@ -62,13 +70,8 @@ function pluginsConnectorName(): string {
   return appState?.status.surfaces.find(item => item.id === 'plugins')?.connectorName ?? 'Chat On Steroids Plugins';
 }
 export async function refreshPlugins(): Promise<void> {
-  const own = epoch + 1;
-  if (await mutate(window.api.pluginsSnapshot(), false)) return;
-  // A failed first load says so, not Loading… for good; Check local status tries again. A refresh that a
-  // newer one replaced says nothing: the newer one decides (CodeRabbit on #2002).
-  if (pluginsLoaded || own !== epoch) return;
-  pluginsLoadFailed = true;
-  renderInstalled();
+  // A failed first load says so, not Loading… for good; Check local status tries again.
+  await mutate(window.api.pluginsSnapshot(), false, true);
 }
 export function applyPluginsState(next: AppState): void {
   appState = next;
