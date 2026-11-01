@@ -100,8 +100,11 @@ const entrySchema = inputArgs.extend({
   /** Shared unfinished-response fallback belongs to this question in every mode. */
   /** An automatic Continue the app sent on as an ordinary message (`continueAsOrdinaryMessage`). */
   continuedFrom: z.literal('recovery').optional(),
-  /** A new chat's tab vanished before anything reached it, and a fresh one was opened this often (max 2). */
-  openingReopens: z.number().int().min(1).max(2).optional(),
+  /**
+   * A new chat's tab vanished before anything reached it, and a fresh one was opened this often (max 2).
+   * A damaged count reads as used up: it must never make the outbox unreadable, nor grant more tabs.
+   */
+  openingReopens: z.number().int().min(1).max(2).optional().catch(2),
   /** The question that Continue continues, still checked until it is sent (CodeRabbit on #1960). */
   continuesQuestionId: z.string().max(200).optional(),
   recovery: z.object({ questionId: z.string(), episode: z.string().max(200).optional(), pro: z.boolean(), busyUntil: z.number(), phase: z.enum(['ready', 'stopping', 'reloading', 'resumed']), reloadOwner: z.string().optional(),
