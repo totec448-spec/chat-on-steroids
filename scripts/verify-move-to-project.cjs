@@ -174,15 +174,21 @@ app.whenReady().then(async () => {
 
     // Dragging a chat onto a project row moves it there; the row lights up while it would take it.
     await js(`document.querySelector('[data-project-id="demo-project"] > summary').click()`);
-    // The window is only as tall as the screen (smaller on CI): the sidebar is scrolled so the middle
-    // of a drag sits in the middle of the window, away from the edges that scroll it during a drag.
+    // The window is only as tall as the screen (1024x656 on CI): the sidebar list is scrolled so the
+    // middle of a drag sits in the middle of the list's own visible area, below the fixed New chat /
+    // Plugins block and away from the edges that scroll it during a drag. Centring it in the window
+    // put the target under that block on CI, where the pointer could not reach it.
     const frame = (a, b) => js(`(() => { const one=document.querySelector('${a}').getBoundingClientRect(), two=document.querySelector('${b}').getBoundingClientRect();
-      const list=document.querySelector('${a}').closest('.scroll'); list.scrollTop += (one.top+two.top)/2 - innerHeight/2; })()`)
+      const list=document.querySelector('${a}').closest('.scroll'), view=list.getBoundingClientRect();
+      list.scrollTop += (one.top+two.top)/2 - (view.top+view.bottom)/2; })()`)
       .then(() => js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))'));
+    // Both ends inside the list's visible area, not merely inside the window.
+    const reachable = (sel, point) => js(`document.querySelector('${sel}').closest('.scroll').contains(document.elementFromPoint(${point.x}, ${point.y}))`);
     const at = sel => js(`(() => { const r=document.querySelector('${sel}').getBoundingClientRect(); return {x:Math.round(r.left+40),y:Math.round(r.top+r.height/2)}; })()`);
     await frame('[data-id="loose-0"] .sess-top', '[data-project-id="second-project"] > summary');
     const from = await at('[data-id="loose-0"] .sess-top'), onto = await at('[data-project-id="second-project"] > summary');
-    assert.ok(from.y < await js('innerHeight') - 40 && onto.y > 40, 'both ends of the drag are on screen: '+JSON.stringify({from,onto}));
+    assert.ok(await reachable('[data-id="loose-0"] .sess-top', from) && await reachable('[data-project-id="second-project"] > summary', onto),
+      'both ends of the drag are visible in the list: '+JSON.stringify({from,onto}));
     win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...from});
     await new Promise(r=>setTimeout(r,25));
     win.webContents.sendInputEvent({type:'mouseMove',x:from.x,y:from.y-12});
@@ -212,7 +218,8 @@ app.whenReady().then(async () => {
     await until(`document.querySelector('[data-project-id="demo-project"]').open`, 'project open again');
     await frame('[data-id="loose-0"] .sess-top', '[data-group-id="g-italian"] > summary');
     const chat = await at('[data-id="loose-0"] .sess-top'), group = await at('[data-group-id="g-italian"] > summary');
-    assert.ok(chat.y < await js('innerHeight') - 40 && group.y > 40, 'both ends of the drag are on screen: '+JSON.stringify({chat,group}));
+    assert.ok(await reachable('[data-id="loose-0"] .sess-top', chat) && await reachable('[data-group-id="g-italian"] > summary', group),
+      'both ends of the drag are visible in the list: '+JSON.stringify({chat,group}));
     win.webContents.sendInputEvent({type:'mouseDown',button:'left',clickCount:1,...chat});
     await new Promise(r=>setTimeout(r,25));
     win.webContents.sendInputEvent({type:'mouseMove',x:chat.x,y:chat.y-12});
