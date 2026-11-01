@@ -234,3 +234,26 @@ it('shows recommended skill descriptions in the interface language and finds the
     await vi.waitFor(() => expect([...w.document.querySelectorAll<HTMLElement>('[data-recommended-skill-id]')].map(item => item.dataset.recommendedSkillId)).toEqual(['code-review']));
   } finally { setLanguage('en'); }
 });
+
+// Design audit 2026-11-01: a failed first load kept saying "Loading…" for good.
+it('says the skills could not be loaded when the first load fails, and lists them after Refresh', async () => {
+  dom = new JSDOM(`<!doctype html><body>
+    <input id="skillsSearch"><button id="skillsRefresh"></button>
+    <button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <span id="skillsCount">Loading…</span><div id="skillsInstalled"></div><span id="skillsRecommendedCount"></span><div id="skillsRecommended"></div>
+  </body>`, { url: 'https://skills.test/' });
+  const w = dom.window;
+  for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement, HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
+  let fail = true;
+  const listManagedSkills = vi.fn(async () => fail ? { ok: false as const, error: 'Skill library unavailable' }
+    : { ok: true as const, data: [{ id: 'review', name: 'Review', description: 'Reviews code.', path: '/skills/review/SKILL.md', origin: null }] as ManagedSkill[] });
+  const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
+  initSkillsLibrary({ listManagedSkills, skillsCheckGithub: vi.fn(async () => ({ ok: true as const, data: [] })) } as any);
+  await vi.waitFor(() => expect(w.document.getElementById('skillsInstalled')!.textContent).toBe('Skills could not be loaded.'));
+  expect(w.document.getElementById('skillsCount')!.textContent).toBe('');
+  fail = false;
+  (w.document.getElementById('skillsRefresh') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(w.document.querySelectorAll('.skill-library-card')).toHaveLength(1));
+  expect(w.document.getElementById('skillsCount')!.textContent).toContain('1 skill');
+});
