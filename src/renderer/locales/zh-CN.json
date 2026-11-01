@@ -3695,5 +3695,6 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "未发送：此新聊天的浏览器标签页已关闭或丢失。请检查消息后重新发送。",
   "Recovery stopped": "恢复已停止",
   "Stopped after {0} attempts": "已尝试 {0} 次，已停止",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "浏览器自动重新加载 {0} 次后，仍未接收到待处理步骤。原队列输入或目标待处理项仍已保存。CoS 不会再为这一步自动重载此聊天；请打开聊天手动继续。"
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "浏览器自动重新加载 {0} 次后，仍未接收到待处理步骤。原队列输入或目标待处理项仍已保存。CoS 不会再为这一步自动重载此聊天；请打开聊天手动继续。",
+  "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.": "ChatGPT 的模型选择器未确认助手的模型。目标将使用 ChatGPT 当前的选择再次询问。"
 }

@@ -3857,5 +3857,6 @@
   "Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.": "No enviado: la pestaña del navegador de este chat nuevo se cerró o se perdió. Revisa el mensaje y vuelve a enviarlo.",
   "Recovery stopped": "Recuperación detenida",
   "Stopped after {0} attempts": "Detenido después de {0} intentos",
-  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "El navegador no recogió el paso pendiente tras {0} recargas automáticas. La entrada original de la cola o la tarea de Objetivo sigue guardada. CoS no volverá a recargar este chat automáticamente para este paso; ábrelo y continúa manualmente."
+  "The browser did not collect the pending step after {0} automatic reload attempts. Its original queued input or Goal obligation remains saved. CoS will not reload this chat for this step again; open the chat to continue manually.": "El navegador no recogió el paso pendiente tras {0} recargas automáticas. La entrada original de la cola o la tarea de Objetivo sigue guardada. CoS no volverá a recargar este chat automáticamente para este paso; ábrelo y continúa manualmente.",
+  "ChatGPT's picker did not confirm the helper's model. Goal asks again on ChatGPT's current selection.": "El selector de ChatGPT no confirmó el modelo del ayudante. Objetivo vuelve a preguntar con la selección actual de ChatGPT."
 }
