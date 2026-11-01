@@ -57,7 +57,11 @@ app.whenReady().then(async () => {
   let win;
   try {
     await server.listen(); fs.mkdirSync(output,{recursive:true});
-    win=new BrowserWindow({show:false,width:1180,height:760,webPreferences:{offscreen:true,sandbox:true}});
+    // Repeated pixel captures of a hidden offscreen window can stall under
+    // GNOME Wayland. Map only this synthetic fixture in explicit local UI mode.
+    const showLinuxFixture = process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1';
+    win=new BrowserWindow({show:showLinuxFixture,width:1180,height:760,
+      webPreferences:{offscreen:!showLinuxFixture,sandbox:true,backgroundThrottling:false}});
     const js=e=>win.webContents.executeJavaScript(e);
     const pause=ms=>new Promise(r=>setTimeout(r,ms));
     const until=async(expression,ms=6000)=>{const end=Date.now()+ms;while(Date.now()<end){if(await js(expression))return;await pause(40);}throw new Error('Timeout: '+expression);};

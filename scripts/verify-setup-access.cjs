@@ -42,7 +42,10 @@ app.whenReady().then(async () => {
     await import('/main.ts');
     window.fixtureReady=true;
   `;
+  // This synthetic inline module imports main.ts itself. Do not run a second
+  // eager HTML dependency scan while the browser requests the actual modules.
   const server = await createServer({configFile:false,root:path.join(root,'src/renderer'),cacheDir:path.join(output,'vite'),
+    optimizeDeps:{noDiscovery:true,include:[]},
     server:{host:'127.0.0.1',port:0},plugins:[{name:'setup-access-fixture',configureServer(vite) {
       vite.middlewares.use('/fixture.html',async (_req,res)=>{
         // The page's one script tag, by its exact text: the fixture loads main.ts itself, after the API.

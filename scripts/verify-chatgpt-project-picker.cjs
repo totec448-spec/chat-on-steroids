@@ -27,8 +27,15 @@ app.whenReady().then(async () => {
   const css = icons + fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8');
   const html = withoutScripts(fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')).replace(/<link\b[^>]*>/g, '')
     .replace('</head>', `<style>${css}</style></head>`);
-  const win = new BrowserWindow({ show: false, width: 1100, height: 760, webPreferences: { sandbox: true, offscreen: true, backgroundThrottling: false } });
-  await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
+  // Embedded icon fonts make the percent-encoded data: URL enormous and some
+  // Chromium runs reject it before the renderer even starts. Load the exact
+  // synthetic HTML from an isolated local file instead, with no network.
+  const fixtureHtml = path.join(output, 'fixture.html');
+  fs.writeFileSync(fixtureHtml, html);
+  const showLinuxFixture = process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1';
+  const win = new BrowserWindow({ show: showLinuxFixture, width: 1100, height: 760,
+    webPreferences: { sandbox: true, offscreen: !showLinuxFixture, backgroundThrottling: false } });
+  await win.loadFile(fixtureHtml);
   win.webContents.on('console-message', (_e, _l, message) => { if (/error|Error/.test(message)) console.error('renderer:', message); });
   await win.webContents.executeJavaScript(code);
   await win.webContents.executeJavaScript('picker.initLanguage(); true');
