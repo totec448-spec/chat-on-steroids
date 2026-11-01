@@ -457,10 +457,24 @@ async function get(url: string, timeout: number | AbortSignal, headers: Record<s
  */
 async function download(version: string, name: string, expected: string): Promise<string> {
   const dir = stagingDir(version);
+  // Removing the whole cache used to unlink these entries before writing. Preserve
+  // that destination boundary without following a relocated root/version directory.
+  for (const directory of [path.dirname(dir), dir]) {
+    const entry = await lstat(directory).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') return null;
+      throw err;
+    });
+    if (entry && (!entry.isDirectory() || entry.isSymbolicLink())) {
+      throw new Error('the update staging path must use ordinary directories');
+    }
+  }
   // Keep the previous verified download and handoff note until a successor is verified.
   // An interrupted transfer owns only this version's .part file, never the entire cache.
   await mkdir(dir, { recursive: true });
   const file = path.join(dir, name);
+  // Start with a fresh inode: truncating an existing .part could follow a file link.
+  // Non-recursive removal never erases an unexpected directory stored at this name.
+  await rm(`${file}.part`, { force: true });
   // Stopped when the connection goes quiet, not when the file is simply large for the line.
   const quiet = new AbortController();
   const stalled = new Error(`downloading ${name} stopped: no data for ${DOWNLOAD_STALL_MS / 1000} seconds`);
@@ -471,7 +485,7 @@ async function download(version: string, name: string, expected: string): Promis
     if (!response.body) throw new Error(`downloading ${name} returned no content`);
     const body = Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]);
     body.on('data', (chunk: Buffer) => { hash.update(chunk); watch.refresh(); });
-    await pipeline(body, createWriteStream(`${file}.part`), { signal: quiet.signal });
+    await pipeline(body, createWriteStream(`${file}.part`, { flags: 'wx' }), { signal: quiet.signal });
   } catch (err) {
     throw quiet.signal.aborted ? stalled : err;
   } finally {
