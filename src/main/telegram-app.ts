@@ -4,24 +4,32 @@
  */
 import { readDurable, writeDurableNow } from './durable.js';
 import { clearSecret, getSecret, setSecret } from './secrets.js';
-import { createTelegram, isTelegramToken, type TelegramLink, type TelegramText, type TelegramView } from './telegram.js';
+import { createTelegram, isTelegramToken, type ChatAction, type TelegramLink, type TelegramText, type TelegramView } from './telegram.js';
 import { telegramStatus, type StatusChat, type StatusText } from './telegram-status.js';
 import type { MainText } from '../shared/main-texts.js';
 
 const LINK_STATE = 'telegram-link';
+/** Chats whose Goal or Loop `/pause` turned off: only these may `/resume` (2026-10-31). */
+const PAUSED_STATE = 'telegram-paused';
 
 export interface TelegramAppDeps {
   fetch(url: string, init: { method: string; body: string; headers: Record<string, string>; signal?: AbortSignal }): Promise<{ status: number; json(): Promise<unknown> }>;
   log(line: string): void;
   mainText(source: MainText): string;
-  /** What the person's chats are doing, for `/status`. */
-  chats(): Promise<StatusChat[]>;
+  /** What the person's chats are doing, for `/status` and for what `/stop`, `/pause`, `/resume` can mean. */
+  chats(): Promise<Array<StatusChat & { sessionId: string }>>;
   details(): boolean;
   deny(sessionId: string, cardId: string): Promise<'denied' | 'already' | 'failed'>;
+  /** The app's Stop on the chat's running turn; `nothing` when none runs. */
+  stop(sessionId: string): Promise<'done' | 'nothing' | 'failed'>;
+  /** Goal or Loop off (keeping which), or back on as it was. False when the chat has no ChatGPT chat. */
+  setAutomation(sessionId: string, on: boolean): Promise<boolean>;
+  steer(sessionId: string, text: string): Promise<'sent' | 'queued' | 'off' | 'refused' | 'failed'>;
 }
 
 let bot: ReturnType<typeof createTelegram> | null = null;
 let link: TelegramLink | null = null;
+let paused = new Set<string>();
 let appDeps: TelegramAppDeps | null = null;
 const listeners = new Set<() => void>();
 
@@ -39,6 +47,9 @@ function validLink(raw: unknown): TelegramLink | null {
 export async function startTelegram(deps: TelegramAppDeps): Promise<void> {
   appDeps = deps;
   link = validLink(await readDurable<unknown>(LINK_STATE).catch(() => null));
+  const savedPaused = await readDurable<unknown>(PAUSED_STATE).catch(() => null);
+  paused = new Set(Array.isArray(savedPaused) ? savedPaused.filter((id): id is string => typeof id === 'string' && id.length <= 200).slice(-200) : []);
+  const savePaused = (next: Set<string>) => writeDurableNow(PAUSED_STATE, [...next]).then(() => { paused = next; });
   bot = createTelegram({
     token: () => getSecret('telegramBotToken'),
     link: () => link,
@@ -59,6 +70,29 @@ export async function startTelegram(deps: TelegramAppDeps): Promise<void> {
     status: async details => telegramStatus(await deps.chats(), details, (source: StatusText, values) => fill(deps.mainText(source), values)),
     details: deps.details,
     deny: deps.deny,
+    targets: async (action: ChatAction) => (await deps.chats()).filter(chat =>
+      action === 'stop' ? chat.working : action === 'pause' ? chat.automation !== null : paused.has(chat.sessionId) && chat.automation === null)
+      .map(chat => ({ sessionId: chat.sessionId })),
+    act: async (action: ChatAction, sessionId: string) => {
+      if (action === 'stop') return deps.stop(sessionId);
+      const chat = (await deps.chats()).find(row => row.sessionId === sessionId);
+      if (!chat) return 'nothing';
+      if (action === 'pause') {
+        if (chat.automation === null) return 'nothing';
+        // Saved first: a pause /resume cannot find again would leave the chat off for good.
+        await savePaused(new Set([...paused, sessionId]));
+        return await deps.setAutomation(sessionId, false) ? 'done' : 'failed';
+      }
+      // Turned back on in the app meanwhile, or never paused from here: nothing to resume.
+      if (!paused.has(sessionId) || chat.automation !== null) {
+        if (paused.has(sessionId)) await savePaused(new Set([...paused].filter(id => id !== sessionId)));
+        return 'nothing';
+      }
+      if (!await deps.setAutomation(sessionId, true)) return 'failed';
+      await savePaused(new Set([...paused].filter(id => id !== sessionId)));
+      return 'done';
+    },
+    steer: deps.steer,
     text: (source: TelegramText, values) => fill(deps.mainText(source), values),
     changed: () => { for (const listener of listeners) listener(); },
     sleep: (ms, signal) => new Promise((resolve, reject) => {
@@ -105,7 +139,7 @@ export async function disconnectTelegram(): Promise<void> {
 }
 
 /** The linked bot as a phone notification destination, or null. */
-export function telegramDestination(): { send(text: string, approval?: { sessionId: string; cardId: string }): Promise<boolean> } | null {
+export function telegramDestination(): { send(text: string, about?: { sessionId?: string; cardId?: string }): Promise<boolean> } | null {
   return bot && link ? bot : null;
 }
 
@@ -118,4 +152,4 @@ export async function testTelegram(): Promise<void> {
   appDeps.log('telegram: test sent');
 }
 
-export function resetTelegramForTests(): void { bot?.stop(); bot = null; link = null; appDeps = null; listeners.clear(); }
+export function resetTelegramForTests(): void { bot?.stop(); bot = null; link = null; paused = new Set(); appDeps = null; listeners.clear(); }

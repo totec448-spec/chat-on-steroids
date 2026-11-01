@@ -44,7 +44,7 @@ export interface PhonePushDeps {
   post(url: string, body: string, headers: Record<string, string>): Promise<{ ok: boolean; status: number }>;
   log(line: string): void;
   /** The linked Telegram bot (#1934), when there is one: a second destination under the same rules. */
-  telegram?(): { send(text: string, approval?: { sessionId: string; cardId: string }): Promise<boolean> } | null;
+  telegram?(): { send(text: string, about?: { sessionId?: string; cardId?: string }): Promise<boolean> } | null;
 }
 
 const TOPIC = /^[-_A-Za-z0-9]{1,64}$/;
@@ -168,7 +168,10 @@ export function createPhonePush(deps: PhonePushDeps) {
       })() : Promise.resolve(null);
       const viaTelegram = telegram ? (async () => {
         const text = [shown.title === 'Chat On Steroids' ? '' : shown.title, shown.message, shown.click ?? ''].filter(Boolean).join('\n');
-        const sent = await telegram.send(text, event.kind === 'needs-you' ? event.approval : undefined).catch(() => false);
+        // About which chat, so a reply acts on it; Deny under an approval (#1934, phase 2 2026-10-31).
+        const approval = event.kind === 'needs-you' ? event.approval : undefined;
+        const sessionId = approval?.sessionId ?? event.sessionId;
+        const sent = await telegram.send(text, sessionId ? { sessionId, ...(approval ? { cardId: approval.cardId } : {}) } : undefined).catch(() => false);
         deps.log(sent ? `phone push: sent "${name}" to Telegram${event.approval && event.kind === 'needs-you' ? ' with Deny' : ''}` : `phone push: "${name}" did not reach Telegram`);
         return sent;
       })() : Promise.resolve(null);
