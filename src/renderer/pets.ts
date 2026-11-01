@@ -210,11 +210,12 @@ export function initPets(api: AppApi, runtime: PetController): void {
   initCardMenuDismissal();
   let state: PetLibraryState = { pets: [] };
   let epoch = 0;
+  let loaded = false;
 
   $('petsFormatInstructions').textContent = PET_FORMAT_INSTRUCTIONS;
 
   const apply = (next: PetLibraryState): void => {
-    state = next; runtime.applyLibraryState(next); render();
+    state = next; loaded = true; runtime.applyLibraryState(next); render();
   };
   const mutate = async (request: ReturnType<AppApi['petsList']>): Promise<boolean> => {
     const own = ++epoch; const next = await run(request);
@@ -277,5 +278,10 @@ export function initPets(api: AppApi, runtime: PetController): void {
   void (async () => {
     const next = await run(api.petsList());
     if (next) apply(next);
+    else if (!loaded) {
+      // A failed first load says so, not Loading… for good.
+      $('petsCount').textContent = '';
+      $('petsInstalled').replaceChildren(el('p', 'plugin-no-results muted', () => t('Pets could not be loaded.')));
+    }
   })();
 }

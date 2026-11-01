@@ -8,6 +8,8 @@ export function initSkillsLibrary(api: AppApi): () => void {
   initCardMenuDismissal();
   let skills: ManagedSkill[] = [];
   let epoch = 0;
+  // Until a list arrives the header says Loading…; a failed first load says so instead of loading for good.
+  let loaded = false;
   const checks = new Map<string, GitHubSkillUpdateCheck>();
   const checking = new Set<string>();
   let linkTarget: ManagedSkill | null = null;
@@ -135,7 +137,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
   };
 
   const setSkills = (next: ManagedSkill[]): void => {
-    skills = next;
+    skills = next; loaded = true;
     for (const [id, check] of checks) {
       if (skills.find(skill => skill.id === id)?.origin?.revision !== check.originRevision) checks.delete(id);
     }
@@ -273,8 +275,16 @@ export function initSkillsLibrary(api: AppApi): () => void {
   };
 
   $('skillsSearch').addEventListener('input', render);
+  const loadList = async (): Promise<boolean> => {
+    if (await update(api.listManagedSkills())) return true;
+    if (!loaded) {
+      $('skillsCount').textContent = '';
+      $('skillsInstalled').replaceChildren(el('p', 'plugin-no-results muted', () => t('Skills could not be loaded.')));
+    }
+    return false;
+  };
   const refresh = (force: boolean): void => {
-    void (async () => { if (await update(api.listManagedSkills())) await checkUpdates(force); })();
+    void (async () => { if (await loadList()) await checkUpdates(force); })();
   };
   $('skillsRefresh').addEventListener('click', () => refresh(true));
   for (const [id, kind] of [['skillsImportFolder', 'folder'], ['skillsImportFile', 'file']] as const) {
@@ -346,7 +356,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
       ui(githubSubmit, 'textContent', () => t(linkTarget ? 'Link source' : 'Import skill'));
     }
   })());
-  void update(api.listManagedSkills());
+  void loadList();
   if (typeof api.listRecommendedSkills === 'function') void run(api.listRecommendedSkills()).then(list => { if (list) { recommended = list; renderRecommended(); } });
   return () => refresh(false);
 }

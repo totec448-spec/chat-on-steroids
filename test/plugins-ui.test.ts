@@ -416,3 +416,19 @@ it('asks before uninstalling like removing a skill: Cancel first and focused, th
   [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog .pet-delete-actions button')].find(node => node.textContent === 'Uninstall plugin')!.click(); await tick();
   expect(api.pluginsUninstall).toHaveBeenCalledExactlyOnceWith('one');
 });
+
+// Design audit 2026-11-01: a failed first load kept saying "Loading…" for good.
+it('says the plugins could not be loaded when the first load fails, and lists them once a retry works', async () => {
+  vi.resetModules();
+  const fresh = await import('../src/renderer/plugins.js');
+  api.pluginsSnapshot!.mockImplementationOnce(async () => ({ ok: false, error: 'Plugin store unavailable' }));
+  await fresh.refreshPlugins();
+  expect(document.getElementById('pluginsCount')!.textContent).toBe('');
+  expect(document.getElementById('pluginsInstalled')!.textContent).toBe('Plugins could not be loaded.');
+  await fresh.refreshPlugins();
+  expect(document.querySelectorAll('#pluginsInstalled .plugin-card')).toHaveLength(1);
+  // Once a list has shown, a later failed refresh keeps it and only says so in the toast.
+  api.pluginsSnapshot!.mockImplementationOnce(async () => ({ ok: false, error: 'Plugin store unavailable' }));
+  await fresh.refreshPlugins();
+  expect(document.querySelectorAll('#pluginsInstalled .plugin-card')).toHaveLength(1);
+});
