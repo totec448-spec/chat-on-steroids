@@ -8507,6 +8507,9 @@ export async function pickupNow(sessionId: string, shown: { next: string; stoppe
   const current = (await sessionRecoveryCountdowns(sessionId, conversationId)).find(row => row.kind === 'pickup-stopped');
   if (!current || current.next !== shown.next || current.deadline !== shown.stoppedAt)
     return refuse('changed', `the stopped step shown (${shown.next}, stopped ${new Date(shown.stoppedAt).toISOString()}) is no longer the one waiting in ${conversationId}`);
+  // A history limit can arrive while the reads above ran: nothing is tried inside it (CodeRabbit on #1979).
+  const limitedLate = providerHistoryBackoff(conversationId, Date.now());
+  if (limitedLate !== null) return refuse('history-limit', `ChatGPT began limiting ${conversationId}'s history meanwhile`);
   if (owed.queued && owed.inputId && shown.next === 'continue') {
     const outcome = await continueAsOrdinaryMessage(owed.inputId, 'the person asked to continue now');
     if ('row' in outcome) {
@@ -9875,6 +9878,9 @@ async function inspectOwedPickups(now: number, focus?: PickupFocus): Promise<boo
           ? { stoppedAt: reply.pickupStoppedAt ?? reply.acceptedAt } : {}) };
       pickupWatch.set(reply.conversationId, watch);
     }
+    // The person's click is due now, also for a watch this pass just made again after a restart
+    // (CodeRabbit on #1979).
+    if (focus?.conversationId === reply.conversationId) watch.dueAt = Math.min(watch.dueAt, now);
     // An automatic Continue nothing took for long becomes an ordinary message rather than another
     // reload or a stop: the chat must not stop while it is unfinished (user decision 2026-10-31).
     // Checked between reloads and after a stop too; the conversion itself refuses while anything newer
@@ -10285,6 +10291,8 @@ function retireSpentRepairs(): void {
 let rotationHoldMs = 15_000;
 /** Test seam. */
 export function setRotationHoldForTests(ms: number): void { rotationHoldMs = ms; }
+/** What a restart loses of the pickup schedule: the in-memory watches; the saved attempts stay. */
+export function forgetPickupWatchesForTests(): void { pickupWatch.clear(); }
 /**
  * Stops the 30-second maintenance timer. For tests that move a mocked Date.now by minutes on real
  * timers: a real tick landing between two of their steps measures that jump as the computer
