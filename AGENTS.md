@@ -6070,8 +6070,19 @@ insufficient. A dirty-tree snapshot request does not authorize exposing all loca
 
 `update.ts` checks immediately and every six hours with one in-flight pass; opening Settings (`update:refresh`) checks again when the last answer is over ten minutes old. Download to a
 partial file, verify SHA-256 before staging/adoption, and rehash at ordinary quit before handing
-off. Windows NSIS/Linux AppImage can apply automatically; macOS/DEB present the supported manual
-path, development does not stage. Explicit install may relaunch; ordinary quit does not force
+off. Windows NSIS/Linux AppImage can apply automatically; DEB and ad-hoc/read-only Mac
+installations stay manual, and development does not stage. `mac-update.ts` probes packaged Mac
+eligibility once: writable bundle parent, valid CoS Developer ID signature and Gatekeeper
+assessment. For eligible Macs, Electron/Squirrel receives the selected public ZIP URL and its
+published SHA-256 through a transient loopback feed, and owns download, digest/signature
+verification and atomic replacement. A verified native candidate stays selected until quit;
+ordinary termination installs without relaunch. Explicit Install transfers final exit to
+`finishNativeUpdateQuit` only after every shutdown phase and the final log flush; native quit
+re-entry sees `shutdownComplete`. A failed relaunch logs and exits, with the existing handoff
+receipt reporting an uninstalled version next start. The first signed release still needs a
+manual installation; no release signing or permission continuity is implied by this runtime
+path. `mac-update.test.ts` and `update.test.ts` cover eligibility, feed lifetime, native failures
+and explicit versus ordinary quit. Explicit install may relaunch; ordinary quit does not force
 relaunch. Failed checks never replace a verified staged candidate with unverified bytes.
 The updater classifies its own `TypeError('fetch failed')` as `GitHub could not be reached`,
 retaining the original diagnostic in its warning log. The card, update banners and retained

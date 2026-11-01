@@ -27,9 +27,9 @@
  * asking for a password during quit is not something this app will do — so a `.deb` install is
  * *told* a new version exists and is given the release page, and nothing is downloaded behind
  * it. That is a real limitation, not parity, and the notice says so rather than implying an
- * update is on its way. macOS is out entirely: those artifacts ship unsigned and unnotarized
- * (see electron-builder.yml), so an app that silently replaced itself there would be handing
- * Gatekeeper a binary the user never chose to trust.
+ * update is on its way. Ad-hoc Mac installations also stay manual. Writable Developer ID
+ * installations assessed by Gatekeeper delegate their ZIP download and same-signer atomic
+ * replacement to Electron/Squirrel; its candidate remains selected until termination.
  *
  * What this module does **not** own: the version of the browser extension. The bridge already
  * learns that from the authenticated `x-extension-version` header of a paired extension, and
@@ -48,6 +48,7 @@ import { app } from 'electron';
 import { logInfo, logWarn } from './logger.js';
 import { APP_VERSION } from './version.js';
 import { isNewer, type UpdateStatus } from '../shared/types.js';
+import { canUpdateMac, restartForMacUpdate, stageMacUpdate } from './mac-update.js';
 
 const REPO = 'totec448-spec/chat-on-steroids';
 const LATEST_RELEASE_API = `https://api.github.com/repos/${REPO}/releases/latest`;
@@ -79,7 +80,8 @@ export const STALE_CHECK_MS = 10 * 60_000;
 /**
  * The artifact this exact installation can apply to itself, or null for one that cannot.
  *
- * Null is a normal answer, not a failure: macOS is out by policy, a Linux `.deb` belongs to the
+ * Null is a normal answer, not a failure: Mac eligibility has a separate native signing probe;
+ * a Linux `.deb` belongs to the
  * system package manager and would need root to replace, and an architecture with no published
  * artifact has nothing to fetch. Those installations are still told a newer version exists —
  * that is what `latest` with a stage of `idle` means, and the notice turns it into a download
@@ -112,7 +114,7 @@ export function stagedArtifact(
 /**
  * The published file an installation that cannot update itself should download, or null.
  *
- * macOS and a Linux `.deb` are told about a release but never replaced from here (see above).
+ * Manual Mac installations and a Linux `.deb` are given a direct download (see above).
  * Pointing their "Get update" at the exact file for this machine, instead of the release page,
  * saves the search for the right one of thirteen assets. The download still happens in the
  * user's browser, so macOS applies its normal quarantine and Gatekeeper checks to it.
@@ -145,7 +147,9 @@ export function releaseVersion(tag: unknown): string | null {
 const CLEAR: UpdateStatus = { current: APP_VERSION, latest: null, stage: 'idle', error: null, checkedAt: null };
 
 let status: UpdateStatus = CLEAR;
-let staged: { version: string; file: string; kind: 'installer' | 'appimage'; target: string; digest: string } | null = null;
+let staged: { version: string; file: string; kind: 'installer' | 'appimage'; target: string; digest: string }
+  | { version: string; kind: 'mac' } | null = null;
+let nativeRestart = false;
 let pass: Promise<void> | null = null;
 /** Set by `markInstallOnQuit`: the user pressed Install, so bring the app back afterwards. */
 let runAfterInstall = false;
@@ -250,6 +254,13 @@ export function checkForUpdates(): Promise<void> {
 }
 
 async function runPass(): Promise<void> {
+  // Squirrel owns an accepted candidate until termination. Do not reset that owner or
+  // advertise a different release while the OS already has a verified pending update.
+  if (staged?.kind === 'mac') {
+    logInfo(`update: native Mac update ${staged.version} already awaits quit; keeping that candidate`);
+    set({ latest: staged.version, stage: 'ready', error: null });
+    return;
+  }
   set({ stage: 'checking', error: null });
   const release = { version: await latestVersion() };
   // GitHub answered. From here the UI can tell "current" from "not asked yet", whatever the
@@ -264,6 +275,17 @@ async function runPass(): Promise<void> {
     return;
   }
   logInfo(`update: ${release.version} is available; this app is ${APP_VERSION}`);
+  if (await canUpdateMac()) {
+    const name = `Chat-On-Steroids-macOS-${process.arch}.zip`;
+    const digest = (await releaseDigests(release.version)).get(name);
+    if (!digest) throw new Error(`release ${release.version} publishes no ${name}`);
+    set({ latest: release.version, stage: 'downloading' });
+    await stageMacUpdate(release.version, assetUrl(release.version, name), digest);
+    staged = { version: release.version, kind: 'mac' };
+    set({ stage: 'ready' });
+    logInfo(`update: native Mac update ${release.version} passed download and signing verification; ready on quit`);
+    return;
+  }
   const artifact = stagedArtifact();
   // `latest` and what is being done about it are set in one go. Published separately, the
   // renderer would paint one frame of "a new version exists, and this install updates by
@@ -566,8 +588,14 @@ export async function applyStagedUpdate(): Promise<void> {
   runAfterInstall = false;
   if (!ready) return;
   try {
-    if ((await fileDigest(ready.file)) !== ready.digest) throw new Error('the staged artifact changed after verification');
-    if (ready.kind === 'installer') {
+    if (ready.kind !== 'mac' && (await fileDigest(ready.file)) !== ready.digest) throw new Error('the staged artifact changed after verification');
+    if (ready.kind === 'mac') {
+      // Squirrel applies on termination. Only an explicit Install asks it to reopen the app.
+      await mkdir(path.dirname(handoffNote()), { recursive: true });
+      await writeFile(handoffNote(), JSON.stringify({ version: ready.version, at: Date.now() }));
+      nativeRestart = relaunch;
+      handoffStep('installer');
+    } else if (ready.kind === 'installer') {
       // `--updated` tells the assisted NSIS installer this is an upgrade of the install it
       // already owns, so it keeps the location and the shortcuts instead of asking about them.
       // `--force-run` is added only when the user pressed Install and is waiting for the app to
@@ -618,6 +646,14 @@ export async function applyStagedUpdate(): Promise<void> {
   }
 }
 
+/** True transfers final process exit to Squirrel, after the app has fully drained and flushed. */
+export function finishNativeUpdateQuit(): boolean {
+  if (!nativeRestart) return false;
+  nativeRestart = false;
+  try { restartForMacUpdate(); return true; }
+  catch (err) { logWarn(`update: native restart did not start: ${(err as Error).message}`); return false; }
+}
+
 /** Test seam: forgets the pass, the staged file and everything reported about them. */
 export function resetUpdateForTests(): void {
   installFolderAccess = probeInstallFolder;
@@ -625,6 +661,7 @@ export function resetUpdateForTests(): void {
   staged = null;
   pass = null;
   runAfterInstall = false;
+  nativeRestart = false;
   listeners.clear();
   if (recheck) clearInterval(recheck);
   if (retry) clearTimeout(retry);

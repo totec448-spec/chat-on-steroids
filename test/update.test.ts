@@ -47,6 +47,12 @@ vi.mock('node:child_process', () => ({
 let userData = '';
 let packaged = true;
 const relaunched: Array<{ execPath?: string }> = [];
+const mac = vi.hoisted(() => ({ eligible: false, stage: vi.fn(), restart: vi.fn() }));
+vi.mock('../src/main/mac-update.js', () => ({
+  canUpdateMac: async () => mac.eligible,
+  stageMacUpdate: mac.stage,
+  restartForMacUpdate: mac.restart
+}));
 vi.mock('electron', () => ({
   app: {
     getPath: () => userData,
@@ -65,6 +71,7 @@ const {
   applyStagedUpdate,
   checkForUpdates,
   checkForUpdatesIfStale,
+  finishNativeUpdateQuit,
   installingVersion,
   manualDownloadName,
   manualDownloadUrl,
@@ -151,6 +158,9 @@ async function asPlatform(platform: string, appImage: string | undefined, run: (
 beforeEach(() => {
   userData = mkdtempSync(path.join(tmpdir(), 'cos-update-'));
   packaged = true;
+  mac.eligible = false;
+  mac.stage.mockReset().mockResolvedValue(undefined);
+  mac.restart.mockReset();
   spawned.length = 0;
   spawnOptions.length = 0;
   elevation.exitCode = 0;
@@ -181,6 +191,41 @@ describe('the file Get update opens for an installation that cannot update itsel
     expect(manualDownloadUrl(null, 'Chat-On-Steroids-macOS-arm64.dmg')).toBe('https://github.com/totec448-spec/chat-on-steroids/releases/latest');
     expect(manualDownloadUrl('2.1.17', null)).toBe('https://github.com/totec448-spec/chat-on-steroids/releases/latest');
     expect(manualDownloadUrl('../evil', 'x.dmg')).toBe('https://github.com/totec448-spec/chat-on-steroids/releases/latest');
+  });
+});
+
+describe('native signed Mac update handoff', () => {
+  it('pins the published ZIP digest and keeps the verified native candidate until quit', async () => {
+    mac.eligible = true;
+    const name = `Chat-On-Steroids-macOS-${process.arch}.zip`;
+    const { asked } = github({ checksums: `${'a'.repeat(64)}  ${name}\n` });
+    await asPlatform('darwin', undefined, () => checkForUpdates());
+    expect(updateStatus()).toMatchObject({ stage: 'ready', latest: NEXT });
+    expect(mac.stage).toHaveBeenCalledExactlyOnceWith(NEXT,
+      `https://github.com/totec448-spec/chat-on-steroids/releases/download/v${NEXT}/${name}`, 'a'.repeat(64));
+    await checkForUpdates();
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt']);
+    expect(markInstallOnQuit(NEXT)).toBe(true);
+    await applyStagedUpdate();
+    expect(mac.restart).not.toHaveBeenCalled();
+    expect(finishNativeUpdateQuit()).toBe(true);
+    expect(finishNativeUpdateQuit()).toBe(false);
+    expect(mac.restart).toHaveBeenCalledOnce();
+    expect(JSON.parse(readFileSync(path.join(userData, 'updates', 'handoff.json'), 'utf8')).version).toBe(NEXT);
+  });
+  it('does not relaunch on an ordinary quit and reports a failed native verification', async () => {
+    mac.eligible = true;
+    github({ checksums: `${'a'.repeat(64)}  Chat-On-Steroids-macOS-${process.arch}.zip\n` });
+    mac.stage.mockRejectedValueOnce(new Error('native signature refused'));
+    await checkForUpdates();
+    expect(updateStatus()).toMatchObject({ stage: 'failed', error: 'native signature refused' });
+    expect(markInstallOnQuit()).toBe(false);
+    await checkForUpdates();
+    await applyStagedUpdate();
+    expect(finishNativeUpdateQuit()).toBe(false);
+    expect(mac.restart).not.toHaveBeenCalled();
+    expect(spawned).toEqual([]);
+    expect(relaunched).toEqual([]);
   });
 });
 

@@ -117,7 +117,7 @@ import {
 import { runShutdownSequence } from './shutdown.js';
 import { startAgentRuntimeGc, stopAgentRuntimeGc } from './runtime-gc.js';
 import { restoreManagedWorktrees } from './worktrees/index.js';
-import { applyStagedUpdate, ELEVATION_ANSWER_MS, installingVersion, onInstallerTakeover, onUpdateHandoffStep, startUpdateChecks } from './update.js';
+import { applyStagedUpdate, ELEVATION_ANSWER_MS, finishNativeUpdateQuit, installingVersion, onInstallerTakeover, onUpdateHandoffStep, startUpdateChecks } from './update.js';
 import { setUpdateProgressStep, showUpdateProgress, untilInstallerTakesOver } from './update-progress.js';
 import { resumeUpdateRefresh } from './update-all.js';
 import { UI_BASE_ZOOM, windowLayoutForDisplays, windowPlacementWasMaximized, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
@@ -897,6 +897,9 @@ app.on('will-quit', (event) => {
         // The sequence has just logged its completion; a phase inside it would flush too early.
         void flushLogBeforeExit().finally(() => {
           shutdownComplete = true;
+          // Squirrel must arrange relaunch before this process exits; a direct app.exit here
+          // would race its asynchronous native handoff. A native quit re-entry is now safe.
+          if (finishNativeUpdateQuit()) return;
           // A Keychain read still waiting on the macOS password prompt holds Chromium's teardown,
           // so app.exit() would leave the process running with nothing to click, ignoring even
           // SIGTERM (2026-10-10, a new build quit before its prompt was answered). Every phase has
