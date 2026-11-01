@@ -90,6 +90,7 @@ interface LiveConversation {
   recordingLineage?: RecordingLineage;
   /** Fresh page proof in this process, not reconstructed from historical turns. */
   pageRequest?: { requestId: string; at: number; createAt?: number; turnId?: string };
+  questionId?: string;
   questionAt?: number;
   turnQuestionAt?: number;
   conversationId: string;
@@ -2517,8 +2518,14 @@ async function recordChatObservationsNow(
           messageId: item.messageId
         }, { preferTime: item.authoredTime === true, work: item.authoredNow === true });
         if (!written.changed) continue;
-        if (live && !live.turnId && item.authoredTime === true && written.event.origin === written.event.seq) {
-          live.questionAt = written.event.time;
+        if (live && !live.turnId) {
+          if (written.event.origin === written.event.seq) {
+            live.questionId = item.messageId;
+            delete live.questionAt;
+          }
+          if (item.authoredTime === true && live.questionId === item.messageId && live.questionAt === undefined) {
+            live.questionAt = written.event.time;
+          }
         }
         if (item.authoredNow === true) {
           activity.meaningful = true; activity.at = Math.max(activity.at ?? 0, item.time);
@@ -2529,6 +2536,7 @@ async function recordChatObservationsNow(
       case 'assistant_message': {
         if (!item.messageId) continue;
         if (live && !live.turnId) {
+          delete live.questionId;
           delete live.questionAt;
         }
         const state = item.state ?? (item.final === true ? 'final' : 'streaming');
@@ -2753,6 +2761,7 @@ async function recordChatObservationsNow(
             `request attribution: continued recording context in ${conversationId}; explicit continued turn`
           );
           const questionAt = live.questionAt;
+          delete live.questionId;
           delete live.questionAt;
           live.turnQuestionAt = questionAt;
           if (live.pageRequest && !continuing && !live.pageRequest.turnId &&
@@ -2835,6 +2844,7 @@ async function recordChatObservationsNow(
               : null;
           live.turnRequestIds = new Set<string>();
           if (live.turnId === item.turnId) {
+            delete live.questionId;
             delete live.questionAt;
             delete live.turnQuestionAt;
             if (live.pageRequest && (live.pageRequest.turnId === item.turnId || live.pageRequest.at <= item.time)) {

@@ -127,6 +127,7 @@ it('anchors a turn when the response request id arrives between the new question
     calls: [{ requestId: 'historical-without-create-time', messageId: 'm-hist', tool: 'read', order: 0, answered: false }]
   }]);
   await recordChatObservations('chat-a', [
+    { kind: 'user_message', time: now - 6000, messageId: 'question-old', text: 'Earlier DOM question' },
     { kind: 'user_message', time: now - 1000, authoredTime: true, messageId: 'question-0', text: 'Warmup' },
     { kind: 'turn_start', time: now - 400, turnId: 'turn-0' }
   ]);
@@ -142,6 +143,8 @@ it('anchors a turn when the response request id arrives between the new question
     calls: [{ requestId: 'fast-stream-request', messageId: 'm-fast', tool: 'read', order: 0, answered: false, createTime: (now - 150) / 1000 }]
   }]);
   await recordChatObservations('chat-a', [
+    { kind: 'user_message', time: now - 190, messageId: 'question-1', text: 'Next step' },
+    { kind: 'user_message', time: now - 6000, authoredTime: true, messageId: 'question-old', text: 'Earlier DOM question' },
     { kind: 'user_message', time: now - 200, authoredTime: true, messageId: 'question-1', text: 'Next step' },
     { kind: 'turn_start', time: now - 10, turnId: 'turn-1' }
   ]);
