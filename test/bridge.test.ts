@@ -355,11 +355,12 @@ async function waitForOpened(count = 1, timeout?: number): Promise<void> {
 
 async function waitForRevival(): Promise<{ id: string; conversationId: string }> {
   let revival: { id: string; conversationId: string } | null = null;
+  // The release runners (Intel macOS, Linux arm64) are slow: not vi.waitFor's one-second default.
   await vi.waitFor(async () => {
     const status = await request('GET', '/status');
     revival = status.body.revival ?? null;
     expect(revival).toMatchObject({ id: expect.any(String), conversationId: expect.any(String) });
-  });
+  }, { timeout: 10_000, interval: 50 });
   return revival!;
 }
 
@@ -372,7 +373,7 @@ async function waitForRevival(): Promise<{ id: string; conversationId: string }>
 async function redeem(id?: string, client = 'tab-1'): Promise<any> {
   if (!id) {
     const index = anonymousRedeemIndex++;
-    await vi.waitFor(() => expect(opened.length).toBeGreaterThan(index));
+    await vi.waitFor(() => expect(opened.length).toBeGreaterThan(index), { timeout: 10_000, interval: 20 });
     id = new URL(opened[index]!).searchParams.get('clf')!;
   }
   const reply = await request('POST', '/commands/redeem', { body: { id, client } });
@@ -5983,6 +5984,29 @@ describe('delivering a bootstrap', () => {
    * names the same id back, and the browser has to say which conversation it typed into
    * before the broker will believe the worker is awake.
    */
+  // #1952: a worker opened on GPT-5.6 high went on in GPT-6 medium, because its wake was typed
+  // without choosing a model. The wake carries the worker's own model and effort.
+  it('asks the page to choose the worker\'s own model and effort before typing its wake', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'write the audit', model: 'gpt-5-6', reasoning_effort: 'high' }], caller: { conversationId: PRIME_CHAT } });
+    const bootstrap = await redeem();
+    expect(bootstrap).toMatchObject({ model: 'gpt-5-6', reasoningEffort: 'high' });
+    const conversationId = 'cafecafe-7654-3210-fedc-ba98765432a1';
+    await request('POST', '/commands/ack', { body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' } });
+    finishAgent({ conversationId }, 'the first half is done');
+    wake([{ to: 'worker-1', text: 'now do the second half' }]);
+    const revival = await waitForRevival();
+    const claimed = await request('POST', '/commands/redeem', { body: { id: revival.id, client: 'tab-wake-model', conversationId } });
+    expect(claimed.body.command).toMatchObject({ type: 'revive', model: 'gpt-5-6', reasoningEffort: 'high' });
+    // Another page cannot report it: only the page that redeemed the wake speaks for it.
+    const foreign = await request('POST', '/commands/step', { body: { id: revival.id, client: 'tab-someone-else', step: 'model-unconfirmed' } });
+    expect(foreign.body.ok).not.toBe(true);
+    expect(getLog().some(entry => entry.message.includes(`worker-1's wake in ${conversationId} goes out on ChatGPT's current model`))).toBe(false);
+    // The picker could not confirm it: the wake goes out anyway, and the app says on what.
+    expect((await request('POST', '/commands/step', { body: { id: revival.id, client: 'tab-wake-model', step: 'model-unconfirmed' } })).body).toEqual({ ok: true });
+    expect(getLog().some(entry => entry.message.includes(`worker-1's wake in ${conversationId} goes out on ChatGPT's current model: gpt-5-6 high could not be confirmed`))).toBe(true);
+  });
+
   it("routes revival to the worker's own chat without opening a duplicate, and treats the typed message as an offer", async () => {
     await pair();
     spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
