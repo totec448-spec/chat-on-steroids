@@ -820,6 +820,36 @@ describe('a check or download that goes wrong on a bad connection', () => {
     expect(online.asked).toHaveLength(calls);
   });
 
+  /**
+   * A pass still waiting for the installer when the state is reset belongs to the reset before it.
+   * It used to finish anyway: it wrote the installer into the staging folder and set it as staged,
+   * so the next check announced "ready" without downloading anything (CodeRabbit on #2018).
+   */
+  it('leaves no file and no staged update behind from a pass that outlived a reset', async () => {
+    const { fetch } = github();
+    const answer = fetch.getMockImplementation()!;
+    let release: (() => void) | null = null;
+    fetch.mockImplementation(async (input: string | URL) => {
+      if (!String(input).endsWith(WINDOWS_ASSET)) return answer(input);
+      // Answers only when the test says so, and as the real fetch would even if the pass was told to stop.
+      await new Promise<void>(resolve => { release = resolve; });
+      return answer(input);
+    });
+    const old = asPlatform('win32', undefined, () => checkForUpdates());
+    await vi.waitFor(() => expect(release).not.toBeNull());
+    resetUpdateForTests();
+    release!();
+    await old;
+    expect(updateStatus().stage).toBe('idle');
+    expect(existsSync(path.join(userData, 'updates', NEXT))
+      ? readdirSync(path.join(userData, 'updates', NEXT)) : []).toEqual([]);
+    // The next check has nothing staged to fall back on: it fetches the installer itself.
+    const next = github({ fail: 'asset' });
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(next.asked).toContain(WINDOWS_ASSET);
+    expect(updateStatus().stage).toBe('failed');
+  });
+
   it('gives up on a download only when no data arrives for a minute, however long the whole file takes', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     const body = 'installer bytes';
