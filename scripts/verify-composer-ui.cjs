@@ -119,6 +119,32 @@ app.whenReady().then(async () => {
     if (zoom===1&&width===1440&&language==='en') await capture('effort-'+theme);
     if (zoom===1.25&&width===900&&theme==='dark'&&language==='pt-BR') await capture('effort-narrow-pt-BR');
   }
+  // Design audit 2026-11-01: the + menu had a fixed width, and "Fotos & Dateien hinzufügen" took two lines.
+  // Every language at the narrow width and the larger zoom: each item on one line, the menu inside the window.
+  const modelMenuWasOpen = await js(`document.getElementById('modelMenu').open`);
+  if (modelMenuWasOpen) await click('#modelMenu > summary');
+  win.setContentSize(900, 960); win.webContents.setZoomFactor(1.25);
+  for (const language of ['en', 'de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW']) {
+    const appearance = await win.webContents.debugger.sendCommand('Runtime.callFunctionOn', {
+      objectId: appearanceWindow.objectId, arguments: [{ value: language }], awaitPromise: true,
+      functionDeclaration: `async function(language) {
+        const select = document.getElementById('uiLanguage'); select.value = language;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+        const { data } = await window.api.getState();
+        await window.api.saveSettings({ patch: { ui: { ...data.config.ui, theme: 'dark', language } } });
+      }`
+    });
+    assert(!appearance.exceptionDetails, 'Language fixture update succeeded');
+    await pause(100);
+    await click('#attachmentMenu > summary'); await pause(200);
+    await check('Add menu items on one line '+language, `(()=>{const p=document.querySelector('#attachmentMenu > .composer-popover'),r=p.getBoundingClientRect();
+      const lines=[...p.querySelectorAll('button')].filter(b=>b.textContent.trim()).map(b=>{const range=document.createRange();range.selectNodeContents(b);const tops=[...range.getClientRects()].filter(x=>x.width>0).map(x=>x.top).sort((x,y)=>x-y);return 1+tops.filter((top,i)=>i&&top-tops[i-1]>8).length});
+      return lines.length===3&&lines.every(n=>n===1)&&r.left>=0&&r.right<=innerWidth+.5&&p.scrollWidth<=p.clientWidth+1})()`);
+    if (language === 'de') await capture('add-de');
+    await click('#attachmentMenu > summary'); await pause(150);
+  }
+  win.setContentSize(1440, 960); win.webContents.setZoomFactor(1);
+  if (modelMenuWasOpen) await click('#modelMenu > summary');
   await win.webContents.debugger.sendCommand('Runtime.releaseObject', { objectId: appearanceWindow.objectId });
   win.webContents.debugger.detach();
   win.setContentSize(1440, 960); win.webContents.setZoomFactor(1);
