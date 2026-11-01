@@ -3221,6 +3221,30 @@ async function followAppNow(data) {
 }
 
 /**
+ * The popup paints with the app's colors and theme (the app's extension-appearance.ts sends them with
+ * every status). Stored when they change, so a popup opened while the app is closed keeps the last look.
+ */
+const APP_APPEARANCE_KEY = 'appAppearance';
+const APPEARANCE_THEMES = new Set(['light', 'dark', 'system']);
+let appAppearanceApplied = null;
+let appAppearanceWriting = null;
+function validAppearanceTokens(tokens) {
+  if (!tokens || typeof tokens !== 'object' || Array.isArray(tokens)) return false;
+  const entries = Object.entries(tokens);
+  return entries.length > 0 && entries.length <= 40 && entries.every(([name, value]) => /^--[a-z-]{2,30}$/.test(name) && /^#[0-9a-f]{6}$/i.test(value));
+}
+function followAppearance(value) {
+  if (!value || !APPEARANCE_THEMES.has(value.theme) || !validAppearanceTokens(value.light) || !validAppearanceTokens(value.dark)) return;
+  const json = JSON.stringify({ theme: value.theme, light: value.light, dark: value.dark });
+  // A write in flight finishes first; a status after it writes the newest colors if they differ.
+  if (json === appAppearanceApplied || appAppearanceWriting) return;
+  appAppearanceWriting = boundedStorage(chrome.storage.local.set({ [APP_APPEARANCE_KEY]: JSON.parse(json) }), 'write')
+    .then(() => { appAppearanceApplied = json; })
+    .catch(() => undefined)
+    .finally(() => { appAppearanceWriting = null; });
+}
+
+/**
  * "Open in ChatGPT" from the app, shown in this browser: the chat's tab if it has one, else a new
  * one. The app asks here rather than the OS, which can pick another browser or account (#882).
  */
@@ -3491,6 +3515,7 @@ async function maintainOnce() {
   const liveSending = Array.isArray(reply.data.inputSendingIds) ? new Set(reply.data.inputSendingIds) : null;
   void reloadForExtensionUpdate(reply.data.extensionUpdate, liveOpenings, liveCommands, liveSending).catch(() => undefined);
   void followApp(reply.data).catch(() => undefined);
+  followAppearance(reply.data.appearance);
   void revealChats(reply.data.reveals).catch(() => undefined);
   void followChat(reply.data.follow).catch(() => undefined);
   void runImageExports(reply.data.imageExports).catch(() => undefined);
