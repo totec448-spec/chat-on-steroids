@@ -291,8 +291,8 @@ it.each(['original', 'renamed'])('rechecks the exact enrolled installed link bef
   if (name === 'renamed') h.link.querySelector('span')!.textContent = 'User renamed it 日本語';
   expect(await h.run()).toBe(true);
   expect(h.installed).toHaveBeenCalledTimes(2);
-  expect(h.installed).toHaveBeenNthCalledWith(1, 'Chat On Steroids Core', 'asdk_app_synthetic', 'core');
-  expect(h.installed).toHaveBeenNthCalledWith(2, 'Chat On Steroids Core', 'asdk_app_synthetic', 'core');
+  expect(h.installed).toHaveBeenNthCalledWith(1, 'Chat On Steroids Core', 'asdk_app_synthetic', 'core', true);
+  expect(h.installed).toHaveBeenNthCalledWith(2, 'Chat On Steroids Core', 'asdk_app_synthetic', 'core', true);
   expect(h.assign).toHaveBeenCalledExactlyOnceWith(pathRouted);
   expect(h.click).not.toHaveBeenCalled();
   expect(h.view).not.toHaveBeenCalled();
