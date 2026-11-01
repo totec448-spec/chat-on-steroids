@@ -247,7 +247,7 @@ import type { ContinuationView } from './session/continuation.js';
 import { noteResumeOpening } from './session/resume-gate.js';
 import { readDurable, writeDurableNow, writeDurableSoon } from './durable.js';
 import { APP_VERSION, BRIDGE_PROTOCOL } from './version.js';
-import { conversationHasMcpCallSince, readHandoffResponse } from './session/store.js';
+import { conversationHasMcpCallSince, readHandoff, readHandoffResponse } from './session/store.js';
 import { sessionWorkingAt } from '../shared/session-activity.js';
 import { requestCorrelation } from './session/correlation.js';
 import { completeImageExport, IMAGE_EXPORT_BODY_BYTES, pendingImageExports } from './image-export.js';
@@ -2218,6 +2218,11 @@ export type SessionControlsView = {
   blocked: 'worker' | 'blocked' | '';
   job: ResumeJobView | null;
   /**
+   * The session's latest saved summary, offered when a Compact & Resume has waited STUCK_SUMMARY_MS without
+   * ChatGPT writing one (2026-11-01): "Continue in a new chat from the last summary" replaces that ticket.
+   */
+  lastSummary?: { handoffId: string; createdAt: number; earlierChat: boolean } | null;
+  /**
    * No page picked up this chat's repairs, so recovery gave up (#1787); in memory, lifted when the page
    * polls again. Not the session list's durable `recoveryStopped`.
    */
@@ -2272,7 +2277,41 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
     proLoopDelivery: control.enabled && getConfig().ui.finishTool === true && session.selectedModel?.conversationId === id &&
       supportsFinishAutomation(control.mode, session.selectedModel.model, session.selectedModel.reasoningEffort),
     automation: goalArmedFor(id) && !blocked ? control.enabled ? control.mode : 'goal' : 'off',
-    blocked, job: resumeJobFor(sessionId), pageless: pagelessChats.has(id) };
+    blocked, job: resumeJobFor(sessionId), lastSummary: await stuckSummaryOffer(sessionId, session), pageless: pagelessChats.has(id) };
+}
+
+/**
+ * The unattended way on for a compaction ChatGPT never answers: a chat with Goal or Loop on continues from
+ * the session's last saved summary (resumeFromSavedSummary cancels the stuck ticket). False when the chat is
+ * not unattended, has no usable summary, or the reopen is refused; the ordinary backoff then goes on.
+ */
+async function continueStuckFromSavedSummary(entry: { token: string; sessionId: string; from: string }, watch: { continuedFromSaved?: boolean }): Promise<boolean> {
+  watch.continuedFromSaved = true;
+  if (!goalArmedFor(entry.from) || !goalSwitchFor(entry.from).enabled) return false;
+  const session = await getSession(entry.sessionId).catch(() => null);
+  if (!session?.lastHandoffId || session.conversationId !== entry.from) return false;
+  try {
+    await resumeFromSavedSummary(entry.sessionId, session.lastHandoffId);
+    logWarn(`bridge: compaction ticket ${entry.token.slice(0, 8)} for ${entry.from} never reached ChatGPT; ` +
+      `the ${goalSwitchFor(entry.from).mode} chat continues in a new chat from saved summary ${session.lastHandoffId}`);
+    return true;
+  } catch (error) {
+    logInfo(`bridge: compaction ticket ${entry.token.slice(0, 8)} could not continue from the saved summary (${(error as Error).message}); backing off as before`);
+    return false;
+  }
+}
+
+/** How long a Compact & Resume may wait for ChatGPT's summary before the last saved one is offered. */
+export const STUCK_SUMMARY_MS = 15 * 60_000;
+async function stuckSummaryOffer(sessionId: string, session: SessionSummary): Promise<SessionControlsView['lastSummary']> {
+  const job = resumeJobFor(sessionId);
+  if (!job || job.stage !== 'handoff-pending' || job.handoffId || Date.now() - job.startedAt < STUCK_SUMMARY_MS) return null;
+  if (!session.lastHandoffId) return null;
+  const saved = await readHandoff(sessionId, session.lastHandoffId).catch(() => null);
+  if (!saved) return null;
+  const source = saved.provenance?.sourceConversationId;
+  if (source && source !== session.conversationId && !session.chatIds.includes(source)) return null;
+  return { handoffId: saved.id, createdAt: saved.createdAt, earlierChat: !!source && source !== session.conversationId };
 }
 /** One absolute budget includes opening an absent tab and native hydration. */
 export const STOP_COMMAND_TIMEOUT_MS = 120_000;
@@ -2486,6 +2525,12 @@ export async function compactSession(sessionId: string): Promise<SessionControls
 /** Compact & Resume again from the summary an abandoned run already captured (#1215). */
 export async function resumeFromSavedSummary(sessionId: string, handoffId: string): Promise<SessionControlsView> {
   await controlledConversation(sessionId);
+  // The person chose the saved summary over a Compact & Resume still waiting for ChatGPT's: that ticket ends.
+  const waiting = continuationForSession(sessionId);
+  if (waiting && waiting.state === 'awaiting-summary' && !waiting.handoffId) {
+    logInfo(`bridge: ${sessionId} continues from saved summary ${handoffId}; the Compact & Resume still waiting for ChatGPT's summary is cancelled`);
+    await cancelResumeNow(sessionId);
+  }
   const opened = await reopenWithHandoffNow(sessionId, handoffId);
   if (!opened) throw new Error('This summary can no longer be used. Start Compact & Resume again.');
   queueResumeCommand(sessionId, opened.token);
@@ -9680,7 +9725,7 @@ const COMPACTION_PICKUPS: Record<CompactionPhase, { every: number; attempts: num
   writing: { every: 5 * 60_000, attempts: 3 },
   opening: { every: 15 * 60_000, attempts: 3 }
 };
-const compactionWatch = new Map<string, { token: string; phase: CompactionPhase; nextAt: number; attempts: number; backoffs?: number; told?: boolean; streamLost?: boolean }>();
+const compactionWatch = new Map<string, { token: string; phase: CompactionPhase; nextAt: number; attempts: number; backoffs?: number; told?: boolean; streamLost?: boolean; continuedFromSaved?: boolean }>();
 /**
  * Why the source page last stopped an automatic ticket's attempt before asking (#1643), by token.
  * Kept until the next pickup lets the page try again, so the chat says it is held, not asking.
@@ -10047,6 +10092,10 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
         ).catch(() => undefined);
       }
       if (phase !== 'asking') continue;
+      // A Goal or Loop chat runs unattended: when a slowed burst too could not ask ChatGPT for a summary
+      // (2026-11-01: it no longer served the chat at all), it goes on from the last saved summary in a new
+      // chat of the same session, rather than waiting for someone to notice. One per ticket.
+      if ((watch.backoffs ?? 0) >= 1 && !watch.continuedFromSaved && await continueStuckFromSavedSummary(entry, watch)) continue;
       if (entry.automatic && (watch.backoffs ?? 0) < AUTOMATIC_ASKING_RETRY_BURSTS) {
         // A threshold-created ticket is durable work, not a ten-minute liveness verdict. The
         // source can spend this whole first budget draining native/local work without ever

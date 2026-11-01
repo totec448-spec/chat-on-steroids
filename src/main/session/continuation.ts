@@ -1130,6 +1130,13 @@ export async function attachSummary(token: string, text: string): Promise<Handof
   );
 }
 
+/** Leads a summary written in an earlier chat of the session, so the new chat checks what changed since. */
+export function earlierSummaryNote(createdAt: number): string {
+  return `This summary was written in an earlier chat of this conversation (${new Date(createdAt).toISOString().slice(0, 16).replace('T', ' ')} UTC). ` +
+    'Work may have continued after it in later chats. Before redoing anything, check the current state of the files, the version ' +
+    'history, deployments and running services, and continue from what is actually there.';
+}
+
 /** The plan notice prepareHandoff appends; a reused brief gets the current one instead. */
 const PLAN_NOTICE_HEAD = '\n\nSaved task plan at handoff (reported progress, not verification evidence):\n';
 
@@ -1149,10 +1156,16 @@ export async function reopenWithHandoffNow(sessionId: string, handoffId: string)
   if (!session?.conversationId || session.lastHandoffId !== handoffId) return null;
   if ([...byToken.values()].some((entry) => entry.sessionId === sessionId && isOpen(entry))) return null;
   const saved = await readHandoff(sessionId, handoffId);
-  if (!saved || (saved.provenance && saved.provenance.sourceConversationId !== session.conversationId)) return null;
+  // The summary of an earlier chat of this session is accepted too: the current chat may never have
+  // written one, because ChatGPT stopped serving it (2026-11-01: "temporarily limited access to this
+  // conversation history" for hours, at about 400k tokens). It then says that work went on after it.
+  const source = saved?.provenance?.sourceConversationId;
+  const earlier = !!source && source !== session.conversationId;
+  if (!saved || (earlier && !session.chatIds.includes(source))) return null;
   const cut = saved.text.lastIndexOf(PLAN_NOTICE_HEAD);
-  const brief = (cut >= 0 ? saved.text.slice(0, cut) : saved.text).trim();
-  if (!brief) return null;
+  const written = (cut >= 0 ? saved.text.slice(0, cut) : saved.text).trim();
+  if (!written) return null;
+  const brief = earlier ? `${earlierSummaryNote(saved.createdAt)}\n\n${written}` : written;
   // Chat B belongs beside chat A: reuse the Project the abandoned run carried, when it is still known.
   const prior = saved.provenance?.continuationId
     ? [...byToken.values()].find((entry) => handoffContinuationId(entry.token) === saved.provenance?.continuationId)
