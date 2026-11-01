@@ -6072,7 +6072,7 @@ insufficient. A dirty-tree snapshot request does not authorize exposing all loca
 partial file, verify SHA-256 before staging/adoption, and rehash at ordinary quit before handing
 off. Windows NSIS/Linux AppImage can apply automatically; DEB and ad-hoc/read-only Mac
 installations stay manual, and development does not stage. `mac-update.ts` probes packaged Mac
-eligibility once: writable bundle parent, valid CoS Developer ID signature and Gatekeeper
+eligibility once: Electron's Applications-folder check, writable bundle parent, valid CoS Developer ID signature and Gatekeeper
 assessment. For eligible Macs the existing updater downloads/adopts and SHA-256 verifies the
 ZIP before Electron/Squirrel can see it. Electron 44.3 ignores a native feed sha256 field, so
 `mac-update.ts` serves only that verified archive through a transient loopback feed; Squirrel

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 
 const fixture = vi.hoisted(() => ({
   command: vi.fn(), access: vi.fn(), log: vi.fn(), warn: vi.fn(), exit: vi.fn(),
-  packaged: true, native: null as any, server: null as any, feed: '', check: vi.fn(), quit: vi.fn()
+  packaged: true, inApplications: true, native: null as any, server: null as any, feed: '', check: vi.fn(), quit: vi.fn()
 }));
 vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events');
@@ -13,7 +13,8 @@ vi.mock('electron', async () => {
     setFeedURL: ({ url }: { url: string }) => { fixture.feed = url; },
     checkForUpdates: fixture.check, quitAndInstall: fixture.quit
   });
-  return { app: { get isPackaged() { return fixture.packaged; }, exit: fixture.exit }, autoUpdater: fixture.native };
+  return { app: { get isPackaged() { return fixture.packaged; }, isInApplicationsFolder: () => fixture.inApplications,
+    exit: fixture.exit }, autoUpdater: fixture.native };
 });
 vi.mock('node:child_process', () => ({ execFile: fixture.command }));
 vi.mock('node:http', async importOriginal => {
@@ -34,6 +35,7 @@ beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
   fixture.packaged = true;
+  fixture.inApplications = true;
   fixture.access.mockResolvedValue(undefined);
   fixture.command.mockImplementation((_file, _args, _options, done) => done(null));
   fixture.check.mockImplementation(() => undefined);
@@ -71,6 +73,13 @@ it('never enables native updates in development or on a read-only mount', async 
   fixture.access.mockRejectedValue(new Error('read-only disk image'));
   expect(await adapter.canUpdateMac()).toBe(false);
   expect(fixture.command).not.toHaveBeenCalled();
+});
+it('keeps portable copies outside Applications manual before any signature or file probe', async () => {
+  fixture.inApplications = false;
+  expect(await adapter.canUpdateMac()).toBe(false);
+  expect(fixture.command).not.toHaveBeenCalled();
+  expect(fixture.access).not.toHaveBeenCalled();
+  expect(fixture.log.mock.calls.flat().join(' ')).toContain('not installed in an Applications folder');
 });
 it.each(['/usr/bin/codesign', '/usr/sbin/spctl'])('keeps the manual path when %s refuses or times out', async file => {
   fixture.command.mockImplementation((command, _args, _options, done) => done(command === file ? new Error('untrusted private path') : null));

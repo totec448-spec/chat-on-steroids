@@ -19,8 +19,12 @@ export function canUpdateMac(): Promise<boolean> {
   if (process.platform !== 'darwin' || !app.isPackaged || !['x64', 'arm64'].includes(process.arch)) return Promise.resolve(false);
   return eligibility ??= (async () => {
     const bundle = path.dirname(path.dirname(path.dirname(process.execPath)));
-    let reason = 'not an installed app bundle';
+    let reason = 'not installed in an Applications folder';
     try {
+      // ShipIt is a separate process. A writable Documents/Desktop path is not proof
+      // it can coordinate a replacement there; keep those portable copies manual.
+      if (!app.isInApplicationsFolder()) throw new Error(reason);
+      reason = 'not an installed app bundle';
       if (!bundle.endsWith('.app')) throw new Error('not an installed app bundle');
       reason = 'bundle parent is not writable';
       await access(path.dirname(bundle), constants.W_OK);
