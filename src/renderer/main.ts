@@ -69,7 +69,7 @@ import {
   WRITE_CAPABILITIES
 } from '../shared/types.js';
 import type { SwarmState } from '../shared/session.js';
-import { $, ago, disclosureChevron, el, elapsedDurationText, icon, run, shortAgo, toast } from './dom.js';
+import { $, ago, disclosureChevron, el, elapsedDurationText, icon, paintWhenShown, run, shortAgo, toast } from './dom.js';
 import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatSearch, openChatView, openFeedback } from './chat.js';
 import { publishStopNoticeTexts } from './stop-notices.js';
 import { publishMainTexts } from './main-texts.js';
@@ -1718,7 +1718,7 @@ function apply(next: AppState): void {
 
   // ---- health numbers and facts
   paintClock();
-  $('facts').replaceChildren(...facts(next));
+  paintWhenShown($('facts'), () => $('facts').replaceChildren(...facts(next)));
 
   // ---- permissions
   $('readOnlyBtn').classList.toggle('is-on', config.readOnly);
@@ -1919,7 +1919,7 @@ function apply(next: AppState): void {
   // The add button is the call to action until a folder is shared, then it quiets to done.
   $('wizAddFolder').dataset.tone = config.roots.length > 0 ? 'ok' : 'off';
   // One folder per line: they are paths, and a row of them wraps mid-name.
-  $('wizFolders').replaceChildren(...(config.roots.length === 0
+  paintWhenShown($('wizFolders'), () => $('wizFolders').replaceChildren(...(config.roots.length === 0
     ? [(() => {
       // Empty is an invitation, not a hole: the whole area chooses a folder, like the button.
       const row = el('li', 'is-empty');
@@ -1930,7 +1930,7 @@ function apply(next: AppState): void {
       row.append(pick);
       return row;
     })()]
-    : config.roots.map((root) => { const row = el('li'); row.append(icon('i-folder'), el('span', '', `/${root.name}`)); return row; })));
+    : config.roots.map((root) => { const row = el('li'); row.append(icon('i-folder'), el('span', '', `/${root.name}`)); return row; }))));
   const secureStorageAvailable = next.secureStorage?.available ?? true;
   const apiKey = $<HTMLInputElement>('apiKey');
   ui(apiKey, 'placeholder', () => next.hasApiKey ? t("•••••••• stored") : 'sk-…');
@@ -2002,7 +2002,7 @@ function apply(next: AppState): void {
           : t("ChatGPT ran a tool {0} — the whole chain works.", [ago(ranAt)]));
 
   const cards = $('connectorCards');
-  cards.replaceChildren(...connectorCards(next));
+  paintWhenShown(cards, () => cards.replaceChildren(...connectorCards(next)));
 
   // Step marks: everything before the first unfinished step counts as done.
   const order = ['browser', 'folder', 'access', 'tunnel', 'key', 'connect', 'chatgpt'];
@@ -2352,7 +2352,7 @@ function paintReady(shown: string[], done: Set<string>, cosBrowser: boolean, all
   $('readyStart').hidden = !allSet;
   step('ready').classList.toggle('is-all-set', allSet);
   const list = $('readyChecks');
-  const rows = shown.map(name => {
+  paintWhenShown(list, () => list.replaceChildren(...shown.map(name => {
     const check = READY_CHECKS[name]!;
     const passed = done.has(name);
     const narrowed = name === 'access' && limited;
@@ -2371,8 +2371,7 @@ function paintReady(shown: string[], done: Set<string>, cosBrowser: boolean, all
       row.append(go);
     }
     return row;
-  });
-  list.replaceChildren(...rows);
+  })));
 }
 
 /** A connector's newest evidence that ChatGPT uses it: this run's, else what earlier runs proved. */
