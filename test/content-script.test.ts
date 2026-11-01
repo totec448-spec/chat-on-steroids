@@ -20060,11 +20060,14 @@ describe('one live isolated-world recorder per document', () => {
       messages: [{ role: 'assistant', messageId: 'approval-native-message', rawMessageId: 'approval-native-message', rawText: 'Checking.' }] } }]);
     live.hook.observe(); await settle(); await live.hook.flush();
     expect(emitted(live.sent, 'turn_end')).toEqual([]);
+    // Nor is its last message published as final: the recorder would close the turn on it (CodeRabbit on #1992).
+    expect(emitted(live.sent, 'assistant_message').some(row => row.event.final === true)).toBe(false);
     card.remove();
     await bindFiberTurns([{ section, turn: { turnId: 'approval-native', endMessageId: 'approval-native-message',
       messages: [{ role: 'assistant', messageId: 'approval-native-message', rawMessageId: 'approval-native-message', rawText: 'Checking.' }] } }]);
     await settleTurn(live); await live.hook.flush();
     expect(emitted(live.sent, 'turn_end')).toHaveLength(1);
+    expect(emitted(live.sent, 'assistant_message').some(row => row.event.final === true)).toBe(true);
   });
 
   it('reports the recorder protocol version rather than the unrelated Fiber protocol version', async () => {
@@ -23880,6 +23883,27 @@ describe('app Stop command uses current native turn proof', () => {
     expect(await live!.runtimeMessage(h.request)).toEqual({ ok: true });
     live!.hook.observe(); await settle(); await live!.hook.flush();
     expect(h.clicks()).toBe(0);
+    expect(emitted(live!.sent, 'turn_end').map(row => row.event)).toEqual([
+      expect.objectContaining({ turnId: h.request.turnId, outcome: 'stopped' })
+    ]);
+  });
+
+  // CodeRabbit on #1992: an approval card holds the turn open (#1977), but the app's Stop still ends it.
+  it('ends a turn held by an approval card when the app asks to stop it', async () => {
+    const h = await setup();
+    stopGenerating(live!.document);
+    const card = live!.document.createElement('div');
+    card.setAttribute('data-codex-approval-surface', 'true');
+    card.append(live!.document.createElement('button'), live!.document.createElement('button'));
+    card.getClientRects = () => [{ width: 600, height: 200 }] as unknown as DOMRectList;
+    live!.document.body.append(card);
+    live!.advance(30_000);
+    live!.hook.observe(); await settle(); await live!.hook.flush();
+    expect(emitted(live!.sent, 'turn_end')).toEqual([]);
+    expect(await live!.runtimeMessage(h.request)).toEqual({ ok: true });
+    live!.hook.observe(); await settle();
+    live!.advance(live!.hook.TURN_SETTLE_MS);
+    live!.hook.observe(); await settle(); await live!.hook.flush();
     expect(emitted(live!.sent, 'turn_end').map(row => row.event)).toEqual([
       expect.objectContaining({ turnId: h.request.turnId, outcome: 'stopped' })
     ]);

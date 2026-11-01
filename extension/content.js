@@ -3270,7 +3270,9 @@
     // ChatGPT's tool approval card hides Stop while the turn waits for a person. That is a held
     // turn, not a quiet one: closing it after the settle window lost every answer section that
     // followed the person's answer (#1977, 2.1.49 on Windows). It counts as still generating here.
-    const heldForApproval = CLF_DOM.approvalWaiting();
+    // The app's Stop still ends it: with the card standing there is no native Stop to press, and
+    // the stop is recorded as the page sees it, as before (CodeRabbit on #1992).
+    const heldForApproval = CLF_DOM.approvalWaiting() && !stopRequestedAt;
     if (generating && (nowGenerating || heldForApproval) && quietSince > 0) {
       // The stop button came back, so it never went away in the sense that matters: this is
       // one turn that flickered, not two turns. Everything the generation holds — its id,
@@ -5172,8 +5174,13 @@
         // like a sequence of finished answers and could let recovery treat the wrong one as
         // completion evidence.
         const terminalMessageId = turn.endMessageId;
+        // The running turn's last message is not final while ChatGPT's approval card waits: the
+        // recorder would close the turn on it, and the turn goes on once the person answers (#1977,
+        // CodeRabbit on #1992). The message's state is part of its signature, so the refresh after
+        // the card goes publishes it as final.
+        const heldForApproval = generating && index === activeTurnIndex && CLF_DOM.approvalWaiting();
         const exactTerminal = Boolean(
-          terminalMessageId &&
+          terminalMessageId && !heldForApproval &&
             (message.rawMessageId === terminalMessageId || message.messageId === terminalMessageId)
         );
         const state = terminalMessageId
