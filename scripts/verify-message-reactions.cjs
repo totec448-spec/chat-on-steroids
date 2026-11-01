@@ -36,7 +36,7 @@ app.whenReady().then(async () => {
     window.reaction=(value)=>{question.reaction=value;question.seq++;window.changed({sessionIds:[summary.id]})};
     await import('/main.ts');window.ready=true;
   `;
-  const server = await createServer({ configFile:false, root:path.join(root,'src/renderer'), server:{host:'127.0.0.1',port:0,hmr:false},
+  const server = await createServer({ configFile:false, root:path.join(root,'src/renderer'), cacheDir:path.join(output,'vite'), server:{host:'127.0.0.1',port:0,hmr:false},
     plugins:[{name:'reaction-fixture',configureServer(vite){vite.middlewares.use('/fixture.html',async (_req,res)=>{
       const html=withoutScripts(fs.readFileSync(path.join(root,'src/renderer/index.html'),'utf8'))
         .replace('</body>','<script type="module">'+fixture+'</script></body>');
@@ -45,7 +45,9 @@ app.whenReady().then(async () => {
   let win;
   try {
     fs.mkdirSync(output,{recursive:true}); await server.listen();
-    win = new BrowserWindow({show:false,width:1100,height:800,webPreferences:{sandbox:true,backgroundThrottling:false}});
+    // The geometry test waits for animation frames; map its synthetic window
+    // only on the explicitly enabled native Wayland test display.
+    win = new BrowserWindow({show:process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1',width:1100,height:800,webPreferences:{sandbox:true,backgroundThrottling:false}});
     win.webContents.on('console-message',event=>{if(event.level==='error')console.error(event.message)});
     await win.loadURL(server.resolvedUrls.local[0]+'fixture.html');
     const js = code=>win.webContents.executeJavaScript(code);

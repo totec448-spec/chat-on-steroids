@@ -24,8 +24,11 @@ app.whenReady().then(async () => {
     }); } }]
   });
   await server.listen();
-  const win = new BrowserWindow({ show: false, width: 1440, height: 960,
-    webPreferences: { sandbox: true, offscreen: true, backgroundThrottling: false } });
+  // Native Wayland can suspend offscreen frame delivery; use a mapped synthetic
+  // window only in the opt-in local UI run, leaving CI behavior unchanged.
+  const showLinuxFixture = process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1';
+  const win = new BrowserWindow({ show: showLinuxFixture, width: 1440, height: 960,
+    webPreferences: { sandbox: true, offscreen: !showLinuxFixture, backgroundThrottling: false } });
   const errors = [];
   win.webContents.on('console-message', event => { if (event.level === 'error') errors.push(event.message); });
   await win.loadURL('http://127.0.0.1:4420'); win.webContents.setZoomFactor(1); await pause(2200);

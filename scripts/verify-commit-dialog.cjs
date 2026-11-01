@@ -106,7 +106,11 @@ app.whenReady().then(async () => {
       window.fixtureReady=true;
     `;
     const icons = path.join(root, 'node_modules/@phosphor-icons/web/src');
-    server = await createServer({ configFile: false, root: path.join(root, 'src/renderer'), resolve: { alias: { '@phosphor-icons/web': icons } },
+    // The synthetic inline fixture includes a PDF payload and a large dynamic
+    // module. Vite's eager HTML scanner can misparse it; the real imports are
+    // still resolved and transformed when the browser requests them.
+    server = await createServer({ configFile: false, root: path.join(root, 'src/renderer'), cacheDir: path.join(output, 'vite'),
+      optimizeDeps: { noDiscovery: true, include: [] }, resolve: { alias: { '@phosphor-icons/web': icons } },
       server: { host: '127.0.0.1', port: 0, fs: { allow: [root, fs.realpathSync(icons)] } }, plugins: [{ name: 'commit-dialog-fixture', configureServer(vite) {
         vite.middlewares.use('/fixture.html', async (_request, response) => {
           const source = withoutScripts(fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8'))

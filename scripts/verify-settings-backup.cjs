@@ -29,7 +29,11 @@ app.whenReady().then(async () => {
   const css = linked.map(name => name === 'icons.css' ? icons : fs.readFileSync(path.join(root, 'src/renderer', name), 'utf8')).join('\n');
   const html = withoutScripts(fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')).replace(/<link\b[^>]*>/g, '')
     .replace('</head>', `<style>${css}</style></head>`);
-  const win = new BrowserWindow({ show: false, width: 1100, height: 760, webPreferences: { sandbox: true, offscreen: true, backgroundThrottling: false } });
+  // Screenshot capture from an offscreen hidden window can block permanently
+  // under native Wayland. Map the synthetic fixture in the explicit UI mode.
+  const showLinuxFixture = process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1';
+  const win = new BrowserWindow({ show: showLinuxFixture, width: 1100, height: 760,
+    webPreferences: { sandbox: true, offscreen: !showLinuxFixture, backgroundThrottling: false } });
   await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
   win.webContents.on('console-message', (_e, _l, message) => { if (/error|Error/.test(message)) console.error('renderer:', message); });
   await win.webContents.executeJavaScript(code);

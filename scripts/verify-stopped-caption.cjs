@@ -24,8 +24,11 @@ app.whenReady().then(async () => {
   const css = fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8');
   const html = withoutScripts(fs.readFileSync(path.join(root, 'src/renderer/index.html'), 'utf8')).replace(/<link\b[^>]*>/g, '')
     .replace('</head>', `<style>${css}</style></head>`);
-  const win = new BrowserWindow({ show: false, width: 1100, height: 760,
-    webPreferences: { sandbox: true, offscreen: true, backgroundThrottling: false } });
+  // Keep real animation frames flowing in the explicitly enabled Wayland
+  // acceptance mode. Default CI remains hidden and offscreen.
+  const showLinuxFixture = process.platform === 'linux' && process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1';
+  const win = new BrowserWindow({ show: showLinuxFixture, width: 1100, height: 760,
+    webPreferences: { sandbox: true, offscreen: !showLinuxFixture, backgroundThrottling: false } });
   await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
   await win.webContents.executeJavaScript(`(() => {
     const ok = data => Promise.resolve({ok:true,data});
