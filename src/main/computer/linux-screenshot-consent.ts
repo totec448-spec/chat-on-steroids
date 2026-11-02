@@ -8,6 +8,7 @@
  */
 import { checkLinuxScreenshotVersion, runLinuxScreenshot, type LinuxScreenshotCommand, type LinuxDesktopEnvelope } from './linux-screenshot-backend.js';
 import { parseLinuxScreenshot } from './linux-screenshot.js';
+import { logInfo } from '../logger.js';
 
 export interface LinuxScreenshotConsentDependencies {
   focused: () => boolean;
@@ -37,6 +38,7 @@ export async function testLinuxScreenshotConsent(deps: LinuxScreenshotConsentDep
   // Consent is not a durable grant: Screen permission or native opt-in may
   // have been revoked while GNOME displayed the portal or decoded the image.
   if (!deps.enabled() || !deps.screenAllowed()) {
+    logInfo('linux screenshot consent: discarded the capture because native Linux Desktop or Screen access was disabled during the request');
     throw new Error('Native Linux Desktop or Screen access was disabled during the screenshot request.');
   }
   return { pngBytes: screenshot.png.byteLength };
