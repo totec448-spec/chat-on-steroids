@@ -6053,6 +6053,9 @@ describe('the goal opening, which waits on a model', () => {
     expect(workerMs).toBeGreaterThan(appMs);
     // And it is the goal opening that spends it. Nothing else here waits on a model.
     expect(backgroundSource).toContain("await call('/goal/open', {\n      method: 'POST',\n      timeoutMs: MODEL_REQUEST_TIMEOUT_MS,");
+    // A ChatGPT helper may take longer than that (#2033); the page's opening message stays capped.
+    const bridgeSource = await fs.readFile(path.join(process.cwd(), 'src', 'main', 'bridge.ts'), 'utf8');
+    expect(bridgeSource).toContain('await draftOpeningMessage(text, opening, undefined, undefined, REQUEST_TIMEOUT_MS)');
   });
 });
 
