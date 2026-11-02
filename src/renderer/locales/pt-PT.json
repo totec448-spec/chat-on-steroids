@@ -1,4 +1,13 @@
 {
+  "Move chats between projects, chats that keep going, and an extension that updates during long runs.": "Mover chats entre projetos, chats que continuam e uma extensão que se atualiza durante execuções longas.",
+  "Move chats between projects": "Mover chats entre projetos",
+  "Drag a chat onto a project, or use Move to project in its menu. Undo puts it back.": "Arraste um chat para um projeto ou use Mover para projeto no respetivo menu. Anular repõe-no.",
+  "Chats keep going": "Os chats continuam",
+  "When a chat's next step is not picked up, the app keeps trying, tells you, and offers Continue now.": "Quando o passo seguinte de um chat não é retomado, a app continua a tentar, avisa-o e propõe Continuar agora.",
+  "The extension updates itself": "A extensão atualiza-se sozinha",
+  "It no longer waits for every long-running chat to finish first.": "Já não espera que cada chat longo termine.",
+  "Big chats stay fast": "Os chats grandes continuam rápidos",
+  "Very long chats no longer slow the app down.": "Os chats muito longos já não tornam a app lenta.",
   "Long chats that get through ChatGPT's limits, pop-ups out of the way, and message times.": "Chats longos que passam os limites do ChatGPT, janelas pop-up fora do caminho e a hora das mensagens.",
   "Long chats keep going": "Os chats longos continuam",
   "When ChatGPT limits a long chat's history, the app waits instead of reloading it.": "Quando o ChatGPT limita o histórico de um chat longo, a app espera em vez de o recarregar.",
