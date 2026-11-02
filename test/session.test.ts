@@ -4338,7 +4338,8 @@ describe('the latest question of a chat', () => {
     await upsertMessageEvent(session.id, { kind: 'user_message', time: 1_000, source: 'extension', messageId: 'q-one', message: { text: 'Build it', chars: 8, truncated: false } });
     for (let n = 0; n < 50; n++) await appendEvent(session.id, { kind: 'progress', time: 2_000 + n, source: 'extension', message: { text: `step ${n}`, chars: 6, truncated: false } });
     const opened = vi.spyOn(fs, 'open');
-    const journalReads = () => opened.mock.calls.filter(([file]) => String(file).endsWith(`${session.id}/events.jsonl`)).length;
+    // Either slash: Windows paths use backslashes (CodeRabbit on #2030).
+    const journalReads = () => opened.mock.calls.filter(([file]) => String(file).replace(/\\/g, '/').endsWith(`${session.id}/events.jsonl`)).length;
     try {
       expect((await readLatestUserMessage(session.id))?.messageId).toBe('q-one');
       const first = journalReads();
@@ -4346,6 +4347,12 @@ describe('the latest question of a chat', () => {
       expect((await readLatestUserMessage(session.id))?.messageId).toBe('q-one');
       expect((await readLatestUserMessage(session.id))?.messageId).toBe('q-one');
       expect(journalReads(), 'an unchanged chat was scanned again').toBe(first);
+      // Callers at the same new revision share one scan instead of each reading the journal.
+      await appendEvent(session.id, { kind: 'progress', time: 8_000, source: 'extension', message: { text: 'shared', chars: 6, truncated: false } });
+      const beforeShared = journalReads();
+      const answers = await Promise.all([readLatestUserMessage(session.id), readLatestUserMessage(session.id), readLatestUserMessage(session.id)]);
+      expect(answers.map(answer => answer?.messageId)).toEqual(['q-one', 'q-one', 'q-one']);
+      expect(journalReads() - beforeShared).toBe(1);
       // A new question is seen at once.
       await upsertMessageEvent(session.id, { kind: 'user_message', time: 9_000, source: 'extension', messageId: 'q-two', message: { text: 'Now test it', chars: 11, truncated: false } });
       expect((await readLatestUserMessage(session.id))?.messageId).toBe('q-two');

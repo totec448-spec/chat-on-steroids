@@ -2706,6 +2706,33 @@ describe('native progress silence authority', () => {
     } finally { clock.mockRestore(); }
   });
 
+  // CodeRabbit on #2030: while its pages refuse it because the chat shows another last question, the
+  // Continue is not turned into an ordinary message, which would lose that check.
+  it('does not send a Continue on as an ordinary message while its pages say the question changed', async () => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const source = await open('gpt-5.6-sol');
+      expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+      const ticket = (await input.listInputs()).find(row => row.recovery && row.state === 'queued')!;
+      await post('/events', { conversationId: source.conversationId, events: [
+        { kind: 'turn_end', turnId: source.turnId, outcome: 'stalled', time: now }
+      ] });
+      for (let minute = 1; minute <= 16; minute++) {
+        now += 60_000;
+        await post('/page-note', { note: 'input-held', reason: 'recovery-question-changed', inputId: ticket.id, conversationId: source.conversationId });
+        await (await bridge()).sweepStaleSwarm(now);
+        const repairs = (await post('/status', { openConversations: [source.conversationId] })).body.repairs ?? [];
+        for (const repair of repairs.filter((row: any) => row.conversationId === source.conversationId)) {
+          if (repair.requiresClaim) await post('/repairs/claim', { conversationId: source.conversationId, token: repair.token });
+          await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [source.conversationId] });
+        }
+      }
+      const row = (await input.listInputs()).find(entry => entry.id === ticket.id)!;
+      expect(row.recovery, 'it was sent on as an ordinary message while the question no longer matched').toBeDefined();
+      expect(row.continuedFrom).toBeUndefined();
+    } finally { clock.mockRestore(); }
+  });
+
   // 2026-10-31: the person's one click sends a waiting automatic Continue now, as an ordinary message.
   it('sends a waiting automatic Continue now when the person asks, without waiting ten minutes', async () => {
     let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
