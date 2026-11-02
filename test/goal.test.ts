@@ -280,6 +280,94 @@ describe('what leaves this machine', () => {
     expect(goal.templateDecisionText(await goal.conversationMessages(own.id))).toBe(fake);
   });
 
+  // #2007: ChatGPT can keep writing commentary after its final answer in the same turn. The Offline
+  // marker check reads the final answer, not the last commentary.
+  it('reads the Offline marker from the final answer, not commentary written after it in the same turn (#2007)', async () => {
+    const session = await createSession({ title: 'offline commentary', conversationId: 'offline-commentary' });
+    const say = (time: number, messageId: string, text: string, final: boolean) => appendEvent(session.id, { time, source: 'extension', kind: 'assistant_message',
+      turnId: 'commentary-turn', messageId, final, message: { text, chars: text.length, truncated: false } });
+    await appendEvent(session.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'Keep going', chars: 10, truncated: false } });
+    await say(110, 'c-before', 'Verifying the test results next.', false);
+    await say(120, 'c-final', 'Tests pass.\n[[COS_GOAL:CONTINUE]]', true);
+    await say(130, 'c-after-1', 'State consistency recovered.', false);
+    await say(140, 'c-after-2', 'Solver parameters tried; results look plausible.', false);
+    expect(goal.templateDecisionText(await goal.conversationMessages(session.id))).toBe('Tests pass.\n[[COS_GOAL:CONTINUE]]');
+    // A turn with only commentary (no final yet) still reads its last message, as before.
+    const open = await createSession({ title: 'only commentary', conversationId: 'only-commentary' });
+    await appendEvent(open.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'Go', chars: 2, truncated: false } });
+    await appendEvent(open.id, { time: 110, source: 'extension', kind: 'assistant_message', turnId: 'open-turn', messageId: 'o-1', final: false,
+      message: { text: 'Working on it.', chars: 14, truncated: false } });
+    expect(goal.templateDecisionText(await goal.conversationMessages(open.id))).toBe('Working on it.');
+    // A final answer from an earlier turn is never borrowed across the user message that opened this one.
+    const later = await createSession({ title: 'earlier final', conversationId: 'earlier-final' });
+    await appendEvent(later.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'One', chars: 3, truncated: false } });
+    await appendEvent(later.id, { time: 110, source: 'extension', kind: 'assistant_message', turnId: 'l-1', messageId: 'l-final', final: true,
+      message: { text: 'Done.\n[[COS_GOAL:COMPLETE]]', chars: 27, truncated: false } });
+    await appendEvent(later.id, { time: 120, source: 'extension', kind: 'user_message', message: { text: 'Two', chars: 3, truncated: false } });
+    await appendEvent(later.id, { time: 130, source: 'extension', kind: 'assistant_message', turnId: 'l-2', messageId: 'l-c', final: false,
+      message: { text: 'Starting step two.', chars: 18, truncated: false } });
+    expect(goal.templateDecisionText(await goal.conversationMessages(later.id))).toBe('Starting step two.');
+    // A Retry reuses the question: the earlier generation's final answer stays recorded before the new
+    // generation's commentary, and is never read for the new one (CodeRabbit on #2014).
+    const retried = await createSession({ title: 'retried', conversationId: 'retried-turn' });
+    await appendEvent(retried.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'Go', chars: 2, truncated: false } });
+    await appendEvent(retried.id, { time: 110, source: 'extension', kind: 'assistant_message', turnId: 'gen-1', messageId: 'r-final', final: true,
+      message: { text: 'Done.\n[[COS_GOAL:COMPLETE]]', chars: 27, truncated: false } });
+    await appendEvent(retried.id, { time: 120, source: 'extension', kind: 'assistant_message', turnId: 'gen-2', messageId: 'r-c', final: false,
+      message: { text: 'Trying again.', chars: 13, truncated: false } });
+    expect(goal.templateDecisionText(await goal.conversationMessages(retried.id))).toBe('Trying again.');
+    // Much commentary after the final answer: the context cut keeps the final answer (CodeRabbit on #2014).
+    const long = await createSession({ title: 'long commentary', conversationId: 'long-commentary' });
+    await appendEvent(long.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'Go', chars: 2, truncated: false } });
+    await appendEvent(long.id, { time: 101, source: 'extension', kind: 'assistant_message', turnId: 'long-turn', messageId: 'long-final', final: true,
+      message: { text: 'All done.\n[[COS_GOAL:CONTINUE]]', chars: 31, truncated: false } });
+    for (let n = 0; n < 130; n++) await appendEvent(long.id, { time: 102 + n, source: 'extension', kind: 'assistant_message', turnId: 'long-turn',
+      messageId: `long-c-${n}`, final: false, message: { text: `Note ${n}.`, chars: 8, truncated: false } });
+    const longMessages = await goal.conversationMessages(long.id);
+    expect(longMessages.length).toBeLessThanOrEqual(120);
+    expect(goal.templateDecisionText(longMessages)).toBe('All done.\n[[COS_GOAL:CONTINUE]]');
+  });
+
+  // CodeRabbit on #2014: the final answer must not take a user correction's place in the helper's context.
+  it('keeps user corrections in the context and still reads the Offline marker when the final answer does not fit', async () => {
+    const session = await createSession({ title: 'corrections first', conversationId: 'corrections-first' });
+    const user = (time: number, text: string) => appendEvent(session.id, { time, source: 'extension', kind: 'user_message', message: { text, chars: text.length, truncated: false } });
+    await user(100, 'O'.repeat(48_000));
+    await user(110, 'A'.repeat(48_000));
+    await user(120, 'B'.repeat(10_000));
+    const final = `${'F'.repeat(11_900)}\n[[COS_GOAL:CONTINUE]]`;
+    await appendEvent(session.id, { time: 130, source: 'extension', kind: 'assistant_message', turnId: 'cf-turn', messageId: 'cf-final', final: true,
+      message: { text: final, chars: final.length, truncated: false } });
+    await appendEvent(session.id, { time: 140, source: 'extension', kind: 'assistant_message', turnId: 'cf-turn', messageId: 'cf-after', final: false,
+      message: { text: 'C'.repeat(12_000), chars: 12_000, truncated: false } });
+    const messages = await goal.conversationMessages(session.id);
+    expect(messages.filter(message => message.role === 'user').map(message => message.content[0])).toEqual(['O', 'A', 'B']);
+    expect(goal.templateDecisionText(messages)).toBe(final);
+  });
+
+  // CodeRabbit on #2014: a reload can record the same commentary again without its turn. The store keeps a
+  // stable message's first turn, so the marker is still read from the final answer.
+  it('keeps the turn of a message re-recorded without it, by its exact message id', async () => {
+    const { upsertMessageEvent } = await import('../src/main/session/store.js');
+    const session = await createSession({ title: 'reloaded commentary', conversationId: 'reloaded-commentary' });
+    const say = (time: number, messageId: string, text: string, final: boolean, turnId?: string) => upsertMessageEvent(session.id, { time, source: 'extension',
+      kind: 'assistant_message', ...(turnId ? { turnId } : {}), messageId, final, message: { text, chars: text.length, truncated: false } });
+    await appendEvent(session.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'Keep going', chars: 10, truncated: false } });
+    await say(110, 'r-final', 'Tests pass.\n[[COS_GOAL:CONTINUE]]', true, 'reload-turn');
+    await say(120, 'r-after', 'Checking the logs.', false, 'reload-turn');
+    await say(130, 'r-after', 'Checking the logs once more.', false);
+    expect(goal.templateDecisionText(await goal.conversationMessages(session.id))).toBe('Tests pass.\n[[COS_GOAL:CONTINUE]]');
+    // A different message recorded without a turn has no identity tying it to the earlier answer: it is
+    // read as its own, as before, rather than borrowing that answer's marker by position.
+    const loose = await createSession({ title: 'loose commentary', conversationId: 'loose-commentary' });
+    await appendEvent(loose.id, { time: 100, source: 'extension', kind: 'user_message', message: { text: 'Go', chars: 2, truncated: false } });
+    await appendEvent(loose.id, { time: 110, source: 'extension', kind: 'assistant_message', turnId: 'loose-turn', messageId: 'l-final', final: true,
+      message: { text: 'Done.\n[[COS_GOAL:COMPLETE]]', chars: 27, truncated: false } });
+    await appendEvent(loose.id, { time: 120, source: 'extension', kind: 'assistant_message', messageId: 'l-other', final: false,
+      message: { text: 'Something else.', chars: 15, truncated: false } });
+    expect(goal.templateDecisionText(await goal.conversationMessages(loose.id))).toBe('Something else.');
+  });
+
   // 2.1.43, live on Windows: a Goal step split by two fresh turns ran its five commands as 2 + 2 + 1.
   // The rotated turns have no answer, so the helper saw "1 tool call" and asked three more times.
   it('counts the calls of the turns a fresh turn continued into the answer that finished them', async () => {
