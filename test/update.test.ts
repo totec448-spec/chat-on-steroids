@@ -226,6 +226,45 @@ describe('cleanup of updater-owned downloads', () => {
     writeFileSync(path.join(dir, 'download.part'), body);
     return dir;
   }
+  it('checks the release normally when the existing update cache is empty', async () => {
+    const root = path.join(userData, 'updates');
+    mkdirSync(root);
+    const { asked } = github({ fail: 'release' });
+    await checkForUpdates();
+    expect(readdirSync(root)).toEqual([]);
+    expect(asked).toEqual(['latest']);
+    expect(updateStatus().stage).toBe('failed');
+  });
+  it('handles a 1024-directory mixed cache while preserving reset custody and retained entries', async () => {
+    const obsolete = Array.from({ length: 128 }, (_, i) => cached(`0.0.${i}`));
+    const future = Array.from({ length: 128 }, (_, i) => cached(`99.0.${i}`, 'future candidate'));
+    const root = path.join(userData, 'updates');
+    const unknown = Array.from({ length: 384 }, (_, i) => path.join(root, `saved-${i}`));
+    const damaged = Array.from({ length: 384 }, (_, i) => path.join(root, `2.1.${i}-damaged`));
+    for (const dir of [...unknown, ...damaged]) mkdirSync(dir);
+    const keep = path.join(unknown[0]!, 'keep');
+    writeFileSync(keep, 'unrecognized root entry');
+    const note = path.join(root, 'handoff.json'), receipt = JSON.stringify({ version: '98.0.0', at: 1 });
+    writeFileSync(note, receipt);
+    const { asked } = github({ fail: 'release' });
+    const boundary = pauseAfter('readdir', root);
+    const old = checkForUpdates();
+    await boundary.paused;
+    resetUpdateForTests(); boundary.resume();
+    await old;
+    expect(obsolete.every(existsSync)).toBe(true);
+    expect(asked).toEqual([]);
+    expect(updateStatus().stage).toBe('idle');
+
+    await checkForUpdates();
+    expect(obsolete.some(existsSync)).toBe(false);
+    expect([...future, ...unknown, ...damaged].every(existsSync)).toBe(true);
+    expect(readFileSync(path.join(future[0]!, 'download.part'), 'utf8')).toBe('future candidate');
+    expect(readFileSync(keep, 'utf8')).toBe('unrecognized root entry');
+    expect(readFileSync(note, 'utf8')).toBe(receipt);
+    expect(asked).toEqual(['latest']);
+    expect(updateStatus().stage).toBe('failed');
+  });
   it.each(['lstat', 'readdir'])('does not prune or contact GitHub after a reset during cache %s', async operation => {
     const previous = cached('0.0.1');
     const { asked } = github();
