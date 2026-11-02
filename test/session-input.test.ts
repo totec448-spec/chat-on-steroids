@@ -2411,7 +2411,7 @@ describe('edit and resubmit (#365)', () => {
 // #1922: which of the app's own messages a page may replace when it finds one left in the composer.
 describe('own messages that never reached Send', () => {
   it('lists only claimed, never-authorized, attachment-free messages of that chat from the last day, newest first', async () => {
-    const base = { sessionId, mode: 'auto' as const, dueAt: 0, model: null, reasoningEffort: null, owner: null, conversationId: 'conversation-a', offeredAt: now };
+    const base = { sessionId, mode: 'auto' as const, dueAt: 0, model: null, reasoningEffort: null, owner: null, conversationId: 'conversation-a', offeredAt: now, requiresAuthorization: true };
     const row = (text: string, extra: Partial<InputEntry> = {}): InputEntry =>
       ({ ...base, id: randomUUID(), text, state: 'cancelled', createdAt: now - 1_000, ...extra } as InputEntry);
     const rows = [
@@ -2422,7 +2422,12 @@ describe('own messages that never reached Send', () => {
       row('never claimed', { offeredAt: undefined }),
       row('other chat', { conversationId: 'conversation-b' }),
       row('with an image', { images: [{ name: 'a.webp', dataUrl: 'data:image/webp;base64,AAAA' }] }),
-      row('yesterday', { createdAt: now - 25 * 60 * 60_000 })
+      row('yesterday', { createdAt: now - 25 * 60 * 60_000 }),
+      // An older saved claim that never needed Send authorization may have been sent.
+      row('old claim without authorization', { requiresAuthorization: undefined }),
+      // A message and its companion went out as one text: neither alone is listed.
+      row('combined root', { companionInputId: '00000000-0000-4000-8000-000000000001' }),
+      row('its companion', { id: '00000000-0000-4000-8000-000000000001' })
     ];
     await writeDurableNow('session-input', rows);
     resetInputForTests();
