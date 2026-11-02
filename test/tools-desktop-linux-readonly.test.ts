@@ -42,6 +42,8 @@ describe.runIf(process.platform === 'linux')('read-only native screenshot MCP su
     const decl = declarations.get('linux_observe');
     expect(decl.annotations.readOnlyHint).toBe(true);
     expect(decl.inputSchema.safeParse({ what: 'screenshot', display: 0 }).success).toBe(true);
+    expect(decl.inputSchema.safeParse({ what: 'screenshot', display: 1 }).success).toBe(false);
+    expect(decl.inputSchema.safeParse({ what: 'screenshot', display: 32 }).success).toBe(false);
     expect(decl.inputSchema.safeParse({ what: 'click', ref: '@s1:e1' }).success).toBe(false);
     expect(decl.inputSchema.safeParse({ what: 'snapshot', window_id: '1' }).success).toBe(false);
   });
@@ -53,6 +55,13 @@ describe.runIf(process.platform === 'linux')('read-only native screenshot MCP su
     expect(result.content?.find(part => part.type === 'text')?.text).toContain('"scope":"display"');
     expect(result.content?.find(part => part.type === 'text')?.text).not.toContain(shot);
     expect(native.run).toHaveBeenCalledExactlyOnceWith({ kind: 'screenshot', display: 0 });
+  });
+  it('refuses a nonzero display even if an internal caller bypasses schema validation', async () => {
+    const result = await registry().handlers.get('linux_observe')!({ what: 'screenshot', display: 1 });
+    expect(result.isError).toBe(true);
+    expect(result.content?.find(part => part.type === 'text')?.text).toContain('DISPLAY_UNSUPPORTED');
+    expect(native.version).not.toHaveBeenCalled();
+    expect(native.run).not.toHaveBeenCalled();
   });
 
   it('refuses before the version check if opt-in or Screen permission is off', async () => {

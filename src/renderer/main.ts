@@ -615,6 +615,7 @@ function linuxScreenshotConsentRow(): HTMLElement {
   status.setAttribute('aria-live', 'polite');
   button.addEventListener('click', async () => {
     if (linuxScreenshotConsentBusy || button.disabled) return;
+    const hadFocus = document.activeElement === button;
     linuxScreenshotConsentBusy = true;
     button.disabled = true;
     status.textContent = t('Waiting for GNOME screenshot permission…');
@@ -622,13 +623,24 @@ function linuxScreenshotConsentRow(): HTMLElement {
       const reply = await api.linuxScreenshotConsent();
       status.textContent = reply.ok
         ? t('Screenshot permission confirmed. No image was saved.')
-        : t('Screenshot permission request failed: {0}', [reply.error]);
+        : t('Screenshot permission request failed: {0}', [
+          reply.error === 'Screenshot permission can be requested only from the Chat On Steroids main window.' ||
+          reply.error === 'A screenshot permission request is already running.'
+            ? t(reply.error) : t('GNOME screenshot permission could not be confirmed.')
+        ]);
     } catch {
-      status.textContent = t('Screenshot permission request failed: {0}', ['UNKNOWN']);
+      status.textContent = t('Screenshot permission request failed: {0}', [
+        t('GNOME screenshot permission could not be confirmed.')
+      ]);
     } finally {
       linuxScreenshotConsentBusy = false;
       const config = state?.config;
       button.disabled = !config || config.ui.linuxDesktopEnabled !== true || config.capabilities.screen !== true;
+      // A disabled button can drop keyboard focus. Restore it only when the
+      // person originally focused this button and has not moved elsewhere.
+      const active = document.activeElement;
+      if (hadFocus && !button.disabled && (!active || active === button ||
+          active === document.body || active === document.documentElement)) button.focus();
     }
   });
   body.append(button, status);

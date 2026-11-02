@@ -3718,5 +3718,6 @@
   "Off by default. Allows read-only GNOME display screenshots only with Screen permission and operating-system consent. No native input or accessibility control is available.": "기본적으로 꺼져 있습니다. 화면 권한과 운영 체제 동의가 있는 경우에만 GNOME 디스플레이의 읽기 전용 스크린샷을 허용합니다. 네이티브 입력이나 접근성 제어는 허용되지 않습니다.",
   "Screenshot permission can be requested only from the Chat On Steroids main window.": "스크린샷 권한은 Chat On Steroids의 기본 창에서만 요청할 수 있습니다.",
   "Click while the Chat On Steroids window is active. If GNOME asks, choose Allow. The screenshot is discarded.": "Chat On Steroids 창이 활성화된 상태에서 클릭하세요. GNOME이 요청하면 허용을 선택하세요. 스크린샷은 삭제됩니다.",
-  "Request screenshot permission": "스크린샷 권한 요청"
+  "Request screenshot permission": "스크린샷 권한 요청",
+  "GNOME screenshot permission could not be confirmed.": "GNOME 화면 캡처 권한을 확인하지 못했습니다."
 }
