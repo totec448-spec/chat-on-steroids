@@ -2910,9 +2910,10 @@ var CLF_DOM = (() => {
     // granting Current/Claim. Never substitute these aliases for that stronger proof.
     const tunnelInspection = nativeInspection && /^tunnel_[a-zA-Z0-9]{8,80}$/.test(snapshot?.tunnelId || '') &&
       (expectedAppId ? snapshot?.appId === expectedAppId : snapshot?.connectorName === connectorName);
+    const conflictingNativeIdentity = nativeInspection && identified.some(app => app.surface !== expectedSurface);
     const externalPlugins = tunnelInspection ? expectedSurface === 'plugins'
       : proven?.length ? proven.every(app => app.surface === 'plugins') : pluginsConnectorName(connectorName);
-    if (!snapshot || snapshot.appId !== route?.[1] || (!tunnelInspection && (expectedAppId ? snapshot.appId !== expectedAppId : !ownSnapshot(snapshot, connectorName))) ||
+    if (!snapshot || snapshot.appId !== route?.[1] || (!tunnelInspection && (conflictingNativeIdentity || (expectedAppId ? snapshot.appId !== expectedAppId : !ownSnapshot(snapshot, connectorName)))) ||
         !Array.isArray(snapshot.tools) || (snapshot.tools.length < 1 && !externalPlugins) || snapshot.tools.length > (externalPlugins ? 257 : 64) || JSON.stringify(snapshot.tools).length > 300000 ||
         snapshot.tools.some(tool => !tool || typeof tool.name !== 'string' || !(externalPlugins ? /^[a-z0-9_.-]{1,64}$/i : /^[a-z][a-z0-9_]{0,79}$/).test(tool.name) || typeof tool.description !== 'string' || tool.inputSchema?.type !== 'object') ||
         new Set(snapshot.tools.map(tool => tool.name)).size !== snapshot.tools.length) return null;
