@@ -4951,7 +4951,11 @@
       // are progress. A known call drawn again with another request id or owner is reported
       // again, but counting it kept every repair refused while ChatGPT's stream was gone (#1787).
       const advanced = [];
-      const fresh = turn.calls.filter((call) => {
+      const callRequests = new Set((turn.calls || []).map((call) => call?.requestId).filter(Boolean));
+      const candidates = index === activeTurnIndex && activeLocalTurnId
+        ? [...turn.calls, ...(turn.requests || []).filter((req) => req?.requestId && !callRequests.has(req.requestId))]
+        : turn.calls;
+      const fresh = candidates.filter((call) => {
         // A mismatched owned turn is admissible only as a provisional-first-turn candidate.
         // Its request id must have survived the app's explicit owner read-back before the
         // transcript channel may repeat that evidence. A rejected/stale id is simply omitted;
@@ -4961,11 +4965,12 @@
           (!call.requestId || requestOwnersConfirmed.get(call.requestId) !== askedConversation)
         ) return false;
         const owner = index === activeTurnIndex ? activeLocalTurnId || '' : '';
-        const signature = `${call.tool}\u0000${call.requestId || ''}\u0000${call.answered ? '1' : '0'}\u0000${owner}`;
-        const previous = callsReported.get(call.messageId);
+        const key = call.tool ? call.messageId : `request:${call.requestId}`;
+        const signature = `${call.tool || ''}\u0000${call.requestId || ''}\u0000${call.answered ? '1' : '0'}\u0000${owner}`;
+        const previous = callsReported.get(key);
         if (previous?.signature === signature) return false;
-        if (previous === undefined || (call.answered && !previous.answered)) advanced.push(call);
-        callsReported.set(call.messageId, { signature, answered: Boolean(call.answered) });
+        if (call.tool && (previous === undefined || (call.answered && !previous.answered))) advanced.push(call);
+        callsReported.set(key, { signature, answered: Boolean(call.answered) });
         return true;
       });
       if (fresh.length > 0) {
@@ -4978,17 +4983,19 @@
             (previous.calls || []).some(seen => turn.calls.some(call => call.messageId === seen.messageId))));
         const witnessedSend = Boolean(newestUser?.id && openedUserMessageId === newestUser.id);
         if (advanced.length && generating && index === activeTurnIndex && (knownTurn || witnessedSend)) noteTurnProgress(turnId, 'page-call');
-        emit({
-          kind: 'tool_evidence',
-          ...(index === activeTurnIndex ? { turnId: activeLocalTurnId } : {}),
-          ...(turn.conversationId && !(
-            turn === ownedPageTurn &&
-            askedConversation &&
-            concreteConversation(turn.conversationId) &&
-            concreteConversation(turn.conversationId) !== askedConversation
-          ) ? { fiberConversationId: turn.conversationId } : {}),
-          calls: fresh
-        });
+        for (let offset = 0; offset < fresh.length; offset += 200) {
+          emit({
+            kind: 'tool_evidence',
+            ...(index === activeTurnIndex ? { turnId: activeLocalTurnId } : {}),
+            ...(turn.conversationId && !(
+              turn === ownedPageTurn &&
+              askedConversation &&
+              concreteConversation(turn.conversationId) &&
+              concreteConversation(turn.conversationId) !== askedConversation
+            ) ? { fiberConversationId: turn.conversationId } : {}),
+            calls: fresh.slice(offset, offset + 200)
+          });
+        }
       }
     }
     // What the settle window is waiting for, decided from the scan itself rather than from a
@@ -12246,9 +12253,11 @@
     const modelConfirmed = !!(boot.model || boot.reasoningEffort) && (await chooseModel() ||
       ((await closeAnnouncements(stillOnTarget)).length > 0 && stillOnTarget() && await chooseModel()));
     let mayGoOn = !(boot.model || boot.reasoningEffort) || modelConfirmed;
-    // A wake goes out on ChatGPT's current model rather than not at all: a worker that never wakes
-    // stops its whole run. The app logs which model it could not confirm (#1952).
-    if (!mayGoOn && boot.type === 'revive' && stillOnTarget()) { step('model-unconfirmed'); mayGoOn = true; }
+    // A wake or a Compact & Resume goes out on ChatGPT's current model rather than not at all: a worker
+    // that never wakes stops its whole run (#1952), and an abandoned resume stops its chat for good
+    // (2026-11-01, Mac). A resume tries the model again in its new chat (publishBootstrapSelection).
+    // The app logs which model it could not confirm. A new worker's chat still refuses.
+    if (!mayGoOn && (boot.type === 'revive' || boot.type === 'resume') && stillOnTarget()) { step('model-unconfirmed'); mayGoOn = true; }
     if (!mayGoOn) {
       return void (await fail(t(
         'content_bootstrap_model_unavailable',
@@ -14144,13 +14153,14 @@
       }
       // Identity and Refresh paint before the tool declarations. A partial settings
       // panel is neither an old schema nor permission to click; wait on the existing
-      // DOM observer and leave an unclaimed request available if hydration times out.
+      // DOM observer and polling, with the same one-minute bound as post-refresh reads.
+      // Slow native settings hydration can exceed 12 seconds; no click is claimed yet.
       const settle = settledPluginView();
       const view = await waitPageView(async () => {
         const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools, request.appId);
         const appId = pluginViewAppId(location.href);
         return settle(appId && next?.appId === appId && Array.isArray(next.tools) && (next.tools.length > 0 || next.settled === true) ? next : null);
-      }, current, 12000, 250);
+      }, current, 60000, 250);
       if (!view) {
         // Say so. `pluginSnapshot()` refuses for two different reasons — the page has not
         // rendered the card yet, and the page renders a card this build cannot read — and

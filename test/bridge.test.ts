@@ -110,10 +110,10 @@ const {
   startBridge,
   stopBridge,
   sweepStaleSwarm,
+  pickupNow,
   noteRecoverySweepTick,
   unpair,
-  workerBriefForTests
-} = await import('../src/main/bridge.js');
+  workerBriefForTests, forgetPickupWatchesForTests } = await import('../src/main/bridge.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
 const { setStuckNotifier } = await import('../src/main/stuck-notice.js');
 const {
@@ -474,7 +474,14 @@ describe('lost first-message opening', () => {
         body: { id: row.id, tab: 7, stage: 'ready' }
       });
       if (phase === 'unclaimed') {
-        expect(reply.body).toEqual({ ok: true });
+        // Nothing reached the lost tab: twice a fresh one (the extension forgets the old), then Not sent.
+        expect(reply.body).toEqual({ ok: true, reopen: true });
+        expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued', openingReopens: 1 });
+        // The same lost tab again (its answer never reached the extension): the same grant, nothing spent.
+        expect((await request('POST', '/input/opening-unavailable', { browser, body: { id: row.id, tab: 7, stage: 'ready' } })).body).toEqual({ ok: true, reopen: true });
+        expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued', openingReopens: 1, openingReopenedTab: `${browser}:7` });
+        expect((await request('POST', '/input/opening-unavailable', { browser, body: { id: row.id, tab: 8, stage: 'ready' } })).body).toEqual({ ok: true, reopen: true });
+        expect((await request('POST', '/input/opening-unavailable', { browser, body: { id: row.id, tab: 9, stage: 'ready' } })).body).toEqual({ ok: true });
         expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed' });
         expect(await input.pendingBrowserInputs()).toEqual([]);
         expect(await input.claimBrowserInput(row.id, '7:late-document:0', null, true)).toBeNull();
@@ -8497,6 +8504,20 @@ describe('targeted open', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // 2026-11-01 (Mac): a resume whose model the picker could not confirm was abandoned. It now goes on
+  // on ChatGPT's current model, and the app says which model it could not confirm.
+  it('logs a Compact & Resume that goes on without its model', async () => {
+    setBrowserOpener(async (url) => { opened.push(url); });
+    await pair();
+    const { sessionId, token } = await automaticCompactedSession('66666666-7777-8888-9999-aaaaaaaaaaaf', 'the brief');
+    const first = queueResume(sessionId, token)!;
+    await waitForOpened(1, 10_000);
+    await redeem(first.id, 'tab-1');
+    expect((await request('POST', '/commands/step', { body: { id: first.id, client: 'tab-1', step: 'model-unconfirmed' } })).body).toEqual({ ok: true });
+    expect(getLog().some(entry => entry.level === 'warn' && entry.message.includes(`the Compact & Resume of session ${sessionId} starts its new chat on ChatGPT's current model`))).toBe(true);
+    expect(continuationByToken(token)?.state).not.toBe('aborted');
   });
 
   /**
@@ -16839,6 +16860,70 @@ describe('the goal loop over the bridge', () => {
       await sweepStaleSwarm(Date.now());
       expect((await request('GET', '/status')).body.repairs?.some((item: { conversationId: string }) => item.conversationId === chat)).toBe(true);
     } finally {
+      await writeDurableNow('session-input', []);
+      input.resetInputForTests();
+      vi.useRealTimers();
+    }
+  });
+
+  // 2026-10-31: the alert when a chat's quick tries run out, and the person's one click to go on.
+  it('alerts once when quick tries run out, and tries a stopped queued message again at once on request', async () => {
+    vi.useFakeTimers();
+    const input = await import('../src/main/session/input.js');
+    input.resetInputForTests();
+    const told: Array<{ title: string; sessionId: string }> = [];
+    setStuckNotifier((title, _body, sessionId) => { told.push({ title, sessionId }); return true; });
+    try {
+      await writeDurableNow('session-input', []);
+      await pair();
+      const chat = 'cafe0177-0000-4000-8000-000000000177';
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'work', messageId: 'now-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'now-turn' }
+      ] } });
+      const session = (await findSessionByConversation(chat, { requireUnique: true }))!;
+      const id = 'abca0177-0000-4000-8000-000000000177';
+      await input.enqueueInput({ id, sessionId: session.id, text: 'next step', mode: 'after-turn', dueAt: Date.now(), model: null, reasoningEffort: null });
+      await vi.advanceTimersByTimeAsync(1);
+      // The stopped step the button shows: what main now projects for this chat.
+      const shownStep = async () => {
+        const row = (await sessionControlsFor(session.id)).recovery?.find(entry => entry.kind === 'pickup-stopped');
+        return { next: row?.next ?? 'queue', stoppedAt: row?.deadline ?? 0 };
+      };
+      expect(await pickupNow(session.id, await shownStep())).toEqual({ ok: false, code: 'nothing-waiting' });
+      expect(getLog().some(entry => entry.message.includes(`the person asked to pick up session ${session.id} now; nothing was tried — nothing is owed`))).toBe(true);
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'turn_end', time: Date.now(), turnId: 'now-turn', outcome: 'completed' }
+      ] } });
+      await recordFinalForTest(chat, 'now-turn');
+      for (const minutes of [2, 5, 10]) {
+        await vi.advanceTimersByTimeAsync(minutes * 60_000);
+        await sweepStaleSwarm(Date.now());
+        const repair = (await request('GET', '/status')).body.repairs?.find((item: { conversationId: string }) => item.conversationId === chat);
+        await request('GET', `/status?repaired=${repair.token}&repairAction=reloaded`);
+      }
+      expect(told.filter(notice => notice.title === 'Recovery slowed')).toEqual([{ title: 'Recovery slowed', sessionId: session.id }]);
+      // Inside a history limit nothing is tried, and the person is told why.
+      await request('POST', '/events', { body: { conversationId: chat, events: [{ kind: 'chat_error', time: Date.now(), recoverable: false, blocking: true,
+        retryAt: Date.now() + 60_000, text: 'ChatGPT temporarily rate-limited loading this conversation history.' }] } });
+      expect(await pickupNow(session.id, await shownStep())).toEqual({ ok: false, code: 'history-limit' });
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      const shown = await shownStep();
+      expect(shown).toMatchObject({ next: 'queue' });
+      // A click for a stopped step that is no longer the one waiting acts on nothing (CodeRabbit on #1979).
+      expect(await pickupNow(session.id, { ...shown, stoppedAt: shown.stoppedAt - 1 })).toEqual({ ok: false, code: 'changed' });
+      expect(await pickupNow(session.id, { ...shown, next: 'goal' })).toEqual({ ok: false, code: 'changed' });
+      // A queued message of the person's own is tried again at once, not at its next slow slot, also
+      // right after a restart, before the first sweep made its watch again (CodeRabbit on #1979).
+      forgetPickupWatchesForTests();
+      expect(await pickupNow(session.id, shown)).toEqual({ ok: true, did: 'retrying' });
+      expect((await request('GET', '/status')).body.repairs?.some((item: { conversationId: string }) => item.conversationId === chat)).toBe(true);
+      expect((await input.listInputs()).find(row => row.id === id)).toMatchObject({ text: 'next step', state: 'queued', pickupRecovery: { attempts: 4 } });
+      expect(told.filter(notice => notice.title === 'Recovery slowed')).toHaveLength(1);
+      // Its reload is still in flight: a second click starts nothing and says so, not "trying again".
+      expect(await pickupNow(session.id, await shownStep())).toEqual({ ok: false, code: 'not-started' });
+    } finally {
+      setStuckNotifier(null);
       await writeDurableNow('session-input', []);
       input.resetInputForTests();
       vi.useRealTimers();
