@@ -4935,6 +4935,9 @@ document, including hidden panels and bound text nodes. Never retain or periodic
 an index of every past label: WeakRef sweeps keep detached trees alive during allocation-heavy
 repaints. `scripts/verify-renderer-label-memory.cjs` checks real Chromium collection under repeated
 row replacement; ordinary language tests preserve controls, drafts and authored values.
+Lists that every state push rebuilds in Setup, Settings or a collapsed card go through
+`dom.paintWhenShown`: a hidden list keeps only its newest paint and runs it when it gets a box, before
+that frame is drawn. Rebuilding hidden lists left Blink's heap at 1.1 GB with 180 MB in use (2026-11-01).
 Authored prose uses automatic text direction; shell/code remain LTR with logical layout edges.
 Theme and layout preferences do not change backend authority.
 Settings places ChatGPT model defaults second and Workers & recovery third, after Continuation
@@ -5467,6 +5470,13 @@ opens the app on click. A skipped or failed notice is not retried; notification 
 tunnel state or recovery. No raw tunnel detail or secret identifier enters the notice.
 `test/connection.test.ts` and `test/connection-notice.test.ts` cover grace/recovery, sleep,
 intentional retirement and notification presentation.
+
+`tunnel/workdir.ts` creates each OpenAI client's private temporary directory. On macOS only,
+an inherited directory missing with `ENOENT` is resolved once through the bounded system
+`getconf DARWIN_USER_TEMP_DIR` lookup; other filesystem failures propagate. The client receives
+its live work directory as `TMPDIR`, without changing the app's environment or recreating an
+installer's deleted directory. Stop still terminates the client before removing its directory.
+`tunnel-workdir.test.ts` and `tunnel-lifecycle.test.ts` cover recovery, refusal and child ownership.
 
 tunnel-client reads proxies only from its environment (Go: `HTTPS_PROXY`, `NO_PROXY`). On every
 launch `tunnel/proxy.ts` derives them (#1255): an existing `HTTPS_PROXY` is left alone; otherwise
@@ -6074,9 +6084,10 @@ The *Active chats* lines end with each chat's Goal/Loop state as the app holds i
 the new chat, or is dropped because the new chat already had its own.
 Tests: `report-scrub.test.ts`, `diagnostics-report.test.ts` and `ipc.test.ts` (no personal value survives).
 
-Send feedback (Activity's button, `/feedback`; `feedback-dialog.ts`) writes a problem report or an idea
-and opens GitHub's issue form filled in: `feedback:openIssue { kind: 'bug', what, steps?, frequency? }`
-or `{ kind: 'idea', problem, proposal }` → `{ trimmed }`. Main builds the address (`feedback.ts`) with the
+Send feedback (Activity's button, `/feedback`; `feedback-dialog.ts`) writes a problem report and opens
+GitHub's bug form filled in: `feedback:openIssue { kind: 'bug', what, steps?, frequency? }` → `{ trimmed }`.
+New features come as pull requests (2026-11-01): there is no idea form, in the app or in
+`.github/ISSUE_TEMPLATE`; the dialog links CONTRIBUTING.md's "New features" instead. Main builds the address (`feedback.ts`) with the
 form's own field ids and dropdown texts (`.github/ISSUE_TEMPLATE`; `feedback-issue.test.ts` fails when a
 template renames one), adds the version, system, architecture and what it knows of the extension, and
 opens it with `shell.openExternal`; nothing is sent from the app. Text that does not fit in a 7800-character

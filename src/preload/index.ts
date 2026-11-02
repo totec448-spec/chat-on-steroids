@@ -292,8 +292,8 @@ const api = {
     call<{ url: string; via: 'gh' | 'existing' | 'browser' }>('projectCommit:pullRequest', { projectId, title, body }),
   setCommitFlow: (flow: CommitFlow) => call<boolean>('projectCommit:flow', { flow }),
   saveDiagnosticsReport: () => call<{ saved: false } | { saved: true; name: string }>('diagnostics:saveReport'),
-  openFeedbackIssue: (report: { kind: 'bug'; what: string; steps?: string; frequency?: 'Every time' | 'Sometimes' | 'It happened once' }
-    | { kind: 'idea'; problem: string; proposal: string }) => call<{ trimmed: boolean }>('feedback:openIssue', report),
+  openFeedbackIssue: (report: { kind: 'bug'; what: string; steps?: string; frequency?: 'Every time' | 'Sometimes' | 'It happened once' }) =>
+    call<{ trimmed: boolean }>('feedback:openIssue', report),
   requestDesktopAccessibility: () => call<AppState>('desktop:requestAccessibility'),
   repairDesktopAccess: () => call<AppState>('desktop:repairPermissions'),
   getLog: () => call<LogEntry[]>('log:get'),
