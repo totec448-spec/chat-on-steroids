@@ -521,6 +521,11 @@ const recoveryQuestionChanged = new Map<string, { since: number; last: number }>
 /** Refusals further apart than this are not one run; this long of one run retires the Continue. */
 let QUESTION_CHANGED_GAP_MS = 5 * 60_000;
 let QUESTION_CHANGED_RETIRE_MS = 30 * 60_000;
+/** Whether pages are refusing this automatic Continue right now because the chat shows another question. */
+function questionChangedRefusalActive(inputId: string, now = Date.now()): boolean {
+  const run = recoveryQuestionChanged.get(inputId);
+  return !!run && now - run.last <= QUESTION_CHANGED_GAP_MS;
+}
 export function setQuestionChangedTimingForTests(gapMs = 5 * 60_000, retireMs = 30 * 60_000): void {
   QUESTION_CHANGED_GAP_MS = gapMs; QUESTION_CHANGED_RETIRE_MS = retireMs;
   recoveryQuestionChanged.clear();
@@ -9980,7 +9985,9 @@ async function inspectOwedPickups(now: number, focus?: PickupFocus): Promise<boo
     // reload or a stop: the chat must not stop while it is unfinished (user decision 2026-10-31).
     // Checked between reloads and after a stop too; the conversion itself refuses while anything newer
     // happened in the chat or anything runs.
-    if (reply.queued && reply.inputId && now - reply.acceptedAt >= RECOVERY_ORDINARY_AFTER_MS) {
+    // Not while its pages refuse it because the chat shows another last question: as an ordinary message it
+    // would lose that check and answer the wrong question (CodeRabbit on #2030).
+    if (reply.queued && reply.inputId && now - reply.acceptedAt >= RECOVERY_ORDINARY_AFTER_MS && !questionChangedRefusalActive(reply.inputId, now)) {
       const stuck = watch.stoppedAt || watch.attempts >= 1 ? `not claimed after ${watch.attempts} reload(s)` : await queuedInputOfferBlocker(reply.inputId);
       if (stuck) {
         const outcome = await continueAsOrdinaryMessage(reply.inputId, stuck, RECOVERY_ORDINARY_AFTER_MS);
