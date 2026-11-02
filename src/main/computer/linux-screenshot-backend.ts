@@ -57,7 +57,7 @@ export function runLinuxScreenshot(
         const value: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
         if (!value || typeof value !== 'object' ||
             typeof (value as LinuxDesktopEnvelope).ok !== 'boolean' ||
-            typeof (value as LinuxDesktopEnvelope).command !== 'string') throw new Error();
+            (value as LinuxDesktopEnvelope).command !== command.kind) throw new Error();
         resolve(value as LinuxDesktopEnvelope);
       } catch {
         reject(new Error('Linux screenshot backend returned an invalid response'));

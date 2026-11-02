@@ -34,4 +34,16 @@ describe('Linux screenshot backend is read only', () => {
     expect(await runLinuxScreenshot({ kind: 'screenshot', display: 0 }, binary))
       .toMatchObject({ ok: false, error: { code: 'PERM_DENIED' } });
   });
+
+  it.skipIf(process.platform === 'win32')('rejects a backend envelope for a different requested command', async () => {
+    directory = await mkdtemp(join(tmpdir(), 'cos-linux-shot-'));
+    const binary = join(directory, 'backend');
+    await writeFile(binary, '#!/bin/sh\nprintf \'%s\\n\' \'{"ok":true,"command":"version","data":{"secret":"private screen title"}}\'\n');
+    await chmod(binary, 0o700);
+    await expect(runLinuxScreenshot({ kind: 'screenshot', display: 0 }, binary))
+      .rejects.toThrow('Linux screenshot backend returned an invalid response');
+    await writeFile(binary, '#!/bin/sh\nprintf \'%s\\n\' \'{"ok":true,"command":"screenshot","data":{"secret":"private screen title"}}\'\n');
+    await expect(checkLinuxScreenshotVersion(binary))
+      .rejects.toThrow('Linux screenshot backend returned an invalid response');
+  });
 });
