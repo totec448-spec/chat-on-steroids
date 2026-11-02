@@ -452,6 +452,7 @@ function setCallerConversation(context: CallContext, conversationId: string | nu
   context.caller.conversationId = conversationId;
   const exact = conversationId ? requestCorrelation(context.caller.requestId) : null;
   context.caller.sessionId = exact?.conversationId === conversationId ? exact.sessionId : null;
+  context.caller.providerSessionAnchor = exact?.conversationId === conversationId ? exact.providerSessionAnchor : undefined;
 }
 
 /** The only SDK handler context field this layer consumes; request identity comes from ingress ALS. */
@@ -1045,7 +1046,7 @@ async function dispatchTracked(
     handlerRan = true;
     return run();
   };
-  const result = await runInCallContext(context, () =>
+  let result = await runInCallContext(context, () =>
       admissionRefusal
         ? Promise.resolve(fail(admissionRefusal))
         : compacting
@@ -1098,8 +1099,6 @@ async function dispatchTracked(
         : invokeHandler()
   );
   markTiming('handler');
-  // Nested exec children are counted under their own names, like direct calls.
-  noteToolCall(name, toolOutcome(result), Date.now() - callStartedAt);
   if (identityRefusals.has(result)) rememberIdentityRefusal(requestId, name);
   // Identity, once, from this call's own evidence — see callerConversation. `agents` has
   // already established its own inside the call and adopted it, and re-reading here would
@@ -1115,7 +1114,22 @@ async function dispatchTracked(
     ? await conversationAccessRefusal(context.caller.conversationId)
     : isChatBlocked(context.caller.conversationId) ? BLOCKED_CHAT_REFUSAL : null) ??
     workerConnectionProfileRefusal(context.caller);
-  const deliveryFenced = Boolean(conversationPolicyRefusal) || compacting || supersededConversation || Boolean(silentCeilingWorker) ||
+  const currentProviderProof = context.caller.providerSessionAnchor ? requestCorrelation(requestId) : null;
+  const providerIdentityChanged = !!context.caller.providerSessionAnchor &&
+    (!currentProviderProof || currentProviderProof.conversationId !== context.caller.conversationId || currentProviderProof.sessionId !== context.caller.sessionId);
+  if (providerIdentityChanged) {
+    logWarn(`provider session delivery refused for request ${requestId}; caller proof changed while the operation ran`);
+    result = failIdentity('CALLER_IDENTITY_CHANGED: caller proof changed while this operation ran. Its result was withheld. ' +
+      'The operation may already have completed; do not repeat it to repair attribution.');
+    context.outcome = 'tool_internal_error';
+    context.evidence = emptyEvidence();
+    context.caller = { ...context.caller, conversationId: null, sessionId: null, runId: undefined };
+    context.agent = null;
+    rememberIdentityRefusal(requestId, name);
+  }
+  // Nested exec children are counted under their own names, like direct calls.
+  noteToolCall(name, toolOutcome(result), Date.now() - callStartedAt);
+  const deliveryFenced = providerIdentityChanged || Boolean(conversationPolicyRefusal) || compacting || supersededConversation || Boolean(silentCeilingWorker) ||
     Boolean(deliveryPolicyRefusal) ||
     compactingConversation(context.caller.conversationId) !== null || Boolean(context.caller.conversationId &&
       (await conversationAttachment(context.caller.conversationId, context.caller.sessionId ?? null)) === 'superseded');
@@ -1243,6 +1257,7 @@ async function dispatchTracked(
     requestId: context.caller.requestId,
     conversationId: context.caller.conversationId,
     sessionId: context.caller.sessionId ?? null,
+    ...(context.caller.providerSessionAnchor ? { providerSessionAnchor: context.caller.providerSessionAnchor } : {}),
     endsActivity: isFinish && !result.isError
   });
   // Exact request-id identity needs no browser wait, so make its durable session append part
