@@ -13615,6 +13615,10 @@
       const reply = await ask({ type: 'desktop_input', id: message.id, conversationId: target, requiresAuthorization: true,
         ...(project ? { project: CLF_DOM.projectHomeId() } : {}) });
       const input = reply?.data?.input;
+      // Texts the app put into this chat that never reached Send (#1922): exactly one of them in the composer
+      // is the app's own leftover, not the person's draft, and this message replaces it.
+      const ownUnsent = (Array.isArray(reply?.data?.ownUnsent) ? reply.data.ownUnsent : [])
+        .filter(value => typeof value === 'string' && value.trim()).slice(0, 5).map(sendText);
       if (input?.silenceBoundary || input?.completedTurnId) { claimedSilence = input; sourceQuiet = true; }
       if (!input) return false;
       if (!onTarget()) { noteWithdraw(offTarget()); return false; }
@@ -13653,7 +13657,13 @@
         'ChatGPT is not signed in in this browser. Sign in to ChatGPT there, then send again.'
       ));
       const ownResidue = sendText(CLF_DOM.composerText(composer)) === sendText(input.text);
-      if ((!ownsFreshPage() && CLF_DOM.composerText(composer).trim() && !ownResidue) || CLF_DOM.hasComposerAttachments()) return fail(t(
+      // ChatGPT can keep inserted text with its Markdown escaped; either form is the same leftover.
+      const ownLeftover = () => {
+        const shown = CLF_DOM.composerText() || '';
+        return ownUnsent.includes(sendText(shown)) || ownUnsent.includes(sendText(unescapeMarkdown(shown)));
+      };
+      const leftover = !ownResidue && ownLeftover();
+      if ((!ownsFreshPage() && CLF_DOM.composerText(composer).trim() && !ownResidue && !leftover) || CLF_DOM.hasComposerAttachments()) return fail(t(
         'content_delivery_existing_draft',
         'ChatGPT already contains an unsent draft. Send or clear that draft in Chrome before trying again.'
       ));
@@ -13709,13 +13719,14 @@
       // model selection and the writability wait sit between the two and can replace the editor.
       if (!onTarget() || (CLF_DOM.generating() && !message.directTurn) ||
           (!ownsFreshPage() && (CLF_DOM.composerText() || '').trim() &&
-            sendText(CLF_DOM.composerText()) !== sendText(input.text)) ||
+            sendText(CLF_DOM.composerText()) !== sendText(input.text) && !(leftover && ownLeftover())) ||
           CLF_DOM.hasComposerAttachments()) return fail(t(
         'content_delivery_composer_changed',
         'The ChatGPT composer changed before sending'
       ));
       let insertionFailure = '';
-      if (!CLF_DOM.insertPrompt(input.text, ownsFreshPage(), reason => { insertionFailure = reason; }))
+      // The app's own leftover is replaced as a whole; any other text keeps the usual rule.
+      if (!CLF_DOM.insertPrompt(input.text, ownsFreshPage() || (leftover && ownLeftover()), reason => { insertionFailure = reason; }))
         return fail(t(
           'content_delivery_text_not_accepted',
           'ChatGPT did not accept the text$1',

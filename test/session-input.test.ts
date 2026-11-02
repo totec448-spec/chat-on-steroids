@@ -9,7 +9,7 @@ import {
   fileSilenceInput, deferSilenceInput, revokeSilenceInputs, pendingQueuedPickups, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, enqueueInput,
   failBrowserInput, listInputs, offerToolInput as offerToolInputBatch, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
   authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy, retryUnclaimedInput,
-  noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS, holdInputForSendCheck
+  noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS, holdInputForSendCheck, ownUnsentTexts
 } from '../src/main/session/input.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import { editReplacement } from '../src/main/session/edits.js';
@@ -2405,5 +2405,29 @@ describe('edit and resubmit (#365)', () => {
     const edited = randomUUID();
     expect(await acknowledgeBrowserInput(entry.id, claim!.owner!, 'conversation-a', edited)).toBe(true);
     expect(editReplacement(edited)).toBe(later);
+  });
+});
+
+// #1922: which of the app's own messages a page may replace when it finds one left in the composer.
+describe('own messages that never reached Send', () => {
+  it('lists only claimed, never-authorized, attachment-free messages of that chat from the last day, newest first', async () => {
+    const base = { sessionId, mode: 'auto' as const, dueAt: 0, model: null, reasoningEffort: null, owner: null, conversationId: 'conversation-a', offeredAt: now };
+    const row = (text: string, extra: Partial<InputEntry> = {}): InputEntry =>
+      ({ ...base, id: randomUUID(), text, state: 'cancelled', createdAt: now - 1_000, ...extra } as InputEntry);
+    const rows = [
+      row('withdrawn continue'),
+      row('failed with frozen text', { state: 'failed', deliveryText: 'frozen delivery text', createdAt: now - 500 }),
+      row('authorized, then lost', { sendAuthorizedAt: now }),
+      row('delivered', { state: 'sent', deliveredAt: now }),
+      row('never claimed', { offeredAt: undefined }),
+      row('other chat', { conversationId: 'conversation-b' }),
+      row('with an image', { images: [{ name: 'a.webp', dataUrl: 'data:image/webp;base64,AAAA' }] }),
+      row('yesterday', { createdAt: now - 25 * 60 * 60_000 })
+    ];
+    await writeDurableNow('session-input', rows);
+    resetInputForTests();
+    expect(await ownUnsentTexts('conversation-a', 'someone-else', now)).toEqual(['frozen delivery text', 'withdrawn continue']);
+    // A message is never its own leftover.
+    expect(await ownUnsentTexts('conversation-a', rows[0]!.id, now)).toEqual(['frozen delivery text']);
   });
 });
