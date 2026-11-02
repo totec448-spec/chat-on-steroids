@@ -88,6 +88,7 @@ import {
   beginGoalDraft,
   discardPreparedGoalDraft,
   draftOpeningMessage,
+  REQUEST_TIMEOUT_MS,
   goalKeyPresent,
   registerGoalDecisionChat,
   isGoalDecisionChat,
@@ -4888,7 +4889,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const opening =
       body['mode'] === 'goal' || body['mode'] === 'loop' ? (body['mode'] as 'goal' | 'loop') : null;
     if (!(await goalKeyPresent(opening ?? goalModeFor()))) return goalJson(res, 409, { error: 'no_api_key' }, origin);
-    const drafted = await draftOpeningMessage(text, opening);
+    // The extension gives up on this request after 190 s; a slower helper (#2033) must not outlast it.
+    const drafted = await draftOpeningMessage(text, opening, undefined, undefined, REQUEST_TIMEOUT_MS);
     if ('error' in drafted) return goalJson(res, 502, drafted, origin);
     // The page types it into a new chat; the message it comes back as is the app's (#1655).
     noteAutomaticReply(NEW_CHAT, drafted.reply);
