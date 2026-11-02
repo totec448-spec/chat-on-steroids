@@ -3799,5 +3799,6 @@
   "Off by default. Allows read-only GNOME display screenshots only with Screen permission and operating-system consent. No native input or accessibility control is available.": "Varsayılan olarak kapalıdır. Yalnızca Ekran izni ve işletim sistemi onayıyla GNOME ekranının salt okunur görüntülerini almaya izin verir. Yerel giriş veya erişilebilirlik denetimi yoktur.",
   "Screenshot permission can be requested only from the Chat On Steroids main window.": "Ekran görüntüsü izni yalnızca Chat On Steroids ana penceresinden istenebilir.",
   "Click while the Chat On Steroids window is active. If GNOME asks, choose Allow. The screenshot is discarded.": "Chat On Steroids penceresi etkinken tıklayın. GNOME sorarsa İzin Ver seçeneğini seçin. Görüntü saklanmaz.",
-  "Request screenshot permission": "Ekran görüntüsü izni iste"
+  "Request screenshot permission": "Ekran görüntüsü izni iste",
+  "GNOME screenshot permission could not be confirmed.": "GNOME ekran görüntüsü izni doğrulanamadı."
 }

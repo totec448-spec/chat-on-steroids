@@ -3799,5 +3799,6 @@
   "Off by default. Allows read-only GNOME display screenshots only with Screen permission and operating-system consent. No native input or accessibility control is available.": "Standardmäßig aus. Erlaubt nur lesende GNOME-Display-Screenshots mit Bildschirmberechtigung und Zustimmung des Betriebssystems. Keine native Eingabe oder Bedienung von Barrierefreiheitselementen.",
   "Screenshot permission can be requested only from the Chat On Steroids main window.": "Die Screenshotberechtigung kann nur im Hauptfenster von Chat On Steroids angefordert werden.",
   "Click while the Chat On Steroids window is active. If GNOME asks, choose Allow. The screenshot is discarded.": "Klicke bei aktivem Chat-On-Steroids-Fenster. Falls GNOME nachfragt, wähle Zulassen. Der Screenshot wird verworfen.",
-  "Request screenshot permission": "Screenshotberechtigung anfordern"
+  "Request screenshot permission": "Screenshotberechtigung anfordern",
+  "GNOME screenshot permission could not be confirmed.": "Die GNOME-Screenshotberechtigung konnte nicht bestätigt werden."
 }
