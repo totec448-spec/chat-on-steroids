@@ -374,9 +374,9 @@ const configSchema = z.object({
       return undefined;
     }),
     /** Browser screen/control grants never opt Linux into native AT-SPI or portal access. */
-    linuxDesktopEnabled: z.boolean().optional().catch(() => {
+    linuxDesktopEnabled: z.boolean().default(false).catch(() => {
       logWarn('config: the saved ui.linuxDesktopEnabled was damaged; native Linux Desktop access remains off');
-      return undefined;
+      return false;
     }),
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
