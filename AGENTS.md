@@ -1739,6 +1739,13 @@ model/effort, inserts the full text, uploads native files,
 rechecks composer and attachment nodes, crosses app authorization, then **rechecks again after
 every await before Send**. Native stable user-message and conversation identity establish
 acceptance. Composer insertion, button disappearance and a local “sent” variable do not.
+An occupied composer blocks delivery unless it holds this message's own text, or exactly one of the
+app's own unsent messages for that chat: `/input/claim` returns `ownUnsent` (`ownUnsentTexts`: claimed
+with `requiresAuthorization`, then failed or withdrawn before Send authorization, no images or
+attachments, not part of a combined companion claim, the last 24 h, at most 5, newest first; never the
+claimed message itself). The page re-reads it after model selection, where ChatGPT may restore it. The page compares with whitespace removed, also
+Markdown-unescaped, and replaces that text as a whole; edited or unlisted text stays the person's
+draft (#1922: a rotation continue left in the box refused every later message).
 
 Direct active-turn corrections freeze `directTurn` in the same outbox entry. The exact turn
 start decides eligibility; earlier or running MCP calls do not revoke it. Recheck the exact claim
@@ -2691,6 +2698,11 @@ release it through existing lifecycle events;
 ordinary idle/reuse/close policy remains unchanged. Session storage retains attachment cleanup
 custody and cancellation, never activity authority. Chrome/user debugger cancellation is not
 retried until that activity scope ends. Browser tools cannot borrow these attachments.
+Lease changes never hold the worker's status pass: each debugger call gives up after 5 s (an attach
+that answers later, and a failed lease whose release fails, go into retiring custody until the release
+is confirmed), and the worker waits at most 3 s for a lease change
+(`renderingLeases`) and ignores its failure. A lease that never answered, or could not be released,
+kept every later pass from reaching its repairs (2026-11-01).
 `test/active-tabs.test.ts` and `test/desktop-input-maintenance.test.ts` cover custody, election,
 document proof and races; `scripts/verify-active-tabs.mjs` verifies native background animation
 pause/resume, same-document handoff and reload/release in isolated Chromium without observing the target
@@ -3292,7 +3304,19 @@ sent manually; reactivating the same Goal reply does not refund its attempts. Th
 lifetime bounds the slow retries too (2026-10-31: a chat must not stop for good while it is unfinished). Page activity that
 pushes a retry out is saved with its owners (queued input and Goal reply), so a restart keeps the later
 deadline. A stop with no retry left (24 reloads, or 12 hours) carries `exhausted` and reads "Recovery
-stopped" instead of "Recovery slowed". Two exceptions keep a chat from stopping while it
+stopped" instead of "Recovery slowed".
+When the quick reloads run out, the chat also gets a stop notice ("Recovery slowed", desktop and, under
+its rules, the phone). The notice row offers one click (`sessions:pickupNow` → `pickupNow` in bridge.ts):
+**Continue now** for a waiting automatic Continue (sent at once as an ordinary message through
+`continueAsOrdinaryMessage`, with all its checks), **Try now** for a queued message or Goal/Loop step (its
+next try runs at once and counts as a reload). The click names the stopped step it was shown for
+(`next` and its stop time, the row's `deadline`); a different step now waiting is refused (`changed`), never
+acted on in its name. The reply says only what really started: `queued` (the Continue is a queued ordinary
+message, not yet delivered) or `retrying` (this chat's reload was queued, read from `inspectOwedPickups`'
+`focus`); otherwise a refusal code (`no-chat`, `history-limit`, `nothing-waiting`, `changed`, `not-sent`,
+`not-started`) that the renderer words with fixed, translated texts, and only while the same chat is still
+selected. An exhausted stop offers only Continue now, for a waiting Continue; nothing is left to try again.
+Every click and refusal is logged. Two exceptions keep a chat from stopping while it
 is unfinished (2026-10-31): a queued input the app itself does not offer (`queuedInputOfferBlocker`
 names the gate) spends no reload, and the bridge logs `next automation/input step in <chat> is not
 offered to the page — <gate>; no reload is spent on it` once per chat, input and gate; and an
@@ -3546,7 +3570,13 @@ Silence, missing-tab, stalled-tab and queued/Goal repairs also use that exact pr
 offers retain one token; a claimed action is not reissued merely because its ACK is absent.
 When an unclaimed repair exhausts its offers the chat is marked page-less, the session gets its timeline note
 and the user gets one notification through the stuck-chat notifier, once per episode; a page that asks for
-its chat again lifts the verdict.
+its chat again lifts the verdict. A Goal or Loop chat (`goalActiveFor`, so never a worker; not blocked, no
+Stop, not "browser only") is first shown once per episode by a connected browser that can show chats
+(`showUnclaimedChatOnce`, the extension's reveal), with a timeline note and a log line, and its offers start
+over (user, 2026-11-02). Without such a browser nothing could be shown, so it gets the verdict as before.
+Taking the chat is not showing it: a browser whose tab or window step fails posts `/reveal/failed`
+(`unclaimedChatShowFailed`), and that chat may be shown once more when its offers run out. A report
+counts only within 60 s of the show; a second failed show leaves the page-less verdict.
 Only offers no page asked for count toward that budget (#1922): a `/repairs/claim` for the offered token
 that is refused (not current, another chat's events still being saved, replaced) proves a page: for
 2 minutes after it no offer counts (`CLAIM_ASKED_FRESH_MS`, whichever browser polls), nor does any offer to a
@@ -3814,13 +3844,25 @@ awaiting-summary -> awaiting-chat -> claimed -> committing -> committed
 disk. `sessions:resumeFromHandoff` (preload `resumeFromHandoff(id, handoffId)`, bridge
 `resumeFromSavedSummary`) starts a new run from it through `reopenWithHandoffNow`: only when that
 handoff is still the session's `lastHandoffId`, no continuation is open, and its provenance
-source is the session's current chat. The new run is an ordinary transaction: it reserves A
+source is the session's current chat or an earlier one in its `chatIds` (2026-11-01: ChatGPT can stop
+serving a chat, "temporarily limited access to this conversation history", before it writes a summary
+of its own). A summary from an earlier chat is sent behind `earlierSummaryNote()`, which says work
+may have continued after it and asks to check the current state first. The new run is an ordinary transaction: it reserves A
 again with the abandoned run's project, records the source request as already sent (nothing is
 asked of ChatGPT), and `attachSummary` writes a fresh handoff with the same text bound to the
 new token. Claim, commit, restart recovery and provenance then work unchanged; a failed attach
 aborts the new run. Timeline `handoff` events carry an optional `continuation` token so the
 reopened run's row owns its handoff; the reuse button is shown only on the newest Compact &
 Resume row.
+
+**A Compact & Resume ChatGPT never answers.** `SessionControlsView.lastSummary` (`{ handoffId,
+createdAt, earlierChat }`) is set once a continuation has waited in `awaiting-summary` without a
+handoff for `STUCK_SUMMARY_MS` (15 minutes) and the session has a usable `lastHandoffId`; the context
+meter shows a dot and its popover the button "Continue in a new chat from the last summary". Using
+it, `resumeFromSavedSummary` first cancels that waiting continuation. A chat with Goal or Loop on
+does this by itself (`continueStuckFromSavedSummary`), once per ticket, when an automatic ticket's
+first slowed burst of pickups could not ask either; a chat without them is never moved by itself.
+The new ChatGPT chat joins the same session, as after any Compact & Resume.
 
 Restart restoration must converge on that same committed projection. A persisted send attempt
 can outlive a transport command; expiration releases transport, not permission for another
@@ -4092,7 +4134,10 @@ unfinished turn is not proved yet (`recovery-not-ready`), or the visible-compose
 usable box (`page-moved` for a reload or navigation, `chat-moved-on` for a new message, turn or progress on the same chat, `question-gone` when the question captured before is no longer on the page, `no-composer`, `composer-hidden`). `/page-note` logs `bridge: the page of
 <chat> held queued message <id> back: <why>` once a minute per chat (a new chat: per message) and
 reason. The page says nothing once the tab shows another chat or the person stopped the automatic
-Continue, and `inputId` must be a UUID. Internal busy states
+Continue, and `inputId` must be a UUID. An automatic Continue held for `recovery-question-changed`
+without a break of more than 5 minutes, and with no other hold reason in between, for 30 minutes is retired (`retireMismatchedRecoveryInput`:
+cancelled with its reason, `recovery.ended: 'page-final'`); it would only answer the wrong question
+(2026-11-02: one sat queued for eleven hours). Internal busy states
 (another delivery, a model read, a Goal draft) stay unlogged. A dialog with a field
 (Settings, Rename, a form) is left alone and keeps holding input as before.
 A worker given up for time after a page claimed it (no page-reported failure) is a late-start
@@ -4949,6 +4994,9 @@ document, including hidden panels and bound text nodes. Never retain or periodic
 an index of every past label: WeakRef sweeps keep detached trees alive during allocation-heavy
 repaints. `scripts/verify-renderer-label-memory.cjs` checks real Chromium collection under repeated
 row replacement; ordinary language tests preserve controls, drafts and authored values.
+Lists that every state push rebuilds in Setup, Settings or a collapsed card go through
+`dom.paintWhenShown`: a hidden list keeps only its newest paint and runs it when it gets a box, before
+that frame is drawn. Rebuilding hidden lists left Blink's heap at 1.1 GB with 180 MB in use (2026-11-01).
 Authored prose uses automatic text direction; shell/code remain LTR with logical layout edges.
 Theme and layout preferences do not change backend authority.
 Settings places ChatGPT model defaults second and Workers & recovery third, after Continuation
@@ -5329,6 +5377,8 @@ status cannot refresh ChatGPT's cached declarations.
 
 `plugin-refresh.ts` applies to Core, Desktop and Plugins. Its fingerprint includes names,
 descriptions and input schemas, not app-version/instruction churn. Changes debounce for 20s.
+Initial detail-page hydration waits up to one minute, like post-refresh observation, before
+reporting an unreadable card; a slow load must not exhaust inspection attempts after 12 seconds.
 Refresh targets the exact account-observed installed app id, durably claims before clicking,
 and completes only after observed declarations fully match. Automatic refresh is opt-in;
 unsupported/manual-required stays visible instead of opening more helper tabs.
@@ -5479,6 +5529,13 @@ opens the app on click. A skipped or failed notice is not retried; notification 
 tunnel state or recovery. No raw tunnel detail or secret identifier enters the notice.
 `test/connection.test.ts` and `test/connection-notice.test.ts` cover grace/recovery, sleep,
 intentional retirement and notification presentation.
+
+`tunnel/workdir.ts` creates each OpenAI client's private temporary directory. On macOS only,
+an inherited directory missing with `ENOENT` is resolved once through the bounded system
+`getconf DARWIN_USER_TEMP_DIR` lookup; other filesystem failures propagate. The client receives
+its live work directory as `TMPDIR`, without changing the app's environment or recreating an
+installer's deleted directory. Stop still terminates the client before removing its directory.
+`tunnel-workdir.test.ts` and `tunnel-lifecycle.test.ts` cover recovery, refusal and child ownership.
 
 tunnel-client reads proxies only from its environment (Go: `HTTPS_PROXY`, `NO_PROXY`). On every
 launch `tunnel/proxy.ts` derives them (#1255): an existing `HTTPS_PROXY` is left alone; otherwise
@@ -6086,9 +6143,10 @@ The *Active chats* lines end with each chat's Goal/Loop state as the app holds i
 the new chat, or is dropped because the new chat already had its own.
 Tests: `report-scrub.test.ts`, `diagnostics-report.test.ts` and `ipc.test.ts` (no personal value survives).
 
-Send feedback (Activity's button, `/feedback`; `feedback-dialog.ts`) writes a problem report or an idea
-and opens GitHub's issue form filled in: `feedback:openIssue { kind: 'bug', what, steps?, frequency? }`
-or `{ kind: 'idea', problem, proposal }` → `{ trimmed }`. Main builds the address (`feedback.ts`) with the
+Send feedback (Activity's button, `/feedback`; `feedback-dialog.ts`) writes a problem report and opens
+GitHub's bug form filled in: `feedback:openIssue { kind: 'bug', what, steps?, frequency? }` → `{ trimmed }`.
+New features come as pull requests (2026-11-01): there is no idea form, in the app or in
+`.github/ISSUE_TEMPLATE`; the dialog links CONTRIBUTING.md's "New features" instead. Main builds the address (`feedback.ts`) with the
 form's own field ids and dropdown texts (`.github/ISSUE_TEMPLATE`; `feedback-issue.test.ts` fails when a
 template renames one), adds the version, system, architecture and what it knows of the extension, and
 opens it with `shell.openExternal`; nothing is sent from the app. Text that does not fit in a 7800-character

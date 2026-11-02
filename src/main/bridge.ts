@@ -21,6 +21,7 @@ import { isDeliberateEffort, isProModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
 import { injectedUserMessage, recordedRequestTurn, responseTurnId, type TimelineTurns } from '../shared/chronology.js';
 import type { SessionSummary } from '../shared/session.js';
+import { STUCK_SUMMARY_MS } from '../shared/session.js';
 import { messageReferences } from '../shared/session.js';
 import { turnTrace } from '../shared/turn-trace.js';
 import { checkAutomaticSend, SEND_CHECK_RETRY_MS } from './send-check.js';
@@ -38,7 +39,7 @@ export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
-import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation } from './session/input.js';
+import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation, ownUnsentTexts, retireMismatchedRecoveryInput } from './session/input.js';
 /**
  * The local bridge between the Chrome extension and this app.
  *
@@ -236,6 +237,7 @@ import {
   normalizeProjectId,
   openContinuationNow,
   reopenWithHandoffNow,
+  savedSummaryUsable,
   releaseContinuationDestinationSendNow,
   recoverContinuationFromRecordedBootstrap,
   repairPrimeFromResumeShadow,
@@ -247,7 +249,7 @@ import type { ContinuationView } from './session/continuation.js';
 import { noteResumeOpening } from './session/resume-gate.js';
 import { readDurable, writeDurableNow, writeDurableSoon } from './durable.js';
 import { APP_VERSION, BRIDGE_PROTOCOL } from './version.js';
-import { conversationHasMcpCallSince, readHandoffResponse } from './session/store.js';
+import { conversationHasMcpCallSince, readHandoff, readHandoffResponse } from './session/store.js';
 import { sessionWorkingAt } from '../shared/session-activity.js';
 import { requestCorrelation } from './session/correlation.js';
 import { completeImageExport, IMAGE_EXPORT_BODY_BYTES, pendingImageExports } from './image-export.js';
@@ -516,6 +518,20 @@ const HELD_INPUT_REASONS: Record<string, string> = {
 };
 /** When each page-note was last logged, by chat and heading (see `/page-note`). */
 const pageNotesLogged = new Map<string, number>();
+/** Uninterrupted "question changed" refusals of one automatic Continue: since when, and the last one. */
+const recoveryQuestionChanged = new Map<string, { since: number; last: number }>();
+/** Refusals further apart than this are not one run; this long of one run retires the Continue. */
+let QUESTION_CHANGED_GAP_MS = 5 * 60_000;
+let QUESTION_CHANGED_RETIRE_MS = 30 * 60_000;
+/** Whether pages are refusing this automatic Continue right now because the chat shows another question. */
+function questionChangedRefusalActive(inputId: string, now = Date.now()): boolean {
+  const run = recoveryQuestionChanged.get(inputId);
+  return !!run && now - run.last <= QUESTION_CHANGED_GAP_MS;
+}
+export function setQuestionChangedTimingForTests(gapMs = 5 * 60_000, retireMs = 30 * 60_000): void {
+  QUESTION_CHANGED_GAP_MS = gapMs; QUESTION_CHANGED_RETIRE_MS = retireMs;
+  recoveryQuestionChanged.clear();
+}
 /** When each repair-claim refusal was last logged, by chat and reason (#1922). */
 const claimRefusalsLogged = new Map<string, number>();
 /** Marks a page-note key logged now, as the newest entry, so a full map evicts the oldest log, not this one. */
@@ -2220,6 +2236,11 @@ export type SessionControlsView = {
   blocked: 'worker' | 'blocked' | '';
   job: ResumeJobView | null;
   /**
+   * The session's latest saved summary, offered when a Compact & Resume has waited STUCK_SUMMARY_MS without
+   * ChatGPT writing one (2026-11-01): "Continue in a new chat from the last summary" replaces that ticket.
+   */
+  lastSummary?: { handoffId: string; createdAt: number; earlierChat: boolean } | null;
+  /**
    * No page picked up this chat's repairs, so recovery gave up (#1787); in memory, lifted when the page
    * polls again. Not the session list's durable `recoveryStopped`.
    */
@@ -2274,7 +2295,53 @@ export async function sessionControlsFor(sessionId: string): Promise<SessionCont
     proLoopDelivery: control.enabled && getConfig().ui.finishTool === true && session.selectedModel?.conversationId === id &&
       supportsFinishAutomation(control.mode, session.selectedModel.model, session.selectedModel.reasoningEffort),
     automation: goalArmedFor(id) && !blocked ? control.enabled ? control.mode : 'goal' : 'off',
-    blocked, job: resumeJobFor(sessionId), pageless: pagelessChats.has(id) };
+    blocked, job: resumeJobFor(sessionId), lastSummary: await stuckSummaryOffer(sessionId, session), pageless: pagelessChats.has(id) };
+}
+
+/**
+ * The unattended way on for a compaction ChatGPT never answers: a chat with Goal or Loop on continues from
+ * the session's last saved summary (resumeFromSavedSummary cancels the stuck ticket). False when the chat is
+ * not unattended, has no usable summary, or the reopen is refused; the ordinary backoff then goes on.
+ */
+async function continueStuckFromSavedSummary(entry: { token: string; sessionId: string; from: string }, watch: { continuedFromSaved?: boolean }): Promise<boolean> {
+  watch.continuedFromSaved = true;
+  // Unattended means Goal or Loop on and the chat not blocked (a block keeps the switch's state; CodeRabbit on #2019).
+  const unattended = (): boolean => !goalBlockReason(entry.from) && goalArmedFor(entry.from) && goalSwitchFor(entry.from).enabled;
+  // Each refusal says why, once per ticket (this runs once per ticket; CodeRabbit on #2019).
+  const skip = (why: string): false => {
+    logInfo(`bridge: compaction ticket ${entry.token.slice(0, 8)} does not continue from the saved summary: ${why}`);
+    return false;
+  };
+  const attended = (): string => goalBlockReason(entry.from) ? 'the chat is blocked' : 'Goal and Loop are off for this chat';
+  if (!unattended()) return skip(attended());
+  const session = await getSession(entry.sessionId).catch(() => null);
+  if (!session) return skip('its session could not be read');
+  if (session.conversationId !== entry.from) return skip('the session has moved to another chat');
+  if (!session.lastHandoffId) return skip('the session has no saved summary');
+  // Checked again after the reads: the person may have blocked the chat or turned the switch off meanwhile.
+  if (!unattended()) return skip(attended());
+  if (!await savedSummaryUsable(entry.sessionId, session.lastHandoffId)) return skip(`saved summary ${session.lastHandoffId} is empty or unusable`);
+  if (!unattended()) return skip(attended());
+  try {
+    await resumeFromSavedSummary(entry.sessionId, session.lastHandoffId);
+    logWarn(`bridge: compaction ticket ${entry.token.slice(0, 8)} for ${entry.from} never reached ChatGPT; ` +
+      `the ${goalSwitchFor(entry.from).mode} chat continues in a new chat from saved summary ${session.lastHandoffId}`);
+    return true;
+  } catch (error) {
+    logInfo(`bridge: compaction ticket ${entry.token.slice(0, 8)} could not continue from the saved summary (${(error as Error).message}); backing off as before`);
+    return false;
+  }
+}
+
+export { STUCK_SUMMARY_MS };
+async function stuckSummaryOffer(sessionId: string, session: SessionSummary): Promise<SessionControlsView['lastSummary']> {
+  const job = resumeJobFor(sessionId);
+  if (!job || job.stage !== 'handoff-pending' || job.handoffId || Date.now() - job.startedAt < STUCK_SUMMARY_MS) return null;
+  if (!session.lastHandoffId || !await savedSummaryUsable(sessionId, session.lastHandoffId)) return null;
+  const saved = await readHandoff(sessionId, session.lastHandoffId).catch(() => null);
+  if (!saved) return null;
+  const source = saved.provenance?.sourceConversationId;
+  return { handoffId: saved.id, createdAt: saved.createdAt, earlierChat: !!source && source !== session.conversationId };
 }
 /** One absolute budget includes opening an absent tab and native hydration. */
 export const STOP_COMMAND_TIMEOUT_MS = 120_000;
@@ -2488,6 +2555,14 @@ export async function compactSession(sessionId: string): Promise<SessionControls
 /** Compact & Resume again from the summary an abandoned run already captured (#1215). */
 export async function resumeFromSavedSummary(sessionId: string, handoffId: string): Promise<SessionControlsView> {
   await controlledConversation(sessionId);
+  // A summary that cannot be used ends nothing: the waiting Compact & Resume stays (CodeRabbit on #2019).
+  if (!await savedSummaryUsable(sessionId, handoffId)) throw new Error('This summary can no longer be used. Start Compact & Resume again.');
+  // The person chose the saved summary over a Compact & Resume still waiting for ChatGPT's: that ticket ends.
+  const waiting = continuationForSession(sessionId);
+  if (waiting && waiting.state === 'awaiting-summary' && !waiting.handoffId) {
+    logInfo(`bridge: ${sessionId} continues from saved summary ${handoffId}; the Compact & Resume still waiting for ChatGPT's summary is cancelled`);
+    await cancelResumeNow(sessionId);
+  }
   const opened = await reopenWithHandoffNow(sessionId, handoffId);
   if (!opened) throw new Error('This summary can no longer be used. Start Compact & Resume again.');
   queueResumeCommand(sessionId, opened.token);
@@ -3271,7 +3346,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       const input = await claimBrowserInput(body.id, body.owner, target, body.requiresAuthorization === true);
       // The first message for an existing chat after a new tunnel-client is what the hold learns from.
       if (input && target) noteRouteExistingChatSend(target);
-      return json(res, 200, { input }, origin);
+      // The app's own unsent messages for this chat, so the page can replace one left in the composer (#1922).
+      const ownUnsent = input && target ? await ownUnsentTexts(target, input.id) : [];
+      return json(res, 200, { input, ...(ownUnsent.length ? { ownUnsent } : {}) }, origin);
     } finally {
       claimsInProgress--;
     }
@@ -3573,6 +3650,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     }
     if (committed?.wake) wakeBrowserWork();
     return json(res, 200, { sessionId: committed!.sessionId, stored: committed!.stored }, origin);
+  }
+
+  if (route === '/reveal/failed' && req.method === 'POST') {
+    let body: Record<string, unknown>;
+    try { body = (await readBody(req)) as Record<string, unknown>; } catch { return json(res, 400, { error: 'bad_request' }, origin); }
+    const id = conversationId(body['conversationId']);
+    if (!id) return json(res, 400, { error: 'bad_conversation_id' }, origin);
+    unclaimedChatShowFailed(id);
+    return json(res, 200, { ok: true }, origin);
   }
 
   if (route === '/closed' && req.method === 'POST') {
@@ -5269,6 +5355,20 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       if (now - (pageNotesLogged.get(key) ?? 0) >= 60_000) {
         notePageNoteLogged(key, now);
         logInfo(`bridge: ${chat ? `the page of ${chat}` : 'a ChatGPT page'} held queued message ${inputId} back: ${HELD_INPUT_REASONS[reason]}`);
+      }
+      // A page that keeps showing another last question will not stop: after half an hour of it without a
+      // break, the automatic Continue would only answer the wrong question, so it ends (2026-11-02).
+      // Any other reason in between means the page saw something else: the run starts over (CodeRabbit on #2030).
+      if (reason !== 'recovery-question-changed') recoveryQuestionChanged.delete(inputId);
+      if (reason === 'recovery-question-changed' && chat) {
+        const run = recoveryQuestionChanged.get(inputId);
+        const since = run && now - run.last <= QUESTION_CHANGED_GAP_MS ? run.since : now;
+        recoveryQuestionChanged.set(inputId, { since, last: now });
+        if (recoveryQuestionChanged.size > 200) recoveryQuestionChanged.delete(recoveryQuestionChanged.keys().next().value!);
+        if (now - since >= QUESTION_CHANGED_RETIRE_MS && await retireMismatchedRecoveryInput(inputId, chat)) {
+          recoveryQuestionChanged.delete(inputId);
+          changed();
+        }
       }
       return json(res, 200, { ok: true }, origin);
     }
@@ -8540,6 +8640,61 @@ function assistantRecoveryCancelledFor(conversationId: string, sessionId: string
  * The user's "don't reload this answer". Only a reload the browser has not claimed can be
  * withdrawn; a claimed one is already happening. Returns whether a countdown was cancelled.
  */
+const HISTORY_LIMIT_REFUSAL = 'ChatGPT limits its chat\'s history';
+
+/** Why the person's one click did nothing; the renderer words each one (CodeRabbit on #1979). */
+export type PickupNowRefusal = 'no-chat' | 'history-limit' | 'nothing-waiting' | 'changed' | 'not-sent' | 'not-started';
+
+/**
+ * The person's one click on a chat whose next step was not picked up (2026-10-31): an automatic
+ * Continue goes as an ordinary message now (a plain Continue was taken at once where the automatic
+ * one sat); a queued message or a Goal/Loop step is tried again now. Never inside a history limit.
+ * `shown`: the stopped step the button belonged to; a newer one is never acted on in its name.
+ * The answer says only what really started: `queued` is a queued ordinary message, not a delivery.
+ */
+export async function pickupNow(sessionId: string, shown: { next: string; stoppedAt: number }, now = Date.now()):
+    Promise<{ ok: true; did: 'queued' | 'retrying' } | { ok: false; code: PickupNowRefusal }> {
+  const refuse = (code: PickupNowRefusal, why: string) => {
+    logInfo(`bridge: the person asked to pick up session ${sessionId} now; nothing was tried — ${why}`);
+    return { ok: false as const, code };
+  };
+  const conversationId = (await getSession(sessionId))?.conversationId;
+  if (!conversationId) return refuse('no-chat', 'it has no ChatGPT conversation yet');
+  const limitedUntil = providerHistoryBackoff(conversationId, now);
+  if (limitedUntil !== null)
+    return refuse('history-limit', `ChatGPT limits ${conversationId}'s history for ${Math.ceil((limitedUntil - now) / 1000)} s more`);
+  const owed = (await owedPickups(now)).get(conversationId);
+  if (!owed || owed.sessionId !== sessionId) return refuse('nothing-waiting', `nothing is owed in ${conversationId} any more`);
+  const current = (await sessionRecoveryCountdowns(sessionId, conversationId)).find(row => row.kind === 'pickup-stopped');
+  if (!current || current.next !== shown.next || current.deadline !== shown.stoppedAt)
+    return refuse('changed', `the stopped step shown (${shown.next}, stopped ${new Date(shown.stoppedAt).toISOString()}) is no longer the one waiting in ${conversationId}`);
+  // A history limit can arrive while the reads above ran: nothing is tried inside it (CodeRabbit on #1979).
+  const limitedLate = providerHistoryBackoff(conversationId, Date.now());
+  if (limitedLate !== null) return refuse('history-limit', `ChatGPT began limiting ${conversationId}'s history meanwhile`);
+  if (owed.queued && owed.inputId && shown.next === 'continue') {
+    const outcome = await continueAsOrdinaryMessage(owed.inputId, 'the person asked to continue now', 0,
+      conversation => providerHistoryBackoff(conversation, Date.now()) !== null ? HISTORY_LIMIT_REFUSAL : null);
+    if ('refused' in outcome && outcome.refused === HISTORY_LIMIT_REFUSAL)
+      return refuse('history-limit', `ChatGPT began limiting ${conversationId}'s history while the Continue was checked`);
+    if ('row' in outcome) {
+      pickupWatch.delete(conversationId);
+      logInfo(`bridge: the person queued the automatic Continue in ${conversationId} now, as an ordinary message`);
+      wakeBrowserWork();
+      return { ok: true, did: 'queued' };
+    }
+    // A queued message of the person's own is no automatic Continue: it is retried instead.
+    if (!/no longer a queued automatic Continue/.test(outcome.refused)) return refuse('not-sent', `the Continue in ${conversationId} was not queued: ${outcome.refused}`);
+  }
+  // The exact owed step the button stood for: a replacement that arrives meanwhile is not tried in
+  // its name (CodeRabbit on #1979).
+  const focus: PickupFocus = { conversationId, replyId: owed.replyId };
+  await inspectOwedPickups(now, focus);
+  if (!focus.started) return refuse('not-started', `no retry of ${conversationId} could start now (its tries are used up, or another repair or a gate holds it)`);
+  logInfo(`bridge: the person asked to pick up ${conversationId} now; ${focus.started === 'queued' ? 'its Continue was queued as an ordinary message' : 'its next try runs at once'}`);
+  wakeBrowserWork();
+  return { ok: true, did: focus.started };
+}
+
 export async function cancelAssistantRecovery(sessionId: string): Promise<boolean> {
   const conversationId = (await getSession(sessionId))?.conversationId;
   if (!conversationId) return false;
@@ -8643,6 +8798,62 @@ async function assistantRepairCurrent(conversationId: string, repair: Repair): P
  * is to offer again; this only ends the case where nothing is listening at all.
  */
 const UNCLAIMED_REPAIR_OFFERS = 10;
+/** Stuck repairs whose chat was already shown once (session and episode), so it is shown only once. */
+const unclaimedChatShown = new Set<string>();
+/** Which of those a chat's last show belongs to, and when it went out, so a failed show is given back. */
+const unclaimedChatShownFor = new Map<string, { key: string; at: number }>();
+/** Shows of one stuck repair the browser could not carry out: one more try, then the page-less verdict. */
+const unclaimedChatShowFailures = new Map<string, number>();
+/** A browser that cannot show a chat says so within seconds; a report later than this is not about that show. */
+const SHOW_FAILURE_REPORT_MS = 60_000;
+const SHOW_RETRIES_PER_REPAIR = 1;
+
+/**
+ * The browser took the chat to show it and could not (#2027): it may be shown once more when its offers run
+ * out. Only a report soon after the show counts, so an older show's late failure cannot release a newer
+ * episode's (a newer episode's show comes at least ten offers later), and repeated failures end in the
+ * page-less verdict instead of showing and offering forever (CodeRabbit on #2027).
+ */
+export function unclaimedChatShowFailed(conversationId: string, now = Date.now()): void {
+  const shown = unclaimedChatShownFor.get(conversationId);
+  if (!shown || now - shown.at > SHOW_FAILURE_REPORT_MS) return;
+  unclaimedChatShownFor.delete(conversationId);
+  const failures = (unclaimedChatShowFailures.get(shown.key) ?? 0) + 1;
+  unclaimedChatShowFailures.set(shown.key, failures);
+  if (unclaimedChatShowFailures.size > 500) unclaimedChatShowFailures.delete(unclaimedChatShowFailures.keys().next().value!);
+  if (failures > SHOW_RETRIES_PER_REPAIR) {
+    logWarn(`bridge: the browser could not show ${conversationId} again; its recovery stops when its offers run out`);
+    return;
+  }
+  unclaimedChatShown.delete(shown.key);
+  logWarn(`bridge: the browser could not show ${conversationId}; it is shown again if its recovery stays unclaimed`);
+}
+
+/**
+ * Before a Goal or Loop chat is given up as page-less, a browser running the extension shows its tab once
+ * and the offers start over (user, 2026-11-02). Twice on 2026-11-01 a Loop chat's repairs went unclaimed
+ * until the app stopped, and showing the chat by hand brought it back at once. Only a browser that can
+ * show chats counts: without one nothing would be shown, so the chat gets the page-less notice as before
+ * (CodeRabbit on #2027). Worker chats and chats nobody automates are never brought forward.
+ */
+function showUnclaimedChatOnce(conversationId: string, repair: Repair): boolean {
+  const key = `${repair.sessionId}:${repair.episode}`;
+  if (unclaimedChatShown.has(key) || !goalActiveFor(conversationId) || isChatBlocked(conversationId) ||
+      stopRequestedFor(conversationId) || getConfig().ui.browserOnly === true ||
+      !browserWakeConnected() || !revealCapable()) return false;
+  unclaimedChatShown.add(key);
+  unclaimedChatShownFor.set(conversationId, { key, at: Date.now() });
+  if (unclaimedChatShown.size > 500) unclaimedChatShown.delete(unclaimedChatShown.values().next().value!);
+  if (unclaimedChatShownFor.size > 500) unclaimedChatShownFor.delete(unclaimedChatShownFor.keys().next().value!);
+  repair.offers = 1;
+  logWarn(`bridge: ${conversationId} never claimed ${UNCLAIMED_REPAIR_OFFERS} ${repair.reason} repair offer(s) — showing its tab once before giving up`);
+  void recordNote(repair.sessionId, 'The browser did not pick up this chat\'s recovery, so the app is showing its tab to go on.')
+    .catch(() => undefined);
+  void revealChatInBrowser(conversationId).then(shown => {
+    if (!shown) logWarn(`bridge: no browser took ${conversationId} to show it; its recovery is offered ${UNCLAIMED_REPAIR_OFFERS} more times`);
+  });
+  return true;
+}
 /** How long a page's refused claim keeps a repair's offers from counting as unclaimed (#1922). */
 const CLAIM_ASKED_FRESH_MS = 2 * 60_000;
 const unclaimedRepairTold = new Set<string>();
@@ -9682,7 +9893,7 @@ const COMPACTION_PICKUPS: Record<CompactionPhase, { every: number; attempts: num
   writing: { every: 5 * 60_000, attempts: 3 },
   opening: { every: 15 * 60_000, attempts: 3 }
 };
-const compactionWatch = new Map<string, { token: string; phase: CompactionPhase; nextAt: number; attempts: number; backoffs?: number; told?: boolean; streamLost?: boolean }>();
+const compactionWatch = new Map<string, { token: string; phase: CompactionPhase; nextAt: number; attempts: number; backoffs?: number; told?: boolean; streamLost?: boolean; continuedFromSaved?: boolean }>();
 /**
  * Why the source page last stopped an automatic ticket's attempt before asking (#1643), by token.
  * Kept until the next pickup lets the page try again, so the chat says it is held, not asking.
@@ -9840,7 +10051,10 @@ async function owedPickups(now: number): Promise<Map<string, OwedPickup>> {
   return owed;
 }
 
-async function inspectOwedPickups(now: number): Promise<boolean> {
+/** One chat whose outcome a caller of inspectOwedPickups needs: what started for it, if anything. */
+type PickupFocus = { conversationId: string; replyId: string; started?: 'queued' | 'retrying' };
+
+async function inspectOwedPickups(now: number, focus?: PickupFocus): Promise<boolean> {
   const floor = pickupWatchFloor;
   if (floor === null) return false;
   const owed = await owedPickups(now);
@@ -9854,7 +10068,15 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
     if (repair?.reason === 'goal' && (now >= watch.expiresAt || repair.state !== 'handed' || owed.has(conversationId))) repairsInFlight.delete(conversationId);
   }
   let queued = false;
+  let focusSkipLogged = false;
   for (const reply of owed.values()) {
+    // The person's click is about one chat: another chat's pickup is neither tried nor spent by it
+    // (CodeRabbit on #1979).
+    if (focus && reply.conversationId !== focus.conversationId) {
+      // Said once per pass that skips anything: the person's click leaves other chats to the sweep.
+      if (!focusSkipLogged) { focusSkipLogged = true; logInfo(`bridge: the person's pickup click for ${focus.conversationId} leaves other chats' pickups to the regular sweep`); }
+      continue;
+    }
     const session = await getSession(reply.sessionId);
     if (session?.conversationId !== reply.conversationId || isChatBlocked(reply.conversationId) ||
         stopRequestedFor(reply.conversationId) || await conversationWasSuperseded(reply.conversationId) ||
@@ -9884,11 +10106,18 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
           ? { stoppedAt: reply.pickupStoppedAt ?? reply.acceptedAt } : {}) };
       pickupWatch.set(reply.conversationId, watch);
     }
+    // The person's click is due now, also for a watch this pass just made again after a restart
+    // (CodeRabbit on #1979).
+    // Due now for the person's click only: a click that starts nothing leaves the schedule as it was
+    // (CodeRabbit on #1979).
+    const dueAt = focus?.conversationId === reply.conversationId && focus.replyId === reply.replyId ? Math.min(watch.dueAt, now) : watch.dueAt;
     // An automatic Continue nothing took for long becomes an ordinary message rather than another
     // reload or a stop: the chat must not stop while it is unfinished (user decision 2026-10-31).
     // Checked between reloads and after a stop too; the conversion itself refuses while anything newer
     // happened in the chat or anything runs.
-    if (reply.queued && reply.inputId && now - reply.acceptedAt >= RECOVERY_ORDINARY_AFTER_MS) {
+    // Not while its pages refuse it because the chat shows another last question: as an ordinary message it
+    // would lose that check and answer the wrong question (CodeRabbit on #2030).
+    if (reply.queued && reply.inputId && now - reply.acceptedAt >= RECOVERY_ORDINARY_AFTER_MS && !questionChangedRefusalActive(reply.inputId, now)) {
       const stuck = watch.stoppedAt || watch.attempts >= 1 ? `not claimed after ${watch.attempts} reload(s)` : await queuedInputOfferBlocker(reply.inputId);
       if (stuck) {
         const outcome = await continueAsOrdinaryMessage(reply.inputId, stuck, RECOVERY_ORDINARY_AFTER_MS);
@@ -9896,6 +10125,7 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
           pickupWatch.delete(reply.conversationId);
           wakeBrowserWork();
           queued = true;
+          if (focus?.conversationId === reply.conversationId && focus.replyId === reply.replyId) focus.started = 'queued';
           continue;
         }
         // Why it stays, once per chat, input and reason (CodeRabbit on #1960). Not for a ticket that
@@ -9911,7 +10141,7 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
       }
     }
     if (watch.attempts >= BROWSER_PICKUP_ATTEMPT_LIMIT) continue;
-    if (now < watch.dueAt || now < reply.listenUntil) continue;
+    if (now < dueAt || now < reply.listenUntil) continue;
     // A reload inside a history limit cannot bring the page back and can extend the limit. Counting
     // it anyway, at queue time, let it wait out the limit and then run with the next one due right
     // behind it (2026-10-30: two of three reloads 61 seconds apart). It is counted when it can run.
@@ -9952,9 +10182,9 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
     const wasStopped = !!watch.stoppedAt;
     const nextAt = nextAttempts < BROWSER_PICKUP_ATTEMPT_LIMIT ? now + browserPickupDelay(nextAttempts) : undefined;
     const reserved = reply.queued && reply.inputId
-      ? await recordQueuedPickupAttemptNow(reply.inputId, reply.replyId, now, nextAt, sharedState)
+      ? await recordQueuedPickupAttemptNow(reply.inputId, reply.replyId, now, nextAt, sharedState, watch.attempts)
       : !reply.queued && reply.goalReplyId
-        ? await recordGoalPickupAttemptNow(reply.conversationId, reply.goalReplyId, now, nextAt)
+        ? await recordGoalPickupAttemptNow(reply.conversationId, reply.goalReplyId, now, nextAt, watch.attempts)
         : null;
     if (!reserved) continue;
     watch.attempts = reserved.attempts;
@@ -9964,14 +10194,31 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
     // The session list's `recoveryStopped`, pushed as soon as the stop is recorded, whether or not
     // its last reload can still be queued. A queued input's stop already pushed with its outbox
     // write; a Goal reply's ledger has no push of its own.
-    if (watch.stoppedAt && !wasStopped) notifyChanged();
+    const justStopped = Boolean(watch.stoppedAt && !wasStopped);
+    // The person may have blocked or stopped the chat while the stop mark was being saved: then nothing
+    // keeps trying, and a notice saying so would be wrong (CodeRabbit on #1979).
+    let skipped: string | null = null;
+    if (justStopped) {
+      if (isChatBlocked(reply.conversationId)) skipped = 'the chat was blocked';
+      else if (stopRequestedFor(reply.conversationId)) skipped = 'a Stop is pending';
+      else if ((await getSession(reply.sessionId).catch(() => null))?.conversationId !== reply.conversationId) skipped = 'the session moved to another chat';
+      notifyChanged();
+      if (skipped) logInfo(`bridge: no Recovery slowed notice for ${reply.conversationId} — ${skipped} while its stop mark was saved`);
+    }
+    const stillOwed = justStopped && !skipped;
+    if (stillOwed) {
+      // The alert goes with the saved stop mark, once, also when this pass's reload cannot be queued
+      // (another repair holds the chat): later passes see the chat already stopped (CodeRabbit on #1979).
+      logWarn(`bridge: browser pickup recovery has not collected the step in ${reply.conversationId} after ${watch.attempts} reloads; ` +
+        `the chat shows as stopped, and the app keeps trying every 15 to 60 minutes`);
+      noticeChatStopped('Recovery slowed', "The browser has not picked up this chat's next step. The app keeps trying; you can go on from the chat at once.", reply.sessionId);
+    }
     if (!queueBrowserRecovery(reply.conversationId, reply.sessionId,
       `goal:${reply.replyId}:${watch.attempts}`, 'goal', 0, now)) continue;
     queued = true;
+    if (focus?.conversationId === reply.conversationId && focus.replyId === reply.replyId) focus.started = 'retrying';
     logInfo(`bridge: next automation/input step uncollected in ${reply.conversationId} — reload ${watch.attempts}` +
       (wasStopped ? ' (slow retry)' : ''));
-    if (watch.stoppedAt && !wasStopped) logWarn(`bridge: browser pickup recovery has not collected the step in ${reply.conversationId} after ${watch.attempts} reloads; ` +
-      `the chat shows as stopped, and the app keeps trying every 15 to 60 minutes`);
   }
   return queued;
 }
@@ -10049,6 +10296,10 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
         ).catch(() => undefined);
       }
       if (phase !== 'asking') continue;
+      // A Goal or Loop chat runs unattended: when a slowed burst too could not ask ChatGPT for a summary
+      // (2026-11-01: it no longer served the chat at all), it goes on from the last saved summary in a new
+      // chat of the same session, rather than waiting for someone to notice. One per ticket.
+      if ((watch.backoffs ?? 0) >= 1 && !watch.continuedFromSaved && await continueStuckFromSavedSummary(entry, watch)) continue;
       if (entry.automatic && (watch.backoffs ?? 0) < AUTOMATIC_ASKING_RETRY_BURSTS) {
         // A threshold-created ticket is durable work, not a ten-minute liveness verdict. The
         // source can spend this whole first budget draining native/local work without ever
@@ -10288,6 +10539,8 @@ function retireSpentRepairs(): void {
 let rotationHoldMs = 15_000;
 /** Test seam. */
 export function setRotationHoldForTests(ms: number): void { rotationHoldMs = ms; }
+/** What a restart loses of the pickup schedule: the in-memory watches; the saved attempts stay. */
+export function forgetPickupWatchesForTests(): void { pickupWatch.clear(); }
 /**
  * Stops the 30-second maintenance timer. For tests that move a mocked Date.now by minutes on real
  * timers: a real tick landing between two of their steps measures that jump as the computer
@@ -10752,6 +11005,7 @@ async function takePendingRepairs(
       // its polls would use up the budget while the chosen page keeps asking (CodeRabbit on #1953).
       const askedRecently = repair.claimAskedAt !== undefined && now - repair.claimAskedAt < CLAIM_ASKED_FRESH_MS;
       repair.offers = (repair.offers ?? 1) + (canClaim && !askedRecently ? 1 : 0);
+      if (repair.offers > UNCLAIMED_REPAIR_OFFERS && showUnclaimedChatOnce(conversationId, repair)) continue;
       if (repair.offers > UNCLAIMED_REPAIR_OFFERS) {
         // Nothing is listening. Say that, rather than go on offering into an empty room until
         // some other subsystem happens to clear the entry — and say it as what it is: the
