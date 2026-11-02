@@ -48,6 +48,7 @@
       "js": [
         "i18n.js",
         "chatgpt-dom.js",
+        "app-palette.js",
         "content.js"
       ],
       "css": [
