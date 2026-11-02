@@ -5783,11 +5783,32 @@ process once and retains an explicit access error; ordinary network retry remain
 
 ### Native Desktop
 
-Desktop is available only on Windows and supported macOS. Linux removes it from live discovery
-and enforcement while preserving stored preferences. Windows uses the bounded PowerShell/Win32/
+Native mouse/keyboard Desktop control is available only on Windows and supported macOS.
+Linux preserves those stored preferences but exposes no native input tool at this stage.
+Windows uses the bounded PowerShell/Win32/
 UIA helper; macOS uses Swift ScreenCaptureKit/AX/CGEvent through an architecture-matched N-API
 addon on an Electron worker. The packaged Electron app is the macOS permission subject; a
 standalone CLI probe does not prove Screen Recording/Accessibility permission for the app.
+
+**GNOME Wayland read-only display screenshots (Linux staged integration, part 2).** A separate,
+default-off `ui.linuxDesktopEnabled` setting is saved by `config.ts`, projected through
+`shared/types.ts`, edited through Settings/IPC and treated as wider access in settings imports.
+Neither browser permission nor native Control permission enables it. `linux_observe` has only
+`what:'screenshot'` in this stage, not window inventory, accessibility refs, clicks, typing
+or coordinates. Its registrar requires live `screen` capability and the Linux opt-in before
+and after backend waits, image decoding and portal consent; a revoked grant emits no image.
+The checked `agent-desktop` 1.0.2 subprocess adapter admits only `version` and `screenshot`,
+never uses a shell, bounds output and validates decoded PNG/dimensions before MCP image output.
+A full-display capture is never a per-window screenshot.
+
+The Settings button calls `linuxScreenshotConsent` via preload →
+`desktop:linuxScreenshotConsent` only from the focused CoS main window. It triggers one
+GNOME screenshot portal request and returns only the PNG byte count; no image is saved or sent
+to the renderer. Aborted/denied portal prompts are not retried. Saved opt-in changes invalidate
+MCP surface exposure so a removed tool is not retained in model-facing discovery. Tests cover
+the backend command boundary, malformed PNG, opt-in and Screen revocation mid-capture, Settings
+consent and twelve locale catalogs. A future control PR adds accessibility refs and input
+*after* this read-only path, with its own ownership and permission gates.
 
 The permission self-test reports native preflight results, not a completed capture or input.
 An actual screenshot and AX query remain separate evidence; the existing grant-history and

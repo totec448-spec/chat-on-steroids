@@ -3948,5 +3948,16 @@
   "New features come as pull requests, not issues.": "Новые функции принимаются как pull request, а не как issue.",
   "How to start one": "Как его начать",
   "Plugins could not be loaded.": "Не удалось загрузить плагины.",
-  "Pets could not be loaded.": "Не удалось загрузить питомцев."
+  "Pets could not be loaded.": "Не удалось загрузить питомцев.",
+  "Allow native Linux Desktop access": "Разрешить нативный доступ к рабочему столу Linux",
+  "Off by default. Allows read-only GNOME display screenshots only with Screen permission and operating-system consent. No native input or accessibility control is available.": "По умолчанию отключено. Разрешает только снимки экрана GNOME в режиме чтения при наличии разрешения на экран и согласия ОС. Ввод и управление элементами доступности недоступны.",
+  "Test GNOME screenshot permission": "Проверить разрешение GNOME на снимки экрана",
+  "Click while the Chat On Steroids window is active. If GNOME asks, choose Allow. The screenshot is discarded.": "Нажмите при активном окне Chat On Steroids. Если GNOME спросит, выберите «Разрешить». Снимок не сохраняется.",
+  "Request screenshot permission": "Запросить разрешение на снимок",
+  "Waiting for GNOME screenshot permission…": "Ожидание разрешения GNOME на снимок экрана…",
+  "Screenshot permission confirmed. No image was saved.": "Разрешение подтверждено. Снимок не был сохранён.",
+  "Screenshot permission request failed: {0}": "Не удалось получить разрешение на снимок: {0}",
+  "A screenshot permission request is already running.": "Запрос разрешения на снимок экрана уже выполняется.",
+  "Screenshot permission can be requested only from the Chat On Steroids main window.": "Разрешение на снимок экрана можно запросить только из главного окна Chat On Steroids.",
+  "Native Linux Desktop access on": "Нативный доступ к рабочему столу Linux включён"
 }
