@@ -1223,7 +1223,7 @@ async function latchAppDisconnect() {
   void getBrowserController().then(controller => controller?.revoke()).catch(() => undefined);
   token = null;
   disconnected = true;
-  await activeTabs?.revoke().catch(() => undefined);
+  await renderingLeases(() => activeTabs?.revoke());
   await persist();
 }
 
@@ -2871,7 +2871,9 @@ function inspectRequestedModels(request) {
       ...(typeof tabDocuments[key] === 'string' ? { documentId: tabDocuments[key] } : {}),
       ...(Number.isSafeInteger(tabEpochs[key]) ? { navigationEpoch: tabEpochs[key] } : {}) });
     if (intent !== connectionEpoch || !token || disconnected || Date.now() >= wanted.expiresAt) return;
-    await activeTabs?.set(`catalog:${wanted.nonce}`, [tab]);
+    // Bounded and never failing, like every lease change: another tab's pending release must not end this
+    // inspection (CodeRabbit on #2027).
+    await renderingLeases(() => activeTabs?.set(`catalog:${wanted.nonce}`, [tab]));
     await waiting('inspecting');
     if (!current()) return;
     const inspected = await send({ type: 'clf-model-catalog', nonce: wanted.nonce, expiresAt: wanted.expiresAt });
@@ -2880,7 +2882,7 @@ function inspectRequestedModels(request) {
     if (inspected === true || inspected?.ok === true) await retireCatalogTabs();
     else await waiting(inspected?.reason || 'result_unconfirmed');
   })().catch(() => waiting('inspection_failed')).finally(async () => {
-    if (targetNonce) await activeTabs?.set(`catalog:${targetNonce}`, []).catch(() => undefined);
+    if (targetNonce) await renderingLeases(() => activeTabs?.set(`catalog:${targetNonce}`, []));
     if (targetNonce) await releaseModelCatalogTarget(targetNonce);
     modelCatalogFlight = null;
   });
@@ -4475,7 +4477,7 @@ const HANDLERS = {
     // Remembered, not just cleared. Otherwise the next request — two seconds away in any
     // open tab — provisions a new token and the browser is connected again.
     disconnected = true;
-    await activeTabs?.revoke().catch(() => undefined);
+    await renderingLeases(() => activeTabs?.revoke());
     pairingError = null;
     await persist();
     return { ok: true };

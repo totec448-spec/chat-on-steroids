@@ -79,8 +79,10 @@ export function createActiveTabs(chrome) {
           catch (error) { pending ??= error; }
         }
         for (const [id, url] of cancelled) if (states.get(id)?.url !== url) cancelled.delete(id);
-        // No DOM, Runtime, Network, screenshots, artificial input or polling domains.
-        for (const state of states.values()) await attach(state);
+        // No DOM, Runtime, Network, screenshots, artificial input or polling domains. A tab whose previous
+        // lease is still being released waits for it: a second attach would fail and mark it failed for
+        // good (CodeRabbit on #2027).
+        for (const state of states.values()) if (![...retiring].some(old => old.id === state.id)) await attach(state);
         await save();
       } while (again);
       if (pending) throw pending;
