@@ -201,6 +201,7 @@ app.whenReady().then(async () => {
   await until(`document.getElementById('contextMeter').hasAttribute('data-attention')`, 8000);
   await check('The offer is said to screen readers', `/15 minutes/.test(document.getElementById('contextMeterNotice').textContent)&&document.getElementById('contextMeterButton').getAttribute('aria-describedby')==='contextMeterNotice'`);
   await click('#contextMeterButton'); await pause(200);
+  await check('The popover\'s status line does not announce the offer a second time', `document.getElementById('sessionControlStatus').getAttribute('aria-live')==='off'`);
   await check('A stuck Compact & Resume offers the last summary', `!document.getElementById('resumeLastSummary').hidden&&getComputedStyle(document.getElementById('resumeLastSummary')).display!=='none'&&/15 minutes/.test(document.getElementById('sessionControlStatus').textContent)`);
   await capture('context-last-summary');
   await click('#resumeLastSummary'); await pause(300);
