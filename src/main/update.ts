@@ -338,7 +338,7 @@ function stagingDir(version: string): string {
   return path.join(app.getPath('userData'), 'updates', version);
 }
 
-/** Only version directories owned by this updater, never other app copies or user backups. */
+/** Version directories in the updater-exclusive cache; never scan app copies or backups elsewhere. */
 async function pruneUpdateCache(keepVersion?: string): Promise<void> {
   stillCurrent();
   const root = path.join(app.getPath('userData'), 'updates');

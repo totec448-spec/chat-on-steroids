@@ -327,6 +327,18 @@ describe('cleanup of updater-owned downloads', () => {
     expect(readFileSync(legacy, 'utf8')).toBe('legacy installer bytes');
     expect(updateStatus().stage).toBe('failed');
   });
+  it('never scans a version-shaped backup outside the updater-exclusive cache', async () => {
+    const old = cached('0.0.1');
+    const backup = path.join(userData, 'backups', '0.0.1');
+    mkdirSync(backup, { recursive: true });
+    const installer = path.join(backup, WINDOWS_ASSET);
+    writeFileSync(installer, 'manually saved installer');
+    github({ fail: 'release' });
+    await checkForUpdates();
+    expect(existsSync(old)).toBe(false);
+    expect(readFileSync(installer, 'utf8')).toBe('manually saved installer');
+    expect(updateStatus().stage).toBe('failed');
+  });
   it('keeps the previous candidate and the handoff note when a newer download fails', async () => {
     const previous = cached('98.0.0');
     const note = path.join(userData, 'updates', 'handoff.json');
