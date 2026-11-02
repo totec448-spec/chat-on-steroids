@@ -13719,14 +13719,15 @@
       // model selection and the writability wait sit between the two and can replace the editor.
       if (!onTarget() || (CLF_DOM.generating() && !message.directTurn) ||
           (!ownsFreshPage() && (CLF_DOM.composerText() || '').trim() &&
-            sendText(CLF_DOM.composerText()) !== sendText(input.text) && !(leftover && ownLeftover())) ||
+            sendText(CLF_DOM.composerText()) !== sendText(input.text) && !ownLeftover()) ||
           CLF_DOM.hasComposerAttachments()) return fail(t(
         'content_delivery_composer_changed',
         'The ChatGPT composer changed before sending'
       ));
       let insertionFailure = '';
-      // The app's own leftover is replaced as a whole; any other text keeps the usual rule.
-      if (!CLF_DOM.insertPrompt(input.text, ownsFreshPage() || (leftover && ownLeftover()), reason => { insertionFailure = reason; }))
+      // The app's own leftover is replaced as a whole, also one ChatGPT restored only during model selection
+      // (CodeRabbit on #2028); any other text keeps the usual rule.
+      if (!CLF_DOM.insertPrompt(input.text, ownsFreshPage() || ownLeftover(), reason => { insertionFailure = reason; }))
         return fail(t(
           'content_delivery_text_not_accepted',
           'ChatGPT did not accept the text$1',
