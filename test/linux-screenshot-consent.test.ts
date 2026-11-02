@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { testLinuxScreenshotConsent } from '../src/main/computer/linux-screenshot-consent.js';
 
 const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
@@ -21,6 +22,14 @@ function context() {
 }
 
 describe.skipIf(process.platform !== 'linux')('manual GNOME screenshot permission probe', () => {
+  it('translates the generic permission failure instead of exposing unknown backend error text', () => {
+    const key = 'GNOME screenshot permission could not be confirmed.';
+    for (const locale of ['de', 'es', 'fr', 'ja', 'ko', 'pt-BR', 'pt-PT', 'ru', 'tr', 'vi', 'zh-CN', 'zh-TW']) {
+      const catalog = JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>;
+      expect(catalog[key], locale).toBeTruthy();
+      expect(catalog[key], locale).not.toBe(key);
+    }
+  });
   it('requires native opt-in, screen permission and an already active window', async () => {
     for (const revoke of ['setEnabled', 'setScreen', 'setFocused'] as const) {
       const deps = context();
@@ -50,6 +59,18 @@ describe.skipIf(process.platform !== 'linux')('manual GNOME screenshot permissio
     expect(response).toEqual({ pngBytes: Buffer.from(tinyPng, 'base64').byteLength });
     expect(JSON.stringify(response)).not.toContain('iVBOR');
     expect(deps.run).toHaveBeenCalledExactlyOnceWith({ kind: 'screenshot', display: 0 });
+  });
+  it('rejects a consent result if Screen or native opt-in was revoked during capture', async () => {
+    for (const revoke of ['setEnabled', 'setScreen'] as const) {
+      const deps = context();
+      deps.run.mockImplementationOnce(async () => {
+        deps[revoke](false);
+        return { ok: true, command: 'screenshot',
+          data: { data: tinyPng, format: 'png', width: 1, height: 1, scale_factor: 1 } };
+      });
+      await expect(testLinuxScreenshotConsent(deps)).rejects.toThrow('disabled during the screenshot request');
+      expect(deps.run).toHaveBeenCalledTimes(1);
+    }
   });
   it('does not retry a portal refusal or return application error details', async () => {
     const deps = context();

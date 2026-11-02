@@ -5809,7 +5809,8 @@ standalone CLI probe does not prove Screen Recording/Accessibility permission fo
 default-off `ui.linuxDesktopEnabled` setting is saved by `config.ts`, projected through
 `shared/types.ts`, edited through Settings/IPC and treated as wider access in settings imports.
 Neither browser permission nor native Control permission enables it. `linux_observe` has only
-`what:'screenshot'` in this stage, not window inventory, accessibility refs, clicks, typing
+`what:'screenshot',display:0` in this stage; a nonzero display is rejected even
+on an internal direct call. It has no window inventory, accessibility refs, clicks, typing
 or coordinates. Its registrar requires live `screen` capability and the Linux opt-in before
 and after backend waits, image decoding and portal consent; a revoked grant emits no image.
 The checked `agent-desktop` 1.0.2 subprocess adapter admits only `version` and `screenshot`,

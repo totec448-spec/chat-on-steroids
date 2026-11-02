@@ -1775,9 +1775,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // to trigger an operating-system access dialog.
     const window = getWindow();
     if (!window || window.isDestroyed() || event.sender !== window.webContents) {
+      logInfo('linux screenshot consent: refused because the request was not from the main window');
       throw new Error('Screenshot permission can be requested only from the Chat On Steroids main window.');
     }
-    if (linuxScreenshotConsentPending) throw new Error('A screenshot permission request is already running.');
+    if (linuxScreenshotConsentPending) {
+      logInfo('linux screenshot consent: refused because another request is already running');
+      throw new Error('A screenshot permission request is already running.');
+    }
     linuxScreenshotConsentPending = true;
     try {
       return await testLinuxScreenshotConsent({

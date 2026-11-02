@@ -216,7 +216,7 @@ macOS publishes `observe` and `computer`, described below.
 
 This first Linux stage publishes `linux_observe` only when a person enables
 `ui.linuxDesktopEnabled` and grants Screen permission. Its input schema allows
-only `{ what: 'screenshot', display: 0 }` (optional display index 0–32).
+only `{ what: 'screenshot', display: 0 }` (display 0 is the only allowed value).
 The bounded output is an MCP PNG image plus text metadata labeled `scope: 'display'`.
 GNOME's operating-system portal can ask for consent and can be cancelled; do not retry
 automatically. The separate Settings test requests one portal screenshot but discards it
