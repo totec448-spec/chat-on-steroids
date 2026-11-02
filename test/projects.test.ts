@@ -7,7 +7,7 @@ import { bindBrowserInputProject, claimBrowserInput, enqueueInput, listInputs, p
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { flushDurable, initDurableStore, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import { createSession, getSession, initSessionStore, moveSessionProject, rebindSession, resetSessionStoreForTests, setSessionOrigin } from '../src/main/session/store.js';
-import { addProject, armProjectCreate, assignSessionProject, bindChatToLinkedProject, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, getSessionProject, inheritSessionProject, listProjects, markProjectGone, moveChatToProject, pendingProjectCreates, PROJECT_CREATE_ARMED_MS, PROJECT_CREATE_CLAIM_MS, projectWorkspace, removeProject, retryProjectCreate, sessionSecretsShieldOff, setProjectColor, setProjectSecretsShieldOff } from '../src/main/projects.js';
+import { addProject, armProjectCreate, assignSessionProject, bindChatToLinkedProject, claimProjectCreate, completeProjectCreate, failProjectCreate, getProject, getSessionProject, inheritSessionProject, listProjects, markProjectGone, moveChatToProject, moveChatWithGroup, pendingProjectCreates, PROJECT_CREATE_ARMED_MS, PROJECT_CREATE_CLAIM_MS, projectWorkspace, removeProject, retryProjectCreate, sessionSecretsShieldOff, setProjectColor, setProjectSecretsShieldOff } from '../src/main/projects.js';
 import { validateNewRoot } from '../src/main/sandbox.js';
 import { resetWorkspaces, setWorkspaceFor } from '../src/main/workspace.js';
 
@@ -332,6 +332,39 @@ it("never moves a worker, or a chat that already works in a folder, into a linke
     expect(await bindChatToLinkedProject(working.id, nativeId)).toBe('kept');
     expect((await getSession(working.id))?.projectId).toBeUndefined();
   } finally { resetWorkspaces(); }
+});
+
+it('keeps a sub-agent created during a move in the project the chat moves to', async () => {
+  const first = await addProject(path.join(approved, 'first'));
+  const second = await addProject(path.join(approved, 'second'));
+  const chat = await createSession({ title: 'Main', conversationId: randomUUID() });
+  await assignSessionProject(chat.id, first.id);
+  const worker = await createSession({ title: 'Worker', conversationId: randomUUID() });
+  // The worker's origin is written while the family moves: it must end where its main chat is.
+  await Promise.all([
+    setSessionOrigin(worker.id, { kind: 'worker', fromSessionId: chat.id, agentId: 'worker-1', task: 'Check' }, 'Worker'),
+    moveChatToProject(chat.id, second.id)
+  ]);
+  expect((await getSession(chat.id))?.projectId).toBe(second.id);
+  expect((await getSession(worker.id))?.projectId).toBe(second.id);
+});
+
+it('runs two overlapping moves of one chat with their groups one after the other', async () => {
+  const groups = await import('../src/main/chat-groups.js');
+  groups.resetChatGroupsForTests();
+  const first = await addProject(path.join(approved, 'first'));
+  const second = await addProject(path.join(approved, 'second'));
+  const chat = await createSession({ title: 'Main', conversationId: randomUUID() });
+  await assignSessionProject(chat.id, first.id);
+  const { group } = await groups.createChatGroup(first.id, 'Spanish', () => true);
+  await groups.assignChatGroup({ id: chat.id, projectId: first.id, origin: null }, group.id);
+  const [away, back] = await Promise.all([moveChatWithGroup(chat.id, second.id), moveChatWithGroup(chat.id, first.id)]);
+  // The second move starts from where the first left the chat: project second, no group. Its Undo
+  // goes there, not to the group the chat had before the first move.
+  expect(away).toMatchObject({ from: first.id, fromGroup: group.id });
+  expect(back).toMatchObject({ from: second.id, fromGroup: null });
+  expect((await getSession(chat.id))?.projectId).toBe(first.id);
+  expect((await groups.chatGroupsState()).members[chat.id]).toBeUndefined();
 });
 
 it('finishes a family move that stopped half way when the person moves the chat there again', async () => {
