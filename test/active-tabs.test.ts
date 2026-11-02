@@ -178,6 +178,30 @@ describe('a renderer that never answers', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  // CodeRabbit on #2027: a late attachment whose first release fails is kept and released by a later pass.
+  it('keeps a late attachment in custody until its release goes through', async () => {
+    vi.useFakeTimers();
+    try {
+      const { control, chrome, attached } = setup();
+      let finish: (() => void) | null = null;
+      chrome.debugger.attach.mockImplementation(({ tabId }: { tabId: number }) => new Promise<void>(resolve => {
+        finish = () => { attached.add(tabId); resolve(); };
+      }));
+      chrome.debugger.detach.mockRejectedValueOnce(new Error('transient'));
+      await vi.advanceTimersByTimeAsync(0);
+      const change = control.set('policy', [A]);
+      await vi.advanceTimersByTimeAsync(5_100);
+      await change;
+      finish!();
+      await vi.advanceTimersByTimeAsync(0);
+      expect([...attached]).toEqual([1]);
+      expect(control.owns(1)).toBe(true);
+      await control.revoke().catch(() => undefined);
+      expect([...attached]).toEqual([]);
+      expect(control.owns(1)).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('releases an attachment that answers only after it was given up', async () => {
     vi.useFakeTimers();
     try {

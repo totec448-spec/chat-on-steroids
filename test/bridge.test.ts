@@ -2878,46 +2878,62 @@ describe('automatic compaction', () => {
   });
 
   // 2026-11-01, the maintainer's Mac: a Loop chat stopped twice this way, and showing its tab by hand brought it
-  // back at once. A Goal or Loop chat gets that once per stuck repair before the app gives up (user, 2026-11-02).
-  it('shows a Goal or Loop chat once before it stops offering a repair nobody claims', async () => {
+  // back at once. A Goal or Loop chat is shown once per stuck repair, by a browser that can show chats, before
+  // the app gives up (user, 2026-11-02). Without such a browser nothing could be shown: it stops as before.
+  it.each([true, false])('shows a Loop chat once before it stops offering a repair nobody claims (browser can show chats: %s)', async canShow => {
     const { setSessionAutomation } = await import('../src/main/bridge.js');
     await pair();
-    const conversationId = randomUUID();
-    await request('POST', '/events', { body: { conversationId, events: [
-      { kind: 'user_message', time: Date.now(), text: 'Continue this task', messageId: 'loop-never-claimed' },
-      { kind: 'turn_start', time: Date.now(), turnId: 'loop-never-claimed-turn' }
-    ] } });
-    const session = (await findSessionByConversation(conversationId))!;
-    await setSessionAutomation(session.id, 'loop');
-    await request('POST', '/events', { body: { conversationId, events: [
-      { kind: 'chat_error', time: Date.now(), turnId: 'loop-never-claimed-turn', recoverable: true,
-        text: 'Connection interrupted. Waiting for the complete answer' }
-    ] } });
-    await settled();
-    const offered = async (): Promise<boolean> => ((await request('GET', '/status')).body.repairs as Array<{ conversationId: string }>)
-      .some(row => row.conversationId === conversationId);
-    const notes = async () => (await readEvents(session.id, { kinds: ['note'] }))
-      .map(event => (event as { message: { text: string } }).message.text);
-
-    let seen = 0;
-    for (let pass = 0; pass < 40 && await offered(); pass++) {
-      seen += 1;
-      if (recoveryBrowserWake.mock.calls.length) break;
+    const browser = 'cccccccccccccccc3333';
+    let socket: WebSocket | null = null;
+    if (canShow) {
+      socket = new WebSocket(base.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
+      await once(socket, 'open');
+      const authenticated = once(socket, 'message'); socket.send(token!); await authenticated;
     }
-    // No browser could show it in place (no extension connected here), so it is opened through the OS.
-    await vi.waitFor(() => expect(recoveryBrowserWake).toHaveBeenCalledTimes(1));
-    expect(recoveryBrowserWake.mock.calls[0]![0]).toBe(`https://chatgpt.com/c/${conversationId}`);
-    expect(seen).toBeGreaterThanOrEqual(10);
-    expect(await offered(), 'the repair stopped instead of waiting for the shown tab').toBe(true);
-    expect((await sessionControlsFor(session.id)).pageless).toBe(false);
-    expect((await notes()).some(text => text.includes('showing its tab'))).toBe(true);
+    try {
+      const conversationId = randomUUID();
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'user_message', time: Date.now(), text: 'Continue this task', messageId: 'loop-never-claimed' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'loop-never-claimed-turn' }
+      ] } });
+      const session = (await findSessionByConversation(conversationId))!;
+      await setSessionAutomation(session.id, 'loop');
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'chat_error', time: Date.now(), turnId: 'loop-never-claimed-turn', recoverable: true,
+          text: 'Connection interrupted. Waiting for the complete answer' }
+      ] } });
+      await settled();
+      const reveals: string[] = [];
+      const offered = async (): Promise<boolean> => {
+        const body = (await request('POST', '/status', { browser, body: { openConversations: [], canReveal: true } })).body;
+        reveals.push(...(body.reveals ?? []));
+        return (body.repairs as Array<{ conversationId: string }>).some(row => row.conversationId === conversationId);
+      };
+      const notes = async () => (await readEvents(session.id, { kinds: ['note'] }))
+        .map(event => (event as { message: { text: string } }).message.text);
 
-    // Shown once only: still nobody claims, so it stops as before.
-    for (let pass = 0; pass < 40 && await offered(); pass++) { /* re-read until retired */ }
-    expect(await offered()).toBe(false);
-    expect(recoveryBrowserWake).toHaveBeenCalledTimes(1);
-    expect((await sessionControlsFor(session.id)).pageless).toBe(true);
-    expect((await notes()).some(text => text.includes('has no page to reload'))).toBe(true);
+      // The reply that hands over the chat to show skips the repair once; it stops for good only after that.
+      let seen = 0, absent = 0;
+      for (let pass = 0; pass < 60 && absent < 3; pass++) {
+        if (await offered()) { seen += 1; absent = 0; } else absent += 1;
+      }
+      expect(absent, 'the repair was still being offered after sixty reads').toBe(3);
+      expect((await sessionControlsFor(session.id)).pageless).toBe(true);
+      expect((await notes()).some(text => text.includes('has no page to reload'))).toBe(true);
+      if (canShow) {
+        // Shown once (the next status after the ten offers carries it), then nine more offers, then the stop.
+        await vi.waitFor(() => expect(reveals).toEqual([conversationId]), { timeout: 5_000 });
+        expect(seen).toBeGreaterThanOrEqual(19);
+        expect((await notes()).some(text => text.includes('showing its tab'))).toBe(true);
+      } else {
+        expect(reveals).toEqual([]);
+        expect(seen).toBeLessThan(19);
+        expect((await notes()).some(text => text.includes('showing its tab'))).toBe(false);
+      }
+      expect(recoveryBrowserWake).not.toHaveBeenCalled();
+    } finally {
+      if (socket) { const closed = once(socket, 'close'); socket.close(); await closed; }
+    }
   });
 
   it('stops offering a repair the browser never claims, and says the chat has no page', async () => {
