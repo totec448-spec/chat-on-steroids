@@ -1651,7 +1651,7 @@ it('leaves hidden Setup lists alone on state pushes and paints the newest state 
   let setupShown = false;
   let notify: (() => void) | null = null;
   (w.Element.prototype as any).checkVisibility = function (this: Element) { return setupShown || !this.closest('#wizard'); };
-  (globalThis as any).ResizeObserver = class { constructor(callback: () => void) { notify = callback; } observe() {} disconnect() {} };
+  (globalThis as any).ResizeObserver = class { constructor(callback: () => void) { notify = callback; } observe() {} unobserve() {} disconnect() {} };
   try {
     const surface = (connectorName: string) => ({ id: 'desktop', connectorName, description: 'Desktop control', cardSummary: '', optional: true,
       available: true, localUrl: null, publicUrl: null, tools: ['observe'], state: 'off', detail: '', lastRequestAt: null, lastToolCallAt: null });
