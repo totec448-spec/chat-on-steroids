@@ -163,3 +163,22 @@ it('keeps blocked cache failures explicit and directs recovery instead of an unc
     nextStep: 'Save a Diagnostics report from Activity for help with recovery. The saved state has been kept.'
   });
 });
+
+it('shows the Diagnostics action for an automatic staging failure and clears it after recovery', async () => {
+  const { paintUpdateReadiness } = await import('../src/renderer/update-readiness.js');
+  const next = state();
+  next.update.stage = 'failed'; next.update.error = 'the update staging path must use ordinary directories';
+  paintUpdateReadiness(next);
+  const report = dom.window.document.getElementById('updateDiagnosticsReport')!;
+  expect(report.hidden).toBe(false);
+  expect(dom.window.document.querySelector('[data-update-part="app"]')!.textContent).toContain('Save a Diagnostics report');
+  expect(dom.window.document.getElementById('updateAllError')!.hidden).toBe(true);
+
+  paintUpdateReadiness(state());
+  expect(report.hidden).toBe(true);
+  paintUpdateReadiness(state(), 'Could not read plugin-refresh state');
+  expect(report.hidden).toBe(false);
+  next.update.error = 'GitHub could not be reached';
+  paintUpdateReadiness(next);
+  expect(report.hidden).toBe(true);
+});

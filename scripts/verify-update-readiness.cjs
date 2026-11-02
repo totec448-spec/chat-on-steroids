@@ -317,6 +317,15 @@ app.whenReady().then(async () => {
       const cacheError = await js(`document.querySelector('[data-update-part="app"]').textContent`);
       assert.ok(cacheError.includes(copy('The update cache and its version folders must be ordinary folders, not files or links.')),lang+' linked cache reason is translated');
       assert.ok(cacheError.includes(copy('Save a Diagnostics report from Activity for help with recovery. The saved state has been kept.')),lang+' blocked cache directs diagnostics rather than unchanged retry');
+      await until(`!document.querySelector('.toast')`);
+      assert.equal(await js(`document.getElementById('updateDiagnosticsReport').checkVisibility()`),true,lang+' automatic blocked cache exposes report action without Update all');
+      assert.equal(await js(`(()=>{const b=document.getElementById('updateDiagnosticsReport'),r=b.getBoundingClientRect();return r.bottom<=innerHeight&&b.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2))})()`),true,lang+' automatic failure report is reachable');
+      await js(`window.mutations.length=0;document.getElementById('updateDiagnosticsReport').click()`);
+      await until(`!document.getElementById('updateDiagnosticsReport').disabled`);
+      assert.deepEqual(await js('window.mutations'),['diagnostics-report'],lang+' automatic failure report does not retry updates');
+      if(lang==='en'){await pause(200);await shot('automatic-cache-rejection-en.png');}
+      await js(`window.fixturePush(window.fixtureState)`);
+      assert.equal(await js(`document.getElementById('updateDiagnosticsReport').hidden`),true,lang+' recovered update hides report action');
       await js(`document.getElementById('updateAll').click();window.fixtureFinishUpdate({ok:false,error:'the update staging path must use ordinary directories'})`);
       await until(`!document.getElementById('updateAll').disabled`);
       await until(`!document.querySelector('.toast')`);
