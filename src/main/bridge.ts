@@ -1945,7 +1945,9 @@ function parseObservations(input: unknown): ChatObservation[] {
     if (kind === 'chat_error' && item['blocking'] === true && typeof item['retryAt'] === 'number' &&
         Number.isFinite(item['retryAt']) && item['retryAt'] > observation.time &&
         item['retryAt'] - observation.time <= 24 * 60 * 60_000) observation.retryAt = Math.floor(item['retryAt']);
-    if (Array.isArray(item['calls'])) observation.calls = parseCallEvidence(item['calls']);
+    if (Array.isArray(item['calls'])) {
+      observation.calls = parseCallEvidence(item['calls'], kind === 'tool_evidence' && Boolean(observation.turnId));
+    }
     out.push(observation);
   }
   return out;
@@ -8538,6 +8540,61 @@ function assistantRecoveryCancelledFor(conversationId: string, sessionId: string
  * The user's "don't reload this answer". Only a reload the browser has not claimed can be
  * withdrawn; a claimed one is already happening. Returns whether a countdown was cancelled.
  */
+const HISTORY_LIMIT_REFUSAL = 'ChatGPT limits its chat\'s history';
+
+/** Why the person's one click did nothing; the renderer words each one (CodeRabbit on #1979). */
+export type PickupNowRefusal = 'no-chat' | 'history-limit' | 'nothing-waiting' | 'changed' | 'not-sent' | 'not-started';
+
+/**
+ * The person's one click on a chat whose next step was not picked up (2026-10-31): an automatic
+ * Continue goes as an ordinary message now (a plain Continue was taken at once where the automatic
+ * one sat); a queued message or a Goal/Loop step is tried again now. Never inside a history limit.
+ * `shown`: the stopped step the button belonged to; a newer one is never acted on in its name.
+ * The answer says only what really started: `queued` is a queued ordinary message, not a delivery.
+ */
+export async function pickupNow(sessionId: string, shown: { next: string; stoppedAt: number }, now = Date.now()):
+    Promise<{ ok: true; did: 'queued' | 'retrying' } | { ok: false; code: PickupNowRefusal }> {
+  const refuse = (code: PickupNowRefusal, why: string) => {
+    logInfo(`bridge: the person asked to pick up session ${sessionId} now; nothing was tried — ${why}`);
+    return { ok: false as const, code };
+  };
+  const conversationId = (await getSession(sessionId))?.conversationId;
+  if (!conversationId) return refuse('no-chat', 'it has no ChatGPT conversation yet');
+  const limitedUntil = providerHistoryBackoff(conversationId, now);
+  if (limitedUntil !== null)
+    return refuse('history-limit', `ChatGPT limits ${conversationId}'s history for ${Math.ceil((limitedUntil - now) / 1000)} s more`);
+  const owed = (await owedPickups(now)).get(conversationId);
+  if (!owed || owed.sessionId !== sessionId) return refuse('nothing-waiting', `nothing is owed in ${conversationId} any more`);
+  const current = (await sessionRecoveryCountdowns(sessionId, conversationId)).find(row => row.kind === 'pickup-stopped');
+  if (!current || current.next !== shown.next || current.deadline !== shown.stoppedAt)
+    return refuse('changed', `the stopped step shown (${shown.next}, stopped ${new Date(shown.stoppedAt).toISOString()}) is no longer the one waiting in ${conversationId}`);
+  // A history limit can arrive while the reads above ran: nothing is tried inside it (CodeRabbit on #1979).
+  const limitedLate = providerHistoryBackoff(conversationId, Date.now());
+  if (limitedLate !== null) return refuse('history-limit', `ChatGPT began limiting ${conversationId}'s history meanwhile`);
+  if (owed.queued && owed.inputId && shown.next === 'continue') {
+    const outcome = await continueAsOrdinaryMessage(owed.inputId, 'the person asked to continue now', 0,
+      conversation => providerHistoryBackoff(conversation, Date.now()) !== null ? HISTORY_LIMIT_REFUSAL : null);
+    if ('refused' in outcome && outcome.refused === HISTORY_LIMIT_REFUSAL)
+      return refuse('history-limit', `ChatGPT began limiting ${conversationId}'s history while the Continue was checked`);
+    if ('row' in outcome) {
+      pickupWatch.delete(conversationId);
+      logInfo(`bridge: the person queued the automatic Continue in ${conversationId} now, as an ordinary message`);
+      wakeBrowserWork();
+      return { ok: true, did: 'queued' };
+    }
+    // A queued message of the person's own is no automatic Continue: it is retried instead.
+    if (!/no longer a queued automatic Continue/.test(outcome.refused)) return refuse('not-sent', `the Continue in ${conversationId} was not queued: ${outcome.refused}`);
+  }
+  // The exact owed step the button stood for: a replacement that arrives meanwhile is not tried in
+  // its name (CodeRabbit on #1979).
+  const focus: PickupFocus = { conversationId, replyId: owed.replyId };
+  await inspectOwedPickups(now, focus);
+  if (!focus.started) return refuse('not-started', `no retry of ${conversationId} could start now (its tries are used up, or another repair or a gate holds it)`);
+  logInfo(`bridge: the person asked to pick up ${conversationId} now; ${focus.started === 'queued' ? 'its Continue was queued as an ordinary message' : 'its next try runs at once'}`);
+  wakeBrowserWork();
+  return { ok: true, did: focus.started };
+}
+
 export async function cancelAssistantRecovery(sessionId: string): Promise<boolean> {
   const conversationId = (await getSession(sessionId))?.conversationId;
   if (!conversationId) return false;
@@ -9838,7 +9895,10 @@ async function owedPickups(now: number): Promise<Map<string, OwedPickup>> {
   return owed;
 }
 
-async function inspectOwedPickups(now: number): Promise<boolean> {
+/** One chat whose outcome a caller of inspectOwedPickups needs: what started for it, if anything. */
+type PickupFocus = { conversationId: string; replyId: string; started?: 'queued' | 'retrying' };
+
+async function inspectOwedPickups(now: number, focus?: PickupFocus): Promise<boolean> {
   const floor = pickupWatchFloor;
   if (floor === null) return false;
   const owed = await owedPickups(now);
@@ -9852,7 +9912,15 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
     if (repair?.reason === 'goal' && (now >= watch.expiresAt || repair.state !== 'handed' || owed.has(conversationId))) repairsInFlight.delete(conversationId);
   }
   let queued = false;
+  let focusSkipLogged = false;
   for (const reply of owed.values()) {
+    // The person's click is about one chat: another chat's pickup is neither tried nor spent by it
+    // (CodeRabbit on #1979).
+    if (focus && reply.conversationId !== focus.conversationId) {
+      // Said once per pass that skips anything: the person's click leaves other chats to the sweep.
+      if (!focusSkipLogged) { focusSkipLogged = true; logInfo(`bridge: the person's pickup click for ${focus.conversationId} leaves other chats' pickups to the regular sweep`); }
+      continue;
+    }
     const session = await getSession(reply.sessionId);
     if (session?.conversationId !== reply.conversationId || isChatBlocked(reply.conversationId) ||
         stopRequestedFor(reply.conversationId) || await conversationWasSuperseded(reply.conversationId) ||
@@ -9882,6 +9950,11 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
           ? { stoppedAt: reply.pickupStoppedAt ?? reply.acceptedAt } : {}) };
       pickupWatch.set(reply.conversationId, watch);
     }
+    // The person's click is due now, also for a watch this pass just made again after a restart
+    // (CodeRabbit on #1979).
+    // Due now for the person's click only: a click that starts nothing leaves the schedule as it was
+    // (CodeRabbit on #1979).
+    const dueAt = focus?.conversationId === reply.conversationId && focus.replyId === reply.replyId ? Math.min(watch.dueAt, now) : watch.dueAt;
     // An automatic Continue nothing took for long becomes an ordinary message rather than another
     // reload or a stop: the chat must not stop while it is unfinished (user decision 2026-10-31).
     // Checked between reloads and after a stop too; the conversion itself refuses while anything newer
@@ -9894,6 +9967,7 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
           pickupWatch.delete(reply.conversationId);
           wakeBrowserWork();
           queued = true;
+          if (focus?.conversationId === reply.conversationId && focus.replyId === reply.replyId) focus.started = 'queued';
           continue;
         }
         // Why it stays, once per chat, input and reason (CodeRabbit on #1960). Not for a ticket that
@@ -9909,7 +9983,7 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
       }
     }
     if (watch.attempts >= BROWSER_PICKUP_ATTEMPT_LIMIT) continue;
-    if (now < watch.dueAt || now < reply.listenUntil) continue;
+    if (now < dueAt || now < reply.listenUntil) continue;
     // A reload inside a history limit cannot bring the page back and can extend the limit. Counting
     // it anyway, at queue time, let it wait out the limit and then run with the next one due right
     // behind it (2026-10-30: two of three reloads 61 seconds apart). It is counted when it can run.
@@ -9950,9 +10024,9 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
     const wasStopped = !!watch.stoppedAt;
     const nextAt = nextAttempts < BROWSER_PICKUP_ATTEMPT_LIMIT ? now + browserPickupDelay(nextAttempts) : undefined;
     const reserved = reply.queued && reply.inputId
-      ? await recordQueuedPickupAttemptNow(reply.inputId, reply.replyId, now, nextAt, sharedState)
+      ? await recordQueuedPickupAttemptNow(reply.inputId, reply.replyId, now, nextAt, sharedState, watch.attempts)
       : !reply.queued && reply.goalReplyId
-        ? await recordGoalPickupAttemptNow(reply.conversationId, reply.goalReplyId, now, nextAt)
+        ? await recordGoalPickupAttemptNow(reply.conversationId, reply.goalReplyId, now, nextAt, watch.attempts)
         : null;
     if (!reserved) continue;
     watch.attempts = reserved.attempts;
@@ -9962,14 +10036,31 @@ async function inspectOwedPickups(now: number): Promise<boolean> {
     // The session list's `recoveryStopped`, pushed as soon as the stop is recorded, whether or not
     // its last reload can still be queued. A queued input's stop already pushed with its outbox
     // write; a Goal reply's ledger has no push of its own.
-    if (watch.stoppedAt && !wasStopped) notifyChanged();
+    const justStopped = Boolean(watch.stoppedAt && !wasStopped);
+    // The person may have blocked or stopped the chat while the stop mark was being saved: then nothing
+    // keeps trying, and a notice saying so would be wrong (CodeRabbit on #1979).
+    let skipped: string | null = null;
+    if (justStopped) {
+      if (isChatBlocked(reply.conversationId)) skipped = 'the chat was blocked';
+      else if (stopRequestedFor(reply.conversationId)) skipped = 'a Stop is pending';
+      else if ((await getSession(reply.sessionId).catch(() => null))?.conversationId !== reply.conversationId) skipped = 'the session moved to another chat';
+      notifyChanged();
+      if (skipped) logInfo(`bridge: no Recovery slowed notice for ${reply.conversationId} — ${skipped} while its stop mark was saved`);
+    }
+    const stillOwed = justStopped && !skipped;
+    if (stillOwed) {
+      // The alert goes with the saved stop mark, once, also when this pass's reload cannot be queued
+      // (another repair holds the chat): later passes see the chat already stopped (CodeRabbit on #1979).
+      logWarn(`bridge: browser pickup recovery has not collected the step in ${reply.conversationId} after ${watch.attempts} reloads; ` +
+        `the chat shows as stopped, and the app keeps trying every 15 to 60 minutes`);
+      noticeChatStopped('Recovery slowed', "The browser has not picked up this chat's next step. The app keeps trying; you can go on from the chat at once.", reply.sessionId);
+    }
     if (!queueBrowserRecovery(reply.conversationId, reply.sessionId,
       `goal:${reply.replyId}:${watch.attempts}`, 'goal', 0, now)) continue;
     queued = true;
+    if (focus?.conversationId === reply.conversationId && focus.replyId === reply.replyId) focus.started = 'retrying';
     logInfo(`bridge: next automation/input step uncollected in ${reply.conversationId} — reload ${watch.attempts}` +
       (wasStopped ? ' (slow retry)' : ''));
-    if (watch.stoppedAt && !wasStopped) logWarn(`bridge: browser pickup recovery has not collected the step in ${reply.conversationId} after ${watch.attempts} reloads; ` +
-      `the chat shows as stopped, and the app keeps trying every 15 to 60 minutes`);
   }
   return queued;
 }
@@ -10286,6 +10377,8 @@ function retireSpentRepairs(): void {
 let rotationHoldMs = 15_000;
 /** Test seam. */
 export function setRotationHoldForTests(ms: number): void { rotationHoldMs = ms; }
+/** What a restart loses of the pickup schedule: the in-memory watches; the saved attempts stay. */
+export function forgetPickupWatchesForTests(): void { pickupWatch.clear(); }
 /**
  * Stops the 30-second maintenance timer. For tests that move a mocked Date.now by minutes on real
  * timers: a real tick landing between two of their steps measures that jump as the computer
