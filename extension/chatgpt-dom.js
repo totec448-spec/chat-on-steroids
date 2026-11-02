@@ -2910,7 +2910,7 @@ var CLF_DOM = (() => {
     // granting Current/Claim. Never substitute these aliases for that stronger proof.
     const tunnelInspection = nativeInspection && /^tunnel_[a-zA-Z0-9]{8,80}$/.test(snapshot?.tunnelId || '') &&
       (expectedAppId ? snapshot?.appId === expectedAppId : snapshot?.connectorName === connectorName);
-    const conflictingNativeIdentity = nativeInspection && identified.some(app => app.surface !== expectedSurface);
+    const conflictingNativeIdentity = nativeInspection && ownApps.some(app => app.appId === snapshot?.appId && app.surface !== expectedSurface);
     const externalPlugins = tunnelInspection ? expectedSurface === 'plugins'
       : proven?.length ? proven.every(app => app.surface === 'plugins') : pluginsConnectorName(connectorName);
     if (!snapshot || snapshot.appId !== route?.[1] || (!tunnelInspection && (conflictingNativeIdentity || (expectedAppId ? snapshot.appId !== expectedAppId : !ownSnapshot(snapshot, connectorName)))) ||
