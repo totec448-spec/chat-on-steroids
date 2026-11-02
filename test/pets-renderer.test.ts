@@ -136,11 +136,12 @@ it("shows a bundled pet's description in the app's language and leaves an import
 it('has a translation of every bundled pet description in every language', async () => {
   const fs = await import('node:fs');
   // Folders only, as the app reads them: Finder's .DS_Store in a checkout is not a pet.
-  const descriptions = [...fs.readdirSync('pets', { withFileTypes: true }).filter(entry => entry.isDirectory())
+  const descriptions = [...fs.readdirSync('pets', { withFileTypes: true })
+    .filter(entry => entry.isDirectory() && !entry.isSymbolicLink() && fs.statSync(`pets/${entry.name}/pet.json`, { throwIfNoEntry: false })?.isFile())
     .map(entry => JSON.parse(fs.readFileSync(`pets/${entry.name}/pet.json`, 'utf8')).description as string),
     /description: '([^']+)'/.exec(fs.readFileSync('src/main/pet-library.ts', 'utf8'))![1]!];
   expect(descriptions).toHaveLength(4);
-  for (const file of fs.readdirSync('src/renderer/locales').filter(name => name.endsWith('.json'))) {
+  for (const file of fs.readdirSync('src/renderer/locales', { withFileTypes: true }).filter(entry => entry.isFile() && entry.name.endsWith('.json')).map(entry => entry.name)) {
     const catalog = JSON.parse(fs.readFileSync(`src/renderer/locales/${file}`, 'utf8')) as Record<string, string>;
     for (const description of descriptions) expect(catalog[description], `${file}: ${description}`).toBeTruthy();
   }
