@@ -3703,5 +3703,7 @@
   "Report a problem. GitHub opens with it filled in.": "报告问题。GitHub 会打开并已填好内容。",
   "Report a problem.": "报告问题。",
   "New features come as pull requests, not issues.": "新功能请以 Pull Request 提交，而不是 Issue。",
-  "How to start one": "如何开始"
+  "How to start one": "如何开始",
+  "Plugins could not be loaded.": "无法加载插件。",
+  "Pets could not be loaded.": "无法加载宠物。"
 }
