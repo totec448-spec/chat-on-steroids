@@ -565,8 +565,14 @@ it('retires an automatic Continue that pages refuse for half an hour because the
     now += 7_000;
     for (let step = 0; step < 29; step++) { await hold(); now += 1_000; }
     expect((await state())?.state).toBe('queued');
+    // Another reason in between starts the run over: thirty more seconds with one other hold in them is not a run.
+    now += 7_000;
+    for (let step = 0; step < 15; step++) { await hold(); now += 1_000; }
+    await hold('still-answering'); now += 1_000;
+    for (let step = 0; step < 16; step++) { await hold(); now += 1_000; }
+    expect((await state())?.state).toBe('queued');
     // A full run without a break: retired, with the reason on the message.
-    await hold(); now += 1_000; await hold();
+    for (let step = 0; step < 15; step++) { await hold(); now += 1_000; }
     expect(await state()).toMatchObject({ state: 'cancelled', error: expect.stringContaining('no longer the one it answers') });
   } finally { clock.mockRestore(); setQuestionChangedTimingForTests(); }
 });
