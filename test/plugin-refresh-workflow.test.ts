@@ -321,6 +321,18 @@ it.each(['hidden', 'disabled'])('does not replace a proven-ID row that is still 
   expect(h.click).not.toHaveBeenCalled();
   expect(h.ask).not.toHaveBeenCalled();
 });
+it.each(['hidden', 'disabled'])('does not treat a visible configured-name row as unique while another match is unavailable (%s)', async mode => {
+  const h = nativeInstalledWorkflow(null, false);
+  const duplicate = h.link.cloneNode(true) as HTMLAnchorElement;
+  duplicate.href = '/settings/plugins-settings/plugin_asdk_app_other';
+  if (mode === 'hidden') duplicate.hidden = true;
+  else Object.defineProperty(duplicate, 'disabled', { value: true });
+  h.link.after(duplicate);
+  expect(await h.run()).toBe(false);
+  expect(h.assign).not.toHaveBeenCalled();
+  expect(h.click).not.toHaveBeenCalled();
+  expect(h.ask).not.toHaveBeenCalled();
+});
 it.each(['original', 'renamed'])('rechecks the exact enrolled installed link before an observation with two proven Core IDs (%s)', async name => {
   const h = nativeInstalledWorkflow('asdk_app_synthetic');
   if (name === 'renamed') h.link.querySelector('span')!.textContent = 'User renamed it 日本語';

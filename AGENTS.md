@@ -5337,6 +5337,8 @@ renames; when call-derived aliases collide, it visits only the unique configured
 row or its durable exact App ID. An unbound request may inspect a unique configured-name row if
 none of its proven-ID rows remains installed, including hidden or unavailable rows; a bound
 target never borrows that replacement.
+Hidden or unavailable configured-name matches also preserve ambiguity; multiple visible matches
+remain separate rows for the caller to reject, not a single selected target.
 The isolated reader passes an optional `refresh: { appId, surface }`
 on `clf-plugin-ask` so the native Fiber reader applies that surface's catalog bound only to the
 exact matching card, even when its learned Plugins alias is missing. Legacy reads keep their
