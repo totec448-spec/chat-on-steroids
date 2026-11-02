@@ -259,6 +259,16 @@ export function projectTimeline<T extends Chronological>(
       const response = assistantResponseKey(entry);
       if (response) boundary = responses.get(response) ?? undefined;
     }
+    if (boundary?.continued === true && entry.kind === 'assistant_message' && (entry.final === true || entry.state === 'final')) {
+      const finalAt = residenceOf(entry);
+      let candidate = boundary;
+      while (candidate?.continued === true && finalAt > (candidate.endOrigin ?? candidate.origin)) {
+        const next = starts.find(s => s.origin > candidate.origin && s.origin >= (candidate.endOrigin ?? candidate.origin));
+        if (!next || next.origin === candidate.origin) break;
+        candidate = next;
+      }
+      if (candidate && candidate !== boundary) boundary = candidate;
+    }
     // Older recorders dropped the local turn after its end. Its earlier exact request
     // proof still places the call, including when that proof lies outside this page.
     const requestOwner = !entry.turnId && entry.kind === 'tool_call' && entry.source === 'mcp' && entry.call?.attribution === 'request_id'
@@ -330,13 +340,27 @@ export function residenceOf(entry: Chronological): number {
  * reload can have every message marked final, and interim prose must keep interleaving with
  * the tool calls it ran between — the terminal message is the only one whose position is a
  * matter of definition rather than observation.
+ *
+ * When a turn ends with `continued: true`, an answer that was consolidated after that end
+ * belongs to the continuation and must not close this turn. An answer that completed at or
+ * before the continued end remains the closing message of its turn.
  */
-function closing<T extends Chronological>(group: readonly T[]): T | null {
+function closing<T extends Chronological>(group: readonly T[], isContinued = false): T | null {
+  const continuedEnd = group.find(entry => entry.kind === 'turn_end' && entry.continued === true);
+  const endPosition = continuedEnd ? positionOf(continuedEnd) : undefined;
   let found: T | null = null;
   for (const entry of group) {
     if (entry.kind !== 'assistant_message') continue;
     if (entry.final !== true && entry.state !== 'final') continue;
-    if (!found || positionOf(entry) > positionOf(found)) found = entry;
+    if (endPosition !== undefined && residenceOf(entry) > endPosition) continue;
+    if (!found) {
+      found = entry;
+      continue;
+    }
+    const order = isContinued
+      ? residenceOf(entry) > residenceOf(found)
+      : positionOf(entry) > positionOf(found);
+    if (order) found = entry;
   }
   return found;
 }
@@ -357,21 +381,47 @@ export function chronological<T extends Chronological>(entries: readonly T[]): T
   // Where each opened turn stops, so an event that names no turn can be told whether it
   // happened inside one. A turn still running has no end and holds everything after it.
   const ends = new Map<number, number>();
+  const turnEndOrigins = new Map<string, { endOrigin: number; continued: boolean }>();
+  const turnStarts: Array<{ turnId: string; origin: number }> = [];
   for (const entry of bySeq) {
     // A new delta can join this exact local turn to an earlier response origin.
     // Apply the store's monotonic proof to older rows already resident in the UI.
     if (entry.turnId && Number.isFinite(entry.turnOrigin))
       anchors.set(entry.turnId, Math.min(anchors.get(entry.turnId) ?? Infinity, entry.turnOrigin!));
-    if (entry.kind === 'turn_start' && entry.turnId && !anchors.has(entry.turnId)) {
-      anchors.set(entry.turnId, position(entry));
+    if (entry.kind === 'turn_start' && entry.turnId) {
+      if (!anchors.has(entry.turnId)) anchors.set(entry.turnId, position(entry));
+      turnStarts.push({ turnId: entry.turnId, origin: position(entry) });
     }
   }
   for (const entry of bySeq) {
     if (entry.kind === 'turn_end' && entry.turnId) {
       const anchor = anchors.get(entry.turnId);
       if (anchor !== undefined) ends.set(anchor, Math.max(ends.get(anchor) ?? 0, entry.time));
+      const existing = turnEndOrigins.get(entry.turnId);
+      turnEndOrigins.set(entry.turnId, {
+        endOrigin: Math.max(existing?.endOrigin ?? 0, position(entry)),
+        continued: entry.continued === true || existing?.continued === true
+      });
     }
   }
+
+  const continuedTo = new Map<string, string>();
+  for (const [turnId, endInfo] of turnEndOrigins) {
+    if (!endInfo.continued) continue;
+    const startAnchor = anchors.get(turnId);
+    const nextStart = turnStarts.find(s => s.origin >= endInfo.endOrigin && (startAnchor === undefined || s.origin > startAnchor));
+    if (nextStart) continuedTo.set(turnId, nextStart.turnId);
+  }
+
+  const terminalContinuedTurn = (turnId: string): string => {
+    let current = turnId;
+    const seen = new Set<string>();
+    while (continuedTo.has(current) && !seen.has(current)) {
+      seen.add(current);
+      current = continuedTo.get(current)!;
+    }
+    return current;
+  };
 
   // Position within a turn. The boundaries are the boundaries whatever their timestamps say:
   // a turn cannot begin after its own first observation or end before its last, and the times
@@ -447,17 +497,39 @@ export function chronological<T extends Chronological>(entries: readonly T[]): T
       const end = ends.get(activeAnchor);
       if (end === undefined || entry.time <= end) inferredAnchor = activeAnchor;
     }
-    const anchor = (entry.turnId ? anchors.get(entry.turnId) : undefined) ?? entry.turnOrigin ?? inferredAnchor ?? entryPosition;
+    let turnAnchor = entry.turnId ? anchors.get(entry.turnId) : undefined;
+    if (entry.kind === 'assistant_message' && (entry.final === true || entry.state === 'final')) {
+      if (entry.turnOrigin !== null && entry.turnOrigin !== undefined && turnAnchor !== undefined && entry.turnOrigin > turnAnchor) {
+        turnAnchor = entry.turnOrigin;
+      } else if (entry.turnId && continuedTo.has(entry.turnId)) {
+        const endInfo = turnEndOrigins.get(entry.turnId);
+        if (endInfo && residenceOf(entry) > endInfo.endOrigin) {
+          const terminalTurn = terminalContinuedTurn(entry.turnId);
+          const terminalAnchor = anchors.get(terminalTurn);
+          if (terminalAnchor !== undefined) turnAnchor = terminalAnchor;
+        }
+      }
+    }
+    const anchor = turnAnchor ?? entry.turnOrigin ?? inferredAnchor ?? entryPosition;
     const held = groups.get(anchor);
     if (held) held.push(entry);
     else groups.set(anchor, [entry]);
     if (entry.kind === 'turn_start' && entry.turnId) pendingAnchor = anchors.get(entry.turnId);
   }
 
+  const continuedAnchors = new Set<number>();
+  for (const [sourceTurn, targetTurn] of continuedTo) {
+    const sAnchor = anchors.get(sourceTurn);
+    if (sAnchor !== undefined) continuedAnchors.add(sAnchor);
+    const tAnchor = anchors.get(targetTurn);
+    if (tAnchor !== undefined) continuedAnchors.add(tAnchor);
+  }
+
   const out: T[] = [];
   for (const anchor of [...groups.keys()].sort((a, b) => a - b)) {
     const group = groups.get(anchor)!;
-    const ends = closing(group);
+    const isContinued = continuedAnchors.has(anchor) || group.some(entry => entry.kind === 'turn_end' && entry.continued === true);
+    const ends = closing(group, isContinued);
     placeBefore(group);
     group.sort((a, b) => rank(a, ends) - rank(b, ends) || byTime(a, b));
     out.push(...group);

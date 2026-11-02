@@ -68,13 +68,14 @@ app.whenReady().then(async () => {
     for (const lang of ['en','ja','de']) for (const theme of ['dark','light']) {
       await open('lang='+lang+'&theme='+theme);
       await until(`document.getElementById('updateReadinessSummary').dataset.ready==='true'`);
-      assert.equal(await js(`document.querySelectorAll('.update-readiness .check.is-ok').length`),3);
       assert.equal(await js(`document.getElementById('updateReadinessDetails').open`),false,'Completed status is compact');
       assert.ok(await js(`document.querySelector('.update-readiness').getBoundingClientRect().height`) < 100,'Completed status uses one compact row');
       assert.equal(await js(`(()=>{const b=document.getElementById('updateAll'),r=b.getBoundingClientRect();return r.height>0&&b.contains(document.elementFromPoint(r.left+r.width/2,r.bottom-4))})()`),true,'Update all remains visible and receives pointer input');
       if(lang==='en') await shot('compact-'+theme+'.png');
       await js(`document.getElementById('updateReadinessSummary').click()`);
       assert.equal(await js(`document.getElementById('updateReadinessDetails').open`),true,'The compact status line opens the full card');
+      // Collapsed rows are painted when the card opens, before it is drawn (2026-11-01).
+      await until(`document.querySelectorAll('.update-readiness .check.is-ok').length===3`);
       const geometry = await js(`(()=>{const c=document.querySelector('.update-readiness'),a=document.getElementById('updateReviewSetup').getBoundingClientRect();
         return {clipped:[...c.querySelectorAll('strong,p:not(.sr-only),button')].some(e=>e.scrollWidth>e.clientWidth+1),sideways:c.scrollWidth>c.clientWidth,bottom:a.bottom,height:c.getBoundingClientRect().height,title:document.getElementById('updateReadinessTitle').textContent}})()`);
       assert.ok(!geometry.clipped && !geometry.sideways && geometry.bottom<=850 && geometry.height<600,JSON.stringify(geometry));
@@ -126,7 +127,7 @@ app.whenReady().then(async () => {
     const short = await js(`(()=>{const b=document.getElementById('updateReviewSetup');b.scrollIntoView({block:'nearest'});const a=b.getBoundingClientRect();return {top:a.top,bottom:a.bottom,viewport:innerHeight,reachable:b.contains(document.elementFromPoint(a.left+a.width/2,a.top+a.height/2))}})()`);
     assert.ok(short.top>=0 && short.bottom<=short.viewport+1,'Short window action is reachable (subpixel scroll rounding): '+JSON.stringify(short));
     assert.equal(short.reachable,true,'Short window action receives pointer input');
-    assert.equal(await js(`(()=>{const children=[...document.querySelector('.update-readiness').children].map(e=>e.getBoundingClientRect());return children.some((r,i)=>i>0&&r.top<children[i-1].bottom-1)})()`),false,'Short window does not compress text rows into each other');
+    assert.equal(await js(`(()=>{const children=[...document.querySelector('.update-readiness').children].filter(e=>e.checkVisibility()).map(e=>e.getBoundingClientRect());return children.some((r,i)=>i>0&&r.top<children[i-1].bottom-1)})()`),false,'Short window does not compress text rows into each other');
     await pause(200);
     await shot('short-ja.png');
     // Keyboard focus and action remain stable while fresh bridge evidence arrives.

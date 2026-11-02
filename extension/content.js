@@ -4951,7 +4951,11 @@
       // are progress. A known call drawn again with another request id or owner is reported
       // again, but counting it kept every repair refused while ChatGPT's stream was gone (#1787).
       const advanced = [];
-      const fresh = turn.calls.filter((call) => {
+      const callRequests = new Set((turn.calls || []).map((call) => call?.requestId).filter(Boolean));
+      const candidates = index === activeTurnIndex && activeLocalTurnId
+        ? [...turn.calls, ...(turn.requests || []).filter((req) => req?.requestId && !callRequests.has(req.requestId))]
+        : turn.calls;
+      const fresh = candidates.filter((call) => {
         // A mismatched owned turn is admissible only as a provisional-first-turn candidate.
         // Its request id must have survived the app's explicit owner read-back before the
         // transcript channel may repeat that evidence. A rejected/stale id is simply omitted;
@@ -4961,11 +4965,12 @@
           (!call.requestId || requestOwnersConfirmed.get(call.requestId) !== askedConversation)
         ) return false;
         const owner = index === activeTurnIndex ? activeLocalTurnId || '' : '';
-        const signature = `${call.tool}\u0000${call.requestId || ''}\u0000${call.answered ? '1' : '0'}\u0000${owner}`;
-        const previous = callsReported.get(call.messageId);
+        const key = call.tool ? call.messageId : `request:${call.requestId}`;
+        const signature = `${call.tool || ''}\u0000${call.requestId || ''}\u0000${call.answered ? '1' : '0'}\u0000${owner}`;
+        const previous = callsReported.get(key);
         if (previous?.signature === signature) return false;
-        if (previous === undefined || (call.answered && !previous.answered)) advanced.push(call);
-        callsReported.set(call.messageId, { signature, answered: Boolean(call.answered) });
+        if (call.tool && (previous === undefined || (call.answered && !previous.answered))) advanced.push(call);
+        callsReported.set(key, { signature, answered: Boolean(call.answered) });
         return true;
       });
       if (fresh.length > 0) {
@@ -4978,17 +4983,19 @@
             (previous.calls || []).some(seen => turn.calls.some(call => call.messageId === seen.messageId))));
         const witnessedSend = Boolean(newestUser?.id && openedUserMessageId === newestUser.id);
         if (advanced.length && generating && index === activeTurnIndex && (knownTurn || witnessedSend)) noteTurnProgress(turnId, 'page-call');
-        emit({
-          kind: 'tool_evidence',
-          ...(index === activeTurnIndex ? { turnId: activeLocalTurnId } : {}),
-          ...(turn.conversationId && !(
-            turn === ownedPageTurn &&
-            askedConversation &&
-            concreteConversation(turn.conversationId) &&
-            concreteConversation(turn.conversationId) !== askedConversation
-          ) ? { fiberConversationId: turn.conversationId } : {}),
-          calls: fresh
-        });
+        for (let offset = 0; offset < fresh.length; offset += 200) {
+          emit({
+            kind: 'tool_evidence',
+            ...(index === activeTurnIndex ? { turnId: activeLocalTurnId } : {}),
+            ...(turn.conversationId && !(
+              turn === ownedPageTurn &&
+              askedConversation &&
+              concreteConversation(turn.conversationId) &&
+              concreteConversation(turn.conversationId) !== askedConversation
+            ) ? { fiberConversationId: turn.conversationId } : {}),
+            calls: fresh.slice(offset, offset + 200)
+          });
+        }
       }
     }
     // What the settle window is waiting for, decided from the scan itself rather than from a
@@ -13608,6 +13615,10 @@
       const reply = await ask({ type: 'desktop_input', id: message.id, conversationId: target, requiresAuthorization: true,
         ...(project ? { project: CLF_DOM.projectHomeId() } : {}) });
       const input = reply?.data?.input;
+      // Texts the app put into this chat that never reached Send (#1922): exactly one of them in the composer
+      // is the app's own leftover, not the person's draft, and this message replaces it.
+      const ownUnsent = (Array.isArray(reply?.data?.ownUnsent) ? reply.data.ownUnsent : [])
+        .filter(value => typeof value === 'string' && value.trim()).slice(0, 5).map(sendText);
       if (input?.silenceBoundary || input?.completedTurnId) { claimedSilence = input; sourceQuiet = true; }
       if (!input) return false;
       if (!onTarget()) { noteWithdraw(offTarget()); return false; }
@@ -13646,7 +13657,13 @@
         'ChatGPT is not signed in in this browser. Sign in to ChatGPT there, then send again.'
       ));
       const ownResidue = sendText(CLF_DOM.composerText(composer)) === sendText(input.text);
-      if ((!ownsFreshPage() && CLF_DOM.composerText(composer).trim() && !ownResidue) || CLF_DOM.hasComposerAttachments()) return fail(t(
+      // ChatGPT can keep inserted text with its Markdown escaped; either form is the same leftover.
+      const ownLeftover = () => {
+        const shown = CLF_DOM.composerText() || '';
+        return ownUnsent.includes(sendText(shown)) || ownUnsent.includes(sendText(unescapeMarkdown(shown)));
+      };
+      const leftover = !ownResidue && ownLeftover();
+      if ((!ownsFreshPage() && CLF_DOM.composerText(composer).trim() && !ownResidue && !leftover) || CLF_DOM.hasComposerAttachments()) return fail(t(
         'content_delivery_existing_draft',
         'ChatGPT already contains an unsent draft. Send or clear that draft in Chrome before trying again.'
       ));
@@ -13702,13 +13719,15 @@
       // model selection and the writability wait sit between the two and can replace the editor.
       if (!onTarget() || (CLF_DOM.generating() && !message.directTurn) ||
           (!ownsFreshPage() && (CLF_DOM.composerText() || '').trim() &&
-            sendText(CLF_DOM.composerText()) !== sendText(input.text)) ||
+            sendText(CLF_DOM.composerText()) !== sendText(input.text) && !ownLeftover()) ||
           CLF_DOM.hasComposerAttachments()) return fail(t(
         'content_delivery_composer_changed',
         'The ChatGPT composer changed before sending'
       ));
       let insertionFailure = '';
-      if (!CLF_DOM.insertPrompt(input.text, ownsFreshPage(), reason => { insertionFailure = reason; }))
+      // The app's own leftover is replaced as a whole, also one ChatGPT restored only during model selection
+      // (CodeRabbit on #2028); any other text keeps the usual rule.
+      if (!CLF_DOM.insertPrompt(input.text, ownsFreshPage() || ownLeftover(), reason => { insertionFailure = reason; }))
         return fail(t(
           'content_delivery_text_not_accepted',
           'ChatGPT did not accept the text$1',
@@ -14146,13 +14165,14 @@
       }
       // Identity and Refresh paint before the tool declarations. A partial settings
       // panel is neither an old schema nor permission to click; wait on the existing
-      // DOM observer and leave an unclaimed request available if hydration times out.
+      // DOM observer and polling, with the same one-minute bound as post-refresh reads.
+      // Slow native settings hydration can exceed 12 seconds; no click is claimed yet.
       const settle = settledPluginView();
       const view = await waitPageView(async () => {
         const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools, request.appId);
         const appId = pluginViewAppId(location.href);
         return settle(appId && next?.appId === appId && Array.isArray(next.tools) && (next.tools.length > 0 || next.settled === true) ? next : null);
-      }, current, 12000, 250);
+      }, current, 60000, 250);
       if (!view) {
         // Say so. `pluginSnapshot()` refuses for two different reasons — the page has not
         // rendered the card yet, and the page renders a card this build cannot read — and

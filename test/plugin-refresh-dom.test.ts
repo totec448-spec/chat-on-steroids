@@ -54,6 +54,28 @@ it.each([118, 257])('accepts %s declarations for the Plugins connector including
   const view = await api.pluginRefreshView('Chat On Steroids Plugins');
   expect(view?.tools).toHaveLength(count);
 });
+it.each(['legacy', 'native'])('reads unchanged MCP tool names from external Plugins (%s)', async route => {
+  const fixture = route === 'native' ? settingsPage() : page();
+  const connector = 'connector' in fixture ? fixture.connector : fixture.props.connector;
+  connector.name = 'Chat On Steroids Plugins';
+  const actions = ['resolve-library-id', 'translate-text', 'vendor.Tool', '1_tool'].map(name =>
+    ({ name, description: tool.description, description_model: null, params: tool.inputSchema }));
+  if ('connector' in fixture) fixture.connector.actions = actions as any;
+  else fixture.props.actions = actions;
+  const view = await fixture.api.pluginRefreshView(connector.name);
+  expect(view?.tools.map((item: any) => item.name)).toEqual(actions.map(item => item.name));
+  expect(view?.refresh.id).toBe('refresh');
+});
+it.each(['bad name', 'bad/name', 'bad:name', 'x'.repeat(65)])('rejects invalid external MCP name %s', async name => {
+  const { api, connector } = settingsPage(); connector.name = 'Chat On Steroids Plugins';
+  connector.actions[0]!.name = name;
+  expect(await api.pluginRefreshView(connector.name)).toBeNull();
+});
+it('does not broaden the app-owned tool-name contract', async () => {
+  const { api, connector } = settingsPage(); connector.actions[0]!.name = 'resolve-library-id';
+  expect(await api.pluginRefreshView(connector.name)).toBeNull();
+});
+
 it('reads the Windows Desktop connector with all of its tools (#1763)', async () => {
   // Windows Desktop with every permission declared 24 tools in 2.1.44; the card was refused at 16,
   // so its automatic refresh could never be confirmed.
