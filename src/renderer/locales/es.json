@@ -3878,5 +3878,6 @@
   "Screenshot permission request failed: {0}": "Error al solicitar permiso de captura: {0}",
   "A screenshot permission request is already running.": "Ya hay una solicitud de permiso de captura en curso.",
   "Screenshot permission can be requested only from the Chat On Steroids main window.": "El permiso de captura de pantalla solo se puede solicitar desde la ventana principal de Chat On Steroids.",
-  "Native Linux Desktop access on": "Acceso nativo al escritorio Linux activado"
+  "Native Linux Desktop access on": "Acceso nativo al escritorio Linux activado",
+  "Off by default. GNOME display screenshots require Screen permission and OS consent. Semantic accessibility actions require Control permission, a proven chat, and explicit approval when configured. No physical-input fallback.": "Desactivado por defecto. Las capturas de pantalla de GNOME requieren permiso de pantalla y consentimiento del sistema. Las acciones de accesibilidad semántica requieren permiso de control, un chat verificado y aprobación explícita si está configurada. Sin entrada física alternativa."
 }

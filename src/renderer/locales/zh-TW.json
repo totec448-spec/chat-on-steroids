@@ -3716,5 +3716,6 @@
   "Screenshot permission request failed: {0}": "螢幕截圖權限要求失敗：{0}",
   "A screenshot permission request is already running.": "螢幕截圖權限要求已在進行中。",
   "Screenshot permission can be requested only from the Chat On Steroids main window.": "只能從 Chat On Steroids 主視窗要求螢幕截圖權限。",
-  "Native Linux Desktop access on": "已啟用原生 Linux 桌面存取"
+  "Native Linux Desktop access on": "已啟用原生 Linux 桌面存取",
+  "Off by default. GNOME display screenshots require Screen permission and OS consent. Semantic accessibility actions require Control permission, a proven chat, and explicit approval when configured. No physical-input fallback.": "預設關閉。GNOME 螢幕截圖需要螢幕權限與作業系統同意。語意化輔助使用操作需要控制權限、經驗證的聊天身分，以及設定後的明確核准。絕不回退為實體輸入。"
 }
