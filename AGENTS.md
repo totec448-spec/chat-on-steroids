@@ -2672,6 +2672,11 @@ release it through existing lifecycle events;
 ordinary idle/reuse/close policy remains unchanged. Session storage retains attachment cleanup
 custody and cancellation, never activity authority. Chrome/user debugger cancellation is not
 retried until that activity scope ends. Browser tools cannot borrow these attachments.
+Lease changes never hold the worker's status pass: each debugger call gives up after 5 s (an attach
+that answers later, and a failed lease whose release fails, go into retiring custody until the release
+is confirmed), and the worker waits at most 3 s for a lease change
+(`renderingLeases`) and ignores its failure. A lease that never answered, or could not be released,
+kept every later pass from reaching its repairs (2026-11-01).
 `test/active-tabs.test.ts` and `test/desktop-input-maintenance.test.ts` cover custody, election,
 document proof and races; `scripts/verify-active-tabs.mjs` verifies native background animation
 pause/resume, same-document handoff and reload/release in isolated Chromium without observing the target
@@ -3539,7 +3544,13 @@ Silence, missing-tab, stalled-tab and queued/Goal repairs also use that exact pr
 offers retain one token; a claimed action is not reissued merely because its ACK is absent.
 When an unclaimed repair exhausts its offers the chat is marked page-less, the session gets its timeline note
 and the user gets one notification through the stuck-chat notifier, once per episode; a page that asks for
-its chat again lifts the verdict.
+its chat again lifts the verdict. A Goal or Loop chat (`goalActiveFor`, so never a worker; not blocked, no
+Stop, not "browser only") is first shown once per episode by a connected browser that can show chats
+(`showUnclaimedChatOnce`, the extension's reveal), with a timeline note and a log line, and its offers start
+over (user, 2026-11-02). Without such a browser nothing could be shown, so it gets the verdict as before.
+Taking the chat is not showing it: a browser whose tab or window step fails posts `/reveal/failed`
+(`unclaimedChatShowFailed`), and that chat may be shown once more when its offers run out. A report
+counts only within 60 s of the show; a second failed show leaves the page-less verdict.
 Only offers no page asked for count toward that budget (#1922): a `/repairs/claim` for the offered token
 that is refused (not current, another chat's events still being saved, replaced) proves a page: for
 2 minutes after it no offer counts (`CLAIM_ASKED_FRESH_MS`, whichever browser polls), nor does any offer to a
