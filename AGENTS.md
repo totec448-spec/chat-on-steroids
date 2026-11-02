@@ -4356,7 +4356,7 @@ server obligation once safe; do not acknowledge it as handled or require a reloa
 
 | Backend/role | Behavior |
 | --- | --- |
-| ChatGPT decision helper | Default driver backend. Each Goal/Loop decision uses a Temporary Chat with bounded reference history; outputs a decision, never executes that history. A helper whose model the page could not confirm (`detail: 'model-unconfirmed'`, nothing typed) fails with the retryable `goal_helper_model_unconfirmed`, and `goalHelperSelection` then uses ChatGPT's current selection for 30 minutes (`HELPER_MODEL_FALLBACK_MS`, logged), as for a model the account does not offer; every other helper send failure stays settled. |
+| ChatGPT decision helper | Default driver backend. Each Goal/Loop decision uses a Temporary Chat with bounded reference history; outputs a decision, never executes that history. A helper whose model the page could not confirm (`detail: 'model-unconfirmed'`, nothing typed) fails with the retryable `goal_helper_model_unconfirmed`, and `goalHelperSelection` then uses ChatGPT's current selection for 30 minutes (`HELPER_MODEL_FALLBACK_MS`, logged), as for a model the account does not offer; every other helper send failure stays settled. One draft may take `goalRequestTimeoutMs`: 3 min for API backends and a ChatGPT helper at low or medium effort, 5 min at high, 12 min at xhigh/max/ultra, 20 min at Pro (the effort actually used; 2026-11-01: xhigh timed out at 3 min five times in a row). |
 | API driver | OpenRouter-compatible default or explicit compatible endpoint/model/key. Supports bounded streamed progress and validated final decision. |
 | Goal templates | Offline explicit terminal-marker policy; only Goal supports this backend. Missing/ambiguous expected markers pause rather than infer completion from prose. |
 | Temporary planner | Captures a new workflow for the user in Temporary Chat. Shares temporary transport with decision helpers while retaining its staged-workflow role. |
@@ -4690,10 +4690,13 @@ like the project), then the project's ungrouped chats. A group holding the open 
 Project menu: New group; chat menu: Move to group (this project's groups, New group…) and Remove
 from group. Names use the shared in-app dialog `renderer/name-dialog.ts`.
 Move to project (#1919) changes a main chat's project, unlike the one-time binding: IPC
-`sessions:moveProject { sessionId, projectId | null, groupId? }` → `{ from, fromGroup, groups }`. Main
+`sessions:moveProject { sessionId, projectId | null, groupId? }` → `{ from, fromGroup, groups, summaries }`
+(`summaries`: the moved chats' fresh summaries, which the sidebar puts on rows it already shows). Main
 (`moveChatToProject` in `projects.ts`, `moveSessionProject` in the store) refuses a worker or helper
 chat and a missing or removed project, allows a project whose folder is missing, moves every
-descendant sub-agent and helper chat (by `origin.fromSessionId`) with it, never a branch, logs the
+descendant sub-agent and helper chat (by `origin.fromSessionId`) with it, sub-agents first and the
+main chat last, and on a move to the project the chat already has moves only the family members
+left behind by an earlier move that stopped half way; never a branch, logs the
 move, and sets `projectChosen: true` on each summary, which stops `bindChatToLinkedProject` from
 binding it again. Moved into a project, the chat's commands then run in that project's folder (the
 binding is the workspace authority); moved out (\`null\`), they run in the folder the chat worked in

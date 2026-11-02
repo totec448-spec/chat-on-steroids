@@ -10,6 +10,8 @@ import { SftpError, type SftpClient } from './remote/sftp.js';
 import type { RemoteFolder, Root } from '../shared/types.js';
 import { bindSessionProject, findSessionByConversation, getSession, indexedSessions, moveSessionProject } from './session/store.js';
 import { workspaceForChat } from './workspace.js';
+import { chatGroupsState, movedChatGroup, placeMovedChat } from './chat-groups.js';
+import type { ChatGroupsState } from '../shared/chat-groups.js';
 import { logInfo } from './logger.js';
 import { isListedChatgptProject } from './chatgpt-project-catalog.js';
 import { CHATGPT_PROJECT_ID, PROJECT_COLORS, type ChatgptProjectLink, type LocalProject, type ProjectColor } from '../shared/projects.js';
@@ -322,14 +324,30 @@ export async function getSessionProject(sessionId: string): Promise<{ virtual: s
  * project whose folder is missing is allowed; its row already says so. Returns where it was.
  */
 const chatMoves = new Map<string, Promise<unknown>>();
-export function moveChatToProject(sessionId: string, projectId: string | null): Promise<{ from: string | null; moved: string[] }> {
-  // One move at a time per chat: each reads the project it really replaces, so its Undo goes back
-  // there, not to where an overlapping move started (CodeRabbit on #1965).
-  const move = (chatMoves.get(sessionId) ?? Promise.resolve()).catch(() => undefined).then(() => moveChatNow(sessionId, projectId));
+// One move at a time per chat: each reads the project and group it really replaces, so its Undo goes
+// back there, not to where an overlapping move started (CodeRabbit on #1965).
+function queueChatMove<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
+  const move = (chatMoves.get(sessionId) ?? Promise.resolve()).catch(() => undefined).then(run);
   const settled = move.catch(() => undefined);
   chatMoves.set(sessionId, settled);
   void settled.then(() => { if (chatMoves.get(sessionId) === settled) chatMoves.delete(sessionId); });
   return move;
+}
+export function moveChatToProject(sessionId: string, projectId: string | null): Promise<{ from: string | null; moved: string[] }> {
+  return queueChatMove(sessionId, () => moveChatNow(sessionId, projectId));
+}
+/**
+ * The chat menu's and the drop's move: the chat's group place moves inside the same per-chat step
+ * as its project, so an overlapping move never reads a group the other one is about to change.
+ */
+export function moveChatWithGroup(sessionId: string, projectId: string | null, requested?: string | null):
+  Promise<{ from: string | null; fromGroup: string | null; moved: string[]; groups: ChatGroupsState }> {
+  return queueChatMove(sessionId, async () => {
+    const fromGroup = (await chatGroupsState()).members[sessionId] ?? null;
+    const { from, moved } = await moveChatNow(sessionId, projectId);
+    const groups = await placeMovedChat(sessionId, projectId, movedChatGroup(projectId, requested, from, fromGroup));
+    return { from, fromGroup, moved, groups };
+  });
 }
 
 async function moveChatNow(sessionId: string, projectId: string | null): Promise<{ from: string | null; moved: string[] }> {
@@ -341,7 +359,6 @@ async function moveChatNow(sessionId: string, projectId: string | null): Promise
     if (!project || project.ungrouped) throw new Error('Project not found');
   }
   const from = session.projectId ?? null;
-  if (from === projectId) return { from, moved: [] };
   // Every chat that descends from this one through its sub-agents and helpers, however deep.
   const all = await indexedSessions();
   const family = [session.id];
@@ -350,9 +367,35 @@ async function moveChatNow(sessionId: string, projectId: string | null): Promise
       if ((child.origin?.kind === 'worker' || child.origin?.kind === 'helper') && child.origin.fromSessionId === family[index] && !family.includes(child.id)) family.push(child.id);
     }
   }
-  for (const id of family) await moveSessionProject(id, projectId);
+  const stray = (id: string) => (all.find(entry => entry.id === id)?.projectId ?? null) !== projectId;
+  if (from === projectId) {
+    // Already there: a family move that stopped half way (a failed write, a restart) left
+    // sub-agents behind. Moving the chat there again brings them along (CodeRabbit on #1965).
+    const behind = family.slice(1).filter(stray);
+    for (const id of behind) await moveSessionProject(id, projectId);
+    if (behind.length) logInfo(`projects: chat ${sessionId} was already in ${projectId ? `project ${projectId}` : 'no project'}; ${behind.length} of its sub-agent chat(s) were not, and now follow it`);
+    return { from, moved: behind };
+  }
+  // Sub-agents first, the main chat last: if a write fails, the main chat still shows where it was,
+  // so the person's retry is a real move and finishes the family.
+  for (const id of family.slice(1)) await moveSessionProject(id, projectId);
+  await moveSessionProject(session.id, projectId);
+  // A sub-agent whose origin was written while this ran missed the scan above: look again now that
+  // the main chat shows its new project (a later one reads that project itself, see setSessionOrigin).
+  for (const id of await strayDescendants(session.id, projectId)) { await moveSessionProject(id, projectId); family.push(id); }
   logInfo(`projects: the person moved chat ${sessionId}${family.length > 1 ? ` and its ${family.length - 1} sub-agent chat(s)` : ''} from ${from ? `project ${from}` : 'no project'} to ${projectId ? `project ${projectId}` : 'no project'}; its commands now run in ${projectId ? "that project's folder" : 'the folder it worked in before'}`);
   return { from, moved: family };
+}
+
+async function strayDescendants(sessionId: string, projectId: string | null): Promise<string[]> {
+  const all = await indexedSessions();
+  const family = [sessionId];
+  for (let index = 0; index < family.length; index++) {
+    for (const child of all) {
+      if ((child.origin?.kind === 'worker' || child.origin?.kind === 'helper') && child.origin.fromSessionId === family[index] && !family.includes(child.id)) family.push(child.id);
+    }
+  }
+  return family.slice(1).filter(id => (all.find(entry => entry.id === id)?.projectId ?? null) !== projectId);
 }
 
 /** The broker supplies an exact prime conversation; unrelated families are never consulted. */

@@ -2398,7 +2398,7 @@ it('moves a chat to a project from its menu and undoes it from the toast (#1919)
   const moveChatProject = vi.fn(async (_id: string, projectId: string | null) => {
     const from = (chat.projectId as string | undefined) ?? null;
     chat = { ...chat, projectId: projectId ?? undefined };
-    return { ok: true, data: { from, fromGroup: null, groups } };
+    return { ok: true, data: { from, fromGroup: null, groups, summaries: [chat] } };
   });
   const mounted = await mountChat({}, [], {
     listProjects: async () => ({ ok: true, data: [
