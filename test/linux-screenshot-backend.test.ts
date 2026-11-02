@@ -1,8 +1,11 @@
 import { mkdtemp, rm, writeFile, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { checkLinuxScreenshotVersion, linuxScreenshotArgs, runLinuxScreenshot } from '../src/main/computer/linux-screenshot-backend.js';
+import { logInfo } from '../src/main/logger.js';
+
+vi.mock('../src/main/logger.js', () => ({ logInfo: vi.fn() }));
 
 let directory: string | undefined;
 afterEach(async () => { if (directory) await rm(directory, { recursive: true, force: true }); directory = undefined; });
@@ -36,6 +39,7 @@ describe('Linux screenshot backend is read only', () => {
   });
 
   it.skipIf(process.platform === 'win32')('rejects a backend envelope for a different requested command', async () => {
+    vi.mocked(logInfo).mockClear();
     directory = await mkdtemp(join(tmpdir(), 'cos-linux-shot-'));
     const binary = join(directory, 'backend');
     await writeFile(binary, '#!/bin/sh\nprintf \'%s\\n\' \'{"ok":true,"command":"version","data":{"secret":"private screen title"}}\'\n');
@@ -45,5 +49,10 @@ describe('Linux screenshot backend is read only', () => {
     await writeFile(binary, '#!/bin/sh\nprintf \'%s\\n\' \'{"ok":true,"command":"screenshot","data":{"secret":"private screen title"}}\'\n');
     await expect(checkLinuxScreenshotVersion(binary))
       .rejects.toThrow('Linux screenshot backend returned an invalid response');
+    expect(logInfo).toHaveBeenCalledTimes(2);
+    for (const [message] of vi.mocked(logInfo).mock.calls) {
+      expect(message).toBe('linux screenshot backend: refused because the response command did not match the requested command');
+      expect(message).not.toContain('private screen title');
+    }
   });
 });

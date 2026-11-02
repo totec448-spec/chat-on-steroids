@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { logInfo } from '../logger.js';
 
 /** Screenshots are the ONLY native Linux operations admitted in this stage. */
 export type LinuxScreenshotCommand = { kind: 'version' } | { kind: 'screenshot'; display: number };
@@ -57,7 +58,11 @@ export function runLinuxScreenshot(
         const value: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
         if (!value || typeof value !== 'object' ||
             typeof (value as LinuxDesktopEnvelope).ok !== 'boolean' ||
-            (value as LinuxDesktopEnvelope).command !== command.kind) throw new Error();
+            typeof (value as LinuxDesktopEnvelope).command !== 'string') throw new Error();
+        if ((value as LinuxDesktopEnvelope).command !== command.kind) {
+          logInfo('linux screenshot backend: refused because the response command did not match the requested command');
+          throw new Error();
+        }
         resolve(value as LinuxDesktopEnvelope);
       } catch {
         reject(new Error('Linux screenshot backend returned an invalid response'));
