@@ -95,6 +95,10 @@
 .update-readiness-status, .update-readiness-actions { display: grid; gap: 8px; min-width: 0; }
 .update-readiness-status > p, .update-readiness-actions > p { margin: 0; overflow-wrap: anywhere; }
 .update-readiness-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+/* With no button to show, the actions row and its grid track take no space (its notice stays the
+   Update all button's description). */
+.update-readiness-actions:not(:has(.update-readiness-buttons > :not([hidden]))) { display: none; }
+[data-panel='activity'] .update-readiness:not(.is-compact):not(:has(.update-readiness-buttons > :not([hidden]))) { grid-template-rows: max-content max-content minmax(0, 1fr); }
 .update-readiness-header { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .update-readiness .update-readiness-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 4px 0; border: 0; background: transparent; text-align: left; white-space: normal; overflow-wrap: anywhere; }
 .update-readiness-header > #updateAll { flex: 0 0 auto; }
