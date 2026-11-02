@@ -14153,13 +14153,14 @@
       }
       // Identity and Refresh paint before the tool declarations. A partial settings
       // panel is neither an old schema nor permission to click; wait on the existing
-      // DOM observer and leave an unclaimed request available if hydration times out.
+      // DOM observer and polling, with the same one-minute bound as post-refresh reads.
+      // Slow native settings hydration can exceed 12 seconds; no click is claimed yet.
       const settle = settledPluginView();
       const view = await waitPageView(async () => {
         const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools, request.appId);
         const appId = pluginViewAppId(location.href);
         return settle(appId && next?.appId === appId && Array.isArray(next.tools) && (next.tools.length > 0 || next.settled === true) ? next : null);
-      }, current, 12000, 250);
+      }, current, 60000, 250);
       if (!view) {
         // Say so. `pluginSnapshot()` refuses for two different reasons — the page has not
         // rendered the card yet, and the page renders a card this build cannot read — and
