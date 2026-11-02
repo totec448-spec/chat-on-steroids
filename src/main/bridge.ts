@@ -8643,6 +8643,31 @@ async function assistantRepairCurrent(conversationId: string, repair: Repair): P
  * is to offer again; this only ends the case where nothing is listening at all.
  */
 const UNCLAIMED_REPAIR_OFFERS = 10;
+/** Stuck repairs whose chat was already shown once (session and episode), so it is shown only once. */
+const unclaimedChatShown = new Set<string>();
+
+/**
+ * Before a Goal or Loop chat is given up as page-less, its tab is shown once and the offers start over
+ * (user, 2026-11-02). Twice on 2026-11-01 a Loop chat's repairs went unclaimed until the app stopped,
+ * and showing the chat by hand brought it back at once. A chat nobody automates still gets the notice.
+ */
+function showUnclaimedChatOnce(conversationId: string, repair: Repair): boolean {
+  const key = `${repair.sessionId}:${repair.episode}`;
+  if (unclaimedChatShown.has(key) || !goalArmedFor(conversationId) || isChatBlocked(conversationId) ||
+      stopRequestedFor(conversationId) || getConfig().ui.browserOnly === true) return false;
+  unclaimedChatShown.add(key);
+  if (unclaimedChatShown.size > 500) unclaimedChatShown.delete(unclaimedChatShown.values().next().value!);
+  repair.offers = 1;
+  logWarn(`bridge: ${conversationId} never claimed ${UNCLAIMED_REPAIR_OFFERS} ${repair.reason} repair offer(s) — showing its tab once before giving up`);
+  void recordNote(repair.sessionId, 'The browser did not pick up this chat\'s recovery, so the app is showing its tab to go on.')
+    .catch(() => undefined);
+  const current = () => repairsInFlight.get(conversationId) === repair && !isChatBlocked(conversationId) && !stopRequestedFor(conversationId);
+  // A browser running the extension shows its tab, or opens it there; without one the chat opens through the OS.
+  void revealChatInBrowser(conversationId)
+    .then(shown => shown ? undefined : wakeBrowserUrl(chatUrl(conversationId), true, false, { current }))
+    .catch((error: Error) => logWarn(`bridge: could not show ${conversationId} for its recovery: ${error.message}`));
+  return true;
+}
 /** How long a page's refused claim keeps a repair's offers from counting as unclaimed (#1922). */
 const CLAIM_ASKED_FRESH_MS = 2 * 60_000;
 const unclaimedRepairTold = new Set<string>();
@@ -10752,6 +10777,7 @@ async function takePendingRepairs(
       // its polls would use up the budget while the chosen page keeps asking (CodeRabbit on #1953).
       const askedRecently = repair.claimAskedAt !== undefined && now - repair.claimAskedAt < CLAIM_ASKED_FRESH_MS;
       repair.offers = (repair.offers ?? 1) + (canClaim && !askedRecently ? 1 : 0);
+      if (repair.offers > UNCLAIMED_REPAIR_OFFERS && showUnclaimedChatOnce(conversationId, repair)) continue;
       if (repair.offers > UNCLAIMED_REPAIR_OFFERS) {
         // Nothing is listening. Say that, rather than go on offering into an empty room until
         // some other subsystem happens to clear the entry — and say it as what it is: the

@@ -527,6 +527,8 @@ function loadWorker(options: {
   >;
   tabsSendMessage?: (tabId: number, message: Record<string, unknown>) => Promise<unknown>;
   windowsGet?: (windowId: number) => Promise<{ focused?: boolean }>;
+  /** A Chrome debugger API: the worker then keeps background tabs rendering with the real active-tabs.js. */
+  debuggerApi?: Record<string, unknown>;
   /** Chrome's tab-group API with these groups; omitted, the browser has none. */
   tabGroups?: Array<{ id: number; windowId: number; title?: string; collapsed?: boolean }>;
 }): WorkerHarness {
@@ -657,7 +659,11 @@ function loadWorker(options: {
   const fetch = options.fetch ?? (async () => response(503, {}));
   // This legacy VM harness exercises non-debugger hosts. The real MV3 entry fixture
   // separately loads the unchanged module graph and verifies browser registration.
-  vm.runInNewContext(backgroundSource.replace(/^import .*$/gm, ''), {
+  if (options.debuggerApi) (chrome as Record<string, unknown>).debugger = options.debuggerApi;
+  const activeTabsSource = options.debuggerApi ? readFileSync('extension/active-tabs.js', 'utf8').replace('export function', 'function') : '';
+  vm.runInNewContext(activeTabsSource + backgroundSource.replace(/^import .*$/gm, ''), {
+    // The browser-control module is imported in the real worker; with a debugger it is asked for one.
+    ...(options.debuggerApi ? { createBrowserControl: () => ({ pump: async () => undefined, event: async () => undefined }) } : {}),
     chrome,
     fetch,
     AbortController,
@@ -1559,6 +1565,55 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
       expect(worker.tabsCreate).not.toHaveBeenCalled();
     }
   );
+
+  // 2026-11-01, the maintainer's Mac: a Loop chat's repairs were handed out ten times and never claimed, twice,
+  // and the app stopped recovering it. Each status pass waited for the rendering leases (a debugger command to
+  // every background chat tab, without a time limit) before it looked at its repairs. A lease that never answers
+  // or fails to release must not keep recovery waiting.
+  it.each(['hangs', 'cannot release'] as const)('performs a handed repair when keeping tabs rendering %s', async mode => {
+    let armed = false;
+    let handed = false;
+    const trace: string[] = [];
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/repairs/claim') { trace.push('claim'); return response(200, { allowed: true }); }
+      if (url.pathname === '/status') {
+        if (url.searchParams.has('repaired')) trace.push('repaired');
+        // Released once the repair is due: a lease whose release keeps failing rejected every later pass.
+        const leased = mode === 'hangs' || !armed ? [CHAT] : [];
+        if (!armed || handed) return response(200, { nonDiscardableConversations: leased, repairs: [] });
+        handed = true;
+        return response(200, { nonDiscardableConversations: leased,
+          repairs: [{ conversationId: CHAT, token: 'stuck-lease', reason: 'assistant-error', requiresClaim: true }] });
+      }
+      return response(200, {});
+    });
+    const debuggerApi = {
+      attach: vi.fn(async () => undefined),
+      detach: vi.fn(async () => { throw new Error('detach failed'); }),
+      getTargets: vi.fn(async () => [{ tabId: 21, attached: true }]),
+      sendCommand: vi.fn(() => mode === 'hangs' ? new Promise(() => undefined) : Promise.resolve({})),
+      onDetach: { addListener: () => undefined },
+      onEvent: { addListener: () => undefined }
+    };
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch, debuggerApi,
+      tabsGet: async () => ({ id: 21, url: `https://chatgpt.com/c/${CHAT}` }),
+      tabsSendMessage: async (_id, message) => message.type === 'clf-repair-check'
+        ? { safe: true, revision: 1, turnId: 'source', questionId: 'question' }
+        : message.type === 'clf-page-status' ? { ok: true, conversationId: CHAT } : { ok: true },
+      tabsQuery: async () => [{ id: 21, url: `https://chatgpt.com/c/${CHAT}` }] });
+    await worker.registerTab(21);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 21);
+    await worker.fireAlarm();
+    armed = true;
+    // Alarms keep coming, as Chrome's do; a pass still running takes none. Each lease change waits at most
+    // three seconds, so the repair follows instead of never.
+    const alarms = setInterval(() => void worker.fireAlarm(), 1000);
+    try { await vi.waitFor(() => expect(trace).toContain('repaired'), { timeout: 25_000 }); } finally { clearInterval(alarms); }
+    expect(trace).toContain('claim');
+    expect(worker.tabsReload).toHaveBeenCalledExactlyOnceWith(21);
+  }, 40_000);
 
   it.each([
     { page: 'still loading', status: 'loading', answers: false, reload: false },
