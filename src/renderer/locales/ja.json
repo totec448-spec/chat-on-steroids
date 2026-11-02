@@ -3707,5 +3707,17 @@
   "Plugins could not be loaded.": "プラグインを読み込めませんでした。",
   "Pets could not be loaded.": "ペットを読み込めませんでした。",
   "Continue in a new chat from the last summary": "最新の要約で新しいチャットを続ける",
-  "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT が 15 分間要約を書いていません。保存済みの最新の要約で、新しいチャットで作業を続けられます。"
+  "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT が 15 分間要約を書いていません。保存済みの最新の要約で、新しいチャットで作業を続けられます。",
+  "Drag a chat here, or move it from its menu.": "チャットをここへドラッグするか、そのメニューから移動します。",
+  "Move to project": "プロジェクトへ移動",
+  "Move this chat to a project; its commands then run in that project's folder": "このチャットをプロジェクトへ移動します。以後のコマンドはそのプロジェクトのフォルダーで実行されます",
+  "Moved to {0}": "{0} へ移動しました",
+  "Moved out of its project": "プロジェクトから外しました",
+  "ChatGPT keeps it where it was.": "ChatGPT では元の場所のままです。",
+  "Undo": "元に戻す",
+  "Move undone": "移動を元に戻しました",
+  "Today": "今日",
+  "Yesterday": "昨日",
+  "Previous 7 days": "過去 7 日間",
+  "Previous 30 days": "過去 30 日間"
 }
