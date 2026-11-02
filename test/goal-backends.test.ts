@@ -652,6 +652,46 @@ describe('Goal decision backends', () => {
       expect(browser.request.mock.calls[0]?.[2]).toMatchObject({ reasoningEffort: 'low' });
     } finally { await saveConfig(config); }
   });
+  // 2026-11-02, the maintainer's Loop chat: the helper was never told the 12,000-character cap, its
+  // messages grew from 8,500 to 11,500 characters, the next one failed as reply_too_long, and the
+  // retry asked for the same thing again.
+  it('tells the helper the reply limit, and asks for a shorter message after one that was too long', async () => {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, backend: 'chatgpt' } });
+    const id = 'goal-too-long';
+    const sessionId = await recording(id, 'Done with part one');
+    const prompt = (call: number) => browser.request.mock.calls[call]?.[0] as string;
+    browser.request.mockResolvedValueOnce(JSON.stringify({ action: 'continue', reply: 'x'.repeat(12_500) }));
+    goal.startGoalDraft({ conversationId: id, sessionId, turnId: 't-long' });
+    expect(await settled(id)).toMatchObject({ stage: 'failed', error: 'reply_too_long' });
+    expect(warnings.some(line => line.includes(`goal: draft for ${id} failed — reply_too_long; the next draft for this chat asks for a shorter message`))).toBe(true);
+    expect(prompt(0)).toContain('Keep reply under 10,000 characters');
+    expect(prompt(0)).not.toContain('previous message for this chat was too long');
+
+    browser.request.mockResolvedValueOnce('{"action":"continue","reply":"Shorter next step"}');
+    goal.startGoalDraft({ conversationId: id, sessionId, turnId: 't-short' });
+    expect(await settled(id)).toMatchObject({ stage: 'ready' });
+    expect(prompt(1)).toContain('previous message for this chat was too long');
+
+    // Once a message fitted, the extra request is gone again.
+    browser.request.mockResolvedValueOnce('{"action":"continue","reply":"Next step"}');
+    goal.startGoalDraft({ conversationId: id, sessionId, turnId: 't-next' });
+    await settled(id);
+    expect(prompt(2)).not.toContain('previous message for this chat was too long');
+  });
+  it('marks the chat and says so when the stream itself ends as too long', async () => {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, backend: 'chatgpt' } });
+    const id = 'goal-stream-too-long';
+    const sessionId = await recording(id, 'Done with part one');
+    browser.request.mockRejectedValueOnce(new Error('reply_too_long'));
+    goal.startGoalDraft({ conversationId: id, sessionId, turnId: 't-stream' });
+    expect(await settled(id)).toMatchObject({ stage: 'failed', error: 'reply_too_long' });
+    expect(warnings.some(line => line.includes(`goal: draft for ${id} failed — reply_too_long; the next draft for this chat asks for a shorter message`))).toBe(true);
+    browser.request.mockResolvedValueOnce('{"action":"continue","reply":"Shorter next step"}');
+    goal.startGoalDraft({ conversationId: id, sessionId, turnId: 't-after' });
+    await settled(id);
+    expect(browser.request.mock.calls.at(-1)?.[0]).toContain('previous message for this chat was too long');
+  });
+
   it('does not let a stale browser answer replace a newer source-chat draft', async () => {
     await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: true, backend: 'chatgpt' } });
     const id = 'goal-browser-stale';
