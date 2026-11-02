@@ -155,7 +155,9 @@ app.whenReady().then(async () => {
 
   // At the narrow breakpoint the sidebar becomes 205px; the title yields space to the menu,
   // rather than widening a row or shrinking its accessible action target.
-  win.setSize(820,760);await pause(250);
+  // Also exercise the 656px-tall hosted macOS screen rather than relying on a tall
+  // local display; macOS clamps taller BrowserWindows to its visible work area.
+  win.setSize(820,656);await pause(250);
   await js(`setRowMode('dark',false,14,false)`);
   await until(`document.documentElement.dataset.theme==='dark'&&document.documentElement.dataset.highContrast==='false'`);
   const narrow=await assertRows({narrow:true});
@@ -170,12 +172,43 @@ app.whenReady().then(async () => {
   const chatOrderExpression=`([...document.querySelectorAll('#chatList > .sess[data-id]')]).map(row=>row.dataset.id)`;
   const initialChatOrder=await js(chatOrderExpression);
   assert.deepEqual(initialChatOrder,['compact-row-3','compact-row-4','compact-row-5'],'The isolated fixture starts with the expected unfiled chat order before dragging');
-  const dragPoints=await js(`(()=>{const from=document.querySelector('#chatList .sess[data-id="compact-row-3"] .sess-top').getBoundingClientRect(),to=document.querySelector('#chatList .sess[data-id="compact-row-5"]').getBoundingClientRect();return {fromX:from.left+from.width/2,fromY:from.top+from.height/2,toX:to.left+to.width/2,toY:to.top+2}})()`);
+  // Both drag endpoints must be within the real scroll viewport, not just inside
+  // the DOM. A macOS CI window can be shorter than requested, leaving chats
+  // rendered below the fixed sidebar header. Follow verify-move-to-project's
+  // frame/reachable approach before sending any synthetic pointer event.
+  const frameDragRows=async()=>{
+    const framed=await js(`(()=>{const from=document.querySelector('#chatList .sess[data-id="compact-row-3"] .sess-top'),
+      to=document.querySelector('#chatList .sess[data-id="compact-row-5"]'),
+      scroll=from?.closest('.scroll');
+      if(!from||!to||!scroll||to.closest('.scroll')!==scroll)return false;
+      const a=from.getBoundingClientRect(),b=to.getBoundingClientRect(),view=scroll.getBoundingClientRect();
+      scroll.scrollTop+=(a.top+a.bottom+b.top+b.bottom)/4-(view.top+view.bottom)/2;
+      return true})()`);
+    assert.equal(framed,true,'Source and destination share a visible sidebar scroll region');
+    await js(`new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))`);
+    const points=await js(`(()=>{const from=document.querySelector('#chatList .sess[data-id="compact-row-3"] .sess-top'),
+      to=document.querySelector('#chatList .sess[data-id="compact-row-5"]'),
+      scroll=from.closest('.scroll'),a=from.getBoundingClientRect(),b=to.getBoundingClientRect(),v=scroll.getBoundingClientRect(),
+      source={x:Math.round(a.left+Math.min(40,a.width/2)),y:Math.round((a.top+a.bottom)/2)},
+      target={x:Math.round(b.left+Math.min(40,b.width/2)),y:Math.round(b.top+Math.min(6,b.height/4))},
+      hitSource=document.elementFromPoint(source.x,source.y),hitTarget=document.elementFromPoint(target.x,target.y);
+      return {fromX:source.x,fromY:source.y,toX:target.x,toY:target.y,
+        sourceReachable:scroll.contains(hitSource)&&from.contains(hitSource),
+        targetReachable:scroll.contains(hitTarget)&&to.contains(hitTarget),
+        viewport:{width:innerWidth,height:innerHeight},
+        scroll:{top:v.top,bottom:v.bottom,scrollTop:scroll.scrollTop},
+        hits:[hitSource?.tagName,hitTarget?.tagName]}})()`);
+    assert.ok(points.sourceReachable&&points.targetReachable,
+      'Both drag endpoints must be hit-test reachable in the visible scroll area: '+JSON.stringify(points));
+    return points;
+  };
   const expectedChatOrder=['compact-row-4','compact-row-3','compact-row-5'];
   let reordered=false;
   for(let attempt=1;attempt<=2&&!reordered;attempt++){
     assert.deepEqual(await js(chatOrderExpression),initialChatOrder,'A retry must begin from the untouched initial chat order');
     await settle();win.focus();win.webContents.focus();
+    await pointerAway();
+    const dragPoints=await frameDragRows();
     win.webContents.sendInputEvent({type:'mouseMove',x:dragPoints.fromX,y:dragPoints.fromY});
     await pause(100);
     win.webContents.sendInputEvent({type:'mouseDown',x:dragPoints.fromX,y:dragPoints.fromY,button:'left',clickCount:1});
@@ -196,8 +229,8 @@ app.whenReady().then(async () => {
       const after=await js(chatOrderExpression);
       // Only retry a gesture that the hosted input layer dropped. A wrong new order is a real failure.
       assert.deepEqual(after,initialChatOrder,'Pointer drag changed chat order incorrectly: '+JSON.stringify({attempt,gesture,after}));
-      if(attempt===1){console.warn('Hosted pointer drag did not activate; retrying one fresh gesture: '+JSON.stringify(gesture));await pointerAway();}
-      else assert.fail('Two real pointer drags left the original chat order unchanged: '+JSON.stringify({gesture,after}));
+      if(attempt===1){console.warn('Hosted pointer drag did not activate; retrying one fresh gesture: '+JSON.stringify({gesture,dragPoints}));await pointerAway();}
+      else assert.fail('Two real pointer drags left the original chat order unchanged: '+JSON.stringify({gesture,after,dragPoints}));
     }
   }
   assert.deepEqual(await js(chatOrderExpression),expectedChatOrder,'Pointer reorder must persist after the gesture has settled');
