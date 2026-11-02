@@ -5288,6 +5288,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       }
       // A page that keeps showing another last question will not stop: after half an hour of it without a
       // break, the automatic Continue would only answer the wrong question, so it ends (2026-11-02).
+      // Any other reason in between means the page saw something else: the run starts over (CodeRabbit on #2030).
+      if (reason !== 'recovery-question-changed') recoveryQuestionChanged.delete(inputId);
       if (reason === 'recovery-question-changed' && chat) {
         const run = recoveryQuestionChanged.get(inputId);
         const since = run && now - run.last <= QUESTION_CHANGED_GAP_MS ? run.since : now;
