@@ -434,7 +434,9 @@ function paintDetails(status, info) {
   detail(
     grid,
     t('popup_detail_in_this_browser', 'in this browser'),
-    info ? `${tn('popup_count_held', Number(info.pending) || 0, '$1 held', '$1 held')} · ${t('popup_detail_total', '$1 total', Number(info.pendingAll) || 0)}` : null,
+    // A failed tabStatus answers with an error and no counts: a dash, not "0 held · 0 total".
+    info && Number.isFinite(info.pending) && Number.isFinite(info.pendingAll)
+      ? `${tn('popup_count_held', info.pending, '$1 held', '$1 held')} · ${t('popup_detail_total', '$1 total', info.pendingAll)}` : null,
     Boolean(info && info.pendingAll)
   );
   const deliveryState = sent ? (sent.ok ? t('popup_status_ok', 'ok') : sent.error || t('popup_status_failed', 'failed')) : '';

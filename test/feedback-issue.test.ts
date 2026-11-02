@@ -26,12 +26,6 @@ describe('the prefilled GitHub issue', () => {
     expect(fields(feedbackIssueUrl({ kind: 'bug', what: 'x' }, { ...env, arch: 'ia32' }).url).architecture).toBe('Not sure');
   });
 
-  it('opens the idea form with the problem and the proposal', () => {
-    const { url } = feedbackIssueUrl({ kind: 'idea', problem: 'I lose track of long Goal runs', proposal: 'A summary when a run ends' }, env);
-    expect(fields(url)).toEqual({ template: 'feature_request.yml', title: 'I lose track of long Goal runs',
-      problem: 'I lose track of long Goal runs', proposal: 'A summary when a run ends' });
-  });
-
   it('keeps the title to one short line', () => {
     const long = 'word '.repeat(60).trim();
     const title = fields(feedbackIssueUrl({ kind: 'bug', what: `  ${long}` }, env).url).title!;
@@ -74,9 +68,9 @@ describe('the prefilled GitHub issue', () => {
   });
 
   it('cuts at whole characters even for emoji', () => {
-    const { url } = feedbackIssueUrl({ kind: 'idea', problem: '🙂'.repeat(3000), proposal: 'p' }, env);
+    const { url } = feedbackIssueUrl({ kind: 'bug', what: '🙂'.repeat(3000), steps: 'p' }, env);
     expect(url.length).toBeLessThanOrEqual(MAX_ISSUE_URL);
-    expect(fields(url).problem).toMatch(/^(?:🙂)+…$/u);
+    expect(fields(url).what).toMatch(/^(?:🙂)+…$/u);
   });
 
   it('keeps a family or flag emoji whole when the title or the text is shortened', () => {
@@ -106,17 +100,26 @@ describe('the operating system name', () => {
 });
 
 describe('the issue forms it fills in', () => {
+  // 2026-11-01: new features come as pull requests. The repository has only the bug form, and the
+  // new-issue page points ideas to the guide instead of a form.
+  it('has only the bug form, and points ideas to the pull request guide', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs');
+    expect(readdirSync('.github/ISSUE_TEMPLATE').sort()).toEqual(['bug_report.yml', 'config.yml']);
+    const config = readFileSync('.github/ISSUE_TEMPLATE/config.yml', 'utf8');
+    expect(config).toMatch(/^blank_issues_enabled: false$/m);
+    expect(config).toContain('CONTRIBUTING.md#new-features');
+    expect(readFileSync('CONTRIBUTING.md', 'utf8')).toMatch(/^## New features$/m);
+  });
+
   // GitHub fills a field only when the address names its id, and picks a dropdown answer only by its
   // exact text: a renamed field or option in .github/ISSUE_TEMPLATE would silently stay empty.
   it('names only fields and answers the repository forms really have', async () => {
     const { readFileSync } = await import('node:fs');
-    const forms = { 'bug_report.yml': readFileSync('.github/ISSUE_TEMPLATE/bug_report.yml', 'utf8'),
-      'feature_request.yml': readFileSync('.github/ISSUE_TEMPLATE/feature_request.yml', 'utf8') };
+    const forms = { 'bug_report.yml': readFileSync('.github/ISSUE_TEMPLATE/bug_report.yml', 'utf8') };
     const reports = [
       feedbackIssueUrl({ kind: 'bug', what: 'x', steps: 's', frequency: 'Every time' }, env),
       feedbackIssueUrl({ kind: 'bug', what: 'x', frequency: 'Sometimes' }, { ...env, arch: 'x64', extension: { present: true, version: '1' } }),
-      feedbackIssueUrl({ kind: 'bug', what: 'x', frequency: 'It happened once' }, { ...env, arch: 'ia32', extension: { present: false, version: null } }),
-      feedbackIssueUrl({ kind: 'idea', problem: 'p', proposal: 'q' }, env)
+      feedbackIssueUrl({ kind: 'bug', what: 'x', frequency: 'It happened once' }, { ...env, arch: 'ia32', extension: { present: false, version: null } })
     ];
     for (const { url } of reports) {
       const fields = new URL(url).searchParams;

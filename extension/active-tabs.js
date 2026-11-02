@@ -1,6 +1,14 @@
 /** Lightweight rendering leases. The bridge/operation owns activity, never this module. */
 export function createActiveTabs(chrome) {
   const KEY = 'cosActiveTabs';
+  // A debugger command to a renderer that never answers (a huge or hung chat page) must not hold every
+  // later lease change, and with it the status pass, forever (2026-11-01).
+  const COMMAND_MS = 5000;
+  const within = (work, label) => {
+    let timer;
+    return Promise.race([work, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} timed out`)), COMMAND_MS); })])
+      .finally(() => clearTimeout(timer));
+  };
   const scopes = new Map(), states = new Map(), retiring = new Set(), cancelled = new Map();
   let syncing = null, again = false;
   const valid = tab => Number.isInteger(tab?.id) && tab.id > 0 && typeof tab.url === 'string' &&
@@ -18,9 +26,9 @@ export function createActiveTabs(chrome) {
   })();
   async function detach(state) {
     if (!state.attached) return;
-    try { await chrome.debugger.detach({ tabId: state.id }); }
+    try { await within(chrome.debugger.detach({ tabId: state.id }), 'Detach'); }
     catch {
-      const targets = await chrome.debugger.getTargets();
+      const targets = await within(chrome.debugger.getTargets(), 'Target list');
       if (targets.some(t => t.tabId === state.id && t.attached)) throw new Error('Active tab release remains pending');
     }
     state.attached = false;
@@ -33,36 +41,51 @@ export function createActiveTabs(chrome) {
     if (!current(state) || !valid(tab) || tab.url !== state.url) return;
     // A foreign debugger (including the browser tools) keeps its own session. Never steal it.
     state.attaching = true;
-    try { await chrome.debugger.attach({ tabId: state.id }, '1.3'); }
-    catch { state.failed = true; return; }
+    const attaching = chrome.debugger.attach({ tabId: state.id }, '1.3');
+    try { await within(attaching, 'Attach'); }
+    catch (error) {
+      state.failed = true;
+      // An attach that answers after its time ran out is ours: it goes into retiring custody, released by the
+      // bounded detach and kept there until the release is confirmed (CodeRabbit on #2027).
+      if (/timed out/.test(error?.message || '')) void attaching.then(() => { state.attached = true; retiring.add(state); return sync(); }).catch(() => undefined);
+      return;
+    }
     finally { state.attaching = false; }
     state.attached = true;
     try {
       await save();
       const latest = await chrome.tabs.get(state.id);
       if (!current(state) || !valid(latest) || latest.url !== state.url) throw new Error('Tab changed');
-      await chrome.debugger.sendCommand({ tabId: state.id }, 'Emulation.setFocusEmulationEnabled', { enabled: true });
+      await within(chrome.debugger.sendCommand({ tabId: state.id }, 'Emulation.setFocusEmulationEnabled', { enabled: true }), 'Focus emulation');
       if (!current(state)) throw new Error('Activity ended');
     } catch {
       state.failed = true;
-      await detach(state);
+      // A release that cannot be confirmed stays in retiring custody, retried on every later pass, so a
+      // failed lease is never left attached (CodeRabbit on #2027).
+      try { await detach(state); } catch { retiring.add(state); }
     }
   }
   function sync() {
     if (syncing) { again = true; return syncing; }
     syncing = (async () => {
       await loaded;
+      let pending = null;
       do {
         again = false;
+        // A release that keeps failing stays for the next pass, but does not keep other tabs from their
+        // leases (CodeRabbit on #2027); the pass still reports it once the rest is done.
         for (const state of retiring) {
-          await detach(state);
-          retiring.delete(state);
+          try { await detach(state); retiring.delete(state); }
+          catch (error) { pending ??= error; }
         }
         for (const [id, url] of cancelled) if (states.get(id)?.url !== url) cancelled.delete(id);
-        // No DOM, Runtime, Network, screenshots, artificial input or polling domains.
-        for (const state of states.values()) await attach(state);
+        // No DOM, Runtime, Network, screenshots, artificial input or polling domains. A tab whose previous
+        // lease is still being released waits for it: a second attach would fail and mark it failed for
+        // good (CodeRabbit on #2027).
+        for (const state of states.values()) if (![...retiring].some(old => old.id === state.id)) await attach(state);
         await save();
       } while (again);
+      if (pending) throw pending;
     })().finally(() => { syncing = null; });
     return syncing;
   }
