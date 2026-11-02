@@ -229,6 +229,23 @@ describe('a renderer that never answers', () => {
     expect([...attached]).toEqual([2]);
   });
 
+  // CodeRabbit on #2027: a tab whose previous lease is still being released is not attached again until
+  // that release goes through, so it does not end up failed for good.
+  it('waits for a pending release of the same tab before attaching it again', async () => {
+    const { control, chrome, attached, tabs } = setup();
+    await control.set('policy', [A]);
+    chrome.debugger.detach.mockRejectedValueOnce(new Error('still attached'));
+    // Same tab, new page: the old lease retires, its release fails once.
+    tabs.set(1, { ...A, url: 'https://chatgpt.com/c/a2' });
+    await control.set('policy', [{ ...A, url: 'https://chatgpt.com/c/a2' }]).catch(() => undefined);
+    expect(chrome.debugger.attach).toHaveBeenCalledTimes(1);
+    // The release goes through on the next pass, and only then is the tab attached for its new page.
+    await control.set('policy', [{ ...A, url: 'https://chatgpt.com/c/a2' }]);
+    expect(chrome.debugger.attach).toHaveBeenCalledTimes(2);
+    expect([...attached]).toEqual([1]);
+    expect(control.owns(1)).toBe(true);
+  });
+
   it('releases an attachment that answers only after it was given up', async () => {
     vi.useFakeTimers();
     try {

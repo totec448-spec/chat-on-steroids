@@ -6435,3 +6435,11 @@ describe('a ChatGPT page that moves to a new address', () => {
     expect(routeNotices(worker)).toEqual([]);
   });
 });
+
+// CodeRabbit on #2027: every lease change the worker waits for goes through the bounded, non-failing
+// `renderingLeases`, so another tab's stuck lease can neither hold nor fail an unrelated caller.
+it('waits for rendering leases only through renderingLeases', () => {
+  const source = readFileSync('extension/background.js', 'utf8');
+  const raw = source.split('\n').filter(line => /await\s+activeTabs/.test(line) && !line.includes('renderingLeases'));
+  expect(raw).toEqual([]);
+});
