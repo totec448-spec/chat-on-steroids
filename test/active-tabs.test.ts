@@ -216,6 +216,19 @@ describe('a renderer that never answers', () => {
     expect(chrome.debugger.attach).toHaveBeenCalledTimes(1);
   });
 
+  // CodeRabbit on #2027: a release that keeps failing does not keep another tab from its lease.
+  it('gives other tabs their leases while one release keeps failing', async () => {
+    const { control, chrome, attached } = setup();
+    await control.set('policy', [A]);
+    chrome.debugger.detach.mockRejectedValue(new Error('still attached'));
+    await expect(control.set('policy', [B])).rejects.toThrow('release remains pending');
+    expect(attached.has(2)).toBe(true);
+    expect(control.owns(1)).toBe(true);
+    chrome.debugger.detach.mockImplementation(async ({ tabId }: { tabId: number }) => { attached.delete(tabId); });
+    await control.set('policy', [B]);
+    expect([...attached]).toEqual([2]);
+  });
+
   it('releases an attachment that answers only after it was given up', async () => {
     vi.useFakeTimers();
     try {

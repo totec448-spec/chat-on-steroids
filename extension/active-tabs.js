@@ -69,17 +69,21 @@ export function createActiveTabs(chrome) {
     if (syncing) { again = true; return syncing; }
     syncing = (async () => {
       await loaded;
+      let pending = null;
       do {
         again = false;
+        // A release that keeps failing stays for the next pass, but does not keep other tabs from their
+        // leases (CodeRabbit on #2027); the pass still reports it once the rest is done.
         for (const state of retiring) {
-          await detach(state);
-          retiring.delete(state);
+          try { await detach(state); retiring.delete(state); }
+          catch (error) { pending ??= error; }
         }
         for (const [id, url] of cancelled) if (states.get(id)?.url !== url) cancelled.delete(id);
         // No DOM, Runtime, Network, screenshots, artificial input or polling domains.
         for (const state of states.values()) await attach(state);
         await save();
       } while (again);
+      if (pending) throw pending;
     })().finally(() => { syncing = null; });
     return syncing;
   }

@@ -2937,8 +2937,8 @@ describe('automatic compaction', () => {
   });
 
   // CodeRabbit on #2027: a show the browser reports it could not carry out is not used up.
-  it('shows a Loop chat again when the browser could not show it the first time', async () => {
-    const { setSessionAutomation } = await import('../src/main/bridge.js');
+  it.each(['soon', 'late'] as const)('shows a Loop chat again when the browser reports, %s, that it could not show it', async report => {
+    const { setSessionAutomation, unclaimedChatShowFailed } = await import('../src/main/bridge.js');
     await pair();
     const browser = 'dddddddddddddddd4444';
     const socket = new WebSocket(base.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
@@ -2965,9 +2965,24 @@ describe('automatic compaction', () => {
       };
       for (let pass = 0; pass < 30 && !reveals.length; pass++) await poll();
       expect(reveals).toEqual([conversationId]);
+      if (report === 'late') {
+        // A report long after the show is not about it: the show stays used, and the chat ends page-less.
+        unclaimedChatShowFailed(conversationId, Date.now() + 61_000);
+        let still = true;
+        for (let pass = 0; pass < 40 && still; pass++) still = await poll() || (await poll());
+        expect(reveals).toEqual([conversationId]);
+        expect((await sessionControlsFor(session.id)).pageless).toBe(true);
+        return;
+      }
       expect((await request('POST', '/reveal/failed', { body: { conversationId } })).body).toEqual({ ok: true });
       for (let pass = 0; pass < 30 && reveals.length < 2; pass++) await poll();
       expect(reveals).toEqual([conversationId, conversationId]);
+      // Failed again: no third show, and the chat ends page-less as before (CodeRabbit on #2027).
+      expect((await request('POST', '/reveal/failed', { body: { conversationId } })).body).toEqual({ ok: true });
+      let offered = true;
+      for (let pass = 0; pass < 40 && offered; pass++) offered = await poll() || (await poll());
+      expect(reveals).toHaveLength(2);
+      expect((await sessionControlsFor(session.id)).pageless).toBe(true);
     } finally { const closed = once(socket, 'close'); socket.close(); await closed; }
   });
 
