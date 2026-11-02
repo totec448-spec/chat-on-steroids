@@ -38,7 +38,7 @@ export { setBrowserWorkArea } from './browser-window-layout.js';
 import { pendingBrowserPreferenceRequest, acknowledgeBrowserPreferences } from './browser-preferences.js';
 import { sessionFinishHeld, releaseSessionFinish, getSessionFinishDraft, sessionFinishWaiting } from './session/finish.js';
 import { observeUsage } from './session/usage.js';
-import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation } from './session/input.js';
+import { inBrowserDelivery, automaticSendKind, heldBySendCheck, holdInputForSendCheck, pendingBrowserInputs, claimBrowserInput, acknowledgeBrowserInput, bindBrowserInputProject, failBrowserInput, lostBrowserOpening, completeBrowserDecision, listInputs, fileSilenceInput, fileRecoveryInput, advanceRecoveryInput, hasQueuedAfterTurnInput, inputBeforeGoal, pendingQueuedPickups, queuedInputOfferBlocker, continueAsOrdinaryMessage, recordQueuedPickupAttemptNow, syncQueuedPickupRecoveryNow, deferSilenceInput, revokeSilenceInputs, endRecoveryInput, failBranchInput, retryUnclaimedInput, failInputsForDeletedConversation, retireMismatchedRecoveryInput } from './session/input.js';
 /**
  * The local bridge between the Chrome extension and this app.
  *
@@ -516,6 +516,15 @@ const HELD_INPUT_REASONS: Record<string, string> = {
 };
 /** When each page-note was last logged, by chat and heading (see `/page-note`). */
 const pageNotesLogged = new Map<string, number>();
+/** Uninterrupted "question changed" refusals of one automatic Continue: since when, and the last one. */
+const recoveryQuestionChanged = new Map<string, { since: number; last: number }>();
+/** Refusals further apart than this are not one run; this long of one run retires the Continue. */
+let QUESTION_CHANGED_GAP_MS = 5 * 60_000;
+let QUESTION_CHANGED_RETIRE_MS = 30 * 60_000;
+export function setQuestionChangedTimingForTests(gapMs = 5 * 60_000, retireMs = 30 * 60_000): void {
+  QUESTION_CHANGED_GAP_MS = gapMs; QUESTION_CHANGED_RETIRE_MS = retireMs;
+  recoveryQuestionChanged.clear();
+}
 /** When each repair-claim refusal was last logged, by chat and reason (#1922). */
 const claimRefusalsLogged = new Map<string, number>();
 /** Marks a page-note key logged now, as the newest entry, so a full map evicts the oldest log, not this one. */
@@ -5269,6 +5278,18 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       if (now - (pageNotesLogged.get(key) ?? 0) >= 60_000) {
         notePageNoteLogged(key, now);
         logInfo(`bridge: ${chat ? `the page of ${chat}` : 'a ChatGPT page'} held queued message ${inputId} back: ${HELD_INPUT_REASONS[reason]}`);
+      }
+      // A page that keeps showing another last question will not stop: after half an hour of it without a
+      // break, the automatic Continue would only answer the wrong question, so it ends (2026-11-02).
+      if (reason === 'recovery-question-changed' && chat) {
+        const run = recoveryQuestionChanged.get(inputId);
+        const since = run && now - run.last <= QUESTION_CHANGED_GAP_MS ? run.since : now;
+        recoveryQuestionChanged.set(inputId, { since, last: now });
+        if (recoveryQuestionChanged.size > 200) recoveryQuestionChanged.delete(recoveryQuestionChanged.keys().next().value!);
+        if (now - since >= QUESTION_CHANGED_RETIRE_MS && await retireMismatchedRecoveryInput(inputId, chat)) {
+          recoveryQuestionChanged.delete(inputId);
+          changed();
+        }
       }
       return json(res, 200, { ok: true }, origin);
     }
