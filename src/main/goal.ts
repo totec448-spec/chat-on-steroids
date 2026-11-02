@@ -2751,9 +2751,32 @@ async function pauseRepeatingGoal(draft: GoalDraft, answer: string): Promise<voi
 const answerBeforeNote = new WeakMap<ChatMessage, string>();
 
 /** What the Offline marker check reads: the newest answer as written, without the app's own note. */
+/** Assistant messages ChatGPT marked final, as opposed to its commentary (#2007). */
+const finalAnswers = new WeakSet<ChatMessage>();
+/** The turn each recorded assistant message belongs to, where the recording names one. */
+const turnOfMessage = new WeakMap<ChatMessage, string>();
+/**
+ * The marker text read from the whole projection before the context cut. The cut keeps user
+ * corrections ahead of the final answer, so the answer the marker sits in may not be among the
+ * messages sent (CodeRabbit on #2014).
+ */
+const decisionTextOf = new WeakMap<readonly ChatMessage[], string>();
+
 export function templateDecisionText(messages: readonly ChatMessage[]): string {
-  const last = messages.filter(message => message.role === 'assistant').at(-1);
-  return last ? answerBeforeNote.get(last) ?? last.content : '';
+  const known = decisionTextOf.get(messages);
+  if (known !== undefined) return known;
+  const lastAt = messages.findLastIndex(message => message.role === 'assistant');
+  if (lastAt < 0) return '';
+  // Commentary ChatGPT writes after its final answer in the same turn is not the answer: the marker is
+  // in the final one (#2007). Walk back to it, never past the user message that opened the turn, and
+  // never into another turn: a Retry keeps the earlier generation's answers before the new one's.
+  let chosen = messages[lastAt]!;
+  const turn = turnOfMessage.get(chosen);
+  for (let at = lastAt; at >= 0 && messages[at]!.role === 'assistant'; at--) {
+    if (turnOfMessage.get(messages[at]!) !== turn) break;
+    if (finalAnswers.has(messages[at]!)) { chosen = messages[at]!; break; }
+  }
+  return answerBeforeNote.get(chosen) ?? chosen.content;
 }
 
 interface ChatMessage {
@@ -2912,6 +2935,8 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
     } else if ((event.kind === 'assistant_message' && (event.final || event.messageId)) || (event.kind === 'progress' && event.source === 'extension')) {
       const content = clip(event.kind === 'assistant_message' ? modelFacingText(event.message.text, event.renderedHtml) : event.message.text);
       if (content) next = { role: 'assistant', content };
+      if (next && event.kind === 'assistant_message' && event.final) finalAnswers.add(next);
+      if (next && typeof event.turnId === 'string' && event.turnId) turnOfMessage.set(next, event.turnId);
     }
     if (!next) continue;
 
@@ -2959,6 +2984,9 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
     const answer = ordered[at]!;
     const noted = { ...answer, content: `${answer.content}\n\n${toolCallFootnote(count, before)}` };
     answerBeforeNote.set(noted, answerBeforeNote.get(answer) ?? answer.content);
+    if (finalAnswers.has(answer)) finalAnswers.add(noted);
+    const answerTurn = turnOfMessage.get(answer);
+    if (answerTurn) turnOfMessage.set(noted, answerTurn);
     ordered[at] = noted;
   }
   for (const text of deliveredInput.slice(-5)) {
@@ -3046,9 +3074,12 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
     chars += message.content.length;
     selected.push({ at, message });
   }
-  return [...anchors, ...selected]
+  const result = [...anchors, ...selected]
     .sort((left, right) => left.at - right.at)
     .map((entry) => entry.message);
+  // The Offline marker is read from everything recorded, whatever the cut left out.
+  decisionTextOf.set(result, templateDecisionText(ordered));
+  return result;
 }
 
 /*
