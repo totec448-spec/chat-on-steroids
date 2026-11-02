@@ -5962,7 +5962,9 @@ Failure and recovery stay visible outside native details. Identical pushes prese
 choice/focus; meaningful owner changes reopen attention. A keyboard button controls native
 details and a separate polite live region announces changed status. The card keeps the event
 feed's remaining height and internal scrolling in short windows. Diagnostics uses the existing
-save owner with both buttons disabled during saving, and does not retry updates. Disclosure and
+save owner with both buttons disabled during saving, and does not retry updates. The report
+action follows the effective operation/update error, including automatic staging failures
+before the person presses Update all. Disclosure and
 action regressions stay with the view; real-Electron cross-feature acceptance is added separately.
 
 ## 19. Debugging, tests and working here
