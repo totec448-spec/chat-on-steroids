@@ -147,7 +147,11 @@ export const $ = <T extends HTMLElement>(id: string): T => document.getElementBy
  * (2026-11-01, 80–92% fragmented pages that a collection never hands back).
  */
 const pendingPaints = new Map<Element, () => void>();
+/** Elements the observer watches. Observing an element again, or inside the observer's own callback, makes
+ * Chromium report it once more in the same frame: "ResizeObserver loop completed with undelivered notifications". */
+const watched = new Set<Element>();
 let shownWatch: ResizeObserver | undefined;
+let rewatch = 0;
 
 /** The outermost hidden element around `node`: the one whose box appears when the panel is shown. */
 function hiddenRoot(node: Element): Element {
@@ -156,13 +160,36 @@ function hiddenRoot(node: Element): Element {
   return root;
 }
 
+function watch(node: Element): void {
+  shownWatch ??= new ResizeObserver(flushShownPaints);
+  for (const target of [hiddenRoot(node), node]) {
+    if (watched.has(target)) continue;
+    watched.add(target);
+    shownWatch.observe(target);
+  }
+}
+
 function flushShownPaints(): void {
-  shownWatch?.disconnect();
   for (const [node, paint] of [...pendingPaints]) {
     if (!node.isConnected) { pendingPaints.delete(node); continue; }
-    if (!node.checkVisibility()) { shownWatch!.observe(hiddenRoot(node)); shownWatch!.observe(node); continue; }
+    if (!node.checkVisibility()) continue;
     pendingPaints.delete(node);
     paint();
+  }
+  // Keep watching what still waits; stop watching the rest. A hidden root that changed is watched
+  // after this frame, never from inside this callback.
+  const needed = new Set<Element>();
+  for (const node of pendingPaints.keys()) { needed.add(node); needed.add(hiddenRoot(node)); }
+  for (const target of [...watched]) {
+    if (needed.has(target)) continue;
+    watched.delete(target);
+    shownWatch!.unobserve(target);
+  }
+  if ([...needed].some(target => !watched.has(target)) && !rewatch) {
+    rewatch = window.setTimeout(() => {
+      rewatch = 0;
+      for (const node of pendingPaints.keys()) if (node.isConnected && !node.checkVisibility()) watch(node);
+    }, 0);
   }
 }
 
@@ -175,9 +202,7 @@ export function paintWhenShown(node: Element, paint: () => void): void {
   }
   pendingPaints.set(node, paint);
   // A shown panel gets a box before the frame is painted, so it never shows the older list.
-  shownWatch ??= new ResizeObserver(flushShownPaints);
-  shownWatch.observe(hiddenRoot(node));
-  shownWatch.observe(node);
+  watch(node);
 }
 
 let toastTimer: number | undefined;
