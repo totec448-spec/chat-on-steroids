@@ -255,7 +255,14 @@ app.whenReady().then(async () => {
     // A chat whose row the newest page does not refresh still shows its new project (CodeRabbit on #1965).
     await js(`window.staleRows['loose-5'] = {...window.fixtureRows.find(r=>r.id==='loose-5')}`);
     await js(`document.querySelector('[data-id="loose-5"]').scrollIntoView({block:'center'})`);
-    await js(`document.querySelector('[data-id="loose-5"] .sess-menu').click()`);
+    // The cancelled drag above swallows the next click for one frame (as the drop does): wait it out,
+    // with no other menu open, before opening this chat's menu.
+    await js('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+    await until(`!document.querySelector('.row-menu')`, 'no menu open before the old chat\'s');
+    const openOldMenu = () => js(`document.querySelector('[data-id="loose-5"] .sess-menu').click()`);
+    await openOldMenu();
+    // Clicked again only if no menu opened at all: a second click on an open menu would close it.
+    if (!await js(`new Promise(r=>setTimeout(()=>r(!!document.querySelector('.row-menu')),600))`)) await openOldMenu();
     await until(`!!document.querySelector('.row-menu [data-row-action="move-to-project"]')`, 'old chat menu has Move to project');
     await js(`document.querySelector('.row-menu [data-row-action="move-to-project"]').focus()`);
     press('Right');
