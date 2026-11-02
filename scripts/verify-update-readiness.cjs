@@ -314,7 +314,7 @@ app.whenReady().then(async () => {
       assert.equal(await js(`document.getElementById('updateReadinessSummary').dataset.ready`),'true');
       await js(`(()=>{const next=structuredClone(window.fixtureState);next.update={...next.update,stage:'failed',latest:'99.0.0',error:'the update staging path must use ordinary directories'};window.fixturePush(next)})()`);
       const cacheError = await js(`document.querySelector('[data-update-part="app"]').textContent`);
-      assert.ok(cacheError.includes(copy('The update cache must be a folder, not a link.')),lang+' linked cache reason is translated');
+      assert.ok(cacheError.includes(copy('The update cache and its version folders must be ordinary folders, not files or links.')),lang+' linked cache reason is translated');
       assert.ok(cacheError.includes(copy('Save a Diagnostics report from Activity for help with recovery. The saved state has been kept.')),lang+' blocked cache directs diagnostics rather than unchanged retry');
       await js(`document.getElementById('updateAll').click();window.fixtureFinishUpdate({ok:false,error:'the update staging path must use ordinary directories'})`);
       await until(`!document.getElementById('updateAll').disabled`);

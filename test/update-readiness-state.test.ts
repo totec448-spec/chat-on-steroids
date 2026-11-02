@@ -159,7 +159,7 @@ it('keeps blocked cache failures explicit and directs recovery instead of an unc
   const next = state();
   next.update.stage = 'failed'; next.update.error = 'the update staging path must use ordinary directories';
   expect(updateReadiness(next).find(row => row.id === 'app')).toMatchObject({
-    status: 'fail', reason: 'The update cache must be a folder, not a link.',
+    status: 'fail', reason: 'The update cache and its version folders must be ordinary folders, not files or links.',
     nextStep: 'Save a Diagnostics report from Activity for help with recovery. The saved state has been kept.'
   });
 });
