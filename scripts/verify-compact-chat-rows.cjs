@@ -211,26 +211,33 @@ app.whenReady().then(async () => {
   // Focus and menu behavior are unchanged by the smaller row pitch. Choose an unselected row,
   // because opening a different chat intentionally rebuilds the tree and may move focus onward.
   await pointerAway();
-  const targetId=await js(`(()=>[...document.querySelectorAll('#chatList .sess[data-id]')].find(row=>!row.classList.contains('is-sel'))?.dataset.id)()`);
-  assert.ok(targetId,'The fixture has an unselected chat for keyboard activation');
-  const rowSelector=`#chatList .sess[data-id=${JSON.stringify(targetId)}]`;
+  // Keep the selected ID inside the fixture renderer; never interpolate DOM data into
+  // executable JavaScript strings. Re-query the row after selection may rebuild it.
+  const targetFound=await js(`(()=>{
+    const row=[...document.querySelectorAll('#chatList .sess[data-id]')].find(row=>!row.classList.contains('is-sel'));
+    window.__compactTargetRowId=row?.dataset.id;
+    window.__compactTargetRow=()=>[...document.querySelectorAll('#chatList .sess[data-id]')]
+      .find(candidate=>candidate.dataset.id===window.__compactTargetRowId);
+    return !!row;
+  })()`);
+  assert.ok(targetFound,'The fixture has an unselected chat for keyboard activation');
   await js(`document.activeElement?.blur()`);await key('Tab');
-  await js(`document.querySelector(${JSON.stringify(rowSelector+' .sess-top')}).focus()`);
-  const ring=await js(`(()=>{const e=document.querySelector(${JSON.stringify(rowSelector+' .sess-top')}),r=e.closest('.sess'),s=getComputedStyle(r);return {matches:e.matches(':focus-visible'),style:s.outlineStyle,width:s.outlineWidth,offset:s.outlineOffset,height:e.getBoundingClientRect().height}})()`);
+  await js(`window.__compactTargetRow().querySelector('.sess-top').focus()`);
+  const ring=await js(`(()=>{const e=window.__compactTargetRow().querySelector('.sess-top'),r=e.closest('.sess'),s=getComputedStyle(r);return {matches:e.matches(':focus-visible'),style:s.outlineStyle,width:s.outlineWidth,offset:s.outlineOffset,height:e.getBoundingClientRect().height}})()`);
   assert.ok(ring.matches&&ring.style==='solid'&&ring.width==='2px'&&ring.offset==='-2px'&&ring.height>=24,'Keyboard focus has a visible row ring around a 24px target: '+JSON.stringify(ring));
   await capture('dark-keyboard-focus.png');
-  const point=await js(`(()=>{const r=document.querySelector(${JSON.stringify(rowSelector)}).getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`);
+  const point=await js(`(()=>{const r=window.__compactTargetRow().getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`);
   win.webContents.sendInputEvent({type:'mouseMove',x:point.x,y:point.y});await pause(150);
-  const hover=await js(`(()=>{const row=document.querySelector(${JSON.stringify(rowSelector)}),actions=row.querySelector('.sess-actions'),top=row.querySelector('.sess-top'),s=getComputedStyle(actions);return {hover:row.matches(':hover'),opacity:s.opacity,pointer:s.pointerEvents,mask:getComputedStyle(top).maskImage}})()`);
+  const hover=await js(`(()=>{const row=window.__compactTargetRow(),actions=row.querySelector('.sess-actions'),top=row.querySelector('.sess-top'),s=getComputedStyle(actions);return {hover:row.matches(':hover'),opacity:s.opacity,pointer:s.pointerEvents,mask:getComputedStyle(top).maskImage}})()`);
   assert.ok(hover.hover&&hover.opacity==='1'&&hover.pointer==='auto'&&hover.mask!=='none','Hover reveals actions while masking the title beneath them: '+JSON.stringify(hover));
   await capture('dark-hover-actions.png');
-  await js(`document.querySelector(${JSON.stringify(rowSelector+' .sess-top')}).focus()`);
+  await js(`window.__compactTargetRow().querySelector('.sess-top').focus()`);
   await key('Space');
-  await until(`document.querySelector(${JSON.stringify(rowSelector)})?.classList.contains('is-sel')`);
-  assert.equal(await js(`document.querySelector(${JSON.stringify(rowSelector)})?.classList.contains('is-sel')`),true,'Space selects an unselected chat');
-  await js(`document.querySelector(${JSON.stringify(rowSelector+' .row-menu-button')}).click()`);
+  await until(`window.__compactTargetRow()?.classList.contains('is-sel')`);
+  assert.equal(await js(`window.__compactTargetRow()?.classList.contains('is-sel')`),true,'Space selects an unselected chat');
+  await js(`window.__compactTargetRow().querySelector('.row-menu-button').click()`);
   await until(`document.querySelector('.row-menu')`);
-  assert.equal(await js(`document.querySelector(${JSON.stringify(rowSelector+' .row-menu-button')}).getAttribute('aria-expanded')`),'true');
+  assert.equal(await js(`window.__compactTargetRow().querySelector('.row-menu-button').getAttribute('aria-expanded')`),'true');
   assert.deepEqual(errors,[],'No unexpected renderer console errors');
   console.log('PASS visible keyboard focus, hover action reveal, Space selection, row menu, and no renderer console errors');
   win.destroy();await server.close();app.exit(0);
