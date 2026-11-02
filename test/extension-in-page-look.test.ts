@@ -8,18 +8,21 @@ const manifest = JSON.parse(await readFile(new URL('../extension/manifest.json',
 let page: JSDOM | undefined;
 afterEach(() => { page?.window.close(); });
 
+const TOKENS = ['--page', '--card', '--ink', '--soft', '--faint', '--line', '--edge', '--hover', '--track', '--accent',
+  '--accent-wash', '--accent-fill', '--on-accent', '--knob-off', '--knob-on', '--green', '--green-wash', '--red', '--red-wash'];
+const palette = (overrides: Record<string, string>) => ({ ...Object.fromEntries(TOKENS.map(name => [name, '#808080'])), ...overrides });
 const appearance = {
   theme: 'dark',
-  light: { '--card': '#ffffff', '--ink': '#0c0c0e', '--accent': '#486f9d' },
-  dark: { '--card': '#262725', '--ink': '#eceeeb', '--accent': '#d9773a' }
+  light: palette({ '--card': '#ffffff', '--ink': '#0c0c0e', '--accent': '#486f9d' }),
+  dark: palette({ '--card': '#262725', '--ink': '#eceeeb', '--accent': '#d9773a' })
 };
 
-async function open(stored: unknown) {
+async function open(stored: unknown, read?: Promise<unknown>) {
   page = new JSDOM('<!doctype html><html data-clf-theme="dark"><head></head><body></body></html>', { url: 'https://chatgpt.com/', runScripts: 'outside-only' });
   const listeners: Array<(changes: Record<string, any>, area: string) => void> = [];
   Object.assign(page.window, {
     chrome: { storage: {
-      local: { get: async () => (stored === undefined ? {} : { appAppearance: stored }) },
+      local: { get: async () => { const value = read ? await read : stored; return value === undefined ? {} : { appAppearance: value }; } },
       onChanged: { addListener: (listener: (changes: Record<string, any>, area: string) => void) => listeners.push(listener) }
     } }
   });
@@ -38,8 +41,9 @@ it('loads the palette script with the content scripts, before content.js', () =>
 
 it('gives the CoS parts of the page the app palette for the theme ChatGPT shows', async () => {
   const { css } = await open(appearance);
-  expect(css()).toContain(":root:root[data-clf-theme='dark'] { --clf-app-card: #262725; --clf-app-ink: #eceeeb; --clf-app-accent: #d9773a; }");
-  expect(css()).toContain(":root:root[data-clf-theme='light'] { --clf-app-card: #ffffff;");
+  expect(css()).toContain('--clf-app-card: #262725; --clf-app-ink: #eceeeb;');
+  expect(css()).toMatch(/:root:root\[data-clf-theme='dark'\] \{[^}]*--clf-app-accent: #d9773a;/);
+  expect(css()).toMatch(/:root:root\[data-clf-theme='light'\] \{[^}]*--clf-app-card: #ffffff;/);
 });
 
 it('follows a palette change and drops the colors again when the stored value is gone', async () => {
@@ -47,7 +51,7 @@ it('follows a palette change and drops the colors again when the stored value is
   expect(css()).toBeNull();
   change(appearance);
   expect(css()).toContain('--clf-app-accent: #d9773a;');
-  change({ ...appearance, dark: { '--accent': '#3a8fd9' } });
+  change({ ...appearance, dark: { ...appearance.dark, '--accent': '#3a8fd9' } });
   expect(css()).toContain('--clf-app-accent: #3a8fd9;');
   expect(css()).not.toContain('#d9773a');
   change(appearance, 'sync');
@@ -56,14 +60,36 @@ it('follows a palette change and drops the colors again when the stored value is
   expect(css()).toBeNull();
 });
 
-it('writes only well-formed color tokens into the page', async () => {
-  const { css } = await open({ theme: 'dark', light: {}, dark: {
-    '--card': '#262725', '--ink': 'url(https://example.test/x)', '--line': '#181818; background: red',
-    '--x}body{': '#ffffff', '--accent': '#d9773a'
-  } });
-  expect(css()).toContain('--clf-app-card: #262725;');
+it('writes only complete, well-formed palettes into the page', async () => {
+  for (const dark of [
+    { ...appearance.dark, '--ink': 'url(https://example.test/x)' },
+    { ...appearance.dark, '--line': '#181818; background: red' },
+    // Incomplete: a missing color would leave the stylesheet's default for the other theme beside it.
+    { '--card': '#262725', '--ink': '#eceeeb' }
+  ]) {
+    const { css } = await open({ ...appearance, dark });
+    expect(css()).toBeNull();
+  }
+  // Names beyond the app's colors are not written, whatever they hold.
+  const { css } = await open({ ...appearance, dark: { ...appearance.dark, '--x}body{': '#ffffff' } });
   expect(css()).toContain('--clf-app-accent: #d9773a;');
   expect(css()).not.toMatch(/url\(|background|body/);
+});
+
+it('lets a change during the first read win over the older stored value', async () => {
+  let release!: (value: unknown) => void;
+  const { change, css } = await open(undefined, new Promise(resolve => { release = resolve; }));
+  change({ ...appearance, dark: { ...appearance.dark, '--accent': '#3a8fd9' } });
+  release(appearance);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(css()).toContain('--clf-app-accent: #3a8fd9;');
+});
+
+it('keeps the same list of colors as the popup', async () => {
+  const popup = await readFile(new URL('../extension/popup.js', import.meta.url), 'utf8');
+  const list = (source: string, name: string) => JSON.parse((new RegExp(`const ${name} = (\\[[^\\]]*\\])`).exec(source)?.[1] ?? '[]').replace(/'/g, '"'));
+  expect(list(script, 'APP_TOKENS')).toEqual(list(popup, 'APP_TOKENS'));
+  expect(list(script, 'APP_TOKENS')).toEqual(TOKENS);
 });
 
 it('ignores a damaged stored value', async () => {
