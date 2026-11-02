@@ -52,7 +52,7 @@ import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser } from '.
 import { wakeBrowserUrl } from './browser-startup.js';
 import { registerPluginIpc } from './plugins-ipc.js';
 import { deletePet, importPet, loadPetAsset, petLibraryState, setPetEnabled, setPetFavorite } from './pet-library.js';
-import { assignChatGroup, chatGroupsState, createChatGroup, deleteChatGroup, forgetChatGroupMember, movedChatGroup, placeMovedChat, renameChatGroup } from './chat-groups.js';
+import { assignChatGroup, chatGroupsState, createChatGroup, deleteChatGroup, forgetChatGroupMember, renameChatGroup } from './chat-groups.js';
 import { petOverlayControlState, refreshPetOverlayActivities, refreshPetOverlayAppearance, setPetOverlayVisible } from './pet-overlay.js';
 import { confirmedPluginSchemas, pluginRefreshPublications, pluginRefreshStatuses, onPluginRefreshChange, pluginRefreshUnreadable, resetPluginRefreshLedger } from './plugin-refresh.js';
 /**
@@ -106,7 +106,7 @@ import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { inFlightToolCalls } from './mcp/call-context.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, addRemoteProject, createChatgptProjectFor, linkChatgptProject, unlinkChatgptProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, moveChatToProject, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff } from './projects.js';
+import { addProject, addRemoteProject, createChatgptProjectFor, linkChatgptProject, unlinkChatgptProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, moveChatWithGroup, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff } from './projects.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile, serverFileSnapshot } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
@@ -1220,9 +1220,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('sessions:moveProject', async payload => {
     const { sessionId, projectId, groupId: target } = z.object({ sessionId: sessionIdArg.shape.id,
       projectId: z.string().min(1).max(160).nullable(), groupId: groupId.nullable().optional() }).strict().parse(payload);
-    const fromGroup = (await chatGroupsState()).members[sessionId] ?? null;
-    const { from, moved } = await moveChatToProject(sessionId, projectId);
-    const groups = await placeMovedChat(sessionId, projectId, movedChatGroup(projectId, target, from, fromGroup));
+    const { from, fromGroup, moved, groups } = await moveChatWithGroup(sessionId, projectId, target);
     // The moved chats' own summaries: a row from older history is not on the newest page the
     // sidebar rereads, and a move does not change its place in the list (CodeRabbit on #1965).
     const summaries = (await Promise.all([...new Set([sessionId, ...moved])].map(id => getSession(id))))
