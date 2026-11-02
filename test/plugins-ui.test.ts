@@ -441,17 +441,22 @@ it('says the plugins could not be loaded when the first load fails, and lists th
 });
 
 // CodeRabbit on #2002: a refresh that a newer one replaced says nothing while the newer one is on its way.
-it('shows no load error for a plugin refresh that a newer one replaced', async () => {
+// Either order: the older failure arriving first, or only after the newer list is already shown (CodeRabbit on #2002).
+it.each(['before', 'after'] as const)('shows no load error for a plugin refresh that a newer one replaced (failure %s the list)', async order => {
   vi.resetModules();
   const fresh = await import('../src/renderer/plugins.js');
   const replies: Array<(reply: unknown) => void> = [];
   api.pluginsSnapshot!.mockImplementation(() => new Promise(resolve => replies.push(resolve)));
   const first = fresh.refreshPlugins();
   const second = fresh.refreshPlugins();
-  replies[0]!({ ok: false, error: 'Plugin store unavailable' });
-  await first;
-  expect(document.getElementById('pluginsInstalled')!.textContent).not.toBe('Plugins could not be loaded.');
+  const fail = async () => {
+    replies[0]!({ ok: false, error: 'Plugin store unavailable' });
+    await first;
+    expect(document.getElementById('pluginsInstalled')!.textContent).not.toBe('Plugins could not be loaded.');
+  };
+  if (order === 'before') await fail();
   replies[1]!({ ok: true, data: state });
   await second;
+  if (order === 'after') await fail();
   expect(document.querySelectorAll('#pluginsInstalled .plugin-card')).toHaveLength(1);
 });
