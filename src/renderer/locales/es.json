@@ -3869,5 +3869,17 @@
   "Plugins could not be loaded.": "No se pudieron cargar los complementos.",
   "Pets could not be loaded.": "No se pudieron cargar las mascotas.",
   "Continue in a new chat from the last summary": "Continuar en un chat nuevo con el último resumen",
-  "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT lleva 15 minutos sin escribir el resumen. El último resumen guardado puede continuar el trabajo en un chat nuevo."
+  "ChatGPT has not written the summary for 15 minutes. The last saved summary can continue the work in a new chat.": "ChatGPT lleva 15 minutos sin escribir el resumen. El último resumen guardado puede continuar el trabajo en un chat nuevo.",
+  "Drag a chat here, or move it from its menu.": "Arrastra un chat aquí o muévelo desde su menú.",
+  "Move to project": "Mover a proyecto",
+  "Move this chat to a project; its commands then run in that project's folder": "Mueve este chat a un proyecto; sus comandos se ejecutarán en la carpeta de ese proyecto",
+  "Moved to {0}": "Movido a {0}",
+  "Moved out of its project": "Sacado de su proyecto",
+  "ChatGPT keeps it where it was.": "ChatGPT lo deja donde estaba.",
+  "Undo": "Deshacer",
+  "Move undone": "Movimiento deshecho",
+  "Today": "Hoy",
+  "Yesterday": "Ayer",
+  "Previous 7 days": "Últimos 7 días",
+  "Previous 30 days": "Últimos 30 días"
 }
